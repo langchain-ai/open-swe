@@ -1,5 +1,6 @@
 import {
   createContext,
+  useCallback,
   useContext,
   useEffect,
   useLayoutEffect,
@@ -19,15 +20,27 @@ import {
   createLocalGraphClient,
   dashboardFetch,
 } from "@/lib/langgraph-client"
-import { selectStreamFor, useStreamPool } from "./streamPool"
+import { RunTracker } from "@/lib/perf/streaming"
+import {
+  MAX_RECONNECT_ATTEMPTS,
+  reconnectDelayMs,
+  selectConnectionFor,
+  selectStreamFor,
+  useStreamPool,
+} from "./streamPool"
 import type { ReactNode } from "react"
 import type {
   AgentStream,
   AgentThreadTransport,
+  StreamConnection,
   StreamPoolEntry,
 } from "./streamPool"
 
-export type { AgentStream, AgentThreadTransport } from "./streamPool"
+export type {
+  AgentStream,
+  AgentThreadTransport,
+  StreamConnection,
+} from "./streamPool"
 
 const AGENT_ASSISTANT_ID = "agent"
 const SWEEP_INTERVAL_MS = 10_000
@@ -52,6 +65,11 @@ function PooledStream({ entry }: { entry: StreamPoolEntry }) {
     [cloud]
   )
   const pool = useStreamPool.getState
+  const [runTracker] = useState(
+    () =>
+      new RunTracker({ transport: entry.transport, threadId: entry.threadId })
+  )
+  useEffect(() => () => runTracker.dispose(), [runTracker])
   const [isOffloading, setIsOffloading] = useState(false)
   const [routed, setRouted] = useState<{
     route?: string
@@ -63,13 +81,23 @@ function PooledStream({ entry }: { entry: StreamPoolEntry }) {
     assistantId: AGENT_ASSISTANT_ID,
     threadId: entry.threadId,
     fetch: dashboardFetch,
-    onThreadId: (threadId) => pool().rekey(entry.id, threadId),
+    maxReconnectAttempts: MAX_RECONNECT_ATTEMPTS,
+    reconnectDelayMs,
+    onReconnect: ({ attempt, delayMs }) =>
+      pool().streamReconnecting(entry.id, attempt, Date.now() + delayMs),
+    onConnected: () => pool().streamLive(entry.id),
+    onThreadId: (threadId) => {
+      runTracker.bindThread(threadId)
+      pool().rekey(entry.id, threadId)
+    },
     onCreated: () => {
+      runTracker.created()
       setIsOffloading(false)
       pool().runAccepted(entry.id)
       if (cloud) invalidateAgentThreadLists(queryClient)
     },
-    onCompleted: () => {
+    onCompleted: (info) => {
+      runTracker.completed(info.reason)
       setIsOffloading(false)
       if (!cloud) return
       const threadId = pool().entries.find((e) => e.id === entry.id)?.threadId
@@ -100,11 +128,35 @@ function PooledStream({ entry }: { entry: StreamPoolEntry }) {
     onError: () => setIsOffloading(false),
   })
 
+  useChannelEffect(stream, ["lifecycle", "messages"], {
+    onEvent: (event) => runTracker.event(event),
+  })
+
+  // Every send goes through the published handle, so timing it here covers
+  // the composer, the home page and the local queue alike.
+  const submit = useCallback<AgentStream["submit"]>(
+    (...args) => {
+      runTracker.submitted()
+      return stream.submit(...args)
+    },
+    [runTracker, stream]
+  )
+
   const publish = useStreamPool((state) => state.publish)
   useLayoutEffect(
-    () => publish(entry.id, { ...stream, isOffloading, routed }),
-    [entry.id, publish, stream, isOffloading, routed]
+    () => publish(entry.id, { ...stream, submit, isOffloading, routed }),
+    [entry.id, publish, stream, submit, isOffloading, routed]
   )
+
+  useEffect(() => {
+    if (!stream.isLoading) pool().streamLive(entry.id)
+  }, [entry.id, pool, stream.isLoading])
+
+  useEffect(() => {
+    const thread = stream.getThread()
+    if (!thread) return
+    return thread.onError(() => pool().streamLive(entry.id))
+  }, [entry.id, pool, stream])
 
   return null
 }
@@ -164,5 +216,15 @@ export function AgentStreamProvider({
         </AgentStreamContext.Provider>
       )}
     </>
+  )
+}
+
+/** Liveness of the bound thread's event stream. */
+export function useAgentStreamConnection(
+  transport: AgentThreadTransport,
+  threadId: string | null
+): StreamConnection {
+  return useStreamPool((state) =>
+    selectConnectionFor(state, transport, threadId)
   )
 }

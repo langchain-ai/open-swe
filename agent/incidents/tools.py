@@ -51,6 +51,21 @@ async def manage_incident(action: IncidentAction) -> dict[str, Any]:
     control = _CONTROLS[action].get(record.status)
     if control is None:
         return _result(record, action, changed=False)
+    # Both sides must name a real run: a dashboard completion records no run id and
+    # current_run_id() is empty outside a run, which must not read as a match.
+    closed_by_this_run = (
+        bool(record.completed_run_id) and record.completed_run_id == current_run_id()
+    )
+    if control == "reopen" and closed_by_this_run:
+        return {
+            "success": False,
+            "error": (
+                "This run just completed the incident; it cannot reopen it. A responder can "
+                "mention me with reopen if it should keep going."
+            ),
+            "status": record.status,
+            "incident_id": record.id,
+        }
     # The current run is the one carrying out the request, so it must keep running.
     record = await channels.apply_control(
         record, control, _actor(cfg), keep_run_id=current_run_id()

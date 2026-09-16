@@ -28,6 +28,7 @@ class SlackRequest(BaseModel):
     untagged_reply: bool = False
     message_update: bool = False
     code_channel: bool = False
+    dm_session: bool = False
     explicit_request: bool = False
 
     @property

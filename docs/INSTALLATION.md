@@ -49,11 +49,19 @@ The example assumes Postgres and Redis run on the Docker host; `--add-host` is w
 
 Either way, the URL browsers and webhooks use from here on is `<URL>`: `https://<name>-<hash>.<region>.langgraph.app` on the platform, or your ingress hostname in front of the container.
 
+**Analytics storage.** When `POSTGRES_URI` is available to application code, startup migrations create and update the `open_swe_analytics` schema in that database. The database role must be allowed to create the schema and manage its tables and indexes. Workspace identity and collection-start metadata are persisted automatically; no additional analytics settings or worker deployment are required. `POSTGRES_URI` is required: the same migrations create the `repository`, `pull_request`, `pull_request_thread`, and `pull_request_review` tables that record which threads and reviews belong to each pull request, the `users` and `user_identity` tables that give each person one stable id across their GitHub and Slack identities (a user row is only ever created for a GitHub login that passes the same `ALLOWED_GITHUB_USERS`/`ALLOWED_GITHUB_ORGS` gate as dashboard login; when `CONFIGURED_ADMINS` is set, startup also syncs each user's `is_admin` flag from it), and the `workspace`, `workspace_repository`, and `workspace_slack_channel` tables that hold Open SWE's workspaces and the repository and Slack-channel bindings that route to them (a repository or Slack channel belongs to at most one workspace, enforced by the binding table's primary key, not just checked in application code), and the server refuses to start without it. Startup logs identify the setting and schema without printing the connection string. Once a startup's migrations have run, it copies any workspace records still sitting in the LangGraph Store — from before this table existed — into PostgreSQL and removes them from the Store; this import runs once and is a no-op on every later boot.
+
+Analytics opens its own pooled SQLAlchemy/asyncpg connection to PostgreSQL. It does not provision or host a database. On LangGraph Platform, verify that the deployment exposes `POSTGRES_URI` to custom application code; having a working Agent Server Store does not by itself establish that access. For standalone deployments, explicitly supply `POSTGRES_URI` from the same database secret used for Agent Server's `DATABASE_URI`. Analytics reads only `POSTGRES_URI`, so setting `DATABASE_URI` alone does not enable it. PostgreSQL URLs using `postgres://` or `postgresql://` are accepted, and `sslmode` is translated for asyncpg. Preserve the deployment's TLS settings when mapping the connection.
+
+After deployment, look for `Analytics database initialized` in startup logs. A signed-in administrator can then open `/dashboard/api/analytics/readiness` and check `configured: true` and `ready: true`; `/dashboard/api/analytics/outbox-status` reports pending and failed deliveries. These endpoints are added by the analytics API integration. Startup failures leave the app running, so a healthy homepage alone does not verify analytics. If readiness fails, check that the role can create the analytics schema and owns its tables for future migrations. No workspace UUID or collection timestamp needs to be supplied.
+
+`collection_started_at` is set when the first event is successfully captured, not at startup. Reports read event-derived SQL tables and include `last_processed_at` plus indicators for queued or failed deliveries. Collection start and processing progress do not guarantee complete coverage: events can arrive late, and sources that have not been connected to analytics are absent. The Usage leaderboard, reviewer statistics, and PR outcomes all read these PostgreSQL projections. There is no analytics Store fallback or historical import. `reporting_cutover_at` is persisted once when the complete reporting integration first starts, and survives restarts. Reports exclude activity before this date; “All time” means since this cutover. The Usage page displays the date explicitly. Collection can begin earlier while the stack is rolling out, so `collection_started_at` and the reporting cutover describe different milestones.
+
 ## 2. LangSmith API key
 
 Create a [LangSmith](https://smith.langchain.com/) API key under **Settings → API Keys** and save it as `LANGSMITH_API_KEY`. LangGraph Platform injects it into the deployment for you, along with `LANGSMITH_TRACING` and `LANGSMITH_PROJECT`; standalone deployments set it themselves.
 
-The same key is used for tracing, sandboxes, and trace links. Trace links find your workspace through the key and the project by name, so no tenant or project ids are needed (`LANGSMITH_TENANT_ID` remains an override). Sandboxes boot from LangSmith's root snapshot, which ships `git`, `gh`, Python, `uv`, and Node, so there is nothing to configure; when your repositories need more, admins capture an **Environment** from the dashboard later (see step 6). Other sandbox providers are covered in [CUSTOMIZATION.md](CUSTOMIZATION.md).
+The same key is used for tracing, sandboxes, and trace links. Trace links find your workspace through the key and the project by name, so no tenant or project ids are needed (`LANGSMITH_TENANT_ID` remains an override). Sandboxes boot from LangSmith's root snapshot, which ships `git`, `gh`, Python, `uv`, and Node, so there is nothing to configure; when your repositories need more, admins capture a sandbox image for a workspace from the **Workspaces** page later (see step 6). Other sandbox providers are covered in [CUSTOMIZATION.md](CUSTOMIZATION.md).
 
 ## 3. Create a GitHub App
 
@@ -90,7 +98,7 @@ Give each deployment its own GitHub App, or at least a distinct mention handle (
 
 ## 4. Model providers and API keys
 
-Open SWE calls models through [LangChain](https://python.langchain.com/) chat models named `provider:model`, so any provider you give a key for is available. Set at least one:
+Open SWE calls models through [LangChain](https://python.langchain.com/) chat models named `provider:model`, so any provider you give a key for is available. Set at least one provider key unless you use an LLM gateway, such as the LangSmith Gateway described below:
 
 | Provider | Variable | Notes |
 |---|---|---|
@@ -132,7 +140,16 @@ Open SWE answers `@`-mentions in Slack and posts its progress there, and Slack i
         "bot_user": {
             "display_name": "Open SWE",
             "always_online": true
-        }
+        },
+        "slash_commands": [
+            {
+                "command": "/oswe",
+                "url": "https://<your-url>/webhooks/slack/commands",
+                "description": "Ask Open SWE",
+                "usage_hint": "[your request or question]",
+                "should_escape": false
+            }
+        ]
     },
     "oauth_config": {
         "redirect_urls": [
@@ -141,6 +158,7 @@ Open SWE answers `@`-mentions in Slack and posts its progress there, and Slack i
         "scopes": {
             "bot": [
                 "reactions:write",
+                "commands",
                 "app_mentions:read",
                 "channels:history",
                 "channels:read",
@@ -198,6 +216,8 @@ SLACK_BOT_USER_ID=""      # the bot's member id (open the bot's profile in Slack
 SLACK_BOT_USERNAME=""     # the bot's handle, e.g. open-swe
 ```
 
+`/oswe <request or question>` answers or carries out a request without starting a Slack thread: replies are ephemeral, visible only to whoever asked, and the immediate acknowledgement links to the thread in the web dashboard. Each person's commands in a channel share one private scratch thread, kept out of everyone's thread list; continuing it on the web makes it an ordinary thread. Substantial work belongs in a thread of its own, which Open SWE starts in the channel.
+
 Both Slack URLs must point at the Open SWE deployment, and Block Kit buttons only work with Interactivity enabled and pointed at `/webhooks/slack/interactivity`. Slack messages are routed to the thread's repository, a `repo:owner/name` token in the message, or the team default repository. Open SWE refuses Slack Connect channels (`is_ext_shared`) and fails closed when it cannot verify a channel.
 
 `files:read` lets Open SWE download non-image files attached to a message (archives, logs, CSVs) and stage them in the thread's sandbox, where the agent reads them by path. Existing installations must add the scope in **OAuth & Permissions** and reinstall the app before attachments reach the agent; without it, uploads stay invisible and only the message text is used.
@@ -235,11 +255,13 @@ On LangGraph Platform, set them under the deployment's environment variables; sa
 
 ## 7. Verify it works
 
-**Dashboard.** Open `<URL>`, click **Sign in with GitHub**, and you should land logged in. With your login in `CONFIGURED_ADMINS`, the **Admin** pages (Global defaults, User mappings, Sandbox, Environments, …) appear. Set **Admin → Global defaults → Default Repository** so runs that name no repository have somewhere to go. Start a task from the composer. Every run gets a sandbox booted from LangSmith's root snapshot; when your repositories need extra toolchains preinstalled, an admin can start an **admin thread** (the Admin toggle in the composer), have the agent set the sandbox up, and capture it under **Admin → Environments** as the environment named `default`, which later runs boot from.
+**Dashboard.** Open `<URL>`, click **Sign in with GitHub**, and you should land logged in. With your login in `CONFIGURED_ADMINS`, the **Admin** pages (Global defaults, User mappings, Sandbox, …) appear, along with the **Workspaces** page at `/workspaces` that every signed-in user can see. Set **Admin → Global defaults → Default Repository** so runs that name no repository have somewhere to go. Start a task from the composer. Every run gets a sandbox booted from LangSmith's root snapshot; when your repositories need extra toolchains preinstalled, an admin can start an **admin thread** (the Admin toggle in the composer), have the agent set the sandbox up, and capture it from the **Workspaces** page into the `default` workspace, which later runs boot from.
 
 **Slack.** Invite the bot to a channel and mention it: `@Open SWE what's in the repo?`. It replies in a thread. Public runs use the workspace GitHub App for agent operations, and user-owned PRs are opened as the thread's initiating GitHub user. Link the Slack user to a GitHub login before starting the thread, either by signing in to the dashboard once or through [Sign in with Slack](#slack-sign-in-and-code-channels).
 
 **GitHub.** GitHub-triggered conversations are public. Agent GitHub operations use the App installation identity, while PRs use the initiating commenter's OAuth. The commenter must have a linked account; an unmapped commenter is skipped with a warning in the server log. Comment `@openswe what files are in this repo?` on an issue in a repository where the App is installed. Within a few seconds you should see a 👀 reaction, a run in your LangSmith project, and a reply comment. GitHub lists every delivery and its response under the App's **Advanced** tab.
+
+**How a run picks its workspace.** A workspace owns repositories, Slack channels, MCP connections, and team settings, and carries the sandbox prompt/snapshot/scripts described above. New work is routed to a workspace in this order, first match wins: the thread it belongs to already has one; the message that opened the thread carries a `workspace:<slug>` tag (`env:<slug>` still works as an alias); the repository belongs to a workspace; the Slack channel it was posted in is bound to a workspace; the user has a default workspace set under **My settings**; otherwise it falls back to `default`. GitHub events for a repository that no workspace owns follow `OPEN_SWE_UNASSIGNED_REPO_WORKSPACE`: `default` (the default) routes them to the `default` workspace, and `ignore` drops them without creating a run. Workspace records and their repository and Slack-channel bindings live in PostgreSQL (see **Analytics storage** above), not the LangGraph Store; a workspace's MCP connections and team settings do stay in the Store, keyed by the workspace's slug.
 
 ---
 
@@ -298,7 +320,7 @@ The bundled dashboard needs none of this. Read on only if the dashboard is deplo
 
 **Mount prefix.** If the server runs under a LangGraph `http.mount_prefix`, the Platform image builds the UI for that prefix automatically; locally pass it to the build (`DASHBOARD_BASE_PATH=/<prefix>/ make build-dashboard`) and keep `LANGGRAPH_URL` on the mounted URL.
 
-**Datadog RUM.** Set `VITE_DATADOG_APPLICATION_ID` and `VITE_DATADOG_CLIENT_TOKEN` when building. Optional: `VITE_DATADOG_SITE` (default `us5.datadoghq.com`), `VITE_DATADOG_SERVICE` (default `open-swe-dashboard`), `VITE_DATADOG_ENV`, `VITE_DATADOG_VERSION`, `VITE_DATADOG_SESSION_SAMPLE_RATE` and `VITE_DATADOG_SESSION_REPLAY_SAMPLE_RATE` (default `100`). Session Replay masks all content and telemetry strips query strings and fragments. `VITE_` values are public in the bundle; use a client token, never an API or application key.
+**Datadog RUM.** Set `VITE_DATADOG_APPLICATION_ID` and `VITE_DATADOG_CLIENT_TOKEN` when building. Optional: `VITE_DATADOG_SITE` (default `us5.datadoghq.com`), `VITE_DATADOG_SERVICE` (default `open-swe-dashboard`), `VITE_DATADOG_ENV`, `VITE_DATADOG_VERSION`, `VITE_DATADOG_SESSION_SAMPLE_RATE` and `VITE_DATADOG_SESSION_REPLAY_SAMPLE_RATE` (default `100`). Session Replay masks all content and telemetry strips query strings and fragments. `VITE_` values are public in the bundle; use a client token, never an API or application key. The dashboard also reports two custom duration vitals, `thread_load` and `agent_run`, with their phase breakdown in the vital context (RUM Explorer: `@type:vital @vital.name:thread_load`); see [docs/DEVELOPMENT.md](DEVELOPMENT.md#profiling-thread-load-and-streaming) for what they measure.
 
 </details>
 
@@ -336,6 +358,7 @@ ALLOWED_GITHUB_ORGS="langchain-ai,anthropics"                        # org membe
 ALLOWED_GITHUB_USERS="octocat,hubot"                                 # individual users allowed to log in
 ALLOWED_GITHUB_REPOS="some-user/their-repo,another-org/specific-repo"  # specific owner/repo pairs
 PUBLIC_REPO_ORG_GATE=""   # single org whose members may trigger runs on *public* repos; empty = no gate
+OPEN_SWE_UNASSIGNED_REPO_WORKSPACE="default"   # GitHub events for a repo no workspace owns: "default" (the default) routes to the default workspace, "ignore" drops them
 ```
 
 Shared backend startup requires at least one entry in `ALLOWED_GITHUB_ORGS` or `ALLOWED_GITHUB_USERS`; an empty value in both stops the server. The desktop app's authenticated private local backend is exempt because it supports local mode without GitHub. When both are configured, they form a union: dashboard login accepts an explicitly listed user **or** an active member of a listed organization. Organization membership is verified server-side with the installation token and fails closed on any API error; install the App in every listed organization and grant **Organization → Members: Read-only**. A GitHub or Linear webhook is accepted if the repo's org is in `ALLOWED_GITHUB_ORGS` **or** the `owner/repo` is in `ALLOWED_GITHUB_REPOS`; both repository allowlists empty allows every installed repository. For Slack and dashboard requests, `ALLOWED_GITHUB_ORGS` also adds a prompt-level guard: editing a repository outside those orgs requires the user to name it with its full `https://github.com/<owner>/<repo>` URL. When team LangSmith credentials are connected, every active member of a listed organization can use the read-only LangSmith trace tools, so only list organizations whose full membership may see team-level trace data.
@@ -416,7 +439,7 @@ User identity and membership checks still apply to public runs.
 
 - `LANGSMITH_API_KEY` must be set and valid, and the workspace must have sandbox access (403 on the sandbox endpoints means it does not; contact LangSmith support).
 - Check LangSmith sandbox quotas in your workspace settings.
-- `Failed to create sandbox from snapshot '<id>'` means an admin-captured environment or base snapshot no longer exists or is not `ready` in that workspace; delete or recapture it under **Admin → Environments** (or clear **Admin → Sandbox → Base snapshot**) to fall back to the root snapshot.
+- `Failed to create sandbox from snapshot '<id>'` means a workspace's captured snapshot or the base snapshot no longer exists or is not `ready`; delete or recapture it from the **Workspaces** page (or clear **Admin → Sandbox → Base snapshot**) to fall back to the root snapshot.
 
 ### Agent not responding to comments
 

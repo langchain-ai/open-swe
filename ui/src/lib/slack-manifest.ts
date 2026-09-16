@@ -1,5 +1,6 @@
 const BASE_BOT_SCOPES = [
   "reactions:write",
+  "commands",
   "app_mentions:read",
   "channels:history",
   "channels:read",
@@ -30,6 +31,8 @@ const BASE_BOT_EVENTS = [
 
 const BACKEND_URL_PLACEHOLDER = "https://<your-backend-url>"
 
+export const ASK_COMMAND = "/oswe"
+
 export interface SlackManifestConfig {
   backendUrl?: string | null
 }
@@ -54,6 +57,15 @@ export function slackAppManifest(
       messages_tab_read_only_enabled: false,
     },
     bot_user: { display_name: "Open SWE", always_online: true },
+    slash_commands: [
+      {
+        command: ASK_COMMAND,
+        url: `${backendUrl}/webhooks/slack/commands`,
+        description: "Ask Open SWE",
+        usage_hint: "[your request or question]",
+        should_escape: false,
+      },
+    ],
   }
   if (codeChannelsEnabled) {
     features.code_channels = {

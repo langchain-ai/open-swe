@@ -12,8 +12,10 @@ def _middleware(
     route: Literal["fast", "balanced", "performance"] = "fast",
     *,
     route_model_ids: dict[str, str] | None = None,
+    routing_mode: Literal["auto", "performance"] = "auto",
 ) -> tuple[ModelSelectionMiddleware, dict[str, MagicMock], AsyncMock]:
-    models = {profile: MagicMock(name=profile) for profile in ("fast", "balanced", "performance")}
+    profiles = ("fast", "balanced", "performance")
+    models = {profile: MagicMock(name=profile) for profile in profiles}
     structured = AsyncMock(return_value=RouteDecision(model_route=route))
     classifier = MagicMock()
     classifier.tags = None
@@ -23,6 +25,7 @@ def _middleware(
         cast(Any, models),
         classifier,
         route_model_ids=route_model_ids,
+        routing_mode=routing_mode,
     )
     classifier.model_copy.assert_called_once_with(update={"tags": ["nostream"]})
     tagged.with_structured_output.assert_called_once_with(
@@ -61,6 +64,37 @@ async def test_route_is_stored_in_state_and_used_for_model_calls() -> None:
 
 
 @pytest.mark.asyncio
+async def test_performance_mode_skips_classifier_and_routing_event(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    events: list[dict[str, Any]] = []
+    monkeypatch.setattr(
+        "agent.middleware.model_selection.get_stream_writer",
+        lambda: events.append,
+    )
+    middleware, models, classifier = _middleware(routing_mode="performance")
+    state = {"messages": [HumanMessage(content="Update the README")]}
+
+    state.update(await middleware.abefore_model(cast(Any, state), MagicMock()))
+
+    assert state["model_route"] == "performance"
+    assert (await _invoke(middleware, state)).model is models["performance"]
+    classifier.assert_not_awaited()
+    assert events == []
+
+
+@pytest.mark.asyncio
+async def test_routing_decision_only_runs_once() -> None:
+    middleware, _, classifier = _middleware()
+    state = {"messages": [HumanMessage(content="Update the README")]}
+
+    state.update(await middleware.abefore_model(cast(Any, state), MagicMock()))
+    await middleware.abefore_model(cast(Any, state), MagicMock())
+
+    classifier.assert_awaited_once()
+
+
+@pytest.mark.asyncio
 async def test_existing_route_is_reused_without_classifier() -> None:
     middleware, models, classifier = _middleware()
     state = {
@@ -72,6 +106,21 @@ async def test_existing_route_is_reused_without_classifier() -> None:
 
     assert state["model_route"] == "performance"
     assert (await _invoke(middleware, state)).model is models["performance"]
+    classifier.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_persisted_fast_alt_route_is_migrated_to_fast() -> None:
+    middleware, models, classifier = _middleware()
+    state = {
+        "messages": [HumanMessage(content="Follow up on the task")],
+        "model_route": "fast_alt",
+    }
+
+    assert (await _invoke(middleware, state)).model is models["fast"]
+    state.update(await middleware.abefore_model(cast(Any, state), MagicMock()))
+
+    assert state["model_route"] == "fast"
     classifier.assert_not_awaited()
 
 

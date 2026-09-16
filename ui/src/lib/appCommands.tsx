@@ -119,17 +119,6 @@ export function AppCommandProvider({
         run: () => void navigate({ to: chat.home }),
       },
       {
-        id: "open-kanban",
-        label: "Open Kanban",
-        aliases: ["board", "all threads"],
-        group: "Navigation",
-        run: () =>
-          void navigate({
-            to: "/agents/threads",
-            search: { page: 1, layout: "board", group: "focus" },
-          }),
-      },
-      {
         id: "open-skills",
         label: "Open skills",
         group: "Navigation",

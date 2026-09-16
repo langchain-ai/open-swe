@@ -10,7 +10,9 @@ it to, so the link can only ever land on the session the app itself holds.
 import base64
 import hashlib
 from typing import Any
+from unittest.mock import AsyncMock
 from urllib.parse import parse_qs, urlparse
+from uuid import uuid7
 
 import jwt
 import pytest
@@ -19,6 +21,7 @@ from fastapi.testclient import TestClient
 
 from agent.dashboard import routes
 from agent.dashboard.oauth import COOKIE_NAME, issue_session
+from agent.slack import connect
 from agent.slack.oauth import SlackIdentity
 
 _VERIFIER = "desktop-connect-verifier"
@@ -52,16 +55,18 @@ def links(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]]:
     async def fake_upsert_mapping(**kwargs: Any) -> None:
         collected.append(kwargs)
 
-    monkeypatch.setattr(routes, "slack_oauth_configured", lambda: True)
+    monkeypatch.setattr(connect.User, "get", AsyncMock(return_value=None))
+    monkeypatch.setattr(connect.User, "for_login", AsyncMock(return_value=None))
+    monkeypatch.setattr(connect, "slack_oauth_configured", lambda: True)
     monkeypatch.setattr(
-        routes,
+        connect,
         "build_authorize_url",
         lambda *, redirect_uri, state: f"https://slack.example/authorize?state={state}",
     )
-    monkeypatch.setattr(routes, "exchange_slack_code", fake_exchange)
-    monkeypatch.setattr(routes, "fetch_slack_identity", fake_identity)
-    monkeypatch.setattr(routes, "verify_team", lambda identity: None)
-    monkeypatch.setattr(routes, "upsert_mapping", fake_upsert_mapping)
+    monkeypatch.setattr(connect, "exchange_slack_code", fake_exchange)
+    monkeypatch.setattr(connect, "fetch_slack_identity", fake_identity)
+    monkeypatch.setattr(connect, "verify_team", lambda identity: None)
+    monkeypatch.setattr(connect, "upsert_mapping", fake_upsert_mapping)
     return collected
 
 
@@ -100,7 +105,10 @@ def test_desktop_slack_connect_links_under_the_session_the_app_holds(
     links: list[dict[str, Any]],
 ) -> None:
     with _client() as client:
-        client.cookies.set(COOKIE_NAME, issue_session(login="alice", email=None, avatar_url=None))
+        client.cookies.set(
+            COOKIE_NAME,
+            issue_session(login="alice", email=None, avatar_url=None, user_id=str(uuid7())),
+        )
         handoff = _start_desktop_slack_flow(client)
         assert links == [], "the callback alone must not link an account"
 
@@ -139,4 +147,12 @@ def test_desktop_slack_connect_links_under_the_session_the_app_holds(
     # Slack account to that login instead.
     payload = jwt.decode(handoff, "test-secret", algorithms=["HS256"])
     assert "alice" not in payload.values()
-    assert set(payload) == {"slack_user_id", "email", "provider", "challenge", "iat", "exp"}
+    assert set(payload) == {
+        "slack_user_id",
+        "email",
+        "team_id",
+        "provider",
+        "challenge",
+        "iat",
+        "exp",
+    }

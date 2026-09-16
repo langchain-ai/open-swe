@@ -293,7 +293,13 @@ async def _finalize_agent_usage_telemetry(
     await finalize_agent_invocation_usage(
         invocation_id=invocation_id,
         thread_id=thread_id,
+        invocation_started_at=(
+            payload.get("metadata", {}).get("invocation_started_at")
+            if isinstance(payload.get("metadata"), dict)
+            else None
+        ),
         state=state,
+        status=str(status),
     )
 
 
@@ -366,6 +372,12 @@ async def _handle_successful_run(
             "agent_thread_id": thread_id,
             "run_id": run_id,
             **with_invocation_id(None, invocation_id),
+            **(
+                {"invocation_started_at": payload_metadata["invocation_started_at"]}
+                if isinstance(payload_metadata, dict)
+                and isinstance(payload_metadata.get("invocation_started_at"), str)
+                else {}
+            ),
             "channel_id": channel_id,
             "thread_ts": thread_ts,
         },

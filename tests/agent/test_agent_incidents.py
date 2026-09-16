@@ -10,9 +10,10 @@ from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from langchain_core.outputs import ChatGeneration, ChatResult
 from langchain_core.tools import StructuredTool
 
-from agent.dashboard.workspace_mcps import workspace_mcp_source
 from agent.incidents import runtime, service, turns
 from agent.incidents.models import Incident, IncidentPolicy
+from agent.mcp.workspace import workspace_mcp_source
+from agent.workspaces.store import DEFAULT_WORKSPACE_SLUG
 from tests.agent.test_agent_assembly_context import (
     _capture_create_deep_agent_kwargs,
 )
@@ -89,7 +90,9 @@ async def test_incident_uses_system_sandbox_tools_integrations_and_delegation(
         patch("agent.server._notion_tools_for", AsyncMock(return_value=[])) as notion,
     ):
         result = cast(dict[str, Any], await _capture_create_deep_agent_kwargs(_incident_config()))
-    mcps.assert_awaited_once_with(workspace_mcp_source)
+    mcps.assert_awaited_once()
+    (called_source,) = mcps.await_args.args
+    assert called_source.namespace == workspace_mcp_source(DEFAULT_WORKSPACE_SLUG).namespace
     notion.assert_awaited_once_with(None)
     assert isinstance(result["backend"].default, SandboxBackendProxy)
     names = {_registered_tool_name(tool) for tool in result["tools"]}

@@ -164,3 +164,28 @@ async def test_controls_need_an_incident_channel_and_an_enabled_policy(configure
     nowhere = await tools.manage_incident("start")
     assert nowhere["success"] is False and "Slack channel" in nowhere["error"]
     channels.apply_control.assert_not_awaited()
+
+
+async def test_a_run_cannot_reopen_the_incident_it_just_completed(configured):
+    """The run that completed an incident must not undo it seconds later."""
+    record = configured.record
+    record.status, record.completed_run_id = "completed", "run-now"
+    await service.INCIDENTS.put(record.id, record)
+
+    for action in ("resume", "start"):
+        refused = await tools.manage_incident(action)
+        assert refused["success"] is False
+        assert "completed" in refused["error"]
+    channels.apply_control.assert_not_awaited()
+
+
+async def test_reopening_a_dashboard_completed_incident_is_still_allowed(configured, monkeypatch):
+    """No run closed it and none is running, so two empty run ids must not read as a match."""
+    record = configured.record
+    record.status, record.completed_run_id = "completed", ""
+    await service.INCIDENTS.put(record.id, record)
+    monkeypatch.setattr(tools, "current_run_id", lambda: "")
+
+    reopened = await tools.manage_incident("resume")
+
+    assert reopened["success"] is True and reopened["status"] == "watching"

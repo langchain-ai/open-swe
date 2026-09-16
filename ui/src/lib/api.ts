@@ -95,10 +95,12 @@ export interface SessionUser {
   login: string
   email: string | null
   avatar_url: string | null
+  user_id?: string | null
   is_admin: boolean
   slack_oauth_enabled?: boolean
   api_base_url?: string
   slack_base_url?: string
+  default_workspace: string | null
 }
 
 export interface ModelOption {
@@ -132,6 +134,7 @@ export interface Profile {
   branch_prefix?: string | null
   auto_fix_ci?: boolean
   model_routing_enabled?: boolean
+  dm_session_enabled?: boolean
   draft_prs?: boolean
   review_draft_prs?: boolean | null
   updated_at?: string
@@ -148,6 +151,7 @@ export interface ProfileUpdate {
   branch_prefix?: string | null
   auto_fix_ci?: boolean
   model_routing_enabled?: boolean | null
+  dm_session_enabled?: boolean
   draft_prs?: boolean
   review_draft_prs?: boolean | null
 }
@@ -180,6 +184,8 @@ export interface TeamSettings {
   /** Tri-state LLM Gateway toggle; null inherits the LANGSMITH_GATEWAY_ENABLED default. */
   gateway_enabled?: boolean | null
   fable_enabled?: boolean
+  /** Experimental: approve and merge tiny PRs from their Slack thread. Off by default. */
+  expedited_review_enabled?: boolean
   org_guidelines?: string | null
   default_agent_model?: string | null
   default_agent_reasoning_effort?: string | null
@@ -264,12 +270,24 @@ export interface UserMappingsPage {
 
 export type UsageLeaderboardPeriod = "7d" | "30d" | "all"
 
+export interface AnalyticsMetadata {
+  reporting_cutover_at: string
+  collection_started_at: string | null
+  last_processed_at: string | null
+  data_source: "event_projections"
+  completeness: "not_started" | "observed_events_only"
+  has_pending_events: boolean
+  has_failed_events: boolean
+  as_of: string
+}
+
 export interface UsageLeaderboardRow {
   rank: number
   user: {
     name: string
     github_login: string | null
     email: string | null
+    avatar_url?: string | null
   }
   favorite_model: string
   invocations: number
@@ -282,6 +300,8 @@ export interface UsageLeaderboardRow {
   deletions: number
   total_tokens: number
   total_cost_usd: number
+  invocations_without_cost?: number
+  invocations_with_partial_cost?: number
   avg_invocation_seconds: number
   /** @deprecated Rolling compatibility with older clients. */
   avg_run_seconds?: number
@@ -309,13 +329,38 @@ export interface ReviewerStatsPayload {
   generated_at_ms: number | null
 }
 
-export interface UsageLeaderboardPayload {
+export interface UsageLeaderboardPayload extends AnalyticsMetadata {
   period: UsageLeaderboardPeriod
   rows: Array<UsageLeaderboardRow>
   total_members: number
+  next_cursor?: string | null
   current_user_rank: number | null
   generated_at_ms: number | null
   reviewer_stats: ReviewerStatsPayload
+}
+
+export interface PRMergeRateCohort {
+  model_id: string | null
+  model_attribution_quality: "effective" | "configured" | "unavailable"
+  merged: number
+  closed_without_merge: number
+  mature_pending: number
+  waiting: number
+  cohort_size: number
+  decided_denominator: number
+  decided_merge_rate: number | null
+  mature_denominator: number
+  mature_cohort_merge_share: number | null
+}
+
+export interface PRMergeRatePayload extends AnalyticsMetadata {
+  status: "ready" | "not_started" | "no_prs" | "suppressed"
+  metric: "pr_outcomes_by_opening_invocation_configured_model"
+  definition: string
+  maturity_days: number
+  period: UsageLeaderboardPeriod
+  suppression_threshold: number
+  cohorts: PRMergeRateCohort[]
 }
 
 export interface Repository {
@@ -412,15 +457,15 @@ export interface SandboxSettings {
   updated_by: string | null
 }
 
-/** What a non-admin needs to pick an environment for a new thread. */
-export type EnvironmentRefreshStatus =
+/** What a non-admin needs to pick a workspace for a new thread. */
+export type WorkspaceRefreshStatus =
   | "never"
   | "refreshing"
   | "success"
   | "failed"
 
 /** One stage of a rebuild: booting the builder, a script, the capture. */
-export interface EnvironmentRefreshStep {
+export interface WorkspaceRefreshStep {
   label: string
   status: "running" | "success" | "failed"
   started_at?: string
@@ -429,20 +474,23 @@ export interface EnvironmentRefreshStep {
   log_path?: string | null
 }
 
-export interface EnvironmentOption {
+export interface WorkspaceOption {
   slug: string
   name: string
+  repos: Array<string>
+  slack_channel_ids: Array<string>
+  is_default: boolean
   has_snapshot: boolean
-  refresh_status?: EnvironmentRefreshStatus
+  refresh_status?: WorkspaceRefreshStatus
   refresh_kind?: "full" | "update" | null
   refresh_finished_at?: string | null
   refresh_error?: string | null
   refresh_log_excerpt?: string | null
-  refresh_steps?: Array<EnvironmentRefreshStep>
+  refresh_steps?: Array<WorkspaceRefreshStep>
 }
 
-export interface EnvironmentOptionList {
-  environments: Array<EnvironmentOption>
+export interface WorkspaceOptionList {
+  workspaces: Array<WorkspaceOption>
   default_slug: string
 }
 
@@ -796,8 +844,8 @@ export const api = {
       method: "PUT",
       body: JSON.stringify({ base_snapshot_id }),
     }),
-  listEnvironmentOptions: () =>
-    request<EnvironmentOptionList>("/environments/options"),
+  listWorkspaceOptions: () =>
+    request<WorkspaceOptionList>("/workspaces/options"),
   getTeamSettings: () => request<TeamSettings>("/team-settings"),
   listSlackBots: () => request<SlackBotOption[]>("/slack/bots"),
   listAllowedSlackBots: () => request<AllowedSlackBot[]>("/slack/allowed-bots"),
@@ -816,24 +864,31 @@ export const api = {
       method: "PUT",
       body: JSON.stringify(body),
     }),
-  getWorkspaceMCPs: () => request<MCPConnection[]>("/workspace-mcps"),
-  revealWorkspaceMCPHeaders: (name: string) =>
+  getWorkspaceMCPs: (workspace: string) =>
+    request<MCPConnection[]>(
+      `/workspaces/${encodeURIComponent(workspace)}/mcps`
+    ),
+  revealWorkspaceMCPHeaders: (workspace: string, name: string) =>
     request<Record<string, string>>(
-      `/workspace-mcps/${encodeURIComponent(name)}/headers/reveal`,
+      `/workspaces/${encodeURIComponent(workspace)}/mcps/${encodeURIComponent(name)}/headers/reveal`,
       { method: "POST", cache: "no-store" }
     ),
-  saveWorkspaceMCP: (body: MCPConnectionUpdate) =>
-    request<MCPConnection>(`/workspace-mcps/${encodeURIComponent(body.name)}`, {
-      method: "PUT",
-      body: JSON.stringify(body),
-    }),
-  deleteWorkspaceMCP: (name: string) =>
-    request<void>(`/workspace-mcps/${encodeURIComponent(name)}`, {
-      method: "DELETE",
-    }),
-  discoverWorkspaceMCP: (body: MCPConnectionUpdate) =>
+  saveWorkspaceMCP: (workspace: string, body: MCPConnectionUpdate) =>
+    request<MCPConnection>(
+      `/workspaces/${encodeURIComponent(workspace)}/mcps/${encodeURIComponent(body.name)}`,
+      {
+        method: "PUT",
+        body: JSON.stringify(body),
+      }
+    ),
+  deleteWorkspaceMCP: (workspace: string, name: string) =>
+    request<void>(
+      `/workspaces/${encodeURIComponent(workspace)}/mcps/${encodeURIComponent(name)}`,
+      { method: "DELETE" }
+    ),
+  discoverWorkspaceMCP: (workspace: string, body: MCPConnectionUpdate) =>
     request<{ name: string; description: string }[]>(
-      `/workspace-mcps/${encodeURIComponent(body.name)}/discover`,
+      `/workspaces/${encodeURIComponent(workspace)}/mcps/${encodeURIComponent(body.name)}/discover`,
       { method: "POST", body: JSON.stringify(body) }
     ),
   getMyMCPs: () => request<MCPConnection[]>("/my-mcps"),
@@ -869,9 +924,13 @@ export const api = {
       method: "PUT",
       body: JSON.stringify({ full_name, enabled: runAutomatically }),
     }),
-  usageLeaderboard: (period: UsageLeaderboardPeriod = "30d", limit = 10) =>
+  usageLeaderboard: (
+    period: UsageLeaderboardPeriod = "7d",
+    limit = 10,
+    cursor?: string
+  ) =>
     request<UsageLeaderboardPayload>(
-      `/agent-usage-leaderboard?period=${encodeURIComponent(period)}&limit=${limit}`
+      `/agent-usage-leaderboard?period=${encodeURIComponent(period)}&limit=${limit}${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`
     ).then((payload) => ({
       ...payload,
       rows: payload.rows.map((row) => ({
@@ -881,6 +940,13 @@ export const api = {
           row.avg_invocation_seconds ?? row.avg_run_seconds ?? 0,
       })),
     })),
+  prMergeRateByModel: (
+    period: UsageLeaderboardPeriod = "7d",
+    maturityDays?: number
+  ) =>
+    request<PRMergeRatePayload>(
+      `/analytics/pr-merge-rate-by-model?period=${encodeURIComponent(period)}${maturityDays == null ? "" : `&maturity_days=${maturityDays}`}`
+    ),
   myMapping: () => request<Partial<UserMapping>>("/my-mapping"),
   adminListUserMappings: (page = 1, pageSize = 20) =>
     request<UserMappingsPage>(

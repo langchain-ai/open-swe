@@ -15,12 +15,14 @@ import logging
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel, model_validator
 
 from agent.dashboard.oauth import (
     expires_at_from_github_response,
     is_unrecoverable_refresh_error,
     refresh_user_access_token,
+    require_session,
 )
 from agent.dashboard.options import (
     DEPRECATED_MODEL_IDS,
@@ -55,6 +57,7 @@ class ProfileUpdate(BaseModel):
     branch_prefix: str | None = None
     auto_fix_ci: bool = True
     model_routing_enabled: bool | None = None
+    dm_session_enabled: bool = False
     draft_prs: bool | None = None
     review_draft_prs: bool | None = None
     experimental_assistant_ui: bool | None = None
@@ -175,6 +178,11 @@ async def upsert_profile(login: str, email: str, update: ProfileUpdate) -> dict[
             update.model_routing_enabled
             if "model_routing_enabled" in update.model_fields_set
             else existing.get("model_routing_enabled")
+        ),
+        "dm_session_enabled": (
+            update.dm_session_enabled
+            if "dm_session_enabled" in update.model_fields_set
+            else existing.get("dm_session_enabled", False)
         ),
         "draft_prs": (
             update.draft_prs if update.draft_prs is not None else existing.get("draft_prs", True)
@@ -384,3 +392,27 @@ async def has_access_token_record(login: str) -> bool:
 
 async def list_profiles() -> list[dict[str, Any]]:
     return await search_values(PROFILES_NAMESPACE, limit=1000)
+
+
+router = APIRouter(tags=["profiles"])
+# Not agent.dashboard.deps: that module imports repo_access, which imports this one.
+_SESSION_DEP = Depends(require_session)
+
+
+@router.get("/profile")
+async def get_my_profile(
+    session: dict[str, Any] = _SESSION_DEP,
+) -> dict[str, Any]:
+    profile = await get_profile(session["sub"])
+    if not profile:
+        return {}
+    return normalize_profile_for_response(profile)
+
+
+@router.put("/profile")
+async def put_my_profile(
+    update: ProfileUpdate,
+    session: dict[str, Any] = _SESSION_DEP,
+) -> dict[str, Any]:
+    update.validate_pairing()
+    return await upsert_profile(session["sub"], session.get("email") or "", update)

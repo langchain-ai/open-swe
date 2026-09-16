@@ -9,7 +9,7 @@ import { ArrowUp, Map, Plus, Square, X } from "lucide-react"
 import { ModelPicker } from "@/features/agents/components/ModelPicker"
 import { useModelOptions } from "@/features/agents/lib/provider/useModelOptions"
 import { modelConfigurable } from "@/features/agents/lib/stream/promptMessage"
-import { useEnvironmentOptions } from "@/features/agents/lib/queries"
+import { useWorkspaceOptions } from "@/features/agents/lib/queries"
 import { useProfile, useRepos } from "@/lib/profile"
 import { useThreadMetadata } from "./AssistantProvider"
 
@@ -56,8 +56,8 @@ export function Composer({ initialRepo }: { initialRepo?: string | null }) {
   const { models, defaultSelection } = useModelOptions()
   const profile = useProfile()
   const repos = useRepos()
-  const environmentQuery = useEnvironmentOptions(!thread)
-  const environments = environmentQuery.data?.environments ?? []
+  const workspaceQuery = useWorkspaceOptions(!thread)
+  const workspaces = workspaceQuery.data?.workspaces ?? []
   const update = (values: Record<string, unknown>) =>
     aui.composer().setRunConfig({ custom: { ...config, ...values } })
 
@@ -169,22 +169,22 @@ export function Composer({ initialRepo }: { initialRepo?: string | null }) {
                   </option>
                 ))}
               </select>
-              {environments.length > 0 && (
+              {workspaces.length > 0 && (
                 <select
-                  aria-label="Environment"
+                  aria-label="Workspace"
                   value={
                     typeof config?.environment === "string"
                       ? config.environment
-                      : (environmentQuery.data?.default_slug ?? "")
+                      : (workspaceQuery.data?.default_slug ?? "")
                   }
                   onChange={(event) =>
                     update({ environment: event.target.value })
                   }
                   className="max-w-32 bg-transparent text-xs"
                 >
-                  {environments.map((environment) => (
-                    <option key={environment.slug} value={environment.slug}>
-                      {environment.slug}
+                  {workspaces.map((workspace) => (
+                    <option key={workspace.slug} value={workspace.slug}>
+                      {workspace.slug}
                     </option>
                   ))}
                 </select>

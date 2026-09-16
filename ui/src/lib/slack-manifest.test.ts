@@ -47,6 +47,25 @@ describe("slackAppManifest", () => {
     }
   )
 
+  it.each([false, true])(
+    "registers the ask slash command with Code Channels=%s",
+    (codeChannelsEnabled) => {
+      const manifest = slackAppManifest(codeChannelsEnabled, {
+        backendUrl: "https://openswe.example.com",
+      })
+
+      expect(manifest.features.slash_commands).toEqual([
+        expect.objectContaining({
+          command: "/oswe",
+          url: "https://openswe.example.com/webhooks/slack/commands",
+        }),
+      ])
+      expect(manifest.oauth_config.scopes.bot).toEqual(
+        expect.arrayContaining(["commands"])
+      )
+    }
+  )
+
   it("defaults to the legacy Slack integration", () => {
     const manifest = slackAppManifest()
 

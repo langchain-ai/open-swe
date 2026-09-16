@@ -82,6 +82,8 @@ class Incident(BaseModel):
     reason: str = ""
     is_archived: bool = False
     last_failure_run_id: str = ""
+    # The run that completed this incident, which must not reopen it moments later.
+    completed_run_id: str = ""
     created_at: str = Field(default_factory=now_iso)
     updated_at: str = Field(default_factory=now_iso)
     activity: list[Activity] = Field(default_factory=list)
@@ -96,6 +98,7 @@ class IncidentReportRecord(BaseModel):
     run_id: str = ""
     posted_digest: str = ""
     posted_run_id: str = ""
+    posted_at: str = ""
     updated_at: str = Field(default_factory=now_iso)
     activity: list[Activity] = Field(default_factory=list)
 

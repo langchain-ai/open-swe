@@ -38,14 +38,14 @@ Every channel message, including bot alerts, is queued for the thread as a conte
 |---|---|---|
 | `incidents/policies` | admin API | enablement, prefix, exclusions, model, model-call limit |
 | `incidents/incidents` | webhook handler, incidents API, completion hook | identity, thread id, status, reason, activity |
-| `incidents/reports` | `record_incident_report` | latest report, digest, run id, findings activity |
+| `incidents/reports` | `record_incident_report` | latest report, digest, run id, last posted digest/run/time, findings activity |
 | `incidents/summaries`, `incidents/history` | the report tool and the handler through `documents.py` | postmortem Markdown and curated metadata |
 
 Each record has one writer class so concurrent turns and controls cannot lose updates. The dashboard merges the two activity lists and reports `investigating` while the thread has a pending or running run.
 
 ## Reports and Slack updates
 
-The agent finishes each turn by calling `record_incident_report`. Claims without evidence ids from this turn's context blocks or tool results are dropped and noted as a gap. The tool stores the report, rewrites the postmortem summary, and posts a compact channel update only when the report digest changed or the turn answered a question; a repeated call in the same run does not post again. Pause and complete cancel the thread's pending and running runs and post a notice; complete includes the latest summary.
+The agent finishes each turn by calling `record_incident_report`. Claims without evidence ids from this turn's context blocks or tool results are dropped and noted as a gap. The tool stores the report, rewrites the postmortem summary, and posts a compact channel update when the turn answered a question, or, unprompted, only when the report digest changed and the last post is at least `UNPROMPTED_POST_INTERVAL` old; a repeated call in the same run does not post again. The digest covers the conclusion — summary, impact, outcome, next steps, hypotheses, questions, with citations stripped — and not the retrieved evidence, because every turn cites the newest channel message and would otherwise always look new. Rewording alone still reads as a change, which is what the interval absorbs. A held report is not lost: it is recorded, and the next turn offers it again. Pause and complete cancel the thread's pending and running runs and post a notice; complete includes the latest summary.
 
 ## Failure handling
 

@@ -10,27 +10,48 @@ import type { ReactNode } from "react"
 
 interface StreamOptions {
   threadId: string | null
+  maxReconnectAttempts: number
+  reconnectDelayMs: (attempt: number) => number
+  onReconnect: (options: { attempt: number; delayMs: number }) => void
+  onConnected: () => void
   onThreadId: (threadId: string) => void
   onCreated: () => void
-  onCompleted: () => void
+  onCompleted: (info: { reason: "success" }) => void
+}
+
+interface StreamHandle {
+  threadId: string | null
+  isLoading: boolean
+  getThread: () => { onError: (listener: (error: Error) => void) => () => void }
 }
 
 const mocks = vi.hoisted(() => ({
   streams: [] as Array<StreamOptions>,
+  threadErrors: [] as Array<(error: Error) => void>,
   onEvent: (_event: unknown) => {},
 }))
 
 vi.mock("@langchain/react", () => ({
   useChannelEffect: (
     _stream: unknown,
-    _channels: unknown,
+    channels: Array<string>,
     options: { onEvent: (event: unknown) => void }
   ) => {
-    mocks.onEvent = options.onEvent
+    // The provider also subscribes lifecycle/messages for perf tracking.
+    if (channels.includes("custom")) mocks.onEvent = options.onEvent
   },
   useStream: (options: StreamOptions) => {
     mocks.streams.push(options)
-    return { threadId: options.threadId, isLoading: false }
+    return {
+      threadId: options.threadId,
+      isLoading: false,
+      getThread: () => ({
+        onError: (listener: (error: Error) => void) => {
+          mocks.threadErrors.push(listener)
+          return () => {}
+        },
+      }),
+    } satisfies StreamHandle
   },
 }))
 
@@ -58,6 +79,7 @@ function wrapper(children: ReactNode) {
 
 beforeEach(() => {
   mocks.streams.length = 0
+  mocks.threadErrors.length = 0
   useStreamPool.setState({
     entries: [],
     handles: {},
@@ -105,8 +127,55 @@ describe("AgentStreamProvider", () => {
       expect(view.container.textContent).toBe("idle")
     }
     emit("started")
-    act(() => mocks.streams.at(-1)?.onCompleted())
+    act(() => mocks.streams.at(-1)?.onCompleted({ reason: "success" }))
     expect(view.container.textContent).toBe("idle")
+  })
+
+  it("clears reconnect state when the stream gives up", () => {
+    render(
+      wrapper(
+        <AgentStreamProvider threadId="one">
+          <Probe />
+        </AgentStreamProvider>
+      )
+    )
+    const stream = mocks.streams[0]
+    if (!stream) throw new Error("stream was not mounted")
+
+    act(() => stream.onReconnect({ attempt: 12, delayMs: 300_000 }))
+    expect(useStreamPool.getState().entries[0]?.connection.status).toBe(
+      "reconnecting"
+    )
+
+    act(() => mocks.threadErrors[0]?.(new Error("stream closed")))
+    expect(useStreamPool.getState().entries[0]?.connection).toEqual({
+      status: "live",
+    })
+  })
+
+  it("tracks reconnect attempts until the stream reconnects", () => {
+    render(
+      wrapper(
+        <AgentStreamProvider threadId="one">
+          <Probe />
+        </AgentStreamProvider>
+      )
+    )
+    const stream = mocks.streams[0]
+    if (!stream) throw new Error("stream was not mounted")
+
+    expect(stream.maxReconnectAttempts).toBe(12)
+    expect(stream.reconnectDelayMs(12)).toBe(300_000)
+    act(() => stream.onReconnect({ attempt: 3, delayMs: 4_000 }))
+    expect(useStreamPool.getState().entries[0]?.connection).toMatchObject({
+      status: "reconnecting",
+      attempt: 3,
+    })
+
+    act(() => stream.onConnected())
+    expect(useStreamPool.getState().entries[0]?.connection).toEqual({
+      status: "live",
+    })
   })
 
   it("serves the stream bound to the requested thread", () => {

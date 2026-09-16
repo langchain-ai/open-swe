@@ -1,4 +1,4 @@
-"""GitHub App OAuth code-exchange and signed-JWT session cookie."""
+"""GitHub App OAuth code-exchange, signed-JWT sessions, and the dashboard's cookies."""
 
 import base64
 import hashlib
@@ -8,19 +8,29 @@ import re
 import secrets
 import time
 from datetime import UTC, datetime, timedelta
-from typing import Any
+from typing import Any, Literal
 from urllib.parse import quote, urlparse
+from uuid import UUID
 
 import httpx2
 import jwt
-from fastapi import Depends, HTTPException, Request
+from fastapi import Depends, HTTPException, Request, Response
 from fastapi.security import APIKeyCookie
+from pydantic import BaseModel
 from starlette.requests import HTTPConnection
 
 from agent.config import ENV
-from agent.github.org_membership import is_user_active_org_member
 from agent.github.token_auth import bearer_github_token
-from agent.utils.dashboard_links import dashboard_base_url
+from agent.users.authorization import (
+    allowed_logins,
+    allowed_orgs,
+    is_authorized_github_login,
+)
+from agent.utils.dashboard_links import (
+    dashboard_api_base_url,
+    dashboard_base_url,
+    dashboard_is_same_origin,
+)
 from agent.utils.http import DEFAULT_HTTP_TIMEOUT
 
 logger = logging.getLogger(__name__)
@@ -157,16 +167,8 @@ def sanitize_redirect_to(redirect_to: str | None) -> str:
     return fallback
 
 
-def _allowed_login_orgs() -> tuple[str, ...]:
-    return tuple(dict.fromkeys(org.lower() for org in ENV.ALLOWED_GITHUB_ORGS.get_list()))
-
-
-def _allowed_login_users() -> tuple[str, ...]:
-    return tuple(dict.fromkeys(user.lower() for user in ENV.ALLOWED_GITHUB_USERS.get_list()))
-
-
 def validate_github_login_allowlist() -> None:
-    if ENV.OPEN_SWE_LOCAL_AUTH_TOKEN.is_set() or _allowed_login_orgs() or _allowed_login_users():
+    if ENV.OPEN_SWE_LOCAL_AUTH_TOKEN.is_set() or allowed_orgs() or allowed_logins():
         return
     message = "ALLOWED_GITHUB_ORGS or ALLOWED_GITHUB_USERS must be configured"
     logger.error(message)
@@ -174,12 +176,8 @@ def validate_github_login_allowlist() -> None:
 
 
 async def enforce_github_login_gate(login: str) -> None:
-    normalized_login = login.strip().lower()
-    if any(hmac.compare_digest(normalized_login, user) for user in _allowed_login_users()):
+    if await is_authorized_github_login(login):
         return
-    for org in _allowed_login_orgs():
-        if await is_user_active_org_member(normalized_login, org):
-            return
     logger.warning(
         "Rejected dashboard login",
         extra={"github_login": login, "reason": "not in allowed users or orgs"},
@@ -187,16 +185,28 @@ async def enforce_github_login_gate(login: str) -> None:
     raise HTTPException(403, "your GitHub account is not authorized")
 
 
-def issue_session(*, login: str, email: str | None, avatar_url: str | None) -> str:
+def issue_session(*, login: str, email: str | None, avatar_url: str | None, user_id: str) -> str:
     now = int(time.time())
     payload = {
         "sub": login,
         "email": email,
         "avatar_url": avatar_url,
+        "user_id": user_id,
         "iat": now,
         "exp": now + SESSION_TTL_SECONDS,
     }
     return jwt.encode(payload, _secret(), algorithm=JWT_ALG)
+
+
+def session_user_id(session: dict[str, Any]) -> UUID | None:
+    """The person a session was minted for, or ``None`` for one issued without."""
+    raw = session.get("user_id")
+    if not isinstance(raw, str) or not raw:
+        return None
+    try:
+        return UUID(raw)
+    except ValueError:
+        return None
 
 
 def decode_session(token: str) -> dict[str, Any]:
@@ -311,12 +321,17 @@ def _decode_handoff(*, code: str, verifier: str) -> dict[str, Any]:
 
 
 def issue_desktop_handoff(
-    *, login: str, email: str | None, avatar_url: str | None, challenge: str
+    *,
+    login: str,
+    email: str | None,
+    avatar_url: str | None,
+    challenge: str,
+    user_id: str,
 ) -> str:
     """Mint the code the browser hands back after a desktop login."""
     return _mint_handoff(
         challenge=challenge,
-        claims={"sub": login, "email": email, "avatar_url": avatar_url},
+        claims={"sub": login, "email": email, "avatar_url": avatar_url, "user_id": user_id},
     )
 
 
@@ -324,7 +339,8 @@ def redeem_desktop_handoff(*, code: str, verifier: str) -> str:
     """Mint the session a desktop handoff code was issued for."""
     payload = _decode_handoff(code=code, verifier=verifier)
     login = payload.get("sub")
-    if not isinstance(login, str) or not login:
+    user_id = payload.get("user_id")
+    if not isinstance(login, str) or not login or not isinstance(user_id, str) or not user_id:
         raise HTTPException(400, "malformed handoff code")
     email = payload.get("email")
     avatar_url = payload.get("avatar_url")
@@ -332,6 +348,7 @@ def redeem_desktop_handoff(*, code: str, verifier: str) -> str:
         login=login,
         email=email if isinstance(email, str) else None,
         avatar_url=avatar_url if isinstance(avatar_url, str) else None,
+        user_id=user_id,
     )
 
 
@@ -524,7 +541,17 @@ async def refresh_user_access_token(refresh_token: str) -> dict[str, Any]:
     return data
 
 
-async def fetch_github_user(access_token: str) -> tuple[dict[str, Any], str | None]:
+class GithubUser(BaseModel):
+    """The GitHub account a dashboard session is minted from."""
+
+    id: int
+    login: str
+    name: str | None = None
+    avatar_url: str | None = None
+    email: str | None = None
+
+
+async def fetch_github_user(access_token: str) -> tuple[GithubUser, str | None]:
     """Return ``(user, primary_email)`` for the authenticated user."""
     headers = {
         "Authorization": f"Bearer {access_token}",
@@ -534,8 +561,8 @@ async def fetch_github_user(access_token: str) -> tuple[dict[str, Any], str | No
     async with httpx2.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as client:
         u = await client.get("https://api.github.com/user", headers=headers)
         u.raise_for_status()
-        user = u.json()
-        email = user.get("email")
+        user = GithubUser.model_validate(u.json())
+        email = user.email
         if not email:
             e = await client.get("https://api.github.com/user/emails", headers=headers)
             if e.status_code == 200:
@@ -543,3 +570,68 @@ async def fetch_github_user(access_token: str) -> tuple[dict[str, Any], str | No
                 if primary:
                     email = primary.get("email")
     return user, email
+
+
+def frontend_base_url() -> str:
+    v = dashboard_base_url()
+    if not v:
+        raise HTTPException(500, "DASHBOARD_BASE_URL not configured")
+    return v
+
+
+def cookie_security() -> tuple[bool, Literal["lax", "none"]]:
+    """Cookie ``secure``/``samesite`` flags derived from where the dashboard is served.
+
+    On the API's own origin (the bundled dashboard, or local dev) the session
+    cookie is ``SameSite=Lax``, ``Secure`` only over HTTPS since ``Secure``
+    cookies are rejected on ``http://localhost``. A dashboard on another origin
+    (the split deployment) needs ``Secure; SameSite=None`` for the browser to
+    send the cookie cross-site.
+    """
+    secure = dashboard_api_base_url().startswith("https://")
+    if not secure or dashboard_is_same_origin():
+        return secure, "lax"
+    return True, "none"
+
+
+def set_session_cookie(response: Response, jwt_token: str) -> None:
+    secure, samesite = cookie_security()
+    response.set_cookie(
+        key=COOKIE_NAME,
+        value=jwt_token,
+        max_age=SESSION_TTL_SECONDS,
+        httponly=True,
+        secure=secure,
+        samesite=samesite,
+        path="/",
+    )
+
+
+def set_state_cookie(response: Response, nonce: str) -> None:
+    # SameSite=Lax so GitHub's top-level redirect back to /auth/callback
+    # still presents this cookie; the cookie is single-purpose and lives
+    # only for the duration of one OAuth round-trip.
+    secure, _ = cookie_security()
+    response.set_cookie(
+        key=STATE_COOKIE_NAME,
+        value=nonce,
+        max_age=STATE_TTL_SECONDS,
+        httponly=True,
+        secure=secure,
+        samesite="lax",
+        path="/dashboard/api/auth",
+    )
+
+
+def clear_state_cookie(response: Response) -> None:
+    secure, _ = cookie_security()
+    response.delete_cookie(
+        STATE_COOKIE_NAME, path="/dashboard/api/auth", samesite="lax", secure=secure
+    )
+
+
+class DesktopConnectExchange(BaseModel):
+    """Body of a desktop connect handoff redemption."""
+
+    code: str
+    verifier: str

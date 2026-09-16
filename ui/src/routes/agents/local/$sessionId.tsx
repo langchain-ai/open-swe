@@ -1,8 +1,14 @@
 import { Navigate, createFileRoute } from "@tanstack/react-router"
+import { useEffect } from "react"
 
 import { LocalAgentThreadView } from "@/features/agents/components/LocalAgentThreadView"
 import { useReadyDesktopLocalThread } from "@/features/agents/lib/desktopLocal"
 import { Skeleton } from "@/components/ui/skeleton"
+import {
+  ensureThreadLoad,
+  threadDetailFailed,
+  threadLocalResolved,
+} from "@/lib/perf/threadLoad"
 
 export const Route = createFileRoute("/agents/local/$sessionId")({
   component: LocalAgentThreadPage,
@@ -11,6 +17,15 @@ export const Route = createFileRoute("/agents/local/$sessionId")({
 function LocalAgentThreadPage() {
   const { sessionId } = Route.useParams()
   const threadQuery = useReadyDesktopLocalThread(sessionId)
+  const resolved = threadQuery.data !== undefined
+  const failed = threadQuery.isError || threadQuery.data === null
+  useEffect(() => {
+    ensureThreadLoad(sessionId)
+  }, [sessionId])
+  useEffect(() => {
+    if (failed) threadDetailFailed(sessionId)
+    else if (resolved) threadLocalResolved(sessionId)
+  }, [failed, resolved, sessionId])
   if (typeof window === "undefined" || !window.openSweDesktop) {
     return <Navigate to="/agents" />
   }

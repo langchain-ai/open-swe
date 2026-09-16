@@ -2,6 +2,7 @@
 
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
+from uuid import uuid7
 
 import pytest
 from fastapi import FastAPI, HTTPException
@@ -9,7 +10,7 @@ from fastapi.testclient import TestClient
 
 from agent import completion, incidents
 from agent.dashboard import oauth, routes
-from agent.dashboard.threads import api, listing, proxy
+from agent.threads import handlers, listing, proxy
 from tests.conftest import patch_thread_module
 
 
@@ -26,7 +27,7 @@ def client(monkeypatch: pytest.MonkeyPatch) -> TestClient:
 def _login(client: TestClient, *, login: str = "sre", email: str = "sre@example.com") -> None:
     client.cookies.set(
         oauth.COOKIE_NAME,
-        oauth.issue_session(login=login, email=email, avatar_url=None),
+        oauth.issue_session(login=login, email=email, avatar_url=None, user_id=str(uuid7())),
     )
 
 
@@ -333,7 +334,7 @@ async def test_admin_cancel_cannot_mutate_an_incidents_thread(monkeypatch, sourc
     patch_thread_module(monkeypatch, "langgraph_client", lambda: client)
 
     with pytest.raises(HTTPException) as exc:
-        await api.admin_cancel_dashboard_thread("i1")
+        await handlers.admin_cancel_dashboard_thread("i1")
 
     assert exc.value.status_code == 404
     threads.update.assert_not_awaited()

@@ -155,6 +155,16 @@ async def test_message_without_a_mention_is_marked_untagged() -> None:
     assert await _untagged_flag_for("how about now", "Ev-plain") is True
 
 
+async def test_file_share_without_a_mention_is_marked_untagged() -> None:
+    payload = _message_payload("the alignment is still wrong", "Ev-file")
+    payload["event"]["subtype"] = "file_share"
+    background_tasks = _FakeBackgroundTasks()
+    response = await slack_routes.slack_webhook(
+        cast(Request, _FakeRequest(payload)), cast(BackgroundTasks, background_tasks)
+    )
+    assert cast(dict[str, object], response)["status"] == "accepted"
+
+
 async def test_message_update_queues_only_the_new_text() -> None:
     background_tasks = _FakeBackgroundTasks()
 
@@ -179,7 +189,9 @@ async def _run_message_update_task(background_tasks: _FakeBackgroundTasks) -> No
     await func(*args)
 
 
-async def test_root_message_update_uses_original_message_as_thread() -> None:
+async def test_root_message_update_uses_original_message_as_thread(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     payload = _message_update_payload()
     del payload["event"]["message"]["thread_ts"]
     del payload["event"]["previous_message"]["thread_ts"]
@@ -191,6 +203,8 @@ async def test_root_message_update_uses_original_message_as_thread() -> None:
         "agent_thread_id": "t1",
     }
     background_tasks = _FakeBackgroundTasks()
+    process = AsyncMock()
+    monkeypatch.setattr(slack_service, "process_slack_mention", process)
 
     response = await slack_routes.slack_webhook(
         cast(Request, _FakeRequest(payload)),
@@ -206,6 +220,9 @@ async def test_root_message_update_uses_original_message_as_thread() -> None:
     await_args = lookup.await_args
     assert await_args is not None
     assert await_args.args[2] == "1786573369.551099"
+    process.assert_awaited_once()
+    process_request = cast(SlackRequest, process.await_args.args[0])
+    assert process_request.thread_ts == "1786573369.551099"
 
 
 @pytest.mark.parametrize(

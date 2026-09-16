@@ -94,7 +94,7 @@ async def test_workspace_mcps_load_for_non_admins_and_respect_plan_mode(
             return_value="/workspace",
         ),
         patch(
-            "agent.server.get_team_default_model_pair",
+            "agent.server.cached_team_default_model_pair",
             new_callable=AsyncMock,
             return_value=(("openai:gpt-5.6-sol", "medium"), ("openai:gpt-5.6-sol", "low")),
         ),
@@ -104,7 +104,7 @@ async def test_workspace_mcps_load_for_non_admins_and_respect_plan_mode(
         patch("agent.server.make_model", return_value=MagicMock()),
         patch("agent.server.construct_system_prompt", return_value="prompt"),
         patch("agent.server.create_deep_agent", return_value=_DummyAgent()) as build_agent,
-        patch("agent.server.email_for_login", new_callable=AsyncMock, return_value=None),
+        patch("agent.tools.admin_gate.email_for_login", new_callable=AsyncMock, return_value=None),
         patch("agent.server._mcp_tools_for", side_effect=rendezvous([mcp_tool])),
         patch("agent.server._notion_tools_for", side_effect=rendezvous([])),
     ):
