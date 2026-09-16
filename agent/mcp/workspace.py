@@ -1,22 +1,16 @@
 """Admin-managed MCP connections, sharded by workspace slug."""
 
-import logging
 from collections.abc import Callable, Coroutine
 from functools import partial
 from typing import Any
-from uuid import uuid4
 
 from fastapi import Request, Response
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from fastapi.routing import APIRoute
-from pydantic import ValidationError
 
 from agent.mcp import MCPConnection, MCPConnectionUpdate, MCPSource, prepare_connection
-from agent.store import TypedStore, delete_value, now_iso, search_all_entries
-from agent.workspaces.store import DEFAULT_WORKSPACE_SLUG
-
-logger = logging.getLogger(__name__)
+from agent.mcp.store import MCPConnectionStore
 
 WORKSPACE_MCPS_NAMESPACE = ["workspace_mcps"]
 _VALIDATION_MESSAGES = {
@@ -60,54 +54,16 @@ class MCPRoute(APIRoute):
         return redacted_handler
 
 
-def _store(workspace: str) -> TypedStore[MCPConnection]:
-    return TypedStore([*WORKSPACE_MCPS_NAMESPACE, workspace.strip().lower()], MCPConnection)
-
-
-async def _migrate_legacy_default() -> None:
-    """Flat records predate workspaces and were always the default workspace's.
-
-    A Store search matches by namespace prefix, so scanning the flat namespace
-    can also surface records that actually live under a nested
-    ``["workspace_mcps", <workspace>]`` namespace; only an entry whose own
-    namespace is exactly the flat one (or one whose namespace the transport
-    does not report, as with the in-memory test double, which only ever
-    matches exactly) is legacy. Each migrated record is deleted from the flat
-    namespace, so this has nothing left to migrate once it has run.
-    """
-    entries = await search_all_entries(WORKSPACE_MCPS_NAMESPACE)
-    legacy = [entry for entry in entries if entry.namespace in (None, WORKSPACE_MCPS_NAMESPACE)]
-    if not legacy:
-        return
-    target = _store(DEFAULT_WORKSPACE_SLUG)
-    existing = {record.name for record in await target.search_all()}
-    for entry in legacy:
-        try:
-            # Some flat records predate the revision/updated_at bookkeeping fields;
-            # stamp fresh ones rather than reject a record that is otherwise sound.
-            record = MCPConnection.model_validate(
-                {"revision": uuid4().hex, "updated_at": now_iso(), **entry.value}
-            )
-        except ValidationError:
-            logger.warning("Skipping unreadable legacy workspace MCP record", exc_info=True)
-            continue
-        if record.name not in existing:
-            await target.put(record.name, record)
-        await delete_value(WORKSPACE_MCPS_NAMESPACE, record.name)
+def _store(workspace: str) -> MCPConnectionStore:
+    return MCPConnectionStore("workspace", workspace)
 
 
 async def get_workspace_mcp(workspace: str, name: str) -> MCPConnection | None:
-    workspace = workspace.strip().lower()
-    if workspace == DEFAULT_WORKSPACE_SLUG:
-        await _migrate_legacy_default()
     return await _store(workspace).get(name)
 
 
 async def list_workspace_mcp_records(workspace: str) -> list[MCPConnection]:
-    workspace = workspace.strip().lower()
-    if workspace == DEFAULT_WORKSPACE_SLUG:
-        await _migrate_legacy_default()
-    return sorted(await _store(workspace).search_all(), key=lambda record: record.name)
+    return sorted(await _store(workspace).list_all(), key=lambda record: record.name)
 
 
 async def list_workspace_mcps(workspace: str) -> list[dict[str, Any]]:
@@ -132,9 +88,6 @@ async def save_workspace_mcp(
 
 
 async def delete_workspace_mcp(workspace: str, name: str) -> None:
-    workspace = workspace.strip().lower()
-    if workspace == DEFAULT_WORKSPACE_SLUG:
-        await _migrate_legacy_default()
     await _store(workspace).delete(name)
 
 

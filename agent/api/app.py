@@ -33,6 +33,7 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     from agent.dashboard.admin import configured_admins
     from agent.dashboard.oauth import validate_github_login_allowlist
     from agent.database.analytics import activate_reporting, load_workspace
+    from agent.mcp.store import import_store_records as import_mcp_store_records
     from agent.sandboxes.providers.registry import validate_sandbox_startup_config
     from agent.users import User
     from agent.utils.model import close_cached_models, validate_local_dev_llm_config
@@ -57,6 +58,17 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         logger.info(
             "Imported workspaces from the LangGraph Store",
             extra={"imported_workspaces": imported},
+        )
+    try:
+        imported_connections = await import_mcp_store_records()
+    except Exception:  # noqa: BLE001
+        # Personal and workspace MCP connections stay in the Store until an
+        # import succeeds, so the dashboard shows none until then.
+        logger.exception("Importing MCP connections from the LangGraph Store failed")
+    else:
+        logger.info(
+            "Imported MCP connections from the LangGraph Store",
+            extra={"imported_mcp_connections": imported_connections},
         )
     if admins := configured_admins():
         await User.sync_admins(admins)
