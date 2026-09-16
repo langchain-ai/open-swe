@@ -211,13 +211,29 @@ async def control_collaborator_permission(request: Request) -> JSONResponse:
 
 @app.post("/control/team-settings")
 async def control_team_settings(request: Request) -> JSONResponse:
-    """Write workspace settings the way the admin dashboard does, then drop the
-    factory's TTL cache so the next run sees them instead of a stale snapshot."""
-    from agent.dashboard.team_settings import TeamSettingsUpdate, upsert_team_settings
+    """Patch workspace settings, then drop the factory's TTL cache so the next
+    run sees them instead of a stale snapshot.
+
+    A patch, not a replace: the settings record is one store item shared by
+    every spec and it outlives the dev server, so writing a bare update would
+    reset unrelated fields — the default agent model included, which the
+    dashboard's first-run onboarding reads — for every spec that follows.
+    """
+    from agent.dashboard.team_settings import (
+        TeamSettingsUpdate,
+        get_team_settings,
+        upsert_team_settings,
+    )
     from agent.utils import ttl_cache
 
     body = await request.json()
-    settings = await upsert_team_settings(TeamSettingsUpdate.model_validate(body))
+    current = await get_team_settings()
+    patched = {
+        key: body.get(key, current.get(key))
+        for key in TeamSettingsUpdate.model_fields
+        if key in body or key in current
+    }
+    settings = await upsert_team_settings(TeamSettingsUpdate.model_validate(patched))
     ttl_cache.clear()
     return JSONResponse({"ok": True, "settings": settings})
 
