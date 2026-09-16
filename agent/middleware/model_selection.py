@@ -17,6 +17,7 @@ from agent.prompts import load_prompt, render_prompt
 logger = logging.getLogger(__name__)
 
 Route = Literal["fast", "fast_alt", "balanced", "performance"]
+RoutingMode = Literal["auto", "performant"]
 
 # A/B experiment: "fast" sends a share of fast-routed turns to a second model
 # (``fast_alt``) so the two can be compared under real traffic. The share is
@@ -65,6 +66,13 @@ def fast_alt_bucket(thread_id: str | None) -> float:
     """Deterministic [0, 1) bucket for a thread, from the first 8 hex digits of SHA-256."""
     digest = hashlib.sha256((thread_id or "").encode("utf-8")).hexdigest()
     return int(digest[:8], 16) / float(0xFFFF_FFFF)
+
+
+def routing_mode(thread_id: str | None, auto_probability: float = 0.5) -> RoutingMode:
+    """Assign a thread to the auto-routing or performant experiment arm."""
+    digest = hashlib.sha256(f"routing-mode:{thread_id or ''}".encode()).hexdigest()
+    bucket = int(digest[:8], 16) / float(0x1_0000_0000)
+    return "auto" if bucket < auto_probability else "performant"
 
 
 async def _emit_routed_model(
