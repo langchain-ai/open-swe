@@ -86,7 +86,7 @@ function baseMetadata(
     origin: "dashboard",
     thread_category: "interactive",
     trigger_kind: "user",
-    repos: [{ owner: "acme", name: "alpha" }],
+    repos: ["acme/alpha"],
     base_branch: "main",
     branch_name: "open-swe/e2e-workspace",
     created_at_ms: now - 120_000,
@@ -95,7 +95,7 @@ function baseMetadata(
   };
 }
 
-/** Threads still stored with the pre-`repos` scalar keys must keep rendering. */
+/** Threads still stored with the pre-`repository_ids` scalar keys must keep rendering. */
 function legacyRepoMetadata(
   metadata: Record<string, unknown>,
   owner: string,
@@ -128,7 +128,7 @@ function workspaceThreads(): Array<ThreadSeed> {
       metadata: baseMetadata(now, TITLES.error, 2_000, {
         source: "linear",
         origin: "linear",
-        repos: [{ owner: "acme", name: "delta" }],
+        repos: ["acme/delta"],
         latest_run_id: "e2e-run-error",
         latest_run_status: "error",
       }),
@@ -151,7 +151,7 @@ function workspaceThreads(): Array<ThreadSeed> {
       metadata: baseMetadata(now, TITLES.running, 3_000, {
         source: "slack",
         origin: "slack",
-        repos: [{ owner: "acme", name: "beta" }],
+        repos: ["acme/beta"],
         latest_run_id: "e2e-run-running",
         latest_run_status: "running",
       }),
@@ -159,7 +159,7 @@ function workspaceThreads(): Array<ThreadSeed> {
     {
       id: THREAD_IDS.ready,
       metadata: baseMetadata(now, TITLES.ready, 4_000, {
-        repos: [{ owner: "acme", name: "gamma" }],
+        repos: ["acme/gamma"],
         latest_run_id: "e2e-run-ready",
         latest_run_status: "success",
         last_viewed_run_id: "e2e-run-ready",
@@ -253,7 +253,7 @@ function automationThreads(): Array<ThreadSeed> {
         trigger_kind: "schedule",
         schedule_id: SCHEDULE_IDS.weekly,
         schedule_name: "E2E Weekly Cleanup",
-        repos: [{ owner: "acme", name: "beta" }],
+        repos: ["acme/beta"],
         latest_run_id: "e2e-run-weekly-running",
         latest_run_status: "running",
       }),
@@ -303,11 +303,54 @@ async function purgeParticipantThreads(request: APIRequestContext) {
   }
 }
 
+/**
+ * Threads link to repositories by row id, which only the backend can mint, so
+ * seeds name repositories as `owner/name` and this resolves them first.
+ */
+async function resolveRepositoryIds(
+  request: APIRequestContext,
+  threads: Array<ThreadSeed>,
+): Promise<Map<string, string>> {
+  const fullNames = [
+    ...new Set(
+      threads.flatMap((thread) =>
+        Array.isArray(thread.metadata.repos)
+          ? (thread.metadata.repos as Array<string>)
+          : [],
+      ),
+    ),
+  ];
+  if (fullNames.length === 0) return new Map();
+  const response = await request.post("/control/repository-ids", {
+    data: { full_names: fullNames },
+  });
+  expect(response.ok(), await response.text()).toBeTruthy();
+  const { ids } = (await response.json()) as { ids: Record<string, string> };
+  return new Map(Object.entries(ids));
+}
+
+function seedMetadata(
+  metadata: Record<string, unknown>,
+  ids: Map<string, string>,
+): Record<string, unknown> {
+  if (!Array.isArray(metadata.repos)) return metadata;
+  const { repos, ...rest } = metadata;
+  return {
+    ...rest,
+    repository_ids: (repos as Array<string>).map((fullName) => {
+      const id = ids.get(fullName);
+      expect(id, `no repository id for ${fullName}`).toBeTruthy();
+      return id;
+    }),
+  };
+}
+
 async function seedThreads(
   request: APIRequestContext,
   threads: Array<ThreadSeed>,
 ) {
   await purgeParticipantThreads(request);
+  const repositoryIds = await resolveRepositoryIds(request, threads);
   for (const thread of threads) {
     const resetResponse = await request.delete(`/threads/${thread.id}`);
     expect([200, 204, 404]).toContain(resetResponse.status());
@@ -315,7 +358,7 @@ async function seedThreads(
       data: {
         thread_id: thread.id,
         if_exists: "raise",
-        metadata: thread.metadata,
+        metadata: seedMetadata(thread.metadata, repositoryIds),
       },
     });
     expect(response.ok(), await response.text()).toBeTruthy();
@@ -913,10 +956,7 @@ test.describe("threads workspace", () => {
         id: THREAD_IDS.multiRepo,
         metadata: baseMetadata(now, TITLES.multiRepo, 1_000, {
           participant_logins: { [ADMIN_USER.login]: true },
-          repos: [
-            { owner: "acme", name: "alpha" },
-            { owner: "acme", name: "beta" },
-          ],
+          repos: ["acme/alpha", "acme/beta"],
           latest_run_id: "e2e-run-multi-repo",
           latest_run_status: "success",
         }),

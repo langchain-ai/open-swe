@@ -64,6 +64,11 @@ async function seedTargetThread(request: APIRequestContext) {
   const deleteResponse = await request.delete(`/threads/${TARGET_THREAD_ID}`);
   expect([200, 204, 404]).toContain(deleteResponse.status());
   const now = Date.now();
+  const idsResponse = await request.post("/control/repository-ids", {
+    data: { full_names: ["fakeorg/demo"] },
+  });
+  expect(idsResponse.ok(), await idsResponse.text()).toBeTruthy();
+  const { ids } = (await idsResponse.json()) as { ids: Record<string, string> };
   const response = await request.post("/threads", {
     data: {
       thread_id: TARGET_THREAD_ID,
@@ -75,7 +80,7 @@ async function seedTargetThread(request: APIRequestContext) {
         origin: "dashboard",
         thread_category: "interactive",
         trigger_kind: "user",
-        repos: [{ owner: "fakeorg", name: "demo" }],
+        repository_ids: [ids["fakeorg/demo"]],
         base_branch: "main",
         branch_name: "open-swe/e2e-thread-tools-target",
         created_at_ms: now - 60_000,

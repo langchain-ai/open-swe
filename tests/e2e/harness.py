@@ -67,6 +67,7 @@ from langgraph_sdk import get_client  # noqa: E402
 
 from agent.api.app import app  # noqa: E402
 from agent.dashboard.oauth import COOKIE_NAME, issue_session  # noqa: E402
+from agent.github.repositories import Repository  # noqa: E402
 from agent.slack.client import lookup_slack_thread_id  # noqa: E402
 from agent.utils.dashboard_ui import keep_dashboard_ui_last  # noqa: E402
 
@@ -110,6 +111,16 @@ async def control_reset() -> JSONResponse:
 async def control_prepare_sandbox_repo() -> JSONResponse:
     fakes.seed_sandbox_repo()
     return JSONResponse({"ok": True})
+
+
+@app.post("/control/repository-ids")
+async def control_repository_ids(body: dict[str, list[str]]) -> JSONResponse:
+    """Row ids for ``owner/name`` repositories, so seeds can link threads to them."""
+    ids = {
+        full_name: str((await Repository.ensure(full_name)).id)
+        for full_name in body.get("full_names", [])
+    }
+    return JSONResponse({"ids": ids})
 
 
 @app.get("/control/state")
