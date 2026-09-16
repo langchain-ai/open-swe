@@ -121,7 +121,7 @@ async def control_state() -> JSONResponse:
 
 @app.get("/control/snapshots")
 async def control_snapshots() -> JSONResponse:
-    """Snapshot captures/deletes the environment tools asked the platform for."""
+    """Snapshot captures/deletes the workspace tools asked the platform for."""
     return JSONResponse({"captured": fakes.SNAPSHOTS, "deleted": fakes.DELETED_SNAPSHOTS})
 
 

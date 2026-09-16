@@ -27,7 +27,7 @@ function SandboxSettingsPage() {
     <AppShell
       user={session.data}
       title="Sandbox"
-      description="The snapshot new sandboxes boot from when their environment has none."
+      description="The snapshot new sandboxes boot from when their workspace has none."
       backTo={{ to: "/cloud-agents", label: "Back to Open SWE Agent" }}
     >
       <div className="rounded-lg border border-border bg-card">

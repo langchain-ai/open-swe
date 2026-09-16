@@ -5,8 +5,11 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from agent.dashboard.team_settings import TeamSettingsUpdate, upsert_team_settings
 from agent.github import webhook as github_webhooks
 from agent.webhooks import common as webhook_common
+from agent.workspaces.store import WORKSPACES, WorkspaceCreate
+from tests.conftest import FakeStore
 
 
 def _pr_payload(
@@ -417,3 +420,21 @@ async def test_converted_to_draft_keeps_watch_when_team_default_drafts_on(
     ):
         await github_webhooks.process_github_pr_close(_converted_to_draft_payload())
     fake_set.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_pr_ready_draft_reads_the_owning_workspaces_team_default(
+    monkeypatch: pytest.MonkeyPatch, fake_store: FakeStore, registry_db: None
+) -> None:
+    """The draft-review default belongs to the workspace that owns the repo."""
+    fake_client = MagicMock()
+    fake_client.runs.create = AsyncMock()
+    _patch_dispatch_deps(monkeypatch, fake_client)
+    monkeypatch.setattr(webhook_common, "get_profile", AsyncMock(return_value=None))
+    await WORKSPACES.create(WorkspaceCreate(name="OSS", repos=["lc/repo"]), "alice")
+    await upsert_team_settings(TeamSettingsUpdate(review_draft_prs=True), workspace="oss")
+    await upsert_team_settings(TeamSettingsUpdate(review_draft_prs=False), workspace="default")
+
+    await github_webhooks.process_github_pr_ready(_pr_payload(action="opened", draft=True))
+
+    fake_client.runs.create.assert_awaited_once()

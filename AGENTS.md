@@ -24,7 +24,7 @@ Follow [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) for local startup, tunnel conf
 | `chat` | `agent.graphs.chat:traced_chat_agent` | `agent/chat.py` |
 | `scheduler` | `agent.graphs.scheduler:get_scheduler` | `agent/scheduler.py` |
 
-The FastAPI app is `agent.webapp:app`. `agent/dashboard/routes.py` only aggregates routers under `/dashboard/api`: each feature package (`agent/threads/`, `agent/review/`, `agent/environments/`, `agent/schedules/`, `agent/skill_store/`, `agent/mcp/`, `agent/slack/`, `agent/analytics/`, `agent/incidents/`, `agent/github/`) exposes its own `router`, and `agent/dashboard/` keeps auth, session, and per-user/team settings. New endpoints go in the package that owns the feature, never in `routes.py`.
+The FastAPI app is `agent.webapp:app`. `agent/dashboard/routes.py` only aggregates routers under `/dashboard/api`: each feature package (`agent/threads/`, `agent/review/`, `agent/workspaces/`, `agent/schedules/`, `agent/skill_store/`, `agent/mcp/`, `agent/slack/`, `agent/analytics/`, `agent/incidents/`, `agent/github/`) exposes its own `router`, and `agent/dashboard/` keeps auth, session, and per-user/team settings. New endpoints go in the package that owns the feature, never in `routes.py`.
 
 The main agent is assembled in `agent/server.py` from the middleware in `agent/middleware/`, with tools from `agent/tools/` and sandboxes from `agent/sandboxes/`.
 

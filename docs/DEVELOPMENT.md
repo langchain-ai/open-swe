@@ -82,9 +82,15 @@ SLACK_PUBLIC_BASE_URL="https://<name>.ngrok-free.dev"  # your existing domain fr
 TOKEN_ENCRYPTION_KEY=""         # openssl rand -base64 32  (encrypts stored GitHub and Slack tokens)
 DASHBOARD_JWT_SECRET=""         # openssl rand -hex 32     (signs the session cookie and OAuth state)
 CONFIGURED_ADMINS=""            # your GitHub login or email; admins see the Admin pages
+
+POSTGRES_URI=""                 # postgresql://localhost:5432/open_swe; startup migrations create its schema and refuse to start without it
 ```
 
 `LANGGRAPH_URL` defaults to `http://localhost:2024`, and `DASHBOARD_BASE_URL` / `DASHBOARD_API_BASE_URL` default to it, so none of the three is needed locally. Keep them on localhost when setting `SLACK_PUBLIC_BASE_URL` to the tunnel. You only need one model credential: either a provider key or a gateway key if you route model calls through an LLM gateway, such as the [LangSmith Gateway](INSTALLATION.md#4-model-providers-and-api-keys). How the running model is chosen is covered in the same section. Linear, if you use it, comes from the [Linear](INSTALLATION.md#linear) section of the installation guide, with your ngrok domain as the URL.
+
+`POSTGRES_URI` needs a real local PostgreSQL database; `make dev` refuses to start without one. Point it at any database you can create schemas in — see [Analytics storage](INSTALLATION.md#1-create-the-deployment) for what startup migrations create there, including the `repository`, `users`, and `workspace` tables.
+
+`TEST_ANALYTICS_POSTGRES_URI` is the same thing for the test suite, and only for it: the tests that exercise those tables create a throwaway schema per test, migrate it, and drop it afterwards, so point it at a separate database (`postgresql+asyncpg://<user>@localhost:5432/open_swe_test`) rather than the one `make dev` uses. Unset, every such test skips rather than fails, so a run without it proves less than it appears to; CI sets it, so a regression in that code is caught there either way.
 
 ## 6. Run
 
@@ -126,6 +132,8 @@ Before reporting readiness, verify `/ok` on localhost, open the dashboard in a b
 **Slack.** With the tunnel running and the Request URL verified, invite your bot to a channel and mention it: `@open_swe_you what's in the repo?`. It replies in a thread; ngrok's inspector at `http://localhost:4040` shows the event arriving.
 
 **GitHub.** With the tunnel running and the App's webhook pointed at it, comment `@openswe what files are in this repo?` on an issue in a repository where the App is installed. Within a few seconds you should see a 👀 reaction, a run in your LangSmith project, and a reply comment. GitHub-triggered runs act as the commenting user, so that account has to have signed in to your local dashboard once. The App's **Advanced** tab lists every delivery and its response, and ngrok's inspector at `http://localhost:4040` shows what arrived.
+
+With only the seeded `default` workspace, Slack and GitHub runs land there by default. Create additional workspaces from the **Workspaces** page to exercise routing locally: the same order applies as in a deployment (thread, `workspace:<slug>` tag on the opening message — `env:<slug>` remains an alias, owning repository, bound Slack channel, user default, then `default`); see [How a run picks its workspace](INSTALLATION.md#7-verify-it-works) in the installation guide.
 
 **Incidents.** Follow [Incidents setup](INSTALLATION.md#incidents) to enroll Slack channels. Set `SLACK_APP_ID`; anyone in a channel can pause or complete its incident, and asking the agent requires a connected Open SWE account. Incident turns run on the main `agent` graph and are dispatched straight from the Slack webhook, so `make dev` or `make dev-ui` is all that is needed.
 
