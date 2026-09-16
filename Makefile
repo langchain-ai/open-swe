@@ -7,13 +7,27 @@ all: help
 # DEVELOPMENT
 ######################
 
-dev: postgres
-	POSTGRES_URI="$${POSTGRES_URI:-postgresql://postgres:postgres@localhost:5433/postgres}" uv run langgraph dev --no-browser --port 2024 --n-jobs-per-worker 10
+# Local PostgreSQL. An explicit POSTGRES_URI (shell environment, or the gitignored .env
+# that langgraph dev loads) is left alone; without one, `dev` starts a postgres:16 container
+# on loopback port 5433 with a named volume, so `docker rm` does not lose local data.
+POSTGRES_URI ?= $(shell sed -n 's/^POSTGRES_URI=//p' .env 2>/dev/null | tail -1 | tr -d "\"'")
+LOCAL_POSTGRES_URI := postgresql://postgres:postgres@127.0.0.1:5433/postgres
+POSTGRES_CONTAINER := open-swe-postgres
+
+dev: $(if $(POSTGRES_URI),,postgres)
+	@if command -v lsof >/dev/null 2>&1 && lsof -nP -iTCP:2024 -sTCP:LISTEN >/dev/null 2>&1; then \
+		echo 'Port 2024 is already in use (a stale container or another backend?):' >&2; \
+		lsof -nP -iTCP:2024 -sTCP:LISTEN >&2; exit 1; fi
+	POSTGRES_URI="$(or $(POSTGRES_URI),$(LOCAL_POSTGRES_URI))" uv run langgraph dev --no-browser --port 2024 --n-jobs-per-worker 10
 
 postgres:
-	@docker inspect open-swe-postgres >/dev/null 2>&1 || docker run --name open-swe-postgres -e POSTGRES_PASSWORD=postgres -p 5433:5432 -d postgres:16
-	@docker start open-swe-postgres >/dev/null
-	@until docker exec open-swe-postgres pg_isready -U postgres >/dev/null 2>&1; do sleep 1; done
+	@docker info >/dev/null 2>&1 || { echo 'Docker is not running; start it, or set POSTGRES_URI to an existing database.' >&2; exit 1; }
+	@docker inspect $(POSTGRES_CONTAINER) >/dev/null 2>&1 || docker run -d --name $(POSTGRES_CONTAINER) \
+		-e POSTGRES_PASSWORD=postgres -p 127.0.0.1:5433:5432 \
+		-v $(POSTGRES_CONTAINER):/var/lib/postgresql/data postgres:16 >/dev/null
+	@docker start $(POSTGRES_CONTAINER) >/dev/null
+	@until docker exec $(POSTGRES_CONTAINER) pg_isready -U postgres >/dev/null 2>&1; do sleep 1; done
+	@echo 'PostgreSQL ready on 127.0.0.1:5433'
 
 # UI development in one terminal: Vite (`make web`) and the backend fronting it, so
 # http://localhost:2024 hot-reloads without a build or any cross-origin setup. The two
@@ -108,9 +122,9 @@ typecheck:
 
 help:
 	@echo '----'
-	@echo 'dev                          - start local PostgreSQL and run LangGraph dev server'
+	@echo 'dev                          - run LangGraph dev server (starts the local PostgreSQL container unless POSTGRES_URI is set)'
 	@echo 'dev-ui                       - Vite dev server plus the LangGraph dev server fronting it (UI hot reload on :2024)'
-	@echo 'postgres                     - start local PostgreSQL on :5433'
+	@echo 'postgres                     - start the local PostgreSQL container on 127.0.0.1:5433'
 	@echo 'web                          - run the dashboard web server'
 	@echo 'tunnel                       - ngrok tunnel to :2024 on NGROK_DOMAIN, webhooks only (any other tunnel works too)'
 	@echo 'run                          - run webhook server'

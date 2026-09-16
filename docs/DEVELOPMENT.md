@@ -83,22 +83,22 @@ TOKEN_ENCRYPTION_KEY=""         # openssl rand -base64 32  (encrypts stored GitH
 DASHBOARD_JWT_SECRET=""         # openssl rand -hex 32     (signs the session cookie and OAuth state)
 CONFIGURED_ADMINS=""            # your GitHub login or email; admins see the Admin pages
 
-POSTGRES_URI=""                 # optional locally; make dev defaults to PostgreSQL on localhost:5433
+POSTGRES_URI=""                 # leave unset to use the local container `make dev` starts; or point it at your own database
 ```
 
 `LANGGRAPH_URL` defaults to `http://localhost:2024`, and `DASHBOARD_BASE_URL` / `DASHBOARD_API_BASE_URL` default to it, so none of the three is needed locally. Keep them on localhost when setting `SLACK_PUBLIC_BASE_URL` to the tunnel. You only need one model credential: either a provider key or a gateway key if you route model calls through an LLM gateway, such as the [LangSmith Gateway](INSTALLATION.md#4-model-providers-and-api-keys). How the running model is chosen is covered in the same section. Linear, if you use it, comes from the [Linear](INSTALLATION.md#linear) section of the installation guide, with your ngrok domain as the URL.
 
-`POSTGRES_URI` needs a real local PostgreSQL database; `langgraph dev` uses SQLite and does not provide a PostgreSQL URL to custom application code. The `make dev` and `make dev-ui` commands default it to PostgreSQL on port 5433, create and start the matching `postgres:16` container automatically, and preserve an explicitly configured value; `make postgres` starts the database independently. Point `POSTGRES_URI` at any database you can create schemas in if you do not use the local container — see [Analytics storage](INSTALLATION.md#1-create-the-deployment) for what startup migrations create there, including the `repository`, `users`, and `workspace` tables.
+Open SWE needs a PostgreSQL database for its own tables, and `langgraph dev` does not provide one: it keeps LangGraph's threads and Store in memory, so the platform's Postgres is not there locally. With `POSTGRES_URI` unset in both the shell and `.env`, `make dev` and `make dev-ui` run a `postgres:16` container named `open-swe-postgres` on `127.0.0.1:5433` and point the backend at it. The container binds to loopback only and keeps its data in a Docker volume of the same name, so stopping or removing the container preserves your local users, workspaces, and settings. `make postgres` starts it on its own, and `make dev` fails with a hint if Docker is not running. Set `POSTGRES_URI` to skip the container and use any database you can create schemas in — see [Analytics storage](INSTALLATION.md#1-create-the-deployment) for what startup migrations create there, including the `repository`, `users`, and `workspace` tables.
 
 `TEST_ANALYTICS_POSTGRES_URI` is the same thing for the test suite, and only for it: the tests that exercise those tables create a throwaway schema per test, migrate it, and drop it afterwards, so point it at a separate database (`postgresql+asyncpg://<user>@localhost:5432/open_swe_test`) rather than the one `make dev` uses. Unset, every such test skips rather than fails, so a run without it proves less than it appears to; CI sets it, so a regression in that code is caught there either way.
 
 ## 6. Run
 
-Check existing processes and ports before starting. When switching worktrees, stop the previous backend gracefully and wait for it to release port 2024 before starting the replacement. Prepare the [worktree state](#langgraph-state-across-worktrees) before startup.
+`make dev` refuses to start while something else listens on port 2024, and names the process. When switching worktrees, stop the previous backend gracefully and wait for it to release port 2024 before starting the replacement. Prepare the [worktree state](#langgraph-state-across-worktrees) before startup.
 
 ```bash
 make build-dashboard   # pnpm install + Vite build into ui/.output/public
-make dev               # langgraph dev on http://localhost:2024, serving the API and the dashboard
+make dev               # langgraph dev on http://localhost:2024, serving the API and the dashboard (starts the Postgres container first)
 ```
 
 `langgraph dev` serves the graphs, the FastAPI app, and the dashboard build together on port 2024. The bundled UI is a static build, so rebuild it when you pull UI changes, or skip `make build-dashboard` if you only need webhooks and the API. It reloads on code changes only: after editing `.env`, restart it.
