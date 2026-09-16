@@ -10,13 +10,11 @@ from agent.mcp import (
     discover_tools,
     prepare_connection,
 )
-from agent.store import TypedStore
-
-USER_MCPS_NAMESPACE = ["user_mcps"]
+from agent.mcp.store import USER_MCPS_NAMESPACE, MCPConnectionStore
 
 
-def _store(login: str) -> TypedStore[MCPConnection]:
-    return TypedStore([*USER_MCPS_NAMESPACE, login.strip().lower()], MCPConnection)
+def _store(login: str) -> MCPConnectionStore:
+    return MCPConnectionStore("user", login)
 
 
 async def get_user_mcp(login: str, name: str) -> MCPConnection | None:
@@ -24,7 +22,7 @@ async def get_user_mcp(login: str, name: str) -> MCPConnection | None:
 
 
 async def list_user_mcp_records(login: str) -> list[MCPConnection]:
-    return sorted(await _store(login).search_all(), key=lambda record: record.name)
+    return sorted(await _store(login).list_all(), key=lambda record: record.name)
 
 
 async def list_user_mcps(login: str) -> list[dict[str, Any]]:
@@ -59,7 +57,7 @@ async def discover_user_mcp(
     )
     if record is None:
         raise ValueError("Personal MCP connection does not exist")
-    definitions = await discover_tools(record, tuple(_store(login).namespace))
+    definitions = await discover_tools(record, (*USER_MCPS_NAMESPACE, _store(login).owner))
     return [{"name": tool.name, "description": tool.description or ""} for tool in definitions]
 
 

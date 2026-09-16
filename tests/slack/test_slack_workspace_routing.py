@@ -16,7 +16,7 @@ from agent.run_config import Repo
 from agent.slack import webhook as slack_webhooks
 from agent.slack.request import SlackRequest
 from agent.webhooks import common as webhook_common
-from agent.workspaces.store import WORKSPACES, WorkspaceCreate, parse_workspace_tag
+from agent.workspaces.store import WORKSPACES, WorkspaceCreate, WorkspaceUpdate, parse_workspace_tag
 from tests.conftest import FakeStore
 from tests.slack.test_slack_context import _setup_slack_mention_fakes
 
@@ -88,7 +88,7 @@ async def test_a_bound_channel_outranks_a_defaulted_repository(
 
     monkeypatch.setattr(webhook_common, "thread_exists", fake_thread_exists)
 
-    await WORKSPACES.create(WorkspaceCreate(name="Default", repos=["acme/internal"]), "alice")
+    await WORKSPACES.apply_update("default", WorkspaceUpdate(repos=["acme/internal"]))
     await WORKSPACES.create(
         WorkspaceCreate(name="OSS", repos=["acme/oss"], slack_channel_ids=["C0SS"]), "alice"
     )

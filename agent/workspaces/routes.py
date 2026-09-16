@@ -153,6 +153,10 @@ async def api_delete_workspace(
     slug: str,
     _admin: dict[str, Any] = ADMIN_DEP,
 ) -> Response:
-    if not await WORKSPACES.remove(_normalized_slug(slug)):
+    try:
+        removed = await WORKSPACES.remove(_normalized_slug(slug))
+    except ValueError as e:
+        raise _save_conflict(e) from e
+    if not removed:
         raise HTTPException(404, "workspace not found")
     return Response(status_code=204)
