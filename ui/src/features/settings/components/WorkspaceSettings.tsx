@@ -10,7 +10,8 @@ import {
 } from "@/features/agents/lib/queries"
 import { api, type WorkspaceOption, type WorkspaceRecord } from "@/lib/api"
 import { MCPConnectionsSection } from "./MCPConnectionsSection"
-import { ReviewTeamSettings } from "./ReviewTeamSettings"
+import { ExpeditedReviewSection } from "./ExpeditedReviewSection"
+import { ReviewSettings } from "./ReviewSettings"
 import {
   slackChannelLabel,
   useSlackChannelDirectory,
@@ -22,10 +23,13 @@ import {
 } from "./WorkspaceEditor"
 import { WorkspaceSandboxSection } from "./WorkspaceSandboxSection"
 import {
+  DefaultRepoSection,
   FableSection,
   LLMGatewaySection,
-  WorkspaceDefaultsSection,
-} from "./WorkspaceTeamSettingsSections"
+  ModelDefaultsSection,
+} from "./WorkspaceSettingsSections"
+import type { SettingsScope } from "@/features/settings/lib/settingsScope"
+import { useOptions } from "@/lib/profile"
 
 export const workspaceRecordKey = (slug: string) => ["workspace", slug] as const
 
@@ -109,7 +113,7 @@ function GeneralSection({
 }
 
 /** Everything configured per workspace, on one page. */
-export function WorkspaceSettings({
+export function WorkspaceSettingsPanel({
   slug,
   canEdit,
 }: {
@@ -124,10 +128,8 @@ export function WorkspaceSettings({
   const options = useWorkspaceOptions(true)
   // Model options follow the workspace: the Fable flag that gates some of
   // them is one of its settings.
-  const modelOptions = useQuery({
-    queryKey: ["options", slug],
-    queryFn: () => api.options(slug),
-  })
+  const modelOptions = useOptions(slug)
+  const scope: SettingsScope = { kind: "workspace", slug }
   const channelDirectory = useSlackChannelDirectory(canEdit)
   const channelLabel = (id: string) =>
     slackChannelLabel(channelDirectory.data, id)
@@ -163,16 +165,17 @@ export function WorkspaceSettings({
         record={record.data}
         onSaved={onSaved}
       />
-      <WorkspaceDefaultsSection
-        workspace={slug}
+      <ModelDefaultsSection
+        scope={scope}
         models={(modelOptions.data?.models ?? []).filter(
           (model) => model.can_be_default !== false
         )}
-        repositories={record.data.repos}
       />
-      <LLMGatewaySection workspace={slug} />
-      <FableSection workspace={slug} />
-      <ReviewTeamSettings workspace={slug} canEdit={canEdit} />
+      <DefaultRepoSection scope={scope} repositories={record.data.repos} />
+      <LLMGatewaySection scope={scope} />
+      <FableSection scope={scope} />
+      <ReviewSettings scope={scope} canEdit={canEdit} />
+      <ExpeditedReviewSection scope={scope} />
       <MCPConnectionsSection key={slug} scope="workspace" workspace={slug} />
     </>
   )

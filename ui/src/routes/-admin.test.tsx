@@ -11,10 +11,14 @@ import {
 } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
-import { api, type TeamSettings } from "@/lib/api"
+import {
+  api,
+  type WorkspaceSettings,
+  type WorkspaceSettingsView,
+} from "@/lib/api"
 
 import { SlackIntegrationSection } from "./admin"
-import { FableSection } from "@/features/settings/components/WorkspaceTeamSettingsSections"
+import { FableSection } from "@/features/settings/components/WorkspaceSettingsSections"
 
 afterEach(cleanup)
 
@@ -74,31 +78,38 @@ describe("SlackIntegrationSection", () => {
 })
 
 describe("FableSection", () => {
-  const settings = (fable_enabled: boolean): TeamSettings => ({
+  const settings = (fable_enabled: boolean): WorkspaceSettings => ({
     review_draft_prs: false,
     pr_summaries: false,
     review_trace_links: false,
     fable_enabled,
   })
+  const loaded = (fable_enabled: boolean): WorkspaceSettingsView => ({
+    effective: settings(fable_enabled),
+    overrides: {},
+  })
 
   afterEach(() => vi.restoreAllMocks())
 
-  it("caches a save under the workspace it started in, not the one selected when it finishes", async () => {
+  it("caches a save under the workspace it started in, not the one shown when it finishes", async () => {
     const qc = new QueryClient({
       defaultOptions: { queries: { retry: false } },
     })
-    vi.spyOn(api, "getTeamSettings").mockImplementation(async () =>
-      settings(false)
+    vi.spyOn(api, "getWorkspaceSettings").mockImplementation(async () =>
+      loaded(false)
     )
-    let finishSave: (saved: TeamSettings) => void = () => {}
-    const saveTeamSettings = vi
-      .spyOn(api, "saveTeamSettings")
+    let finishSave: (saved: WorkspaceSettingsView) => void = () => {}
+    const save = vi
+      .spyOn(api, "saveWorkspaceSettings")
       .mockImplementation(
-        () => new Promise<TeamSettings>((resolve) => (finishSave = resolve))
+        () =>
+          new Promise<WorkspaceSettingsView>(
+            (resolve) => (finishSave = resolve)
+          )
       )
-    const section = (workspace: string) => (
+    const section = (slug: string) => (
       <QueryClientProvider client={qc}>
-        <FableSection workspace={workspace} />
+        <FableSection scope={{ kind: "workspace", slug }} />
       </QueryClientProvider>
     )
 
@@ -112,17 +123,23 @@ describe("FableSection", () => {
     })
     fireEvent.click(toggle)
     await waitFor(() =>
-      expect(saveTeamSettings).toHaveBeenCalledWith(settings(true), "alpha")
+      expect(save).toHaveBeenCalledWith("alpha", { fable_enabled: true })
     )
 
     view.rerender(section("beta"))
-    finishSave(settings(true))
+    const saved: WorkspaceSettingsView = {
+      effective: settings(true),
+      overrides: { fable_enabled: true },
+    }
+    finishSave(saved)
 
     await waitFor(() =>
-      expect(qc.getQueryData(["teamSettings", "alpha"])).toEqual(settings(true))
+      expect(qc.getQueryData(["workspaceSettings", "alpha"])).toEqual(saved)
     )
     await waitFor(() =>
-      expect(qc.getQueryData(["teamSettings", "beta"])).toEqual(settings(false))
+      expect(qc.getQueryData(["workspaceSettings", "beta"])).toEqual(
+        loaded(false)
+      )
     )
   })
 })

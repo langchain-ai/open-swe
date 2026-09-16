@@ -29,12 +29,24 @@ import {
 import { dashboardApiBase } from "@/lib/api-base"
 import { AllowedSlackBotsSection } from "@/features/settings/components/AllowedSlackBotsSection"
 import { ExpeditedReviewSection } from "@/features/settings/components/ExpeditedReviewSection"
+import { MCPConnectionsSection } from "@/features/settings/components/MCPConnectionsSection"
+import { ReviewSettings } from "@/features/settings/components/ReviewSettings"
+import {
+  DefaultRepoSection,
+  FableSection,
+  LLMGatewaySection,
+  ModelDefaultsSection,
+} from "@/features/settings/components/WorkspaceSettingsSections"
+import { INSTANCE_SCOPE } from "@/features/settings/lib/settingsScope"
+import { useOptions, useRepos } from "@/lib/profile"
 import { IncidentSettings } from "@/features/incidents/IncidentSettings"
 
 export const Route = createFileRoute("/admin")({ component: AdminPage })
 
 function AdminPage() {
   const session = useSession()
+  const modelOptions = useOptions()
+  const repos = useRepos()
 
   if (session.isLoading) {
     return (
@@ -50,23 +62,39 @@ function AdminPage() {
     <AppShell
       user={session.data}
       title="Admin"
-      description="Instance-wide integrations and user mappings. Per-workspace settings live with each workspace."
+      description="Defaults every workspace inherits, plus instance-wide integrations and user mappings. Open a workspace to override a setting there."
     >
       <SettingsSection title="Workspaces">
         <SettingsNavRow
           to="/workspaces"
           label="Workspace settings"
-          description="Repositories, Slack channels, sandbox image, model defaults, MCP connections, and review settings, per workspace."
+          description="Repositories, Slack channels, sandbox image, and overrides of the defaults below, per workspace."
         />
       </SettingsSection>
+
+      <ModelDefaultsSection
+        scope={INSTANCE_SCOPE}
+        models={(modelOptions.data?.models ?? []).filter(
+          (model) => model.can_be_default !== false
+        )}
+      />
+      <DefaultRepoSection
+        scope={INSTANCE_SCOPE}
+        repositories={(repos.data?.repositories ?? []).map(
+          (repo) => repo.full_name
+        )}
+      />
+      <LLMGatewaySection scope={INSTANCE_SCOPE} />
+      <FableSection scope={INSTANCE_SCOPE} />
+      <ReviewSettings scope={INSTANCE_SCOPE} canEdit />
+      <ExpeditedReviewSection scope={INSTANCE_SCOPE} />
+      <MCPConnectionsSection scope="instance" />
 
       <SlackIntegrationSection
         backendUrl={session.data.slack_base_url ?? session.data.api_base_url}
       >
         <AllowedSlackBotsSection />
       </SlackIntegrationSection>
-
-      <ExpeditedReviewSection />
 
       <TriggerReviewSection />
 

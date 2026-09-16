@@ -15,7 +15,7 @@ type Header = { name: string; value: string; revealed?: boolean }
 type Draft = Omit<MCPConnectionUpdate, "headers"> & { existing: boolean }
 type Catalog = { name: string; description: string }[]
 
-export type MCPScope = "workspace" | "user"
+export type MCPScope = "instance" | "workspace" | "user"
 
 type MCPScopeConfig = {
   title: string
@@ -30,10 +30,21 @@ type MCPScopeConfig = {
 
 function scopeConfig(scope: MCPScope, workspace: string): MCPScopeConfig {
   const scopes: Record<MCPScope, MCPScopeConfig> = {
+    instance: {
+      title: "Instance MCPs",
+      description:
+        "Connect remote MCP servers that every workspace inherits. A workspace or personal connection with the same name replaces one of these in its runs. New connections preselect all discovered tools; review the selection and save to enable them.",
+      queryKey: ["instanceMCPs"],
+      list: api.getInstanceMCPs,
+      save: api.saveInstanceMCP,
+      remove: api.deleteInstanceMCP,
+      revealHeaders: api.revealInstanceMCPHeaders,
+      discover: api.discoverInstanceMCP,
+    },
     workspace: {
       title: "Workspace MCPs",
       description:
-        "Connect remote MCP servers for authorized coding-agent runs. New connections preselect all discovered tools; review the selection and save to enable them.",
+        "Connect remote MCP servers for this workspace's runs. A connection here replaces an inherited instance connection with the same name. New connections preselect all discovered tools; review the selection and save to enable them.",
       queryKey: ["workspaceMCPs", workspace],
       list: () => api.getWorkspaceMCPs(workspace),
       save: (body) => api.saveWorkspaceMCP(workspace, body),
@@ -70,6 +81,13 @@ export function MCPConnectionsSection({
   )
   const qc = useQueryClient()
   const connections = useQuery({ queryKey, queryFn: client.list })
+  // What this workspace inherits; shown so an admin can see what a same-named
+  // connection here would replace.
+  const inherited = useQuery({
+    queryKey: ["instanceMCPs"],
+    queryFn: api.getInstanceMCPs,
+    enabled: scope === "workspace",
+  })
   const [draft, setDraft] = useState<Draft | null>(null)
   const [headers, setHeaders] = useState<Header[]>([])
   const [replaceHeaders, setReplaceHeaders] = useState(false)
@@ -641,6 +659,49 @@ export function MCPConnectionsSection({
             {connections.error?.message || error}
           </p>
         )}
+        {scope === "workspace" &&
+          inherited.data &&
+          inherited.data.length > 0 && (
+            <section
+              aria-label="Inherited instance MCP connections"
+              className="rounded-md border border-dashed"
+            >
+              <p className="px-3 pt-3 text-xs font-medium text-muted-foreground">
+                Inherited from the instance
+              </p>
+              <ul className="divide-y divide-border">
+                {inherited.data.map((connection) => {
+                  const replaced = connections.data?.some(
+                    (own) => own.name === connection.name
+                  )
+                  return (
+                    <li
+                      key={connection.name}
+                      className="flex flex-wrap items-center justify-between gap-3 p-3"
+                    >
+                      <div className="min-w-0">
+                        <p className="text-sm">
+                          {connection.name}{" "}
+                          <span className="text-muted-foreground">
+                            · {connection.enabled ? "Enabled" : "Disabled"} ·{" "}
+                            {connection.allowed_tools.length} tools
+                          </span>
+                        </p>
+                        <p className="text-xs break-all text-muted-foreground">
+                          {connection.url}
+                        </p>
+                      </div>
+                      <span className="text-xs text-muted-foreground">
+                        {replaced
+                          ? "Replaced by this workspace's connection"
+                          : "Edit under Admin"}
+                      </span>
+                    </li>
+                  )
+                })}
+              </ul>
+            </section>
+          )}
         {connections.data?.map((connection) => {
           const isEditing = draft?.existing && draft.name === connection.name
           return (

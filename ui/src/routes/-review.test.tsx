@@ -11,8 +11,12 @@ import {
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { afterEach, expect, it, vi } from "vitest"
 
-import { ReviewTeamSettings } from "@/features/settings/components/ReviewTeamSettings"
-import type { TeamSettings } from "@/lib/api"
+import { ReviewSettings } from "@/features/settings/components/ReviewSettings"
+import type {
+  WorkspaceSettings,
+  WorkspaceSettingsOverrides,
+  WorkspaceSettingsView,
+} from "@/lib/api"
 
 afterEach(() => {
   cleanup()
@@ -26,7 +30,7 @@ function rowSwitch(label: string): HTMLElement {
   return within(row).getByRole("switch")
 }
 
-const SETTINGS: TeamSettings = {
+const SETTINGS: WorkspaceSettings = {
   review_draft_prs: false,
   pr_summaries: true,
   review_trace_links: true,
@@ -41,18 +45,24 @@ const SETTINGS: TeamSettings = {
   default_reviewer_subagent_reasoning_effort: null,
 }
 
-it("reads and writes the settings of the selected workspace", async () => {
+const VIEW: WorkspaceSettingsView = { effective: SETTINGS, overrides: {} }
+
+it("reads the workspace's settings and writes only its own override", async () => {
   const reads: string[] = []
-  const writes: Array<{ url: string; body: TeamSettings }> = []
+  const writes: Array<{ url: string; body: WorkspaceSettingsOverrides }> = []
   vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
     const url = String(input)
     if (init?.method === "PUT") {
-      const body = JSON.parse(String(init.body)) as TeamSettings
+      const body = JSON.parse(String(init.body)) as WorkspaceSettingsOverrides
       writes.push({ url, body })
-      return new Response(JSON.stringify(body))
+      const view: WorkspaceSettingsView = {
+        effective: { ...SETTINGS, ...body },
+        overrides: body,
+      }
+      return new Response(JSON.stringify(view))
     }
     reads.push(url)
-    return new Response(JSON.stringify(SETTINGS))
+    return new Response(JSON.stringify(VIEW))
   })
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
@@ -60,27 +70,33 @@ it("reads and writes the settings of the selected workspace", async () => {
 
   render(
     <QueryClientProvider client={client}>
-      <ReviewTeamSettings workspace="oss" canEdit={true} />
+      <ReviewSettings scope={{ kind: "workspace", slug: "oss" }} canEdit />
     </QueryClientProvider>
   )
 
   await waitFor(() => expect(reads.length).toBeGreaterThan(0))
-  expect(
-    reads.every((url) => url.includes("/team-settings?workspace=oss"))
-  ).toBe(true)
+  expect(reads.every((url) => url.includes("/workspaces/oss/settings"))).toBe(
+    true
+  )
   await waitFor(() =>
     expect(screen.getByRole("textbox")).toHaveProperty(
       "value",
       "oss guidelines"
     )
   )
+  expect(screen.getByText("Inherited from the instance.")).toBeTruthy()
 
   fireEvent.click(rowSwitch("PR Summaries"))
 
   await waitFor(() => expect(writes.length).toBe(1))
-  expect(writes[0]!.url).toContain("/team-settings?workspace=oss")
-  expect(writes[0]!.body.pr_summaries).toBe(false)
-  expect(writes[0]!.body.org_guidelines).toBe("oss guidelines")
+  expect(writes[0]!.url).toContain("/workspaces/oss/settings")
+  // Only the field that changed becomes an override; guidelines stay inherited.
+  expect(writes[0]!.body).toEqual({ pr_summaries: false })
+  expect(
+    await screen.findByRole("button", {
+      name: "Reset PR Summaries to the instance value",
+    })
+  ).toBeTruthy()
   client.clear()
 })
 
@@ -89,7 +105,7 @@ it("does not write before the workspace's settings have loaded", async () => {
   vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
     if (init?.method === "PUT") {
       writes.push(String(input))
-      return new Response(JSON.stringify(SETTINGS))
+      return new Response(JSON.stringify(VIEW))
     }
     return new Promise(() => {})
   })
@@ -99,7 +115,7 @@ it("does not write before the workspace's settings have loaded", async () => {
 
   render(
     <QueryClientProvider client={client}>
-      <ReviewTeamSettings workspace="oss" canEdit={true} />
+      <ReviewSettings scope={{ kind: "workspace", slug: "oss" }} canEdit />
     </QueryClientProvider>
   )
 

@@ -198,7 +198,8 @@ export interface AllowedSlackBot {
   image_url: string
 }
 
-export interface TeamSettings {
+/** The settings record at either tier: the instance, or what a workspace's runs see. */
+export interface WorkspaceSettings {
   review_draft_prs: boolean
   pr_summaries: boolean
   review_trace_links: boolean
@@ -232,6 +233,15 @@ export interface TeamSettings {
   default_thread_title_model?: string | null
   default_thread_title_reasoning_effort?: string | null
   updated_at?: string | null
+}
+
+/** The fields of a workspace's own settings record; anything absent inherits the instance value. */
+export type WorkspaceSettingsOverrides = Partial<WorkspaceSettings>
+
+/** One workspace's settings: what its runs see, and which of those values it set itself. */
+export interface WorkspaceSettingsView {
+  effective: WorkspaceSettings
+  overrides: WorkspaceSettingsOverrides
 }
 
 export interface MCPOAuth {
@@ -1071,9 +1081,20 @@ export const api = {
     request<void>(`/workspaces/${encodeURIComponent(slug)}`, {
       method: "DELETE",
     }),
-  getTeamSettings: (workspace: string = DEFAULT_WORKSPACE_SLUG) =>
-    request<TeamSettings>(
-      `/team-settings?workspace=${encodeURIComponent(workspace)}`
+  /** The instance record every workspace inherits. */
+  getInstanceSettings: () => request<WorkspaceSettings>("/settings"),
+  getWorkspaceSettings: (slug: string) =>
+    request<WorkspaceSettingsView>(
+      `/workspaces/${encodeURIComponent(slug)}/settings`
+    ),
+  /** Replaces the workspace's overrides; a field left out inherits the instance value. */
+  saveWorkspaceSettings: (
+    slug: string,
+    overrides: WorkspaceSettingsOverrides
+  ) =>
+    request<WorkspaceSettingsView>(
+      `/workspaces/${encodeURIComponent(slug)}/settings`,
+      { method: "PUT", body: JSON.stringify(overrides) }
     ),
   listSlackBots: () => request<SlackBotOption[]>("/slack/bots"),
   listSlackChannels: () => request<SlackChannelDirectory>("/slack/channels"),
@@ -1088,16 +1109,28 @@ export const api = {
       `/slack/allowed-bots/${encodeURIComponent(teamId)}/${encodeURIComponent(botId)}`,
       { method: "DELETE" }
     ),
-  saveTeamSettings: (
-    body: TeamSettings,
-    workspace: string = DEFAULT_WORKSPACE_SLUG
-  ) =>
-    request<TeamSettings>(
-      `/team-settings?workspace=${encodeURIComponent(workspace)}`,
-      {
-        method: "PUT",
-        body: JSON.stringify(body),
-      }
+  saveInstanceSettings: (body: WorkspaceSettings) =>
+    request<WorkspaceSettings>("/settings", {
+      method: "PUT",
+      body: JSON.stringify(body),
+    }),
+  getInstanceMCPs: () => request<MCPConnection[]>("/mcps"),
+  revealInstanceMCPHeaders: (name: string) =>
+    request<Record<string, string>>(
+      `/mcps/${encodeURIComponent(name)}/headers/reveal`,
+      { method: "POST", cache: "no-store" }
+    ),
+  saveInstanceMCP: (body: MCPConnectionUpdate) =>
+    request<MCPConnection>(`/mcps/${encodeURIComponent(body.name)}`, {
+      method: "PUT",
+      body: JSON.stringify(body),
+    }),
+  deleteInstanceMCP: (name: string) =>
+    request<void>(`/mcps/${encodeURIComponent(name)}`, { method: "DELETE" }),
+  discoverInstanceMCP: (body: MCPConnectionUpdate) =>
+    request<{ name: string; description: string }[]>(
+      `/mcps/${encodeURIComponent(body.name)}/discover`,
+      { method: "POST", body: JSON.stringify(body) }
     ),
   getWorkspaceMCPs: (workspace: string) =>
     request<MCPConnection[]>(

@@ -7,17 +7,18 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
 import {
   api,
   ApiError,
-  type TeamSettings,
+  type WorkspaceSettings,
   type WorkspaceRecord,
 } from "@/lib/api"
 
-import { WorkspaceSettings } from "./WorkspaceSettings"
+import { WorkspaceSettingsPanel } from "./WorkspaceSettings"
 
 const RECORD: WorkspaceRecord = {
   slug: "oss",
@@ -35,7 +36,7 @@ const RECORD: WorkspaceRecord = {
   fs_capacity_bytes: null,
 }
 
-const SETTINGS: TeamSettings = {
+const SETTINGS: WorkspaceSettings = {
   review_draft_prs: false,
   pr_summaries: true,
   review_trace_links: true,
@@ -80,7 +81,11 @@ function mockApis(record: WorkspaceRecord = RECORD) {
     default_agent_subagent_model: "anthropic:claude-opus-5",
     default_agent_subagent_reasoning_effort: "medium",
   })
-  vi.spyOn(api, "getTeamSettings").mockResolvedValue(SETTINGS)
+  vi.spyOn(api, "getWorkspaceSettings").mockResolvedValue({
+    effective: SETTINGS,
+    overrides: {},
+  })
+  vi.spyOn(api, "getInstanceMCPs").mockResolvedValue([])
   vi.spyOn(api, "listSlackChannels").mockResolvedValue({
     channels: [
       {
@@ -105,12 +110,12 @@ function renderPage() {
   clients.push(client)
   return render(
     <QueryClientProvider client={client}>
-      <WorkspaceSettings slug="oss" canEdit />
+      <WorkspaceSettingsPanel slug="oss" canEdit />
     </QueryClientProvider>
   )
 }
 
-describe("WorkspaceSettings", () => {
+describe("WorkspaceSettingsPanel", () => {
   it("loads the record into the general form and saves the edited name", async () => {
     mockApis()
     const update = vi
@@ -198,5 +203,38 @@ describe("WorkspaceSettings", () => {
     // The chip in General plus the option in the dropdown; Core's repo nowhere.
     expect(screen.getAllByText("acme/oss").length).toBeGreaterThan(1)
     expect(screen.queryByText("acme/api")).toBeNull()
+  })
+
+  it("turns an inherited setting into an override and resets it back", async () => {
+    mockApis()
+    const save = vi
+      .spyOn(api, "saveWorkspaceSettings")
+      .mockImplementation(async (_slug, overrides) => ({
+        effective: { ...SETTINGS, ...overrides },
+        overrides,
+      }))
+    renderPage()
+
+    const fable = (
+      await screen.findByRole("heading", { name: "Fable" })
+    ).closest("section")
+    if (!fable) throw new Error("no Fable section")
+    const toggle = within(fable).getByRole("switch")
+    await waitFor(() => expect(toggle.hasAttribute("disabled")).toBe(false))
+    expect(within(fable).getByText("Inherited")).toBeTruthy()
+
+    fireEvent.click(toggle)
+    await waitFor(() =>
+      expect(save).toHaveBeenCalledWith("oss", { fable_enabled: true })
+    )
+    expect(await within(fable).findByText("Overridden")).toBeTruthy()
+
+    fireEvent.click(
+      within(fable).getByRole("button", {
+        name: "Reset Allow Fable models to the instance value",
+      })
+    )
+    await waitFor(() => expect(save).toHaveBeenLastCalledWith("oss", {}))
+    expect(await within(fable).findByText("Inherited")).toBeTruthy()
   })
 })

@@ -3,7 +3,7 @@ import { Navigate, createFileRoute } from "@tanstack/react-router"
 import { AppShell } from "@/components/AppShell"
 import { Skeleton } from "@/components/ui/skeleton"
 import { useWorkspaceOptions } from "@/features/agents/lib/queries"
-import { WorkspaceSettings } from "@/features/settings/components/WorkspaceSettings"
+import { WorkspaceSettingsPanel } from "@/features/settings/components/WorkspaceSettings"
 import { RequireLogin } from "@/lib/auth-redirect"
 import { useSession } from "@/lib/session"
 
@@ -37,7 +37,7 @@ function WorkspaceSettingsPage() {
       description="Everything configured for this workspace: what it owns, the sandbox image its runs boot from, model defaults, review settings, and MCP connections."
       backTo={{ to: "/workspaces", label: "Back to Workspaces" }}
     >
-      <WorkspaceSettings slug={slug} canEdit />
+      <WorkspaceSettingsPanel slug={slug} canEdit />
     </AppShell>
   )
 }

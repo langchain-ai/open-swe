@@ -45,9 +45,9 @@ export function PullRequestsSection() {
   })
   const workspace =
     preferences.data?.default_workspace ?? DEFAULT_WORKSPACE_SLUG
-  const teamSettings = useQuery({
-    queryKey: ["teamSettings", workspace],
-    queryFn: () => api.getTeamSettings(workspace),
+  const workspaceSettings = useQuery({
+    queryKey: ["workspaceSettings", workspace],
+    queryFn: () => api.getWorkspaceSettings(workspace),
   })
   const [error, setError] = useState<string | null>(null)
 
@@ -69,7 +69,8 @@ export function PullRequestsSection() {
   }
 
   const disabled = profile.isLoading || save.isPending
-  const teamDefaultOn = teamSettings.data?.review_draft_prs ?? false
+  const teamDefaultOn =
+    workspaceSettings.data?.effective.review_draft_prs ?? false
 
   return (
     <SettingsSection

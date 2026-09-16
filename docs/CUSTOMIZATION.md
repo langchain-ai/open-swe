@@ -230,7 +230,7 @@ Open SWE ships with a small set of custom tools on top of the built-in Deep Agen
 
 ### Workspace MCP servers
 
-Admins can connect generic remote MCP servers under **Workspaces → the workspace → MCP connections**.
+Admins can connect generic remote MCP servers under **Admin → Instance MCPs**, which every workspace inherits, or under **Workspaces → the workspace → Workspace MCPs** for one workspace; a workspace connection replaces an inherited one with the same name.
 Connections belong to this Open SWE deployment and are shared across repositories
 and remote coding-agent threads. Enabled connections provide baseline tools for
 all users, limited to the tools selected by an admin. Only admins can manage
