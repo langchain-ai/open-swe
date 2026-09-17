@@ -1,4 +1,4 @@
-"""Read-only PostgreSQL access for private admin threads."""
+"""Read-only PostgreSQL access for private admin surfaces."""
 
 import json
 import logging
@@ -10,7 +10,7 @@ from uuid import UUID
 from sqlalchemy import text
 
 from agent.database import postgres
-from agent.tools.admin_gate import configurable, require_admin
+from agent.tools.admin_gate import require_private_admin_surface
 
 logger = logging.getLogger(__name__)
 
@@ -38,16 +38,9 @@ def _json_value(value: object) -> object:
     return str(value)
 
 
-async def _require_private_admin_thread() -> str | None:
-    cfg = configurable()
-    if cfg.admin_thread is not True or cfg.source != "dashboard":
-        return "Read-only SQL is available only in an admin's private dashboard thread."
-    return await require_admin("query the database")
-
-
 async def read_only_sql(query: str) -> dict[str, object]:
-    """Run one read-only PostgreSQL query in a private admin thread."""
-    if error := await _require_private_admin_thread():
+    """Run one read-only PostgreSQL query on a private admin surface."""
+    if error := await require_private_admin_surface("query the database"):
         return {"ok": False, "error": error}
 
     query = query.strip()

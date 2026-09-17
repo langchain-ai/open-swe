@@ -16,13 +16,23 @@ def _config(**configurable: object) -> dict[str, dict[str, object]]:
 
 
 @pytest.mark.asyncio
-async def test_read_only_sql_requires_private_admin_dashboard_thread(
+async def test_read_only_sql_requires_private_admin_surface(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv("CONFIGURED_ADMINS", "admin")
     configs = (
         _config(source="dashboard", github_login="admin"),
         _config(admin_thread=True, source="slack", github_login="admin"),
+        _config(
+            admin_thread=True,
+            source="slack",
+            github_login="admin",
+            slack_thread={
+                "channel_id": "C123",
+                "thread_ts": "0",
+                "channel_context": {"is_im": False},
+            },
+        ),
         _config(admin_thread=True, source="schedule", github_login="admin"),
     )
 
@@ -31,8 +41,41 @@ async def test_read_only_sql_requires_private_admin_dashboard_thread(
             result = await query_tool("SELECT 1")
         assert result == {
             "ok": False,
-            "error": "Read-only SQL is available only in an admin's private dashboard thread.",
+            "error": "Only workspace admins on a private admin surface can query the database.",
         }
+
+
+@pytest.mark.asyncio
+async def test_read_only_sql_allows_admin_slack_dm(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("CONFIGURED_ADMINS", "admin")
+    result = MagicMock()
+    result.keys.return_value = ["value"]
+    result.fetchmany = AsyncMock(return_value=[(1,)])
+    conn = AsyncMock()
+    conn.stream.return_value = result
+
+    @asynccontextmanager
+    async def connection():
+        yield conn
+
+    monkeypatch.setattr(sql_tool.postgres, "read_only_transaction", connection)
+    with patch(
+        "agent.run_config.get_config",
+        return_value=_config(
+            admin_thread=True,
+            source="slack",
+            github_login="admin",
+            slack_thread={
+                "channel_id": "D123",
+                "thread_ts": "0",
+                "channel_context": {"is_im": True},
+            },
+        ),
+    ):
+        response = await query_tool("SELECT 1 AS value")
+
+    assert response["ok"] is True
+    assert response["rows"] == [[1]]
 
 
 @pytest.mark.asyncio
@@ -44,7 +87,10 @@ async def test_read_only_sql_rechecks_admin_membership(monkeypatch: pytest.Monke
     ):
         result = await query_tool("SELECT 1")
 
-    assert result == {"ok": False, "error": "Only workspace admins can query the database."}
+    assert result == {
+        "ok": False,
+        "error": "Only workspace admins on a private admin surface can query the database.",
+    }
 
 
 @pytest.mark.asyncio

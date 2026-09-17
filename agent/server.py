@@ -195,7 +195,7 @@ from agent.tools import (
     update_automation,
     web_search,
 )
-from agent.tools.admin_gate import actor_is_admin, is_private_admin_thread
+from agent.tools.admin_gate import actor_has_admin_context, actor_is_admin, is_private_admin_surface
 from agent.utils import ttl_cache
 from agent.utils.authorship import (
     CollaboratorIdentity,
@@ -520,7 +520,7 @@ async def _workspace_admin(config: RunnableConfig, profile_login: str | None) ->
 
 async def _admin_thread(config: RunnableConfig, profile_login: str | None) -> bool:
     """Whether this run may manage workspaces and organization skills."""
-    return await is_private_admin_thread(RunConfig.from_config(config), login=profile_login)
+    return await actor_has_admin_context(RunConfig.from_config(config), login=profile_login)
 
 
 async def _private_thread(thread_id: str | None) -> bool:
@@ -1155,6 +1155,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
 
     async with aphase(thread_id, "factory.admin_thread"):
         admin_thread = await _admin_thread(config, profile_login)
+    private_admin_surface = admin_thread and is_private_admin_surface(cfg)
     if admin_thread:
         logger.info("Admin thread %s: adding workspace management tools", thread_id)
 
@@ -1235,7 +1236,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         slack_thread_reply,
         submit_thread_feedback,
         *(ADMIN_TOOLS if admin_thread else ()),
-        *((read_only_sql,) if admin_thread and source == "dashboard" else ()),
+        *((read_only_sql,) if private_admin_surface else ()),
     ]
     if credential_login is None:
         personal_tools = (

@@ -151,6 +151,25 @@ async def test_admin_thread_accepts_configured_login(monkeypatch: pytest.MonkeyP
 
 
 @pytest.mark.asyncio
+async def test_admin_thread_accepts_configured_admin_slack_dm(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("CONFIGURED_ADMINS", "ramonn")
+    config = _config(
+        admin_thread=True,
+        source="slack",
+        github_login="ramonn",
+        slack_thread={
+            "channel_id": "D123",
+            "thread_ts": "0",
+            "channel_context": {"is_im": True},
+        },
+    )
+
+    assert await server._admin_thread(config, None) is True
+
+
+@pytest.mark.asyncio
 async def test_workspace_admin_resolves_email_for_github_login(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
