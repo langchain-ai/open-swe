@@ -36,10 +36,6 @@ logger = logging.getLogger(__name__)
 SLACK_BOT_TOKEN = ENV.SLACK_BOT_TOKEN.get()
 SLACK_THREAD_MAX_MESSAGES = 500
 SLACK_FILE_UPLOAD_MAX_BYTES = 16 * 1024 * 1024
-SLACK_CHANNEL_INFO_CACHE_TTL_SECONDS = 300
-
-SlackChannelContext = dict[str, str | bool | None]
-_SLACK_CHANNEL_INFO_CACHE: dict[str, tuple[float, dict[str, Any]]] = {}
 
 SLACK_WEB_LINK_FOOTER_LABEL = "Open in Web"
 SLACK_SECTION_TEXT_MAX_CHARS = 3000
@@ -317,11 +313,26 @@ def _format_forwarded_slack_attachments(attachments: Any) -> str:
     return "\n".join(forwarded)
 
 
+def _slack_thread_reply_marker(message: dict[str, Any]) -> str:
+    """A pointer to the replies hanging off a channel message, when it has any."""
+    raw_thread_ts = message.get("thread_ts")
+    thread_ts = raw_thread_ts.strip() if isinstance(raw_thread_ts, str) else ""
+    reply_count = message.get("reply_count")
+    if not _SLACK_MESSAGE_TS_RE.fullmatch(thread_ts) or not isinstance(reply_count, int):
+        return ""
+    if reply_count < 1:
+        return ""
+    plural = "reply" if reply_count == 1 else "replies"
+    return f" [thread: {reply_count} {plural}, thread_ts={thread_ts}]"
+
+
 def format_slack_messages_for_prompt(
     messages: list[dict[str, Any]],
     user_names_by_id: dict[str, str] | None = None,
     bot_user_id: str = "",
     bot_username: str = "",
+    *,
+    include_thread_replies: bool = False,
 ) -> str:
     """Format Slack messages, including forwarded context, as readable prompt text."""
     if not messages:
@@ -348,7 +359,8 @@ def format_slack_messages_for_prompt(
         identifier = (
             f" [message_ts={message_ts}]" if _SLACK_MESSAGE_TS_RE.fullmatch(message_ts) else ""
         )
-        line = f"{author}{identifier}: {text}"
+        replies = _slack_thread_reply_marker(message) if include_thread_replies else ""
+        line = f"{author}{identifier}{replies}: {text}"
         if forwarded:
             line += f"\n{forwarded}"
         lines.append(line)
@@ -1157,165 +1169,6 @@ async def get_slack_user_info(user_id: str) -> dict[str, Any] | None:
         return None
 
 
-def clear_slack_channel_info_cache() -> None:
-    """Clear cached Slack channel info."""
-    _SLACK_CHANNEL_INFO_CACHE.clear()
-
-
-def _cached_slack_channel_info(channel_id: str) -> dict[str, Any] | None:
-    cached = _SLACK_CHANNEL_INFO_CACHE.get(channel_id)
-    if not cached:
-        return None
-    expires_at, channel = cached
-    if expires_at <= time.time():
-        _SLACK_CHANNEL_INFO_CACHE.pop(channel_id, None)
-        return None
-    return dict(channel)
-
-
-def _cache_slack_channel_info(channel_id: str, channel: dict[str, Any]) -> None:
-    _SLACK_CHANNEL_INFO_CACHE[channel_id] = (
-        time.time() + SLACK_CHANNEL_INFO_CACHE_TTL_SECONDS,
-        dict(channel),
-    )
-
-
-async def get_slack_channel_info(
-    channel_id: str, *, use_cache: bool = True
-) -> dict[str, Any] | None:
-    """Get Slack channel details (including topic/purpose) by channel ID."""
-    if not SLACK_BOT_TOKEN or not channel_id:
-        return None
-    if use_cache and (cached := _cached_slack_channel_info(channel_id)) is not None:
-        return cached
-    try:
-        async with slack_client(token=SLACK_BOT_TOKEN) as client:
-            data = await client.conversations_info(channel=channel_id)
-        channel = data.get("channel")
-        if isinstance(channel, dict):
-            _cache_slack_channel_info(channel_id, channel)
-            return dict(channel)
-    except SLACK_REQUEST_ERRORS as exc:
-        logger.warning("Slack channel lookup failed", extra={"slack_error": slack_error(exc)})
-    return None
-
-
-def _channel_section_value(channel: dict[str, Any] | None, key: str) -> str:
-    if not isinstance(channel, dict):
-        return ""
-    section = channel.get(key)
-    if isinstance(section, dict):
-        value = section.get("value")
-        if isinstance(value, str):
-            return value.strip()
-    value = channel.get(key)
-    return value.strip() if isinstance(value, str) else ""
-
-
-def extract_channel_description_text(channel: dict[str, Any] | None) -> str:
-    """Combine a Slack channel's topic and purpose text into one string."""
-    parts = [
-        value for key in ("topic", "purpose") if (value := _channel_section_value(channel, key))
-    ]
-    return "\n".join(parts)
-
-
-def normalize_slack_channel_context(
-    channel_id: str, channel: dict[str, Any] | None
-) -> SlackChannelContext:
-    """Normalize Slack channel info for prompts and metadata."""
-    name = ""
-    name_normalized = ""
-    if isinstance(channel, dict):
-        raw_name = channel.get("name")
-        raw_normalized = channel.get("name_normalized")
-        if isinstance(raw_name, str):
-            name = raw_name.strip()
-        if isinstance(raw_normalized, str):
-            name_normalized = raw_normalized.strip()
-    topic = _channel_section_value(channel, "topic")
-    purpose = _channel_section_value(channel, "purpose")
-    description = "\n".join(value for value in (topic, purpose) if value)
-    is_ext_shared = channel.get("is_ext_shared") if isinstance(channel, dict) else None
-    is_pending_ext_shared = (
-        channel.get("is_pending_ext_shared") if isinstance(channel, dict) else None
-    )
-    is_im = channel.get("is_im") if isinstance(channel, dict) else None
-    return {
-        "id": channel_id,
-        "name": name,
-        "name_normalized": name_normalized,
-        "topic": topic,
-        "purpose": purpose,
-        "description": description,
-        "is_ext_shared": is_ext_shared if isinstance(is_ext_shared, bool) else None,
-        "is_pending_ext_shared": (
-            is_pending_ext_shared if isinstance(is_pending_ext_shared, bool) else None
-        ),
-        "is_im": is_im if isinstance(is_im, bool) else None,
-    }
-
-
-def slack_channel_allows_operations(channel_context: dict[str, Any] | None) -> bool:
-    """Allow operations only when Slack confirms the channel is not externally shared."""
-    if not isinstance(channel_context, dict):
-        return False
-    return channel_context.get("is_im") is True or (
-        channel_context.get("is_ext_shared") is False
-        and channel_context.get("is_pending_ext_shared") is False
-    )
-
-
-def get_slack_channel_context_description(channel_context: dict[str, Any] | None) -> str:
-    """Extract prompt-safe description text from normalized channel context."""
-    if not isinstance(channel_context, dict):
-        return ""
-    description = channel_context.get("description")
-    if isinstance(description, str) and description.strip():
-        return description.strip()
-    parts: list[str] = []
-    for key in ("topic", "purpose"):
-        value = channel_context.get(key)
-        if isinstance(value, str) and value.strip():
-            parts.append(value.strip())
-    return "\n".join(parts)
-
-
-def slack_channel_context_has_metadata(channel_context: dict[str, Any] | None) -> bool:
-    """Return whether normalized channel context has name or description fields."""
-    if not isinstance(channel_context, dict):
-        return False
-    return any(
-        isinstance(channel_context.get(key), str) and channel_context.get(key, "").strip()
-        for key in ("name", "name_normalized", "topic", "purpose", "description")
-    )
-
-
-def is_slack_channel_named(channel_context: dict[str, Any] | None, expected_name: str) -> bool:
-    """Check normalized channel context against a Slack channel name."""
-    if not isinstance(channel_context, dict):
-        return False
-    expected = expected_name.strip().lower()
-    return any(
-        isinstance(value, str) and value.strip().lower() == expected
-        for value in (channel_context.get("name"), channel_context.get("name_normalized"))
-    )
-
-
-async def get_slack_channel_context(
-    channel_id: str, *, use_cache: bool = True
-) -> SlackChannelContext:
-    """Fetch and normalize Slack channel context."""
-    channel = await get_slack_channel_info(channel_id, use_cache=use_cache)
-    return normalize_slack_channel_context(channel_id, channel)
-
-
-async def get_slack_channel_description(channel_id: str) -> str:
-    """Fetch a Slack channel's combined topic + purpose text."""
-    channel = await get_slack_channel_info(channel_id)
-    return extract_channel_description_text(channel)
-
-
 async def get_slack_user_names(user_ids: list[str]) -> dict[str, str]:
     """Get display names for a set of Slack user IDs."""
     unique_ids = sorted({user_id for user_id in user_ids if isinstance(user_id, str) and user_id})
@@ -1980,7 +1833,6 @@ async def store_slack_message_run_mapping(
     *,
     run_id: str | None = None,
     triggering_user_id: str | None = None,
-    should_ask_for_feedback: bool = False,
 ) -> None:
     """Persist an exact run-to-Slack-message mapping."""
     namespace = (_SLACK_RUN_MAP_NAMESPACE, channel_id)
@@ -2010,10 +1862,6 @@ async def store_slack_message_run_mapping(
             "thread_ts": thread_ts,
             "message_ts": message_ts,
         }
-        if should_ask_for_feedback:
-            value["should_ask_for_feedback"] = True
-        else:
-            value.pop("should_ask_for_feedback", None)
         if triggering_user_id:
             value["triggering_user_id"] = triggering_user_id
         await langgraph_client.store.put_item(

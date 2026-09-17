@@ -35,6 +35,7 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     from agent.database.analytics import activate_reporting, load_workspace
     from agent.sandboxes.providers.registry import validate_sandbox_startup_config
     from agent.users import User
+    from agent.users.import_store import import_user_mappings
     from agent.utils.model import close_cached_models, validate_local_dev_llm_config
     from agent.workspaces.store import import_store_records
 
@@ -57,6 +58,19 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         logger.info(
             "Imported workspaces from the LangGraph Store",
             extra={"imported_workspaces": imported},
+        )
+    try:
+        # People used to be Store records keyed by GitHub login; this moves them
+        # into the users table and is a no-op once it has.
+        imported_users = await import_user_mappings()
+    except Exception:  # noqa: BLE001
+        # Startup continues: anyone still in the Store cannot vote or be
+        # resolved from Slack until an import succeeds, and nothing else breaks.
+        logger.exception("Importing user mappings from the LangGraph Store failed")
+    else:
+        logger.info(
+            "Imported user mappings from the LangGraph Store",
+            extra={"imported_users": imported_users},
         )
     if admins := configured_admins():
         await User.sync_admins(admins)

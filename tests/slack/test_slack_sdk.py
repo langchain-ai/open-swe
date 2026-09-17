@@ -61,6 +61,61 @@ async def test_read_thread_tool_paginates_and_resolves_authors(slack_api):
     ]
 
 
+_PUBLIC_CHANNEL = {
+    "ok": True,
+    "channel": {
+        "id": "C1",
+        "is_channel": True,
+        "is_private": False,
+        "is_ext_shared": False,
+        "is_pending_ext_shared": False,
+    },
+}
+
+
+async def test_read_channel_tool_marks_threads_and_skips_joins(slack_api):
+    from agent.slack.tools.read_channel_messages import slack_read_channel_messages
+
+    slack_api.respond(_PUBLIC_CHANNEL)
+    slack_api.respond(
+        {
+            "ok": True,
+            "messages": [
+                {
+                    "ts": "2.0",
+                    "user": "U1",
+                    "text": "Opened a PR",
+                    "thread_ts": "2.0",
+                    "reply_count": 2,
+                },
+                {"ts": "1.5", "user": "U2", "text": "joined", "subtype": "channel_join"},
+                {"ts": "1.0", "user": "U1", "text": "Deploys are failing"},
+            ],
+        }
+    )
+    slack_api.respond({"ok": True, "user": {"profile": {"display_name": "Alice"}}})
+    result = await slack_read_channel_messages("C1", limit=5)
+
+    assert result["success"] is True
+    assert result["count"] == 2
+    formatted = result["formatted"]
+    assert formatted.index("Deploys are failing") < formatted.index("Opened a PR")
+    assert "[thread: 2 replies, thread_ts=2.0]" in formatted
+    assert "joined" not in formatted
+    assert ("conversations.history", {"channel": "C1", "limit": "5"}) in slack_api.calls
+
+
+async def test_read_channel_tool_refuses_a_private_channel(slack_api):
+    from agent.slack.tools.read_channel_messages import slack_read_channel_messages
+
+    slack_api.respond({"ok": True, "channel": {"id": "C1", "is_channel": True, "is_private": True}})
+    result = await slack_read_channel_messages("C1")
+
+    assert result["success"] is False
+    assert "public" in result["error"]
+    assert [call[0] for call in slack_api.calls] == ["conversations.info"]
+
+
 @pytest.mark.parametrize(
     "thread_ts,method", [("0", "conversations.history"), ("1.0", "conversations.replies")]
 )

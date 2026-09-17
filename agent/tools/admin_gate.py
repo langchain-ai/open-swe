@@ -4,9 +4,10 @@ Tools recheck user admin membership or a system invocation's saved authorization
 """
 
 from agent.dashboard.admin import is_admin
-from agent.dashboard.user_mappings import email_for_login
 from agent.run_config import RunConfig
 from agent.schedules.store import authorized_admin_schedule
+from agent.slack.dm import is_dm_session
+from agent.users import User
 
 
 def configurable() -> RunConfig:
@@ -23,17 +24,28 @@ async def actor_is_admin(cfg: RunConfig, *, login: str | None = None) -> bool:
     login = login or cfg.github_login
     if is_admin(cfg.user_email, login=login):
         return True
-    return is_admin(await email_for_login(login), login=login)
+    return is_admin(await User.email_for_login(login), login=login)
 
 
-async def is_private_admin_thread(cfg: RunConfig, *, login: str | None = None) -> bool:
-    """Whether this run is a private admin thread whose actor is still an admin.
+def is_private_admin_surface(cfg: RunConfig) -> bool:
+    """Whether this run comes from a private surface stamped for admin use."""
+    dashboard = cfg.source in {None, "dashboard"}
+    slack_dm = (
+        cfg.source == "slack"
+        and cfg.slack_thread is not None
+        and is_dm_session(cfg.slack_thread.channel_context, cfg.slack_thread.thread_ts)
+    )
+    return cfg.admin_thread is True and (dashboard or slack_dm)
 
-    The dashboard only stamps ``admin_thread`` for an admin session, but the flag
-    is re-checked against ``CONFIGURED_ADMINS`` so a thread cannot carry the
-    capability to a non-admin who later messages it.
-    """
+
+async def actor_has_admin_context(cfg: RunConfig, *, login: str | None = None) -> bool:
+    """Whether an admin-stamped run's current actor remains authorized."""
     return cfg.admin_thread is True and await actor_is_admin(cfg, login=login)
+
+
+async def actor_has_private_admin_surface(cfg: RunConfig, *, login: str | None = None) -> bool:
+    """Whether a private admin surface's current actor remains authorized."""
+    return is_private_admin_surface(cfg) and await actor_is_admin(cfg, login=login)
 
 
 async def require_admin(action: str) -> str | None:
@@ -43,7 +55,7 @@ async def require_admin(action: str) -> str | None:
     return f"Only workspace admins can {action}."
 
 
-async def require_private_admin_thread(action: str) -> str | None:
-    if await is_private_admin_thread(configurable()):
+async def require_private_admin_surface(action: str) -> str | None:
+    if await actor_has_private_admin_surface(configurable()):
         return None
-    return f"Only workspace admins in a private admin thread can {action}."
+    return f"Only workspace admins on a private admin surface can {action}."
