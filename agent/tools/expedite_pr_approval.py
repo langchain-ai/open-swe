@@ -35,6 +35,22 @@ def _failure(error: str) -> dict[str, Any]:
     return {"success": False, "error": error}
 
 
+def _next_step(status: str, elsewhere: bool) -> str:
+    """What the agent should do once the request is registered."""
+    if elsewhere:
+        return (
+            "This revision was already nominated, so the card belongs to that earlier "
+            "request and stays in the Slack thread named here, not the channel you asked "
+            'for. Cancel with action="cancel" and ask again to move it.'
+        )
+    if status == "open":
+        return "The approval card is posted in the Slack thread; two approvals merge the PR."
+    return (
+        "Open SWE is watching the PR and will post the card once checks and reviews are "
+        "clean. Do not poll; you will be told if it is rejected or withdrawn."
+    )
+
+
 async def _context_location(cfg: RunConfig, thread_id: str) -> tuple[str, str]:
     """The run's own Slack ``(channel_id, thread_ts)``; either may be empty."""
     slack_thread = await get_active_slack_thread(
@@ -103,8 +119,9 @@ async def expedite_pr_approval(
                 f"Slack channel {channel.strip()!r} was not found. Pass a channel name the "
                 "bot can see or a channel id."
             )
-        if target.id != channel_id:
-            channel_id, thread_ts = target.id, ""
+        # An explicit channel always gets its own thread, including the channel
+        # this run is already talking in.
+        channel_id, thread_ts = target.id, ""
     if not channel_id:
         return _failure(
             "Expedited review posts its approval card in Slack. This thread has no Slack "
@@ -143,7 +160,16 @@ async def expedite_pr_approval(
         )
 
     payload = PullRequestPayload.model_validate(pr)
-    if not thread_ts:
+    # An active approval for this same revision is reused rather than replaced, and
+    # it keeps the Slack location it was opened with. Posting another root message
+    # would promise a card that is never going to arrive there.
+    active = await ExpeditedApproval.active_for(pr_ref.owner, pr_ref.repo, pr_ref.number)
+    reused = active is not None and active.head_sha == head_sha
+    settled = active.slack_location if reused and active is not None else None
+    elsewhere = settled is not None and settled != (channel_id, thread_ts)
+    if settled is not None:
+        channel_id, thread_ts = settled
+    elif not reused and not thread_ts:
         target = target or await SlackChannel.load(channel_id)
         if target is None:
             return _failure(f"Slack channel {channel_id} is unavailable")
@@ -180,10 +206,5 @@ async def expedite_pr_approval(
         "changed_lines": verdict.changed_lines,
         "slack_channel_id": channel_id,
         "status": status,
-        "next": (
-            "The approval card is posted in the Slack thread; two approvals merge the PR."
-            if status == "open"
-            else "Open SWE is watching the PR and will post the card once checks and reviews "
-            "are clean. Do not poll; you will be told if it is rejected or withdrawn."
-        ),
+        "next": _next_step(status, elsewhere),
     }
