@@ -741,44 +741,42 @@ it("keeps sort controls focused while loading and prevents using a stale page cu
   client.clear()
 })
 
-it("requests server-side sorting and exposes its direction", async () => {
-  vi.spyOn(api, "prMergeRateByModel").mockResolvedValue(captured)
-  vi.mocked(api.usageLeaderboard).mockResolvedValue({
-    ...emptyUsage,
-    total_members: 1,
-    rows: [costRow],
-  })
-  const client = mountReport()
-  await screen.findByText("Cost Reader")
+// Counts are most interesting highest-first; names and ranks read best ascending.
+it.each([
+  ["Invocations", "invocations", "desc", "asc"],
+  ["User", "user", "asc", "desc"],
+] as const)(
+  "sorts %s from its natural direction and toggles on the next click",
+  async (label, sortKey, first, second) => {
+    vi.spyOn(api, "prMergeRateByModel").mockResolvedValue(captured)
+    vi.mocked(api.usageLeaderboard).mockResolvedValue({
+      ...emptyUsage,
+      total_members: 1,
+      rows: [costRow],
+    })
+    const client = mountReport()
+    await screen.findByText("Cost Reader")
 
-  fireEvent.click(screen.getByRole("button", { name: /Invocations/ }))
-  await waitFor(() =>
-    expect(api.usageLeaderboard).toHaveBeenLastCalledWith(
-      "30d",
-      10,
-      undefined,
-      "invocations",
-      "desc"
-    )
-  )
-  expect(
-    (
-      await screen.findByRole("columnheader", { name: /Invocations/ })
-    ).getAttribute("aria-sort")
-  ).toBe("descending")
-
-  fireEvent.click(screen.getByRole("button", { name: /Invocations/ }))
-  await waitFor(() =>
-    expect(api.usageLeaderboard).toHaveBeenLastCalledWith(
-      "30d",
-      10,
-      undefined,
-      "invocations",
-      "asc"
-    )
-  )
-  client.clear()
-})
+    for (const direction of [first, second]) {
+      fireEvent.click(screen.getByRole("button", { name: label }))
+      await waitFor(() =>
+        expect(api.usageLeaderboard).toHaveBeenLastCalledWith(
+          "30d",
+          10,
+          undefined,
+          sortKey,
+          direction
+        )
+      )
+      expect(
+        (await screen.findByRole("columnheader", { name: label })).getAttribute(
+          "aria-sort"
+        )
+      ).toBe(direction === "asc" ? "ascending" : "descending")
+    }
+    client.clear()
+  }
+)
 
 it.each([
   {

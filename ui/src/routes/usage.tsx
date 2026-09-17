@@ -53,6 +53,8 @@ interface SortableColumn {
   key: UsageLeaderboardSort
   label: string
   align: "left" | "right"
+  /** Direction applied on the first click. Counts read best highest-first. */
+  defaultDirection?: SortDirection
 }
 
 type UsageScope = "invocations" | "threads"
@@ -173,7 +175,7 @@ function UsageAnalyticsPeriod({
     staleTime: 60 * 1000,
     refetchInterval: 60 * 1000,
     retry: (count, error) =>
-      !(error instanceof ApiError && error.status === 503) && count < 2,
+      !(error instanceof ApiError && error.status >= 400) && count < 2,
   })
   const report = usePRMergeRateReport(activePeriod, login, isAdmin)
   const metadata = [
@@ -283,9 +285,13 @@ function UsageAnalyticsPeriod({
             sort={sort}
             direction={direction}
             isUpdating={leaderboard.isPlaceholderData}
-            onSort={(nextSort) => {
+            onSort={(nextSort, nextDirection) => {
               setDirection(
-                sort === nextSort && direction === "desc" ? "asc" : "desc"
+                sort === nextSort
+                  ? direction === "asc"
+                    ? "desc"
+                    : "asc"
+                  : nextDirection
               )
               setSort(nextSort)
               setLeaderboardPage(1)
@@ -432,7 +438,7 @@ function usePRMergeRateReport(
     staleTime: 60 * 1000,
     refetchInterval: 60 * 1000,
     retry: (count, error) =>
-      !(error instanceof ApiError && error.status === 503) && count < 2,
+      !(error instanceof ApiError && error.status >= 400) && count < 2,
   })
 }
 
@@ -657,9 +663,14 @@ function PRMergeRateTable({
 
 function usageColumns(scope: UsageScope): Array<SortableColumn> {
   return [
-    { key: "rank", label: "Rank", align: "left" },
-    { key: "user", label: "User", align: "left" },
-    { key: "favorite_model", label: "Favorite Model", align: "left" },
+    { key: "rank", label: "Rank", align: "left", defaultDirection: "asc" },
+    { key: "user", label: "User", align: "left", defaultDirection: "asc" },
+    {
+      key: "favorite_model",
+      label: "Favorite Model",
+      align: "left",
+      defaultDirection: "asc",
+    },
     {
       key: scope === "threads" ? "threads" : "invocations",
       label: scope === "threads" ? "Threads" : "Invocations",
@@ -690,7 +701,7 @@ function SortableHeader({
   column: SortableColumn
   sortKey: UsageLeaderboardSort
   sortDirection: SortDirection
-  onSort: (key: UsageLeaderboardSort) => void
+  onSort: (key: UsageLeaderboardSort, direction: SortDirection) => void
   className: string
 }) {
   const isActive = sortKey === column.key
@@ -713,7 +724,7 @@ function SortableHeader({
     >
       <button
         type="button"
-        onClick={() => onSort(column.key)}
+        onClick={() => onSort(column.key, column.defaultDirection ?? "desc")}
         className={`flex w-full items-center gap-1 rounded-sm px-2 py-3 hover:bg-muted/50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring ${
           column.align === "right" ? "justify-end" : "justify-start"
         } ${isActive ? "text-foreground" : ""}`}
@@ -751,7 +762,7 @@ function UsageTable({
   sort: UsageLeaderboardSort
   direction: SortDirection
   isUpdating: boolean
-  onSort: (key: UsageLeaderboardSort) => void
+  onSort: (key: UsageLeaderboardSort, direction: SortDirection) => void
   onPageChange: (page: number) => void
   onPageSizeChange: (pageSize: number) => void
 }) {
