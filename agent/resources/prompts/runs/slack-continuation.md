@@ -1,7 +1,10 @@
-$who used a Block Kit element on one of your Slack messages.
+Someone used a Block Kit element on one of your Slack messages. This is that interaction, not a new request.
 
-- Element: `$action_id` (a $element you added)
-- Label: $label
-- What they did: $what
+The element is one you wrote and named, so `action_id` is your own name for it and tells you what the click means. Carry on from the answer it gave. It is spent, so do not ask anyone to click it again; post a fresh message when you need another answer.
 
-That element is yours: you chose its `action_id` and you know what it was for. Carry on from what they picked — the click is an answer to whatever you posted it for, not a new request. It is spent, so do not tell anyone to click it again; post a fresh message if you need another answer.
+Element: `$action_id` (a $element)
+Clicked by: $who
+<untrusted-slack-interaction>
+<label>$label</label>
+<action>$what</action>
+</untrusted-slack-interaction>

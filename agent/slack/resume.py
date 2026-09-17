@@ -5,6 +5,7 @@ import logging
 from fastapi import HTTPException
 
 from agent.dispatch import dispatch_agent_run
+from agent.input_messages import SystemIdentity
 from agent.prompts import render_prompt
 from agent.slack.client import post_slack_ephemeral_message
 from agent.slack.continuations import SlackContinuation
@@ -13,6 +14,13 @@ from agent.utils.thread_ops import get_thread_active_status, queue_message_for_t
 from agent.webhooks import common
 
 logger = logging.getLogger(__name__)
+
+_SENDER_ID = "system:slack-continuation"
+_SENDER: SystemIdentity = {
+    "id": _SENDER_ID,
+    "display_name": "Slack interaction",
+    "platform": "slack",
+}
 
 _NOT_YOURS = "That is not yours to answer — the thread behind it is private to someone else."
 _FAILED = "Open SWE could not pick that up. Try again in a moment."
@@ -105,7 +113,14 @@ async def _resume(
         )
         return
 
-    await dispatch_agent_run(row.thread_id, prompt, dict(row.run_config), source="slack")
+    await dispatch_agent_run(
+        row.thread_id,
+        prompt,
+        dict(row.run_config),
+        source="slack",
+        context={"sender_id": _SENDER_ID, "surface": "slack", "kind": "system"},
+        systems=[_SENDER],
+    )
     logger.info(
         "Resumed a thread from a Slack continuation",
         extra={"agent_thread_id": row.thread_id, "slack_continuation": str(row.id)},
