@@ -332,7 +332,7 @@ def _default_settings() -> dict[str, Any]:
         "default_agent_subagent_model": fallback_model,
         "default_agent_subagent_reasoning_effort": fallback_effort,
         "default_agent_routing_fast_model": "openai:gpt-5.6-luna",
-        "default_agent_routing_fast_reasoning_effort": "high",
+        "default_agent_routing_fast_reasoning_effort": "low",
         "default_agent_routing_balanced_model": "openai:gpt-5.6-sol",
         "default_agent_routing_balanced_reasoning_effort": "medium",
         "default_agent_routing_performance_model": "openai:gpt-6-astra",
