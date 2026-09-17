@@ -44,7 +44,7 @@ async def slack_thread_reply(
     slack_thread = cfg.slack_thread.dump() if cfg.slack_thread else {}
     thread_id = cfg.thread_id
     if cfg.slack_ask is True:
-        return await _ephemeral_reply(cfg, message, blocks, state)
+        return await _ephemeral_reply(cfg, message, blocks, options, state)
     client = get_langgraph_client()
     active = await get_active_slack_thread(
         client,
@@ -136,8 +136,20 @@ async def _ephemeral_reply(
     cfg: RunConfig,
     message: str,
     blocks: list[dict[str, Any]] | None,
+    options: list[str] | None,
     state: dict[str, Any] | None,
 ) -> dict[str, Any]:
+    if options:
+        return {
+            "success": False,
+            "error": "options cannot be answered on an ephemeral reply",
+            "retry": True,
+            "hint": (
+                "Slack cannot route a choice button on an ephemeral message back to this run, "
+                "so nothing was posted. Call this tool again without `options`, putting the "
+                "choice in `message` as a question."
+            ),
+        }
     slack_thread = cfg.slack_thread
     channel_id = slack_thread.channel_id if slack_thread else ""
     user_id = slack_thread.triggering_user_id if slack_thread else ""
