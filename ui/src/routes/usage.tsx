@@ -762,19 +762,19 @@ function PRMergeRateCells({
       <td className="px-2 py-3 text-right tabular-nums">
         <OpenPRCount cohort={cohort} maturityDays={maturityDays} />
       </td>
-              <td className="px-2 py-3 text-right tabular-nums">
-                <Tooltip>
-                  <TooltipTrigger className="cursor-help rounded-sm underline decoration-dotted underline-offset-2 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring">
-                    {cohort.median_distance_basis_points == null
-                      ? "—"
-                      : `${(cohort.median_distance_basis_points / 100).toFixed(1)}%`}
-                  </TooltipTrigger>
-                  <TooltipPopup>
-                    {cohort.distance_sample_size ?? 0} merged PR
-                    {cohort.distance_sample_size === 1 ? "" : "s"} measured
-                  </TooltipPopup>
-                </Tooltip>
-              </td>
+      <td className="px-2 py-3 text-right tabular-nums">
+        <Tooltip>
+          <TooltipTrigger className="cursor-help rounded-sm underline decoration-dotted underline-offset-2 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring">
+            {cohort.median_distance_basis_points == null
+              ? "—"
+              : `${(cohort.median_distance_basis_points / 100).toFixed(1)}%`}
+          </TooltipTrigger>
+          <TooltipPopup>
+            {cohort.distance_sample_size ?? 0} merged PR
+            {cohort.distance_sample_size === 1 ? "" : "s"} measured
+          </TooltipPopup>
+        </Tooltip>
+      </td>
       <td className="px-4 py-3 text-right text-sm font-semibold tabular-nums">
         {cohort.mature_cohort_merge_share == null
           ? "—"
