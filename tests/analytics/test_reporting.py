@@ -41,6 +41,7 @@ async def test_report_distinguishes_capture_delivery_period_and_suppression(
         occurred_at=datetime.now(UTC) - timedelta(days=60),
         environment="test",
         payload=PROpenedPayload(opening_run_id=uuid4(), model_attribution_quality="unavailable"),
+        thread_id=uuid4(),
         pr_id=uuid4(),
         repository_id=uuid4(),
     )
@@ -74,8 +75,9 @@ async def test_report_distinguishes_capture_delivery_period_and_suppression(
     assert report["status"] == "no_prs"
     assert report["cohorts"] == []
     report = await queries.pr_merge_rate_by_model(period="all", admin=True)
-    assert report["status"] == "ready"
-    assert report["cohorts"][0]["cohort_size"] == 1
+    assert report["status"] == "suppressed"
+    assert report["cohorts"] == []
+    assert report["unavailable_thread_ids"] == [str(opened.thread_id)]
 
     async with postgres.transaction() as conn:
         await conn.execute(text("DELETE FROM events"))
@@ -84,8 +86,87 @@ async def test_report_distinguishes_capture_delivery_period_and_suppression(
     await postgres.close()
     await initialize_database()
     report = await queries.pr_merge_rate_by_model(period="all", admin=True)
-    assert report["status"] == "ready"
+    assert report["status"] == "suppressed"
+    assert report["unavailable_thread_ids"] == []
     assert datetime.fromisoformat(report["last_processed_at"]) == processed_at
+
+
+async def test_merge_rates_keep_models_without_directory_entries_separate(reporting_db):
+    from agent.analytics import ingestion
+
+    workspace = database.workspace_id()
+    for model_id in (uuid4(), uuid4()):
+        await ingestion.ingest(
+            make_event(
+                workspace_id=workspace,
+                event_name=EventName.PR_OPENED,
+                producer="test",
+                producer_event_id=str(uuid4()),
+                occurred_at=datetime.now(UTC) - timedelta(days=1),
+                environment="test",
+                payload=PROpenedPayload(
+                    opening_run_id=uuid4(),
+                    originating_model_id=model_id,
+                    model_attribution_quality="configured",
+                ),
+                pr_id=uuid4(),
+                repository_id=uuid4(),
+            )
+        )
+    report = await queries.pr_merge_rate_by_model(period="all", admin=True)
+    assert len(report["cohorts"]) == 2
+    assert all(cohort["cohort_size"] == 1 for cohort in report["cohorts"])
+
+
+async def test_merge_rates_group_efforts_under_model_privacy_cohorts(reporting_db):
+    from agent.analytics import ingestion
+    from agent.analytics.events import RunStartedPayload
+
+    workspace = database.workspace_id()
+    model_id = uuid4()
+    repository_id = uuid4()
+    for effort in ("low", "high", "high"):
+        run_id = uuid4()
+        await ingestion.ingest(
+            make_event(
+                workspace_id=workspace,
+                event_name=EventName.RUN_STARTED,
+                producer="test",
+                producer_event_id=str(uuid4()),
+                occurred_at=datetime.now(UTC) - timedelta(days=1),
+                environment="test",
+                payload=RunStartedPayload(
+                    configured_model_id=model_id,
+                    configured_effort=effort,
+                    model_attribution_quality="configured",
+                ),
+                run_id=run_id,
+            )
+        )
+        await ingestion.ingest(
+            make_event(
+                workspace_id=workspace,
+                event_name=EventName.PR_OPENED,
+                producer="test",
+                producer_event_id=str(uuid4()),
+                occurred_at=datetime.now(UTC) - timedelta(days=1),
+                environment="test",
+                payload=PROpenedPayload(
+                    opening_run_id=run_id,
+                    originating_model_id=model_id,
+                    model_attribution_quality="configured",
+                ),
+                pr_id=uuid4(),
+                repository_id=repository_id,
+            )
+        )
+    report = await queries.pr_merge_rate_by_model(period="all", admin=True)
+    cohort = report["cohorts"][0]
+    assert cohort["cohort_size"] == 3
+    assert [(effort["effort"], effort["cohort_size"]) for effort in cohort["efforts"]] == [
+        ("high", 2),
+        ("low", 1),
+    ]
 
 
 async def test_merge_rates_separate_decisions_maturity_and_waiting(reporting_db, monkeypatch):

@@ -52,7 +52,7 @@ async def _start(invocation_id="run"):
         github_user_id=123,
         display_name="Octo Cat",
         model_id="model",
-        effort=None,
+        effort="high",
         source="dashboard",
     )
 
@@ -95,6 +95,8 @@ async def test_queued_completion_and_cost_are_accounted_before_delivery(
         assert await conn.scalar(text("SELECT count(*) FROM run_projection")) == 0
     await _deliver(transaction, reverse=True)
     await _deliver(transaction)
+    async with transaction() as conn:
+        assert await conn.scalar(text("SELECT configured_effort FROM run_projection")) == "high"
     report = await _report()
     row = report["rows"][0]
     assert row["user"]["name"] == "Octo Cat"
