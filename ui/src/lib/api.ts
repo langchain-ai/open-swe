@@ -91,6 +91,31 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   return (await res.json()) as T
 }
 
+let activePrDetails = 0
+const pendingPrDetails: Array<() => void> = []
+
+async function loadPrDetails(
+  repo: string,
+  number: number
+): Promise<OpenPullRequest | null> {
+  await new Promise<void>((resolve) => {
+    const start = () => {
+      activePrDetails++
+      resolve()
+    }
+    if (activePrDetails < 4) start()
+    else pendingPrDetails.push(start)
+  })
+  try {
+    return await request<OpenPullRequest | null>(
+      `/repos/${repo.split("/").map(encodeURIComponent).join("/")}/pulls/${number}`
+    )
+  } finally {
+    activePrDetails--
+    pendingPrDetails.shift()?.()
+  }
+}
+
 export interface SessionUser {
   login: string
   email: string | null
@@ -339,6 +364,19 @@ export interface UsageLeaderboardPayload extends AnalyticsMetadata {
   reviewer_stats: ReviewerStatsPayload
 }
 
+export interface PRMergeRateEffort {
+  effort: string | null
+  merged: number
+  closed_without_merge: number
+  mature_pending: number
+  waiting: number
+  cohort_size: number
+  decided_denominator: number
+  decided_merge_rate: number | null
+  mature_denominator: number
+  mature_cohort_merge_share: number | null
+}
+
 export interface PRMergeRateCohort {
   model_id: string | null
   model_attribution_quality: "effective" | "configured" | "unavailable"
@@ -351,6 +389,8 @@ export interface PRMergeRateCohort {
   decided_merge_rate: number | null
   mature_denominator: number
   mature_cohort_merge_share: number | null
+  avg_merge_seconds: number | null
+  efforts: PRMergeRateEffort[]
 }
 
 export interface PRMergeRatePayload extends AnalyticsMetadata {
@@ -361,6 +401,7 @@ export interface PRMergeRatePayload extends AnalyticsMetadata {
   period: UsageLeaderboardPeriod
   suppression_threshold: number
   cohorts: PRMergeRateCohort[]
+  unavailable_thread_ids: string[]
 }
 
 export interface Repository {
@@ -594,6 +635,62 @@ export interface ReviewListPayload {
   has_more: boolean
 }
 
+export interface OpenPullRequest {
+  detailsLoading?: boolean
+  detailsError?: boolean
+  repo: string
+  number: number
+  title: string
+  draft: boolean | null
+  additions: number | null
+  deletions: number | null
+  mergeable: boolean | null
+  mergeState: string
+  headSha: string | null
+  headRef: string | null
+  reviewDecision: "approved" | "changes_requested" | "none" | null
+  statusAvailable: boolean
+  createdAt: string | null
+  updatedAt: string | null
+  ci: "passing" | "failing" | "pending" | "unknown" | "none"
+  failingChecks: string[]
+  pendingChecks: string[]
+  // null when the review threads could not be read, which is not the same
+  // answer as none being unresolved.
+  unresolvedThreads: number | null
+}
+
+export type MergeMethod = "squash" | "merge" | "rebase"
+
+export type PullRequestActionName = "merge" | "close" | "mark-ready"
+
+export type PullRequestActionRequest =
+  | { action: "merge"; sha: string | null; merge_method: MergeMethod }
+  | { action: "close" }
+  | { action: "mark-ready" }
+
+export interface PullRequestActionResult {
+  action: PullRequestActionName
+  done: boolean
+}
+
+export type PullRequestThreadIntent =
+  | { intent: "open"; title: string }
+  | { intent: "fix"; context: OpenPullRequest | null }
+  | { intent: "address-comments" }
+
+export interface PullRequestThreadResult {
+  thread_id: string
+  already_running: boolean
+}
+
+export interface OpenPullRequestsPayload {
+  pullRequests: OpenPullRequest[]
+  nextPage: number | null
+  incomplete: boolean
+  updatedAt: string
+}
+
 export interface ReviewUserRef {
   login: string
   avatar_url?: string | null
@@ -726,6 +823,32 @@ export interface ReviewerEvalStatus {
   github_run_url?: string | null
   trigger?: string | null
   updated_at: string
+}
+
+async function pullRequestAction(
+  pr: OpenPullRequest,
+  body: PullRequestActionRequest
+): Promise<PullRequestActionResult> {
+  const result = await request<PullRequestActionResult>(
+    `/repos/${pr.repo.split("/").map(encodeURIComponent).join("/")}/pulls/${pr.number}/action`,
+    { method: "POST", body: JSON.stringify(body) }
+  )
+  if (!result.done)
+    throw new Error(
+      "GitHub did not confirm the change. Refresh to check the PR."
+    )
+  return result
+}
+
+function pullRequestThread(
+  repo: string,
+  number: number,
+  body: PullRequestThreadIntent
+): Promise<PullRequestThreadResult> {
+  return request<PullRequestThreadResult>(
+    `/repos/${repo.split("/").map(encodeURIComponent).join("/")}/pulls/${number}/thread`,
+    { method: "POST", body: JSON.stringify(body) }
+  )
 }
 
 export const api = {
@@ -951,6 +1074,51 @@ export const api = {
     request<AdminUsersPage>(`/admin/users?page=${page}&page_size=${pageSize}`),
   listReviews: (page: number, mine: boolean) =>
     request<ReviewListPayload>(`/reviews?page=${page}&mine=${mine}`),
+  myPullRequests: (
+    repo: string,
+    sort: "createdAt" | "updatedAt" = "updatedAt",
+    direction: "asc" | "desc" = "desc",
+    page = 1
+  ) =>
+    request<OpenPullRequestsPayload>(
+      `/pull-requests?repo=${encodeURIComponent(repo)}&lightweight=true&sort=${sort === "createdAt" ? "created" : "updated"}&direction=${direction}&page=${page}&scope=mine`
+    ),
+  myPullRequestDetails: (repo: string, number: number) =>
+    loadPrDetails(repo, number),
+  fixPullRequest: (pr: OpenPullRequest) =>
+    pullRequestThread(pr.repo, pr.number, { intent: "fix", context: pr }),
+  addressPullRequestComments: (pr: OpenPullRequest) =>
+    pullRequestThread(pr.repo, pr.number, { intent: "address-comments" }),
+  pullRequestThreadStatus: (repo: string, number: number) =>
+    request<{ running: boolean }>(
+      `/repos/${repo.split("/").map(encodeURIComponent).join("/")}/pulls/${number}/thread`
+    ),
+  openPullRequestThread: (repo: string, number: number, title: string) =>
+    pullRequestThread(repo, number, { intent: "open", title }),
+  mergePullRequest: (
+    pr: OpenPullRequest,
+    method: MergeMethod
+  ): Promise<PullRequestActionResult> =>
+    pullRequestAction(pr, {
+      action: "merge",
+      sha: pr.headSha,
+      merge_method: method,
+    }),
+  closePullRequest: (pr: OpenPullRequest): Promise<PullRequestActionResult> =>
+    pullRequestAction(pr, { action: "close" }),
+  markPullRequestReady: (
+    pr: OpenPullRequest
+  ): Promise<PullRequestActionResult> =>
+    pullRequestAction(pr, { action: "mark-ready" }),
+  repoMergeMethods: (repo: string) =>
+    request<{ mergeMethods: MergeMethod[] }>(
+      `/repos/${repo.split("/").map(encodeURIComponent).join("/")}/merge-methods`
+    ),
+  reviewSummaries: (pullRequests: Array<{ repo: string; number: number }>) =>
+    request<Record<string, ReviewSummary | null>>("/reviews/summaries", {
+      method: "POST",
+      body: JSON.stringify({ pullRequests }),
+    }),
   getReview: (owner: string, repo: string, number: number) =>
     request<ReviewDetail>(
       `/reviews/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}`

@@ -331,7 +331,7 @@ async def test_reports_require_activation_and_exclude_pre_cutover_facts(usage_db
     assert result["reviewer_stats"]["human_replies"] == 1
     assert result["reporting_cutover_at"] == (NOW - timedelta(days=1)).isoformat()
     outcomes = await queries.pr_merge_rate_by_model(period="all", admin=True)
-    assert outcomes["cohorts"][0]["cohort_size"] == 1
+    assert outcomes["cohorts"] == []
     async with postgres.transaction() as conn:
         await conn.execute(text("UPDATE deployment_metadata SET reporting_cutover_at = NULL"))
     with pytest.raises(RuntimeError, match="not been activated"):

@@ -106,6 +106,7 @@ async def record_agent_invocation_usage(
         run_key=invocation_id,
         thread_key=thread_id,
         model=model_id,
+        effort=effort,
         source=source,
         immutable_person_key=github_user_id or github_login,
         repository_key=repository,

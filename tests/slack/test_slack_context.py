@@ -560,9 +560,7 @@ def test_post_slack_thread_reply_adds_web_context_block(monkeypatch: pytest.Monk
         )
     )
 
-    expected_footer = (
-        "<https://app.example.com/agents/mapped-thread|Open in Web> • calculating cost"
-    )
+    expected_footer = "<https://app.example.com/agents/mapped-thread|Open in Web>"
     assert captured["text"] == f"Done {expected_footer}"
     assert captured["blocks"] == [
         {"type": "section", "text": {"type": "mrkdwn", "text": "Done"}},
@@ -610,9 +608,7 @@ def test_post_slack_thread_reply_keeps_long_messages_text_only(
     )
 
     expected_thread_id = "mapped-thread"
-    expected_footer = (
-        f"<https://app.example.com/agents/{expected_thread_id}|Open in Web> • calculating cost"
-    )
+    expected_footer = f"<https://app.example.com/agents/{expected_thread_id}|Open in Web>"
     assert captured["text"] == f"{long_text} {expected_footer}"
     assert captured["blocks"] is None
 
@@ -652,9 +648,7 @@ def test_post_slack_thread_reply_appends_web_context_block_to_blocks(
     )
 
     expected_thread_id = "mapped-thread"
-    expected_footer = (
-        f"<https://app.example.com/agents/{expected_thread_id}|Open in Web> • calculating cost"
-    )
+    expected_footer = f"<https://app.example.com/agents/{expected_thread_id}|Open in Web>"
     assert captured["text"] == f"Pick one {expected_footer}"
     posted_blocks = captured["blocks"]
     assert isinstance(posted_blocks, list)
@@ -702,22 +696,19 @@ def test_post_slack_thread_reply_keeps_usage_with_existing_web_link(
     assert str(posted_blocks).count(str(dashboard_url)) == 1
     assert posted_blocks[-1] == {
         "type": "context",
-        "elements": [{"type": "mrkdwn", "text": "model-a • calculating cost"}],
+        "block_id": "open_swe_usage_footer",
+        "elements": [{"type": "mrkdwn", "text": "model-a"}],
     }
 
 
-def test_format_slack_web_link_footer_includes_pending_cost() -> None:
+def test_format_slack_web_link_footer_omits_unavailable_cost() -> None:
     usage = RunUsageSummary(models=("model-a", "model-b"), total_tokens=12_345)
 
     footer = slack_utils.format_slack_web_link_footer("https://app.example/agents/t1", usage)
     footer_without_usage = slack_utils.format_slack_web_link_footer("https://app.example/agents/t1")
 
-    assert footer == (
-        "<https://app.example/agents/t1|Open in Web> • model-a + model-b • calculating cost"
-    )
-    assert footer_without_usage == (
-        "<https://app.example/agents/t1|Open in Web> • calculating cost"
-    )
+    assert footer == "<https://app.example/agents/t1|Open in Web> • model-a + model-b"
+    assert footer_without_usage == "<https://app.example/agents/t1|Open in Web>"
 
 
 def test_format_slack_web_link_footer_prefers_session_cost() -> None:
@@ -736,7 +727,7 @@ def test_format_slack_run_usage_shortens_model_paths() -> None:
 
     footer = slack_utils.format_slack_run_usage(usage)
 
-    assert footer == "glm-5p3-flash + openai:gpt-5.6-sol • calculating cost"
+    assert footer == "glm-5p3-flash + openai:gpt-5.6-sol"
 
 
 def test_with_slack_session_cost_preserves_blocks_and_is_idempotent() -> None:
@@ -2359,3 +2350,81 @@ def test_process_slack_mention_runs_an_edit_when_queueing_fails(
     run_create = captured["run_create"]
     assert isinstance(run_create, dict)
     assert run_create["kwargs"]["multitask_strategy"] == "enqueue"
+
+
+@pytest.mark.parametrize("linked_in_body", [False, True])
+def test_deferred_cost_updates_footer_without_placeholder(linked_in_body: bool) -> None:
+    url = "https://app.example/agents/t1"
+    body = f"Done <{url}|Open in Web>" if linked_in_body else "Done"
+    usage = RunUsageSummary(models=("model-a",), total_tokens=123)
+    blocks = slack_utils._with_slack_web_link_context_block(
+        body, [{"type": "section", "text": {"type": "mrkdwn", "text": body}}], url, usage
+    )
+    text = slack_utils.append_slack_web_link_footer(body, url, usage)
+    assert "calculating cost" not in text
+    updated_text, updated_blocks = slack_utils.with_slack_session_cost(text, blocks, 0.42)
+    assert updated_text.endswith("model-a • $0.42")
+    assert updated_blocks is not None
+    assert updated_blocks[0] == blocks[0]
+    assert updated_blocks[-1]["elements"][0]["text"].endswith("model-a • $0.42")
+    assert slack_utils.with_slack_session_cost(updated_text, updated_blocks, 0.42) == (
+        updated_text,
+        updated_blocks,
+    )
+
+
+def test_pending_cost_marks_latest_reply_until_cost_arrives() -> None:
+    url = "https://app.example/agents/t1"
+    usage = RunUsageSummary(models=("model-a",), total_tokens=123)
+    blocks = slack_utils._with_slack_web_link_context_block(
+        "Done", [{"type": "section", "text": {"type": "mrkdwn", "text": "Done"}}], url, usage
+    )
+    text = slack_utils.append_slack_web_link_footer("Done", url, usage)
+    assert "calculating cost" not in text
+
+    pending_text, pending_blocks = slack_utils.with_slack_pending_session_cost(text, blocks)
+    assert pending_text.endswith("model-a • calculating cost")
+    assert pending_blocks is not None
+    assert pending_blocks[-1]["elements"][0]["text"].endswith("model-a • calculating cost")
+
+    # Idempotent while awaiting cost, and the refresh swaps the label for the cost.
+    assert slack_utils.with_slack_pending_session_cost(pending_text, pending_blocks) == (
+        pending_text,
+        pending_blocks,
+    )
+    final_text, final_blocks = slack_utils.with_slack_session_cost(
+        pending_text, pending_blocks, 0.42
+    )
+    assert final_text.endswith("model-a • $0.42")
+    assert final_blocks is not None
+    assert final_blocks[-1]["elements"][0]["text"].endswith("model-a • $0.42")
+
+    # Messages without a web footer (e.g. interim acknowledgements) stay untouched.
+    assert slack_utils.with_slack_pending_session_cost("Working on it", None) == (
+        "Working on it",
+        None,
+    )
+
+
+@pytest.mark.parametrize("usage", [None, RunUsageSummary(models=(), total_tokens=123)])
+def test_cost_enrichment_without_model_metadata(usage: RunUsageSummary | None) -> None:
+    url = "https://app.example/agents/t1"
+    text = f"Done <{url}|Open in Web>"
+    blocks = slack_utils._with_slack_web_link_context_block(
+        text, [{"type": "section", "text": {"type": "mrkdwn", "text": text}}], url, usage
+    )
+    for pending in (False, True):
+        initial_text, initial_blocks = (
+            slack_utils.with_slack_pending_session_cost(text, blocks) if pending else (text, blocks)
+        )
+        final_text, final_blocks = slack_utils.with_slack_session_cost(
+            initial_text, initial_blocks, 0.42
+        )
+        assert final_text.endswith("$0.42")
+        assert final_blocks[-1]["elements"][0]["text"] == "$0.42"
+        assert final_blocks[0] == blocks[0]
+    cleared_text, cleared_blocks = slack_utils.with_slack_pending_session_cost(
+        initial_text, initial_blocks, clear=True
+    )
+    assert "calculating cost" not in cleared_text
+    assert "calculating cost" not in str(cleared_blocks)
