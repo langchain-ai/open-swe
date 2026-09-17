@@ -129,7 +129,8 @@ class ModelSelectionMiddleware(OpenSWEMiddleware[ModelSelectionState]):
         route: Route = "balanced"
         try:
             decision = await self._classifier.ainvoke(
-                render_prompt("model-selection.md", task=task[-8_000:])
+                render_prompt("model-selection.md", task=task[-8_000:]),
+                config={"run_name": "model_router"},
             )
             if isinstance(decision, RouteDecision):
                 route = decision.model_route
