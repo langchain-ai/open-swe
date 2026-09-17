@@ -32,6 +32,10 @@ UsageSort = Literal[
 SortDirection = Literal["asc", "desc"]
 
 
+class InvalidUsageCursor(ValueError):
+    """Raised when a usage leaderboard cursor cannot be decoded."""
+
+
 def period_start(period: str | None) -> datetime:
     days = 7 if period == "7d" else 30
     if period == "all":
@@ -308,7 +312,7 @@ def _decode_usage_cursor(
         json.JSONDecodeError,
         ValueError,
     ):
-        raise ValueError("invalid usage leaderboard cursor") from None
+        raise InvalidUsageCursor("invalid usage leaderboard cursor") from None
 
 
 _USAGE_SQL = """

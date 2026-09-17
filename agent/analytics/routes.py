@@ -5,7 +5,7 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query
 
-from agent.analytics.queries import SortDirection, UsageSort, usage_leaderboard
+from agent.analytics.queries import InvalidUsageCursor, SortDirection, UsageSort, usage_leaderboard
 from agent.dashboard.deps import ADMIN_DEP, SESSION_DEP, session_is_admin
 
 logger = logging.getLogger(__name__)
@@ -40,15 +40,13 @@ async def api_agent_usage_leaderboard(
             current_email=session.get("email"),
             admin=session_is_admin(session),
         )
-    except ValueError as exc:
-        # A cursor is only valid for the ordering it was issued for, so a rejected one
-        # is a stale client request rather than a deployment-level outage.
+    except InvalidUsageCursor as exc:
         logger.info(
             "Usage analytics request rejected",
             extra={"analytics_error_type": type(exc).__name__, "analytics_error": str(exc)},
         )
         raise HTTPException(400, str(exc)) from exc
-    except (SQLAlchemyError, PostgresError, OSError, RuntimeError) as exc:
+    except (SQLAlchemyError, PostgresError, OSError, RuntimeError, ValueError) as exc:
         logger.warning(
             "Usage analytics report unavailable",
             extra={"analytics_error_type": type(exc).__name__, "analytics_error": str(exc)},
