@@ -435,6 +435,7 @@ async def _post_slack_message_with_ts(
 
     # A code channel is one flowing session: replies belong in the channel.
     reply_ts = None if is_code_channel_session(thread_ts) else thread_ts
+    broadcast = {"reply_broadcast": True} if reply_broadcast and reply_ts else {}
 
     try:
         async with slack_client(token=SLACK_BOT_TOKEN) as client:
@@ -445,7 +446,7 @@ async def _post_slack_message_with_ts(
                 unfurl_links=unfurl_links,
                 unfurl_media=unfurl_media,
                 blocks=blocks or None,
-                reply_broadcast=reply_broadcast if reply_ts else False,
+                **broadcast,
             )
         message_ts = data.get("ts")
         if isinstance(message_ts, str) and message_ts:
