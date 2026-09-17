@@ -91,6 +91,7 @@ from agent.middleware import (
     ModelSelectionMiddleware,
     PlanModeMiddleware,
     PullRequestCreationGuardMiddleware,
+    RepairMalformedToolCallsMiddleware,
     SanitizeFireworksMessagesMiddleware,
     SanitizeOpenAIResponsesMiddleware,
     SanitizeThinkingBlocksMiddleware,
@@ -1443,6 +1444,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
                 notify_step_limit_reached,
                 record_run_usage,
                 *([model_selection] if model_selection else []),
+                RepairMalformedToolCallsMiddleware(),
                 *fallback_middleware,
                 PlanModeMiddleware(
                     excluded=PLAN_MODE_EXCLUDED_TOOLS | frozenset(tool.name for tool in mcp_tools),
