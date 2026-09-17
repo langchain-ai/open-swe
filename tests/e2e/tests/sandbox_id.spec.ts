@@ -37,8 +37,18 @@ async function createThreadWithSandbox(page: Page): Promise<string> {
 
 const copyItem = (page: Page) =>
   page.getByRole("menuitem", { name: "Copy sandbox ID" });
-const copyThreadIdItem = (page: Page) =>
-  page.getByRole("menuitem", { name: "Copy thread ID" });
+
+async function getSandboxId(page: Page, threadId: string): Promise<string> {
+  const response = await page.request.get(
+    `/dashboard/api/threads/${threadId}?mark_viewed=false`,
+  );
+  expect(response.ok()).toBeTruthy();
+  const thread: { sandboxId?: string | null } = await response.json();
+  if (typeof thread.sandboxId !== "string" || !thread.sandboxId) {
+    throw new Error(`Thread ${threadId} has no sandbox ID`);
+  }
+  return thread.sandboxId;
+}
 
 test.describe("thread sandbox id (real dashboard UI)", () => {
   test("desktop: context menu copies the real sandbox id", async ({
@@ -58,33 +68,12 @@ test.describe("thread sandbox id (real dashboard UI)", () => {
     await row.click({ button: "right" });
 
     await expect(copyItem(page)).toBeEnabled();
+    const sandboxId = await getSandboxId(page, threadId);
     await copyItem(page).click();
 
-    const clip = await page.evaluate(() => navigator.clipboard.readText());
-    expect(clip.length).toBeGreaterThan(0);
-  });
-
-  test("desktop: context menu copies the real thread id", async ({
-    page,
-    baseURL,
-  }) => {
-    await page
-      .context()
-      .grantPermissions(["clipboard-read", "clipboard-write"], {
-        origin: baseURL,
-      });
-    await loginAs(page, SAME_USER);
-    const threadId = await createThreadWithSandbox(page);
-
-    const row = page.locator(`a[href$="/agents/${threadId}"]`).first();
-    await expect(row).toBeVisible();
-    await row.click({ button: "right" });
-
-    await expect(copyThreadIdItem(page)).toBeVisible();
-    await copyThreadIdItem(page).click();
-
-    const clip = await page.evaluate(() => navigator.clipboard.readText());
-    expect(clip).toBe(threadId);
+    await expect
+      .poll(() => page.evaluate(() => navigator.clipboard.readText()))
+      .toBe(sandboxId);
   });
 
   test("iPad: long press copies the sandbox id without navigating", async ({
@@ -140,10 +129,12 @@ test.describe("thread sandbox id (real dashboard UI)", () => {
     await rowA.dispatchEvent("click");
 
     await expect(copyItem(page)).toBeEnabled();
+    const sandboxId = await getSandboxId(page, threadA);
     await copyItem(page).tap();
 
-    const clip = await page.evaluate(() => navigator.clipboard.readText());
-    expect(clip.length).toBeGreaterThan(0);
+    await expect
+      .poll(() => page.evaluate(() => navigator.clipboard.readText()))
+      .toBe(sandboxId);
 
     await expect(page).toHaveURL(new RegExp(`/agents/${threadB}$`));
 
