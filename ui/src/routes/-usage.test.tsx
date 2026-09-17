@@ -229,7 +229,7 @@ it.each([
       "Merged",
       "Closed without merge",
       "Open",
-      "Distance",
+      "Avg distance",
       "Merge rate",
       "Avg time to merge",
     ])

@@ -484,7 +484,7 @@ function PRMergeRateSection({
               {data.maturity_days} days or longer.
             </p>
             <p>
-              <strong>Distance</strong> is the median normalized line edit
+              <strong>Avg distance</strong> is the median normalized line edit
               distance between each merged PR’s opening diff and final diff. It
               is calculated only for merged PRs with complete text patches;
               lower means less post-open editing.
@@ -603,7 +603,7 @@ function PRMergeRateTable({
             <th className="px-2 py-3 text-right font-medium text-foreground">
               <Tooltip>
                 <TooltipTrigger className="cursor-help rounded-sm underline decoration-dotted underline-offset-2 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring">
-                  Distance
+                  Avg distance
                 </TooltipTrigger>
                 <TooltipPopup className="max-w-xs">
                   Median post-open line edit distance across merged PRs. Lower
