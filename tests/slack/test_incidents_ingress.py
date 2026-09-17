@@ -12,6 +12,7 @@ from fastapi.testclient import TestClient
 
 from agent.incidents import channels
 from agent.slack import routes
+from agent.slack.payloads import SlackChannelContext
 from agent.webhooks import common
 
 _SIGNING_SECRET = "incidents-test-signing-secret"
@@ -132,7 +133,7 @@ def test_handler_errors_do_not_fall_through_to_coding(client, handler, monkeypat
 
 def test_unregistered_event_falls_through_to_ordinary_slack(client, handler, monkeypatch):
     handler.return_value = None
-    context = AsyncMock(return_value={"is_ext_shared": True})
+    context = AsyncMock(return_value=SlackChannelContext(is_ext_shared=True))
     monkeypatch.setattr(common, "resolve_slack_channel_context", context)
 
     response = _post(client, _payload({"type": "message", "channel": "ordinary"}))

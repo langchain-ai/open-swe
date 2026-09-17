@@ -11,9 +11,9 @@ from agent.incidents import service, turns
 from agent.incidents.models import Incident, IncidentPolicy
 from agent.incidents.presentation import report_message
 from agent.input_messages import PersonIdentity
+from agent.slack.channels import SlackChannel
 from agent.slack.client import (
     fetch_slack_thread_messages,
-    get_slack_channel_info,
     get_slack_user_info,
     post_slack_thread_reply_with_ts,
     resolve_slack_thread_id,
@@ -164,7 +164,7 @@ async def enroll_channel(
     try:
         async with slack_client(token=ENV.SLACK_BOT_TOKEN.get()) as slack:
             await slack.conversations_join(channel=channel_id)
-        info = await get_slack_channel_info(channel_id, use_cache=False)
+        info = await SlackChannel.fetch(channel_id, use_cache=False)
         if not info or not service.channel_allowed(info, policy, require_prefix=not manual):
             record.status, record.reason = "needs_attention", "setup_failed"
             service.note(record, "error", "Channel is not an eligible public internal channel.")
