@@ -6,7 +6,6 @@ from typing import Annotated, Any
 from langgraph.config import get_config
 from langgraph.prebuilt import InjectedState
 from langgraph_sdk.client import LangGraphClient
-from slack_sdk.models.blocks import Block
 
 from agent.run_config import RunConfig
 from agent.slack.client import (
@@ -31,61 +30,6 @@ from agent.utils.thread_ops import langgraph_client as get_langgraph_client
 logger = logging.getLogger(__name__)
 
 
-_NO_HANDLER = (
-    "a click on it reaches an endpoint that has no handler for it, so the element would "
-    "render and then do nothing. Use a link button (a `button` carrying `url`) for anything "
-    "clickable, or pass `options` instead of `blocks` to ask for a choice"
-)
-
-
-def _unhandled_element(block: dict[str, Any]) -> str | None:
-    """Why an element in `block` would be dead once clicked, or None.
-
-    Slack routes a click back to `/webhooks/slack/interactivity`, which answers
-    only its own `action_id` and `value` contract and ignores everything else.
-    A hand-written interactive element therefore fails silently: Slack marks
-    nothing wrong, and the click simply does not arrive.
-    """
-    if block.get("type") == "input":
-        return f"an input block submits through a modal, and {_NO_HANDLER}"
-    candidates = [
-        element
-        for element in (
-            block.get("elements") if block.get("type") == "actions" else [],
-            [block.get("accessory")],
-        )
-        for element in (element if isinstance(element, list) else [])
-        if isinstance(element, dict)
-    ]
-    for element in candidates:
-        url = element.get("url")
-        if element.get("type") == "button" and isinstance(url, str) and url.strip():
-            continue
-        return f"`{element.get('type') or 'element'}` is interactive and {_NO_HANDLER}"
-    return None
-
-
-def _invalid_blocks(blocks: list[dict[str, Any]] | None) -> str | None:
-    """The first Block Kit problem in `blocks`, or None."""
-    for index, block in enumerate(blocks or []):
-        if not isinstance(block, dict):
-            return f"block {index} is not an object"
-        label = f"block {index} ({block.get('type') or 'no type'})"
-        try:
-            parsed = Block.parse(block)
-        except Exception as exc:  # noqa: BLE001
-            return f"{label}: {exc}"
-        if parsed is None:
-            return f"{label}: unrecognized block type"
-        try:
-            parsed.validate_json()
-        except Exception as exc:  # noqa: BLE001
-            return f"{label}: {exc}"
-        if problem := _unhandled_element(block):
-            return f"{label}: {problem}"
-    return None
-
-
 async def slack_thread_reply(
     message: str,
     options: list[str] | None = None,
@@ -94,15 +38,6 @@ async def slack_thread_reply(
     should_ask_for_feedback: bool = False,
 ) -> dict[str, Any]:
     """Implement the `slack_thread_reply` tool."""
-    if problem := _invalid_blocks(blocks):
-        return {
-            "success": False,
-            "error": f"Block Kit is invalid: {problem}",
-            "retry": True,
-            "hint": "Nothing was posted and the asker is still waiting. Fix the block named "
-            "above and call this tool again; if the second attempt fails too, send `message` "
-            "on its own without `blocks`.",
-        }
     config = get_config()
     cfg = RunConfig.from_config(config)
     run_id = _current_run_id(config)
@@ -211,9 +146,8 @@ async def _ephemeral_reply(
             "retry": True,
             "hint": (
                 "Slack cannot route a choice button on an ephemeral message back to this run, "
-                "so nothing was posted. Call this tool again without `options`: put the choice "
-                "in `message` as a question, or use `blocks` with link buttons, which do work "
-                "here."
+                "so nothing was posted. Call this tool again without `options`, putting the "
+                "choice in `message` as a question."
             ),
         }
     slack_thread = cfg.slack_thread

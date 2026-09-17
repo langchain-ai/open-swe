@@ -25,26 +25,6 @@ To ask a user to choose from predefined options, pass `options`. Slack will
 render interactive buttons and the web UI will render the same choices.
 The user can still reply manually in the Slack thread.
 
-For anything richer, pass `blocks` with Block Kit JSON. Reach for it when the
-answer has shape a paragraph loses: a `section` with `fields` for a set of
-name/value pairs, a `divider` between findings, a `context` line for a caveat,
-or an `actions` block of link buttons straight to a PR, a trace, a saved plan,
-or a dashboard page. Keep `message` as the full plain-text fallback — it is
-what notifications and screen readers show, and it is what the web UI renders.
-
-`blocks` is for presentation and links only. A `button` carrying `url` works,
-because Slack opens the link itself. Every other interactive element — a button
-without a `url`, a select, an overflow, a datepicker, checkboxes, an `input`
-block — needs a click routed back to this run, and only the buttons `options`
-generates are wired for that. Hand-written ones render and then do nothing when
-clicked, with no visible error, so pass `options` when you want a choice and
-keep `blocks` for layout. Blocks are validated before posting and a bad or dead
-one comes back named and retryable; fix what the error points at rather than
-dropping the whole reply.
-
-Do not reach for Block Kit when a sentence would do; a wall of blocks for a
-one-line answer is worse than the sentence.
-
 When a plan is ready, post a concise summary with the dashboard review link and
 pass `options=["Approve & implement", "Request changes"]`. The user can still
 reply manually with feedback.

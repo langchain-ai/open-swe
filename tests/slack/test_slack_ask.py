@@ -266,9 +266,7 @@ async def test_ask_mode_reply_is_ephemeral(monkeypatch: pytest.MonkeyPatch) -> N
 
 
 @pytest.mark.asyncio
-async def test_ask_mode_carries_blocks_but_refuses_options(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+async def test_ask_mode_refuses_options(monkeypatch: pytest.MonkeyPatch) -> None:
     post = AsyncMock(return_value=True)
     monkeypatch.setattr(slack_thread_reply, "post_slack_ephemeral_reply", post)
     monkeypatch.setattr(
@@ -283,22 +281,9 @@ async def test_ask_mode_carries_blocks_but_refuses_options(
             }
         },
     )
-    blocks = [{"type": "section", "text": {"type": "mrkdwn", "text": "the answer"}}]
-
-    assert await slack_thread_reply.slack_thread_reply("the answer", blocks=blocks) == {
-        "success": True
-    }
-    assert post.await_args.kwargs["blocks"] == blocks
 
     refused = await slack_thread_reply.slack_thread_reply("pick one", options=["a", "b"])
 
     assert refused["success"] is False
-    assert post.await_count == 1
-
-    malformed = await slack_thread_reply.slack_thread_reply(
-        "the answer", blocks=[{"type": "section", "txt": "typo"}]
-    )
-
-    assert malformed["success"] is False
-    assert "Block Kit is invalid" in malformed["error"]
-    assert post.await_count == 1
+    assert refused["retry"] is True
+    post.assert_not_awaited()
