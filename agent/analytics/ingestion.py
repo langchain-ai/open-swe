@@ -424,10 +424,12 @@ async def _project(conn: AsyncConnection, event: EventEnvelope) -> None:
             EventName.PR_CLOSED_WITHOUT_MERGE: "closed_without_merge",
             EventName.PR_REOPENED: "open",
         }[name]
+        payload = event.payload.model_dump()
         await conn.execute(
             text(
                 "UPDATE pr_projection SET current_state = :state, outcome_at = CASE WHEN "
                 ":state = 'open' THEN NULL ELSE :occurred_at END, source_version = :source_version, "
+                "distance_basis_points = CASE WHEN :state = 'merged' THEN :distance ELSE NULL END, "
                 "latest_transition_at = :occurred_at, updated_at = clock_timestamp() "
                 "WHERE workspace_id = :workspace_id AND pr_id = :pr_id "
                 "AND ((:source_version IS NOT NULL AND (source_version IS NULL OR :source_version > source_version)) "
@@ -438,6 +440,7 @@ async def _project(conn: AsyncConnection, event: EventEnvelope) -> None:
                 "state": state,
                 "occurred_at": event.occurred_at,
                 "source_version": event.source_version,
+                "distance": payload.get("distance_basis_points"),
                 "workspace_id": event.workspace_id,
                 "pr_id": event.pr_id,
             },

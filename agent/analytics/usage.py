@@ -10,7 +10,7 @@ from uuid import UUID
 from sqlalchemy import text
 
 from agent import database
-from agent.analytics import directory, emitter
+from agent.analytics import directory, distance, emitter
 from agent.analytics.capture import fail_soft
 from agent.analytics.events import (
     EventName,
@@ -308,6 +308,22 @@ async def update_agent_pr_usage_from_webhook(payload: dict[str, Any]) -> None:
     action = payload.get("action")
     if action in {"closed", "reopened"}:
         merged = pr.get("merged") is True
+        distance_basis_points = None
+        if merged:
+            from agent.github.pull_requests import PullRequest
+
+            stored = await PullRequest.get(owner, repo, number)
+            base_data = as_json_object(pr.get("base"))
+            head_data = as_json_object(pr.get("head"))
+            if stored is not None:
+                distance_basis_points = await distance.post_open_distance_basis_points(
+                    owner=owner,
+                    repo=repo,
+                    opening_base_sha=stored.opening_base_sha,
+                    opening_head_sha=stored.opening_head_sha,
+                    final_base_sha=str(base_data.get("sha") or ""),
+                    final_head_sha=str(head_data.get("sha") or ""),
+                )
         await emitter.pr_state(
             owner=owner,
             repo=repo,
@@ -323,6 +339,7 @@ async def update_agent_pr_usage_from_webhook(payload: dict[str, Any]) -> None:
                 else None
             )
             or observed_at,
+            distance_basis_points=distance_basis_points,
         )
 
 

@@ -1,0 +1,103 @@
+"""Compute normalized distance between opening and merged pull request patches."""
+
+from collections.abc import Sequence
+
+import httpx2
+
+from agent.github.app import get_github_app_installation_token
+from agent.github.http import github_client, github_request
+
+_GITHUB_API = "https://api.github.com"
+
+
+def _patch_lines(files: object) -> list[str] | None:
+    if not isinstance(files, list):
+        return None
+    lines: list[str] = []
+    for file in files:
+        if not isinstance(file, dict):
+            return None
+        changes = file.get("changes")
+        patch = file.get("patch")
+        if patch is None:
+            if isinstance(changes, int) and changes > 0:
+                return None
+            continue
+        path = file.get("filename")
+        if not isinstance(path, str) or not isinstance(patch, str):
+            return None
+        for line in patch.splitlines():
+            if line.startswith(("+++", "---")):
+                continue
+            if line.startswith(("+", "-")):
+                lines.append(f"{path}\0{line}")
+    return lines
+
+
+def _insert_delete_distance(before: Sequence[str], after: Sequence[str]) -> int:
+    n, m = len(before), len(after)
+    if not n or not m:
+        return n + m
+    frontier = {1: 0}
+    for edits in range(n + m + 1):
+        for diagonal in range(-edits, edits + 1, 2):
+            if diagonal == -edits or (
+                diagonal != edits
+                and frontier.get(diagonal - 1, -1) < frontier.get(diagonal + 1, -1)
+            ):
+                x = frontier.get(diagonal + 1, 0)
+            else:
+                x = frontier.get(diagonal - 1, 0) + 1
+            y = x - diagonal
+            while x < n and y < m and before[x] == after[y]:
+                x += 1
+                y += 1
+            frontier[diagonal] = x
+            if x >= n and y >= m:
+                return edits
+    return n + m
+
+
+async def _compare_files(
+    client: httpx2.AsyncClient, owner: str, repo: str, base: str, head: str
+) -> object:
+    response = await github_request(
+        client,
+        "GET",
+        f"{_GITHUB_API}/repos/{owner}/{repo}/compare/{base}...{head}",
+        max_retries=1,
+    )
+    if response.status_code != 200:
+        return None
+    payload = response.json()
+    return payload.get("files") if isinstance(payload, dict) else None
+
+
+async def post_open_distance_basis_points(
+    *,
+    owner: str,
+    repo: str,
+    opening_base_sha: str,
+    opening_head_sha: str,
+    final_base_sha: str,
+    final_head_sha: str,
+) -> int | None:
+    """Return normalized line edit distance in basis points, or None when unavailable."""
+    if not all((opening_base_sha, opening_head_sha, final_base_sha, final_head_sha)):
+        return None
+    token = await get_github_app_installation_token(repositories=[repo], log_errors=False)
+    if not token:
+        return None
+    async with github_client(token=token) as client:
+        opening_files = await _compare_files(
+            client, owner, repo, opening_base_sha, opening_head_sha
+        )
+        final_files = await _compare_files(client, owner, repo, final_base_sha, final_head_sha)
+    opening = _patch_lines(opening_files)
+    final = _patch_lines(final_files)
+    if opening is None or final is None:
+        return None
+    total = len(opening) + len(final)
+    if total == 0:
+        return 0
+    return round(10_000 * _insert_delete_distance(opening, final) / total)

@@ -484,6 +484,12 @@ function PRMergeRateSection({
               {data.maturity_days} days or longer.
             </p>
             <p>
+              <strong>Distance</strong> is the median normalized line edit
+              distance between each merged PR’s opening diff and final diff. It
+              is calculated only for merged PRs with complete text patches;
+              lower means less post-open editing.
+            </p>
+            <p>
               <strong>Merge rate</strong> includes only PRs old enough to have a
               meaningful outcome. It counts merged, closed without merge, and
               still-open PRs that are at least {data.maturity_days} days old.
@@ -591,7 +597,7 @@ function PRMergeRateTable({
 
   return (
     <div className="overflow-x-auto">
-      <table className="w-full min-w-[760px] text-xs">
+      <table className="w-full min-w-[860px] text-xs">
         <thead className="border-b border-border text-muted-foreground">
           <tr>
             <th className="px-4 py-3 text-left font-normal">Opening model</th>
@@ -601,6 +607,17 @@ function PRMergeRateTable({
               Closed without merge
             </th>
             <th className="px-2 py-3 text-right font-normal">Open</th>
+            <th className="px-2 py-3 text-right font-medium text-foreground">
+              <Tooltip>
+                <TooltipTrigger className="cursor-help rounded-sm underline decoration-dotted underline-offset-2 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring">
+                  Distance
+                </TooltipTrigger>
+                <TooltipPopup className="max-w-xs">
+                  Median post-open line edit distance across merged PRs. Lower
+                  means the final diff changed less after the PR opened.
+                </TooltipPopup>
+              </Tooltip>
+            </th>
             <th className="px-4 py-3 text-right font-medium text-foreground">
               <Tooltip>
                 <TooltipTrigger className="cursor-help rounded-sm underline decoration-dotted underline-offset-2 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring">
@@ -728,6 +745,8 @@ function PRMergeRateCells({
     | "mature_pending"
     | "waiting"
     | "mature_cohort_merge_share"
+    | "median_distance_basis_points"
+    | "distance_sample_size"
   >
   maturityDays: number
 }) {
@@ -743,6 +762,19 @@ function PRMergeRateCells({
       <td className="px-2 py-3 text-right tabular-nums">
         <OpenPRCount cohort={cohort} maturityDays={maturityDays} />
       </td>
+              <td className="px-2 py-3 text-right tabular-nums">
+                <Tooltip>
+                  <TooltipTrigger className="cursor-help rounded-sm underline decoration-dotted underline-offset-2 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring">
+                    {cohort.median_distance_basis_points == null
+                      ? "—"
+                      : `${(cohort.median_distance_basis_points / 100).toFixed(1)}%`}
+                  </TooltipTrigger>
+                  <TooltipPopup>
+                    {cohort.distance_sample_size ?? 0} merged PR
+                    {cohort.distance_sample_size === 1 ? "" : "s"} measured
+                  </TooltipPopup>
+                </Tooltip>
+              </td>
       <td className="px-4 py-3 text-right text-sm font-semibold tabular-nums">
         {cohort.mature_cohort_merge_share == null
           ? "—"
