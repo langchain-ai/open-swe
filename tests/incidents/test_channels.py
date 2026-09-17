@@ -9,6 +9,7 @@ from fastapi import BackgroundTasks, HTTPException
 
 from agent.incidents import channels, service, turns
 from agent.incidents.models import Incident, IncidentPolicy, IncidentReport, IncidentReportRecord
+from agent.slack.channels import SlackChannel
 
 CHANNEL = {
     "id": "C1",
@@ -45,7 +46,7 @@ async def configured(fake_store, monkeypatch):
         "dashboard_incident_url",
         lambda incident_id: f"https://dash/incidents/{incident_id}",
     )
-    monkeypatch.setattr(channels, "get_slack_channel_info", AsyncMock(return_value=dict(CHANNEL)))
+    monkeypatch.setattr(SlackChannel, "fetch", AsyncMock(return_value=dict(CHANNEL)))
     monkeypatch.setattr(
         channels,
         "get_slack_user_info",
@@ -171,7 +172,7 @@ async def test_empty_new_channel_enrolls_without_a_first_turn(configured):
 
 
 async def test_ineligible_channel_records_a_setup_failure(configured):
-    channels.get_slack_channel_info.return_value = {**CHANNEL, "is_private": True}
+    SlackChannel.fetch.return_value = {**CHANNEL, "is_private": True}
     await handle({"type": "channel_created", "channel": {"id": "C1", "name": "inc-api"}})
 
     record = await service.INCIDENTS.get(service.incident_id("T1", "C1"))

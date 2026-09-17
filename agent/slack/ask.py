@@ -15,14 +15,14 @@ from pydantic import BaseModel
 
 from agent.dispatch import dispatch_agent_run
 from agent.prompts import render_prompt
+from agent.slack.channels import SlackChannel
 from agent.slack.client import (
-    fetch_slack_channel_messages,
     format_slack_messages_for_prompt,
     get_slack_user_info,
     get_slack_user_names,
     post_slack_ephemeral_message,
-    slack_channel_allows_operations,
 )
+from agent.slack.payloads import SlackChannelContext
 from agent.slack.webhook import workspace_scoped_default_repo
 from agent.source_context import SlackThreadRef, SourceContext
 from agent.users import User
@@ -76,27 +76,23 @@ async def _slack_user_profile(user_id: str) -> tuple[str, str]:
     return (name if isinstance(name, str) else ""), (email if isinstance(email, str) else "")
 
 
-def _channel_label(channel_context: dict[str, Any] | None) -> str:
+def _channel_label(channel_context: SlackChannelContext) -> str:
     """`` (#eng)`` when Slack names the channel, empty when it does not."""
-    if not isinstance(channel_context, dict):
-        return ""
-    for key in ("name_normalized", "name"):
-        value = channel_context.get(key)
-        if isinstance(value, str) and value.strip():
-            return f" (#{value.strip()})"
-    return ""
+    label = channel_context.name_normalized.strip() or channel_context.name.strip()
+    return f" (#{label})" if label else ""
 
 
 async def _channel_context(channel_id: str) -> str:
     """Recent channel messages, oldest trimmed away until they fit the budget."""
-    messages = await fetch_slack_channel_messages(channel_id, CHANNEL_CONTEXT_MESSAGE_LIMIT)
+    channel = await SlackChannel.load(channel_id)
+    messages = await channel.messages(CHANNEL_CONTEXT_MESSAGE_LIMIT) if channel else []
     if not messages:
         return ""
-    user_ids = [
-        user_id for msg in messages if isinstance(user_id := msg.get("user"), str) and user_id
-    ]
+    user_ids = [message.user for message in messages if message.user]
     user_names = await get_slack_user_names(user_ids) if user_ids else {}
-    transcript = format_slack_messages_for_prompt(messages, user_names, include_thread_replies=True)
+    transcript = format_slack_messages_for_prompt(
+        [message.dump() for message in messages], user_names, include_thread_replies=True
+    )
     kept: list[str] = []
     remaining = _CHANNEL_CONTEXT_MAX_CHARS - len(_CHANNEL_CONTEXT_TRIMMED) - 1
     for line in reversed(transcript.splitlines()):
@@ -139,7 +135,7 @@ async def _runnable_login(request: SlackAskRequest, login: str | None, email: st
 
 async def _process_slack_ask(request: SlackAskRequest) -> None:
     channel_context = await common.resolve_slack_channel_context(request.channel_id)
-    if not slack_channel_allows_operations(channel_context):
+    if not channel_context.allows_operations:
         await _refuse(request, _CHANNEL_REFUSAL)
         return
 

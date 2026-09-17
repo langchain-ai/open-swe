@@ -9,10 +9,8 @@ from urllib.parse import quote
 
 from langgraph_sdk.client import LangGraphClient
 
-from agent.slack.client import (
-    SLACK_BOT_TOKEN,
-    get_slack_channel_info,
-)
+from agent.slack.channels import SlackChannel
+from agent.slack.client import SLACK_BOT_TOKEN
 from agent.slack.http import SLACK_REQUEST_ERRORS, slack_client, slack_error
 
 logger = logging.getLogger(__name__)
@@ -65,7 +63,7 @@ def is_code_channel_session(thread_ts: str | None) -> bool:
 
 async def is_code_channel(channel_id: str) -> bool:
     """Return whether a Slack channel is a code channel owned by an agent."""
-    channel = await get_slack_channel_info(channel_id)
+    channel = await SlackChannel.fetch(channel_id)
     properties = channel.get("properties") if isinstance(channel, dict) else None
     record = properties.get("record_channel") if isinstance(properties, dict) else None
     return isinstance(record, dict) and record.get("record_type") == "agent_channel"

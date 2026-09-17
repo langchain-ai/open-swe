@@ -9,6 +9,8 @@ from fastapi import BackgroundTasks, Request
 from agent.run_config import Repo
 from agent.slack import ask as slack_ask
 from agent.slack import routes as slack_routes
+from agent.slack.channels import SlackChannel
+from agent.slack.payloads import SlackChannelContext, SlackMessage
 from agent.slack.tools import thread_reply as slack_thread_reply
 from agent.threads.listing import _metadata_matches_filters
 
@@ -85,16 +87,24 @@ async def test_command_refuses_an_oversized_question() -> None:
     assert background_tasks.tasks == []
 
 
+def _patch_channel(monkeypatch: pytest.MonkeyPatch, messages: list[SlackMessage]) -> None:
+    """Point the channel read at ``messages`` without touching Slack."""
+    monkeypatch.setattr(SlackChannel, "load", AsyncMock(return_value=SlackChannel(id="C1")))
+    monkeypatch.setattr(SlackChannel, "messages", AsyncMock(return_value=messages))
+
+
 @pytest.fixture
 def linked_asker(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
-        slack_ask.common, "resolve_slack_channel_context", AsyncMock(return_value={"name": "eng"})
+        slack_ask.common,
+        "resolve_slack_channel_context",
+        AsyncMock(return_value=SlackChannelContext(name="eng")),
     )
-    monkeypatch.setattr(slack_ask, "slack_channel_allows_operations", lambda _context: True)
+    monkeypatch.setattr(SlackChannelContext, "allows_operations", property(lambda _self: True))
     monkeypatch.setattr(slack_ask, "get_slack_user_info", AsyncMock(return_value=None))
     monkeypatch.setattr(slack_ask.User, "login_for_slack", AsyncMock(return_value="octocat"))
     monkeypatch.setattr(slack_ask.common, "get_valid_access_token", AsyncMock(return_value="gho_x"))
-    monkeypatch.setattr(slack_ask, "fetch_slack_channel_messages", AsyncMock(return_value=[]))
+    _patch_channel(monkeypatch, [])
     monkeypatch.setattr(slack_ask, "get_slack_user_names", AsyncMock(return_value={}))
 
 
@@ -172,21 +182,18 @@ async def test_channel_context_reaches_the_prompt(monkeypatch: pytest.MonkeyPatc
     monkeypatch.setattr(
         slack_ask.common, "upsert_agent_thread_metadata", AsyncMock(return_value=True)
     )
-    monkeypatch.setattr(
-        slack_ask,
-        "fetch_slack_channel_messages",
-        AsyncMock(
-            return_value=[
-                {"ts": "1.000001", "user": "U2", "text": "deploys are failing"},
-                {
-                    "ts": "2.000002",
-                    "user": "U3",
-                    "text": "opened a PR",
-                    "thread_ts": "2.000002",
-                    "reply_count": 3,
-                },
-            ]
-        ),
+    _patch_channel(
+        monkeypatch,
+        [
+            SlackMessage(ts="1.000001", user="U2", text="deploys are failing"),
+            SlackMessage(
+                ts="2.000002",
+                user="U3",
+                text="opened a PR",
+                thread_ts="2.000002",
+                reply_count=3,
+            ),
+        ],
     )
     monkeypatch.setattr(slack_ask, "get_slack_user_names", AsyncMock(return_value={"U2": "ada"}))
     dispatch = AsyncMock()
@@ -209,15 +216,9 @@ async def test_channel_context_reaches_the_prompt(monkeypatch: pytest.MonkeyPatc
 @pytest.mark.asyncio
 @pytest.mark.usefixtures("linked_asker")
 async def test_channel_context_stays_inside_its_budget(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(
-        slack_ask,
-        "fetch_slack_channel_messages",
-        AsyncMock(
-            return_value=[
-                {"ts": f"{index}.000000", "user": "U2", "text": "x" * 4000}
-                for index in range(1, 30)
-            ]
-        ),
+    _patch_channel(
+        monkeypatch,
+        [SlackMessage(ts=f"{index}.000000", user="U2", text="x" * 4000) for index in range(1, 30)],
     )
     monkeypatch.setattr(slack_ask, "get_slack_user_names", AsyncMock(return_value={}))
 
