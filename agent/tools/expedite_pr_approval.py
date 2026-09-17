@@ -6,7 +6,7 @@ from typing import Any, Literal
 from langgraph.config import get_config
 from langgraph_sdk import get_client
 
-from agent.dashboard.team_settings import get_team_expedited_review_enabled
+from agent.dashboard.workspace_settings import get_workspace_settings
 from agent.expedited_review.approvals import ExpeditedApproval
 from agent.expedited_review.eligibility import (
     MAX_CHANGED_LINES,
@@ -39,7 +39,7 @@ async def expedite_pr_approval(
     thread_id = cfg.thread_id
     if not thread_id:
         return _failure("No executable agent thread is available")
-    if not await get_team_expedited_review_enabled():
+    if not (await get_workspace_settings()).expedited_review_enabled:
         return _failure(
             "Expedited review is disabled for this Open SWE instance. "
             "An admin can enable it under Settings; ask for a normal review instead."

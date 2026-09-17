@@ -9,10 +9,10 @@ from agent.dashboard.notion_routes import router as notion_router
 from agent.dashboard.oauth import require_same_origin_for_mutations
 from agent.dashboard.options_routes import router as options_router
 from agent.dashboard.profiles import router as profiles_router
-from agent.dashboard.team_settings import router as team_settings_router
 from agent.dashboard.user_instructions import router as user_instructions_router
 from agent.dashboard.user_mappings import router as user_mappings_router
 from agent.dashboard.user_preferences import router as user_preferences_router
+from agent.dashboard.workspace_settings import router as workspace_settings_router
 from agent.github.dashboard_routes import router as repos_router
 from agent.incidents.document_routes import router as incident_documents_router
 from agent.incidents.routes import router as incidents_router
@@ -39,7 +39,7 @@ router.include_router(profiles_router)
 router.include_router(user_mappings_router)
 router.include_router(notion_router)
 router.include_router(slack_router)
-router.include_router(team_settings_router)
+router.include_router(workspace_settings_router)
 router.include_router(mcp_router)
 router.include_router(workspaces_router)
 router.include_router(repos_router)

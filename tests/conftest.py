@@ -216,7 +216,7 @@ def _no_bundled_dashboard(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> No
 
 @pytest.fixture(autouse=True)
 def _reset_ttl_cache() -> Iterator[None]:
-    """Keep the process-global TTL cache from leaking team settings between tests."""
+    """Keep the process-global TTL cache from leaking workspace settings between tests."""
     ttl_cache.clear()
     yield
     ttl_cache.clear()

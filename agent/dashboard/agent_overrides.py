@@ -11,8 +11,8 @@ from agent.dashboard.options import (
     provider_fallback_pair,
 )
 from agent.dashboard.profiles import PROFILES_NAMESPACE
-from agent.dashboard.team_settings import get_team_default_model
 from agent.dashboard.user_mappings import cached_login_for_email, login_for_email
+from agent.dashboard.workspace_settings import get_workspace_settings
 from agent.store import get_value
 
 logger = logging.getLogger(__name__)
@@ -122,8 +122,8 @@ def _normalize_profile_model_pair(
         return model_id, effort
     # A stored selection whose exact id dropped out of the supported set (e.g. an
     # Opus minor-version bump) stays on its provider rather than being discarded
-    # and silently deferring to the team default. An absent/unknown-provider
-    # selection still returns (None, None) so the team default applies.
+    # and silently deferring to the workspace default. An absent/unknown-provider
+    # selection still returns (None, None) so the workspace default applies.
     if isinstance(model_id, str):
         provider_pair = provider_fallback_pair(model_id, effort)
         if provider_pair is not None:
@@ -158,13 +158,13 @@ async def resolve_agent_model_id(
 ) -> str:
     """Resolve the agent model ID using the same precedence as ``get_agent``.
 
-    Order: per-thread override → profile override → team default.
+    Order: per-thread override → profile override → the workspace's default.
 
-    ``workspace`` is the workspace the run will land in, whose team default
+    ``workspace`` is the workspace the run will land in, whose default
     applies; omitting it reads ``default``'s, which is only right for a run
     that lands there.
     """
-    model_id, _effort = await get_team_default_model("agent", workspace)
+    model_id, _effort = (await get_workspace_settings(workspace)).default_model("agent")
     if github_login:
         profile = await load_profile(github_login)
         if profile:

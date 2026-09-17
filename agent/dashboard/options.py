@@ -328,7 +328,7 @@ def provider_fallback_pair(model_id: object, effort: object = None) -> tuple[str
     supports it, otherwise uses that model's default effort. Returns ``None`` when
     no supported model shares the provider.
 
-    Explicitly deprecated ids inherit the team default instead.
+    Explicitly deprecated ids inherit the workspace default instead.
     """
     if not isinstance(model_id, str) or model_id in DEPRECATED_MODEL_IDS:
         return None
@@ -347,7 +347,7 @@ def provider_fallback_pair(model_id: object, effort: object = None) -> tuple[str
 
 
 def default_model_pair() -> tuple[str, str]:
-    """Deployment fallback used when no team default is set."""
+    """Deployment fallback used when neither the workspace nor the instance sets a default."""
     model_id = ENV.LLM_MODEL_ID.get(DEFAULT_MODEL_ID)
     effort = ENV.LLM_REASONING_EFFORT.get()
     for model in SUPPORTED_MODELS:

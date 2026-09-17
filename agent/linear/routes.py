@@ -120,7 +120,7 @@ async def linear_webhook(  # noqa: PLR0911, PLR0912, PLR0915
             repo_config = profile_repo
 
     if not repo_config:
-        repo_config = await common.get_team_default_repo()
+        repo_config = (await common.get_workspace_settings()).default_repo
 
     if not repo_config:
         return {"status": "ignored", "reason": "No default repository configured"}

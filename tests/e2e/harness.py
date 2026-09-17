@@ -220,21 +220,21 @@ async def control_team_settings(request: Request) -> JSONResponse:
     reset unrelated fields — the default agent model included, which the
     dashboard's first-run onboarding reads — for every spec that follows.
     """
-    from agent.dashboard.team_settings import (
-        TeamSettingsUpdate,
-        get_team_settings,
-        upsert_team_settings,
+    from agent.dashboard.workspace_settings import (
+        WorkspaceSettingsUpdate,
+        get_instance_settings,
+        upsert_instance_settings,
     )
     from agent.utils import ttl_cache
 
     body = await request.json()
-    current = await get_team_settings()
+    current = await get_instance_settings()
     patched = {
         key: body.get(key, current.get(key))
-        for key in TeamSettingsUpdate.model_fields
+        for key in WorkspaceSettingsUpdate.model_fields
         if key in body or key in current
     }
-    settings = await upsert_team_settings(TeamSettingsUpdate.model_validate(patched))
+    settings = await upsert_instance_settings(WorkspaceSettingsUpdate.model_validate(patched))
     ttl_cache.clear()
     return JSONResponse({"ok": True, "settings": settings})
 

@@ -1,12 +1,9 @@
-from unittest.mock import AsyncMock, patch
-
 import pytest
 from pydantic import ValidationError
 
-from agent.dashboard.team_settings import (
-    TeamSettingsUpdate,
-    get_team_agent_routing_models,
-    get_team_default_grouping_model,
+from agent.dashboard.workspace_settings import (
+    WorkspaceSettings,
+    WorkspaceSettingsUpdate,
 )
 
 _REVIEWER_SUBAGENT_PAIR = ("openai:gpt-5.6-sol", "low")
@@ -31,38 +28,33 @@ def _settings(**overrides: object) -> dict[str, object]:
 
 @pytest.mark.asyncio
 async def test_grouping_inherits_reviewer_subagent_when_unset() -> None:
-    with patch(
-        "agent.dashboard.team_settings.get_team_settings",
-        new_callable=AsyncMock,
-        return_value=_settings(),
-    ):
-        assert await get_team_default_grouping_model() == _REVIEWER_SUBAGENT_PAIR
+    assert WorkspaceSettings(_settings()).default_grouping_model == _REVIEWER_SUBAGENT_PAIR
 
 
 @pytest.mark.asyncio
 async def test_grouping_uses_configured_model_when_set() -> None:
-    with patch(
-        "agent.dashboard.team_settings.get_team_settings",
-        new_callable=AsyncMock,
-        return_value=_settings(
-            default_grouping_model=_GROUPING_PAIR[0],
-            default_grouping_reasoning_effort=_GROUPING_PAIR[1],
-        ),
-    ):
-        assert await get_team_default_grouping_model() == _GROUPING_PAIR
+    assert (
+        WorkspaceSettings(
+            _settings(
+                default_grouping_model=_GROUPING_PAIR[0],
+                default_grouping_reasoning_effort=_GROUPING_PAIR[1],
+            )
+        ).default_grouping_model
+        == _GROUPING_PAIR
+    )
 
 
 @pytest.mark.asyncio
 async def test_grouping_inherits_when_configured_model_invalid() -> None:
-    with patch(
-        "agent.dashboard.team_settings.get_team_settings",
-        new_callable=AsyncMock,
-        return_value=_settings(
-            default_grouping_model="bogus:model",
-            default_grouping_reasoning_effort="high",
-        ),
-    ):
-        assert await get_team_default_grouping_model() == _REVIEWER_SUBAGENT_PAIR
+    assert (
+        WorkspaceSettings(
+            _settings(
+                default_grouping_model="bogus:model",
+                default_grouping_reasoning_effort="high",
+            )
+        ).default_grouping_model
+        == _REVIEWER_SUBAGENT_PAIR
+    )
 
 
 @pytest.mark.asyncio
@@ -72,16 +64,11 @@ async def test_agent_routing_uses_configured_model_pairs() -> None:
         for tier, pair in _ROUTING_PAIRS.items()
         for suffix, value in zip(("model", "reasoning_effort"), pair, strict=True)
     }
-    with patch(
-        "agent.dashboard.team_settings.get_team_settings",
-        new_callable=AsyncMock,
-        return_value=settings,
-    ):
-        assert await get_team_agent_routing_models() == _ROUTING_PAIRS
+    assert WorkspaceSettings(settings).agent_routing_models == _ROUTING_PAIRS
 
 
-def test_team_settings_update_accepts_routing_pairs() -> None:
-    update = TeamSettingsUpdate(
+def test_workspace_settings_update_accepts_routing_pairs() -> None:
+    update = WorkspaceSettingsUpdate(
         **{
             f"default_agent_routing_{tier}_{suffix}": value
             for tier, pair in _ROUTING_PAIRS.items()
@@ -95,8 +82,8 @@ def test_team_settings_update_accepts_routing_pairs() -> None:
     )
 
 
-def test_team_settings_update_accepts_grouping_pair() -> None:
-    update = TeamSettingsUpdate(
+def test_workspace_settings_update_accepts_grouping_pair() -> None:
+    update = WorkspaceSettingsUpdate(
         default_grouping_model=_GROUPING_PAIR[0],
         default_grouping_reasoning_effort=_GROUPING_PAIR[1],
     )
@@ -104,14 +91,14 @@ def test_team_settings_update_accepts_grouping_pair() -> None:
     assert update.default_grouping_reasoning_effort == _GROUPING_PAIR[1]
 
 
-def test_team_settings_update_rejects_grouping_effort_without_model() -> None:
+def test_workspace_settings_update_rejects_grouping_effort_without_model() -> None:
     with pytest.raises(ValidationError):
-        TeamSettingsUpdate(default_grouping_reasoning_effort="high")
+        WorkspaceSettingsUpdate(default_grouping_reasoning_effort="high")
 
 
-def test_team_settings_update_rejects_unsupported_grouping_effort() -> None:
+def test_workspace_settings_update_rejects_unsupported_grouping_effort() -> None:
     with pytest.raises(ValidationError):
-        TeamSettingsUpdate(
+        WorkspaceSettingsUpdate(
             default_grouping_model=_GROUPING_PAIR[0],
             default_grouping_reasoning_effort="max",
         )

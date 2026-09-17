@@ -636,8 +636,15 @@ async def workspace_scoped_default_repo(candidate: Repo, workspace: str | None) 
     owner = await workspace_for_repo(candidate.owner, candidate.name)
     if owner is None or owner == workspace:
         return candidate
-    scoped = await common.get_team_default_repo(workspace)
-    return Repo.model_validate(scoped) if scoped else None
+    scoped = (await common.get_workspace_settings(workspace)).default_repo
+    if not scoped:
+        return None
+    fallback = Repo.model_validate(scoped)
+    # The workspace's default may itself be inherited from the instance record.
+    fallback_owner = await workspace_for_repo(fallback.owner, fallback.name)
+    if fallback_owner is None or fallback_owner == workspace:
+        return fallback
+    return None
 
 
 async def _slack_login(user_id: str, user_email: str | None = None) -> str | None:
