@@ -399,5 +399,5 @@ async def test_slack_model_switch_uses_workspace_route_and_overrides_stored_choi
     text = content_block["text"]
     assert isinstance(text, str)
     request_text = ElementTree.fromstring(text)
-    assert request_text.findtext("content") == "fix this then"
+    assert request_text.findtext("content") == "fix this  then "
     assert captured["explicit_model_choice"] == ("anthropic:claude-haiku-4-5", "low")

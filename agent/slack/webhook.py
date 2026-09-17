@@ -76,7 +76,6 @@ def parse_slack_model_switch(text: str) -> SlackModelSwitchParse:
     if any(value not in _MODEL_ROUTING_TIERS for value in values):
         return SlackModelSwitchParse(None, text, invalid=True)
     cleaned = _MODEL_SWITCH_RE.sub("", text)
-    cleaned = re.sub(r"[ \t]{2,}", " ", cleaned).strip()
     return SlackModelSwitchParse(cast(SlackModelSwitch, values[-1]), cleaned)
 
 

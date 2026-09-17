@@ -61,10 +61,10 @@ class _FakeClient:
 @pytest.mark.parametrize(
     ("text", "expected_switch", "expected_text", "invalid"),
     [
-        ("please /model:fast fix this", "fast", "please fix this", False),
-        ("/model:perf\ncheck this", "perf", "check this", False),
-        ("/model:fast first /model:perf", "perf", "first", False),
-        ("/model:perf /model:fast last", "fast", "last", False),
+        ("please /model:fast fix this", "fast", "please  fix this", False),
+        ("/model:perf\ncheck this", "perf", "\ncheck this", False),
+        ("/model:fast first /model:perf", "perf", " first ", False),
+        ("/model:perf /model:fast last", "fast", "  last", False),
         ("keep x/model:fast and https://example.com/model:perf", None, None, False),
         ("reject /model:", None, None, True),
         ("reject /model:Fast", None, None, True),
@@ -85,6 +85,17 @@ def test_parse_slack_model_switch(
     assert parsed.model_switch == expected_switch
     assert parsed.cleaned_text == (text if expected_text is None else expected_text)
     assert parsed.invalid is invalid
+
+
+@pytest.mark.parametrize("switch", ["/model:fast", "/model:perf"])
+def test_model_switch_preserves_code_whitespace(switch: str) -> None:
+    snippet = '    if ready:\n        value = "two  spaces"\n\t\tprocess(value)  \n'
+    text = f"{snippet}{switch}\n"
+
+    parsed = slack_webhooks.parse_slack_model_switch(text)
+
+    assert parsed.cleaned_text == f"{snippet}\n"
+    assert not parsed.invalid
 
 
 def test_channel_context_preserves_external_sharing_status() -> None:
