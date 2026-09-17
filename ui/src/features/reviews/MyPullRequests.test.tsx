@@ -125,8 +125,12 @@ function mount() {
 }
 const section = () =>
   screen.getByRole("region", { name: "My open pull requests" })
+// Anchored on the title heading: a card's own failing-check list also contains
+// list items, and the empty state is a list item too.
 const cards = () =>
-  screen.queryAllByLabelText(/^Select PR #/).map((box) => box.closest("li")!)
+  within(section())
+    .queryAllByRole("heading", { level: 3 })
+    .map((title) => title.closest("li")!)
 const statusNames = [
   "Loading…",
   "Could not load status",
@@ -143,17 +147,22 @@ const statuses = (card: HTMLElement) =>
   statusNames.filter((status) => within(card).queryAllByText(status).length > 0)
 const titles = () =>
   cards().map((card) => within(card).getByText(/^Change/).textContent)
-const bulk = "Bulk pull request actions"
-const selectAll = async () => {
-  fireEvent.click(screen.getByLabelText("Select all PRs on this page"))
-  await screen.findByRole("group", { name: bulk })
+const mergeSelect = async (number: number) => {
+  const select = (await screen.findByRole("combobox", {
+    name: `Merge method for PR #${number}`,
+  })) as HTMLSelectElement
+  await waitFor(() => expect(select.disabled).toBe(false))
+  return select
 }
-const bulkButton = (name: string) =>
-  within(screen.getByRole("group", { name: bulk })).getByRole("button", {
-    name,
-  }) as HTMLButtonElement
+const mergeOptions = (select: HTMLSelectElement) =>
+  within(select)
+    .getAllByRole("option")
+    .map((option) => option.textContent)
 
 beforeEach(() => {
+  vi.mocked(api.repoMergeMethods).mockResolvedValue({
+    mergeMethods: ["squash", "merge", "rebase"],
+  })
   vi.mocked(api.pullRequestThreadStatus).mockResolvedValue({ running: false })
   vi.mocked(api.reviewSummaries).mockResolvedValue({})
   vi.mocked(api.myPullRequests).mockResolvedValue(payload)
@@ -259,10 +268,7 @@ describe("My PRs", () => {
     )
     mount()
     const card = (await screen.findByText("Change 1")).closest("li")!
-    fireEvent.change(
-      screen.getByRole("combobox", { name: "Merge method for PR #1" }),
-      { target: { value: "squash" } }
-    )
+    fireEvent.change(await mergeSelect(1), { target: { value: "squash" } })
     fireEvent.click(within(card).getByRole("button", { name: "Merge" }))
     const merging = await screen.findByRole("button", { name: "Merging…" })
     expect((merging as HTMLButtonElement).disabled).toBe(true)
@@ -288,10 +294,7 @@ describe("My PRs", () => {
     )
     mount()
     await screen.findByText("Change 1")
-    fireEvent.change(
-      screen.getByRole("combobox", { name: "Merge method for PR #1" }),
-      { target: { value: "merge" } }
-    )
+    fireEvent.change(await mergeSelect(1), { target: { value: "merge" } })
     fireEvent.click(screen.getByRole("button", { name: "Merge" }))
     expect(await screen.findByRole("alert")).toHaveProperty(
       "textContent",
@@ -522,12 +525,8 @@ describe("My PRs", () => {
     const card = (await screen.findByText("Change 1")).closest("li")!
     expect(within(card).getByText("Approved")).toBeTruthy()
     expect(within(card).queryByText("Status unavailable")).toBeNull()
-    // The card offers the merge and lets GitHub reject it; the bulk run must
-    // not attempt what GitHub has not said it will accept.
+    // The card offers the merge and lets GitHub reject it.
     expect(within(card).getByRole("button", { name: "Merge" })).toBeTruthy()
-    fireEvent.click(screen.getByLabelText("Select PR #1 in acme/app"))
-    await screen.findByRole("group", { name: bulk })
-    expect(bulkButton("Merge").disabled).toBe(true)
   })
 
   it("offers both a fix and a merge when only optional checks fail", async () => {
@@ -548,9 +547,6 @@ describe("My PRs", () => {
     expect(within(card).getByText("Browser E2E")).toBeTruthy()
     expect(within(card).getByRole("button", { name: "Fix" })).toBeTruthy()
     expect(within(card).getByRole("button", { name: "Merge" })).toBeTruthy()
-    await selectAll()
-    expect(bulkButton("Merge").disabled).toBe(false)
-    expect(bulkButton("Fix").disabled).toBe(false)
   })
 
   it("shows a draft's conflicts and failing checks alongside Draft", async () => {
@@ -583,7 +579,7 @@ describe("My PRs", () => {
     expect(titles()).toEqual(["Change 1"])
   })
 
-  it("still offers a card merge while the checks could not be read, but no bulk merge", async () => {
+  it("still offers a merge while the checks could not be read", async () => {
     vi.mocked(api.myPullRequests).mockResolvedValue({
       ...payload,
       pullRequests: [
@@ -598,9 +594,6 @@ describe("My PRs", () => {
     const card = (await screen.findByText("Change 1")).closest("li")!
     expect(within(card).getByText("Approved")).toBeTruthy()
     expect(within(card).getByRole("button", { name: "Merge" })).toBeTruthy()
-    fireEvent.click(screen.getByLabelText("Select PR #1 in acme/app"))
-    await screen.findByRole("group", { name: bulk })
-    expect(bulkButton("Merge").disabled).toBe(true)
   })
 
   it("withholds the merge only where GitHub has already refused it", async () => {
@@ -633,9 +626,7 @@ describe("My PRs", () => {
     })
     mount()
     await screen.findByText("Change 1")
-    const select = screen.getByRole("combobox", {
-      name: "Merge method for PR #1",
-    }) as HTMLSelectElement
+    const select = await mergeSelect(1)
     expect(select.value).toBe("")
     fireEvent.change(select, { target: { value: "rebase" } })
     fireEvent.click(screen.getByRole("button", { name: "Merge" }))
@@ -651,13 +642,81 @@ describe("My PRs", () => {
     })
     mount()
     await screen.findByText("Change 2")
-    expect(
-      (
-        screen.getByRole("combobox", {
-          name: "Merge method for PR #2",
-        }) as HTMLSelectElement
-      ).value
-    ).toBe("rebase")
+    expect((await mergeSelect(2)).value).toBe("rebase")
+  })
+
+  it("offers only the merge methods the repository allows", async () => {
+    vi.mocked(api.myPullRequests).mockResolvedValue({
+      ...payload,
+      pullRequests: [
+        pull(1, { reviewDecision: "approved" }),
+        pull(2, { repo: "acme/other", reviewDecision: "approved" }),
+      ],
+    })
+    vi.mocked(api.repoMergeMethods).mockImplementation(async (repo) => ({
+      mergeMethods: repo === "acme/app" ? ["squash"] : ["squash", "merge"],
+    }))
+    vi.mocked(api.mergePullRequest).mockResolvedValue({
+      action: "merge",
+      done: true,
+    })
+    mount()
+    await screen.findByText("Change 2")
+    const only = await mergeSelect(1)
+    expect(mergeOptions(only)).toEqual(["Merge method", "Squash merge"])
+    // Nothing left to choose, so the merge is ready without a selection.
+    expect(only.value).toBe("squash")
+    const pair = await mergeSelect(2)
+    expect(mergeOptions(pair)).toEqual([
+      "Merge method",
+      "Squash merge",
+      "Merge commit",
+    ])
+    expect(pair.value).toBe("")
+    fireEvent.click(
+      within((await screen.findByText("Change 1")).closest("li")!).getByRole(
+        "button",
+        { name: "Merge" }
+      )
+    )
+    await waitFor(() =>
+      expect(api.mergePullRequest).toHaveBeenCalledWith(
+        expect.objectContaining({ number: 1 }),
+        "squash"
+      )
+    )
+  })
+
+  it("offers every merge method when the repository settings cannot be read", async () => {
+    vi.mocked(api.myPullRequests).mockResolvedValue({
+      ...payload,
+      pullRequests: [pull(1, { reviewDecision: "approved" })],
+    })
+    vi.mocked(api.repoMergeMethods).mockRejectedValue(
+      new Error("Repository settings unavailable")
+    )
+    vi.mocked(api.mergePullRequest).mockResolvedValue({
+      action: "merge",
+      done: true,
+    })
+    mount()
+    await screen.findByText("Change 1")
+    const select = await mergeSelect(1)
+    expect(mergeOptions(select)).toEqual([
+      "Merge method",
+      "Squash merge",
+      "Merge commit",
+      "Rebase merge",
+    ])
+    expect(screen.queryByRole("alert")).toBeNull()
+    fireEvent.change(select, { target: { value: "rebase" } })
+    fireEvent.click(screen.getByRole("button", { name: "Merge" }))
+    await waitFor(() =>
+      expect(api.mergePullRequest).toHaveBeenCalledWith(
+        expect.objectContaining({ number: 1 }),
+        "rebase"
+      )
+    )
   })
 
   it("rediscovers a reopened PR on manual refresh", async () => {
@@ -869,74 +928,6 @@ describe("My PRs", () => {
     expect(cards()).toHaveLength(2)
   })
 
-  it("counts row and page selections together", async () => {
-    mount()
-    await screen.findByText("Change 1")
-    expect(screen.queryByRole("group", { name: bulk })).toBeNull()
-    fireEvent.click(screen.getByLabelText("Select PR #1 in acme/app"))
-    expect(await screen.findByText("1 selected")).toBeTruthy()
-    fireEvent.click(screen.getByLabelText("Select PR #2 in acme/other"))
-    expect(await screen.findByText("2 selected")).toBeTruthy()
-    const toggleAll = () =>
-      screen.getByLabelText("Select all PRs on this page") as HTMLInputElement
-    expect(toggleAll().checked).toBe(true)
-    fireEvent.click(toggleAll())
-    await waitFor(() =>
-      expect(screen.queryByRole("group", { name: bulk })).toBeNull()
-    )
-    fireEvent.click(toggleAll())
-    expect(await screen.findByText("2 selected")).toBeTruthy()
-    fireEvent.click(
-      within(screen.getByRole("group", { name: bulk })).getByRole("button", {
-        name: "Clear selection",
-      })
-    )
-    await waitFor(() =>
-      expect(screen.queryByRole("group", { name: bulk })).toBeNull()
-    )
-  })
-
-  it("closes every selected pull request after confirmation", async () => {
-    vi.mocked(api.closePullRequest).mockResolvedValue({
-      action: "close",
-      done: true,
-    })
-    mount()
-    await screen.findByText("Change 1")
-    await selectAll()
-    fireEvent.click(bulkButton("Close"))
-    const dialog = await screen.findByRole("alertdialog")
-    expect(within(dialog).getByText("Close 2 pull requests?")).toBeTruthy()
-    expect(within(dialog).getByText("acme/other#2")).toBeTruthy()
-    expect(within(dialog).getByText("acme/app#1")).toBeTruthy()
-    fireEvent.click(
-      within(dialog).getByRole("button", { name: "Close pull requests" })
-    )
-    await waitFor(() => expect(screen.queryByText("Change 1")).toBeNull())
-    expect(screen.queryByText("Change 2")).toBeNull()
-    expect(api.closePullRequest).toHaveBeenCalledTimes(2)
-    expect(toast.success).toHaveBeenCalledWith("Closed 2 pull requests")
-  })
-
-  it("keeps a pull request that could not be closed and reports the partial result", async () => {
-    vi.mocked(api.closePullRequest).mockImplementation(async (pr) => {
-      if (pr.number === 2) throw new Error("Close rejected")
-      return { action: "close", done: true }
-    })
-    mount()
-    await screen.findByText("Change 1")
-    await selectAll()
-    fireEvent.click(bulkButton("Close"))
-    fireEvent.click(
-      await screen.findByRole("button", { name: "Close pull requests" })
-    )
-    await waitFor(() => expect(screen.queryByText("Change 1")).toBeNull())
-    expect(screen.getByText("Change 2")).toBeTruthy()
-    expect(toast.error).toHaveBeenCalledWith("Closed 1 of 2 pull requests", {
-      description: "acme/other#2: Close rejected",
-    })
-  })
-
   it("closes a single pull request only after confirmation", async () => {
     vi.mocked(api.myPullRequests).mockResolvedValue({
       ...payload,
@@ -950,8 +941,7 @@ describe("My PRs", () => {
     const card = (await screen.findByText("Change 1")).closest("li")!
     fireEvent.click(within(card).getByRole("button", { name: "Close" }))
     const dialog = await screen.findByRole("alertdialog")
-    expect(within(dialog).getByText("Close 1 pull request?")).toBeTruthy()
-    expect(within(dialog).getByText("acme/app#1")).toBeTruthy()
+    expect(within(dialog).getByText("Close acme/app#1?")).toBeTruthy()
     fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }))
     await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull())
     expect(api.closePullRequest).not.toHaveBeenCalled()
@@ -959,7 +949,7 @@ describe("My PRs", () => {
     fireEvent.click(within(card).getByRole("button", { name: "Close" }))
     fireEvent.click(
       within(await screen.findByRole("alertdialog")).getByRole("button", {
-        name: "Close pull requests",
+        name: "Close pull request",
       })
     )
     await waitFor(() => expect(screen.queryByText("Change 1")).toBeNull())
@@ -1002,156 +992,6 @@ describe("My PRs", () => {
     )
   })
 
-  it("marks ready in bulk only when every selected pull request is a draft", async () => {
-    vi.mocked(api.myPullRequests).mockResolvedValue({
-      ...payload,
-      pullRequests: [pull(1, { draft: true }), pull(2, { repo: "acme/other" })],
-    })
-    vi.mocked(api.markPullRequestReady).mockResolvedValue({
-      action: "mark-ready",
-      done: true,
-    })
-    mount()
-    await screen.findByText("Change 2")
-    await selectAll()
-    const ready = bulkButton("Mark ready")
-    expect(ready.disabled).toBe(true)
-    expect(ready.title).toBe("Every selected PR must be a draft")
-    fireEvent.click(ready)
-    expect(api.markPullRequestReady).not.toHaveBeenCalled()
-    fireEvent.click(screen.getByLabelText("Select PR #2 in acme/other"))
-    await waitFor(() => expect(bulkButton("Mark ready").disabled).toBe(false))
-    fireEvent.click(bulkButton("Mark ready"))
-    await waitFor(() =>
-      expect(api.markPullRequestReady).toHaveBeenCalledTimes(1)
-    )
-    expect(toast.success).toHaveBeenCalledWith(
-      "Marked 1 pull request ready for review"
-    )
-    expect(titles()).toEqual(["Change 1", "Change 2"])
-  })
-
-  it("disables the bulk fix when the selection mixes fixable and healthy PRs", async () => {
-    mount()
-    await screen.findByText("Change 1")
-    await selectAll()
-    const fix = bulkButton("Fix")
-    expect(fix.disabled).toBe(true)
-    expect(fix.title).toBe("Every selected PR must be conflicted or failing")
-    fireEvent.click(fix)
-    expect(api.fixPullRequest).not.toHaveBeenCalled()
-  })
-
-  it("queues a fix for every selected pull request when all are fixable", async () => {
-    vi.mocked(api.myPullRequests).mockResolvedValue({
-      ...payload,
-      pullRequests: [
-        pull(1, { ci: "failing" }),
-        pull(2, { repo: "acme/other", mergeable: false }),
-      ],
-    })
-    vi.mocked(api.fixPullRequest).mockResolvedValue({ thread_id: "fix" })
-    mount()
-    await screen.findByText("Change 2")
-    await selectAll()
-    expect(bulkButton("Fix").disabled).toBe(false)
-    fireEvent.click(bulkButton("Fix"))
-    await waitFor(() => expect(api.fixPullRequest).toHaveBeenCalledTimes(2))
-    expect(toast.success).toHaveBeenCalledWith(
-      "Queued fixes for 2 pull requests"
-    )
-    expect(screen.getByText("Change 1")).toBeTruthy()
-  })
-
-  it("disables the bulk merge unless every selected pull request is approved", async () => {
-    mount()
-    await screen.findByText("Change 1")
-    await selectAll()
-    const merge = bulkButton("Merge")
-    expect(merge.disabled).toBe(true)
-    expect(merge.title).toBe("Every selected PR must be approved and passing")
-  })
-
-  it("merges with the single method both repositories allow", async () => {
-    vi.mocked(api.myPullRequests).mockResolvedValue({
-      ...payload,
-      pullRequests: [
-        pull(1, { reviewDecision: "approved" }),
-        pull(2, { repo: "acme/other", reviewDecision: "approved" }),
-      ],
-    })
-    vi.mocked(api.repoMergeMethods).mockImplementation(async (repo) => ({
-      mergeMethods: repo === "acme/app" ? ["squash", "merge"] : ["squash"],
-    }))
-    vi.mocked(api.mergePullRequest).mockResolvedValue({
-      action: "merge",
-      done: true,
-    })
-    mount()
-    await screen.findByText("Change 2")
-    await selectAll()
-    fireEvent.click(bulkButton("Merge"))
-    const dialog = await screen.findByRole("dialog")
-    expect(
-      await within(dialog).findByText("Merge method: Squash merge")
-    ).toBeTruthy()
-    expect(
-      within(dialog).queryByRole("combobox", { name: "Merge method" })
-    ).toBeNull()
-    fireEvent.click(
-      within(dialog).getByRole("button", { name: "Merge pull requests" })
-    )
-    await waitFor(() => expect(api.mergePullRequest).toHaveBeenCalledTimes(2))
-    expect(api.mergePullRequest).toHaveBeenCalledWith(
-      expect.objectContaining({ number: 1 }),
-      "squash"
-    )
-    expect(toast.success).toHaveBeenCalledWith("Merged 2 pull requests")
-    await waitFor(() => expect(screen.queryByText("Change 1")).toBeNull())
-  })
-
-  it("requires a choice when the selected repositories share two merge methods", async () => {
-    vi.mocked(api.myPullRequests).mockResolvedValue({
-      ...payload,
-      pullRequests: [
-        pull(1, { reviewDecision: "approved" }),
-        pull(2, { repo: "acme/other", reviewDecision: "approved" }),
-      ],
-    })
-    vi.mocked(api.repoMergeMethods).mockResolvedValue({
-      mergeMethods: ["squash", "merge"],
-    })
-    vi.mocked(api.mergePullRequest).mockResolvedValue({
-      action: "merge",
-      done: true,
-    })
-    mount()
-    await screen.findByText("Change 2")
-    await selectAll()
-    fireEvent.click(bulkButton("Merge"))
-    const dialog = await screen.findByRole("dialog")
-    const select = await within(dialog).findByRole("combobox", {
-      name: "Merge method",
-    })
-    const confirm = within(dialog).getByRole("button", {
-      name: "Merge pull requests",
-    }) as HTMLButtonElement
-    expect(confirm.disabled).toBe(true)
-    expect(
-      within(select)
-        .getAllByRole("option")
-        .map((option) => option.textContent)
-    ).toEqual(["Choose a merge method", "Squash merge", "Merge commit"])
-    fireEvent.change(select, { target: { value: "merge" } })
-    await waitFor(() => expect(confirm.disabled).toBe(false))
-    fireEvent.click(confirm)
-    await waitFor(() => expect(api.mergePullRequest).toHaveBeenCalledTimes(2))
-    expect(api.mergePullRequest).toHaveBeenCalledWith(
-      expect.objectContaining({ number: 2 }),
-      "merge"
-    )
-  })
-
   it("surfaces a repository rule violation from a merge the dashboard could not predict", async () => {
     vi.mocked(api.myPullRequests).mockResolvedValue({
       ...payload,
@@ -1164,10 +1004,7 @@ describe("My PRs", () => {
     )
     mount()
     const card = (await screen.findByText("Change 1")).closest("li")!
-    fireEvent.change(
-      within(card).getByRole("combobox", { name: "Merge method for PR #1" }),
-      { target: { value: "squash" } }
-    )
+    fireEvent.change(await mergeSelect(1), { target: { value: "squash" } })
     fireEvent.click(within(card).getByRole("button", { name: "Merge" }))
     expect((await within(card).findByRole("alert")).textContent).toContain(
       "A conversation must be resolved"
@@ -1176,8 +1013,6 @@ describe("My PRs", () => {
       description: expect.stringContaining("Repository rule violations found"),
     })
     expect(within(card).getByText("Change 1")).toBeTruthy()
-    await selectAll()
-    expect(bulkButton("Merge").disabled).toBe(true)
   })
 
   it("offers addressing comments only when conversations are left to address", async () => {

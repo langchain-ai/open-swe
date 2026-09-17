@@ -19,7 +19,6 @@ export interface GithubAction {
   succeeded: (subject: string) => string
   failed: (subject: string) => string
   run: (pr: OpenPullRequest, method?: MergeMethod) => Promise<void>
-  settles: "removes" | "refreshes"
 }
 
 export const githubActions: Record<PullRequestActionName, GithubAction> = {
@@ -36,7 +35,6 @@ export const githubActions: Record<PullRequestActionName, GithubAction> = {
       if (!method) throw new Error("Choose a merge method.")
       await api.mergePullRequest(pr, method)
     },
-    settles: "removes",
   },
   close: {
     labels: {
@@ -50,7 +48,6 @@ export const githubActions: Record<PullRequestActionName, GithubAction> = {
     run: async (pr) => {
       await api.closePullRequest(pr)
     },
-    settles: "removes",
   },
   "mark-ready": {
     labels: {
@@ -64,7 +61,6 @@ export const githubActions: Record<PullRequestActionName, GithubAction> = {
     run: async (pr) => {
       await api.markPullRequestReady(pr)
     },
-    settles: "refreshes",
   },
 }
 

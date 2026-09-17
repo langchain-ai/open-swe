@@ -67,17 +67,3 @@ export function canAttemptMerge(pr: OpenPullRequest) {
   if (pr.draft === true) return false
   return pr.mergeable !== false && pr.mergeState !== "dirty"
 }
-
-// Approved is a review verdict, so it can stand while GitHub is still deciding
-// whether the branch merges or while the checks could not be read. Merging
-// needs both of those answers: GitHub blocks only required checks, so an
-// unread check could be a failing one. `unstable` is GitHub saying it will
-// accept the merge and only checks it does not require are unhappy.
-export function isMergeable(pr: OpenPullRequest) {
-  if (pr.mergeable !== true || !pr.headSha) return false
-  if (pr.mergeState === "unstable") return pr.reviewDecision === "approved"
-  return (
-    overallStatus(pr) === "Approved" &&
-    (pr.ci === "passing" || pr.ci === "none")
-  )
-}

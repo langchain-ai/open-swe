@@ -12,15 +12,14 @@ import type { OpenPullRequest } from "@/lib/api"
 import { pullRequestKey } from "../lib/status"
 
 export function ConfirmCloseDialog({
-  pullRequests,
+  pr,
   onCancel,
   onConfirm,
 }: {
-  pullRequests: OpenPullRequest[]
+  pr: OpenPullRequest
   onCancel: () => void
   onConfirm: () => void
 }) {
-  const listed = pullRequests.slice(0, 10)
   return (
     <AlertDialog
       open
@@ -30,26 +29,15 @@ export function ConfirmCloseDialog({
     >
       <AlertDialogContent>
         <AlertDialogHeader>
-          <AlertDialogTitle>
-            Close {pullRequests.length} pull request
-            {pullRequests.length === 1 ? "" : "s"}?
-          </AlertDialogTitle>
+          <AlertDialogTitle>Close {pullRequestKey(pr)}?</AlertDialogTitle>
           <AlertDialogDescription>
-            GitHub closes them without merging.
+            GitHub closes it without merging.
           </AlertDialogDescription>
         </AlertDialogHeader>
-        <ul className="max-h-48 overflow-y-auto font-mono text-xs">
-          {listed.map((pr) => (
-            <li key={pullRequestKey(pr)}>{pullRequestKey(pr)}</li>
-          ))}
-          {pullRequests.length > listed.length && (
-            <li>+{pullRequests.length - listed.length} more</li>
-          )}
-        </ul>
         <AlertDialogFooter>
           <AlertDialogCancel>Cancel</AlertDialogCancel>
           <AlertDialogAction onClick={onConfirm}>
-            Close pull requests
+            Close pull request
           </AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>

@@ -1,6 +1,7 @@
+import { useQuery } from "@tanstack/react-query"
 import { useState } from "react"
 
-import type { MergeMethod, OpenPullRequest } from "@/lib/api"
+import { api, type MergeMethod, type OpenPullRequest } from "@/lib/api"
 import { actionLabel, githubActions } from "../lib/githubActions"
 import {
   mergeMethodLabels,
@@ -24,9 +25,29 @@ export function MergePullRequest({
   pr: OpenPullRequest
   onMerged: () => void
 }) {
-  const [method, setMethod] = useState<MergeMethod | "">(
-    () => readPreferredMergeMethod() ?? ""
-  )
+  const [choice, setChoice] = useState<MergeMethod | "">("")
+  const [preferred] = useState(readPreferredMergeMethod)
+  const allowed = useQuery({
+    queryKey: ["repo-merge-methods", pr.repo],
+    queryFn: () => api.repoMergeMethods(pr.repo),
+    staleTime: Infinity,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
+    retry: false,
+  })
+  // An unread settings list is an ambiguity, not a known impossibility, so the
+  // attempt stands and GitHub's refusal is the answer.
+  const options: readonly MergeMethod[] = allowed.isError
+    ? mergeMethods
+    : mergeMethods.filter((option) =>
+        (allowed.data?.mergeMethods ?? []).includes(option)
+      )
+  const method =
+    choice && options.includes(choice)
+      ? choice
+      : options.length === 1
+        ? options[0]!
+        : (options.find((option) => option === preferred) ?? "")
   const merge = usePullRequestAction({
     pr,
     action: "merge",
@@ -47,16 +68,16 @@ export function MergePullRequest({
         className={control}
         aria-label={`Merge method for PR #${pr.number}`}
         value={method}
-        disabled={merge.isPending}
+        disabled={allowed.isPending || merge.isPending}
         onChange={(event) => {
           const chosen = asMergeMethod(event.target.value)
-          if (chosen !== null) setMethod(chosen)
+          if (chosen !== null) setChoice(chosen)
         }}
       >
         <option value="" disabled>
           Merge method
         </option>
-        {mergeMethods.map((option) => (
+        {options.map((option) => (
           <option key={option} value={option}>
             {mergeMethodLabels[option]}
           </option>

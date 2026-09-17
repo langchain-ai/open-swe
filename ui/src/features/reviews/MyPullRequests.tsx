@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query"
-import { useEffect, useState } from "react"
+import { useEffect } from "react"
 
 import { Button } from "@/components/ui/button"
 import { MultiSelect } from "@/components/ui/multi-select"
@@ -7,7 +7,6 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { api } from "@/lib/api"
 import { useRepos } from "@/lib/profile"
 import { cn } from "@/lib/utils"
-import { BulkActions } from "./components/BulkActions"
 import { PullRequestCard } from "./components/PullRequestCard"
 import { PullRequestReview } from "./components/PullRequestReview"
 import { forgetPullRequest, refreshPullRequest } from "./lib/cache"
@@ -49,7 +48,6 @@ export function MyPullRequests({
       direction: sort === next && direction === "asc" ? "desc" : "asc",
     })
   const queryClient = useQueryClient()
-  const [selection, setSelection] = useState<Set<string>>(new Set())
   const query = useOpenPullRequests(login, repo, sort, direction)
   const knownRepos = useRepos()
   const pages = query.data?.pages ?? []
@@ -91,19 +89,6 @@ export function MyPullRequests({
       filter.some((status) => statusLabels(pr).includes(status))
   )
   const visible = filtered.slice(page * pageSize, (page + 1) * pageSize)
-  const selected = all.filter((pr) => selection.has(pullRequestKey(pr)))
-  const selectedOnPage = visible.filter((pr) =>
-    selection.has(pullRequestKey(pr))
-  ).length
-  const toggleSelection = (keys: string[], include: boolean) =>
-    setSelection((current) => {
-      const next = new Set(current)
-      for (const key of keys) {
-        if (include) next.add(key)
-        else next.delete(key)
-      }
-      return next
-    })
   const refreshing = query.isFetching && !query.isFetchingNextPage
   const incomplete = pages.some((loaded) => loaded.incomplete)
   const reviewRefs = visible.map((pr) => ({ repo: pr.repo, number: pr.number }))
@@ -220,38 +205,7 @@ export function MyPullRequests({
       ) : (
         latest && (
           <>
-            {selected.length > 0 && (
-              <BulkActions
-                selected={selected}
-                login={login}
-                onClear={() => setSelection(new Set())}
-                onSettled={(succeeded) =>
-                  toggleSelection(succeeded.map(pullRequestKey), false)
-                }
-              />
-            )}
             <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-xs text-muted-foreground">
-              <label className="flex items-center gap-2">
-                <input
-                  type="checkbox"
-                  aria-label="Select all PRs on this page"
-                  checked={
-                    visible.length > 0 && selectedOnPage === visible.length
-                  }
-                  ref={(node) => {
-                    if (node)
-                      node.indeterminate =
-                        selectedOnPage > 0 && selectedOnPage < visible.length
-                  }}
-                  onChange={(event) =>
-                    toggleSelection(
-                      visible.map(pullRequestKey),
-                      event.target.checked
-                    )
-                  }
-                />
-                Select all on this page
-              </label>
               <span className="ml-auto flex items-center gap-1">
                 Sort
                 {sortOptions.map(([label, key]) => (
@@ -283,10 +237,6 @@ export function MyPullRequests({
                     key={pullRequestKey(pr)}
                     pr={pr}
                     login={login}
-                    selected={selection.has(pullRequestKey(pr))}
-                    onSelect={(include) =>
-                      toggleSelection([pullRequestKey(pr)], include)
-                    }
                     review={
                       reviews.isError ? null : (
                         <PullRequestReview

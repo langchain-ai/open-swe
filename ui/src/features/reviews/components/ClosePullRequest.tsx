@@ -24,7 +24,7 @@ export function ClosePullRequest({
     >
       {confirming && (
         <ConfirmCloseDialog
-          pullRequests={[pr]}
+          pr={pr}
           onCancel={() => setConfirming(false)}
           onConfirm={() => {
             setConfirming(false)
