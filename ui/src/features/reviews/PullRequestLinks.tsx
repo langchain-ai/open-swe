@@ -1,6 +1,11 @@
 import { Link, useNavigate } from "@tanstack/react-router"
 import { useMutation } from "@tanstack/react-query"
+
+import { buttonVariants } from "@/components/ui/button"
 import { api } from "@/lib/api"
+import { cn } from "@/lib/utils"
+
+const link = cn(buttonVariants({ variant: "ghost", size: "sm" }), "px-1.5")
 
 export function PullRequestLinks({
   repo,
@@ -20,34 +25,33 @@ export function PullRequestLinks({
     retry: false,
   })
   return (
-    <div className="text-xs text-muted-foreground">
-      Open:{" "}
-      <button
-        type="button"
-        className="hover:underline disabled:opacity-50"
-        disabled={thread.isPending || thread.isSuccess}
-        aria-live="polite"
-        onClick={() => thread.mutate()}
-      >
-        {thread.isPending ? "Opening thread…" : "Agent"}
-      </button>
-      ,{" "}
-      <Link
-        className="hover:underline"
-        to="/agents/reviews/$owner/$repo/$number"
-        params={{ owner: owner!, repo: name!, number: String(number) }}
-      >
-        Reviewer
-      </Link>
-      ,{" "}
-      <a
-        className="hover:underline"
-        href={`https://github.com/${repo}/pull/${number}`}
-        target="_blank"
-        rel="noreferrer"
-      >
-        GitHub
-      </a>
+    <div className="text-xs">
+      <span className="flex flex-wrap items-center gap-0.5">
+        <button
+          type="button"
+          className={link}
+          disabled={thread.isPending || thread.isSuccess}
+          aria-live="polite"
+          onClick={() => thread.mutate()}
+        >
+          {thread.isPending ? "Opening thread…" : "Agent"}
+        </button>
+        <Link
+          className={link}
+          to="/agents/reviews/$owner/$repo/$number"
+          params={{ owner: owner!, repo: name!, number: String(number) }}
+        >
+          Reviewer
+        </Link>
+        <a
+          className={link}
+          href={`https://github.com/${repo}/pull/${number}`}
+          target="_blank"
+          rel="noreferrer"
+        >
+          GitHub
+        </a>
+      </span>
       {thread.error && (
         <p role="alert" className="mt-1 text-destructive">
           {thread.error.message}

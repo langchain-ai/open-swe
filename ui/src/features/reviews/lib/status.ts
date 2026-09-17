@@ -59,6 +59,15 @@ export function hasUnresolvedConversations(pr: OpenPullRequest) {
   return pr.unresolvedThreads === null || pr.unresolvedThreads > 0
 }
 
+// Offer the merge unless GitHub has already refused it. It enforces rules the
+// dashboard cannot see — an unresolved conversation, say — so an attempt that
+// only might fail is still worth offering, and its refusal is the answer. A
+// conflict or a draft is not a guess: those merges are certain to be rejected.
+export function canAttemptMerge(pr: OpenPullRequest) {
+  if (pr.draft === true) return false
+  return pr.mergeable !== false && pr.mergeState !== "dirty"
+}
+
 // Approved is a review verdict, so it can stand while GitHub is still deciding
 // whether the branch merges or while the checks could not be read. Merging
 // needs both of those answers: GitHub blocks only required checks, so an

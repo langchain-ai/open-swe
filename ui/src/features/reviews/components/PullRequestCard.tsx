@@ -4,6 +4,7 @@ import type { OpenPullRequest } from "@/lib/api"
 import { cn } from "@/lib/utils"
 import { dateLabel } from "../lib/dateLabel"
 import {
+  canAttemptMerge,
   hasUnresolvedConversations,
   isFixable,
   statusLabels,
@@ -111,7 +112,9 @@ export function PullRequestCard({
               {pr.draft === true && (
                 <MarkPullRequestReady pr={pr} onReady={onReady} />
               )}
-              <MergePullRequest pr={pr} onMerged={onRemoved} />
+              {canAttemptMerge(pr) && (
+                <MergePullRequest pr={pr} onMerged={onRemoved} />
+              )}
               <ClosePullRequest pr={pr} onClosed={onRemoved} />
             </div>
             <PullRequestLinks

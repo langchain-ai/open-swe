@@ -599,6 +599,25 @@ describe("My PRs", () => {
     expect(bulkButton("Merge").disabled).toBe(true)
   })
 
+  it("withholds the merge only where GitHub has already refused it", async () => {
+    vi.mocked(api.myPullRequests).mockResolvedValue({
+      ...payload,
+      pullRequests: [
+        pull(1, { mergeable: false, mergeState: "dirty" }),
+        pull(2, { repo: "acme/other", draft: true }),
+        pull(3, { repo: "acme/third", ci: "failing", failingChecks: ["E2E"] }),
+      ],
+    })
+    mount()
+    const card = async (title: string) =>
+      within((await screen.findByText(title)).closest("li")!)
+    const merge = { name: "Merge" }
+    expect((await card("Change 1")).queryByRole("button", merge)).toBeNull()
+    expect((await card("Change 2")).queryByRole("button", merge)).toBeNull()
+    // A failing check may be one GitHub does not require, so the attempt stands.
+    expect((await card("Change 3")).getByRole("button", merge)).toBeTruthy()
+  })
+
   it("offers the merge method used last time", async () => {
     vi.mocked(api.myPullRequests).mockResolvedValue({
       ...payload,
