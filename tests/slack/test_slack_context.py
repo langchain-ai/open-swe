@@ -58,6 +58,26 @@ class _FakeClient:
         self.threads = threads_client
 
 
+@pytest.mark.parametrize(
+    ("text", "expected_switch", "expected_text"),
+    [
+        ("please /model:fast fix this", "fast", "please fix this"),
+        ("/model:perf\ncheck this", "perf", "check this"),
+        ("/model:fast first /model:perf", "perf", "first"),
+        ("/model:perf /model:fast last", "fast", "last"),
+        (
+            "keep /model:Fast /model:performance x/model:fast",
+            None,
+            "keep /model:Fast /model:performance x/model:fast",
+        ),
+    ],
+)
+def test_parse_slack_model_switch(
+    text: str, expected_switch: str | None, expected_text: str
+) -> None:
+    assert slack_webhooks.parse_slack_model_switch(text) == (expected_switch, expected_text)
+
+
 def test_channel_context_preserves_external_sharing_status() -> None:
     context = slack_utils.normalize_slack_channel_context(
         "C123", {"name": "shared", "is_ext_shared": True}
@@ -2036,16 +2056,16 @@ def test_thread_workspace_round_trips_through_metadata(
 def test_thread_model_choice_round_trips_explicit_metadata(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    threads = _FakeThreadsClient(
-        {
-            "metadata": {
-                "model_selection": "explicit",
-                "model": "anthropic:claude-opus-5",
-                "effort": "high",
-            }
-        }
-    )
+    threads = _FakeThreadsClient({"metadata": {}})
     monkeypatch.setattr(webhook_common, "get_client", lambda url: _FakeClient(threads))
+
+    asyncio.run(
+        webhook_common.upsert_agent_thread_metadata(
+            "thread-id",
+            source="slack",
+            explicit_model_choice=("anthropic:claude-opus-5", "high"),
+        )
+    )
 
     assert asyncio.run(webhook_common.get_thread_model_choice("thread-id")) == (
         "anthropic:claude-opus-5",
