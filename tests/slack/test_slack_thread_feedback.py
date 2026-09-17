@@ -233,9 +233,8 @@ async def test_prompt_uses_exact_run_mapping_and_deduplicates(
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("should_ask_for_feedback", [False, True])
-async def test_success_completion_only_prompts_for_answered_question(
-    context: Any, fake_store: Any, monkeypatch: pytest.MonkeyPatch, should_ask_for_feedback: bool
+async def test_success_completion_schedules_feedback_prompt(
+    context: Any, fake_store: Any, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     fake_store.values(("slack_thread_feedback", "C1")).clear()
     client = AsyncMock()
@@ -249,26 +248,14 @@ async def test_success_completion_only_prompts_for_answered_question(
     monkeypatch.setattr(prompt_scheduler, "langgraph_client", lambda: client)
     schedule = AsyncMock()
     monkeypatch.setattr(prompt_scheduler, "_schedule", schedule)
-    monkeypatch.setattr(
-        "agent.slack.client.lookup_slack_run_message_mapping",
-        AsyncMock(
-            return_value={
-                "run_id": "run-1",
-                "triggering_user_id": "U1",
-                "message_ts": "2.0",
-                "thread_ts": "1.0",
-                "should_ask_for_feedback": should_ask_for_feedback,
-            }
-        ),
-    )
     await completion.handle_run_completion(
         {"thread_id": "thread-1", "run_id": "run-1", "status": "success"}
     )
-    assert schedule.await_count == int(should_ask_for_feedback)
+    schedule.assert_awaited_once()
+    assert schedule.await_args.kwargs["answer_run_id"] == "run-1"
+    assert schedule.await_args.kwargs["slack_run_id"] == "run-1"
+    assert schedule.await_args.kwargs["channel_id"] == "C1"
     feedback.post_slack_ephemeral_message.assert_not_awaited()
-    if should_ask_for_feedback:
-        assert schedule.await_args.kwargs["answer_run_id"] == "run-1"
-        assert schedule.await_args.kwargs["slack_run_id"] == "run-1"
 
 
 @pytest.mark.asyncio
@@ -726,9 +713,8 @@ async def test_prompt_deduplicates_existing_records_by_requester_and_slack_threa
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("merged_pr", [False, True])
 async def test_followup_prompts_only_thread_initiator(
-    context: Any, fake_store: Any, monkeypatch: pytest.MonkeyPatch, merged_pr: bool
+    context: Any, fake_store: Any, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     fake_store.values(("slack_thread_feedback", "C1")).clear()
     monkeypatch.setattr(
@@ -740,13 +726,10 @@ async def test_followup_prompts_only_thread_initiator(
                 "triggering_user_id": "U2",
                 "thread_ts": "1.0",
                 "message_ts": "2.0",
-                "should_ask_for_feedback": True,
             }
         ),
     )
-    await feedback.post_slack_feedback_prompt(
-        "thread-1", "run-1", "C1", require_answer=not merged_pr
-    )
+    await feedback.post_slack_feedback_prompt("thread-1", "run-1", "C1")
 
     feedback.post_slack_ephemeral_message.assert_awaited_once()
     assert feedback.post_slack_ephemeral_message.await_args.args[:2] == ("C1", "U1")

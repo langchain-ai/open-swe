@@ -16,7 +16,6 @@ from agent.slack.client import (
     slack_thread_mutation_lock,
     store_slack_message_run_mapping,
 )
-from agent.slack.dm import is_dm_session
 from agent.slack.orphan import (
     dashboard_handoff_message,
     move_thread_to_dashboard,
@@ -35,7 +34,6 @@ async def slack_thread_reply(
     options: list[str] | None = None,
     blocks: list[dict[str, Any]] | None = None,
     state: Annotated[dict[str, Any] | None, InjectedState] = None,
-    should_ask_for_feedback: bool = False,
 ) -> dict[str, Any]:
     """Implement the `slack_thread_reply` tool."""
     config = get_config()
@@ -99,15 +97,6 @@ async def slack_thread_reply(
             langgraph_client=client,
             run_id=run_id,
             triggering_user_id=_triggering_user_id(cfg),
-            # A DM session is a private back-and-forth, so it never asks for a rating.
-            should_ask_for_feedback=(
-                should_ask_for_feedback
-                and not options
-                and not is_dm_session(
-                    cfg.slack_thread.channel_context if cfg.slack_thread else None,
-                    str(thread_ts),
-                )
-            ),
         )
     if message_ts is None:
         if slack_error == "thread_not_found":
@@ -320,7 +309,6 @@ async def _post_and_store_mapping(
     run_id: str | None = None,
     triggering_user_id: str | None = None,
     post_thread_ts: str | None = None,
-    should_ask_for_feedback: bool = False,
 ) -> tuple[str | None, str | None]:
     message_ts, slack_error = await post_slack_thread_reply_with_ts(
         channel_id,
@@ -339,6 +327,5 @@ async def _post_and_store_mapping(
             message_ts,
             run_id=run_id,
             triggering_user_id=triggering_user_id,
-            should_ask_for_feedback=should_ask_for_feedback,
         )
     return message_ts, slack_error
