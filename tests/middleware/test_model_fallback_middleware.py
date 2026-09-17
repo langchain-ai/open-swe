@@ -71,16 +71,15 @@ class TestShouldFallback:
         assert _should_fallback(exc) is True
 
     def test_http_remote_protocol_error_falls_back(self) -> None:
-        exc = httpx2.RemoteProtocolError(
+        exc = httpx.ReadError(
             "peer closed connection without sending complete message body (incomplete chunked read)"
         )
         assert _should_fallback(exc) is True
 
-    def test_legacy_httpx_remote_protocol_error_falls_back(self) -> None:
-        exc = httpx.RemoteProtocolError(
-            "peer closed connection without sending complete message body (incomplete chunked read)"
-        )
-        assert _should_fallback(exc) is True
+    @pytest.mark.parametrize("error_name", ["FireworksConnectionError", "OpenAIConnectionError"])
+    def test_provider_connection_errors_fall_back(self, error_name: str) -> None:
+        error_type = type(error_name, (Exception,), {})
+        assert _should_fallback(error_type("provider unavailable")) is True
 
     def test_retryable_langchain_model_error_falls_back(self) -> None:
         assert _should_fallback(ModelConnectionError("Fireworks unavailable")) is True
@@ -168,7 +167,7 @@ class TestModelFallbackMiddleware:
         assert calls[1] is override.return_value
 
     @pytest.mark.asyncio
-    async def test_async_falls_over_on_httpx2_stream_transport_error(self) -> None:
+    async def test_async_falls_over_on_httpx_stream_transport_error(self) -> None:
         fallback_model = MagicMock(name="fallback_model")
         middleware = ModelFallbackMiddleware(fallback_model)
 
@@ -178,7 +177,7 @@ class TestModelFallbackMiddleware:
         async def handler(req: ModelRequest[None]) -> ModelResponse[Any]:
             calls.append(req)
             if len(calls) == 1:
-                raise httpx2.RemoteProtocolError(
+                raise httpx.ReadError(
                     "peer closed connection without sending complete message body "
                     "(incomplete chunked read)"
                 )

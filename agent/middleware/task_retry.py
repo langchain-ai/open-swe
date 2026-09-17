@@ -1,8 +1,15 @@
 import json
 
-_RETURN_TO_MODEL_CODES = frozenset({"invalid_prompt", "context_length_exceeded"})
-_RETURN_TO_MODEL_STATUS_CODES = frozenset({400, 422})
+import httpx
+
 _RETRY_HTTP_STATUS_CODES = frozenset({408, 409, 425, 429, 500, 502, 503, 504, 529})
+_TRANSIENT_ERROR_NAME_SUFFIXES = (
+    "ConnectionError",
+    "ConnectTimeout",
+    "TimeoutException",
+    "ReadTimeout",
+    "TransportError",
+)
 _TRANSIENT_ERROR_NAMES = frozenset(
     {
         "APIConnectionError",
@@ -52,32 +59,23 @@ def _error_fields(exc: Exception) -> dict[str, object]:
 
 
 def _is_httpx_transport_error(exc: Exception) -> bool:
-    try:
-        import httpx2
-    except ImportError:  # pragma: no cover - dependency is declared in production
-        return False
-    return isinstance(exc, httpx2.TransportError)
+    return isinstance(exc, httpx.TransportError)
 
 
 def task_retry_on(exc: Exception) -> bool:
     status = _status_code(exc)
     if isinstance(status, int) and (status in _RETRY_HTTP_STATUS_CODES or status >= 500):
         return True
-    return exc.__class__.__name__ in _TRANSIENT_ERROR_NAMES or _is_httpx_transport_error(exc)
+    error_name = exc.__class__.__name__
+    return (
+        error_name in _TRANSIENT_ERROR_NAMES
+        or error_name.endswith(_TRANSIENT_ERROR_NAME_SUFFIXES)
+        or _is_httpx_transport_error(exc)
+    )
 
 
 def task_on_failure(exc: Exception) -> str:
     error = _error_fields(exc)
-    code = error.get("code")
-    status = error.get("status_code")
-    returnable = code in _RETURN_TO_MODEL_CODES or (
-        code is None
-        and error.get("type") == "invalid_request_error"
-        and isinstance(status, int)
-        and status in _RETURN_TO_MODEL_STATUS_CODES
-    )
-    if not returnable:
-        raise exc
     return json.dumps(
         {"status": "failed", "source": "subagent", "error": error},
         sort_keys=True,
