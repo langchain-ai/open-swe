@@ -4,7 +4,7 @@ import base64
 import binascii
 import json
 from datetime import UTC, datetime, timedelta
-from typing import Any
+from typing import Any, Literal
 from uuid import UUID
 
 from sqlalchemy import text
@@ -14,6 +14,22 @@ from sqlalchemy.ext.asyncio import AsyncConnection
 from agent.config import ENV
 from agent.database import connection
 from agent.database.analytics import reporting_metadata, workspace_id
+
+UsageSort = Literal[
+    "rank",
+    "user",
+    "favorite_model",
+    "invocations",
+    "threads",
+    "total_tokens",
+    "total_cost_usd",
+    "avg_invocation_seconds",
+    "avg_thread_seconds",
+    "prs_opened",
+    "merged_prs",
+    "agent_loc",
+]
+SortDirection = Literal["asc", "desc"]
 
 
 def period_start(period: str | None) -> datetime:
@@ -203,20 +219,35 @@ async def pr_merge_rate_by_model(
     }
 
 
-def _encode_usage_cursor(as_of: datetime, offset: int, workspace: UUID, period: str) -> str:
+def _encode_usage_cursor(
+    as_of: datetime,
+    offset: int,
+    workspace: UUID,
+    period: str,
+    sort: UsageSort,
+    direction: SortDirection,
+) -> str:
     payload = json.dumps(
         {
             "as_of": as_of.isoformat(),
             "offset": offset,
             "period": period,
             "workspace_id": str(workspace),
+            "sort": sort,
+            "direction": direction,
         },
         separators=(",", ":"),
     ).encode()
     return base64.urlsafe_b64encode(payload).decode().rstrip("=")
 
 
-def _decode_usage_cursor(cursor: str, workspace: UUID, period: str) -> tuple[datetime, int]:
+def _decode_usage_cursor(
+    cursor: str,
+    workspace: UUID,
+    period: str,
+    sort: UsageSort,
+    direction: SortDirection,
+) -> tuple[datetime, int]:
     try:
         encoded = cursor.encode("ascii")
         payload = json.loads(
@@ -227,6 +258,8 @@ def _decode_usage_cursor(cursor: str, workspace: UUID, period: str) -> tuple[dat
             "offset",
             "period",
             "workspace_id",
+            "sort",
+            "direction",
         }:
             raise ValueError
         as_of = datetime.fromisoformat(payload["as_of"])
@@ -234,6 +267,8 @@ def _decode_usage_cursor(cursor: str, workspace: UUID, period: str) -> tuple[dat
         if (
             payload["workspace_id"] != str(workspace)
             or payload["period"] != period
+            or payload["sort"] != sort
+            or payload["direction"] != direction
             or as_of.tzinfo is None
             or not isinstance(offset, int)
             or isinstance(offset, bool)
@@ -341,8 +376,44 @@ WITH runs AS (
     SELECT *, row_number() OVER (
         ORDER BY merged_prs DESC, agent_loc DESC, prs_opened DESC, name, person_id
     ) AS rank FROM metrics
+), ordered AS (
+    SELECT *, row_number() OVER (ORDER BY
+        CASE WHEN :sort = 'rank' AND :direction = 'asc' THEN rank END ASC,
+        CASE WHEN :sort = 'rank' AND :direction = 'desc' THEN rank END DESC,
+        CASE WHEN :sort = 'user' AND :direction = 'asc' THEN
+            lower(CASE WHEN :admin OR is_current OR NULLIF(github_login, '') IS NOT NULL
+                THEN name ELSE 'Open SWE user' END) END ASC,
+        CASE WHEN :sort = 'user' AND :direction = 'desc' THEN
+            lower(CASE WHEN :admin OR is_current OR NULLIF(github_login, '') IS NOT NULL
+                THEN name ELSE 'Open SWE user' END) END DESC,
+        CASE WHEN :sort = 'favorite_model' AND :direction = 'asc' THEN lower(favorite_model) END ASC,
+        CASE WHEN :sort = 'favorite_model' AND :direction = 'desc' THEN lower(favorite_model) END DESC,
+        CASE WHEN :sort = 'invocations' AND :direction = 'asc' THEN invocations END ASC,
+        CASE WHEN :sort = 'invocations' AND :direction = 'desc' THEN invocations END DESC,
+        CASE WHEN :sort = 'threads' AND :direction = 'asc' THEN threads END ASC,
+        CASE WHEN :sort = 'threads' AND :direction = 'desc' THEN threads END DESC,
+        CASE WHEN :sort = 'total_tokens' AND :direction = 'asc' THEN total_tokens END ASC,
+        CASE WHEN :sort = 'total_tokens' AND :direction = 'desc' THEN total_tokens END DESC,
+        CASE WHEN :sort = 'total_cost_usd' AND :direction = 'asc' THEN total_cost_usd END ASC,
+        CASE WHEN :sort = 'total_cost_usd' AND :direction = 'desc' THEN total_cost_usd END DESC,
+        CASE WHEN :sort = 'avg_invocation_seconds' AND :direction = 'asc'
+            THEN avg_invocation_seconds END ASC,
+        CASE WHEN :sort = 'avg_invocation_seconds' AND :direction = 'desc'
+            THEN avg_invocation_seconds END DESC,
+        CASE WHEN :sort = 'avg_thread_seconds' AND :direction = 'asc'
+            THEN avg_thread_seconds END ASC,
+        CASE WHEN :sort = 'avg_thread_seconds' AND :direction = 'desc'
+            THEN avg_thread_seconds END DESC,
+        CASE WHEN :sort = 'prs_opened' AND :direction = 'asc' THEN prs_opened END ASC,
+        CASE WHEN :sort = 'prs_opened' AND :direction = 'desc' THEN prs_opened END DESC,
+        CASE WHEN :sort = 'merged_prs' AND :direction = 'asc' THEN merged_prs END ASC,
+        CASE WHEN :sort = 'merged_prs' AND :direction = 'desc' THEN merged_prs END DESC,
+        CASE WHEN :sort = 'agent_loc' AND :direction = 'asc' THEN agent_loc END ASC,
+        CASE WHEN :sort = 'agent_loc' AND :direction = 'desc' THEN agent_loc END DESC,
+        rank
+    ) AS position FROM ranked
 ), selected AS (
-    SELECT rank,
+    SELECT position,
         jsonb_build_object(
             'rank', rank,
             'user', jsonb_build_object(
@@ -363,9 +434,9 @@ WITH runs AS (
             'invocations_without_cost', invocations_without_cost,
             'invocations_with_partial_cost', invocations_with_partial_cost
         ) AS row
-    FROM ranked WHERE rank > :offset AND rank <= :offset + :limit
+    FROM ordered WHERE position > :offset AND position <= :offset + :limit
 )
-SELECT (SELECT COALESCE(jsonb_agg(row ORDER BY rank), '[]'::jsonb) FROM selected) AS rows,
+SELECT (SELECT COALESCE(jsonb_agg(row ORDER BY position), '[]'::jsonb) FROM selected) AS rows,
     count(*) AS total_members,
     min(rank) FILTER (WHERE is_current) AS current_user_rank,
     COALESCE(sum(invocations_without_cost), 0)::bigint AS invocations_without_cost,
@@ -418,13 +489,15 @@ async def usage_leaderboard(
     current_email: str | None,
     offset: int = 0,
     cursor: str | None = None,
+    sort: UsageSort = "rank",
+    direction: SortDirection = "asc",
     admin: bool = False,
 ) -> dict[str, Any]:
     """Read usage and review cohorts from one bounded PostgreSQL snapshot."""
     normalized = period if period in {"7d", "30d", "all"} else "30d"
     workspace = workspace_id()
     if cursor:
-        as_of, offset = _decode_usage_cursor(cursor, workspace, normalized)
+        as_of, offset = _decode_usage_cursor(cursor, workspace, normalized, sort, direction)
     else:
         as_of = datetime.now(UTC)
     generated_at_ms = int(as_of.timestamp() * 1000)
@@ -436,6 +509,8 @@ async def usage_leaderboard(
         "current_login": (current_login or "").strip().lower(),
         "current_email": (current_email or "").strip().lower(),
         "admin": admin,
+        "sort": sort,
+        "direction": direction,
     }
     async with connection() as conn:
         await conn.execute(text("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY"))
@@ -459,7 +534,12 @@ async def usage_leaderboard(
         **usage,
         "next_cursor": (
             _encode_usage_cursor(
-                as_of, parameters["offset"] + len(usage["rows"]), workspace, normalized
+                as_of,
+                parameters["offset"] + len(usage["rows"]),
+                workspace,
+                normalized,
+                sort,
+                direction,
             )
             if len(usage["rows"]) == parameters["limit"]
             and parameters["offset"] + len(usage["rows"]) < usage["total_members"]

@@ -61,5 +61,6 @@ describe("usageLeaderboard", () => {
     })
     const requestedUrl = String(fetchMock.mock.calls[0]?.[0] ?? "")
     expect(requestedUrl).toContain("period=7d")
+    expect(requestedUrl).toContain("sort=rank&direction=asc")
   })
 })

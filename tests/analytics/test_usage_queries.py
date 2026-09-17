@@ -186,6 +186,32 @@ async def test_usage_ranks_run_and_pr_cohorts_with_cost_coverage(usage_db):
     assert [row["rank"] for row in (await report(limit=1, offset=1))["rows"]] == [2]
 
 
+async def test_usage_sorting_happens_before_pagination(usage_db):
+    alice = await person("alice", display_name="Alice")
+    bob = await person("bob", display_name="bob")
+    carol = await person("carol", display_name="Carol")
+    await run(alice, tokens=10)
+    await run(bob, tokens=30)
+    await run(carol, tokens=20)
+
+    first = await report(limit=2, sort="total_tokens", direction="desc")
+    assert [row["user"]["name"] for row in first["rows"]] == ["bob", "Carol"]
+    second = await report(
+        limit=2,
+        cursor=first["next_cursor"],
+        sort="total_tokens",
+        direction="desc",
+    )
+    assert [row["user"]["name"] for row in second["rows"]] == ["Alice"]
+    with pytest.raises(ValueError, match="invalid usage leaderboard cursor"):
+        await report(
+            limit=2,
+            cursor=first["next_cursor"],
+            sort="user",
+            direction="asc",
+        )
+
+
 async def test_aliases_and_pr_only_members_preserve_privacy(usage_db):
     canonical = await person("named", "named@example.com")
     email_only = await person(email="private@example.com")

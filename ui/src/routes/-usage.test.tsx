@@ -7,6 +7,7 @@ import {
   fireEvent,
   render,
   screen,
+  waitFor,
   within,
 } from "@testing-library/react"
 import { afterEach, beforeEach, expect, it, vi } from "vitest"
@@ -494,7 +495,13 @@ it("resets leaderboard pagination when the period changes outside the selector",
     </QueryClientProvider>
   )
   expect(await screen.findByText("Page 1 of 2")).toBeTruthy()
-  expect(api.usageLeaderboard).toHaveBeenLastCalledWith("7d", 10, undefined)
+  expect(api.usageLeaderboard).toHaveBeenLastCalledWith(
+    "7d",
+    10,
+    undefined,
+    "rank",
+    "asc"
+  )
   client.clear()
 })
 
@@ -720,6 +727,45 @@ const costRow: UsageLeaderboardRow = {
   invocations_with_partial_cost: 0,
   avg_invocation_seconds: 90,
 }
+
+it("requests server-side sorting and exposes its direction", async () => {
+  vi.spyOn(api, "prMergeRateByModel").mockResolvedValue(captured)
+  vi.mocked(api.usageLeaderboard).mockResolvedValue({
+    ...emptyUsage,
+    total_members: 1,
+    rows: [costRow],
+  })
+  const client = mountReport()
+  await screen.findByText("Cost Reader")
+
+  fireEvent.click(screen.getByRole("button", { name: /Invocations/ }))
+  await waitFor(() =>
+    expect(api.usageLeaderboard).toHaveBeenLastCalledWith(
+      "30d",
+      10,
+      undefined,
+      "invocations",
+      "desc"
+    )
+  )
+  expect(
+    (
+      await screen.findByRole("columnheader", { name: /Invocations/ })
+    ).getAttribute("aria-sort")
+  ).toBe("descending")
+
+  fireEvent.click(screen.getByRole("button", { name: /Invocations/ }))
+  await waitFor(() =>
+    expect(api.usageLeaderboard).toHaveBeenLastCalledWith(
+      "30d",
+      10,
+      undefined,
+      "invocations",
+      "asc"
+    )
+  )
+  client.clear()
+})
 
 it.each([
   {
