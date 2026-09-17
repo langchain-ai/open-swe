@@ -166,8 +166,8 @@ async def post_slack_feedback_prompt(
                 message_ts=message_ts,
                 user_id=origin.triggering_user_id,
             )
-        context = await SlackChannel.context(channel_id, use_cache=False)
-        if not SlackChannel.allows_operations(context):
+        context = await SlackChannel.context_for(channel_id, use_cache=False)
+        if not context.allows_operations:
             return
         async with _locked_feedback(record) as current:
             record = current or record
@@ -234,8 +234,8 @@ async def _load_feedback(channel_id: str, run_id: str, user_id: str) -> ThreadFe
     record = await _store(channel_id).get(run_id)
     if record is None or record.user_id != user_id or record.channel_id != channel_id:
         return None
-    context = await SlackChannel.context(channel_id, use_cache=False)
-    return record if SlackChannel.allows_operations(context) else None
+    context = await SlackChannel.context_for(channel_id, use_cache=False)
+    return record if context.allows_operations else None
 
 
 def comment_modal(record: ThreadFeedback, response_url: str) -> dict[str, Any]:

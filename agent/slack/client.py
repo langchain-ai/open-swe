@@ -21,7 +21,6 @@ from slack_sdk.errors import SlackApiError
 from slack_sdk.web.async_slack_response import AsyncSlackResponse
 
 from agent.config import ENV
-from agent.slack.channels import SlackChannel
 from agent.slack.http import SLACK_REQUEST_ERRORS, slack_client, slack_error, slack_retry_after
 from agent.source_context import SlackThreadRef, SourceContext
 from agent.thread_ids import slack_thread_id
@@ -36,7 +35,6 @@ logger = logging.getLogger(__name__)
 
 SLACK_BOT_TOKEN = ENV.SLACK_BOT_TOKEN.get()
 SLACK_THREAD_MAX_MESSAGES = 500
-SLACK_CHANNEL_HISTORY_MAX_MESSAGES = 100
 SLACK_FILE_UPLOAD_MAX_BYTES = 16 * 1024 * 1024
 
 SLACK_WEB_LINK_FOOTER_LABEL = "Open in Web"
@@ -1243,52 +1241,6 @@ async def fetch_slack_thread_messages(channel_id: str, thread_ts: str) -> list[d
     messages.sort(key=lambda item: parse_slack_ts(item.get("ts")))
     if truncated:
         messages = messages[-SLACK_THREAD_MAX_MESSAGES:]
-    return messages
-
-
-_SLACK_NOISE_SUBTYPES = frozenset(
-    {"channel_join", "channel_leave", "channel_topic", "channel_purpose", "channel_name"}
-)
-
-
-async def fetch_slack_channel_messages(
-    channel_id: str, limit: int = 30
-) -> list[dict[str, Any]] | None:
-    """The most recent top-level messages in a public channel, oldest first.
-
-    ``None`` means the channel could not be confirmed readable this way; an empty
-    list means it is readable and has nothing to show. Thread replies are not in
-    channel history, so a message that has any carries its `reply_count` and
-    `thread_ts` for `slack_read_thread_messages` to follow.
-    """
-    if not SLACK_BOT_TOKEN or not channel_id:
-        return None
-    if not await SlackChannel.is_public(channel_id):
-        logger.info(
-            "Refused to read history for a non-public Slack channel",
-            extra={"slack_channel": channel_id},
-        )
-        return None
-
-    capped = max(1, min(limit, SLACK_CHANNEL_HISTORY_MAX_MESSAGES))
-    async with slack_client(token=SLACK_BOT_TOKEN) as client:
-        try:
-            payload = await client.conversations_history(channel=channel_id, limit=capped)
-        except SLACK_REQUEST_ERRORS as exc:
-            logger.warning(
-                "Slack channel history fetch failed", extra={"slack_error": slack_error(exc)}
-            )
-            return []
-
-    batch = payload.get("messages", [])
-    if not isinstance(batch, list):
-        return []
-    messages = [
-        item
-        for item in batch
-        if isinstance(item, dict) and item.get("subtype") not in _SLACK_NOISE_SUBTYPES
-    ]
-    messages.sort(key=lambda item: parse_slack_ts(item.get("ts")))
     return messages
 
 

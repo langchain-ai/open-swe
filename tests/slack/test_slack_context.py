@@ -9,7 +9,6 @@ from agent.dashboard.workspace_settings import WorkspaceSettings
 from agent.run_config import Repo
 from agent.slack import client as slack_utils
 from agent.slack import webhook as slack_webhooks
-from agent.slack.channels import SlackChannel
 from agent.slack.client import (
     convert_mentions_to_slack_format,
     format_slack_messages_for_prompt,
@@ -20,6 +19,7 @@ from agent.slack.client import (
     select_slack_context_messages,
     strip_bot_mention,
 )
+from agent.slack.payloads import SlackChannelContext, SlackChannelPayload
 from agent.slack.request import SlackRequest
 from agent.source_context import SourceContext
 from agent.utils.run_usage import RunUsageSummary
@@ -60,22 +60,22 @@ class _FakeClient:
 
 
 def test_channel_context_preserves_external_sharing_status() -> None:
-    context = SlackChannel.normalize_context("C123", {"name": "shared", "is_ext_shared": True})
+    context = SlackChannelPayload.of({"name": "shared", "is_ext_shared": True}).to_context("C123")
 
-    assert context["is_ext_shared"] is True
-    assert not SlackChannel.allows_operations(context)
+    assert context.is_ext_shared is True
+    assert not context.allows_operations
 
 
 def test_channel_operations_fail_closed_without_external_sharing_status() -> None:
-    context = SlackChannel.normalize_context("C123", None)
+    context = SlackChannelPayload.of(None).to_context("C123")
 
-    assert context["is_ext_shared"] is None
-    assert not SlackChannel.allows_operations(context)
-    assert SlackChannel.allows_operations({"is_ext_shared": False, "is_pending_ext_shared": False})
-    assert not SlackChannel.allows_operations(
-        {"is_ext_shared": False, "is_pending_ext_shared": True}
-    )
-    assert SlackChannel.allows_operations({"is_im": True})
+    assert context.is_ext_shared is None
+    assert not context.allows_operations
+    assert SlackChannelContext(is_ext_shared=False, is_pending_ext_shared=False).allows_operations
+    assert not SlackChannelContext(
+        is_ext_shared=False, is_pending_ext_shared=True
+    ).allows_operations
+    assert SlackChannelContext(is_im=True).allows_operations
 
 
 def test_source_context_preserves_existing_slack_permalink_on_lookup_failure(
@@ -1206,7 +1206,7 @@ async def test_slack_files_reach_bound_sandbox_with_thread_environment(
 ):
     request, threads, provisioned, captured = slack_file_mention
     if private:
-        request = request.model_copy(update={"channel_context": {"is_im": True}})
+        request = request.model_copy(update={"channel_context": SlackChannelContext(is_im=True)})
     if existing:
         threads.metadata = {
             "visibility": "private" if private else "public",
@@ -1246,7 +1246,7 @@ async def test_slack_file_provisioning_requires_account_and_persisted_thread(
         )
 
     if failure == "private-persistence":
-        request = request.model_copy(update={"channel_context": {"is_im": True}})
+        request = request.model_copy(update={"channel_context": SlackChannelContext(is_im=True)})
         with pytest.raises(RuntimeError, match="authorization metadata"):
             await slack_webhooks._process_slack_mention_impl(request, None)
     else:

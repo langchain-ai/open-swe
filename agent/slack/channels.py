@@ -18,14 +18,14 @@ from agent.config import ENV
 from agent.database import postgres
 from agent.database.orm import NOW, Base
 from agent.slack.http import SLACK_REQUEST_ERRORS, slack_client, slack_error
+from agent.slack.payloads import SlackChannelContext, SlackChannelPayload, SlackMessage
 from agent.utils.json_types import JsonObject
 
 logger = logging.getLogger(__name__)
 
 SLACK_BOT_TOKEN = ENV.SLACK_BOT_TOKEN.get()
 PAYLOAD_TTL = timedelta(seconds=300)
-
-SlackChannelContext = dict[str, str | bool | None]
+HISTORY_MAX_MESSAGES = 100
 
 _MENTION = re.compile(r"^<#([A-Z0-9]+)(?:\|[^>]*)?>$")
 _ID_SHAPE = re.compile(r"^[CGD][A-Z0-9]{8,}$")
@@ -42,6 +42,21 @@ class SlackChannel(Base):
     @property
     def fresh(self) -> bool:
         return self.fetched_at is not None and datetime.now(UTC) - self.fetched_at < PAYLOAD_TTL
+
+    @property
+    def details(self) -> SlackChannelPayload:
+        """A typed read of the stored Slack channel object."""
+        return SlackChannelPayload.of(self.payload)
+
+    @property
+    def public(self) -> bool:
+        """Whether anybody in the workspace can already read this channel."""
+        return self.details.is_public
+
+    @property
+    def context(self) -> SlackChannelContext:
+        """This channel's identity and description, for prompts and thread metadata."""
+        return self.details.to_context(self.id)
 
     @classmethod
     def from_payload(cls, payload: JsonObject) -> Self | None:
@@ -90,22 +105,34 @@ class SlackChannel(Base):
             return await session.scalar(select(cls).where(cls.name == name))
 
     @classmethod
-    async def fetch(cls, channel_id: str, *, use_cache: bool = True) -> JsonObject | None:
-        """Slack channel details (including topic and purpose) for one channel id."""
+    async def load(cls, channel_id: str, *, use_cache: bool = True) -> Self | None:
+        """The channel, from the directory while fresh and from Slack otherwise."""
         if not SLACK_BOT_TOKEN or not channel_id:
             return None
         if use_cache and (known := await cls._row(channel_id)) is not None and known.fresh:
-            return dict(known.payload)
+            return known
         try:
             async with slack_client(token=SLACK_BOT_TOKEN) as client:
                 data = await client.conversations_info(channel=channel_id)
             payload = data.get("channel")
             if isinstance(payload, dict):
                 await cls.save_all(payload)
-                return dict(payload)
+                return cls.from_payload(payload)
         except SLACK_REQUEST_ERRORS as exc:
             logger.warning("Slack channel lookup failed", extra={"slack_error": slack_error(exc)})
         return None
+
+    @classmethod
+    async def fetch(cls, channel_id: str, *, use_cache: bool = True) -> JsonObject | None:
+        """The raw Slack channel object, for callers reading fields this model omits."""
+        channel = await cls.load(channel_id, use_cache=use_cache)
+        return dict(channel.payload) if channel is not None else None
+
+    @classmethod
+    async def context_for(cls, channel_id: str, *, use_cache: bool = True) -> SlackChannelContext:
+        """One channel's context, empty but for its id when the channel is unreadable."""
+        channel = await cls.load(channel_id, use_cache=use_cache)
+        return channel.context if channel is not None else SlackChannelContext(id=channel_id)
 
     @classmethod
     async def _search(cls, name: str) -> str | None:
@@ -147,142 +174,48 @@ class SlackChannel(Base):
         if not value:
             return None
         if _ID_SHAPE.fullmatch(value):
-            payload = await cls.fetch(value)
-            found = payload.get("id") if payload else None
-            return found if isinstance(found, str) and found else None
+            channel = await cls.load(value)
+            return channel.id if channel is not None else None
         name = value.lower()
         if (known := await cls._row_named(name)) is not None:
             # A stale row may predate a rename, so confirm it before trusting the name.
-            current = known.payload if known.fresh else await cls.fetch(known.id)
-            if current is not None and current.get("name") == name:
+            current = known if known.fresh else await cls.load(known.id, use_cache=False)
+            if current is not None and current.details.name.lower() == name:
                 return known.id
         return await cls._search(name)
 
-    @classmethod
-    async def is_public(cls, channel_id: str) -> bool:
-        """Whether a channel is one anybody in the workspace can already read.
+    async def messages(self, limit: int = 30) -> list[SlackMessage]:
+        """The most recent top-level messages, oldest first.
 
-        Channel history is fetched with the deployment's bot token, which says
-        nothing about who is asking, so only a channel with no membership to leak
-        may be read this way: not private, not a DM or group DM, and not shared with
-        another organization.
+        Empty when the channel may not be read this way, when the fetch failed,
+        and when the channel is simply quiet; a caller that has to tell those
+        apart checks ``public`` first. Thread replies are not in channel history,
+        so a message that has any carries its ``reply_count`` and ``thread_ts``
+        for ``slack_read_thread_messages`` to follow.
         """
-        payload = await cls.fetch(channel_id)
-        if not isinstance(payload, dict):
-            return False
-        return (
-            payload.get("is_channel") is True
-            and payload.get("is_private") is False
-            and payload.get("is_im") is not True
-            and payload.get("is_mpim") is not True
-            and payload.get("is_ext_shared") is False
-            and payload.get("is_pending_ext_shared") is False
-        )
-
-    @classmethod
-    def section(cls, payload: JsonObject | None, key: str) -> str:
-        if not isinstance(payload, dict):
-            return ""
-        section = payload.get(key)
-        if isinstance(section, dict):
-            value = section.get("value")
-            if isinstance(value, str):
-                return value.strip()
-        value = payload.get(key)
-        return value.strip() if isinstance(value, str) else ""
-
-    @classmethod
-    def topic_and_purpose(cls, payload: JsonObject | None) -> str:
-        """A channel's topic and purpose text joined into one string."""
-        parts = [value for key in ("topic", "purpose") if (value := cls.section(payload, key))]
-        return "\n".join(parts)
-
-    @classmethod
-    def normalize_context(cls, channel_id: str, payload: JsonObject | None) -> SlackChannelContext:
-        """Normalize Slack channel details for prompts and metadata."""
-        name = ""
-        name_normalized = ""
-        if isinstance(payload, dict):
-            raw_name = payload.get("name")
-            raw_normalized = payload.get("name_normalized")
-            if isinstance(raw_name, str):
-                name = raw_name.strip()
-            if isinstance(raw_normalized, str):
-                name_normalized = raw_normalized.strip()
-        topic = cls.section(payload, "topic")
-        purpose = cls.section(payload, "purpose")
-        description = "\n".join(value for value in (topic, purpose) if value)
-        is_ext_shared = payload.get("is_ext_shared") if isinstance(payload, dict) else None
-        is_pending_ext_shared = (
-            payload.get("is_pending_ext_shared") if isinstance(payload, dict) else None
-        )
-        is_im = payload.get("is_im") if isinstance(payload, dict) else None
-        return {
-            "id": channel_id,
-            "name": name,
-            "name_normalized": name_normalized,
-            "topic": topic,
-            "purpose": purpose,
-            "description": description,
-            "is_ext_shared": is_ext_shared if isinstance(is_ext_shared, bool) else None,
-            "is_pending_ext_shared": (
-                is_pending_ext_shared if isinstance(is_pending_ext_shared, bool) else None
-            ),
-            "is_im": is_im if isinstance(is_im, bool) else None,
-        }
-
-    @classmethod
-    async def context(cls, channel_id: str, *, use_cache: bool = True) -> SlackChannelContext:
-        """Normalized context for one channel id."""
-        return cls.normalize_context(channel_id, await cls.fetch(channel_id, use_cache=use_cache))
-
-    @classmethod
-    async def description(cls, channel_id: str) -> str:
-        """One channel's combined topic and purpose text."""
-        return cls.topic_and_purpose(await cls.fetch(channel_id))
-
-    @classmethod
-    def allows_operations(cls, context: SlackChannelContext | None) -> bool:
-        """Allow operations only where Slack confirms the channel is not externally shared."""
-        if not isinstance(context, dict):
-            return False
-        return context.get("is_im") is True or (
-            context.get("is_ext_shared") is False and context.get("is_pending_ext_shared") is False
-        )
-
-    @classmethod
-    def context_description(cls, context: SlackChannelContext | None) -> str:
-        """Prompt-safe description text from normalized context."""
-        if not isinstance(context, dict):
-            return ""
-        description = context.get("description")
-        if isinstance(description, str) and description.strip():
-            return description.strip()
-        parts: list[str] = []
-        for key in ("topic", "purpose"):
-            value = context.get(key)
-            if isinstance(value, str) and value.strip():
-                parts.append(value.strip())
-        return "\n".join(parts)
-
-    @classmethod
-    def context_has_metadata(cls, context: SlackChannelContext | None) -> bool:
-        """Whether normalized context carries any name or description field."""
-        if not isinstance(context, dict):
-            return False
-        return any(
-            isinstance(value, str) and value.strip()
-            for key in ("name", "name_normalized", "topic", "purpose", "description")
-            if (value := context.get(key)) is not None
-        )
-
-    @classmethod
-    def context_is_named(cls, context: SlackChannelContext | None, expected: str) -> bool:
-        """Whether normalized context matches a Slack channel name."""
-        if not isinstance(context, dict):
-            return False
-        wanted = expected.strip().lower()
-        return any(
-            isinstance(value, str) and value.strip().lower() == wanted
-            for value in (context.get("name"), context.get("name_normalized"))
-        )
+        if not SLACK_BOT_TOKEN:
+            return []
+        if not self.public:
+            logger.info(
+                "Refused to read history for a non-public Slack channel",
+                extra={"slack_channel": self.id},
+            )
+            return []
+        capped = max(1, min(limit, HISTORY_MAX_MESSAGES))
+        try:
+            async with slack_client(token=SLACK_BOT_TOKEN) as client:
+                payload = await client.conversations_history(channel=self.id, limit=capped)
+        except SLACK_REQUEST_ERRORS as exc:
+            logger.warning(
+                "Slack channel history fetch failed", extra={"slack_error": slack_error(exc)}
+            )
+            return []
+        batch = payload.get("messages")
+        if not isinstance(batch, list):
+            return []
+        messages = [
+            message
+            for item in batch
+            if (message := SlackMessage.parse(item)) is not None and not message.is_noise
+        ]
+        return sorted(messages, key=lambda message: message.sort_key)

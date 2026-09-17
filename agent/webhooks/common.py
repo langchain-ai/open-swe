@@ -124,6 +124,7 @@ from agent.slack.feedback import (
     process_slack_reaction_added,
     process_slack_reaction_removed,
 )
+from agent.slack.payloads import SlackChannelContext
 from agent.slack.stop import process_agent_session_stopped, process_slack_stop_reaction
 from agent.source_context import SourceContext
 from agent.threads.summary import thread_is_private, thread_is_promptable
@@ -383,13 +384,13 @@ def run_id_for_logging(run: Any) -> str:
 
 async def resolve_slack_channel_context(
     channel_id: str, *, use_cache: bool = True
-) -> dict[str, Any]:
+) -> SlackChannelContext:
     """Fetch Slack channel context without blocking Slack-triggered runs on failure."""
     try:
-        return await SlackChannel.context(channel_id, use_cache=use_cache)
+        return await SlackChannel.context_for(channel_id, use_cache=use_cache)
     except Exception:  # noqa: BLE001
         logger.exception("Failed to resolve Slack channel context")
-        return SlackChannel.normalize_context(channel_id, None)
+        return SlackChannelContext(id=channel_id)
 
 
 def is_repo_allowed(repo_config: dict[str, str]) -> bool:
@@ -696,7 +697,7 @@ async def get_slack_repo_config(
     channel_id: str,
     thread_ts: str,
     slack_user_id: str | None = None,
-    channel_context: dict[str, Any] | None = None,
+    channel_context: SlackChannelContext | None = None,
     thread_id: str | None = None,
 ) -> SlackRepoResolution:
     """Resolve the default repository hint for a Slack-triggered run, if any source names one.
@@ -738,9 +739,9 @@ async def get_slack_repo_config(
     if not repo_config:
         try:
             if channel_context is not None:
-                channel_description = SlackChannel.context_description(channel_context)
+                channel_description = channel_context.description_text
             else:
-                channel_description = await SlackChannel.description(channel_id)
+                channel_description = (await SlackChannel.context_for(channel_id)).description_text
             if channel_description:
                 channel_repo_config = extract_repo_from_text(
                     channel_description, default_owner=default_owner

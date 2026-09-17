@@ -10,7 +10,7 @@ owner enabled ever reaches a run with it.
 
 from agent.dashboard.agent_overrides import profile_dm_session_enabled
 from agent.dashboard.profiles import get_profile
-from agent.slack.channels import SlackChannelContext
+from agent.slack.payloads import SlackChannelContext
 from agent.users import User
 
 DM_SESSION_TS = "0"
@@ -18,7 +18,7 @@ DM_SESSION_TS = "0"
 
 def is_dm_channel(channel_context: SlackChannelContext | None) -> bool:
     """Whether Slack reports this channel as a direct message with the bot."""
-    return channel_context is not None and channel_context.get("is_im") is True
+    return channel_context is not None and channel_context.is_im is True
 
 
 def is_dm_session(channel_context: SlackChannelContext | None, thread_ts: str) -> bool:

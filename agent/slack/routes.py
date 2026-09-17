@@ -18,7 +18,6 @@ from agent.slack.ask import (
     ask_thread_id,
     process_slack_ask,
 )
-from agent.slack.channels import SlackChannel, SlackChannelContext
 from agent.slack.dm import DM_SESSION_TS, dm_session_enabled, is_dm_channel
 from agent.slack.failures import (
     SlackRequestError,
@@ -29,6 +28,7 @@ from agent.slack.failures import (
 from agent.slack.payloads import (
     SlackBlockAction,
     SlackButtonValue,
+    SlackChannelContext,
     SlackEventEnvelope,
     SlackInteraction,
     SlackInteractionMessage,
@@ -243,7 +243,7 @@ async def _process_slack_message_update_impl(request: SlackRequest) -> None:
     channel_context = await common.resolve_slack_channel_context(
         request.channel_id, use_cache=False
     )
-    if not SlackChannel.allows_operations(channel_context):
+    if not channel_context.allows_operations:
         common.logger.warning(
             "Blocked Slack message update in ineligible channel=%s", request.channel_id
         )
@@ -300,8 +300,8 @@ async def slack_webhook(
     channel_context: SlackChannelContext | None = None
     if channel_id:
         channel_context = await common.resolve_slack_channel_context(channel_id, use_cache=False)
-        if not SlackChannel.allows_operations(channel_context):
-            is_external = channel_context.get("is_ext_shared") is True
+        if not channel_context.allows_operations:
+            is_external = channel_context.is_ext_shared is True
             event_ts = event.event_ts or event.ts
             thread_ts = event.thread_ts or event.ts
             if (
@@ -720,7 +720,7 @@ async def slack_interactivity(
     if not channel_id:
         return ignored("Slack channel is not eligible")
     channel_context = await common.resolve_slack_channel_context(channel_id, use_cache=False)
-    if not SlackChannel.allows_operations(channel_context):
+    if not channel_context.allows_operations:
         common.logger.warning("Blocked Slack interaction in ineligible channel=%s", channel_id)
         return ignored("Slack channel is not eligible")
 
