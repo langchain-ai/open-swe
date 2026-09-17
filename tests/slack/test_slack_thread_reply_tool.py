@@ -373,10 +373,10 @@ def test_slack_action_ids_are_unique_and_recognized() -> None:
 
     assert len({action["action_id"] for action in actions}) == len(actions)
     parsed = [SlackBlockAction.model_validate(action) for action in actions]
-    assert slack_routes._first_option_action(parsed) is parsed[0]
+    assert slack_routes._first_open_swe_action(parsed) is parsed[0]
     legacy = SlackBlockAction(action_id="open_swe_option_select")
-    assert slack_routes._first_option_action([legacy]) is legacy
-    assert slack_routes._first_option_action([SlackBlockAction(action_id="unrelated")]) is None
+    assert slack_routes._first_open_swe_action([legacy]) is legacy
+    assert slack_routes._first_open_swe_action([SlackBlockAction(action_id="unrelated")]) is None
 
 
 async def test_slack_thread_reply_passes_live_run_id(

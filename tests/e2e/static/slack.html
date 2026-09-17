@@ -34,6 +34,11 @@
       .who { font-size: 14px; font-weight: 800; }
       .text { margin-top: 3px; white-space: pre-wrap; line-height: 1.45; font-size: 14px; }
       .context { color: #616061; font-size: 12px; margin-top: 5px; }
+      .section { white-space: pre-wrap; margin-top: 6px; }
+      .block-header { font-weight: 800; margin-top: 8px; }
+      .actions select { margin: 8px 6px 0 0; padding: 6px 8px; }
+      .actions a.link-button { display: inline-block; margin: 8px 6px 0 0; padding: 6px 10px; border: 1px solid #bbb; border-radius: 5px; font-weight: 700; text-decoration: none; color: #1264a3; }
+      .accessory { max-height: 48px; margin-top: 8px; }
       .actions button { margin: 8px 6px 0 0; border: 1px solid #bbb; border-radius: 5px; padding: 6px 10px; background: #fff; font-weight: 700; cursor: pointer; }
       .actions button.primary { background: #007a5a; color: #fff; border-color: #007a5a; }
       .composer-wrap { padding: 10px 22px 20px; }
@@ -89,15 +94,80 @@
         }));
       }
 
-      async function sendAction(message, action, button) {
-        button.disabled = true;
+      async function sendAction(message, action, control) {
+        control.disabled = true;
         const response = await fetch("/mock/slack/action", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ action, message_ts: message.ts, thread_ts: message.thread_ts, user: $("user").value }),
         });
-        if (!response.ok) button.disabled = false;
+        if (!response.ok) control.disabled = false;
         await poll();
+      }
+
+      /** Slack's own text objects: mrkdwn and plain_text both carry `.text`. */
+      function textOf(object) {
+        return object && typeof object.text === "string" ? object.text : "";
+      }
+
+      /** An element's interaction payload, shaped the way Slack sends it. */
+      function actionPayload(element, selected) {
+        const payload = { action_id: element.action_id, type: element.type };
+        if (element.text) payload.text = element.text;
+        if (element.value !== undefined) payload.value = element.value;
+        if (selected !== undefined) payload.selected_option = selected;
+        return payload;
+      }
+
+      /** One interactive element, or a plain link for a `url` button. */
+      function renderElement(message, element) {
+        if (element.type === "image") {
+          const image = document.createElement("img");
+          image.className = "accessory";
+          image.src = element.image_url || "";
+          image.alt = element.alt_text || "";
+          return image;
+        }
+        if (element.type === "button" && element.url) {
+          // Slack opens a link button itself and sends no interaction.
+          const link = document.createElement("a");
+          link.className = "link-button";
+          link.href = element.url;
+          link.textContent = textOf(element.text) || "Open";
+          return link;
+        }
+        if (element.type === "button") {
+          const button = document.createElement("button");
+          button.type = "button";
+          button.dataset.actionId = element.action_id || "";
+          button.textContent = textOf(element.text) || "Choose";
+          if (element.style === "primary") button.classList.add("primary");
+          button.addEventListener("click", () => sendAction(message, actionPayload(element), button));
+          return button;
+        }
+        if (element.type === "static_select") {
+          const select = document.createElement("select");
+          select.dataset.actionId = element.action_id || "";
+          const blank = document.createElement("option");
+          blank.value = "";
+          blank.textContent = textOf(element.placeholder) || "Select";
+          select.appendChild(blank);
+          for (const option of element.options || []) {
+            const item = document.createElement("option");
+            item.value = option.value || "";
+            item.textContent = textOf(option.text) || option.value || "";
+            select.appendChild(item);
+          }
+          select.addEventListener("change", () => {
+            const chosen = (element.options || []).find((option) => option.value === select.value);
+            if (chosen) sendAction(message, actionPayload(element, chosen), select);
+          });
+          return select;
+        }
+        const unsupported = document.createElement("div");
+        unsupported.className = "context";
+        unsupported.textContent = `[unrendered ${element.type}]`;
+        return unsupported;
       }
 
       function renderMessages(messages) {
@@ -139,23 +209,42 @@
           for (const block of message.blocks || []) {
             if (block.type === "context") {
               for (const context of block.elements || []) {
-                if (context.type !== "plain_text" || !context.text) continue;
+                if (!textOf(context)) continue;
                 const element = document.createElement("div");
                 element.className = "context";
-                element.textContent = context.text;
+                element.textContent = textOf(context);
                 body.appendChild(element);
+              }
+            }
+            if (block.type === "divider") {
+              body.appendChild(document.createElement("hr"));
+            }
+            if (block.type === "header") {
+              const header = document.createElement("div");
+              header.className = "block-header";
+              header.textContent = textOf(block.text);
+              body.appendChild(header);
+            }
+            if (block.type === "section") {
+              const parts = [textOf(block.text), ...(block.fields || []).map(textOf)].filter(Boolean);
+              if (parts.length) {
+                const element = document.createElement("div");
+                element.className = "section";
+                element.textContent = parts.join("\n");
+                body.appendChild(element);
+              }
+              if (block.accessory) {
+                const accessory = document.createElement("div");
+                accessory.className = "actions";
+                accessory.appendChild(renderElement(message, block.accessory));
+                body.appendChild(accessory);
               }
             }
             if (block.type === "actions") {
               const actions = document.createElement("div");
               actions.className = "actions";
-              for (const action of block.elements || []) {
-                const button = document.createElement("button");
-                button.type = "button";
-                button.textContent = action.text?.text || "Choose";
-                if (action.style === "primary") button.classList.add("primary");
-                button.addEventListener("click", () => sendAction(message, action, button));
-                actions.appendChild(button);
+              for (const element of block.elements || []) {
+                actions.appendChild(renderElement(message, element));
               }
               body.appendChild(actions);
             }
