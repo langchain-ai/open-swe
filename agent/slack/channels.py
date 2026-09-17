@@ -17,7 +17,7 @@ from sqlalchemy.orm import Mapped, mapped_column
 from agent.config import ENV
 from agent.database import postgres
 from agent.database.orm import NOW, Base
-from agent.slack.http import SLACK_REQUEST_ERRORS, slack_client, slack_error
+from agent.slack.http import SLACK_REQUEST_ERRORS, SlackClient, slack_error
 from agent.slack.payloads import SlackChannelContext, SlackChannelPayload, SlackMessage
 from agent.utils.json_types import JsonObject
 
@@ -112,7 +112,7 @@ class SlackChannel(Base):
         if use_cache and (known := await cls._row(channel_id)) is not None and known.fresh:
             return known
         try:
-            async with slack_client(token=SLACK_BOT_TOKEN) as client:
+            async with SlackClient.bot() as client:
                 data = await client.conversations_info(channel=channel_id)
             payload = data.get("channel")
             if isinstance(payload, dict):
@@ -139,7 +139,7 @@ class SlackChannel(Base):
         """Page ``conversations.list`` for ``name``, saving every channel it walks past."""
         cursor: str | None = None
         try:
-            async with slack_client(token=SLACK_BOT_TOKEN) as client:
+            async with SlackClient.bot() as client:
                 while True:
                     data = await client.conversations_list(
                         types="public_channel,private_channel",
@@ -203,7 +203,7 @@ class SlackChannel(Base):
             return []
         capped = max(1, min(limit, HISTORY_MAX_MESSAGES))
         try:
-            async with slack_client(token=SLACK_BOT_TOKEN) as client:
+            async with SlackClient.bot() as client:
                 payload = await client.conversations_history(channel=self.id, limit=capped)
         except SLACK_REQUEST_ERRORS as exc:
             logger.warning(

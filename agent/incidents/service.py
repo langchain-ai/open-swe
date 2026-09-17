@@ -21,7 +21,7 @@ from agent.incidents.models import (
 )
 from agent.input_messages import PersonIdentity
 from agent.slack.channels import SlackChannel
-from agent.slack.http import slack_client
+from agent.slack.http import SlackClient
 from agent.store import TypedStore, now_iso
 from agent.utils.langsmith import get_langsmith_trace_url
 
@@ -162,7 +162,7 @@ async def readable(
 
 
 async def _auth_test() -> tuple[dict[str, Any], list[str] | None]:
-    async with slack_client(token=ENV.SLACK_BOT_TOKEN.get()) as client:
+    async with SlackClient.bot() as client:
         response = await client.auth_test()
     data = response.data if isinstance(response.data, dict) else {}
     header = response.headers.get("x-oauth-scopes") if response.headers else None
