@@ -9,8 +9,6 @@ from fastapi import APIRouter, Response
 from langgraph_sdk.client import LangGraphClient
 
 from agent.expedited_review import slack as expedited_review
-from agent.slack import continuations
-from agent.slack import resume as slack_resume
 from agent.slack import webhook as service
 from agent.slack.allowed_bots import resolve_allowed_slack_bot
 from agent.slack.ask import (
@@ -714,7 +712,7 @@ async def slack_interactivity(
             explicit_request=True,
         )
 
-    action = _first_open_swe_action(interaction.actions)
+    action = _first_option_action(interaction.actions)
     if action is None:
         return ignored("No Open SWE action")
 
@@ -725,39 +723,6 @@ async def slack_interactivity(
     if not channel_context.allows_operations:
         common.logger.warning("Blocked Slack interaction in ineligible channel=%s", channel_id)
         return ignored("Slack channel is not eligible")
-
-    # A continuation carries everything in its row, so it answers here rather
-    # than through the repository and thread resolution the option path needs.
-    if (token := continuations.token_in(action.action_id)) is not None:
-        # Read, authorize, then claim: a click nobody is allowed to make must
-        # not spend the answer the thread's owner still owes.
-        pending = await continuations.peek(token)
-        if pending is None:
-            background_tasks.add_task(slack_resume.refuse_spent, channel_id, interaction.user.id)
-            return ignored("Slack continuation is no longer open")
-        if not await slack_resume.clicker_may_resume(pending, interaction.user.id):
-            background_tasks.add_task(
-                slack_resume.refuse_not_yours, channel_id, interaction.user.id
-            )
-            return ignored("Slack continuation belongs to another thread's owner")
-        claimed = await continuations.claim(token, slack_user_id=interaction.user.id)
-        if claimed is None:
-            background_tasks.add_task(slack_resume.refuse_spent, channel_id, interaction.user.id)
-            return ignored("Slack continuation is no longer open")
-        row = claimed.row
-        # An ephemeral message has no timestamp to rewrite. Only the elements
-        # the claim actually spent leave the message, so a reusable select stays
-        # exactly as clickable as its row says it is.
-        if claimed.spent_action_ids and row.message_ts:
-            background_tasks.add_task(
-                _update_selected_option_message,
-                interaction,
-                action,
-                row.label or "Answered",
-                claimed.spent_action_ids,
-            )
-        background_tasks.add_task(slack_resume.resume, row, interaction, action)
-        return accepted("Slack continuation queued")
 
     button = SlackButtonValue.parse(parse_json_object((action.value or "{}").encode("utf-8")))
     if button is None:
@@ -959,15 +924,12 @@ async def slack_interactivity(
 
 
 async def _update_selected_option_message(
-    interaction: SlackInteraction,
-    action: SlackBlockAction,
-    fallback_label: str,
-    spent: frozenset[str] | None = None,
+    interaction: SlackInteraction, action: SlackBlockAction, fallback_label: str
 ) -> None:
     channel_id = interaction.channel_id
     message_ts = interaction.message_ts
     label = ((action.text.text if action.text else "") or fallback_label).strip()[:150]
-    blocks = _selected_option_blocks(interaction.message, label, spent)
+    blocks = _selected_option_blocks(interaction.message, label)
     if not channel_id or not message_ts or not label or not blocks:
         return
 
@@ -995,52 +957,27 @@ async def _update_selected_option_message(
         )
 
 
-def _selected_option_blocks(
-    message: SlackInteractionMessage, label: str, spent: frozenset[str] | None = None
-) -> list[JsonObject]:
-    """`message` with the answered elements replaced by what was chosen.
-
-    `spent` names exactly which `action_id` values are done; without it every
-    element Open SWE drew in that block is treated as answered, which is what
-    a vote or an approval card wants.
-    """
+def _selected_option_blocks(message: SlackInteractionMessage, label: str) -> list[JsonObject]:
     selected_block: JsonObject = {
         "type": "context",
         "elements": [{"type": "plain_text", "text": f"Selected: {label}"}],
     }
-    answered = (
-        (lambda element: _element_action_id(element) in spent)
-        if spent is not None
-        else (lambda element: _has_option_element([element]))
-    )
     updated_blocks: list[JsonObject] = []
     replaced = False
     for block in message.blocks:
         elements = block.get("elements")
-        if block.get("type") != "actions" or not any(
-            isinstance(element, dict) and answered(element)
-            for element in (elements if isinstance(elements, list) else [])
-        ):
+        if block.get("type") != "actions" or not _has_option_element(elements):
             updated_blocks.append(block)
             continue
         if not replaced:
             updated_blocks.append(selected_block)
             replaced = True
         if isinstance(elements, list):
-            remaining = [
-                element
-                for element in elements
-                if not (isinstance(element, dict) and answered(element))
-            ]
+            remaining = [element for element in elements if not _has_option_element([element])]
             if remaining:
                 updated_blocks.append({**block, "elements": remaining})
 
     return updated_blocks if replaced else []
-
-
-def _element_action_id(element: JsonObject) -> str:
-    action_id = element.get("action_id")
-    return action_id if isinstance(action_id, str) else ""
 
 
 def _is_option_action_id(action_id: object) -> bool:
@@ -1049,21 +986,16 @@ def _is_option_action_id(action_id: object) -> bool:
     )
 
 
-def _is_open_swe_action_id(action_id: object) -> bool:
-    """Whether Open SWE drew the element this ``action_id`` belongs to."""
-    return _is_option_action_id(action_id) or continuations.token_in(action_id) is not None
-
-
-def _first_open_swe_action(actions: list[SlackBlockAction]) -> SlackBlockAction | None:
-    return next((action for action in actions if _is_open_swe_action_id(action.action_id)), None)
+def _first_option_action(actions: list[SlackBlockAction]) -> SlackBlockAction | None:
+    return next((action for action in actions if _is_option_action_id(action.action_id)), None)
 
 
 def _has_option_element(elements: object) -> bool:
-    """Whether a Block Kit ``elements`` list holds one of Open SWE's own elements."""
+    """Whether a Block Kit ``elements`` list holds one of Open SWE's option buttons."""
     if not isinstance(elements, list):
         return False
     return any(
-        isinstance(element, dict) and _is_open_swe_action_id(element.get("action_id"))
+        isinstance(element, dict) and _is_option_action_id(element.get("action_id"))
         for element in elements
     )
 

@@ -19,19 +19,6 @@ To ask a user to choose from predefined options, pass `options`. Slack will
 render interactive buttons and the web UI will render the same choices.
 The user can still reply manually in the Slack thread.
 
-For anything `options` cannot express, pass `blocks` with Block Kit JSON:
-`section` `fields` for name/value pairs, a `divider` between findings, an
-`actions` block of buttons, a `static_select`, a `datepicker`. Interactive
-elements work — a click comes back to this thread and tells you which
-`action_id` was used and what was chosen, so name each one for what it means
-(`rerun_tests`, `pick_base_branch`) and you will read that name back. A button
-carrying `url` is a plain link and never comes back. An `input` block is
-refused: a text input is only submitted through a modal, so ask for text in the
-message instead. A button and an overflow are spent once used; a select or a
-picker can be changed as often as the person likes. Keep `message` as the full
-plain-text fallback — it is what notifications, screen readers, and the web UI
-show — and skip blocks entirely when a sentence would do.
-
 When a plan is ready, post a concise summary with the dashboard review link and
 pass `options=["Approve & implement", "Request changes"]`. The user can still
 reply manually with feedback.
