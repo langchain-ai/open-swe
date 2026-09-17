@@ -1179,6 +1179,10 @@ async def resolve_slack_channel_id(channel: str) -> str | None:
         found = info.get("id") if info else None
         return found if isinstance(found, str) and found else None
     name = reference.lower()
+    for channel_id in list(_SLACK_CHANNEL_INFO_CACHE):
+        cached = _cached_slack_channel_info(channel_id)
+        if cached is not None and cached.get("name") == name:
+            return channel_id
     cursor: str | None = None
     try:
         async with slack_client(token=SLACK_BOT_TOKEN) as client:
