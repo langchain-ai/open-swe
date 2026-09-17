@@ -110,7 +110,12 @@ async def pr_merge_rate_by_model(
                     count(*) AS cohort_size,
                     avg(EXTRACT(EPOCH FROM p.outcome_at - p.opened_at))
                         FILTER (WHERE p.current_state = 'merged' AND p.outcome_at IS NOT NULL)
-                        AS avg_merge_seconds
+                        AS avg_merge_seconds,
+                    avg(EXTRACT(EPOCH FROM p.opened_at - r.started_at))
+                        FILTER (WHERE r.started_at IS NOT NULL AND p.opened_at >= r.started_at)
+                        AS avg_delivery_seconds,
+                    count(*) FILTER (WHERE r.started_at IS NOT NULL
+                        AND p.opened_at >= r.started_at) AS delivery_samples
                 FROM pr_projection p
                 JOIN eligible_models e
                   ON e.originating_model_id IS NOT DISTINCT FROM p.originating_model_id
@@ -136,6 +141,8 @@ async def pr_merge_rate_by_model(
         )
         grouped: dict[tuple[object, object], dict[str, Any]] = {}
         merge_seconds_totals: dict[tuple[object, object], float] = {}
+        delivery_seconds_totals: dict[tuple[object, object], float] = {}
+        delivery_sample_counts: dict[tuple[object, object], int] = {}
         for row in result.mappings():
             key = (row["originating_model_id"], row["model_attribution_quality"])
             cohort = grouped.setdefault(
@@ -162,6 +169,14 @@ async def pr_merge_rate_by_model(
                 merge_seconds_totals[key] = (
                     merge_seconds_totals.get(key, 0.0) + avg_merge_seconds * merged_count
                 )
+            if row["avg_delivery_seconds"] is not None and row["delivery_samples"]:
+                delivery_seconds_totals[key] = (
+                    delivery_seconds_totals.get(key, 0.0)
+                    + float(row["avg_delivery_seconds"]) * row["delivery_samples"]
+                )
+                delivery_sample_counts[key] = (
+                    delivery_sample_counts.get(key, 0) + row["delivery_samples"]
+                )
             for field in (
                 "merged",
                 "closed_without_merge",
@@ -175,6 +190,12 @@ async def pr_merge_rate_by_model(
             merge_seconds_total = merge_seconds_totals.get(key, 0.0)
             cohort["avg_merge_seconds"] = (
                 merge_seconds_total / cohort["merged"] if cohort["merged"] else None
+            )
+            delivery_samples = delivery_sample_counts.get(key, 0)
+            cohort["avg_delivery_seconds"] = (
+                delivery_seconds_totals.get(key, 0.0) / delivery_samples
+                if delivery_samples
+                else None
             )
             decided = cohort["merged"] + cohort["closed_without_merge"]
             mature = decided + cohort["mature_pending"]

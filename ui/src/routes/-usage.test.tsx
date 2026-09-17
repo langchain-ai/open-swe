@@ -129,6 +129,7 @@ it("shows delivery lag separately from suppression, then refreshes to a populate
         mature_denominator: 5,
         mature_cohort_merge_share: 0.6,
         avg_merge_seconds: 172800,
+        avg_delivery_seconds: 7200,
         efforts: [
           {
             effort: "high",
@@ -181,6 +182,7 @@ it.each([
           mature_denominator: 5,
           mature_cohort_merge_share: 0.6,
           avg_merge_seconds: 90000,
+          avg_delivery_seconds: 7200,
           efforts: [
             {
               effort: "high",
@@ -211,6 +213,7 @@ it.each([
       "1",
       "3",
       "60%",
+      "2h",
       "1d",
     ])
 
@@ -226,6 +229,7 @@ it.each([
       "Closed without merge",
       "Open",
       "Merge rate",
+      "Avg time to PR",
       "Avg time to merge",
     ])
 
@@ -305,6 +309,7 @@ it("expands model totals into reasoning effort rows", async () => {
         model_id: "example-model",
         model_attribution_quality: "configured",
         avg_merge_seconds: 172800,
+        avg_delivery_seconds: 5400,
         merged: 3,
         closed_without_merge: 1,
         mature_pending: 0,
@@ -372,6 +377,7 @@ it("shows an em dash for avg time to merge when a group has no merges", async ()
         mature_denominator: 2,
         mature_cohort_merge_share: 0,
         avg_merge_seconds: null,
+        avg_delivery_seconds: null,
         efforts: [],
       },
     ],
@@ -403,6 +409,7 @@ it("shortens model paths while preserving providers across usage tables", async 
         mature_denominator: 1,
         mature_cohort_merge_share: 1,
         avg_merge_seconds: 3600,
+        avg_delivery_seconds: 1800,
         efforts: [
           {
             effort: "medium",
