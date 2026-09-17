@@ -1160,6 +1160,70 @@ async def add_slack_reaction(channel_id: str, message_ts: str, emoji: str = "eye
         return False
 
 
+_SLACK_CHANNEL_MENTION_RE = re.compile(r"^<#([A-Z0-9]+)(?:\|[^>]*)?>$")
+_SLACK_CHANNEL_ID_SHAPE_RE = re.compile(r"^[CGD][A-Z0-9]{8,}$")
+
+
+async def resolve_slack_channel_id(channel: str) -> str | None:
+    """The id of a channel given as an id, ``<#C…|name>``, ``#name`` or ``name``."""
+    if not SLACK_BOT_TOKEN:
+        return None
+    reference = channel.strip()
+    if mention := _SLACK_CHANNEL_MENTION_RE.fullmatch(reference):
+        reference = mention.group(1)
+    reference = reference.lstrip("#")
+    if not reference:
+        return None
+    if _SLACK_CHANNEL_ID_SHAPE_RE.fullmatch(reference):
+        info = await get_slack_channel_info(reference)
+        found = info.get("id") if info else None
+        return found if isinstance(found, str) and found else None
+    name = reference.lower()
+    cursor: str | None = None
+    try:
+        async with slack_client(token=SLACK_BOT_TOKEN) as client:
+            while True:
+                data = await client.conversations_list(
+                    types="public_channel,private_channel",
+                    exclude_archived=True,
+                    limit=1000,
+                    cursor=cursor,
+                )
+                channels = data.get("channels")
+                for item in channels if isinstance(channels, list) else []:
+                    if not isinstance(item, dict) or item.get("name") != name:
+                        continue
+                    channel_id = item.get("id")
+                    if isinstance(channel_id, str) and channel_id:
+                        _cache_slack_channel_info(channel_id, item)
+                        return channel_id
+                metadata = data.get("response_metadata")
+                cursor = metadata.get("next_cursor") if isinstance(metadata, dict) else None
+                if not cursor:
+                    return None
+    except SLACK_REQUEST_ERRORS as exc:
+        logger.warning("Slack channel list failed", extra={"slack_error": slack_error(exc)})
+        return None
+
+
+async def join_slack_channel(channel_id: str) -> bool:
+    """Join a public channel; private channels need an invite instead."""
+    if not SLACK_BOT_TOKEN:
+        return False
+    try:
+        async with slack_client(token=SLACK_BOT_TOKEN) as client:
+            await client.conversations_join(channel=channel_id)
+        return True
+    except SLACK_REQUEST_ERRORS as exc:
+        error = slack_error(exc)
+        if error == "already_in_channel":
+            return True
+        logger.warning(
+            "Slack channel join failed", extra={"slack_channel": channel_id, "slack_error": error}
+        )
+        return False
+
+
 async def get_slack_user_info(user_id: str) -> dict[str, Any] | None:
     """Get Slack user details by user ID."""
     if not SLACK_BOT_TOKEN:

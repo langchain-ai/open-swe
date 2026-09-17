@@ -1,4 +1,4 @@
-"""Tool that nominates a tiny pull request for approval from its Slack thread."""
+"""Tool that nominates a tiny pull request for approval from Slack."""
 
 from collections.abc import Mapping
 from typing import Any, Literal
@@ -16,10 +16,18 @@ from agent.expedited_review.eligibility import (
 )
 from agent.expedited_review.watch import evaluate_approval, retire, start_approval
 from agent.github.ci import fetch_pr
-from agent.github.pull_requests import PullRequest
+from agent.github.pull_requests import PullRequest, PullRequestPayload
 from agent.github.token import resolve_github_token
 from agent.run_config import RunConfig
-from agent.slack.client import get_active_slack_thread, parse_github_pr_url
+from agent.slack.blocks import escape
+from agent.slack.client import (
+    GitHubPrRef,
+    get_active_slack_thread,
+    join_slack_channel,
+    parse_github_pr_url,
+    post_slack_top_level_message_with_ts,
+    resolve_slack_channel_id,
+)
 from agent.tools.manage_baby_sit import dispatch_run_config
 
 
@@ -27,8 +35,40 @@ def _failure(error: str) -> dict[str, Any]:
     return {"success": False, "error": error}
 
 
+async def _context_location(cfg: RunConfig, thread_id: str) -> tuple[str, str]:
+    """The run's own Slack ``(channel_id, thread_ts)``; either may be empty."""
+    slack_thread = await get_active_slack_thread(
+        get_client(), thread_id, cfg.slack_thread.dump() if cfg.slack_thread else None
+    )
+    channel_id = str((slack_thread or {}).get("channel_id") or "")
+    thread_ts = str((slack_thread or {}).get("thread_ts") or "")
+    if not channel_id and cfg.slack_thread is not None:
+        channel_id = cfg.slack_thread.channel_id.strip()
+    return channel_id, thread_ts
+
+
+async def _post_root_message(
+    channel_id: str, pr_ref: GitHubPrRef, title: str
+) -> tuple[str | None, str | None]:
+    """Open a thread in ``channel_id`` for the card; joins the channel if needed."""
+    label = f"{pr_ref.owner}/{pr_ref.repo}#{pr_ref.number}"
+    text = (
+        f"*Expedited review requested* for <{pr_ref.url}|{label}> {escape(title)}\n"
+        "The diff will be posted here with Approve and Reject buttons once every check "
+        "is green and every review is clean; two approvals merge it."
+    )
+    message_ts, error = await post_slack_top_level_message_with_ts(
+        channel_id, text, unfurl_links=False, unfurl_media=False
+    )
+    if message_ts is None and error == "not_in_channel" and await join_slack_channel(channel_id):
+        message_ts, error = await post_slack_top_level_message_with_ts(
+            channel_id, text, unfurl_links=False, unfurl_media=False
+        )
+    return message_ts, error
+
+
 async def expedite_pr_approval(
-    pr_url: str, action: Literal["start", "cancel"] = "start"
+    pr_url: str, action: Literal["start", "cancel"] = "start", channel: str = ""
 ) -> dict[str, Any]:
     """Implement the `expedite_pr_approval` tool."""
     pr_ref = parse_github_pr_url(pr_url)
@@ -54,13 +94,21 @@ async def expedite_pr_approval(
         await retire(approval, "failed", "Cancelled by the agent.")
         return {"success": True, "cancelled": True}
 
-    slack_thread = await get_active_slack_thread(
-        get_client(), thread_id, cfg.slack_thread.dump() if cfg.slack_thread else None
-    )
-    channel_id = str((slack_thread or {}).get("channel_id") or "")
-    thread_ts = str((slack_thread or {}).get("thread_ts") or "")
-    if not channel_id or not thread_ts:
-        return _failure("Expedited review needs a Slack thread to post the approval card in")
+    channel_id, thread_ts = await _context_location(cfg, thread_id)
+    if channel.strip():
+        requested = await resolve_slack_channel_id(channel)
+        if requested is None:
+            return _failure(
+                f"Slack channel {channel.strip()!r} was not found. Pass a channel name the "
+                "bot can see or a channel id."
+            )
+        if requested != channel_id:
+            channel_id, thread_ts = requested, ""
+    if not channel_id:
+        return _failure(
+            "Expedited review posts its approval card in Slack. This thread has no Slack "
+            "location, so pass `channel` with the Slack channel name or id to post in."
+        )
 
     try:
         token, _ = await resolve_github_token(
@@ -93,7 +141,22 @@ async def expedite_pr_approval(
             "file has to have a readable text diff. Ask for a normal review."
         )
 
+    payload = PullRequestPayload.model_validate(pr)
+    if not thread_ts:
+        thread_ts, error = await _post_root_message(channel_id, pr_ref, payload.title)
+        if not thread_ts:
+            return _failure(
+                f"Could not post in Slack channel {channel_id}: {error or 'unknown error'}. "
+                "For a private channel, invite the bot first."
+            )
+
     pull_request = await PullRequest.load(pr_ref.owner, pr_ref.repo, pr_ref.number)
+    if not pull_request.title:
+        pull_request.title = payload.title
+        pull_request.head_ref = payload.head_ref
+        pull_request.base_ref = payload.base_ref
+        pull_request.author = payload.author
+        pull_request.author_github_id = payload.author_id
     pull_request = await pull_request.link_thread(thread_id, source="expedited_review")
     approval = await start_approval(
         pull_request=pull_request,
@@ -111,6 +174,7 @@ async def expedite_pr_approval(
         "pr_url": pr_ref.url,
         "head_sha": head_sha,
         "changed_lines": verdict.changed_lines,
+        "slack_channel_id": channel_id,
         "status": status,
         "next": (
             "The approval card is posted in the Slack thread; two approvals merge the PR."
