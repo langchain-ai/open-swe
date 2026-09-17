@@ -1,7 +1,7 @@
 """PostgreSQL reporting preserves usage cohorts, identities, and disclosure rules."""
 
 from datetime import UTC, datetime, timedelta
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 from sqlalchemy import text
@@ -199,6 +199,96 @@ async def test_usage_ranks_run_and_pr_cohorts_with_cost_coverage(usage_db):
     assert result["rows"][0]["user"]["github_login"] is None
     assert (await report(limit=0))["rows"][0]["rank"] == 1
     assert [row["rank"] for row in (await report(limit=1, offset=1))["rows"]] == [2]
+
+
+async def test_usage_sorting_happens_before_pagination(usage_db):
+    alice = await person("alice", display_name="Alice")
+    bob = await person("bob", display_name="bob")
+    carol = await person("carol", display_name="Carol")
+    await run(alice, tokens=10)
+    await run(bob, tokens=30)
+    await run(carol, tokens=20)
+
+    first = await report(limit=2, sort="total_tokens", direction="desc")
+    assert [row["user"]["name"] for row in first["rows"]] == ["bob", "Carol"]
+    second = await report(
+        limit=2,
+        cursor=first["next_cursor"],
+        sort="total_tokens",
+        direction="desc",
+    )
+    assert [row["user"]["name"] for row in second["rows"]] == ["Alice"]
+    with pytest.raises(ValueError, match="invalid usage leaderboard cursor"):
+        await report(
+            limit=2,
+            cursor=first["next_cursor"],
+            sort="user",
+            direction="asc",
+        )
+
+
+async def test_user_sort_follows_disclosed_names_not_hidden_ones(usage_db):
+    # Hidden members are ordered by the label the viewer sees, so their real names
+    # cannot be inferred from where they land in the list.
+    zeta = await person(email="zeta@example.com")
+    alpha = await person(email="alpha@example.com")
+    mid = await person("mid")
+    for member in (zeta, alpha, mid):
+        await run(member)
+    await pr(zeta, state="merged")
+
+    ordinary = await report(sort="user", direction="asc")
+    assert [row["user"]["name"] for row in ordinary["rows"]] == [
+        "mid",
+        "Open SWE user",
+        "Open SWE user",
+    ]
+    # Masked members tie on their shared label and fall back to rank, not to "alpha"
+    # before "zeta".
+    assert [row["rank"] for row in ordinary["rows"]] == [3, 1, 2]
+
+    admin = await report(sort="user", direction="asc", admin=True)
+    assert [row["user"]["name"] for row in admin["rows"]] == ["alpha", "mid", "zeta"]
+
+
+@pytest.mark.parametrize("direction", ["asc", "desc"])
+async def test_favorite_models_sort_by_displayed_labels_before_pagination(
+    usage_db: UUID, direction: queries.SortDirection
+) -> None:
+    # Alphabetical display order, including sanitizing, truncation ties, and fallbacks.
+    models = [
+        "provider/---Alpha---",
+        None,
+        "fireworks:accounts/fireworks/models/kimi-k3",
+        "google_genai:gemini-3.8-flash",
+        "provider/" + "m" * 48 + "z",
+        "provider/" + "m" * 48 + "a",
+        "provider/model space",
+        "///",
+        "provider/Zulu",
+    ]
+    for index, provider_model_id in enumerate(models):
+        member = await person(f"member-{index}")
+        model_id = None
+        if provider_model_id is not None:
+            model_id = uuid4()
+            await insert("model_directory", model_id=model_id, provider_model_id=provider_model_id)
+        await run(member, model_id=model_id)
+
+    expected = list(range(len(models)))
+    if direction == "desc":
+        expected.reverse()
+        # Equal displayed labels retain rank order in either direction.
+        expected[3:5] = [4, 5]
+    cursor = None
+    actual: list[str] = []
+    while True:
+        page = await report(limit=2, cursor=cursor, sort="favorite_model", direction=direction)
+        actual.extend(row["favorite_model"] for row in page["rows"])
+        cursor = page["next_cursor"]
+        if cursor is None:
+            break
+    assert actual == [models[index] or "default" for index in expected]
 
 
 async def test_favorite_model_effort_is_scoped_to_the_favorite_model(usage_db):

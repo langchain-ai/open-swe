@@ -7,6 +7,7 @@ import {
   fireEvent,
   render,
   screen,
+  waitFor,
   within,
 } from "@testing-library/react"
 import { afterEach, beforeEach, expect, it, vi } from "vitest"
@@ -128,6 +129,7 @@ it("shows delivery lag separately from suppression, then refreshes to a populate
         mature_denominator: 5,
         mature_cohort_merge_share: 0.6,
         avg_merge_seconds: 172800,
+        avg_delivery_seconds: 7200,
         efforts: [
           {
             effort: "high",
@@ -182,6 +184,7 @@ it.each([
           mature_denominator: 5,
           mature_cohort_merge_share: 0.6,
           avg_merge_seconds: 90000,
+          avg_delivery_seconds: 7200,
           efforts: [
             {
               effort: "high",
@@ -215,6 +218,7 @@ it.each([
       "3",
       "17.5%",
       "60%",
+      "2h",
       "1d",
     ])
 
@@ -231,6 +235,7 @@ it.each([
       "Open",
       "Median distance",
       "Merge rate",
+      "Avg time to PR",
       "Avg time to merge",
     ])
 
@@ -310,6 +315,7 @@ it("expands model totals into reasoning effort rows", async () => {
         model_id: "example-model",
         model_attribution_quality: "configured",
         avg_merge_seconds: 172800,
+        avg_delivery_seconds: 5400,
         merged: 3,
         closed_without_merge: 1,
         mature_pending: 0,
@@ -377,6 +383,7 @@ it("shows an em dash for avg time to merge when a group has no merges", async ()
         mature_denominator: 2,
         mature_cohort_merge_share: 0,
         avg_merge_seconds: null,
+        avg_delivery_seconds: null,
         efforts: [],
       },
     ],
@@ -408,6 +415,7 @@ it("shortens model paths while preserving providers across usage tables", async 
         mature_denominator: 1,
         mature_cohort_merge_share: 1,
         avg_merge_seconds: 3600,
+        avg_delivery_seconds: 1800,
         efforts: [
           {
             effort: "medium",
@@ -486,6 +494,50 @@ it("offers recovery from unavailability without claiming an empty or suppressed 
   client.clear()
 })
 
+it("refreshes the usage leaderboard and merge rate report from the coverage footer", async () => {
+  let pendingReport: () => void = () => {}
+  vi.spyOn(api, "prMergeRateByModel")
+    .mockResolvedValueOnce(captured)
+    .mockImplementationOnce(
+      () =>
+        new Promise<PRMergeRatePayload>((resolve) => {
+          pendingReport = () => resolve(captured)
+        })
+    )
+    .mockResolvedValue(captured)
+  const client = mountReport()
+  expect(await screen.findByText("Analytics are updating")).toBeTruthy()
+
+  const beforeUsage = vi.mocked(api.usageLeaderboard).mock.calls.length
+  const beforeReport = vi.mocked(api.prMergeRateByModel).mock.calls.length
+  const button = screen.getByRole("button", { name: "Refresh now" })
+  fireEvent.click(button)
+  expect(vi.mocked(api.usageLeaderboard).mock.calls.length).toBe(
+    beforeUsage + 1
+  )
+  expect(vi.mocked(api.prMergeRateByModel).mock.calls.length).toBe(
+    beforeReport + 1
+  )
+
+  const refreshing = await screen.findByRole("button", {
+    name: "Refreshing…",
+  })
+  expect(refreshing).toHaveProperty("disabled", true)
+  fireEvent.click(refreshing)
+  expect(vi.mocked(api.prMergeRateByModel).mock.calls.length).toBe(
+    beforeReport + 1
+  )
+
+  await act(() => pendingReport())
+  expect(
+    await screen.findByRole("button", { name: "Refresh now" })
+  ).toBeTruthy()
+  expect(
+    screen.getByLabelText("Analytics coverage").querySelector("details")?.open
+  ).toBe(false)
+  client.clear()
+})
+
 it("keeps failed delivery visible when all PR groups are suppressed", async () => {
   vi.spyOn(api, "prMergeRateByModel").mockResolvedValue({
     ...captured,
@@ -546,7 +598,13 @@ it("resets leaderboard pagination when the period changes outside the selector",
     </QueryClientProvider>
   )
   expect(await screen.findByText("Page 1 of 2")).toBeTruthy()
-  expect(api.usageLeaderboard).toHaveBeenLastCalledWith("7d", 10, undefined)
+  expect(api.usageLeaderboard).toHaveBeenLastCalledWith(
+    "7d",
+    10,
+    undefined,
+    "rank",
+    "asc"
+  )
   client.clear()
 })
 
@@ -772,6 +830,175 @@ const costRow: UsageLeaderboardRow = {
   invocations_with_partial_cost: 0,
   avg_invocation_seconds: 90,
 }
+
+it.each([
+  ["Invocations", "Threads", "invocations", "threads"],
+  [
+    "Avg Invocation Duration",
+    "Avg Thread Duration",
+    "avg_invocation_seconds",
+    "avg_thread_seconds",
+  ],
+] as const)(
+  "keeps sorting the visible %s metric when switching scopes",
+  async (invocationLabel, threadLabel, invocationSort, threadSort) => {
+    vi.spyOn(api, "prMergeRateByModel").mockResolvedValue(captured)
+    vi.mocked(api.usageLeaderboard).mockImplementation(
+      async (_period, _limit, cursor) => ({
+        ...emptyUsage,
+        total_members: 11,
+        next_cursor: cursor ? null : "next-page",
+        rows: [costRow],
+      })
+    )
+    const client = mountReport()
+    fireEvent.click(
+      await screen.findByRole("button", { name: invocationLabel })
+    )
+    await waitFor(() =>
+      expect(
+        screen.getByRole<HTMLButtonElement>("button", { name: "Next" }).disabled
+      ).toBe(false)
+    )
+    fireEvent.click(await screen.findByRole("button", { name: "Next" }))
+    expect(await screen.findByText("Page 2 of 2")).toBeTruthy()
+
+    fireEvent.click(screen.getByRole("button", { name: "threads" }))
+    await waitFor(() =>
+      expect(api.usageLeaderboard).toHaveBeenLastCalledWith(
+        "30d",
+        10,
+        undefined,
+        threadSort,
+        "desc"
+      )
+    )
+    expect(await screen.findByText("Page 1 of 2")).toBeTruthy()
+    expect(
+      (
+        await screen.findByRole("columnheader", { name: threadLabel })
+      ).getAttribute("aria-sort")
+    ).toBe("descending")
+
+    fireEvent.click(screen.getByRole("button", { name: "invocations" }))
+    await waitFor(() =>
+      expect(api.usageLeaderboard).toHaveBeenLastCalledWith(
+        "30d",
+        10,
+        undefined,
+        invocationSort,
+        "desc"
+      )
+    )
+    expect(
+      (
+        await screen.findByRole("columnheader", { name: invocationLabel })
+      ).getAttribute("aria-sort")
+    ).toBe("descending")
+    client.clear()
+  }
+)
+
+it("keeps sort controls focused while loading and prevents using a stale page cursor", async () => {
+  vi.spyOn(api, "prMergeRateByModel").mockResolvedValue(captured)
+  const initial: UsageLeaderboardPayload = {
+    ...emptyUsage,
+    total_members: 11,
+    next_cursor: "rank-cursor",
+    rows: [costRow],
+  }
+  let resolveSorted!: (value: UsageLeaderboardPayload) => void
+  const sorted = new Promise<UsageLeaderboardPayload>((resolve) => {
+    resolveSorted = resolve
+  })
+  vi.mocked(api.usageLeaderboard)
+    .mockResolvedValueOnce(initial)
+    .mockReturnValue(sorted)
+  const client = mountReport()
+  const header = await screen.findByRole("button", {
+    name: "Invocations",
+  })
+  act(() => header.focus())
+  fireEvent.click(header)
+  await waitFor(() =>
+    expect(api.usageLeaderboard).toHaveBeenLastCalledWith(
+      "30d",
+      10,
+      undefined,
+      "invocations",
+      "desc"
+    )
+  )
+  expect(document.activeElement).toBe(header)
+  expect(
+    screen.getByRole<HTMLButtonElement>("button", { name: "Next" }).disabled
+  ).toBe(true)
+
+  await act(async () =>
+    resolveSorted({
+      ...initial,
+      next_cursor: "invocations-cursor",
+      rows: [
+        {
+          ...costRow,
+          rank: 11,
+          user: { ...costRow.user, name: "Sorted Reader" },
+        },
+      ],
+    })
+  )
+  const row = (await screen.findByText("Sorted Reader")).closest("tr")!
+  expect(within(row).getAllByRole("cell")[0]?.textContent).toBe("11")
+  expect(document.activeElement).toBe(header)
+  fireEvent.click(screen.getByRole("button", { name: "Next" }))
+  await waitFor(() =>
+    expect(api.usageLeaderboard).toHaveBeenLastCalledWith(
+      "30d",
+      10,
+      "invocations-cursor",
+      "invocations",
+      "desc"
+    )
+  )
+  client.clear()
+})
+
+// Counts are most interesting highest-first; names and ranks read best ascending.
+it.each([
+  ["Invocations", "invocations", "desc", "asc"],
+  ["User", "user", "asc", "desc"],
+] as const)(
+  "sorts %s from its natural direction and toggles on the next click",
+  async (label, sortKey, first, second) => {
+    vi.spyOn(api, "prMergeRateByModel").mockResolvedValue(captured)
+    vi.mocked(api.usageLeaderboard).mockResolvedValue({
+      ...emptyUsage,
+      total_members: 1,
+      rows: [costRow],
+    })
+    const client = mountReport()
+    await screen.findByText("Cost Reader")
+
+    for (const direction of [first, second]) {
+      fireEvent.click(screen.getByRole("button", { name: label }))
+      await waitFor(() =>
+        expect(api.usageLeaderboard).toHaveBeenLastCalledWith(
+          "30d",
+          10,
+          undefined,
+          sortKey,
+          direction
+        )
+      )
+      expect(
+        (await screen.findByRole("columnheader", { name: label })).getAttribute(
+          "aria-sort"
+        )
+      ).toBe(direction === "asc" ? "ascending" : "descending")
+    }
+    client.clear()
+  }
+)
 
 it.each([
   {

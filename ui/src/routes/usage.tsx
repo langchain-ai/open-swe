@@ -1,20 +1,29 @@
 import { createFileRoute } from "@tanstack/react-router"
 import { useQuery } from "@tanstack/react-query"
 import {
+  ArrowClockwiseIcon,
   CaretDownIcon,
   CheckCircleIcon,
   ClockCountdownIcon,
   WarningCircleIcon,
 } from "@phosphor-icons/react"
-import { ChevronDown, ChevronRight } from "lucide-react"
+import {
+  ArrowDownNarrowWide,
+  ArrowUpNarrowWide,
+  ArrowUpDown,
+  ChevronDown,
+  ChevronRight,
+} from "lucide-react"
 import { Fragment, useState } from "react"
 
 import type {
   AnalyticsMetadata,
   PRMergeRateCohort,
   ReviewerStatsPayload,
+  SortDirection,
   UsageLeaderboardPeriod,
   UsageLeaderboardRow,
+  UsageLeaderboardSort,
 } from "@/lib/api"
 import { AppShell, SettingsSection } from "@/components/AppShell"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
@@ -42,6 +51,14 @@ export const Route = createFileRoute("/usage")({
 })
 
 const PAGE_SIZES = [10, 25, 50, 100] as const
+
+interface SortableColumn {
+  key: UsageLeaderboardSort
+  label: string
+  align: "left" | "right"
+  /** Direction applied on the first click. Counts read best highest-first. */
+  defaultDirection?: SortDirection
+}
 
 type UsageScope = "invocations" | "threads"
 
@@ -127,6 +144,8 @@ function UsageAnalyticsPeriod({
   onPeriodChange: (period: UsageLeaderboardPeriod) => void
 }) {
   const [leaderboardPage, setLeaderboardPage] = useState(1)
+  const [sort, setSort] = useState<UsageLeaderboardSort>("rank")
+  const [direction, setDirection] = useState<SortDirection>("asc")
   const [usageScope, setUsageScope] = useState<UsageScope>("invocations")
   const [leaderboardCursors, setLeaderboardCursors] = useState<
     (string | undefined)[]
@@ -140,19 +159,33 @@ function UsageAnalyticsPeriod({
       leaderboardPage,
       leaderboardPageSize,
       leaderboardCursors[leaderboardPage - 1],
+      sort,
+      direction,
     ],
     queryFn: () =>
       api.usageLeaderboard(
         activePeriod,
         leaderboardPageSize,
-        leaderboardCursors[leaderboardPage - 1]
+        leaderboardCursors[leaderboardPage - 1],
+        sort,
+        direction
       ),
+    placeholderData: (previousData, previousQuery) =>
+      previousQuery?.queryKey[2] === login &&
+      previousQuery.queryKey[3] === isAdmin
+        ? previousData
+        : undefined,
     staleTime: 60 * 1000,
     refetchInterval: 60 * 1000,
     retry: (count, error) =>
-      !(error instanceof ApiError && error.status === 503) && count < 2,
+      !(error instanceof ApiError && error.status >= 400) && count < 2,
   })
   const report = usePRMergeRateReport(activePeriod, login, isAdmin)
+  const refreshing = leaderboard.isFetching || report.isFetching
+  const refreshNow = () => {
+    void leaderboard.refetch()
+    void report.refetch()
+  }
   const metadata = [
     leaderboard.isError ? undefined : leaderboard.data,
     report.isError ? undefined : report.data,
@@ -182,6 +215,18 @@ function UsageAnalyticsPeriod({
                   className="capitalize"
                   onClick={() => {
                     setUsageScope(scope)
+                    if (sort === "invocations" || sort === "threads") {
+                      setSort(scope)
+                    } else if (
+                      sort === "avg_invocation_seconds" ||
+                      sort === "avg_thread_seconds"
+                    ) {
+                      setSort(
+                        scope === "threads"
+                          ? "avg_thread_seconds"
+                          : "avg_invocation_seconds"
+                      )
+                    }
                     setLeaderboardPage(1)
                     setLeaderboardCursors([undefined])
                   }}
@@ -245,6 +290,21 @@ function UsageAnalyticsPeriod({
             totalMembers={leaderboard.data.total_members}
             page={leaderboardPage}
             pageSize={leaderboardPageSize}
+            sort={sort}
+            direction={direction}
+            isUpdating={leaderboard.isPlaceholderData}
+            onSort={(nextSort, nextDirection) => {
+              setDirection(
+                sort === nextSort
+                  ? direction === "asc"
+                    ? "desc"
+                    : "asc"
+                  : nextDirection
+              )
+              setSort(nextSort)
+              setLeaderboardPage(1)
+              setLeaderboardCursors([undefined])
+            }}
             onPageChange={(page) => {
               const nextCursor = leaderboard.data.next_cursor
               if (page > leaderboardPage && nextCursor) {
@@ -289,12 +349,24 @@ function UsageAnalyticsPeriod({
           </div>
         )}
       </SettingsSection>
-      <AnalyticsCoverage reports={metadata} />
+      <AnalyticsCoverage
+        reports={metadata}
+        refreshing={refreshing}
+        onRefresh={refreshNow}
+      />
     </>
   )
 }
 
-function AnalyticsCoverage({ reports }: { reports: AnalyticsMetadata[] }) {
+function AnalyticsCoverage({
+  reports,
+  refreshing,
+  onRefresh,
+}: {
+  reports: AnalyticsMetadata[]
+  refreshing: boolean
+  onRefresh: () => void
+}) {
   if (!reports.length) return null
   const latest = reports.reduce((a, b) => (a.as_of > b.as_of ? a : b))
   const hasPendingEvents = reports.some((data) => data.has_pending_events)
@@ -341,6 +413,23 @@ function AnalyticsCoverage({ reports }: { reports: AnalyticsMetadata[] }) {
               {status.description}
             </span>
           </span>
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            className="shrink-0"
+            disabled={refreshing}
+            onClick={(event) => {
+              event.preventDefault()
+              onRefresh()
+            }}
+          >
+            <ArrowClockwiseIcon
+              aria-hidden="true"
+              className={`size-3.5 ${refreshing ? "animate-spin" : ""}`}
+            />
+            {refreshing ? "Refreshing…" : "Refresh now"}
+          </Button>
           <span className="flex shrink-0 items-center gap-1 font-medium text-muted-foreground group-open:text-foreground">
             Details
             <CaretDownIcon
@@ -386,7 +475,7 @@ function usePRMergeRateReport(
     staleTime: 60 * 1000,
     refetchInterval: 60 * 1000,
     retry: (count, error) =>
-      !(error instanceof ApiError && error.status === 503) && count < 2,
+      !(error instanceof ApiError && error.status >= 400) && count < 2,
   })
 }
 
@@ -502,6 +591,12 @@ function PRMergeRateSection({
               period. Unmerged PRs are excluded, and it shows — when a group has
               no merges.
             </p>
+            <p>
+              <strong>Avg time to PR</strong> is the arithmetic mean of time
+              from opening-run start to PR creation across all PRs opened in the
+              selected period. PRs without a valid opening-run start time are
+              excluded, and it shows — when a group has none.
+            </p>
             <ul className="list-disc space-y-1 pl-4">
               <li>
                 Merge rate = merged ÷ (merged + closed without merge + open at
@@ -566,8 +661,25 @@ function AvgTimeToMerge({ cohort }: { cohort: PRMergeRateCohort }) {
     <span>
       {cohort.avg_merge_seconds == null
         ? "—"
-        : formatAvgMergeTime(cohort.avg_merge_seconds)}
+        : formatAvgDuration(cohort.avg_merge_seconds)}
     </span>
+  )
+}
+
+function AvgTimeToPR({ cohort }: { cohort: PRMergeRateCohort }) {
+  if (cohort.avg_delivery_seconds == null) {
+    return <span>—</span>
+  }
+  return (
+    <Tooltip>
+      <TooltipTrigger className="cursor-help rounded-sm underline decoration-dotted underline-offset-2 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring">
+        {formatAvgDuration(cohort.avg_delivery_seconds)}
+      </TooltipTrigger>
+      <TooltipPopup className="max-w-xs">
+        Based on PRs whose opening run has a valid start time, regardless of
+        outcome; PRs with missing or invalid timing are excluded.
+      </TooltipPopup>
+    </Tooltip>
   )
 }
 
@@ -622,6 +734,7 @@ function PRMergeRateTable({
                 </TooltipPopup>
               </Tooltip>
             </th>
+            <th className="px-4 py-3 text-right font-normal">Avg time to PR</th>
             <th className="px-4 py-3 text-right font-normal">
               <Tooltip>
                 <TooltipTrigger className="cursor-help rounded-sm underline decoration-dotted underline-offset-2 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring">
@@ -687,6 +800,9 @@ function PRMergeRateTable({
                     maturityDays={maturityDays}
                   />
                   <td className="px-4 py-3 text-right tabular-nums">
+                    <AvgTimeToPR cohort={cohort} />
+                  </td>
+                  <td className="px-4 py-3 text-right tabular-nums">
                     <AvgTimeToMerge cohort={cohort} />
                   </td>
                 </tr>
@@ -703,6 +819,11 @@ function PRMergeRateTable({
                           cohort={effort}
                           maturityDays={maturityDays}
                         />
+                        <td className="px-4 py-3 text-right tabular-nums">
+                          <span title="Average shown at the model level">
+                            —
+                          </span>
+                        </td>
                         <td className="px-4 py-3 text-right tabular-nums">
                           <span title="Average shown at the model level">
                             —
@@ -727,6 +848,84 @@ function PRMergeRateTable({
         }}
       />
     </div>
+  )
+}
+
+function usageColumns(scope: UsageScope): Array<SortableColumn> {
+  return [
+    { key: "rank", label: "Rank", align: "left", defaultDirection: "asc" },
+    { key: "user", label: "User", align: "left", defaultDirection: "asc" },
+    {
+      key: "favorite_model",
+      label: "Favorite Model",
+      align: "left",
+      defaultDirection: "asc",
+    },
+    {
+      key: scope === "threads" ? "threads" : "invocations",
+      label: scope === "threads" ? "Threads" : "Invocations",
+      align: "right",
+    },
+    { key: "total_tokens", label: "Tokens", align: "right" },
+    { key: "total_cost_usd", label: "Cost", align: "right" },
+    {
+      key:
+        scope === "threads" ? "avg_thread_seconds" : "avg_invocation_seconds",
+      label:
+        scope === "threads" ? "Avg Thread Duration" : "Avg Invocation Duration",
+      align: "right",
+    },
+    { key: "prs_opened", label: "PRs Opened", align: "right" },
+    { key: "merged_prs", label: "Merged PRs", align: "right" },
+    { key: "agent_loc", label: "Agent LOC", align: "right" },
+  ]
+}
+
+function SortableHeader({
+  column,
+  sortKey,
+  sortDirection,
+  onSort,
+  className,
+}: {
+  column: SortableColumn
+  sortKey: UsageLeaderboardSort
+  sortDirection: SortDirection
+  onSort: (key: UsageLeaderboardSort, direction: SortDirection) => void
+  className: string
+}) {
+  const isActive = sortKey === column.key
+  const Icon = isActive
+    ? sortDirection === "asc"
+      ? ArrowUpNarrowWide
+      : ArrowDownNarrowWide
+    : ArrowUpDown
+  const ariaSort = isActive
+    ? sortDirection === "asc"
+      ? "ascending"
+      : "descending"
+    : undefined
+
+  return (
+    <th
+      scope="col"
+      aria-sort={ariaSort}
+      className={`${className} p-0 font-normal`}
+    >
+      <button
+        type="button"
+        onClick={() => onSort(column.key, column.defaultDirection ?? "desc")}
+        className={`flex w-full items-center gap-1 rounded-sm px-2 py-3 hover:bg-muted/50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring ${
+          column.align === "right" ? "justify-end" : "justify-start"
+        } ${isActive ? "text-foreground" : ""}`}
+      >
+        {column.label}
+        <Icon
+          className={`size-3 shrink-0 ${isActive ? "" : "text-muted-foreground/50"}`}
+          aria-hidden
+        />
+      </button>
+    </th>
   )
 }
 
@@ -794,6 +993,10 @@ function UsageTable({
   totalMembers,
   page,
   pageSize,
+  sort,
+  direction,
+  isUpdating,
+  onSort,
   onPageChange,
   onPageSizeChange,
 }: {
@@ -803,33 +1006,36 @@ function UsageTable({
   totalMembers: number
   page: number
   pageSize: number
+  sort: UsageLeaderboardSort
+  direction: SortDirection
+  isUpdating: boolean
+  onSort: (key: UsageLeaderboardSort, direction: SortDirection) => void
   onPageChange: (page: number) => void
   onPageSizeChange: (pageSize: number) => void
 }) {
   return (
     <div className="overflow-x-auto">
-      <table className="w-full min-w-[1040px] text-xs">
+      <table aria-busy={isUpdating} className="w-full min-w-[1040px] text-xs">
+        {isUpdating ? (
+          <caption className="sr-only">Updating leaderboard</caption>
+        ) : null}
         <thead className="border-b border-border text-xs text-muted-foreground">
           <tr>
-            <th className="w-14 px-4 py-3 text-left font-normal">Rank</th>
-            <th className="px-2 py-3 text-left font-normal">User</th>
-            <th className="px-2 py-3 text-left font-normal">Favorite Model</th>
-            <th className="px-2 py-3 text-right font-normal">
-              {scope === "threads" ? "Threads" : "Invocations"}
-            </th>
-            <th className="px-2 py-3 text-right font-normal">Tokens</th>
-            <th className="px-2 py-3 text-right font-normal">Cost</th>
-            <th className="px-2 py-3 text-right font-normal">
-              {scope === "threads"
-                ? "Avg Thread Duration"
-                : "Avg Invocation Duration"}
-            </th>
-            <th className="px-2 py-3 text-right font-normal">PRs Opened</th>
-            <th className="px-2 py-3 text-right font-normal">Merged PRs</th>
-            <th className="px-4 py-3 text-right font-normal">Agent LOC</th>
+            {usageColumns(scope).map((column, index, columns) => (
+              <SortableHeader
+                key={column.key}
+                column={column}
+                sortKey={sort}
+                sortDirection={direction}
+                onSort={onSort}
+                className={`${index === 0 ? "w-14 pr-0 pl-4" : index === columns.length - 1 ? "pr-4 pl-0" : "px-0"} ${column.align === "right" ? "text-right" : "text-left"}`}
+              />
+            ))}
           </tr>
         </thead>
-        <tbody className="divide-y divide-border">
+        <tbody
+          className={`divide-y divide-border ${isUpdating ? "opacity-50" : ""}`}
+        >
           {rows.map((row) => (
             <tr
               key={`${row.rank}-${row.user.github_login ?? row.user.email ?? row.user.name}`}
@@ -889,6 +1095,7 @@ function UsageTable({
         page={page}
         pageSize={pageSize}
         total={totalMembers}
+        disabled={isUpdating}
         onPageChange={onPageChange}
         onPageSizeChange={onPageSizeChange}
       />
@@ -900,12 +1107,14 @@ function TablePagination({
   page,
   pageSize,
   total,
+  disabled = false,
   onPageChange,
   onPageSizeChange,
 }: {
   page: number
   pageSize: number
   total: number
+  disabled?: boolean
   onPageChange: (page: number) => void
   onPageSizeChange: (pageSize: number) => void
 }) {
@@ -923,6 +1132,7 @@ function TablePagination({
       <div className="flex items-center gap-2">
         <span>Rows per page</span>
         <Select
+          disabled={disabled}
           value={String(pageSize)}
           onValueChange={(value) => onPageSizeChange(Number(value))}
         >
@@ -940,7 +1150,7 @@ function TablePagination({
         <Button
           type="button"
           variant="outline"
-          disabled={page === 1}
+          disabled={disabled || page === 1}
           onClick={() => onPageChange(page - 1)}
         >
           Previous
@@ -951,7 +1161,7 @@ function TablePagination({
         <Button
           type="button"
           variant="outline"
-          disabled={page >= pageCount}
+          disabled={disabled || page >= pageCount}
           onClick={() => onPageChange(page + 1)}
         >
           Next
@@ -1202,7 +1412,7 @@ function formatDuration(value: number): string {
   return `${Math.round(value / 60)}m`
 }
 
-function formatAvgMergeTime(seconds: number): string {
+function formatAvgDuration(seconds: number): string {
   if (seconds < 3600) return `${Math.round(seconds / 60)}m`
   if (seconds < 86400) return `${Math.round(seconds / 3600)}h`
   return `${Math.round(seconds / 86400)}d`
