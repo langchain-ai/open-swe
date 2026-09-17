@@ -617,6 +617,7 @@ async def slack_command(
             thread_id=thread_id,
             command=command or ASK_COMMAND,
             team_id=value("team_id"),
+            response_url=value("response_url"),
         ),
     )
     acknowledgement = "Working on it — the answer will appear here, visible only to you."
