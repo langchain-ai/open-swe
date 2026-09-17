@@ -16,13 +16,11 @@ from pydantic import BaseModel
 from agent.dispatch import dispatch_agent_run
 from agent.prompts import render_prompt
 from agent.slack.client import (
-    clear_slack_command_message,
     fetch_slack_channel_messages,
     format_slack_messages_for_prompt,
     get_slack_user_info,
     get_slack_user_names,
     post_slack_ephemeral_message,
-    replace_slack_command_message,
     slack_channel_allows_operations,
 )
 from agent.slack.webhook import workspace_scoped_default_repo
@@ -52,7 +50,6 @@ class SlackAskRequest(BaseModel):
     thread_id: str
     command: str = ASK_COMMAND
     team_id: str = ""
-    response_url: str = ""
 
 
 def ask_thread_id(channel_id: str, user_id: str, invocation: str) -> str:
@@ -111,8 +108,6 @@ async def _channel_context(channel_id: str) -> str:
 
 
 async def _refuse(request: SlackAskRequest, text: str) -> None:
-    if request.response_url and await replace_slack_command_message(request.response_url, text):
-        return
     await post_slack_ephemeral_message(request.channel_id, request.user_id, text)
 
 
@@ -138,8 +133,6 @@ async def _runnable_login(request: SlackAskRequest, login: str | None, email: st
         reason="revoked" if has_record else "unlinked",
         ephemeral=True,
     )
-    if request.response_url:
-        await clear_slack_command_message(request.response_url)
     return None
 
 
@@ -213,7 +206,6 @@ async def _process_slack_ask(request: SlackAskRequest) -> None:
         "slack_thread": slack_thread.dump(),
         "source": "slack",
         "slack_ask": True,
-        "slack_ask_response_url": request.response_url,
         "plan_mode": False,
         "github_login": login,
         "user_email": user_email,

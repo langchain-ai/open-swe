@@ -22,7 +22,6 @@ def _command_request(text: str, command: str = "/oswe") -> Request:
             "trigger_id": "trigger-1",
             "command": command,
             "text": text,
-            "response_url": "https://hooks.slack.com/commands/T1/1/abc",
         }
     ).encode()
 
@@ -43,19 +42,15 @@ def signed(monkeypatch: pytest.MonkeyPatch) -> None:
 
 @pytest.mark.asyncio
 @pytest.mark.usefixtures("signed")
-async def test_command_queues_the_question(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(
-        slack_routes,
-        "dashboard_thread_url",
-        lambda thread_id: f"https://swe.test/agents/{thread_id}",
-    )
+async def test_command_queues_the_question() -> None:
     background_tasks = BackgroundTasks()
 
     result = await slack_routes.slack_command(
         _command_request("how does thread routing work?"), background_tasks
     )
 
-    assert result["response_type"] == "ephemeral"
+    assert result.status_code == 200
+    assert result.body == b""
     assert len(background_tasks.tasks) == 1
     queued = background_tasks.tasks[0]
     assert queued.func is slack_ask.process_slack_ask
@@ -63,9 +58,7 @@ async def test_command_queues_the_question(monkeypatch: pytest.MonkeyPatch) -> N
     assert request.question == "how does thread routing work?"
     assert request.channel_id == "C1"
     assert request.user_id == "U1"
-    # The acknowledgement links to the thread the queued run will use.
     assert request.thread_id == slack_ask.ask_thread_id("C1", "U1", "trigger-1")
-    assert request.thread_id in result["text"]
 
 
 @pytest.mark.asyncio
@@ -288,48 +281,3 @@ async def test_ask_mode_refuses_options(monkeypatch: pytest.MonkeyPatch) -> None
     assert refused["success"] is False
     assert refused["retry"] is True
     post.assert_not_awaited()
-
-
-@pytest.mark.asyncio
-async def test_first_ask_reply_replaces_the_acknowledgement(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    post = AsyncMock(return_value=True)
-    replace = AsyncMock(return_value=True)
-    monkeypatch.setattr(slack_thread_reply, "post_slack_ephemeral_reply", post)
-    monkeypatch.setattr(slack_thread_reply, "replace_slack_command_message", replace)
-    monkeypatch.setattr(
-        slack_thread_reply, "claim_slack_event", AsyncMock(side_effect=[True, False])
-    )
-    monkeypatch.setattr(
-        slack_thread_reply,
-        "get_config",
-        lambda: {
-            "configurable": {
-                "thread_id": "thread-1",
-                "source": "slack",
-                "slack_ask": True,
-                "slack_ask_response_url": "https://hooks.slack.com/commands/T1/1/abc",
-                "slack_thread": {"channel_id": "C1", "triggering_user_id": "U1"},
-            }
-        },
-    )
-
-    assert await slack_thread_reply.slack_thread_reply("the answer") == {"success": True}
-    assert replace.await_args.args == ("https://hooks.slack.com/commands/T1/1/abc", "the answer")
-    post.assert_not_awaited()
-
-    assert await slack_thread_reply.slack_thread_reply("one more thing") == {"success": True}
-    assert replace.await_count == 1
-    assert post.await_args.args == ("C1", "U1", "one more thing")
-
-
-@pytest.mark.asyncio
-@pytest.mark.usefixtures("signed")
-async def test_command_carries_the_response_url() -> None:
-    background_tasks = BackgroundTasks()
-
-    await slack_routes.slack_command(_command_request("why?"), background_tasks)
-
-    request = background_tasks.tasks[0].args[0]
-    assert request.response_url == "https://hooks.slack.com/commands/T1/1/abc"
