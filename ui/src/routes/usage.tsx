@@ -556,19 +556,12 @@ function OpenPRCount({
 }
 
 function AvgTimeToMerge({ cohort }: { cohort: PRMergeRateCohort }) {
-  if (cohort.avg_merge_seconds == null) {
-    return <span>—</span>
-  }
   return (
-    <Tooltip>
-      <TooltipTrigger className="cursor-help rounded-sm underline decoration-dotted underline-offset-2 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring">
-        {formatAvgMergeTime(cohort.avg_merge_seconds)}
-      </TooltipTrigger>
-      <TooltipPopup className="max-w-xs">
-        Based on {cohort.merged} merged {cohort.merged === 1 ? "PR" : "PRs"};
-        unmerged PRs are excluded.
-      </TooltipPopup>
-    </Tooltip>
+    <span>
+      {cohort.avg_merge_seconds == null
+        ? "—"
+        : formatAvgMergeTime(cohort.avg_merge_seconds)}
+    </span>
   )
 }
 
@@ -613,7 +606,12 @@ function PRMergeRateTable({
               </Tooltip>
             </th>
             <th className="px-4 py-3 text-right font-normal">
-              Avg time to merge
+              <Tooltip>
+                <TooltipTrigger className="cursor-help rounded-sm underline decoration-dotted underline-offset-2 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring">
+                  Avg time to merge
+                </TooltipTrigger>
+                <TooltipPopup>Unmerged PRs are excluded.</TooltipPopup>
+              </Tooltip>
             </th>
           </tr>
         </thead>

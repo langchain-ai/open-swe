@@ -258,10 +258,10 @@ it.each([
       await screen.findByText(/Includes merged and closed PRs/)
     ).toBeTruthy()
 
-    const avgTime = within(row).getByRole("button", { name: "1d" })
+    expect(within(row).queryByRole("button", { name: "1d" })).toBeNull()
+    const avgTime = within(table).getByText("Avg time to merge")
     act(() => avgTime.focus())
-    expect(await screen.findByText(/Based on 3 merged PRs/)).toBeTruthy()
-    expect(row.textContent).not.toContain("Based on")
+    expect(await screen.findByText("Unmerged PRs are excluded.")).toBeTruthy()
     act(() => avgTime.blur())
     fireEvent.keyDown(avgTime, { key: "Escape" })
 
