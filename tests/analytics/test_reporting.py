@@ -41,6 +41,7 @@ async def test_report_distinguishes_capture_delivery_period_and_suppression(
         occurred_at=datetime.now(UTC) - timedelta(days=60),
         environment="test",
         payload=PROpenedPayload(opening_run_id=uuid4(), model_attribution_quality="unavailable"),
+        thread_id=uuid4(),
         pr_id=uuid4(),
         repository_id=uuid4(),
     )
@@ -74,8 +75,9 @@ async def test_report_distinguishes_capture_delivery_period_and_suppression(
     assert report["status"] == "no_prs"
     assert report["cohorts"] == []
     report = await queries.pr_merge_rate_by_model(period="all", admin=True)
-    assert report["status"] == "ready"
-    assert report["cohorts"][0]["cohort_size"] == 1
+    assert report["status"] == "suppressed"
+    assert report["cohorts"] == []
+    assert report["unavailable_thread_ids"] == [str(opened.thread_id)]
 
     async with postgres.transaction() as conn:
         await conn.execute(text("DELETE FROM events"))
