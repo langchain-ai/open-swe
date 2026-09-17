@@ -14,12 +14,13 @@ slack_reply_tool = importlib.import_module("agent.slack.tools.thread_reply")
 
 
 @pytest.fixture(autouse=True)
-def _patch_mutation_lock(monkeypatch: pytest.MonkeyPatch) -> None:
+def _patch_slack_side_effects(monkeypatch: pytest.MonkeyPatch) -> None:
     @asynccontextmanager
     async def mutation_lock(*_args: Any):
         yield
 
     monkeypatch.setattr(slack_reply_tool, "slack_thread_mutation_lock", mutation_lock)
+    monkeypatch.setattr(slack_reply_tool, "restore_slack_thinking_status", AsyncMock())
 
 
 def _config() -> dict[str, Any]:
@@ -34,18 +35,16 @@ def _config() -> dict[str, Any]:
 
 
 @pytest.mark.parametrize(
-    "should_ask_for_feedback,options,expected",
+    "options,stores_mapping",
     [
-        (True, None, True),
-        (False, None, False),
-        (True, ["Yes", "No"], False),
+        (None, True),
+        (["Yes", "No"], True),
     ],
 )
-async def test_reply_records_answer_completion_only_without_pending_choices(
+async def test_reply_records_mapping_with_or_without_pending_choices(
     monkeypatch: pytest.MonkeyPatch,
-    should_ask_for_feedback: bool,
     options: list[str] | None,
-    expected: bool,
+    stores_mapping: bool,
 ) -> None:
     monkeypatch.setattr(slack_reply_tool, "get_config", _config)
     monkeypatch.setattr(
@@ -63,10 +62,10 @@ async def test_reply_records_answer_completion_only_without_pending_choices(
     )
     mapping = AsyncMock()
     monkeypatch.setattr(slack_reply_tool, "store_slack_message_run_mapping", mapping)
-    assert await slack_reply_tool.slack_thread_reply(
-        "The answer", should_ask_for_feedback=should_ask_for_feedback, options=options
-    ) == {"success": True}
-    assert mapping.await_args.kwargs["should_ask_for_feedback"] is expected
+    assert await slack_reply_tool.slack_thread_reply("The answer", options=options) == {
+        "success": True
+    }
+    assert mapping.await_count == int(stores_mapping)
 
 
 async def test_slack_thread_reply_holds_mutation_lock_while_posting(
@@ -282,6 +281,23 @@ async def test_slack_thread_reply_passes_executing_run_id(
     assert captured["triggering_user_id"] == "active-user"
 
 
+async def test_slack_thread_reply_restores_thinking_status_after_interim_reply(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    run_id = UUID("12345678-1234-5678-1234-567812345678")
+    config = _config()
+    config["run_id"] = run_id
+    restore_status = AsyncMock()
+    monkeypatch.setattr(slack_reply_tool, "get_config", lambda: config)
+    monkeypatch.setattr(
+        slack_reply_tool, "_post_and_store_mapping", AsyncMock(return_value=("2.0", None))
+    )
+    monkeypatch.setattr(slack_reply_tool, "restore_slack_thinking_status", restore_status)
+
+    assert await slack_reply_tool.slack_thread_reply("Still working") == {"success": True}
+    restore_status.assert_awaited_once_with("C1", "1.0")
+
+
 async def test_slack_thread_reply_posts_plain_text_without_options(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -420,3 +436,91 @@ async def test_slack_thread_reply_passes_model_reported_usage(
     usage = captured["usage"]
     assert usage.models == ("model-a",)
     assert usage.total_tokens == 110
+
+
+async def test_reply_moves_the_thread_to_the_dashboard_when_its_slack_thread_is_gone(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        slack_reply_tool,
+        "get_config",
+        lambda: {
+            "configurable": {
+                "thread_id": "T1",
+                "slack_thread": {"channel_id": "C1", "thread_ts": "1.0"},
+            }
+        },
+    )
+    monkeypatch.setattr(
+        slack_reply_tool,
+        "get_active_slack_thread",
+        AsyncMock(return_value={"channel_id": "C1", "thread_ts": "1.0"}),
+    )
+    monkeypatch.setattr(
+        slack_reply_tool,
+        "post_slack_thread_reply_with_ts",
+        AsyncMock(return_value=(None, "thread_not_found")),
+    )
+    moved = AsyncMock(return_value=True)
+    monkeypatch.setattr(slack_reply_tool, "move_thread_to_dashboard", moved)
+
+    result = await slack_reply_tool.slack_thread_reply("The answer")
+
+    assert result["moved_to_dashboard"] is True
+    assert result["retry"] is False
+    assert moved.await_args.args[1:] == ("T1", "C1", "1.0")
+
+
+async def test_reply_stops_calling_slack_once_the_thread_lives_in_the_dashboard(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        slack_reply_tool,
+        "get_config",
+        lambda: {
+            "configurable": {
+                "thread_id": "T1",
+                "slack_thread": {"channel_id": "C1", "thread_ts": "1.0"},
+            }
+        },
+    )
+    monkeypatch.setattr(slack_reply_tool, "get_active_slack_thread", AsyncMock(return_value=None))
+    monkeypatch.setattr(
+        slack_reply_tool, "_already_moved_to_dashboard", AsyncMock(return_value=True)
+    )
+    post = AsyncMock()
+    monkeypatch.setattr(slack_reply_tool, "post_slack_thread_reply_with_ts", post)
+
+    assert (await slack_reply_tool.slack_thread_reply("The answer"))["moved_to_dashboard"] is True
+    post.assert_not_awaited()
+
+
+async def test_reply_does_not_claim_a_handoff_when_detaching_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        slack_reply_tool,
+        "get_config",
+        lambda: {
+            "configurable": {
+                "thread_id": "T1",
+                "slack_thread": {"channel_id": "C1", "thread_ts": "1.0"},
+            }
+        },
+    )
+    monkeypatch.setattr(
+        slack_reply_tool,
+        "get_active_slack_thread",
+        AsyncMock(return_value={"channel_id": "C1", "thread_ts": "1.0"}),
+    )
+    monkeypatch.setattr(
+        slack_reply_tool,
+        "post_slack_thread_reply_with_ts",
+        AsyncMock(return_value=(None, "thread_not_found")),
+    )
+    monkeypatch.setattr(slack_reply_tool, "move_thread_to_dashboard", AsyncMock(return_value=False))
+
+    result = await slack_reply_tool.slack_thread_reply("The answer")
+
+    assert result["moved_to_dashboard"] is False
+    assert result["retry"] is True

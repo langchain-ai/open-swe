@@ -11,34 +11,14 @@ from agent.dashboard.options import (
     provider_fallback_pair,
 )
 from agent.dashboard.profiles import PROFILES_NAMESPACE
-from agent.dashboard.team_settings import get_team_default_model
-from agent.dashboard.user_mappings import cached_login_for_email, login_for_email
+from agent.dashboard.workspace_settings import get_workspace_settings
 from agent.store import get_value
+from agent.users import User
 
 logger = logging.getLogger(__name__)
 
 
-def resolve_login_from_email(email: str | None) -> str | None:
-    """Reverse-lookup the user-mapping store for the GitHub login of an email.
-
-    Reads the in-process mapping cache (sync). When the cache is cold the
-    lookup misses; the webhook path that triggers a run primes the cache via
-    :func:`agent.dashboard.user_mappings.refresh_cache` beforehand.
-    """
-    return cached_login_for_email(email)
-
-
-async def resolve_login_from_email_async(email: str | None) -> str | None:
-    """Async reverse-lookup that falls through to the Store on a cold cache.
-
-    Use this from webhook/repo-resolution paths that may run on a freshly
-    started worker before the user-mapping cache has been primed, so a mapped
-    user still resolves to their GitHub login (and dashboard ``default_repo``).
-    """
-    return await login_for_email(email if isinstance(email, str) else None)
-
-
-def resolve_github_login(config: dict[str, Any]) -> str | None:
+async def resolve_github_login(config: dict[str, Any]) -> str | None:
     """Best-effort resolution of the triggering user's GitHub login from config."""
     configurable = (config or {}).get("configurable") or {}
 
@@ -48,7 +28,7 @@ def resolve_github_login(config: dict[str, Any]) -> str | None:
 
     slack_thread = configurable.get("slack_thread") or {}
     email = configurable.get("user_email") or slack_thread.get("triggering_user_email")
-    return resolve_login_from_email(email if isinstance(email, str) else None)
+    return await User.login_for_email(email if isinstance(email, str) else None)
 
 
 async def get_profile_default_repo(login: str | None) -> dict[str, str] | None:
@@ -92,6 +72,12 @@ def profile_draft_prs(profile: dict[str, Any] | None) -> bool:
     return value if isinstance(value, bool) else True
 
 
+def profile_dm_session_enabled(profile: dict[str, Any] | None) -> bool:
+    """Whether this person's Open SWE DM is one continuous session. Defaults to False."""
+    value = profile.get("dm_session_enabled") if isinstance(profile, dict) else None
+    return value is True
+
+
 def profile_model_routing_enabled(profile: dict[str, Any] | None) -> bool | None:
     """The user's adaptive model routing preference, or ``None`` to inherit the org default."""
     value = profile.get("model_routing_enabled") if isinstance(profile, dict) else None
@@ -116,8 +102,8 @@ def _normalize_profile_model_pair(
         return model_id, effort
     # A stored selection whose exact id dropped out of the supported set (e.g. an
     # Opus minor-version bump) stays on its provider rather than being discarded
-    # and silently deferring to the team default. An absent/unknown-provider
-    # selection still returns (None, None) so the team default applies.
+    # and silently deferring to the workspace default. An absent/unknown-provider
+    # selection still returns (None, None) so the workspace default applies.
     if isinstance(model_id, str):
         provider_pair = provider_fallback_pair(model_id, effort)
         if provider_pair is not None:
@@ -148,12 +134,17 @@ def normalize_profile_subagent_overrides(
 async def resolve_agent_model_id(
     github_login: str | None,
     per_thread_model_id: str | None = None,
+    workspace: str | None = None,
 ) -> str:
     """Resolve the agent model ID using the same precedence as ``get_agent``.
 
-    Order: per-thread override → profile override → team default.
+    Order: per-thread override → profile override → the workspace's default.
+
+    ``workspace`` is the workspace the run will land in, whose default
+    applies; omitting it reads ``default``'s, which is only right for a run
+    that lands there.
     """
-    model_id, _effort = await get_team_default_model("agent")
+    model_id, _effort = (await get_workspace_settings(workspace)).default_model("agent")
     if github_login:
         profile = await load_profile(github_login)
         if profile:

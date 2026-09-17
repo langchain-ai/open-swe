@@ -4,7 +4,7 @@ import { CaretRightIcon } from "@phosphor-icons/react"
 import { useEffect, useMemo, useState } from "react"
 import type { ReactNode } from "react"
 
-import type { ModelOption, TeamSettings, UserMapping } from "@/lib/api"
+import type { AdminUser, ModelOption, TeamSettings } from "@/lib/api"
 import { AppShell, SettingsRow, SettingsSection } from "@/components/AppShell"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -30,9 +30,11 @@ import {
 } from "@/lib/slack-manifest"
 import { dashboardApiBase } from "@/lib/api-base"
 import { AllowedSlackBotsSection } from "@/features/settings/components/AllowedSlackBotsSection"
+import { ExpeditedReviewSection } from "@/features/settings/components/ExpeditedReviewSection"
 import { MCPConnectionsSection } from "@/features/settings/components/MCPConnectionsSection"
 import { RepoSelector } from "@/features/settings/components/RepoSelector"
 import { useRepos } from "@/lib/profile"
+import { IncidentSettings } from "@/features/incidents/IncidentSettings"
 
 export const Route = createFileRoute("/admin")({ component: AdminPage })
 
@@ -78,7 +80,13 @@ function AdminPage() {
 
       <FableSection />
 
+      <ExpeditedReviewSection />
+
       <TriggerReviewSection />
+
+      <div id="incidents" className="scroll-mt-8">
+        <IncidentSettings />
+      </div>
 
       <RunningAgentsSection />
 
@@ -100,7 +108,7 @@ function AdminPage() {
         </Link>
       </SettingsSection>
 
-      <UserMappingsSection enabled={!!session.data.is_admin} />
+      <UsersSection enabled={!!session.data.is_admin} />
     </AppShell>
   )
 }
@@ -378,67 +386,50 @@ function TriggerReviewSection() {
 
 const PAGE_SIZE = 20
 
-function UserMappingsSection({ enabled }: { enabled: boolean }) {
-  const [error, setError] = useState<string | null>(null)
+function UsersSection({ enabled }: { enabled: boolean }) {
   const [page, setPage] = useState(1)
 
-  const mappings = useQuery({
-    queryKey: ["adminUserMappings", page],
-    queryFn: () => api.adminListUserMappings(page, PAGE_SIZE),
+  const users = useQuery({
+    queryKey: ["adminUsers", page],
+    queryFn: () => api.adminListUsers(page, PAGE_SIZE),
     enabled,
   })
 
-  const total = mappings.data?.total ?? 0
+  const total = users.data?.total ?? 0
   const pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE))
-
-  const remove = useMutation({
-    mutationFn: (gh: string) => api.adminDeleteUserMapping(gh),
-    onSuccess: () => {
-      setPage((current) =>
-        Math.min(current, Math.max(1, Math.ceil((total - 1) / PAGE_SIZE)))
-      )
-      void mappings.refetch()
-    },
-    onError: (e: Error) => setError(e.message),
-  })
-
-  const items = mappings.data?.items ?? []
+  const items = users.data?.items ?? []
 
   return (
     <SettingsSection
-      title="User mappings"
-      description="Mappings are created when users connect Slack from settings. Admins can remove stale mappings here."
+      title="Users"
+      description="Everyone who has signed in with GitHub, and the Slack account each has connected from their own settings."
     >
       <div className="flex flex-col gap-3 p-4">
-        {error && <span className="text-xs text-destructive">{error}</span>}
-
         <div className="flex flex-col gap-0.5">
-          {mappings.isLoading ? (
+          {users.isLoading ? (
             <Skeleton className="h-32" />
           ) : !items.length ? (
-            <p className="text-xs text-muted-foreground">No mappings yet.</p>
+            <p className="text-xs text-muted-foreground">No users yet.</p>
           ) : (
-            items.map((m: UserMapping) => (
+            items.map((user: AdminUser) => (
               <div
-                key={m.github_login}
+                key={user.user_id}
                 className="flex items-center justify-between gap-2 border-b border-border py-1.5 text-xs last:border-b-0"
               >
                 <div className="flex min-w-0 flex-col">
-                  <span className="truncate font-medium">{m.github_login}</span>
+                  <span className="truncate font-medium">
+                    {user.github_login || user.display_name || user.user_id}
+                  </span>
                   <span className="truncate text-xs text-muted-foreground">
-                    {m.work_email}
-                    {m.slack_user_id ? ` · ${m.slack_user_id}` : ""}
-                    {m.source ? ` · ${m.source}` : ""}
+                    {user.email}
+                    {user.slack_user_id ? ` · Slack ${user.slack_user_id}` : ""}
                   </span>
                 </div>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => remove.mutate(m.github_login)}
-                  disabled={remove.isPending}
-                >
-                  Remove
-                </Button>
+                {user.is_admin && (
+                  <span className="text-[10px] font-medium text-muted-foreground">
+                    Admin
+                  </span>
+                )}
               </div>
             ))
           )}
@@ -447,15 +438,14 @@ function UserMappingsSection({ enabled }: { enabled: boolean }) {
         {total > PAGE_SIZE && (
           <div className="flex items-center justify-between pt-1 text-xs text-muted-foreground">
             <span>
-              {total} mapping{total === 1 ? "" : "s"} · page {page} of{" "}
-              {pageCount}
+              {total} user{total === 1 ? "" : "s"} · page {page} of {pageCount}
             </span>
             <div className="flex items-center gap-2">
               <Button
                 variant="outline"
                 size="sm"
                 onClick={() => setPage((p) => Math.max(1, p - 1))}
-                disabled={page <= 1 || mappings.isFetching}
+                disabled={page <= 1 || users.isFetching}
               >
                 Previous
               </Button>
@@ -463,7 +453,7 @@ function UserMappingsSection({ enabled }: { enabled: boolean }) {
                 variant="outline"
                 size="sm"
                 onClick={() => setPage((p) => Math.min(pageCount, p + 1))}
-                disabled={page >= pageCount || mappings.isFetching}
+                disabled={page >= pageCount || users.isFetching}
               >
                 Next
               </Button>

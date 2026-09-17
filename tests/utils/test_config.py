@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 from agent.config import ENV, Registry
+from agent.run_config import RunConfig
 
 
 def test_current_name_wins_over_alias(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -140,3 +141,10 @@ def test_no_configuration_is_read_outside_the_registry() -> None:
         if pattern.search(line)
     ]
     assert offenders == []
+
+
+def test_workspace_slug_prefers_workspace_and_falls_back_to_environment() -> None:
+    assert RunConfig(workspace="oss", environment="old").workspace_slug == "oss"
+    assert RunConfig(environment="old").workspace_slug == "old"
+    assert RunConfig(workspace="  ").workspace_slug is None
+    assert RunConfig().workspace_slug is None

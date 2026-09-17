@@ -14,7 +14,7 @@ import {
   PushPinSlashIcon,
   SparkleIcon,
 } from "@phosphor-icons/react"
-import { Kanban } from "lucide-react"
+import { Radar } from "lucide-react"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 
 import type { DesktopUpdateState } from "@/desktop"
@@ -115,15 +115,10 @@ interface HydratedProjectGroup extends SidebarProjectGroup {
 }
 
 const NAV = [
-  {
-    to: "/agents/threads",
-    label: "Kanban",
-    icon: Kanban,
-    badge: "Experimental",
-  },
   { to: "/agents/skills", label: "Skills", icon: SparkleIcon },
   { to: "/agents/automations", label: "Automations", icon: LightningIcon },
-  { to: "/agents/reviews", label: "Reviews", icon: GitPullRequestIcon },
+  { to: "/agents/reviews", label: "Pull Requests", icon: GitPullRequestIcon },
+  { to: "/incidents", label: "Incidents", icon: Radar },
 ] as const
 
 /** Threads shown per project before the group needs a "Show more". */
@@ -720,11 +715,6 @@ export function AgentsSidebar({
                     >
                       <Icon className="size-4" />
                       {item.label}
-                      {"badge" in item && (
-                        <span className="rounded-full border border-border px-1.5 py-0.5 text-[9px] leading-none font-medium text-muted-foreground">
-                          {item.badge}
-                        </span>
-                      )}
                     </Link>
                   )
                 })}

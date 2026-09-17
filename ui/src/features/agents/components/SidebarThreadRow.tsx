@@ -9,6 +9,7 @@ import {
   FolderIcon,
   GitMergeIcon,
   GitPullRequestIcon,
+  LockIcon,
   PushPinIcon,
   PushPinSlashIcon,
   WarningCircleIcon,
@@ -376,13 +377,7 @@ export function SidebarThreadRow({
     archived && "opacity-55",
     compact ? "h-7 gap-1.5" : "h-8",
     "text-foreground",
-    isActive
-      ? thread?.adminThread
-        ? "bg-destructive/10"
-        : "bg-accent"
-      : thread?.adminThread
-        ? "bg-destructive/5 group-hover/row:bg-destructive/10"
-        : "group-hover/row:bg-sidebar-row-hover"
+    isActive ? "bg-accent" : "group-hover/row:bg-sidebar-row-hover"
   )
 
   const link =
@@ -433,6 +428,9 @@ export function SidebarThreadRow({
             <ContextMenu.Popup className="min-w-[10rem] overflow-hidden rounded-md border border-border bg-popover p-1 text-popover-foreground shadow-md outline-none data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95">
               <ThreadMenuItems
                 thread={thread}
+                localThread={
+                  item.location === "local" ? item.thread : undefined
+                }
                 pinned={pinned}
                 archived={archived}
                 isDeleting={isDeleting}
@@ -473,9 +471,9 @@ function ThreadHoverCard({
   item: SidebarThreadItem
   live?: PullRequestSnapshot
 }) {
-  const EnvironmentIcon =
+  const LocationIcon =
     item.location === "local" ? IoLaptopOutline : IoCloudOutline
-  const environmentLabel = item.location === "local" ? "This Mac" : "Cloud"
+  const locationLabel = item.location === "local" ? "This Mac" : "Cloud"
 
   return (
     <div className="flex min-w-0 flex-col gap-2">
@@ -483,9 +481,15 @@ function ThreadHoverCard({
         <span className="min-w-0 flex-1 text-[13px] font-medium text-foreground">
           {item.title}
         </span>
-        <EnvironmentIcon
+        {item.location === "cloud" && item.thread.visibility === "private" && (
+          <LockIcon
+            className="mt-0.5 size-3.5 shrink-0 text-muted-foreground"
+            aria-label="Private thread"
+          />
+        )}
+        <LocationIcon
           className="mt-0.5 size-3.5 shrink-0 text-muted-foreground"
-          aria-label={environmentLabel}
+          aria-label={locationLabel}
         />
         <span className="mt-px shrink-0 text-[11px] text-muted-foreground">
           {compactAge(item.updatedAt)}

@@ -1,4 +1,4 @@
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, call
 
 from agent.slack import thinking as slack_thinking
 
@@ -186,3 +186,155 @@ def test_namespaced_tool_events_have_stable_distinct_ids() -> None:
     assert len(stream.steps) == 2
     assert {step.title for step in stream.steps.values()} == {"Reading auth.py"}
     assert len({step.task_id for step in stream.steps.values()}) == 2
+
+
+class _AnchorStore:
+    """The session status anchor, as the LangGraph store keeps it."""
+
+    def __init__(self) -> None:
+        self.items: dict[tuple[tuple[str, ...], str], dict[str, object]] = {}
+
+    async def get_item(self, namespace: tuple[str, ...], key: str) -> dict[str, object] | None:
+        value = self.items.get((namespace, key))
+        return {"value": value} if value is not None else None
+
+    async def put_item(
+        self, namespace: tuple[str, ...], key: str, value: dict[str, object]
+    ) -> None:
+        self.items[(namespace, key)] = value
+
+    async def delete_item(self, namespace: tuple[str, ...], key: str) -> None:
+        self.items.pop((namespace, key), None)
+
+
+class _IdleThreadStream:
+    """A run that ends the moment it is observed."""
+
+    def __init__(self, run_id: str) -> None:
+        self._run_id = run_id
+
+    async def __aenter__(self) -> _IdleThreadStream:
+        return self
+
+    async def __aexit__(self, *_args: object) -> None:
+        return None
+
+    def subscribe(self, _channels: list[str]):
+        event = _event("lifecycle", {"event": "completed"})
+        event["event_id"] = f"synth:{self._run_id}:lc||completed"
+
+        async def iterator():
+            yield event
+
+        return iterator()
+
+
+def _status_client(store: _AnchorStore, run_id: str) -> AsyncMock:
+    client = AsyncMock()
+    client.store = store
+    client.threads.stream = lambda *_args, **_kwargs: _IdleThreadStream(run_id)
+    return client
+
+
+async def test_session_status_moves_to_the_newest_message(monkeypatch) -> None:
+    """A DM shows one indicator, on the message being answered, then none."""
+    calls: list[tuple[str, str, str]] = []
+
+    async def set_status(channel_id: str, thread_ts: str, status: str) -> bool:
+        calls.append((channel_id, thread_ts, status))
+        return True
+
+    monkeypatch.setattr(slack_thinking, "set_slack_thread_status", set_status)
+    monkeypatch.setattr(slack_thinking, "_STATUS_REFRESH_SECONDS", 3600.0)
+    store = _AnchorStore()
+
+    await slack_thinking.show_slack_thinking_status(
+        client=_status_client(store, "run-1"),
+        thread_id="t1",
+        run_id="run-1",
+        channel_id="D1",
+        thread_ts="111.0",
+        session_ts="0",
+    )
+    await slack_thinking.show_slack_thinking_status(
+        client=_status_client(store, "run-2"),
+        thread_id="t1",
+        run_id="run-2",
+        channel_id="D1",
+        thread_ts="222.0",
+        session_ts="0",
+    )
+
+    assert calls == [
+        ("D1", "111.0", "Thinking..."),
+        ("D1", "111.0", ""),
+        ("D1", "222.0", "Thinking..."),
+        ("D1", "222.0", ""),
+    ]
+    assert store.items == {}
+
+
+async def test_session_status_release_leaves_a_newer_runs_indicator_alone(monkeypatch) -> None:
+    """The run that finishes first must not clear the indicator someone is waiting on."""
+    cleared: list[str] = []
+
+    async def set_status(channel_id: str, thread_ts: str, status: str) -> bool:  # noqa: ARG001
+        if not status:
+            cleared.append(thread_ts)
+        return True
+
+    monkeypatch.setattr(slack_thinking, "set_slack_thread_status", set_status)
+    store = _AnchorStore()
+    client = _status_client(store, "run-2")
+
+    # The newer run already owns the session's status.
+    await slack_thinking._claim_status_anchor(client, "D1", "0", "222.0")
+
+    released = await slack_thinking._release_status_anchor(client, "D1", "0", "111.0")
+
+    assert released is False
+    assert cleared == []
+    assert store.items[(("slack_session_status_anchor", "D1"), "0")] == {"message_ts": "222.0"}
+
+
+async def test_thread_status_refreshes_until_the_run_ends(monkeypatch) -> None:
+    """A thread's indicator keeps refreshing until the run is over, then clears."""
+    set_status = AsyncMock(return_value=True)
+    monkeypatch.setattr(slack_thinking, "set_slack_thread_status", set_status)
+    monkeypatch.setattr(slack_thinking, "_STATUS_REFRESH_SECONDS", 0.0)
+
+    client = _status_client(_AnchorStore(), "run-1")
+    client.runs.list = AsyncMock(return_value=[])
+
+    await slack_thinking.show_slack_thinking_status(
+        client=client,
+        thread_id="thread-1",
+        run_id="run-1",
+        channel_id="C1",
+        thread_ts="1.0",
+    )
+
+    assert set_status.await_args_list == [
+        call("C1", "1.0", slack_thinking._THINKING_STATUS),
+        call("C1", "1.0", ""),
+    ]
+
+
+async def test_thread_status_survives_while_another_run_is_active(monkeypatch) -> None:
+    """A completion landing mid-run leaves the active run's indicator alone."""
+    set_status = AsyncMock(return_value=True)
+    monkeypatch.setattr(slack_thinking, "set_slack_thread_status", set_status)
+    monkeypatch.setattr(slack_thinking, "_STATUS_REFRESH_SECONDS", 3600.0)
+
+    client = _status_client(_AnchorStore(), "run-1")
+    client.runs.list = AsyncMock(return_value=[{"id": "run-2"}])
+
+    await slack_thinking.show_slack_thinking_status(
+        client=client,
+        thread_id="thread-1",
+        run_id="run-1",
+        channel_id="C1",
+        thread_ts="1.0",
+    )
+
+    assert call("C1", "1.0", "") not in set_status.await_args_list

@@ -1,0 +1,62 @@
+name: Build preview branch
+
+on:
+  push:
+    branches: [main]
+  pull_request_target:
+    types: [labeled, unlabeled, synchronize, reopened, closed]
+  workflow_dispatch:
+    inputs:
+      force:
+        description: Republish even when the preview tree is unchanged
+        type: boolean
+        default: false
+  schedule:
+    - cron: "4,19,34,49 * * * *"
+
+permissions:
+  contents: write
+  issues: write
+  pull-requests: read
+
+concurrency:
+  group: build-preview-branch
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Rebuild preview from main and labeled PRs
+    if: >-
+      github.event_name != 'pull_request_target'
+      || contains(github.event.pull_request.labels.*.name, 'preview')
+      || github.event.label.name == 'preview'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          ref: main
+          fetch-depth: 0
+          persist-credentials: true
+      - name: Require reapproval after a PR update
+        if: github.event_name == 'pull_request_target' && github.event.action == 'synchronize'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          if [[ "${{ contains(github.event.pull_request.labels.*.name, 'preview') }}" == true ]]; then
+            gh api --method DELETE "repos/${GH_REPO}/issues/${PR_NUMBER}/labels/preview"
+          fi
+      - name: Reset the preview to main when due
+        if: github.event_name == 'schedule'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: ./scripts/build_preview_branch.sh reset
+      - name: Assemble and publish the preview tree
+        env:
+          EXCLUDE_PR_NUMBER: ${{ github.event.action == 'synchronize' && github.event.pull_request.number || '' }}
+          FORCE: ${{ inputs.force }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: ./scripts/build_preview_branch.sh build

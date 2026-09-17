@@ -10,8 +10,10 @@ agent-written updates and dashboard profile saves can't clobber each other.
 
 from typing import Any
 
+from fastapi import APIRouter, Response
 from pydantic import BaseModel, Field
 
+from agent.dashboard.deps import SESSION_DEP
 from agent.store import delete_value, get_value, now_iso, put_value
 
 USER_INSTRUCTIONS_NAMESPACE: list[str] = ["user_instructions"]
@@ -60,3 +62,32 @@ async def get_user_custom_instructions(login: str | None) -> str | None:
     if isinstance(instructions, str) and instructions.strip():
         return instructions.strip()
     return None
+
+
+router = APIRouter(tags=["user-instructions"])
+
+
+@router.get("/me/instructions")
+async def api_get_my_instructions(
+    session: dict[str, Any] = SESSION_DEP,
+) -> dict[str, Any]:
+    login = session["sub"]
+    record = await get_user_instructions(login)
+    return record or {"login": login, "instructions": ""}
+
+
+@router.put("/me/instructions")
+async def api_put_my_instructions(
+    body: UserInstructionsUpdate,
+    session: dict[str, Any] = SESSION_DEP,
+) -> dict[str, Any]:
+    login = session["sub"]
+    return await set_user_instructions(login, body.instructions, updated_by=login)
+
+
+@router.delete("/me/instructions")
+async def api_delete_my_instructions(
+    session: dict[str, Any] = SESSION_DEP,
+) -> Response:
+    await delete_user_instructions(session["sub"])
+    return Response(status_code=204)

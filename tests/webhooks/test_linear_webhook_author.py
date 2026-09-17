@@ -50,6 +50,7 @@ def _run_process(
         user_email="",
         title="",
         source_context=None,
+        workspace=None,
     ):
         captured["upsert"] = {"github_login": github_login, "user_email": user_email}
         return None
@@ -65,9 +66,7 @@ def _run_process(
         issue_data = full_issue
     with (
         patch.object(linear_webhook, "linear_issue_thread_id", return_value="thread-1"),
-        patch.object(
-            linear_webhook.common, "resolve_login_from_email_async", side_effect=fake_resolve_login
-        ),
+        patch.object(linear_webhook.User, "login_for_email", side_effect=fake_resolve_login),
         patch.object(linear_webhook.common, "dispatch_agent_run", side_effect=fake_dispatch),
         patch.object(
             linear_webhook.common, "upsert_agent_thread_metadata", side_effect=fake_upsert
@@ -91,7 +90,7 @@ def _run_process(
     )
 
 
-def test_linear_configurable_carries_github_login() -> None:
+def test_linear_configurable_carries_github_login(fake_store: Any) -> None:
     configurable, _upsert, resolved_email, _content = _run_process(
         _issue_data(user_email="zhen@example.com"),
         {"owner": "langchain-ai", "name": "open-swe"},
@@ -103,7 +102,7 @@ def test_linear_configurable_carries_github_login() -> None:
     assert configurable["user_email"] == "zhen@example.com"
 
 
-def test_linear_upsert_tags_thread_with_login() -> None:
+def test_linear_upsert_tags_thread_with_login(fake_store: Any) -> None:
     _configurable, upsert, _email, _content = _run_process(
         _issue_data(user_email="zhen@example.com"),
         {"owner": "langchain-ai", "name": "open-swe"},
@@ -113,7 +112,7 @@ def test_linear_upsert_tags_thread_with_login() -> None:
     assert upsert["user_email"] == "zhen@example.com"
 
 
-def test_linear_omits_login_when_unmapped() -> None:
+def test_linear_omits_login_when_unmapped(fake_store: Any) -> None:
     configurable, upsert, resolved_email, _content = _run_process(
         _issue_data(user_email="nobody@example.com"),
         {"owner": "langchain-ai", "name": "open-swe"},
@@ -124,7 +123,7 @@ def test_linear_omits_login_when_unmapped() -> None:
     assert upsert["github_login"] == ""
 
 
-def test_linear_description_images_stay_with_issue_without_comments() -> None:
+def test_linear_description_images_stay_with_issue_without_comments(fake_store: Any) -> None:
     issue = _full_issue()
     issue["description"] = "See ![issue](https://example.com/issue.png)"
     _configurable, _upsert, _email, content = _run_process(
@@ -138,7 +137,7 @@ def test_linear_description_images_stay_with_issue_without_comments() -> None:
     assert messages[1]["content"][1]["image_url"]["url"] == "https://example.com/issue.png"
 
 
-def test_linear_comment_images_stay_with_their_comments() -> None:
+def test_linear_comment_images_stay_with_their_comments(fake_store: Any) -> None:
     issue = _full_issue()
     issue["comments"]["nodes"] = [
         {

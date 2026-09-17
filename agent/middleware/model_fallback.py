@@ -38,9 +38,10 @@ from langchain.agents.middleware.types import ModelRequest, ModelResponse
 from langchain_core.exceptions import ModelError
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AIMessage
+from langsmith import trace
 
 from agent.middleware.trace import OpenSWEMiddleware
-from agent.utils.errors import error_tracking_fields, exception_fields
+from agent.utils.errors import classify_exception, error_tracking_fields, exception_fields
 
 logger = logging.getLogger(__name__)
 
@@ -95,6 +96,8 @@ def _should_fallback(exc: BaseException) -> bool:
         status = getattr(exc, "status_code", None)
         if isinstance(status, int) and status in _RETRYABLE_STATUS_CODES:
             return True
+    if type(exc) is openai.APIError:
+        return classify_exception(exc) == "provider_overloaded"
     return False
 
 
@@ -178,6 +181,7 @@ class ModelFallbackMiddleware(OpenSWEMiddleware):
     ) -> Any:
         total_attempts = len(self._backoff_schedule) + 1
         last_exc: BaseException | None = None
+        delay = 0.0
 
         for attempt in range(total_attempts):
             # Alternate: primary on even attempts, fallback on odd. If one
@@ -187,7 +191,41 @@ class ModelFallbackMiddleware(OpenSWEMiddleware):
                 request.override(model=self._fallback_model) if use_fallback else request
             )
             try:
-                return await handler(attempt_request)
+                if last_exc is None:
+                    return await handler(attempt_request)
+                failed_model = request.model if use_fallback else self._fallback_model
+                metadata: dict[str, str | int | float | None] = {
+                    "attempt": attempt + 1,
+                    "max_attempts": total_attempts,
+                    "failed_model": str(
+                        getattr(failed_model, "model_name", None)
+                        or getattr(failed_model, "model", "unknown")
+                    ),
+                    "next_model": str(
+                        getattr(attempt_request.model, "model_name", None)
+                        or getattr(attempt_request.model, "model", "unknown")
+                    ),
+                    "error_type": type(last_exc).__name__,
+                    "backoff_seconds": delay,
+                    "retry_with": "fallback" if use_fallback else "primary",
+                }
+                status_code = getattr(last_exc, "status_code", None)
+                if isinstance(status_code, int):
+                    metadata["status_code"] = status_code
+                retry_error: Exception | None = None
+                async with trace("model_retry", inputs={}, metadata=metadata) as retry_span:
+                    try:
+                        if delay > 0:
+                            await asyncio.sleep(delay)
+                        response = await handler(attempt_request)
+                    except Exception as exc:
+                        retry_span.end(error=type(exc).__name__)
+                        retry_error = exc
+                    else:
+                        retry_span.end(outputs={"outcome": "success"})
+                        return response
+                if retry_error is not None:
+                    raise retry_error
             except Exception as exc:
                 fields = exception_fields(exc)
                 access_error_message = _provider_access_error_message(exc)
@@ -222,8 +260,6 @@ class ModelFallbackMiddleware(OpenSWEMiddleware):
                         },
                     },
                 )
-                if delay > 0:
-                    await asyncio.sleep(delay)
 
         assert last_exc is not None  # loop always sets it before breaking
         last_fields = exception_fields(last_exc)

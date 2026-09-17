@@ -24,7 +24,7 @@ Follow [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) for local startup, tunnel conf
 | `chat` | `agent.graphs.chat:traced_chat_agent` | `agent/chat.py` |
 | `scheduler` | `agent.graphs.scheduler:get_scheduler` | `agent/scheduler.py` |
 
-The FastAPI app is `agent.webapp:app`; dashboard routes live in `agent/dashboard/`.
+The FastAPI app is `agent.webapp:app`. `agent/dashboard/routes.py` only aggregates routers under `/dashboard/api`: each feature package (`agent/threads/`, `agent/review/`, `agent/workspaces/`, `agent/schedules/`, `agent/skill_store/`, `agent/mcp/`, `agent/slack/`, `agent/analytics/`, `agent/incidents/`, `agent/github/`) exposes its own `router`, and `agent/dashboard/` keeps auth, session, and per-user/team settings. New endpoints go in the package that owns the feature, never in `routes.py`.
 
 The main agent is assembled in `agent/server.py` from the middleware in `agent/middleware/`, with tools from `agent/tools/` and sandboxes from `agent/sandboxes/`.
 
@@ -33,8 +33,11 @@ The main agent is assembled in `agent/server.py` from the middleware in `agent/m
 - Use async-only implementations. Add a sync method only when an interface requires it, and then raise `NotImplementedError`.
 - Use strong types everywhere, in both Python and TypeScript. Prefer precise types, type aliases, TypedDicts/dataclasses/Pydantic models (Python) or interfaces/`satisfies` (TypeScript), and Literal/enum types over loose ones. Never use `Any` (Python) or `any` (TypeScript) — strongly discouraged even when it would be convenient; if a value's shape is dynamic, type it with a union, a generic, a protocol, or `object`/`unknown` plus narrowing instead. Widening a parameter or return type to `Any`/`any` is not acceptable to silence a type error. Expanding the scope of a PR to add or fix types is worth it.
 - Use absolute imports across packages; same-package imports may start with one dot. Never use parent-relative imports.
+- Keep prompts in markdown files under `agent/resources/prompts/` and load them with `load_prompt`/`render_prompt`; never write prompt text as an inline string literal.
 - Keep comments minimal and only explain non-obvious reasons.
 - Use structured logging with a static message and values in `extra`; never interpolate values into log messages. Avoid standard `LogRecord` field names in `extra`.
+- Every new API write operation exposed through UI controls must also be available as an appropriately authorized agent tool. Prefer display-only UI with modifications performed through agent tools unless direct UI controls are explicitly required.
+- Never discard an error. Every `except` either propagates (re-raise, or raise a more useful error) or logs what it swallowed — a bare `except ...: return None` / `pass` hides the failure from everyone debugging it later.
 
 ## Testing
 

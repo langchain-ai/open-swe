@@ -60,7 +60,7 @@ export function AppShell({
 }
 
 interface SettingsSectionProps {
-  title: string
+  title: ReactNode
   description?: string
   action?: ReactNode
   children: ReactNode

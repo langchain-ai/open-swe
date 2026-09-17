@@ -5,10 +5,11 @@ from unittest.mock import AsyncMock
 import langgraph_sdk
 import pytest
 
-from agent.dashboard import plan_api, profiles, workflow_approval_api
+from agent.dashboard import profiles
 from agent.run_config import RunConfig
 from agent.slack import webhook as slack_webhook
 from agent.slack.request import SlackRequest
+from agent.threads import plan_api, workflow_approval_api
 
 
 @pytest.mark.parametrize(
@@ -41,8 +42,8 @@ async def test_approval_run_uses_authenticated_actor(monkeypatch, fake_store, ac
         workflow_approval_api, "decide_workflow_push_approval", AsyncMock(return_value={})
     )
     monkeypatch.setattr(
-        slack_webhook.common,
-        "login_for_slack_id",
+        slack_webhook.User,
+        "login_for_slack",
         AsyncMock(return_value=None if action == "slack_unlinked" else "Bob"),
     )
     monkeypatch.setattr(slack_webhook.common, "get_slack_user_info", AsyncMock(return_value={}))

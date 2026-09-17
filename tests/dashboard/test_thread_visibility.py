@@ -4,8 +4,7 @@ from unittest.mock import AsyncMock
 import pytest
 from fastapi import HTTPException
 
-from agent.dashboard import plan_api, workflow_approval_api
-from agent.dashboard.threads import access, api, listing, summary
+from agent.threads import access, handlers, listing, plan_api, summary, workflow_approval_api
 from agent.tools import threads as tools
 
 _ADMINS = {"admin", "admin@example.com"}
@@ -33,9 +32,11 @@ def private_thread(monkeypatch):
         ),
         runs=SimpleNamespace(cancel_many=AsyncMock()),
     )
-    for module in (access, api, listing, tools):
+    for module in (access, handlers, listing, tools):
         monkeypatch.setattr(module, "langgraph_client", lambda: client)
-    monkeypatch.setattr(api, "_thread_summary", AsyncMock(side_effect=lambda t, **_: t["metadata"]))
+    monkeypatch.setattr(
+        handlers, "_thread_summary", AsyncMock(side_effect=lambda t, **_: t["metadata"])
+    )
     monkeypatch.setattr(
         summary,
         "is_admin",
@@ -61,10 +62,10 @@ def test_private_readable_by_owner_and_admin_but_promptable_by_owner_only(privat
 @pytest.mark.parametrize(
     "operation",
     [
-        api.get_dashboard_thread_state,
-        api.get_dashboard_terminal_sandbox,
-        api.delete_dashboard_thread,
-        api.cancel_dashboard_thread,
+        handlers.get_dashboard_thread_state,
+        handlers.get_dashboard_terminal_sandbox,
+        handlers.delete_dashboard_thread,
+        handlers.cancel_dashboard_thread,
     ],
 )
 async def test_private_routes_deny_nonowner_before_side_effects(private_thread, operation):
@@ -81,9 +82,9 @@ async def test_admin_can_view_but_not_open_terminal(private_thread):
     thread["metadata"]["sandbox_id"] = "sbx"
     assert await access._readable_thread_metadata("private-thread", login="admin") is not None
     with pytest.raises(HTTPException) as exc:
-        await api.get_dashboard_terminal_sandbox("private-thread", "admin")
+        await handlers.get_dashboard_terminal_sandbox("private-thread", "admin")
     assert exc.value.status_code == 404
-    assert await api.get_dashboard_terminal_sandbox("private-thread", "alice") == ("sbx", None)
+    assert await handlers.get_dashboard_terminal_sandbox("private-thread", "alice") == ("sbx", None)
 
 
 async def test_admin_can_read_plan_but_not_approve(private_thread, monkeypatch):
@@ -151,7 +152,7 @@ async def test_continue_privately_copies_transcript_and_drops_linkage(private_th
             ]
         }
     }
-    await api.continue_thread_privately("private-thread", "Bob", email="bob@x")
+    await handlers.continue_thread_privately("private-thread", "Bob", email="bob@x")
 
     metadata = client.threads.create.call_args.kwargs["metadata"]
     assert metadata["visibility"] == "private"
@@ -175,6 +176,26 @@ async def test_continue_privately_copies_transcript_and_drops_linkage(private_th
     assert copied[0]["additional_kwargs"]["x"] == 1
 
 
+async def test_continue_privately_carries_new_workspace_key(private_thread):
+    thread, client = private_thread
+    thread["metadata"] = {"source": "slack", "workspace": "oss"}
+    client.threads.get_state.return_value = {"values": {"messages": []}}
+    await handlers.continue_thread_privately("private-thread", "bob")
+    metadata = client.threads.create.call_args.kwargs["metadata"]
+    assert metadata["workspace"] == "oss"
+    assert "environment" not in metadata
+
+
+async def test_continue_privately_falls_back_to_legacy_environment_key(private_thread):
+    thread, client = private_thread
+    thread["metadata"] = {"source": "slack", "environment": "old"}
+    client.threads.get_state.return_value = {"values": {"messages": []}}
+    await handlers.continue_thread_privately("private-thread", "bob")
+    metadata = client.threads.create.call_args.kwargs["metadata"]
+    assert metadata["workspace"] == "old"
+    assert "environment" not in metadata
+
+
 async def test_continue_privately_rolls_back_when_copy_fails(private_thread):
     thread, client = private_thread
     thread["metadata"]["visibility"] = "public"
@@ -182,7 +203,7 @@ async def test_continue_privately_rolls_back_when_copy_fails(private_thread):
     client.threads.update_state.side_effect = RuntimeError("boom")
     client.threads.delete = AsyncMock()
     with pytest.raises(HTTPException) as exc:
-        await api.continue_thread_privately("private-thread", "bob")
+        await handlers.continue_thread_privately("private-thread", "bob")
     assert exc.value.status_code == 502
     client.threads.delete.assert_awaited_once()
 
@@ -239,7 +260,9 @@ async def test_admin_cancel_reaches_private_thread_without_exporting_details(
 
 
 async def test_email_admin_can_cancel_private_thread(private_thread, monkeypatch):
-    monkeypatch.setattr(api, "_cancel_active_thread_runs", AsyncMock())
+    monkeypatch.setattr(handlers, "_cancel_active_thread_runs", AsyncMock())
     with pytest.raises(HTTPException):
-        await api.admin_cancel_dashboard_thread("private-thread", "someone")
-    await api.admin_cancel_dashboard_thread("private-thread", "someone", email="admin@example.com")
+        await handlers.admin_cancel_dashboard_thread("private-thread", "someone")
+    await handlers.admin_cancel_dashboard_thread(
+        "private-thread", "someone", email="admin@example.com"
+    )
