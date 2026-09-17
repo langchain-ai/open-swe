@@ -192,9 +192,6 @@ export interface TeamSettings {
   default_agent_subagent_reasoning_effort?: string | null
   default_agent_routing_fast_model?: string | null
   default_agent_routing_fast_reasoning_effort?: string | null
-  default_agent_routing_fast_alt_model?: string | null
-  default_agent_routing_fast_alt_reasoning_effort?: string | null
-  default_agent_routing_fast_alt_probability?: number | null
   default_agent_routing_balanced_model?: string | null
   default_agent_routing_balanced_reasoning_effort?: string | null
   default_agent_routing_performance_model?: string | null
@@ -292,6 +289,7 @@ export interface UsageLeaderboardRow {
   }
   favorite_model: string
   invocations: number
+  threads?: number
   /** @deprecated Rolling compatibility with older clients. */
   agent_runs?: number
   prs_opened: number
@@ -304,6 +302,7 @@ export interface UsageLeaderboardRow {
   invocations_without_cost?: number
   invocations_with_partial_cost?: number
   avg_invocation_seconds: number
+  avg_thread_seconds?: number
   /** @deprecated Rolling compatibility with older clients. */
   avg_run_seconds?: number
 }

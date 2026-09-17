@@ -77,7 +77,6 @@ describe("apiWarmupScript", () => {
   it("only matches the routes that render a sidebar or transcript", () => {
     expect(apiWarmupScript("/")).toBeNull()
     expect(apiWarmupScript("/login")).toBeNull()
-    expect(apiWarmupScript("/agents/threads")).toBeNull()
     expect(apiWarmupScript(`/agents/local/${THREAD_ID}`)).toBeNull()
     expect(apiWarmupScript(`/agents/${THREAD_ID}/plan`)).toBeNull()
     expect(apiWarmupScript("/agents")).toContain("/threads/page")

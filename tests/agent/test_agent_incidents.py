@@ -12,6 +12,7 @@ from langchain_core.tools import StructuredTool
 
 from agent.incidents import runtime, service, turns
 from agent.incidents.models import Incident, IncidentPolicy
+from agent.mcp.instance import instance_mcp_source
 from agent.mcp.workspace import workspace_mcp_source
 from agent.workspaces.store import DEFAULT_WORKSPACE_SLUG
 from tests.agent.test_agent_assembly_context import (
@@ -91,8 +92,11 @@ async def test_incident_uses_system_sandbox_tools_integrations_and_delegation(
     ):
         result = cast(dict[str, Any], await _capture_create_deep_agent_kwargs(_incident_config()))
     mcps.assert_awaited_once()
-    (called_source,) = mcps.await_args.args
-    assert called_source.namespace == workspace_mcp_source(DEFAULT_WORKSPACE_SLUG).namespace
+    # System runs load the instance tier and the default workspace's, never a person's.
+    assert [source.namespace for source in mcps.await_args.args] == [
+        instance_mcp_source().namespace,
+        workspace_mcp_source(DEFAULT_WORKSPACE_SLUG).namespace,
+    ]
     notion.assert_awaited_once_with(None)
     assert isinstance(result["backend"].default, SandboxBackendProxy)
     names = {_registered_tool_name(tool) for tool in result["tools"]}

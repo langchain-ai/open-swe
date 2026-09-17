@@ -5,7 +5,7 @@ provider calls through LangSmith: the client authenticates with a LangSmith API
 key and the gateway resolves the real provider key from workspace Provider
 Secrets, enforcing spend/PII/secrets policies and tracing every call. Routing is
 opt-in via ``LANGSMITH_GATEWAY_ENABLED`` (deployment default) or the
-``gateway_enabled`` team setting, and is applied centrally in
+``gateway_enabled`` workspace setting, and is applied centrally in
 :func:`agent.utils.model.make_model`.
 """
 
@@ -81,9 +81,9 @@ def gateway_openai_use_responses() -> bool:
 
 
 def resolve_gateway_enabled(team_value: bool | None) -> bool:
-    """Combine the team-settings toggle with the env default.
+    """Combine the workspace-settings toggle with the env default.
 
-    A team value of ``True``/``False`` is authoritative; ``None`` inherits the
+    A workspace value of ``True``/``False`` is authoritative; ``None`` inherits the
     ``LANGSMITH_GATEWAY_ENABLED`` deployment default.
     """
     if team_value is None:

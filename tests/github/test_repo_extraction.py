@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
+from agent.dashboard.workspace_settings import WorkspaceSettings
 from agent.slack.client import extract_channel_description_text
 from agent.utils.repo import extract_repo_from_text
 
@@ -149,8 +150,10 @@ class TestLinearWebhookRepoOverride:
         with (
             patch("agent.webhooks.common.verify_linear_signature", return_value=True),
             patch(
-                "agent.webhooks.common.get_team_default_repo",
-                AsyncMock(return_value={"owner": "langchain-ai", "name": "open-swe"}),
+                "agent.webhooks.common.get_workspace_settings",
+                AsyncMock(
+                    return_value=WorkspaceSettings({"default_repo": "langchain-ai/open-swe"})
+                ),
             ),
             patch("agent.webhooks.common.is_repo_allowed", return_value=True),
         ):

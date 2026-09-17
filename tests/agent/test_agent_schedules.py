@@ -13,7 +13,7 @@ from pydantic import ValidationError
 from agent import store as agent_store
 from agent.dashboard import repo_access
 from agent.dashboard.options import fable_disabled_fallback
-from agent.dashboard.team_settings import TeamSettingsUpdate, upsert_team_settings
+from agent.dashboard.workspace_settings import WorkspaceSettingsUpdate, upsert_workspace_overrides
 from agent.schedules import store as schedules
 from agent.schedules.store import ScheduleCreateBody, ScheduleUpdateBody
 from agent.workspaces.store import WORKSPACES, WorkspaceCreate
@@ -1181,7 +1181,7 @@ async def test_launch_scheduled_agent_run_gates_fable_by_the_repos_workspace(
     model through.
     """
     await WORKSPACES.create(WorkspaceCreate(name="OSS", repos=["langchain-ai/open-swe"]), "alice")
-    await upsert_team_settings(TeamSettingsUpdate(fable_enabled=True), workspace="default")
+    await upsert_workspace_overrides("default", WorkspaceSettingsUpdate(fable_enabled=True))
     record = {
         "id": "sched_1",
         "name": "Weekly dependencies",

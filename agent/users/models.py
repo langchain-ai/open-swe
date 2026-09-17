@@ -96,6 +96,8 @@ class User(Base):
     @classmethod
     async def for_email(cls, email: str) -> Self | None:
         """The person one of whose identities carries ``email``; most recently seen wins."""
+        if not postgres.configured():
+            return None
         async with postgres.session() as session:
             return await session.scalar(
                 cls._with_identities(select(cls))
@@ -132,7 +134,7 @@ class User(Base):
     async def known_logins(cls, logins: Iterable[str]) -> frozenset[str]:
         """Lowercased GitHub logins among ``logins`` that belong to a person."""
         wanted = {login.strip().lower() for login in logins if login and login.strip()}
-        if not wanted:
+        if not wanted or not postgres.configured():
             return frozenset()
         async with postgres.session() as session:
             rows = await session.scalars(
@@ -159,6 +161,8 @@ class User(Base):
     @classmethod
     async def for_identity(cls, provider: Provider, external_id: str) -> Self | None:
         """The person owning that provider account, or ``None``."""
+        if not postgres.configured():
+            return None
         async with postgres.session() as session:
             return await session.scalar(
                 cls._with_identities(select(cls))
@@ -172,6 +176,8 @@ class User(Base):
     @classmethod
     async def for_login(cls, provider: Provider, login: str) -> Self | None:
         """The person behind a mutable handle; the most recently seen one wins."""
+        if not postgres.configured():
+            return None
         async with postgres.session() as session:
             return await session.scalar(
                 cls._with_identities(select(cls))

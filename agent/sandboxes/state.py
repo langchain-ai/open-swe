@@ -179,6 +179,7 @@ class SandboxBackendProxy(BaseSandbox):
         async with self._get_lock():
             if self._startup_task is startup_task:
                 self._backend = unwrap_sandbox_backend(sandbox_backend)
+                remember_connection(self._backend)
                 self._startup_task = None
                 SANDBOX_BACKENDS[self._thread_id] = self
             backend = self._backend
@@ -323,6 +324,14 @@ class SandboxBackendProxy(BaseSandbox):
 # Thread ID -> stable SandboxBackendProxy, shared between server.py and middleware.
 SANDBOX_BACKENDS: dict[str, SandboxBackendProxy] = {}
 
+# Sandbox ID -> live connection to it. Keyed by sandbox rather than thread so a
+# thread rebound on another worker can never be handed the box it left.
+SANDBOX_CONNECTIONS: dict[str, SandboxBackendProtocol] = {}
+
+
+def remember_connection(sandbox_backend: SandboxBackendProtocol) -> None:
+    SANDBOX_CONNECTIONS[sandbox_backend.id] = sandbox_backend
+
 
 def unwrap_sandbox_backend(sandbox_backend: SandboxBackendProtocol) -> SandboxBackendProtocol:
     if isinstance(sandbox_backend, SandboxBackendProxy):
@@ -339,6 +348,10 @@ def set_sandbox_backend(
         return sandbox_backend
 
     existing = SANDBOX_BACKENDS.get(thread_id)
+    previous = existing.current if existing is not None and existing.has_backend else None
+    if previous is not None and previous.id != sandbox_backend.id:
+        SANDBOX_CONNECTIONS.pop(previous.id, None)
+    remember_connection(sandbox_backend)
     if isinstance(existing, SandboxBackendProxy):
         existing.replace_backend(sandbox_backend)
         return existing
@@ -379,13 +392,9 @@ async def get_sandbox_metadata(thread_id: str) -> dict[str, Any]:
             exc_info=True,
         )
 
-    try:
-        client = get_client()
-        thread = await client.threads.get(thread_id)
-    except Exception:
-        logger.exception("Failed to fetch live thread metadata for sandbox")
-        return {}
-
+    # A failed lookup must not read as "unbound": the caller would create a
+    # replacement and bind it over the thread's real sandbox.
+    thread = await get_client().threads.get(thread_id)
     metadata = thread.get("metadata", {}) if isinstance(thread, dict) else {}
     return metadata if isinstance(metadata, dict) else {}
 

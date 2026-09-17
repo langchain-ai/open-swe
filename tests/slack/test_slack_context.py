@@ -5,6 +5,7 @@ from xml.etree import ElementTree
 
 import pytest
 
+from agent.dashboard.workspace_settings import WorkspaceSettings
 from agent.run_config import Repo
 from agent.slack import client as slack_utils
 from agent.slack import webhook as slack_webhooks
@@ -873,8 +874,8 @@ def test_get_slack_repo_config_uses_existing_thread_repo(
     assert not posted
 
 
-async def _no_team_default_repo(workspace: str | None = None) -> dict[str, str] | None:
-    return None
+async def _no_default_repo(workspace: str | None = None) -> WorkspaceSettings:
+    return WorkspaceSettings({})
 
 
 def test_get_slack_repo_config_new_thread_uses_default(
@@ -884,7 +885,7 @@ def test_get_slack_repo_config_new_thread_uses_default(
     threads_client = _FakeThreadsClient(raise_not_found=True)
     monkeypatch.setattr(webhook_common, "SLACK_REPO_OWNER", "default-owner")
     monkeypatch.setattr(webhook_common, "SLACK_REPO_NAME", "default-repo")
-    monkeypatch.setattr(webhook_common, "get_team_default_repo", _no_team_default_repo)
+    monkeypatch.setattr(webhook_common, "get_workspace_settings", _no_default_repo)
 
     monkeypatch.setattr(webhook_common, "get_client", lambda url: _FakeClient(threads_client))
 
@@ -904,7 +905,7 @@ def test_get_slack_repo_config_existing_thread_without_repo_uses_default(
     threads_client = _FakeThreadsClient(thread={"metadata": {}})
     monkeypatch.setattr(webhook_common, "SLACK_REPO_OWNER", "default-owner")
     monkeypatch.setattr(webhook_common, "SLACK_REPO_NAME", "default-repo")
-    monkeypatch.setattr(webhook_common, "get_team_default_repo", _no_team_default_repo)
+    monkeypatch.setattr(webhook_common, "get_workspace_settings", _no_default_repo)
 
     monkeypatch.setattr(webhook_common, "get_client", lambda url: _FakeClient(threads_client))
 
@@ -969,11 +970,11 @@ def test_get_slack_repo_config_applies_team_default_repo(
 ) -> None:
     threads_client = _FakeThreadsClient(thread={"metadata": {}})
 
-    async def fake_get_team_default_repo(workspace: str | None = None) -> dict[str, str] | None:
-        return {"owner": "team-owner", "name": "team-repo"}
+    async def fake_get_workspace_settings(workspace: str | None = None) -> WorkspaceSettings:
+        return WorkspaceSettings({"default_repo": "team-owner/team-repo"})
 
     monkeypatch.setattr(webhook_common, "get_client", lambda url: _FakeClient(threads_client))
-    monkeypatch.setattr(webhook_common, "get_team_default_repo", fake_get_team_default_repo)
+    monkeypatch.setattr(webhook_common, "get_workspace_settings", fake_get_workspace_settings)
     monkeypatch.setattr(webhook_common, "SLACK_REPO_NAME", "")
     monkeypatch.setattr(webhook_common, "DEFAULT_REPO_NAME", "")
 
@@ -992,7 +993,7 @@ def test_get_slack_repo_config_is_none_when_nothing_names_a_repo(
     threads_client = _FakeThreadsClient(thread={"metadata": {}})
 
     monkeypatch.setattr(webhook_common, "get_client", lambda url: _FakeClient(threads_client))
-    monkeypatch.setattr(webhook_common, "get_team_default_repo", _no_team_default_repo)
+    monkeypatch.setattr(webhook_common, "get_workspace_settings", _no_default_repo)
     monkeypatch.setattr(webhook_common, "SLACK_REPO_OWNER", "")
     monkeypatch.setattr(webhook_common, "SLACK_REPO_NAME", "")
     monkeypatch.setattr(webhook_common, "DEFAULT_REPO_OWNER", "")

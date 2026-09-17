@@ -1,6 +1,7 @@
 """Dashboard login, logout, desktop handoff redemption, and the session identity."""
 
 import hmac
+import logging
 from typing import Any
 from urllib.parse import urlencode
 
@@ -42,6 +43,8 @@ from agent.users import User
 from agent.utils.dashboard_links import dashboard_api_base_url
 
 router = APIRouter(tags=["auth"])
+
+logger = logging.getLogger(__name__)
 
 # Module-level so a local harness can point the browser leg at a fake consent
 # page and still run the real login/callback code.
@@ -179,9 +182,19 @@ async def auth_logout() -> Response:
 
 @router.get("/me")
 async def me(session: dict[str, Any] = SESSION_DEP) -> dict[str, Any]:
-    # By login rather than the session's user_id claim: sessions minted before
-    # that claim existed still need to see their own row.
-    user = await User.for_login("github", session["sub"])
+    # By login rather than the session's user_id claim, so a session minted before
+    # that claim existed still sees its own row. Best-effort: this endpoint is what
+    # the dashboard boots on, and it must answer from the session alone when the
+    # database is unreachable.
+    user = None
+    try:
+        user = await User.for_login("github", session["sub"])
+    except Exception:
+        logger.warning(
+            "Could not read the signed-in user's row",
+            extra={"github_login": session["sub"]},
+            exc_info=True,
+        )
     return {
         "login": session["sub"],
         "email": session.get("email") or (user.email or None if user else None),

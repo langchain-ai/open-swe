@@ -1,8 +1,8 @@
-"""Workspaces: repos, Slack channels, and team settings, plus the sandbox they boot.
+"""Workspaces: repos, Slack channels, and workspace settings, plus the sandbox they boot.
 
 A workspace owns one or more repositories (a repo belongs to exactly one
-workspace), zero or more Slack channels, its MCP connections, and its team
-settings. It also carries the former "environment" fields: a prompt appended
+workspace), zero or more Slack channels, its MCP connections, and its own
+settings overrides. It also carries the former "environment" fields: a prompt appended
 to the agent's system prompt, a ``setup_script`` that provisions a sandbox from
 the base snapshot (clone the repos, install toolchains, warm caches), and an
 optional ``update_script`` that freshens what goes stale in an image — a
