@@ -145,6 +145,25 @@ async def control_state() -> JSONResponse:
     )
 
 
+@app.post("/control/slack-run-complete")
+async def control_slack_run_complete() -> JSONResponse:
+    """Deliver the platform completion event omitted by the local runtime."""
+    from agent.completion import handle_run_completion
+    from agent.slack.client import lookup_slack_thread_run_mapping
+
+    client = get_client(url=BASE_URL)
+    channel = CURRENT_THREAD["channel"]
+    thread_ts = CURRENT_THREAD["thread_ts"]
+    thread_id = await lookup_slack_thread_id(client, channel, thread_ts)
+    mapping = await lookup_slack_thread_run_mapping(client, channel, thread_ts)
+    if not thread_id or not mapping:
+        raise HTTPException(409, "Run mapping not ready")
+    run = await client.runs.get(thread_id, mapping["run_id"])
+    if run["status"] != "success":
+        raise HTTPException(409, "Run has not completed")
+    return JSONResponse(await handle_run_completion(dict(run)))
+
+
 @app.get("/control/snapshots")
 async def control_snapshots() -> JSONResponse:
     """Snapshot captures/deletes the workspace tools asked the platform for."""
