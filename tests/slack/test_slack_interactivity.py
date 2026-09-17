@@ -4,10 +4,11 @@ from unittest.mock import ANY, AsyncMock
 from urllib.parse import urlencode
 
 import pytest
-from fastapi import BackgroundTasks, Request
+from fastapi import BackgroundTasks, HTTPException, Request
 
 from agent.slack import routes as slack_routes
 from agent.slack.payloads import SlackBlockAction, SlackChannelContext, SlackInteraction
+from agent.users import User
 
 
 def _request(payload: dict[str, Any]) -> Request:
@@ -258,7 +259,9 @@ def eligible_channel(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         slack_routes.common,
         "resolve_slack_channel_context",
-        AsyncMock(return_value={"is_ext_shared": False, "is_pending_ext_shared": False}),
+        AsyncMock(
+            return_value=SlackChannelContext(is_ext_shared=False, is_pending_ext_shared=False)
+        ),
     )
 
 
@@ -283,9 +286,9 @@ async def test_a_continuation_click_resumes_its_own_thread(
     claim = AsyncMock(return_value=Claim(row=row, spent_action_ids=frozenset({_aid(row.id)})))
     monkeypatch.setattr(slack_routes.continuations, "claim", claim)
     monkeypatch.setattr(slack_routes.continuations, "peek", AsyncMock(return_value=row))
-    monkeypatch.setattr(
-        slack_routes.slack_resume, "clicker_may_resume", AsyncMock(return_value=True)
-    )
+    monkeypatch.setattr(User, "login_for_slack", AsyncMock(return_value="owner"))
+    authorize = AsyncMock()
+    monkeypatch.setattr(slack_routes.common, "authorize_github_thread", authorize)
     lookup = AsyncMock(return_value="thread-other")
     monkeypatch.setattr(slack_routes.common, "lookup_slack_thread_id", lookup)
     background_tasks = BackgroundTasks()
@@ -296,6 +299,7 @@ async def test_a_continuation_click_resumes_its_own_thread(
 
     assert result == {"status": "accepted", "message": "Slack continuation queued"}
     claim.assert_awaited_once_with(row.id, slack_user_id="U1")
+    authorize.assert_awaited_once_with("thread-9", "owner")
     # The row names the thread, so none of the option path's resolution runs.
     lookup.assert_not_awaited()
     assert [task.func for task in background_tasks.tasks] == [
@@ -332,7 +336,10 @@ async def test_a_spent_continuation_says_so_and_dispatches_nothing(
 
 @pytest.mark.asyncio
 @pytest.mark.usefixtures("eligible_channel")
-async def test_an_unauthorized_click_consumes_nothing(monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.parametrize("login", ["other-user", None])
+async def test_an_unauthorized_click_consumes_nothing(
+    monkeypatch: pytest.MonkeyPatch, login: str | None
+) -> None:
     from agent.slack.continuations import SlackContinuation, action_id_for
 
     row = SlackContinuation(
@@ -345,9 +352,9 @@ async def test_an_unauthorized_click_consumes_nothing(monkeypatch: pytest.Monkey
     claim = AsyncMock()
     monkeypatch.setattr(slack_routes.continuations, "peek", AsyncMock(return_value=row))
     monkeypatch.setattr(slack_routes.continuations, "claim", claim)
-    monkeypatch.setattr(
-        slack_routes.slack_resume, "clicker_may_resume", AsyncMock(return_value=False)
-    )
+    monkeypatch.setattr(User, "login_for_slack", AsyncMock(return_value=login))
+    authorize = AsyncMock(side_effect=HTTPException(status_code=403))
+    monkeypatch.setattr(slack_routes.common, "authorize_github_thread", authorize)
     background_tasks = BackgroundTasks()
 
     result = await slack_routes.slack_interactivity(

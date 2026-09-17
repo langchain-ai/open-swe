@@ -10,6 +10,7 @@ from agent.prompts import render_prompt
 from agent.slack.client import post_slack_ephemeral_message
 from agent.slack.continuations import SlackContinuation
 from agent.slack.payloads import SlackBlockAction, SlackInteraction
+from agent.users import User
 from agent.utils.thread_ops import get_thread_active_status, queue_message_for_thread
 from agent.webhooks import common
 
@@ -79,7 +80,7 @@ async def clicker_may_resume(row: SlackContinuation, slack_user_id: str) -> bool
     channel other people can see, and their click must not spend the answer its
     owner is still expected to give.
     """
-    login = await common.login_for_slack_id(slack_user_id) or ""
+    login = await User.login_for_slack(slack_user_id) or ""
     try:
         await common.authorize_github_thread(row.thread_id, login)
     except HTTPException:
