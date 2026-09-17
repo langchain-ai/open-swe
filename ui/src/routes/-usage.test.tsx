@@ -427,6 +427,7 @@ it("shortens model paths across usage tables", async () => {
         rank: 1,
         user: { name: "Model Reader", github_login: "reader", email: null },
         favorite_model: "fireworks:accounts/fireworks/models/glm-5p3-flash",
+        favorite_model_effort: "high",
         invocations: 1,
         prs_opened: 1,
         merged_prs: 1,
@@ -444,6 +445,7 @@ it("shortens model paths across usage tables", async () => {
 
   const client = mountReport()
   expect(await screen.findAllByText("glm-5p3-flash")).toHaveLength(2)
+  expect(screen.getByText("high")).toBeTruthy()
   expect(screen.queryByText(/accounts\/fireworks\/models/)).toBeNull()
   client.clear()
 })

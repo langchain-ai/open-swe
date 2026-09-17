@@ -806,8 +806,15 @@ function UsageTable({
                   isCurrentUser={row.rank === currentUserRank}
                 />
               </td>
-              <td className="max-w-48 truncate px-2 py-3 text-muted-foreground">
-                {safeModelLabel(row.favorite_model) || "Unavailable"}
+              <td className="max-w-48 px-2 py-3 text-muted-foreground">
+                <div className="truncate">
+                  {safeModelLabel(row.favorite_model) || "Unavailable"}
+                </div>
+                <div className="capitalize">
+                  {row.favorite_model_effort === undefined
+                    ? null
+                    : (row.favorite_model_effort ?? "Unknown")}
+                </div>
               </td>
               <td className="px-2 py-3 text-right tabular-nums">
                 {formatNumber(
