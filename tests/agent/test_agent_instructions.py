@@ -95,6 +95,21 @@ def test_construct_system_prompt_contains_only_repository_instructions() -> None
     assert "Sender's Custom Instructions" not in prompt
 
 
+def test_construct_system_prompt_places_repository_instructions_after_tool_guidance() -> None:
+    prompt = construct_system_prompt(
+        working_dir="/work",
+        repo_custom_instructions="Never use ripgrep.",
+    )
+
+    assert prompt.index("content search") < prompt.index("Never use ripgrep.")
+
+
+def test_construct_system_prompt_does_not_mandate_a_named_search_binary() -> None:
+    prompt = construct_system_prompt(working_dir="/work")
+
+    assert "Use `rg`" not in prompt
+
+
 def test_resolve_repo_custom_instructions_returns_none_without_repo() -> None:
     result = asyncio.run(server._resolve_repo_custom_instructions(None))
     assert result is None
