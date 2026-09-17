@@ -6,6 +6,8 @@ from hashlib import sha256
 from typing import Literal
 from uuid import UUID
 
+from sqlalchemy.ext.asyncio import AsyncConnection
+
 from agent.analytics.capture import fail_soft
 from agent.analytics.directory import upsert_model, upsert_repository
 from agent.analytics.events import (
@@ -62,6 +64,7 @@ async def enqueue_event(
     occurred_at: datetime | None = None,
     source: str | None = None,
     source_version: int | None = None,
+    conn: AsyncConnection | None = None,
     **identifiers: object,
 ) -> bool:
     event = make_event(
@@ -76,7 +79,7 @@ async def enqueue_event(
         entry_point=entry_point(source),
         **identifiers,
     )
-    return await enqueue(event)
+    return await enqueue(event) if conn is None else await enqueue(event, conn)
 
 
 @fail_soft
@@ -97,6 +100,7 @@ async def emit(
         occurred_at=occurred_at,
         source=source,
         source_version=source_version,
+        conn=None,
         **identifiers,
     )
 

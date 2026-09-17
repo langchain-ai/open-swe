@@ -7,6 +7,7 @@ from typing import Any
 from uuid import UUID
 
 from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncConnection
 
 from agent.analytics.events import EventEnvelope
 from agent.analytics.ingestion import ingest
@@ -17,24 +18,26 @@ from agent.database.analytics import record_capture
 logger = logging.getLogger(__name__)
 
 
-async def enqueue(event: EventEnvelope) -> bool:
-    async with transaction() as conn:
-        result = await conn.execute(
-            text(
-                "INSERT INTO outbox (event_id, workspace_id, event_body) VALUES "
-                "(:event_id, :workspace_id, CAST(:event_body AS jsonb)) ON CONFLICT DO NOTHING "
-                "RETURNING event_id"
-            ),
-            {
-                "event_id": event.event_id,
-                "workspace_id": event.workspace_id,
-                "event_body": event.model_dump_json(),
-            },
-        )
-        inserted = result.scalar_one_or_none() is not None
-        if inserted:
-            await record_capture(conn)
-        return inserted
+async def enqueue(event: EventEnvelope, conn: AsyncConnection | None = None) -> bool:
+    if conn is None:
+        async with transaction() as owned:
+            return await enqueue(event, owned)
+    result = await conn.execute(
+        text(
+            "INSERT INTO outbox (event_id, workspace_id, event_body) VALUES "
+            "(:event_id, :workspace_id, CAST(:event_body AS jsonb)) ON CONFLICT DO NOTHING "
+            "RETURNING event_id"
+        ),
+        {
+            "event_id": event.event_id,
+            "workspace_id": event.workspace_id,
+            "event_body": event.model_dump_json(),
+        },
+    )
+    inserted = result.scalar_one_or_none() is not None
+    if inserted:
+        await record_capture(conn)
+    return inserted
 
 
 async def _claim(limit: int = 50) -> list[dict[str, Any]]:

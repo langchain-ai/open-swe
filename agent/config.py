@@ -333,6 +333,8 @@ ENV.var("ANALYTICS_POOL_SIZE", "Analytics PostgreSQL connection pool size.", def
 ENV.var("ANALYTICS_POOL_OVERFLOW", "Analytics PostgreSQL pool overflow.", default="5")
 ENV.var("ANALYTICS_POOL_TIMEOUT_SECONDS", "Analytics pool checkout timeout.", default="5")
 ENV.var("ANALYTICS_HEALTH_TIMEOUT_SECONDS", "Analytics readiness timeout.", default="3")
+ENV.var("COST_RECOVERY_ENABLED", "Process durable cost jobs.", default="false")
+ENV.var("COST_RECOVERY_SPACING_SECONDS", "Minimum global cost lookup spacing.", default="15")
 ENV.var("ANALYTICS_OUTBOX_MAX_ATTEMPTS", "Delivery attempts before dead-lettering.", default="10")
 ENV.var("ANALYTICS_RAW_EVENT_MONTHS", "Online raw-event retention.", default="25")
 ENV.var("ANALYTICS_AGGREGATE_YEARS", "Aggregate summary retention.", default="7")

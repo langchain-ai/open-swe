@@ -3,6 +3,7 @@
 import asyncio
 import logging
 
+from agent.analytics.cost_recovery import run_worker as run_cost_worker
 from agent.analytics.outbox import deliver_batch
 from agent.analytics.retention import enforce_retention
 from agent.analytics.summaries import recompute_dirty_partitions
@@ -12,6 +13,7 @@ logger = logging.getLogger(__name__)
 
 _STOP = asyncio.Event()
 _WORKER: asyncio.Task[None] | None = None
+_COST_WORKER: asyncio.Task[None] | None = None
 
 
 async def run_worker() -> None:
@@ -30,16 +32,20 @@ async def run_worker() -> None:
 
 
 async def start_worker() -> None:
-    global _WORKER
+    global _WORKER, _COST_WORKER
     if not configured() or (_WORKER is not None and not _WORKER.done()):
         return
     _STOP.clear()
     _WORKER = asyncio.create_task(run_worker(), name="analytics-outbox-worker")
+    _COST_WORKER = asyncio.create_task(run_cost_worker(_STOP), name="cost-recovery-worker")
 
 
 async def stop_worker() -> None:
-    global _WORKER
+    global _WORKER, _COST_WORKER
     _STOP.set()
     if _WORKER is not None:
         await _WORKER
+    if _COST_WORKER is not None:
+        await _COST_WORKER
+    _COST_WORKER = None
     _WORKER = None

@@ -8,7 +8,6 @@ from langchain_core.language_models.fake_chat_models import FakeListChatModel
 from langchain_core.messages import AIMessage, HumanMessage
 from langgraph.runtime import Runtime
 
-from agent.agent_cost import finalize_agent_invocation_usage
 from agent.middleware.model_fallback import ModelFallbackMiddleware
 from agent.middleware.record_run_usage import record_run_usage
 
@@ -50,15 +49,6 @@ async def test_records_whole_run_across_queued_human_messages() -> None:
             new_callable=AsyncMock,
             return_value=True,
         ) as record,
-        patch(
-            "agent.agent_cost.schedule_agent_cost_refresh",
-            new_callable=AsyncMock,
-            return_value=True,
-        ) as schedule,
-        patch(
-            "agent.agent_cost.mark_agent_invocation_cost_refresh_scheduled",
-            new_callable=AsyncMock,
-        ) as mark_scheduled,
     ):
         await record_run_usage.aafter_agent(state, cast(Runtime[Any], MagicMock()))
 
@@ -66,42 +56,8 @@ async def test_records_whole_run_across_queued_human_messages() -> None:
     assert usage.input_tokens == 300
     assert usage.output_tokens == 30
     assert usage.total_tokens == 330
-    schedule.assert_awaited_once_with({"thread_id": "thread-1", "invocation_id": "run-1"})
-    mark_scheduled.assert_awaited_once_with(invocation_id="run-1")
-
-
-@pytest.mark.asyncio
-async def test_retries_cost_scheduling_after_completion_was_recorded() -> None:
-    with (
-        patch(
-            "agent.agent_cost.record_agent_invocation_completion",
-            new_callable=AsyncMock,
-            return_value=False,
-        ),
-        patch(
-            "agent.agent_cost.agent_invocation_needs_cost_refresh",
-            new_callable=AsyncMock,
-            return_value=True,
-        ),
-        patch(
-            "agent.agent_cost.schedule_agent_cost_refresh",
-            new_callable=AsyncMock,
-            side_effect=[False, True],
-        ) as schedule,
-        patch(
-            "agent.agent_cost.mark_agent_invocation_cost_refresh_scheduled",
-            new_callable=AsyncMock,
-        ) as mark_scheduled,
-    ):
-        await finalize_agent_invocation_usage(
-            invocation_id="run-1", thread_id="thread-1", state=None
-        )
-        await finalize_agent_invocation_usage(
-            invocation_id="run-1", thread_id="thread-1", state=None
-        )
-
-    assert schedule.await_count == 2
-    mark_scheduled.assert_awaited_once_with(invocation_id="run-1")
+    assert record.await_args.kwargs["invocation_id"] == "run-1"
+    assert record.await_args.kwargs["thread_id"] == "thread-1"
 
 
 @pytest.mark.asyncio
@@ -160,14 +116,6 @@ async def test_successful_fallback_is_not_recorded_as_a_failed_invocation() -> N
             new_callable=AsyncMock,
             return_value=True,
         ) as record,
-        patch(
-            "agent.agent_cost.schedule_agent_cost_refresh",
-            new_callable=AsyncMock,
-            return_value=True,
-        ),
-        patch(
-            "agent.agent_cost.mark_agent_invocation_cost_refresh_scheduled", new_callable=AsyncMock
-        ),
     ):
         result = await graph.ainvoke(
             {"messages": [HumanMessage(content="Do the task")]},

@@ -120,6 +120,7 @@ async def record_agent_invocation_completion(
     status: str = "success",
     failure_code: str | None = None,
     thread_id: str = "",
+    invocation_started_at: str | None = None,
 ) -> bool:
     if not invocation_id or not database.configured():
         return False
@@ -154,15 +155,22 @@ async def record_agent_invocation_completion(
             output_tokens=counts.output_tokens,
             total_tokens=counts.total_tokens,
         )
-    return await emitter.enqueue_event(
-        name,
-        f"run:{invocation_id}:middleware:{name.value}",
-        payload,
-        run_id=run_id,
-        preparation_run_id=opaque_id("preparation_run", invocation_id),
-        thread_id=opaque_id("thread", thread_id),
-        task_id=opaque_id("task", thread_id),
-    )
+    from agent.analytics.cost_recovery import enqueue_job
+
+    async with database.transaction() as conn:
+        recorded = await emitter.enqueue_event(
+            name,
+            f"run:{invocation_id}:middleware:{name.value}",
+            payload,
+            run_id=run_id,
+            preparation_run_id=opaque_id("preparation_run", invocation_id),
+            thread_id=opaque_id("thread", thread_id),
+            task_id=opaque_id("task", thread_id),
+            conn=conn,
+        )
+        if thread_id:
+            await enqueue_job(conn, invocation_id, thread_id, invocation_started_at)
+        return recorded
 
 
 async def agent_invocation_needs_cost_refresh(*, invocation_id: str) -> bool:

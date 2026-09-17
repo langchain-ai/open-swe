@@ -6,16 +6,11 @@ from typing import Any, Literal, NotRequired, TypedDict
 
 from langgraph_sdk.client import LangGraphClient
 
-from agent.analytics.usage import (
-    agent_invocation_needs_cost_refresh,
-    mark_agent_invocation_cost_refresh_scheduled,
-    record_agent_invocation_completion,
-    record_agent_invocation_cost,
-)
+from agent import database
+from agent.analytics.cost_recovery import enqueue_job
+from agent.analytics.usage import record_agent_invocation_completion
 from agent.invocation import resolve_invocation_id
-from agent.utils.langsmith import LangSmithCostUnavailable, get_langsmith_thread_cost
 from agent.utils.run_usage import summarize_run_usage
-from agent.utils.thread_ops import langgraph_client
 
 logger = logging.getLogger(__name__)
 
@@ -42,6 +37,7 @@ def _payload(state: Mapping[str, Any], attempt: int) -> AgentCostRefresh | None:
     try:
         invocation_id = resolve_invocation_id(state)
     except ValueError:
+        logger.warning("Invalid cost recovery invocation identity")
         return None
     legacy_run_id = _value(state, "run_id")
     if invocation_id is not None and legacy_run_id is not None and invocation_id != legacy_run_id:
@@ -65,7 +61,7 @@ def _payload(state: Mapping[str, Any], attempt: int) -> AgentCostRefresh | None:
 async def schedule_agent_cost_refresh(
     state: Mapping[str, Any], *, attempt: int = 0, client: LangGraphClient | None = None
 ) -> bool:
-    """Schedule one stateless, delayed cost refresh attempt."""
+    """Persist a compatibility cost job without scheduling callbacks."""
     if attempt < 0 or attempt >= len(_RETRY_DELAYS_SECONDS):
         return False
     payload = _payload(state, attempt)
@@ -75,91 +71,31 @@ async def schedule_agent_cost_refresh(
             extra={"usage_attempt": attempt},
         )
         return False
-    client = client or langgraph_client()
-    try:
-        await client.runs.create(
-            None,
-            "scheduler",
-            input=payload,
-            metadata={"kind": "agent_cost_refresh", "run_id": payload["invocation_id"]},
-            after_seconds=_RETRY_DELAYS_SECONDS[attempt],
-            on_completion="delete",
+    async with database.transaction() as conn:
+        await enqueue_job(
+            conn,
+            payload["invocation_id"],
+            payload["thread_id"],
+            payload.get("invocation_started_at"),
         )
-    except Exception:  # noqa: BLE001
-        logger.warning(
-            "Could not schedule agent cost refresh",
-            extra={"usage_run_id": payload["invocation_id"], "usage_attempt": attempt},
-            exc_info=True,
-        )
-        return False
     return True
 
 
 async def run_agent_cost_refresh(
     state: Mapping[str, Any], *, client: LangGraphClient | None = None
 ) -> dict[str, Any]:
-    """Store one run's cost or enqueue the next bounded attempt."""
-    client = client or langgraph_client()
-    raw_attempt = state.get("attempt")
-    attempt = (
-        raw_attempt if isinstance(raw_attempt, int) and not isinstance(raw_attempt, bool) else -1
-    )
-    payload = _payload(state, attempt)
-    if payload is None or attempt < 0 or attempt >= len(_RETRY_DELAYS_SECONDS):
+    """Import scheduler payloads without creating another retry chain."""
+    payload = _payload(state, 0)
+    if payload is None:
         return {"status": "unavailable", "reason": "invalid payload"}
-
-    try:
-        cost_kwargs: dict[str, Any] = {"run_only": True}
-        if started_at := payload.get("invocation_started_at"):
-            cost_kwargs["lookup_start"] = started_at
-        snapshot = await get_langsmith_thread_cost(
-            payload["thread_id"], payload["invocation_id"], **cost_kwargs
+    async with database.transaction() as conn:
+        await enqueue_job(
+            conn,
+            payload["invocation_id"],
+            payload["thread_id"],
+            payload.get("invocation_started_at"),
         )
-    except LangSmithCostUnavailable as exc:
-        logger.info(
-            "Agent cost refresh unavailable",
-            extra={
-                "usage_run_id": payload["invocation_id"],
-                "usage_attempt": attempt,
-                "usage_reason": str(exc),
-            },
-        )
-        return {"status": "unavailable", "reason": str(exc)}
-    except Exception:  # noqa: BLE001
-        logger.warning(
-            "Agent cost refresh attempt failed",
-            extra={"usage_run_id": payload["invocation_id"], "usage_attempt": attempt},
-            exc_info=True,
-        )
-        snapshot = None
-    if snapshot is not None:
-        try:
-            await record_agent_invocation_cost(
-                invocation_id=payload["invocation_id"], cost_usd=snapshot.total_cost
-            )
-        except Exception:  # noqa: BLE001
-            logger.warning(
-                "Could not persist agent run cost",
-                extra={"usage_run_id": payload["invocation_id"], "usage_attempt": attempt},
-                exc_info=True,
-            )
-            snapshot = None
-        else:
-            return {"status": "updated"}
-
-    next_attempt = attempt + 1
-    if next_attempt >= len(_RETRY_DELAYS_SECONDS):
-        logger.info(
-            "Agent cost refresh exhausted",
-            extra={"usage_run_id": payload["invocation_id"], "usage_attempt": attempt},
-        )
-        return {"status": "exhausted", "reason": "LangSmith cost unavailable"}
-    scheduled = await schedule_agent_cost_refresh(state, attempt=next_attempt, client=client)
-    return {
-        "status": "retry_scheduled" if scheduled else "unavailable",
-        "reason": "LangSmith cost unavailable",
-        "attempt": next_attempt,
-    }
+    return {"status": "queued"}
 
 
 async def finalize_agent_invocation_usage(
@@ -173,33 +109,19 @@ async def finalize_agent_invocation_usage(
 ) -> None:
     """Persist terminal invocation usage and schedule deferred cost enrichment."""
     try:
-        recorded = await record_agent_invocation_completion(
+        await record_agent_invocation_completion(
             invocation_id=invocation_id,
             thread_id=thread_id,
+            invocation_started_at=invocation_started_at,
             status=status,
             failure_code=failure_code,
             usage=summarize_run_usage(state, invocation_id=invocation_id),
         )
-        if not recorded and not await agent_invocation_needs_cost_refresh(
-            invocation_id=invocation_id
-        ):
-            return
-        scheduled = await schedule_agent_cost_refresh(
-            {
-                "thread_id": thread_id,
-                "invocation_id": invocation_id,
-                **(
-                    {"invocation_started_at": invocation_started_at}
-                    if invocation_started_at
-                    else {}
-                ),
-            }
-        )
-        if scheduled:
-            await mark_agent_invocation_cost_refresh_scheduled(invocation_id=invocation_id)
-    except Exception:  # noqa: BLE001
+    except Exception as exc:  # noqa: BLE001
         logger.warning(
             "Failed to record completed agent invocation usage",
-            extra={"usage_invocation_id": invocation_id, "usage_thread_id": thread_id},
-            exc_info=True,
+            extra={
+                "cost_error_code": "terminal_commit_failed",
+                "cost_error_type": type(exc).__name__,
+            },
         )

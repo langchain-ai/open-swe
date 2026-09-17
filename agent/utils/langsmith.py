@@ -134,10 +134,10 @@ async def resolve_tenant_id() -> str | None:
     return _TENANT_ID_CACHE.get(workspace)
 
 
-async def _resolve_project_id_by_name(project_name: str) -> str | None:
+async def _resolve_project_id_by_name(project_name: str, *, strict: bool = False) -> str | None:
     """Resolve a LangSmith project id from its name, caching definitive results."""
     cache_key = (_workspace_key(), project_name)
-    if cache_key in _PROJECT_ID_CACHE:
+    if cache_key in _PROJECT_ID_CACHE and (not strict or _PROJECT_ID_CACHE[cache_key]):
         return _PROJECT_ID_CACHE[cache_key] or None
     client = _build_langsmith_client()
     if client is None:
@@ -145,9 +145,13 @@ async def _resolve_project_id_by_name(project_name: str) -> str | None:
     try:
         project = await client.read_project(project_name=project_name)
     except LangSmithNotFoundError:
+        if strict:
+            raise
         _PROJECT_ID_CACHE[cache_key] = ""
         return None
     except Exception:  # noqa: BLE001
+        if strict:
+            raise
         logger.debug("Could not resolve LangSmith project id for %s", project_name, exc_info=True)
         return None
     project_id = getattr(project, "id", None)
@@ -309,12 +313,14 @@ async def get_langsmith_thread_cost(
     *,
     run_only: bool = False,
     lookup_start: datetime | str | None = None,
+    project_name: str | None = None,
+    strict: bool = False,
 ) -> LangSmithThreadCost | None:
     """Return fresh trace cost correlated to one completed invocation."""
     client = _build_langsmith_client()
     if client is None:
         raise LangSmithCostUnavailable("LangSmith credentials are not configured")
-    project_id = await _resolve_project_id_by_name(tracing_project())
+    project_id = await _resolve_project_id_by_name(project_name or tracing_project(), strict=strict)
     if not project_id:
         raise LangSmithCostUnavailable("LangSmith tracing project is unavailable")
     try:
@@ -346,8 +352,12 @@ async def get_langsmith_thread_cost(
             stats_kwargs["filter"] = _langsmith_trace_filter(list(matched_roots))
         stats = await client.threads.stats(thread_id, **stats_kwargs)
     except LangSmithNotFoundError as exc:
+        if strict:
+            raise
         raise LangSmithCostUnavailable("LangSmith thread stats are unsupported") from exc
     except Exception as exc:  # noqa: BLE001
+        if strict:
+            raise
         status_code = None
         cause: BaseException | None = exc
         seen: set[int] = set()
