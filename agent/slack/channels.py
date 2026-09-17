@@ -135,7 +135,7 @@ class SlackChannel(Base):
         return channel.context if channel is not None else SlackChannelContext(id=channel_id)
 
     @classmethod
-    async def _search(cls, name: str) -> str | None:
+    async def _search(cls, name: str) -> Self | None:
         """Page ``conversations.list`` for ``name``, saving every channel it walks past."""
         cursor: str | None = None
         try:
@@ -151,9 +151,8 @@ class SlackChannel(Base):
                     page = [item for item in listed if isinstance(item, dict)] if listed else []
                     await cls.save_all(*page)
                     for item in page:
-                        channel_id = item.get("id")
-                        if item.get("name") == name and isinstance(channel_id, str) and channel_id:
-                            return channel_id
+                        if item.get("name") == name and (row := cls.from_payload(item)):
+                            return row
                     metadata = data.get("response_metadata")
                     cursor = metadata.get("next_cursor") if isinstance(metadata, dict) else None
                     if not cursor:
@@ -163,8 +162,8 @@ class SlackChannel(Base):
             return None
 
     @classmethod
-    async def resolve_id(cls, reference: str) -> str | None:
-        """The channel id for an id, a ``<#C…|name>`` mention, ``#name`` or ``name``."""
+    async def resolve(cls, reference: str) -> Self | None:
+        """The channel for an id, a ``<#C…|name>`` mention, ``#name`` or ``name``."""
         if not SLACK_BOT_TOKEN:
             return None
         value = reference.strip()
@@ -174,15 +173,32 @@ class SlackChannel(Base):
         if not value:
             return None
         if _ID_SHAPE.fullmatch(value):
-            channel = await cls.load(value)
-            return channel.id if channel is not None else None
+            return await cls.load(value)
         name = value.lower()
         if (known := await cls._row_named(name)) is not None:
             # A stale row may predate a rename, so confirm it before trusting the name.
             current = known if known.fresh else await cls.load(known.id, use_cache=False)
             if current is not None and current.details.name.lower() == name:
-                return known.id
+                return current
         return await cls._search(name)
+
+    async def join(self) -> bool:
+        """Join this channel; a private one needs an invite instead."""
+        if not SLACK_BOT_TOKEN:
+            return False
+        try:
+            async with slack_client(token=SLACK_BOT_TOKEN) as client:
+                await client.conversations_join(channel=self.id)
+            return True
+        except SLACK_REQUEST_ERRORS as exc:
+            error = slack_error(exc)
+            if error == "already_in_channel":
+                return True
+            logger.warning(
+                "Slack channel join failed",
+                extra={"slack_channel": self.id, "slack_error": error},
+            )
+            return False
 
     async def messages(self, limit: int = 30) -> list[SlackMessage]:
         """The most recent top-level messages, oldest first.

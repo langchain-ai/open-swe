@@ -21,13 +21,12 @@ from agent.github.token import resolve_github_token
 from agent.prompts import render_prompt
 from agent.run_config import RunConfig
 from agent.slack.blocks import escape
+from agent.slack.channels import SlackChannel
 from agent.slack.client import (
     GitHubPrRef,
     get_active_slack_thread,
-    join_slack_channel,
     parse_github_pr_url,
     post_slack_top_level_message_with_ts,
-    resolve_slack_channel_id,
 )
 from agent.tools.manage_baby_sit import dispatch_run_config
 
@@ -49,9 +48,9 @@ async def _context_location(cfg: RunConfig, thread_id: str) -> tuple[str, str]:
 
 
 async def _post_root_message(
-    channel_id: str, pr_ref: GitHubPrRef, title: str
+    channel: SlackChannel, pr_ref: GitHubPrRef, title: str
 ) -> tuple[str | None, str | None]:
-    """Open a thread in ``channel_id`` for the card; joins the channel if needed."""
+    """Open a thread in ``channel`` for the card, joining it when the bot is outside."""
     text = render_prompt(
         "slack/expedited-review-requested.md",
         pr_url=pr_ref.url,
@@ -59,11 +58,11 @@ async def _post_root_message(
         title=escape(title),
     )
     message_ts, error = await post_slack_top_level_message_with_ts(
-        channel_id, text, unfurl_links=False, unfurl_media=False
+        channel.id, text, unfurl_links=False, unfurl_media=False
     )
-    if message_ts is None and error == "not_in_channel" and await join_slack_channel(channel_id):
+    if message_ts is None and error == "not_in_channel" and await channel.join():
         message_ts, error = await post_slack_top_level_message_with_ts(
-            channel_id, text, unfurl_links=False, unfurl_media=False
+            channel.id, text, unfurl_links=False, unfurl_media=False
         )
     return message_ts, error
 
@@ -96,15 +95,16 @@ async def expedite_pr_approval(
         return {"success": True, "cancelled": True}
 
     channel_id, thread_ts = await _context_location(cfg, thread_id)
+    target: SlackChannel | None = None
     if channel.strip():
-        requested = await resolve_slack_channel_id(channel)
-        if requested is None:
+        target = await SlackChannel.resolve(channel)
+        if target is None:
             return _failure(
                 f"Slack channel {channel.strip()!r} was not found. Pass a channel name the "
                 "bot can see or a channel id."
             )
-        if requested != channel_id:
-            channel_id, thread_ts = requested, ""
+        if target.id != channel_id:
+            channel_id, thread_ts = target.id, ""
     if not channel_id:
         return _failure(
             "Expedited review posts its approval card in Slack. This thread has no Slack "
@@ -144,7 +144,10 @@ async def expedite_pr_approval(
 
     payload = PullRequestPayload.model_validate(pr)
     if not thread_ts:
-        thread_ts, error = await _post_root_message(channel_id, pr_ref, payload.title)
+        target = target or await SlackChannel.load(channel_id)
+        if target is None:
+            return _failure(f"Slack channel {channel_id} is unavailable")
+        thread_ts, error = await _post_root_message(target, pr_ref, payload.title)
         if not thread_ts:
             return _failure(
                 f"Could not post in Slack channel {channel_id}: {error or 'unknown error'}. "
