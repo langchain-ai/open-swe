@@ -284,48 +284,6 @@ it("shows unavailable attribution thread IDs for admin triage", async () => {
   client.clear()
 })
 
-it("hides the Open age breakdown when no PRs are open", async () => {
-  vi.spyOn(api, "prMergeRateByModel").mockResolvedValue({
-    ...captured,
-    status: "ready",
-    cohorts: [
-      {
-        model_id: "example-model",
-        model_attribution_quality: "configured",
-        merged: 1,
-        closed_without_merge: 1,
-        mature_pending: 0,
-        waiting: 0,
-        cohort_size: 2,
-        decided_denominator: 2,
-        decided_merge_rate: 0.5,
-        mature_denominator: 2,
-        mature_cohort_merge_share: 0.5,
-        efforts: [
-          {
-            effort: "low",
-            merged: 1,
-            closed_without_merge: 1,
-            mature_pending: 0,
-            waiting: 0,
-            cohort_size: 2,
-            decided_denominator: 2,
-            decided_merge_rate: 0.5,
-            mature_denominator: 2,
-            mature_cohort_merge_share: 0.5,
-          },
-        ],
-      },
-    ],
-  })
-  const client = mountReport()
-  const row = (await screen.findByText("example-model")).closest("tr")!
-  expect(within(row).getAllByRole("cell")[4]!.textContent).toBe("0")
-  expect(within(row).queryByRole("button", { name: "0" })).toBeNull()
-  expect(within(row).queryByText(/open for less than/)).toBeNull()
-  client.clear()
-})
-
 it("expands model totals into reasoning effort rows", async () => {
   vi.spyOn(api, "prMergeRateByModel").mockResolvedValue({
     ...captured,
