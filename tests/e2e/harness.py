@@ -145,6 +145,25 @@ async def control_state() -> JSONResponse:
     )
 
 
+@app.post("/control/slack-run-complete")
+async def control_slack_run_complete() -> JSONResponse:
+    """Deliver the platform completion event omitted by the local runtime."""
+    from agent.completion import handle_run_completion
+    from agent.slack.client import lookup_slack_thread_run_mapping
+
+    client = get_client(url=BASE_URL)
+    channel = CURRENT_THREAD["channel"]
+    thread_ts = CURRENT_THREAD["thread_ts"]
+    thread_id = await lookup_slack_thread_id(client, channel, thread_ts)
+    mapping = await lookup_slack_thread_run_mapping(client, channel, thread_ts)
+    if not thread_id or not mapping:
+        raise HTTPException(409, "Run mapping not ready")
+    run = await client.runs.get(thread_id, mapping["run_id"])
+    if run["status"] != "success":
+        raise HTTPException(409, "Run has not completed")
+    return JSONResponse(await handle_run_completion(dict(run)))
+
+
 @app.get("/control/snapshots")
 async def control_snapshots() -> JSONResponse:
     """Snapshot captures/deletes the workspace tools asked the platform for."""
@@ -220,21 +239,21 @@ async def control_team_settings(request: Request) -> JSONResponse:
     reset unrelated fields — the default agent model included, which the
     dashboard's first-run onboarding reads — for every spec that follows.
     """
-    from agent.dashboard.team_settings import (
-        TeamSettingsUpdate,
-        get_team_settings,
-        upsert_team_settings,
+    from agent.dashboard.workspace_settings import (
+        WorkspaceSettingsUpdate,
+        get_instance_settings,
+        upsert_instance_settings,
     )
     from agent.utils import ttl_cache
 
     body = await request.json()
-    current = await get_team_settings()
+    current = await get_instance_settings()
     patched = {
         key: body.get(key, current.get(key))
-        for key in TeamSettingsUpdate.model_fields
+        for key in WorkspaceSettingsUpdate.model_fields
         if key in body or key in current
     }
-    settings = await upsert_team_settings(TeamSettingsUpdate.model_validate(patched))
+    settings = await upsert_instance_settings(WorkspaceSettingsUpdate.model_validate(patched))
     ttl_cache.clear()
     return JSONResponse({"ok": True, "settings": settings})
 
@@ -292,22 +311,17 @@ _MAPPINGS_SEEDED = False
 
 
 async def _seed_test_user_mappings() -> None:
-    """Give each named test user the records a signed-in person would have.
+    """Give each named test user the ``users`` row a signed-in person would have.
 
-    Two stores, because both are real: a ``users`` row with a GitHub and a Slack
-    identity (what the OAuth callback and the Slack link flow write), and the
-    legacy Slack-id → login mapping the webhook account gate still reads.
+    A GitHub identity, as the OAuth callback writes, and a Slack one, as the
+    Slack link flow writes.
     """
     global _MAPPINGS_SEEDED
     if _MAPPINGS_SEEDED:
         return
-    from agent.dashboard.user_mappings import upsert_mapping
     from agent.users import User
 
     for user in TEST_USERS:
-        await upsert_mapping(
-            github_login=user["login"], work_email=user["email"], slack_user_id=user["slack_id"]
-        )
         signed_in = await User.sign_in(
             "github",
             user["github_id"],

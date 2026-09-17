@@ -6,7 +6,7 @@ from agent.incidents import channels, service
 from agent.incidents.models import Incident, IncidentPolicy
 from agent.incidents.runtime import current_run_id
 from agent.run_config import RunConfig
-from agent.slack.client import get_slack_channel_info
+from agent.slack.channels import SlackChannel
 from agent.utils.dashboard_links import dashboard_incident_url
 
 IncidentAction = Literal["start", "pause", "resume", "complete"]
@@ -82,7 +82,7 @@ async def _start(cfg: RunConfig, policy: IncidentPolicy, channel_id: str) -> dic
                 "(Sign in with Slack in the dashboard)"
             ),
         }
-    info = await get_slack_channel_info(channel_id, use_cache=False)
+    info = await SlackChannel.fetch(channel_id, use_cache=False)
     if info is None or not service.channel_allowed(info, policy, require_prefix=False):
         return {
             "success": False,

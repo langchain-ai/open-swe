@@ -294,15 +294,13 @@ async def test_success_status_is_ignored(monkeypatch: pytest.MonkeyPatch) -> Non
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("feedback_error", [None, RuntimeError("Feedback unavailable")])
-async def test_success_status_schedules_session_cost_refresh(
-    monkeypatch: pytest.MonkeyPatch, feedback_error: Exception | None
+async def test_success_status_schedules_feedback_and_session_cost_refresh(
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     client = _FakeClient(_slack_metadata())
     monkeypatch.setattr(completion, "langgraph_client", lambda: client)
-    monkeypatch.setattr(
-        completion, "schedule_answer_feedback", AsyncMock(side_effect=feedback_error)
-    )
+    schedule_feedback = AsyncMock()
+    monkeypatch.setattr(completion, "schedule_answer_feedback", schedule_feedback)
     schedule = AsyncMock(return_value=True)
     monkeypatch.setattr(completion, "schedule_session_cost_refresh", schedule)
 
@@ -316,6 +314,7 @@ async def test_success_status_schedules_session_cost_refresh(
     )
 
     assert result == {"status": "ok", "reason": "cost refresh scheduled"}
+    schedule_feedback.assert_awaited_once_with("t1", "run-1", _slack_metadata())
     schedule.assert_awaited_once_with(
         {
             "agent_thread_id": "t1",

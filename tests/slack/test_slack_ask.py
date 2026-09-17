@@ -9,6 +9,8 @@ from fastapi import BackgroundTasks, Request
 from agent.run_config import Repo
 from agent.slack import ask as slack_ask
 from agent.slack import routes as slack_routes
+from agent.slack.channels import SlackChannel
+from agent.slack.payloads import SlackChannelContext, SlackMessage
 from agent.slack.tools import thread_reply as slack_thread_reply
 from agent.threads.listing import _metadata_matches_filters
 
@@ -42,19 +44,15 @@ def signed(monkeypatch: pytest.MonkeyPatch) -> None:
 
 @pytest.mark.asyncio
 @pytest.mark.usefixtures("signed")
-async def test_command_queues_the_question(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(
-        slack_routes,
-        "dashboard_thread_url",
-        lambda thread_id: f"https://swe.test/agents/{thread_id}",
-    )
+async def test_command_queues_the_question() -> None:
     background_tasks = BackgroundTasks()
 
     result = await slack_routes.slack_command(
         _command_request("how does thread routing work?"), background_tasks
     )
 
-    assert result["response_type"] == "ephemeral"
+    assert result.status_code == 200
+    assert result.body == b""
     assert len(background_tasks.tasks) == 1
     queued = background_tasks.tasks[0]
     assert queued.func is slack_ask.process_slack_ask
@@ -62,9 +60,7 @@ async def test_command_queues_the_question(monkeypatch: pytest.MonkeyPatch) -> N
     assert request.question == "how does thread routing work?"
     assert request.channel_id == "C1"
     assert request.user_id == "U1"
-    # The acknowledgement links to the thread the queued run will use.
-    assert request.thread_id == slack_ask.ask_thread_id("C1", "U1")
-    assert request.thread_id in result["text"]
+    assert request.thread_id == slack_ask.ask_thread_id("C1", "U1", "trigger-1")
 
 
 @pytest.mark.asyncio
@@ -91,16 +87,25 @@ async def test_command_refuses_an_oversized_question() -> None:
     assert background_tasks.tasks == []
 
 
+def _patch_channel(monkeypatch: pytest.MonkeyPatch, messages: list[SlackMessage]) -> None:
+    """Point the channel read at ``messages`` without touching Slack."""
+    monkeypatch.setattr(SlackChannel, "load", AsyncMock(return_value=SlackChannel(id="C1")))
+    monkeypatch.setattr(SlackChannel, "messages", AsyncMock(return_value=messages))
+
+
 @pytest.fixture
 def linked_asker(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
-        slack_ask.common, "resolve_slack_channel_context", AsyncMock(return_value={"name": "eng"})
+        slack_ask.common,
+        "resolve_slack_channel_context",
+        AsyncMock(return_value=SlackChannelContext(name="eng")),
     )
-    monkeypatch.setattr(slack_ask, "slack_channel_allows_operations", lambda _context: True)
+    monkeypatch.setattr(SlackChannelContext, "allows_operations", property(lambda _self: True))
     monkeypatch.setattr(slack_ask, "get_slack_user_info", AsyncMock(return_value=None))
-    monkeypatch.setattr(slack_ask.common, "login_for_slack_id", AsyncMock(return_value="octocat"))
+    monkeypatch.setattr(slack_ask.User, "login_for_slack", AsyncMock(return_value="octocat"))
     monkeypatch.setattr(slack_ask.common, "get_valid_access_token", AsyncMock(return_value="gho_x"))
-    monkeypatch.setattr(slack_ask, "get_thread_active_status", AsyncMock(return_value=False))
+    _patch_channel(monkeypatch, [])
+    monkeypatch.setattr(slack_ask, "get_slack_user_names", AsyncMock(return_value={}))
 
 
 @pytest.mark.asyncio
@@ -131,32 +136,11 @@ async def test_command_thread_is_private_and_unlisted(monkeypatch: pytest.Monkey
     assert "thread_ts" not in configurable["slack_thread"]
 
 
-@pytest.mark.asyncio
-@pytest.mark.usefixtures("linked_asker")
-async def test_a_command_joins_work_already_running(monkeypatch: pytest.MonkeyPatch) -> None:
-    queue = AsyncMock(return_value=True)
-    dispatch = AsyncMock()
-    monkeypatch.setattr(
-        slack_ask.common,
-        "get_slack_repo_config",
-        AsyncMock(return_value=slack_ask.common.SlackRepoResolution()),
-    )
-    monkeypatch.setattr(
-        slack_ask.common, "upsert_agent_thread_metadata", AsyncMock(return_value=True)
-    )
-    monkeypatch.setattr(slack_ask, "get_thread_active_status", AsyncMock(return_value=True))
-    monkeypatch.setattr(slack_ask, "queue_message_for_thread", queue)
-    monkeypatch.setattr(slack_ask, "post_slack_ephemeral_message", AsyncMock(return_value=True))
-    monkeypatch.setattr(slack_ask, "dispatch_agent_run", dispatch)
+def test_each_invocation_gets_its_own_thread() -> None:
+    first = slack_ask.ask_thread_id("C1", "U1", "trigger-1")
 
-    await slack_ask.process_slack_ask(
-        slack_ask.SlackAskRequest(
-            channel_id="C1", user_id="U1", question="and the other one?", thread_id="t-1"
-        )
-    )
-
-    dispatch.assert_not_awaited()
-    assert "and the other one?" in queue.await_args.args[1][0]["text"]
+    assert slack_ask.ask_thread_id("C1", "U1", "trigger-2") != first
+    assert slack_ask.ask_thread_id("C1", "U1", "trigger-1") == first
 
 
 @pytest.mark.asyncio
@@ -185,6 +169,64 @@ async def test_named_repository_picks_the_workspace(monkeypatch: pytest.MonkeyPa
 
     assert resolve_workspace.await_args.kwargs["repo"] == ("acme", "api")
     assert dispatch.await_args.args[2]["workspace"] == "payments"
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("linked_asker")
+async def test_channel_context_reaches_the_prompt(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        slack_ask.common,
+        "get_slack_repo_config",
+        AsyncMock(return_value=slack_ask.common.SlackRepoResolution()),
+    )
+    monkeypatch.setattr(
+        slack_ask.common, "upsert_agent_thread_metadata", AsyncMock(return_value=True)
+    )
+    _patch_channel(
+        monkeypatch,
+        [
+            SlackMessage(ts="1.000001", user="U2", text="deploys are failing"),
+            SlackMessage(
+                ts="2.000002",
+                user="U3",
+                text="opened a PR",
+                thread_ts="2.000002",
+                reply_count=3,
+            ),
+        ],
+    )
+    monkeypatch.setattr(slack_ask, "get_slack_user_names", AsyncMock(return_value={"U2": "ada"}))
+    dispatch = AsyncMock()
+    monkeypatch.setattr(slack_ask, "dispatch_agent_run", dispatch)
+
+    await slack_ask.process_slack_ask(
+        slack_ask.SlackAskRequest(
+            channel_id="C1", user_id="U1", question="what broke?", thread_id="t-3"
+        )
+    )
+
+    prompt = dispatch.await_args.args[1]
+    assert prompt.startswith("<markdown>")
+    assert prompt.endswith("</markdown>")
+    assert "@ada(U2)" in prompt
+    assert "deploys are failing" in prompt
+    assert "[thread: 3 replies, thread_ts=2.000002]" in prompt
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("linked_asker")
+async def test_channel_context_stays_inside_its_budget(monkeypatch: pytest.MonkeyPatch) -> None:
+    _patch_channel(
+        monkeypatch,
+        [SlackMessage(ts=f"{index}.000000", user="U2", text="x" * 4000) for index in range(1, 30)],
+    )
+    monkeypatch.setattr(slack_ask, "get_slack_user_names", AsyncMock(return_value={}))
+
+    context = await slack_ask._channel_context("C1")
+
+    assert len(context) <= slack_ask._CHANNEL_CONTEXT_MAX_CHARS
+    assert context.startswith(slack_ask._CHANNEL_CONTEXT_TRIMMED)
+    assert "29.000000" in context
 
 
 def test_unlisted_threads_stay_out_of_the_thread_list() -> None:
@@ -216,3 +258,27 @@ async def test_ask_mode_reply_is_ephemeral(monkeypatch: pytest.MonkeyPatch) -> N
     assert result == {"success": True}
     assert post.await_args.args == ("C1", "U1", "the answer")
     assert post.await_args.kwargs["agent_thread_id"] == "thread-1"
+
+
+@pytest.mark.asyncio
+async def test_ask_mode_refuses_options(monkeypatch: pytest.MonkeyPatch) -> None:
+    post = AsyncMock(return_value=True)
+    monkeypatch.setattr(slack_thread_reply, "post_slack_ephemeral_reply", post)
+    monkeypatch.setattr(
+        slack_thread_reply,
+        "get_config",
+        lambda: {
+            "configurable": {
+                "thread_id": "thread-1",
+                "source": "slack",
+                "slack_ask": True,
+                "slack_thread": {"channel_id": "C1", "triggering_user_id": "U1"},
+            }
+        },
+    )
+
+    refused = await slack_thread_reply.slack_thread_reply("pick one", options=["a", "b"])
+
+    assert refused["success"] is False
+    assert refused["retry"] is True
+    post.assert_not_awaited()

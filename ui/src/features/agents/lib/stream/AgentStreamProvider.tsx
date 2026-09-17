@@ -21,6 +21,7 @@ import {
   dashboardFetch,
 } from "@/lib/langgraph-client"
 import { RunTracker } from "@/lib/perf/streaming"
+import { useReconnectNotice } from "./useReconnectNotice"
 import {
   MAX_RECONNECT_ATTEMPTS,
   reconnectDelayMs,
@@ -65,6 +66,8 @@ function PooledStream({ entry }: { entry: StreamPoolEntry }) {
     [cloud]
   )
   const pool = useStreamPool.getState
+  const { schedule: scheduleReconnectNotice, clear: clearReconnectNotice } =
+    useReconnectNotice(entry.id)
   const [runTracker] = useState(
     () =>
       new RunTracker({ transport: entry.transport, threadId: entry.threadId })
@@ -83,9 +86,8 @@ function PooledStream({ entry }: { entry: StreamPoolEntry }) {
     fetch: dashboardFetch,
     maxReconnectAttempts: MAX_RECONNECT_ATTEMPTS,
     reconnectDelayMs,
-    onReconnect: ({ attempt, delayMs }) =>
-      pool().streamReconnecting(entry.id, attempt, Date.now() + delayMs),
-    onConnected: () => pool().streamLive(entry.id),
+    onReconnect: scheduleReconnectNotice,
+    onConnected: clearReconnectNotice,
     onThreadId: (threadId) => {
       runTracker.bindThread(threadId)
       pool().rekey(entry.id, threadId)
@@ -149,14 +151,14 @@ function PooledStream({ entry }: { entry: StreamPoolEntry }) {
   )
 
   useEffect(() => {
-    if (!stream.isLoading) pool().streamLive(entry.id)
-  }, [entry.id, pool, stream.isLoading])
+    if (!stream.isLoading) clearReconnectNotice()
+  }, [clearReconnectNotice, stream.isLoading])
 
   useEffect(() => {
     const thread = stream.getThread()
     if (!thread) return
-    return thread.onError(() => pool().streamLive(entry.id))
-  }, [entry.id, pool, stream])
+    return thread.onError(clearReconnectNotice)
+  }, [clearReconnectNotice, stream])
 
   return null
 }

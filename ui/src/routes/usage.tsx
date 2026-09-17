@@ -461,7 +461,11 @@ function PRMergeRateSection({
           </button>
         </div>
       ) : data?.status === "ready" ? (
-        <PRMergeRateTable key={data.period} cohorts={data.cohorts} />
+        <PRMergeRateTable
+          key={data.period}
+          cohorts={data.cohorts}
+          maturityDays={data.maturity_days}
+        />
       ) : (
         <p
           className="p-6 text-center text-xs text-muted-foreground"
@@ -473,14 +477,14 @@ function PRMergeRateSection({
       {data ? (
         <details className="border-t border-border px-4 py-3 text-xs text-muted-foreground">
           <summary className="cursor-pointer rounded-sm focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-ring">
-            How this is calculated
+            How these numbers work
           </summary>
           <div className="mt-3 space-y-3">
             <p>
-              <strong>Open</strong> includes every PR that is still open. We
-              separate these into newer PRs that are still gathering data and
-              PRs that are at least {data.maturity_days} days old but still do
-              not have a final outcome.
+              <strong>Open</strong> includes PRs that haven’t been merged or
+              closed. Each count’s tooltip shows the age breakdown: open for
+              less than {data.maturity_days} days, or open for{" "}
+              {data.maturity_days} days or longer.
             </p>
             <p>
               <strong>Merge rate</strong> includes only PRs old enough to have a
@@ -514,7 +518,43 @@ function PRMergeRateSection({
   )
 }
 
-function PRMergeRateTable({ cohorts }: { cohorts: PRMergeRateCohort[] }) {
+function OpenPRCount({
+  cohort,
+  maturityDays,
+}: {
+  cohort: PRMergeRateCohort
+  maturityDays: number
+}) {
+  const [open, setOpen] = useState(false)
+
+  return (
+    <Tooltip open={open} onOpenChange={setOpen}>
+      <TooltipTrigger
+        closeOnClick={false}
+        onClick={() => setOpen(true)}
+        className="cursor-help rounded-sm underline decoration-dotted underline-offset-2 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+      >
+        {cohort.waiting + cohort.mature_pending}
+      </TooltipTrigger>
+      <TooltipPopup>
+        <div>
+          {cohort.waiting} open for less than {maturityDays} days
+        </div>
+        <div>
+          {cohort.mature_pending} open for {maturityDays} days or longer
+        </div>
+      </TooltipPopup>
+    </Tooltip>
+  )
+}
+
+function PRMergeRateTable({
+  cohorts,
+  maturityDays,
+}: {
+  cohorts: PRMergeRateCohort[]
+  maturityDays: number
+}) {
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(10)
   const pageCount = Math.max(1, Math.ceil(cohorts.length / pageSize))
@@ -542,8 +582,8 @@ function PRMergeRateTable({ cohorts }: { cohorts: PRMergeRateCohort[] }) {
                   Merge rate
                 </TooltipTrigger>
                 <TooltipPopup className="max-w-xs">
-                  Includes PRs old enough to have a meaningful outcome; newer
-                  open PRs are still gathering data.
+                  Includes merged and closed PRs, plus PRs open for at least{" "}
+                  {maturityDays} days. Newer open PRs are excluded.
                 </TooltipPopup>
               </Tooltip>
             </th>
@@ -572,7 +612,7 @@ function PRMergeRateTable({ cohorts }: { cohorts: PRMergeRateCohort[] }) {
                 {cohort.closed_without_merge}
               </td>
               <td className="px-2 py-3 text-right tabular-nums">
-                {cohort.mature_pending + cohort.waiting}
+                <OpenPRCount cohort={cohort} maturityDays={maturityDays} />
               </td>
               <td className="px-4 py-3 text-right text-sm font-semibold tabular-nums">
                 {cohort.mature_cohort_merge_share == null
