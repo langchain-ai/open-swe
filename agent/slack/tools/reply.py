@@ -13,9 +13,11 @@ from agent.slack.client import (
     get_active_slack_thread,
     post_slack_ephemeral_reply,
     post_slack_thread_reply_with_ts,
+    replace_slack_command_message,
     slack_thread_mutation_lock,
     store_slack_message_run_mapping,
 )
+from agent.slack.events import claim_slack_event
 from agent.slack.orphan import (
     dashboard_handoff_message,
     move_thread_to_dashboard,
@@ -146,12 +148,30 @@ async def _ephemeral_reply(
         return {"success": False, "error": "Missing the Slack channel or user to answer"}
     if not message.strip():
         return {"success": False, "error": "Message cannot be empty"}
+    text = convert_mentions_to_slack_format(message)
+    usage = summarize_run_usage(state)
+    response_url = cfg.slack_ask_response_url or ""
+    # The acknowledgement stands in for this answer, so the first reply takes its
+    # place rather than leaving it above a duplicate.
+    if response_url and await claim_slack_event(f"slack-ask-answer:{cfg.thread_id}"):
+        if await replace_slack_command_message(
+            response_url,
+            text,
+            blocks=blocks,
+            usage=usage,
+            agent_thread_id=cfg.thread_id,
+        ):
+            return {"success": True}
+        logger.warning(
+            "Could not replace the Slack slash command acknowledgement",
+            extra={"agent_thread_id": cfg.thread_id},
+        )
     posted = await post_slack_ephemeral_reply(
         channel_id,
         user_id,
-        convert_mentions_to_slack_format(message),
+        text,
         blocks=blocks,
-        usage=summarize_run_usage(state),
+        usage=usage,
         agent_thread_id=cfg.thread_id,
     )
     if not posted:
