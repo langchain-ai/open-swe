@@ -242,7 +242,14 @@ const DEV_PORT = Number(process.env.PORT) || 3000
 
 const config = defineConfig({
   base: BASE_PATH,
-  server: { port: DEV_PORT, strictPort: true, hmr: { clientPort: DEV_PORT } },
+  server: {
+    port: DEV_PORT,
+    strictPort: true,
+    hmr: { clientPort: DEV_PORT },
+    // A backend running in Docker (`langgraph up`) reaches this server through
+    // the host gateway name, which Vite's host check rejects by default.
+    allowedHosts: ["host.docker.internal"],
+  },
   resolve: { tsconfigPaths: true },
   optimizeDeps: {
     include: [
