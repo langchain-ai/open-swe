@@ -24,7 +24,6 @@ import { Route as AdminEvalsRouteImport } from './routes/admin_.evals'
 import { Route as AgentsIndexRouteImport } from './routes/agents/index'
 import { Route as AgentsThreadIdRouteImport } from './routes/agents/$threadId'
 import { Route as AgentsSkillsRouteImport } from './routes/agents/skills'
-import { Route as AgentsThreadsRouteImport } from './routes/agents/threads'
 import { Route as AgentsInstructionsRouteImport } from './routes/agents_.instructions'
 import { Route as AgentsSandboxRouteImport } from './routes/agents_.sandbox'
 import { Route as AgentsWorkspacesRouteImport } from './routes/agents_.workspaces'
@@ -114,11 +113,6 @@ const AgentsThreadIdRoute = AgentsThreadIdRouteImport.update({
 const AgentsSkillsRoute = AgentsSkillsRouteImport.update({
   id: '/skills',
   path: '/skills',
-  getParentRoute: () => AgentsRoute,
-} as any)
-const AgentsThreadsRoute = AgentsThreadsRouteImport.update({
-  id: '/threads',
-  path: '/threads',
   getParentRoute: () => AgentsRoute,
 } as any)
 const AgentsInstructionsRoute = AgentsInstructionsRouteImport.update({
@@ -214,7 +208,6 @@ export interface FileRoutesByFullPath {
   '/admin/evals': typeof AdminEvalsRoute
   '/agents/$threadId': typeof AgentsThreadIdRoute
   '/agents/skills': typeof AgentsSkillsRoute
-  '/agents/threads': typeof AgentsThreadsRoute
   '/agents/instructions': typeof AgentsInstructionsRoute
   '/agents/sandbox': typeof AgentsSandboxRoute
   '/agents/workspaces': typeof AgentsWorkspacesRoute
@@ -245,7 +238,6 @@ export interface FileRoutesByTo {
   '/admin/evals': typeof AdminEvalsRoute
   '/agents/$threadId': typeof AgentsThreadIdRoute
   '/agents/skills': typeof AgentsSkillsRoute
-  '/agents/threads': typeof AgentsThreadsRoute
   '/agents/instructions': typeof AgentsInstructionsRoute
   '/agents/sandbox': typeof AgentsSandboxRoute
   '/agents/workspaces': typeof AgentsWorkspacesRoute
@@ -279,7 +271,6 @@ export interface FileRoutesById {
   '/admin_/evals': typeof AdminEvalsRoute
   '/agents/$threadId': typeof AgentsThreadIdRoute
   '/agents/skills': typeof AgentsSkillsRoute
-  '/agents/threads': typeof AgentsThreadsRoute
   '/agents_/instructions': typeof AgentsInstructionsRoute
   '/agents_/sandbox': typeof AgentsSandboxRoute
   '/agents_/workspaces': typeof AgentsWorkspacesRoute
@@ -314,7 +305,6 @@ export interface FileRouteTypes {
     | '/admin/evals'
     | '/agents/$threadId'
     | '/agents/skills'
-    | '/agents/threads'
     | '/agents/instructions'
     | '/agents/sandbox'
     | '/agents/workspaces'
@@ -345,7 +335,6 @@ export interface FileRouteTypes {
     | '/admin/evals'
     | '/agents/$threadId'
     | '/agents/skills'
-    | '/agents/threads'
     | '/agents/instructions'
     | '/agents/sandbox'
     | '/agents/workspaces'
@@ -378,7 +367,6 @@ export interface FileRouteTypes {
     | '/admin_/evals'
     | '/agents/$threadId'
     | '/agents/skills'
-    | '/agents/threads'
     | '/agents_/instructions'
     | '/agents_/sandbox'
     | '/agents_/workspaces'
@@ -525,13 +513,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AgentsSkillsRouteImport
       parentRoute: typeof AgentsRoute
     }
-    '/agents/threads': {
-      id: '/agents/threads'
-      path: '/threads'
-      fullPath: '/agents/threads'
-      preLoaderRoute: typeof AgentsThreadsRouteImport
-      parentRoute: typeof AgentsRoute
-    }
     '/agents_/instructions': {
       id: '/agents_/instructions'
       path: '/agents/instructions'
@@ -643,7 +624,6 @@ declare module '@tanstack/react-router' {
 interface AgentsRouteChildren {
   AgentsThreadIdRoute: typeof AgentsThreadIdRoute
   AgentsSkillsRoute: typeof AgentsSkillsRoute
-  AgentsThreadsRoute: typeof AgentsThreadsRoute
   AgentsIndexRoute: typeof AgentsIndexRoute
   AgentsThreadIdPlanRoute: typeof AgentsThreadIdPlanRoute
   AgentsAutomationsScheduleIdRoute: typeof AgentsAutomationsScheduleIdRoute
@@ -657,7 +637,6 @@ interface AgentsRouteChildren {
 const AgentsRouteChildren: AgentsRouteChildren = {
   AgentsThreadIdRoute: AgentsThreadIdRoute,
   AgentsSkillsRoute: AgentsSkillsRoute,
-  AgentsThreadsRoute: AgentsThreadsRoute,
   AgentsIndexRoute: AgentsIndexRoute,
   AgentsThreadIdPlanRoute: AgentsThreadIdPlanRoute,
   AgentsAutomationsScheduleIdRoute: AgentsAutomationsScheduleIdRoute,

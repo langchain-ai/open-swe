@@ -1271,7 +1271,9 @@ async def test_admin_schedule_keeps_tools_without_personal_execution_identity(
     from agent.tools import automations, organization_skills, workspaces
 
     monkeypatch.setenv("CONFIGURED_ADMINS", "alice")
-    monkeypatch.setattr(server, "email_for_login", AsyncMock(return_value=None))
+    from agent.tools import admin_gate
+
+    monkeypatch.setattr(admin_gate, "email_for_login", AsyncMock(return_value=None))
     record = {
         "id": "admin-schedule",
         "prompt": "Manage workspace environments",

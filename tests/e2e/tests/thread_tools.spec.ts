@@ -153,10 +153,6 @@ async function successfulThreadTools(
   return successes;
 }
 
-function threadsUrl(resolved: boolean) {
-  return `/agents/threads?resolved=${resolved}&q=${encodeURIComponent(TARGET_TITLE)}&layout=list&group=none`;
-}
-
 test.afterEach(async ({ request }) => {
   await purgeParticipantThreads(request);
 });
@@ -165,18 +161,6 @@ test("agent thread tools update the real threads UI", async ({ page }) => {
   await loginAs(page);
   await saveDefaultModel(page);
   await seedTargetThread(page.request);
-
-  await page.goto(threadsUrl(false));
-  const activeMain = page.locator("main");
-  const activeTarget = activeMain
-    .getByRole("link", { name: new RegExp(TARGET_TITLE) })
-    .first();
-  await expect(activeTarget).toBeVisible();
-  const activeRow = activeTarget.locator("..");
-  await expect(
-    activeRow.getByRole("button", { name: "Resolve thread" }),
-  ).toBeVisible();
-  await expect(activeRow).not.toContainText("Resolved");
 
   await page.goto("/agents");
   await typeIntoComposer(
@@ -213,16 +197,4 @@ test("agent thread tools update the real threads UI", async ({ page }) => {
       get_thread: true,
       manage_thread: true,
     });
-
-  await page.goto(threadsUrl(true));
-  const resolvedMain = page.locator("main");
-  const resolvedTarget = resolvedMain
-    .getByRole("link", { name: new RegExp(TARGET_TITLE) })
-    .first();
-  await expect(resolvedTarget).toBeVisible();
-  const resolvedRow = resolvedTarget.locator("..");
-  await expect(resolvedRow).toContainText("Resolved");
-  await expect(
-    resolvedRow.getByRole("button", { name: "Reopen thread" }),
-  ).toBeVisible();
 });

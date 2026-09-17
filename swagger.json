@@ -794,6 +794,11 @@
             ],
             "title": "Default Subagent Model"
           },
+          "dm_session_enabled": {
+            "default": false,
+            "title": "Dm Session Enabled",
+            "type": "boolean"
+          },
           "draft_prs": {
             "anyOf": [
               {
@@ -2334,39 +2339,6 @@
             ],
             "title": "Default Agent Routing Balanced Reasoning Effort"
           },
-          "default_agent_routing_fast_alt_model": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Default Agent Routing Fast Alt Model"
-          },
-          "default_agent_routing_fast_alt_probability": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Default Agent Routing Fast Alt Probability"
-          },
-          "default_agent_routing_fast_alt_reasoning_effort": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Default Agent Routing Fast Alt Reasoning Effort"
-          },
           "default_agent_routing_fast_model": {
             "anyOf": [
               {
@@ -2553,6 +2525,17 @@
               }
             ],
             "title": "Default Thread Title Reasoning Effort"
+          },
+          "expedited_review_enabled": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expedited Review Enabled"
           },
           "fable_enabled": {
             "anyOf": [
@@ -11086,6 +11069,25 @@
           }
         },
         "summary": "Slack Code Channel Command"
+      }
+    },
+    "/webhooks/slack/commands": {
+      "post": {
+        "description": "Answer a single `/oswe` question, ephemerally and without a Slack thread.",
+        "operationId": "slack_command_webhooks_slack_commands_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SlashCommandResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Slack Command"
       }
     },
     "/webhooks/slack/interactivity": {

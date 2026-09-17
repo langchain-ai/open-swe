@@ -465,7 +465,7 @@ async def slack_webhook(
             )
         )
         is_untagged_two_party_reply = bool(
-            not event.subtype
+            event.subtype in {"", "file_share"}
             and not is_direct_message
             and not has_username_mention
             and not has_id_mention

@@ -19,6 +19,8 @@ from agent.config import ENV
 
 logger = logging.getLogger(__name__)
 
+_MODEL_ROUTING_SPLIT = 0.5
+
 from langgraph.graph.state import RunnableConfig
 from langgraph.pregel import Pregel
 from langgraph.runtime import Runtime
@@ -47,7 +49,6 @@ from langchain_core.messages import HumanMessage
 
 from agent.analytics.usage import record_agent_invocation_usage
 from agent.credential_scope import private_credential_login
-from agent.dashboard.admin import is_admin
 from agent.dashboard.agent_overrides import (
     load_profile,
     normalize_profile_overrides,
@@ -62,7 +63,6 @@ from agent.dashboard.options import (
     gate_fable_model,
     model_supports_effort,
 )
-from agent.dashboard.user_mappings import email_for_login
 from agent.dashboard.workspace_settings import WorkspaceSettings, get_workspace_settings
 from agent.dashboard.workspace_settings_cache import cached_workspace_settings
 from agent.desktop import create_desktop_backend, desktop_artifact_routes, is_desktop_run
@@ -110,7 +110,7 @@ from agent.middleware import (
     task_retry_on,
 )
 from agent.middleware.conversation_offloading import ConversationOffloadingMiddleware
-from agent.middleware.model_selection import ModelSelectionState
+from agent.middleware.model_selection import ModelSelectionState, RoutingMode
 from agent.middleware.prepare_run import PrepareRunState
 from agent.middleware.sandbox_circuit_breaker import post_sandbox_unreachable_notification
 from agent.prompt import (
@@ -139,7 +139,6 @@ from agent.sandboxes.state import (
     SandboxUnreachableError,
     get_or_create_sandbox_backend_proxy,
 )
-from agent.schedules.store import authorized_admin_schedule
 from agent.skill_store.store import ORGANIZATION_SKILLS_NAMESPACE, SKILLS_NAMESPACE
 from agent.slack.dm import is_dm_session
 from agent.thread_title import TITLE_GENERATION_MAX_TOKENS, schedule_thread_title_generation
@@ -178,7 +177,6 @@ from agent.tools import (
     refresh_workspace_start,
     report_platform_issue,
     request_pr_review,
-    sandbox_reset,
     save_organization_skill,
     save_plan,
     save_user_instructions,
@@ -195,6 +193,7 @@ from agent.tools import (
     update_automation,
     web_search,
 )
+from agent.tools.admin_gate import actor_is_admin, is_private_admin_thread
 from agent.utils import ttl_cache
 from agent.utils.authorship import (
     CollaboratorIdentity,
@@ -357,7 +356,6 @@ PLAN_MODE_EXCLUDED_TOOLS: frozenset[str] = frozenset(
         "manage_thread",
         "open_pull_request",
         "recreate_sandbox",
-        "sandbox_reset",
         "request_pr_review",
         "save_user_skill",
         "delete_user_skill",
@@ -488,7 +486,6 @@ _SENDER_CONTEXT_SYSTEM: SystemIdentity = {
 
 # Added to an admin thread's tools; see the admin-thread section of the prompt.
 ADMIN_TOOLS = (
-    sandbox_reset,
     list_automations,
     create_automation,
     update_automation,
@@ -509,26 +506,12 @@ def workspace_slug(cfg: RunConfig) -> str | None:
 
 
 async def _workspace_admin(config: RunnableConfig, profile_login: str | None) -> bool:
-    cfg = RunConfig.from_config(config)
-    if cfg.source == "schedule":
-        return await authorized_admin_schedule(cfg) is not None
-    login = profile_login or cfg.github_login
-    if is_admin(cfg.user_email, login=login):
-        return True
-    return is_admin(await email_for_login(login), login=login)
+    return await actor_is_admin(RunConfig.from_config(config), login=profile_login)
 
 
 async def _admin_thread(config: RunnableConfig, profile_login: str | None) -> bool:
-    """Whether this run may manage workspaces and organization skills.
-
-    The dashboard only stamps ``admin_thread`` for an admin session, but the flag
-    is re-checked here against ``CONFIGURED_ADMINS`` so a thread cannot carry the
-    capability to a non-admin who later messages it. Scheduled runs instead verify
-    the saved authorization for their specific invocation.
-    """
-    return RunConfig.from_config(config).admin_thread is True and await _workspace_admin(
-        config, profile_login
-    )
+    """Whether this run may manage workspaces and organization skills."""
+    return await is_private_admin_thread(RunConfig.from_config(config), login=profile_login)
 
 
 async def _cached_tool_loader(key: str, ttl_seconds: float, loader: Any) -> list[Any]:
@@ -613,6 +596,12 @@ def _slack_dm_run(cfg: RunConfig) -> bool:
         and cfg.slack_thread is not None
         and is_dm_session(cfg.slack_thread.channel_context, cfg.slack_thread.thread_ts)
     )
+
+
+def _model_routing_mode(thread_id: str) -> RoutingMode:
+    digest = hashlib.sha256(thread_id.encode()).hexdigest()
+    bucket = int(digest[:8], 16) / float(0xFFFF_FFFF)
+    return "auto" if bucket < _MODEL_ROUTING_SPLIT else "performance"
 
 
 def _make_model_or_defer(
@@ -959,7 +948,6 @@ async def get_agent(config: RunnableConfig) -> Pregel:
             "balanced": default_model_pair(),
             "performance": default_model_pair(),
         }
-        fast_alt_probability = 0.0
         title_defaults = model_defaults[0]
         use_gateway = gateway_env_default()
         profile = None
@@ -975,7 +963,6 @@ async def get_agent(config: RunnableConfig) -> Pregel:
             title_defaults = settings.default_thread_title_model
             use_gateway = settings.effective_gateway_enabled
             fable_enabled = settings.fable_enabled
-            fast_alt_probability = settings.fast_alt_probability
 
     slack_ask_mode = _slack_ask_mode(cfg)
     linear_issue = as_json_object(cfg.linear_issue.model_dump() if cfg.linear_issue else None)
@@ -1087,9 +1074,11 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         model_id, profile_effort = routing_defaults["fast"]
         subagent_model_id, subagent_effort = routing_defaults["fast"]
 
+    model_routing_mode = _model_routing_mode(thread_id) if adaptive_model_routing else None
     config["metadata"] = {
         **(config.get("metadata") or {}),
         "model_routing_applied": adaptive_model_routing,
+        **({"model_routing_mode": model_routing_mode} if model_routing_mode else {}),
     }
     model_id, profile_effort = gate_fable_model(
         model_id, profile_effort, fable_enabled=fable_enabled
@@ -1299,6 +1288,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
     main_model = _make_model_or_defer(model_id, use_gateway=use_gateway, **model_kwargs)
     model_selection: ModelSelectionMiddleware | None = None
     if adaptive_model_routing:
+        assert model_routing_mode is not None
         routing_models = {
             route: _make_model_or_defer(
                 routed_model_id,
@@ -1317,8 +1307,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
             route_model_ids={
                 route: routed_model_id for route, (routed_model_id, _) in routing_defaults.items()
             },
-            fast_alt_probability=fast_alt_probability,
-            thread_id=thread_id,
+            routing_mode=model_routing_mode,
         )
     subagent_model = _make_model_or_defer(
         subagent_model_id,

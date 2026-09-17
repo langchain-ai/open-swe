@@ -31,9 +31,9 @@ async def test_initialization_failure_publishes_nothing(failing_step: str) -> No
 
     with (
         patch(
-            "agent.sandboxes.lifecycle.get_sandbox_id_from_metadata",
+            "agent.sandboxes.lifecycle.get_sandbox_metadata",
             new_callable=AsyncMock,
-            return_value=None,
+            return_value={},
         ),
         patch(
             "agent.sandboxes.lifecycle._create_sandbox_with_proxy",
@@ -61,9 +61,9 @@ async def test_new_sandbox_persists_its_base_proxy_config() -> None:
 
     with (
         patch(
-            "agent.sandboxes.lifecycle.get_sandbox_id_from_metadata",
+            "agent.sandboxes.lifecycle.get_sandbox_metadata",
             new_callable=AsyncMock,
-            return_value=None,
+            return_value={},
         ),
         patch(
             "agent.sandboxes.lifecycle._create_sandbox_with_proxy",

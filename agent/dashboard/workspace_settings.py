@@ -79,10 +79,6 @@ class WorkspaceSettingsUpdate(BaseModel):
     default_agent_subagent_reasoning_effort: str | None = None
     default_agent_routing_fast_model: str | None = None
     default_agent_routing_fast_reasoning_effort: str | None = None
-    default_agent_routing_fast_alt_model: str | None = None
-    default_agent_routing_fast_alt_reasoning_effort: str | None = None
-    # Probability that a fast-routed turn goes to the fast_alt model instead.
-    default_agent_routing_fast_alt_probability: float | None = None
     default_agent_routing_balanced_model: str | None = None
     default_agent_routing_balanced_reasoning_effort: str | None = None
     default_agent_routing_performance_model: str | None = None
@@ -127,7 +123,7 @@ class WorkspaceSettingsUpdate(BaseModel):
                 self.default_agent_subagent_reasoning_effort,
             )
         )
-        for tier in ("fast", "fast_alt", "balanced", "performance"):
+        for tier in ("fast", "balanced", "performance"):
             model_field = f"default_agent_routing_{tier}_model"
             effort_field = f"default_agent_routing_{tier}_reasoning_effort"
             if not hasattr(self, model_field):
@@ -137,12 +133,6 @@ class WorkspaceSettingsUpdate(BaseModel):
             )
             setattr(self, model_field, model)
             setattr(self, effort_field, effort)
-        if self.default_agent_routing_fast_alt_model is not None:
-            if self.default_agent_routing_fast_model is None:
-                raise ValueError("fast_alt model set without a fast model")
-            probability = self.default_agent_routing_fast_alt_probability
-            if probability is not None and not 0.0 <= probability <= 1.0:
-                raise ValueError("fast_alt probability must be between 0.0 and 1.0")
         self.default_reviewer_model, self.default_reviewer_reasoning_effort = (
             _normalize_stale_model_pair(
                 self.default_reviewer_model,
@@ -180,7 +170,7 @@ class WorkspaceSettingsUpdate(BaseModel):
             self.default_agent_subagent_reasoning_effort,
             "agent subagent",
         )
-        for tier in ("fast", "fast_alt", "balanced", "performance"):
+        for tier in ("fast", "balanced", "performance"):
             _validate_model_effort_pair(
                 getattr(self, f"default_agent_routing_{tier}_model"),
                 getattr(self, f"default_agent_routing_{tier}_reasoning_effort"),
@@ -283,10 +273,6 @@ _MODEL_PAIR_FIELDS: tuple[tuple[str, str], ...] = (
     ("default_agent_subagent_model", "default_agent_subagent_reasoning_effort"),
     ("default_agent_routing_fast_model", "default_agent_routing_fast_reasoning_effort"),
     (
-        "default_agent_routing_fast_alt_model",
-        "default_agent_routing_fast_alt_reasoning_effort",
-    ),
-    (
         "default_agent_routing_balanced_model",
         "default_agent_routing_balanced_reasoning_effort",
     ),
@@ -345,12 +331,8 @@ def _default_settings() -> dict[str, Any]:
         "default_agent_reasoning_effort": fallback_effort,
         "default_agent_subagent_model": fallback_model,
         "default_agent_subagent_reasoning_effort": fallback_effort,
-        "default_agent_routing_fast_model": "fireworks:accounts/fireworks/models/glm-5p3-flash",
+        "default_agent_routing_fast_model": "openai:gpt-5.6-luna",
         "default_agent_routing_fast_reasoning_effort": "high",
-        # A/B experiment: half of fast-routed turns go to Luna.
-        "default_agent_routing_fast_alt_model": "openai:gpt-5.6-luna",
-        "default_agent_routing_fast_alt_reasoning_effort": "high",
-        "default_agent_routing_fast_alt_probability": 0.5,
         "default_agent_routing_balanced_model": "openai:gpt-5.6-sol",
         "default_agent_routing_balanced_reasoning_effort": "medium",
         "default_agent_routing_performance_model": "openai:gpt-6-astra",
@@ -411,16 +393,11 @@ def _set_fields(record: Mapping[str, Any] | None) -> dict[str, Any]:
     """The fields of a stored record that carry a value.
 
     None-valued fields fall through to the tier below, so legacy records (or
-    PUTs that cleared a selection) never pin a null; an explicit 0 fast_alt
-    probability stays, since zero is a valid "experiment off".
+    PUTs that cleared a selection) never pin a null.
     """
     if not record:
         return {}
-    return {
-        k: v
-        for k, v in record.items()
-        if v is not None or k == "default_agent_routing_fast_alt_probability"
-    }
+    return {k: v for k, v in record.items() if v is not None}
 
 
 def _finish(merged: dict[str, Any]) -> WorkspaceSettings:
@@ -647,39 +624,13 @@ class WorkspaceSettings(Mapping[str, Any]):
 
     @property
     def agent_routing_models(self) -> dict[str, tuple[str, str]]:
-        tiers = ("fast", "fast_alt", "balanced", "performance")
-        models = {
+        return {
             tier: _resolve_default_pair(
                 self.get(f"default_agent_routing_{tier}_model"),
                 self.get(f"default_agent_routing_{tier}_reasoning_effort"),
             )
-            for tier in tiers
+            for tier in ("fast", "balanced", "performance")
         }
-        fast_alt_probability = self.get("default_agent_routing_fast_alt_probability")
-        # An explicit 0 probability is a valid "experiment off" configuration; only
-        # drop the alt model when no probability (or an unparseable one) was stored
-        # or the alt model was explicitly cleared.
-        if (
-            isinstance(fast_alt_probability, bool)
-            or not isinstance(fast_alt_probability, int | float)
-            or not 0.0 <= float(fast_alt_probability) <= 1.0
-            or float(fast_alt_probability) == 0.0
-        ):
-            models.pop("fast_alt", None)
-        return models
-
-    @property
-    def fast_alt_probability(self) -> float:
-        """The stored fast-route split, defaulting to the 50/50 experiment value.
-
-        An explicit ``0`` disables the experiment (no fast turns go to the alt
-        model); a missing or invalid value restores the default 50/50 split.
-        """
-        value = self.get("default_agent_routing_fast_alt_probability")
-        if isinstance(value, bool) or not isinstance(value, int | float):
-            return 0.5
-        probability = float(value)
-        return probability if 0.0 <= probability <= 1.0 else 0.5
 
     @property
     def default_grouping_model(self) -> tuple[str, str]:
