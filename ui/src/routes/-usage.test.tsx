@@ -1325,7 +1325,12 @@ it.each([
     })
     const client = mountReport()
     const row = (await screen.findByText("cost-model")).closest("tr")!
-    expect(within(row).getByText(amount)).toBeTruthy()
+    const costIndex = within(row.closest("table")!)
+      .getAllByRole("columnheader")
+      .findIndex((header) => header.textContent === "Avg PR cost")
+    expect(
+      within(within(row).getAllByRole("cell")[costIndex]!).getByText(amount)
+    ).toBeTruthy()
     expect(
       within(row).queryByRole("button", {
         name: "Average PR cost incomplete",

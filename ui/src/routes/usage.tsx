@@ -654,11 +654,10 @@ function PRMergeRateSection({
               cost across all PR outcomes, including all runs and contributing
               models, even outside the selected period or after merge. We assume
               one PR per thread; multiple PRs each carry the whole thread cost
-              without allocation. The average is unavailable unless every PR has
-              a known thread and complete costs for all recorded runs. When more
-              than half the PRs have complete costs, the average uses only those
-              PRs and shows an incomplete-data indicator. Otherwise it is
-              unavailable. Missing or partial costs are not zero.
+              without allocation. When more than half the PRs have a known
+              thread and complete costs for all recorded runs, the average uses
+              only those PRs and shows an incomplete-data indicator. Otherwise
+              it is unavailable. Missing or partial costs are not zero.
             </p>
             {data.suppression_threshold > 1 ? (
               <p>

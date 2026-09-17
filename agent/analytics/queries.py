@@ -313,8 +313,9 @@ async def pr_merge_rate_by_model(
             "this metric does not allocate independent model credit. "
             "Average PR cost includes lifetime costs from all runs in the opening thread, "
             "across all PR outcomes. Assumes one PR per thread; multiple PRs each carry "
-            "the full thread cost without allocation. The average is unavailable unless "
-            "every PR has a known thread and complete cost observations for all recorded runs."
+            "the full thread cost without allocation. When more than half the PRs have "
+            "a known thread and complete cost observations for all recorded runs, the average "
+            "uses only those PRs; otherwise it is unavailable."
         ),
         "maturity_days": days,
         "period": period if period in {"24h", "7d", "30d", "all"} else "30d",
