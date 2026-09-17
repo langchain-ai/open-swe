@@ -480,6 +480,50 @@ it("offers recovery from unavailability without claiming an empty or suppressed 
   client.clear()
 })
 
+it("refreshes the usage leaderboard and merge rate report from the coverage footer", async () => {
+  let pendingReport: () => void = () => {}
+  vi.spyOn(api, "prMergeRateByModel")
+    .mockResolvedValueOnce(captured)
+    .mockImplementationOnce(
+      () =>
+        new Promise<PRMergeRatePayload>((resolve) => {
+          pendingReport = () => resolve(captured)
+        })
+    )
+    .mockResolvedValue(captured)
+  const client = mountReport()
+  expect(await screen.findByText("Analytics are updating")).toBeTruthy()
+
+  const beforeUsage = vi.mocked(api.usageLeaderboard).mock.calls.length
+  const beforeReport = vi.mocked(api.prMergeRateByModel).mock.calls.length
+  const button = screen.getByRole("button", { name: "Refresh now" })
+  fireEvent.click(button)
+  expect(vi.mocked(api.usageLeaderboard).mock.calls.length).toBe(
+    beforeUsage + 1
+  )
+  expect(vi.mocked(api.prMergeRateByModel).mock.calls.length).toBe(
+    beforeReport + 1
+  )
+
+  const refreshing = await screen.findByRole("button", {
+    name: "Refreshing…",
+  })
+  expect(refreshing).toHaveProperty("disabled", true)
+  fireEvent.click(refreshing)
+  expect(vi.mocked(api.prMergeRateByModel).mock.calls.length).toBe(
+    beforeReport + 1
+  )
+
+  await act(() => pendingReport())
+  expect(
+    await screen.findByRole("button", { name: "Refresh now" })
+  ).toBeTruthy()
+  expect(
+    screen.getByLabelText("Analytics coverage").querySelector("details")?.open
+  ).toBe(false)
+  client.clear()
+})
+
 it("keeps failed delivery visible when all PR groups are suppressed", async () => {
   vi.spyOn(api, "prMergeRateByModel").mockResolvedValue({
     ...captured,

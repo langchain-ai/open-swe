@@ -1,6 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router"
 import { useQuery } from "@tanstack/react-query"
 import {
+  ArrowClockwiseIcon,
   CaretDownIcon,
   CheckCircleIcon,
   ClockCountdownIcon,
@@ -153,6 +154,11 @@ function UsageAnalyticsPeriod({
       !(error instanceof ApiError && error.status === 503) && count < 2,
   })
   const report = usePRMergeRateReport(activePeriod, login, isAdmin)
+  const refreshing = leaderboard.isFetching || report.isFetching
+  const refreshNow = () => {
+    void leaderboard.refetch()
+    void report.refetch()
+  }
   const metadata = [
     leaderboard.isError ? undefined : leaderboard.data,
     report.isError ? undefined : report.data,
@@ -289,12 +295,24 @@ function UsageAnalyticsPeriod({
           </div>
         )}
       </SettingsSection>
-      <AnalyticsCoverage reports={metadata} />
+      <AnalyticsCoverage
+        reports={metadata}
+        refreshing={refreshing}
+        onRefresh={refreshNow}
+      />
     </>
   )
 }
 
-function AnalyticsCoverage({ reports }: { reports: AnalyticsMetadata[] }) {
+function AnalyticsCoverage({
+  reports,
+  refreshing,
+  onRefresh,
+}: {
+  reports: AnalyticsMetadata[]
+  refreshing: boolean
+  onRefresh: () => void
+}) {
   if (!reports.length) return null
   const latest = reports.reduce((a, b) => (a.as_of > b.as_of ? a : b))
   const hasPendingEvents = reports.some((data) => data.has_pending_events)
@@ -341,6 +359,23 @@ function AnalyticsCoverage({ reports }: { reports: AnalyticsMetadata[] }) {
               {status.description}
             </span>
           </span>
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            className="shrink-0"
+            disabled={refreshing}
+            onClick={(event) => {
+              event.preventDefault()
+              onRefresh()
+            }}
+          >
+            <ArrowClockwiseIcon
+              aria-hidden="true"
+              className={`size-3.5 ${refreshing ? "animate-spin" : ""}`}
+            />
+            {refreshing ? "Refreshing…" : "Refresh now"}
+          </Button>
           <span className="flex shrink-0 items-center gap-1 font-medium text-muted-foreground group-open:text-foreground">
             Details
             <CaretDownIcon
