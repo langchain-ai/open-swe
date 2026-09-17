@@ -40,6 +40,22 @@ _THREADS_PAGE_SCAN_CAP = 5000
 _THREAD_LIST_SELECT = ["thread_id", "status", "metadata", "created_at", "updated_at"]
 _RUN_REFRESH_CONCURRENCY = 8
 _RUNNING_METADATA_STATUSES = {"pending", "running"}
+_INTERACTIVE_SOURCES = tuple(source for source in _SURFACED_SOURCES if source != "schedule")
+
+
+def _scope_searches(
+    searches: list[dict[str, Any]],
+    *,
+    scope: Literal["all", "interactive", "automation"],
+    source: str | None,
+) -> list[dict[str, Any]]:
+    if scope != "interactive" or source is not None:
+        return searches
+    return [
+        {**search, "source": interactive_source}
+        for search in searches
+        for interactive_source in _INTERACTIVE_SOURCES
+    ]
 
 
 def _participant_search_filters(
@@ -407,7 +423,11 @@ async def list_dashboard_thread_projects(
 ) -> list[dict[str, Any]]:
     candidates = await _collect_thread_candidates(
         langgraph_client(),
-        _participant_search_filters(login, email=email, include_all=include_all),
+        _scope_searches(
+            _participant_search_filters(login, email=email, include_all=include_all),
+            scope="all" if include_automations else "interactive",
+            source=None,
+        ),
         viewer_login=login,
         viewer_email=email,
         resolved=None if include_resolved else False,
@@ -477,7 +497,11 @@ async def list_dashboard_threads_page(
     searches = (
         [{"thread_category": "automation"}, {"source": "schedule"}]
         if scope == "automation" and filter_participant_login is None
-        else _participant_search_filters(search_login, email=search_email, include_all=include_all)
+        else _scope_searches(
+            _participant_search_filters(search_login, email=search_email, include_all=include_all),
+            scope=scope,
+            source=source,
+        )
     )
     safe_offset = max(offset, 0)
     safe_limit = min(max(limit, 1), 100)
