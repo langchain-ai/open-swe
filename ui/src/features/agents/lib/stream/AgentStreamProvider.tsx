@@ -5,7 +5,6 @@ import {
   useEffect,
   useLayoutEffect,
   useMemo,
-  useRef,
   useState,
 } from "react"
 import { useChannelEffect, useStream } from "@langchain/react"
@@ -22,6 +21,7 @@ import {
   dashboardFetch,
 } from "@/lib/langgraph-client"
 import { RunTracker } from "@/lib/perf/streaming"
+import { useReconnectNotice } from "./useReconnectNotice"
 import {
   MAX_RECONNECT_ATTEMPTS,
   reconnectDelayMs,
@@ -44,7 +44,6 @@ export type {
 } from "./streamPool"
 
 const AGENT_ASSISTANT_ID = "agent"
-const RECONNECT_NOTICE_DELAY_MS = 3_000
 const SWEEP_INTERVAL_MS = 10_000
 
 const AgentStreamContext = createContext<AgentStream | null>(null)
@@ -67,34 +66,8 @@ function PooledStream({ entry }: { entry: StreamPoolEntry }) {
     [cloud]
   )
   const pool = useStreamPool.getState
-  const reconnectNoticeTimer = useRef<ReturnType<typeof setTimeout>>(null)
-  const pendingReconnect = useRef<{ attempt: number; delayMs: number }>(null)
-  const clearReconnectNotice = useCallback(() => {
-    if (reconnectNoticeTimer.current) {
-      clearTimeout(reconnectNoticeTimer.current)
-      reconnectNoticeTimer.current = null
-    }
-    pendingReconnect.current = null
-    pool().streamLive(entry.id)
-  }, [entry.id, pool])
-  const showReconnectNotice = useCallback(
-    (attempt: number, delayMs: number) => {
-      pendingReconnect.current = { attempt, delayMs }
-      if (reconnectNoticeTimer.current) return
-      reconnectNoticeTimer.current = setTimeout(() => {
-        reconnectNoticeTimer.current = null
-        const reconnect = pendingReconnect.current
-        if (!reconnect) return
-        pool().streamReconnecting(
-          entry.id,
-          reconnect.attempt,
-          Date.now() + reconnect.delayMs
-        )
-      }, RECONNECT_NOTICE_DELAY_MS)
-    },
-    [entry.id, pool]
-  )
-  useEffect(() => () => clearReconnectNotice(), [clearReconnectNotice])
+  const { schedule: scheduleReconnectNotice, clear: clearReconnectNotice } =
+    useReconnectNotice(entry.id)
   const [runTracker] = useState(
     () =>
       new RunTracker({ transport: entry.transport, threadId: entry.threadId })
@@ -113,8 +86,7 @@ function PooledStream({ entry }: { entry: StreamPoolEntry }) {
     fetch: dashboardFetch,
     maxReconnectAttempts: MAX_RECONNECT_ATTEMPTS,
     reconnectDelayMs,
-    onReconnect: ({ attempt, delayMs }) =>
-      showReconnectNotice(attempt, delayMs),
+    onReconnect: scheduleReconnectNotice,
     onConnected: clearReconnectNotice,
     onThreadId: (threadId) => {
       runTracker.bindThread(threadId)
