@@ -1,5 +1,6 @@
 """Render a pull request's diff as a syntax-highlighted PNG for Slack."""
 
+import logging
 from dataclasses import dataclass
 from io import BytesIO
 from pathlib import Path
@@ -13,6 +14,8 @@ from pygments.token import _TokenType
 from pygments.util import ClassNotFound
 
 from agent.expedited_review.eligibility import ChangedFile
+
+logger = logging.getLogger(__name__)
 
 LineKind = Literal["add", "remove", "context", "hunk", "meta"]
 
@@ -104,7 +107,7 @@ class DiffFile:
         lines: list[DiffLine] = []
         old_number = 0
         new_number = 0
-        for raw in (file.patch or "").splitlines():
+        for raw in cls._records(file.patch or ""):
             if raw.startswith("@@"):
                 old_number, new_number = cls._hunk_start(raw)
                 lines.append(DiffLine("hunk", raw, None, None))
@@ -128,6 +131,19 @@ class DiffFile:
         return cls(file.filename, file.additions, file.deletions, lines)
 
     @staticmethod
+    def _records(patch: str) -> list[str]:
+        """Patch records, split on LF only.
+
+        ``splitlines`` also breaks on form feed, vertical tab and U+2028/U+2029,
+        which a patched source line may legitimately contain; splitting there
+        would invent rows and desynchronise the line counters.
+        """
+        records = patch.split("\n")
+        if records and not records[-1]:
+            records.pop()
+        return records
+
+    @staticmethod
     def _hunk_start(header: str) -> tuple[int, int]:
         try:
             ranges = header.split("@@")[1].strip()
@@ -135,6 +151,7 @@ class DiffFile:
             old = int(old_part.lstrip("-").split(",")[0])
             new = int(new_part.lstrip("+").split(",")[0])
         except IndexError, ValueError:
+            logger.warning("Unparsable diff hunk header", extra={"hunk_header": header})
             return 1, 1
         return old, new
 
@@ -174,6 +191,9 @@ class Highlighter:
         try:
             return get_lexer_for_filename(filename, stripnl=False)
         except ClassNotFound:
+            logger.debug(
+                "No lexer for diff file; drawing it unhighlighted", extra={"diff_file": filename}
+            )
             return None
 
     def _span(self, token: _TokenType, value: str) -> Span:
@@ -310,6 +330,13 @@ class DiffImageRenderer:
             out.append(span.slice(max(start - span_start, 0), min(stop, span_end) - span_start))
         return out
 
+    def _fit_path(self, path: str, available: float) -> str:
+        """``path`` shortened from the left, so the basename always survives."""
+        if self._fonts.bold.getlength(path) <= available:
+            return path
+        keep = max(int(available / self._char_width) - 1, 1)
+        return "…" + path[-keep:]
+
     def _file_height(self, rows: list[Row]) -> int:
         return self._metrics.header_height + len(rows) * self._metrics.line_height + 14
 
@@ -330,16 +357,19 @@ class DiffImageRenderer:
         header_bottom = top + metrics.header_height
         baseline = (metrics.header_height - metrics.font_size) // 2
 
+        counts = f"+{file.additions}  \u2212{file.deletions}"
+        counts_width = self._fonts.bold.getlength(counts)
+        path_width = right - left - metrics.gutter_padding * 3 - counts_width
+
         draw.rectangle((left, top, right, header_bottom), fill=theme.surface)
         draw.text(
             (left + metrics.gutter_padding, top + baseline),
-            file.filename,
+            self._fit_path(file.filename, path_width),
             font=self._fonts.bold,
             fill=theme.text,
         )
-        counts = f"+{file.additions}  \u2212{file.deletions}"
         draw.text(
-            (right - metrics.gutter_padding - self._fonts.bold.getlength(counts), top + baseline),
+            (right - metrics.gutter_padding - counts_width, top + baseline),
             counts,
             font=self._fonts.bold,
             fill=theme.muted,

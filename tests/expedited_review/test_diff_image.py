@@ -54,6 +54,28 @@ def test_wrapped_rows_carry_the_whole_highlighted_line() -> None:
     assert "".join(span.text for row in added for span in row.spans) == long_line[1:]
 
 
+def test_unicode_separators_stay_inside_their_line() -> None:
+    patch = '@@ -1,1 +1,1 @@\n-old = 1\n+new = "a\u2028b"\n'
+    parsed = DiffFile.parse(ChangedFile(filename="x.py", additions=1, deletions=1, patch=patch))
+
+    assert [(line.kind, line.text) for line in parsed.lines] == [
+        ("hunk", "@@ -1,1 +1,1 @@"),
+        ("remove", "old = 1"),
+        ("add", 'new = "a\u2028b"'),
+    ]
+
+
+def test_a_long_path_keeps_its_basename_and_clears_the_counts() -> None:
+    renderer = DiffImageRenderer()
+    deep = "agent/" + "nested_package/" * 8 + "module_under_review.py"
+
+    fitted = renderer._fit_path(deep, 400.0)
+
+    assert fitted.startswith("\u2026")
+    assert fitted.endswith("module_under_review.py")
+    assert renderer._fonts.bold.getlength(fitted) <= 400.0
+
+
 def test_render_produces_a_png_covering_both_files() -> None:
     png = render_diff_png(
         [
