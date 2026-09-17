@@ -114,7 +114,11 @@ class TestConfigureGithubProxy:
             assert api_headers[0]["value"] == f"Bearer {token}"
 
             # env_vars are stored plaintext, so the real token must never land here.
-            assert api_rule["env_vars"] == {"GH_TOKEN": PROXY_GH_TOKEN_PLACEHOLDER}
+            assert api_rule["env_vars"] == {
+                "GH_TOKEN": PROXY_GH_TOKEN_PLACEHOLDER,
+                "COREPACK_ENABLE_STRICT": "0",
+                "COREPACK_ENABLE_DOWNLOAD_PROMPT": "0",
+            }
             assert token not in api_rule["env_vars"]["GH_TOKEN"]
 
             web_rule = rules[1]
