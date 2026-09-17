@@ -26,49 +26,25 @@ def _config(**configurable: object) -> RunnableConfig:
 
 
 @pytest.mark.asyncio
-async def test_default_workspace_snapshot_wins_over_base() -> None:
-    with (
-        patch.object(lifecycle, "load_workspace", new_callable=AsyncMock, return_value=_READY),
-        patch.object(
-            lifecycle,
-            "get_admin_base_snapshot_id",
-            new_callable=AsyncMock,
-            return_value="admin-snap",
-        ),
-    ):
+async def test_ready_workspace_snapshot_is_what_new_sandboxes_boot_from() -> None:
+    with patch.object(lifecycle, "load_workspace", new_callable=AsyncMock, return_value=_READY):
         assert (await lifecycle.SandboxCreateConfig.resolve()).snapshot_id == "env-snap"
 
 
 @pytest.mark.asyncio
-async def test_workspace_without_a_captured_snapshot_falls_back_to_base() -> None:
+async def test_workspace_without_a_captured_snapshot_falls_back_to_the_provider_base() -> None:
     never_captured = _READY.model_copy(update={"snapshot_status": "failed", "snapshot_id": None})
-    with (
-        patch.object(
-            lifecycle, "load_workspace", new_callable=AsyncMock, return_value=never_captured
-        ),
-        patch.object(
-            lifecycle,
-            "get_admin_base_snapshot_id",
-            new_callable=AsyncMock,
-            return_value="admin-snap",
-        ),
+    with patch.object(
+        lifecycle, "load_workspace", new_callable=AsyncMock, return_value=never_captured
     ):
-        assert (await lifecycle.SandboxCreateConfig.resolve()).snapshot_id == "admin-snap"
+        assert (await lifecycle.SandboxCreateConfig.resolve()).snapshot_id is None
 
 
 @pytest.mark.asyncio
 async def test_a_nightly_capture_does_not_send_runs_to_the_base_image() -> None:
     """The new id lands only on success, so a refresh in flight changes nothing."""
     capturing = _READY.model_copy(update={"snapshot_status": "capturing"})
-    with (
-        patch.object(lifecycle, "load_workspace", new_callable=AsyncMock, return_value=capturing),
-        patch.object(
-            lifecycle,
-            "get_admin_base_snapshot_id",
-            new_callable=AsyncMock,
-            return_value="admin-snap",
-        ),
-    ):
+    with patch.object(lifecycle, "load_workspace", new_callable=AsyncMock, return_value=capturing):
         assert (await lifecycle.SandboxCreateConfig.resolve()).snapshot_id == "env-snap"
 
 
@@ -77,15 +53,7 @@ async def test_snapshot_resolution_passes_the_threads_workspace() -> None:
     resolve = AsyncMock(
         return_value=_READY.model_copy(update={"slug": "staging", "snapshot_id": "staging-snap"})
     )
-    with (
-        patch.object(lifecycle, "load_workspace", resolve),
-        patch.object(
-            lifecycle,
-            "get_admin_base_snapshot_id",
-            new_callable=AsyncMock,
-            return_value="admin-snap",
-        ),
-    ):
+    with patch.object(lifecycle, "load_workspace", resolve):
         snapshot_id = (await lifecycle.SandboxCreateConfig.resolve("staging")).snapshot_id
 
     assert snapshot_id == "staging-snap"

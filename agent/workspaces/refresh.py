@@ -35,7 +35,6 @@ from typing import Any
 from langgraph_sdk import get_client
 
 from agent.config import ENV, EnvVar
-from agent.workspaces.sandbox_settings import resolve_base_snapshot_id
 from agent.workspaces.store import (
     WORKSPACES,
     RefreshKind,
@@ -280,11 +279,7 @@ async def refresh_workspace(slug: str, kind: RefreshKind = "full") -> dict[str, 
     except RuntimeError as exc:
         return {"status": "unsupported", "slug": slug, "error": str(exc)}
 
-    base = (
-        record.ready_snapshot_id
-        if kind == "update"
-        else record.base_snapshot_id or await resolve_base_snapshot_id()
-    )
+    base = record.ready_snapshot_id if kind == "update" else record.base_snapshot_id
     await WORKSPACES.mark_refreshing(slug, kind)
     started = datetime.now(UTC)
     sandbox_id: str | None = None

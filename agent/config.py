@@ -311,8 +311,6 @@ ENV.var(
     secret=True,
 )
 ENV.var("CONFIGURED_ADMINS", "Comma-separated GitHub logins or emails with admin access.")
-ENV.var("ADMIN_OIDC_SUBJECTS", "Comma-separated GitHub Actions OIDC subjects allowed as admins.")
-ENV.var("ADMIN_OIDC_AUDIENCE", "Audience required on admin OIDC tokens.", default="open-swe")
 ENV.var(
     "NOTION_MCP_CLIENT_NAME",
     "Client name registered with the Notion MCP OAuth server.",
@@ -369,7 +367,6 @@ ENV.var(
     "Sandbox provider: langsmith, modal, daytona, runloop, e2b or local.",
     default="langsmith",
 )
-ENV.var("DEFAULT_SANDBOX_SNAPSHOT_ID", "Base LangSmith snapshot new sandboxes boot from.")
 ENV.var("DEFAULT_SANDBOX_SNAPSHOT_FS_CAPACITY_BYTES", "Root filesystem size for new sandboxes.")
 ENV.var("DEFAULT_SANDBOX_VCPUS", "vCPUs for new sandboxes.")
 ENV.var("DEFAULT_SANDBOX_MEM_BYTES", "Memory for new sandboxes.")
