@@ -196,7 +196,10 @@ async def test_only_the_first_click_claims_a_single_use_element() -> None:
     row = _row()
     await save([row])
 
-    assert await claim(row.id, slack_user_id="U1") is not None
+    first = await claim(row.id, slack_user_id="U1")
+
+    assert first is not None
+    assert first.spent_action_ids == frozenset({action_id_for(row.id)})
     assert await claim(row.id, slack_user_id="U2") is None
 
 
@@ -205,10 +208,28 @@ async def test_claiming_one_answer_revokes_the_alternatives() -> None:
     chosen, sibling, elsewhere = _row(), _row(action_id="skip"), _row(message_ts="1700.000300")
     await save([chosen, sibling, elsewhere])
 
-    assert await claim(chosen.id, slack_user_id="U1") is not None
+    taken = await claim(chosen.id, slack_user_id="U1")
+
+    assert taken is not None
+    assert taken.spent_action_ids == frozenset(
+        {action_id_for(chosen.id), action_id_for(sibling.id)}
+    )
     assert await claim(sibling.id, slack_user_id="U1") is None
     # A different message keeps its own elements.
     assert await claim(elsewhere.id, slack_user_id="U1") is not None
+
+
+@pytest.mark.usefixtures("registry_db")
+async def test_a_reusable_element_survives_a_sibling_being_answered() -> None:
+    button = _row()
+    select = _row(action_id="pick_base", element_type="static_select", single_use=False)
+    await save([button, select])
+
+    taken = await claim(button.id, slack_user_id="U1")
+
+    assert taken is not None
+    assert action_id_for(select.id) not in taken.spent_action_ids
+    assert await claim(select.id, slack_user_id="U1") is not None
 
 
 @pytest.mark.usefixtures("registry_db")
@@ -216,7 +237,11 @@ async def test_a_select_can_be_changed_again() -> None:
     row = _row(element_type="static_select", single_use=False)
     await save([row])
 
-    assert await claim(row.id, slack_user_id="U1") is not None
+    reusable = await claim(row.id, slack_user_id="U1")
+
+    assert reusable is not None
+    # Nothing was spent, so nothing leaves the message.
+    assert reusable.spent_action_ids == frozenset()
     assert await claim(row.id, slack_user_id="U1") is not None
 
 

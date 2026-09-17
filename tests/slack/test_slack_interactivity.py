@@ -277,7 +277,10 @@ async def test_a_continuation_click_resumes_its_own_thread(
         message_ts="2.0",
         label="Rerun tests",
     )
-    claim = AsyncMock(return_value=row)
+    from agent.slack.continuations import Claim
+    from agent.slack.continuations import action_id_for as _aid
+
+    claim = AsyncMock(return_value=Claim(row=row, spent_action_ids=frozenset({_aid(row.id)})))
     monkeypatch.setattr(slack_routes.continuations, "claim", claim)
     lookup = AsyncMock(return_value="thread-other")
     monkeypatch.setattr(slack_routes.common, "lookup_slack_thread_id", lookup)

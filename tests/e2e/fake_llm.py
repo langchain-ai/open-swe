@@ -219,6 +219,10 @@ DELEGATE_MARKER = "E2E_DELEGATE"
 SUBAGENT_TASK_MARKER = "E2E_SUBAGENT_TASK"
 SLACK_REPLY_ORDER_MARKER = "E2E_SLACK_REPLY_ORDER"
 BLOCK_KIT_MARKER = "E2E_BLOCK_KIT"
+# A resumed run carries only the turn that woke it, so the marker has to be in
+# that turn: the envelope's own sender attribute, which nothing else sends and
+# which escaping of the body cannot touch.
+CONTINUATION_TURN_MARKER = 'sender="system:slack-continuation"'
 
 # One card holding each element class the reply path treats differently: a link
 # button Slack opens itself, a button that has to come back, and a select that
@@ -260,7 +264,7 @@ def _block_kit_echo_step(messages: list[BaseMessage]) -> AIMessage:
     humans = _script_humans(messages)
     latest = _text(humans[-1].content) if humans else ""
     match = re.search(r"Element: `([^`]+)`", latest)
-    chosen = re.search(r"<action>([^<]*)</action>", latest)
+    chosen = re.search(r"What they did: (.+)", latest)
     return AIMessage(
         content="Reporting the interaction back to Slack.",
         tool_calls=[
@@ -275,6 +279,15 @@ def _block_kit_echo_step(messages: list[BaseMessage]) -> AIMessage:
                 "id": f"call-block-kit-echo-{len(humans)}",
             }
         ],
+    )
+
+
+def _block_kit_card_step() -> StepSpec:
+    return _tool_step(
+        "Posting the failure with the actions the user can take.",
+        "slack_thread_reply",
+        {"message": "unit tests failed on this branch.", "blocks": list(_BLOCK_KIT_CARD)},
+        "call-block-kit-card",
     )
 
 
@@ -953,16 +966,16 @@ SCRIPT_LIBRARY: dict[str, tuple[StepSpec, ...]] = {
         ),
         _dynamic_step(_desktop_reply_step),
     ),
+    # Steps are consumed per model call, so the card and the answer to a click
+    # are separate scripts: a click starts a new run whose last turn carries the
+    # resume prompt, and the rules route on that.
     "block_kit": (
-        _tool_step(
-            "Posting the failure with the actions the user can take.",
-            "slack_thread_reply",
-            {"message": "unit tests failed on this branch.", "blocks": list(_BLOCK_KIT_CARD)},
-            "call-block-kit-card",
-        ),
+        _block_kit_card_step(),
+        StepSpec(content="Posted the options and waiting on the user."),
+    ),
+    "block_kit_echo": (
         _dynamic_step(_block_kit_echo_step),
-        _dynamic_step(_block_kit_echo_step),
-        StepSpec(content="Done reporting Slack interactions."),
+        StepSpec(content="Reported the interaction."),
     ),
     "slack_reply_order": (
         _tool_step(
@@ -1302,6 +1315,7 @@ SCRIPT_RULES: tuple[ScriptRule, ...] = (
         "slack_reply_order",
         lambda ctx: SLACK_REPLY_ORDER_MARKER in ctx.first_text,
     ),
+    ScriptRule("block_kit_echo", lambda ctx: CONTINUATION_TURN_MARKER in ctx.last_text),
     ScriptRule("block_kit", lambda ctx: BLOCK_KIT_MARKER in ctx.first_text),
     ScriptRule(
         "thread_tools",

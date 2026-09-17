@@ -15,6 +15,7 @@ not wake a thread whose sandbox and branch are long gone.
 """
 
 import logging
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Literal
 from uuid import UUID, uuid7
@@ -93,7 +94,15 @@ async def attach_message(tokens: list[UUID], channel_id: str, message_ts: str) -
         )
 
 
-async def claim(token: UUID, *, slack_user_id: str) -> SlackContinuation | None:
+@dataclass(frozen=True)
+class Claim:
+    """A taken click, and the ``action_id`` values it just spent."""
+
+    row: SlackContinuation
+    spent_action_ids: frozenset[str]
+
+
+async def claim(token: UUID, *, slack_user_id: str) -> Claim | None:
     """Take ownership of one click, or None when there is nothing left to take.
 
     A single-use element is flipped to ``used`` by the same statement that
@@ -111,7 +120,7 @@ async def claim(token: UUID, *, slack_user_id: str) -> SlackContinuation | None:
         if row is None:
             return None
         if not row.single_use:
-            return row
+            return Claim(row=row, spent_action_ids=frozenset())
         # `state = 'open'` in the predicate is the gate, and RETURNING says
         # whether this statement is the one that closed it.
         claimed = await session.scalar(
@@ -122,18 +131,26 @@ async def claim(token: UUID, *, slack_user_id: str) -> SlackContinuation | None:
         )
         if claimed is None:
             return None
-        # The other elements on that message offered alternatives to this one
-        # answer, so they stop being clickable with it.
+        # The other single-use elements on that message offered alternatives to
+        # this one answer, so they stop being clickable with it. A reusable one
+        # is left alone, in the row and in the message.
+        revoked: list[UUID] = []
         if row.message_ts:
-            await session.execute(
-                update(SlackContinuation)
-                .where(
-                    SlackContinuation.channel_id == row.channel_id,
-                    SlackContinuation.message_ts == row.message_ts,
-                    SlackContinuation.id != token,
-                    SlackContinuation.single_use.is_(True),
-                    SlackContinuation.state == "open",
+            revoked = list(
+                await session.scalars(
+                    update(SlackContinuation)
+                    .where(
+                        SlackContinuation.channel_id == row.channel_id,
+                        SlackContinuation.message_ts == row.message_ts,
+                        SlackContinuation.id != token,
+                        SlackContinuation.single_use.is_(True),
+                        SlackContinuation.state == "open",
+                    )
+                    .values(state="revoked", updated_at=now)
+                    .returning(SlackContinuation.id)
                 )
-                .values(state="revoked", updated_at=now)
             )
-        return row
+        return Claim(
+            row=row,
+            spent_action_ids=frozenset(action_id_for(spent) for spent in [token, *revoked]),
+        )
