@@ -258,10 +258,10 @@ it.each([
       await screen.findByText(/Includes merged and closed PRs/)
     ).toBeTruthy()
 
-    const avgTime = within(row).getByRole("button", { name: "1d" })
+    expect(within(row).queryByRole("button", { name: "1d" })).toBeNull()
+    const avgTime = within(table).getByText("Avg time to merge")
     act(() => avgTime.focus())
-    expect(await screen.findByText(/Based on 3 merged PRs/)).toBeTruthy()
-    expect(row.textContent).not.toContain("Based on")
+    expect(await screen.findByText("Unmerged PRs are excluded.")).toBeTruthy()
     act(() => avgTime.blur())
     fireEvent.keyDown(avgTime, { key: "Escape" })
 
@@ -384,7 +384,7 @@ it("shows an em dash for avg time to merge when a group has no merges", async ()
   client.clear()
 })
 
-it("shortens model paths across usage tables", async () => {
+it("shortens model paths while preserving providers across usage tables", async () => {
   vi.spyOn(api, "prMergeRateByModel").mockResolvedValue({
     ...captured,
     status: "ready",
@@ -427,6 +427,7 @@ it("shortens model paths across usage tables", async () => {
         rank: 1,
         user: { name: "Model Reader", github_login: "reader", email: null },
         favorite_model: "fireworks:accounts/fireworks/models/glm-5p3-flash",
+        favorite_model_effort: "high",
         invocations: 1,
         prs_opened: 1,
         merged_prs: 1,
@@ -443,7 +444,8 @@ it("shortens model paths across usage tables", async () => {
   })
 
   const client = mountReport()
-  expect(await screen.findAllByText("glm-5p3-flash")).toHaveLength(2)
+  expect(await screen.findAllByText("fireworks:glm-5p3-flash")).toHaveLength(2)
+  expect(screen.getByText("high")).toBeTruthy()
   expect(screen.queryByText(/accounts\/fireworks\/models/)).toBeNull()
   client.clear()
 })

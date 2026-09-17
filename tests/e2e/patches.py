@@ -140,8 +140,13 @@ def apply() -> None:
     # OAuth-token store is an external credential boundary. Stub it so a web
     # follow-up (dashboard run.start) and PR-as-user resolution have a token;
     # the real ownership/authorization checks still run.
-    from agent.dashboard import profiles
-    from agent.github import pull_request_context, pull_request_status
+    from agent.dashboard import profiles, repo_access
+    from agent.github import (
+        pull_request_actions,
+        pull_request_context,
+        pull_request_status,
+        repo_merge_methods,
+    )
     from agent.threads import access as thread_access
 
     async def _dummy_user_token(login: str, **_kwargs: object) -> str:
@@ -151,7 +156,6 @@ def apply() -> None:
 
     # Every module that bound the name at import time needs its own rebind, or
     # it keeps calling the real store and reports "no GitHub token for @user".
-    from agent.dashboard import repo_access
     from agent.github import repos as github_repos
     from agent.review import routes as review_routes
     from agent.webhooks import common as webhook_common
@@ -166,9 +170,20 @@ def apply() -> None:
         review_routes,
     ):
         module.__dict__["get_valid_access_token"] = _dummy_user_token
+    # Each of these imported GITHUB_API_BASE by name, so the module attribute is
+    # the one their calls read.
     pull_request_status.GITHUB_API_BASE = FAKE_GITHUB_API
+    pull_request_actions.GITHUB_API_BASE = FAKE_GITHUB_API
+    repo_merge_methods.GITHUB_API_BASE = FAKE_GITHUB_API
     pull_request_status.GITHUB_GRAPHQL = f"{FAKE_GITHUB_API}/graphql"
     pull_request_context.GITHUB_GRAPHQL = f"{FAKE_GITHUB_API}/graphql"
+    pull_request_actions.GITHUB_GRAPHQL = f"{FAKE_GITHUB_API}/graphql"
+
+    # The repo-access check builds its api.github.com URL inline, so there is no
+    # base to repoint; swap the one call for the same request against the fake.
+    # require_repo_access_for_user's own token fetch, 401 refresh and status
+    # mapping still run.
+    repo_access.assert_repo_access = _fake_assert_repo_access
 
     # Every other module that captured the REST base at import time: PR and
     # check reads (``ci``), the check-run writes, and the expedited-review
@@ -204,6 +219,27 @@ def apply() -> None:
     workspace_refresh._release_builder_sandbox = _release_nothing
 
     _applied = True
+
+
+async def _fake_assert_repo_access(full_name: str, token: str) -> str:
+    import httpx2
+    from e2e_env import FAKE_GITHUB_API
+
+    from agent.dashboard import repo_access
+
+    normalized = repo_access.normalize_repo_full_name(full_name)
+    owner, name = normalized.split("/", 1)
+    async with httpx2.AsyncClient(timeout=repo_access.DEFAULT_HTTP_TIMEOUT) as client:
+        response = await client.get(
+            f"{FAKE_GITHUB_API}/repos/{owner}/{name}",
+            headers={
+                "Authorization": f"Bearer {token}",
+                "Accept": "application/vnd.github+json",
+                "X-GitHub-Api-Version": "2022-11-28",
+            },
+        )
+    repo_access._raise_for_github_repo_status(response.status_code)  # noqa: SLF001
+    return normalized
 
 
 async def _fake_builder_sandbox(_record: object, _snapshot_id: object = None) -> object:

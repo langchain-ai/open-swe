@@ -279,7 +279,7 @@ def _decode_usage_cursor(cursor: str, workspace: UUID, period: str) -> tuple[dat
 _USAGE_SQL = """
 WITH runs AS (
     SELECT COALESCE(a.person_id, r.user_id) AS person_id, r.configured_model_id,
-        r.thread_id,
+        r.configured_effort, r.thread_id,
         COALESCE(c.total_tokens, r.total_tokens, 0) AS total_tokens,
         c.cost_usd, c.status AS cost_status,
         CASE WHEN r.terminal_at >= r.started_at
@@ -312,6 +312,13 @@ WITH runs AS (
       ON m.workspace_id = :workspace_id AND m.model_id = r.configured_model_id
     GROUP BY r.person_id, m.provider_model_id
     ORDER BY r.person_id, count(*) DESC, m.provider_model_id
+), efforts AS (
+    SELECT DISTINCT ON (r.person_id, m.provider_model_id)
+        r.person_id, m.provider_model_id, r.configured_effort
+    FROM runs r JOIN model_directory m
+      ON m.workspace_id = :workspace_id AND m.model_id = r.configured_model_id
+    GROUP BY r.person_id, m.provider_model_id, r.configured_effort
+    ORDER BY r.person_id, m.provider_model_id, count(*) DESC, r.configured_effort
 ), prs AS (
     SELECT COALESCE(a.person_id, u.user_id, r.user_id) AS person_id,
         p.current_state, COALESCE(u.additions, 0) AS additions,
@@ -350,6 +357,7 @@ WITH runs AS (
         COALESCE(r.avg_invocation_seconds, 0) AS avg_invocation_seconds,
         COALESCE(r.avg_thread_seconds, 0) AS avg_thread_seconds,
         COALESCE(m.provider_model_id, 'default') AS favorite_model,
+        e.configured_effort AS favorite_model_effort,
         COALESCE(pr.prs_opened, 0) AS prs_opened,
         COALESCE(pr.merged_prs, 0) AS merged_prs,
         COALESCE(pr.additions, 0) AS additions,
@@ -361,6 +369,8 @@ WITH runs AS (
     LEFT JOIN run_totals r ON r.person_id = p.person_id
     LEFT JOIN pr_totals pr ON pr.person_id = p.person_id
     LEFT JOIN models m ON m.person_id = p.person_id
+    LEFT JOIN efforts e
+      ON e.person_id = p.person_id AND e.provider_model_id = m.provider_model_id
 ), ranked AS (
     SELECT *, row_number() OVER (
         ORDER BY merged_prs DESC, agent_loc DESC, prs_opened DESC, name, person_id
@@ -377,6 +387,7 @@ WITH runs AS (
                 'avatar_url', CASE WHEN NULLIF(github_login, '') IS NOT NULL
                     THEN 'https://github.com/' || github_login || '.png?size=80' END),
             'favorite_model', favorite_model,
+            'favorite_model_effort', favorite_model_effort,
             'avg_invocation_seconds', avg_invocation_seconds,
             'avg_thread_seconds', avg_thread_seconds,
             'avg_run_seconds', avg_invocation_seconds,

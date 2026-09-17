@@ -530,6 +530,10 @@ function OpenPRCount({
 }) {
   const [open, setOpen] = useState(false)
 
+  if (cohort.waiting === 0 && cohort.mature_pending === 0) {
+    return <span>0</span>
+  }
+
   return (
     <Tooltip open={open} onOpenChange={setOpen}>
       <TooltipTrigger
@@ -552,19 +556,12 @@ function OpenPRCount({
 }
 
 function AvgTimeToMerge({ cohort }: { cohort: PRMergeRateCohort }) {
-  if (cohort.avg_merge_seconds == null) {
-    return <span>—</span>
-  }
   return (
-    <Tooltip>
-      <TooltipTrigger className="cursor-help rounded-sm underline decoration-dotted underline-offset-2 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring">
-        {formatAvgMergeTime(cohort.avg_merge_seconds)}
-      </TooltipTrigger>
-      <TooltipPopup className="max-w-xs">
-        Based on {cohort.merged} merged {cohort.merged === 1 ? "PR" : "PRs"};
-        unmerged PRs are excluded.
-      </TooltipPopup>
-    </Tooltip>
+    <span>
+      {cohort.avg_merge_seconds == null
+        ? "—"
+        : formatAvgMergeTime(cohort.avg_merge_seconds)}
+    </span>
   )
 }
 
@@ -609,7 +606,12 @@ function PRMergeRateTable({
               </Tooltip>
             </th>
             <th className="px-4 py-3 text-right font-normal">
-              Avg time to merge
+              <Tooltip>
+                <TooltipTrigger className="cursor-help rounded-sm underline decoration-dotted underline-offset-2 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring">
+                  Avg time to merge
+                </TooltipTrigger>
+                <TooltipPopup>Unmerged PRs are excluded.</TooltipPopup>
+              </Tooltip>
             </th>
           </tr>
         </thead>
@@ -629,7 +631,7 @@ function PRMergeRateTable({
                       {hasMultipleEfforts ? (
                         <button
                           type="button"
-                          className="-ml-1 rounded-sm p-1 text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+                          className="-ml-1 size-5.5 shrink-0 rounded-sm p-1 text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
                           aria-expanded={isExpanded}
                           aria-label={`${isExpanded ? "Collapse" : "Expand"} ${modelLabel} reasoning efforts`}
                           onClick={() =>
@@ -647,7 +649,12 @@ function PRMergeRateTable({
                             <ChevronRight className="size-3.5" />
                           )}
                         </button>
-                      ) : null}
+                      ) : (
+                        <span
+                          aria-hidden="true"
+                          className="-ml-1 size-5.5 shrink-0"
+                        />
+                      )}
                       <div>
                         <div className="font-medium">{modelLabel}</div>
                         <div className="text-muted-foreground">
@@ -802,8 +809,15 @@ function UsageTable({
                   isCurrentUser={row.rank === currentUserRank}
                 />
               </td>
-              <td className="max-w-48 truncate px-2 py-3 text-muted-foreground">
-                {safeModelLabel(row.favorite_model) || "Unavailable"}
+              <td className="max-w-48 px-2 py-3 text-muted-foreground">
+                <div className="truncate">
+                  {safeModelLabel(row.favorite_model) || "Unavailable"}
+                </div>
+                <div className="capitalize">
+                  {row.favorite_model_effort === undefined
+                    ? null
+                    : (row.favorite_model_effort ?? "Unknown")}
+                </div>
               </td>
               <td className="px-2 py-3 text-right tabular-nums">
                 {formatNumber(
