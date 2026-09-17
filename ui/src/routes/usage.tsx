@@ -633,7 +633,7 @@ function PRMergeRateTable({
                       {hasMultipleEfforts ? (
                         <button
                           type="button"
-                          className="-ml-1 rounded-sm p-1 text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+                          className="-ml-1 size-5.5 shrink-0 rounded-sm p-1 text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
                           aria-expanded={isExpanded}
                           aria-label={`${isExpanded ? "Collapse" : "Expand"} ${modelLabel} reasoning efforts`}
                           onClick={() =>
@@ -651,7 +651,12 @@ function PRMergeRateTable({
                             <ChevronRight className="size-3.5" />
                           )}
                         </button>
-                      ) : null}
+                      ) : (
+                        <span
+                          aria-hidden="true"
+                          className="-ml-1 size-5.5 shrink-0"
+                        />
+                      )}
                       <div>
                         <div className="font-medium">{modelLabel}</div>
                         <div className="text-muted-foreground">
