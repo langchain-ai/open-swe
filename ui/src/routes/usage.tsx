@@ -508,6 +508,16 @@ function PRMergeRateSection({
               subagents, or later runs, so these rates do not measure one
               model's independent success.
             </p>
+            <p>
+              <strong>Avg PR cost</strong> averages the full lifetime thread
+              cost across all PR outcomes, including all runs and contributing
+              models, even outside the selected period or after merge. We assume
+              one PR per thread; multiple PRs each carry the whole thread cost
+              without allocation. The average is unavailable unless every PR has
+              a known thread and complete costs for all recorded runs. Coverage
+              shows how many PRs have complete costs; missing or partial costs
+              are not zero.
+            </p>
             {data.suppression_threshold > 1 ? (
               <p>
                 Groups with fewer than {data.suppression_threshold} PRs are
@@ -612,6 +622,7 @@ function PRMergeRateTable({
                 </TooltipPopup>
               </Tooltip>
             </th>
+            <th className="px-4 py-3 text-right font-normal">Avg PR cost</th>
             <th className="px-4 py-3 text-right font-normal">
               Avg time to merge
             </th>
@@ -728,6 +739,8 @@ function PRMergeRateCells({
     | "mature_pending"
     | "waiting"
     | "mature_cohort_merge_share"
+    | "avg_pr_cost_usd"
+    | "prs_with_complete_cost"
   >
   maturityDays: number
 }) {
@@ -747,6 +760,17 @@ function PRMergeRateCells({
         {cohort.mature_cohort_merge_share == null
           ? "—"
           : formatPercent(cohort.mature_cohort_merge_share)}
+      </td>
+      <td className="px-4 py-3 text-right tabular-nums">
+        {cohort.avg_pr_cost_usd == null
+          ? "—"
+          : formatCurrency(cohort.avg_pr_cost_usd)}
+        {cohort.avg_pr_cost_usd == null ? (
+          <div className="text-muted-foreground">
+            {cohort.prs_with_complete_cost}/{cohort.cohort_size} PRs with
+            complete costs
+          </div>
+        ) : null}
       </td>
     </>
   )
