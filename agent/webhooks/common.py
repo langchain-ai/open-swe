@@ -82,20 +82,17 @@ from agent.review.findings import (
 from agent.review.publish import fetch_pr_review_threads, post_review_started_comment  # noqa: F401
 from agent.review.reconcile import reconcile_findings_with_review_threads  # noqa: F401
 from agent.run_config import Repo
+from agent.slack.channels import SlackChannel
 from agent.slack.client import (
     GitHubPrRef,
     SlackThreadMappingError,  # noqa: F401
     fetch_slack_thread_messages,  # noqa: F401
     format_slack_messages_for_prompt,  # noqa: F401
-    get_slack_channel_context,
-    get_slack_channel_context_description,
-    get_slack_channel_description,
     get_slack_permalink,
     get_slack_user_info,
     get_slack_user_names,  # noqa: F401
     lookup_slack_run_mapping,  # noqa: F401
     lookup_slack_thread_id,  # noqa: F401
-    normalize_slack_channel_context,  # noqa: F401
     parse_slack_ts,  # noqa: F401
     post_slack_ephemeral_message,
     post_slack_thread_reply,
@@ -103,7 +100,6 @@ from agent.slack.client import (
     resolve_slack_links_in_context,  # noqa: F401
     resolve_slack_thread_id,  # noqa: F401
     select_slack_context_messages,  # noqa: F401
-    slack_channel_allows_operations,  # noqa: F401
     store_slack_run_mapping,  # noqa: F401
     strip_bot_mention,  # noqa: F401
     update_slack_message,
@@ -128,6 +124,7 @@ from agent.slack.feedback import (
     process_slack_reaction_added,
     process_slack_reaction_removed,
 )
+from agent.slack.payloads import SlackChannelContext
 from agent.slack.stop import process_agent_session_stopped, process_slack_stop_reaction
 from agent.source_context import SourceContext
 from agent.threads.summary import thread_is_private, thread_is_promptable
@@ -239,7 +236,6 @@ __all__ = [
     "get_github_app_installation_token_with_expiry",
     "get_profile_default_repo",
     "get_recent_comments",
-    "get_slack_channel_context_description",
     "SlackRepoResolution",
     "get_slack_repo_config",
     "get_slack_user_info",
@@ -254,7 +250,6 @@ __all__ = [
     "logger",
     "lookup_slack_thread_id",
     "model_supports_images",
-    "normalize_slack_channel_context",
     "parse_qs",
     "post_review_started_comment",
     "post_slack_thread_reply",
@@ -275,7 +270,6 @@ __all__ = [
     "set_context_bar",
     "set_reviewer_thread_metadata",
     "set_session_status",
-    "slack_channel_allows_operations",
     "slack_event_already_seen",
     "store_slack_run_mapping",
     "strip_bot_mention",
@@ -390,13 +384,13 @@ def run_id_for_logging(run: Any) -> str:
 
 async def resolve_slack_channel_context(
     channel_id: str, *, use_cache: bool = True
-) -> dict[str, Any]:
+) -> SlackChannelContext:
     """Fetch Slack channel context without blocking Slack-triggered runs on failure."""
     try:
-        return await get_slack_channel_context(channel_id, use_cache=use_cache)
+        return await SlackChannel.context_for(channel_id, use_cache=use_cache)
     except Exception:  # noqa: BLE001
         logger.exception("Failed to resolve Slack channel context")
-        return normalize_slack_channel_context(channel_id, None)
+        return SlackChannelContext(id=channel_id)
 
 
 def is_repo_allowed(repo_config: dict[str, str]) -> bool:
@@ -703,7 +697,7 @@ async def get_slack_repo_config(
     channel_id: str,
     thread_ts: str,
     slack_user_id: str | None = None,
-    channel_context: dict[str, Any] | None = None,
+    channel_context: SlackChannelContext | None = None,
     thread_id: str | None = None,
 ) -> SlackRepoResolution:
     """Resolve the default repository hint for a Slack-triggered run, if any source names one.
@@ -745,9 +739,9 @@ async def get_slack_repo_config(
     if not repo_config:
         try:
             if channel_context is not None:
-                channel_description = get_slack_channel_context_description(channel_context)
+                channel_description = channel_context.description_text
             else:
-                channel_description = await get_slack_channel_description(channel_id)
+                channel_description = (await SlackChannel.context_for(channel_id)).description_text
             if channel_description:
                 channel_repo_config = extract_repo_from_text(
                     channel_description, default_owner=default_owner

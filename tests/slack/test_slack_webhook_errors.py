@@ -6,6 +6,7 @@ import pytest
 from agent.run_config import Repo
 from agent.slack import failures as slack_failures
 from agent.slack import webhook as slack_webhook
+from agent.slack.payloads import SlackChannelContext
 from agent.slack.request import SlackRequest
 from agent.threads import plan_api
 from agent.webhooks import common as webhook_common
@@ -614,7 +615,7 @@ async def test_errored_dm_owner_falls_back_to_email_mapping(
     )
     monkeypatch.setattr(slack_webhook.User, "login_for_email", AsyncMock(return_value="alice"))
 
-    request = _event_data().model_copy(update={"channel_context": {"is_im": True}})
+    request = _event_data().model_copy(update={"channel_context": SlackChannelContext(is_im=True)})
     await slack_webhook._mark_slack_thread_errored("t1", request, None)
 
     kwargs = upsert.await_args.kwargs

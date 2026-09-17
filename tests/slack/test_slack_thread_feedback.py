@@ -14,6 +14,8 @@ from agent import completion
 from agent import thread_feedback as prompt_scheduler
 from agent.slack import routes
 from agent.slack import thread_feedback as feedback
+from agent.slack.channels import SlackChannel
+from agent.slack.payloads import SlackChannelContext
 
 _RESPONSE_URL = "https://hooks.slack.com/actions/T1/B1/test-response"
 
@@ -32,7 +34,9 @@ async def test_feedback_interaction_requires_prompt_recipient(
         payload = _rating(run_id="run-2")
     else:
         monkeypatch.setattr(
-            feedback, "get_slack_channel_context", AsyncMock(return_value={"is_ext_shared": True})
+            SlackChannel,
+            "context_for",
+            AsyncMock(return_value=SlackChannelContext(is_ext_shared=True)),
         )
     tasks = BackgroundTasks()
     await routes.slack_interactivity(_request(payload), tasks)
@@ -65,9 +69,11 @@ def context(monkeypatch: pytest.MonkeyPatch, fake_store: Any) -> dict[str, Any]:
     fake_store.seed(("slack_thread_feedback", "C1"), "run-1", record)
     monkeypatch.setattr(routes.common, "verify_slack_signature", lambda **kwargs: True)
     monkeypatch.setattr(
-        feedback,
-        "get_slack_channel_context",
-        AsyncMock(return_value={"is_ext_shared": False, "is_pending_ext_shared": False}),
+        SlackChannel,
+        "context_for",
+        AsyncMock(
+            return_value=SlackChannelContext(is_ext_shared=False, is_pending_ext_shared=False)
+        ),
     )
     monkeypatch.setattr(feedback, "post_slack_ephemeral_message", AsyncMock(return_value=True))
     monkeypatch.setattr(feedback, "respond_to_slack_interaction", AsyncMock(return_value=True))
@@ -284,7 +290,9 @@ async def test_invalid_comment_keeps_modal_open(
         payload = _submission("x" * 3001)
     else:
         monkeypatch.setattr(
-            feedback, "get_slack_channel_context", AsyncMock(return_value={"is_ext_shared": True})
+            SlackChannel,
+            "context_for",
+            AsyncMock(return_value=SlackChannelContext(is_ext_shared=True)),
         )
     tasks = BackgroundTasks()
     result = await routes.slack_interactivity(_request(payload), tasks)
@@ -545,7 +553,7 @@ async def test_scheduled_prompt_rechecks_readiness_after_channel_lookup(
     monkeypatch.setattr(prompt_scheduler, "now_ms", lambda: 400000)
     assert await prompt_scheduler.feedback_event_is_ready("thread-1", "answer:run-1")
 
-    async def channel_lookup(*args: Any, **kwargs: Any) -> dict[str, bool]:
+    async def channel_lookup(*args: Any, **kwargs: Any) -> SlackChannelContext:
         if change == "activity":
             client.threads.get.return_value["metadata"][prompt_scheduler.ACTIVITY_KEY] = 399000
         elif change == "event":
@@ -554,11 +562,9 @@ async def test_scheduled_prompt_rechecks_readiness_after_channel_lookup(
             )
         else:
             await prompt_scheduler.complete_feedback_prompt("thread-1", change)
-        return {"is_ext_shared": False, "is_pending_ext_shared": False}
+        return SlackChannelContext(is_ext_shared=False, is_pending_ext_shared=False)
 
-    monkeypatch.setattr(
-        feedback, "get_slack_channel_context", AsyncMock(side_effect=channel_lookup)
-    )
+    monkeypatch.setattr(SlackChannel, "context_for", AsyncMock(side_effect=channel_lookup))
 
     await feedback.post_slack_feedback_prompt(
         "thread-1", "run-1", "C1", expected_event_id="answer:run-1"

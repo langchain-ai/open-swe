@@ -2,8 +2,8 @@
 
 from pydantic import BaseModel, Field
 
-from agent.slack.client import SlackChannelContext
 from agent.slack.failures import SlackRequestTarget
+from agent.slack.payloads import SlackChannelContext
 from agent.utils.json_types import JsonObject
 
 

@@ -97,15 +97,15 @@ def _dispatch_input(content: ContentBlocks, source: str, configurable: dict[str,
             channel_id = f"slack:{slack_thread.channel_id}"
             channel: ChannelIdentity = {"id": channel_id, "platform": "slack"}
             channel_context = slack_thread.channel_context
-            if isinstance(channel_context, dict):
-                name = channel_context.get("name") or channel_context.get("name_normalized")
-                topic = channel_context.get("topic")
-                purpose = channel_context.get("purpose")
-                if isinstance(name, str) and name:
+            if channel_context is not None:
+                name = channel_context.label
+                topic = channel_context.topic
+                purpose = channel_context.purpose
+                if name:
                     channel["name"] = name
-                if isinstance(topic, str) and topic:
+                if topic:
                     channel["topic"] = topic
-                if isinstance(purpose, str) and purpose:
+                if purpose:
                     channel["purpose"] = purpose
             if slack_thread.thread_ts:
                 channel["thread_id"] = slack_thread.thread_ts

@@ -17,6 +17,7 @@ from agent.github import webhook as github_webhooks
 from agent.slack import client as slack_utils
 from agent.slack import webhook as slack_webhooks
 from agent.slack.client import GitHubPrRef
+from agent.slack.payloads import SlackChannelContext
 from agent.slack.request import SlackRequest
 from agent.slack.tools.request_pr_review import request_pr_review as request_pr_review_tool
 from agent.thread_ids import github_issue_thread_id
@@ -43,8 +44,8 @@ def _slack_routing_dependencies(monkeypatch: pytest.MonkeyPatch) -> None:
     async def lookup(*args: object, **kwargs: object) -> None:
         return None
 
-    async def channel_context(*args: object, **kwargs: object) -> dict[str, bool]:
-        return {"is_ext_shared": False, "is_pending_ext_shared": False}
+    async def channel_context(*args: object, **kwargs: object) -> SlackChannelContext:
+        return SlackChannelContext(is_ext_shared=False, is_pending_ext_shared=False)
 
     async def claim(*args: object, **kwargs: object) -> bool:
         return True
@@ -599,20 +600,20 @@ async def test_github_webhook_ignores_review_requested(monkeypatch, registry_db)
 def test_slack_webhook_routes_docs_plz_channel_to_agent(monkeypatch) -> None:
     captured: dict[str, object] = {}
 
-    channel_context = {
-        "id": "C123",
-        "name": "docs-plz",
-        "name_normalized": "docs-plz",
-        "topic": "Coordinate work",
-        "purpose": "repo:langchain-ai/open-swe",
-        "description": "Coordinate work\nrepo:langchain-ai/open-swe",
-        "is_ext_shared": False,
-        "is_pending_ext_shared": False,
-    }
+    channel_context = SlackChannelContext(
+        id="C123",
+        name="docs-plz",
+        name_normalized="docs-plz",
+        topic="Coordinate work",
+        purpose="repo:langchain-ai/open-swe",
+        description="Coordinate work\nrepo:langchain-ai/open-swe",
+        is_ext_shared=False,
+        is_pending_ext_shared=False,
+    )
 
     async def fake_get_slack_channel_context(
         channel_id: str, *, use_cache: bool = True
-    ) -> dict[str, str | bool]:
+    ) -> SlackChannelContext:
         captured["channel_context_request"] = channel_id
         return channel_context
 
@@ -620,7 +621,7 @@ def test_slack_webhook_routes_docs_plz_channel_to_agent(monkeypatch) -> None:
         channel_id: str,
         thread_ts: str,
         slack_user_id: str | None = None,
-        channel_context: dict[str, str] | None = None,
+        channel_context: SlackChannelContext | None = None,
         **kwargs: object,
     ) -> dict[str, str]:
         captured["repo_config_request"] = {
