@@ -1,4 +1,9 @@
-import { test, expect, type APIRequestContext, type Page } from "@playwright/test";
+import {
+  test,
+  expect,
+  type APIRequestContext,
+  type Page,
+} from "@playwright/test";
 
 // Block Kit interactions, end to end, through the real interactivity route:
 //
@@ -58,7 +63,10 @@ test.describe("Slack Block Kit interactions", () => {
 
     // A link button is an anchor Slack opens itself, never an interaction.
     const link = card(page).getByRole("link", { name: "Open the run" });
-    await expect(link).toHaveAttribute("href", "https://ci.example.com/runs/9001");
+    await expect(link).toHaveAttribute(
+      "href",
+      "https://ci.example.com/runs/9001",
+    );
     expect(await reported(request)).toHaveLength(0);
 
     // 2. Clicking the button resumes the thread, which names the agent's own
@@ -109,10 +117,15 @@ test.describe("Slack Block Kit interactions", () => {
             text: string;
             ts: string;
             is_bot: boolean;
-            blocks?: Array<{ type: string; elements?: Array<Record<string, string>> }>;
+            blocks?: Array<{
+              type: string;
+              elements?: Array<Record<string, string>>;
+            }>;
           }>;
           for (const msg of msgs) {
-            const actions = (msg.blocks || []).find((b) => b.type === "actions");
+            const actions = (msg.blocks || []).find(
+              (b) => b.type === "actions",
+            );
             const element = (actions?.elements || []).find(
               (e) => e.type === "button" && !e.url,
             );
