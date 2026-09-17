@@ -104,7 +104,7 @@ async def test_incident_uses_system_sandbox_tools_integrations_and_delegation(
         "open_pull_request",
         "http_request",
         "background_execute",
-        "slack_thread_reply",
+        "slack_reply",
         "manage_incident",
     }
     assert {"record_incident_report", "search_incidents"} <= names

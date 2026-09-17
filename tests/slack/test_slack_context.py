@@ -1472,7 +1472,7 @@ def test_process_slack_mention_creates_thread_first_run_without_trace_reply(
     assert "## Open SWE Links" in prompt
     assert f"- Web: https://app.example.com/agents/{expected_thread_id}" in prompt
     assert "- Trace: https://smith/x" in prompt
-    assert "slack_thread_reply" not in prompt
+    assert "slack_reply" not in prompt
     assert "slack_add_reaction" not in prompt
     assert "slack_read_thread_messages" not in prompt
     assert request == "continue on the branch"

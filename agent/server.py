@@ -91,6 +91,7 @@ from agent.middleware import (
     ModelSelectionMiddleware,
     PlanModeMiddleware,
     PullRequestCreationGuardMiddleware,
+    RequireUserReplyMiddleware,
     SanitizeFireworksMessagesMiddleware,
     SanitizeOpenAIResponsesMiddleware,
     SanitizeThinkingBlocksMiddleware,
@@ -188,8 +189,8 @@ from agent.tools import (
     slack_move_thread,
     slack_read_channel_messages,
     slack_read_thread_messages,
+    slack_reply,
     slack_start_new_thread,
-    slack_thread_reply,
     submit_thread_feedback,
     trigger_automation,
     update_automation,
@@ -389,7 +390,7 @@ INCIDENT_AUTOMATIC_EXCLUDED_TOOLS: frozenset[str] = PLAN_MODE_EXCLUDED_TOOLS | f
         "manage_incident",
         "slack_add_reaction",
         "slack_attach_html",
-        "slack_thread_reply",
+        "slack_reply",
     }
 )
 
@@ -1085,13 +1086,10 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         async with aphase(thread_id, "factory.store_settings"):
             await store_thread_settings(client, thread_id, {**thread_settings, **resolved_settings})
 
-    # A `/oswe` question always runs on the fast route and never routes
-    # adaptively. Applied after the thread's settings are stored, so continuing
-    # the thread on the web picks the model up from the usual defaults.
+    # A `/oswe` question runs on the asker's own default model, and never routes
+    # adaptively: one question gets one answer, so there is nothing to route.
     if slack_ask_mode:
         adaptive_model_routing = False
-        model_id, profile_effort = routing_defaults["fast"]
-        subagent_model_id, subagent_effort = routing_defaults["fast"]
 
     model_routing_mode = _model_routing_mode(thread_id) if adaptive_model_routing else None
     config["metadata"] = {
@@ -1192,8 +1190,8 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         slack_attach_html,
         slack_move_thread,
         slack_read_thread_messages,
+        slack_reply,
         slack_start_new_thread,
-        slack_thread_reply,
     ]
     static_tools = [
         http_request,
@@ -1232,8 +1230,8 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         slack_move_thread,
         slack_read_channel_messages,
         slack_read_thread_messages,
+        slack_reply,
         slack_start_new_thread,
-        slack_thread_reply,
         submit_thread_feedback,
         *(ADMIN_TOOLS if admin_thread else ()),
         *((read_only_sql,) if private_admin_surface else ()),
@@ -1272,7 +1270,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
     if local_run:
         static_tools = apply_tool_descriptions([http_request, fetch_url, web_search])
     elif stop_summary_mode:
-        static_tools = apply_tool_descriptions([slack_read_thread_messages, slack_thread_reply])
+        static_tools = apply_tool_descriptions([slack_read_thread_messages, slack_reply])
     reserved_tool_names = {_registered_tool_name(tool) for tool in static_tools}
     dynamic_tool_middleware: DynamicToolMiddleware | None = None
     integration_tool_groups: dict[str, IntegrationGroup | Sequence[Any]] = {
@@ -1442,6 +1440,11 @@ async def get_agent(config: RunnableConfig) -> Pregel:
                 refresh_github_proxy_before_model,
                 *([] if stop_summary_mode else [check_message_queue_before_model]),
                 TimeoutWrapupMiddleware(),
+                *(
+                    [RequireUserReplyMiddleware(_registered_tool_name(slack_reply))]
+                    if slack_ask_mode
+                    else []
+                ),
                 notify_step_limit_reached,
                 record_run_usage,
                 *([model_selection] if model_selection else []),

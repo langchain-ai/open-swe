@@ -43,7 +43,7 @@ function toolKind(name: string): ToolKind {
   const lowered = name.toLowerCase()
   if (lowered === "task") return "task"
   if (lowered === "read_only_sql") return "sql"
-  if (lowered === "slack_thread_reply") return "slack"
+  if (lowered === "slack_reply") return "slack"
   if (lowered === "linear_comment") return "linear"
   if (
     EDIT_TOOLS.has(lowered) ||
@@ -398,7 +398,7 @@ export function streamMessagesToUi(
           ? structuredEntities.get(parsed.sender)
           : undefined
       // Our own replies reach the transcript twice: once forwarded as thread
-      // context, once as the `slack_thread_reply` call that sent them.
+      // context, once as the `slack_reply` call that sent them.
       if (entity?.senderType === "self") return
       const text = parsed.content
       if (text.trim()) chunks.push({ kind: "text", text })

@@ -17,7 +17,7 @@ async def mark_question_answered() -> dict[str, Any]:
     suggestions, even if no other tools were needed. Do not use for coding tasks,
     plans, approval requests, blockers, or partial answers. Coding tasks request
     feedback after their PR merges.
-    For Slack answers, use slack_thread_reply with should_ask_for_feedback=True.
+    For Slack answers, use slack_reply with should_ask_for_feedback=True.
     Feedback is offered only if this run succeeds and the user does not continue
     the conversation for five minutes. This does not send a message or end the run.
     """

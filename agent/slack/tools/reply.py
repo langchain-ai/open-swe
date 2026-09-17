@@ -30,14 +30,14 @@ from agent.utils.thread_ops import langgraph_client as get_langgraph_client
 logger = logging.getLogger(__name__)
 
 
-async def slack_thread_reply(
+async def slack_reply(
     message: str,
     options: list[str] | None = None,
     blocks: list[dict[str, Any]] | None = None,
     state: Annotated[dict[str, Any] | None, InjectedState] = None,
     should_ask_for_feedback: bool = False,
 ) -> dict[str, Any]:
-    """Implement the `slack_thread_reply` tool."""
+    """Implement the `slack_reply` tool."""
     config = get_config()
     cfg = RunConfig.from_config(config)
     run_id = _current_run_id(config)

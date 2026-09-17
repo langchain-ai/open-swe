@@ -9,7 +9,7 @@ from fastapi import BackgroundTasks, Request
 from agent.run_config import Repo
 from agent.slack import ask as slack_ask
 from agent.slack import routes as slack_routes
-from agent.slack.tools import thread_reply as slack_thread_reply
+from agent.slack.tools import reply as slack_reply
 from agent.threads.listing import _metadata_matches_filters
 
 
@@ -238,9 +238,9 @@ def test_unlisted_threads_stay_out_of_the_thread_list() -> None:
 @pytest.mark.asyncio
 async def test_ask_mode_reply_is_ephemeral(monkeypatch: pytest.MonkeyPatch) -> None:
     post = AsyncMock(return_value=True)
-    monkeypatch.setattr(slack_thread_reply, "post_slack_ephemeral_reply", post)
+    monkeypatch.setattr(slack_reply, "post_slack_ephemeral_reply", post)
     monkeypatch.setattr(
-        slack_thread_reply,
+        slack_reply,
         "get_config",
         lambda: {
             "configurable": {
@@ -252,7 +252,7 @@ async def test_ask_mode_reply_is_ephemeral(monkeypatch: pytest.MonkeyPatch) -> N
         },
     )
 
-    result = await slack_thread_reply.slack_thread_reply("the answer")
+    result = await slack_reply.slack_reply("the answer")
 
     assert result == {"success": True}
     assert post.await_args.args == ("C1", "U1", "the answer")
@@ -262,9 +262,9 @@ async def test_ask_mode_reply_is_ephemeral(monkeypatch: pytest.MonkeyPatch) -> N
 @pytest.mark.asyncio
 async def test_ask_mode_refuses_options(monkeypatch: pytest.MonkeyPatch) -> None:
     post = AsyncMock(return_value=True)
-    monkeypatch.setattr(slack_thread_reply, "post_slack_ephemeral_reply", post)
+    monkeypatch.setattr(slack_reply, "post_slack_ephemeral_reply", post)
     monkeypatch.setattr(
-        slack_thread_reply,
+        slack_reply,
         "get_config",
         lambda: {
             "configurable": {
@@ -276,7 +276,7 @@ async def test_ask_mode_refuses_options(monkeypatch: pytest.MonkeyPatch) -> None
         },
     )
 
-    refused = await slack_thread_reply.slack_thread_reply("pick one", options=["a", "b"])
+    refused = await slack_reply.slack_reply("pick one", options=["a", "b"])
 
     assert refused["success"] is False
     assert refused["retry"] is True

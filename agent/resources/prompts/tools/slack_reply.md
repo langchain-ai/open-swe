@@ -1,4 +1,5 @@
-Post a message to the current Slack thread and the Web UI.
+Send a message to the person who asked, in Slack and the Web UI. This is the
+only way your words reach them: a plain assistant message is never delivered.
 
 Use this for clarifying questions, essential progress updates, and the final
 answer or outcome. For Slack-triggered information-only requests, put the

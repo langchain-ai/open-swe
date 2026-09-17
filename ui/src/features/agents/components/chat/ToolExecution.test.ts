@@ -63,7 +63,7 @@ describe("formatToolDisplay", () => {
       "Save plan"
     )
     expect(
-      formatToolDisplay("slack_thread_reply", "other", {}, projectPath)
+      formatToolDisplay("slack_reply", "other", {}, projectPath)
     ).toBe("Slack thread reply")
   })
 })
