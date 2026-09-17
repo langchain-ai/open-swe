@@ -40,10 +40,18 @@ async def api_agent_usage_leaderboard(
             current_email=session.get("email"),
             admin=session_is_admin(session),
         )
-    except (SQLAlchemyError, PostgresError, OSError, RuntimeError, ValueError) as exc:
+    except ValueError as exc:
+        # A cursor is only valid for the ordering it was issued for, so a rejected one
+        # is a stale client request rather than a deployment-level outage.
+        logger.info(
+            "Usage analytics request rejected",
+            extra={"analytics_error_type": type(exc).__name__, "analytics_error": str(exc)},
+        )
+        raise HTTPException(400, str(exc)) from exc
+    except (SQLAlchemyError, PostgresError, OSError, RuntimeError) as exc:
         logger.warning(
             "Usage analytics report unavailable",
-            extra={"analytics_error_type": type(exc).__name__},
+            extra={"analytics_error_type": type(exc).__name__, "analytics_error": str(exc)},
         )
         raise HTTPException(503, "Usage analytics is unavailable on this deployment.") from exc
 
