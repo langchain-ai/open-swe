@@ -1,3 +1,4 @@
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -19,8 +20,8 @@ class _Client:
         self.threads = _Threads(metadata)
 
 
-async def _active_mapping(login: str) -> dict[str, str]:
-    return {"github_login": login, "status": "active"}
+async def _known_user(provider: str, login: str) -> SimpleNamespace:
+    return SimpleNamespace(github_login=login)
 
 
 @pytest.mark.asyncio
@@ -34,7 +35,7 @@ async def test_resolves_slack_participants_from_verified_source_context() -> Non
     }
     with (
         patch.object(participants, "get_client", return_value=_Client(metadata)),
-        patch.object(participants, "get_mapping", side_effect=_active_mapping),
+        patch.object(participants.User, "for_login", side_effect=_known_user),
         patch.object(
             participants,
             "fetch_slack_thread_messages",
@@ -42,8 +43,8 @@ async def test_resolves_slack_participants_from_verified_source_context() -> Non
             return_value=[{"user": "U2"}],
         ) as fetch,
         patch.object(
-            participants,
-            "login_for_slack_id",
+            participants.User,
+            "login_for_slack",
             new_callable=AsyncMock,
             return_value="teammate",
         ),
@@ -67,7 +68,7 @@ async def test_resolves_linear_participants_from_metadata() -> None:
     }
     with (
         patch.object(participants, "get_client", return_value=_Client(metadata)),
-        patch.object(participants, "get_mapping", side_effect=_active_mapping),
+        patch.object(participants.User, "for_login", side_effect=_known_user),
     ):
         logins, unresolved, error = await participants.resolve_thread_participant_logins(
             {"configurable": {"thread_id": "thread-1", "source": "linear"}}
@@ -88,7 +89,6 @@ async def test_resolves_github_participants_from_issue_context() -> None:
     }
     with (
         patch.object(participants, "get_client", return_value=_Client(metadata)),
-        patch.object(participants, "get_mapping", return_value=None),
         patch.object(participants, "get_github_token", return_value="token"),
         patch.object(
             participants,
@@ -118,7 +118,7 @@ async def test_source_fetch_failure_does_not_fall_back_to_metadata_owner() -> No
     }
     with (
         patch.object(participants, "get_client", return_value=_Client(metadata)),
-        patch.object(participants, "get_mapping", side_effect=_active_mapping),
+        patch.object(participants.User, "for_login", side_effect=_known_user),
         patch.object(
             participants,
             "fetch_slack_thread_messages",

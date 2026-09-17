@@ -8,11 +8,11 @@ from langgraph.config import get_config
 from langgraph_sdk import get_client
 
 from agent.dashboard.agent_overrides import resolve_github_login
-from agent.dashboard.user_mappings import get_mapping, login_for_email, login_for_slack_id
 from agent.github.comments import fetch_github_thread_participants
 from agent.github.thread_token import get_github_token
 from agent.slack.client import fetch_slack_thread_messages
 from agent.source_context import SourceContext
+from agent.users import User
 from agent.utils.json_types import as_json_object, thread_metadata
 
 PARTICIPANT_LOGINS_KEY = "participant_logins"
@@ -72,11 +72,8 @@ def participant_logins(stored: Any) -> list[str]:
 async def _active_mapping_login(login: str | None) -> str | None:
     if not isinstance(login, str) or not login.strip():
         return None
-    record = await get_mapping(login.strip())
-    if not record or record.get("status", "active") != "active":
-        return None
-    value = record.get("github_login")
-    return value.strip() if isinstance(value, str) and value.strip() else None
+    user = await User.for_login("github", login.strip())
+    return (user.github_login or None) if user is not None else None
 
 
 async def _mapped_slack_logins(messages: list[dict[str, Any]]) -> tuple[set[str], int]:
@@ -89,13 +86,13 @@ async def _mapped_slack_logins(messages: list[dict[str, Any]]) -> tuple[set[str]
         and isinstance(user_id := message.get("user"), str)
         and user_id
     }
-    resolved = await asyncio.gather(*(login_for_slack_id(user_id) for user_id in user_ids))
+    resolved = await asyncio.gather(*(User.login_for_slack(user_id) for user_id in user_ids))
     mapped = await asyncio.gather(*(_active_mapping_login(login) for login in resolved))
     return {login for login in mapped if login}, sum(login is None for login in mapped)
 
 
 async def _mapped_email_logins(emails: set[str]) -> tuple[set[str], int]:
-    resolved = await asyncio.gather(*(login_for_email(email) for email in emails))
+    resolved = await asyncio.gather(*(User.login_for_email(email) for email in emails))
     mapped = await asyncio.gather(*(_active_mapping_login(login) for login in resolved))
     return {login for login in mapped if login}, sum(login is None for login in mapped)
 
@@ -203,7 +200,7 @@ async def resolve_participant(on_behalf_of: str) -> str:
     if not login:
         raise ValueError("on_behalf_of is required: name the thread participant to act for.")
     config = get_config()
-    caller = resolve_github_login(as_json_object(config))
+    caller = await resolve_github_login(as_json_object(config))
     if not caller or login.lower() != caller.lower():
         raise ValueError("on_behalf_of must match the user who triggered this run.")
     participants, _, error = await resolve_thread_participant_logins(config)

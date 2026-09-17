@@ -29,6 +29,7 @@ import {
   reconnectDelayMs,
   useStreamConnection,
 } from "./streamConnection"
+import { useReconnectNotice } from "./useReconnectNotice"
 import type { ReactNode } from "react"
 import type {
   AgentStream,
@@ -84,7 +85,8 @@ function AgentStreamHost({
         : createLocalGraphClient(),
     [cloud]
   )
-  const connection = useStreamConnection.getState
+  const { schedule: scheduleReconnectNotice, clear: clearReconnectNotice } =
+    useReconnectNotice()
   const [runTracker] = useState(() => new RunTracker({ transport, threadId }))
   useEffect(() => () => runTracker.dispose(), [runTracker])
   useEffect(() => {
@@ -111,9 +113,8 @@ function AgentStreamHost({
     fetch: dashboardFetch,
     maxReconnectAttempts: MAX_RECONNECT_ATTEMPTS,
     reconnectDelayMs,
-    onReconnect: ({ attempt, delayMs }) =>
-      connection().reconnecting(attempt, Date.now() + delayMs),
-    onConnected: () => connection().live(),
+    onReconnect: scheduleReconnectNotice,
+    onConnected: clearReconnectNotice,
     onThreadId: (id) => {
       runTracker.bindThread(id)
       if (boundThreadId.current === null) mintedThreadId.current = id
@@ -181,19 +182,19 @@ function AgentStreamHost({
   )
 
   useEffect(() => {
-    if (!stream.isLoading) connection().live()
-  }, [connection, stream.isLoading])
+    if (!stream.isLoading) clearReconnectNotice()
+  }, [clearReconnectNotice, stream.isLoading])
 
   useEffect(() => {
     const thread = stream.getThread()
     if (!thread) return
-    return thread.onError(() => connection().live())
-  }, [connection, stream])
+    return thread.onError(clearReconnectNotice)
+  }, [clearReconnectNotice, stream])
 
   // A thread switch leaves the previous connection's status behind.
   useEffect(() => {
-    connection().live()
-  }, [connection, threadId])
+    clearReconnectNotice()
+  }, [clearReconnectNotice, threadId])
 
   return (
     <AgentStreamContext.Provider value={handle}>

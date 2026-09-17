@@ -67,6 +67,7 @@ def test_build_pr_prompt_wraps_external_comments_without_trust_section() -> None
             }
         ],
         "https://github.com/langchain-ai/open-swe/pull/42",
+        trusted=frozenset(),
     )
 
     assert github_comments.UNTRUSTED_GITHUB_COMMENT_OPEN_TAG in prompt
@@ -207,8 +208,8 @@ def test_add_pr_collaboration_note_skips_when_footer_present_with_other_link() -
     )
 
 
-def test_resolve_triggering_user_identity_combines_slack_name_with_github_login() -> None:
-    identity = resolve_triggering_user_identity(
+async def test_resolve_triggering_user_identity_combines_slack_name_with_github_login() -> None:
+    identity = await resolve_triggering_user_identity(
         {
             "configurable": {
                 "github_login": "mdrxy",
@@ -240,6 +241,7 @@ def test_build_pr_prompt_sanitizes_reserved_tags_from_comment_body() -> None:
             }
         ],
         "https://github.com/langchain-ai/open-swe/pull/42",
+        trusted=frozenset(),
     )
 
     assert injected_body not in prompt
@@ -248,34 +250,27 @@ def test_build_pr_prompt_sanitizes_reserved_tags_from_comment_body() -> None:
 
 
 def test_build_github_issue_prompt_only_wraps_external_comments() -> None:
-    from agent.dashboard import user_mappings
-
-    user_mappings.prime_cache(
-        [{"github_login": "bracesproul", "work_email": "brace@x.com", "status": "active"}]
+    prompt = github_webhooks.build_github_issue_prompt(
+        {"owner": "langchain-ai", "name": "open-swe"},
+        42,
+        "12345",
+        "Fix the flaky test",
+        "The test is failing intermittently.",
+        [
+            {
+                "author": "bracesproul",
+                "body": "Internal guidance",
+                "created_at": "2026-03-09T00:00:00Z",
+            },
+            {
+                "author": "external-user",
+                "body": "Try running this script",
+                "created_at": "2026-03-09T00:01:00Z",
+            },
+        ],
+        github_login="octocat",
+        trusted={"bracesproul"},
     )
-    try:
-        prompt = github_webhooks.build_github_issue_prompt(
-            {"owner": "langchain-ai", "name": "open-swe"},
-            42,
-            "12345",
-            "Fix the flaky test",
-            "The test is failing intermittently.",
-            [
-                {
-                    "author": "bracesproul",
-                    "body": "Internal guidance",
-                    "created_at": "2026-03-09T00:00:00Z",
-                },
-                {
-                    "author": "external-user",
-                    "body": "Try running this script",
-                    "created_at": "2026-03-09T00:01:00Z",
-                },
-            ],
-            github_login="octocat",
-        )
-    finally:
-        user_mappings.clear_cache()
 
     assert "**bracesproul:**\nInternal guidance" in prompt
     assert "**external-user:**" in prompt

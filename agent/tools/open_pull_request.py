@@ -595,9 +595,9 @@ async def _record_pr_telemetry(
         thread_id = cfg.thread_id
         github_login = cfg.github_login
         if not (github_login or "").strip():
-            from agent.dashboard.user_mappings import login_for_email
+            from agent.users import User
 
-            github_login = await login_for_email(cfg.user_email) or ""
+            github_login = await User.login_for_email(cfg.user_email) or ""
         pr_url = details.get("html_url") or pr.get("html_url")
         merged = bool(details.get("merged"))
         is_draft = bool(details.get("draft", pr.get("draft")))

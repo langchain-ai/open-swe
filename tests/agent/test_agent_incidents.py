@@ -12,7 +12,9 @@ from langchain_core.tools import StructuredTool
 
 from agent.incidents import runtime, service, turns
 from agent.incidents.models import Incident, IncidentPolicy
+from agent.mcp.instance import instance_mcp_source
 from agent.mcp.workspace import workspace_mcp_source
+from agent.slack.channels import SlackChannel
 from agent.workspaces.store import DEFAULT_WORKSPACE_SLUG
 from tests.agent.test_agent_assembly_context import (
     _capture_create_deep_agent_kwargs,
@@ -91,8 +93,11 @@ async def test_incident_uses_system_sandbox_tools_integrations_and_delegation(
     ):
         result = cast(dict[str, Any], await _capture_create_deep_agent_kwargs(_incident_config()))
     mcps.assert_awaited_once()
-    (called_source,) = mcps.await_args.args
-    assert called_source.namespace == workspace_mcp_source(DEFAULT_WORKSPACE_SLUG).namespace
+    # System runs load the instance tier and the default workspace's, never a person's.
+    assert [source.namespace for source in mcps.await_args.args] == [
+        instance_mcp_source().namespace,
+        workspace_mcp_source(DEFAULT_WORKSPACE_SLUG).namespace,
+    ]
     notion.assert_awaited_once_with(None)
     assert isinstance(result["backend"].default, SandboxBackendProxy)
     names = {_registered_tool_name(tool) for tool in result["tools"]}
@@ -164,7 +169,7 @@ async def test_main_agent_records_the_incident_report_through_the_tool(
     saved_thread_scope.update(
         source="incidents_agent", owner_type="system", visibility="public", incident_id="incident"
     )
-    monkeypatch.setattr(service, "get_slack_channel_info", AsyncMock(return_value=dict(CHANNEL)))
+    monkeypatch.setattr(SlackChannel, "fetch", AsyncMock(return_value=dict(CHANNEL)))
     posted = AsyncMock(return_value=("9.0", None))
     monkeypatch.setattr(runtime, "post_slack_thread_reply_with_ts", posted)
     config = _incident_config(

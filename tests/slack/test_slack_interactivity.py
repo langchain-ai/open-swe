@@ -7,7 +7,7 @@ import pytest
 from fastapi import BackgroundTasks, Request
 
 from agent.slack import routes as slack_routes
-from agent.slack.payloads import SlackBlockAction, SlackInteraction
+from agent.slack.payloads import SlackBlockAction, SlackChannelContext, SlackInteraction
 
 
 def _request(payload: dict[str, Any]) -> Request:
@@ -95,7 +95,7 @@ async def test_external_channel_interaction_is_blocked(
     monkeypatch.setattr(
         slack_routes.common,
         "resolve_slack_channel_context",
-        AsyncMock(return_value={"is_ext_shared": True}),
+        AsyncMock(return_value=SlackChannelContext(is_ext_shared=True)),
     )
     background_tasks = BackgroundTasks()
 
@@ -122,11 +122,9 @@ async def test_option_interaction_schedules_update_before_agent_processing(
         slack_routes.common,
         "resolve_slack_channel_context",
         AsyncMock(
-            return_value={
-                "name": "proj-open-swe",
-                "is_ext_shared": False,
-                "is_pending_ext_shared": False,
-            }
+            return_value=SlackChannelContext(
+                name="proj-open-swe", is_ext_shared=False, is_pending_ext_shared=False
+            )
         ),
     )
     monkeypatch.setattr(
@@ -182,7 +180,9 @@ async def test_code_channel_view_action_routes_to_channel_session(
     )
     monkeypatch.setattr(slack_routes.common, "claim_slack_event", AsyncMock(return_value=True))
     monkeypatch.setattr(
-        slack_routes.common, "resolve_slack_channel_context", AsyncMock(return_value={})
+        slack_routes.common,
+        "resolve_slack_channel_context",
+        AsyncMock(return_value=SlackChannelContext()),
     )
     monkeypatch.setattr(
         slack_routes.common,

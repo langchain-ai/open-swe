@@ -96,6 +96,7 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup()
+  vi.useRealTimers()
 })
 
 describe("AgentStreamProvider", () => {
@@ -131,7 +132,8 @@ describe("AgentStreamProvider", () => {
     expect(view.getByRole("status").textContent).toBe("idle")
   })
 
-  it("tracks reconnect attempts until the stream reconnects", () => {
+  it("waits before surfacing reconnect attempts and clears brief interruptions", () => {
+    vi.useFakeTimers()
     render(
       wrapper(
         <AgentStreamProvider threadId="t1">
@@ -139,7 +141,19 @@ describe("AgentStreamProvider", () => {
         </AgentStreamProvider>
       )
     )
+    expect(latest().maxReconnectAttempts).toBe(12)
+    expect(latest().reconnectDelayMs(12)).toBe(300_000)
+
+    act(() => latest().onReconnect({ attempt: 1, delayMs: 1_000 }))
+    act(() => vi.advanceTimersByTime(2_000))
+    act(() => latest().onConnected())
+    act(() => vi.advanceTimersByTime(1_000))
+    expect(useStreamConnection.getState().connection).toEqual({
+      status: "live",
+    })
+
     act(() => latest().onReconnect({ attempt: 2, delayMs: 2_000 }))
+    act(() => vi.advanceTimersByTime(3_000))
     expect(useStreamConnection.getState().connection).toMatchObject({
       status: "reconnecting",
       attempt: 2,
@@ -149,6 +163,7 @@ describe("AgentStreamProvider", () => {
   })
 
   it("clears reconnect state when the stream gives up", () => {
+    vi.useFakeTimers()
     render(
       wrapper(
         <AgentStreamProvider threadId="t1">
@@ -157,6 +172,10 @@ describe("AgentStreamProvider", () => {
       )
     )
     act(() => latest().onReconnect({ attempt: 12, delayMs: 300_000 }))
+    act(() => vi.advanceTimersByTime(3_000))
+    expect(useStreamConnection.getState().connection.status).toBe(
+      "reconnecting"
+    )
     act(() => {
       for (const listener of mocks.threadErrors) listener(new Error("gone"))
     })
@@ -172,7 +191,9 @@ describe("AgentStreamProvider", () => {
       )
     )
     expect(view.getByRole("status").textContent).toBe("t1")
-    act(() => latest().onReconnect({ attempt: 1, delayMs: 1_000 }))
+    act(() =>
+      useStreamConnection.getState().reconnecting(1, Date.now() + 1_000)
+    )
     view.rerender(
       wrapper(
         <AgentStreamProvider threadId="t2">

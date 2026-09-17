@@ -1,4 +1,4 @@
-"""Dashboard API for workspace-wide and per-user MCP connections."""
+"""Dashboard API for instance-wide, workspace, and per-user MCP connections."""
 
 from typing import Any
 
@@ -6,6 +6,13 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import JSONResponse
 
 from agent.dashboard.deps import ADMIN_DEP, SESSION_DEP
+from agent.mcp.instance import (
+    delete_instance_mcp,
+    discover_instance_mcp,
+    get_instance_mcp,
+    list_instance_mcps,
+    save_instance_mcp,
+)
 from agent.mcp.models import (
     MCPConnection,
     MCPConnectionPublic,
@@ -45,6 +52,48 @@ def _normalized_workspace(raw: str) -> str:
         return slugify(raw)
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
+
+
+instance_mcp_router = APIRouter(route_class=MCPRoute)
+
+
+@instance_mcp_router.get("/mcps", response_model=list[MCPConnectionPublic])
+async def api_list_instance_mcps(_admin: dict[str, Any] = ADMIN_DEP) -> list[dict[str, Any]]:
+    return await list_instance_mcps()
+
+
+@instance_mcp_router.put("/mcps/{name}", response_model=MCPConnectionPublic)
+async def api_save_instance_mcp(
+    name: str, update: MCPConnectionUpdate, _admin: dict[str, Any] = ADMIN_DEP
+) -> dict[str, Any]:
+    try:
+        return await save_instance_mcp(name, update)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from None
+
+
+@instance_mcp_router.delete("/mcps/{name}", status_code=204)
+async def api_delete_instance_mcp(name: str, _admin: dict[str, Any] = ADMIN_DEP) -> None:
+    await delete_instance_mcp(name)
+
+
+@instance_mcp_router.post("/mcps/{name}/headers/reveal")
+async def api_reveal_instance_mcp_headers(
+    name: str, _admin: dict[str, Any] = ADMIN_DEP
+) -> JSONResponse:
+    return _reveal_mcp_headers(await get_instance_mcp(name))
+
+
+@instance_mcp_router.post("/mcps/{name}/discover", response_model=list[MCPToolDescription])
+async def api_discover_instance_mcp(
+    name: str,
+    update: MCPConnectionUpdate | None = None,
+    _admin: dict[str, Any] = ADMIN_DEP,
+) -> list[dict[str, str]]:
+    try:
+        return await discover_instance_mcp(name, update)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from None
 
 
 workspace_mcp_router = APIRouter(route_class=MCPRoute)
@@ -147,5 +196,6 @@ async def api_discover_my_mcp(
 
 
 router = APIRouter()
+router.include_router(instance_mcp_router)
 router.include_router(workspace_mcp_router)
 router.include_router(user_mcp_router)

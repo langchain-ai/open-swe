@@ -96,6 +96,7 @@ export interface SessionUser {
   email: string | null
   avatar_url: string | null
   user_id?: string | null
+  slack_user_id?: string | null
   is_admin: boolean
   slack_oauth_enabled?: boolean
   api_base_url?: string
@@ -249,18 +250,17 @@ export interface NotionCredentialStatus {
   updated_at?: string | null
 }
 
-export interface UserMapping {
+export interface AdminUser {
+  user_id: string
   github_login: string
-  work_email: string
-  slack_user_id?: string | null
-  source?: string
-  status?: string
-  created_at?: string
-  updated_at?: string
+  email: string
+  slack_user_id: string | null
+  display_name: string
+  is_admin: boolean
 }
 
-export interface UserMappingsPage {
-  items: Array<UserMapping>
+export interface AdminUsersPage {
+  items: Array<AdminUser>
   total: number
   page: number
   page_size: number
@@ -339,6 +339,19 @@ export interface UsageLeaderboardPayload extends AnalyticsMetadata {
   reviewer_stats: ReviewerStatsPayload
 }
 
+export interface PRMergeRateEffort {
+  effort: string | null
+  merged: number
+  closed_without_merge: number
+  mature_pending: number
+  waiting: number
+  cohort_size: number
+  decided_denominator: number
+  decided_merge_rate: number | null
+  mature_denominator: number
+  mature_cohort_merge_share: number | null
+}
+
 export interface PRMergeRateCohort {
   model_id: string | null
   model_attribution_quality: "effective" | "configured" | "unavailable"
@@ -351,6 +364,7 @@ export interface PRMergeRateCohort {
   decided_merge_rate: number | null
   mature_denominator: number
   mature_cohort_merge_share: number | null
+  efforts: PRMergeRateEffort[]
 }
 
 export interface PRMergeRatePayload extends AnalyticsMetadata {
@@ -361,6 +375,7 @@ export interface PRMergeRatePayload extends AnalyticsMetadata {
   period: UsageLeaderboardPeriod
   suppression_threshold: number
   cohorts: PRMergeRateCohort[]
+  unavailable_thread_ids: string[]
 }
 
 export interface Repository {
@@ -947,16 +962,8 @@ export const api = {
     request<PRMergeRatePayload>(
       `/analytics/pr-merge-rate-by-model?period=${encodeURIComponent(period)}${maturityDays == null ? "" : `&maturity_days=${maturityDays}`}`
     ),
-  myMapping: () => request<Partial<UserMapping>>("/my-mapping"),
-  adminListUserMappings: (page = 1, pageSize = 20) =>
-    request<UserMappingsPage>(
-      `/admin/user-mappings?page=${page}&page_size=${pageSize}`
-    ),
-  adminDeleteUserMapping: (github_login: string) =>
-    request<{ deleted: boolean }>(
-      `/admin/user-mappings/${encodeURIComponent(github_login)}`,
-      { method: "DELETE" }
-    ),
+  adminListUsers: (page = 1, pageSize = 20) =>
+    request<AdminUsersPage>(`/admin/users?page=${page}&page_size=${pageSize}`),
   listReviews: (page: number, mine: boolean) =>
     request<ReviewListPayload>(`/reviews?page=${page}&mine=${mine}`),
   getReview: (owner: string, repo: string, number: number) =>

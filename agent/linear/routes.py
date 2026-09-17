@@ -5,6 +5,7 @@ import re
 from fastapi import APIRouter
 
 from agent.linear import webhook as service
+from agent.users import User
 from agent.webhooks import common
 
 router = APIRouter()
@@ -105,7 +106,7 @@ async def linear_webhook(  # noqa: PLR0911, PLR0912, PLR0915
         comment_user_email = (data.get("user") or payload.get("actor") or {}).get("email")
         try:
             profile_repo = await common.get_profile_default_repo(
-                await common.resolve_login_from_email_async(comment_user_email)
+                await User.login_for_email(comment_user_email)
             )
         except Exception:  # noqa: BLE001
             common.logger.exception("Failed to apply dashboard default_repo for Linear user")
@@ -120,7 +121,7 @@ async def linear_webhook(  # noqa: PLR0911, PLR0912, PLR0915
             repo_config = profile_repo
 
     if not repo_config:
-        repo_config = await common.get_team_default_repo()
+        repo_config = (await common.get_workspace_settings()).default_repo
 
     if not repo_config:
         return {"status": "ignored", "reason": "No default repository configured"}

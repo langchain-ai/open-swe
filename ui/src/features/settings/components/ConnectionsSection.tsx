@@ -28,20 +28,19 @@ function StatusPill({ connected }: { connected: boolean }) {
 
 function SlackRow({ user }: { user: SessionUser }) {
   const qc = useQueryClient()
-  const mapping = useQuery({ queryKey: ["myMapping"], queryFn: api.myMapping })
   const [connecting, setConnecting] = useState(false)
 
-  const slackUserId = mapping.data?.slack_user_id ?? null
-  const workEmail = mapping.data?.work_email ?? null
+  const slackUserId = user.slack_user_id ?? null
+  const workEmail = user.email ?? null
   const connected = !!slackUserId
 
   const connect = () => {
     setConnecting(true)
-    // Refresh the cached mapping when the user returns from the OAuth redirect.
-    void qc.invalidateQueries({ queryKey: ["myMapping"] })
+    // The link lands on the session's user row; refresh it when the OAuth redirect returns.
+    void qc.invalidateQueries({ queryKey: ["session"] })
     void connectService("slack")?.finally(() => {
       setConnecting(false)
-      void qc.invalidateQueries({ queryKey: ["myMapping"] })
+      void qc.invalidateQueries({ queryKey: ["session"] })
     })
   }
 
@@ -61,7 +60,7 @@ function SlackRow({ user }: { user: SessionUser }) {
               size="sm"
               variant={connected ? "outline" : "default"}
               onClick={connect}
-              disabled={connecting || mapping.isLoading}
+              disabled={connecting}
             >
               <IoLogoSlack className="size-4" />
               {connecting
