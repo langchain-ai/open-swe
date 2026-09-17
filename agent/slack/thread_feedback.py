@@ -130,7 +130,6 @@ async def post_slack_feedback_prompt(
     run_id: str,
     channel_id: str,
     *,
-    require_answer: bool = False,
     expected_event_id: str | None = None,
 ) -> None:
     """Prompt the thread initiator once, using the qualifying run's response mapping."""
@@ -139,11 +138,9 @@ async def post_slack_feedback_prompt(
         record = await store.get(run_id)
         if record is not None and record.prompted:
             return
-        if record is None or require_answer:
+        if record is None:
             mapping = await lookup_slack_run_message_mapping(langgraph_client(), channel_id, run_id)
             if not mapping or mapping.get("run_id") != run_id:
-                return
-            if require_answer and mapping.get("should_ask_for_feedback") is not True:
                 return
         thread_ts = record.thread_ts if record else mapping.get("thread_ts")
         if not isinstance(thread_ts, str) or not thread_ts:

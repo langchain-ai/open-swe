@@ -168,7 +168,6 @@ from agent.tools import (
     manage_code_channel,
     manage_incident,
     manage_thread,
-    mark_question_answered,
     notify_automation_channel,
     open_pull_request,
     output_iframe,
@@ -1210,7 +1209,6 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         manage_thread,
         manage_baby_sit,
         expedite_pr_approval,
-        mark_question_answered,
         notify_automation_channel,
         open_pull_request,
         *(
