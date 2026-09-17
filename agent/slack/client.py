@@ -426,6 +426,7 @@ async def _post_slack_message_with_ts(
     unfurl_links: bool = True,
     unfurl_media: bool = True,
     blocks: list[dict[str, Any]] | None = None,
+    reply_broadcast: bool = False,
 ) -> tuple[str | None, str | None]:
     if not SLACK_BOT_TOKEN:
         return None, "missing_slack_bot_token"
@@ -444,6 +445,7 @@ async def _post_slack_message_with_ts(
                 unfurl_links=unfurl_links,
                 unfurl_media=unfurl_media,
                 blocks=blocks or None,
+                reply_broadcast=reply_broadcast if reply_ts else False,
             )
         message_ts = data.get("ts")
         if isinstance(message_ts, str) and message_ts:
@@ -657,6 +659,7 @@ async def post_slack_thread_reply_with_ts(
     blocks: list[dict[str, Any]] | None = None,
     usage: RunUsageSummary | None = None,
     agent_thread_id: str | None = None,
+    reply_broadcast: bool = False,
 ) -> tuple[str | None, str | None]:
     """Post a reply in a Slack thread and return its Slack timestamp and error."""
     from agent.slack.code_channels import is_code_channel_session
@@ -673,6 +676,7 @@ async def post_slack_thread_reply_with_ts(
         unfurl_links=unfurl_links,
         unfurl_media=unfurl_media,
         blocks=blocks,
+        reply_broadcast=reply_broadcast,
     )
 
 
@@ -845,15 +849,19 @@ async def update_slack_message(
 
 
 async def upload_slack_thread_file(
-    channel_id: str,
-    thread_ts: str,
+    channel_id: str | None,
+    thread_ts: str | None,
     filename: str,
     content: bytes,
     *,
     title: str | None = None,
     initial_comment: str | None = None,
 ) -> tuple[str | None, str | None]:
-    """Upload one file to a Slack thread and return its file ID and any error."""
+    """Upload one file and return its file ID and any error.
+
+    Without a channel the file is hosted but never posted, which is what a block
+    that renders the file itself needs.
+    """
     if not SLACK_BOT_TOKEN:
         return None, "missing_slack_bot_token"
     if not content:
