@@ -464,6 +464,12 @@ function PRMergeRateSection({
               Newer open PRs are excluded so they do not lower the rate before
               they have had enough time to merge.
             </p>
+            <p>
+              <strong>Avg time to merge</strong> is the arithmetic mean of time
+              from PR opened to merged across merged PRs opened in the selected
+              period. Unmerged PRs are excluded, and it shows — when a group has
+              no merges.
+            </p>
             <ul className="list-disc space-y-1 pl-4">
               <li>
                 Merge rate = merged ÷ (merged + closed without merge + open at
@@ -519,6 +525,23 @@ function OpenPRCount({
   )
 }
 
+function AvgTimeToMerge({ cohort }: { cohort: PRMergeRateCohort }) {
+  if (cohort.avg_merge_seconds == null) {
+    return <span>—</span>
+  }
+  return (
+    <Tooltip>
+      <TooltipTrigger className="cursor-help rounded-sm underline decoration-dotted underline-offset-2 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring">
+        {formatAvgMergeTime(cohort.avg_merge_seconds)}
+      </TooltipTrigger>
+      <TooltipPopup className="max-w-xs">
+        Based on {cohort.merged} merged {cohort.merged === 1 ? "PR" : "PRs"};
+        unmerged PRs are excluded.
+      </TooltipPopup>
+    </Tooltip>
+  )
+}
+
 function PRMergeRateTable({
   cohorts,
   maturityDays,
@@ -558,6 +581,9 @@ function PRMergeRateTable({
                 </TooltipPopup>
               </Tooltip>
             </th>
+            <th className="px-4 py-3 text-right font-normal">
+              Avg time to merge
+            </th>
           </tr>
         </thead>
         <tbody className="divide-y divide-border">
@@ -589,6 +615,9 @@ function PRMergeRateTable({
                 {cohort.mature_cohort_merge_share == null
                   ? "—"
                   : formatPercent(cohort.mature_cohort_merge_share)}
+              </td>
+              <td className="px-4 py-3 text-right tabular-nums">
+                <AvgTimeToMerge cohort={cohort} />
               </td>
             </tr>
           ))}
@@ -1014,6 +1043,12 @@ function formatCurrency(value: number): string {
 function formatDuration(value: number): string {
   if (value < 60) return `${Math.round(value)}s`
   return `${Math.round(value / 60)}m`
+}
+
+function formatAvgMergeTime(seconds: number): string {
+  if (seconds < 3600) return `${Math.round(seconds / 60)}m`
+  if (seconds < 86400) return `${Math.round(seconds / 3600)}h`
+  return `${Math.round(seconds / 86400)}d`
 }
 
 function formatPercent(value: number): string {

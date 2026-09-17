@@ -47,7 +47,10 @@ async def pr_merge_rate_by_model(
                     count(*) FILTER (WHERE current_state = 'closed_without_merge') AS closed,
                     count(*) FILTER (WHERE current_state = 'open' AND opened_at <= :mature_before) AS mature_pending,
                     count(*) FILTER (WHERE current_state = 'open' AND opened_at > :mature_before) AS waiting,
-                    count(*) AS cohort_size
+                    count(*) AS cohort_size,
+                    avg(EXTRACT(EPOCH FROM outcome_at - opened_at))
+                        FILTER (WHERE current_state = 'merged' AND outcome_at IS NOT NULL)
+                        AS avg_merge_seconds
                 FROM pr_projection p LEFT JOIN model_directory m
                   ON m.workspace_id = p.workspace_id AND m.model_id = p.originating_model_id
                 WHERE p.workspace_id = :workspace_id AND opened_at >= :start AND opened_at <= :as_of
@@ -85,6 +88,11 @@ async def pr_merge_rate_by_model(
                     "decided_merge_rate": merged / decided if decided else None,
                     "mature_denominator": mature,
                     "mature_cohort_merge_share": merged / mature if mature else None,
+                    "avg_merge_seconds": (
+                        float(row["avg_merge_seconds"])
+                        if row["avg_merge_seconds"] is not None
+                        else None
+                    ),
                 }
             )
         metadata = await reporting_metadata(conn)
