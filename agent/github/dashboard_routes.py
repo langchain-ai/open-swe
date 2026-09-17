@@ -2,9 +2,10 @@
 
 from typing import Any
 
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 
 from agent.dashboard.deps import SESSION_DEP
+from agent.dashboard.profiles import get_valid_access_token
 from agent.github import repos
 from agent.github.repo_cache import (
     REPO_LIST_FRESH_MS,
@@ -12,6 +13,7 @@ from agent.github.repo_cache import (
     schedule_repo_cache_refresh,
     write_cached_repos,
 )
+from agent.github.repo_merge_methods import RepositoryMergeMethods, repository_merge_methods
 
 router = APIRouter(tags=["github"])
 
@@ -57,3 +59,13 @@ async def list_repos(
                 schedule_repo_cache_refresh(login, lambda: _build_repo_payload(login))
             return payload
     return await _build_repo_payload(login)
+
+
+@router.get("/repos/{owner}/{repo}/merge-methods")
+async def api_repository_merge_methods(
+    owner: str, repo: str, session: dict[str, Any] = SESSION_DEP
+) -> RepositoryMergeMethods:
+    token = await get_valid_access_token(session["sub"])
+    if not token:
+        raise HTTPException(401, "GitHub token unavailable, re-login required")
+    return await repository_merge_methods(owner, repo, token)

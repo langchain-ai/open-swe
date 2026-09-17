@@ -16,6 +16,7 @@ import appCss from "../styles.css?url"
 import type { QueryClient } from "@tanstack/react-query"
 import { AppCommandProvider } from "@/lib/appCommands"
 import { resolveSessionOnServer } from "@/lib/session-ssr"
+import { Toaster } from "@/components/ui/sonner"
 import { ThemeSync } from "@/lib/ThemeSync"
 import { THEME_COLOR } from "@/lib/theme"
 import { apiWarmupScript } from "@/features/agents/lib/apiWarmup"
@@ -103,6 +104,7 @@ function RootDocument({ children }: { children: React.ReactNode }) {
             <div aria-hidden data-desktop-drag-strip="" />
           )}
         <ThemeSync />
+        <Toaster position="bottom-right" closeButton />
         <QueryClientProvider client={queryClient}>
           <AppCommandProvider>{children ?? <Outlet />}</AppCommandProvider>
           <PerfHudMount />

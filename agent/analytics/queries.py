@@ -8,6 +8,7 @@ from typing import Any, Literal
 from uuid import UUID
 
 from sqlalchemy import text
+from sqlalchemy.engine import RowMapping
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from agent.config import ENV
@@ -45,6 +46,30 @@ async def _reporting_start(conn: AsyncConnection, period: str | None) -> datetim
     return max(period_start(period), cutover)
 
 
+def _integer(value: object) -> int:
+    return value if isinstance(value, int) and not isinstance(value, bool) else 0
+
+
+def _pr_outcome_counts(row: RowMapping) -> dict[str, int | float | None]:
+    merged = _integer(row["merged"])
+    closed = _integer(row["closed"])
+    pending = _integer(row["mature_pending"])
+    waiting = _integer(row["waiting"])
+    decided = merged + closed
+    mature = decided + pending
+    return {
+        "merged": merged,
+        "closed_without_merge": closed,
+        "mature_pending": pending,
+        "waiting": waiting,
+        "cohort_size": _integer(row["cohort_size"]),
+        "decided_denominator": decided,
+        "decided_merge_rate": merged / decided if decided else None,
+        "mature_denominator": mature,
+        "mature_cohort_merge_share": merged / mature if mature else None,
+    }
+
+
 async def pr_merge_rate_by_model(
     *, period: str | None, maturity_days: int | None = None, admin: bool = False
 ) -> dict[str, Any]:
@@ -58,19 +83,43 @@ async def pr_merge_rate_by_model(
         result = await conn.execute(
             text(
                 """
+                WITH eligible_models AS (
+                    SELECT originating_model_id, model_attribution_quality
+                    FROM pr_projection
+                    WHERE workspace_id = :workspace_id
+                      AND opened_at >= :start AND opened_at <= :as_of
+                      AND originating_model_id IS NOT NULL
+                      AND model_attribution_quality <> 'unavailable'
+                    GROUP BY originating_model_id, model_attribution_quality
+                    HAVING count(*) >= :minimum
+                    ORDER BY count(*) DESC, originating_model_id
+                    LIMIT 100
+                )
                 SELECT p.originating_model_id, p.model_attribution_quality, m.provider_model_id,
-                    count(*) FILTER (WHERE current_state = 'merged') AS merged,
-                    count(*) FILTER (WHERE current_state = 'closed_without_merge') AS closed,
-                    count(*) FILTER (WHERE current_state = 'open' AND opened_at <= :mature_before) AS mature_pending,
-                    count(*) FILTER (WHERE current_state = 'open' AND opened_at > :mature_before) AS waiting,
-                    count(*) AS cohort_size
-                FROM pr_projection p LEFT JOIN model_directory m
+                    r.configured_effort,
+                    count(*) FILTER (WHERE p.current_state = 'merged') AS merged,
+                    count(*) FILTER (WHERE p.current_state = 'closed_without_merge') AS closed,
+                    count(*) FILTER (WHERE p.current_state = 'open'
+                        AND p.opened_at <= :mature_before) AS mature_pending,
+                    count(*) FILTER (WHERE p.current_state = 'open'
+                        AND p.opened_at > :mature_before) AS waiting,
+                    count(*) AS cohort_size,
+                    avg(EXTRACT(EPOCH FROM p.outcome_at - p.opened_at))
+                        FILTER (WHERE p.current_state = 'merged' AND p.outcome_at IS NOT NULL)
+                        AS avg_merge_seconds
+                FROM pr_projection p
+                JOIN eligible_models e
+                  ON e.originating_model_id IS NOT DISTINCT FROM p.originating_model_id
+                  AND e.model_attribution_quality = p.model_attribution_quality
+                LEFT JOIN model_directory m
                   ON m.workspace_id = p.workspace_id AND m.model_id = p.originating_model_id
-                WHERE p.workspace_id = :workspace_id AND opened_at >= :start AND opened_at <= :as_of
-                GROUP BY p.originating_model_id, p.model_attribution_quality, m.provider_model_id
-                HAVING count(*) >= :minimum
-                ORDER BY count(*) DESC, originating_model_id
-                LIMIT 100
+                LEFT JOIN run_projection r
+                  ON r.workspace_id = p.workspace_id AND r.run_id = p.opening_run_id
+                WHERE p.workspace_id = :workspace_id
+                  AND p.opened_at >= :start AND p.opened_at <= :as_of
+                GROUP BY p.originating_model_id, p.model_attribution_quality, m.provider_model_id,
+                    r.configured_effort
+                ORDER BY p.originating_model_id, p.model_attribution_quality, r.configured_effort
                 """
             ),
             {
@@ -81,28 +130,87 @@ async def pr_merge_rate_by_model(
                 "minimum": minimum,
             },
         )
-        cohorts = []
+        grouped: dict[tuple[object, object], dict[str, Any]] = {}
+        merge_seconds_totals: dict[tuple[object, object], float] = {}
         for row in result.mappings():
-            merged = int(row["merged"] or 0)
-            closed = int(row["closed"] or 0)
-            pending = int(row["mature_pending"] or 0)
-            decided = merged + closed
-            mature = decided + pending
-            cohorts.append(
+            key = (row["originating_model_id"], row["model_attribution_quality"])
+            cohort = grouped.setdefault(
+                key,
                 {
                     "model_id": row["provider_model_id"],
                     "model_attribution_quality": row["model_attribution_quality"],
-                    "merged": merged,
-                    "closed_without_merge": closed,
-                    "mature_pending": pending,
-                    "waiting": int(row["waiting"] or 0),
-                    "cohort_size": int(row["cohort_size"]),
+                    "merged": 0,
+                    "closed_without_merge": 0,
+                    "mature_pending": 0,
+                    "waiting": 0,
+                    "cohort_size": 0,
+                    "efforts": [],
+                },
+            )
+            effort = _pr_outcome_counts(row)
+            effort["avg_merge_seconds"] = (
+                float(row["avg_merge_seconds"]) if row["avg_merge_seconds"] is not None else None
+            )
+            cohort["efforts"].append({"effort": row["configured_effort"], **effort})
+            avg_merge_seconds = effort["avg_merge_seconds"]
+            merged_count = effort["merged"]
+            if isinstance(avg_merge_seconds, float) and isinstance(merged_count, int):
+                merge_seconds_totals[key] = (
+                    merge_seconds_totals.get(key, 0.0) + avg_merge_seconds * merged_count
+                )
+            for field in (
+                "merged",
+                "closed_without_merge",
+                "mature_pending",
+                "waiting",
+                "cohort_size",
+            ):
+                cohort[field] += effort[field]
+        cohorts = []
+        for key, cohort in grouped.items():
+            merge_seconds_total = merge_seconds_totals.get(key, 0.0)
+            cohort["avg_merge_seconds"] = (
+                merge_seconds_total / cohort["merged"] if cohort["merged"] else None
+            )
+            decided = cohort["merged"] + cohort["closed_without_merge"]
+            mature = decided + cohort["mature_pending"]
+            cohorts.append(
+                {
+                    **cohort,
                     "decided_denominator": decided,
-                    "decided_merge_rate": merged / decided if decided else None,
+                    "decided_merge_rate": cohort["merged"] / decided if decided else None,
                     "mature_denominator": mature,
-                    "mature_cohort_merge_share": merged / mature if mature else None,
+                    "mature_cohort_merge_share": cohort["merged"] / mature if mature else None,
                 }
             )
+        if not admin:
+            for cohort in cohorts:
+                efforts = cohort["efforts"]
+                if isinstance(efforts, list) and any(
+                    effort["cohort_size"] < minimum for effort in efforts
+                ):
+                    cohort["efforts"] = []
+        cohorts.sort(key=lambda cohort: (-_integer(cohort["cohort_size"]), str(cohort["model_id"])))
+        unavailable_threads = []
+        if admin:
+            unavailable_threads = [
+                str(thread_id)
+                for thread_id in (
+                    await conn.execute(
+                        text(
+                            "SELECT DISTINCT e.thread_id FROM pr_projection p "
+                            "JOIN events e ON e.workspace_id = p.workspace_id "
+                            "AND e.pr_id = p.pr_id AND e.event_name = 'pr.opened' "
+                            "WHERE p.workspace_id = :workspace_id "
+                            "AND p.opened_at >= :start AND p.opened_at <= :as_of "
+                            "AND (p.originating_model_id IS NULL "
+                            "OR p.model_attribution_quality = 'unavailable') "
+                            "AND e.thread_id IS NOT NULL ORDER BY e.thread_id LIMIT 100"
+                        ),
+                        {"workspace_id": workspace_id(), "start": start, "as_of": as_of},
+                    )
+                ).scalars()
+            ]
         metadata = await reporting_metadata(conn)
         if cohorts:
             status = "ready"
@@ -129,6 +237,7 @@ async def pr_merge_rate_by_model(
         "period": period if period in {"7d", "30d", "all"} else "30d",
         "suppression_threshold": minimum,
         "cohorts": cohorts,
+        "unavailable_thread_ids": unavailable_threads,
         **metadata,
         "as_of": as_of.isoformat(),
     }
@@ -205,7 +314,7 @@ def _decode_usage_cursor(
 _USAGE_SQL = """
 WITH runs AS (
     SELECT COALESCE(a.person_id, r.user_id) AS person_id, r.configured_model_id,
-        r.thread_id,
+        r.configured_effort, r.thread_id,
         COALESCE(c.total_tokens, r.total_tokens, 0) AS total_tokens,
         c.cost_usd, c.status AS cost_status,
         CASE WHEN r.terminal_at >= r.started_at
@@ -238,6 +347,13 @@ WITH runs AS (
       ON m.workspace_id = :workspace_id AND m.model_id = r.configured_model_id
     GROUP BY r.person_id, m.provider_model_id
     ORDER BY r.person_id, count(*) DESC, m.provider_model_id
+), efforts AS (
+    SELECT DISTINCT ON (r.person_id, m.provider_model_id)
+        r.person_id, m.provider_model_id, r.configured_effort
+    FROM runs r JOIN model_directory m
+      ON m.workspace_id = :workspace_id AND m.model_id = r.configured_model_id
+    GROUP BY r.person_id, m.provider_model_id, r.configured_effort
+    ORDER BY r.person_id, m.provider_model_id, count(*) DESC, r.configured_effort
 ), prs AS (
     SELECT COALESCE(a.person_id, u.user_id, r.user_id) AS person_id,
         p.current_state, COALESCE(u.additions, 0) AS additions,
@@ -276,6 +392,7 @@ WITH runs AS (
         COALESCE(r.avg_invocation_seconds, 0) AS avg_invocation_seconds,
         COALESCE(r.avg_thread_seconds, 0) AS avg_thread_seconds,
         COALESCE(m.provider_model_id, 'default') AS favorite_model,
+        e.configured_effort AS favorite_model_effort,
         COALESCE(pr.prs_opened, 0) AS prs_opened,
         COALESCE(pr.merged_prs, 0) AS merged_prs,
         COALESCE(pr.additions, 0) AS additions,
@@ -287,6 +404,12 @@ WITH runs AS (
     LEFT JOIN run_totals r ON r.person_id = p.person_id
     LEFT JOIN pr_totals pr ON pr.person_id = p.person_id
     LEFT JOIN models m ON m.person_id = p.person_id
+    LEFT JOIN efforts e
+      ON e.person_id = p.person_id AND e.provider_model_id = m.provider_model_id
+), labeled AS (
+    SELECT *, regexp_replace(favorite_model, '[^A-Za-z0-9._:/+-]', '-', 'g')
+        AS sanitized_model
+    FROM metrics
 ), ranked AS (
     SELECT *,
         -- Sorting and disclosure must agree, so derive each displayed label once here
@@ -295,12 +418,14 @@ WITH runs AS (
             THEN name ELSE 'Open SWE user' END AS display_name,
         -- Mirrors safeModelLabel in ui/src/lib/modelLabel.ts and the usage table's
         -- empty-label fallback.
-        COALESCE(NULLIF(btrim(left(split_part(
-            regexp_replace(favorite_model, '[^A-Za-z0-9._:/+-]', '-', 'g'), '/', -1
-        ), 48), '-'), ''), 'Unavailable') AS favorite_model_label,
+        COALESCE(NULLIF(btrim(left(
+            left(sanitized_model, strpos(sanitized_model, ':')) ||
+            split_part(substr(sanitized_model, strpos(sanitized_model, ':') + 1), '/', -1),
+            48
+        ), '-'), ''), 'Unavailable') AS favorite_model_label,
         row_number() OVER (
             ORDER BY merged_prs DESC, agent_loc DESC, prs_opened DESC, name, person_id
-        ) AS rank FROM metrics
+        ) AS rank FROM labeled
 ), keyed AS (
     SELECT *,
         -- One key per sortable type: the inactive key is NULL for every row, so it
@@ -341,6 +466,7 @@ WITH runs AS (
                 'avatar_url', CASE WHEN NULLIF(github_login, '') IS NOT NULL
                     THEN 'https://github.com/' || github_login || '.png?size=80' END),
             'favorite_model', favorite_model,
+            'favorite_model_effort', favorite_model_effort,
             'avg_invocation_seconds', avg_invocation_seconds,
             'avg_thread_seconds', avg_thread_seconds,
             'avg_run_seconds', avg_invocation_seconds,
