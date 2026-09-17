@@ -11,6 +11,7 @@ from langchain.agents.middleware.types import (
 from langchain_core.messages import SystemMessage
 from langgraph.runtime import Runtime
 
+from agent.input_messages import input_message_text
 from agent.middleware.trace import OpenSWEMiddleware
 from agent.utils.startup_trace import flush_phases
 
@@ -18,6 +19,7 @@ from agent.utils.startup_trace import flush_phases
 class PrepareRunState(AgentState):
     run_prepared: NotRequired[bool]
     run_prepared_for: NotRequired[str]
+    completion_summary_posted: NotRequired[bool]
     work_dir: NotRequired[str | None]
     rendered_system_prompt: NotRequired[str | None]
 
@@ -36,6 +38,15 @@ def _latest_message_fingerprint(state: Mapping[str, Any]) -> str | None:
     }
     encoded = json.dumps(payload, sort_keys=True, default=str).encode("utf-8")
     return hashlib.sha256(encoded).hexdigest()
+
+
+def _latest_message_is_input(state: Mapping[str, Any]) -> bool:
+    messages = state.get("messages")
+    if not isinstance(messages, list) or not messages:
+        return False
+    latest = messages[-1]
+    content = getattr(latest, "content", latest)
+    return input_message_text(content) is not None
 
 
 class BasePrepareRunMiddleware(OpenSWEMiddleware):
@@ -65,6 +76,8 @@ class BasePrepareRunMiddleware(OpenSWEMiddleware):
             ):
                 return None
             updates = await self._prepare(prepared_state, runtime)
+            if _latest_message_is_input(prepared_state):
+                updates["completion_summary_posted"] = False
             return {"run_prepared": True, "run_prepared_for": fingerprint, **updates}
         finally:
             # This hook is the first span the startup work can hang off of. A

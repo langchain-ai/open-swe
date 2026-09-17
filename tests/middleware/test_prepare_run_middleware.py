@@ -64,6 +64,35 @@ async def test_prepare_latch_reruns_when_fingerprint_changes():
 
 
 @pytest.mark.asyncio
+async def test_prepare_resets_completion_summary_for_new_input_message():
+    middleware = DummyPrepareMiddleware()
+    state = cast(
+        AgentState,
+        {
+            "messages": [
+                HumanMessage(
+                    content=cast(
+                        str,
+                        human_input(
+                            "new request",
+                            {"sender_id": "slack:U1", "surface": "slack", "kind": "human"},
+                        )["content"],
+                    )
+                )
+            ],
+            "run_prepared": True,
+            "run_prepared_for": "stale",
+            "completion_summary_posted": True,
+        },
+    )
+
+    update = await middleware.abefore_agent(state, cast(Runtime[None], MagicMock()))
+
+    assert update is not None
+    assert update["completion_summary_posted"] is False
+
+
+@pytest.mark.asyncio
 async def test_prepare_prompt_injection():
     middleware = DummyPrepareMiddleware()
     seen = {}
