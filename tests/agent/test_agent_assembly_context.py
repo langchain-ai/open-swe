@@ -523,7 +523,7 @@ async def test_agent_includes_recreate_sandbox_tool() -> None:
 
 
 @pytest.mark.asyncio
-async def test_agent_includes_admin_tools_only_in_private_dashboard_admin_threads(
+async def test_agent_includes_sql_only_on_private_admin_surfaces(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from agent.tools import read_only_sql
@@ -546,6 +546,18 @@ async def test_agent_includes_admin_tools_only_in_private_dashboard_admin_thread
     assert isinstance(subagents, list)
     general_purpose = next(item for item in subagents if item["name"] == "general-purpose")
     assert read_only_sql not in general_purpose["tools"]
+
+    configurable["source"] = "slack"
+    configurable["slack_thread"] = {
+        "channel_id": "D123",
+        "thread_ts": "0",
+        "triggering_user_id": "U123",
+        "channel_context": {"is_im": True},
+    }
+    captured = await _capture_create_deep_agent_kwargs(config)
+    tools = captured["tools"]
+    assert isinstance(tools, list)
+    assert read_only_sql in tools
 
     configurable["source"] = "schedule"
     captured = await _capture_create_deep_agent_kwargs(config)
