@@ -200,9 +200,10 @@ async def _ephemeral_reply(
             "error": "options cannot be answered on an ephemeral reply",
             "retry": True,
             "hint": (
-                "Slack cannot route a choice button on an ephemeral message back to this run, "
-                "so nothing was posted. Call this tool again without `options`, putting the "
-                "choice in `message` as a question."
+                "`options` buttons are answered by a route that needs a real message to look "
+                "up, which an ephemeral reply has none of, so nothing was posted. Call this "
+                "tool again with the choice as `blocks` — an interactive element there is "
+                "registered against this thread and does come back — or ask in `message`."
             ),
         }
     slack_thread = cfg.slack_thread
@@ -212,8 +213,9 @@ async def _ephemeral_reply(
         return {"success": False, "error": "Missing the Slack channel or user to answer"}
     if not message.strip():
         return {"success": False, "error": "Message cannot be empty"}
-    # An ephemeral message has no timestamp to update or hang siblings off, but
-    # the token rides in the element's own `action_id`, so a click still lands.
+    # An ephemeral message has no timestamp to attach, but a set is exclusive by
+    # its group and the token rides in the element's own `action_id`, so a click
+    # still finds its way back.
     try:
         blocks, _ = await _register_continuations(blocks, cfg, channel_id=channel_id, thread_ts="")
     except interactive.UnsupportedBlocks as exc:
