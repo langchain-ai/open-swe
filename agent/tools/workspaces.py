@@ -103,21 +103,22 @@ async def list_workspaces() -> dict[str, Any]:
 
 
 async def set_model_routing_provider(
-    provider: ModelRoutingProvider,
+    provider: ModelRoutingProvider | None,
     workspace: str | None = None,
-) -> dict[str, Any]:
-    """Set the Jev or LangChain classifier for an organization or workspace."""
+) -> dict[str, str | bool]:
+    """Set or clear the classifier selection for an organization or workspace."""
     if error := await _require_admin():
         return {"ok": False, "error": error}
     if workspace is None:
         current = await get_instance_settings()
         values = {key: current.get(key) for key in WorkspaceSettingsUpdate.model_fields}
         values["model_routing_provider"] = provider
-        saved = await upsert_instance_settings(WorkspaceSettingsUpdate.model_validate(values))
+        await upsert_instance_settings(WorkspaceSettingsUpdate.model_validate(values))
+        effective = await get_instance_settings()
         return {
             "ok": True,
             "scope": "organization",
-            "model_routing_provider": saved["model_routing_provider"],
+            "model_routing_provider": effective.model_routing_provider,
         }
     try:
         slug = store.slugify(workspace)

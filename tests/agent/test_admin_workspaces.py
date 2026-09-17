@@ -194,12 +194,19 @@ async def test_admin_can_set_workspace_model_routing_provider(
         ),
     ):
         result = await env_tools.set_model_routing_provider("jev", workspace="Base")
+        inherited = await env_tools.set_model_routing_provider(None, workspace="Base")
 
     assert result == {
         "ok": True,
         "scope": "workspace",
         "workspace": "base",
         "model_routing_provider": "jev",
+    }
+    assert inherited == {
+        "ok": True,
+        "scope": "workspace",
+        "workspace": "base",
+        "model_routing_provider": "langchain",
     }
 
 
