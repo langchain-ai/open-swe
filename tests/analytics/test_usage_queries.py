@@ -1,7 +1,7 @@
 """PostgreSQL reporting preserves usage cohorts, identities, and disclosure rules."""
 
 from datetime import UTC, datetime, timedelta
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 from sqlalchemy import text
@@ -210,6 +210,46 @@ async def test_usage_sorting_happens_before_pagination(usage_db):
             sort="user",
             direction="asc",
         )
+
+
+@pytest.mark.parametrize("direction", ["asc", "desc"])
+async def test_favorite_models_sort_by_displayed_labels_before_pagination(
+    usage_db: UUID, direction: queries.SortDirection
+) -> None:
+    # Alphabetical display order, including sanitizing, truncation ties, and fallbacks.
+    models = [
+        "provider/---Alpha---",
+        None,
+        "google_genai:gemini-3.8-flash",
+        "fireworks:accounts/fireworks/models/kimi-k3",
+        "provider/" + "m" * 48 + "z",
+        "provider/" + "m" * 48 + "a",
+        "provider/model space",
+        "///",
+        "provider/Zulu",
+    ]
+    for index, provider_model_id in enumerate(models):
+        member = await person(f"member-{index}")
+        model_id = None
+        if provider_model_id is not None:
+            model_id = uuid4()
+            await insert("model_directory", model_id=model_id, provider_model_id=provider_model_id)
+        await run(member, model_id=model_id)
+
+    expected = list(range(len(models)))
+    if direction == "desc":
+        expected.reverse()
+        # Equal displayed labels retain rank order in either direction.
+        expected[3:5] = [4, 5]
+    cursor = None
+    actual: list[str] = []
+    while True:
+        page = await report(limit=2, cursor=cursor, sort="favorite_model", direction=direction)
+        actual.extend(row["favorite_model"] for row in page["rows"])
+        cursor = page["next_cursor"]
+        if cursor is None:
+            break
+    assert actual == [models[index] or "default" for index in expected]
 
 
 async def test_aliases_and_pr_only_members_preserve_privacy(usage_db):

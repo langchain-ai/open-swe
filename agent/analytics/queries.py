@@ -288,7 +288,12 @@ WITH runs AS (
     LEFT JOIN pr_totals pr ON pr.person_id = p.person_id
     LEFT JOIN models m ON m.person_id = p.person_id
 ), ranked AS (
-    SELECT *, row_number() OVER (
+    SELECT *,
+    -- Match safeModelLabel and its empty-label fallback in the usage table.
+    COALESCE(NULLIF(btrim(left(split_part(
+        regexp_replace(favorite_model, '[^A-Za-z0-9._:/+-]', '-', 'g'), '/', -1
+    ), 48), '-'), ''), 'Unavailable') AS favorite_model_label,
+    row_number() OVER (
         ORDER BY merged_prs DESC, agent_loc DESC, prs_opened DESC, name, person_id
     ) AS rank FROM metrics
 ), ordered AS (
@@ -301,8 +306,10 @@ WITH runs AS (
         CASE WHEN :sort = 'user' AND :direction = 'desc' THEN
             lower(CASE WHEN :admin OR is_current OR NULLIF(github_login, '') IS NOT NULL
                 THEN name ELSE 'Open SWE user' END) END DESC,
-        CASE WHEN :sort = 'favorite_model' AND :direction = 'asc' THEN lower(favorite_model) END ASC,
-        CASE WHEN :sort = 'favorite_model' AND :direction = 'desc' THEN lower(favorite_model) END DESC,
+        CASE WHEN :sort = 'favorite_model' AND :direction = 'asc'
+            THEN lower(favorite_model_label) END ASC,
+        CASE WHEN :sort = 'favorite_model' AND :direction = 'desc'
+            THEN lower(favorite_model_label) END DESC,
         CASE WHEN :sort = 'invocations' AND :direction = 'asc' THEN invocations END ASC,
         CASE WHEN :sort = 'invocations' AND :direction = 'desc' THEN invocations END DESC,
         CASE WHEN :sort = 'threads' AND :direction = 'asc' THEN threads END ASC,
