@@ -227,3 +227,93 @@ async def test_code_channel_external_select_returns_registered_suggestions(
 
     assert result == {"options": options}
     get_suggestions.assert_awaited_once_with(ANY, "C-code", "V-plan", "repository", "open")
+
+
+def _continuation_payload(action_id: str) -> dict[str, Any]:
+    action = {
+        "action_id": action_id,
+        "action_ts": "3.0",
+        "type": "button",
+        "text": {"type": "plain_text", "text": "Rerun tests"},
+    }
+    return {
+        "actions": [action],
+        "channel": {"id": "C1"},
+        "message": {
+            "ts": "2.0",
+            "thread_ts": "1.0",
+            "text": "Tests failed",
+            "blocks": [
+                {"type": "section", "text": {"type": "mrkdwn", "text": "Tests failed"}},
+                {"type": "actions", "elements": [action]},
+            ],
+        },
+        "user": {"id": "U1"},
+    }
+
+
+@pytest.fixture
+def eligible_channel(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(slack_routes.common, "verify_slack_signature", lambda **_kwargs: True)
+    monkeypatch.setattr(
+        slack_routes.common,
+        "resolve_slack_channel_context",
+        AsyncMock(return_value={"is_ext_shared": False, "is_pending_ext_shared": False}),
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("eligible_channel")
+async def test_a_continuation_click_resumes_its_own_thread(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agent.slack.continuations import SlackContinuation, action_id_for
+
+    row = SlackContinuation(
+        thread_id="thread-9",
+        action_id="rerun_tests",
+        element_type="button",
+        channel_id="C1",
+        message_ts="2.0",
+        label="Rerun tests",
+    )
+    claim = AsyncMock(return_value=row)
+    monkeypatch.setattr(slack_routes.continuations, "claim", claim)
+    lookup = AsyncMock(return_value="thread-other")
+    monkeypatch.setattr(slack_routes.common, "lookup_slack_thread_id", lookup)
+    background_tasks = BackgroundTasks()
+
+    result = await slack_routes.slack_interactivity(
+        _request(_continuation_payload(action_id_for(row.id))), background_tasks
+    )
+
+    assert result == {"status": "accepted", "message": "Slack continuation queued"}
+    claim.assert_awaited_once_with(row.id, slack_user_id="U1")
+    # The row names the thread, so none of the option path's resolution runs.
+    lookup.assert_not_awaited()
+    assert [task.func for task in background_tasks.tasks] == [
+        slack_routes._update_selected_option_message,
+        slack_routes.slack_resume.resume,
+    ]
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("eligible_channel")
+async def test_a_spent_continuation_says_so_and_dispatches_nothing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from uuid import uuid7
+
+    from agent.slack.continuations import action_id_for
+
+    monkeypatch.setattr(slack_routes.continuations, "claim", AsyncMock(return_value=None))
+    background_tasks = BackgroundTasks()
+
+    result = await slack_routes.slack_interactivity(
+        _request(_continuation_payload(action_id_for(uuid7()))), background_tasks
+    )
+
+    assert result == {"status": "ignored", "reason": "Slack continuation is no longer open"}
+    assert [task.func for task in background_tasks.tasks] == [
+        slack_routes.slack_resume.refuse_spent
+    ]

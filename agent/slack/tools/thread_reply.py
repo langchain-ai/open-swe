@@ -7,7 +7,9 @@ from langgraph.config import get_config
 from langgraph.prebuilt import InjectedState
 from langgraph_sdk.client import LangGraphClient
 
+from agent.database import postgres
 from agent.run_config import RunConfig
+from agent.slack import continuations, interactive
 from agent.slack.client import (
     convert_mentions_to_slack_format,
     get_active_slack_thread,
@@ -28,6 +30,51 @@ from agent.utils.run_usage import RunUsageSummary, summarize_run_usage
 from agent.utils.thread_ops import langgraph_client as get_langgraph_client
 
 logger = logging.getLogger(__name__)
+
+# Replaying these would pin a resumed run to this one's identity or mode.
+_TRANSIENT_CONFIG_KEYS = frozenset(
+    {"invocation_id", "resolved_agent_model_id", "run_id", "stop_summary"}
+)
+
+
+def _unsupported_blocks(reason: str) -> dict[str, Any]:
+    return {
+        "success": False,
+        "error": f"Those blocks cannot be posted: {reason}",
+        "retry": True,
+        "hint": "Nothing was posted. Call this tool again with that element removed.",
+    }
+
+
+def _resume_config(cfg: RunConfig) -> dict[str, Any]:
+    """The configurable a click should resume this thread with."""
+    return {key: value for key, value in cfg.dump().items() if key not in _TRANSIENT_CONFIG_KEYS}
+
+
+async def _register_continuations(
+    blocks: list[dict[str, Any]] | None,
+    cfg: RunConfig,
+    *,
+    channel_id: str,
+    thread_ts: str,
+) -> tuple[list[dict[str, Any]] | None, list[continuations.SlackContinuation]]:
+    """`blocks` with its interactive elements registered against this thread."""
+    if not blocks or not cfg.thread_id:
+        return blocks, []
+    if not postgres.configured() and interactive.has_interactive_element(blocks):
+        raise interactive.UnsupportedBlocks(
+            "this deployment has no database to remember an interactive element by, so a "
+            "click on it could never be answered. Use a link button instead"
+        )
+    prepared, rows = interactive.prepare(
+        blocks,
+        thread_id=str(cfg.thread_id),
+        channel_id=channel_id,
+        thread_ts=thread_ts,
+        run_config=_resume_config(cfg),
+    )
+    await continuations.save(rows)
+    return prepared, rows
 
 
 async def slack_thread_reply(
@@ -82,6 +129,13 @@ async def slack_thread_reply(
         else str(thread_ts)
     )
 
+    try:
+        blocks, rows = await _register_continuations(
+            blocks, cfg, channel_id=str(channel_id), thread_ts=str(thread_ts)
+        )
+    except interactive.UnsupportedBlocks as exc:
+        return _unsupported_blocks(str(exc))
+
     async with slack_thread_mutation_lock(client, channel_id, thread_ts):
         message = convert_mentions_to_slack_format(message)
         slack_blocks = blocks or _build_option_blocks(message, options)
@@ -122,6 +176,7 @@ async def slack_thread_reply(
             "message_chars": len(message),
             "hint": _slack_reply_failure_hint(slack_error),
         }
+    await continuations.attach_message(interactive.tokens(rows), str(channel_id), str(message_ts))
     if run_id:
         # Slack drops the status when the app posts; a session keeps its on
         # whichever message currently holds it rather than on the session itself.
@@ -145,6 +200,12 @@ async def _ephemeral_reply(
         return {"success": False, "error": "Missing the Slack channel or user to answer"}
     if not message.strip():
         return {"success": False, "error": "Message cannot be empty"}
+    # An ephemeral message has no timestamp to update or hang siblings off, but
+    # the token rides in the element's own `action_id`, so a click still lands.
+    try:
+        blocks, _ = await _register_continuations(blocks, cfg, channel_id=channel_id, thread_ts="")
+    except interactive.UnsupportedBlocks as exc:
+        return _unsupported_blocks(str(exc))
     posted = await post_slack_ephemeral_reply(
         channel_id,
         user_id,
