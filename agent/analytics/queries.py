@@ -160,7 +160,7 @@ async def pr_merge_rate_by_model(
                         text(
                             "SELECT DISTINCT e.thread_id FROM pr_projection p "
                             "JOIN events e ON e.workspace_id = p.workspace_id "
-                            "AND e.pr_id = p.pr_id AND e.event_name = 'pr_opened' "
+                            "AND e.pr_id = p.pr_id AND e.event_name = 'pr.opened' "
                             "WHERE p.workspace_id = :workspace_id "
                             "AND p.opened_at >= :start AND p.opened_at <= :as_of "
                             "AND (p.originating_model_id IS NULL "
