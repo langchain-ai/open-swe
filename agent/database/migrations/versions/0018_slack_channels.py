@@ -14,7 +14,7 @@ def upgrade() -> None:
         CREATE TABLE slack_channel (
             id text PRIMARY KEY,
             name text NOT NULL DEFAULT '',
-            info jsonb NOT NULL DEFAULT '{}'::jsonb,
+            payload jsonb NOT NULL DEFAULT '{}'::jsonb,
             fetched_at timestamptz NOT NULL DEFAULT clock_timestamp()
         )
         """

@@ -9,6 +9,7 @@ from agent.dashboard.workspace_settings import WorkspaceSettings
 from agent.run_config import Repo
 from agent.slack import client as slack_utils
 from agent.slack import webhook as slack_webhooks
+from agent.slack.channels import SlackChannel
 from agent.slack.client import (
     convert_mentions_to_slack_format,
     format_slack_messages_for_prompt,
@@ -59,26 +60,22 @@ class _FakeClient:
 
 
 def test_channel_context_preserves_external_sharing_status() -> None:
-    context = slack_utils.normalize_slack_channel_context(
-        "C123", {"name": "shared", "is_ext_shared": True}
-    )
+    context = SlackChannel.normalize_context("C123", {"name": "shared", "is_ext_shared": True})
 
     assert context["is_ext_shared"] is True
-    assert not slack_utils.slack_channel_allows_operations(context)
+    assert not SlackChannel.allows_operations(context)
 
 
 def test_channel_operations_fail_closed_without_external_sharing_status() -> None:
-    context = slack_utils.normalize_slack_channel_context("C123", None)
+    context = SlackChannel.normalize_context("C123", None)
 
     assert context["is_ext_shared"] is None
-    assert not slack_utils.slack_channel_allows_operations(context)
-    assert slack_utils.slack_channel_allows_operations(
-        {"is_ext_shared": False, "is_pending_ext_shared": False}
-    )
-    assert not slack_utils.slack_channel_allows_operations(
+    assert not SlackChannel.allows_operations(context)
+    assert SlackChannel.allows_operations({"is_ext_shared": False, "is_pending_ext_shared": False})
+    assert not SlackChannel.allows_operations(
         {"is_ext_shared": False, "is_pending_ext_shared": True}
     )
-    assert slack_utils.slack_channel_allows_operations({"is_im": True})
+    assert SlackChannel.allows_operations({"is_im": True})
 
 
 def test_source_context_preserves_existing_slack_permalink_on_lookup_failure(

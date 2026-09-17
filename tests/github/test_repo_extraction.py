@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from agent.dashboard.workspace_settings import WorkspaceSettings
-from agent.slack.client import extract_channel_description_text
+from agent.slack.channels import SlackChannel
 from agent.utils.repo import extract_repo_from_text
 
 
@@ -64,21 +64,21 @@ class TestExtractChannelDescriptionText:
             "topic": {"value": "repo:my-org/my-repo"},
             "purpose": {"value": "Team channel"},
         }
-        assert extract_channel_description_text(channel) == "repo:my-org/my-repo\nTeam channel"
+        assert SlackChannel.topic_and_purpose(channel) == "repo:my-org/my-repo\nTeam channel"
 
     def test_handles_missing_sections(self) -> None:
-        assert extract_channel_description_text({"topic": {"value": "hi"}}) == "hi"
+        assert SlackChannel.topic_and_purpose({"topic": {"value": "hi"}}) == "hi"
 
     def test_empty_for_none(self) -> None:
-        assert extract_channel_description_text(None) == ""
+        assert SlackChannel.topic_and_purpose(None) == ""
 
     def test_empty_for_blank_values(self) -> None:
         channel = {"topic": {"value": "  "}, "purpose": {"value": ""}}
-        assert extract_channel_description_text(channel) == ""
+        assert SlackChannel.topic_and_purpose(channel) == ""
 
     def test_repo_token_extractable_from_description(self) -> None:
         channel = {"topic": {"value": "Use repo:langchain-ai/open-swe here"}, "purpose": {}}
-        description = extract_channel_description_text(channel)
+        description = SlackChannel.topic_and_purpose(channel)
         assert extract_repo_from_text(description) == {
             "owner": "langchain-ai",
             "name": "open-swe",

@@ -30,6 +30,7 @@ from agent.prompts import load_prompt
 from agent.run_config import Repo
 from agent.slack import client as slack_utils
 from agent.slack.allowed_bots import AllowedSlackBot, resolve_allowed_slack_bot
+from agent.slack.channels import SlackChannel
 from agent.slack.dm import dm_thread_title, is_dm_session
 from agent.slack.failures import report_slack_failure
 from agent.slack.request import SlackRequest
@@ -245,7 +246,7 @@ def _format_slack_thread_section(
         lines.append(f"- Channel name: #{channel_name}")
     lines.append(f"- Thread TS: {thread_ts}")
     lines.append(f"- Context starts at: {context_source}")
-    channel_description = common.get_slack_channel_context_description(channel_context)
+    channel_description = SlackChannel.context_description(channel_context)
     if channel_description:
         lines.append(
             "- Slack-provided channel description (topic/purpose; may specify the repository "
@@ -741,7 +742,7 @@ async def _process_slack_mention_impl(
     channel_context = (
         request.channel_context
         if request.channel_context is not None
-        else common.normalize_slack_channel_context(channel_id, None)
+        else SlackChannel.normalize_context(channel_id, None)
     )
     treat_all_messages_as_mentions = request.treat_all_messages_as_mentions
     untagged_reply = request.untagged_reply

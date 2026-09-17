@@ -10,7 +10,7 @@ owner enabled ever reaches a run with it.
 
 from agent.dashboard.agent_overrides import profile_dm_session_enabled
 from agent.dashboard.profiles import get_profile
-from agent.slack.client import SlackChannelContext
+from agent.slack.channels import SlackChannelContext
 from agent.users import User
 
 DM_SESSION_TS = "0"

@@ -5,7 +5,6 @@ from agent.slack.client import (
     fetch_slack_channel_messages,
     format_slack_messages_for_prompt,
     get_slack_user_names,
-    slack_channel_is_public,
 )
 
 DEFAULT_CHANNEL_MESSAGE_LIMIT = 30
@@ -21,13 +20,12 @@ async def slack_read_channel_messages(channel_id: str, limit: int = 30) -> dict[
     """Implement the `slack_read_channel_messages` tool."""
     if not channel_id or not channel_id.strip():
         return {"success": False, "error": "channel_id is required"}
-    if not await slack_channel_is_public(channel_id.strip()):
-        return {"success": False, "error": _NOT_PUBLIC}
-
     requested = limit if isinstance(limit, int) and limit > 0 else DEFAULT_CHANNEL_MESSAGE_LIMIT
     messages = await fetch_slack_channel_messages(
         channel_id.strip(), min(requested, SLACK_CHANNEL_HISTORY_MAX_MESSAGES)
     )
+    if messages is None:
+        return {"success": False, "error": _NOT_PUBLIC}
     if not messages:
         return {
             "success": False,

@@ -39,8 +39,6 @@ SLACK_THREAD_MAX_MESSAGES = 500
 SLACK_CHANNEL_HISTORY_MAX_MESSAGES = 100
 SLACK_FILE_UPLOAD_MAX_BYTES = 16 * 1024 * 1024
 
-SlackChannelContext = dict[str, str | bool | None]
-
 SLACK_WEB_LINK_FOOTER_LABEL = "Open in Web"
 SLACK_SECTION_TEXT_MAX_CHARS = 3000
 LANGGRAPH_URL = ENV.LANGGRAPH_URL.get()
@@ -1173,197 +1171,6 @@ async def get_slack_user_info(user_id: str) -> dict[str, Any] | None:
         return None
 
 
-async def get_slack_channel_info(
-    channel_id: str, *, use_cache: bool = True
-) -> dict[str, Any] | None:
-    """Get Slack channel details (including topic/purpose) by channel ID."""
-    if not SLACK_BOT_TOKEN or not channel_id:
-        return None
-    if use_cache and (known := await SlackChannel.get(channel_id)) is not None and known.fresh:
-        return dict(known.info)
-    try:
-        async with slack_client(token=SLACK_BOT_TOKEN) as client:
-            data = await client.conversations_info(channel=channel_id)
-        channel = data.get("channel")
-        if isinstance(channel, dict):
-            await SlackChannel.record(channel)
-            return dict(channel)
-    except SLACK_REQUEST_ERRORS as exc:
-        logger.warning("Slack channel lookup failed", extra={"slack_error": slack_error(exc)})
-    return None
-
-
-_SLACK_CHANNEL_MENTION_RE = re.compile(r"^<#([A-Z0-9]+)(?:\|[^>]*)?>$")
-_SLACK_CHANNEL_ID_SHAPE_RE = re.compile(r"^[CGD][A-Z0-9]{8,}$")
-
-
-async def _list_slack_channels(name: str) -> str | None:
-    """Page ``conversations.list``, recording every channel, until ``name`` turns up."""
-    cursor: str | None = None
-    try:
-        async with slack_client(token=SLACK_BOT_TOKEN) as client:
-            while True:
-                data = await client.conversations_list(
-                    types="public_channel,private_channel",
-                    exclude_archived=True,
-                    limit=1000,
-                    cursor=cursor,
-                )
-                channels = data.get("channels")
-                page = [item for item in channels if isinstance(item, dict)] if channels else []
-                await SlackChannel.record(*page)
-                for item in page:
-                    channel_id = item.get("id")
-                    if item.get("name") == name and isinstance(channel_id, str) and channel_id:
-                        return channel_id
-                metadata = data.get("response_metadata")
-                cursor = metadata.get("next_cursor") if isinstance(metadata, dict) else None
-                if not cursor:
-                    return None
-    except SLACK_REQUEST_ERRORS as exc:
-        logger.warning("Slack channel list failed", extra={"slack_error": slack_error(exc)})
-        return None
-
-
-async def resolve_slack_channel_id(channel: str) -> str | None:
-    """The id of a channel given as an id, ``<#C…|name>``, ``#name`` or ``name``."""
-    if not SLACK_BOT_TOKEN:
-        return None
-    reference = channel.strip()
-    if mention := _SLACK_CHANNEL_MENTION_RE.fullmatch(reference):
-        reference = mention.group(1)
-    reference = reference.lstrip("#")
-    if not reference:
-        return None
-    if _SLACK_CHANNEL_ID_SHAPE_RE.fullmatch(reference):
-        info = await get_slack_channel_info(reference)
-        found = info.get("id") if info else None
-        return found if isinstance(found, str) and found else None
-    name = reference.lower()
-    if (known := await SlackChannel.by_name(name)) is not None:
-        # A stale row may predate a rename; confirm against Slack before trusting it.
-        current = known.info if known.fresh else await get_slack_channel_info(known.id)
-        if current is not None and current.get("name") == name:
-            return known.id
-    return await _list_slack_channels(name)
-
-
-def _channel_section_value(channel: dict[str, Any] | None, key: str) -> str:
-    if not isinstance(channel, dict):
-        return ""
-    section = channel.get(key)
-    if isinstance(section, dict):
-        value = section.get("value")
-        if isinstance(value, str):
-            return value.strip()
-    value = channel.get(key)
-    return value.strip() if isinstance(value, str) else ""
-
-
-def extract_channel_description_text(channel: dict[str, Any] | None) -> str:
-    """Combine a Slack channel's topic and purpose text into one string."""
-    parts = [
-        value for key in ("topic", "purpose") if (value := _channel_section_value(channel, key))
-    ]
-    return "\n".join(parts)
-
-
-def normalize_slack_channel_context(
-    channel_id: str, channel: dict[str, Any] | None
-) -> SlackChannelContext:
-    """Normalize Slack channel info for prompts and metadata."""
-    name = ""
-    name_normalized = ""
-    if isinstance(channel, dict):
-        raw_name = channel.get("name")
-        raw_normalized = channel.get("name_normalized")
-        if isinstance(raw_name, str):
-            name = raw_name.strip()
-        if isinstance(raw_normalized, str):
-            name_normalized = raw_normalized.strip()
-    topic = _channel_section_value(channel, "topic")
-    purpose = _channel_section_value(channel, "purpose")
-    description = "\n".join(value for value in (topic, purpose) if value)
-    is_ext_shared = channel.get("is_ext_shared") if isinstance(channel, dict) else None
-    is_pending_ext_shared = (
-        channel.get("is_pending_ext_shared") if isinstance(channel, dict) else None
-    )
-    is_im = channel.get("is_im") if isinstance(channel, dict) else None
-    return {
-        "id": channel_id,
-        "name": name,
-        "name_normalized": name_normalized,
-        "topic": topic,
-        "purpose": purpose,
-        "description": description,
-        "is_ext_shared": is_ext_shared if isinstance(is_ext_shared, bool) else None,
-        "is_pending_ext_shared": (
-            is_pending_ext_shared if isinstance(is_pending_ext_shared, bool) else None
-        ),
-        "is_im": is_im if isinstance(is_im, bool) else None,
-    }
-
-
-def slack_channel_allows_operations(channel_context: dict[str, Any] | None) -> bool:
-    """Allow operations only when Slack confirms the channel is not externally shared."""
-    if not isinstance(channel_context, dict):
-        return False
-    return channel_context.get("is_im") is True or (
-        channel_context.get("is_ext_shared") is False
-        and channel_context.get("is_pending_ext_shared") is False
-    )
-
-
-def get_slack_channel_context_description(channel_context: dict[str, Any] | None) -> str:
-    """Extract prompt-safe description text from normalized channel context."""
-    if not isinstance(channel_context, dict):
-        return ""
-    description = channel_context.get("description")
-    if isinstance(description, str) and description.strip():
-        return description.strip()
-    parts: list[str] = []
-    for key in ("topic", "purpose"):
-        value = channel_context.get(key)
-        if isinstance(value, str) and value.strip():
-            parts.append(value.strip())
-    return "\n".join(parts)
-
-
-def slack_channel_context_has_metadata(channel_context: dict[str, Any] | None) -> bool:
-    """Return whether normalized channel context has name or description fields."""
-    if not isinstance(channel_context, dict):
-        return False
-    return any(
-        isinstance(channel_context.get(key), str) and channel_context.get(key, "").strip()
-        for key in ("name", "name_normalized", "topic", "purpose", "description")
-    )
-
-
-def is_slack_channel_named(channel_context: dict[str, Any] | None, expected_name: str) -> bool:
-    """Check normalized channel context against a Slack channel name."""
-    if not isinstance(channel_context, dict):
-        return False
-    expected = expected_name.strip().lower()
-    return any(
-        isinstance(value, str) and value.strip().lower() == expected
-        for value in (channel_context.get("name"), channel_context.get("name_normalized"))
-    )
-
-
-async def get_slack_channel_context(
-    channel_id: str, *, use_cache: bool = True
-) -> SlackChannelContext:
-    """Fetch and normalize Slack channel context."""
-    channel = await get_slack_channel_info(channel_id, use_cache=use_cache)
-    return normalize_slack_channel_context(channel_id, channel)
-
-
-async def get_slack_channel_description(channel_id: str) -> str:
-    """Fetch a Slack channel's combined topic + purpose text."""
-    channel = await get_slack_channel_info(channel_id)
-    return extract_channel_description_text(channel)
-
-
 async def get_slack_user_names(user_ids: list[str]) -> dict[str, str]:
     """Get display names for a set of Slack user IDs."""
     unique_ids = sorted({user_id for user_id in user_ids if isinstance(user_id, str) and user_id})
@@ -1444,41 +1251,24 @@ _SLACK_NOISE_SUBTYPES = frozenset(
 )
 
 
-async def slack_channel_is_public(channel_id: str) -> bool:
-    """Whether a channel is one anybody in the workspace can already read.
-
-    Channel history is fetched with the deployment's bot token, which says
-    nothing about who is asking, so only a channel with no membership to leak
-    may be read this way: not private, not a DM or group DM, and not shared with
-    another organization.
-    """
-    channel = await get_slack_channel_info(channel_id)
-    if not isinstance(channel, dict):
-        return False
-    return (
-        channel.get("is_channel") is True
-        and channel.get("is_private") is False
-        and channel.get("is_im") is not True
-        and channel.get("is_mpim") is not True
-        and channel.get("is_ext_shared") is False
-        and channel.get("is_pending_ext_shared") is False
-    )
-
-
-async def fetch_slack_channel_messages(channel_id: str, limit: int = 30) -> list[dict[str, Any]]:
+async def fetch_slack_channel_messages(
+    channel_id: str, limit: int = 30
+) -> list[dict[str, Any]] | None:
     """The most recent top-level messages in a public channel, oldest first.
 
-    Thread replies are not in channel history, so a message that has any carries
-    its `reply_count` and `thread_ts` for `slack_read_thread_messages` to follow.
+    ``None`` means the channel could not be confirmed readable this way; an empty
+    list means it is readable and has nothing to show. Thread replies are not in
+    channel history, so a message that has any carries its `reply_count` and
+    `thread_ts` for `slack_read_thread_messages` to follow.
     """
     if not SLACK_BOT_TOKEN or not channel_id:
-        return []
-    if not await slack_channel_is_public(channel_id):
+        return None
+    if not await SlackChannel.is_public(channel_id):
         logger.info(
             "Refused to read history for a non-public Slack channel",
             extra={"slack_channel": channel_id},
         )
-        return []
+        return None
 
     capped = max(1, min(limit, SLACK_CHANNEL_HISTORY_MAX_MESSAGES))
     async with slack_client(token=SLACK_BOT_TOKEN) as client:

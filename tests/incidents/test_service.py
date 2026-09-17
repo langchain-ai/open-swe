@@ -7,6 +7,7 @@ from fastapi import HTTPException
 
 from agent.incidents import channels, service, turns
 from agent.incidents.models import Incident, IncidentPolicy, IncidentReport, IncidentReportRecord
+from agent.slack.channels import SlackChannel
 
 CHANNEL = {
     "id": "C1",
@@ -25,7 +26,7 @@ async def configured(fake_store, monkeypatch):
         "default",
         IncidentPolicy(enabled=True, workspace_id="T1", slack_app_id="A1", enabled_at=100),
     )
-    monkeypatch.setattr(service, "get_slack_channel_info", AsyncMock(return_value=dict(CHANNEL)))
+    monkeypatch.setattr(SlackChannel, "fetch", AsyncMock(return_value=dict(CHANNEL)))
     monkeypatch.setattr(turns, "has_active_run", AsyncMock(return_value=False))
     monkeypatch.setattr(
         service, "get_langsmith_trace_url", AsyncMock(return_value="https://smith/t")
@@ -152,7 +153,7 @@ async def test_list_filters_by_activity_and_hides_unreadable_channels(configured
     def info(channel_id: str, *, use_cache: bool = True):
         return None if channel_id == "C3" else {**CHANNEL, "id": channel_id}
 
-    service.get_slack_channel_info.side_effect = info
+    SlackChannel.fetch.side_effect = info
 
     active = await service.list_incidents(view="active")
     inactive = await service.list_incidents(view="inactive")
@@ -209,11 +210,11 @@ async def test_detail_merges_control_and_finding_activity(configured):
 
 async def test_revoked_channel_access_hides_the_incident(configured):
     record = await _record()
-    service.get_slack_channel_info.return_value = {**CHANNEL, "is_member": False}
+    SlackChannel.fetch.return_value = {**CHANNEL, "is_member": False}
     with pytest.raises(HTTPException) as error:
         await service.get_incident(record.id)
     assert error.value.status_code == 404
-    service.get_slack_channel_info.return_value = None
+    SlackChannel.fetch.return_value = None
     with pytest.raises(HTTPException) as error:
         await service.get_incident(record.id)
     assert error.value.status_code == 503

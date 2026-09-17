@@ -6,6 +6,7 @@ import pytest
 from fastapi import BackgroundTasks, Request
 
 from agent.slack import routes as slack_routes
+from agent.slack.channels import SlackChannel
 
 JOIN = {
     "type": "message",
@@ -44,7 +45,6 @@ def webhook(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
         "resolve_slack_channel_context": AsyncMock(
             return_value={"id": "C-code", "is_ext_shared": False, "is_pending_ext_shared": False}
         ),
-        "slack_channel_allows_operations": lambda _context: True,
         "is_code_channel": AsyncMock(return_value=True),
         "claim_slack_event": AsyncMock(return_value=True),
         "slack_event_already_seen": AsyncMock(return_value=False),
@@ -54,6 +54,7 @@ def webhook(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
         "get_slack_repo_config": AsyncMock(return_value={"owner": "acme", "name": "billing"}),
         "SLACK_BOT_USER_ID": "U-BOT",
     }
+    monkeypatch.setattr(SlackChannel, "allows_operations", lambda _context: True)
     for name, mock in calls.items():
         monkeypatch.setattr(slack_routes.common, name, mock)
     dispatched = AsyncMock()

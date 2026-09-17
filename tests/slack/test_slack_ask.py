@@ -9,6 +9,7 @@ from fastapi import BackgroundTasks, Request
 from agent.run_config import Repo
 from agent.slack import ask as slack_ask
 from agent.slack import routes as slack_routes
+from agent.slack.channels import SlackChannel
 from agent.slack.tools import thread_reply as slack_thread_reply
 from agent.threads.listing import _metadata_matches_filters
 
@@ -90,7 +91,7 @@ def linked_asker(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         slack_ask.common, "resolve_slack_channel_context", AsyncMock(return_value={"name": "eng"})
     )
-    monkeypatch.setattr(slack_ask, "slack_channel_allows_operations", lambda _context: True)
+    monkeypatch.setattr(SlackChannel, "allows_operations", lambda _context: True)
     monkeypatch.setattr(slack_ask, "get_slack_user_info", AsyncMock(return_value=None))
     monkeypatch.setattr(slack_ask.User, "login_for_slack", AsyncMock(return_value="octocat"))
     monkeypatch.setattr(slack_ask.common, "get_valid_access_token", AsyncMock(return_value="gho_x"))

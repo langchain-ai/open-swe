@@ -15,13 +15,13 @@ from pydantic import BaseModel
 
 from agent.dispatch import dispatch_agent_run
 from agent.prompts import render_prompt
+from agent.slack.channels import SlackChannel
 from agent.slack.client import (
     fetch_slack_channel_messages,
     format_slack_messages_for_prompt,
     get_slack_user_info,
     get_slack_user_names,
     post_slack_ephemeral_message,
-    slack_channel_allows_operations,
 )
 from agent.slack.webhook import workspace_scoped_default_repo
 from agent.source_context import SlackThreadRef, SourceContext
@@ -89,7 +89,7 @@ def _channel_label(channel_context: dict[str, Any] | None) -> str:
 
 async def _channel_context(channel_id: str) -> str:
     """Recent channel messages, oldest trimmed away until they fit the budget."""
-    messages = await fetch_slack_channel_messages(channel_id, CHANNEL_CONTEXT_MESSAGE_LIMIT)
+    messages = await fetch_slack_channel_messages(channel_id, CHANNEL_CONTEXT_MESSAGE_LIMIT) or []
     if not messages:
         return ""
     user_ids = [
@@ -139,7 +139,7 @@ async def _runnable_login(request: SlackAskRequest, login: str | None, email: st
 
 async def _process_slack_ask(request: SlackAskRequest) -> None:
     channel_context = await common.resolve_slack_channel_context(request.channel_id)
-    if not slack_channel_allows_operations(channel_context):
+    if not SlackChannel.allows_operations(channel_context):
         await _refuse(request, _CHANNEL_REFUSAL)
         return
 
