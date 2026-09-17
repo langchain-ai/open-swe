@@ -573,10 +573,10 @@ function PRMergeRateSection({
               {data.maturity_days} days or longer.
             </p>
             <p>
-              <strong>Median distance</strong> is the median normalized line edit
-              distance between each merged PR’s opening diff and final diff. It
-              is calculated only for merged PRs with complete text patches;
-              lower means less post-open editing.
+              <strong>Median distance</strong> is the median normalized line
+              edit distance between each merged PR’s opening diff and final
+              diff. It is calculated only for merged PRs with complete text
+              patches; lower means less post-open editing.
             </p>
             <p>
               <strong>Merge rate</strong> includes only PRs old enough to have a
