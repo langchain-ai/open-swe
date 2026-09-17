@@ -152,9 +152,7 @@ async def pr_merge_rate_by_model(
             total_cost = row["total_pr_cost_usd"]
             effort["prs_with_complete_cost"] = covered
             effort["avg_pr_cost_usd"] = (
-                float(total_cost / covered)
-                if covered == effort["cohort_size"] and covered
-                else None
+                float(total_cost / covered) if covered * 2 > effort["cohort_size"] else None
             )
             cohort["prs_with_complete_cost"] += covered
             if total_cost is not None:
@@ -182,8 +180,8 @@ async def pr_merge_rate_by_model(
             )
             total_cost = cohort.pop("total_pr_cost_usd")
             cohort["avg_pr_cost_usd"] = (
-                float(total_cost / cohort["cohort_size"])
-                if cohort["prs_with_complete_cost"] == cohort["cohort_size"]
+                float(total_cost / cohort["prs_with_complete_cost"])
+                if cohort["prs_with_complete_cost"] * 2 > cohort["cohort_size"]
                 else None
             )
             decided = cohort["merged"] + cohort["closed_without_merge"]

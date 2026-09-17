@@ -943,8 +943,9 @@ it("explains omitted PR costs in the average", async () => {
 it.each([
   [0, 2, 2, "$0.00"],
   [12.345, 2, 2, "$12.35"],
+  [2.5, 2, 3, "$2.50"],
   [null, 1, 2, "—"],
-  [null, 0, 1, "—"],
+  [null, 0, 2, "—"],
 ] as const)(
   "renders PR average %s with coverage %s of %s",
   async (cost, covered, cohortSize, amount) => {
@@ -996,7 +997,7 @@ it.each([
     ).toBe(covered < cohortSize)
     fireEvent.click(screen.getByText("How these numbers work"))
     expect(
-      screen.getByText(/missing or partial costs are not zero/)
+      screen.getByText(/Missing or partial costs are not zero/)
     ).toBeTruthy()
     client.clear()
   }
