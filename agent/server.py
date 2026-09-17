@@ -853,8 +853,8 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
                             if triggering_user_identity and triggering_user_identity.github_profile
                             else None
                         ),
-                        model_id=self._model_id,
-                        effort=self._effort,
+                        model_id=attribution_model_id,
+                        effort=attribution_effort,
                         source=self._source,
                         repository=cfg.repo_full_name or None,
                     )
