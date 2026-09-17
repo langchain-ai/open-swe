@@ -58,7 +58,7 @@ import { useIsMobile } from "@/lib/useIsMobile"
 import { useAgentStream } from "@/features/agents/lib/stream/AgentStreamProvider"
 import {
   markTranscriptPainted,
-  useLazyToolResults,
+  useDeferredParts,
 } from "@/features/agents/lib/stream/lazyHydration"
 import { useReconnectStatus } from "@/features/agents/lib/stream/useReconnectStatus"
 import {
@@ -218,20 +218,20 @@ export function AgentThreadView({
     [handlePanelCollapsedChange]
   )
 
-  const lazyResults = useLazyToolResults((state) => state.results[thread.id])
+  const deferred = useDeferredParts((state) => state.parts[thread.id])
   const baseMessages = useMemo<Array<Message>>(() => {
     const started = perfNow()
     const built = streamMessagesToUi(
       stream.messages,
       stream.toolCalls,
       messageArrivalTimestamp,
-      lazyResults
+      deferred
     )
     const elapsed = perfNow() - started
     threadTranscriptBuilt(thread.id, elapsed)
     runTranscriptBuilt(thread.id, elapsed)
     return built
-  }, [lazyResults, stream.messages, stream.toolCalls, thread.id])
+  }, [deferred, stream.messages, stream.toolCalls, thread.id])
 
   const isStreaming = thread.status === "running" || stream.isLoading
   const activeRun = useMemo(

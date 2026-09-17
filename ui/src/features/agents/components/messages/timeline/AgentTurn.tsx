@@ -197,6 +197,7 @@ export function AgentTurn({
             <ReasoningBlock
               text={reasoningChunk?.text ?? ""}
               isLive={!!isStreaming && index === total - 1}
+              pending={reasoningChunk?.pending}
             />
           </div>
         )

@@ -18,9 +18,12 @@ function reasoningLabel(elapsedMs: number | null): string {
 export function ReasoningBlock({
   text,
   isLive,
+  pending = false,
 }: {
   text: string
   isLive: boolean
+  /** The text is still loading after a skeleton hydrate. */
+  pending?: boolean
 }) {
   const [userExpanded, setUserExpanded] = useState(false)
   const [elapsedMs, setElapsedMs] = useState<number | null>(null)
@@ -40,7 +43,7 @@ export function ReasoningBlock({
   }, [isLive])
 
   const trimmed = text.trim()
-  if (!trimmed && !isLive) return null
+  if (!trimmed && !isLive && !pending) return null
 
   const expanded = isLive || userExpanded
 
@@ -73,6 +76,11 @@ export function ReasoningBlock({
         <div className="ms-1 mt-1 border-s border-border/45 ps-3 text-[13px] leading-5 break-words whitespace-pre-wrap text-muted-foreground">
           {trimmed}
         </div>
+      )}
+      {expanded && !trimmed && pending && (
+        <p className="ms-1 mt-1 ps-3 text-[13px] text-muted-foreground/70">
+          Loading…
+        </p>
       )}
     </div>
   )

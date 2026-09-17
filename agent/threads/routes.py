@@ -28,10 +28,10 @@ from agent.threads.handlers import (
     delete_dashboard_thread,
     get_dashboard_pull_request_checks,
     get_dashboard_thread,
+    get_dashboard_thread_deferred_parts,
     get_dashboard_thread_pull_request_context,
     get_dashboard_thread_pull_request_status,
     get_dashboard_thread_state,
-    get_dashboard_thread_tool_results,
     rename_dashboard_thread,
     resolve_all_dashboard_threads,
     resolve_dashboard_thread,
@@ -412,15 +412,20 @@ async def api_get_thread_state(
     return JSONResponse(payload, headers={"Server-Timing": header})
 
 
-@router.get("/threads/{thread_id}/state/tool-results")
-async def api_get_thread_tool_results(
+@router.get("/threads/{thread_id}/state/deferred")
+async def api_get_thread_deferred_parts(
     thread_id: str,
+    checkpoint_id: str | None = None,
     session: dict[str, Any] = SESSION_DEP,
 ) -> Response:
     timings: dict[str, float] = {}
     started = perf_counter()
-    payload = await get_dashboard_thread_tool_results(
-        thread_id, session["sub"], email=session.get("email"), timings=timings
+    payload = await get_dashboard_thread_deferred_parts(
+        thread_id,
+        session["sub"],
+        checkpoint_id=checkpoint_id,
+        email=session.get("email"),
+        timings=timings,
     )
     timings["total"] = (perf_counter() - started) * 1000
     header = server_timing_header(timings)

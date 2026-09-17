@@ -94,11 +94,19 @@ export function UserMessage({ message }: { message: Message }) {
                     key={i}
                     className="overflow-hidden rounded-lg border border-border/80 bg-background/70"
                   >
-                    <img
-                      src={`data:${img.mimeType};base64,${img.base64}`}
-                      alt={img.fileName || "image"}
-                      className="block h-auto max-h-[220px] w-full object-cover"
-                    />
+                    {img.pending ? (
+                      <div
+                        className="h-[120px] w-full animate-pulse bg-muted"
+                        role="img"
+                        aria-label="Loading image"
+                      />
+                    ) : (
+                      <img
+                        src={`data:${img.mimeType};base64,${img.base64}`}
+                        alt={img.fileName || "image"}
+                        className="block h-auto max-h-[220px] w-full object-cover"
+                      />
+                    )}
                   </div>
                 ))}
               </div>

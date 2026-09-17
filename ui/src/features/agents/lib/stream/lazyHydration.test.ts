@@ -9,7 +9,7 @@ import {
   lazyHydrationEnabled,
   lazyMarker,
   markTranscriptPainted,
-  useLazyToolResults,
+  useDeferredParts,
   withLazyHydration,
 } from "./lazyHydration"
 
@@ -36,7 +36,7 @@ async function flush(): Promise<void> {
 beforeEach(() => {
   window.localStorage.clear()
   window.history.replaceState(null, "", "/agents")
-  useLazyToolResults.setState({ results: {}, loading: {} })
+  useDeferredParts.setState({ parts: {}, loading: {} })
 })
 
 afterEach(() => {
@@ -56,29 +56,38 @@ describe("lazyHydrationEnabled", () => {
 })
 
 describe("withLazyHydration", () => {
-  it("hydrates from the skeleton and applies tool results after first paint", async () => {
+  const summary = {
+    deferred: 1,
+    deferred_bytes: 4096,
+    kept_bytes: 512,
+    categories: { tool_content: 4096 },
+  }
+
+  it("hydrates from the skeleton and applies deferred parts after first paint", async () => {
     const { client } = fakeClient()
     const calls: Array<string> = []
+    const parts = {
+      tool_results: {
+        call_1: {
+          content: "the whole output",
+          artifact: null,
+          status: "success",
+        },
+      },
+      reasoning: { ai_1: "thinking…" },
+      images: {},
+    }
     const fetchImpl: typeof fetch = async (input) => {
       const url = String(input)
       calls.push(url)
       if (url.endsWith("/state?view=skeleton")) {
         return jsonResponse({
           values: { messages: [] },
-          [LAZY_MARKER_KEY]: { deferred: 1, deferred_bytes: 4096 },
+          checkpoint: { checkpoint_id: "cp-1" },
+          [LAZY_MARKER_KEY]: summary,
         })
       }
-      if (url.endsWith("/state/tool-results")) {
-        return jsonResponse({
-          results: {
-            call_1: {
-              content: "the whole output",
-              artifact: null,
-              status: "success",
-            },
-          },
-        })
-      }
+      if (url.includes("/state/deferred")) return jsonResponse(parts)
       throw new Error(`unexpected ${url}`)
     }
     withLazyHydration(client, API, fetchImpl)
@@ -88,27 +97,25 @@ describe("withLazyHydration", () => {
     expect(calls[0]).toBe(`${API}/threads/${THREAD}/state?view=skeleton`)
 
     await flush()
-    expect(calls[1]).toBe(`${API}/threads/${THREAD}/state/tool-results`)
-    // Results wait for the transcript's first frame.
-    expect(useLazyToolResults.getState().results[THREAD]).toBeUndefined()
+    // The deferred read names the checkpoint so the proxy can reuse the parts
+    // it already computed for the skeleton.
+    expect(calls[1]).toBe(
+      `${API}/threads/${THREAD}/state/deferred?checkpoint_id=cp-1`
+    )
+    // Parts wait for the transcript's first frame.
+    expect(useDeferredParts.getState().parts[THREAD]).toBeUndefined()
     markTranscriptPainted(THREAD)
     await flush()
-    expect(useLazyToolResults.getState().results[THREAD]).toEqual({
-      call_1: {
-        content: "the whole output",
-        artifact: null,
-        status: "success",
-      },
-    })
-    expect(useLazyToolResults.getState().loading[THREAD]).toBe(false)
+    expect(useDeferredParts.getState().parts[THREAD]).toEqual(parts)
+    expect(useDeferredParts.getState().loading[THREAD]).toBe(false)
   })
 
-  it("skips the results fetch when nothing was deferred", async () => {
+  it("skips the deferred fetch when nothing was deferred", async () => {
     const { client } = fakeClient()
     const fetchImpl = vi.fn(async () =>
       jsonResponse({
         values: { messages: [] },
-        [LAZY_MARKER_KEY]: { deferred: 0, deferred_bytes: 0 },
+        [LAZY_MARKER_KEY]: { ...summary, deferred: 0, deferred_bytes: 0 },
       })
     )
     withLazyHydration(client, API, fetchImpl as unknown as typeof fetch)
@@ -149,7 +156,11 @@ describe("lazyMarker", () => {
       content: "preview",
       additional_kwargs: { [LAZY_MARKER_KEY]: { truncated: true, size: 9000 } },
     })
-    expect(lazyMarker(trimmed)).toEqual({ truncated: true, size: 9000 })
+    expect(lazyMarker(trimmed)).toEqual({
+      truncated: true,
+      size: 9000,
+      parts: ["content"],
+    })
     expect(
       lazyMarker(new ToolMessage({ tool_call_id: "c", content: "x" }))
     ).toBeNull()

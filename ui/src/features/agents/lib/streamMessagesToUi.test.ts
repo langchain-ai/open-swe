@@ -285,11 +285,22 @@ describe("streamMessagesToUi", () => {
     ).toBeUndefined()
   })
 
-  it("shows a skeleton tool result as pending until its full result loads", () => {
+  it("overlays deferred parts on a skeleton hydrate and shows them as pending meanwhile", () => {
+    const marker = (parts: Array<string>) => ({
+      [LAZY_MARKER_KEY]: { truncated: true, size: 9000, parts },
+    })
     const messages = [
+      new HumanMessage({
+        id: "h-1",
+        content: [
+          { type: "text", text: "look" },
+          { type: "image", mime_type: "", data: "" },
+        ],
+        additional_kwargs: marker(["images"]),
+      }),
       new AIMessage({
         id: "ai-1",
-        content: "",
+        content: [{ type: "reasoning", reasoning: "" }],
         tool_calls: [
           {
             id: "call-1",
@@ -298,44 +309,70 @@ describe("streamMessagesToUi", () => {
             type: "tool_call",
           },
         ],
+        additional_kwargs: marker(["reasoning"]),
       }),
       new ToolMessage({
         tool_call_id: "call-1",
-        content: "preview of the",
-        status: "success",
-        additional_kwargs: {
-          [LAZY_MARKER_KEY]: { truncated: true, size: 9000 },
-        },
+        content: "",
+        status: "error",
+        additional_kwargs: marker(["content", "artifact"]),
       }),
     ]
-    const toolChunk = (lazy?: Parameters<typeof streamMessagesToUi>[3]) => {
-      const chunk = streamMessagesToUi(messages, [], undefined, lazy)[0]
-        ?.chunks[0]
-      return chunk?.kind === "tool-execution" ? chunk : undefined
+    const build = (deferred?: Parameters<typeof streamMessagesToUi>[3]) => {
+      const built = streamMessagesToUi(messages, [], undefined, deferred)
+      const agent = built.find((m) => m.author === "agent")
+      return {
+        image: built[0]?.chunks.find((c) => c.kind === "image"),
+        reasoning: agent?.chunks.find((c) => c.kind === "reasoning"),
+        tool: agent?.chunks.find((c) => c.kind === "tool-execution"),
+      }
     }
 
-    expect(toolChunk()).toMatchObject({
-      status: "completed",
-      output: "preview of the",
+    const pending = build()
+    expect(pending.image).toMatchObject({ kind: "image", pending: true })
+    expect(pending.reasoning).toMatchObject({ text: "", pending: true })
+    // The persisted status wins over the SDK projection, which saw no output.
+    expect(pending.tool).toMatchObject({
+      status: "error",
       outputPending: true,
     })
-    const loaded = toolChunk({
-      "call-1": {
-        content: [{ type: "text", text: "preview of the full output" }],
-        artifact: {
-          type: "output_iframe",
-          html: "<p>hi</p>",
-          title: "Result",
-          filename: "r.html",
+    expect(
+      pending.tool?.kind === "tool-execution" && pending.tool.output
+    ).toBeUndefined()
+
+    const loaded = build({
+      tool_results: {
+        "call-1": {
+          content: [{ type: "text", text: "the full output" }],
+          artifact: {
+            type: "output_iframe",
+            html: "<p>hi</p>",
+            title: "Result",
+            filename: "r.html",
+          },
+          status: "error",
         },
-        status: "success",
+      },
+      reasoning: { "ai-1": "let me think" },
+      images: {
+        "h-1": [{ type: "image", mime_type: "image/png", data: "AAAA" }],
       },
     })
-    expect(loaded?.output).toBe("preview of the full output")
-    expect(loaded?.outputPending).toBeUndefined()
-    expect(loaded?.display).toMatchObject({
-      type: "output_iframe",
-      title: "Result",
+    expect(loaded.image).toMatchObject({
+      base64: "AAAA",
+      mimeType: "image/png",
     })
+    expect(
+      loaded.image?.kind === "image" && loaded.image.pending
+    ).toBeUndefined()
+    expect(loaded.reasoning).toMatchObject({ text: "let me think" })
+    expect(loaded.tool).toMatchObject({
+      status: "error",
+      output: "the full output",
+      display: { type: "output_iframe", title: "Result" },
+    })
+    expect(
+      loaded.tool?.kind === "tool-execution" && loaded.tool.outputPending
+    ).toBeUndefined()
   })
 })

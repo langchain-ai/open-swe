@@ -132,6 +132,8 @@ export interface TextChunk {
 export interface ReasoningChunk {
   kind: "reasoning"
   text: string
+  /** The text is still loading after a skeleton hydrate. */
+  pending?: boolean
 }
 
 export interface CodeChunk {
@@ -160,6 +162,8 @@ export interface ImageChunk {
   base64: string
   mimeType: string
   fileName?: string
+  /** The image is still loading after a skeleton hydrate. */
+  pending?: boolean
 }
 
 export type Chunk =

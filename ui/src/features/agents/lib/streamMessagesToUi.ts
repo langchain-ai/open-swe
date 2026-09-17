@@ -6,7 +6,7 @@ import {
 } from "./structuredInputMessages"
 import { lazyMarker } from "./stream/lazyHydration"
 import { humanizeToolName } from "./toolNames"
-import type { LazyToolResult } from "./stream/lazyHydration"
+import type { DeferredParts } from "./stream/lazyHydration"
 import type { BaseMessage, ContentBlock } from "@langchain/core/messages"
 import type { AssembledToolCall } from "@langchain/react"
 
@@ -179,6 +179,20 @@ function reasoningText(raw: BaseMessage): string {
   return text.trim()
 }
 
+/** One placeholder per image block a skeleton hydrate emptied out. */
+function pendingImageChunks(content: unknown): Array<Chunk> {
+  if (!Array.isArray(content)) return []
+  return content.flatMap((item): Array<Chunk> => {
+    const type =
+      item && typeof item === "object" && !Array.isArray(item)
+        ? (item as Record<string, unknown>).type
+        : undefined
+    return type === "image" || type === "image_url"
+      ? [{ kind: "image", base64: "", mimeType: "", pending: true }]
+      : []
+  })
+}
+
 function imageChunks(content: unknown): Array<Chunk> {
   if (!Array.isArray(content)) return []
 
@@ -344,8 +358,8 @@ export function streamMessagesToUi(
   messages: Array<BaseMessage>,
   toolCalls: ReadonlyArray<AssembledToolCall> = [],
   resolveCreatedAt?: (messageId: string) => string | undefined,
-  /** Full results for tool messages a skeleton hydrate trimmed, by tool call id. */
-  lazyResults?: Record<string, LazyToolResult>
+  /** What a skeleton hydrate left out, once loaded. */
+  deferred?: DeferredParts
 ): Array<Message> {
   const toolCallsById = new Map<string, AssembledToolCall>()
   for (const toolCall of toolCalls) {
@@ -408,8 +422,16 @@ export function streamMessagesToUi(
       if (raw.additional_kwargs.lc_source === "summarization") return
       flushAgentTurn()
       turnKey = typeof raw.id === "string" ? raw.id : undefined
+      const humanLazy = lazyMarker(raw)
+      const loadedImages = humanLazy?.parts.includes("images")
+        ? deferred?.images[msgId]
+        : undefined
       const content = (raw as unknown as { content?: unknown }).content
-      const chunks = imageChunks(content)
+      const chunks = loadedImages
+        ? imageChunks(loadedImages)
+        : humanLazy?.parts.includes("images")
+          ? pendingImageChunks(content)
+          : imageChunks(content)
       const parsed = parseStructuredInput(raw.text, structuredEntities)
       if (parsed.type === "entity") return
       if (
@@ -454,8 +476,18 @@ export function streamMessagesToUi(
     if (AIMessage.isInstance(raw)) {
       if (raw.additional_kwargs.lc_source === "summarization") return
       const chunks: Array<Chunk> = []
-      const reasoning = reasoningText(raw)
-      if (reasoning) chunks.push({ kind: "reasoning", text: reasoning })
+      const aiLazy = lazyMarker(raw)
+      if (aiLazy?.parts.includes("reasoning")) {
+        const loaded = deferred?.reasoning[msgId]
+        chunks.push(
+          loaded === undefined
+            ? { kind: "reasoning", text: "", pending: true }
+            : { kind: "reasoning", text: loaded }
+        )
+      } else {
+        const reasoning = reasoningText(raw)
+        if (reasoning) chunks.push({ kind: "reasoning", text: reasoning })
+      }
       const text = raw.text.trim()
       if (text) chunks.push({ kind: "text", text })
 
@@ -466,6 +498,7 @@ export function streamMessagesToUi(
         const args = parseToolArgs(toolCall.args)
         const assembled = toolCallsById.get(toolCallId)
         const toolMessage = toolMessagesById.get(toolCallId)
+        const lazy = toolMessage ? lazyMarker(toolMessage) : null
         const chunk: ToolExecutionChunk = {
           kind: "tool-execution",
           toolCallId,
@@ -473,20 +506,21 @@ export function streamMessagesToUi(
           title: toolTitle(name, args),
           toolKind: toolKind(name),
           input: args,
-          status: toolStatus(assembled, toolMessage),
+          status: lazy
+            ? // The SDK's projection saw an empty result and thinks the call
+              // is still running; the persisted status is the truth.
+              toolMessage?.status === "error"
+              ? "error"
+              : "completed"
+            : toolStatus(assembled, toolMessage),
         }
-        const lazy = toolMessage ? lazyMarker(toolMessage) : null
-        const loaded = lazy ? lazyResults?.[toolCallId] : undefined
+        const loaded = lazy ? deferred?.tool_results[toolCallId] : undefined
         if (loaded) {
           const output = toolResultText(loaded.content)
           if (output) chunk.output = output
           const display = outputIframeDisplay(loaded.artifact)
           if (display) chunk.display = display
         } else if (lazy) {
-          // The skeleton carries a preview; the SDK's projection saw the same
-          // truncated text, so neither is the real output yet.
-          const preview = toolMessage?.text.trim()
-          if (preview) chunk.output = preview
           chunk.outputPending = true
         } else {
           const output = toolOutputText(assembled, toolMessage)

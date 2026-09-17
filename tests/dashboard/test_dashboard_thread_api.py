@@ -1682,6 +1682,7 @@ async def test_thread_state_skeleton_trims_tool_results_and_reports_them(monkeyp
                     ]
                 },
                 "next": [],
+                "checkpoint": {"checkpoint_id": "cp-1"},
             }
 
     class FakeRuns:
@@ -1700,15 +1701,21 @@ async def test_thread_state_skeleton_trims_tool_results_and_reports_them(monkeyp
 
     skeleton = await handlers.get_dashboard_thread_state("tid", "owner", view="skeleton")
     trimmed = skeleton["values"]["messages"][1]
-    assert len(trimmed["content"]) < len(big)
+    assert trimmed["content"] == ""
     assert trimmed["additional_kwargs"]["open_swe_lazy"]["truncated"] is True
     assert skeleton["open_swe_lazy"]["deferred"] == 1
 
-    results = await handlers.get_dashboard_thread_tool_results("tid", "owner")
-    assert results == {"results": {"c1": {"content": big, "artifact": None, "status": "success"}}}
+    # The deferred request for the same checkpoint is served from the parts
+    # the skeleton request already computed.
+    FakeThreads.get_state = None  # type: ignore[assignment]
+    parts = await handlers.get_dashboard_thread_deferred_parts(
+        "tid", "owner", checkpoint_id=skeleton["checkpoint"]["checkpoint_id"]
+    )
+    assert parts["tool_results"] == {"c1": {"content": big, "artifact": None, "status": "success"}}
+    assert parts["reasoning"] == {} and parts["images"] == {}
 
 
-async def test_thread_tool_results_hidden_for_private_thread_non_owner(monkeypatch) -> None:
+async def test_thread_deferred_parts_hidden_for_private_thread_non_owner(monkeypatch) -> None:
     class FakeThreads:
         async def get(self, thread_id: str) -> dict[str, object]:
             return {
@@ -1729,7 +1736,7 @@ async def test_thread_tool_results_hidden_for_private_thread_non_owner(monkeypat
     patch_thread_module(monkeypatch, "langgraph_client", lambda: FakeClient())
 
     with pytest.raises(HTTPException) as exc_info:
-        await handlers.get_dashboard_thread_tool_results("tid", "stranger")
+        await handlers.get_dashboard_thread_deferred_parts("tid", "stranger")
     assert exc_info.value.status_code == 404
 
 

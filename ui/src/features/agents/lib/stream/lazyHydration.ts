@@ -1,22 +1,23 @@
 /**
- * Lazy thread hydration: paint the transcript from a skeleton, fill in tool
- * results afterwards.
+ * Lazy thread hydration: paint the transcript from a skeleton, fill in the
+ * rest afterwards.
  *
- * The SDK seeds `useStream` from one `client.threads.getState()` call, and on
- * a long thread most of that payload is tool output nobody sees until a card
- * is expanded. `withLazyHydration` swaps the SDK's state read for the
- * dashboard's `?view=skeleton` variant, where each large tool result is a
- * short preview plus a marker, then fetches the full results from
- * `/state/tool-results` and publishes them here once the transcript has
- * painted. `streamMessagesToUi` overlays them on the marked messages.
+ * The SDK seeds `useStream` from one `client.threads.getState()` call. The
+ * dashboard's `?view=skeleton` variant of that read keeps only what the
+ * transcript needs for first paint: user and assistant text, tool calls and
+ * their arguments, statuses and timestamps. Tool results and artifacts,
+ * reasoning text, pasted images and non-message state are left out, each
+ * trimmed message carrying a marker, and fetched from `/state/deferred` once
+ * the transcript has painted. `streamMessagesToUi` overlays them on the
+ * marked messages.
  *
- * The client patch is a local stand-in for a hydration hook the SDK does not
- * offer yet; it only intercepts the single-argument read `hydrate()` makes.
+ * `withLazyHydration` swaps the SDK client's own state read for that flow; it
+ * is a local stand-in for a hydration hook the SDK does not offer yet and only
+ * intercepts the single-argument read `hydrate()` makes.
  */
 
 import { create } from "zustand"
 import type { Client } from "@langchain/langgraph-sdk"
-import type { ToolMessage } from "@langchain/core/messages"
 
 import { threadLoadLazy } from "@/lib/perf/threadLoad"
 import { startSpan } from "@/lib/perf/trace"
@@ -26,12 +27,15 @@ const FLAG_STORAGE_KEY = "open-swe.lazy-hydration"
 const FLAG_QUERY_KEY = "lazy"
 /** How long a loaded batch waits for the first paint before applying anyway. */
 const PAINT_WAIT_MS = 1_500
-/** Threads whose loaded results stay in memory. */
+/** Threads whose loaded parts stay in memory. */
 const RETAINED_THREADS = 3
+
+export type DeferredPart = "content" | "artifact" | "reasoning" | "images"
 
 export interface LazyMarker {
   truncated: boolean
   size: number
+  parts: Array<DeferredPart>
 }
 
 export interface LazyToolResult {
@@ -40,13 +44,21 @@ export interface LazyToolResult {
   status: string | null
 }
 
-interface SkeletonSummary {
-  deferred: number
-  deferred_bytes: number
+/** What the skeleton left out, addressed the way the transcript looks things up. */
+export interface DeferredParts {
+  /** By tool call id. */
+  tool_results: Record<string, LazyToolResult>
+  /** Reasoning text by assistant message id. */
+  reasoning: Record<string, string>
+  /** Image content blocks by human message id. */
+  images: Record<string, Array<unknown>>
 }
 
-interface ToolResultsResponse {
-  results: Record<string, LazyToolResult>
+export interface SkeletonSummary {
+  deferred: number
+  deferred_bytes: number
+  kept_bytes: number
+  categories: Record<string, number>
 }
 
 /**
@@ -70,8 +82,10 @@ export function lazyHydrationEnabled(): boolean {
   }
 }
 
-/** The marker a skeleton hydration left on a trimmed tool message, if any. */
-export function lazyMarker(message: ToolMessage): LazyMarker | null {
+/** The marker a skeleton hydration left on a trimmed message, if any. */
+export function lazyMarker(message: {
+  additional_kwargs: Record<string, unknown>
+}): LazyMarker | null {
   const marker = message.additional_kwargs[LAZY_MARKER_KEY]
   if (
     marker &&
@@ -79,31 +93,32 @@ export function lazyMarker(message: ToolMessage): LazyMarker | null {
     (marker as LazyMarker).truncated === true &&
     typeof (marker as LazyMarker).size === "number"
   ) {
-    return marker as LazyMarker
+    const parts = (marker as Partial<LazyMarker>).parts
+    return {
+      truncated: true,
+      size: (marker as LazyMarker).size,
+      parts: Array.isArray(parts) ? parts : ["content"],
+    }
   }
   return null
 }
 
-export interface LazyToolResultsState {
-  /** Loaded results by thread id, then by tool call id. */
-  results: Record<string, Record<string, LazyToolResult>>
+export interface DeferredPartsState {
+  /** Loaded parts by thread id. */
+  parts: Record<string, DeferredParts>
   loading: Record<string, boolean>
-  receive(threadId: string, results: Record<string, LazyToolResult>): void
+  receive(threadId: string, parts: DeferredParts): void
   setLoading(threadId: string, loading: boolean): void
 }
 
-export const useLazyToolResults = create<LazyToolResultsState>((set) => ({
-  results: {},
+export const useDeferredParts = create<DeferredPartsState>((set) => ({
+  parts: {},
   loading: {},
-  receive(threadId, results) {
+  receive(threadId, parts) {
     set((state) => {
-      const kept = Object.entries(state.results).filter(
-        ([id]) => id !== threadId
-      )
+      const kept = Object.entries(state.parts).filter(([id]) => id !== threadId)
       const pruned = kept.slice(Math.max(0, kept.length - RETAINED_THREADS + 1))
-      return {
-        results: { ...Object.fromEntries(pruned), [threadId]: results },
-      }
+      return { parts: { ...Object.fromEntries(pruned), [threadId]: parts } }
     })
   },
   setLoading(threadId, loading) {
@@ -129,7 +144,7 @@ function paintWaiter(threadId: string) {
   return waiter
 }
 
-/** The transcript view reports its first frame here so results apply after it. */
+/** The transcript view reports its first frame here so parts apply after it. */
 export function markTranscriptPainted(threadId: string): void {
   paintWaiter(threadId).resolve()
 }
@@ -154,13 +169,14 @@ function stateUrl(apiUrl: string, threadId: string, suffix = ""): string {
   return `${apiUrl}/threads/${encodeURIComponent(threadId)}/state${suffix}`
 }
 
-async function loadToolResults(
+async function loadDeferredParts(
   threadId: string,
   apiUrl: string,
   fetchImpl: typeof fetch,
-  summary: SkeletonSummary
+  summary: SkeletonSummary,
+  checkpointId: string | undefined
 ): Promise<void> {
-  const store = useLazyToolResults.getState()
+  const store = useDeferredParts.getState()
   if (store.loading[threadId]) return
   store.setLoading(threadId, true)
   const span = startSpan("thread_tool_results", {
@@ -168,27 +184,39 @@ async function loadToolResults(
     deferred_kb: Math.round(summary.deferred_bytes / 1024),
   })
   try {
+    const query = checkpointId
+      ? `?checkpoint_id=${encodeURIComponent(checkpointId)}`
+      : ""
     const response = await fetchImpl(
-      stateUrl(apiUrl, threadId, "/tool-results"),
+      stateUrl(apiUrl, threadId, `/deferred${query}`),
       { headers: { Accept: "application/json" } }
     )
     if (!response.ok) {
-      throw new HttpError(response.status, `tool results ${response.status}`)
+      throw new HttpError(response.status, `deferred parts ${response.status}`)
     }
-    const body = (await response.json()) as ToolResultsResponse
+    const body = (await response.json()) as DeferredParts
     span.mark("fetched")
     await afterPaint(threadId)
-    useLazyToolResults.getState().receive(threadId, body.results)
-    span.end({ results: Object.keys(body.results).length })
+    useDeferredParts.getState().receive(threadId, body)
+    span.end({
+      results: Object.keys(body.tool_results).length,
+      reasoning: Object.keys(body.reasoning).length,
+      images: Object.keys(body.images).length,
+    })
   } catch (error) {
     span.abandon("failed")
-    console.warn("[lazy-hydration] tool results failed", { threadId, error })
+    console.warn("[lazy-hydration] deferred parts failed", { threadId, error })
   } finally {
-    useLazyToolResults.getState().setLoading(threadId, false)
+    useDeferredParts.getState().setLoading(threadId, false)
   }
 }
 
 type GetState = (threadId: string, ...rest: Array<unknown>) => Promise<unknown>
+
+interface SkeletonPayload {
+  checkpoint?: { checkpoint_id?: string } | null
+  [LAZY_MARKER_KEY]?: SkeletonSummary
+}
 
 /**
  * Point the SDK's hydration read at the skeleton endpoint. Reads with a
@@ -214,11 +242,17 @@ export function withLazyHydration(
     if (!response.ok) {
       throw new HttpError(response.status, `thread state ${response.status}`)
     }
-    const payload = (await response.json()) as Record<string, unknown>
-    const summary = payload[LAZY_MARKER_KEY] as SkeletonSummary | undefined
-    threadLoadLazy(threadId, summary ?? { deferred: 0, deferred_bytes: 0 })
+    const payload = (await response.json()) as SkeletonPayload
+    const summary = payload[LAZY_MARKER_KEY]
+    threadLoadLazy(threadId, summary ?? null)
     if (summary && summary.deferred > 0) {
-      void loadToolResults(threadId, apiUrl, fetchImpl, summary)
+      void loadDeferredParts(
+        threadId,
+        apiUrl,
+        fetchImpl,
+        summary,
+        payload.checkpoint?.checkpoint_id
+      )
     }
     return payload
   }

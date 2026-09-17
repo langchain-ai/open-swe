@@ -112,17 +112,31 @@ export function threadDetailFailed(threadId: string): void {
 /** Whether the hydrate was a skeleton, and how much it left for later. */
 export function threadLoadLazy(
   threadId: string,
-  summary: { deferred: number; deferred_bytes: number } | null
+  summary: {
+    deferred: number
+    deferred_bytes: number
+    kept_bytes?: number
+    categories?: Record<string, number>
+  } | null
 ): void {
-  current(threadId)?.set(
-    summary
-      ? {
-          lazy: true,
-          lazy_deferred: summary.deferred,
-          lazy_deferred_kb: Math.round(summary.deferred_bytes / 1024),
-        }
-      : { lazy: false }
-  )
+  const span = current(threadId)
+  if (!span) return
+  if (!summary) {
+    span.set({ lazy: false })
+    return
+  }
+  const attributes: PerfAttributes = {
+    lazy: true,
+    lazy_deferred: summary.deferred,
+    lazy_deferred_kb: Math.round(summary.deferred_bytes / 1024),
+  }
+  if (summary.kept_bytes !== undefined) {
+    attributes.lazy_kept_kb = Math.round(summary.kept_bytes / 1024)
+  }
+  for (const [category, bytes] of Object.entries(summary.categories ?? {})) {
+    attributes[`lazy_${category}_kb`] = Math.round(bytes / 1024)
+  }
+  span.set(attributes)
 }
 
 export function threadHydrated(threadId: string): void {
