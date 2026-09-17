@@ -62,6 +62,7 @@ function mockApis(record: WorkspaceRecord = RECORD) {
         repos: ["acme/oss"],
         slack_channel_ids: ["C1"],
         is_default: true,
+        default_repo: null,
         has_snapshot: true,
       },
       {
@@ -70,6 +71,7 @@ function mockApis(record: WorkspaceRecord = RECORD) {
         repos: ["acme/api"],
         slack_channel_ids: [],
         is_default: false,
+        default_repo: null,
         has_snapshot: false,
       },
     ],

@@ -120,9 +120,12 @@ owner and admins, as today. Role-based access per workspace is explicitly deferr
 ### Dashboard
 
 The Environments page becomes the Workspaces page, with repositories and Slack channels editable.
-The composer's environment picker becomes a workspace picker that preselects the workspace owning
-the chosen repository. The sidebar groups threads by workspace, and grouping by repository remains
-available within a workspace, since every repository sits inside exactly one workspace. Admin
+The composer picks the workspace first and the repository second: the repository list is the
+workspace's own repositories (plus, for `default`, every unassigned one), and choosing a workspace
+preselects its default repository. A repository named from outside — a link or the profile default —
+still selects the workspace that owns it. The dashboard has no separate "project" notion: the
+sidebar groups threads by repository, nested under the owning workspace, since every repository sits
+inside exactly one workspace. Admin
 settings and MCP connections gain a workspace selector.
 
 ### Migration
