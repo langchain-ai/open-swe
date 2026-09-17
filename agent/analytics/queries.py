@@ -169,7 +169,10 @@ async def pr_merge_rate_by_model(
             )
         if not admin:
             for cohort in cohorts:
-                if any(effort["cohort_size"] < minimum for effort in cohort["efforts"]):
+                efforts = cohort["efforts"]
+                if isinstance(efforts, list) and any(
+                    effort["cohort_size"] < minimum for effort in efforts
+                ):
                     cohort["efforts"] = []
         cohorts.sort(key=lambda cohort: (-_integer(cohort["cohort_size"]), str(cohort["model_id"])))
         unavailable_threads = []
