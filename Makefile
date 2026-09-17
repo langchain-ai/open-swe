@@ -13,8 +13,6 @@ all: help
 ifeq ($(origin POSTGRES_URI),undefined)
 POSTGRES_URI := $(shell sh scripts/dotenv_value.sh .env POSTGRES_URI)
 endif
-POSTGRES_CONTAINER := open-swe-postgres
-
 dev: $(if $(POSTGRES_URI),,postgres)
 	@if command -v lsof >/dev/null 2>&1 && lsof -nP -iTCP:2024 -sTCP:LISTEN >/dev/null 2>&1; then \
 		echo 'Port 2024 is already in use (a stale container or another backend?):' >&2; \
@@ -22,13 +20,7 @@ dev: $(if $(POSTGRES_URI),,postgres)
 	uv run langgraph dev --no-browser --port 2024 --n-jobs-per-worker 10
 
 postgres:
-	@docker info >/dev/null 2>&1 || { echo 'Docker is not running; start it, or set POSTGRES_URI to an existing database.' >&2; exit 1; }
-	@docker inspect $(POSTGRES_CONTAINER) >/dev/null 2>&1 || docker run -d --name $(POSTGRES_CONTAINER) \
-		-e POSTGRES_PASSWORD=postgres -p 127.0.0.1:5433:5432 \
-		-v $(POSTGRES_CONTAINER):/var/lib/postgresql/data postgres:16 >/dev/null
-	@docker start $(POSTGRES_CONTAINER) >/dev/null
-	@until docker exec $(POSTGRES_CONTAINER) pg_isready -U postgres >/dev/null 2>&1; do sleep 1; done
-	@echo 'PostgreSQL ready on 127.0.0.1:5433'
+	docker compose up -d --wait postgres
 
 # UI development in one terminal: Vite (`make web`) and the backend fronting it, so
 # http://localhost:2024 hot-reloads without a build or any cross-origin setup. The two
