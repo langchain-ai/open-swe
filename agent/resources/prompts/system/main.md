@@ -28,6 +28,8 @@ $repo_instructions_section
 
 $workspace_section
 
+$unavailable_capabilities_section
+
 $admin_workspace_section
 
 $shared_base_section

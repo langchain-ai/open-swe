@@ -658,6 +658,7 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
         model_selection: ModelSelectionMiddleware | None = None,
         routing_defaults: Mapping[str, tuple[str, str | None]] | None = None,
         credential_login: str | None = None,
+        unavailable_capabilities: Sequence[str] = (),
     ) -> None:
         self._thread_id = thread_id
         self._config = config
@@ -676,6 +677,7 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
         self._admin_workspaces = admin_workspaces
         self._model_selection = model_selection
         self._routing_defaults = dict(routing_defaults or {})
+        self._unavailable_capabilities = tuple(unavailable_capabilities)
 
     def _prepare_config_fingerprint(self) -> Any:
         cfg = RunConfig.from_config(self._config)
@@ -888,6 +890,7 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
                 slack_ask=_slack_ask_mode(cfg),
                 sandbox_file_downloads=_sandbox_file_downloads_enabled(cfg),
                 continued_from_collaborative=bool(cfg.continued_from_thread_id),
+                unavailable_capabilities=self._unavailable_capabilities,
             ),
         }
 
@@ -1183,6 +1186,13 @@ async def get_agent(config: RunnableConfig) -> Pregel:
             ),
         )
 
+    expedited_review_enabled = bool(settings and settings.expedited_review_enabled)
+    unavailable_capabilities = []
+    if not _slack_tools_enabled(cfg):
+        unavailable_capabilities.append("Slack delivery tools")
+    if local_run or not expedited_review_enabled:
+        unavailable_capabilities.append("expedited PR approval")
+
     slack_tools = [
         expedite_pr_approval,
         manage_code_channel,
@@ -1252,10 +1262,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         static_tools = [
             tool for tool in static_tools if _registered_tool_name(tool) not in DM_EXCLUDED_TOOLS
         ]
-    if (
-        local_run
-        or not (await cached_workspace_settings(settings_workspace)).expedited_review_enabled
-    ):
+    if local_run or not expedited_review_enabled:
         static_tools = [tool for tool in static_tools if tool is not expedite_pr_approval]
     incident_automatic = incident_session is not None and incident_session.explicit_request is None
     if incident_session is not None:
@@ -1402,6 +1409,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
                     admin_workspaces=admin_thread,
                     model_selection=model_selection,
                     routing_defaults=routing_defaults,
+                    unavailable_capabilities=unavailable_capabilities,
                 ),
                 *([IncidentMiddleware(incident_session)] if incident_session is not None else []),
                 *([workspace_skills] if workspace_skills else []),
