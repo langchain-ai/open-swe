@@ -288,6 +288,7 @@ export interface UsageLeaderboardRow {
     avatar_url?: string | null
   }
   favorite_model: string
+  favorite_model_effort?: string | null
   invocations: number
   threads?: number
   /** @deprecated Rolling compatibility with older clients. */
