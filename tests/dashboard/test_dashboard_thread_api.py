@@ -2434,7 +2434,7 @@ async def test_list_dashboard_threads_page_filters_flat_and_legacy_repo_metadata
     ]
 
 
-async def test_list_dashboard_thread_projects_discovers_metadata_without_summaries(
+async def test_list_dashboard_thread_repos_discovers_metadata_without_summaries(
     monkeypatch, fake_store: FakeStore
 ) -> None:
     threads = _make_threads(5, resolved_before=0)
@@ -2467,7 +2467,7 @@ async def test_list_dashboard_thread_projects_discovers_metadata_without_summari
         lambda: SimpleNamespace(threads=FakeThreads()),
     )
 
-    result = await thread_listing.list_dashboard_thread_projects("octocat")
+    result = await thread_listing.list_dashboard_thread_repos("octocat")
 
     assert result == [
         {
@@ -2485,7 +2485,7 @@ async def test_list_dashboard_thread_projects_discovers_metadata_without_summari
     ]
 
 
-async def test_list_dashboard_thread_projects_resolves_workspace_from_repo(
+async def test_list_dashboard_thread_repos_resolves_workspace_from_repo(
     monkeypatch, fake_store: FakeStore, registry_db
 ) -> None:
     threads = _make_threads(1, resolved_before=0)
@@ -2504,7 +2504,7 @@ async def test_list_dashboard_thread_projects_resolves_workspace_from_repo(
     )
     await WORKSPACES.create(WorkspaceCreate(name="OSS", repos=["acme/oss"]), "alice")
 
-    result = await thread_listing.list_dashboard_thread_projects("octocat")
+    result = await thread_listing.list_dashboard_thread_repos("octocat")
 
     assert result == [
         {
