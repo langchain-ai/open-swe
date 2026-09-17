@@ -63,16 +63,8 @@ from agent.dashboard.options import (
     gate_fable_model,
     model_supports_effort,
 )
-from agent.dashboard.team_settings import get_team_default_repo
-from agent.dashboard.team_settings_cache import (
-    cached_agent_routing_models,
-    cached_fable_enabled,
-    cached_gateway_enabled,
-    cached_model_routing_enabled,
-    cached_team_default_model_pair,
-    cached_team_settings,
-    cached_thread_title_model,
-)
+from agent.dashboard.workspace_settings import WorkspaceSettings, get_workspace_settings
+from agent.dashboard.workspace_settings_cache import cached_workspace_settings
 from agent.desktop import create_desktop_backend, desktop_artifact_routes, is_desktop_run
 from agent.desktop_branch import schedule_worktree_branch_rename
 from agent.github.token import resolve_github_token
@@ -85,6 +77,7 @@ from agent.input_messages import (
     visible_dynamic_context_hashes,
 )
 from agent.mcp import load_mcp_tools
+from agent.mcp.instance import instance_mcp_source
 from agent.mcp.user import user_mcp_source
 from agent.mcp.workspace import workspace_mcp_source
 from agent.middleware import (
@@ -149,6 +142,7 @@ from agent.sandboxes.state import (
 from agent.skill_store.store import ORGANIZATION_SKILLS_NAMESPACE, SKILLS_NAMESPACE
 from agent.slack.dm import is_dm_session
 from agent.thread_title import TITLE_GENERATION_MAX_TOKENS, schedule_thread_title_generation
+from agent.threads.summary import thread_is_private
 from agent.tool_loaders.notion_mcp import load_notion_tools
 from agent.tools import (
     approve_plan,
@@ -173,7 +167,6 @@ from agent.tools import (
     manage_code_channel,
     manage_incident,
     manage_thread,
-    mark_question_answered,
     notify_automation_channel,
     open_pull_request,
     output_iframe,
@@ -192,6 +185,7 @@ from agent.tools import (
     slack_add_reaction,
     slack_attach_html,
     slack_move_thread,
+    slack_read_channel_messages,
     slack_read_thread_messages,
     slack_start_new_thread,
     slack_thread_reply,
@@ -200,7 +194,7 @@ from agent.tools import (
     update_automation,
     web_search,
 )
-from agent.tools.admin_gate import actor_is_admin, is_private_admin_thread
+from agent.tools.admin_gate import actor_has_admin_context, actor_is_admin, is_private_admin_surface
 from agent.utils import ttl_cache
 from agent.utils.authorship import (
     CollaboratorIdentity,
@@ -266,6 +260,11 @@ SLACK_ASK_EXCLUDED_TOOLS = DEEP_AGENT_EXCLUDED_TOOLS | frozenset(
 )
 
 
+# Reading a Slack channel takes an explicit channel id and nothing from the run's
+# source context, so it survives every gate the thread-bound Slack tools do not.
+SOURCE_FREE_SLACK_TOOLS: frozenset[str] = frozenset({"slack_read_channel_messages"})
+
+
 def _registered_tool_name(value: Any) -> str:
     name = getattr(value, "name", None) or getattr(value, "__name__", None)
     if not isinstance(name, str) or not name:
@@ -296,9 +295,9 @@ async def _resolve_prompt_default_repo(cfg: RunConfig) -> dict[str, str] | None:
         return None
 
     try:
-        return await get_team_default_repo(workspace_slug(cfg))
+        return (await get_workspace_settings(workspace_slug(cfg))).default_repo
     except Exception:
-        logger.debug("Failed to load team default repo for prompt", exc_info=True)
+        logger.debug("Failed to load the workspace default repo for prompt", exc_info=True)
         return None
 
 
@@ -429,6 +428,8 @@ def _subagent_middleware(
 def _is_subagent_excluded_tool(tool: Any) -> bool:
     """Return whether a tool depends on parent-only source context."""
     name = getattr(tool, "name", None) or getattr(tool, "__name__", "")
+    if name in SOURCE_FREE_SLACK_TOOLS:
+        return False
     return name.startswith("slack_") or name in {
         "get_thread",
         "manage_code_channel",
@@ -518,7 +519,19 @@ async def _workspace_admin(config: RunnableConfig, profile_login: str | None) ->
 
 async def _admin_thread(config: RunnableConfig, profile_login: str | None) -> bool:
     """Whether this run may manage workspaces and organization skills."""
-    return await is_private_admin_thread(RunConfig.from_config(config), login=profile_login)
+    return await actor_has_admin_context(RunConfig.from_config(config), login=profile_login)
+
+
+async def _private_thread(thread_id: str | None) -> bool:
+    """Whether only this thread's owner can read it. Fails closed."""
+    if not thread_id:
+        return False
+    try:
+        thread = await client.threads.get(thread_id=thread_id)
+    except Exception:
+        logger.debug("Could not read visibility for thread %s", thread_id, exc_info=True)
+        return False
+    return thread_is_private(thread_metadata(thread))
 
 
 async def _cached_tool_loader(key: str, ttl_seconds: float, loader: Any) -> list[Any]:
@@ -546,8 +559,11 @@ async def _notion_tools_for(profile_login: str | None) -> list[Any]:
 
 
 async def _mcp_tools_for(credential_login: str | None, workspace: str) -> list[Any]:
-    """Load the run's workspace MCPs with private-owner personal overrides."""
-    sources = [workspace_mcp_source(workspace)]
+    """Load the run's MCPs by tier: instance, then workspace, then the user's own.
+
+    A later tier's connection replaces a same-named one from the tier before.
+    """
+    sources = [instance_mcp_source(), workspace_mcp_source(workspace)]
     if credential_login:
         sources.append(user_mcp_source(credential_login))
     return await load_mcp_tools(*sources)
@@ -758,9 +774,7 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
         async with aphase(self._thread_id, "prepare.default_repo"):
             prompt_default_repo = await _resolve_prompt_default_repo(cfg)
         triggering_user_identity_task = asyncio.create_task(
-            asyncio.to_thread(
-                resolve_triggering_user_identity, as_json_object(self._config), github_token
-            )
+            resolve_triggering_user_identity(as_json_object(self._config), github_token)
         )
         sandbox_task = asyncio.create_task(
             get_or_create_sandbox_backend_proxy(self._thread_id).ready()
@@ -839,8 +853,8 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
                             if triggering_user_identity and triggering_user_identity.github_profile
                             else None
                         ),
-                        model_id=self._model_id,
-                        effort=self._effort,
+                        model_id=attribution_model_id,
+                        effort=attribution_effort,
                         source=self._source,
                         repository=cfg.repo_full_name or None,
                     )
@@ -904,7 +918,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         incident_session = await load_incident_session(config)
         cfg.slack_thread = incident_session.slack_thread
         configurable["slack_thread"] = cfg.slack_thread.dump()
-    profile_login = resolve_github_login(as_json_object(config))
+    profile_login = await resolve_github_login(as_json_object(config))
     credential_login = None
     credential_scope_known = False
     if not is_desktop_run(cfg):
@@ -940,46 +954,42 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         thread_settings, settings_changed = normalize_thread_settings(
             {} if local_run else await load_thread_settings(client, thread_id)
         )
-    # Team/profile settings are accepted stale for a short TTL so graph factories
+    # Workspace/profile settings are accepted stale for a short TTL so graph factories
     # stay off the critical path during worker load and retry storms.
+    settings: WorkspaceSettings | None = None
     if local_run:
         from agent.dashboard.options import default_model_pair
 
-        team_defaults = (default_model_pair(), default_model_pair())
+        model_defaults = (default_model_pair(), default_model_pair())
         routing_defaults = {
             "fast": default_model_pair(),
             "balanced": default_model_pair(),
             "performance": default_model_pair(),
         }
-        title_defaults = team_defaults[0]
+        title_defaults = model_defaults[0]
         use_gateway = gateway_env_default()
         profile = None
         fable_enabled = False
     else:
         async with aphase(thread_id, "factory.settings_defaults"):
-            (
-                team_defaults,
-                routing_defaults,
-                title_defaults,
-                use_gateway,
-                profile,
-                fable_enabled,
-            ) = await asyncio.gather(
-                cached_team_default_model_pair("agent", settings_workspace),
-                cached_agent_routing_models(settings_workspace),
-                cached_thread_title_model(settings_workspace),
-                cached_gateway_enabled(settings_workspace),
+            settings, profile = await asyncio.gather(
+                cached_workspace_settings(settings_workspace),
                 _cached_profile(None if thread_settings.get("model_id") else profile_login),
-                cached_fable_enabled(settings_workspace),
             )
+            model_defaults = settings.default_model_pair("agent")
+            routing_defaults = settings.agent_routing_models
+            title_defaults = settings.default_thread_title_model
+            use_gateway = settings.effective_gateway_enabled
+            fable_enabled = settings.fable_enabled
+
     slack_ask_mode = _slack_ask_mode(cfg)
     linear_issue = as_json_object(cfg.linear_issue.model_dump() if cfg.linear_issue else None)
     linear_project_id = linear_issue.get("linear_project_id", "")
     linear_issue_number = linear_issue.get("linear_issue_number", "")
 
-    (model_id, profile_effort), (subagent_model_id, subagent_effort) = team_defaults
+    (model_id, profile_effort), (subagent_model_id, subagent_effort) = model_defaults
     title_model_id, title_effort = title_defaults
-    logger.info("Using team default agent model: model=%s effort=%s", model_id, profile_effort)
+    logger.info("Using workspace default agent model: model=%s effort=%s", model_id, profile_effort)
 
     if profile_login and profile:
         overridden_model, overridden_effort = normalize_profile_overrides(profile)
@@ -1007,12 +1017,10 @@ async def get_agent(config: RunnableConfig) -> Pregel:
             subagent_model_id = overridden_subagent_model
             subagent_effort = overridden_subagent_effort
 
-    # User preference overrides the org-wide toggle; None inherits it.
+    # User preference overrides the workspace's toggle; None inherits it.
     adaptive_model_routing = profile_model_routing_enabled(profile)
     if adaptive_model_routing is None:
-        adaptive_model_routing = (
-            False if local_run else await cached_model_routing_enabled(settings_workspace)
-        )
+        adaptive_model_routing = settings.model_routing_enabled if settings else False
     stored_model = thread_settings.get("model_id")
     if isinstance(stored_model, str):
         model_id = stored_model
@@ -1146,8 +1154,14 @@ async def get_agent(config: RunnableConfig) -> Pregel:
 
     async with aphase(thread_id, "factory.admin_thread"):
         admin_thread = await _admin_thread(config, profile_login)
+    private_admin_surface = admin_thread and is_private_admin_surface(cfg)
     if admin_thread:
         logger.info("Admin thread %s: adding workspace management tools", thread_id)
+
+    # Channel history pulls messages into the transcript, so everyone who can
+    # read the thread reads them. Only a private thread gets the tool at all.
+    async with aphase(thread_id, "factory.private_thread"):
+        private_thread = await _private_thread(thread_id)
 
     stop_summary_mode = cfg.stop_summary is True
     sandbox_file_downloads = _sandbox_file_downloads_enabled(cfg)
@@ -1197,7 +1211,6 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         manage_thread,
         manage_baby_sit,
         expedite_pr_approval,
-        mark_question_answered,
         notify_automation_channel,
         open_pull_request,
         *(
@@ -1215,12 +1228,13 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         slack_add_reaction,
         slack_attach_html,
         slack_move_thread,
+        slack_read_channel_messages,
         slack_read_thread_messages,
         slack_start_new_thread,
         slack_thread_reply,
         submit_thread_feedback,
         *(ADMIN_TOOLS if admin_thread else ()),
-        *((read_only_sql,) if admin_thread and source == "dashboard" else ()),
+        *((read_only_sql,) if private_admin_surface else ()),
     ]
     if credential_login is None:
         personal_tools = (
@@ -1230,6 +1244,8 @@ async def get_agent(config: RunnableConfig) -> Pregel:
             read_user_settings,
         )
         static_tools = [tool for tool in static_tools if tool not in personal_tools]
+    if not private_thread:
+        static_tools = [tool for tool in static_tools if tool is not slack_read_channel_messages]
     if not _slack_tools_enabled(cfg):
         static_tools = [tool for tool in static_tools if tool not in slack_tools]
     elif _slack_dm_run(cfg):
@@ -1238,8 +1254,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         ]
     if (
         local_run
-        or (await cached_team_settings(settings_workspace)).get("expedited_review_enabled")
-        is not True
+        or not (await cached_workspace_settings(settings_workspace)).expedited_review_enabled
     ):
         static_tools = [tool for tool in static_tools if tool is not expedite_pr_approval]
     incident_automatic = incident_session is not None and incident_session.explicit_request is None

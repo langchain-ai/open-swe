@@ -124,10 +124,26 @@ async def test_usage_ranks_run_and_pr_cohorts_with_cost_coverage(usage_db):
     stale = await person("stale")
     model = uuid4()
     await insert("model_directory", model_id=model, provider_model_id="model-a")
-    first_run = await run(alice, duration=60, model_id=model, tokens=4)
-    await run(alice, duration=120, model_id=model, tokens=7)
-    await run(alice, duration=-1, tokens=3)
-    await run(alice, tokens=6)
+    first_thread = uuid4()
+    second_thread = uuid4()
+    first_run = await run(
+        alice,
+        duration=60,
+        model_id=model,
+        configured_effort="high",
+        tokens=4,
+        thread_id=first_thread,
+    )
+    await run(
+        alice,
+        duration=120,
+        model_id=model,
+        configured_effort="high",
+        tokens=7,
+        thread_id=first_thread,
+    )
+    await run(alice, duration=-1, tokens=3, thread_id=second_thread)
+    await run(alice, tokens=6, thread_id=second_thread)
     await run(alice, age=8, duration=10000, tokens=9999)
     await run(alice, age=-1, duration=10000, tokens=9999)
     await run(stale, age=8)
@@ -164,8 +180,11 @@ async def test_usage_ranks_run_and_pr_cohorts_with_cost_coverage(usage_db):
         "avatar_url": "https://github.com/alice.png?size=80",
     }
     assert row["invocations"] == row["agent_runs"] == 4
+    assert row["threads"] == 2
     assert row["avg_invocation_seconds"] == row["avg_run_seconds"] == 90
+    assert row["avg_thread_seconds"] == 180
     assert row["favorite_model"] == "model-a"
+    assert row["favorite_model_effort"] == "high"
     assert row["prs_opened"] == 1
     assert row["merged_prs"] == 0
     assert row["agent_loc"] == 20
@@ -180,6 +199,36 @@ async def test_usage_ranks_run_and_pr_cohorts_with_cost_coverage(usage_db):
     assert result["rows"][0]["user"]["github_login"] is None
     assert (await report(limit=0))["rows"][0]["rank"] == 1
     assert [row["rank"] for row in (await report(limit=1, offset=1))["rows"]] == [2]
+
+
+async def test_favorite_model_effort_is_scoped_to_the_favorite_model(usage_db):
+    reader = await person("reader")
+    favorite_model = uuid4()
+    other_model = uuid4()
+    await insert("model_directory", model_id=favorite_model, provider_model_id="favorite")
+    await insert("model_directory", model_id=other_model, provider_model_id="other")
+    await run(reader, model_id=favorite_model, configured_effort="high")
+    await run(reader, model_id=favorite_model, configured_effort="medium")
+    await run(reader, model_id=favorite_model, configured_effort="medium")
+    for _ in range(4):
+        await run(reader, model_id=other_model, configured_effort="max")
+    for _ in range(3):
+        await run(reader, model_id=favorite_model, configured_effort="high")
+
+    row = (await report())["rows"][0]
+    assert row["favorite_model"] == "favorite"
+    assert row["favorite_model_effort"] == "high"
+
+
+async def test_favorite_model_effort_reports_missing_legacy_values(usage_db):
+    reader = await person("reader")
+    model = uuid4()
+    await insert("model_directory", model_id=model, provider_model_id="favorite")
+    await run(reader, model_id=model)
+
+    row = (await report())["rows"][0]
+    assert row["favorite_model"] == "favorite"
+    assert row["favorite_model_effort"] is None
 
 
 async def test_aliases_and_pr_only_members_preserve_privacy(usage_db):
@@ -327,7 +376,7 @@ async def test_reports_require_activation_and_exclude_pre_cutover_facts(usage_db
     assert result["reviewer_stats"]["human_replies"] == 1
     assert result["reporting_cutover_at"] == (NOW - timedelta(days=1)).isoformat()
     outcomes = await queries.pr_merge_rate_by_model(period="all", admin=True)
-    assert outcomes["cohorts"][0]["cohort_size"] == 1
+    assert outcomes["cohorts"] == []
     async with postgres.transaction() as conn:
         await conn.execute(text("UPDATE deployment_metadata SET reporting_cutover_at = NULL"))
     with pytest.raises(RuntimeError, match="not been activated"):

@@ -91,6 +91,7 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup()
+  vi.useRealTimers()
 })
 
 describe("AgentStreamProvider", () => {
@@ -132,6 +133,7 @@ describe("AgentStreamProvider", () => {
   })
 
   it("clears reconnect state when the stream gives up", () => {
+    vi.useFakeTimers()
     render(
       wrapper(
         <AgentStreamProvider threadId="one">
@@ -143,6 +145,7 @@ describe("AgentStreamProvider", () => {
     if (!stream) throw new Error("stream was not mounted")
 
     act(() => stream.onReconnect({ attempt: 12, delayMs: 300_000 }))
+    act(() => vi.advanceTimersByTime(3_000))
     expect(useStreamPool.getState().entries[0]?.connection.status).toBe(
       "reconnecting"
     )
@@ -153,7 +156,8 @@ describe("AgentStreamProvider", () => {
     })
   })
 
-  it("tracks reconnect attempts until the stream reconnects", () => {
+  it("waits before surfacing reconnect attempts and clears brief interruptions", () => {
+    vi.useFakeTimers()
     render(
       wrapper(
         <AgentStreamProvider threadId="one">
@@ -166,10 +170,19 @@ describe("AgentStreamProvider", () => {
 
     expect(stream.maxReconnectAttempts).toBe(12)
     expect(stream.reconnectDelayMs(12)).toBe(300_000)
-    act(() => stream.onReconnect({ attempt: 3, delayMs: 4_000 }))
+    act(() => stream.onReconnect({ attempt: 1, delayMs: 1_000 }))
+    act(() => vi.advanceTimersByTime(2_000))
+    act(() => stream.onConnected())
+    act(() => vi.advanceTimersByTime(1_000))
+    expect(useStreamPool.getState().entries[0]?.connection).toEqual({
+      status: "live",
+    })
+
+    act(() => stream.onReconnect({ attempt: 2, delayMs: 2_000 }))
+    act(() => vi.advanceTimersByTime(3_000))
     expect(useStreamPool.getState().entries[0]?.connection).toMatchObject({
       status: "reconnecting",
-      attempt: 3,
+      attempt: 2,
     })
 
     act(() => stream.onConnected())

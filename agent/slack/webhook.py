@@ -32,9 +32,11 @@ from agent.slack import client as slack_utils
 from agent.slack.allowed_bots import AllowedSlackBot, resolve_allowed_slack_bot
 from agent.slack.dm import dm_thread_title, is_dm_session
 from agent.slack.failures import report_slack_failure
+from agent.slack.payloads import SlackChannelContext
 from agent.slack.request import SlackRequest
 from agent.slack.thinking import show_slack_thinking_status, stream_slack_thinking_steps
 from agent.source_context import SlackThreadRef, SourceContext
+from agent.users import User
 from agent.utils.json_types import as_json_object
 from agent.utils.langsmith import get_langsmith_trace_url
 from agent.utils.thread_ops import (
@@ -230,21 +232,15 @@ def _format_slack_thread_section(
     channel_id: str,
     thread_ts: str,
     context_source: str,
-    channel_context: dict[str, Any] | None,
+    channel_context: SlackChannelContext,
 ) -> str:
     lines = ["## Slack Thread", f"- Channel ID: {channel_id}"]
-    channel_name = ""
-    if isinstance(channel_context, dict):
-        for key in ("name_normalized", "name"):
-            value = channel_context.get(key)
-            if isinstance(value, str) and value.strip():
-                channel_name = value.strip()
-                break
+    channel_name = channel_context.name_normalized.strip() or channel_context.name.strip()
     if channel_name:
         lines.append(f"- Channel name: #{channel_name}")
     lines.append(f"- Thread TS: {thread_ts}")
     lines.append(f"- Context starts at: {context_source}")
-    channel_description = common.get_slack_channel_context_description(channel_context)
+    channel_description = channel_context.description_text
     if channel_description:
         lines.append(
             "- Slack-provided channel description (topic/purpose; may specify the repository "
@@ -403,7 +399,7 @@ async def _slack_logins_by_user_id(user_ids: list[str]) -> dict[str, str]:
     """Map Slack user ids to the GitHub logins of linked Open SWE accounts."""
     logins: dict[str, str] = {}
     for user_id in {value for value in user_ids if value}:
-        login = await common.login_for_slack_id(user_id)
+        login = await User.login_for_slack(user_id)
         if login:
             logins[user_id] = login
     return logins
@@ -636,19 +632,26 @@ async def workspace_scoped_default_repo(candidate: Repo, workspace: str | None) 
     owner = await workspace_for_repo(candidate.owner, candidate.name)
     if owner is None or owner == workspace:
         return candidate
-    scoped = await common.get_team_default_repo(workspace)
-    return Repo.model_validate(scoped) if scoped else None
+    scoped = (await common.get_workspace_settings(workspace)).default_repo
+    if not scoped:
+        return None
+    fallback = Repo.model_validate(scoped)
+    # The workspace's default may itself be inherited from the instance record.
+    fallback_owner = await workspace_for_repo(fallback.owner, fallback.name)
+    if fallback_owner is None or fallback_owner == workspace:
+        return fallback
+    return None
 
 
 async def _slack_login(user_id: str, user_email: str | None = None) -> str | None:
     """GitHub login for a Slack user: by Slack id first, then by profile email."""
-    if login := await common.login_for_slack_id(user_id):
+    if login := await User.login_for_slack(user_id):
         return login
     if user_email is None and user_id:
         slack_user = await common.get_slack_user_info(user_id)
         profile = slack_user.get("profile") if isinstance(slack_user, dict) else None
         user_email = profile.get("email") if isinstance(profile, dict) else None
-    return await common.login_for_email(user_email) if user_email else None
+    return await User.login_for_email(user_email) if user_email else None
 
 
 def _slack_thread_title(request_text: str, dm_session: bool, name: str) -> str:
@@ -656,9 +659,9 @@ def _slack_thread_title(request_text: str, dm_session: bool, name: str) -> str:
     return dm_thread_title(name) if dm_session else request_text
 
 
-def _slack_thread_visibility(channel_context: dict[str, Any] | None) -> str:
+def _slack_thread_visibility(channel_context: SlackChannelContext | None) -> str:
     """Bot DMs are private to the person; anything in a channel is collaborative."""
-    if isinstance(channel_context, dict) and channel_context.get("is_im") is True:
+    if channel_context is not None and channel_context.is_im is True:
         return "private"
     return "public"
 
@@ -733,7 +736,7 @@ async def _process_slack_mention_impl(
     channel_context = (
         request.channel_context
         if request.channel_context is not None
-        else common.normalize_slack_channel_context(channel_id, None)
+        else SlackChannelContext(id=channel_id)
     )
     treat_all_messages_as_mentions = request.treat_all_messages_as_mentions
     untagged_reply = request.untagged_reply
@@ -785,12 +788,6 @@ async def _process_slack_mention_impl(
                     extra={"agent_thread_id": thread_id, "slack_bot_id": allowed_bot.bot_id},
                 )
                 return
-    # Prime the user-mapping cache so login/email/slack-id lookups below are warm.
-    try:
-        await common.refresh_user_mapping_cache()
-    except Exception:  # noqa: BLE001
-        common.logger.debug("Could not refresh user mapping cache for Slack mention", exc_info=True)
-
     user_email = None
     user_name = allowed_bot.name if allowed_bot is not None else ""
     user_timezone = ""
@@ -1039,7 +1036,7 @@ async def _process_slack_mention_impl(
 
     slack_thread_context: dict[str, Any] = {
         "channel_id": channel_id,
-        "channel_context": channel_context,
+        "channel_context": channel_context.dump(),
         "thread_ts": thread_ts,
         "triggering_user_id": user_id,
         "triggering_user_name": user_name,

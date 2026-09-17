@@ -1,0 +1,73 @@
+import { useMutation, useQuery } from "@tanstack/react-query"
+import { toast } from "sonner"
+
+import { api, type OpenPullRequest } from "@/lib/api"
+import {
+  threadActions,
+  type PullRequestThreadActionName,
+} from "../lib/threadActions"
+import { PullRequestActionButton } from "./PullRequestActionButton"
+
+/**
+ * A button that dispatches agent work onto the pull request's own thread.
+ * One thread per pull request, so any of these actions blocks the others
+ * while a run is live.
+ */
+export function PullRequestThreadAction({
+  pr,
+  login,
+  action,
+}: {
+  pr: OpenPullRequest
+  login: string
+  action: PullRequestThreadActionName
+}) {
+  const { labels, toasts, run: dispatch } = threadActions[action]
+  const thread = useQuery({
+    queryKey: ["pr-thread-status", login, pr.repo, pr.number],
+    queryFn: () => api.pullRequestThreadStatus(pr.repo, pr.number),
+    staleTime: Infinity,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
+    retry: false,
+  })
+  const run = useMutation({
+    mutationFn: () => dispatch(pr),
+    onSuccess: (result) =>
+      toast.success(
+        `${result.already_running ? toasts.running : toasts.queued} ${pr.repo}#${pr.number}`
+      ),
+    onError: (error) =>
+      toast.error(`${toasts.failed} ${pr.repo}#${pr.number}`, {
+        description: error.message,
+      }),
+  })
+  return (
+    <PullRequestActionButton
+      label={
+        thread.data?.running || run.data?.already_running
+          ? labels.running
+          : thread.isPending
+            ? labels.checking
+            : thread.isError
+              ? labels.unavailable
+              : run.isPending
+                ? labels.queuing
+                : run.isSuccess
+                  ? labels.queued
+                  : run.isError
+                    ? labels.retry
+                    : labels.idle
+      }
+      disabled={
+        thread.isPending ||
+        thread.isError ||
+        thread.data?.running === true ||
+        run.isPending ||
+        run.isSuccess
+      }
+      onClick={() => run.mutate()}
+      errors={[thread.error, run.error]}
+    />
+  )
+}

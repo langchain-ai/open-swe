@@ -21,6 +21,7 @@ from agent.sandboxes.providers.langsmith import configure_github_proxy, get_sand
 from agent.sandboxes.providers.registry import SandboxGoneError, create_sandbox
 from agent.sandboxes.state import (
     SANDBOX_BACKENDS,
+    SANDBOX_CONNECTIONS,
     SandboxBackendProxy,
     SandboxUnreachableError,
     get_or_create_sandbox_backend_proxy,
@@ -366,9 +367,9 @@ async def ensure_sandbox_for_thread(
     never provisions two sandboxes concurrently — no cross-process sentinel is
     needed):
 
-    1. Cached in memory -> ping, then refresh proxy.
-    2. Metadata has an id -> reconnect, then refresh proxy.
-    3. No sandbox at all -> create one and persist the id.
+    1. Metadata has an id -> reuse this process's connection to that sandbox if
+       it has one, else reconnect; then refresh proxy.
+    2. No sandbox at all -> create one and persist the id.
 
     A sandbox that exists but can't be reached raises ``SandboxUnreachableError``
     instead of being replaced, because a replacement is empty and swapping one in
@@ -389,24 +390,20 @@ async def ensure_sandbox_for_thread(
     lose their ``--global`` config, and Vercel preview deploys reject commits
     whose author email can't be resolved to a GitHub account.
     """
-    cached_proxy = SANDBOX_BACKENDS.get(thread_id)
-    sandbox_backend = (
-        unwrap_sandbox_backend(cached_proxy)
-        if cached_proxy is not None and cached_proxy.has_backend
-        else None
-    )
     async with aphase(thread_id, "sandbox.thread_metadata"):
-        sandbox_id = await get_sandbox_id_from_metadata(thread_id)
-        sandbox_metadata = await get_sandbox_metadata(thread_id) if sandbox_id is not None else {}
+        sandbox_metadata = await get_sandbox_metadata(thread_id)
+    raw_sandbox_id = sandbox_metadata.get("sandbox_id")
+    sandbox_id = raw_sandbox_id if isinstance(raw_sandbox_id, str) else None
     metadata_proxy_config = sandbox_metadata.get(_SANDBOX_PROXY_CONFIG_METADATA_KEY)
     base_proxy_config = (
         metadata_proxy_config
         if isinstance(metadata_proxy_config, dict)
         else get_recorded_proxy_base_config(thread_id)
     )
+    created = False
     created_proxy_config: dict[str, Any] | None = None
 
-    if sandbox_backend is None and sandbox_id is None:
+    if sandbox_id is None:
         logger.info("Creating new sandbox for thread %s", thread_id)
         sandbox_backend = await _create_sandbox_with_proxy(
             github_proxy_token,
@@ -414,13 +411,14 @@ async def ensure_sandbox_for_thread(
             github_proxy_repositories=github_proxy_repositories,
             workspace_slug=workspace_slug,
         )
+        created = True
         created_proxy_config = get_recorded_proxy_base_config(thread_id)
         logger.info("Sandbox created: %s", sandbox_backend.id)
     else:
         try:
             sandbox_backend = await _connect_existing_sandbox(
                 thread_id,
-                cached=sandbox_backend,
+                cached=SANDBOX_CONNECTIONS.get(sandbox_id),
                 sandbox_id=sandbox_id,
                 github_proxy_token=github_proxy_token,
                 github_proxy_repositories=github_proxy_repositories,
@@ -443,6 +441,7 @@ async def ensure_sandbox_for_thread(
                     github_proxy_repositories=github_proxy_repositories,
                     workspace_slug=workspace_slug,
                 )
+                created = True
                 created_proxy_config = get_recorded_proxy_base_config(thread_id)
             except Exception as create_exc:
                 # Keep the failure typed so callers still recognize "this run has no
@@ -461,7 +460,7 @@ async def ensure_sandbox_for_thread(
     # Bind the thread only once the sandbox is created and initialized: a run
     # that dies earlier leaves no id to reconnect to, so the next run creates
     # rather than adopting a half-built box.
-    if sandbox_id != sandbox_backend.id:
+    if created:
         sandbox_metadata: dict[str, Any] = {"sandbox_id": sandbox_backend.id}
         if created_proxy_config is not None:
             sandbox_metadata[_SANDBOX_PROXY_CONFIG_METADATA_KEY] = created_proxy_config

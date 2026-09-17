@@ -117,7 +117,7 @@ interface HydratedProjectGroup extends SidebarProjectGroup {
 const NAV = [
   { to: "/agents/skills", label: "Skills", icon: SparkleIcon },
   { to: "/agents/automations", label: "Automations", icon: LightningIcon },
-  { to: "/agents/reviews", label: "Reviews", icon: GitPullRequestIcon },
+  { to: "/agents/reviews", label: "Pull Requests", icon: GitPullRequestIcon },
   { to: "/incidents", label: "Incidents", icon: Radar },
 ] as const
 

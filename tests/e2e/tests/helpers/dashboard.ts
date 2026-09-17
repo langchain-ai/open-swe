@@ -76,6 +76,142 @@ export async function setPullRequestHealth(
   expect(res.ok()).toBeTruthy();
 }
 
+export type MergeMethod = "squash" | "merge" | "rebase";
+
+export interface FakeCheckRun {
+  name: string;
+  status: "queued" | "in_progress" | "completed";
+  conclusion?:
+    | "success"
+    | "failure"
+    | "timed_out"
+    | "action_required"
+    | "startup_failure"
+    | "cancelled"
+    | "stale"
+    | "skipped"
+    | "neutral"
+    | null;
+  details_url?: string;
+  required?: boolean;
+}
+
+export interface FakeCommitStatus {
+  context: string;
+  state: "pending" | "success" | "failure" | "error";
+  target_url?: string;
+  required?: boolean;
+}
+
+export interface FakeReview {
+  id?: number;
+  author: string;
+  state: "APPROVED" | "CHANGES_REQUESTED" | "COMMENTED" | "DISMISSED";
+  body?: string;
+  url?: string;
+}
+
+export interface FakeReviewThread {
+  path: string;
+  line?: number;
+  original_line?: number;
+  is_resolved?: boolean;
+  is_outdated?: boolean;
+  author?: string;
+  body?: string;
+  url?: string;
+  comments?: Array<{ author: string; body: string; url?: string }>;
+}
+
+export interface SeedPullRequestOptions {
+  repo?: string;
+  title?: string;
+  body?: string;
+  author?: string;
+  head?: string;
+  base?: string;
+  draft?: boolean;
+  created_at?: string;
+  updated_at?: string;
+  mergeable?: boolean;
+  mergeable_state?: "clean" | "dirty" | "blocked" | "behind" | "unknown";
+  check_runs?: FakeCheckRun[];
+  statuses?: FakeCommitStatus[];
+  reviews?: FakeReview[];
+  review_threads?: FakeReviewThread[];
+  review_decision?: "APPROVED" | "CHANGES_REQUESTED" | "REVIEW_REQUIRED";
+}
+
+export interface SeededPullRequest {
+  number: number;
+  repo: string;
+  head_sha: string;
+}
+
+// Put an open PR in the fake GitHub store so the PR search ("Pull Requests →
+// Mine") returns it. `author` defaults to SAME_USER's login, the identity
+// `loginAs(page, SAME_USER)` signs in as.
+export async function seedOpenPullRequest(
+  page: Page,
+  options: SeedPullRequestOptions = {},
+): Promise<SeededPullRequest> {
+  const res = await page.request.post("/control/pull-request", {
+    data: { author: SAME_USER.login, ...options },
+  });
+  expect(res.ok()).toBeTruthy();
+  const payload = (await res.json()) as SeededPullRequest;
+  return payload;
+}
+
+export async function setRepoMergeMethods(
+  page: Page,
+  repo: string,
+  methods: MergeMethod[],
+) {
+  const res = await page.request.post("/control/repo-merge-methods", {
+    data: { repo, methods },
+  });
+  expect(res.ok()).toBeTruthy();
+}
+
+export interface MockPullRequest {
+  number: number;
+  repo: string;
+  title: string;
+  head: string;
+  head_sha: string;
+  base: string;
+  state: "open" | "closed";
+  draft: boolean;
+  merged: boolean;
+  merge_method: MergeMethod | "" | null;
+  mergeable: boolean;
+  mergeable_state: string;
+  author: string;
+  body: string;
+  created_at: string;
+  updated_at: string;
+  url: string;
+}
+
+// Read one PR straight out of the fake GitHub store, so a spec can assert what
+// the dashboard's merge/close actually did server-side.
+export async function readPullRequest(
+  page: Page,
+  owner: string,
+  repo: string,
+  number: number,
+): Promise<MockPullRequest> {
+  const res = await page.request.get("/mock/github/data");
+  expect(res.ok()).toBeTruthy();
+  const pulls = (await res.json()) as MockPullRequest[];
+  const match = pulls.find(
+    (pull) => pull.repo === `${owner}/${repo}` && pull.number === number,
+  );
+  expect(match, `no fake PR ${owner}/${repo}#${number}`).toBeDefined();
+  return match as MockPullRequest;
+}
+
 // Hold the fake run open long enough to load its busy composer and queue a
 // follow-up. It may finish while the UI observes the next server refresh.
 export async function openRunningThreadViaSlackLink(page: Page) {

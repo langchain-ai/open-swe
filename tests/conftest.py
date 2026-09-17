@@ -18,6 +18,7 @@ from sqlalchemy.ext.asyncio import create_async_engine
 
 from agent import store as agent_store
 from agent.database import postgres
+from agent.sandboxes.state import SANDBOX_BACKENDS, SANDBOX_CONNECTIONS
 from agent.threads import access, diffs, handlers, listing, proxy, runs, summary
 from agent.utils import ttl_cache
 from agent.webhooks import common as webhook_common
@@ -215,10 +216,21 @@ def _no_bundled_dashboard(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> No
 
 @pytest.fixture(autouse=True)
 def _reset_ttl_cache() -> Iterator[None]:
-    """Keep the process-global TTL cache from leaking team settings between tests."""
+    """Keep the process-global TTL cache from leaking workspace settings between tests."""
     ttl_cache.clear()
     yield
     ttl_cache.clear()
+
+
+@pytest.fixture(autouse=True)
+def _reset_sandbox_registries() -> Iterator[None]:
+    """Both sandbox registries are process globals; a leaked handle would let one
+    test's sandbox answer for the next test's thread."""
+    SANDBOX_BACKENDS.clear()
+    SANDBOX_CONNECTIONS.clear()
+    yield
+    SANDBOX_BACKENDS.clear()
+    SANDBOX_CONNECTIONS.clear()
 
 
 @pytest.fixture(autouse=True)
@@ -253,11 +265,12 @@ def _default_enable_auto_review(monkeypatch: pytest.MonkeyPatch) -> None:
 
 @pytest.fixture
 def slack_api(monkeypatch: pytest.MonkeyPatch):
-    from agent.slack import client, code_channels, http
+    from agent.slack import channels, client, code_channels, http
     from tests.support.slack_api import slack_api_server
 
     with slack_api_server() as api:
         monkeypatch.setattr(http, "SLACK_API_BASE_URL", api.base_url)
         monkeypatch.setattr(client, "SLACK_BOT_TOKEN", "test-slack-token")
         monkeypatch.setattr(code_channels, "SLACK_BOT_TOKEN", "test-slack-token")
+        monkeypatch.setattr(channels, "SLACK_BOT_TOKEN", "test-slack-token")
         yield api

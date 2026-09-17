@@ -12,6 +12,7 @@ from langchain_core.messages import HumanMessage, ToolMessage
 from agent.incidents import documents, runtime, service
 from agent.incidents.models import Incident, IncidentPolicy
 from agent.incidents.report import CONTEXT_MARKER
+from agent.slack.channels import SlackChannel
 
 CHANNEL = {
     "id": "C1",
@@ -43,7 +44,7 @@ async def incident(fake_store, monkeypatch):
             threads=SimpleNamespace(get=AsyncMock(side_effect=lambda _id: {"metadata": metadata}))
         ),
     )
-    monkeypatch.setattr(service, "get_slack_channel_info", AsyncMock(return_value=dict(CHANNEL)))
+    monkeypatch.setattr(SlackChannel, "fetch", AsyncMock(return_value=dict(CHANNEL)))
     monkeypatch.setattr(
         runtime, "post_slack_thread_reply_with_ts", AsyncMock(return_value=("7.0", None))
     )

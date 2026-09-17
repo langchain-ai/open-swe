@@ -11,7 +11,11 @@ from typing import Any
 
 import pytest
 
-from agent.dashboard.team_settings import TeamSettingsUpdate, upsert_team_settings
+from agent.dashboard.workspace_settings import (
+    WorkspaceSettingsUpdate,
+    upsert_instance_settings,
+    upsert_workspace_overrides,
+)
 from agent.run_config import Repo
 from agent.slack import webhook as slack_webhooks
 from agent.slack.request import SlackRequest
@@ -20,7 +24,7 @@ from agent.workspaces.store import WORKSPACES, WorkspaceCreate, parse_workspace_
 from tests.conftest import FakeStore
 from tests.slack.test_slack_context import _setup_slack_mention_fakes
 
-# Workspaces are rows; team settings are still Store records, so the tests that
+# Workspaces are rows; workspace settings are still Store records, so the tests that
 # read one keep the store double as well.
 _needs_workspace_rows = pytest.mark.usefixtures("registry_db")
 
@@ -76,7 +80,7 @@ async def test_a_bound_channel_outranks_a_defaulted_repository(
 ) -> None:
     """A repository nobody named does not decide the workspace.
 
-    `get_slack_repo_config` almost always produces one — the team default or
+    `get_slack_repo_config` almost always produces one — the workspace default or
     `SLACK_REPO_*` — so if a defaulted repository counted, a bound channel's
     workspace would never win.
     """
@@ -92,7 +96,7 @@ async def test_a_bound_channel_outranks_a_defaulted_repository(
     await WORKSPACES.create(
         WorkspaceCreate(name="OSS", repos=["acme/oss"], slack_channel_ids=["C0SS"]), "alice"
     )
-    await upsert_team_settings(TeamSettingsUpdate(default_repo="acme/oss"), workspace="oss")
+    await upsert_workspace_overrides("oss", WorkspaceSettingsUpdate(default_repo="acme/oss"))
 
     request = SlackRequest.model_validate(
         {
@@ -124,8 +128,8 @@ async def test_the_vision_fallback_reads_the_resolved_workspaces_model(
 ) -> None:
     """An image in a bound channel is checked against that workspace's model.
 
-    `default` here runs a model that takes images and `oss` one that does not,
-    so reading the wrong workspace's default would skip the fallback entirely.
+    The instance default takes images and `oss` overrides it with one that does
+    not, so reading the wrong tier would skip the fallback entirely.
     """
     captured: dict[str, Any] = {}
     _setup_slack_mention_fakes(monkeypatch, captured)
@@ -152,19 +156,18 @@ async def test_the_vision_fallback_reads_the_resolved_workspaces_model(
     await WORKSPACES.create(
         WorkspaceCreate(name="OSS", repos=["acme/oss"], slack_channel_ids=["C0SS"]), "alice"
     )
-    await upsert_team_settings(
-        TeamSettingsUpdate(
+    await upsert_instance_settings(
+        WorkspaceSettingsUpdate(
             default_agent_model="anthropic:claude-opus-5",
             default_agent_reasoning_effort="high",
-        ),
-        workspace="default",
+        )
     )
-    await upsert_team_settings(
-        TeamSettingsUpdate(
+    await upsert_workspace_overrides(
+        "oss",
+        WorkspaceSettingsUpdate(
             default_agent_model="fireworks:accounts/fireworks/models/kimi-k3",
             default_agent_reasoning_effort="high",
         ),
-        workspace="oss",
     )
 
     request = SlackRequest.model_validate(
@@ -185,6 +188,47 @@ async def test_the_vision_fallback_reads_the_resolved_workspaces_model(
     assert (configurable["agent_model_id"], configurable["agent_effort"]) == (
         webhook_common.default_vision_model_pair()
     )
+
+
+@_needs_workspace_rows
+async def test_an_inherited_default_repository_owned_elsewhere_is_not_used(
+    monkeypatch: pytest.MonkeyPatch, fake_store: FakeStore
+) -> None:
+    """The instance default repository does not cross into a workspace that does not own it."""
+    captured: dict[str, Any] = {}
+    _setup_slack_mention_fakes(monkeypatch, captured)
+
+    async def fake_thread_exists(thread_id: str) -> bool:
+        return False
+
+    monkeypatch.setattr(webhook_common, "thread_exists", fake_thread_exists)
+
+    await WORKSPACES.create(WorkspaceCreate(name="Core", repos=["acme/internal"]), "alice")
+    await WORKSPACES.create(
+        WorkspaceCreate(name="OSS", repos=["acme/oss"], slack_channel_ids=["C0SS"]), "alice"
+    )
+    # Set on the instance, so `oss` inherits it without owning it.
+    await upsert_instance_settings(WorkspaceSettingsUpdate(default_repo="acme/internal"))
+
+    request = SlackRequest.model_validate(
+        {
+            "channel_id": "C0SS",
+            "thread_ts": "1700000000.000100",
+            "event_ts": "1700000000.000200",
+            "user_id": "U123",
+            "text": "<@UBOT> hello",
+            "bot_user_id": "UBOT",
+        }
+    )
+
+    await slack_webhooks._process_slack_mention_impl(
+        request,
+        webhook_common.SlackRepoResolution(Repo(owner="acme", name="internal"), explicit=False),
+    )
+
+    configurable = captured["run_create"]["kwargs"]["config"]["configurable"]
+    assert configurable["workspace"] == "oss"
+    assert configurable.get("repo") is None
 
 
 @_needs_workspace_rows

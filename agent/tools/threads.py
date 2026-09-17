@@ -14,7 +14,6 @@ from langgraph.config import get_config
 from langgraph.prebuilt import InjectedState
 
 from agent.dashboard.admin import is_admin
-from agent.dashboard.agent_overrides import resolve_login_from_email_async
 from agent.dashboard.oauth import enforce_github_login_gate
 from agent.dashboard.options import SUPPORTED_MODEL_IDS, canonical_model_pair, model_supports_effort
 from agent.input_messages import input_message_text, message_sender_id
@@ -40,6 +39,7 @@ from agent.threads.workflow_approval import (
     get_workflow_push_approvals,
     workflow_push_approval_responses,
 )
+from agent.users import User
 from agent.utils.dashboard_links import (
     dashboard_plan_url,
     dashboard_thread_id,
@@ -116,7 +116,7 @@ async def _actor(state: Mapping[str, Any] | None = None) -> _Actor | None:
     login_value = configurable.get("github_login")
     login = login_value.strip() if isinstance(login_value, str) and login_value.strip() else None
     if not login:
-        login = await resolve_login_from_email_async(email)
+        login = await User.login_for_email(email)
     if not login:
         return None
     current_login = _latest_state_github_login(state)

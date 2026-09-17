@@ -76,6 +76,27 @@ async def test_sources_combine_distinct_connections_and_replace_matching_names(r
     ]
 
 
+async def test_each_tier_replaces_the_same_named_connection_from_the_tier_before(remote):
+    instance = source(
+        ("instance_mcps",),
+        {"linear": record(), "docs": record("docs"), "incident": record("incident")},
+    )
+    workspace = source(
+        ("workspace_mcps", "oss"),
+        {"linear": record(url="https://oss-linear.example/mcp")},
+    )
+    user = source(
+        ("user_mcps", "alice"),
+        {"docs": record("docs", url="https://personal-docs.example/mcp")},
+    )
+    tools = await runtime.load_mcp_tools(instance, workspace, user)
+    assert sorted([(await tool.ainvoke({}))[0]["text"] for tool in tools]) == [
+        "https://incident.example/mcp",
+        "https://oss-linear.example/mcp",
+        "https://personal-docs.example/mcp",
+    ]
+
+
 @pytest.mark.parametrize("override", [{"enabled": False}, {"allowed_tools": []}])
 async def test_disabled_or_empty_override_never_falls_back_to_workspace(remote, override):
     workspace = source(("workspace_mcps",), {"linear": record()})
