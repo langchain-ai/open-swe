@@ -42,19 +42,15 @@ def signed(monkeypatch: pytest.MonkeyPatch) -> None:
 
 @pytest.mark.asyncio
 @pytest.mark.usefixtures("signed")
-async def test_command_queues_the_question(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(
-        slack_routes,
-        "dashboard_thread_url",
-        lambda thread_id: f"https://swe.test/agents/{thread_id}",
-    )
+async def test_command_queues_the_question() -> None:
     background_tasks = BackgroundTasks()
 
     result = await slack_routes.slack_command(
         _command_request("how does thread routing work?"), background_tasks
     )
 
-    assert result["response_type"] == "ephemeral"
+    assert result.status_code == 200
+    assert result.body == b""
     assert len(background_tasks.tasks) == 1
     queued = background_tasks.tasks[0]
     assert queued.func is slack_ask.process_slack_ask
@@ -62,9 +58,7 @@ async def test_command_queues_the_question(monkeypatch: pytest.MonkeyPatch) -> N
     assert request.question == "how does thread routing work?"
     assert request.channel_id == "C1"
     assert request.user_id == "U1"
-    # The acknowledgement links to the thread the queued run will use.
     assert request.thread_id == slack_ask.ask_thread_id("C1", "U1", "trigger-1")
-    assert request.thread_id in result["text"]
 
 
 @pytest.mark.asyncio
