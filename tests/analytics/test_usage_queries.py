@@ -212,6 +212,30 @@ async def test_usage_sorting_happens_before_pagination(usage_db):
         )
 
 
+async def test_user_sort_follows_disclosed_names_not_hidden_ones(usage_db):
+    # Hidden members are ordered by the label the viewer sees, so their real names
+    # cannot be inferred from where they land in the list.
+    zeta = await person(email="zeta@example.com")
+    alpha = await person(email="alpha@example.com")
+    mid = await person("mid")
+    for member in (zeta, alpha, mid):
+        await run(member)
+    await pr(zeta, state="merged")
+
+    ordinary = await report(sort="user", direction="asc")
+    assert [row["user"]["name"] for row in ordinary["rows"]] == [
+        "mid",
+        "Open SWE user",
+        "Open SWE user",
+    ]
+    # Masked members tie on their shared label and fall back to rank, not to "alpha"
+    # before "zeta".
+    assert [row["rank"] for row in ordinary["rows"]] == [3, 1, 2]
+
+    admin = await report(sort="user", direction="asc", admin=True)
+    assert [row["user"]["name"] for row in admin["rows"]] == ["alpha", "mid", "zeta"]
+
+
 @pytest.mark.parametrize("direction", ["asc", "desc"])
 async def test_favorite_models_sort_by_displayed_labels_before_pagination(
     usage_db: UUID, direction: queries.SortDirection

@@ -289,58 +289,53 @@ WITH runs AS (
     LEFT JOIN models m ON m.person_id = p.person_id
 ), ranked AS (
     SELECT *,
-    -- Match safeModelLabel and its empty-label fallback in the usage table.
-    COALESCE(NULLIF(btrim(left(split_part(
-        regexp_replace(favorite_model, '[^A-Za-z0-9._:/+-]', '-', 'g'), '/', -1
-    ), 48), '-'), ''), 'Unavailable') AS favorite_model_label,
-    row_number() OVER (
-        ORDER BY merged_prs DESC, agent_loc DESC, prs_opened DESC, name, person_id
-    ) AS rank FROM metrics
+        -- Sorting and disclosure must agree, so derive each displayed label once here
+        -- and let both the ordering and the emitted row read the same column.
+        CASE WHEN :admin OR is_current OR NULLIF(github_login, '') IS NOT NULL
+            THEN name ELSE 'Open SWE user' END AS display_name,
+        -- Mirrors safeModelLabel in ui/src/lib/modelLabel.ts and the usage table's
+        -- empty-label fallback.
+        COALESCE(NULLIF(btrim(left(split_part(
+            regexp_replace(favorite_model, '[^A-Za-z0-9._:/+-]', '-', 'g'), '/', -1
+        ), 48), '-'), ''), 'Unavailable') AS favorite_model_label,
+        row_number() OVER (
+            ORDER BY merged_prs DESC, agent_loc DESC, prs_opened DESC, name, person_id
+        ) AS rank FROM metrics
+), keyed AS (
+    SELECT *,
+        -- One key per sortable type: the inactive key is NULL for every row, so it
+        -- ties and drops out of the ordering. Adding a column is a single line.
+        CASE :sort
+            WHEN 'user' THEN lower(display_name)
+            WHEN 'favorite_model' THEN lower(favorite_model_label)
+        END AS text_key,
+        CASE :sort
+            WHEN 'rank' THEN rank::numeric
+            WHEN 'invocations' THEN invocations::numeric
+            WHEN 'threads' THEN threads::numeric
+            WHEN 'total_tokens' THEN total_tokens::numeric
+            WHEN 'total_cost_usd' THEN total_cost_usd::numeric
+            WHEN 'avg_invocation_seconds' THEN avg_invocation_seconds::numeric
+            WHEN 'avg_thread_seconds' THEN avg_thread_seconds::numeric
+            WHEN 'prs_opened' THEN prs_opened::numeric
+            WHEN 'merged_prs' THEN merged_prs::numeric
+            WHEN 'agent_loc' THEN agent_loc::numeric
+        END AS numeric_key
+    FROM ranked
 ), ordered AS (
     SELECT *, row_number() OVER (ORDER BY
-        CASE WHEN :sort = 'rank' AND :direction = 'asc' THEN rank END ASC,
-        CASE WHEN :sort = 'rank' AND :direction = 'desc' THEN rank END DESC,
-        CASE WHEN :sort = 'user' AND :direction = 'asc' THEN
-            lower(CASE WHEN :admin OR is_current OR NULLIF(github_login, '') IS NOT NULL
-                THEN name ELSE 'Open SWE user' END) END ASC,
-        CASE WHEN :sort = 'user' AND :direction = 'desc' THEN
-            lower(CASE WHEN :admin OR is_current OR NULLIF(github_login, '') IS NOT NULL
-                THEN name ELSE 'Open SWE user' END) END DESC,
-        CASE WHEN :sort = 'favorite_model' AND :direction = 'asc'
-            THEN lower(favorite_model_label) END ASC,
-        CASE WHEN :sort = 'favorite_model' AND :direction = 'desc'
-            THEN lower(favorite_model_label) END DESC,
-        CASE WHEN :sort = 'invocations' AND :direction = 'asc' THEN invocations END ASC,
-        CASE WHEN :sort = 'invocations' AND :direction = 'desc' THEN invocations END DESC,
-        CASE WHEN :sort = 'threads' AND :direction = 'asc' THEN threads END ASC,
-        CASE WHEN :sort = 'threads' AND :direction = 'desc' THEN threads END DESC,
-        CASE WHEN :sort = 'total_tokens' AND :direction = 'asc' THEN total_tokens END ASC,
-        CASE WHEN :sort = 'total_tokens' AND :direction = 'desc' THEN total_tokens END DESC,
-        CASE WHEN :sort = 'total_cost_usd' AND :direction = 'asc' THEN total_cost_usd END ASC,
-        CASE WHEN :sort = 'total_cost_usd' AND :direction = 'desc' THEN total_cost_usd END DESC,
-        CASE WHEN :sort = 'avg_invocation_seconds' AND :direction = 'asc'
-            THEN avg_invocation_seconds END ASC,
-        CASE WHEN :sort = 'avg_invocation_seconds' AND :direction = 'desc'
-            THEN avg_invocation_seconds END DESC,
-        CASE WHEN :sort = 'avg_thread_seconds' AND :direction = 'asc'
-            THEN avg_thread_seconds END ASC,
-        CASE WHEN :sort = 'avg_thread_seconds' AND :direction = 'desc'
-            THEN avg_thread_seconds END DESC,
-        CASE WHEN :sort = 'prs_opened' AND :direction = 'asc' THEN prs_opened END ASC,
-        CASE WHEN :sort = 'prs_opened' AND :direction = 'desc' THEN prs_opened END DESC,
-        CASE WHEN :sort = 'merged_prs' AND :direction = 'asc' THEN merged_prs END ASC,
-        CASE WHEN :sort = 'merged_prs' AND :direction = 'desc' THEN merged_prs END DESC,
-        CASE WHEN :sort = 'agent_loc' AND :direction = 'asc' THEN agent_loc END ASC,
-        CASE WHEN :sort = 'agent_loc' AND :direction = 'desc' THEN agent_loc END DESC,
+        CASE WHEN :direction = 'asc' THEN text_key END ASC,
+        CASE WHEN :direction = 'desc' THEN text_key END DESC,
+        CASE WHEN :direction = 'asc' THEN numeric_key END ASC,
+        CASE WHEN :direction = 'desc' THEN numeric_key END DESC,
         rank
-    ) AS position FROM ranked
+    ) AS position FROM keyed
 ), selected AS (
     SELECT position,
         jsonb_build_object(
             'rank', rank,
             'user', jsonb_build_object(
-                'name', CASE WHEN :admin OR is_current OR NULLIF(github_login, '') IS NOT NULL
-                    THEN name ELSE 'Open SWE user' END,
+                'name', display_name,
                 'github_login', CASE WHEN :admin OR is_current THEN NULLIF(github_login, '') END,
                 'email', CASE WHEN is_current THEN NULLIF(email, '') END,
                 'avatar_url', CASE WHEN NULLIF(github_login, '') IS NOT NULL
