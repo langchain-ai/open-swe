@@ -609,6 +609,138 @@ const costRow: UsageLeaderboardRow = {
   avg_invocation_seconds: 90,
 }
 
+it.each([
+  ["Invocations", "Threads", "invocations", "threads"],
+  [
+    "Avg Invocation Duration",
+    "Avg Thread Duration",
+    "avg_invocation_seconds",
+    "avg_thread_seconds",
+  ],
+] as const)(
+  "keeps sorting the visible %s metric when switching scopes",
+  async (invocationLabel, threadLabel, invocationSort, threadSort) => {
+    vi.spyOn(api, "prMergeRateByModel").mockResolvedValue(captured)
+    vi.mocked(api.usageLeaderboard).mockImplementation(
+      async (_period, _limit, cursor) => ({
+        ...emptyUsage,
+        total_members: 11,
+        next_cursor: cursor ? null : "next-page",
+        rows: [costRow],
+      })
+    )
+    const client = mountReport()
+    fireEvent.click(
+      await screen.findByRole("button", { name: invocationLabel })
+    )
+    await waitFor(() =>
+      expect(
+        screen.getByRole<HTMLButtonElement>("button", { name: "Next" }).disabled
+      ).toBe(false)
+    )
+    fireEvent.click(await screen.findByRole("button", { name: "Next" }))
+    expect(await screen.findByText("Page 2 of 2")).toBeTruthy()
+
+    fireEvent.click(screen.getByRole("button", { name: "threads" }))
+    await waitFor(() =>
+      expect(api.usageLeaderboard).toHaveBeenLastCalledWith(
+        "30d",
+        10,
+        undefined,
+        threadSort,
+        "desc"
+      )
+    )
+    expect(await screen.findByText("Page 1 of 2")).toBeTruthy()
+    expect(
+      (
+        await screen.findByRole("columnheader", { name: threadLabel })
+      ).getAttribute("aria-sort")
+    ).toBe("descending")
+
+    fireEvent.click(screen.getByRole("button", { name: "invocations" }))
+    await waitFor(() =>
+      expect(api.usageLeaderboard).toHaveBeenLastCalledWith(
+        "30d",
+        10,
+        undefined,
+        invocationSort,
+        "desc"
+      )
+    )
+    expect(
+      (
+        await screen.findByRole("columnheader", { name: invocationLabel })
+      ).getAttribute("aria-sort")
+    ).toBe("descending")
+    client.clear()
+  }
+)
+
+it("keeps sort controls focused while loading and prevents using a stale page cursor", async () => {
+  vi.spyOn(api, "prMergeRateByModel").mockResolvedValue(captured)
+  const initial: UsageLeaderboardPayload = {
+    ...emptyUsage,
+    total_members: 11,
+    next_cursor: "rank-cursor",
+    rows: [costRow],
+  }
+  let resolveSorted!: (value: UsageLeaderboardPayload) => void
+  const sorted = new Promise<UsageLeaderboardPayload>((resolve) => {
+    resolveSorted = resolve
+  })
+  vi.mocked(api.usageLeaderboard)
+    .mockResolvedValueOnce(initial)
+    .mockReturnValue(sorted)
+  const client = mountReport()
+  const header = await screen.findByRole("button", {
+    name: "Invocations",
+  })
+  act(() => header.focus())
+  fireEvent.click(header)
+  await waitFor(() =>
+    expect(api.usageLeaderboard).toHaveBeenLastCalledWith(
+      "30d",
+      10,
+      undefined,
+      "invocations",
+      "desc"
+    )
+  )
+  expect(document.activeElement).toBe(header)
+  expect(
+    screen.getByRole<HTMLButtonElement>("button", { name: "Next" }).disabled
+  ).toBe(true)
+
+  await act(async () =>
+    resolveSorted({
+      ...initial,
+      next_cursor: "invocations-cursor",
+      rows: [
+        {
+          ...costRow,
+          rank: 11,
+          user: { ...costRow.user, name: "Sorted Reader" },
+        },
+      ],
+    })
+  )
+  const row = (await screen.findByText("Sorted Reader")).closest("tr")!
+  expect(within(row).getAllByRole("cell")[0]?.textContent).toBe("11")
+  expect(document.activeElement).toBe(header)
+  fireEvent.click(screen.getByRole("button", { name: "Next" }))
+  await waitFor(() =>
+    expect(api.usageLeaderboard).toHaveBeenLastCalledWith(
+      "30d",
+      10,
+      "invocations-cursor",
+      "invocations",
+      "desc"
+    )
+  )
+  client.clear()
+})
+
 it("requests server-side sorting and exposes its direction", async () => {
   vi.spyOn(api, "prMergeRateByModel").mockResolvedValue(captured)
   vi.mocked(api.usageLeaderboard).mockResolvedValue({

@@ -165,6 +165,11 @@ function UsageAnalyticsPeriod({
         sort,
         direction
       ),
+    placeholderData: (previousData, previousQuery) =>
+      previousQuery?.queryKey[2] === login &&
+      previousQuery.queryKey[3] === isAdmin
+        ? previousData
+        : undefined,
     staleTime: 60 * 1000,
     refetchInterval: 60 * 1000,
     retry: (count, error) =>
@@ -200,6 +205,18 @@ function UsageAnalyticsPeriod({
                   className="capitalize"
                   onClick={() => {
                     setUsageScope(scope)
+                    if (sort === "invocations" || sort === "threads") {
+                      setSort(scope)
+                    } else if (
+                      sort === "avg_invocation_seconds" ||
+                      sort === "avg_thread_seconds"
+                    ) {
+                      setSort(
+                        scope === "threads"
+                          ? "avg_thread_seconds"
+                          : "avg_invocation_seconds"
+                      )
+                    }
                     setLeaderboardPage(1)
                     setLeaderboardCursors([undefined])
                   }}
@@ -265,6 +282,7 @@ function UsageAnalyticsPeriod({
             pageSize={leaderboardPageSize}
             sort={sort}
             direction={direction}
+            isUpdating={leaderboard.isPlaceholderData}
             onSort={(nextSort) => {
               setDirection(
                 sort === nextSort && direction === "desc" ? "asc" : "desc"
@@ -719,6 +737,7 @@ function UsageTable({
   pageSize,
   sort,
   direction,
+  isUpdating,
   onSort,
   onPageChange,
   onPageSizeChange,
@@ -731,13 +750,17 @@ function UsageTable({
   pageSize: number
   sort: UsageLeaderboardSort
   direction: SortDirection
+  isUpdating: boolean
   onSort: (key: UsageLeaderboardSort) => void
   onPageChange: (page: number) => void
   onPageSizeChange: (pageSize: number) => void
 }) {
   return (
     <div className="overflow-x-auto">
-      <table className="w-full min-w-[1040px] text-xs">
+      <table aria-busy={isUpdating} className="w-full min-w-[1040px] text-xs">
+        {isUpdating ? (
+          <caption className="sr-only">Updating leaderboard</caption>
+        ) : null}
         <thead className="border-b border-border text-xs text-muted-foreground">
           <tr>
             {usageColumns(scope).map((column, index, columns) => (
@@ -752,7 +775,9 @@ function UsageTable({
             ))}
           </tr>
         </thead>
-        <tbody className="divide-y divide-border">
+        <tbody
+          className={`divide-y divide-border ${isUpdating ? "opacity-50" : ""}`}
+        >
           {rows.map((row) => (
             <tr
               key={`${row.rank}-${row.user.github_login ?? row.user.email ?? row.user.name}`}
@@ -805,6 +830,7 @@ function UsageTable({
         page={page}
         pageSize={pageSize}
         total={totalMembers}
+        disabled={isUpdating}
         onPageChange={onPageChange}
         onPageSizeChange={onPageSizeChange}
       />
@@ -816,12 +842,14 @@ function TablePagination({
   page,
   pageSize,
   total,
+  disabled = false,
   onPageChange,
   onPageSizeChange,
 }: {
   page: number
   pageSize: number
   total: number
+  disabled?: boolean
   onPageChange: (page: number) => void
   onPageSizeChange: (pageSize: number) => void
 }) {
@@ -839,6 +867,7 @@ function TablePagination({
       <div className="flex items-center gap-2">
         <span>Rows per page</span>
         <Select
+          disabled={disabled}
           value={String(pageSize)}
           onValueChange={(value) => onPageSizeChange(Number(value))}
         >
@@ -856,7 +885,7 @@ function TablePagination({
         <Button
           type="button"
           variant="outline"
-          disabled={page === 1}
+          disabled={disabled || page === 1}
           onClick={() => onPageChange(page - 1)}
         >
           Previous
@@ -867,7 +896,7 @@ function TablePagination({
         <Button
           type="button"
           variant="outline"
-          disabled={page >= pageCount}
+          disabled={disabled || page >= pageCount}
           onClick={() => onPageChange(page + 1)}
         >
           Next
