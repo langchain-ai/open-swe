@@ -87,7 +87,10 @@ async def pr_merge_rate_by_model(
                         AND p.opened_at <= :mature_before) AS mature_pending,
                     count(*) FILTER (WHERE p.current_state = 'open'
                         AND p.opened_at > :mature_before) AS waiting,
-                    count(*) AS cohort_size
+                    count(*) AS cohort_size,
+                    avg(EXTRACT(EPOCH FROM p.outcome_at - p.opened_at))
+                        FILTER (WHERE p.current_state = 'merged' AND p.outcome_at IS NOT NULL)
+                        AS avg_merge_seconds
                 FROM pr_projection p
                 JOIN eligible_models e
                   ON e.originating_model_id IS NOT DISTINCT FROM p.originating_model_id
@@ -112,6 +115,7 @@ async def pr_merge_rate_by_model(
             },
         )
         grouped: dict[tuple[object, object], dict[str, Any]] = {}
+        merge_seconds_totals: dict[tuple[object, object], float] = {}
         for row in result.mappings():
             key = (row["originating_model_id"], row["model_attribution_quality"])
             cohort = grouped.setdefault(
@@ -128,7 +132,16 @@ async def pr_merge_rate_by_model(
                 },
             )
             effort = _pr_outcome_counts(row)
+            effort["avg_merge_seconds"] = (
+                float(row["avg_merge_seconds"]) if row["avg_merge_seconds"] is not None else None
+            )
             cohort["efforts"].append({"effort": row["configured_effort"], **effort})
+            avg_merge_seconds = effort["avg_merge_seconds"]
+            merged_count = effort["merged"]
+            if isinstance(avg_merge_seconds, float) and isinstance(merged_count, int):
+                merge_seconds_totals[key] = (
+                    merge_seconds_totals.get(key, 0.0) + avg_merge_seconds * merged_count
+                )
             for field in (
                 "merged",
                 "closed_without_merge",
@@ -138,7 +151,11 @@ async def pr_merge_rate_by_model(
             ):
                 cohort[field] += effort[field]
         cohorts = []
-        for cohort in grouped.values():
+        for key, cohort in grouped.items():
+            merge_seconds_total = merge_seconds_totals.get(key, 0.0)
+            cohort["avg_merge_seconds"] = (
+                merge_seconds_total / cohort["merged"] if cohort["merged"] else None
+            )
             decided = cohort["merged"] + cohort["closed_without_merge"]
             mature = decided + cohort["mature_pending"]
             cohorts.append(
@@ -150,6 +167,13 @@ async def pr_merge_rate_by_model(
                     "mature_cohort_merge_share": cohort["merged"] / mature if mature else None,
                 }
             )
+        if not admin:
+            for cohort in cohorts:
+                efforts = cohort["efforts"]
+                if isinstance(efforts, list) and any(
+                    effort["cohort_size"] < minimum for effort in efforts
+                ):
+                    cohort["efforts"] = []
         cohorts.sort(key=lambda cohort: (-_integer(cohort["cohort_size"]), str(cohort["model_id"])))
         unavailable_threads = []
         if admin:

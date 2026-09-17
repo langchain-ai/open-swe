@@ -127,6 +127,7 @@ it("shows delivery lag separately from suppression, then refreshes to a populate
         decided_merge_rate: 0.75,
         mature_denominator: 5,
         mature_cohort_merge_share: 0.6,
+        avg_merge_seconds: 172800,
         efforts: [
           {
             effort: "high",
@@ -178,6 +179,7 @@ it.each([
           decided_merge_rate: 0.75,
           mature_denominator: 5,
           mature_cohort_merge_share: 0.6,
+          avg_merge_seconds: 90000,
           efforts: [
             {
               effort: "high",
@@ -208,6 +210,7 @@ it.each([
       "1",
       "3",
       "60%",
+      "1d",
     ])
 
     const table = row.closest("table")!
@@ -222,6 +225,7 @@ it.each([
       "Closed without merge",
       "Open",
       "Merge rate",
+      "Avg time to merge",
     ])
 
     const openCount = within(row).getByRole("button", { name: "3" })
@@ -253,6 +257,13 @@ it.each([
     expect(
       await screen.findByText(/Includes merged and closed PRs/)
     ).toBeTruthy()
+
+    const avgTime = within(row).getByRole("button", { name: "1d" })
+    act(() => avgTime.focus())
+    expect(await screen.findByText(/Based on 3 merged PRs/)).toBeTruthy()
+    expect(row.textContent).not.toContain("Based on")
+    act(() => avgTime.blur())
+    fireEvent.keyDown(avgTime, { key: "Escape" })
 
     fireEvent.click(screen.getByText("How these numbers work"))
     expect(
@@ -292,6 +303,7 @@ it("expands model totals into reasoning effort rows", async () => {
       {
         model_id: "example-model",
         model_attribution_quality: "configured",
+        avg_merge_seconds: 172800,
         merged: 3,
         closed_without_merge: 1,
         mature_pending: 0,
@@ -341,6 +353,37 @@ it("expands model totals into reasoning effort rows", async () => {
   client.clear()
 })
 
+it("shows an em dash for avg time to merge when a group has no merges", async () => {
+  vi.spyOn(api, "prMergeRateByModel").mockResolvedValue({
+    ...captured,
+    status: "ready",
+    cohorts: [
+      {
+        model_id: "example-model",
+        model_attribution_quality: "configured",
+        merged: 0,
+        closed_without_merge: 2,
+        mature_pending: 0,
+        waiting: 0,
+        cohort_size: 2,
+        decided_denominator: 2,
+        decided_merge_rate: 0,
+        mature_denominator: 2,
+        mature_cohort_merge_share: 0,
+        avg_merge_seconds: null,
+        efforts: [],
+      },
+    ],
+  })
+  const client = mountReport()
+  const row = (await screen.findByText("example-model")).closest("tr")!
+  const cells = within(row).getAllByRole("cell")
+  expect(cells.at(-1)?.textContent).toBe("\u2014")
+  expect(within(row).queryByRole("button", { name: /Based on/ })).toBeNull()
+  expect(row.textContent).not.toContain("Based on")
+  client.clear()
+})
+
 it("shortens model paths across usage tables", async () => {
   vi.spyOn(api, "prMergeRateByModel").mockResolvedValue({
     ...captured,
@@ -358,6 +401,7 @@ it("shortens model paths across usage tables", async () => {
         decided_merge_rate: 1,
         mature_denominator: 1,
         mature_cohort_merge_share: 1,
+        avg_merge_seconds: 3600,
         efforts: [
           {
             effort: "medium",
