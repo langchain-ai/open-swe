@@ -149,6 +149,7 @@ from agent.sandboxes.state import (
 from agent.skill_store.store import ORGANIZATION_SKILLS_NAMESPACE, SKILLS_NAMESPACE
 from agent.slack.dm import is_dm_session
 from agent.thread_title import TITLE_GENERATION_MAX_TOKENS, schedule_thread_title_generation
+from agent.threads.summary import thread_is_private
 from agent.tool_loaders.notion_mcp import load_notion_tools
 from agent.tools import (
     approve_plan,
@@ -527,6 +528,18 @@ async def _workspace_admin(config: RunnableConfig, profile_login: str | None) ->
 async def _admin_thread(config: RunnableConfig, profile_login: str | None) -> bool:
     """Whether this run may manage workspaces and organization skills."""
     return await is_private_admin_thread(RunConfig.from_config(config), login=profile_login)
+
+
+async def _private_thread(thread_id: str | None) -> bool:
+    """Whether only this thread's owner can read it. Fails closed."""
+    if not thread_id:
+        return False
+    try:
+        thread = await client.threads.get(thread_id=thread_id)
+    except Exception:
+        logger.debug("Could not read visibility for thread %s", thread_id, exc_info=True)
+        return False
+    return thread_is_private(thread_metadata(thread))
 
 
 async def _cached_tool_loader(key: str, ttl_seconds: float, loader: Any) -> list[Any]:
@@ -1157,6 +1170,11 @@ async def get_agent(config: RunnableConfig) -> Pregel:
     if admin_thread:
         logger.info("Admin thread %s: adding workspace management tools", thread_id)
 
+    # Channel history pulls messages into the transcript, so everyone who can
+    # read the thread reads them. Only a private thread gets the tool at all.
+    async with aphase(thread_id, "factory.private_thread"):
+        private_thread = await _private_thread(thread_id)
+
     stop_summary_mode = cfg.stop_summary is True
     sandbox_file_downloads = _sandbox_file_downloads_enabled(cfg)
     mcp_tools: list[Any] = []
@@ -1239,6 +1257,8 @@ async def get_agent(config: RunnableConfig) -> Pregel:
             read_user_settings,
         )
         static_tools = [tool for tool in static_tools if tool not in personal_tools]
+    if not private_thread:
+        static_tools = [tool for tool in static_tools if tool is not slack_read_channel_messages]
     if not _slack_tools_enabled(cfg):
         static_tools = [tool for tool in static_tools if tool not in slack_tools]
     elif _slack_dm_run(cfg):
@@ -1264,9 +1284,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
     if local_run:
         static_tools = apply_tool_descriptions([http_request, fetch_url, web_search])
     elif stop_summary_mode:
-        static_tools = apply_tool_descriptions(
-            [slack_read_channel_messages, slack_read_thread_messages, slack_thread_reply]
-        )
+        static_tools = apply_tool_descriptions([slack_read_thread_messages, slack_thread_reply])
     reserved_tool_names = {_registered_tool_name(tool) for tool in static_tools}
     dynamic_tool_middleware: DynamicToolMiddleware | None = None
     integration_tool_groups: dict[str, IntegrationGroup | Sequence[Any]] = {
