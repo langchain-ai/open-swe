@@ -4,7 +4,7 @@ import base64
 import binascii
 import json
 from datetime import UTC, datetime, timedelta
-from typing import Any
+from typing import Any, Literal
 from uuid import UUID
 
 from sqlalchemy import text
@@ -14,6 +14,26 @@ from sqlalchemy.ext.asyncio import AsyncConnection
 from agent.config import ENV
 from agent.database import connection
 from agent.database.analytics import reporting_metadata, workspace_id
+
+UsageSort = Literal[
+    "rank",
+    "user",
+    "favorite_model",
+    "invocations",
+    "threads",
+    "total_tokens",
+    "total_cost_usd",
+    "avg_invocation_seconds",
+    "avg_thread_seconds",
+    "prs_opened",
+    "merged_prs",
+    "agent_loc",
+]
+SortDirection = Literal["asc", "desc"]
+
+
+class InvalidUsageCursor(ValueError):
+    """Raised when a usage leaderboard cursor cannot be decoded."""
 
 
 def period_start(period: str | None) -> datetime:
@@ -227,20 +247,35 @@ async def pr_merge_rate_by_model(
     }
 
 
-def _encode_usage_cursor(as_of: datetime, offset: int, workspace: UUID, period: str) -> str:
+def _encode_usage_cursor(
+    as_of: datetime,
+    offset: int,
+    workspace: UUID,
+    period: str,
+    sort: UsageSort,
+    direction: SortDirection,
+) -> str:
     payload = json.dumps(
         {
             "as_of": as_of.isoformat(),
             "offset": offset,
             "period": period,
             "workspace_id": str(workspace),
+            "sort": sort,
+            "direction": direction,
         },
         separators=(",", ":"),
     ).encode()
     return base64.urlsafe_b64encode(payload).decode().rstrip("=")
 
 
-def _decode_usage_cursor(cursor: str, workspace: UUID, period: str) -> tuple[datetime, int]:
+def _decode_usage_cursor(
+    cursor: str,
+    workspace: UUID,
+    period: str,
+    sort: UsageSort,
+    direction: SortDirection,
+) -> tuple[datetime, int]:
     try:
         encoded = cursor.encode("ascii")
         payload = json.loads(
@@ -251,6 +286,8 @@ def _decode_usage_cursor(cursor: str, workspace: UUID, period: str) -> tuple[dat
             "offset",
             "period",
             "workspace_id",
+            "sort",
+            "direction",
         }:
             raise ValueError
         as_of = datetime.fromisoformat(payload["as_of"])
@@ -258,6 +295,8 @@ def _decode_usage_cursor(cursor: str, workspace: UUID, period: str) -> tuple[dat
         if (
             payload["workspace_id"] != str(workspace)
             or payload["period"] != period
+            or payload["sort"] != sort
+            or payload["direction"] != direction
             or as_of.tzinfo is None
             or not isinstance(offset, int)
             or isinstance(offset, bool)
@@ -273,7 +312,7 @@ def _decode_usage_cursor(cursor: str, workspace: UUID, period: str) -> tuple[dat
         json.JSONDecodeError,
         ValueError,
     ):
-        raise ValueError("invalid usage leaderboard cursor") from None
+        raise InvalidUsageCursor("invalid usage leaderboard cursor") from None
 
 
 _USAGE_SQL = """
@@ -371,17 +410,61 @@ WITH runs AS (
     LEFT JOIN models m ON m.person_id = p.person_id
     LEFT JOIN efforts e
       ON e.person_id = p.person_id AND e.provider_model_id = m.provider_model_id
+), labeled AS (
+    SELECT *, regexp_replace(favorite_model, '[^A-Za-z0-9._:/+-]', '-', 'g')
+        AS sanitized_model
+    FROM metrics
 ), ranked AS (
-    SELECT *, row_number() OVER (
-        ORDER BY merged_prs DESC, agent_loc DESC, prs_opened DESC, name, person_id
-    ) AS rank FROM metrics
+    SELECT *,
+        -- Sorting and disclosure must agree, so derive each displayed label once here
+        -- and let both the ordering and the emitted row read the same column.
+        CASE WHEN :admin OR is_current OR NULLIF(github_login, '') IS NOT NULL
+            THEN name ELSE 'Open SWE user' END AS display_name,
+        -- Mirrors safeModelLabel in ui/src/lib/modelLabel.ts and the usage table's
+        -- empty-label fallback.
+        COALESCE(NULLIF(btrim(left(
+            left(sanitized_model, strpos(sanitized_model, ':')) ||
+            split_part(substr(sanitized_model, strpos(sanitized_model, ':') + 1), '/', -1),
+            48
+        ), '-'), ''), 'Unavailable') AS favorite_model_label,
+        row_number() OVER (
+            ORDER BY merged_prs DESC, agent_loc DESC, prs_opened DESC, name, person_id
+        ) AS rank FROM labeled
+), keyed AS (
+    SELECT *,
+        -- One key per sortable type: the inactive key is NULL for every row, so it
+        -- ties and drops out of the ordering. Adding a column is a single line.
+        CASE :sort
+            WHEN 'user' THEN lower(display_name)
+            WHEN 'favorite_model' THEN lower(favorite_model_label)
+        END AS text_key,
+        CASE :sort
+            WHEN 'rank' THEN rank::numeric
+            WHEN 'invocations' THEN invocations::numeric
+            WHEN 'threads' THEN threads::numeric
+            WHEN 'total_tokens' THEN total_tokens::numeric
+            WHEN 'total_cost_usd' THEN total_cost_usd::numeric
+            WHEN 'avg_invocation_seconds' THEN avg_invocation_seconds::numeric
+            WHEN 'avg_thread_seconds' THEN avg_thread_seconds::numeric
+            WHEN 'prs_opened' THEN prs_opened::numeric
+            WHEN 'merged_prs' THEN merged_prs::numeric
+            WHEN 'agent_loc' THEN agent_loc::numeric
+        END AS numeric_key
+    FROM ranked
+), ordered AS (
+    SELECT *, row_number() OVER (ORDER BY
+        CASE WHEN :direction = 'asc' THEN text_key END ASC,
+        CASE WHEN :direction = 'desc' THEN text_key END DESC,
+        CASE WHEN :direction = 'asc' THEN numeric_key END ASC,
+        CASE WHEN :direction = 'desc' THEN numeric_key END DESC,
+        rank
+    ) AS position FROM keyed
 ), selected AS (
-    SELECT rank,
+    SELECT position,
         jsonb_build_object(
             'rank', rank,
             'user', jsonb_build_object(
-                'name', CASE WHEN :admin OR is_current OR NULLIF(github_login, '') IS NOT NULL
-                    THEN name ELSE 'Open SWE user' END,
+                'name', display_name,
                 'github_login', CASE WHEN :admin OR is_current THEN NULLIF(github_login, '') END,
                 'email', CASE WHEN is_current THEN NULLIF(email, '') END,
                 'avatar_url', CASE WHEN NULLIF(github_login, '') IS NOT NULL
@@ -398,9 +481,9 @@ WITH runs AS (
             'invocations_without_cost', invocations_without_cost,
             'invocations_with_partial_cost', invocations_with_partial_cost
         ) AS row
-    FROM ranked WHERE rank > :offset AND rank <= :offset + :limit
+    FROM ordered WHERE position > :offset AND position <= :offset + :limit
 )
-SELECT (SELECT COALESCE(jsonb_agg(row ORDER BY rank), '[]'::jsonb) FROM selected) AS rows,
+SELECT (SELECT COALESCE(jsonb_agg(row ORDER BY position), '[]'::jsonb) FROM selected) AS rows,
     count(*) AS total_members,
     min(rank) FILTER (WHERE is_current) AS current_user_rank,
     COALESCE(sum(invocations_without_cost), 0)::bigint AS invocations_without_cost,
@@ -453,13 +536,15 @@ async def usage_leaderboard(
     current_email: str | None,
     offset: int = 0,
     cursor: str | None = None,
+    sort: UsageSort = "rank",
+    direction: SortDirection = "asc",
     admin: bool = False,
 ) -> dict[str, Any]:
     """Read usage and review cohorts from one bounded PostgreSQL snapshot."""
     normalized = period if period in {"7d", "30d", "all"} else "30d"
     workspace = workspace_id()
     if cursor:
-        as_of, offset = _decode_usage_cursor(cursor, workspace, normalized)
+        as_of, offset = _decode_usage_cursor(cursor, workspace, normalized, sort, direction)
     else:
         as_of = datetime.now(UTC)
     generated_at_ms = int(as_of.timestamp() * 1000)
@@ -471,6 +556,8 @@ async def usage_leaderboard(
         "current_login": (current_login or "").strip().lower(),
         "current_email": (current_email or "").strip().lower(),
         "admin": admin,
+        "sort": sort,
+        "direction": direction,
     }
     async with connection() as conn:
         await conn.execute(text("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY"))
@@ -494,7 +581,12 @@ async def usage_leaderboard(
         **usage,
         "next_cursor": (
             _encode_usage_cursor(
-                as_of, parameters["offset"] + len(usage["rows"]), workspace, normalized
+                as_of,
+                parameters["offset"] + len(usage["rows"]),
+                workspace,
+                normalized,
+                sort,
+                direction,
             )
             if len(usage["rows"]) == parameters["limit"]
             and parameters["offset"] + len(usage["rows"]) < usage["total_members"]
