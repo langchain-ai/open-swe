@@ -281,8 +281,18 @@ export interface ThreadFeedback {
   comment: string
 }
 
+export interface DeferredToolResult {
+  content: unknown
+  artifact: unknown
+  status: "success" | "error"
+}
+
 export const agentsApi = {
   langGraphApiUrl: agentsLangGraphApiUrl,
+  getThreadToolResults: (threadId: string, toolCallIds: Array<string>) =>
+    agentsRequest<Record<string, DeferredToolResult>>(
+      `/threads/${threadId}/state/tool-results?ids=${encodeURIComponent(toolCallIds.join(","))}`
+    ),
   getThreadFeedback: (threadId: string) =>
     agentsRequest<ThreadFeedback>(
       `/threads/${encodeURIComponent(threadId)}/feedback`

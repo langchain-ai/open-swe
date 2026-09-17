@@ -31,3 +31,7 @@ overrides:
   'nanoid@>=3.0.0 <4.0.0': 3.3.18
   postcss: 8.5.26
   undici: 7.29.0
+
+patchedDependencies:
+  '@langchain/langgraph-sdk@1.11.0': patches/@langchain__langgraph-sdk@1.11.0.patch
+  '@langchain/react@1.1.0': patches/@langchain__react@1.1.0.patch

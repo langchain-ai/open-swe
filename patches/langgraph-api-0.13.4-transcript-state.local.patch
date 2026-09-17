@@ -1,0 +1,261 @@
+--- logs/local-dev/langgraph_api_orig/langgraph_api/state.py	2026-09-17 11:59:02
++++ .venv/lib/python3.14/site-packages/langgraph_api/state.py	2026-09-17 14:34:56
+@@ -120,3 +120,99 @@
+         if state.parent_config
+         else None,
+     }
++
++
++# --- open-swe local patch: transcript view -----------------------------------
++# A first-paint projection of ``values["messages"]``: human content, assistant
++# text and tool calls, tool statuses. Tool results, reasoning and provider
++# metadata are dropped and marked so a client can fetch them on demand.
++
++TRANSCRIPT_TRIMMED_MARKER = "open_swe_trimmed"
++
++
++def _transcript_text_content(content: object) -> object:
++    if isinstance(content, str):
++        return content
++    if not isinstance(content, list):
++        return ""
++    kept = [b for b in content if isinstance(b, dict) and b.get("type") == "text"]
++    return kept or ""
++
++
++def trim_transcript_message(message: object) -> dict | None:
++    if not isinstance(message, dict):
++        return None
++    kind = message.get("type")
++    if kind == "human":
++        out = {"type": "human", "id": message.get("id"), "content": message.get("content")}
++        if message.get("name") is not None:
++            out["name"] = message["name"]
++        if isinstance(message.get("additional_kwargs"), dict) and message["additional_kwargs"]:
++            out["additional_kwargs"] = message["additional_kwargs"]
++        return out
++    if kind == "ai":
++        out = {
++            "type": "ai",
++            "id": message.get("id"),
++            "content": _transcript_text_content(message.get("content")),
++            "tool_calls": message.get("tool_calls") or [],
++        }
++        if message.get("name") is not None:
++            out["name"] = message["name"]
++        rm = message.get("response_metadata")
++        if isinstance(rm, dict) and "created_at" in rm:
++            out["response_metadata"] = {"created_at": rm["created_at"]}
++        ak = message.get("additional_kwargs")
++        if isinstance(ak, dict) and "lc_source" in ak:
++            out["additional_kwargs"] = {"lc_source": ak["lc_source"]}
++        return out
++    if kind == "tool":
++        out = {
++            "type": "tool",
++            "id": message.get("id"),
++            "name": message.get("name"),
++            "tool_call_id": message.get("tool_call_id"),
++            "status": message.get("status", "success"),
++            "content": "",
++            "additional_kwargs": {TRANSCRIPT_TRIMMED_MARKER: True},
++        }
++        art = message.get("artifact")
++        if isinstance(art, dict) and "className" in art:
++            out["artifact"] = {"className": art["className"]}
++        return out
++    return None
++
++
++def trim_transcript_messages(messages: object) -> list[dict]:
++    if not isinstance(messages, list):
++        return []
++    return [m for m in (trim_transcript_message(x) for x in messages) if m is not None]
++
++
++def thread_state_transcript_view(state: ThreadState) -> ThreadState:
++    values = state.get("values")
++    if isinstance(values, dict) and "messages" in values:
++        messages = trim_transcript_messages(values["messages"])
++        state = {**state, "values": {**values, "messages": messages}}
++        metadata = dict(state.get("metadata") or {})
++        existing = metadata.get("open_swe_transcript")
++        metadata["open_swe_transcript"] = {**(existing if isinstance(existing, dict) else {}), "messages": len(messages)}
++        state["metadata"] = metadata
++    return state
++
++
++def thread_row_to_thread_state(thread: dict) -> ThreadState:
++    """A ThreadState from a thread row: the latest checkpoint's values while idle."""
++    interrupts = thread.get("interrupts") or {}
++    return {
++        "values": thread.get("values") or {},
++        "next": [],
++        "tasks": [],
++        "metadata": {k: v for k, v in (thread.get("metadata") or {}).items() if k in ("graph_id", "assistant_id")},
++        "created_at": thread.get("state_updated_at") or thread.get("updated_at"),
++        "checkpoint": None,
++        "parent_checkpoint": None,
++        "interrupts": [i for pending in interrupts.values() if isinstance(pending, list) for i in pending],
++        "checkpoint_id": None,
++        "parent_checkpoint_id": None,
++    }
+--- logs/local-dev/langgraph_api_orig/langgraph_api/api/threads.py	2026-09-17 11:59:02
++++ .venv/lib/python3.14/site-packages/langgraph_api/api/threads.py	2026-09-17 14:42:59
+@@ -20,11 +20,16 @@
+ from langgraph_api.route import ApiRequest, ApiResponse, ApiRoute
+ from langgraph_api.schema import (
+     THREAD_ENCRYPTION_FIELDS,
++    ThreadState,
+     THREAD_FIELDS,
+     ThreadStreamMode,
+ )
+ from langgraph_api.sse import EventSourceResponse
+-from langgraph_api.state import state_snapshot_to_thread_state
++from langgraph_api.state import (
++    state_snapshot_to_thread_state,
++    thread_row_to_thread_state,
++    thread_state_transcript_view,
++)
+ from langgraph_api.utils import (
+     fetchone,
+     get_pagination_headers,
+@@ -221,6 +226,93 @@
+     return ApiResponse(count)
+ 
+ 
++# open-swe local patch: hydrate a busy thread from its event stream.
++# The run worker publishes a full `values` event after every step into the
++# thread's event stream (the same tape the SSE endpoint replays). Replaying
++# it server-side and keeping only the last root `values` event gives the
++# current state without the checkpointer, plus the protocol `seq` a client
++# can pass as `since` so its own subscription starts at the live edge.
++# Replay from the stream backlog arrives as a burst; live events trickle. A
++# quiet gap after a minimum warm-up marks the live edge closely enough, and a
++# client resuming from the returned `seq` recovers anything after it anyway.
++_STREAM_SNAPSHOT_QUIET_SECONDS = 0.2
++_STREAM_SNAPSHOT_MIN_SECONDS = 0.3
++_STREAM_SNAPSHOT_MAX_SECONDS = 3.0
++
++
++async def _thread_state_from_stream(thread_id: str) -> ThreadState | None:
++    import asyncio  # noqa: PLC0415
++    from uuid import uuid4  # noqa: PLC0415
++
++    from langgraph_api.api.event_streaming import _make_manager  # noqa: PLC0415
++    from langgraph_api.event_streaming.types import Subscription  # noqa: PLC0415
++
++    snapshot: dict = {"values": None, "seq": 0, "step": None, "events": 0}
++    arrived = asyncio.Event()
++
++    async def on_event(event: dict) -> None:
++        seq = event.get("seq")
++        if isinstance(seq, int) and seq > snapshot["seq"]:
++            snapshot["seq"] = seq
++        params = event.get("params") or {}
++        if params.get("namespace"):
++            return
++        method = event.get("method")
++        if method == "values" and isinstance(params.get("data"), dict):
++            snapshot["values"] = params["data"]
++            snapshot["events"] += 1
++        elif method == "checkpoints" and isinstance(params.get("data"), dict):
++            step = params["data"].get("step")
++            if isinstance(step, int):
++                snapshot["step"] = step
++        arrived.set()
++
++    manager = _make_manager(thread_id, send_event=on_event)
++    manager.install_subscription(
++        Subscription(id=str(uuid4()), channels={"values", "checkpoints"}, active=False)
++    )
++    manager.start_thread_stream()
++    loop = asyncio.get_running_loop()
++    started = loop.time()
++    deadline = started + _STREAM_SNAPSHOT_MAX_SECONDS
++    try:
++        while loop.time() < deadline:
++            arrived.clear()
++            waiter = asyncio.create_task(arrived.wait())
++            ended = asyncio.create_task(manager.wait_for_thread_stream_end())
++            done, _ = await asyncio.wait(
++                {waiter, ended},
++                timeout=_STREAM_SNAPSHOT_QUIET_SECONDS,
++                return_when=asyncio.FIRST_COMPLETED,
++            )
++            for task in (waiter, ended):
++                if not task.done():
++                    task.cancel()
++            if ended in done:
++                break
++            if not done and loop.time() - started >= _STREAM_SNAPSHOT_MIN_SECONDS:
++                break
++    finally:
++        await manager.close()
++    if snapshot["values"] is None:
++        return None
++    metadata: dict = {"open_swe_transcript": {"stream_since": snapshot["seq"], "stream_values_events": snapshot["events"]}}
++    if snapshot["step"] is not None:
++        metadata["step"] = snapshot["step"]
++    return {
++        "values": snapshot["values"],
++        "next": ["__stream__"],
++        "tasks": [],
++        "metadata": metadata,
++        "created_at": None,
++        "checkpoint": None,
++        "parent_checkpoint": None,
++        "interrupts": [],
++        "checkpoint_id": None,
++        "parent_checkpoint_id": None,
++    }
++
++
+ @retry_db
+ async def get_thread_state(
+     request: ApiRequest,
+@@ -229,6 +321,14 @@
+     thread_id = request.path_params["thread_id"]
+     validate_uuid(thread_id, "Invalid thread ID: must be a UUID")
+     subgraphs = request.query_params.get("subgraphs") in ("true", "True")
++    # open-swe local patch: `view=transcript` serves a first-paint projection.
++    # An idle thread's row already holds the latest checkpoint values, so the
++    # graph factory and checkpointer are skipped entirely; a busy thread still
++    # reads the live checkpoint. `X-State-Source` says which path served the request.
++    view = request.query_params.get("view", "full")
++    if view not in ("full", "transcript"):
++        raise HTTPException(status_code=422, detail="view must be 'full' or 'transcript'")
++    source = "checkpoint"
+     async with connect(supports_core_api=PREFER_GRPC_CHECKPOINTER) as conn:
+         config = {
+             "configurable": {
+@@ -236,10 +336,25 @@
+                 "thread_id": thread_id,
+             }
+         }
+-        state = state_snapshot_to_thread_state(
+-            await Threads.State.get(conn, config=config, subgraphs=subgraphs)
+-        )
+-    return ApiResponse(state)
++        state = None
++        if view == "transcript":
++            thread_row = await fetchone(await Threads.get(conn, thread_id))
++            if thread_row.get("status") == "busy":
++                state = await _thread_state_from_stream(thread_id)
++                if state is not None:
++                    source = "stream"
++            if state is None and thread_row.get("values") is not None:
++                # Idle, or busy before the run's first step: the row holds the
++                # last finished state, which beats an empty checkpoint read.
++                state = thread_row_to_thread_state(thread_row)
++                source = "thread_row"
++        if state is None:
++            state = state_snapshot_to_thread_state(
++                await Threads.State.get(conn, config=config, subgraphs=subgraphs)
++            )
++    if view == "transcript":
++        state = thread_state_transcript_view(state)
++    return ApiResponse(state, headers={"X-State-Source": source, "X-State-View": view})
+ 
+ 
+ @retry_db

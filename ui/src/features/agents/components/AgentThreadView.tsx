@@ -66,6 +66,7 @@ import {
   threadHydrationFailed,
   threadTranscriptBuilt,
   threadTranscriptPainted,
+  threadTranscriptReady,
 } from "@/lib/perf/threadLoad"
 import { perfNow } from "@/lib/perf/trace"
 
@@ -288,6 +289,7 @@ export function AgentThreadView({
     if (isHydrating || paintedThreadId.current === thread.id) return
     const messages = visibleMessages.length
     const chunks = visibleMessages.reduce((sum, m) => sum + m.chunks.length, 0)
+    threadTranscriptReady(thread.id)
     const frame = requestAnimationFrame(() => {
       paintedThreadId.current = thread.id
       threadTranscriptPainted(thread.id, { messages, chunks })

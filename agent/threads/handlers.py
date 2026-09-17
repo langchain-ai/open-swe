@@ -7,6 +7,7 @@ import uuid
 from collections.abc import Mapping, Sequence
 from typing import Any
 
+import httpx
 from fastapi import HTTPException
 
 from agent.dashboard.options import normalize_model_choice
@@ -21,6 +22,7 @@ from agent.threads.access import (
     _readable_thread_metadata,
 )
 from agent.threads.listing import list_unresolved_dashboard_threads
+from agent.threads.proxy import langgraph_proxy_headers
 from agent.threads.runs import (
     _ASSISTANT_ID,
     ThreadMessageBody,
@@ -44,10 +46,17 @@ from agent.threads.summary import (
     _thread_summary,
     thread_source,
 )
+from agent.threads.transcript_state import (
+    StateView,
+    state_from_thread_row,
+    tool_results,
+    transcript_values,
+)
 from agent.utils.json_types import as_json_object, as_thread_dict, thread_metadata
 from agent.utils.thread_ops import (
     get_thread_active_status,
     langgraph_client,
+    langgraph_url,
     queue_message_for_thread,
 )
 from agent.utils.thread_participants import (
@@ -685,6 +694,7 @@ async def get_dashboard_thread_state(
     *,
     email: str | None = None,
     timings: dict[str, float] | None = None,
+    view: StateView = "full",
 ) -> dict[str, Any]:
     record = timings if timings is not None else {}
     client = langgraph_client()
@@ -699,20 +709,90 @@ async def get_dashboard_thread_state(
         client, thread, timings=record
     )
     metadata = thread_metadata(thread)
-    with phase(record, "get_state"):
-        state = await client.threads.get_state(thread_id)
-    result = as_json_object(state)
+    metadata_run_status = metadata.get("latest_run_status")
+    busy = (
+        _thread_is_busy(thread)
+        or latest_run_status in {"pending", "running"}
+        or metadata_run_status in {"pending", "running"}
+    )
+    row = as_thread_dict(thread)
+    # The thread row carries the latest checkpoint's values as of the last run
+    # end, so an idle thread's transcript never needs the checkpointer path,
+    # whose fixed cost dominates `get_state` on deployments.
+    result: dict[str, Any] | None = None
+    if view == "transcript" and not busy and row.get("values") is not None:
+        with phase(record, "row_state"):
+            result = state_from_thread_row(row)
+    elif view == "transcript" and busy:
+        # A running thread's current state lives in its event stream, not in
+        # the row. The patched LangGraph API snapshots it server-side and
+        # returns the protocol `seq` the client resumes from.
+        with phase(record, "stream_state"):
+            result = await _upstream_transcript_state(thread_id)
+    if result is None:
+        with phase(record, "get_state"):
+            state = await client.threads.get_state(thread_id)
+        result = as_json_object(state)
+    if view == "transcript":
+        with phase(record, "trim"):
+            values, stats = transcript_values(result.get("values"))
+        result["values"] = values
+        result_metadata = as_json_object(result.get("metadata"))
+        existing = as_json_object(result_metadata.get("open_swe_transcript"))
+        result_metadata["open_swe_transcript"] = {**existing, **stats}
+        result["metadata"] = result_metadata
     # The SDK's `useStream` opens its live event subscription only when the
     # hydrated `getState()` looks active (`next` non-empty / absent). When a
     # run was just started out-of-band (our REST run-create), the latest
     # checkpoint can still be the previous finished one with `next == []`,
     # which the SDK reads as idle and never opens the stream. Drop `next`
     # while a run is pending/running so the SDK treats the thread as active.
-    metadata_run_status = metadata.get("latest_run_status")
-    if (
-        _thread_is_busy(thread)
-        or latest_run_status in {"pending", "running"}
-        or metadata_run_status in {"pending", "running"}
-    ):
+    if busy:
         result.pop("next", None)
     return result
+
+
+async def _upstream_transcript_state(thread_id: str) -> dict[str, Any] | None:
+    """The LangGraph API's own transcript view, when the deployment has it.
+
+    Returns ``None`` when the API is unpatched (no ``X-State-Source``) or the
+    request fails, so the caller falls back to ``get_state``.
+    """
+    url = f"{langgraph_url().rstrip('/')}/threads/{thread_id}/state"
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as http:
+            response = await http.get(
+                url, params={"view": "transcript"}, headers=langgraph_proxy_headers()
+            )
+    except httpx.HTTPError:
+        logger.warning(
+            "upstream transcript state request failed",
+            extra={"thread_id": thread_id},
+            exc_info=True,
+        )
+        return None
+    if response.status_code != 200 or "x-state-source" not in response.headers:
+        return None
+    payload = response.json()
+    return payload if isinstance(payload, dict) else None
+
+
+async def get_dashboard_thread_tool_results(
+    thread_id: str,
+    login: str,
+    tool_call_ids: Sequence[str],
+    *,
+    email: str | None = None,
+) -> dict[str, dict[str, Any]]:
+    """Full tool messages a transcript-view client deferred, keyed by tool call id."""
+    client = langgraph_client()
+    try:
+        thread = await client.threads.get(thread_id)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(404, "thread not found") from exc
+    _assert_thread_readable(thread_metadata(thread), login, email)
+    row = as_thread_dict(thread)
+    values = row.get("values")
+    if _thread_is_busy(thread) or values is None:
+        values = as_json_object(await client.threads.get_state(thread_id)).get("values")
+    return tool_results(values, tool_call_ids)

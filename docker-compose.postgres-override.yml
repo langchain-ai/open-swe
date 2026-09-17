@@ -1,0 +1,17 @@
+# Local prod-like server (langgraph up). NOTE: the CLI writes its compose file to a temp
+# directory, so these volume paths must be made absolute before `langgraph up` (see
+# docs/perf/thread-load-investigation.md); relative paths are kept here so the file is portable.
+# Local prod-like server (langgraph up): the in-container dashboard proxy must reach
+# the API on its own port, and the app's Postgres tables live in the runtime's database.
+services:
+  langgraph-api:
+    environment:
+      LANGGRAPH_URL: http://localhost:8000
+      DASHBOARD_API_BASE_URL: http://localhost:8123
+      DASHBOARD_BASE_URL: http://localhost:8123
+      DASHBOARD_ALLOWED_ORIGINS: http://localhost:8123
+      DASHBOARD_DEV_SERVER_URL: http://host.docker.internal:3000
+    volumes:
+      - ./logs/local-dev/langgraph_api_patched/state.py:/api/langgraph_api/state.py:ro
+      - ./logs/local-dev/langgraph_api_patched/api/threads.py:/api/langgraph_api/api/threads.py:ro
+      - ./agent:/deps/open-swe/agent:ro

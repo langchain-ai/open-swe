@@ -106,6 +106,8 @@ export interface ToolExecutionChunk {
   input?: Record<string, unknown>
   status: AcpToolStatus
   output?: string
+  /** The transcript seed dropped this result; fetch it on demand. */
+  outputDeferred?: boolean
   display?: OutputIframeDisplay
   elapsedMs?: number
   approvalRequestId?: string

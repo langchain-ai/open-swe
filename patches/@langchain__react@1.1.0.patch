@@ -1,0 +1,26 @@
+diff --git a/dist/use-stream.cjs b/dist/use-stream.cjs
+index 4afe99e690d1d912ecd928ae7bb8f40156fcf33c..62782757b9e0ac8522cc31bec229b70b718c6683 100644
+--- a/dist/use-stream.cjs
++++ b/dist/use-stream.cjs
+@@ -98,6 +98,8 @@ function useStream(options) {
+ 			onCompleted: options.onCompleted,
+ 			initialValues: options.initialValues,
+ 			messagesKey: options.messagesKey,
++			getState: options.getState,
++			discoverHistory: options.discoverHistory,
+ 			optimistic: asBag.optimistic
+ 		})
+ 	};
+diff --git a/dist/use-stream.js b/dist/use-stream.js
+index 108651b79005889f80e7c55bb137eac922e509d4..170fc6146a205581ba7f71b57a5ce550837c393e 100644
+--- a/dist/use-stream.js
++++ b/dist/use-stream.js
+@@ -98,6 +98,8 @@ function useStream(options) {
+ 			onCompleted: options.onCompleted,
+ 			initialValues: options.initialValues,
+ 			messagesKey: options.messagesKey,
++			getState: options.getState,
++			discoverHistory: options.discoverHistory,
+ 			optimistic: asBag.optimistic
+ 		})
+ 	};

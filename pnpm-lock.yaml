@@ -22,6 +22,10 @@ overrides:
   postcss: 8.5.26
   undici: 7.29.0
 
+patchedDependencies:
+  '@langchain/langgraph-sdk@1.11.0': a2d11467b18392f60550c52708af8bd3c6eea488c7b958e9048ec256324cd87c
+  '@langchain/react@1.1.0': 9db64438f8ded9f4c7217b32ab9d9bb0c3505625a6b0e634deb9ac8b41c398e0
+
 importers:
 
   .:
@@ -89,10 +93,10 @@ importers:
         version: 1.2.9(ws@8.21.3)
       '@langchain/langgraph-sdk':
         specifier: ^1.11.0
-        version: 1.11.0(@langchain/core@1.2.9(ws@8.21.3))(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
+        version: 1.11.0(patch_hash=a2d11467b18392f60550c52708af8bd3c6eea488c7b958e9048ec256324cd87c)(@langchain/core@1.2.9(ws@8.21.3))(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
       '@langchain/react':
         specifier: ^1.1.0
-        version: 1.1.0(@langchain/core@1.2.9(ws@8.21.3))(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
+        version: 1.1.0(patch_hash=9db64438f8ded9f4c7217b32ab9d9bb0c3505625a6b0e634deb9ac8b41c398e0)(@langchain/core@1.2.9(ws@8.21.3))(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
       '@lexical/react':
         specifier: ^0.49.0
         version: 0.49.0(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(typescript@5.9.3)(yjs@13.6.32)
@@ -6582,7 +6586,7 @@ snapshots:
       - openai
       - ws
 
-  '@langchain/langgraph-sdk@1.11.0(@langchain/core@1.2.9(ws@8.21.3))(react-dom@19.2.8(react@19.2.8))(react@19.2.8)':
+  '@langchain/langgraph-sdk@1.11.0(patch_hash=a2d11467b18392f60550c52708af8bd3c6eea488c7b958e9048ec256324cd87c)(@langchain/core@1.2.9(ws@8.21.3))(react-dom@19.2.8(react@19.2.8))(react@19.2.8)':
     dependencies:
       '@langchain/core': 1.2.9(ws@8.21.3)
       '@langchain/protocol': 0.0.19
@@ -6595,10 +6599,10 @@ snapshots:
 
   '@langchain/protocol@0.0.19': {}
 
-  '@langchain/react@1.1.0(@langchain/core@1.2.9(ws@8.21.3))(react-dom@19.2.8(react@19.2.8))(react@19.2.8)':
+  '@langchain/react@1.1.0(patch_hash=9db64438f8ded9f4c7217b32ab9d9bb0c3505625a6b0e634deb9ac8b41c398e0)(@langchain/core@1.2.9(ws@8.21.3))(react-dom@19.2.8(react@19.2.8))(react@19.2.8)':
     dependencies:
       '@langchain/core': 1.2.9(ws@8.21.3)
-      '@langchain/langgraph-sdk': 1.11.0(@langchain/core@1.2.9(ws@8.21.3))(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
+      '@langchain/langgraph-sdk': 1.11.0(patch_hash=a2d11467b18392f60550c52708af8bd3c6eea488c7b958e9048ec256324cd87c)(@langchain/core@1.2.9(ws@8.21.3))(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
       react: 19.2.8
     transitivePeerDependencies:
       - react-dom

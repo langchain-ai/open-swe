@@ -3,6 +3,7 @@ import { ChevronDown } from "lucide-react"
 
 import { SkillPromptText } from "../SkillBadge"
 import { AgentTurn } from "./timeline/AgentTurn"
+import { DeferredToolResultsProvider } from "./timeline/DeferredToolOutput"
 import { liveActivityLabel } from "./timeline/workEntry"
 import { ThinkingSpinner } from "./ThinkingSpinner"
 import { UserMessage } from "./UserMessage"
@@ -146,18 +147,19 @@ export const Messages = memo(function MessagesComponent({
               }
 
               return (
-                <AgentTurn
-                  key={message.id}
-                  message={message}
-                  isStreaming={messageIsStreaming && !isOffloading}
-                  isMarkdownLive={messageIsMarkdownLive}
-                  projectPath={projectPath}
-                  activityLabel={messageIsStreaming ? activityLabel : undefined}
-                  onApprove={onApprove}
-                  onReject={onReject}
-                  onAutoApprove={onAutoApprove}
-                  onOpenFile={onOpenFile}
-                />
+                <DeferredToolResultsProvider key={message.id} threadId={threadId}>
+                  <AgentTurn
+                    message={message}
+                    isStreaming={messageIsStreaming && !isOffloading}
+                    isMarkdownLive={messageIsMarkdownLive}
+                    projectPath={projectPath}
+                    activityLabel={messageIsStreaming ? activityLabel : undefined}
+                    onApprove={onApprove}
+                    onReject={onReject}
+                    onAutoApprove={onAutoApprove}
+                    onOpenFile={onOpenFile}
+                  />
+                </DeferredToolResultsProvider>
               )
             })}
             {threadId && showPlanArtifact && (

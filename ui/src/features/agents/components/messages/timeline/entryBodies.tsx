@@ -1,5 +1,6 @@
 import { memo } from "react"
 
+import { DeferredToolOutput } from "./DeferredToolOutput"
 import { ToolResultBody } from "./ToolResultBody"
 import type { ToolExecutionChunk } from "@/features/agents/lib/types"
 
@@ -21,6 +22,7 @@ export const ShellEntryBody = memo(function ShellEntryBody({
         </pre>
       )}
       {output && <ToolResultBody value={output} />}
+      {!output && chunk.outputDeferred && <DeferredToolOutput chunk={chunk} />}
       {!output && chunk.status === "in_progress" && (
         <p className="font-mono text-[12px] text-muted-foreground">Running…</p>
       )}

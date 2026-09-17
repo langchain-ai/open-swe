@@ -1,0 +1,274 @@
+diff --git a/dist/client/stream/index.cjs b/dist/client/stream/index.cjs
+index eaa0e018f434f23f421b01b6d3d5a25aaa615758..7da16446f9d503d1e6846a64d16d5a06a73932be 100644
+--- a/dist/client/stream/index.cjs
++++ b/dist/client/stream/index.cjs
+@@ -313,6 +313,18 @@ var SubscriptionHandle = class {
+ var ThreadStream = class {
+ 	threadId;
+ 	ordering = {};
++	/**
++	* open-swe patch: protocol `seq` the hydration snapshot was taken at.
++	* Applied as `since` to the first shared-stream open only, so the
++	* server skips replaying events the snapshot already covers; later
++	* rotations keep the full-replay contract subagent projections rely on.
++	*/
++	#initialSince;
++	setInitialSince(seq) {
++		if (typeof seq !== "number" || seq < 0) return;
++		this.#initialSince = seq;
++		this.ordering.lastSeenSeq = maxSeq(this.ordering.lastSeenSeq, seq);
++	}
+ 	run;
+ 	agent;
+ 	input;
+@@ -1264,7 +1276,12 @@ var ThreadStream = class {
+ 		this.#rotationState = "rotating";
+ 		let newHandle;
+ 		try {
+-			newHandle = this.#transportAdapter.openEventStream(desired);
++			const initialSince = this.#sharedStreamFilter == null ? this.#initialSince : void 0;
++			this.#initialSince = void 0;
++			newHandle = this.#transportAdapter.openEventStream(initialSince != null ? {
++				...desired,
++				since: initialSince
++			} : desired);
+ 		} catch (err) {
+ 			this.#rotationState = "idle";
+ 			this.#rejectUncoveredPending(err);
+diff --git a/dist/client/stream/index.js b/dist/client/stream/index.js
+index 07d564bf0aae142a09505d72c70258d78e67e40a..c5be680bc8c60dd30a08177712bdf47d2985dba6 100644
+--- a/dist/client/stream/index.js
++++ b/dist/client/stream/index.js
+@@ -313,6 +313,18 @@ var SubscriptionHandle = class {
+ var ThreadStream = class {
+ 	threadId;
+ 	ordering = {};
++	/**
++	* open-swe patch: protocol `seq` the hydration snapshot was taken at.
++	* Applied as `since` to the first shared-stream open only, so the
++	* server skips replaying events the snapshot already covers; later
++	* rotations keep the full-replay contract subagent projections rely on.
++	*/
++	#initialSince;
++	setInitialSince(seq) {
++		if (typeof seq !== "number" || seq < 0) return;
++		this.#initialSince = seq;
++		this.ordering.lastSeenSeq = maxSeq(this.ordering.lastSeenSeq, seq);
++	}
+ 	run;
+ 	agent;
+ 	input;
+@@ -1264,7 +1276,12 @@ var ThreadStream = class {
+ 		this.#rotationState = "rotating";
+ 		let newHandle;
+ 		try {
+-			newHandle = this.#transportAdapter.openEventStream(desired);
++			const initialSince = this.#sharedStreamFilter == null ? this.#initialSince : void 0;
++			this.#initialSince = void 0;
++			newHandle = this.#transportAdapter.openEventStream(initialSince != null ? {
++				...desired,
++				since: initialSince
++			} : desired);
+ 		} catch (err) {
+ 			this.#rotationState = "idle";
+ 			this.#rejectUncoveredPending(err);
+diff --git a/dist/stream/controller.cjs b/dist/stream/controller.cjs
+index 9c000c5f1fc0fff58a87bee94b232c16c53b3b1d..65900d2c63a98d40f32746160e309d4411dce890 100644
+--- a/dist/stream/controller.cjs
++++ b/dist/stream/controller.cjs
+@@ -408,6 +408,12 @@ var StreamController = class {
+ 		if (threadId == null) return null;
+ 		const transport = this.#options.transport;
+ 		if (transport != null && typeof transport === "object" && typeof transport.getState === "function") return await transport.getState();
++		/**
++		* open-swe patch: an application-provided hydration read. Lets the host
++		* fetch a trimmed / paginated projection of the thread state instead of
++		* the full checkpoint the default `threads.getState()` returns.
++		*/
++		if (typeof this.#options.getState === "function") return await this.#options.getState(threadId);
+ 		return this.#options.client.threads.getState(threadId);
+ 	}
+ 	/**
+@@ -488,8 +494,10 @@ var StreamController = class {
+ 		let threadExists = false;
+ 		let threadMissing = false;
+ 		let threadActive = true;
++		let streamSince;
+ 		try {
+ 			const state = await this.#fetchHydrationState();
++			streamSince = state?.metadata?.open_swe_transcript?.stream_since;
+ 			if (this.#disposed || this.#currentThreadId !== hydratedThreadId) return;
+ 			threadExists = state != null;
+ 			threadActive = isThreadStateActive(state);
+@@ -631,6 +639,12 @@ var StreamController = class {
+ 		*/
+ 		const thread = this.#ensureThread(hydratedThreadId, !threadActive);
+ 		/**
++		* open-swe patch: a hydration snapshot taken from the run's event
++		* stream carries the `seq` it was current at; start the live
++		* subscription there instead of replaying the whole run.
++		*/
++		if (typeof streamSince === "number" && typeof thread.setInitialSince === "function") thread.setInitialSince(streamSince);
++		/**
+ 		* Start the wildcard lifecycle watcher up-front for existing,
+ 		* active threads. The root content pump runs at `depth: 1`, which
+ 		* covers root-namespace and one-deep events but not arbitrarily-
+@@ -646,7 +660,14 @@ var StreamController = class {
+ 		*    call `startLifecycleWatcher` on first submission instead.
+ 		*/
+ 		if (threadExists && threadActive) thread.startLifecycleWatcher();
+-		if (threadExists) {
++		/**
++		* open-swe patch: `discoverHistory: false` skips the hydrate-time
++		* `getHistory` page. Each checkpoint in that page is a full copy of the
++		* thread state, so on large threads it costs more than the hydration
++		* read itself; hosts that render no subgraph / scoped subagent views
++		* can opt out.
++		*/
++		if (threadExists && this.#options.discoverHistory !== false) {
+ 			/**
+ 			* Seed subgraph discovery and promote subagent execution
+ 			* namespaces from a single bounded `getHistory` page. Subgraph
+diff --git a/dist/stream/controller.js b/dist/stream/controller.js
+index 85a89ea7b6286d74f9f20dbce1b842231af20d22..b6932af4d9f43178585d1fb5fe8b7b085f95343d 100644
+--- a/dist/stream/controller.js
++++ b/dist/stream/controller.js
+@@ -407,6 +407,12 @@ var StreamController = class {
+ 		if (threadId == null) return null;
+ 		const transport = this.#options.transport;
+ 		if (transport != null && typeof transport === "object" && typeof transport.getState === "function") return await transport.getState();
++		/**
++		* open-swe patch: an application-provided hydration read. Lets the host
++		* fetch a trimmed / paginated projection of the thread state instead of
++		* the full checkpoint the default `threads.getState()` returns.
++		*/
++		if (typeof this.#options.getState === "function") return await this.#options.getState(threadId);
+ 		return this.#options.client.threads.getState(threadId);
+ 	}
+ 	/**
+@@ -487,8 +493,10 @@ var StreamController = class {
+ 		let threadExists = false;
+ 		let threadMissing = false;
+ 		let threadActive = true;
++		let streamSince;
+ 		try {
+ 			const state = await this.#fetchHydrationState();
++			streamSince = state?.metadata?.open_swe_transcript?.stream_since;
+ 			if (this.#disposed || this.#currentThreadId !== hydratedThreadId) return;
+ 			threadExists = state != null;
+ 			threadActive = isThreadStateActive(state);
+@@ -630,6 +638,12 @@ var StreamController = class {
+ 		*/
+ 		const thread = this.#ensureThread(hydratedThreadId, !threadActive);
+ 		/**
++		* open-swe patch: a hydration snapshot taken from the run's event
++		* stream carries the `seq` it was current at; start the live
++		* subscription there instead of replaying the whole run.
++		*/
++		if (typeof streamSince === "number" && typeof thread.setInitialSince === "function") thread.setInitialSince(streamSince);
++		/**
+ 		* Start the wildcard lifecycle watcher up-front for existing,
+ 		* active threads. The root content pump runs at `depth: 1`, which
+ 		* covers root-namespace and one-deep events but not arbitrarily-
+@@ -645,7 +659,14 @@ var StreamController = class {
+ 		*    call `startLifecycleWatcher` on first submission instead.
+ 		*/
+ 		if (threadExists && threadActive) thread.startLifecycleWatcher();
+-		if (threadExists) {
++		/**
++		* open-swe patch: `discoverHistory: false` skips the hydrate-time
++		* `getHistory` page. Each checkpoint in that page is a full copy of the
++		* thread state, so on large threads it costs more than the hydration
++		* read itself; hosts that render no subgraph / scoped subagent views
++		* can opt out.
++		*/
++		if (threadExists && this.#options.discoverHistory !== false) {
+ 			/**
+ 			* Seed subgraph discovery and promote subagent execution
+ 			* namespaces from a single bounded `getHistory` page. Subgraph
+diff --git a/dist/stream/types.d.cts b/dist/stream/types.d.cts
+index d1fb9ac279fd0576cfe6f246d8eadb6cfcb45295..0d4b2d886fb96eeb315f6be2318e0d628efdf921 100644
+--- a/dist/stream/types.d.cts
++++ b/dist/stream/types.d.cts
+@@ -1,3 +1,4 @@
++import { ThreadState } from "../schema.cjs";
+ import { Interrupt } from "../schema.cjs";
+ import { ClientConfig } from "../client/base.cjs";
+ import { AssembledToolCall } from "../client/stream/handles/tools.cjs";
+@@ -126,6 +127,16 @@ interface UseStreamCommonOptions<StateType extends object, ThreadIdType = string
+   initialValues?: StateType;
+   /** State key holding the message array. Defaults to {@link DEFAULT_MESSAGES_KEY}. */
+   messagesKey?: string;
++  /**
++   * open-swe patch: custom hydration read used instead of
++   * `client.threads.getState(threadId)`; return `null` to hydrate empty.
++   */
++  getState?: (threadId: string) => Promise<ThreadState<StateType> | null>;
++  /**
++   * open-swe patch: fetch one `getHistory` page at hydrate to seed subgraph /
++   * subagent discovery. Defaults to `true`.
++   */
++  discoverHistory?: boolean;
+   /** Headless tool implementations; auto-resumes matching interrupts. */
+   tools?: AnyHeadlessToolImplementation[];
+   /** Observe lifecycle events for registered {@link tools}. */
+@@ -340,6 +351,16 @@ interface StreamControllerOptions<StateType extends object = Record<string, unkn
+   initialValues?: StateType;
+   /** Key inside `values` that holds the message array. Defaults to {@link DEFAULT_MESSAGES_KEY}. */
+   messagesKey?: string;
++  /**
++   * open-swe patch: custom hydration read used instead of
++   * `client.threads.getState(threadId)`; return `null` to hydrate empty.
++   */
++  getState?: (threadId: string) => Promise<ThreadState<StateType> | null>;
++  /**
++   * open-swe patch: fetch one `getHistory` page at hydrate to seed subgraph /
++   * subagent discovery. Defaults to `true`.
++   */
++  discoverHistory?: boolean;
+   /**
+    * Optimistic UI for `submit()`. Defaults to `true`. See
+    * {@link UseStreamCommonOptions.optimistic} for the full contract.
+diff --git a/dist/stream/types.d.ts b/dist/stream/types.d.ts
+index 6d3b8ee597a918ea7a7c098be2e3771fcafef984..c6df1eabe8b4daa69625bf6c9a7ea9807542777d 100644
+--- a/dist/stream/types.d.ts
++++ b/dist/stream/types.d.ts
+@@ -1,3 +1,4 @@
++import { ThreadState } from "../schema.js";
+ import { Interrupt } from "../schema.js";
+ import { ClientConfig } from "../client/base.js";
+ import { AssembledToolCall } from "../client/stream/handles/tools.js";
+@@ -126,6 +127,16 @@ interface UseStreamCommonOptions<StateType extends object, ThreadIdType = string
+   initialValues?: StateType;
+   /** State key holding the message array. Defaults to {@link DEFAULT_MESSAGES_KEY}. */
+   messagesKey?: string;
++  /**
++   * open-swe patch: custom hydration read used instead of
++   * `client.threads.getState(threadId)`; return `null` to hydrate empty.
++   */
++  getState?: (threadId: string) => Promise<ThreadState<StateType> | null>;
++  /**
++   * open-swe patch: fetch one `getHistory` page at hydrate to seed subgraph /
++   * subagent discovery. Defaults to `true`.
++   */
++  discoverHistory?: boolean;
+   /** Headless tool implementations; auto-resumes matching interrupts. */
+   tools?: AnyHeadlessToolImplementation[];
+   /** Observe lifecycle events for registered {@link tools}. */
+@@ -340,6 +351,16 @@ interface StreamControllerOptions<StateType extends object = Record<string, unkn
+   initialValues?: StateType;
+   /** Key inside `values` that holds the message array. Defaults to {@link DEFAULT_MESSAGES_KEY}. */
+   messagesKey?: string;
++  /**
++   * open-swe patch: custom hydration read used instead of
++   * `client.threads.getState(threadId)`; return `null` to hydrate empty.
++   */
++  getState?: (threadId: string) => Promise<ThreadState<StateType> | null>;
++  /**
++   * open-swe patch: fetch one `getHistory` page at hydrate to seed subgraph /
++   * subagent discovery. Defaults to `true`.
++   */
++  discoverHistory?: boolean;
+   /**
+    * Optimistic UI for `submit()`. Defaults to `true`. See
+    * {@link UseStreamCommonOptions.optimistic} for the full contract.

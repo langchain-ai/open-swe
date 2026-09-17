@@ -5,7 +5,7 @@ from time import perf_counter
 from typing import Any, Literal
 from uuid import UUID
 
-from fastapi import APIRouter, HTTPException, Request, Response
+from fastapi import APIRouter, HTTPException, Query, Request, Response
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
@@ -30,6 +30,7 @@ from agent.threads.handlers import (
     get_dashboard_thread_pull_request_context,
     get_dashboard_thread_pull_request_status,
     get_dashboard_thread_state,
+    get_dashboard_thread_tool_results,
     rename_dashboard_thread,
     resolve_all_dashboard_threads,
     resolve_dashboard_thread,
@@ -54,6 +55,7 @@ from agent.threads.runs import (
     ThreadRenameBody,
     ThreadResolveBody,
 )
+from agent.threads.transcript_state import StateView
 from agent.utils.langsmith import get_langsmith_trace_url
 from agent.utils.timing import server_timing_header
 
@@ -394,16 +396,38 @@ async def api_delete_thread(
 async def api_get_thread_state(
     thread_id: str,
     session: dict[str, Any] = SESSION_DEP,
+    view: StateView = "full",
 ) -> Response:
     timings: dict[str, float] = {}
     started = perf_counter()
     payload = await get_dashboard_thread_state(
-        thread_id, session["sub"], email=session.get("email"), timings=timings
+        thread_id,
+        session["sub"],
+        email=session.get("email"),
+        timings=timings,
+        view=view,
     )
     timings["total"] = (perf_counter() - started) * 1000
     header = server_timing_header(timings)
-    logger.info("thread state timings thread_id=%s %s", thread_id, header)
-    return JSONResponse(payload, headers={"Server-Timing": header})
+    logger.info(
+        "thread state timings",
+        extra={"thread_id": thread_id, "view": view, "server_timing": header},
+    )
+    return JSONResponse(payload, headers={"Server-Timing": header, "X-State-View": view})
+
+
+@router.get("/threads/{thread_id}/state/tool-results")
+async def api_get_thread_tool_results(
+    thread_id: str,
+    ids: str = Query(min_length=1),
+    session: dict[str, Any] = SESSION_DEP,
+) -> Response:
+    """Tool results the transcript view deferred, for the given comma-separated tool call ids."""
+    tool_call_ids = [item for item in ids.split(",") if item]
+    payload = await get_dashboard_thread_tool_results(
+        thread_id, session["sub"], tool_call_ids, email=session.get("email")
+    )
+    return JSONResponse(payload)
 
 
 @router.post("/threads/{thread_id}/stream/events")

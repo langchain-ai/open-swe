@@ -14,6 +14,7 @@ import { MessageCopyButton } from "./MessageCopyButton"
 import { WorkEntryRow } from "./WorkEntryRow"
 import { describeWorkEntry, latestDiff } from "./workEntry"
 import { TurnFoldRow, WorkGroupToggleRow } from "./foldRows"
+import { DeferredToolOutput } from "./DeferredToolOutput"
 import { ShellEntryBody } from "./entryBodies"
 import type { ReactNode } from "react"
 import type { RenderItem } from "../renderItems"
@@ -253,6 +254,11 @@ export function AgentTurn({
             key={item.key}
             entry={describeWorkEntry(item.chunk, projectPath)}
             timestamp={item.chunk.timestamp}
+            body={
+              item.chunk.outputDeferred ? (
+                <DeferredToolOutput chunk={item.chunk} />
+              ) : undefined
+            }
           />
         )
 

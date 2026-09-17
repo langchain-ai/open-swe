@@ -242,6 +242,13 @@ function toolStatus(
   return "in_progress"
 }
 
+/** Marker the transcript state view leaves on tool messages whose result it dropped. */
+const DEFERRED_TOOL_RESULT_MARKER = "open_swe_trimmed"
+
+function toolResultDeferred(toolMessage: ToolMessage | undefined): boolean {
+  return toolMessage?.additional_kwargs[DEFERRED_TOOL_RESULT_MARKER] === true
+}
+
 function toolOutputText(
   assembled: AssembledToolCall | undefined,
   toolMessage: ToolMessage | undefined
@@ -453,6 +460,7 @@ export function streamMessagesToUi(
         }
         const output = toolOutputText(assembled, toolMessage)
         if (output) chunk.output = output
+        else if (toolResultDeferred(toolMessage)) chunk.outputDeferred = true
         const display = outputIframeDisplay(toolMessage)
         if (display) chunk.display = display
         const diffData = maybeDiffFromArgs(args)

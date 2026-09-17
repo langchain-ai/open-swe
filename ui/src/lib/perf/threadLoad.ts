@@ -129,6 +129,17 @@ export function threadTranscriptBuilt(
   span.add("builds", 1)
 }
 
+/**
+ * The commit that replaced the hydration placeholder with the transcript.
+ * Unlike `paint` it does not wait for an animation frame, so it stays
+ * meaningful in a hidden tab where `requestAnimationFrame` is throttled.
+ */
+export function threadTranscriptReady(threadId: string): void {
+  const span = current(threadId)
+  if (!span || span.has("ready")) return
+  span.mark("ready")
+}
+
 export function threadTranscriptPainted(
   threadId: string,
   attributes: { messages: number; chunks: number }
@@ -144,4 +155,24 @@ export function threadTranscriptPainted(
 export function resetThreadLoadTracking(): void {
   abandonThreadLoad("reset")
   navigated = false
+}
+
+/** What the hydration read returned: which projection and how many bytes. */
+export function threadStateFetched(
+  threadId: string,
+  attributes: {
+    view: string
+    bytes: number
+    messages: number | null
+  }
+): void {
+  const span = current(threadId)
+  if (!span) return
+  span.set({
+    state_view: attributes.view,
+    state_bytes: attributes.bytes,
+    ...(attributes.messages !== null
+      ? { state_messages: attributes.messages }
+      : {}),
+  })
 }

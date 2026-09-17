@@ -81,7 +81,11 @@ export function OnboardingDialog() {
 
   const needsModel =
     !profile.isLoading && profile.data !== undefined && !hasDefaultModel
+  // Local perf testing: the Slack prompt is disabled while hydration work is
+  // measured against servers where storage and Slack OAuth are unavailable.
+  const SLACK_PROMPT_ENABLED = false
   const needsSlack =
+    SLACK_PROMPT_ENABLED &&
     slackEnabled &&
     !slackConnected &&
     !slackDismissed &&

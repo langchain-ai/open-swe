@@ -21,6 +21,8 @@ import {
   dashboardFetch,
 } from "@/lib/langgraph-client"
 import { RunTracker } from "@/lib/perf/streaming"
+import { threadStateFetched } from "@/lib/perf/threadLoad"
+import { readHydrationFlags, stateQuery } from "./hydrationFlags"
 import { useReconnectNotice } from "./useReconnectNotice"
 import {
   MAX_RECONNECT_ATTEMPTS,
@@ -30,6 +32,7 @@ import {
   useStreamPool,
 } from "./streamPool"
 import type { ReactNode } from "react"
+import type { ThreadState } from "@langchain/langgraph-sdk"
 import type {
   AgentStream,
   AgentThreadTransport,
@@ -45,6 +48,41 @@ export type {
 
 const AGENT_ASSISTANT_ID = "agent"
 const SWEEP_INTERVAL_MS = 10_000
+
+interface TranscriptStats {
+  messages?: number
+}
+
+/**
+ * The hydration read for a cloud thread: the dashboard's state endpoint in the
+ * projection the flags select. Only the transcript is seeded from it; the
+ * remaining state (tool results, reasoning) loads on demand.
+ */
+type DashboardThreadState = ThreadState<Record<string, unknown>>
+
+async function fetchDashboardThreadState(
+  threadId: string
+): Promise<DashboardThreadState | null> {
+  const flags = readHydrationFlags()
+  const url = `${agentsApi.langGraphApiUrl}/threads/${threadId}/state${stateQuery(flags)}`
+  const response = await dashboardFetch(url, { method: "GET" })
+  if (response.status === 404) return null
+  if (!response.ok) {
+    const error = new Error(`thread state request failed: ${response.status}`)
+    Object.assign(error, { status: response.status })
+    throw error
+  }
+  const text = await response.text()
+  const state = JSON.parse(text) as DashboardThreadState
+  const stats = (state.metadata as { open_swe_transcript?: TranscriptStats } | undefined)
+    ?.open_swe_transcript
+  threadStateFetched(threadId, {
+    view: flags.view,
+    bytes: text.length,
+    messages: stats?.messages ?? null,
+  })
+  return state
+}
 
 const AgentStreamContext = createContext<AgentStream | null>(null)
 
@@ -79,11 +117,14 @@ function PooledStream({ entry }: { entry: StreamPoolEntry }) {
     modelId?: string | null
   } | null>(null)
 
+  const hydrationFlags = useMemo(() => readHydrationFlags(), [])
   const stream = useStream({
     client,
     assistantId: AGENT_ASSISTANT_ID,
     threadId: entry.threadId,
     fetch: dashboardFetch,
+    getState: cloud ? fetchDashboardThreadState : undefined,
+    discoverHistory: hydrationFlags.discoverHistory,
     maxReconnectAttempts: MAX_RECONNECT_ATTEMPTS,
     reconnectDelayMs,
     onReconnect: scheduleReconnectNotice,
