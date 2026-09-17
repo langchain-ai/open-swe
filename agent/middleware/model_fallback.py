@@ -32,7 +32,7 @@ from collections.abc import Awaitable, Callable, Sequence
 from typing import Any
 
 import anthropic
-import httpx2
+import httpx
 import openai
 from langchain.agents.middleware.types import ModelRequest, ModelResponse
 from langchain_core.exceptions import ModelError
@@ -56,7 +56,7 @@ _TRANSIENT_EXCEPTIONS: tuple[type[BaseException], ...] = (
     openai.APITimeoutError,
     openai.RateLimitError,
     openai.InternalServerError,
-    httpx2.TransportError,
+    httpx.TransportError,
     # Includes ``ModelCallTimeoutMiddleware``'s deadline: a wedged provider call
     # is exactly the case where trying the other provider is worthwhile.
     TimeoutError,
@@ -79,15 +79,8 @@ MODEL_OUTAGE_MESSAGE = (
 )
 
 
-def _is_legacy_httpx_transport_error(exc: BaseException) -> bool:
-    return exc.__class__.__module__.partition(".")[0] == "httpx" and any(
-        cls.__name__ == "TransportError" and cls.__module__.partition(".")[0] == "httpx"
-        for cls in exc.__class__.__mro__
-    )
-
-
 def _should_fallback(exc: BaseException) -> bool:
-    if isinstance(exc, _TRANSIENT_EXCEPTIONS) or _is_legacy_httpx_transport_error(exc):
+    if isinstance(exc, _TRANSIENT_EXCEPTIONS) or exc.__class__.__name__.endswith("ConnectionError"):
         return True
     if isinstance(exc, ModelError):
         return exc.is_retryable

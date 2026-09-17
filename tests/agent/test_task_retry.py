@@ -1,6 +1,6 @@
 import json
 
-import httpx2
+import httpx
 import pytest
 
 from agent.middleware.model_call_timeout import ModelCallTimeoutError
@@ -34,8 +34,14 @@ def test_task_retry_on_subagent_model_deadline() -> None:
 
 
 def test_task_retry_on_httpx_transport_subclasses() -> None:
-    assert task_retry_on(httpx2.RemoteProtocolError("stream dropped")) is True
-    assert task_retry_on(httpx2.ConnectError("connect failed")) is True
+    assert task_retry_on(httpx.ReadError("stream dropped")) is True
+    assert task_retry_on(httpx.ConnectError("connect failed")) is True
+
+
+@pytest.mark.parametrize("error_name", ["FireworksConnectionError", "OpenAIConnectionError"])
+def test_task_retry_on_provider_connection_errors(error_name: str) -> None:
+    error_type = type(error_name, (Exception,), {})
+    assert task_retry_on(error_type("provider unavailable")) is True
 
 
 def test_task_on_failure_returns_model_fixable_error() -> None:
@@ -46,7 +52,7 @@ def test_task_on_failure_returns_model_fixable_error() -> None:
     assert payload["error"]["code"] == "invalid_prompt"
 
 
-def test_task_on_failure_reraises_unrecoverable_error() -> None:
-    exc = RuntimeError("boom")
-    with pytest.raises(RuntimeError, match="boom"):
-        task_on_failure(exc)
+def test_task_on_failure_returns_structured_unrecoverable_error() -> None:
+    payload = json.loads(task_on_failure(RuntimeError("boom")))
+
+    assert payload == {"error": {}, "source": "subagent", "status": "failed"}
