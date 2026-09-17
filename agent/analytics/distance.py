@@ -17,18 +17,13 @@ def _patch_lines(files: object) -> list[str] | None:
     for file in files:
         if not isinstance(file, dict):
             return None
-        changes = file.get("changes")
         patch = file.get("patch")
         if patch is None:
-            if isinstance(changes, int) and changes > 0:
-                return None
-            continue
+            return None
         path = file.get("filename")
         if not isinstance(path, str) or not isinstance(patch, str):
             return None
         for line in patch.splitlines():
-            if line.startswith(("+++", "---")):
-                continue
             if line.startswith(("+", "-")):
                 lines.append(f"{path}\0{line}")
     return lines
@@ -70,7 +65,12 @@ async def _compare_files(
     if response.status_code != 200:
         return None
     payload = response.json()
-    return payload.get("files") if isinstance(payload, dict) else None
+    if not isinstance(payload, dict):
+        return None
+    files = payload.get("files")
+    if isinstance(files, list) and len(files) >= 300:
+        return None
+    return files
 
 
 async def post_open_distance_basis_points(

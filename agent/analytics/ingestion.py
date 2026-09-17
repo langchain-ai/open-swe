@@ -435,7 +435,10 @@ async def _project(conn: AsyncConnection, event: EventEnvelope) -> None:
                 "AND ((:source_version IS NOT NULL AND (source_version IS NULL OR :source_version > source_version)) "
                 "OR (:source_version IS NULL AND source_version IS NULL AND "
                 "(latest_transition_at IS NULL OR :occurred_at >= latest_transition_at)))"
-            ).bindparams(bindparam("source_version", type_=BigInteger)),
+            ).bindparams(
+                bindparam("source_version", type_=BigInteger),
+                bindparam("distance", type_=BigInteger),
+            ),
             {
                 "state": state,
                 "occurred_at": event.occurred_at,

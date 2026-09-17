@@ -717,10 +717,14 @@ async def _record_pr_telemetry(
                     head_ref=head,
                     base_ref=base,
                     opening_base_sha=(
-                        opening_base_sha if isinstance(opening_base_sha, str) else ""
+                        opening_base_sha
+                        if record_opening and isinstance(opening_base_sha, str)
+                        else ""
                     ),
                     opening_head_sha=(
-                        opening_head_sha if isinstance(opening_head_sha, str) else ""
+                        opening_head_sha
+                        if record_opening and isinstance(opening_head_sha, str)
+                        else ""
                     ),
                     author=author if isinstance(author, str) else "",
                     author_github_id=author_id if isinstance(author_id, int) else None,
