@@ -28,9 +28,12 @@ fetch_main() {
 }
 
 open_preview_pulls() {
+  local excluded="${EXCLUDE_PR_NUMBER:-0}"
+  [[ "$excluded" =~ ^[0-9]+$ ]] || { printf 'invalid EXCLUDE_PR_NUMBER: %s\n' "$excluded" >&2; return 1; }
   gh api --paginate "repos/${GH_REPO}/pulls?state=open&per_page=100" \
     --jq ".[]
       | select(any(.labels[]; .name == \"${PREVIEW_LABEL}\"))
+      | select(.number != (${excluded} | tonumber))
       | [.number, .head.sha, .author_association, .user.login, .html_url, .title]
       | @tsv" |
     sort -n |
@@ -242,13 +245,14 @@ build() {
   if [[ "$assembled_tree" == "$published_tree" ]]; then
     summary ""
     summary "Preview tree unchanged (\`$(short_sha "$assembled_tree")\`) — continuing because publication was forced."
+    git commit --allow-empty -m "preview: force deployment"
   fi
   git push --force origin "HEAD:refs/heads/${PREVIEW_BRANCH}"
   [[ -n "${GITHUB_OUTPUT:-}" ]] && printf 'changed=true\n' >>"$GITHUB_OUTPUT"
 }
 
 reset() {
-  local local_date local_hour latest due=false labels_kept=false branch_kept=false number url title marker pulls
+  local local_date local_hour latest due=false labels_kept=false branch_kept=false number url title marker pulls status
   local_date="$(TZ="$PREVIEW_RESET_ZONE" date +%F)"
   local_hour="$(TZ="$PREVIEW_RESET_ZONE" date +%H)"
   if ((10#$local_hour != PREVIEW_RESET_HOUR)); then
@@ -281,15 +285,22 @@ reset() {
     fi
   done <<<"$pulls"
 
-  if git ls-remote --exit-code --heads origin "refs/heads/${PREVIEW_MANUAL_BRANCH}" >/dev/null 2>&1; then
+  set +e
+  git ls-remote --exit-code --heads origin "refs/heads/${PREVIEW_MANUAL_BRANCH}" >/dev/null 2>&1
+  status=$?
+  set -e
+  if ((status == 0)); then
     if git push origin --delete "$PREVIEW_MANUAL_BRANCH"; then
       summary "- deleted \`${PREVIEW_MANUAL_BRANCH}\`"
     else
       summary "- **kept \`${PREVIEW_MANUAL_BRANCH}\`** — deletion failed"
       branch_kept=true
     fi
-  else
+  elif ((status == 2)); then
     summary "_no \`${PREVIEW_MANUAL_BRANCH}\` branch_"
+  else
+    summary "- **\`${PREVIEW_MANUAL_BRANCH}\` may remain** — branch lookup failed"
+    branch_kept=true
   fi
   if [[ "$labels_kept" == true || "$branch_kept" == true ]]; then
     printf 'Reset incomplete — leaving the %s marker unset so the next tick retries.\n' "$local_date"
