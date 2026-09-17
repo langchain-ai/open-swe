@@ -35,6 +35,7 @@ export function ThreadMenuItems({
   onToggleArchived: () => void
   onDelete: () => void
 }) {
+  const threadId = thread?.id ?? localThread?.id
   return (
     <>
       {thread?.traceUrl && (
@@ -93,11 +94,12 @@ export function ThreadMenuItems({
           Copy sandbox ID
         </Menu.Item>
       )}
-      {localThread && (
+      {threadId && (
         <Menu.Item
           onClick={() => {
-            void navigator.clipboard.writeText(localThread.id)
+            void navigator.clipboard.writeText(threadId)
           }}
+          title={threadId}
           className={menuItemClassName}
         >
           <CopyIcon className="size-3.5" />
