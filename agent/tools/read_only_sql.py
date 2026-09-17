@@ -10,6 +10,7 @@ from uuid import UUID
 from sqlalchemy import text
 
 from agent.database import postgres
+from agent.slack.dm import is_dm_session
 from agent.tools.admin_gate import configurable, require_admin
 
 logger = logging.getLogger(__name__)
@@ -38,16 +39,21 @@ def _json_value(value: object) -> object:
     return str(value)
 
 
-async def _require_private_admin_thread() -> str | None:
+async def _require_private_admin_surface() -> str | None:
     cfg = configurable()
-    if cfg.admin_thread is not True or cfg.source != "dashboard":
-        return "Read-only SQL is available only in an admin's private dashboard thread."
+    slack_dm = (
+        cfg.source == "slack"
+        and cfg.slack_thread is not None
+        and is_dm_session(cfg.slack_thread.channel_context, cfg.slack_thread.thread_ts)
+    )
+    if cfg.admin_thread is not True or (cfg.source != "dashboard" and not slack_dm):
+        return "Read-only SQL is available only in an admin's private dashboard thread or Slack DM."
     return await require_admin("query the database")
 
 
 async def read_only_sql(query: str) -> dict[str, object]:
-    """Run one read-only PostgreSQL query in a private admin thread."""
-    if error := await _require_private_admin_thread():
+    """Run one read-only PostgreSQL query on a private admin surface."""
+    if error := await _require_private_admin_surface():
         return {"ok": False, "error": error}
 
     query = query.strip()

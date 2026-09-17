@@ -1237,7 +1237,11 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         slack_thread_reply,
         submit_thread_feedback,
         *(ADMIN_TOOLS if admin_thread else ()),
-        *((read_only_sql,) if admin_thread and source == "dashboard" else ()),
+        *(
+            (read_only_sql,)
+            if admin_thread and (source == "dashboard" or _slack_dm_run(cfg))
+            else ()
+        ),
     ]
     if credential_login is None:
         personal_tools = (
