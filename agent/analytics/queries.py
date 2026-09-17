@@ -255,7 +255,7 @@ def _decode_usage_cursor(cursor: str, workspace: UUID, period: str) -> tuple[dat
 _USAGE_SQL = """
 WITH runs AS (
     SELECT COALESCE(a.person_id, r.user_id) AS person_id, r.configured_model_id,
-        r.thread_id,
+        r.configured_effort, r.thread_id,
         COALESCE(c.total_tokens, r.total_tokens, 0) AS total_tokens,
         c.cost_usd, c.status AS cost_status,
         CASE WHEN r.terminal_at >= r.started_at
