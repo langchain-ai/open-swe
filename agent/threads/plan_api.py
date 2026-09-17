@@ -265,18 +265,23 @@ async def approve_plan_for_thread(thread_id: str, *, approver: dict[str, str]) -
         )
         if plan_html:
             text = (
-                "The plan has been approved. Use the reviewed self-contained HTML artifact below "
+                "The plan has been approved, and plan mode is already inactive; do not call "
+                "approve_plan. Use the reviewed self-contained HTML artifact below "
                 "as the implementation guide. Apply reasonable engineering judgment where details "
                 f"need adjustment while preserving its goals and reviewer edits:\n\n{plan_html}"
             )
         elif plan_markdown:
             text = (
-                "The plan has been approved. Use the reviewed Markdown plan below as the "
+                "The plan has been approved, and plan mode is already inactive; do not call "
+                "approve_plan. Use the reviewed Markdown plan below as the "
                 "implementation guide. Apply reasonable engineering judgment where details need "
                 f"adjustment while preserving its goals and reviewer edits:\n\n{plan_markdown}"
             )
         else:
-            text = "The plan has been approved. Implement it now as described in the plan."
+            text = (
+                "The plan has been approved, and plan mode is already inactive; do not call "
+                "approve_plan. Implement it now as described in the plan."
+            )
         if feedback:
             text += "\n\nAlso take this reviewer feedback into account:\n\n" + feedback
         try:
