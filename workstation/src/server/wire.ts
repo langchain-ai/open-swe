@@ -134,54 +134,50 @@ class Fields {
   }
 }
 
-export interface RootRequest {
-  readonly root: string
-}
-
-export interface LsRequest extends RootRequest {
+export interface LsRequest {
   readonly path: string
 }
 
-export interface ReadRequest extends RootRequest {
+export interface ReadRequest {
   readonly filePath: string
   readonly options: ReadOptions
 }
 
-export interface WriteRequest extends RootRequest {
+export interface WriteRequest {
   readonly filePath: string
   readonly content: string
 }
 
-export interface EditRequest extends RootRequest {
+export interface EditRequest {
   readonly filePath: string
   readonly oldString: string
   readonly newString: string
   readonly replaceAll: boolean
 }
 
-export interface DeleteRequest extends RootRequest {
+export interface DeleteRequest {
   readonly filePath: string
 }
 
-export interface GrepRequest extends RootRequest {
+export interface GrepRequest {
   readonly pattern: string
   readonly options: GrepOptions
 }
 
-export interface GlobRequest extends RootRequest {
+export interface GlobRequest {
   readonly pattern: string
   readonly path: string | undefined
 }
 
-export interface UploadRequest extends RootRequest {
+export interface UploadRequest {
   readonly files: readonly UploadFile[]
 }
 
-export interface DownloadRequest extends RootRequest {
+export interface DownloadRequest {
   readonly paths: readonly string[]
 }
 
-export interface ExecuteRequest extends RootRequest {
+export interface ExecuteRequest {
   readonly command: string
   readonly options: ExecuteOptions
 }
@@ -191,17 +187,15 @@ function defined<T>(key: string, value: T | undefined): Record<string, T> {
 }
 
 export function parseLsRequest(body: unknown): LsRequest {
-  const fields = new Fields(body, ["root", "path"])
+  const fields = new Fields(body, ["path"])
   return {
-    root: fields.requiredString("root"),
     path: fields.requiredString("path"),
   }
 }
 
 export function parseReadRequest(body: unknown): ReadRequest {
-  const fields = new Fields(body, ["root", "file_path", "offset", "limit"])
+  const fields = new Fields(body, ["file_path", "offset", "limit"])
   return {
-    root: fields.requiredString("root"),
     filePath: fields.requiredString("file_path"),
     options: {
       ...defined("offset", fields.optionalInteger("offset")),
@@ -211,9 +205,8 @@ export function parseReadRequest(body: unknown): ReadRequest {
 }
 
 export function parseWriteRequest(body: unknown): WriteRequest {
-  const fields = new Fields(body, ["root", "file_path", "content"])
+  const fields = new Fields(body, ["file_path", "content"])
   return {
-    root: fields.requiredString("root"),
     filePath: fields.requiredString("file_path"),
     content: fields.requiredText("content"),
   }
@@ -221,14 +214,12 @@ export function parseWriteRequest(body: unknown): WriteRequest {
 
 export function parseEditRequest(body: unknown): EditRequest {
   const fields = new Fields(body, [
-    "root",
     "file_path",
     "old_string",
     "new_string",
     "replace_all",
   ])
   return {
-    root: fields.requiredString("root"),
     filePath: fields.requiredString("file_path"),
     oldString: fields.requiredText("old_string"),
     newString: fields.requiredText("new_string"),
@@ -237,16 +228,14 @@ export function parseEditRequest(body: unknown): EditRequest {
 }
 
 export function parseDeleteRequest(body: unknown): DeleteRequest {
-  const fields = new Fields(body, ["root", "file_path"])
+  const fields = new Fields(body, ["file_path"])
   return {
-    root: fields.requiredString("root"),
     filePath: fields.requiredString("file_path"),
   }
 }
 
 export function parseGrepRequest(body: unknown): GrepRequest {
   const fields = new Fields(body, [
-    "root",
     "pattern",
     "path",
     "glob",
@@ -254,7 +243,6 @@ export function parseGrepRequest(body: unknown): GrepRequest {
     "context_lines",
   ])
   return {
-    root: fields.requiredString("root"),
     pattern: fields.requiredText("pattern"),
     options: {
       ...defined("path", fields.optionalString("path")),
@@ -266,44 +254,39 @@ export function parseGrepRequest(body: unknown): GrepRequest {
 }
 
 export function parseGlobRequest(body: unknown): GlobRequest {
-  const fields = new Fields(body, ["root", "pattern", "path"])
+  const fields = new Fields(body, ["pattern", "path"])
   return {
-    root: fields.requiredString("root"),
     pattern: fields.requiredText("pattern"),
     path: fields.optionalString("path"),
   }
 }
 
 export function parseUploadRequest(body: unknown): UploadRequest {
-  const fields = new Fields(body, ["root", "files"])
-  const root = fields.requiredString("root")
+  const fields = new Fields(body, ["files"])
   const files = fields
     .requiredObjectArray("files", ["path", "content_base64"])
     .map((file) => ({
       path: file.requiredString("path"),
       content: file.requiredBase64("content_base64"),
     }))
-  return { root, files }
+  return { files }
 }
 
 export function parseDownloadRequest(body: unknown): DownloadRequest {
-  const fields = new Fields(body, ["root", "paths"])
+  const fields = new Fields(body, ["paths"])
   return {
-    root: fields.requiredString("root"),
     paths: fields.requiredStringArray("paths"),
   }
 }
 
 export function parseExecuteRequest(body: unknown): ExecuteRequest {
   const fields = new Fields(body, [
-    "root",
     "command",
     "cwd",
     "timeout_seconds",
     "max_output_bytes",
   ])
   return {
-    root: fields.requiredString("root"),
     command: fields.requiredText("command"),
     options: {
       ...defined("cwd", fields.optionalString("cwd")),

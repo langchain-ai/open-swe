@@ -1,5 +1,5 @@
 import assert from "node:assert/strict"
-import { mkdtemp, rm, stat } from "node:fs/promises"
+import { mkdtemp, realpath, rm, stat } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import path from "node:path"
 import test from "node:test"
@@ -189,16 +189,34 @@ test("keeps a multi-byte character intact across a chunk boundary", async (t) =>
   assert.equal(outputs.map((event) => event.data).join(""), "☃")
 })
 
-test("refuses a cwd outside the root without throwing", async (t) => {
+test("runs in a cwd outside the default directory", async (t) => {
+  const root = await makeRoot(t)
+  const outside = await makeRoot(t)
+
+  const result = await execute(root, "pwd", { cwd: outside }, BASH)
+
+  assert.equal(result.exitCode, 0)
+  assert.equal(result.output.trim(), await realpath(outside))
+})
+
+test("defaults the cwd to the default directory", async (t) => {
+  const root = await makeRoot(t)
+
+  const result = await execute(root, "pwd", undefined, BASH)
+
+  assert.equal(result.exitCode, 0)
+  assert.equal(result.output.trim(), await realpath(root))
+})
+
+test("reports an unusable cwd without throwing", async (t) => {
   const root = await makeRoot(t)
   const events = await collect(
-    executeStream(root, "pwd", { cwd: path.join(root, "..") }, BASH)
+    executeStream(root, "pwd", { cwd: "work\0dir" }, BASH)
   )
   assert.equal(events.length, 2)
-  assert.equal(events[0]?.type, "output")
   assert.match(
     events[0]?.type === "output" ? events[0].data : "",
-    /outside the workstation root/
+    /is not a usable filesystem path/
   )
   assert.deepEqual(events[1], {
     type: "exit",

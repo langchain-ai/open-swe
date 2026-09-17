@@ -1,6 +1,3 @@
-import path from "node:path"
-
-import { isInside } from "../backend/paths.ts"
 import type { Backend } from "../backend/types.ts"
 import {
   encodeDownloadResponses,
@@ -42,24 +39,12 @@ export type RouteResult =
   | { readonly kind: "ndjson"; readonly events: AsyncIterable<JsonObject> }
 
 export interface RouterOptions {
-  readonly backends: readonly Backend[]
+  readonly backend: Backend
   readonly logger: WorkstationLogger
   readonly version: Promise<string>
 }
 
 type Handler = (body: unknown) => Promise<RouteResult>
-
-class RouteFailure extends Error {
-  readonly status: number
-  readonly code: string
-
-  constructor(status: number, code: string) {
-    super(code)
-    this.name = "RouteFailure"
-    this.status = status
-    this.code = code
-  }
-}
 
 function errorText(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
@@ -70,13 +55,13 @@ function json(status: number, body: JsonObject): RouteResult {
 }
 
 export class Router {
-  private readonly backends: readonly Backend[]
+  private readonly backend: Backend
   private readonly logger: WorkstationLogger
   private readonly version: Promise<string>
   private readonly handlers: ReadonlyMap<string, Handler>
 
   constructor(options: RouterOptions) {
-    this.backends = options.backends
+    this.backend = options.backend
     this.logger = options.logger
     this.version = options.version
     this.handlers = new Map<string, Handler>([
@@ -103,7 +88,7 @@ export class Router {
       return json(200, {
         ok: true,
         version: await this.version,
-        roots: this.backends.map((backend) => backend.rootDir),
+        default_dir: this.backend.defaultDir,
       })
     }
 
@@ -132,9 +117,6 @@ export class Router {
       if (error instanceof WireError) {
         return Router.invalidRequest(error.message)
       }
-      if (error instanceof RouteFailure) {
-        return json(error.status, { error: error.code })
-      }
       this.logger.warn("workstation route failed", {
         route: pathname,
         error: errorText(error),
@@ -156,59 +138,37 @@ export class Router {
     return json(400, { error: "invalid_request", detail })
   }
 
-  /**
-   * A request names the root it targets; the backend that owns it is the one
-   * with the longest `rootDir` containing that path, so a root nested inside
-   * another still reaches its own backend.
-   */
-  private backendFor(root: string): Backend {
-    const target = path.resolve(root)
-    let owner: Backend | undefined
-    let ownerLength = -1
-    for (const backend of this.backends) {
-      const rootDir = path.resolve(backend.rootDir)
-      if (isInside(rootDir, target) && rootDir.length > ownerLength) {
-        owner = backend
-        ownerLength = rootDir.length
-      }
-    }
-    if (owner === undefined) {
-      throw new RouteFailure(404, "unknown_root")
-    }
-    return owner
-  }
-
   private async ls(body: unknown): Promise<RouteResult> {
     const request = parseLsRequest(body)
-    const backend = this.backendFor(request.root)
-    return json(200, encodeLsResult(await backend.ls(request.path)))
+    return json(200, encodeLsResult(await this.backend.ls(request.path)))
   }
 
   private async read(body: unknown): Promise<RouteResult> {
     const request = parseReadRequest(body)
-    const backend = this.backendFor(request.root)
     return json(
       200,
-      encodeReadResult(await backend.read(request.filePath, request.options))
+      encodeReadResult(
+        await this.backend.read(request.filePath, request.options)
+      )
     )
   }
 
   private async write(body: unknown): Promise<RouteResult> {
     const request = parseWriteRequest(body)
-    const backend = this.backendFor(request.root)
     return json(
       200,
-      encodePathResult(await backend.write(request.filePath, request.content))
+      encodePathResult(
+        await this.backend.write(request.filePath, request.content)
+      )
     )
   }
 
   private async edit(body: unknown): Promise<RouteResult> {
     const request = parseEditRequest(body)
-    const backend = this.backendFor(request.root)
     return json(
       200,
       encodeEditResult(
-        await backend.edit(
+        await this.backend.edit(
           request.filePath,
           request.oldString,
           request.newString,
@@ -220,50 +180,49 @@ export class Router {
 
   private async delete(body: unknown): Promise<RouteResult> {
     const request = parseDeleteRequest(body)
-    const backend = this.backendFor(request.root)
-    return json(200, encodePathResult(await backend.delete(request.filePath)))
+    return json(
+      200,
+      encodePathResult(await this.backend.delete(request.filePath))
+    )
   }
 
   private async grep(body: unknown): Promise<RouteResult> {
     const request = parseGrepRequest(body)
-    const backend = this.backendFor(request.root)
     return json(
       200,
-      encodeGrepResult(await backend.grep(request.pattern, request.options))
+      encodeGrepResult(
+        await this.backend.grep(request.pattern, request.options)
+      )
     )
   }
 
   private async glob(body: unknown): Promise<RouteResult> {
     const request = parseGlobRequest(body)
-    const backend = this.backendFor(request.root)
     return json(
       200,
-      encodeGlobResult(await backend.glob(request.pattern, request.path))
+      encodeGlobResult(await this.backend.glob(request.pattern, request.path))
     )
   }
 
   private async upload(body: unknown): Promise<RouteResult> {
     const request = parseUploadRequest(body)
-    const backend = this.backendFor(request.root)
     return json(
       200,
-      encodeUploadResponses(await backend.uploadFiles(request.files))
+      encodeUploadResponses(await this.backend.uploadFiles(request.files))
     )
   }
 
   private async download(body: unknown): Promise<RouteResult> {
     const request = parseDownloadRequest(body)
-    const backend = this.backendFor(request.root)
     return json(
       200,
-      encodeDownloadResponses(await backend.downloadFiles(request.paths))
+      encodeDownloadResponses(await this.backend.downloadFiles(request.paths))
     )
   }
 
   private async execute(body: unknown): Promise<RouteResult> {
     const request = parseExecuteRequest(body)
-    const backend = this.backendFor(request.root)
-    return { kind: "ndjson", events: this.executeEvents(backend, request) }
+    return { kind: "ndjson", events: this.executeEvents(request) }
   }
 
   /**
@@ -272,11 +231,10 @@ export class Router {
    * must treat the command as failed.
    */
   private async *executeEvents(
-    backend: Backend,
     request: ExecuteRequest
   ): AsyncGenerator<JsonObject> {
     try {
-      for await (const event of backend.executeStream(
+      for await (const event of this.backend.executeStream(
         request.command,
         request.options
       )) {

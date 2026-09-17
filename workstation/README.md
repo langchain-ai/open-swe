@@ -1,7 +1,7 @@
 # open-swe-workstation
 
-Exposes directories on this machine as [deep agents](https://github.com/langchain-ai/deepagents)
-backends over an authenticated HTTP API, so a cloud Open SWE thread can run
+Exposes this machine as a [deep agents](https://github.com/langchain-ai/deepagents)
+backend over an authenticated HTTP API, so a cloud Open SWE thread can run
 against a developer's real checkout instead of a sandbox.
 
 Nothing here opens a port to the internet. The desktop app publishes the server
@@ -13,7 +13,7 @@ replica happens to run the thread.
 ```ts
 import { createLocalBackend } from "open-swe-workstation"
 
-const backend = await createLocalBackend({ rootDir: "/Users/me/project" })
+const backend = await createLocalBackend({ defaultDir: "/Users/me/project" })
 
 await backend.read("/Users/me/project/src/main.ts", { limit: 50 })
 await backend.grep("TODO", { glob: "**/*.ts", maxCount: 20 })
@@ -24,9 +24,12 @@ for await (const event of backend.executeStream("pnpm build")) {
 }
 ```
 
-`createLocalBackend` resolves and checks the root immediately, so a project that
-has been moved or deleted fails at registration rather than mid-run. Results
-mirror the `deepagents.backends.protocol` dataclasses field for field.
+`defaultDir` is where a relative path resolves from, where an `execute` with no
+cwd runs, and where a search with no path starts. It defaults to the user's home
+directory, and it is checked immediately, so a project that has been moved or
+deleted fails when the backend is created rather than mid-run.
+
+Results mirror the `deepagents.backends.protocol` dataclasses field for field.
 
 ## Paths
 
@@ -35,15 +38,20 @@ workstation runs a real shell, so `pwd` and `git status` print host paths that
 the model feeds straight back into `read` and `grep`; virtual addressing would
 make every one of those reads miss.
 
-Relative paths resolve against the root. Anything resolving outside the root,
-including through a symlink, is refused as a result `error`. That is stricter
-than `FilesystemBackend` with `virtual_mode=False`, which applies no
-containment at all, and the strictness is deliberate: the tunnel makes this
-server reachable by every holder of an organization API key.
+**There is no containment.** Every operation may name any absolute path, and the
+backend reaches whatever the user can. A relative path resolves against
+`defaultDir`, and symlinks are not resolved, so a path stays the one the caller
+asked for and matches what the shell prints.
 
-Containment is not a sandbox. `execute` runs real commands as the user, so it
-can reach anything the user can. Containment stops the file API from wandering
-outside the project and makes a request naming another project fail loudly.
+This is deliberate. `execute` runs real shell commands as the user, so the whole
+disk was always reachable; fencing only the file API produced the split where
+the agent could `cat` a file it was refused permission to `read`, and fenced
+nobody. The request signature is the boundary, and it is the only one: a
+verified request can do anything the user's account can do.
+
+The practical consequence is that the caller decides what the agent should
+touch, through `defaultDir`, the prompt, and human-in-the-loop review, rather
+than relying on the backend to refuse.
 
 ## The server
 
@@ -51,7 +59,7 @@ outside the project and makes a request naming another project fail loudly.
 import { createWorkstationServer } from "open-swe-workstation"
 
 const server = createWorkstationServer({
-  backends: [backend],
+  backend,
   secret: process.env.WORKSTATION_SECRET ?? "",
 })
 const { host, port } = await server.listen()
@@ -85,12 +93,12 @@ no detail about which check failed.
 ### Routes
 
 Bodies are JSON with snake_case fields matching the Python method parameters,
-so a response feeds straight into its dataclass. Every `/v1/fs/*` and
-`/v1/execute` body carries `root`, the absolute path of the backend to use.
+so a response feeds straight into its dataclass. Unknown keys are rejected with
+`400 invalid_request`.
 
 | Route | Request | Response |
 |---|---|---|
-| `GET /v1/health` | | `{ok, version, roots[]}` |
+| `GET /v1/health` | | `{ok, version, default_dir}` |
 | `POST /v1/fs/ls` | `path` | `{error?, entries?}` |
 | `POST /v1/fs/read` | `file_path, offset?, limit?` | `{error?, file_data?, total_lines?, start_line?, end_line?, next_offset?, no_lines_requested?}` |
 | `POST /v1/fs/write` | `file_path, content` | `{error?, path?}` |

@@ -23,14 +23,17 @@ import {
 } from "../src/backend/files.ts"
 
 let base: string
+let elsewhere: string
 let counter = 0
 
 before(async () => {
   base = await mkdtemp(path.join(tmpdir(), "workstation-files-"))
+  elsewhere = await mkdtemp(path.join(tmpdir(), "workstation-outside-"))
 })
 
 after(async () => {
   await rm(base, { recursive: true, force: true })
+  await rm(elsewhere, { recursive: true, force: true })
 })
 
 /** Canonical, so a returned real path is directly comparable to `join(root, …)`. */
@@ -39,6 +42,14 @@ async function makeRoot(): Promise<string> {
   const root = path.join(base, `root-${counter}`)
   await mkdir(root, { recursive: true })
   return realpath(root)
+}
+
+/** A directory under a different temporary tree than any `makeRoot()`. */
+async function makeOutside(): Promise<string> {
+  counter += 1
+  const dir = path.join(elsewhere, `outside-${counter}`)
+  await mkdir(dir, { recursive: true })
+  return realpath(dir)
 }
 
 const TEN_LINES = Array.from({ length: 10 }, (_, i) => `line${i + 1}\n`).join(
@@ -183,24 +194,12 @@ describe("read", () => {
     assert.equal(result.error, "File 'nope.txt' not found")
   })
 
-  it("reads a real absolute path inside the root", async () => {
+  it("reads a real absolute path inside the default directory", async () => {
     const root = await rootWithTenLines()
 
     const result = await read(root, path.join(root, "lines.txt"), { limit: 1 })
 
     assert.equal(result.fileData?.content, "line1\n")
-  })
-
-  it("refuses an absolute path outside the root instead of re-anchoring it", async () => {
-    const root = await makeRoot()
-
-    const result = await read(root, "/etc/hosts")
-
-    assert.equal(
-      result.error,
-      "Error: /etc/hosts is outside the workstation root"
-    )
-    assert.equal(result.fileData, undefined)
   })
 
   it("reports a directory as not found", async () => {
@@ -462,11 +461,10 @@ describe("ls", () => {
     assert.deepEqual(result.entries, [])
   })
 
-  it("skips a symlink that points out of the root", async () => {
+  it("lists a symlink pointing outside the default directory", async () => {
     const root = await makeRoot()
-    const outside = `${root}-outside`
-    await mkdir(outside, { recursive: true })
-    await writeFile(path.join(outside, "secret.txt"), "secret")
+    const outside = await makeOutside()
+    await writeFile(path.join(outside, "notes.txt"), "elsewhere")
     await symlink(outside, path.join(root, "escape"))
     await writeFile(path.join(root, "file.txt"), "ok")
 
@@ -475,11 +473,17 @@ describe("ls", () => {
     assert.equal(result.error, undefined)
     assert.deepEqual(
       result.entries?.map((entry) => entry.path),
-      [path.join(root, "file.txt")]
+      [`${path.join(root, "escape")}/`, path.join(root, "file.txt")]
+    )
+
+    const through = await ls(root, "escape")
+    assert.deepEqual(
+      through.entries?.map((entry) => entry.path),
+      [path.join(root, "escape/notes.txt")]
     )
   })
 
-  it("lists an in-root symlink under its own path", async () => {
+  it("lists a symlink to a sibling under its own path", async () => {
     const root = await makeRoot()
     await mkdir(path.join(root, "target"))
     await symlink(path.join(root, "target"), path.join(root, "link"))
@@ -513,66 +517,90 @@ describe("ls", () => {
   })
 })
 
-describe("root containment", () => {
-  async function makeEscapeFixture(): Promise<{
-    readonly root: string
-    readonly outsideFile: string
-    readonly escapes: readonly string[]
-  }> {
+describe("paths outside the default directory", () => {
+  it("reads, writes, edits, lists, and removes an absolute path elsewhere", async () => {
     const root = await makeRoot()
-    const outside = `${root}-outside`
-    await mkdir(outside, { recursive: true })
-    const outsideFile = path.join(outside, "secret.txt")
-    await writeFile(outsideFile, "secret")
-    await symlink(outside, path.join(root, "escape"))
-    return {
-      root,
-      outsideFile,
-      escapes: [`../${path.basename(outside)}/secret.txt`, "escape/secret.txt"],
-    }
-  }
+    const outside = await makeOutside()
+    const target = path.join(outside, "notes.txt")
 
-  it("refuses ls, read, write, edit, and remove", async () => {
-    const { root, outsideFile, escapes } = await makeEscapeFixture()
+    const written = await write(root, target, "secret\n")
+    assert.equal(written.error, undefined)
+    assert.equal(written.path, target)
 
-    for (const escape of escapes) {
-      for (const error of [
-        (await ls(root, escape)).error,
-        (await read(root, escape)).error,
-        (await write(root, escape, "overwritten")).error,
-        (await edit(root, escape, "secret", "overwritten")).error,
-        (await remove(root, escape)).error,
-      ]) {
-        assert.equal(error, `Error: ${escape} is outside the workstation root`)
-      }
-    }
-    assert.equal(await readFile(outsideFile, "utf8"), "secret")
+    const edited = await edit(root, target, "secret", "shared")
+    assert.equal(edited.error, undefined)
+    assert.equal(edited.occurrences, 1)
+    assert.equal(await readFile(target, "utf8"), "shared\n")
+
+    const readBack = await read(root, target)
+    assert.equal(readBack.error, undefined)
+    assert.equal(readBack.fileData?.content, "shared\n")
+
+    assert.deepEqual(
+      (await ls(root, outside)).entries?.map((entry) => entry.path),
+      [target]
+    )
+
+    const removed = await remove(root, target)
+    assert.equal(removed.error, undefined)
+    assert.deepEqual((await ls(root, outside)).entries, [])
   })
 
-  it("refuses uploadFiles and downloadFiles as invalid paths", async () => {
-    const { root, outsideFile, escapes } = await makeEscapeFixture()
+  it("uploads and downloads an absolute path elsewhere", async () => {
+    const root = await makeRoot()
+    const outside = await makeOutside()
+    const target = path.join(outside, "nested/blob.bin")
+    const bytes = new Uint8Array([1, 2, 3, 4])
 
-    const uploads = await uploadFiles(
-      root,
-      escapes.map((escape) => ({
-        path: escape,
-        content: new Uint8Array([1, 2, 3]),
-      }))
-    )
-    const downloads = await downloadFiles(root, escapes)
+    const uploads = await uploadFiles(root, [{ path: target, content: bytes }])
+    const downloads = await downloadFiles(root, [target])
 
-    assert.deepEqual(
-      uploads.map((response) => response.error),
-      escapes.map(() => "invalid_path")
+    assert.deepEqual(uploads, [{ path: target }])
+    assert.equal(downloads[0]?.error, undefined)
+    assert.deepEqual(Array.from(downloads[0]?.content ?? []), Array.from(bytes))
+    assert.deepEqual(Array.from(await readFile(target)), Array.from(bytes))
+  })
+
+  it("resolves a relative path against the default directory", async () => {
+    const root = await makeRoot()
+
+    const written = await write(root, "sub/relative.txt", "here")
+
+    assert.equal(written.path, path.join(root, "sub/relative.txt"))
+    assert.equal(
+      await readFile(path.join(root, "sub/relative.txt"), "utf8"),
+      "here"
     )
-    assert.deepEqual(
-      downloads.map((response) => response.error),
-      escapes.map(() => "invalid_path")
+    assert.equal(
+      (await read(root, "sub/relative.txt")).fileData?.content,
+      "here"
     )
-    assert.deepEqual(
-      downloads.map((response) => response.content),
-      escapes.map(() => undefined)
-    )
-    assert.equal(await readFile(outsideFile, "utf8"), "secret")
+  })
+
+  it("reports an unusable path instead of throwing", async () => {
+    const root = await makeRoot()
+
+    for (const candidate of ["", "notes\0.txt"]) {
+      const expected = `Error: ${candidate} is not a usable filesystem path`
+      for (const error of [
+        (await ls(root, candidate)).error,
+        (await read(root, candidate)).error,
+        (await write(root, candidate, "content")).error,
+        (await edit(root, candidate, "a", "b")).error,
+        (await remove(root, candidate)).error,
+      ]) {
+        assert.equal(error, expected)
+      }
+
+      assert.deepEqual(
+        await uploadFiles(root, [
+          { path: candidate, content: new Uint8Array([1]) },
+        ]),
+        [{ path: candidate, error: "invalid_path" }]
+      )
+      assert.deepEqual(await downloadFiles(root, [candidate]), [
+        { path: candidate, error: "invalid_path" },
+      ])
+    }
   })
 })

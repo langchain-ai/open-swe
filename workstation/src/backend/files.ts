@@ -11,12 +11,7 @@ import {
 } from "node:fs/promises"
 import path from "node:path"
 
-import {
-  errorMessage,
-  isInside,
-  resolveWithinRoot,
-  toFileOperationError,
-} from "./paths.ts"
+import { errorMessage, resolvePath, toFileOperationError } from "./paths.ts"
 import type {
   DeleteResult,
   EditResult,
@@ -298,12 +293,13 @@ async function reportUnresolvableChild(
   }
 }
 
-export async function ls(rootDir: string, target: string): Promise<LsResult> {
-  let root: string
+export async function ls(
+  defaultDir: string,
+  target: string
+): Promise<LsResult> {
   let dirPath: string
   try {
-    root = await realpath(rootDir)
-    dirPath = await resolveWithinRoot(rootDir, target)
+    dirPath = resolvePath(defaultDir, target)
   } catch (error) {
     return { error: errorMessage(error) }
   }
@@ -337,20 +333,6 @@ export async function ls(rootDir: string, target: string): Promise<LsResult> {
       continue
     }
 
-    // A link is listed under its own path, but only once its target is known
-    // to be in the root: the entry is an offer to read that path, and reading
-    // it would follow the link out.
-    let real: string
-    try {
-      real = await realpath(child)
-    } catch (error) {
-      errors.push(
-        `child error: cannot resolve '${child}': ${errorMessage(error)}`
-      )
-      continue
-    }
-    if (!isInside(root, real)) continue
-
     entries.push(entryFor(child, stats))
   }
 
@@ -360,13 +342,13 @@ export async function ls(rootDir: string, target: string): Promise<LsResult> {
 }
 
 export async function read(
-  rootDir: string,
+  defaultDir: string,
   filePath: string,
   options?: ReadOptions
 ): Promise<ReadResult> {
   let resolved: string
   try {
-    resolved = await resolveWithinRoot(rootDir, filePath)
+    resolved = resolvePath(defaultDir, filePath)
   } catch (error) {
     return { error: errorMessage(error) }
   }
@@ -417,13 +399,13 @@ export async function read(
 }
 
 export async function write(
-  rootDir: string,
+  defaultDir: string,
   filePath: string,
   content: string
 ): Promise<WriteResult> {
   let resolved: string
   try {
-    resolved = await resolveWithinRoot(rootDir, filePath)
+    resolved = resolvePath(defaultDir, filePath)
   } catch (error) {
     return { error: errorMessage(error) }
   }
@@ -438,7 +420,7 @@ export async function write(
 }
 
 export async function edit(
-  rootDir: string,
+  defaultDir: string,
   filePath: string,
   oldString: string,
   newString: string,
@@ -446,7 +428,7 @@ export async function edit(
 ): Promise<EditResult> {
   let resolved: string
   try {
-    resolved = await resolveWithinRoot(rootDir, filePath)
+    resolved = resolvePath(defaultDir, filePath)
   } catch (error) {
     return { error: errorMessage(error) }
   }
@@ -482,12 +464,12 @@ export async function edit(
 }
 
 export async function remove(
-  rootDir: string,
+  defaultDir: string,
   filePath: string
 ): Promise<DeleteResult> {
   let resolved: string
   try {
-    resolved = await resolveWithinRoot(rootDir, filePath)
+    resolved = resolvePath(defaultDir, filePath)
   } catch (error) {
     return { error: errorMessage(error) }
   }
@@ -506,13 +488,13 @@ export async function remove(
 }
 
 export async function uploadFiles(
-  rootDir: string,
+  defaultDir: string,
   files: readonly UploadFile[]
 ): Promise<FileUploadResponse[]> {
   const responses: FileUploadResponse[] = []
   for (const file of files) {
     try {
-      const resolved = await resolveWithinRoot(rootDir, file.path)
+      const resolved = resolvePath(defaultDir, file.path)
       await mkdir(path.dirname(resolved), { recursive: true })
       await writeBytes(resolved, CREATE_FLAGS, file.content)
       responses.push({ path: resolved })
@@ -526,13 +508,13 @@ export async function uploadFiles(
 }
 
 export async function downloadFiles(
-  rootDir: string,
+  defaultDir: string,
   paths: readonly string[]
 ): Promise<FileDownloadResponse[]> {
   const responses: FileDownloadResponse[] = []
   for (const filePath of paths) {
     try {
-      const resolved = await resolveWithinRoot(rootDir, filePath)
+      const resolved = resolvePath(defaultDir, filePath)
       let isDirectory = false
       try {
         isDirectory = (await stat(resolved)).isDirectory()

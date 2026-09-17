@@ -141,12 +141,15 @@ export interface ReadOptions {
 }
 
 /**
- * Every operation resolves its paths inside the backend's root and reports a
- * refusal as a result `error`, never by throwing: a path the agent may not
- * touch is an ordinary tool failure it should read and recover from.
+ * The backend reaches the whole filesystem as the user does. `defaultDir` is
+ * only where a relative path resolves from, an omitted `execute` cwd runs, and
+ * an omitted search path starts; it is not a boundary.
+ *
+ * A failure is reported as a result `error`, never by throwing: an unreadable
+ * path is an ordinary tool failure the agent should read and recover from.
  */
 export interface Backend {
-  readonly rootDir: string
+  readonly defaultDir: string
   ls(path: string): Promise<LsResult>
   read(filePath: string, options?: ReadOptions): Promise<ReadResult>
   write(filePath: string, content: string): Promise<WriteResult>

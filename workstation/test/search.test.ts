@@ -142,9 +142,10 @@ test("brace expansion past the limit is reported as an error", async (t) => {
   ])
 })
 
-test("glob defaults to the root and accepts a subdirectory search path", async (t) => {
+test("glob defaults to the default dir and accepts a subdirectory search path", async (t) => {
   const root = await makeTree(t, TREE)
-  assert.deepEqual(relativeMatches(root, await glob(root, "/*.py", "/")), [
+  assert.deepEqual(relativeMatches(root, await glob(root, "/*.py")), ["top.py"])
+  assert.deepEqual(relativeMatches(root, await glob(root, "/*.py", "")), [
     "top.py",
   ])
   assert.deepEqual(relativeMatches(root, await glob(root, "*.py", "src")), [
@@ -250,28 +251,74 @@ test("grep searches a single file path directly", async (t) => {
   })
 })
 
-test("both functions refuse a path outside the root", async (t) => {
+test("both functions search a path outside the default directory", async (t) => {
   const root = await makeTree(t, TREE)
-  const globbed = await glob(root, "*.py", "..")
-  assert.match(globbed.error ?? "", /outside the workstation root/)
-  assert.deepEqual(globbed.matches, [])
+  const outside = await makeTree(t, {
+    "away.py": "print(9)\n",
+    "deep/away.yml": "b: 2\n",
+  })
 
-  const grepped = await grep(root, "print", { path: "/etc" })
-  assert.match(grepped.error ?? "", /outside the workstation root/)
-  assert.deepEqual(grepped.matches, [])
-  assert.equal(grepped.truncated, false)
+  assert.deepEqual(
+    relativeMatches(outside, await glob(root, "*.py", outside)),
+    ["away.py"]
+  )
+  assert.deepEqual(matchedLines(await grep(root, "print", { path: outside })), [
+    ["away.py", 1],
+  ])
+  assert.deepEqual(
+    matchedLines(
+      await grep(root, "print", { path: path.join(outside, "away.py") })
+    ),
+    [["away.py", 1]]
+  )
 })
 
-test("a symlink pointing out of the root is not followed", async (t) => {
-  const outside = await makeTree(t, { "secret.py": "needle\n" })
-  const root = await makeTree(t, { "inside.py": "needle\n" })
-  await symlink(path.join(outside, "secret.py"), path.join(root, "link.py"))
-  await symlink(outside, path.join(root, "linked-dir"))
+test("a symlinked directory is not descended into, so a cycle cannot hang the walk", async (t) => {
+  const root = await makeTree(t, {
+    "inside.py": "needle\n",
+    "sub/deep.py": "needle\n",
+  })
+  await symlink(root, path.join(root, "loop"))
+  await symlink(path.join(root, "sub"), path.join(root, "sub/self"))
 
   assert.deepEqual(relativeMatches(root, await glob(root, "*.py")), [
     "inside.py",
+    "sub/deep.py",
   ])
-  assert.deepEqual(matchedLines(await grep(root, "needle")), [["inside.py", 1]])
+  assert.deepEqual(matchedLines(await grep(root, "needle")), [
+    ["inside.py", 1],
+    ["deep.py", 1],
+  ])
+})
+
+test("a symlink to a file outside the default directory is searched", async (t) => {
+  const outside = await makeTree(t, { "away.py": "needle\n" })
+  const root = await makeTree(t, { "inside.py": "needle\n" })
+  await symlink(path.join(outside, "away.py"), path.join(root, "link.py"))
+
+  assert.deepEqual(relativeMatches(root, await glob(root, "*.py")), [
+    "inside.py",
+    "link.py",
+  ])
+  assert.deepEqual(matchedLines(await grep(root, "needle")), [
+    ["inside.py", 1],
+    ["link.py", 1],
+  ])
+})
+
+test("an unusable search path is reported instead of thrown", async (t) => {
+  const root = await makeTree(t, TREE)
+
+  for (const candidate of ["\0", "src/\0"]) {
+    const globbed = await glob(root, "*.py", candidate)
+    assert.match(globbed.error ?? "", /is not a usable filesystem path/)
+    assert.deepEqual(globbed.matches, [])
+
+    const grepped = await grep(root, "print", { path: candidate })
+    assert.match(grepped.error ?? "", /is not a usable filesystem path/)
+    assert.deepEqual(grepped.matches, [])
+    assert.equal(grepped.truncated, false)
+  }
 })
 
 test("an unreadable subtree truncates glob and is reported by grep", async (t) => {
@@ -308,4 +355,18 @@ test("reports a negative context width instead of throwing", async (t) => {
   )
   assert.deepEqual(result.matches, [])
   assert.equal(result.truncated, false)
+})
+
+test("an explicit search path of / means the filesystem root", async (t) => {
+  const root = await makeTree(t, TREE)
+  const result = await glob(root, "*.py", "/")
+  // The caps are what keep a walk from `/` bounded; it must return rather than
+  // hang, and it must not have silently searched the default dir instead.
+  assert.equal(result.error, undefined)
+  for (const match of result.matches ?? []) {
+    assert.ok(
+      !match.path.startsWith(`${root}/`),
+      `${match.path} came from the default dir, so / was remapped`
+    )
+  }
 })

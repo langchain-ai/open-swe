@@ -2,7 +2,7 @@ import type { ChildProcess } from "node:child_process"
 import { spawn } from "node:child_process"
 import { StringDecoder } from "node:string_decoder"
 
-import { errorMessage, resolveWithinRoot } from "./paths.ts"
+import { errorMessage, resolvePath } from "./paths.ts"
 import type { ExecuteEvent, ExecuteOptions, ExecuteResponse } from "./types.ts"
 
 export interface ExecuteConfig {
@@ -68,7 +68,7 @@ function killGroup(child: ChildProcess, signal: NodeJS.Signals): string | null {
 }
 
 export async function* executeStream(
-  rootDir: string,
+  defaultDir: string,
   command: string,
   options?: ExecuteOptions,
   config?: ExecuteConfig
@@ -81,7 +81,7 @@ export async function* executeStream(
 
   let cwd: string
   try {
-    cwd = await resolveWithinRoot(rootDir, options?.cwd ?? rootDir)
+    cwd = resolvePath(defaultDir, options?.cwd ?? defaultDir)
   } catch (error) {
     yield { type: "output", data: errorMessage(error) }
     yield { type: "exit", exitCode: FAILED_EXIT_CODE, truncated: false }
@@ -227,7 +227,7 @@ export async function* executeStream(
 }
 
 export async function execute(
-  rootDir: string,
+  defaultDir: string,
   command: string,
   options?: ExecuteOptions,
   config?: ExecuteConfig
@@ -235,7 +235,12 @@ export async function execute(
   const chunks: string[] = []
   let exitCode: number | null = null
   let truncated = false
-  for await (const event of executeStream(rootDir, command, options, config)) {
+  for await (const event of executeStream(
+    defaultDir,
+    command,
+    options,
+    config
+  )) {
     if (event.type === "output") {
       chunks.push(event.data)
     } else {

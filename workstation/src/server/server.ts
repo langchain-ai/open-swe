@@ -14,7 +14,7 @@ import type { JsonObject } from "./wire.ts"
 export type { WorkstationLogger } from "./routes.ts"
 
 export interface WorkstationServerOptions {
-  readonly backends: readonly Backend[]
+  readonly backend: Backend
   readonly secret: string
   readonly host?: string
   readonly port?: number
@@ -171,7 +171,7 @@ class HttpWorkstationServer implements WorkstationServer {
   private readonly maxSkewSeconds: number
   private readonly keepaliveIntervalMs: number
   private readonly allowNonLoopbackHost: boolean
-  private readonly roots: readonly string[]
+  private readonly defaultDir: string
   private readonly replay: ReplayGuard
   private readonly server: Server
   private current: { readonly host: string; readonly port: number } | null =
@@ -187,12 +187,12 @@ class HttpWorkstationServer implements WorkstationServer {
     this.keepaliveIntervalMs =
       options.keepaliveIntervalMs ?? DEFAULT_KEEPALIVE_INTERVAL_MS
     this.allowNonLoopbackHost = options.allowNonLoopbackHost ?? false
-    this.roots = options.backends.map((backend) => backend.rootDir)
+    this.defaultDir = options.backend.defaultDir
     this.replay = createReplayGuard(
       options.maxSkewSeconds ?? DEFAULT_MAX_SKEW_SECONDS
     )
     this.router = new Router({
-      backends: options.backends,
+      backend: options.backend,
       logger: this.logger,
       version: packageVersion(this.logger),
     })
@@ -229,7 +229,7 @@ class HttpWorkstationServer implements WorkstationServer {
     this.logger.info("workstation server listening", {
       host: this.current.host,
       port: this.current.port,
-      roots: this.roots,
+      defaultDir: this.defaultDir,
     })
     return this.current
   }
@@ -414,9 +414,6 @@ export function createWorkstationServer(
 ): WorkstationServer {
   if (options.secret.length === 0) {
     throw new Error("workstation server requires a non-empty secret")
-  }
-  if (options.backends.length === 0) {
-    throw new Error("workstation server requires at least one backend")
   }
   if (options.maxBodyBytes !== undefined && options.maxBodyBytes <= 0) {
     throw new Error("workstation server maxBodyBytes must be positive")

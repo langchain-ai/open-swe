@@ -49,7 +49,7 @@ function deferred(): Deferred {
 }
 
 class FakeBackend implements Backend {
-  readonly rootDir: string
+  readonly defaultDir: string
   readonly calls: Call[] = []
   lsResult: LsResult = {
     entries: [
@@ -107,8 +107,8 @@ class FakeBackend implements Backend {
   streamGate: Deferred | null = null
   streamFailure: Error | null = null
 
-  constructor(rootDir: string = ROOT) {
-    this.rootDir = rootDir
+  constructor(defaultDir: string = ROOT) {
+    this.defaultDir = defaultDir
   }
 
   private record(method: string, args: readonly unknown[]): void {
@@ -223,7 +223,7 @@ async function start(
     },
   }
   const server = createWorkstationServer({
-    backends: [backend],
+    backend,
     secret: SECRET,
     port: 0,
     logger,
@@ -304,14 +304,14 @@ function assertNoSecret(harness: Harness, ...texts: readonly string[]): void {
   }
 }
 
-test("health reports the package version and the served roots", async (t) => {
+test("health reports the package version and the default directory", async (t) => {
   const harness = await start(t)
   const response = await harness.send("GET", "/v1/health")
   assert.equal(response.status, 200)
   assert.deepEqual(await payload(response), {
     ok: true,
     version: "0.1.0",
-    roots: [ROOT],
+    default_dir: ROOT,
   })
 })
 
@@ -330,7 +330,7 @@ test("an unsigned request is rejected with no detail", async (t) => {
 
 test("a signature replayed on another path is rejected", async (t) => {
   const harness = await start(t)
-  const body = JSON.stringify({ root: ROOT, path: ROOT })
+  const body = JSON.stringify({ path: ROOT })
   const response = await fetch(`${harness.base}/v1/fs/glob`, {
     method: "POST",
     headers: harness.headers("POST", "/v1/fs/ls", body),
@@ -343,11 +343,11 @@ test("a signature replayed on another path is rejected", async (t) => {
 
 test("a body tampered after signing is rejected", async (t) => {
   const harness = await start(t)
-  const signedBody = JSON.stringify({ root: ROOT, path: ROOT })
+  const signedBody = JSON.stringify({ path: ROOT })
   const response = await fetch(`${harness.base}/v1/fs/ls`, {
     method: "POST",
     headers: harness.headers("POST", "/v1/fs/ls", signedBody),
-    body: JSON.stringify({ root: ROOT, path: `${ROOT}/elsewhere` }),
+    body: JSON.stringify({ path: `${ROOT}/elsewhere` }),
   })
   assert.equal(response.status, 401)
   assert.equal(harness.backend.calls.length, 0)
@@ -355,7 +355,7 @@ test("a body tampered after signing is rejected", async (t) => {
 
 test("a stale timestamp is rejected", async (t) => {
   const harness = await start(t)
-  const body = JSON.stringify({ root: ROOT, path: ROOT })
+  const body = JSON.stringify({ path: ROOT })
   const timestamp = String(Math.floor(Date.now() / 1000) - 3600)
   const response = await fetch(`${harness.base}/v1/fs/ls`, {
     method: "POST",
@@ -403,36 +403,34 @@ test("a wrong method is rejected with the allowed method", async (t) => {
   assert.equal(health.headers.get("allow"), "GET")
 })
 
-test("a root no backend owns is rejected", async (t) => {
+test("a body that still carries a root is rejected", async (t) => {
   const harness = await start(t)
   const response = await harness.send("POST", "/v1/fs/ls", {
-    root: "/tmp/some-other-project",
-    path: "/tmp/some-other-project",
+    path: ROOT,
+    root: ROOT,
   })
-  assert.equal(response.status, 404)
-  assert.deepEqual(await payload(response), { error: "unknown_root" })
+  assert.equal(response.status, 400)
+  assert.equal((await payload(response)).error, "invalid_request")
   assert.equal(harness.backend.calls.length, 0)
 })
 
-test("a request reaches the backend that owns the deepest matching root", async (t) => {
-  const outer = new FakeBackend("/tmp/workstation-outer")
-  const inner = new FakeBackend("/tmp/workstation-outer/inner")
-  const harness = await start(t, { backends: [outer, inner] }, outer)
-  const response = await harness.send("POST", "/v1/fs/ls", {
-    root: "/tmp/workstation-outer/inner",
-    path: "/tmp/workstation-outer/inner",
+test("a path far outside the default directory reaches the backend", async (t) => {
+  const harness = await start(t)
+  const response = await harness.send("POST", "/v1/fs/read", {
+    file_path: "/etc/hosts",
   })
   assert.equal(response.status, 200)
-  assert.equal(outer.calls.length, 0)
-  assert.equal(inner.calls.length, 1)
+  assert.deepEqual(harness.backend.calls, [
+    { method: "read", args: ["/etc/hosts", {}] },
+  ])
 })
 
 test("a malformed body is rejected before the backend is called", async (t) => {
   const harness = await start(t)
   const cases: readonly unknown[] = [
-    { root: ROOT },
-    { root: ROOT, path: ROOT, extra: 1 },
-    { root: ROOT, path: 7 },
+    {},
+    { path: ROOT, extra: 1 },
+    { path: 7 },
     [ROOT],
   ]
   for (const body of cases) {
@@ -453,7 +451,6 @@ test("a malformed body is rejected before the backend is called", async (t) => {
 test("ls round-trips as snake_case entries", async (t) => {
   const harness = await start(t)
   const response = await harness.send("POST", "/v1/fs/ls", {
-    root: ROOT,
     path: `${ROOT}/sub`,
   })
   assert.equal(response.status, 200)
@@ -475,7 +472,6 @@ test("ls round-trips as snake_case entries", async (t) => {
 test("read round-trips file data and a complete pagination window", async (t) => {
   const harness = await start(t)
   const response = await harness.send("POST", "/v1/fs/read", {
-    root: ROOT,
     file_path: `${ROOT}/a.txt`,
     offset: 0,
     limit: 2,
@@ -505,7 +501,6 @@ test("read never emits pagination fields without their window", async (t) => {
   }
   const harness = await start(t, {}, backend)
   const response = await harness.send("POST", "/v1/fs/read", {
-    root: ROOT,
     file_path: `${ROOT}/a.txt`,
   })
   assert.deepEqual(await payload(response), {
@@ -523,7 +518,6 @@ test("read never emits a next_offset that disagrees with end_line", async (t) =>
   }
   const harness = await start(t, {}, backend)
   const response = await harness.send("POST", "/v1/fs/read", {
-    root: ROOT,
     file_path: `${ROOT}/a.txt`,
   })
   assert.deepEqual(await payload(response), { start_line: 1, end_line: 2 })
@@ -534,7 +528,6 @@ test("read reports an uninspected window on its own", async (t) => {
   backend.readResult = { noLinesRequested: true }
   const harness = await start(t, {}, backend)
   const response = await harness.send("POST", "/v1/fs/read", {
-    root: ROOT,
     file_path: `${ROOT}/a.txt`,
     limit: 0,
   })
@@ -544,14 +537,12 @@ test("read reports an uninspected window on its own", async (t) => {
 test("write and delete round-trip the written path", async (t) => {
   const harness = await start(t)
   const written = await harness.send("POST", "/v1/fs/write", {
-    root: ROOT,
     file_path: `${ROOT}/a.txt`,
     content: "body",
   })
   assert.deepEqual(await payload(written), { path: `${ROOT}/a.txt` })
 
   const deleted = await harness.send("POST", "/v1/fs/delete", {
-    root: ROOT,
     file_path: `${ROOT}/a.txt`,
   })
   assert.deepEqual(await payload(deleted), { path: `${ROOT}/a.txt` })
@@ -564,7 +555,6 @@ test("write and delete round-trip the written path", async (t) => {
 test("edit forwards replace_all and returns the occurrence count", async (t) => {
   const harness = await start(t)
   const response = await harness.send("POST", "/v1/fs/edit", {
-    root: ROOT,
     file_path: `${ROOT}/a.txt`,
     old_string: "a",
     new_string: "b",
@@ -584,7 +574,6 @@ test("an error result round-trips as the error field", async (t) => {
   backend.writeResult = { error: "Error: permission denied" }
   const harness = await start(t, {}, backend)
   const response = await harness.send("POST", "/v1/fs/write", {
-    root: ROOT,
     file_path: `${ROOT}/a.txt`,
     content: "body",
   })
@@ -597,7 +586,6 @@ test("an error result round-trips as the error field", async (t) => {
 test("grep round-trips matches with context and forwards its options", async (t) => {
   const harness = await start(t)
   const response = await harness.send("POST", "/v1/fs/grep", {
-    root: ROOT,
     pattern: "needle",
     path: `${ROOT}/sub`,
     glob: "*.txt",
@@ -635,7 +623,6 @@ test("grep round-trips matches with context and forwards its options", async (t)
 test("glob round-trips the truncation reason", async (t) => {
   const harness = await start(t)
   const response = await harness.send("POST", "/v1/fs/glob", {
-    root: ROOT,
     pattern: "**/*.txt",
   })
   assert.deepEqual(await payload(response), {
@@ -651,7 +638,6 @@ test("glob round-trips the truncation reason", async (t) => {
 test("upload decodes base64 content and reports per-file errors", async (t) => {
   const harness = await start(t)
   const response = await harness.send("POST", "/v1/fs/upload", {
-    root: ROOT,
     files: [
       { path: `${ROOT}/x.bin`, content_base64: "AQID" },
       { path: `${ROOT}/y.bin`, content_base64: "" },
@@ -679,7 +665,6 @@ test("upload decodes base64 content and reports per-file errors", async (t) => {
 test("upload rejects content that is not base64", async (t) => {
   const harness = await start(t)
   const response = await harness.send("POST", "/v1/fs/upload", {
-    root: ROOT,
     files: [{ path: `${ROOT}/x.bin`, content_base64: "not base64!" }],
   })
   assert.equal(response.status, 400)
@@ -689,7 +674,6 @@ test("upload rejects content that is not base64", async (t) => {
 test("download base64-encodes content and reports per-path errors", async (t) => {
   const harness = await start(t)
   const response = await harness.send("POST", "/v1/fs/download", {
-    root: ROOT,
     paths: [`${ROOT}/x.bin`, `${ROOT}/missing.bin`],
   })
   assert.deepEqual(await payload(response), {
@@ -708,7 +692,6 @@ test(
     backend.streamGate = deferred()
     const harness = await start(t, {}, backend)
     const response = await harness.send("POST", "/v1/execute", {
-      root: ROOT,
       command: "echo first",
       cwd: `${ROOT}/sub`,
       timeout_seconds: 30,
@@ -746,7 +729,6 @@ test("execute keeps a silent stream alive", { timeout: 2000 }, async (t) => {
   backend.streamGate = deferred()
   const harness = await start(t, { keepaliveIntervalMs: 25 }, backend)
   const response = await harness.send("POST", "/v1/execute", {
-    root: ROOT,
     command: "sleep 1",
   })
 
@@ -784,7 +766,6 @@ test(
     backend.streamFailure = new Error("pty exploded")
     const harness = await start(t, {}, backend)
     const response = await harness.send("POST", "/v1/execute", {
-      root: ROOT,
       command: "true",
     })
     const events: Record<string, unknown>[] = []
@@ -802,7 +783,7 @@ test(
 
 test("a declared body over the cap is rejected", async (t) => {
   const harness = await start(t, { maxBodyBytes: 512 })
-  const body = JSON.stringify({ root: ROOT, path: "x".repeat(600) })
+  const body = JSON.stringify({ path: "x".repeat(600) })
   const response = await fetch(`${harness.base}/v1/fs/ls`, {
     method: "POST",
     headers: harness.headers("POST", "/v1/fs/ls", body),
@@ -864,7 +845,7 @@ test("the server binds loopback by default", async (t) => {
 test("a non-loopback bind is refused unless it is explicitly allowed", async () => {
   const backend = new FakeBackend()
   const refused = createWorkstationServer({
-    backends: [backend],
+    backend,
     secret: SECRET,
     host: "0.0.0.0",
     port: 0,
@@ -873,7 +854,7 @@ test("a non-loopback bind is refused unless it is explicitly allowed", async () 
   assert.equal(refused.address, null)
 
   const allowed = createWorkstationServer({
-    backends: [backend],
+    backend,
     secret: SECRET,
     host: "192.0.2.1",
     port: 0,
@@ -889,20 +870,11 @@ test("a non-loopback bind is refused unless it is explicitly allowed", async () 
 test("createWorkstationServer refuses an unusable configuration", () => {
   const backend = new FakeBackend()
   assert.throws(
-    () => createWorkstationServer({ backends: [backend], secret: "" }),
+    () => createWorkstationServer({ backend, secret: "" }),
     /non-empty secret/
   )
   assert.throws(
-    () => createWorkstationServer({ backends: [], secret: SECRET }),
-    /at least one backend/
-  )
-  assert.throws(
-    () =>
-      createWorkstationServer({
-        backends: [backend],
-        secret: SECRET,
-        maxBodyBytes: 0,
-      }),
+    () => createWorkstationServer({ backend, secret: SECRET, maxBodyBytes: 0 }),
     /maxBodyBytes/
   )
 })
@@ -910,7 +882,6 @@ test("createWorkstationServer refuses an unusable configuration", () => {
 test("the secret never reaches a log line or a response body", async (t) => {
   const harness = await start(t)
   const ok = await harness.send("POST", "/v1/fs/ls", {
-    root: ROOT,
     path: ROOT,
   })
   const rejected = await fetch(`${harness.base}/v1/fs/ls`, {
@@ -923,7 +894,7 @@ test("the secret never reaches a log line or a response body", async (t) => {
 
 test("a captured signature cannot be replayed inside its skew window", async (t) => {
   const harness = await start(t)
-  const body = JSON.stringify({ root: ROOT, path: "/" })
+  const body = JSON.stringify({ path: "/" })
   const headers = harness.headers("POST", "/v1/fs/ls", body)
 
   const first = await fetch(`${harness.base}/v1/fs/ls`, {

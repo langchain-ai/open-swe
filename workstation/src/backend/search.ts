@@ -9,12 +9,12 @@
  */
 
 import type { Dirent, Stats } from "node:fs"
-import { readFile, readdir, realpath, stat } from "node:fs/promises"
+import { readFile, readdir, stat } from "node:fs/promises"
 import path from "node:path"
 
 import picomatch from "picomatch"
 
-import { errorMessage, isInside, resolveWithinRoot } from "./paths.ts"
+import { errorMessage, resolvePath } from "./paths.ts"
 import type {
   ContextLine,
   FileInfo,
@@ -164,17 +164,15 @@ function toRelative(root: string, absolutePath: string): string {
 }
 
 /**
- * Whether a symlink entry should be reported as a regular file. Links are never
- * followed out of the root, and a link to a directory is not descended into at
- * all, which is what keeps the walk free of symlink cycles.
+ * Whether a symlink entry should be reported as a regular file. A link to a
+ * directory is never descended into, which is what keeps the walk free of
+ * symlink cycles.
  */
-async function isContainedFileLink(
-  root: string,
+async function isFileLink(
   absolutePath: string,
   state: WalkState
 ): Promise<boolean> {
   try {
-    if (!isInside(root, await realpath(absolutePath))) return false
     return (await stat(absolutePath)).isFile()
   } catch (error) {
     // A dangling or looping link resolves to no file, so there is nothing to
@@ -213,7 +211,7 @@ async function* walkFiles(
       }
       const absolutePath = path.join(dir, entry.name)
       if (entry.isSymbolicLink()) {
-        if (await isContainedFileLink(root, absolutePath, state)) {
+        if (await isFileLink(absolutePath, state)) {
           yield { absolutePath, relativePath: toRelative(root, absolutePath) }
         }
       } else if (entry.isDirectory()) {
@@ -228,14 +226,18 @@ async function* walkFiles(
   }
 }
 
-async function resolveSearchRoot(
-  rootDir: string,
+/** A bare `/` names the search root itself, matching the pattern contract. */
+function resolveSearchRoot(
+  defaultDir: string,
   candidate: string | undefined
-): Promise<string> {
-  if (candidate === undefined || candidate === "" || candidate === "/") {
-    return realpath(rootDir)
+): string {
+  // An unspecified search path means `defaultDir`; the middleware sends `None`
+  // for an unscoped search rather than a placeholder root. Every actual path,
+  // `/` included, resolves literally.
+  if (candidate === undefined || candidate === "") {
+    return defaultDir
   }
-  return resolveWithinRoot(rootDir, candidate)
+  return resolvePath(defaultDir, candidate)
 }
 
 type PathKind =
@@ -273,7 +275,7 @@ async function toFileInfo(absolutePath: string): Promise<FileInfo> {
 }
 
 export async function glob(
-  rootDir: string,
+  defaultDir: string,
   pattern: string,
   searchPath?: string
 ): Promise<GlobResult> {
@@ -282,7 +284,7 @@ export async function glob(
 
   let base: string
   try {
-    base = await resolveSearchRoot(rootDir, searchPath)
+    base = resolveSearchRoot(defaultDir, searchPath)
   } catch (error) {
     return { error: errorMessage(error), matches: [], truncated: false }
   }
@@ -436,7 +438,7 @@ function joinErrors(
 }
 
 export async function grep(
-  rootDir: string,
+  defaultDir: string,
   pattern: string,
   options: GrepOptions = {}
 ): Promise<GrepResult> {
@@ -460,7 +462,7 @@ export async function grep(
 
   let base: string
   try {
-    base = await resolveSearchRoot(rootDir, options.path)
+    base = resolveSearchRoot(defaultDir, options.path)
   } catch (error) {
     return { error: errorMessage(error), matches: [], truncated: false }
   }
