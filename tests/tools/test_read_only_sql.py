@@ -41,7 +41,7 @@ async def test_read_only_sql_requires_private_admin_surface(
             result = await query_tool("SELECT 1")
         assert result == {
             "ok": False,
-            "error": "Read-only SQL is available only in an admin's private dashboard thread or Slack DM.",
+            "error": "Only workspace admins on a private admin surface can query the database.",
         }
 
 
@@ -87,7 +87,10 @@ async def test_read_only_sql_rechecks_admin_membership(monkeypatch: pytest.Monke
     ):
         result = await query_tool("SELECT 1")
 
-    assert result == {"ok": False, "error": "Only workspace admins can query the database."}
+    assert result == {
+        "ok": False,
+        "error": "Only workspace admins on a private admin surface can query the database.",
+    }
 
 
 @pytest.mark.asyncio

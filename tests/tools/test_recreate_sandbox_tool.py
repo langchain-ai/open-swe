@@ -54,7 +54,7 @@ async def test_recreate_sandbox_workspace_overrides_thread_workspace_for_private
     with (
         patch("agent.run_config.get_config", return_value=config),
         patch(
-            "agent.tools.recreate_sandbox.require_private_admin_thread",
+            "agent.tools.recreate_sandbox.require_private_admin_surface",
             new_callable=AsyncMock,
             return_value=None,
         ),
@@ -72,14 +72,49 @@ async def test_recreate_sandbox_workspace_overrides_thread_workspace_for_private
 
 
 @pytest.mark.asyncio
-async def test_recreate_sandbox_refuses_other_workspace_outside_private_admin_thread() -> None:
+async def test_recreate_sandbox_allows_other_workspace_from_admin_slack_dm(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("CONFIGURED_ADMINS", "admin")
+    config = {
+        "configurable": {
+            "thread_id": "thread-1",
+            "workspace": "open-swe",
+            "admin_thread": True,
+            "source": "slack",
+            "github_login": "admin",
+            "slack_thread": {
+                "channel_id": "D123",
+                "thread_ts": "0",
+                "channel_context": {"is_im": True},
+            },
+        }
+    }
+    with (
+        patch("agent.run_config.get_config", return_value=config),
+        patch(
+            "agent.sandboxes.lifecycle.recreate_sandbox_for_thread",
+            new_callable=AsyncMock,
+            return_value=("sandbox-old", "sandbox-new"),
+        ) as recreate,
+    ):
+        result = await recreate_sandbox(workspace="langchainplus")
+
+    assert result["success"] is True
+    recreate.assert_awaited_once_with(
+        "thread-1", workspace_slug="langchainplus", source="workspace"
+    )
+
+
+@pytest.mark.asyncio
+async def test_recreate_sandbox_refuses_other_workspace_outside_private_admin_surface() -> None:
     config = {"configurable": {"thread_id": "thread-1", "workspace": "open-swe"}}
     with (
         patch("agent.run_config.get_config", return_value=config),
         patch(
-            "agent.tools.recreate_sandbox.require_private_admin_thread",
+            "agent.tools.recreate_sandbox.require_private_admin_surface",
             new_callable=AsyncMock,
-            return_value="Only workspace admins in a private admin thread can boot another workspace's sandbox image.",
+            return_value="Only workspace admins on a private admin surface can boot another workspace's sandbox image.",
         ),
         patch(
             "agent.sandboxes.lifecycle.recreate_sandbox_for_thread",
@@ -89,7 +124,7 @@ async def test_recreate_sandbox_refuses_other_workspace_outside_private_admin_th
         result = await recreate_sandbox(workspace="langchainplus")
 
     assert result["success"] is False
-    assert "private admin thread" in result["error"]
+    assert "private admin surface" in result["error"]
     recreate.assert_not_awaited()
 
 
@@ -99,7 +134,7 @@ async def test_recreate_sandbox_own_workspace_needs_no_admin() -> None:
     with (
         patch("agent.run_config.get_config", return_value=config),
         patch(
-            "agent.tools.recreate_sandbox.require_private_admin_thread",
+            "agent.tools.recreate_sandbox.require_private_admin_surface",
             new_callable=AsyncMock,
         ) as gate,
         patch(
