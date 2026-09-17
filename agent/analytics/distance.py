@@ -1,5 +1,6 @@
 """Compute normalized distance between opening and merged pull request patches."""
 
+import asyncio
 from collections.abc import Sequence
 
 import httpx2
@@ -8,12 +9,15 @@ from agent.github.app import get_github_app_installation_token
 from agent.github.http import github_client, github_request
 
 _GITHUB_API = "https://api.github.com"
+_MAX_PATCH_CHARACTERS = 2_000_000
+_MAX_DISTANCE_STEPS = 100_000
 
 
 def _patch_lines(files: object) -> list[str] | None:
     if not isinstance(files, list):
         return None
     lines: list[str] = []
+    characters = 0
     for file in files:
         if not isinstance(file, dict):
             return None
@@ -23,19 +27,26 @@ def _patch_lines(files: object) -> list[str] | None:
         path = file.get("filename")
         if not isinstance(path, str) or not isinstance(patch, str):
             return None
+        characters += len(patch)
+        if characters > _MAX_PATCH_CHARACTERS:
+            return None
         for line in patch.splitlines():
             if line.startswith(("+", "-")):
                 lines.append(f"{path}\0{line}")
     return lines
 
 
-def _insert_delete_distance(before: Sequence[str], after: Sequence[str]) -> int:
+def _insert_delete_distance(before: Sequence[str], after: Sequence[str]) -> int | None:
     n, m = len(before), len(after)
     if not n or not m:
         return n + m
     frontier = {1: 0}
+    steps = 0
     for edits in range(n + m + 1):
         for diagonal in range(-edits, edits + 1, 2):
+            steps += 1
+            if steps > _MAX_DISTANCE_STEPS:
+                return None
             if diagonal == -edits or (
                 diagonal != edits
                 and frontier.get(diagonal - 1, -1) < frontier.get(diagonal + 1, -1)
@@ -45,6 +56,9 @@ def _insert_delete_distance(before: Sequence[str], after: Sequence[str]) -> int:
                 x = frontier.get(diagonal - 1, 0) + 1
             y = x - diagonal
             while x < n and y < m and before[x] == after[y]:
+                steps += 1
+                if steps > _MAX_DISTANCE_STEPS:
+                    return None
                 x += 1
                 y += 1
             frontier[diagonal] = x
@@ -93,11 +107,14 @@ async def post_open_distance_basis_points(
             client, owner, repo, opening_base_sha, opening_head_sha
         )
         final_files = await _compare_files(client, owner, repo, final_base_sha, final_head_sha)
-    opening = _patch_lines(opening_files)
-    final = _patch_lines(final_files)
+    opening = await asyncio.to_thread(_patch_lines, opening_files)
+    final = await asyncio.to_thread(_patch_lines, final_files)
     if opening is None or final is None:
         return None
     total = len(opening) + len(final)
     if total == 0:
         return 0
-    return round(10_000 * _insert_delete_distance(opening, final) / total)
+    edits = await asyncio.to_thread(_insert_delete_distance, opening, final)
+    if edits is None:
+        return None
+    return round(10_000 * edits / total)
