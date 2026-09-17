@@ -30,9 +30,20 @@ def _patch_lines(files: object) -> list[str] | None:
         characters += len(patch)
         if characters > _MAX_PATCH_CHARACTERS:
             return None
+        additions = file.get("additions")
+        deletions = file.get("deletions")
+        if type(additions) is not int or type(deletions) is not int:
+            return None
+        added = deleted = 0
         for line in patch.splitlines():
-            if line.startswith(("+", "-")):
+            if line.startswith("+"):
+                added += 1
                 lines.append(f"{path}\0{line}")
+            elif line.startswith("-"):
+                deleted += 1
+                lines.append(f"{path}\0{line}")
+        if (added, deleted) != (additions, deletions):
+            return None
     return lines
 
 

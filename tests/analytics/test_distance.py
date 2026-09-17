@@ -13,6 +13,8 @@ def test_patch_distance_ignores_context_and_diff_metadata():
             {
                 "filename": "agent/example.py",
                 "changes": 2,
+                "additions": 1,
+                "deletions": 1,
                 "patch": "@@ -1,2 +1,2 @@\n-old = 1\n+new = 1\n context",
             }
         ]
@@ -22,6 +24,8 @@ def test_patch_distance_ignores_context_and_diff_metadata():
             {
                 "filename": "agent/example.py",
                 "changes": 2,
+                "additions": 1,
+                "deletions": 1,
                 "patch": "@@ -20,2 +20,2 @@\n-old = 1\n+new = 2\n context",
             }
         ]
@@ -37,7 +41,15 @@ def test_patch_lines_rejects_incomplete_text_patch():
 
 def test_patch_lines_preserves_content_with_repeated_signs():
     assert _patch_lines(
-        [{"filename": "README.md", "patch": "@@ -1 +1 @@\n----\n++++", "changes": 2}]
+        [
+            {
+                "filename": "README.md",
+                "patch": "@@ -1 +1 @@\n----\n++++",
+                "changes": 2,
+                "additions": 1,
+                "deletions": 1,
+            }
+        ]
     ) == ["README.md\0----", "README.md\0++++"]
 
 
@@ -65,8 +77,8 @@ def test_patch_size_budget_applies_across_files(monkeypatch: pytest.MonkeyPatch)
     assert (
         _patch_lines(
             [
-                {"filename": "a", "patch": "+12345"},
-                {"filename": "b", "patch": "+12345"},
+                {"filename": "a", "patch": "+12345", "additions": 1, "deletions": 0},
+                {"filename": "b", "patch": "+12345", "additions": 1, "deletions": 0},
             ]
         )
         is None
@@ -74,17 +86,19 @@ def test_patch_size_budget_applies_across_files(monkeypatch: pytest.MonkeyPatch)
 
 
 @pytest.mark.parametrize(
-    ("opening_patch", "final_patch", "expected"),
+    ("opening_patch", "final_patch", "final_additions", "expected"),
     [
-        ("+old", "+new", 10_000),
-        ("+same", "+same", 0),
-        ("+old\n" * 10_000, "+new\n" * 10_000, None),
+        ("+old", "+new", 1, 10_000),
+        ("+same", "+same", 1, 0),
+        ("+old\n" * 10_000, "+new\n" * 10_000, 10_000, None),
+        ("+same", "+same", 1000, None),
     ],
 )
 async def test_measurement_keeps_event_loop_available(
     monkeypatch: pytest.MonkeyPatch,
     opening_patch: str,
     final_patch: str,
+    final_additions: int,
     expected: int | None,
 ) -> None:
     monkeypatch.setattr(
@@ -96,8 +110,22 @@ async def test_measurement_keeps_event_loop_available(
         "_compare_files",
         AsyncMock(
             side_effect=[
-                [{"filename": "a", "patch": opening_patch}],
-                [{"filename": "a", "patch": final_patch}],
+                [
+                    {
+                        "filename": "a",
+                        "patch": opening_patch,
+                        "additions": len(opening_patch.splitlines()),
+                        "deletions": 0,
+                    }
+                ],
+                [
+                    {
+                        "filename": "a",
+                        "patch": final_patch,
+                        "additions": final_additions,
+                        "deletions": 0,
+                    }
+                ],
             ]
         ),
     )
@@ -114,3 +142,61 @@ async def test_measurement_keeps_event_loop_available(
     )
     assert heartbeat.done()
     assert result == expected
+
+
+@pytest.mark.parametrize(
+    ("additions", "deletions"),
+    [
+        (1000, 1),
+        (1, 1000),
+        (0, 2),
+        (2, 0),
+        (None, 1),
+        (1, None),
+        ("1", 1),
+        (True, 1),
+        (-1, 1),
+    ],
+)
+def test_patch_lines_rejects_mismatched_or_missing_statistics(
+    additions: object,
+    deletions: object,
+) -> None:
+    assert (
+        _patch_lines(
+            [
+                {
+                    "filename": "a",
+                    "patch": "@@ -1 +1 @@\n-old\n+new",
+                    "additions": additions,
+                    "deletions": deletions,
+                }
+            ]
+        )
+        is None
+    )
+
+
+def test_patch_completeness_is_checked_per_file() -> None:
+    assert (
+        _patch_lines(
+            [
+                {"filename": "a", "patch": "+a", "additions": 2, "deletions": 0},
+                {"filename": "b", "patch": "+b", "additions": 0, "deletions": 0},
+            ]
+        )
+        is None
+    )
+
+
+def test_complete_patch_with_multiple_hunks_and_no_newline_marker() -> None:
+    assert _patch_lines(
+        [
+            {
+                "filename": "a",
+                "additions": 2,
+                "deletions": 1,
+                "patch": "@@ -1 +1 @@\n-old\n+new\n@@ -10,0 +11 @@\n+more\n\\ No newline at end of file",
+            }
+        ]
+    ) == ["a\0-old", "a\0+new", "a\0+more"]
