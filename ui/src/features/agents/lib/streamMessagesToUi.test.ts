@@ -1,6 +1,7 @@
 import { AIMessage, HumanMessage, ToolMessage } from "@langchain/core/messages"
 import { describe, expect, it } from "vitest"
 
+import { LAZY_MARKER_KEY } from "./stream/lazyHydration"
 import { streamMessagesToUi } from "./streamMessagesToUi"
 
 describe("streamMessagesToUi", () => {
@@ -282,5 +283,59 @@ describe("streamMessagesToUi", () => {
     expect(
       tool?.kind === "tool-execution" ? tool.display : undefined
     ).toBeUndefined()
+  })
+
+  it("shows a skeleton tool result as pending until its full result loads", () => {
+    const messages = [
+      new AIMessage({
+        id: "ai-1",
+        content: "",
+        tool_calls: [
+          {
+            id: "call-1",
+            name: "execute",
+            args: { command: "ls" },
+            type: "tool_call",
+          },
+        ],
+      }),
+      new ToolMessage({
+        tool_call_id: "call-1",
+        content: "preview of the",
+        status: "success",
+        additional_kwargs: {
+          [LAZY_MARKER_KEY]: { truncated: true, size: 9000 },
+        },
+      }),
+    ]
+    const toolChunk = (lazy?: Parameters<typeof streamMessagesToUi>[3]) => {
+      const chunk = streamMessagesToUi(messages, [], undefined, lazy)[0]
+        ?.chunks[0]
+      return chunk?.kind === "tool-execution" ? chunk : undefined
+    }
+
+    expect(toolChunk()).toMatchObject({
+      status: "completed",
+      output: "preview of the",
+      outputPending: true,
+    })
+    const loaded = toolChunk({
+      "call-1": {
+        content: [{ type: "text", text: "preview of the full output" }],
+        artifact: {
+          type: "output_iframe",
+          html: "<p>hi</p>",
+          title: "Result",
+          filename: "r.html",
+        },
+        status: "success",
+      },
+    })
+    expect(loaded?.output).toBe("preview of the full output")
+    expect(loaded?.outputPending).toBeUndefined()
+    expect(loaded?.display).toMatchObject({
+      type: "output_iframe",
+      title: "Result",
+    })
   })
 })

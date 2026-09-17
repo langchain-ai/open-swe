@@ -5,7 +5,7 @@ import logging
 import posixpath
 import uuid
 from collections.abc import Mapping, Sequence
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import HTTPException
 
@@ -19,6 +19,11 @@ from agent.threads.access import (
     _authorized_thread,
     _github_token_for_login,
     _readable_thread_metadata,
+)
+from agent.threads.lazy_state import (
+    LAZY_MARKER_KEY,
+    deferred_tool_results,
+    skeletonize_state,
 )
 from agent.threads.listing import list_unresolved_dashboard_threads
 from agent.threads.runs import (
@@ -60,6 +65,8 @@ from agent.utils.thread_settings import THREAD_SETTINGS_KEY
 from agent.utils.timing import phase
 
 logger = logging.getLogger(__name__)
+
+ThreadStateView = Literal["full", "skeleton"]
 
 
 async def _mark_thread_viewed(
@@ -685,6 +692,7 @@ async def get_dashboard_thread_state(
     *,
     email: str | None = None,
     timings: dict[str, float] | None = None,
+    view: ThreadStateView = "full",
 ) -> dict[str, Any]:
     record = timings if timings is not None else {}
     client = langgraph_client()
@@ -715,4 +723,26 @@ async def get_dashboard_thread_state(
         or metadata_run_status in {"pending", "running"}
     ):
         result.pop("next", None)
+    if view == "skeleton":
+        with phase(record, "skeletonize"):
+            result, summary = skeletonize_state(result)
+        result[LAZY_MARKER_KEY] = summary
     return result
+
+
+async def get_dashboard_thread_tool_results(
+    thread_id: str,
+    login: str,
+    *,
+    email: str | None = None,
+    timings: dict[str, float] | None = None,
+) -> dict[str, Any]:
+    """The tool results a skeleton hydration left out, keyed by ``tool_call_id``."""
+    record = timings if timings is not None else {}
+    with phase(record, "thread_get"):
+        await _readable_thread_metadata(thread_id, login=login, email=email)
+    with phase(record, "get_state"):
+        state = await langgraph_client().threads.get_state(thread_id)
+    with phase(record, "collect"):
+        results = deferred_tool_results(as_json_object(state))
+    return {"results": results}

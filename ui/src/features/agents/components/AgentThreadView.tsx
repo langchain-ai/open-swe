@@ -56,6 +56,10 @@ import { rejectPlan } from "@/lib/plan"
 import { useSession } from "@/lib/session"
 import { useIsMobile } from "@/lib/useIsMobile"
 import { useAgentStream } from "@/features/agents/lib/stream/AgentStreamProvider"
+import {
+  markTranscriptPainted,
+  useLazyToolResults,
+} from "@/features/agents/lib/stream/lazyHydration"
 import { useReconnectStatus } from "@/features/agents/lib/stream/useReconnectStatus"
 import {
   runTranscriptBuilt,
@@ -214,18 +218,20 @@ export function AgentThreadView({
     [handlePanelCollapsedChange]
   )
 
+  const lazyResults = useLazyToolResults((state) => state.results[thread.id])
   const baseMessages = useMemo<Array<Message>>(() => {
     const started = perfNow()
     const built = streamMessagesToUi(
       stream.messages,
       stream.toolCalls,
-      messageArrivalTimestamp
+      messageArrivalTimestamp,
+      lazyResults
     )
     const elapsed = perfNow() - started
     threadTranscriptBuilt(thread.id, elapsed)
     runTranscriptBuilt(thread.id, elapsed)
     return built
-  }, [stream.messages, stream.toolCalls, thread.id])
+  }, [lazyResults, stream.messages, stream.toolCalls, thread.id])
 
   const isStreaming = thread.status === "running" || stream.isLoading
   const activeRun = useMemo(
@@ -251,7 +257,7 @@ export function AgentThreadView({
   const mentionPaths = useMemo(() => editedPaths(baseMessages), [baseMessages])
   const isThinking = stream.isLoading
   const settingUpSandbox = isThinking && baseMessages.length === 0
-  const reconnect = useReconnectStatus("cloud", thread.id)
+  const reconnect = useReconnectStatus()
   // The transcript hydrates from the SDK (`GET …/state` → `stream.messages`).
   // Show a loading state during that one-time fetch instead of the empty state.
   const isHydrating = stream.isThreadLoading && !hasMessages
@@ -291,6 +297,7 @@ export function AgentThreadView({
     const frame = requestAnimationFrame(() => {
       paintedThreadId.current = thread.id
       threadTranscriptPainted(thread.id, { messages, chunks })
+      markTranscriptPainted(thread.id)
     })
     return () => cancelAnimationFrame(frame)
   }, [isHydrating, thread.id, visibleMessages])

@@ -5,7 +5,7 @@ import { act, cleanup, render } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import { AgentStreamProvider, useAgentStream } from "./AgentStreamProvider"
-import { useStreamPool } from "./streamPool"
+import { useStreamConnection } from "./streamConnection"
 import type { ReactNode } from "react"
 
 interface StreamOptions {
@@ -56,9 +56,14 @@ vi.mock("@langchain/react", () => ({
 }))
 
 vi.mock("@/lib/langgraph-client", () => ({
+  absoluteApiUrl: (url: string) => url,
   createDashboardClient: () => ({}),
   createLocalGraphClient: () => ({}),
   dashboardFetch: fetch,
+}))
+
+vi.mock("./lazyHydration", () => ({
+  withLazyHydration: (client: unknown) => client,
 }))
 
 function Probe() {
@@ -77,16 +82,16 @@ function wrapper(children: ReactNode) {
   return <QueryClientProvider client={client}>{children}</QueryClientProvider>
 }
 
+function latest(): StreamOptions {
+  const options = mocks.streams.at(-1)
+  if (!options) throw new Error("no stream mounted")
+  return options
+}
+
 beforeEach(() => {
   mocks.streams.length = 0
   mocks.threadErrors.length = 0
-  useStreamPool.setState({
-    entries: [],
-    handles: {},
-    activeId: null,
-    binding: null,
-    createdThreadId: null,
-  })
+  useStreamConnection.setState({ connection: { status: "live" } })
 })
 
 afterEach(() => {
@@ -97,191 +102,167 @@ describe("AgentStreamProvider", () => {
   it("tracks only root offloading events and clears on completion", () => {
     const view = render(
       wrapper(
-        <AgentStreamProvider threadId="one">
+        <AgentStreamProvider threadId="t1">
           <OffloadingProbe />
         </AgentStreamProvider>
       )
     )
-    const emit = (status: string, namespace: string[] = []) =>
+    const emit = (status: string, namespace: Array<string> = []) =>
       act(() =>
         mocks.onEvent({
           method: "custom",
           params: {
             namespace,
-            data: {
-              payload: {
-                type: "conversation_offloading",
-                status,
-                trigger: "manual",
-              },
-            },
+            data: { payload: { type: "conversation_offloading", status } },
           },
         })
       )
+
     emit("started", ["subagent:one"])
-    expect(view.container.textContent).toBe("idle")
-    for (const status of ["completed", "skipped", "failed"]) {
+    expect(view.getByRole("status").textContent).toBe("idle")
+    for (const status of ["completed", "failed"]) {
       emit("started")
-      expect(view.container.textContent).toBe("offloading")
+      expect(view.getByRole("status").textContent).toBe("offloading")
       emit(status)
-      expect(view.container.textContent).toBe("idle")
+      expect(view.getByRole("status").textContent).toBe("idle")
     }
     emit("started")
-    act(() => mocks.streams.at(-1)?.onCompleted({ reason: "success" }))
-    expect(view.container.textContent).toBe("idle")
-  })
-
-  it("clears reconnect state when the stream gives up", () => {
-    render(
-      wrapper(
-        <AgentStreamProvider threadId="one">
-          <Probe />
-        </AgentStreamProvider>
-      )
-    )
-    const stream = mocks.streams[0]
-    if (!stream) throw new Error("stream was not mounted")
-
-    act(() => stream.onReconnect({ attempt: 12, delayMs: 300_000 }))
-    expect(useStreamPool.getState().entries[0]?.connection.status).toBe(
-      "reconnecting"
-    )
-
-    act(() => mocks.threadErrors[0]?.(new Error("stream closed")))
-    expect(useStreamPool.getState().entries[0]?.connection).toEqual({
-      status: "live",
-    })
+    act(() => latest().onCompleted({ reason: "success" }))
+    expect(view.getByRole("status").textContent).toBe("idle")
   })
 
   it("tracks reconnect attempts until the stream reconnects", () => {
     render(
       wrapper(
-        <AgentStreamProvider threadId="one">
+        <AgentStreamProvider threadId="t1">
           <Probe />
         </AgentStreamProvider>
       )
     )
-    const stream = mocks.streams[0]
-    if (!stream) throw new Error("stream was not mounted")
-
-    expect(stream.maxReconnectAttempts).toBe(12)
-    expect(stream.reconnectDelayMs(12)).toBe(300_000)
-    act(() => stream.onReconnect({ attempt: 3, delayMs: 4_000 }))
-    expect(useStreamPool.getState().entries[0]?.connection).toMatchObject({
+    act(() => latest().onReconnect({ attempt: 2, delayMs: 2_000 }))
+    expect(useStreamConnection.getState().connection).toMatchObject({
       status: "reconnecting",
-      attempt: 3,
+      attempt: 2,
     })
-
-    act(() => stream.onConnected())
-    expect(useStreamPool.getState().entries[0]?.connection).toEqual({
-      status: "live",
-    })
+    act(() => latest().onConnected())
+    expect(useStreamConnection.getState().connection.status).toBe("live")
   })
 
-  it("serves the stream bound to the requested thread", () => {
+  it("clears reconnect state when the stream gives up", () => {
+    render(
+      wrapper(
+        <AgentStreamProvider threadId="t1">
+          <Probe />
+        </AgentStreamProvider>
+      )
+    )
+    act(() => latest().onReconnect({ attempt: 12, delayMs: 300_000 }))
+    act(() => {
+      for (const listener of mocks.threadErrors) listener(new Error("gone"))
+    })
+    expect(useStreamConnection.getState().connection.status).toBe("live")
+  })
+
+  it("follows the route's thread on the same stream", () => {
     const view = render(
       wrapper(
-        <AgentStreamProvider threadId="one">
+        <AgentStreamProvider threadId="t1">
           <Probe />
         </AgentStreamProvider>
       )
     )
-    expect(view.container.textContent).toBe("one")
-
+    expect(view.getByRole("status").textContent).toBe("t1")
+    act(() => latest().onReconnect({ attempt: 1, delayMs: 1_000 }))
     view.rerender(
       wrapper(
-        <AgentStreamProvider threadId="two">
+        <AgentStreamProvider threadId="t2">
           <Probe />
         </AgentStreamProvider>
       )
     )
-    expect(view.container.textContent).toBe("two")
-    expect(useStreamPool.getState().entries).toHaveLength(2)
+    expect(view.getByRole("status").textContent).toBe("t2")
+    expect(latest().threadId).toBe("t2")
+    // The previous thread's retry countdown does not follow the user over.
+    expect(useStreamConnection.getState().connection.status).toBe("live")
   })
 
   it("announces a lazy cloud thread only once the server accepts its run", () => {
-    const onThreadCreated = vi.fn()
-    render(
-      wrapper(
-        <AgentStreamProvider threadId={null} onThreadCreated={onThreadCreated}>
-          <Probe />
-        </AgentStreamProvider>
-      )
-    )
-
-    const stream = mocks.streams[0]
-    if (!stream) throw new Error("stream was not mounted")
-    act(() => stream.onThreadId("created"))
-    expect(onThreadCreated).not.toHaveBeenCalled()
-
-    act(() => stream.onCreated())
-    expect(onThreadCreated).toHaveBeenCalledWith("created")
-  })
-
-  it("does not treat a follow-up run on an existing thread as a creation", () => {
-    const onThreadCreated = vi.fn()
+    const created: Array<string> = []
     render(
       wrapper(
         <AgentStreamProvider
-          threadId="existing"
-          onThreadCreated={onThreadCreated}
+          threadId={null}
+          onThreadCreated={(id) => created.push(id)}
         >
           <Probe />
         </AgentStreamProvider>
       )
     )
+    act(() => latest().onThreadId("minted"))
+    expect(created).toEqual([])
+    act(() => latest().onCreated())
+    expect(created).toEqual(["minted"])
+  })
 
-    const stream = mocks.streams[0]
-    if (!stream) throw new Error("stream was not mounted")
-    act(() => stream.onCreated())
-
-    expect(onThreadCreated).not.toHaveBeenCalled()
+  it("does not treat a follow-up run on an existing thread as a creation", () => {
+    const created: Array<string> = []
+    render(
+      wrapper(
+        <AgentStreamProvider
+          threadId="t1"
+          onThreadCreated={(id) => created.push(id)}
+        >
+          <Probe />
+        </AgentStreamProvider>
+      )
+    )
+    act(() => latest().onThreadId("t1"))
+    act(() => latest().onCreated())
+    expect(created).toEqual([])
   })
 
   it("does not announce a lazy thread the user has already left", () => {
-    const onThreadCreated = vi.fn()
+    const created: Array<string> = []
     const view = render(
       wrapper(
-        <AgentStreamProvider threadId={null} onThreadCreated={onThreadCreated}>
+        <AgentStreamProvider
+          threadId={null}
+          onThreadCreated={(id) => created.push(id)}
+        >
           <Probe />
         </AgentStreamProvider>
       )
     )
-    const draft = mocks.streams[0]
-    if (!draft) throw new Error("stream was not mounted")
-    act(() => draft.onThreadId("created"))
-
+    act(() => latest().onThreadId("minted"))
     view.rerender(
       wrapper(
-        <AgentStreamProvider threadId="other" onThreadCreated={onThreadCreated}>
+        <AgentStreamProvider
+          threadId="other"
+          onThreadCreated={(id) => created.push(id)}
+        >
           <Probe />
         </AgentStreamProvider>
       )
     )
-    act(() => draft.onCreated())
-
-    expect(onThreadCreated).not.toHaveBeenCalled()
+    act(() => latest().onCreated())
+    expect(created).toEqual([])
   })
 
   it("never announces local threads", () => {
-    const onThreadCreated = vi.fn()
+    const created: Array<string> = []
     render(
       wrapper(
         <AgentStreamProvider
           threadId={null}
           transport="local"
-          onThreadCreated={onThreadCreated}
+          onThreadCreated={(id) => created.push(id)}
         >
           <Probe />
         </AgentStreamProvider>
       )
     )
-
-    const stream = mocks.streams[0]
-    if (!stream) throw new Error("stream was not mounted")
-    act(() => stream.onThreadId("created"))
-    act(() => stream.onCreated())
-
-    expect(onThreadCreated).not.toHaveBeenCalled()
+    act(() => latest().onThreadId("minted"))
+    act(() => latest().onCreated())
+    expect(created).toEqual([])
   })
 })

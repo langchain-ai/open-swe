@@ -114,6 +114,7 @@ function expandedTextForChunk(
   const output = rawOutput.trim()
   const jsonOutput = formatJsonToolResult(rawOutput)
   if (output) blocks.push(jsonOutput ?? output)
+  if (chunk.outputPending) blocks.push("Loading full result…")
 
   const locations = chunk.locations ?? []
   if (!output && locations.length > 0) {

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest"
 
 import { reconnectLabel } from "./reconnectLabel"
-import { MAX_RECONNECT_ATTEMPTS } from "./streamPool"
+import { MAX_RECONNECT_ATTEMPTS } from "./streamConnection"
 
 const NOW = 1_000_000
 

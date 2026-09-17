@@ -106,6 +106,8 @@ export interface ToolExecutionChunk {
   input?: Record<string, unknown>
   status: AcpToolStatus
   output?: string
+  /** `output` is a preview; the full result is still loading after a skeleton hydrate. */
+  outputPending?: boolean
   display?: OutputIframeDisplay
   elapsedMs?: number
   approvalRequestId?: string

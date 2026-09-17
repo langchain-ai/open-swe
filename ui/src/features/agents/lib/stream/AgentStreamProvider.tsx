@@ -5,6 +5,7 @@ import {
   useEffect,
   useLayoutEffect,
   useMemo,
+  useRef,
   useState,
 } from "react"
 import { useChannelEffect, useStream } from "@langchain/react"
@@ -16,34 +17,32 @@ import {
   invalidateAgentThreadLists,
 } from "@/features/agents/lib/queries"
 import {
+  absoluteApiUrl,
   createDashboardClient,
   createLocalGraphClient,
   dashboardFetch,
 } from "@/lib/langgraph-client"
 import { RunTracker } from "@/lib/perf/streaming"
+import { withLazyHydration } from "./lazyHydration"
 import {
   MAX_RECONNECT_ATTEMPTS,
   reconnectDelayMs,
-  selectConnectionFor,
-  selectStreamFor,
-  useStreamPool,
-} from "./streamPool"
+  useStreamConnection,
+} from "./streamConnection"
 import type { ReactNode } from "react"
 import type {
   AgentStream,
   AgentThreadTransport,
   StreamConnection,
-  StreamPoolEntry,
-} from "./streamPool"
+} from "./streamConnection"
 
 export type {
   AgentStream,
   AgentThreadTransport,
   StreamConnection,
-} from "./streamPool"
+} from "./streamConnection"
 
 const AGENT_ASSISTANT_ID = "agent"
-const SWEEP_INTERVAL_MS = 10_000
 
 const AgentStreamContext = createContext<AgentStream | null>(null)
 
@@ -53,57 +52,91 @@ export function useAgentStream(): AgentStream {
   return stream
 }
 
-/** One SDK stream, kept mounted for as long as the pool retains its entry. */
-function PooledStream({ entry }: { entry: StreamPoolEntry }) {
+interface HostProps {
+  threadId: string | null
+  transport: AgentThreadTransport
+  onThreadCreated?: (threadId: string) => void
+  children: ReactNode
+}
+
+/**
+ * The one SDK stream under `/agents`. Its `threadId` follows the route: the
+ * SDK swaps threads in place, tearing down the previous subscription and
+ * hydrating the next one, so switching threads is a fresh (skeleton) fetch
+ * rather than a retained instance.
+ */
+function AgentStreamHost({
+  threadId,
+  transport,
+  onThreadCreated,
+  children,
+}: HostProps) {
   const queryClient = useQueryClient()
-  const cloud = entry.transport === "cloud"
+  const cloud = transport === "cloud"
   const client = useMemo(
     () =>
       cloud
-        ? createDashboardClient(agentsApi.langGraphApiUrl)
+        ? withLazyHydration(
+            createDashboardClient(agentsApi.langGraphApiUrl),
+            absoluteApiUrl(agentsApi.langGraphApiUrl),
+            dashboardFetch
+          )
         : createLocalGraphClient(),
     [cloud]
   )
-  const pool = useStreamPool.getState
-  const [runTracker] = useState(
-    () =>
-      new RunTracker({ transport: entry.transport, threadId: entry.threadId })
-  )
+  const connection = useStreamConnection.getState
+  const [runTracker] = useState(() => new RunTracker({ transport, threadId }))
   useEffect(() => () => runTracker.dispose(), [runTracker])
+  useEffect(() => {
+    if (threadId) runTracker.bindThread(threadId)
+  }, [runTracker, threadId])
   const [isOffloading, setIsOffloading] = useState(false)
   const [routed, setRouted] = useState<{
     route?: string
     modelId?: string | null
   } | null>(null)
 
+  // What the route currently shows, readable from SDK callbacks without a
+  // stale closure; and the id a thread-less stream minted on its first send.
+  const boundThreadId = useRef(threadId)
+  useLayoutEffect(() => {
+    boundThreadId.current = threadId
+  }, [threadId])
+  const mintedThreadId = useRef<string | null>(null)
+
   const stream = useStream({
     client,
     assistantId: AGENT_ASSISTANT_ID,
-    threadId: entry.threadId,
+    threadId,
     fetch: dashboardFetch,
     maxReconnectAttempts: MAX_RECONNECT_ATTEMPTS,
     reconnectDelayMs,
     onReconnect: ({ attempt, delayMs }) =>
-      pool().streamReconnecting(entry.id, attempt, Date.now() + delayMs),
-    onConnected: () => pool().streamLive(entry.id),
-    onThreadId: (threadId) => {
-      runTracker.bindThread(threadId)
-      pool().rekey(entry.id, threadId)
+      connection().reconnecting(attempt, Date.now() + delayMs),
+    onConnected: () => connection().live(),
+    onThreadId: (id) => {
+      runTracker.bindThread(id)
+      if (boundThreadId.current === null) mintedThreadId.current = id
     },
     onCreated: () => {
       runTracker.created()
       setIsOffloading(false)
-      pool().runAccepted(entry.id)
-      if (cloud) invalidateAgentThreadLists(queryClient)
+      if (!cloud) return
+      invalidateAgentThreadLists(queryClient)
+      const minted = mintedThreadId.current
+      mintedThreadId.current = null
+      // Only a thread the user is still looking at may steer navigation; a
+      // draft they left behind finishes creating quietly.
+      if (minted && boundThreadId.current === null) onThreadCreated?.(minted)
     },
     onCompleted: (info) => {
       runTracker.completed(info.reason)
       setIsOffloading(false)
       if (!cloud) return
-      const threadId = pool().entries.find((e) => e.id === entry.id)?.threadId
-      if (threadId) {
+      const id = boundThreadId.current ?? mintedThreadId.current
+      if (id) {
         void queryClient.invalidateQueries({
-          queryKey: agentThreadKeys.detail(threadId),
+          queryKey: agentThreadKeys.detail(id),
         })
       }
       invalidateAgentThreadLists(queryClient)
@@ -142,30 +175,34 @@ function PooledStream({ entry }: { entry: StreamPoolEntry }) {
     [runTracker, stream]
   )
 
-  const publish = useStreamPool((state) => state.publish)
-  useLayoutEffect(
-    () => publish(entry.id, { ...stream, submit, isOffloading, routed }),
-    [entry.id, publish, stream, submit, isOffloading, routed]
+  const handle = useMemo<AgentStream>(
+    () => ({ ...stream, submit, isOffloading, routed }),
+    [stream, submit, isOffloading, routed]
   )
 
   useEffect(() => {
-    if (!stream.isLoading) pool().streamLive(entry.id)
-  }, [entry.id, pool, stream.isLoading])
+    if (!stream.isLoading) connection().live()
+  }, [connection, stream.isLoading])
 
   useEffect(() => {
     const thread = stream.getThread()
     if (!thread) return
-    return thread.onError(() => pool().streamLive(entry.id))
-  }, [entry.id, pool, stream])
+    return thread.onError(() => connection().live())
+  }, [connection, stream])
 
-  return null
+  // A thread switch leaves the previous connection's status behind.
+  useEffect(() => {
+    connection().live()
+  }, [connection, threadId])
+
+  return (
+    <AgentStreamContext.Provider value={handle}>
+      {children}
+    </AgentStreamContext.Provider>
+  )
 }
 
-/**
- * Owns every live `useStream` under `/agents`. The bound thread is the one the
- * route asks for; threads left within the last minute (and any still running)
- * stay mounted so returning to them is instant and never orphans a run.
- */
+/** Provides the stream for the thread the route asks for. */
 export function AgentStreamProvider({
   threadId,
   transport = "cloud",
@@ -178,53 +215,20 @@ export function AgentStreamProvider({
   onThreadCreated?: (threadId: string) => void
   children: ReactNode
 }) {
-  const activate = useStreamPool((state) => state.activate)
-  const sweep = useStreamPool((state) => state.sweep)
-  const consumeCreatedThread = useStreamPool(
-    (state) => state.consumeCreatedThread
-  )
-  const entries = useStreamPool((state) => state.entries)
-  const createdThreadId = useStreamPool((state) => state.createdThreadId)
-  const stream = useStreamPool((state) =>
-    selectStreamFor(state, transport, threadId)
-  )
-
-  useLayoutEffect(
-    () => activate(transport, threadId),
-    [activate, threadId, transport]
-  )
-
-  useEffect(() => {
-    const timer = setInterval(() => sweep(Date.now()), SWEEP_INTERVAL_MS)
-    return () => clearInterval(timer)
-  }, [sweep])
-
-  useEffect(() => {
-    if (!createdThreadId) return
-    consumeCreatedThread()
-    onThreadCreated?.(createdThreadId)
-  }, [consumeCreatedThread, createdThreadId, onThreadCreated])
-
+  // A transport change is a different client, so it gets a fresh stream.
   return (
-    <>
-      {entries.map((entry) => (
-        <PooledStream key={entry.id} entry={entry} />
-      ))}
-      {stream && (
-        <AgentStreamContext.Provider value={stream}>
-          {children}
-        </AgentStreamContext.Provider>
-      )}
-    </>
+    <AgentStreamHost
+      key={transport}
+      threadId={threadId}
+      transport={transport}
+      onThreadCreated={onThreadCreated}
+    >
+      {children}
+    </AgentStreamHost>
   )
 }
 
-/** Liveness of the bound thread's event stream. */
-export function useAgentStreamConnection(
-  transport: AgentThreadTransport,
-  threadId: string | null
-): StreamConnection {
-  return useStreamPool((state) =>
-    selectConnectionFor(state, transport, threadId)
-  )
+/** Liveness of the bound stream's event subscription. */
+export function useAgentStreamConnection(): StreamConnection {
+  return useStreamConnection((state) => state.connection)
 }

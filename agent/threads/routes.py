@@ -21,6 +21,7 @@ from agent.threads.diffs import (
 )
 from agent.threads.feedback import feedback_router
 from agent.threads.handlers import (
+    ThreadStateView,
     admin_cancel_dashboard_thread,
     cancel_dashboard_thread,
     continue_thread_privately,
@@ -30,6 +31,7 @@ from agent.threads.handlers import (
     get_dashboard_thread_pull_request_context,
     get_dashboard_thread_pull_request_status,
     get_dashboard_thread_state,
+    get_dashboard_thread_tool_results,
     rename_dashboard_thread,
     resolve_all_dashboard_threads,
     resolve_dashboard_thread,
@@ -393,16 +395,35 @@ async def api_delete_thread(
 @router.get("/threads/{thread_id}/state")
 async def api_get_thread_state(
     thread_id: str,
+    view: ThreadStateView = "full",
     session: dict[str, Any] = SESSION_DEP,
 ) -> Response:
     timings: dict[str, float] = {}
     started = perf_counter()
     payload = await get_dashboard_thread_state(
+        thread_id, session["sub"], email=session.get("email"), timings=timings, view=view
+    )
+    timings["total"] = (perf_counter() - started) * 1000
+    header = server_timing_header(timings)
+    logger.info(
+        "thread state timings",
+        extra={"thread_id": thread_id, "view": view, "server_timing": header},
+    )
+    return JSONResponse(payload, headers={"Server-Timing": header})
+
+
+@router.get("/threads/{thread_id}/state/tool-results")
+async def api_get_thread_tool_results(
+    thread_id: str,
+    session: dict[str, Any] = SESSION_DEP,
+) -> Response:
+    timings: dict[str, float] = {}
+    started = perf_counter()
+    payload = await get_dashboard_thread_tool_results(
         thread_id, session["sub"], email=session.get("email"), timings=timings
     )
     timings["total"] = (perf_counter() - started) * 1000
     header = server_timing_header(timings)
-    logger.info("thread state timings thread_id=%s %s", thread_id, header)
     return JSONResponse(payload, headers={"Server-Timing": header})
 
 

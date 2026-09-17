@@ -109,6 +109,22 @@ export function threadDetailFailed(threadId: string): void {
   if (current(threadId)) abandonThreadLoad("detail_failed")
 }
 
+/** Whether the hydrate was a skeleton, and how much it left for later. */
+export function threadLoadLazy(
+  threadId: string,
+  summary: { deferred: number; deferred_bytes: number } | null
+): void {
+  current(threadId)?.set(
+    summary
+      ? {
+          lazy: true,
+          lazy_deferred: summary.deferred,
+          lazy_deferred_kb: Math.round(summary.deferred_bytes / 1024),
+        }
+      : { lazy: false }
+  )
+}
+
 export function threadHydrated(threadId: string): void {
   current(threadId)?.mark("hydrate")
 }

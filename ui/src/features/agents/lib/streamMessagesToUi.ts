@@ -4,7 +4,9 @@ import {
   collectStructuredEntities,
   parseStructuredInput,
 } from "./structuredInputMessages"
+import { lazyMarker } from "./stream/lazyHydration"
 import { humanizeToolName } from "./toolNames"
+import type { LazyToolResult } from "./stream/lazyHydration"
 import type { BaseMessage, ContentBlock } from "@langchain/core/messages"
 import type { AssembledToolCall } from "@langchain/react"
 
@@ -269,10 +271,30 @@ function isHttpUrl(value: unknown): value is string {
   }
 }
 
+/** Text of a tool result as the wire carries it: a string or content blocks. */
+function toolResultText(content: unknown): string | undefined {
+  if (typeof content === "string") return content.trim() || undefined
+  if (Array.isArray(content)) {
+    const parts = content.flatMap((block) =>
+      typeof block === "string"
+        ? [block]
+        : block && typeof block === "object" && "text" in block
+          ? [String((block as { text: unknown }).text)]
+          : []
+    )
+    if (parts.length) return parts.join("\n").trim() || undefined
+  }
+  if (content == null) return undefined
+  try {
+    return JSON.stringify(content)
+  } catch {
+    return String(content)
+  }
+}
+
 function outputIframeDisplay(
-  toolMessage: ToolMessage | undefined
+  artifact: unknown
 ): OutputIframeDisplay | undefined {
-  const artifact = toolMessage?.artifact
   if (!artifact || typeof artifact !== "object" || Array.isArray(artifact)) {
     return undefined
   }
@@ -321,7 +343,9 @@ function outputIframeDisplay(
 export function streamMessagesToUi(
   messages: Array<BaseMessage>,
   toolCalls: ReadonlyArray<AssembledToolCall> = [],
-  resolveCreatedAt?: (messageId: string) => string | undefined
+  resolveCreatedAt?: (messageId: string) => string | undefined,
+  /** Full results for tool messages a skeleton hydrate trimmed, by tool call id. */
+  lazyResults?: Record<string, LazyToolResult>
 ): Array<Message> {
   const toolCallsById = new Map<string, AssembledToolCall>()
   for (const toolCall of toolCalls) {
@@ -451,10 +475,25 @@ export function streamMessagesToUi(
           input: args,
           status: toolStatus(assembled, toolMessage),
         }
-        const output = toolOutputText(assembled, toolMessage)
-        if (output) chunk.output = output
-        const display = outputIframeDisplay(toolMessage)
-        if (display) chunk.display = display
+        const lazy = toolMessage ? lazyMarker(toolMessage) : null
+        const loaded = lazy ? lazyResults?.[toolCallId] : undefined
+        if (loaded) {
+          const output = toolResultText(loaded.content)
+          if (output) chunk.output = output
+          const display = outputIframeDisplay(loaded.artifact)
+          if (display) chunk.display = display
+        } else if (lazy) {
+          // The skeleton carries a preview; the SDK's projection saw the same
+          // truncated text, so neither is the real output yet.
+          const preview = toolMessage?.text.trim()
+          if (preview) chunk.output = preview
+          chunk.outputPending = true
+        } else {
+          const output = toolOutputText(assembled, toolMessage)
+          if (output) chunk.output = output
+          const display = outputIframeDisplay(toolMessage?.artifact)
+          if (display) chunk.display = display
+        }
         const diffData = maybeDiffFromArgs(args)
         if (diffData) chunk.diffData = diffData
         chunks.push(chunk)

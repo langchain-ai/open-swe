@@ -1645,6 +1645,77 @@ async def test_read_endpoints_accessible_by_non_owner(monkeypatch) -> None:
     assert exc_info.value.status_code == 400
 
 
+async def test_thread_state_skeleton_trims_tool_results_and_reports_them(monkeypatch) -> None:
+    big = "x" * 4096
+
+    class FakeThreads:
+        async def get(self, thread_id: str) -> dict[str, object]:
+            return {
+                "thread_id": thread_id,
+                "status": "idle",
+                "metadata": {"source": "dashboard", "owner_login": "owner"},
+            }
+
+        async def get_state(self, thread_id: str) -> dict[str, object]:
+            return {
+                "values": {
+                    "messages": [
+                        {"type": "human", "content": "go"},
+                        {"type": "tool", "tool_call_id": "c1", "content": big, "status": "success"},
+                    ]
+                },
+                "next": [],
+            }
+
+    class FakeRuns:
+        async def list(self, thread_id: str, **kwargs: object) -> list[dict[str, object]]:
+            return []
+
+    class FakeClient:
+        threads = FakeThreads()
+        runs = FakeRuns()
+
+    patch_thread_module(monkeypatch, "langgraph_client", lambda: FakeClient())
+
+    full = await handlers.get_dashboard_thread_state("tid", "owner")
+    assert full["values"]["messages"][1]["content"] == big
+    assert "open_swe_lazy" not in full
+
+    skeleton = await handlers.get_dashboard_thread_state("tid", "owner", view="skeleton")
+    trimmed = skeleton["values"]["messages"][1]
+    assert len(trimmed["content"]) < len(big)
+    assert trimmed["additional_kwargs"]["open_swe_lazy"]["truncated"] is True
+    assert skeleton["open_swe_lazy"]["deferred"] == 1
+
+    results = await handlers.get_dashboard_thread_tool_results("tid", "owner")
+    assert results == {"results": {"c1": {"content": big, "artifact": None, "status": "success"}}}
+
+
+async def test_thread_tool_results_hidden_for_private_thread_non_owner(monkeypatch) -> None:
+    class FakeThreads:
+        async def get(self, thread_id: str) -> dict[str, object]:
+            return {
+                "thread_id": thread_id,
+                "metadata": {
+                    "source": "dashboard",
+                    "owner_login": "owner",
+                    "visibility": "private",
+                },
+            }
+
+        async def get_state(self, thread_id: str) -> dict[str, object]:
+            raise AssertionError("state must not be read for an unauthorized caller")
+
+    class FakeClient:
+        threads = FakeThreads()
+
+    patch_thread_module(monkeypatch, "langgraph_client", lambda: FakeClient())
+
+    with pytest.raises(HTTPException) as exc_info:
+        await handlers.get_dashboard_thread_tool_results("tid", "stranger")
+    assert exc_info.value.status_code == 404
+
+
 async def test_thread_state_uses_current_run_status_when_checkpoint_is_stale(monkeypatch) -> None:
     class FakeThreads:
         async def get(self, thread_id: str) -> dict[str, object]:

@@ -1,4 +1,7 @@
-import { MAX_RECONNECT_ATTEMPTS, type StreamConnection } from "./streamPool"
+import {
+  MAX_RECONNECT_ATTEMPTS,
+  type StreamConnection,
+} from "./streamConnection"
 
 /**
  * The activity line's text while the event stream is not serving. Mirrors how

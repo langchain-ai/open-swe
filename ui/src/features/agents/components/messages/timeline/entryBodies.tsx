@@ -21,6 +21,11 @@ export const ShellEntryBody = memo(function ShellEntryBody({
         </pre>
       )}
       {output && <ToolResultBody value={output} />}
+      {chunk.outputPending && (
+        <p className="font-mono text-[12px] text-muted-foreground">
+          Loading full result…
+        </p>
+      )}
       {!output && chunk.status === "in_progress" && (
         <p className="font-mono text-[12px] text-muted-foreground">Running…</p>
       )}
