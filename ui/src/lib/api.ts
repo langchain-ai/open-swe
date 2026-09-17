@@ -339,6 +339,19 @@ export interface UsageLeaderboardPayload extends AnalyticsMetadata {
   reviewer_stats: ReviewerStatsPayload
 }
 
+export interface PRMergeRateEffort {
+  effort: string | null
+  merged: number
+  closed_without_merge: number
+  mature_pending: number
+  waiting: number
+  cohort_size: number
+  decided_denominator: number
+  decided_merge_rate: number | null
+  mature_denominator: number
+  mature_cohort_merge_share: number | null
+}
+
 export interface PRMergeRateCohort {
   model_id: string | null
   model_attribution_quality: "effective" | "configured" | "unavailable"
@@ -351,6 +364,7 @@ export interface PRMergeRateCohort {
   decided_merge_rate: number | null
   mature_denominator: number
   mature_cohort_merge_share: number | null
+  efforts: PRMergeRateEffort[]
 }
 
 export interface PRMergeRatePayload extends AnalyticsMetadata {
@@ -361,6 +375,7 @@ export interface PRMergeRatePayload extends AnalyticsMetadata {
   period: UsageLeaderboardPeriod
   suppression_threshold: number
   cohorts: PRMergeRateCohort[]
+  unavailable_thread_ids: string[]
 }
 
 export interface Repository {
