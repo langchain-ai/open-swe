@@ -197,6 +197,8 @@ function toolActivityVerb(chunk: ToolExecutionChunk): string {
     case "read":
     case "search":
       return active ? "Exploring" : "Explored"
+    case "sql":
+      return active ? "Querying" : "Queried"
     case "execute":
       return active ? "Running" : "Ran"
     case "edit":

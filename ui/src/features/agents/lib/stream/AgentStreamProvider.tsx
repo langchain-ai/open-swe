@@ -21,15 +21,26 @@ import {
   dashboardFetch,
 } from "@/lib/langgraph-client"
 import { RunTracker } from "@/lib/perf/streaming"
-import { selectStreamFor, useStreamPool } from "./streamPool"
+import {
+  MAX_RECONNECT_ATTEMPTS,
+  reconnectDelayMs,
+  selectConnectionFor,
+  selectStreamFor,
+  useStreamPool,
+} from "./streamPool"
 import type { ReactNode } from "react"
 import type {
   AgentStream,
   AgentThreadTransport,
+  StreamConnection,
   StreamPoolEntry,
 } from "./streamPool"
 
-export type { AgentStream, AgentThreadTransport } from "./streamPool"
+export type {
+  AgentStream,
+  AgentThreadTransport,
+  StreamConnection,
+} from "./streamPool"
 
 const AGENT_ASSISTANT_ID = "agent"
 const SWEEP_INTERVAL_MS = 10_000
@@ -70,6 +81,11 @@ function PooledStream({ entry }: { entry: StreamPoolEntry }) {
     assistantId: AGENT_ASSISTANT_ID,
     threadId: entry.threadId,
     fetch: dashboardFetch,
+    maxReconnectAttempts: MAX_RECONNECT_ATTEMPTS,
+    reconnectDelayMs,
+    onReconnect: ({ attempt, delayMs }) =>
+      pool().streamReconnecting(entry.id, attempt, Date.now() + delayMs),
+    onConnected: () => pool().streamLive(entry.id),
     onThreadId: (threadId) => {
       runTracker.bindThread(threadId)
       pool().rekey(entry.id, threadId)
@@ -132,6 +148,16 @@ function PooledStream({ entry }: { entry: StreamPoolEntry }) {
     [entry.id, publish, stream, submit, isOffloading, routed]
   )
 
+  useEffect(() => {
+    if (!stream.isLoading) pool().streamLive(entry.id)
+  }, [entry.id, pool, stream.isLoading])
+
+  useEffect(() => {
+    const thread = stream.getThread()
+    if (!thread) return
+    return thread.onError(() => pool().streamLive(entry.id))
+  }, [entry.id, pool, stream])
+
   return null
 }
 
@@ -190,5 +216,15 @@ export function AgentStreamProvider({
         </AgentStreamContext.Provider>
       )}
     </>
+  )
+}
+
+/** Liveness of the bound thread's event stream. */
+export function useAgentStreamConnection(
+  transport: AgentThreadTransport,
+  threadId: string | null
+): StreamConnection {
+  return useStreamPool((state) =>
+    selectConnectionFor(state, transport, threadId)
   )
 }

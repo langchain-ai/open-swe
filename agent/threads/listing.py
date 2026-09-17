@@ -9,8 +9,8 @@ from fastapi import HTTPException
 
 from agent.threads.pins import list_thread_pin_ids, pin_thread, unpin_thread
 from agent.threads.summary import (
-    _DASHBOARD_SOURCE,
     _SURFACED_SOURCES,
+    DASHBOARD_SOURCE,
     _assert_thread_readable,
     _is_automation_thread,
     _is_thread_resolved,
@@ -24,11 +24,14 @@ from agent.threads.summary import (
     _thread_updated_ms,
     _ThreadSortBy,
     thread_is_readable,
+    thread_is_unlisted,
     thread_source,
 )
 from agent.utils.json_types import JsonObject, ThreadLike
 from agent.utils.thread_ops import langgraph_client
 from agent.utils.thread_participants import participant_search_filters
+from agent.workspaces.routing import workspace_for_repo
+from agent.workspaces.store import DEFAULT_WORKSPACE_SLUG
 
 logger = logging.getLogger(__name__)
 
@@ -65,7 +68,7 @@ def _search_metadata_filter(
     metadata = dict(search_filter)
     if resolved is True:
         metadata["resolved"] = True
-    if source and source != _DASHBOARD_SOURCE:
+    if source and source != DASHBOARD_SOURCE:
         metadata["source"] = source
     if automation_id:
         metadata["schedule_id"] = automation_id
@@ -111,6 +114,8 @@ def _metadata_matches_filters(
     admin_threads: bool | None = None,
 ) -> bool:
     """Metadata-only filters that don't require fetching the latest run."""
+    if thread_is_unlisted(metadata):
+        return False
     thread_repo = _metadata_repo(metadata)[2]
     if repo and thread_repo.lower() != repo.lower():
         return False
@@ -340,6 +345,7 @@ async def list_unresolved_dashboard_threads(
                     thread_id
                     and thread_source(thread_metadata) in _SURFACED_SOURCES
                     and thread_is_readable(thread_metadata, login, email)
+                    and not thread_is_unlisted(thread_metadata)
                     and not _is_thread_resolved(thread_metadata)
                 ):
                     seen.setdefault(thread_id, thread)
@@ -421,6 +427,9 @@ async def list_dashboard_thread_projects(
                 "name": name,
                 "updatedAt": updated_at,
             }
+    for project in projects.values():
+        owner, _, repo_name = str(project["repoFullName"]).partition("/")
+        project["workspace"] = await workspace_for_repo(owner, repo_name) or DEFAULT_WORKSPACE_SLUG
     return sorted(projects.values(), key=lambda project: project["updatedAt"], reverse=True)
 
 

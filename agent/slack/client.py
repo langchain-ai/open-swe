@@ -18,6 +18,7 @@ import httpx2
 from langgraph_sdk.client import LangGraphClient
 from langgraph_sdk.errors import ConflictError
 from slack_sdk.errors import SlackApiError
+from slack_sdk.web.async_slack_response import AsyncSlackResponse
 
 from agent.config import ENV
 from agent.slack.http import SLACK_REQUEST_ERRORS, slack_client, slack_error, slack_retry_after
@@ -372,6 +373,39 @@ def _log_automated_warning_sent_to_slack(
     logger.error("Sent automated warning message to Slack channel %s: %s", channel_id, text)
 
 
+def _threaded_under(data: AsyncSlackResponse, reply_ts: str) -> bool:
+    message = data.get("message")
+    if not isinstance(message, Mapping):
+        return True
+    return message.get("thread_ts") == reply_ts
+
+
+async def _slack_thread_exists(channel_id: str, thread_ts: str) -> bool:
+    try:
+        async with slack_client(token=SLACK_BOT_TOKEN) as client:
+            await client.conversations_replies(channel=channel_id, ts=thread_ts, limit=1)
+    except SLACK_REQUEST_ERRORS as exc:
+        error = slack_error(exc)
+        if error == "thread_not_found":
+            return False
+        logger.warning(
+            "Slack thread lookup failed",
+            extra={"slack_error": error, "slack_channel": channel_id},
+        )
+    return True
+
+
+async def _delete_slack_message(channel_id: str, message_ts: str) -> None:
+    try:
+        async with slack_client(token=SLACK_BOT_TOKEN) as client:
+            await client.chat_delete(channel=channel_id, ts=message_ts)
+    except SLACK_REQUEST_ERRORS as exc:
+        logger.warning(
+            "Orphaned Slack reply could not be removed",
+            extra={"slack_error": slack_error(exc), "slack_channel": channel_id},
+        )
+
+
 async def _post_slack_message_with_ts(
     channel_id: str,
     text: str,
@@ -401,6 +435,20 @@ async def _post_slack_message_with_ts(
             )
         message_ts = data.get("ts")
         if isinstance(message_ts, str) and message_ts:
+            # Slack accepts a reply to a deleted parent and posts it at the channel
+            # root, where it reads as a message nobody asked for. Confirm the parent
+            # is really gone before removing what was just posted.
+            if (
+                reply_ts
+                and not _threaded_under(data, reply_ts)
+                and not await _slack_thread_exists(channel_id, reply_ts)
+            ):
+                await _delete_slack_message(channel_id, message_ts)
+                logger.warning(
+                    "Slack reply landed outside its thread",
+                    extra={"slack_channel": channel_id, "slack_thread_ts": reply_ts},
+                )
+                return None, "thread_not_found"
             _log_automated_warning_sent_to_slack(channel_id, thread_ts, text)
             return message_ts, None
         return None, None
@@ -416,36 +464,32 @@ def _slack_thread_dashboard_url(
     return dashboard_thread_url(agent_thread_id) if agent_thread_id else None
 
 
-def _format_token_count(count: int) -> str:
-    if count >= 1_000_000:
-        return f"{count / 1_000_000:.1f}M"
-    if count >= 1_000:
-        return f"{count / 1_000:.1f}K"
-    return str(count)
-
-
 def _safe_model_label(model: str) -> str:
     sanitized = re.sub(r"[^A-Za-z0-9._:/+\-]", "-", model)
     return sanitized.rsplit("/", 1)[-1][:48].strip("-")
 
 
+SLACK_COST_PENDING_LABEL = "calculating cost"
+
+
 def format_slack_run_usage(usage: RunUsageSummary | None) -> str:
     if usage is None:
-        return ""
+        return SLACK_COST_PENDING_LABEL
     labels = sorted({label for model in usage.models if (label := _safe_model_label(model))})
     model_text = " + ".join(labels[:3])
     if len(labels) > 3:
         model_text = f"{model_text} +{len(labels) - 3}"
     parts = [model_text] if model_text else []
-    if usage.session_cost_usd is not None:
-        parts.append(format_slack_session_cost(usage.session_cost_usd))
-    elif usage.total_tokens is not None:
-        parts.append(f"{_format_token_count(usage.total_tokens)} main-agent tokens")
+    parts.append(
+        format_slack_session_cost(usage.session_cost_usd)
+        if usage.session_cost_usd is not None
+        else SLACK_COST_PENDING_LABEL
+    )
     return " • ".join(parts)
 
 
 _SESSION_COST_LABEL_RE = re.compile(
-    r"(?: • )?(?:<\$0\.01|\$[0-9]+(?:\.[0-9]+)?)(?: session cost)?$"
+    rf"(?: • )?(?:<\$0\.01|\$[0-9]+(?:\.[0-9]+)?|{re.escape(SLACK_COST_PENDING_LABEL)})(?: session cost)?$"
 )
 _MAIN_AGENT_TOKEN_LABEL_RE = re.compile(r"(?: • )?[0-9]+(?:\.[0-9]+)?[KM]? main-agent tokens$")
 
@@ -491,7 +535,7 @@ def with_slack_session_cost(
             value_text = value.get("text")
             if not isinstance(value_text, str):
                 continue
-            if "main-agent tokens" in value_text:
+            if "main-agent tokens" in value_text or SLACK_COST_PENDING_LABEL in value_text:
                 candidates.append(value)
             elif SLACK_WEB_LINK_FOOTER_LABEL in value_text:
                 fallback_candidates.append(value)
@@ -616,6 +660,26 @@ async def post_slack_thread_reply_with_ts(
         thread_ts=thread_ts,
         unfurl_links=unfurl_links,
         unfurl_media=unfurl_media,
+        blocks=blocks,
+    )
+
+
+async def post_slack_ephemeral_reply(
+    channel_id: str,
+    user_id: str,
+    text: str,
+    *,
+    blocks: list[dict[str, Any]] | None = None,
+    usage: RunUsageSummary | None = None,
+    agent_thread_id: str | None = None,
+) -> bool:
+    """Answer one person in a channel, carrying the same web link a thread reply would."""
+    dashboard_url = dashboard_thread_url(agent_thread_id) if agent_thread_id else None
+    blocks = _with_slack_web_link_context_block(text, blocks, dashboard_url, usage)
+    return await post_slack_ephemeral_message(
+        channel_id,
+        user_id,
+        append_slack_web_link_footer(text, dashboard_url, usage),
         blocks=blocks,
     )
 
@@ -1640,6 +1704,9 @@ async def update_slack_trace_reply_for_web_handoff(
     return ok
 
 
+SLACK_DETACHED_AT_KEY = "slack_thread_detached_at"
+SLACK_DETACHED_FROM_KEY = "slack_thread_detached_from"
+
 _SLACK_THREAD_MAP_NAMESPACE = "slack_thread_map"
 _SLACK_RUN_MAP_NAMESPACE = "slack_run_map"
 _THREAD_RUN_KEY_PREFIX = "thread:"
@@ -1777,6 +1844,10 @@ async def get_active_slack_thread(
                     context.slack_thread.channel_id, context.slack_thread.thread_ts
                 )
                 return context.dump()["slack_thread"]
+            # A detached thread keeps a stale location in the run config; honoring
+            # it would post into Slack again.
+            if isinstance(metadata, Mapping) and metadata.get(SLACK_DETACHED_AT_KEY):
+                return None
         except Exception:
             logger.debug("Could not resolve active Slack location for thread %s", thread_id)
     if isinstance(fallback, Mapping):

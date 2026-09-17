@@ -19,9 +19,11 @@ UsageSort = Literal[
     "user",
     "favorite_model",
     "invocations",
+    "threads",
     "total_tokens",
     "total_cost_usd",
     "avg_invocation_seconds",
+    "avg_thread_seconds",
     "prs_opened",
     "merged_prs",
     "agent_loc",
@@ -203,6 +205,7 @@ def _decode_usage_cursor(
 _USAGE_SQL = """
 WITH runs AS (
     SELECT COALESCE(a.person_id, r.user_id) AS person_id, r.configured_model_id,
+        r.thread_id,
         COALESCE(c.total_tokens, r.total_tokens, 0) AS total_tokens,
         c.cost_usd, c.status AS cost_status,
         CASE WHEN r.terminal_at >= r.started_at
@@ -214,14 +217,20 @@ WITH runs AS (
       ON c.workspace_id = r.workspace_id AND c.run_id = r.run_id
     WHERE r.workspace_id = :workspace_id AND r.user_id IS NOT NULL
       AND r.started_at >= :start AND r.started_at <= :as_of
+), thread_durations AS (
+    SELECT person_id, thread_id, sum(duration) AS duration
+    FROM runs WHERE thread_id IS NOT NULL GROUP BY person_id, thread_id
 ), run_totals AS (
-    SELECT person_id, count(*) AS invocations, sum(total_tokens) AS total_tokens,
+    SELECT person_id, count(*) AS invocations, count(DISTINCT thread_id) AS threads,
+        sum(total_tokens) AS total_tokens,
         COALESCE(sum(cost_usd) FILTER (WHERE cost_status IN ('complete', 'partial')), 0)
             AS total_cost_usd,
         count(*) FILTER (WHERE cost_usd IS NULL OR cost_status = 'unavailable')
             AS invocations_without_cost,
         count(*) FILTER (WHERE cost_status = 'partial') AS invocations_with_partial_cost,
-        COALESCE(avg(duration), 0) AS avg_invocation_seconds
+        COALESCE(avg(duration), 0) AS avg_invocation_seconds,
+        COALESCE((SELECT avg(t.duration) FROM thread_durations t
+            WHERE t.person_id = runs.person_id), 0) AS avg_thread_seconds
     FROM runs GROUP BY person_id
 ), models AS (
     SELECT DISTINCT ON (r.person_id) r.person_id, m.provider_model_id
@@ -259,11 +268,13 @@ WITH runs AS (
         ((:current_login <> '' AND lower(d.github_login) = :current_login)
           OR (:current_email <> '' AND lower(d.email) = :current_email)) IS TRUE AS is_current,
         COALESCE(r.invocations, 0) AS invocations,
+        COALESCE(r.threads, 0) AS threads,
         COALESCE(r.total_tokens, 0) AS total_tokens,
         COALESCE(r.total_cost_usd, 0) AS total_cost_usd,
         COALESCE(r.invocations_without_cost, 0) AS invocations_without_cost,
         COALESCE(r.invocations_with_partial_cost, 0) AS invocations_with_partial_cost,
         COALESCE(r.avg_invocation_seconds, 0) AS avg_invocation_seconds,
+        COALESCE(r.avg_thread_seconds, 0) AS avg_thread_seconds,
         COALESCE(m.provider_model_id, 'default') AS favorite_model,
         COALESCE(pr.prs_opened, 0) AS prs_opened,
         COALESCE(pr.merged_prs, 0) AS merged_prs,
@@ -278,8 +289,7 @@ WITH runs AS (
     LEFT JOIN models m ON m.person_id = p.person_id
 ), ranked AS (
     SELECT *, row_number() OVER (
-        ORDER BY merged_prs DESC, agent_loc DESC, prs_opened DESC,
-            invocations DESC, name, person_id
+        ORDER BY merged_prs DESC, agent_loc DESC, prs_opened DESC, name, person_id
     ) AS rank FROM metrics
 ), ordered AS (
     SELECT *, row_number() OVER (ORDER BY
@@ -295,6 +305,8 @@ WITH runs AS (
         CASE WHEN :sort = 'favorite_model' AND :direction = 'desc' THEN lower(favorite_model) END DESC,
         CASE WHEN :sort = 'invocations' AND :direction = 'asc' THEN invocations END ASC,
         CASE WHEN :sort = 'invocations' AND :direction = 'desc' THEN invocations END DESC,
+        CASE WHEN :sort = 'threads' AND :direction = 'asc' THEN threads END ASC,
+        CASE WHEN :sort = 'threads' AND :direction = 'desc' THEN threads END DESC,
         CASE WHEN :sort = 'total_tokens' AND :direction = 'asc' THEN total_tokens END ASC,
         CASE WHEN :sort = 'total_tokens' AND :direction = 'desc' THEN total_tokens END DESC,
         CASE WHEN :sort = 'total_cost_usd' AND :direction = 'asc' THEN total_cost_usd END ASC,
@@ -303,6 +315,10 @@ WITH runs AS (
             THEN avg_invocation_seconds END ASC,
         CASE WHEN :sort = 'avg_invocation_seconds' AND :direction = 'desc'
             THEN avg_invocation_seconds END DESC,
+        CASE WHEN :sort = 'avg_thread_seconds' AND :direction = 'asc'
+            THEN avg_thread_seconds END ASC,
+        CASE WHEN :sort = 'avg_thread_seconds' AND :direction = 'desc'
+            THEN avg_thread_seconds END DESC,
         CASE WHEN :sort = 'prs_opened' AND :direction = 'asc' THEN prs_opened END ASC,
         CASE WHEN :sort = 'prs_opened' AND :direction = 'desc' THEN prs_opened END DESC,
         CASE WHEN :sort = 'merged_prs' AND :direction = 'asc' THEN merged_prs END ASC,
@@ -324,8 +340,9 @@ WITH runs AS (
                     THEN 'https://github.com/' || github_login || '.png?size=80' END),
             'favorite_model', favorite_model,
             'avg_invocation_seconds', avg_invocation_seconds,
+            'avg_thread_seconds', avg_thread_seconds,
             'avg_run_seconds', avg_invocation_seconds,
-            'agent_runs', invocations, 'invocations', invocations,
+            'agent_runs', invocations, 'invocations', invocations, 'threads', threads,
             'prs_opened', prs_opened, 'merged_prs', merged_prs,
             'agent_loc', agent_loc, 'additions', additions, 'deletions', deletions,
             'total_tokens', total_tokens, 'total_cost_usd', total_cost_usd,

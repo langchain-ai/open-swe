@@ -16,6 +16,18 @@ function lifecycle(event: string, timestamp: number) {
   }
 }
 
+function messageStart(role: string, timestamp: number) {
+  return {
+    type: "event",
+    method: "messages",
+    params: {
+      namespace: [],
+      timestamp,
+      data: { event: "message-start", role, id: "msg-1" },
+    },
+  }
+}
+
 function textDelta(text: string, timestamp: number) {
   return {
     type: "event",
@@ -62,15 +74,7 @@ describe("agent run span", () => {
       serverTiming: [],
     })
     tracker.event(lifecycle("running", 9_900))
-    tracker.event({
-      type: "event",
-      method: "messages",
-      params: {
-        namespace: [],
-        timestamp: 9_950,
-        data: { event: "message-start", role: "ai", id: "msg-1" },
-      },
-    })
+    tracker.event(messageStart("ai", 9_950))
     tracker.event(textDelta("", 9_960))
     tracker.event(textDelta("Hello", 9_970))
     tracker.event(textDelta(" world", 9_980))
@@ -85,7 +89,8 @@ describe("agent run span", () => {
       "accepted",
       "stream_open",
       "first_event",
-      "first_token",
+      "generation_start",
+      "first_text",
     ])
     expect(span?.attributes).toMatchObject({
       transport: "cloud",
@@ -103,6 +108,36 @@ describe("agent run span", () => {
       commit_ms: 13,
       commit_max_ms: 9,
     })
+  })
+
+  it("marks generation_start for a run that never streams assistant text", () => {
+    vi.spyOn(Date, "now").mockReturnValue(10_000)
+    const tracker = new RunTracker({ transport: "cloud", threadId: THREAD_A })
+
+    tracker.submitted()
+    tracker.event(lifecycle("running", 9_900))
+    tracker.event(messageStart("ai", 9_950))
+    tracker.completed("success")
+
+    const [span] = getPerfSpans()
+    expect(span?.steps.map((step) => step.name)).toEqual([
+      "accepted",
+      "first_event",
+      "generation_start",
+    ])
+    expect(span?.attributes).toMatchObject({ text_deltas: 0 })
+  })
+
+  it("ignores a non-assistant message start for generation_start", () => {
+    vi.spyOn(Date, "now").mockReturnValue(10_000)
+    const tracker = new RunTracker({ transport: "cloud", threadId: THREAD_A })
+
+    tracker.submitted()
+    tracker.event(messageStart("tool", 9_950))
+    tracker.completed("success")
+
+    const [span] = getPerfSpans()
+    expect(span?.steps.map((step) => step.name)).toEqual(["first_event"])
   })
 
   it("opens a joined span when a run starts that this client did not submit", () => {

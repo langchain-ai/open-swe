@@ -377,9 +377,10 @@ def _check_set_key(check_runs: list[dict[str, Any]], statuses: list[dict[str, An
     return hashlib.sha256("|".join(checks).encode()).hexdigest()
 
 
-def _aggregate_state(
+def aggregate_check_state(
     check_runs: list[dict[str, Any]], statuses: list[dict[str, Any]]
 ) -> tuple[str, list[dict[str, Any]]]:
+    """``(pending | success | blocked | failure, failing signals)`` for one check set."""
     failures = _failure_signals(check_runs, statuses)
     if failures:
         return "failure", failures
@@ -473,7 +474,7 @@ async def _evaluate_watch(key: str, *, token: str | None = None) -> str:
         return await _record_evaluation_error(watch, "CI status unavailable")
 
     watch.evaluation_errors = 0
-    state, failures = _aggregate_state(check_runs, statuses)
+    state, failures = aggregate_check_state(check_runs, statuses)
     if state == "pending":
         watch.settled_check_key = ""
         watch.settled_check_at = None

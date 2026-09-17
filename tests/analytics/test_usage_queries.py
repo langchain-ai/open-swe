@@ -124,10 +124,12 @@ async def test_usage_ranks_run_and_pr_cohorts_with_cost_coverage(usage_db):
     stale = await person("stale")
     model = uuid4()
     await insert("model_directory", model_id=model, provider_model_id="model-a")
-    first_run = await run(alice, duration=60, model_id=model, tokens=4)
-    await run(alice, duration=120, model_id=model, tokens=7)
-    await run(alice, duration=-1, tokens=3)
-    await run(alice, tokens=6)
+    first_thread = uuid4()
+    second_thread = uuid4()
+    first_run = await run(alice, duration=60, model_id=model, tokens=4, thread_id=first_thread)
+    await run(alice, duration=120, model_id=model, tokens=7, thread_id=first_thread)
+    await run(alice, duration=-1, tokens=3, thread_id=second_thread)
+    await run(alice, tokens=6, thread_id=second_thread)
     await run(alice, age=8, duration=10000, tokens=9999)
     await run(alice, age=-1, duration=10000, tokens=9999)
     await run(stale, age=8)
@@ -164,7 +166,9 @@ async def test_usage_ranks_run_and_pr_cohorts_with_cost_coverage(usage_db):
         "avatar_url": "https://github.com/alice.png?size=80",
     }
     assert row["invocations"] == row["agent_runs"] == 4
+    assert row["threads"] == 2
     assert row["avg_invocation_seconds"] == row["avg_run_seconds"] == 90
+    assert row["avg_thread_seconds"] == 180
     assert row["favorite_model"] == "model-a"
     assert row["prs_opened"] == 1
     assert row["merged_prs"] == 0

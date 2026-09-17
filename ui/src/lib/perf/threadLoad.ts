@@ -2,12 +2,14 @@
  * The `thread_load` span: from the moment the user asks for a thread until its
  * transcript is on screen.
  *
- *   navigate ─▶ detail ─▶ hydrate ─▶ paint
+ *   navigate ─▶ detail | local ─▶ hydrate ─▶ paint
  *
- * `detail` is the dashboard's thread summary (`GET /threads/:id`), `hydrate`
- * the SDK's state fetch (`GET /threads/:id/state`) that seeds the transcript,
- * and `paint` the first frame after the transcript rendered. A full page load
- * starts the span at the document's time origin so it includes bundle boot.
+ * `detail` is the dashboard's thread summary (`GET /threads/:id`); for a
+ * desktop thread under `/agents/local/:id` the equivalent step is `local`, the
+ * desktop's `getLocalThread` IPC. `hydrate` is the SDK's state fetch
+ * (`GET /threads/:id/state`) that seeds the transcript, and `paint` the first
+ * frame after the transcript rendered. A full page load starts the span at the
+ * document's time origin so it includes bundle boot.
  */
 
 import { subscribeRequestTimings } from "./fetchTiming"
@@ -16,7 +18,7 @@ import { startSpan } from "./trace"
 import type { PerfAttributes, SpanHandle } from "./trace"
 
 const THREAD_PATH_RE =
-  /^\/agents\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/?$/i
+  /^\/agents\/(?:local\/)?([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/?$/i
 
 let active: { threadId: string; span: SpanHandle; buildMs: number } | null =
   null
@@ -97,6 +99,10 @@ export function threadDetailResolved(
   attributes: { cached: boolean }
 ): void {
   current(threadId)?.mark("detail", { detail_cached: attributes.cached })
+}
+
+export function threadLocalResolved(threadId: string): void {
+  current(threadId)?.mark("local")
 }
 
 export function threadDetailFailed(threadId: string): void {

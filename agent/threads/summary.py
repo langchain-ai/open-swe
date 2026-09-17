@@ -26,7 +26,7 @@ from agent.utils.timing import phase
 
 logger = logging.getLogger(__name__)
 
-_DASHBOARD_SOURCE = "dashboard"
+DASHBOARD_SOURCE = "dashboard"
 # Sources whose threads should surface in the Agents UI (besides "dashboard").
 _SURFACED_SOURCES: tuple[str, ...] = ("dashboard", "github", "slack", "linear", "schedule")
 # PR lifecycle states surfaced to the UI for a thread's associated pull request.
@@ -67,7 +67,7 @@ def _thread_metadata(thread: ThreadLike) -> JsonObject:
 
 def thread_source(metadata: Mapping[str, Any]) -> str:
     source = metadata.get("source")
-    return source if isinstance(source, str) and source else _DASHBOARD_SOURCE
+    return source if isinstance(source, str) and source else DASHBOARD_SOURCE
 
 
 def _metadata_model_id(metadata: Mapping[str, Any]) -> str | None:
@@ -93,6 +93,11 @@ def thread_is_owner(metadata: Mapping[str, Any], login: str | None) -> bool:
 
 def thread_is_private(metadata: Mapping[str, Any]) -> bool:
     return metadata.get("visibility", "public") != "public"
+
+
+def thread_is_unlisted(metadata: Mapping[str, Any]) -> bool:
+    """A `/oswe` question thread: readable and promptable, but kept out of thread lists."""
+    return metadata.get("unlisted") is True
 
 
 def thread_is_readable(
@@ -208,6 +213,7 @@ def thread_source_app_url(metadata: Mapping[str, Any]) -> str | None:
         or not team_id
         or not slack_thread.channel_id
         or not slack_thread.thread_ts
+        or slack_thread.thread_ts == CODE_CHANNEL_SESSION_TS
     ):
         return None
     return f"slack://channel?{urlencode({'team': team_id, 'id': slack_thread.channel_id, 'message': slack_thread.thread_ts})}"
@@ -384,6 +390,7 @@ async def _thread_summary(
         "ownerLogin": metadata.get("owner_login"),
         "continuedFromThreadId": metadata.get("continued_from_thread_id"),
         "environment": metadata.get("environment"),
+        "workspace": metadata.get("workspace") or metadata.get("environment"),
         "planStatus": metadata.get("plan_status"),
         "source": thread_source(metadata),
         "origin": origin,

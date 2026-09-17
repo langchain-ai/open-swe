@@ -1,7 +1,7 @@
 """Tests for ModelFallbackMiddleware."""
 
 from typing import Any, cast
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import anthropic
 import httpx
@@ -102,6 +102,48 @@ class TestShouldFallback:
 
 
 class TestModelFallbackMiddleware:
+    @pytest.mark.asyncio
+    async def test_retry_spans_cover_backoff_and_attempt_without_error_body(self) -> None:
+        primary = MagicMock(model_name="primary")
+        fallback = MagicMock(model_name="fallback")
+        request = _make_request()
+        request.model = primary
+        request.override = MagicMock(return_value=MagicMock(model=fallback))
+        response = ModelResponse(result=[AIMessage(content="done")])
+        handler = AsyncMock(side_effect=[TimeoutError("secret"), _openai_5xx(), response])
+        spans: list[MagicMock] = []
+
+        def make_span(*args: object, **kwargs: object) -> MagicMock:
+            span = MagicMock()
+            span.__aenter__ = AsyncMock(return_value=span)
+            span.__aexit__ = AsyncMock(return_value=False)
+            spans.append(span)
+            return span
+
+        with (
+            patch("agent.middleware.model_fallback.trace", side_effect=make_span) as traced,
+            patch("agent.middleware.model_fallback.asyncio.sleep", new_callable=AsyncMock) as sleep,
+            patch("agent.middleware.model_fallback.random.uniform", return_value=0),
+        ):
+            result = await ModelFallbackMiddleware(
+                fallback, backoff_schedule=(0.0, 5.0)
+            ).awrap_model_call(request, handler)
+
+        assert result is response
+        assert traced.call_count == 2
+        first, second = [call.kwargs["metadata"] for call in traced.call_args_list]
+        assert first["failed_model"] == "primary"
+        assert first["next_model"] == "fallback"
+        assert first["error_type"] == "TimeoutError"
+        assert first["attempt"] == 2
+        assert second["next_model"] == "primary"
+        assert second["status_code"] == 503
+        assert second["backoff_seconds"] == 5.0
+        assert "secret" not in str(traced.call_args_list)
+        spans[0].end.assert_called_once_with(error="APIStatusError")
+        spans[1].end.assert_called_once_with(outputs={"outcome": "success"})
+        sleep.assert_awaited_once_with(5.0)
+
     @pytest.mark.asyncio
     async def test_async_falls_over_on_overloaded(self) -> None:
         fallback_model = MagicMock(name="fallback_model")

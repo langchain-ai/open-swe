@@ -118,6 +118,7 @@ async def test_reviewer_reuses_app_token_for_sandbox_proxy() -> None:
             "source": "github",
             "pr_number": 42,
             "base_sha": "base",
+            "workspace": "oss",
         },
         "metadata": {},
     }
@@ -155,6 +156,7 @@ async def test_reviewer_reuses_app_token_for_sandbox_proxy() -> None:
 
     mock_sandbox.assert_awaited_once_with(
         "reviewer-thread-id",
+        workspace_slug="oss",
         github_proxy_token="app-token",
         github_proxy_repositories=["repo"],
         allow_replacement=True,
@@ -402,7 +404,7 @@ async def test_reviewer_inlines_org_guidelines_into_system_prompt() -> None:
             return_value="/workspace",
         ),
         patch(
-            "agent.reviewer.get_org_review_guidelines",
+            "agent.reviewer.cached_org_review_guidelines",
             new_callable=AsyncMock,
             return_value="Never approve a PR that disables a CI gate.",
         ),

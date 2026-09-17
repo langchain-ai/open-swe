@@ -111,6 +111,40 @@ test("caches the managed macOS gateway key", () => {
   assert.equal(probes, 1);
 });
 
+test("concurrent starts share one backend launch", async () => {
+  const { EventEmitter } = require("node:events");
+  const os = require("node:os");
+  let spawned = 0;
+  let releaseTracing;
+  const tracingGate = new Promise((resolve) => (releaseTracing = resolve));
+  const supervisor = new BackendSupervisor({
+    repoRoot: path.resolve("/work/open-swe"),
+    projectsFile: path.join(os.tmpdir(), "projects.json"),
+    worktreesDir: path.join(os.tmpdir(), "open-swe-test-worktrees"),
+    reservePort: async () => 49152,
+    tracingEnv: () => tracingGate,
+    spawn: () => {
+      spawned += 1;
+      return Object.assign(new EventEmitter(), {
+        stdout: null,
+        stderr: null,
+        exitCode: null,
+        signalCode: null,
+        kill() {},
+      });
+    },
+    fetch: async () => new Response(null, { status: 200 }),
+  });
+
+  const first = supervisor.start();
+  const second = supervisor.start();
+  releaseTracing({});
+  await Promise.all([first, second]);
+
+  assert.equal(spawned, 1);
+  assert.equal(second, first);
+});
+
 test("creates the local LangGraph thread before stream hydration", async () => {
   const supervisor = new BackendSupervisor({});
   let request;

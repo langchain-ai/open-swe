@@ -2,7 +2,7 @@
 
 Mirrors ``agent_entrypoint``: applies the boundary patches, then re-exports the
 REAL scheduler factory. Declared so the E2E runs the same topology production
-does — an environment refresh is a background run on this graph, so a config
+does — a workspace refresh is a background run on this graph, so a config
 without it would silently never refresh anything.
 """
 

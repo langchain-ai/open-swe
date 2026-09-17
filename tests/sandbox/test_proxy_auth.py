@@ -12,12 +12,12 @@ from langchain.agents.middleware import AgentMiddleware, AgentState
 from langchain_core.runnables import RunnableConfig
 from langgraph.runtime import Runtime
 
-from agent.environments.store import Environment
 from agent.sandboxes.providers.langsmith import (
     PROXY_GH_TOKEN_PLACEHOLDER,
     configure_github_proxy,
 )
 from agent.sandboxes.state import SandboxBackendProxy
+from agent.workspaces.store import Workspace
 
 
 def _mock_async_client(mock_client_cls: MagicMock, inner: MagicMock) -> None:
@@ -447,8 +447,8 @@ class TestCreateSandboxWithProxy:
             mock_get_token.assert_awaited_once_with()
 
     @pytest.mark.asyncio
-    async def test_passes_environment_resources_to_sandbox_creation(self) -> None:
-        environment = Environment(
+    async def test_passes_workspace_resources_to_sandbox_creation(self) -> None:
+        workspace = Workspace(
             slug="env",
             snapshot_status="ready",
             snapshot_id="env-snap",
@@ -462,9 +462,9 @@ class TestCreateSandboxWithProxy:
         )
         with (
             patch(
-                "agent.sandboxes.lifecycle.resolve_environment",
+                "agent.sandboxes.lifecycle.load_workspace",
                 new_callable=AsyncMock,
-                return_value=environment,
+                return_value=workspace,
             ),
             patch(
                 "agent.sandboxes.lifecycle.create_sandbox", new_callable=AsyncMock
@@ -483,19 +483,19 @@ class TestCreateSandboxWithProxy:
 
             from agent.sandboxes.lifecycle import _create_sandbox_with_proxy
 
-            await _create_sandbox_with_proxy(environment_slug="large")
+            await _create_sandbox_with_proxy(workspace_slug="large")
 
         mock_create.assert_awaited_once_with(
             snapshot_id="env-snap",
             mem_bytes=16,
             vcpus=8,
             fs_capacity_bytes=128,
-            create_params=environment.create_params,
+            create_params=workspace.create_params,
         )
         mock_configure_proxy.assert_awaited_once_with(
             "sandbox-123",
             "ghs_install",
-            base_proxy_config=environment.create_params["proxy_config"],
+            base_proxy_config=workspace.create_params["proxy_config"],
         )
 
     @pytest.mark.asyncio
@@ -616,9 +616,9 @@ class TestRefreshProxyOnSandboxReuse:
                 return_value=("ghp", None),
             ),
             patch(
-                "agent.server.resolve_environment",
+                "agent.server.load_workspace",
                 new_callable=AsyncMock,
-                return_value=Environment(slug="env", create_params={"proxy_config": {}}),
+                return_value=Workspace(slug="env", create_params={"proxy_config": {}}),
             ),
             patch(
                 "agent.sandboxes.lifecycle.get_sandbox_id_from_metadata",
@@ -652,6 +652,11 @@ class TestRefreshProxyOnSandboxReuse:
             patch.dict(
                 "agent.sandboxes.lifecycle.SANDBOX_BACKENDS",
                 {"thread-123": SandboxBackendProxy(mock_sandbox, thread_id="thread-123")},
+                clear=True,
+            ),
+            patch.dict(
+                "agent.sandboxes.lifecycle.SANDBOX_CONNECTIONS",
+                {"sandbox-cached": mock_sandbox},
                 clear=True,
             ),
             patch.dict("os.environ", {"SANDBOX_TYPE": "langsmith"}),

@@ -61,6 +61,13 @@ export function AutomationsList({
           Run Open SWE on a recurring schedule. Each run starts a fresh agent
           thread. {!canManage && "Workspace admins manage automation setup."}
         </p>
+        {canManage && (
+          <p className="mt-3 rounded-lg border border-border bg-card px-3 py-2 text-xs text-muted-foreground">
+            Automations can also be listed and managed through Open SWE. Start a
+            new thread, turn on Admin next to the model picker, then ask the
+            agent to make the change.
+          </p>
+        )}
         <div className="mt-4 flex w-fit rounded-md border border-border bg-card p-0.5">
           {(["overview", "runs"] as const).map((value) => (
             <button
@@ -261,7 +268,11 @@ function AutomationRow({
           <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground/70">
             <span className="flex items-center gap-1">
               <ClockIcon className="size-3.5" />
-              {describeCron(schedule.schedule)}
+              {schedule.trigger === "github_issue_opened"
+                ? "GitHub issue opened"
+                : schedule.schedule
+                  ? describeCron(schedule.schedule)
+                  : "No trigger"}
             </span>
             {schedule.repo && <span>{schedule.repo}</span>}
             {schedule.slackChannelId && <span>{schedule.slackChannelId}</span>}
