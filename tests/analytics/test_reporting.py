@@ -86,7 +86,8 @@ async def test_report_distinguishes_capture_delivery_period_and_suppression(
     await postgres.close()
     await initialize_database()
     report = await queries.pr_merge_rate_by_model(period="all", admin=True)
-    assert report["status"] == "ready"
+    assert report["status"] == "suppressed"
+    assert report["unavailable_thread_ids"] == []
     assert datetime.fromisoformat(report["last_processed_at"]) == processed_at
 
 
