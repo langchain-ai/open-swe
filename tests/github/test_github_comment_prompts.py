@@ -120,6 +120,18 @@ def test_dashboard_prompt_omits_slack_tools() -> None:
     assert "slack_add_reaction" not in prompt
 
 
+def test_prompt_warns_when_gated_capabilities_are_unavailable() -> None:
+    prompt = construct_system_prompt(
+        working_dir="/workspace",
+        unavailable_capabilities=("Slack delivery tools", "expedited PR approval"),
+    )
+
+    assert "Slack delivery tools" in prompt
+    assert "expedited PR approval" in prompt
+    assert "available through the Slack surface" in prompt
+    assert "Never emulate a platform command" in prompt
+
+
 def test_construct_system_prompt_includes_shared_base_explicitly() -> None:
     from agent.prompt import OPEN_SWE_SHARED_BASE
 

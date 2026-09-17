@@ -41,6 +41,11 @@ async def test_read_user_settings_returns_redacted_participant_settings() -> Non
             new_callable=AsyncMock,
             return_value={"notion": {"connected": True}},
         ),
+        patch(
+            "agent.tools.read_user_settings.actor_is_admin",
+            new_callable=AsyncMock,
+            return_value=False,
+        ),
     ):
         result = await read_user_settings()
 
@@ -67,6 +72,57 @@ async def test_read_user_settings_returns_redacted_participant_settings() -> Non
     assert "private/internal" not in rendered
     assert "secret-prefix" not in rendered
     assert "updated_at" not in rendered
+    assert "workspace" not in result
+
+
+@pytest.mark.asyncio
+async def test_read_user_settings_includes_workspace_settings_for_admin() -> None:
+    workspace_settings = {
+        "review_draft_prs": True,
+        "pr_summaries": False,
+        "review_trace_links": True,
+        "model_routing_enabled": False,
+        "gateway_enabled": None,
+        "fable_enabled": False,
+        "expedited_review_enabled": True,
+    }
+    with (
+        patch(
+            "agent.tools.read_user_settings.get_config",
+            return_value={"configurable": {"thread_id": "thread-1", "github_login": "octocat"}},
+        ),
+        patch(
+            "agent.tools.read_user_settings.resolve_thread_participant_logins",
+            new_callable=AsyncMock,
+            return_value=({"octocat"}, 0, None),
+        ),
+        patch(
+            "agent.tools.read_user_settings.get_profile", new_callable=AsyncMock, return_value={}
+        ),
+        patch(
+            "agent.tools.read_user_settings.get_user_instructions",
+            new_callable=AsyncMock,
+            return_value=None,
+        ),
+        patch(
+            "agent.tools.read_user_settings.get_notion_status",
+            new_callable=AsyncMock,
+            return_value={"notion": {"connected": False}},
+        ),
+        patch(
+            "agent.tools.read_user_settings.actor_is_admin",
+            new_callable=AsyncMock,
+            return_value=True,
+        ),
+        patch(
+            "agent.tools.read_user_settings.cached_workspace_settings",
+            new_callable=AsyncMock,
+            return_value=workspace_settings,
+        ),
+    ):
+        result = await read_user_settings()
+
+    assert result["workspace"] == workspace_settings
 
 
 @pytest.mark.asyncio

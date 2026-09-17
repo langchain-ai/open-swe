@@ -9,6 +9,9 @@ from langgraph.config import get_config
 from agent.dashboard.profiles import get_profile, normalize_profile_for_response
 from agent.dashboard.user_credentials import get_notion_status
 from agent.dashboard.user_instructions import get_user_instructions
+from agent.dashboard.workspace_settings_cache import cached_workspace_settings
+from agent.run_config import RunConfig
+from agent.tools.admin_gate import actor_is_admin
 from agent.utils.thread_participants import resolve_thread_participant_logins
 
 _PROFILE_SETTING_KEYS = (
@@ -20,6 +23,15 @@ _PROFILE_SETTING_KEYS = (
     "dm_session_enabled",
     "draft_prs",
     "review_draft_prs",
+)
+_WORKSPACE_SETTING_KEYS = (
+    "review_draft_prs",
+    "pr_summaries",
+    "review_trace_links",
+    "model_routing_enabled",
+    "gateway_enabled",
+    "fable_enabled",
+    "expedited_review_enabled",
 )
 
 
@@ -48,7 +60,7 @@ async def _settings_for_login(login: str) -> dict[str, Any]:
 
 
 async def read_user_settings() -> dict[str, Any]:
-    """Implement the `read_user_settings` tool."""
+    """Read verified participant settings and workspace flags for admins."""
     config = get_config()
     if not isinstance(config, Mapping):
         return {"success": False, "error": "Missing run config"}
@@ -56,8 +68,13 @@ async def read_user_settings() -> dict[str, Any]:
     if error or not logins:
         return {"success": False, "error": error or "No verified participants found"}
     participants = await asyncio.gather(*(_settings_for_login(login) for login in sorted(logins)))
-    return {
+    result: dict[str, Any] = {
         "success": True,
         "participants": list(participants),
         "unresolved_participant_count": unresolved_count,
     }
+    run_config = RunConfig.from_config(config)
+    if await actor_is_admin(run_config, login=run_config.github_login):
+        workspace_settings = await cached_workspace_settings(run_config.workspace_slug)
+        result["workspace"] = {key: workspace_settings.get(key) for key in _WORKSPACE_SETTING_KEYS}
+    return result

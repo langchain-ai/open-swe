@@ -128,6 +128,15 @@ def _render_user_instructions_section(instructions: str | None) -> str:
     return render_prompt("system/user-instructions.md", instructions=instructions.strip())
 
 
+def _render_unavailable_capabilities_section(capabilities: Sequence[str]) -> str:
+    if not capabilities:
+        return ""
+    return render_prompt(
+        "system/unavailable-capabilities.md",
+        capabilities="\n".join(f"- {capability}" for capability in capabilities),
+    )
+
+
 def _git_identity_command(identity: CollaboratorIdentity) -> str:
     return (
         f"git config user.name {shlex.quote(identity.commit_name)} "
@@ -201,6 +210,7 @@ def construct_system_prompt(
     slack_ask: bool = False,
     sandbox_file_downloads: bool = False,
     continued_from_collaborative: bool = False,
+    unavailable_capabilities: Sequence[str] = (),
 ) -> str:
     del linear_project_id, linear_issue_number
     untrusted_section = EXTERNAL_UNTRUSTED_COMMENTS_SECTION
@@ -259,6 +269,9 @@ def construct_system_prompt(
         commit_pr_section=commit_pr_section,
         repo_instructions_section=_render_repo_instructions_section(repo_custom_instructions),
         workspace_section=_render_workspace_section(workspace_name, workspace_instructions),
+        unavailable_capabilities_section=_render_unavailable_capabilities_section(
+            unavailable_capabilities
+        ),
         admin_workspace_section=(
             load_prompt("system/admin-workspace.md") if admin_workspaces else ""
         ),
