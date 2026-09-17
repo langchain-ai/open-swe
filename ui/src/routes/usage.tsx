@@ -497,12 +497,10 @@ function PRMergeRateSection({
               no merges.
             </p>
             <p>
-              <strong>Avg time to PR</strong> is the arithmetic mean of elapsed
-              wall-clock time from the start of the run that opened a PR to the
-              PR's creation, across all PRs opened in the selected period
-              regardless of outcome. PRs whose opening run has no recorded start
-              time, or started after the PR was created, are excluded, and it
-              shows — when no PRs in a group have valid timing.
+              <strong>Avg time to PR</strong> is the arithmetic mean of time
+              from opening-run start to PR creation across all PRs opened in the
+              selected period. PRs without a valid opening-run start time are
+              excluded, and it shows — when a group has none.
             </p>
             <ul className="list-disc space-y-1 pl-4">
               <li>
