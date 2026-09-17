@@ -30,6 +30,7 @@ const captured: PRMergeRatePayload = {
   period: "30d",
   suppression_threshold: 5,
   cohorts: [],
+  unavailable_thread_ids: [],
   reporting_cutover_at: "2026-09-11T11:00:00Z",
   collection_started_at: "2026-09-11T12:00:00Z",
   last_processed_at: null,
@@ -126,6 +127,20 @@ it("shows delivery lag separately from suppression, then refreshes to a populate
         decided_merge_rate: 0.75,
         mature_denominator: 5,
         mature_cohort_merge_share: 0.6,
+        efforts: [
+          {
+            effort: "high",
+            merged: 3,
+            closed_without_merge: 1,
+            mature_pending: 1,
+            waiting: 0,
+            cohort_size: 5,
+            decided_denominator: 4,
+            decided_merge_rate: 0.75,
+            mature_denominator: 5,
+            mature_cohort_merge_share: 0.6,
+          },
+        ],
       },
     ],
   })
@@ -163,6 +178,20 @@ it.each([
           decided_merge_rate: 0.75,
           mature_denominator: 5,
           mature_cohort_merge_share: 0.6,
+          efforts: [
+            {
+              effort: "high",
+              merged: 3,
+              closed_without_merge: 1,
+              mature_pending: 1,
+              waiting: 2,
+              cohort_size: 7,
+              decided_denominator: 4,
+              decided_merge_rate: 0.75,
+              mature_denominator: 5,
+              mature_cohort_merge_share: 0.6,
+            },
+          ],
         },
       ],
     })
@@ -173,7 +202,7 @@ it.each([
         .getAllByRole("cell")
         .map((cell) => cell.textContent)
     ).toEqual([
-      "example-modelconfigured attribution",
+      "example-modelHigh · configured attribution",
       "7",
       "3",
       "1",
@@ -236,6 +265,25 @@ it.each([
   }
 )
 
+it("shows unavailable attribution thread IDs for admin triage", async () => {
+  const threadId = "73b0906a-ff36-59c7-9cc5-ad622fff673e"
+  const writeText = vi.fn().mockResolvedValue(undefined)
+  Object.defineProperty(navigator, "clipboard", {
+    configurable: true,
+    value: { writeText },
+  })
+  vi.spyOn(api, "prMergeRateByModel").mockResolvedValue({
+    ...captured,
+    unavailable_thread_ids: [threadId],
+  })
+  const client = mountReport()
+  fireEvent.click(await screen.findByText("Unavailable model attribution (1)"))
+  expect(screen.getByText(threadId)).toBeTruthy()
+  fireEvent.click(screen.getByRole("button", { name: "Copy" }))
+  expect(writeText).toHaveBeenCalledWith(threadId)
+  client.clear()
+})
+
 it("hides the Open age breakdown when no PRs are open", async () => {
   vi.spyOn(api, "prMergeRateByModel").mockResolvedValue({
     ...captured,
@@ -253,6 +301,20 @@ it("hides the Open age breakdown when no PRs are open", async () => {
         decided_merge_rate: 0.5,
         mature_denominator: 2,
         mature_cohort_merge_share: 0.5,
+        efforts: [
+          {
+            effort: "low",
+            merged: 1,
+            closed_without_merge: 1,
+            mature_pending: 0,
+            waiting: 0,
+            cohort_size: 2,
+            decided_denominator: 2,
+            decided_merge_rate: 0.5,
+            mature_denominator: 2,
+            mature_cohort_merge_share: 0.5,
+          },
+        ],
       },
     ],
   })
@@ -261,6 +323,63 @@ it("hides the Open age breakdown when no PRs are open", async () => {
   expect(within(row).getAllByRole("cell")[4]!.textContent).toBe("0")
   expect(within(row).queryByRole("button", { name: "0" })).toBeNull()
   expect(within(row).queryByText(/open for less than/)).toBeNull()
+  client.clear()
+})
+
+it("expands model totals into reasoning effort rows", async () => {
+  vi.spyOn(api, "prMergeRateByModel").mockResolvedValue({
+    ...captured,
+    status: "ready",
+    cohorts: [
+      {
+        model_id: "example-model",
+        model_attribution_quality: "configured",
+        merged: 3,
+        closed_without_merge: 1,
+        mature_pending: 0,
+        waiting: 0,
+        cohort_size: 4,
+        decided_denominator: 4,
+        decided_merge_rate: 0.75,
+        mature_denominator: 4,
+        mature_cohort_merge_share: 0.75,
+        efforts: [
+          {
+            effort: "low",
+            merged: 1,
+            closed_without_merge: 1,
+            mature_pending: 0,
+            waiting: 0,
+            cohort_size: 2,
+            decided_denominator: 2,
+            decided_merge_rate: 0.5,
+            mature_denominator: 2,
+            mature_cohort_merge_share: 0.5,
+          },
+          {
+            effort: "high",
+            merged: 2,
+            closed_without_merge: 0,
+            mature_pending: 0,
+            waiting: 0,
+            cohort_size: 2,
+            decided_denominator: 2,
+            decided_merge_rate: 1,
+            mature_denominator: 2,
+            mature_cohort_merge_share: 1,
+          },
+        ],
+      },
+    ],
+  })
+  const client = mountReport()
+  expect(await screen.findByText(/All efforts/)).toBeTruthy()
+  expect(screen.queryByText("Low")).toBeNull()
+  fireEvent.click(
+    screen.getByRole("button", { name: /Expand.*reasoning efforts/ })
+  )
+  expect(screen.getByText("Low")).toBeTruthy()
+  expect(screen.getByText("High")).toBeTruthy()
   client.clear()
 })
 
@@ -281,6 +400,20 @@ it("shortens model paths across usage tables", async () => {
         decided_merge_rate: 1,
         mature_denominator: 1,
         mature_cohort_merge_share: 1,
+        efforts: [
+          {
+            effort: "medium",
+            merged: 1,
+            closed_without_merge: 0,
+            mature_pending: 0,
+            waiting: 0,
+            cohort_size: 1,
+            decided_denominator: 1,
+            decided_merge_rate: 1,
+            mature_denominator: 1,
+            mature_cohort_merge_share: 1,
+          },
+        ],
       },
     ],
   })

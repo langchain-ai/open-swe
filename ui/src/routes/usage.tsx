@@ -6,7 +6,8 @@ import {
   ClockCountdownIcon,
   WarningCircleIcon,
 } from "@phosphor-icons/react"
-import { useState } from "react"
+import { ChevronDown, ChevronRight } from "lucide-react"
+import { Fragment, useState } from "react"
 
 import type {
   AnalyticsMetadata,
@@ -445,6 +446,31 @@ function PRMergeRateSection({
           {emptyMessage}
         </p>
       )}
+      {data?.unavailable_thread_ids.length ? (
+        <details className="border-t border-border px-4 py-3 text-xs text-muted-foreground">
+          <summary className="cursor-pointer rounded-sm focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-ring">
+            Unavailable model attribution ({data.unavailable_thread_ids.length})
+          </summary>
+          <p className="mt-3">
+            These PRs are excluded from model outcomes. Copy a thread ID to
+            triage its opening-run attribution.
+          </p>
+          <ul className="mt-2 space-y-1">
+            {data.unavailable_thread_ids.map((threadId) => (
+              <li key={threadId} className="flex items-center gap-2">
+                <code className="select-all">{threadId}</code>
+                <button
+                  type="button"
+                  className="rounded-sm underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+                  onClick={() => void navigator.clipboard.writeText(threadId)}
+                >
+                  Copy
+                </button>
+              </li>
+            ))}
+          </ul>
+        </details>
+      ) : null}
       {data ? (
         <details className="border-t border-border px-4 py-3 text-xs text-muted-foreground">
           <summary className="cursor-pointer rounded-sm focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-ring">
@@ -493,7 +519,7 @@ function OpenPRCount({
   cohort,
   maturityDays,
 }: {
-  cohort: PRMergeRateCohort
+  cohort: Pick<PRMergeRateCohort, "mature_pending" | "waiting">
   maturityDays: number
 }) {
   const [open, setOpen] = useState(false)
@@ -532,6 +558,7 @@ function PRMergeRateTable({
 }) {
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(10)
+  const [expanded, setExpanded] = useState<Set<string>>(() => new Set())
   const pageCount = Math.max(1, Math.ceil(cohorts.length / pageSize))
   const currentPage = Math.min(page, pageCount)
   const rows = cohorts.slice(
@@ -565,37 +592,74 @@ function PRMergeRateTable({
           </tr>
         </thead>
         <tbody className="divide-y divide-border">
-          {rows.map((cohort) => (
-            <tr key={`${cohort.model_id}-${cohort.model_attribution_quality}`}>
-              <td className="px-4 py-3">
-                <div className="font-medium">
-                  {cohort.model_id
-                    ? safeModelLabel(cohort.model_id) || "Unavailable"
-                    : "Unavailable"}
-                </div>
-                <div className="text-muted-foreground">
-                  {cohort.model_attribution_quality} attribution
-                </div>
-              </td>
-              <td className="px-2 py-3 text-right tabular-nums">
-                {cohort.cohort_size}
-              </td>
-              <td className="px-2 py-3 text-right tabular-nums">
-                {cohort.merged}
-              </td>
-              <td className="px-2 py-3 text-right tabular-nums">
-                {cohort.closed_without_merge}
-              </td>
-              <td className="px-2 py-3 text-right tabular-nums">
-                <OpenPRCount cohort={cohort} maturityDays={maturityDays} />
-              </td>
-              <td className="px-4 py-3 text-right text-sm font-semibold tabular-nums">
-                {cohort.mature_cohort_merge_share == null
-                  ? "—"
-                  : formatPercent(cohort.mature_cohort_merge_share)}
-              </td>
-            </tr>
-          ))}
+          {rows.map((cohort) => {
+            const key = `${cohort.model_id}-${cohort.model_attribution_quality}`
+            const hasMultipleEfforts = cohort.efforts.length > 1
+            const isExpanded = hasMultipleEfforts && expanded.has(key)
+            const modelLabel = cohort.model_id
+              ? safeModelLabel(cohort.model_id) || "Unavailable"
+              : "Unavailable"
+            return (
+              <Fragment key={key}>
+                <tr>
+                  <td className="px-4 py-3">
+                    <div className="flex items-center gap-2">
+                      {hasMultipleEfforts ? (
+                        <button
+                          type="button"
+                          className="-ml-1 rounded-sm p-1 text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+                          aria-expanded={isExpanded}
+                          aria-label={`${isExpanded ? "Collapse" : "Expand"} ${modelLabel} reasoning efforts`}
+                          onClick={() =>
+                            setExpanded((current) => {
+                              const next = new Set(current)
+                              if (next.has(key)) next.delete(key)
+                              else next.add(key)
+                              return next
+                            })
+                          }
+                        >
+                          {isExpanded ? (
+                            <ChevronDown className="size-3.5" />
+                          ) : (
+                            <ChevronRight className="size-3.5" />
+                          )}
+                        </button>
+                      ) : null}
+                      <div>
+                        <div className="font-medium">{modelLabel}</div>
+                        <div className="text-muted-foreground">
+                          {hasMultipleEfforts
+                            ? `All efforts · ${cohort.model_attribution_quality} attribution`
+                            : `${formatEffort(cohort.efforts[0]?.effort)} · ${cohort.model_attribution_quality} attribution`}
+                        </div>
+                      </div>
+                    </div>
+                  </td>
+                  <PRMergeRateCells
+                    cohort={cohort}
+                    maturityDays={maturityDays}
+                  />
+                </tr>
+                {isExpanded
+                  ? cohort.efforts.map((effort) => (
+                      <tr
+                        key={`${key}-${effort.effort ?? "unknown"}`}
+                        className="bg-muted/35"
+                      >
+                        <td className="py-3 pr-2 pl-11 font-medium">
+                          {formatEffort(effort.effort)}
+                        </td>
+                        <PRMergeRateCells
+                          cohort={effort}
+                          maturityDays={maturityDays}
+                        />
+                      </tr>
+                    ))
+                  : null}
+              </Fragment>
+            )
+          })}
         </tbody>
       </table>
       <TablePagination
@@ -609,6 +673,48 @@ function PRMergeRateTable({
         }}
       />
     </div>
+  )
+}
+
+function formatEffort(effort: string | null | undefined) {
+  return effort
+    ? effort.charAt(0).toUpperCase() + effort.slice(1)
+    : "Unknown / legacy"
+}
+
+function PRMergeRateCells({
+  cohort,
+  maturityDays,
+}: {
+  cohort: Pick<
+    PRMergeRateCohort,
+    | "cohort_size"
+    | "merged"
+    | "closed_without_merge"
+    | "mature_pending"
+    | "waiting"
+    | "mature_cohort_merge_share"
+  >
+  maturityDays: number
+}) {
+  return (
+    <>
+      <td className="px-2 py-3 text-right tabular-nums">
+        {cohort.cohort_size}
+      </td>
+      <td className="px-2 py-3 text-right tabular-nums">{cohort.merged}</td>
+      <td className="px-2 py-3 text-right tabular-nums">
+        {cohort.closed_without_merge}
+      </td>
+      <td className="px-2 py-3 text-right tabular-nums">
+        <OpenPRCount cohort={cohort} maturityDays={maturityDays} />
+      </td>
+      <td className="px-4 py-3 text-right text-sm font-semibold tabular-nums">
+        {cohort.mature_cohort_merge_share == null
+          ? "—"
+          : formatPercent(cohort.mature_cohort_merge_share)}
+      </td>
+    </>
   )
 }
 
