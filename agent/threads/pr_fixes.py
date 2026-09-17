@@ -2,7 +2,7 @@
 
 import logging
 import uuid
-from typing import Literal
+from typing import Annotated, ClassVar, Literal
 
 from fastapi import HTTPException
 from langgraph_sdk.schema import Thread
@@ -29,10 +29,6 @@ logger = logging.getLogger(__name__)
 _FIX_THREAD_LINK_SOURCE = "dashboard_pr_fix"
 
 
-class OpenPullRequestThreadRequest(BaseModel):
-    title: str = Field(min_length=1, max_length=1000)
-
-
 class PullRequestFixContext(BaseModel):
     model_config = ConfigDict(
         alias_generator=AliasGenerator(validation_alias=to_camel), populate_by_name=True
@@ -55,13 +51,69 @@ class PullRequestThreadStatus(BaseModel):
     running: bool
 
 
-class PullRequestThreadRef(BaseModel):
+class PullRequestThreadRun(BaseModel):
     thread_id: str
+    already_running: bool = False
 
 
-class PullRequestFixResult(BaseModel):
-    thread_id: str
-    already_running: bool | None = None
+class _PullRequestIntentBase(BaseModel):
+    dispatches_run: ClassVar[bool]
+
+    def prompt(self, url: str) -> str:
+        raise NotImplementedError
+
+    def thread_title(self, full_name: str, number: int) -> str:
+        raise NotImplementedError
+
+
+class OpenThreadIntent(_PullRequestIntentBase):
+    intent: Literal["open"]
+    title: str = Field(min_length=1, max_length=1000)
+
+    dispatches_run: ClassVar[bool] = False
+
+    def prompt(self, url: str) -> str:
+        return render_prompt("runs/pull-request-thread.md", url=url)
+
+    def thread_title(self, full_name: str, number: int) -> str:
+        return self.title
+
+
+class FixIntent(_PullRequestIntentBase):
+    intent: Literal["fix"]
+    context: PullRequestFixContext | None = None
+
+    dispatches_run: ClassVar[bool] = True
+
+    def prompt(self, url: str) -> str:
+        prompt = render_prompt("runs/pull-request-fix.md", url=url)
+        if self.context is None:
+            return prompt
+        snapshot = render_prompt(
+            "runs/pull-request-fix-context.md",
+            snapshot=self.context.model_dump_json(indent=2),
+        )
+        return f"{prompt}\n\n{snapshot}"
+
+    def thread_title(self, full_name: str, number: int) -> str:
+        return f"Fix {full_name}#{number}"
+
+
+class AddressCommentsIntent(_PullRequestIntentBase):
+    intent: Literal["address-comments"]
+
+    dispatches_run: ClassVar[bool] = True
+
+    def prompt(self, url: str) -> str:
+        return render_prompt("runs/pull-request-comments.md", url=url)
+
+    def thread_title(self, full_name: str, number: int) -> str:
+        return f"Address comments on {full_name}#{number}"
+
+
+PullRequestThreadIntent = Annotated[
+    OpenThreadIntent | FixIntent | AddressCommentsIntent, Field(discriminator="intent")
+]
 
 
 async def _pr_thread_ids(owner: str, repo: str, number: int) -> list[str]:
@@ -178,52 +230,23 @@ async def pull_request_thread_running(
     )
 
 
-async def open_pull_request_thread(
+async def start_pull_request_thread(
     owner: str,
     repo: str,
     number: int,
     login: str,
     email: str | None = None,
     *,
-    title: str,
-) -> PullRequestThreadRef:
+    intent: PullRequestThreadIntent,
+) -> PullRequestThreadRun:
     full_name = f"{owner}/{repo}"
     if pull_request_identity({"repo_full_name": full_name, "number": number}) is None:
         raise HTTPException(422, "invalid pull request")
     await require_repo_access_for_user(login, full_name)
     await _ensure_dashboard_github_token(login)
     url = f"https://github.com/{full_name}/pull/{number}"
+    prompt = intent.prompt(url)
     client = langgraph_client()
-    async with agent_thread_pr_state_lock(client, _pr_thread_lock_key(login, url)):
-        thread_id = await _find_or_create_pr_thread(
-            owner,
-            repo,
-            number,
-            login,
-            email,
-            prompt=render_prompt("runs/pull-request-thread.md", url=url),
-            title=title,
-        )
-        current = await client.threads.get(thread_id)
-        _assert_thread_postable(thread_metadata(current), login, email)
-        return PullRequestThreadRef(thread_id=thread_id)
-
-
-async def address_pull_request_comments(
-    owner: str,
-    repo: str,
-    number: int,
-    login: str,
-    email: str | None = None,
-) -> PullRequestFixResult:
-    full_name = f"{owner}/{repo}"
-    if pull_request_identity({"repo_full_name": full_name, "number": number}) is None:
-        raise HTTPException(422, "invalid pull request")
-    await require_repo_access_for_user(login, full_name)
-    await _ensure_dashboard_github_token(login)
-    url = f"https://github.com/{full_name}/pull/{number}"
-    client = langgraph_client()
-    prompt = render_prompt("runs/pull-request-comments.md", url=url)
     async with agent_thread_pr_state_lock(client, _pr_thread_lock_key(login, url)):
         thread_id = await _find_or_create_pr_thread(
             owner,
@@ -232,12 +255,14 @@ async def address_pull_request_comments(
             login,
             email,
             prompt=prompt,
-            title=f"Address comments on {full_name}#{number}",
+            title=intent.thread_title(full_name, number),
         )
         current = await client.threads.get(thread_id)
         _assert_thread_postable(thread_metadata(current), login, email)
+        if not intent.dispatches_run:
+            return PullRequestThreadRun(thread_id=thread_id)
         if current.get("status") == "busy":
-            return PullRequestFixResult(thread_id=thread_id, already_running=True)
+            return PullRequestThreadRun(thread_id=thread_id, already_running=True)
         async with agent_thread_pr_state_lock(client, thread_id):
             await client.threads.update(
                 thread_id=thread_id,
@@ -256,61 +281,4 @@ async def address_pull_request_comments(
             client=client,
             multitask_strategy="enqueue",
         )
-        return PullRequestFixResult(thread_id=thread_id)
-
-
-async def fix_pull_request(
-    owner: str,
-    repo: str,
-    number: int,
-    login: str,
-    email: str | None = None,
-    *,
-    context: PullRequestFixContext | None = None,
-) -> PullRequestFixResult:
-    full_name = f"{owner}/{repo}"
-    if pull_request_identity({"repo_full_name": full_name, "number": number}) is None:
-        raise HTTPException(422, "invalid pull request")
-    await require_repo_access_for_user(login, full_name)
-    await _ensure_dashboard_github_token(login)
-    url = f"https://github.com/{full_name}/pull/{number}"
-    client = langgraph_client()
-    prompt = render_prompt("runs/pull-request-fix.md", url=url)
-    if context is not None:
-        prompt += "\n\n" + render_prompt(
-            "runs/pull-request-fix-context.md",
-            snapshot=context.model_dump_json(indent=2),
-        )
-    async with agent_thread_pr_state_lock(client, _pr_thread_lock_key(login, url)):
-        thread_id = await _find_or_create_pr_thread(
-            owner,
-            repo,
-            number,
-            login,
-            email,
-            prompt=prompt,
-            title=f"Fix {full_name}#{number}",
-        )
-        current = await client.threads.get(thread_id)
-        _assert_thread_postable(thread_metadata(current), login, email)
-        if current.get("status") == "busy":
-            return PullRequestFixResult(thread_id=thread_id, already_running=True)
-        async with agent_thread_pr_state_lock(client, thread_id):
-            await client.threads.update(
-                thread_id=thread_id,
-                metadata={"resolved": False, "resolved_at_ms": None, "auto_resolved_by_prs": False},
-            )
-        current = await client.threads.get(thread_id)
-        _assert_thread_postable(thread_metadata(current), login, email)
-        configurable = await _build_dashboard_configurable(
-            thread_id, login, thread_metadata(current)
-        )
-        await dispatch_agent_run(
-            thread_id,
-            prompt,
-            configurable,
-            source="dashboard",
-            client=client,
-            multitask_strategy="enqueue",
-        )
-        return PullRequestFixResult(thread_id=thread_id)
+        return PullRequestThreadRun(thread_id=thread_id)

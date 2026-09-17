@@ -142,6 +142,7 @@ def apply() -> None:
         pull_request_actions,
         pull_request_context,
         pull_request_status,
+        repo_merge_methods,
     )
     from agent.threads import access as thread_access
 
@@ -170,6 +171,7 @@ def apply() -> None:
     # the one their calls read.
     pull_request_status.GITHUB_API_BASE = FAKE_GITHUB_API
     pull_request_actions.GITHUB_API_BASE = FAKE_GITHUB_API
+    repo_merge_methods.GITHUB_API_BASE = FAKE_GITHUB_API
     pull_request_status.GITHUB_GRAPHQL = f"{FAKE_GITHUB_API}/graphql"
     pull_request_context.GITHUB_GRAPHQL = f"{FAKE_GITHUB_API}/graphql"
     pull_request_actions.GITHUB_GRAPHQL = f"{FAKE_GITHUB_API}/graphql"

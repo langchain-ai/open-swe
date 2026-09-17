@@ -17,6 +17,7 @@ import {
   api,
   type OpenPullRequest,
   type PullRequestActionResult,
+  type PullRequestThreadResult,
 } from "@/lib/api"
 import { MyPullRequests } from "./MyPullRequests"
 import type { ReviewsSearch } from "./search"
@@ -204,7 +205,7 @@ describe("My PRs", () => {
   })
 
   it("opens the associated coding thread with immediate loading feedback", async () => {
-    let finish!: (result: { thread_id: string }) => void
+    let finish!: (result: PullRequestThreadResult) => void
     vi.mocked(api.openPullRequestThread).mockImplementation(
       () =>
         new Promise((resolve) => {
@@ -224,7 +225,7 @@ describe("My PRs", () => {
       "Change 1"
     )
     expect(navigate).not.toHaveBeenCalled()
-    finish({ thread_id: "coding-thread" })
+    finish({ thread_id: "coding-thread", already_running: false })
     await waitFor(() =>
       expect(navigate).toHaveBeenCalledWith({
         to: "/agents/$threadId",
@@ -900,7 +901,7 @@ describe("My PRs", () => {
   })
 
   it("queues the fix in the background and keeps the button disabled after success", async () => {
-    let resolve!: (value: { thread_id: string }) => void
+    let resolve!: (value: PullRequestThreadResult) => void
     vi.mocked(api.fixPullRequest).mockImplementation(
       () =>
         new Promise((done) => {
@@ -919,7 +920,7 @@ describe("My PRs", () => {
     expect(api.fixPullRequest).toHaveBeenCalledWith(
       expect.objectContaining(payload.pullRequests[0]!)
     )
-    resolve({ thread_id: "fix-thread" })
+    resolve({ thread_id: "fix-thread", already_running: false })
     const queued = await screen.findByRole("button", { name: "Fix queued" })
     expect((queued as HTMLButtonElement).disabled).toBe(true)
     fireEvent.click(queued)
@@ -1059,7 +1060,7 @@ describe("My PRs", () => {
       ...payload,
       pullRequests: [pull(1, { unresolvedThreads: 2 })],
     })
-    let resolve!: (value: { thread_id: string }) => void
+    let resolve!: (value: PullRequestThreadResult) => void
     vi.mocked(api.addressPullRequestComments).mockImplementation(
       () =>
         new Promise((done) => {
@@ -1081,7 +1082,7 @@ describe("My PRs", () => {
     expect(api.addressPullRequestComments).toHaveBeenCalledWith(
       expect.objectContaining({ number: 1, unresolvedThreads: 2 })
     )
-    resolve({ thread_id: "comments-thread" })
+    resolve({ thread_id: "comments-thread", already_running: false })
     const queued = await within(card).findByRole("button", {
       name: "Comment fixes queued",
     })

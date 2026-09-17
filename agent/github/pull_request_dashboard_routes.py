@@ -1,4 +1,4 @@
-"""Dashboard API for the signed-in user's own open pull requests."""
+"""Dashboard API for pull requests and the coding threads that work on them."""
 
 from typing import Any, Literal
 
@@ -10,9 +10,7 @@ from agent.github.http import github_client
 from agent.github.pull_request_actions import (
     PullRequestAction,
     PullRequestActionResult,
-    RepositoryMergeMethods,
     act_on_pull_request,
-    repository_merge_methods,
 )
 from agent.github.pull_request_status import (
     OpenPullRequest,
@@ -21,17 +19,25 @@ from agent.github.pull_request_status import (
     load_open_pull_request,
     pull_request_identity,
 )
+from agent.threads.pr_fixes import (
+    PullRequestThreadIntent,
+    PullRequestThreadRun,
+    PullRequestThreadStatus,
+    pull_request_thread_running,
+    start_pull_request_thread,
+)
 
 router = APIRouter(tags=["pull-requests"])
 
 
-@router.get("/my-pull-requests")
-async def api_list_my_pull_requests(
+@router.get("/pull-requests")
+async def api_list_pull_requests(
     repo: str = "",
     lightweight: bool = False,
     sort: Literal["created", "updated"] = "updated",
     direction: Literal["asc", "desc"] = "desc",
     page: int = 1,
+    scope: Literal["mine"] = "mine",
     session: dict[str, Any] = SESSION_DEP,
 ) -> OpenPullRequests:
     token = await get_valid_access_token(session["sub"])
@@ -48,19 +54,8 @@ async def api_list_my_pull_requests(
     )
 
 
-# Declared before the ``{number}`` route so the literal path segment wins.
-@router.get("/my-pull-requests/{owner}/{repo}/merge-methods")
-async def api_my_pull_request_merge_methods(
-    owner: str, repo: str, session: dict[str, Any] = SESSION_DEP
-) -> RepositoryMergeMethods:
-    token = await get_valid_access_token(session["sub"])
-    if not token:
-        raise HTTPException(401, "GitHub token unavailable, re-login required")
-    return await repository_merge_methods(owner, repo, token)
-
-
-@router.get("/my-pull-requests/{owner}/{repo}/{number}")
-async def api_my_pull_request_details(
+@router.get("/repos/{owner}/{repo}/pulls/{number}")
+async def api_pull_request_details(
     owner: str, repo: str, number: int, session: dict[str, Any] = SESSION_DEP
 ) -> OpenPullRequest | None:
     if pull_request_identity({"repo_full_name": f"{owner}/{repo}", "number": number}) is None:
@@ -74,8 +69,8 @@ async def api_my_pull_request_details(
         )
 
 
-@router.post("/my-pull-requests/{owner}/{repo}/{number}/action")
-async def api_act_on_my_pull_request(
+@router.post("/repos/{owner}/{repo}/pulls/{number}/action")
+async def api_act_on_pull_request(
     owner: str,
     repo: str,
     number: int,
@@ -86,3 +81,25 @@ async def api_act_on_my_pull_request(
     if not token:
         raise HTTPException(401, "GitHub token unavailable, re-login required")
     return await act_on_pull_request(owner, repo, number, body, token)
+
+
+@router.get("/repos/{owner}/{repo}/pulls/{number}/thread")
+async def api_pull_request_thread_status(
+    owner: str, repo: str, number: int, session: dict[str, str] = SESSION_DEP
+) -> PullRequestThreadStatus:
+    return await pull_request_thread_running(
+        owner, repo, number, session["sub"], session.get("email")
+    )
+
+
+@router.post("/repos/{owner}/{repo}/pulls/{number}/thread")
+async def api_start_pull_request_thread(
+    owner: str,
+    repo: str,
+    number: int,
+    body: PullRequestThreadIntent,
+    session: dict[str, str] = SESSION_DEP,
+) -> PullRequestThreadRun:
+    return await start_pull_request_thread(
+        owner, repo, number, session["sub"], session.get("email"), intent=body
+    )

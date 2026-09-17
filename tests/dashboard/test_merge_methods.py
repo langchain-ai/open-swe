@@ -5,8 +5,8 @@ import httpx2
 import pytest
 from fastapi import HTTPException
 
-from agent.github import pull_request_actions as actions
-from agent.github import pull_request_dashboard_routes as pr_routes
+from agent.github import dashboard_routes as repo_routes
+from agent.github import repo_merge_methods as merge_methods
 
 
 def _client(expected_token: str):
@@ -43,28 +43,28 @@ async def test_merge_methods_reflect_repository_flags(monkeypatch, flags, expect
             200, json=flags, request=httpx2.Request("GET", "https://api.github.com")
         )
     )
-    monkeypatch.setattr(actions, "github_client", _client("user-token"))
-    monkeypatch.setattr(actions, "github_request", request)
-    result = await actions.repository_merge_methods("acme", "app", "user-token")
+    monkeypatch.setattr(merge_methods, "github_client", _client("user-token"))
+    monkeypatch.setattr(merge_methods, "github_request", request)
+    result = await merge_methods.repository_merge_methods("acme", "app", "user-token")
     assert result.merge_methods == expected
     assert result.model_dump(by_alias=True, mode="json") == {"mergeMethods": expected}
     assert request.await_args.args[1:] == ("GET", "https://api.github.com/repos/acme/app")
 
 
 async def test_merge_methods_network_failure_is_bad_gateway(monkeypatch):
-    monkeypatch.setattr(actions, "github_client", _client("user-token"))
+    monkeypatch.setattr(merge_methods, "github_client", _client("user-token"))
     monkeypatch.setattr(
-        actions, "github_request", AsyncMock(side_effect=httpx2.ConnectError("boom"))
+        merge_methods, "github_request", AsyncMock(side_effect=httpx2.ConnectError("boom"))
     )
     with pytest.raises(HTTPException, match="Could not load merge settings from GitHub") as error:
-        await actions.repository_merge_methods("acme", "app", "user-token")
+        await merge_methods.repository_merge_methods("acme", "app", "user-token")
     assert error.value.status_code == 502
 
 
 async def test_merge_methods_error_status_is_bad_gateway(monkeypatch):
-    monkeypatch.setattr(actions, "github_client", _client("user-token"))
+    monkeypatch.setattr(merge_methods, "github_client", _client("user-token"))
     monkeypatch.setattr(
-        actions,
+        merge_methods,
         "github_request",
         AsyncMock(
             return_value=httpx2.Response(
@@ -75,21 +75,21 @@ async def test_merge_methods_error_status_is_bad_gateway(monkeypatch):
         ),
     )
     with pytest.raises(HTTPException) as error:
-        await actions.repository_merge_methods("acme", "app", "user-token")
+        await merge_methods.repository_merge_methods("acme", "app", "user-token")
     assert error.value.status_code == 502
 
 
 async def test_merge_methods_rejects_invalid_repository():
     with pytest.raises(HTTPException) as error:
-        await actions.repository_merge_methods("acme", "..", "user-token")
+        await merge_methods.repository_merge_methods("acme", "..", "user-token")
     assert error.value.status_code == 422
 
 
 async def test_merge_methods_without_user_token_never_calls_github(monkeypatch):
-    monkeypatch.setattr(pr_routes, "get_valid_access_token", AsyncMock(return_value=None))
+    monkeypatch.setattr(repo_routes, "get_valid_access_token", AsyncMock(return_value=None))
     methods = AsyncMock()
-    monkeypatch.setattr(pr_routes, "repository_merge_methods", methods)
+    monkeypatch.setattr(repo_routes, "repository_merge_methods", methods)
     with pytest.raises(HTTPException) as error:
-        await pr_routes.api_my_pull_request_merge_methods("acme", "app", {"sub": "octocat"})
+        await repo_routes.api_repository_merge_methods("acme", "app", {"sub": "octocat"})
     assert error.value.status_code == 401
     methods.assert_not_awaited()

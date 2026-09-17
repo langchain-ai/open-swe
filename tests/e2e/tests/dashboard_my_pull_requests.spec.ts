@@ -211,7 +211,7 @@ test.describe("my pull requests", () => {
     // toast that never arrives.
     const dispatched = page.waitForResponse(
       (response) =>
-        response.url().includes(`/${broken.number}/fix`) &&
+        response.url().includes(`/${broken.number}/thread`) &&
         response.request().method() === "POST",
       { timeout: 30_000 },
     );

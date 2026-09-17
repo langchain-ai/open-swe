@@ -9,13 +9,12 @@ import {
   statusLabels,
 } from "../lib/status"
 import { PullRequestLinks } from "../PullRequestLinks"
-import { AddressPullRequestComments } from "./AddressPullRequestComments"
 import { ClosePullRequest } from "./ClosePullRequest"
 import { Diffstat } from "./Diffstat"
-import { FixPullRequest } from "./FixPullRequest"
 import { MarkPullRequestReady } from "./MarkPullRequestReady"
 import { MergePullRequest } from "./MergePullRequest"
 import { PullRequestChecks } from "./PullRequestChecks"
+import { PullRequestThreadAction } from "./PullRequestThreadAction"
 import { StatusPill } from "./StatusPill"
 import { UnresolvedConversations } from "./UnresolvedConversations"
 
@@ -87,9 +86,15 @@ export function PullRequestCard({
         <PullRequestChecks pr={pr} />
         <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
           <div className="flex flex-wrap items-center gap-x-2 gap-y-2">
-            {isFixable(pr) && <FixPullRequest pr={pr} login={login} />}
+            {isFixable(pr) && (
+              <PullRequestThreadAction pr={pr} login={login} action="fix" />
+            )}
             {hasUnresolvedConversations(pr) && (
-              <AddressPullRequestComments pr={pr} login={login} />
+              <PullRequestThreadAction
+                pr={pr}
+                login={login}
+                action="address-comments"
+              />
             )}
             {pr.draft === true && (
               <MarkPullRequestReady pr={pr} onReady={onReady} />

@@ -159,7 +159,7 @@ async def test_without_a_user_token_the_route_never_calls_github(monkeypatch):
     act = AsyncMock()
     monkeypatch.setattr(pr_routes, "act_on_pull_request", act)
     with pytest.raises(HTTPException) as error:
-        await pr_routes.api_act_on_my_pull_request(
+        await pr_routes.api_act_on_pull_request(
             "acme", "app", 7, actions.CloseAction(action="close"), {"sub": "octocat"}
         )
     assert error.value.status_code == 401
@@ -171,7 +171,7 @@ async def test_the_route_forwards_the_action_with_the_signed_in_users_token(monk
     action = actions.MarkReadyAction(action="mark-ready")
     act = AsyncMock(return_value=actions.PullRequestActionResult(action="mark-ready", done=True))
     monkeypatch.setattr(pr_routes, "act_on_pull_request", act)
-    assert await pr_routes.api_act_on_my_pull_request(
+    assert await pr_routes.api_act_on_pull_request(
         "acme", "app", 7, action, {"sub": "octocat"}
     ) == actions.PullRequestActionResult(action="mark-ready", done=True)
     act.assert_awaited_once_with("acme", "app", 7, action, "user-token")

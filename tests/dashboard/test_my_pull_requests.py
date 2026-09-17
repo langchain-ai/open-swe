@@ -272,7 +272,7 @@ async def test_route_uses_signed_in_user_token_and_rejects_missing_auth(monkeypa
     )
     monkeypatch.setattr(pr_routes, "get_valid_access_token", token)
     monkeypatch.setattr(pr_routes, "list_open_pull_requests", listing)
-    await pr_routes.api_list_my_pull_requests(repo="acme/app", session={"sub": "octocat"})
+    await pr_routes.api_list_pull_requests(repo="acme/app", session={"sub": "octocat"})
     listing.assert_awaited_once_with(
         "octocat",
         "user-token",
@@ -284,7 +284,7 @@ async def test_route_uses_signed_in_user_token_and_rejects_missing_auth(monkeypa
     )
     token.return_value = None
     with pytest.raises(HTTPException) as error:
-        await pr_routes.api_list_my_pull_requests(session={"sub": "another-user"})
+        await pr_routes.api_list_pull_requests(session={"sub": "another-user"})
     assert error.value.status_code == 401
     assert listing.await_count == 1
 

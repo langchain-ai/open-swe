@@ -4,8 +4,7 @@ from typing import Annotated, ClassVar, Literal
 
 import httpx2
 from fastapi import HTTPException
-from pydantic import BaseModel, ConfigDict, Field
-from pydantic.alias_generators import to_camel
+from pydantic import BaseModel, Field
 
 from agent.github.http import (
     GITHUB_API_BASE,
@@ -14,15 +13,9 @@ from agent.github.http import (
     github_request,
 )
 from agent.github.pull_request_status import pull_request_identity
+from agent.github.repo_merge_methods import MergeMethod
 
-MergeMethod = Literal["squash", "merge", "rebase"]
 PullRequestActionName = Literal["merge", "close", "mark-ready"]
-
-_MERGE_METHOD_FLAGS: tuple[tuple[MergeMethod, str], ...] = (
-    ("squash", "allow_squash_merge"),
-    ("merge", "allow_merge_commit"),
-    ("rebase", "allow_rebase_merge"),
-)
 
 # REST cannot clear the draft flag, so marking a PR ready has to go through GraphQL.
 _READY_MUTATION = """
@@ -34,12 +27,6 @@ mutation MarkPullRequestReady($pullRequestId: ID!) {
   }
 }
 """
-
-
-class RepositoryMergeMethods(BaseModel):
-    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
-
-    merge_methods: list[MergeMethod]
 
 
 class PullRequestActionResult(BaseModel):
@@ -218,25 +205,3 @@ async def act_on_pull_request(
     async with github_client(token=token) as client:
         await action.perform(client, owner, repo, number)
     return PullRequestActionResult(action=action.action, done=True)
-
-
-async def repository_merge_methods(owner: str, repo: str, token: str) -> RepositoryMergeMethods:
-    if pull_request_identity({"repo_full_name": f"{owner}/{repo}", "number": 1}) is None:
-        raise HTTPException(422, "invalid repository")
-    try:
-        async with github_client(token=token) as client:
-            response = await github_request(
-                client, "GET", f"{GITHUB_API_BASE}/repos/{owner}/{repo}"
-            )
-        payload = response.json()
-    except (httpx2.HTTPError, ValueError) as exc:
-        raise HTTPException(502, "Could not load merge settings from GitHub") from exc
-    if not response.is_success or not isinstance(payload, dict):
-        raise HTTPException(502, "Could not load merge settings from GitHub")
-    return RepositoryMergeMethods(
-        merge_methods=[
-            method
-            for method, flag in _MERGE_METHOD_FLAGS
-            if not isinstance(payload.get(flag), bool) or payload[flag]
-        ]
-    )

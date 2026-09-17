@@ -108,7 +108,7 @@ async function loadPrDetails(
   })
   try {
     return await request<OpenPullRequest | null>(
-      `/my-pull-requests/${repo.split("/").map(encodeURIComponent).join("/")}/${number}`
+      `/repos/${repo.split("/").map(encodeURIComponent).join("/")}/pulls/${number}`
     )
   } finally {
     activePrDetails--
@@ -659,6 +659,16 @@ export interface PullRequestActionResult {
   done: boolean
 }
 
+export type PullRequestThreadIntent =
+  | { intent: "open"; title: string }
+  | { intent: "fix"; context: OpenPullRequest | null }
+  | { intent: "address-comments" }
+
+export interface PullRequestThreadResult {
+  thread_id: string
+  already_running: boolean
+}
+
 export interface OpenPullRequestsPayload {
   pullRequests: OpenPullRequest[]
   nextPage: number | null
@@ -805,7 +815,7 @@ async function pullRequestAction(
   body: PullRequestActionRequest
 ): Promise<PullRequestActionResult> {
   const result = await request<PullRequestActionResult>(
-    `/my-pull-requests/${pr.repo.split("/").map(encodeURIComponent).join("/")}/${pr.number}/action`,
+    `/repos/${pr.repo.split("/").map(encodeURIComponent).join("/")}/pulls/${pr.number}/action`,
     { method: "POST", body: JSON.stringify(body) }
   )
   if (!result.done)
@@ -813,6 +823,17 @@ async function pullRequestAction(
       "GitHub did not confirm the change. Refresh to check the PR."
     )
   return result
+}
+
+function pullRequestThread(
+  repo: string,
+  number: number,
+  body: PullRequestThreadIntent
+): Promise<PullRequestThreadResult> {
+  return request<PullRequestThreadResult>(
+    `/repos/${repo.split("/").map(encodeURIComponent).join("/")}/pulls/${number}/thread`,
+    { method: "POST", body: JSON.stringify(body) }
+  )
 }
 
 export const api = {
@@ -1053,29 +1074,20 @@ export const api = {
     page = 1
   ) =>
     request<OpenPullRequestsPayload>(
-      `/my-pull-requests?repo=${encodeURIComponent(repo)}&lightweight=true&sort=${sort === "createdAt" ? "created" : "updated"}&direction=${direction}&page=${page}`
+      `/pull-requests?repo=${encodeURIComponent(repo)}&lightweight=true&sort=${sort === "createdAt" ? "created" : "updated"}&direction=${direction}&page=${page}&scope=mine`
     ),
   myPullRequestDetails: (repo: string, number: number) =>
     loadPrDetails(repo, number),
   fixPullRequest: (pr: OpenPullRequest) =>
-    request<{ thread_id: string; already_running?: boolean }>(
-      `/reviews/${pr.repo.split("/").map(encodeURIComponent).join("/")}/${pr.number}/fix`,
-      { method: "POST", body: JSON.stringify(pr) }
-    ),
+    pullRequestThread(pr.repo, pr.number, { intent: "fix", context: pr }),
   addressPullRequestComments: (pr: OpenPullRequest) =>
-    request<{ thread_id: string; already_running?: boolean }>(
-      `/reviews/${pr.repo.split("/").map(encodeURIComponent).join("/")}/${pr.number}/address-comments`,
-      { method: "POST", body: JSON.stringify(pr) }
-    ),
+    pullRequestThread(pr.repo, pr.number, { intent: "address-comments" }),
   pullRequestThreadStatus: (repo: string, number: number) =>
     request<{ running: boolean }>(
-      `/reviews/${repo.split("/").map(encodeURIComponent).join("/")}/${number}/thread-status`
+      `/repos/${repo.split("/").map(encodeURIComponent).join("/")}/pulls/${number}/thread`
     ),
   openPullRequestThread: (repo: string, number: number, title: string) =>
-    request<{ thread_id: string }>(
-      `/reviews/${repo.split("/").map(encodeURIComponent).join("/")}/${number}/thread`,
-      { method: "POST", body: JSON.stringify({ title }) }
-    ),
+    pullRequestThread(repo, number, { intent: "open", title }),
   mergePullRequest: (
     pr: OpenPullRequest,
     method: MergeMethod
@@ -1093,7 +1105,7 @@ export const api = {
     pullRequestAction(pr, { action: "mark-ready" }),
   repoMergeMethods: (repo: string) =>
     request<{ mergeMethods: MergeMethod[] }>(
-      `/my-pull-requests/${repo.split("/").map(encodeURIComponent).join("/")}/merge-methods`
+      `/repos/${repo.split("/").map(encodeURIComponent).join("/")}/merge-methods`
     ),
   reviewSummaries: (pullRequests: Array<{ repo: string; number: number }>) =>
     request<Record<string, ReviewSummary | null>>("/reviews/summaries", {

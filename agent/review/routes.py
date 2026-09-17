@@ -48,17 +48,6 @@ from agent.review.styles import (
     ReviewStylePromptUpdate,
     normalize_repo_full_name,
 )
-from agent.threads.pr_fixes import (
-    OpenPullRequestThreadRequest,
-    PullRequestFixContext,
-    PullRequestFixResult,
-    PullRequestThreadRef,
-    PullRequestThreadStatus,
-    address_pull_request_comments,
-    fix_pull_request,
-    open_pull_request_thread,
-    pull_request_thread_running,
-)
 
 router = APIRouter(tags=["review"])
 
@@ -160,55 +149,6 @@ async def api_list_reviews(
         is_accessible=is_accessible,
     )
     return {"reviews": reviews, "page": page, "has_more": has_more}
-
-
-@router.get("/reviews/{owner}/{repo}/{pr_number}/thread-status")
-async def api_pull_request_thread_status(
-    owner: str, repo: str, pr_number: int, session: dict[str, str] = SESSION_DEP
-) -> PullRequestThreadStatus:
-    return await pull_request_thread_running(
-        owner, repo, pr_number, session["sub"], session.get("email")
-    )
-
-
-@router.post("/reviews/{owner}/{repo}/{pr_number}/thread")
-async def api_open_pull_request_thread(
-    owner: str,
-    repo: str,
-    pr_number: int,
-    body: OpenPullRequestThreadRequest,
-    session: dict[str, str] = SESSION_DEP,
-) -> PullRequestThreadRef:
-    return await open_pull_request_thread(
-        owner, repo, pr_number, session["sub"], session.get("email"), title=body.title
-    )
-
-
-@router.post("/reviews/{owner}/{repo}/{pr_number}/fix", response_model_exclude_none=True)
-async def api_fix_pull_request(
-    owner: str,
-    repo: str,
-    pr_number: int,
-    context: PullRequestFixContext,
-    session: dict[str, Any] = SESSION_DEP,
-) -> PullRequestFixResult:
-    return await fix_pull_request(
-        owner, repo, pr_number, session["sub"], session.get("email"), context=context
-    )
-
-
-@router.post(
-    "/reviews/{owner}/{repo}/{pr_number}/address-comments", response_model_exclude_none=True
-)
-async def api_address_pull_request_comments(
-    owner: str,
-    repo: str,
-    pr_number: int,
-    session: dict[str, Any] = SESSION_DEP,
-) -> PullRequestFixResult:
-    return await address_pull_request_comments(
-        owner, repo, pr_number, session["sub"], session.get("email")
-    )
 
 
 @router.get("/reviews/{owner}/{repo}/{pr_number}")

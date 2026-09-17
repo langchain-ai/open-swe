@@ -2,23 +2,11 @@ import { useMutation, useQuery } from "@tanstack/react-query"
 import { toast } from "sonner"
 
 import { api, type OpenPullRequest } from "@/lib/api"
+import {
+  threadActions,
+  type PullRequestThreadActionName,
+} from "../lib/threadActions"
 import { PullRequestActionButton } from "./PullRequestActionButton"
-
-export interface ThreadActionLabels {
-  idle: string
-  running: string
-  checking: string
-  unavailable: string
-  queuing: string
-  queued: string
-  retry: string
-}
-
-export interface ThreadActionToasts {
-  queued: string
-  running: string
-  failed: string
-}
 
 /**
  * A button that dispatches agent work onto the pull request's own thread.
@@ -28,16 +16,13 @@ export interface ThreadActionToasts {
 export function PullRequestThreadAction({
   pr,
   login,
-  labels,
-  toasts,
-  dispatch,
+  action,
 }: {
   pr: OpenPullRequest
   login: string
-  labels: ThreadActionLabels
-  toasts: ThreadActionToasts
-  dispatch: (pr: OpenPullRequest) => Promise<{ already_running?: boolean }>
+  action: PullRequestThreadActionName
 }) {
+  const { labels, toasts, run: dispatch } = threadActions[action]
   const thread = useQuery({
     queryKey: ["pr-thread-status", login, pr.repo, pr.number],
     queryFn: () => api.pullRequestThreadStatus(pr.repo, pr.number),
