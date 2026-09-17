@@ -35,18 +35,16 @@ def _config() -> dict[str, Any]:
 
 
 @pytest.mark.parametrize(
-    "should_ask_for_feedback,options,expected",
+    "options,stores_mapping",
     [
-        (True, None, True),
-        (False, None, False),
-        (True, ["Yes", "No"], False),
+        (None, True),
+        (["Yes", "No"], True),
     ],
 )
-async def test_reply_records_answer_completion_only_without_pending_choices(
+async def test_reply_records_mapping_with_or_without_pending_choices(
     monkeypatch: pytest.MonkeyPatch,
-    should_ask_for_feedback: bool,
     options: list[str] | None,
-    expected: bool,
+    stores_mapping: bool,
 ) -> None:
     monkeypatch.setattr(slack_reply_tool, "get_config", _config)
     monkeypatch.setattr(
@@ -64,10 +62,10 @@ async def test_reply_records_answer_completion_only_without_pending_choices(
     )
     mapping = AsyncMock()
     monkeypatch.setattr(slack_reply_tool, "store_slack_message_run_mapping", mapping)
-    assert await slack_reply_tool.slack_thread_reply(
-        "The answer", should_ask_for_feedback=should_ask_for_feedback, options=options
-    ) == {"success": True}
-    assert mapping.await_args.kwargs["should_ask_for_feedback"] is expected
+    assert await slack_reply_tool.slack_thread_reply("The answer", options=options) == {
+        "success": True
+    }
+    assert mapping.await_count == int(stores_mapping)
 
 
 async def test_slack_thread_reply_holds_mutation_lock_while_posting(

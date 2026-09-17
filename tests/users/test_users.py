@@ -149,3 +149,17 @@ async def test_concurrent_first_sign_ins_settle_on_one_user() -> None:
 
     assert len({user.id for user in signed_in}) == 1
     assert await _user_count() == 1
+
+
+async def test_the_work_email_wins_over_a_personal_github_one() -> None:
+    """``resolve_run_email`` turns on this precedence: Slack's address is verified."""
+    user = await User.sign_in("github", "1001", login="OctoCat", email="octo@personal.example")
+    await user.link("slack", "U1", email="octo@work.example", team_id="T1")
+
+    assert await User.email_for_login("OctoCat") == "octo@work.example"
+
+
+async def test_the_github_email_is_used_when_no_slack_account_is_linked() -> None:
+    await User.sign_in("github", "1001", login="OctoCat", email="octo@personal.example")
+
+    assert await User.email_for_login("OctoCat") == "octo@personal.example"

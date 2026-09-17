@@ -74,10 +74,8 @@ _PUBLIC_CHANNEL = {
 
 
 async def test_read_channel_tool_marks_threads_and_skips_joins(slack_api):
-    from agent.slack.client import clear_slack_channel_info_cache
     from agent.slack.tools.read_channel_messages import slack_read_channel_messages
 
-    clear_slack_channel_info_cache()
     slack_api.respond(_PUBLIC_CHANNEL)
     slack_api.respond(
         {
@@ -108,10 +106,8 @@ async def test_read_channel_tool_marks_threads_and_skips_joins(slack_api):
 
 
 async def test_read_channel_tool_refuses_a_private_channel(slack_api):
-    from agent.slack.client import clear_slack_channel_info_cache
     from agent.slack.tools.read_channel_messages import slack_read_channel_messages
 
-    clear_slack_channel_info_cache()
     slack_api.respond({"ok": True, "channel": {"id": "C1", "is_channel": True, "is_private": True}})
     result = await slack_read_channel_messages("C1")
 

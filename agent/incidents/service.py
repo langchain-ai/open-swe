@@ -20,7 +20,7 @@ from agent.incidents.models import (
     IncidentReportRecord,
 )
 from agent.input_messages import PersonIdentity
-from agent.slack.client import get_slack_channel_info
+from agent.slack.channels import SlackChannel
 from agent.slack.http import slack_client
 from agent.store import TypedStore, now_iso
 from agent.utils.langsmith import get_langsmith_trace_url
@@ -151,7 +151,7 @@ async def readable(
         or record.channel_id in policy.excluded_channel_ids
     ):
         return False
-    info = await get_slack_channel_info(record.channel_id, use_cache=False)
+    info = await SlackChannel.fetch(record.channel_id, use_cache=False)
     if info is None:
         if raise_on_unavailable:
             raise HTTPException(

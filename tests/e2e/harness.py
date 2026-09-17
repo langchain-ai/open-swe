@@ -292,22 +292,17 @@ _MAPPINGS_SEEDED = False
 
 
 async def _seed_test_user_mappings() -> None:
-    """Give each named test user the records a signed-in person would have.
+    """Give each named test user the ``users`` row a signed-in person would have.
 
-    Two stores, because both are real: a ``users`` row with a GitHub and a Slack
-    identity (what the OAuth callback and the Slack link flow write), and the
-    legacy Slack-id → login mapping the webhook account gate still reads.
+    A GitHub identity, as the OAuth callback writes, and a Slack one, as the
+    Slack link flow writes.
     """
     global _MAPPINGS_SEEDED
     if _MAPPINGS_SEEDED:
         return
-    from agent.dashboard.user_mappings import upsert_mapping
     from agent.users import User
 
     for user in TEST_USERS:
-        await upsert_mapping(
-            github_login=user["login"], work_email=user["email"], slack_user_id=user["slack_id"]
-        )
         signed_in = await User.sign_in(
             "github",
             user["github_id"],

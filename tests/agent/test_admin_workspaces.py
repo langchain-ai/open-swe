@@ -11,6 +11,7 @@ from agent.prompt import construct_sender_context, construct_system_prompt
 from agent.run_config import RunConfig
 from agent.sandboxes import lifecycle
 from agent.tools import workspaces as env_tools
+from agent.users import User
 from agent.workspaces import refresh
 from agent.workspaces.store import Workspace
 
@@ -150,14 +151,31 @@ async def test_admin_thread_accepts_configured_login(monkeypatch: pytest.MonkeyP
 
 
 @pytest.mark.asyncio
+async def test_admin_thread_accepts_configured_admin_slack_dm(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("CONFIGURED_ADMINS", "ramonn")
+    config = _config(
+        admin_thread=True,
+        source="slack",
+        github_login="ramonn",
+        slack_thread={
+            "channel_id": "D123",
+            "thread_ts": "0",
+            "channel_context": {"is_im": True},
+        },
+    )
+
+    assert await server._admin_thread(config, None) is True
+
+
+@pytest.mark.asyncio
 async def test_workspace_admin_resolves_email_for_github_login(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv("CONFIGURED_ADMINS", "ramon@langchain.dev")
-    with patch(
-        "agent.tools.admin_gate.email_for_login",
-        new_callable=AsyncMock,
-        return_value="ramon@langchain.dev",
+    with patch.object(
+        User, "email_for_login", new_callable=AsyncMock, return_value="ramon@langchain.dev"
     ):
         assert await server._workspace_admin(_config(github_login="ramonn"), None) is True
 

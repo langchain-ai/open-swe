@@ -5,7 +5,7 @@ import hashlib
 from time import time_ns
 from typing import Literal, TypedDict, cast
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Response
 from langgraph_sdk.client import LangGraphClient
 
 from agent.expedited_review import slack as expedited_review
@@ -20,7 +20,6 @@ from agent.slack.ask import (
     ask_thread_id,
     process_slack_ask,
 )
-from agent.slack.client import SlackChannelContext
 from agent.slack.dm import DM_SESSION_TS, dm_session_enabled, is_dm_channel
 from agent.slack.failures import (
     SlackRequestError,
@@ -31,6 +30,7 @@ from agent.slack.failures import (
 from agent.slack.payloads import (
     SlackBlockAction,
     SlackButtonValue,
+    SlackChannelContext,
     SlackEventEnvelope,
     SlackInteraction,
     SlackInteractionMessage,
@@ -49,7 +49,6 @@ from agent.slack.responses import (
     ignored,
 )
 from agent.slack.thread_feedback import handle_slack_feedback_interaction, is_slack_feedback_payload
-from agent.utils.dashboard_links import dashboard_thread_url
 from agent.utils.json_types import JsonObject
 from agent.utils.thread_ops import langgraph_client as get_langgraph_client
 from agent.webhooks import common
@@ -246,7 +245,7 @@ async def _process_slack_message_update_impl(request: SlackRequest) -> None:
     channel_context = await common.resolve_slack_channel_context(
         request.channel_id, use_cache=False
     )
-    if not common.slack_channel_allows_operations(channel_context):
+    if not channel_context.allows_operations:
         common.logger.warning(
             "Blocked Slack message update in ineligible channel=%s", request.channel_id
         )
@@ -303,8 +302,8 @@ async def slack_webhook(
     channel_context: SlackChannelContext | None = None
     if channel_id:
         channel_context = await common.resolve_slack_channel_context(channel_id, use_cache=False)
-        if not common.slack_channel_allows_operations(channel_context):
-            is_external = channel_context.get("is_ext_shared") is True
+        if not channel_context.allows_operations:
+            is_external = channel_context.is_ext_shared is True
             event_ts = event.event_ts or event.ts
             thread_ts = event.thread_ts or event.ts
             if (
@@ -580,10 +579,10 @@ async def slack_webhook(
     return await answer_slack_request(target, dispatch)
 
 
-@router.post("/webhooks/slack/commands")
+@router.post("/webhooks/slack/commands", response_model=None)
 async def slack_command(
     request: common.Request, background_tasks: common.BackgroundTasks
-) -> SlashCommandResponse:
+) -> SlashCommandResponse | Response:
     """Answer a single `/oswe` question, ephemerally and without a Slack thread."""
     body = await request.body()
     _verify_signature(request, body, "commands")
@@ -621,11 +620,7 @@ async def slack_command(
             team_id=value("team_id"),
         ),
     )
-    acknowledgement = "Working on it — the answer will appear here, visible only to you."
-    dashboard_url = dashboard_thread_url(thread_id)
-    if dashboard_url:
-        acknowledgement += f" <{dashboard_url}|Follow along in Web>"
-    return ephemeral(acknowledgement)
+    return Response(status_code=200)
 
 
 @router.post("/webhooks/slack/code-channel-commands")
@@ -727,7 +722,7 @@ async def slack_interactivity(
     if not channel_id:
         return ignored("Slack channel is not eligible")
     channel_context = await common.resolve_slack_channel_context(channel_id, use_cache=False)
-    if not common.slack_channel_allows_operations(channel_context):
+    if not channel_context.allows_operations:
         common.logger.warning("Blocked Slack interaction in ineligible channel=%s", channel_id)
         return ignored("Slack channel is not eligible")
 

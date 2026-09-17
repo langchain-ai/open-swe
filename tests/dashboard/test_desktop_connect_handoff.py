@@ -51,12 +51,15 @@ def links(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]]:
         )
 
     collected: list[dict[str, Any]] = []
+    user = connect.User()
 
-    async def fake_upsert_mapping(**kwargs: Any) -> None:
-        collected.append(kwargs)
+    async def fake_link(provider: str, external_id: str, **kwargs: Any) -> connect.User:
+        collected.append({"provider": provider, "external_id": external_id, **kwargs})
+        return user
 
-    monkeypatch.setattr(connect.User, "get", AsyncMock(return_value=None))
-    monkeypatch.setattr(connect.User, "for_login", AsyncMock(return_value=None))
+    monkeypatch.setattr(user, "link", fake_link)
+    monkeypatch.setattr(connect.User, "get", AsyncMock(return_value=user))
+    monkeypatch.setattr(connect.User, "for_login", AsyncMock(return_value=user))
     monkeypatch.setattr(connect, "slack_oauth_configured", lambda: True)
     monkeypatch.setattr(
         connect,
@@ -66,7 +69,6 @@ def links(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]]:
     monkeypatch.setattr(connect, "exchange_slack_code", fake_exchange)
     monkeypatch.setattr(connect, "fetch_slack_identity", fake_identity)
     monkeypatch.setattr(connect, "verify_team", lambda identity: None)
-    monkeypatch.setattr(connect, "upsert_mapping", fake_upsert_mapping)
     return collected
 
 
@@ -134,11 +136,10 @@ def test_desktop_slack_connect_links_under_the_session_the_app_holds(
         assert exchange.status_code == 200
         assert links == [
             {
-                "github_login": "alice",
-                "work_email": "alice@slack.example",
-                "slack_user_id": "U123",
-                "source": "slack_oauth",
-                "status": "active",
+                "provider": "slack",
+                "external_id": "U123",
+                "email": "alice@slack.example",
+                "team_id": "T1",
             }
         ]
 

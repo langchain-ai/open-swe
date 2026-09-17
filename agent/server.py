@@ -167,7 +167,6 @@ from agent.tools import (
     manage_code_channel,
     manage_incident,
     manage_thread,
-    mark_question_answered,
     notify_automation_channel,
     open_pull_request,
     output_iframe,
@@ -195,7 +194,7 @@ from agent.tools import (
     update_automation,
     web_search,
 )
-from agent.tools.admin_gate import actor_is_admin, is_private_admin_thread
+from agent.tools.admin_gate import actor_has_admin_context, actor_is_admin, is_private_admin_surface
 from agent.utils import ttl_cache
 from agent.utils.authorship import (
     CollaboratorIdentity,
@@ -520,7 +519,7 @@ async def _workspace_admin(config: RunnableConfig, profile_login: str | None) ->
 
 async def _admin_thread(config: RunnableConfig, profile_login: str | None) -> bool:
     """Whether this run may manage workspaces and organization skills."""
-    return await is_private_admin_thread(RunConfig.from_config(config), login=profile_login)
+    return await actor_has_admin_context(RunConfig.from_config(config), login=profile_login)
 
 
 async def _private_thread(thread_id: str | None) -> bool:
@@ -775,9 +774,7 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
         async with aphase(self._thread_id, "prepare.default_repo"):
             prompt_default_repo = await _resolve_prompt_default_repo(cfg)
         triggering_user_identity_task = asyncio.create_task(
-            asyncio.to_thread(
-                resolve_triggering_user_identity, as_json_object(self._config), github_token
-            )
+            resolve_triggering_user_identity(as_json_object(self._config), github_token)
         )
         sandbox_task = asyncio.create_task(
             get_or_create_sandbox_backend_proxy(self._thread_id).ready()
@@ -921,7 +918,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         incident_session = await load_incident_session(config)
         cfg.slack_thread = incident_session.slack_thread
         configurable["slack_thread"] = cfg.slack_thread.dump()
-    profile_login = resolve_github_login(as_json_object(config))
+    profile_login = await resolve_github_login(as_json_object(config))
     credential_login = None
     credential_scope_known = False
     if not is_desktop_run(cfg):
@@ -1157,6 +1154,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
 
     async with aphase(thread_id, "factory.admin_thread"):
         admin_thread = await _admin_thread(config, profile_login)
+    private_admin_surface = admin_thread and is_private_admin_surface(cfg)
     if admin_thread:
         logger.info("Admin thread %s: adding workspace management tools", thread_id)
 
@@ -1213,7 +1211,6 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         manage_thread,
         manage_baby_sit,
         expedite_pr_approval,
-        mark_question_answered,
         notify_automation_channel,
         open_pull_request,
         *(
@@ -1237,7 +1234,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         slack_thread_reply,
         submit_thread_feedback,
         *(ADMIN_TOOLS if admin_thread else ()),
-        *((read_only_sql,) if admin_thread and source == "dashboard" else ()),
+        *((read_only_sql,) if private_admin_surface else ()),
     ]
     if credential_login is None:
         personal_tools = (

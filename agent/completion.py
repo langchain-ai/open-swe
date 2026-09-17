@@ -2,9 +2,9 @@
 
 The platform POSTs a run-completion payload to ``/webhooks/run-complete`` (wired
 as the ``webhook`` on every dispatched run, see ``agent.dispatch``). Successful
-Slack runs enqueue deferred session-cost enrichment and offer private feedback
-when a question was answered. Failures (``error`` / ``timeout``) post a short reply
-so a run that died never leaves the user silent.
+runs schedule a private feedback prompt five quiet minutes later, and successful
+Slack runs enqueue deferred session-cost enrichment. Failures (``error`` /
+``timeout``) post a short reply so a run that died never leaves the user silent.
 
 This decouples "the user gets an answer" from "the agent remembered to reply."
 The reply is idempotent per run when the webhook includes a run id. Older or
@@ -398,7 +398,7 @@ async def _handle_successful_run(
 async def handle_run_completion(payload: dict[str, Any]) -> dict[str, str]:
     """Handle a platform run-completion webhook POST.
 
-    Prompts for Slack feedback, enqueues cost refreshes, and posts failure replies.
+    Schedules feedback prompts, enqueues cost refreshes, and posts failure replies.
     """
     status = payload.get("status")
     thread_id = payload.get("thread_id")

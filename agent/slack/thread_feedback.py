@@ -10,13 +10,12 @@ from typing import Any, Literal
 from fastapi import BackgroundTasks
 from pydantic import BaseModel, Field
 
+from agent.slack.channels import SlackChannel
 from agent.slack.client import (
-    get_slack_channel_context,
     lookup_slack_run_message_mapping,
     open_slack_modal,
     post_slack_ephemeral_message,
     respond_to_slack_interaction,
-    slack_channel_allows_operations,
     slack_thread_mutation_lock,
 )
 from agent.slack.responses import FeedbackResponse
@@ -130,7 +129,6 @@ async def post_slack_feedback_prompt(
     run_id: str,
     channel_id: str,
     *,
-    require_answer: bool = False,
     expected_event_id: str | None = None,
 ) -> None:
     """Prompt the thread initiator once, using the qualifying run's response mapping."""
@@ -139,11 +137,9 @@ async def post_slack_feedback_prompt(
         record = await store.get(run_id)
         if record is not None and record.prompted:
             return
-        if record is None or require_answer:
+        if record is None:
             mapping = await lookup_slack_run_message_mapping(langgraph_client(), channel_id, run_id)
             if not mapping or mapping.get("run_id") != run_id:
-                return
-            if require_answer and mapping.get("should_ask_for_feedback") is not True:
                 return
         thread_ts = record.thread_ts if record else mapping.get("thread_ts")
         if not isinstance(thread_ts, str) or not thread_ts:
@@ -170,8 +166,8 @@ async def post_slack_feedback_prompt(
                 message_ts=message_ts,
                 user_id=origin.triggering_user_id,
             )
-        context = await get_slack_channel_context(channel_id, use_cache=False)
-        if not slack_channel_allows_operations(context):
+        context = await SlackChannel.context_for(channel_id, use_cache=False)
+        if not context.allows_operations:
             return
         async with _locked_feedback(record) as current:
             record = current or record
@@ -238,8 +234,8 @@ async def _load_feedback(channel_id: str, run_id: str, user_id: str) -> ThreadFe
     record = await _store(channel_id).get(run_id)
     if record is None or record.user_id != user_id or record.channel_id != channel_id:
         return None
-    context = await get_slack_channel_context(channel_id, use_cache=False)
-    return record if slack_channel_allows_operations(context) else None
+    context = await SlackChannel.context_for(channel_id, use_cache=False)
+    return record if context.allows_operations else None
 
 
 def comment_modal(record: ThreadFeedback, response_url: str) -> dict[str, Any]:

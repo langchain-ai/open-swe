@@ -9,12 +9,6 @@ question. Omit greetings, preambles, headings, recaps, implementation
 details, and redundant context; use bullets only when multiple items are
 essential. End the run by posting a concise final outcome here.
 
-Set `should_ask_for_feedback=True` only when this message completely answers an
-information-only request, with no clarification or further work needed.
-This offers the requester a private rating after the run succeeds. Leave it
-False for progress, plans, approval requests, blockers, partial answers, and
-coding/PR outcomes; coding tasks request feedback when their PR merges.
-
 Format messages using Slack's mrkdwn format, NOT standard Markdown.
 Key differences: *bold*, _italic_, ~strikethrough~, <url|link text>,
 bullet lists with "• ", ```code blocks```, > blockquotes. Code fences must be
