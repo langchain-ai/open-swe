@@ -3,8 +3,11 @@ import logging
 from collections.abc import Mapping
 from typing import Annotated, Any
 
+from langchain_core.messages import ToolMessage
+from langchain_core.tools import InjectedToolCallId
 from langgraph.config import get_config
 from langgraph.prebuilt import InjectedState
+from langgraph.types import Command
 from langgraph_sdk.client import LangGraphClient
 
 from agent.run_config import RunConfig
@@ -36,7 +39,9 @@ async def slack_thread_reply(
     blocks: list[dict[str, Any]] | None = None,
     state: Annotated[dict[str, Any] | None, InjectedState] = None,
     should_ask_for_feedback: bool = False,
-) -> dict[str, Any]:
+    is_completion_summary: bool = False,
+    tool_call_id: Annotated[str, InjectedToolCallId] = "",
+) -> dict[str, Any] | Command:
     """Implement the `slack_thread_reply` tool."""
     config = get_config()
     cfg = RunConfig.from_config(config)
@@ -45,6 +50,12 @@ async def slack_thread_reply(
     thread_id = cfg.thread_id
     if cfg.slack_ask is True:
         return await _ephemeral_reply(cfg, message, blocks, state)
+    if is_completion_summary and state and state.get("completion_summary_posted") is True:
+        return {
+            "success": False,
+            "warning": "completion_summary_already_posted",
+            "hint": "A completion summary was already posted for this turn; only report materially different information.",
+        }
     client = get_langgraph_client()
     active = await get_active_slack_thread(
         client,
@@ -129,6 +140,18 @@ async def slack_thread_reply(
             await restore_slack_session_status(client, str(channel_id), str(thread_ts))
         else:
             await restore_slack_thinking_status(str(channel_id), str(thread_ts))
+    if is_completion_summary:
+        return Command(
+            update={
+                "completion_summary_posted": True,
+                "messages": [
+                    ToolMessage(
+                        content=json.dumps({"success": True}),
+                        tool_call_id=tool_call_id,
+                    )
+                ],
+            }
+        )
     return {"success": True}
 
 

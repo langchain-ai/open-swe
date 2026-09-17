@@ -7,6 +7,7 @@ from uuid import UUID
 
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage
+from langgraph.types import Command
 
 from agent.slack.payloads import SlackBlockAction
 
@@ -94,6 +95,47 @@ async def test_slack_thread_reply_holds_mutation_lock_while_posting(
 
     assert await slack_reply_tool.slack_thread_reply("hello") == {"success": True}
     assert lock_held is False
+
+
+async def test_completion_summary_persists_posted_state(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(slack_reply_tool, "get_config", _config)
+    monkeypatch.setattr(
+        slack_reply_tool, "_post_and_store_mapping", AsyncMock(return_value=("2.0", None))
+    )
+
+    result = await slack_reply_tool.slack_thread_reply(
+        "Completed the requested work.",
+        state={"completion_summary_posted": False},
+        is_completion_summary=True,
+        tool_call_id="call-1",
+    )
+
+    assert isinstance(result, Command)
+    assert result.update["completion_summary_posted"] is True
+    assert result.update["messages"][0].tool_call_id == "call-1"
+
+
+async def test_second_completion_summary_is_suppressed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    post = AsyncMock(return_value=("2.0", None))
+    monkeypatch.setattr(slack_reply_tool, "get_config", _config)
+    monkeypatch.setattr(slack_reply_tool, "_post_and_store_mapping", post)
+
+    result = await slack_reply_tool.slack_thread_reply(
+        "The same completion summary.",
+        state={"completion_summary_posted": True},
+        is_completion_summary=True,
+    )
+
+    assert result == {
+        "success": False,
+        "warning": "completion_summary_already_posted",
+        "hint": "A completion summary was already posted for this turn; only report materially different information.",
+    }
+    post.assert_not_awaited()
 
 
 async def test_code_channel_reply_stays_in_user_started_thread(
