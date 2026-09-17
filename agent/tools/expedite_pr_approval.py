@@ -18,6 +18,7 @@ from agent.expedited_review.watch import evaluate_approval, retire, start_approv
 from agent.github.ci import fetch_pr
 from agent.github.pull_requests import PullRequest, PullRequestPayload
 from agent.github.token import resolve_github_token
+from agent.prompts import render_prompt
 from agent.run_config import RunConfig
 from agent.slack.blocks import escape
 from agent.slack.client import (
@@ -51,11 +52,11 @@ async def _post_root_message(
     channel_id: str, pr_ref: GitHubPrRef, title: str
 ) -> tuple[str | None, str | None]:
     """Open a thread in ``channel_id`` for the card; joins the channel if needed."""
-    label = f"{pr_ref.owner}/{pr_ref.repo}#{pr_ref.number}"
-    text = (
-        f"*Expedited review requested* for <{pr_ref.url}|{label}> {escape(title)}\n"
-        "The diff will be posted here with Approve and Reject buttons once every check "
-        "is green and every review is clean; two approvals merge it."
+    text = render_prompt(
+        "slack/expedited-review-requested.md",
+        pr_url=pr_ref.url,
+        label=f"{pr_ref.owner}/{pr_ref.repo}#{pr_ref.number}",
+        title=escape(title),
     )
     message_ts, error = await post_slack_top_level_message_with_ts(
         channel_id, text, unfurl_links=False, unfurl_media=False
