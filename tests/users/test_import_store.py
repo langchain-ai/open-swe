@@ -82,5 +82,32 @@ async def test_records_that_cannot_be_completed_wait_for_the_next_startup(
     assert await User.for_login("github", "mallory") is None
 
 
+async def test_a_work_email_with_no_slack_id_lands_on_the_github_identity(
+    fake_store: FakeStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    await User.sign_in("github", "4004", login="grace")
+    fake_store.seed(USER_MAPPINGS_NAMESPACE, "grace", _mapping("grace", "grace@work.example"))
+    monkeypatch.setattr(import_store, "_github_account", AsyncMock())
+
+    assert await import_user_mappings() == 1
+
+    assert await User.email_for_login("grace") == "grace@work.example"
+    assert fake_store.values(USER_MAPPINGS_NAMESPACE) == {}
+
+
+async def test_a_work_email_that_cannot_be_stored_keeps_its_record(
+    fake_store: FakeStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The record is the only copy of the work address, so success would delete it."""
+    await User.sign_in("github", "5005", login="grace", email="grace@personal.example")
+    fake_store.seed(USER_MAPPINGS_NAMESPACE, "grace", _mapping("grace", "grace@work.example"))
+    monkeypatch.setattr(import_store, "_github_account", AsyncMock())
+
+    assert await import_user_mappings() == 0
+
+    assert set(fake_store.values(USER_MAPPINGS_NAMESPACE)) == {"grace"}
+    assert await User.email_for_login("grace") == "grace@personal.example"
+
+
 async def test_an_empty_namespace_is_a_noop(fake_store: FakeStore) -> None:
     assert await import_user_mappings() == 0

@@ -103,13 +103,29 @@ async def _import_mapping(mapping: _Mapping, token: str | None) -> bool:
                 extra={"github_login": login},
             )
             return False
-    elif email and not user.email:
-        github = next(identity for identity in user.identities if identity.provider == "github")
-        user = await user.link("github", github.external_id, email=email)
     slack_user_id = (mapping.slack_user_id or "").strip()
     if slack_user_id:
+        # The work address belongs on the Slack identity, where it keeps the
+        # precedence ``User.email`` gives it.
         await user.link("slack", slack_user_id, email=email)
-    return True
+        return True
+    if not email:
+        return True
+    # No Slack identity to carry the work address, so the GitHub one has to. Let
+    # it through only when that would not overwrite a different address: the
+    # record is the sole copy, and reporting success deletes it.
+    github = next(identity for identity in user.identities if identity.provider == "github")
+    stored = github.email.strip().lower()
+    if not stored:
+        await user.link("github", github.external_id, email=email)
+        return True
+    if stored == email:
+        return True
+    logger.error(
+        "Keeping a legacy user mapping whose work email would be lost",
+        extra={"github_login": login, "stored_email": stored},
+    )
+    return False
 
 
 async def _github_account(login: str, token: str) -> _GithubAccount | None:

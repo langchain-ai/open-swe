@@ -71,9 +71,16 @@ class User(Base):
 
     @property
     def email(self) -> str:
-        """The address to reach this person: GitHub's, else whichever identity has one."""
-        return self._identity_field("github", "email") or next(
-            (identity.email for identity in self.identities if identity.email), ""
+        """The address to reach this person, work address first.
+
+        Slack's wins because it is verified against the workspace, where the
+        GitHub one may be a personal account that is not an org member — the
+        distinction :func:`agent.threads.access.resolve_run_email` turns on.
+        """
+        return (
+            self._identity_field("slack", "email")
+            or self._identity_field("github", "email")
+            or next((identity.email for identity in self.identities if identity.email), "")
         )
 
     def _identity_field(
