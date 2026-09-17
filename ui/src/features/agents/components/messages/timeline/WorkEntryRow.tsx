@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react"
+import { useCallback, useEffect, useState } from "react"
 import {
   Bot,
   Check,
@@ -119,9 +119,36 @@ export function WorkEntryRow({
 }) {
   const [expanded, setExpanded] = useState(defaultExpanded)
   const toggle = useCallback(() => setExpanded((value) => !value), [])
+  const [loadedText, setLoadedText] = useState<string | null>(null)
+  const [loadError, setLoadError] = useState<string | null>(null)
+  const loadExpandedText = entry.loadExpandedText
 
+  // Expanding is what pays for the full output; the preview (if any) shows
+  // until it arrives, and a failure says so instead of hanging on a spinner.
+  useEffect(() => {
+    if (!expanded || !loadExpandedText) return
+    if (loadedText !== null || loadError !== null) return
+    let active = true
+    void loadExpandedText().then(
+      (text) => {
+        if (active) setLoadedText(text)
+      },
+      (error: unknown) => {
+        if (!active) return
+        setLoadError(
+          error instanceof Error ? error.message : "Could not load output"
+        )
+      }
+    )
+    return () => {
+      active = false
+    }
+  }, [expanded, loadExpandedText, loadError, loadedText])
+
+  const detailText = loadedText ?? entry.expandedText
   const canExpand =
-    onActivate == null && (body != null || entry.expandedText != null)
+    onActivate == null &&
+    (body != null || detailText != null || loadExpandedText != null)
   const activate = onActivate ?? (canExpand ? toggle : null)
   const isError = entry.tone === "error"
   const hoverTimestamp = formatHoverTimestamp(timestamp)
@@ -258,8 +285,12 @@ export function WorkEntryRow({
           onPointerDown={stopRowToggle}
         >
           {body ??
-            (entry.expandedText != null && (
-              <ToolResultBody value={entry.expandedText} />
+            (detailText != null ? (
+              <ToolResultBody value={detailText} />
+            ) : (
+              <p className="text-[12px] text-muted-foreground">
+                {loadError ?? "Loading output…"}
+              </p>
             ))}
         </div>
       )}

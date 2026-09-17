@@ -9,6 +9,7 @@ import {
 import { AgentsShell } from "@/features/agents/components/AgentsSidebar"
 import { Skeleton } from "@/components/ui/skeleton"
 import { AgentStreamProvider } from "@/features/agents/lib/stream/AgentStreamProvider"
+import { useCachedAgentThread } from "@/features/agents/lib/queries"
 import { RequireLogin } from "@/lib/auth-redirect"
 import { useSession } from "@/lib/session"
 import { isDesktopLocalModeEnabled } from "@/lib/desktop-local-mode"
@@ -46,6 +47,9 @@ function AgentsLayout() {
   })
   const activeThreadId = threadMatch?.params.threadId
   const activeLocalSessionId = localMatch?.params.sessionId
+  // A thread served by the transcript event log needs no SDK stream, so the
+  // pool does not bind one for it.
+  const activeThread = useCachedAgentThread(activeThreadId ?? null)
   const location = useRouterState({
     select: (state) => state.location,
   })
@@ -80,6 +84,7 @@ function AgentsLayout() {
       <AgentStreamProvider
         threadId={activeLocalSessionId ?? activeThreadId ?? null}
         transport={activeLocalSessionId ? "local" : "cloud"}
+        suspended={activeThread?.transcript === "v2"}
         onThreadCreated={(id) => {
           if (!activeThreadId) {
             void navigate({ to: "/agents/$threadId", params: { threadId: id } })

@@ -171,16 +171,24 @@ function PooledStream({ entry }: { entry: StreamPoolEntry }) {
 export function AgentStreamProvider({
   threadId,
   transport = "cloud",
+  suspended = false,
   onThreadCreated,
   children,
 }: {
   threadId: string | null
   transport?: AgentThreadTransport
+  /**
+   * The route's thread is served elsewhere (the transcript event log), so no
+   * stream is bound for it and none is published to the subtree. Instances
+   * already mounted stay until they are idle, which never orphans a live run.
+   */
+  suspended?: boolean
   /** Fires once the server has accepted the first run of a lazily created thread. */
   onThreadCreated?: (threadId: string) => void
   children: ReactNode
 }) {
   const activate = useStreamPool((state) => state.activate)
+  const deactivate = useStreamPool((state) => state.deactivate)
   const sweep = useStreamPool((state) => state.sweep)
   const consumeCreatedThread = useStreamPool(
     (state) => state.consumeCreatedThread
@@ -191,10 +199,10 @@ export function AgentStreamProvider({
     selectStreamFor(state, transport, threadId)
   )
 
-  useLayoutEffect(
-    () => activate(transport, threadId),
-    [activate, threadId, transport]
-  )
+  useLayoutEffect(() => {
+    if (suspended) deactivate()
+    else activate(transport, threadId)
+  }, [activate, deactivate, suspended, threadId, transport])
 
   useEffect(() => {
     const timer = setInterval(() => sweep(Date.now()), SWEEP_INTERVAL_MS)
@@ -212,7 +220,8 @@ export function AgentStreamProvider({
       {entries.map((entry) => (
         <PooledStream key={entry.id} entry={entry} />
       ))}
-      {stream && (
+      {suspended && children}
+      {!suspended && stream && (
         <AgentStreamContext.Provider value={stream}>
           {children}
         </AgentStreamContext.Provider>

@@ -1,0 +1,349 @@
+"""Transcript middleware: paragraph batching and the emitted event sequence."""
+
+import itertools
+from collections.abc import Sequence
+from typing import Any
+from uuid import UUID, uuid7
+
+import pytest
+from langchain.agents.middleware.types import ModelRequest, ModelResponse
+from langchain_core.callbacks.manager import AsyncCallbackManager
+from langchain_core.language_models.fake_chat_models import GenericFakeChatModel
+from langchain_core.messages import AIMessage, AIMessageChunk, HumanMessage, ToolMessage
+from langchain_core.outputs import ChatGenerationChunk
+from langgraph.prebuilt.tool_node import ToolCallRequest
+
+from agent.middleware import transcript as mw
+from agent.transcript.engine import Command
+
+THREAD_ID = "thread-under-test"
+RUN_ID = "run-under-test"
+
+
+@pytest.fixture(autouse=True)
+def _clean_registry() -> Any:
+    mw._runs.clear()
+    yield
+    mw._runs.clear()
+
+
+class FakeEngine:
+    """Collects the commands the middleware appends, in order."""
+
+    def __init__(self) -> None:
+        self.commands: list[Command] = []
+
+    async def append(self, thread_id: str, commands: Sequence[Command]) -> None:
+        assert thread_id == THREAD_ID
+        self.commands.extend(commands)
+
+    @property
+    def types(self) -> list[str]:
+        return [command.event.type for command in self.commands]
+
+    @property
+    def command_ids(self) -> list[str]:
+        return [command.command_id for command in self.commands]
+
+
+def _install(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    transcribed: bool,
+    turn_id: UUID | None = None,
+) -> FakeEngine:
+    engine = FakeEngine()
+    monkeypatch.setattr(mw, "append", engine.append)
+
+    async def _has_transcript(thread_id: str) -> bool:
+        return transcribed
+
+    monkeypatch.setattr(mw, "has_transcript", _has_transcript)
+    configurable: dict[str, Any] = {"thread_id": THREAD_ID, "run_id": RUN_ID}
+    if turn_id is not None:
+        configurable["transcript_turn_id"] = str(turn_id)
+    monkeypatch.setattr(mw, "get_config", lambda: {"configurable": configurable})
+    return engine
+
+
+def _model_request(messages: list[Any], state: dict[str, Any] | None = None) -> ModelRequest:
+    return ModelRequest(
+        model=GenericFakeChatModel(messages=itertools.cycle([AIMessage(content="x")])),
+        messages=messages,
+        state=state if state is not None else {"messages": messages},
+        runtime=None,
+    )
+
+
+def _tool_request(tool_call_id: str, state: dict[str, Any]) -> ToolCallRequest:
+    return ToolCallRequest(
+        tool_call={"name": "read_file", "args": {"path": "a.py"}, "id": tool_call_id},
+        tool=None,
+        state=state,
+        runtime=None,
+    )
+
+
+# --- paragraph splitter ----------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        ("no boundary yet", 0),
+        ("one line\nstill going", 0),
+        ("para one\n\npara two", len("para one\n\n")),
+        ("intro\n- first item", len("intro\n")),
+        ("intro\n1. first item", len("intro\n")),
+        ("```py\ncode\n\nmore\n", 0),
+        ("```py\ncode\n```\ntail", len("```py\ncode\n```\n")),
+        ("```py\n- not a list\n```\nx", len("```py\n- not a list\n```\n")),
+        ("a\n\nb\n\nc", len("a\n\nb\n\n")),
+    ],
+)
+def test_paragraph_boundary(text: str, expected: int) -> None:
+    assert mw.paragraph_boundary(text) == expected
+
+
+def test_buffer_waits_for_the_flush_interval() -> None:
+    buffer = mw.ParagraphBuffer(last_flush=0.0)
+    buffer.add("para one\n\npara two")
+    assert buffer.take(mw.PARAGRAPH_FLUSH_SECONDS / 2) is None
+    assert buffer.take(mw.PARAGRAPH_FLUSH_SECONDS) == "para one\n\n"
+    assert buffer.pending == "para two"
+
+
+def test_buffer_holds_back_without_a_boundary() -> None:
+    buffer = mw.ParagraphBuffer(last_flush=0.0)
+    buffer.add("a single unfinished paragraph")
+    assert buffer.take(10.0) is None
+
+
+def test_buffer_hard_flushes_ignoring_the_interval() -> None:
+    buffer = mw.ParagraphBuffer(last_flush=100.0)
+    buffer.add("x" * mw.HARD_FLUSH_CHARS)
+    fragment = buffer.take(100.0)
+    assert fragment is not None
+    assert len(fragment) == mw.HARD_FLUSH_CHARS
+    assert buffer.pending == ""
+
+
+def test_buffer_hard_flush_prefers_a_boundary() -> None:
+    buffer = mw.ParagraphBuffer(last_flush=100.0)
+    buffer.add("head\n\n" + "x" * mw.HARD_FLUSH_CHARS)
+    assert buffer.take(100.0) == "head\n\n"
+
+
+def test_buffer_final_flush_takes_everything() -> None:
+    buffer = mw.ParagraphBuffer(last_flush=0.0)
+    buffer.add("trailing words with no boundary")
+    assert buffer.take(0.0, final=True) == "trailing words with no boundary"
+
+
+# --- hook sequence ---------------------------------------------------------
+
+
+async def test_hook_sequence_for_a_transcribed_turn(monkeypatch: pytest.MonkeyPatch) -> None:
+    turn_id = uuid7()
+    engine = _install(monkeypatch, transcribed=True, turn_id=turn_id)
+    middleware = mw.TranscriptMiddleware()
+    human = HumanMessage(content="do the thing", id="human-1")
+    state: dict[str, Any] = {"messages": [human]}
+
+    await middleware.abefore_agent(state, None)
+
+    ai = AIMessage(
+        content="on it",
+        id="ai-1",
+        tool_calls=[{"name": "read_file", "args": {"path": "a.py"}, "id": "call-1"}],
+    )
+
+    async def model_handler(request: ModelRequest) -> ModelResponse:
+        return ModelResponse(result=[ai])
+
+    await middleware.awrap_model_call(_model_request([human]), model_handler)
+
+    async def tool_handler(request: ToolCallRequest) -> ToolMessage:
+        assert mw.current_namespace() == ["call-1"]
+        return ToolMessage(content="file body", tool_call_id="call-1")
+
+    await middleware.awrap_tool_call(
+        _tool_request("call-1", {"messages": [human, ai]}), tool_handler
+    )
+    await middleware.aafter_agent({"messages": [human, ai]}, None)
+
+    assert engine.types == [
+        "turn.started",
+        "message.completed",
+        "tool.started",
+        "tool.completed",
+        "turn.completed",
+    ]
+    assert engine.command_ids[0] == f"turn:{turn_id}:started:{RUN_ID}"
+    assert engine.command_ids[-1] == f"turn:{turn_id}:completed"
+    started = engine.commands[2]
+    assert started.event.message_id == "ai-1"
+    assert started.event.namespace == []
+    completed = engine.commands[3]
+    assert completed.event.status == "completed"
+    assert completed.event.output == "file body"
+    assert completed.event.output_truncated is False
+
+
+async def test_follow_up_without_a_turn_id_mints_one(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A dashboard follow-up without ``transcript_turn_id`` (Slack) gets one."""
+    engine = _install(monkeypatch, transcribed=True)
+    middleware = mw.TranscriptMiddleware()
+    human = HumanMessage(content="follow up", id="human-2")
+
+    await middleware.abefore_agent({"messages": [AIMessage(content="old"), human]}, None)
+    await middleware.aafter_agent({"messages": []}, None)
+
+    assert engine.types == ["turn.requested", "turn.started", "turn.completed"]
+    requested = engine.commands[0]
+    assert requested.event.message_id == "human-2"
+    assert requested.event.text == "follow up"
+
+
+async def test_old_thread_is_skipped_entirely(monkeypatch: pytest.MonkeyPatch) -> None:
+    engine = _install(monkeypatch, transcribed=False)
+    middleware = mw.TranscriptMiddleware()
+    state: dict[str, Any] = {
+        "messages": [HumanMessage(content="hi", id="h"), AIMessage(content="hello", id="a")]
+    }
+
+    await middleware.abefore_agent(state, None)
+
+    async def model_handler(request: ModelRequest) -> ModelResponse:
+        return ModelResponse(result=[AIMessage(content="more", id="a2")])
+
+    await middleware.awrap_model_call(_model_request(state["messages"]), model_handler)
+    await middleware.aafter_agent(state, None)
+
+    assert engine.commands == []
+
+
+async def test_queued_human_messages_are_recorded_once(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    engine = _install(monkeypatch, transcribed=True, turn_id=uuid7())
+    middleware = mw.TranscriptMiddleware()
+    first = HumanMessage(content="start", id="human-1")
+    await middleware.abefore_agent({"messages": [first]}, None)
+
+    injected = HumanMessage(content="also do this", id="human-queued")
+    ai = AIMessage(content="ok", id="ai-1")
+
+    async def model_handler(request: ModelRequest) -> ModelResponse:
+        return ModelResponse(result=[ai])
+
+    for _ in range(2):
+        await middleware.awrap_model_call(_model_request([first, injected]), model_handler)
+    await middleware.aafter_agent({"messages": []}, None)
+
+    human_events = [
+        command for command in engine.commands if command.command_id.startswith("human:")
+    ]
+    assert [command.command_id for command in human_events] == ["human:human-queued"]
+    assert human_events[0].event.role == "human"
+
+
+async def test_model_failure_records_turn_failed(monkeypatch: pytest.MonkeyPatch) -> None:
+    engine = _install(monkeypatch, transcribed=True, turn_id=uuid7())
+    middleware = mw.TranscriptMiddleware()
+    await middleware.abefore_agent({"messages": [HumanMessage(content="hi", id="h")]}, None)
+
+    async def model_handler(request: ModelRequest) -> ModelResponse:
+        raise RuntimeError("provider exploded")
+
+    with pytest.raises(RuntimeError):
+        await middleware.awrap_model_call(_model_request([]), model_handler)
+
+    assert engine.types == ["turn.started", "turn.failed"]
+    assert "provider exploded" in engine.commands[-1].event.error
+
+
+async def test_subagent_tool_calls_carry_the_parent_namespace(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    engine = _install(monkeypatch, transcribed=True, turn_id=uuid7())
+    parent = mw.TranscriptMiddleware()
+    subagent = mw.TranscriptMiddleware()
+    await parent.abefore_agent({"messages": [HumanMessage(content="hi", id="h")]}, None)
+
+    async def nested_tool(request: ToolCallRequest) -> ToolMessage:
+        return ToolMessage(content="grepped", tool_call_id="inner-1")
+
+    async def task_tool(request: ToolCallRequest) -> ToolMessage:
+        await subagent.awrap_tool_call(_tool_request("inner-1", {"messages": []}), nested_tool)
+        return ToolMessage(content="delegated", tool_call_id="task-1")
+
+    await parent.awrap_tool_call(_tool_request("task-1", {"messages": []}), task_tool)
+    await parent.aafter_agent({"messages": []}, None)
+
+    namespaces = {
+        command.event.tool_call_id: command.event.namespace
+        for command in engine.commands
+        if command.event.type == "tool.started"
+    }
+    assert namespaces == {"task-1": [], "inner-1": ["task-1"]}
+
+
+async def test_streamed_fragments_keep_one_message_id(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Chunk ids need not match the final message id (OpenAI Responses).
+
+    The fragments and the canonical text have to land on the same row, and a
+    tool call issued by that message has to point at the id they used.
+    """
+    engine = _install(monkeypatch, transcribed=True, turn_id=uuid7())
+    manager = AsyncCallbackManager(handlers=[])
+    monkeypatch.setattr(
+        mw,
+        "get_config",
+        lambda: {
+            "configurable": {"thread_id": THREAD_ID, "run_id": RUN_ID},
+            "callbacks": manager,
+        },
+    )
+    middleware = mw.TranscriptMiddleware()
+    await middleware.abefore_agent({"messages": [HumanMessage(content="hi", id="h")]}, None)
+
+    ai = AIMessage(
+        content="Hello there",
+        id="resp_final",
+        tool_calls=[{"name": "read_file", "args": {}, "id": "call-1"}],
+    )
+
+    async def model_handler(request: ModelRequest) -> ModelResponse:
+        sniffer = manager.handlers[-1]
+        for token in ("Hello", " ", "there", "\n\n"):
+            await sniffer.on_llm_new_token(
+                token,
+                chunk=ChatGenerationChunk(message=AIMessageChunk(content=token, id="lc_run--abc")),
+                run_id=uuid7(),
+            )
+        return ModelResponse(result=[ai])
+
+    await middleware.awrap_model_call(_model_request([]), model_handler)
+
+    async def tool_handler(request: ToolCallRequest) -> ToolMessage:
+        return ToolMessage(content="ok", tool_call_id="call-1")
+
+    await middleware.awrap_tool_call(_tool_request("call-1", {"messages": [ai]}), tool_handler)
+    await middleware.aafter_agent({"messages": []}, None)
+
+    message_events = [
+        command
+        for command in engine.commands
+        if command.event.type in {"message.appended", "message.completed"}
+    ]
+    used_ids = {command.event.message_id for command in message_events}
+    assert len(used_ids) == 1
+    assert used_ids != {"resp_final"}
+    assert message_events[-1].event.type == "message.completed"
+    assert message_events[-1].event.text == "Hello there"
+    assert "".join(command.event.text or "" for command in message_events[:-1]) == "Hello there\n\n"
+    tool_started = next(
+        command for command in engine.commands if command.event.type == "tool.started"
+    )
+    assert tool_started.event.message_id == next(iter(used_ids))

@@ -5,7 +5,7 @@ import {
   useQueryClient,
 } from "@tanstack/react-query"
 import { useNavigate } from "@tanstack/react-router"
-import { useEffect, useRef } from "react"
+import { useCallback, useEffect, useRef, useSyncExternalStore } from "react"
 
 import { agentsApi } from "./api"
 import type { InfiniteData, QueryClient, QueryKey } from "@tanstack/react-query"
@@ -600,6 +600,32 @@ export function useSidebarProjectThreads({
     },
     enabled && Boolean(repoFullName)
   )
+}
+
+/**
+ * The thread detail already in cache, without fetching. Lets a component above
+ * the thread page (the layout that owns the stream pool) branch on the
+ * thread's transcript source before the page itself renders.
+ */
+export function useCachedAgentThread(
+  threadId: string | null
+): AgentThread | undefined {
+  const queryClient = useQueryClient()
+  const subscribe = useCallback(
+    (onChange: () => void) =>
+      threadId ? queryClient.getQueryCache().subscribe(onChange) : () => {},
+    [queryClient, threadId]
+  )
+  const snapshot = useCallback(
+    () =>
+      threadId
+        ? queryClient.getQueryData<AgentThread>(
+            agentThreadKeys.detail(threadId)
+          )
+        : undefined,
+    [queryClient, threadId]
+  )
+  return useSyncExternalStore(subscribe, snapshot, () => undefined)
 }
 
 export function useAgentThread(threadId: string) {

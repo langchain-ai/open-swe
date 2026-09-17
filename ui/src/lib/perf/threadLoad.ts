@@ -41,7 +41,14 @@ function abandonThreadLoad(reason: string): void {
 subscribeRequestTimings((timing: RequestTiming) => {
   if (!active || active.span.ended) return
   if (active.threadId.toLowerCase() !== timing.threadId) return
-  if (timing.kind !== "thread_detail" && timing.kind !== "thread_state") return
+  if (
+    timing.kind !== "thread_detail" &&
+    timing.kind !== "thread_state" &&
+    timing.kind !== "thread_transcript"
+  )
+    return
+  // The snapshot is the transcript log's hydration request, so it reports under
+  // the same `state_*` attributes the SDK's state fetch does.
   const prefix = timing.kind === "thread_detail" ? "detail" : "state"
   const attributes: PerfAttributes = {
     [`${prefix}_ttfb_ms`]: Math.round(timing.ttfbMs),

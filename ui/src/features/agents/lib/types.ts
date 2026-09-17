@@ -106,6 +106,12 @@ export interface ToolExecutionChunk {
   input?: Record<string, unknown>
   status: AcpToolStatus
   output?: string
+  /**
+   * Fetches the call's full output, for sources that only hold a preview (the
+   * transcript log keeps large outputs out of its snapshot). Present only when
+   * there is more output than {@link output} already shows.
+   */
+  loadOutput?: () => Promise<string>
   display?: OutputIframeDisplay
   elapsedMs?: number
   approvalRequestId?: string
@@ -361,6 +367,12 @@ export interface AgentPullRequestContextResponse {
 export interface AgentThread {
   visibility?: "public" | "private"
   id: string
+  /**
+   * Transcript source for the thread, from its LangGraph metadata. `"v2"` means
+   * the append-only event log serves it; absent means the SDK stream does.
+   */
+  transcript?: "v2"
+
   title: string
   repo: string
   repoFullName: string
