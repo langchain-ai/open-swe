@@ -521,6 +521,18 @@ async def test_pr_costs_sum_lifetime_threads_and_weight_prs_across_efforts(repor
     async with postgres.transaction() as conn:
         await conn.execute(
             text("UPDATE latest_cost_projection SET status = 'partial' WHERE run_id = :run"),
+            {"run": runs[2]},
+        )
+    cohort = (await queries.pr_merge_rate_by_model(period="7d", admin=True))["cohorts"][0]
+    assert cohort["prs_with_complete_cost"] == 2
+    assert cohort["avg_pr_cost_usd"] == 13
+    async with postgres.transaction() as conn:
+        await conn.execute(
+            text("UPDATE latest_cost_projection SET status = 'complete' WHERE run_id = :run"),
+            {"run": runs[2]},
+        )
+        await conn.execute(
+            text("UPDATE latest_cost_projection SET status = 'partial' WHERE run_id = :run"),
             {"run": runs[1]},
         )
     cohort = (await queries.pr_merge_rate_by_model(period="7d", admin=True))["cohorts"][0]

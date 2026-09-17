@@ -655,9 +655,10 @@ function PRMergeRateSection({
               models, even outside the selected period or after merge. We assume
               one PR per thread; multiple PRs each carry the whole thread cost
               without allocation. The average is unavailable unless every PR has
-              a known thread and complete costs for all recorded runs. Coverage
-              shows how many PRs have complete costs; missing or partial costs
-              are not zero.
+              a known thread and complete costs for all recorded runs. When more
+              than half the PRs have complete costs, the average uses only those
+              PRs and shows an incomplete-data indicator. Otherwise it is
+              unavailable. Missing or partial costs are not zero.
             </p>
             {data.suppression_threshold > 1 ? (
               <p>
@@ -1084,6 +1085,40 @@ function formatEffort(effort: string | null | undefined) {
     : "Unknown / legacy"
 }
 
+function AveragePRCost({
+  cohort,
+}: {
+  cohort: Pick<
+    PRMergeRateCohort,
+    "avg_pr_cost_usd" | "prs_with_complete_cost" | "cohort_size"
+  >
+}) {
+  const missing = cohort.cohort_size - cohort.prs_with_complete_cost
+  const incomplete = missing > 0
+  const explanation = `${missing} of ${cohort.cohort_size} PRs ${missing === 1 ? "is" : "are"} omitted because ${missing === 1 ? "its" : "their"} full thread cost is incomplete. The average uses ${cohort.prs_with_complete_cost} PRs with complete costs.`
+
+  return (
+    <div className="flex items-center justify-end gap-1">
+      <span>
+        {cohort.avg_pr_cost_usd == null
+          ? "—"
+          : formatCurrency(cohort.avg_pr_cost_usd)}
+      </span>
+      {incomplete ? (
+        <Tooltip>
+          <TooltipTrigger
+            aria-label="Average PR cost incomplete"
+            className="cursor-help rounded-sm text-muted-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+          >
+            <WarningCircleIcon className="size-3.5" weight="fill" />
+          </TooltipTrigger>
+          <TooltipPopup className="max-w-xs">{explanation}</TooltipPopup>
+        </Tooltip>
+      ) : null}
+    </div>
+  )
+}
+
 function PRMergeRateCells({
   cohort,
   maturityDays,
@@ -1134,15 +1169,7 @@ function PRMergeRateCells({
           : formatPercent(cohort.mature_cohort_merge_share)}
       </td>
       <td className="px-4 py-3 text-right tabular-nums">
-        {cohort.avg_pr_cost_usd == null
-          ? "—"
-          : formatCurrency(cohort.avg_pr_cost_usd)}
-        {cohort.avg_pr_cost_usd == null ? (
-          <div className="text-muted-foreground">
-            {cohort.prs_with_complete_cost}/{cohort.cohort_size} PRs with
-            complete costs
-          </div>
-        ) : null}
+        <AveragePRCost cohort={cohort} />
       </td>
     </>
   )
