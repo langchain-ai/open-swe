@@ -1,6 +1,7 @@
 """Live GitHub pull-request health for dashboard threads."""
 
 import asyncio
+import logging
 import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
@@ -14,6 +15,8 @@ from agent.github.http import (
     github_client,
     github_request,
 )
+
+logger = logging.getLogger(__name__)
 
 _OWNER_PATTERN = re.compile(r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?")
 _REPO_PATTERN = re.compile(r"[A-Za-z0-9._-]{1,100}")
@@ -267,13 +270,30 @@ async def fetch_mergeability(
         response.raise_for_status()
         payload = response.json()
     except httpx2.HTTPError, ValueError:
+        logger.warning(
+            "Mergeability query failed; falling back to what REST reported",
+            extra={"pr_repo_full_name": f"{owner}/{repo}", "pr_number": number},
+            exc_info=True,
+        )
         return None
     if not isinstance(payload, Mapping) or payload.get("errors"):
+        logger.warning(
+            "Mergeability query answered with errors; falling back to what REST reported",
+            extra={
+                "pr_repo_full_name": f"{owner}/{repo}",
+                "pr_number": number,
+                "graphql_errors": payload.get("errors") if isinstance(payload, Mapping) else None,
+            },
+        )
         return None
     data = payload.get("data")
     repository = data.get("repository") if isinstance(data, Mapping) else None
     pull = repository.get("pullRequest") if isinstance(repository, Mapping) else None
     if not isinstance(pull, Mapping):
+        logger.warning(
+            "Mergeability query answered without a pull request",
+            extra={"pr_repo_full_name": f"{owner}/{repo}", "pr_number": number},
+        )
         return None
     mergeable = pull.get("mergeable")
     merge_state = pull.get("mergeStateStatus")
