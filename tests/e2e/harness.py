@@ -33,9 +33,11 @@ patches.apply()
 import fakes  # noqa: E402
 import httpx2  # noqa: E402
 from e2e_env import (  # noqa: E402
+    BASE_BRANCH,
     BASE_URL,
     BOT_USER_ID,
     DEMO_CHANNEL,
+    FAKE_GITHUB_API,
     HUMAN_USER,
     OWNER,
     REPO,
@@ -196,6 +198,70 @@ async def control_pull_request_health(request: Request) -> JSONResponse:
     if pull is None:
         raise HTTPException(404, "Pull request not found")
     return JSONResponse({"ok": True, "pull_request": fakes.pull_health_json(pull)})
+
+
+_MERGE_METHOD_FLAG_BY_NAME = {
+    "squash": "allow_squash_merge",
+    "merge": "allow_merge_commit",
+    "rebase": "allow_rebase_merge",
+}
+
+
+def _split_repo(value: object) -> tuple[str, str]:
+    full_name = str(value or f"{OWNER}/{REPO}")
+    if full_name.count("/") != 1 or not all(full_name.split("/")):
+        raise HTTPException(400, "repo must be owner/name")
+    owner, name = full_name.split("/", 1)
+    return owner, name
+
+
+@app.post("/control/repo-merge-methods")
+async def control_repo_merge_methods(request: Request) -> JSONResponse:
+    """Restrict a repo's allowed merge methods (default: all three)."""
+    body = await request.json()
+    owner, name = _split_repo(body.get("repo"))
+    methods = body.get("methods")
+    if not isinstance(methods, list) or any(
+        method not in _MERGE_METHOD_FLAG_BY_NAME for method in methods
+    ):
+        raise HTTPException(400, "methods must be a list of squash/merge/rebase")
+    enabled = {_MERGE_METHOD_FLAG_BY_NAME[method] for method in methods}
+    flags = fakes.set_repo_merge_methods(
+        owner, name, {flag: flag in enabled for flag in fakes.MERGE_METHOD_FLAGS}
+    )
+    return JSONResponse({"ok": True, "repo": f"{owner}/{name}", **flags})
+
+
+@app.post("/control/pull-request")
+async def control_seed_pull_request(request: Request) -> JSONResponse:
+    """Seed an open pull request the PR search returns, without running the agent.
+
+    Anything ``/control/pull-request-health`` accepts may be set inline, so a spec
+    can pick the draft flag, conflict state, checks and reviews up front."""
+    body = await request.json()
+    owner, name = _split_repo(body.get("repo"))
+    pull = fakes.create_pull(
+        owner,
+        name,
+        head=str(body.get("head") or "seeded-branch"),
+        base=str(body.get("base") or BASE_BRANCH),
+        title=str(body.get("title") or "Seeded pull request"),
+        body=str(body.get("body") or ""),
+        draft=bool(body.get("draft", False)),
+        author=str(body.get("author") or TEST_USERS[0]["login"]),
+        created_at=body.get("created_at") if isinstance(body.get("created_at"), str) else None,
+        updated_at=body.get("updated_at") if isinstance(body.get("updated_at"), str) else None,
+    )
+    fakes.update_pull_health(pull["number"], body)
+    return JSONResponse(
+        {
+            "ok": True,
+            "number": pull["number"],
+            "repo": f"{owner}/{name}",
+            "head_sha": pull["head_sha"],
+            "pull_request": fakes.pull_health_json(pull),
+        }
+    )
 
 
 @app.post("/control/github-event")
@@ -718,6 +784,7 @@ async def mock_github_data() -> JSONResponse:
         [
             {
                 "number": p["number"],
+                "repo": f"{p['owner']}/{p['repo']}",
                 "title": p["title"],
                 "head": p["head"],
                 "head_sha": p["head_sha"],
@@ -725,10 +792,15 @@ async def mock_github_data() -> JSONResponse:
                 "state": p["state"],
                 "draft": p["draft"],
                 "merged": p["merged"],
+                "merge_method": p["merge_method"],
+                "mergeable": p["mergeable"],
+                "mergeable_state": p["mergeable_state"],
                 "author": p["author"],
                 "body": p["body"],
                 "files": p["files"],
                 "reviews": p["reviews"],
+                "created_at": p["created_at"],
+                "updated_at": p["updated_at"],
                 "url": _pr_html_url(p),
             }
             for p in fakes.PULLS
@@ -779,6 +851,7 @@ async def gh_installation_repositories() -> JSONResponse:
 def _gh_pr_json(pr: dict[str, Any]) -> dict[str, Any]:
     return {
         "number": pr["number"],
+        "node_id": fakes.pull_node_id(pr),
         "html_url": _pr_html_url(pr),
         "state": pr["state"],
         "draft": pr["draft"],
@@ -806,6 +879,22 @@ def _gh_pr_json(pr: dict[str, Any]) -> dict[str, Any]:
         "deletions": pr["deletions"],
         "changed_files": len(pr["files"]),
         "created_at": pr["created_at"],
+        "updated_at": pr["updated_at"],
+    }
+
+
+def _gh_search_item_json(pr: dict[str, Any]) -> dict[str, Any]:
+    repo_url = f"{FAKE_GITHUB_API}/repos/{pr['owner']}/{pr['repo']}"
+    return {
+        "number": pr["number"],
+        "title": pr["title"],
+        "repository_url": repo_url,
+        "pull_request": {"url": f"{repo_url}/pulls/{pr['number']}"},
+        "user": {"login": pr["author"]},
+        "state": pr["state"],
+        "draft": pr["draft"],
+        "created_at": pr["created_at"],
+        "updated_at": pr["updated_at"],
     }
 
 
@@ -828,7 +917,54 @@ async def gh_list_installation_repositories() -> JSONResponse:
 
 @app.get("/fake-gh/repos/{owner}/{repo}")
 async def gh_get_repo(owner: str, repo: str) -> JSONResponse:
-    return JSONResponse({"full_name": f"{owner}/{repo}", "private": fakes.repo_private()})
+    return JSONResponse(
+        {
+            "full_name": f"{owner}/{repo}",
+            "private": fakes.repo_private(),
+            **fakes.repo_merge_methods(owner, repo),
+        }
+    )
+
+
+@app.get("/fake-gh/search/issues")
+async def gh_search_issues(
+    q: str = "",
+    per_page: int = 100,
+    page: int = 1,
+    sort: str = "updated",
+    order: str = "desc",
+) -> JSONResponse:
+    """The PR search ``list_open_pull_requests`` drives the "Mine" dashboard with.
+
+    Only the qualifiers that code sends are honoured: ``is:pr``, ``is:open``,
+    ``author:<login>`` and any number of ``repo:<owner>/<name>`` (OR'd, as GitHub
+    does)."""
+    terms = q.split()
+    author = next(
+        (term.removeprefix("author:") for term in terms if term.startswith("author:")), ""
+    )
+    repositories = {
+        term.removeprefix("repo:").lower() for term in terms if term.startswith("repo:")
+    }
+    open_only = "is:open" in terms
+    matches = [
+        pull
+        for pull in fakes.PULLS
+        if (not author or pull["author"].lower() == author.lower())
+        and (not repositories or f"{pull['owner']}/{pull['repo']}".lower() in repositories)
+        and (not open_only or (pull["state"] == "open" and not pull["merged"]))
+    ]
+    field = "created_at" if sort == "created" else "updated_at"
+    matches.sort(key=lambda pull: (pull[field], pull["number"]), reverse=order != "asc")
+    size = max(min(per_page, 100), 1)
+    window = matches[max(page - 1, 0) * size :][:size]
+    return JSONResponse(
+        {
+            "total_count": len(matches),
+            "incomplete_results": False,
+            "items": [_gh_search_item_json(pull) for pull in window],
+        }
+    )
 
 
 @app.get("/fake-gh/repos/{owner}/{repo}/branches/{branch:path}")
@@ -866,20 +1002,30 @@ async def gh_get_pull(owner: str, repo: str, number: int) -> JSONResponse:
     return JSONResponse(_gh_pr_json(pr))
 
 
+@app.patch("/fake-gh/repos/{owner}/{repo}/pulls/{number}")
+async def gh_update_pull(owner: str, repo: str, number: int, request: Request) -> JSONResponse:
+    pr = fakes.find_pull(number, owner, repo)
+    if pr is None:
+        return JSONResponse({"message": "Not Found"}, status_code=404)
+    body = await request.json()
+    state = body.get("state")
+    if state is not None:
+        if state not in {"open", "closed"}:
+            return JSONResponse({"message": "Invalid value for state"}, status_code=422)
+        fakes.update_pull_health(number, {"state": state})
+    for field in ("title", "body"):
+        if isinstance(body.get(field), str):
+            pr[field] = body[field]
+    pr["updated_at"] = fakes.github_timestamp()
+    return JSONResponse(_gh_pr_json(pr))
+
+
 @app.get("/fake-gh/repos/{owner}/{repo}/pulls/{number}/files")
 async def gh_list_pull_files(owner: str, repo: str, number: int) -> JSONResponse:
     pr = fakes.find_pull(number, owner, repo)
     if pr is None:
         return JSONResponse({"message": "Not Found"}, status_code=404)
     return JSONResponse(pr["files"])
-
-
-@app.get("/fake-gh/repos/{owner}/{repo}/pulls/{number}/reviews")
-async def gh_list_pull_reviews(owner: str, repo: str, number: int) -> JSONResponse:
-    pr = fakes.find_pull(number, owner, repo)
-    if pr is None:
-        return JSONResponse({"message": "Not Found"}, status_code=404)
-    return JSONResponse(pr["reviews"])
 
 
 @app.post("/fake-gh/repos/{owner}/{repo}/pulls/{number}/reviews")
@@ -920,6 +1066,20 @@ async def gh_merge_pull(owner: str, repo: str, number: int, request: Request) ->
     return JSONResponse(payload, status_code=status)
 
 
+# Seeded reviews carry only ``{author, state}``, so the list has to be
+# normalised: the dashboard's review-decision read needs a login and an id.
+@app.get("/fake-gh/repos/{owner}/{repo}/pulls/{number}/reviews")
+async def gh_list_pull_reviews(owner: str, repo: str, number: int, page: int = 1) -> JSONResponse:
+    pr = fakes.find_pull(number, owner, repo)
+    if pr is None:
+        return JSONResponse({"message": "Not Found"}, status_code=404)
+    if page > 1:
+        return JSONResponse([])
+    return JSONResponse(
+        [fakes.review_rest_json(review, index) for index, review in enumerate(pr["reviews"])]
+    )
+
+
 @app.get("/fake-gh/repos/{owner}/{repo}/collaborators/{username}/permission")
 async def gh_collaborator_permission(owner: str, repo: str, username: str) -> JSONResponse:  # noqa: ARG001
     return JSONResponse(
@@ -947,6 +1107,15 @@ async def gh_get_commit_status(owner: str, repo: str, sha: str) -> JSONResponse:
 async def gh_graphql(request: Request) -> JSONResponse:
     body = await request.json()
     variables = body.get("variables", {})
+    query = body.get("query", "")
+    if "MarkPullRequestReady" in query:
+        node_id = variables.get("pullRequestId")
+        ready = fakes.mark_pull_ready(node_id) if isinstance(node_id, str) else None
+        if ready is None:
+            return JSONResponse({"errors": [{"message": "Could not resolve to a node"}]})
+        return JSONResponse(
+            {"data": {"markPullRequestReadyForReview": {"pullRequest": {"isDraft": False}}}}
+        )
     owner = variables.get("owner")
     repo = variables.get("repo")
     number = variables.get("number")
@@ -955,12 +1124,23 @@ async def gh_graphql(request: Request) -> JSONResponse:
     pr = fakes.find_pull(number, owner, repo)
     if pr is None:
         return JSONResponse({"errors": [{"message": "Pull request not found"}]})
+    if "PullRequestThreadCount" in query:
+        return JSONResponse(
+            {
+                "data": {
+                    "repository": {
+                        "pullRequest": {
+                            "reviewThreads": fakes.review_thread_count_graphql(pr["review_threads"])
+                        }
+                    }
+                }
+            }
+        )
     review_threads = {
         "nodes": [fakes.review_thread_graphql(thread) for thread in pr["review_threads"]],
         "pageInfo": {"hasNextPage": False, "endCursor": None},
     }
     pull_request: dict[str, Any] = {"reviewThreads": review_threads}
-    query = body.get("query", "")
     if "PullRequestFixReviews" in query:
         pull_request.update(
             {

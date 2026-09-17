@@ -4,11 +4,13 @@ from typing import Any, Literal
 
 from fastapi import APIRouter, HTTPException, Request, Response
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel
+from pydantic import AliasGenerator, BaseModel, ConfigDict, Field
+from pydantic.alias_generators import to_camel
 
 from agent.dashboard.deps import ADMIN_DEP, SESSION_DEP, filter_repo_models_for_user
 from agent.dashboard.profiles import get_valid_access_token
 from agent.dashboard.repo_access import require_repo_access_for_user
+from agent.github.pull_request_status import pull_request_identity
 from agent.github.repos import accessible_repo_full_names
 from agent.review.analyzer_cron import remove_continual_cron
 from agent.review.chat import (
@@ -23,9 +25,11 @@ from agent.review.chat import (
 from agent.review.enabled_repos import list_enabled_review_repos, set_review_repo_enabled
 from agent.review.eval_jobs import get_reviewer_eval_status
 from agent.review.reviews import (
+    ReviewSummary,
     create_review_comment,
     get_review,
     get_review_diff,
+    get_review_summaries,
     list_review_comments,
     list_reviews,
     proxy_pr_image,
@@ -90,6 +94,39 @@ async def api_list_review_styles(
         else record
         for record in records
     ]
+
+
+class ReviewSummaryRef(BaseModel):
+    repo: str = Field(max_length=140)
+    number: int = Field(ge=1)
+
+
+class ReviewSummariesRequest(BaseModel):
+    model_config = ConfigDict(
+        alias_generator=AliasGenerator(validation_alias=to_camel), populate_by_name=True
+    )
+
+    pull_requests: list[ReviewSummaryRef] = Field(max_length=100)
+
+
+@router.post("/reviews/summaries")
+async def api_get_review_summaries(
+    payload: ReviewSummariesRequest,
+    session: dict[str, Any] = SESSION_DEP,
+) -> dict[str, ReviewSummary | None]:
+    identities: list[tuple[str, str, int]] = []
+    for ref in payload.pull_requests:
+        identity = pull_request_identity({"repo_full_name": ref.repo, "number": ref.number})
+        if identity is None:
+            raise HTTPException(422, "invalid pull request reference")
+        identities.append(identity)
+    accessible = await accessible_repo_full_names(session["sub"])
+    authorized = [
+        (owner, repo, number)
+        for owner, repo, number in identities
+        if f"{owner}/{repo}".lower() in accessible
+    ]
+    return await get_review_summaries(authorized) if authorized else {}
 
 
 @router.get("/reviews")
