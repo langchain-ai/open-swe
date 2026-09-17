@@ -498,6 +498,10 @@ function OpenPRCount({
 }) {
   const [open, setOpen] = useState(false)
 
+  if (cohort.waiting === 0 && cohort.mature_pending === 0) {
+    return <span>0</span>
+  }
+
   return (
     <Tooltip open={open} onOpenChange={setOpen}>
       <TooltipTrigger
