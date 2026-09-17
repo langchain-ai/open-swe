@@ -90,7 +90,9 @@ async def pr_merge_rate_by_model(
                     count(*) AS cohort_size,
                     avg(EXTRACT(EPOCH FROM p.outcome_at - p.opened_at))
                         FILTER (WHERE p.current_state = 'merged' AND p.outcome_at IS NOT NULL)
-                        AS avg_merge_seconds
+                        AS avg_merge_seconds,
+                    count(tc.cost_usd) AS prs_with_complete_cost,
+                    sum(tc.cost_usd) AS total_pr_cost_usd
                 FROM pr_projection p
                 JOIN eligible_models e
                   ON e.originating_model_id IS NOT DISTINCT FROM p.originating_model_id
@@ -99,6 +101,15 @@ async def pr_merge_rate_by_model(
                   ON m.workspace_id = p.workspace_id AND m.model_id = p.originating_model_id
                 LEFT JOIN run_projection r
                   ON r.workspace_id = p.workspace_id AND r.run_id = p.opening_run_id
+                LEFT JOIN LATERAL (
+                    SELECT CASE WHEN count(*) = count(c.cost_usd)
+                        AND bool_and(c.status = 'complete')
+                        THEN sum(c.cost_usd) END AS cost_usd
+                    FROM run_projection tr
+                    LEFT JOIN latest_cost_projection c
+                      ON c.workspace_id = tr.workspace_id AND c.run_id = tr.run_id
+                    WHERE tr.workspace_id = p.workspace_id AND tr.thread_id = r.thread_id
+                ) tc ON true
                 WHERE p.workspace_id = :workspace_id
                   AND p.opened_at >= :start AND p.opened_at <= :as_of
                 GROUP BY p.originating_model_id, p.model_attribution_quality, m.provider_model_id,
@@ -129,12 +140,25 @@ async def pr_merge_rate_by_model(
                     "waiting": 0,
                     "cohort_size": 0,
                     "efforts": [],
+                    "prs_with_complete_cost": 0,
+                    "total_pr_cost_usd": 0,
                 },
             )
             effort = _pr_outcome_counts(row)
             effort["avg_merge_seconds"] = (
                 float(row["avg_merge_seconds"]) if row["avg_merge_seconds"] is not None else None
             )
+            covered = _integer(row["prs_with_complete_cost"])
+            total_cost = row["total_pr_cost_usd"]
+            effort["prs_with_complete_cost"] = covered
+            effort["avg_pr_cost_usd"] = (
+                float(total_cost / covered)
+                if covered * 2 > _integer(effort["cohort_size"])
+                else None
+            )
+            cohort["prs_with_complete_cost"] += covered
+            if total_cost is not None:
+                cohort["total_pr_cost_usd"] += total_cost
             cohort["efforts"].append({"effort": row["configured_effort"], **effort})
             avg_merge_seconds = effort["avg_merge_seconds"]
             merged_count = effort["merged"]
@@ -155,6 +179,12 @@ async def pr_merge_rate_by_model(
             merge_seconds_total = merge_seconds_totals.get(key, 0.0)
             cohort["avg_merge_seconds"] = (
                 merge_seconds_total / cohort["merged"] if cohort["merged"] else None
+            )
+            total_cost = cohort.pop("total_pr_cost_usd")
+            cohort["avg_pr_cost_usd"] = (
+                float(total_cost / cohort["prs_with_complete_cost"])
+                if cohort["prs_with_complete_cost"] * 2 > cohort["cohort_size"]
+                else None
             )
             decided = cohort["merged"] + cohort["closed_without_merge"]
             mature = decided + cohort["mature_pending"]
@@ -215,7 +245,12 @@ async def pr_merge_rate_by_model(
         "definition": (
             "PR-open-date cohorts grouped by the opening invocation's configured model. "
             "Routing, provider fallback, subagents, and later invocations may use other models; "
-            "this metric does not allocate independent model credit."
+            "this metric does not allocate independent model credit. "
+            "Average PR cost includes lifetime costs from all runs in the opening thread, "
+            "across all PR outcomes. Assumes one PR per thread; multiple PRs each carry "
+            "the full thread cost without allocation. When more than half the PRs have "
+            "a known thread and complete cost observations for all recorded runs, the average "
+            "uses only those PRs; otherwise it is unavailable."
         ),
         "maturity_days": days,
         "period": period if period in {"7d", "30d", "all"} else "30d",

@@ -367,6 +367,8 @@ export interface UsageLeaderboardPayload extends AnalyticsMetadata {
 
 export interface PRMergeRateEffort {
   effort: string | null
+  avg_pr_cost_usd: number | null
+  prs_with_complete_cost: number
   merged: number
   closed_without_merge: number
   mature_pending: number
@@ -379,6 +381,8 @@ export interface PRMergeRateEffort {
 }
 
 export interface PRMergeRateCohort {
+  avg_pr_cost_usd: number | null
+  prs_with_complete_cost: number
   model_id: string | null
   model_attribution_quality: "effective" | "configured" | "unavailable"
   merged: number
