@@ -1,8 +1,8 @@
 import { useMutation, useQuery } from "@tanstack/react-query"
 import { toast } from "sonner"
 
-import { Button } from "@/components/ui/button"
 import { api, type OpenPullRequest } from "@/lib/api"
+import { PullRequestActionButton } from "./PullRequestActionButton"
 
 export interface ThreadActionLabels {
   idle: string
@@ -58,21 +58,9 @@ export function PullRequestThreadAction({
       }),
   })
   return (
-    <div>
-      <Button
-        size="sm"
-        variant="outline"
-        disabled={
-          thread.isPending ||
-          thread.isError ||
-          thread.data?.running ||
-          run.isPending ||
-          run.isSuccess
-        }
-        aria-live="polite"
-        onClick={() => run.mutate()}
-      >
-        {thread.data?.running || run.data?.already_running
+    <PullRequestActionButton
+      label={
+        thread.data?.running || run.data?.already_running
           ? labels.running
           : thread.isPending
             ? labels.checking
@@ -84,18 +72,17 @@ export function PullRequestThreadAction({
                   ? labels.queued
                   : run.isError
                     ? labels.retry
-                    : labels.idle}
-      </Button>
-      {thread.error && (
-        <p role="alert" className="mt-1 text-destructive">
-          {thread.error.message}
-        </p>
-      )}
-      {run.error && (
-        <p role="alert" className="mt-1 text-destructive">
-          {run.error.message}
-        </p>
-      )}
-    </div>
+                    : labels.idle
+      }
+      disabled={
+        thread.isPending ||
+        thread.isError ||
+        thread.data?.running === true ||
+        run.isPending ||
+        run.isSuccess
+      }
+      onClick={() => run.mutate()}
+      errors={[thread.error, run.error]}
+    />
   )
 }

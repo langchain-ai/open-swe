@@ -139,11 +139,9 @@ def apply() -> None:
     # the real ownership/authorization checks still run.
     from agent.dashboard import profiles, repo_access
     from agent.github import (
-        close_pull_request,
-        merge_pull_request,
+        pull_request_actions,
         pull_request_context,
         pull_request_status,
-        ready_pull_request,
     )
     from agent.threads import access as thread_access
 
@@ -171,11 +169,10 @@ def apply() -> None:
     # Each of these imported GITHUB_API_BASE by name, so the module attribute is
     # the one their calls read.
     pull_request_status.GITHUB_API_BASE = FAKE_GITHUB_API
-    merge_pull_request.GITHUB_API_BASE = FAKE_GITHUB_API
-    close_pull_request.GITHUB_API_BASE = FAKE_GITHUB_API
+    pull_request_actions.GITHUB_API_BASE = FAKE_GITHUB_API
     pull_request_status.GITHUB_GRAPHQL = f"{FAKE_GITHUB_API}/graphql"
     pull_request_context.GITHUB_GRAPHQL = f"{FAKE_GITHUB_API}/graphql"
-    ready_pull_request.GITHUB_GRAPHQL = f"{FAKE_GITHUB_API}/graphql"
+    pull_request_actions.GITHUB_GRAPHQL = f"{FAKE_GITHUB_API}/graphql"
 
     # The repo-access check builds its api.github.com URL inline, so there is no
     # base to repoint; swap the one call for the same request against the fake.

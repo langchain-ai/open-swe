@@ -647,6 +647,18 @@ export interface OpenPullRequest {
 
 export type MergeMethod = "squash" | "merge" | "rebase"
 
+export type PullRequestActionName = "merge" | "close" | "mark-ready"
+
+export type PullRequestActionRequest =
+  | { action: "merge"; sha: string | null; merge_method: MergeMethod }
+  | { action: "close" }
+  | { action: "mark-ready" }
+
+export interface PullRequestActionResult {
+  action: PullRequestActionName
+  done: boolean
+}
+
 export interface OpenPullRequestsPayload {
   pullRequests: OpenPullRequest[]
   nextPage: number | null
@@ -786,6 +798,21 @@ export interface ReviewerEvalStatus {
   github_run_url?: string | null
   trigger?: string | null
   updated_at: string
+}
+
+async function pullRequestAction(
+  pr: OpenPullRequest,
+  body: PullRequestActionRequest
+): Promise<PullRequestActionResult> {
+  const result = await request<PullRequestActionResult>(
+    `/my-pull-requests/${pr.repo.split("/").map(encodeURIComponent).join("/")}/${pr.number}/action`,
+    { method: "POST", body: JSON.stringify(body) }
+  )
+  if (!result.done)
+    throw new Error(
+      "GitHub did not confirm the change. Refresh to check the PR."
+    )
+  return result
 }
 
 export const api = {
@@ -1049,24 +1076,21 @@ export const api = {
       `/reviews/${repo.split("/").map(encodeURIComponent).join("/")}/${number}/thread`,
       { method: "POST", body: JSON.stringify({ title }) }
     ),
-  mergePullRequest: (pr: OpenPullRequest, method: MergeMethod) =>
-    request<{ merged: boolean }>(
-      `/my-pull-requests/${pr.repo.split("/").map(encodeURIComponent).join("/")}/${pr.number}/merge`,
-      {
-        method: "POST",
-        body: JSON.stringify({ sha: pr.headSha, merge_method: method }),
-      }
-    ),
-  closePullRequest: (pr: OpenPullRequest) =>
-    request<{ closed: boolean }>(
-      `/my-pull-requests/${pr.repo.split("/").map(encodeURIComponent).join("/")}/${pr.number}/close`,
-      { method: "POST" }
-    ),
-  markPullRequestReady: (pr: OpenPullRequest) =>
-    request<{ ready: boolean }>(
-      `/my-pull-requests/${pr.repo.split("/").map(encodeURIComponent).join("/")}/${pr.number}/ready`,
-      { method: "POST" }
-    ),
+  mergePullRequest: (
+    pr: OpenPullRequest,
+    method: MergeMethod
+  ): Promise<PullRequestActionResult> =>
+    pullRequestAction(pr, {
+      action: "merge",
+      sha: pr.headSha,
+      merge_method: method,
+    }),
+  closePullRequest: (pr: OpenPullRequest): Promise<PullRequestActionResult> =>
+    pullRequestAction(pr, { action: "close" }),
+  markPullRequestReady: (
+    pr: OpenPullRequest
+  ): Promise<PullRequestActionResult> =>
+    pullRequestAction(pr, { action: "mark-ready" }),
   repoMergeMethods: (repo: string) =>
     request<{ mergeMethods: MergeMethod[] }>(
       `/my-pull-requests/${repo.split("/").map(encodeURIComponent).join("/")}/merge-methods`

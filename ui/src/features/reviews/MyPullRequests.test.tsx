@@ -13,7 +13,11 @@ import { useState } from "react"
 import { toast } from "sonner"
 
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }))
-import { api, type OpenPullRequest } from "@/lib/api"
+import {
+  api,
+  type OpenPullRequest,
+  type PullRequestActionResult,
+} from "@/lib/api"
 import { MyPullRequests } from "./MyPullRequests"
 import type { ReviewsSearch } from "./search"
 
@@ -246,7 +250,7 @@ describe("My PRs", () => {
       ...payload,
       pullRequests: [pull(1, { reviewDecision: "approved" }), pull(2)],
     })
-    let finish!: (result: { merged: boolean }) => void
+    let finish!: (result: PullRequestActionResult) => void
     vi.mocked(api.mergePullRequest).mockImplementation(
       () =>
         new Promise((resolve) => {
@@ -267,7 +271,7 @@ describe("My PRs", () => {
       expect.objectContaining({ number: 1, headSha: "a".repeat(40) }),
       "squash"
     )
-    finish({ merged: true })
+    finish({ action: "merge", done: true })
     await waitFor(() => expect(screen.queryByText("Change 1")).toBeNull())
     expect(screen.getByText("Change 2")).toBeTruthy()
     expect(toast.success).toHaveBeenCalledWith("Merged acme/app#1")
@@ -623,7 +627,10 @@ describe("My PRs", () => {
       ...payload,
       pullRequests: [pull(1, { reviewDecision: "approved" })],
     })
-    vi.mocked(api.mergePullRequest).mockResolvedValue({ merged: true })
+    vi.mocked(api.mergePullRequest).mockResolvedValue({
+      action: "merge",
+      done: true,
+    })
     mount()
     await screen.findByText("Change 1")
     const select = screen.getByRole("combobox", {
@@ -890,7 +897,10 @@ describe("My PRs", () => {
   })
 
   it("closes every selected pull request after confirmation", async () => {
-    vi.mocked(api.closePullRequest).mockResolvedValue({ closed: true })
+    vi.mocked(api.closePullRequest).mockResolvedValue({
+      action: "close",
+      done: true,
+    })
     mount()
     await screen.findByText("Change 1")
     await selectAll()
@@ -911,7 +921,7 @@ describe("My PRs", () => {
   it("keeps a pull request that could not be closed and reports the partial result", async () => {
     vi.mocked(api.closePullRequest).mockImplementation(async (pr) => {
       if (pr.number === 2) throw new Error("Close rejected")
-      return { closed: true }
+      return { action: "close", done: true }
     })
     mount()
     await screen.findByText("Change 1")
@@ -932,7 +942,10 @@ describe("My PRs", () => {
       ...payload,
       pullRequests: [pull(1)],
     })
-    vi.mocked(api.closePullRequest).mockResolvedValue({ closed: true })
+    vi.mocked(api.closePullRequest).mockResolvedValue({
+      action: "close",
+      done: true,
+    })
     mount()
     const card = (await screen.findByText("Change 1")).closest("li")!
     fireEvent.click(within(card).getByRole("button", { name: "Close" }))
@@ -961,7 +974,10 @@ describe("My PRs", () => {
       ...payload,
       pullRequests: [pull(1, { draft: true }), pull(2, { repo: "acme/other" })],
     })
-    vi.mocked(api.markPullRequestReady).mockResolvedValue({ ready: true })
+    vi.mocked(api.markPullRequestReady).mockResolvedValue({
+      action: "mark-ready",
+      done: true,
+    })
     mount()
     await screen.findByText("Change 2")
     const shown = cards()
@@ -991,7 +1007,10 @@ describe("My PRs", () => {
       ...payload,
       pullRequests: [pull(1, { draft: true }), pull(2, { repo: "acme/other" })],
     })
-    vi.mocked(api.markPullRequestReady).mockResolvedValue({ ready: true })
+    vi.mocked(api.markPullRequestReady).mockResolvedValue({
+      action: "mark-ready",
+      done: true,
+    })
     mount()
     await screen.findByText("Change 2")
     await selectAll()
@@ -1064,7 +1083,10 @@ describe("My PRs", () => {
     vi.mocked(api.repoMergeMethods).mockImplementation(async (repo) => ({
       mergeMethods: repo === "acme/app" ? ["squash", "merge"] : ["squash"],
     }))
-    vi.mocked(api.mergePullRequest).mockResolvedValue({ merged: true })
+    vi.mocked(api.mergePullRequest).mockResolvedValue({
+      action: "merge",
+      done: true,
+    })
     mount()
     await screen.findByText("Change 2")
     await selectAll()
@@ -1099,7 +1121,10 @@ describe("My PRs", () => {
     vi.mocked(api.repoMergeMethods).mockResolvedValue({
       mergeMethods: ["squash", "merge"],
     })
-    vi.mocked(api.mergePullRequest).mockResolvedValue({ merged: true })
+    vi.mocked(api.mergePullRequest).mockResolvedValue({
+      action: "merge",
+      done: true,
+    })
     mount()
     await screen.findByText("Change 2")
     await selectAll()

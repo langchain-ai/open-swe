@@ -837,6 +837,7 @@ async def gh_installation_repositories() -> JSONResponse:
 def _gh_pr_json(pr: dict[str, Any]) -> dict[str, Any]:
     return {
         "number": pr["number"],
+        "node_id": fakes.pull_node_id(pr),
         "html_url": _pr_html_url(pr),
         "state": pr["state"],
         "draft": pr["draft"],
@@ -1109,16 +1110,6 @@ async def gh_graphql(request: Request) -> JSONResponse:
     pr = fakes.find_pull(number, owner, repo)
     if pr is None:
         return JSONResponse({"errors": [{"message": "Pull request not found"}]})
-    if "PullRequestReadyNodeId" in query:
-        return JSONResponse(
-            {
-                "data": {
-                    "repository": {
-                        "pullRequest": {"id": fakes.pull_node_id(pr), "isDraft": pr["draft"]}
-                    }
-                }
-            }
-        )
     if "PullRequestThreadCount" in query:
         return JSONResponse(
             {

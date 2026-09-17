@@ -3,14 +3,20 @@ import { useState } from "react"
 import { toast } from "sonner"
 
 import { Button } from "@/components/ui/button"
-import { api, type MergeMethod, type OpenPullRequest } from "@/lib/api"
+import {
+  api,
+  type MergeMethod,
+  type OpenPullRequest,
+  type PullRequestActionName,
+} from "@/lib/api"
 import { forgetPullRequest, refreshPullRequest } from "../lib/cache"
+import { githubActions } from "../lib/githubActions"
 import { writePreferredMergeMethod } from "../lib/mergeMethod"
 import { isFixable, isMergeable, pullRequestKey } from "../lib/status"
 import { BulkMergeDialog } from "./BulkMergeDialog"
 import { ConfirmCloseDialog } from "./ConfirmCloseDialog"
 
-type BulkAction = "close" | "fix" | "merge" | "ready"
+type BulkAction = PullRequestActionName | "fix"
 
 interface BulkRequest {
   action: BulkAction
@@ -29,20 +35,11 @@ async function runBulkAction(
   pr: OpenPullRequest,
   method: MergeMethod | undefined
 ) {
-  if (action === "close") {
-    const result = await api.closePullRequest(pr)
-    if (!result.closed) throw new Error("GitHub did not confirm the close.")
-  } else if (action === "ready") {
-    const result = await api.markPullRequestReady(pr)
-    if (!result.ready)
-      throw new Error("GitHub did not confirm the ready for review.")
-  } else if (action === "merge") {
-    if (!method) throw new Error("Choose a merge method.")
-    const result = await api.mergePullRequest(pr, method)
-    if (!result.merged) throw new Error("GitHub did not confirm the merge.")
-  } else {
+  if (action === "fix") {
     await api.fixPullRequest(pr)
+    return
   }
+  await githubActions[action].run(pr, method)
 }
 
 function outcomeMessage({ action, succeeded, failures }: BulkOutcome) {
@@ -51,10 +48,8 @@ function outcomeMessage({ action, succeeded, failures }: BulkOutcome) {
     failures.length === 0
       ? `${total} pull request${total === 1 ? "" : "s"}`
       : `${succeeded.length} of ${total} pull request${total === 1 ? "" : "s"}`
-  if (action === "close") return `Closed ${counted}`
-  if (action === "merge") return `Merged ${counted}`
-  if (action === "ready") return `Marked ${counted} ready for review`
-  return `Queued fixes for ${counted}`
+  if (action === "fix") return `Queued fixes for ${counted}`
+  return githubActions[action].succeeded(counted)
 }
 
 export function BulkActions({
@@ -97,7 +92,7 @@ export function BulkActions({
         void queryClient.invalidateQueries({
           queryKey: ["pr-thread-status", login],
         })
-      else if (action === "ready")
+      else if (githubActions[action].settles === "refreshes")
         for (const pr of succeeded) refreshPullRequest(queryClient, login, pr)
       else for (const pr of succeeded) forgetPullRequest(queryClient, login, pr)
       onSettled(succeeded)
@@ -113,6 +108,10 @@ export function BulkActions({
     retry: false,
   })
   const active = bulk.isPending ? bulk.variables.action : null
+  const label = (action: PullRequestActionName) =>
+    active === action
+      ? githubActions[action].labels.pending
+      : githubActions[action].labels.idle
   const fixable = selected.every((pr) => isFixable(pr) && !pr.detailsLoading)
   const mergeable = selected.every(isMergeable)
   const drafts = selected.every((pr) => pr.draft === true)
@@ -134,7 +133,7 @@ export function BulkActions({
         disabled={bulk.isPending}
         onClick={() => setPrompt("close")}
       >
-        {active === "close" ? "Closing…" : "Close"}
+        {label("close")}
       </Button>
       <Button
         size="sm"
@@ -160,16 +159,18 @@ export function BulkActions({
         }
         onClick={() => setPrompt("merge")}
       >
-        {active === "merge" ? "Merging…" : "Merge"}
+        {label("merge")}
       </Button>
       <Button
         size="sm"
         variant="outline"
         disabled={bulk.isPending || !drafts}
         title={drafts ? undefined : "Every selected PR must be a draft"}
-        onClick={() => bulk.mutate({ action: "ready", pullRequests: selected })}
+        onClick={() =>
+          bulk.mutate({ action: "mark-ready", pullRequests: selected })
+        }
       >
-        {active === "ready" ? "Marking ready…" : "Mark ready"}
+        {label("mark-ready")}
       </Button>
       {prompt === "close" && (
         <ConfirmCloseDialog

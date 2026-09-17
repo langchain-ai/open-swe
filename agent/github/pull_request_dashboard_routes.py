@@ -6,13 +6,12 @@ from fastapi import APIRouter, HTTPException
 
 from agent.dashboard.deps import SESSION_DEP
 from agent.dashboard.profiles import get_valid_access_token
-from agent.github.close_pull_request import ClosePullRequestResult, close_pull_request
 from agent.github.http import github_client
-from agent.github.merge_pull_request import (
-    MergePullRequestRequest,
-    MergePullRequestResult,
+from agent.github.pull_request_actions import (
+    PullRequestAction,
+    PullRequestActionResult,
     RepositoryMergeMethods,
-    merge_pull_request,
+    act_on_pull_request,
     repository_merge_methods,
 )
 from agent.github.pull_request_status import (
@@ -22,7 +21,6 @@ from agent.github.pull_request_status import (
     load_open_pull_request,
     pull_request_identity,
 )
-from agent.github.ready_pull_request import ReadyPullRequestResult, mark_pull_request_ready
 
 router = APIRouter(tags=["pull-requests"])
 
@@ -76,35 +74,15 @@ async def api_my_pull_request_details(
         )
 
 
-@router.post("/my-pull-requests/{owner}/{repo}/{number}/merge")
-async def api_merge_my_pull_request(
+@router.post("/my-pull-requests/{owner}/{repo}/{number}/action")
+async def api_act_on_my_pull_request(
     owner: str,
     repo: str,
     number: int,
-    body: MergePullRequestRequest,
+    body: PullRequestAction,
     session: dict[str, Any] = SESSION_DEP,
-) -> MergePullRequestResult:
+) -> PullRequestActionResult:
     token = await get_valid_access_token(session["sub"])
     if not token:
         raise HTTPException(401, "GitHub token unavailable, re-login required")
-    return await merge_pull_request(owner, repo, number, body, token)
-
-
-@router.post("/my-pull-requests/{owner}/{repo}/{number}/close")
-async def api_close_my_pull_request(
-    owner: str, repo: str, number: int, session: dict[str, Any] = SESSION_DEP
-) -> ClosePullRequestResult:
-    token = await get_valid_access_token(session["sub"])
-    if not token:
-        raise HTTPException(401, "GitHub token unavailable, re-login required")
-    return await close_pull_request(owner, repo, number, token)
-
-
-@router.post("/my-pull-requests/{owner}/{repo}/{number}/ready")
-async def api_ready_my_pull_request(
-    owner: str, repo: str, number: int, session: dict[str, Any] = SESSION_DEP
-) -> ReadyPullRequestResult:
-    token = await get_valid_access_token(session["sub"])
-    if not token:
-        raise HTTPException(401, "GitHub token unavailable, re-login required")
-    return await mark_pull_request_ready(owner, repo, number, token)
+    return await act_on_pull_request(owner, repo, number, body, token)
