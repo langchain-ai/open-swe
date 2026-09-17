@@ -31,8 +31,42 @@ from agent.utils.thread_ops import langgraph_client as get_langgraph_client
 logger = logging.getLogger(__name__)
 
 
+_NO_HANDLER = (
+    "a click on it reaches an endpoint that has no handler for it, so the element would "
+    "render and then do nothing. Use a link button (a `button` carrying `url`) for anything "
+    "clickable, or pass `options` instead of `blocks` to ask for a choice"
+)
+
+
+def _unhandled_element(block: dict[str, Any]) -> str | None:
+    """Why an element in `block` would be dead once clicked, or None.
+
+    Slack routes a click back to `/webhooks/slack/interactivity`, which answers
+    only its own `action_id` and `value` contract and ignores everything else.
+    A hand-written interactive element therefore fails silently: Slack marks
+    nothing wrong, and the click simply does not arrive.
+    """
+    if block.get("type") == "input":
+        return f"an input block submits through a modal, and {_NO_HANDLER}"
+    candidates = [
+        element
+        for element in (
+            block.get("elements") if block.get("type") == "actions" else [],
+            [block.get("accessory")],
+        )
+        for element in (element if isinstance(element, list) else [])
+        if isinstance(element, dict)
+    ]
+    for element in candidates:
+        url = element.get("url")
+        if element.get("type") == "button" and isinstance(url, str) and url.strip():
+            continue
+        return f"`{element.get('type') or 'element'}` is interactive and {_NO_HANDLER}"
+    return None
+
+
 def _invalid_blocks(blocks: list[dict[str, Any]] | None) -> str | None:
-    """The first Block Kit problem Slack's own models find, or None."""
+    """The first Block Kit problem in `blocks`, or None."""
     for index, block in enumerate(blocks or []):
         if not isinstance(block, dict):
             return f"block {index} is not an object"
@@ -47,6 +81,8 @@ def _invalid_blocks(blocks: list[dict[str, Any]] | None) -> str | None:
             parsed.validate_json()
         except Exception as exc:  # noqa: BLE001
             return f"{label}: {exc}"
+        if problem := _unhandled_element(block):
+            return f"{label}: {problem}"
     return None
 
 

@@ -526,3 +526,67 @@ async def test_reply_does_not_claim_a_handoff_when_detaching_fails(
 
     assert result["moved_to_dashboard"] is False
     assert result["retry"] is True
+
+
+@pytest.mark.parametrize(
+    "block",
+    [
+        {
+            "type": "actions",
+            "elements": [{"type": "button", "text": {"type": "plain_text", "text": "Pick"}}],
+        },
+        {
+            "type": "actions",
+            "elements": [{"type": "static_select", "options": [], "action_id": "choose"}],
+        },
+        {
+            "type": "section",
+            "text": {"type": "mrkdwn", "text": "done"},
+            "accessory": {"type": "overflow", "options": []},
+        },
+        {
+            "type": "input",
+            "label": {"type": "plain_text", "text": "Why"},
+            "element": {"type": "plain_text_input", "action_id": "why"},
+        },
+    ],
+)
+def test_elements_without_a_click_handler_are_rejected(block: dict[str, Any]) -> None:
+    from agent.slack.tools.thread_reply import _invalid_blocks
+
+    problem = _invalid_blocks([block])
+
+    assert problem is not None
+    assert "do nothing" in problem
+
+
+def test_link_buttons_and_layout_blocks_are_accepted() -> None:
+    from agent.slack.tools.thread_reply import _invalid_blocks
+
+    assert (
+        _invalid_blocks(
+            [
+                {"type": "section", "text": {"type": "mrkdwn", "text": "*Findings*"}},
+                {"type": "divider"},
+                {
+                    "type": "section",
+                    "fields": [
+                        {"type": "mrkdwn", "text": "*Files*\n3"},
+                        {"type": "mrkdwn", "text": "*Tests*\npassing"},
+                    ],
+                },
+                {"type": "context", "elements": [{"type": "mrkdwn", "text": "cached result"}]},
+                {
+                    "type": "actions",
+                    "elements": [
+                        {
+                            "type": "button",
+                            "text": {"type": "plain_text", "text": "Open PR"},
+                            "url": "https://github.test/pr/1",
+                        }
+                    ],
+                },
+            ]
+        )
+        is None
+    )

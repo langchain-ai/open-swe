@@ -31,11 +31,19 @@ name/value pairs, a `divider` between findings, a `context` line for a caveat,
 or an `actions` block of link buttons straight to a PR, a trace, a saved plan,
 or a dashboard page. Keep `message` as the full plain-text fallback — it is
 what notifications and screen readers show, and it is what the web UI renders.
-`blocks` replaces the buttons `options` would have drawn, so pass one or the
-other. Blocks are checked against Slack's schema before posting and a bad one
-comes back named, so fix what the error points at rather than dropping the
-whole reply. Do not reach for Block Kit when a sentence would do; a wall of
-blocks for a one-line answer is worse than the sentence.
+
+`blocks` is for presentation and links only. A `button` carrying `url` works,
+because Slack opens the link itself. Every other interactive element — a button
+without a `url`, a select, an overflow, a datepicker, checkboxes, an `input`
+block — needs a click routed back to this run, and only the buttons `options`
+generates are wired for that. Hand-written ones render and then do nothing when
+clicked, with no visible error, so pass `options` when you want a choice and
+keep `blocks` for layout. Blocks are validated before posting and a bad or dead
+one comes back named and retryable; fix what the error points at rather than
+dropping the whole reply.
+
+Do not reach for Block Kit when a sentence would do; a wall of blocks for a
+one-line answer is worse than the sentence.
 
 When a plan is ready, post a concise summary with the dashboard review link and
 pass `options=["Approve & implement", "Request changes"]`. The user can still
