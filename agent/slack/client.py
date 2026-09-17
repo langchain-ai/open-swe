@@ -21,6 +21,7 @@ from slack_sdk.errors import SlackApiError
 from slack_sdk.web.async_slack_response import AsyncSlackResponse
 
 from agent.config import ENV
+from agent.slack.channels import SlackChannel
 from agent.slack.http import SLACK_REQUEST_ERRORS, slack_client, slack_error, slack_retry_after
 from agent.source_context import SlackThreadRef, SourceContext
 from agent.thread_ids import slack_thread_id
@@ -37,10 +38,8 @@ SLACK_BOT_TOKEN = ENV.SLACK_BOT_TOKEN.get()
 SLACK_THREAD_MAX_MESSAGES = 500
 SLACK_CHANNEL_HISTORY_MAX_MESSAGES = 100
 SLACK_FILE_UPLOAD_MAX_BYTES = 16 * 1024 * 1024
-SLACK_CHANNEL_INFO_CACHE_TTL_SECONDS = 300
 
 SlackChannelContext = dict[str, str | bool | None]
-_SLACK_CHANNEL_INFO_CACHE: dict[str, tuple[float, dict[str, Any]]] = {}
 
 SLACK_WEB_LINK_FOOTER_LABEL = "Open in Web"
 SLACK_SECTION_TEXT_MAX_CHARS = 3000
@@ -1174,47 +1173,79 @@ async def get_slack_user_info(user_id: str) -> dict[str, Any] | None:
         return None
 
 
-def clear_slack_channel_info_cache() -> None:
-    """Clear cached Slack channel info."""
-    _SLACK_CHANNEL_INFO_CACHE.clear()
-
-
-def _cached_slack_channel_info(channel_id: str) -> dict[str, Any] | None:
-    cached = _SLACK_CHANNEL_INFO_CACHE.get(channel_id)
-    if not cached:
-        return None
-    expires_at, channel = cached
-    if expires_at <= time.time():
-        _SLACK_CHANNEL_INFO_CACHE.pop(channel_id, None)
-        return None
-    return dict(channel)
-
-
-def _cache_slack_channel_info(channel_id: str, channel: dict[str, Any]) -> None:
-    _SLACK_CHANNEL_INFO_CACHE[channel_id] = (
-        time.time() + SLACK_CHANNEL_INFO_CACHE_TTL_SECONDS,
-        dict(channel),
-    )
-
-
 async def get_slack_channel_info(
     channel_id: str, *, use_cache: bool = True
 ) -> dict[str, Any] | None:
     """Get Slack channel details (including topic/purpose) by channel ID."""
     if not SLACK_BOT_TOKEN or not channel_id:
         return None
-    if use_cache and (cached := _cached_slack_channel_info(channel_id)) is not None:
-        return cached
+    if use_cache and (known := await SlackChannel.get(channel_id)) is not None and known.fresh:
+        return dict(known.info)
     try:
         async with slack_client(token=SLACK_BOT_TOKEN) as client:
             data = await client.conversations_info(channel=channel_id)
         channel = data.get("channel")
         if isinstance(channel, dict):
-            _cache_slack_channel_info(channel_id, channel)
+            await SlackChannel.record(channel)
             return dict(channel)
     except SLACK_REQUEST_ERRORS as exc:
         logger.warning("Slack channel lookup failed", extra={"slack_error": slack_error(exc)})
     return None
+
+
+_SLACK_CHANNEL_MENTION_RE = re.compile(r"^<#([A-Z0-9]+)(?:\|[^>]*)?>$")
+_SLACK_CHANNEL_ID_SHAPE_RE = re.compile(r"^[CGD][A-Z0-9]{8,}$")
+
+
+async def _list_slack_channels(name: str) -> str | None:
+    """Page ``conversations.list``, recording every channel, until ``name`` turns up."""
+    cursor: str | None = None
+    try:
+        async with slack_client(token=SLACK_BOT_TOKEN) as client:
+            while True:
+                data = await client.conversations_list(
+                    types="public_channel,private_channel",
+                    exclude_archived=True,
+                    limit=1000,
+                    cursor=cursor,
+                )
+                channels = data.get("channels")
+                page = [item for item in channels if isinstance(item, dict)] if channels else []
+                await SlackChannel.record(*page)
+                for item in page:
+                    channel_id = item.get("id")
+                    if item.get("name") == name and isinstance(channel_id, str) and channel_id:
+                        return channel_id
+                metadata = data.get("response_metadata")
+                cursor = metadata.get("next_cursor") if isinstance(metadata, dict) else None
+                if not cursor:
+                    return None
+    except SLACK_REQUEST_ERRORS as exc:
+        logger.warning("Slack channel list failed", extra={"slack_error": slack_error(exc)})
+        return None
+
+
+async def resolve_slack_channel_id(channel: str) -> str | None:
+    """The id of a channel given as an id, ``<#C…|name>``, ``#name`` or ``name``."""
+    if not SLACK_BOT_TOKEN:
+        return None
+    reference = channel.strip()
+    if mention := _SLACK_CHANNEL_MENTION_RE.fullmatch(reference):
+        reference = mention.group(1)
+    reference = reference.lstrip("#")
+    if not reference:
+        return None
+    if _SLACK_CHANNEL_ID_SHAPE_RE.fullmatch(reference):
+        info = await get_slack_channel_info(reference)
+        found = info.get("id") if info else None
+        return found if isinstance(found, str) and found else None
+    name = reference.lower()
+    if (known := await SlackChannel.by_name(name)) is not None:
+        # A stale row may predate a rename; confirm against Slack before trusting it.
+        current = known.info if known.fresh else await get_slack_channel_info(known.id)
+        if current is not None and current.get("name") == name:
+            return known.id
+    return await _list_slack_channels(name)
 
 
 def _channel_section_value(channel: dict[str, Any] | None, key: str) -> str:
