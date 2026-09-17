@@ -199,9 +199,9 @@ async def get_agent(config: RunnableConfig) -> Pregel:
 
 ### Auto model routing with Jev
 
-Auto mode uses the existing LangChain classifier by default. To try [TypeSafe Jev](https://docs.typesafe.ai/introduction/quickstart) instead, set both `MODEL_ROUTING_PROVIDER=jev` and `TYPESAFE_API_KEY` in the deployment environment. This changes the classifier for eligible Auto turns; it does not enable Auto or change the existing rollout split.
+Auto mode uses the existing LangChain classifier by default. Set the `model_routing_provider` field to `"langchain"` or `"jev"` through the instance/workspace settings APIs, or use the authorized `set_model_routing_provider` admin-thread tool for an organization-wide selection or workspace override. `MODEL_ROUTING_PROVIDER` remains the deployment fallback when no stored setting overrides it. Keep `TYPESAFE_API_KEY` in the deployment environment; selecting Jev changes the classifier for eligible Auto turns but does not enable Auto or change the existing rollout split.
 
-Jev receives the same bounded task text (up to 8,000 characters) as the existing classifier, sent directly to TypeSafe rather than through the LangSmith Gateway. Review data-handling requirements before enabling it. Responses below an initial `0.6` confidence threshold, timeouts, API errors, malformed responses, and a missing key fall back to the existing classifier. This threshold is experimental, not a calibrated correctness probability. Plan-mode routing, explicit performance routing, and persisted routes bypass classification as before. Set `MODEL_ROUTING_PROVIDER=langchain` to disable Jev.
+Jev receives the same bounded task text (up to 8,000 characters) as the existing classifier, sent directly to TypeSafe rather than through the LangSmith Gateway. Review data-handling requirements before enabling it. Responses below an initial `0.6` confidence threshold, timeouts, API errors, malformed responses, and a missing key fall back to the existing classifier. This threshold is experimental, not a calibrated correctness probability. Plan-mode routing, explicit performance routing, and persisted routes bypass classification as before.
 
 ### Routing through the LangSmith LLM Gateway
 

@@ -35,6 +35,8 @@ from agent.workspaces.store import DEFAULT_WORKSPACE_SLUG, WORKSPACES, slugify
 
 logger = logging.getLogger(__name__)
 
+ModelRoutingProvider = Literal["langchain", "jev"]
+
 INSTANCE_SETTINGS_NAMESPACE: list[str] = ["team_settings"]
 # The instance record keeps the key the pre-workspaces ("team settings") record
 # used, so an upgrade needs no data migration.
@@ -69,6 +71,7 @@ class WorkspaceSettingsUpdate(BaseModel):
     # Tri-state adaptive model routing toggle: True/False is authoritative. None
     # on the instance is off (routing is opt-in); None on a workspace inherits.
     model_routing_enabled: bool | None = None
+    model_routing_provider: ModelRoutingProvider | None = None
     gateway_enabled: bool | None = None
     fable_enabled: bool | None = None
     expedited_review_enabled: bool | None = None
@@ -307,6 +310,10 @@ def _env_default_repo() -> str | None:
     return f"{owner}/{name}" if owner and name else None
 
 
+def _env_model_routing_provider() -> ModelRoutingProvider:
+    return "jev" if ENV.MODEL_ROUTING_PROVIDER.get().lower() == "jev" else "langchain"
+
+
 def _parse_repo(value: object) -> dict[str, str] | None:
     if not isinstance(value, str):
         return None
@@ -323,6 +330,7 @@ def _default_settings() -> dict[str, Any]:
         "pr_summaries": True,
         "review_trace_links": True,
         "model_routing_enabled": None,
+        "model_routing_provider": _env_model_routing_provider(),
         "gateway_enabled": None,
         "fable_enabled": False,
         "expedited_review_enabled": False,
@@ -678,6 +686,10 @@ class WorkspaceSettings(Mapping[str, Any]):
     def model_routing_enabled(self) -> bool:
         value = self.get("model_routing_enabled")
         return value if isinstance(value, bool) else False
+
+    @property
+    def model_routing_provider(self) -> ModelRoutingProvider:
+        return "jev" if self.get("model_routing_provider") == "jev" else "langchain"
 
     @property
     def gateway_enabled(self) -> bool | None:

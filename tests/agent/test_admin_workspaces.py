@@ -175,6 +175,32 @@ async def test_tools_refuse_non_admins(monkeypatch: pytest.MonkeyPatch) -> None:
         }
         result = await env_tools.publish_workspace("base", "prompt")
         assert result["ok"] is False
+        assert await env_tools.set_model_routing_provider("jev") == {
+            "ok": False,
+            "error": "Only workspace admins can manage workspaces.",
+        }
+
+
+@pytest.mark.asyncio
+async def test_admin_can_set_workspace_model_routing_provider(
+    monkeypatch: pytest.MonkeyPatch, fake_store
+) -> None:
+    monkeypatch.setenv("CONFIGURED_ADMINS", "ramonn")
+    workspace = Workspace(slug="base", name="Base")
+    with (
+        patch("agent.run_config.get_config", return_value=_config(github_login="ramonn")),
+        patch.object(
+            env_tools.store.WORKSPACES, "get", new_callable=AsyncMock, return_value=workspace
+        ),
+    ):
+        result = await env_tools.set_model_routing_provider("jev", workspace="Base")
+
+    assert result == {
+        "ok": True,
+        "scope": "workspace",
+        "workspace": "base",
+        "model_routing_provider": "jev",
+    }
 
 
 # --- publish: capture this sandbox, then record ---

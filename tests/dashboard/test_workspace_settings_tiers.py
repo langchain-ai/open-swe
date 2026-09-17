@@ -57,6 +57,19 @@ async def test_records_written_beside_the_instance_one_still_apply(fake_store: F
     assert await get_value(INSTANCE_SETTINGS_NAMESPACE, "oss") is None
 
 
+async def test_model_routing_provider_inherits_env_then_instance_and_workspace(
+    fake_store: FakeStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("MODEL_ROUTING_PROVIDER", "jev")
+    assert (await get_workspace_settings("oss")).model_routing_provider == "jev"
+
+    await upsert_instance_settings(WorkspaceSettingsUpdate(model_routing_provider="langchain"))
+    await upsert_workspace_overrides("oss", WorkspaceSettingsUpdate(model_routing_provider="jev"))
+
+    assert (await get_workspace_settings("default")).model_routing_provider == "langchain"
+    assert (await get_workspace_settings("oss")).model_routing_provider == "jev"
+
+
 async def test_an_override_applies_to_its_workspace_only(fake_store: FakeStore) -> None:
     await upsert_instance_settings(
         WorkspaceSettingsUpdate(org_guidelines="internal only", fable_enabled=True)

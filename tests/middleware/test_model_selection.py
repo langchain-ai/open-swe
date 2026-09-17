@@ -19,6 +19,7 @@ def _middleware(
     *,
     route_model_ids: dict[str, str] | None = None,
     routing_mode: Literal["auto", "performance"] = "auto",
+    routing_provider: Literal["langchain", "jev"] = "langchain",
 ) -> tuple[ModelSelectionMiddleware, dict[str, MagicMock], AsyncMock]:
     profiles = ("fast", "balanced", "performance")
     models = {profile: MagicMock(name=profile) for profile in profiles}
@@ -32,6 +33,7 @@ def _middleware(
         classifier,
         route_model_ids=route_model_ids,
         routing_mode=routing_mode,
+        routing_provider=routing_provider,
     )
     classifier.model_copy.assert_called_once_with(update={"tags": ["nostream"]})
     tagged.with_structured_output.assert_called_once_with(
@@ -354,13 +356,12 @@ async def test_jev_routes_with_the_bounded_task(
         )
 
     real_client = httpx2.AsyncClient
-    monkeypatch.setenv("MODEL_ROUTING_PROVIDER", "jev")
     monkeypatch.setenv("TYPESAFE_API_KEY", "secret")
     monkeypatch.setattr(
         "agent.middleware.model_selection.httpx2.AsyncClient",
         lambda **kwargs: real_client(**kwargs, transport=httpx2.MockTransport(handle)),
     )
-    middleware, _, classifier = _middleware(route="performance")
+    middleware, _, classifier = _middleware(route="performance", routing_provider="jev")
     task = "x" * 8_001
 
     route = await middleware.select_route(
@@ -411,13 +412,12 @@ async def test_jev_failure_or_low_confidence_uses_existing_classifier(
         return result
 
     real_client = httpx2.AsyncClient
-    monkeypatch.setenv("MODEL_ROUTING_PROVIDER", "jev")
     monkeypatch.setenv("TYPESAFE_API_KEY", "secret")
     monkeypatch.setattr(
         "agent.middleware.model_selection.httpx2.AsyncClient",
         lambda **kwargs: real_client(**kwargs, transport=httpx2.MockTransport(handle)),
     )
-    middleware, _, classifier = _middleware(route="performance")
+    middleware, _, classifier = _middleware(route="performance", routing_provider="jev")
 
     route = await middleware.select_route(
         ModelSelectionState(messages=[HumanMessage(content="Design this system")])
@@ -428,10 +428,9 @@ async def test_jev_failure_or_low_confidence_uses_existing_classifier(
 
 
 @pytest.mark.asyncio
-async def test_jev_requires_explicit_provider_toggle(
+async def test_jev_requires_workspace_provider_setting(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.delenv("MODEL_ROUTING_PROVIDER", raising=False)
     monkeypatch.setenv("TYPESAFE_API_KEY", "secret")
     middleware, _, classifier = _middleware(route="balanced")
 

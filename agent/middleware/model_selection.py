@@ -11,6 +11,7 @@ from langgraph.runtime import Runtime
 from pydantic import BaseModel, Field
 
 from agent.config import ENV
+from agent.dashboard.workspace_settings import ModelRoutingProvider
 from agent.input_messages import input_message_text, message_sender_id
 from agent.middleware.trace import OpenSWEMiddleware
 from agent.prompts import load_prompt, render_prompt
@@ -46,12 +47,6 @@ class TypeSafeAnswers(BaseModel):
 
 class TypeSafeResponse(BaseModel):
     answers: TypeSafeAnswers
-
-
-def _typesafe_api_key() -> str | None:
-    if ENV.MODEL_ROUTING_PROVIDER.get().lower() != "jev":
-        return None
-    return ENV.TYPESAFE_API_KEY.optional()
 
 
 def _latest_human_task(messages: Sequence[Any]) -> str:
@@ -120,10 +115,12 @@ class ModelSelectionMiddleware(OpenSWEMiddleware[ModelSelectionState]):
         *,
         route_model_ids: Mapping[str, str] | None = None,
         routing_mode: RoutingMode = "auto",
+        routing_provider: ModelRoutingProvider = "langchain",
     ) -> None:
         self._models = dict(models)
         self._route_model_ids = dict(route_model_ids or {})
         self._routing_mode = routing_mode
+        self._routing_provider = routing_provider
         # `nostream` keeps the routing decision out of the user-facing message
         # stream; it stays visible in traces, unlike the offloading summarizer.
         hidden_classifier = classifier.model_copy(
@@ -197,7 +194,7 @@ class ModelSelectionMiddleware(OpenSWEMiddleware[ModelSelectionState]):
         )
         task = (approved_plan or _latest_human_task(messages))[-8_000:]
         route: Route = "balanced"
-        if api_key := _typesafe_api_key():
+        if self._routing_provider == "jev" and (api_key := ENV.TYPESAFE_API_KEY.optional()):
             jev_route = await self._select_jev_route(task, api_key)
             if jev_route is not None:
                 return jev_route
