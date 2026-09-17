@@ -1,11 +1,17 @@
+import json
 from typing import Any, Literal, cast
 from unittest.mock import AsyncMock, MagicMock
 
+import httpx2
 import pytest
 from langchain.agents.middleware.types import ModelRequest, ModelResponse
 from langchain_core.messages import HumanMessage, ToolMessage
 
-from agent.middleware.model_selection import ModelSelectionMiddleware, RouteDecision
+from agent.middleware.model_selection import (
+    ModelSelectionMiddleware,
+    ModelSelectionState,
+    RouteDecision,
+)
 
 
 def _middleware(
@@ -318,3 +324,120 @@ async def test_plain_human_message_without_an_envelope_is_still_classified() -> 
     await middleware.abefore_model(cast(Any, state), MagicMock())
 
     assert "Update the README" in classifier.await_args.args[0]
+
+
+@pytest.mark.asyncio
+async def test_jev_routes_with_the_bounded_task(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    seen: httpx2.Request | None = None
+
+    def handle(request: httpx2.Request) -> httpx2.Response:
+        nonlocal seen
+        seen = request
+        return httpx2.Response(
+            200,
+            json={
+                "answers": {
+                    "route": {
+                        "type": "choice",
+                        "choice": "fast",
+                        "probabilities": {
+                            "fast": 0.8,
+                            "balanced": 0.15,
+                            "performance": 0.05,
+                        },
+                        "confidence": 0.7,
+                    }
+                }
+            },
+        )
+
+    real_client = httpx2.AsyncClient
+    monkeypatch.setenv("MODEL_ROUTING_PROVIDER", "jev")
+    monkeypatch.setenv("TYPESAFE_API_KEY", "secret")
+    monkeypatch.setattr(
+        "agent.middleware.model_selection.httpx2.AsyncClient",
+        lambda **kwargs: real_client(**kwargs, transport=httpx2.MockTransport(handle)),
+    )
+    middleware, _, classifier = _middleware(route="performance")
+    task = "x" * 8_001
+
+    route = await middleware.select_route(
+        ModelSelectionState(messages=[HumanMessage(content=task)])
+    )
+
+    assert route == "fast"
+    classifier.assert_not_awaited()
+    assert seen is not None
+    assert seen.headers["Authorization"] == "Bearer secret"
+    assert seen.url == "https://api.typesafe.ai/v1/systemone"
+    assert json.loads(seen.read())["state"] == "x" * 8_000
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "result",
+    [
+        httpx2.Response(503),
+        httpx2.TimeoutException("timed out"),
+        httpx2.Response(200, json={"answers": {"route": {"choice": "fast"}}}),
+        httpx2.Response(
+            200,
+            json={
+                "answers": {
+                    "route": {
+                        "type": "choice",
+                        "choice": "fast",
+                        "probabilities": {
+                            "fast": 0.5,
+                            "balanced": 0.4,
+                            "performance": 0.1,
+                        },
+                        "confidence": 0.59,
+                    }
+                }
+            },
+        ),
+    ],
+)
+async def test_jev_failure_or_low_confidence_uses_existing_classifier(
+    monkeypatch: pytest.MonkeyPatch,
+    result: httpx2.Response | httpx2.TimeoutException,
+) -> None:
+    def handle(request: httpx2.Request) -> httpx2.Response:
+        if isinstance(result, httpx2.TimeoutException):
+            raise result
+        return result
+
+    real_client = httpx2.AsyncClient
+    monkeypatch.setenv("MODEL_ROUTING_PROVIDER", "jev")
+    monkeypatch.setenv("TYPESAFE_API_KEY", "secret")
+    monkeypatch.setattr(
+        "agent.middleware.model_selection.httpx2.AsyncClient",
+        lambda **kwargs: real_client(**kwargs, transport=httpx2.MockTransport(handle)),
+    )
+    middleware, _, classifier = _middleware(route="performance")
+
+    route = await middleware.select_route(
+        ModelSelectionState(messages=[HumanMessage(content="Design this system")])
+    )
+
+    assert route == "performance"
+    classifier.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_jev_requires_explicit_provider_toggle(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("MODEL_ROUTING_PROVIDER", raising=False)
+    monkeypatch.setenv("TYPESAFE_API_KEY", "secret")
+    middleware, _, classifier = _middleware(route="balanced")
+
+    route = await middleware.select_route(
+        ModelSelectionState(messages=[HumanMessage(content="Fix the bug")])
+    )
+
+    assert route == "balanced"
+    classifier.assert_awaited_once()

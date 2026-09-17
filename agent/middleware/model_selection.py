@@ -2,13 +2,15 @@ import logging
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from typing import Any, Literal, NotRequired
 
+import httpx2
 from langchain.agents.middleware.types import AgentState, ModelRequest, ModelResponse
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import HumanMessage, ToolMessage
 from langgraph.config import get_stream_writer
 from langgraph.runtime import Runtime
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
+from agent.config import ENV
 from agent.input_messages import input_message_text, message_sender_id
 from agent.middleware.trace import OpenSWEMiddleware
 from agent.prompts import load_prompt, render_prompt
@@ -21,6 +23,35 @@ RoutingMode = Literal["auto", "performance"]
 
 _CLASSIFIER_PROMPT = load_prompt("model-selection.md")
 _PLAN_APPROVED_PREFIX = "Plan mode is now inactive because the plan was approved."
+_TYPESAFE_URL = "https://api.typesafe.ai/v1/systemone"
+_TYPESAFE_TIMEOUT = 3.0
+_TYPESAFE_CONFIDENCE_THRESHOLD = 0.6
+_TYPESAFE_CRITERIA: dict[Route, str] = {
+    "fast": "Direct lookup, extraction, status checks, mechanical operations, or localized changes with explicit targets and strong verification.",
+    "balanced": "Ordinary bug fixes, bounded investigations, multi-file implementation, research synthesis, or partially specified localized work.",
+    "performance": "Architecture, design, requirements disambiguation, subtle review, novel root-cause reasoning, broad scope, or high-stakes decisions.",
+}
+
+
+class TypeSafeChoiceAnswer(BaseModel):
+    type: Literal["choice"]
+    choice: Route
+    probabilities: dict[Route, float]
+    confidence: float = Field(ge=0, le=1)
+
+
+class TypeSafeAnswers(BaseModel):
+    route: TypeSafeChoiceAnswer
+
+
+class TypeSafeResponse(BaseModel):
+    answers: TypeSafeAnswers
+
+
+def _typesafe_api_key() -> str | None:
+    if ENV.MODEL_ROUTING_PROVIDER.get().lower() != "jev":
+        return None
+    return ENV.TYPESAFE_API_KEY.optional()
 
 
 def _latest_human_task(messages: Sequence[Any]) -> str:
@@ -102,6 +133,45 @@ class ModelSelectionMiddleware(OpenSWEMiddleware[ModelSelectionState]):
             RouteDecision, method="json_schema"
         )
 
+    async def _select_jev_route(self, task: str, api_key: str) -> Route | None:
+        try:
+            async with httpx2.AsyncClient(timeout=_TYPESAFE_TIMEOUT) as client:
+                response = await client.post(
+                    _TYPESAFE_URL,
+                    headers={"Authorization": f"Bearer {api_key}"},
+                    json={
+                        "model": "jev-latest",
+                        "state": task,
+                        "questions": {
+                            "route": {
+                                "type": "choice",
+                                "instructions": "Choose the least expensive model profile likely to complete the whole software engineering turn safely.",
+                                "criteria": _TYPESAFE_CRITERIA,
+                            }
+                        },
+                    },
+                )
+                response.raise_for_status()
+                answer = TypeSafeResponse.model_validate(response.json()).answers.route
+                probabilities = answer.probabilities
+                if (
+                    set(probabilities) != set(_TYPESAFE_CRITERIA)
+                    or any(value < 0 or value > 1 for value in probabilities.values())
+                    or abs(sum(probabilities.values()) - 1) > 0.01
+                    or probabilities[answer.choice] != max(probabilities.values())
+                ):
+                    raise ValueError("Jev routing probabilities were malformed")
+                if answer.confidence < _TYPESAFE_CONFIDENCE_THRESHOLD:
+                    logger.info(
+                        "Jev model routing confidence below threshold; using fallback classifier",
+                        extra={"confidence": answer.confidence},
+                    )
+                    return None
+                return answer.choice
+        except Exception:  # noqa: BLE001
+            logger.exception("Jev model routing classifier failed; using fallback classifier")
+            return None
+
     async def select_route(
         self,
         state: ModelSelectionState,
@@ -125,11 +195,15 @@ class ModelSelectionMiddleware(OpenSWEMiddleware[ModelSelectionState]):
             ),
             "",
         )
-        task = approved_plan or _latest_human_task(messages)
+        task = (approved_plan or _latest_human_task(messages))[-8_000:]
         route: Route = "balanced"
+        if api_key := _typesafe_api_key():
+            jev_route = await self._select_jev_route(task, api_key)
+            if jev_route is not None:
+                return jev_route
         try:
             decision = await self._classifier.ainvoke(
-                render_prompt("model-selection.md", task=task[-8_000:])
+                render_prompt("model-selection.md", task=task)
             )
             if isinstance(decision, RouteDecision):
                 route = decision.model_route
