@@ -62,8 +62,8 @@ describe("formatToolDisplay", () => {
     expect(formatToolDisplay("save_plan", "other", {}, projectPath)).toBe(
       "Save plan"
     )
-    expect(
-      formatToolDisplay("slack_reply", "other", {}, projectPath)
-    ).toBe("Slack thread reply")
+    expect(formatToolDisplay("slack_reply", "other", {}, projectPath)).toBe(
+      "Slack reply"
+    )
   })
 })
