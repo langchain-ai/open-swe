@@ -21,6 +21,7 @@ SUMMARIZATION_SOURCE = "summarization"
 DeferredPart = Literal["content", "artifact", "reasoning", "images"]
 _IMAGE_BLOCK_TYPES = frozenset({"image", "image_url"})
 _REASONING_BLOCK_TYPES = frozenset({"reasoning", "thinking"})
+_TOOL_CALL_BLOCK_TYPES = frozenset({"tool_call", "tool_use"})
 
 
 class LazyMarker(TypedDict):
@@ -144,21 +145,37 @@ def _split_ai(
     elif isinstance(message_id, str):
         blocks = _blocks(message.get("content"))
         if blocks is not None:
+            # `tool_calls` is what the SDK and the transcript read; the
+            # `tool_call` content blocks repeat it (plus provider extras).
+            drop_tool_call_blocks = bool(message.get("tool_calls"))
             reasoning: list[str] = []
             trimmed_blocks: list[object] = []
+            changed = False
             for block in blocks:
-                if _block_type(block) in _REASONING_BLOCK_TYPES and isinstance(block, Mapping):
+                block_type = _block_type(block)
+                if block_type in _REASONING_BLOCK_TYPES and isinstance(block, Mapping):
+                    # Provider signatures ride in `extras` and can outweigh the
+                    # text; the transcript only ever shows the text.
                     text = _reasoning_text(block)
                     if text:
                         reasoning.append(text)
-                        size += _size(block)
-                        trimmed_blocks.append({"type": "reasoning", "reasoning": ""})
-                        continue
+                    size += _size(block)
+                    trimmed_blocks.append({"type": "reasoning", "reasoning": ""})
+                    changed = True
+                    continue
+                if drop_tool_call_blocks and block_type in _TOOL_CALL_BLOCK_TYPES:
+                    categories["tool_call_blocks"] = categories.get("tool_call_blocks", 0) + _size(
+                        block
+                    )
+                    changed = True
+                    continue
                 trimmed_blocks.append(block)
+            if changed:
+                copy["content"] = trimmed_blocks
+            if size:
+                categories["reasoning"] = categories.get("reasoning", 0) + size
             if reasoning:
                 parts["reasoning"][message_id] = "".join(reasoning)
-                categories["reasoning"] = categories.get("reasoning", 0) + size
-                copy["content"] = trimmed_blocks
                 deferred.append("reasoning")
     metadata = as_json_object(message.get("response_metadata"))
     if metadata:

@@ -63,11 +63,8 @@ def test_reasoning_and_response_metadata_are_deferred_but_text_and_tool_calls_st
     skeleton, parts, summary = split_state(_state([message]))
 
     trimmed = skeleton["values"]["messages"][0]
-    assert trimmed["content"] == [
-        {"type": "reasoning", "reasoning": ""},
-        content[1],
-        content[2],
-    ]
+    # The tool_call block duplicates `tool_calls`, which is what gets read.
+    assert trimmed["content"] == [{"type": "reasoning", "reasoning": ""}, content[1]]
     assert trimmed["tool_calls"] == message["tool_calls"]
     assert trimmed["usage_metadata"] == {"input_tokens": 10}
     assert trimmed["response_metadata"] == {"created_at": "2026-09-16T00:00:00Z"}
@@ -116,3 +113,31 @@ def test_values_keep_only_messages() -> None:
     assert skeleton["values"] == {"messages": state["values"]["messages"]}
     assert summary["categories"]["values"] > len(BIG)
     assert summary["deferred"] == 0
+
+
+def test_signature_only_reasoning_blocks_are_dropped_without_a_marker() -> None:
+    message = {
+        "type": "ai",
+        "id": "a1",
+        "content": [
+            {"type": "reasoning", "reasoning": "", "extras": {"signature": "s" * 2000}},
+            {"type": "text", "text": "answer"},
+        ],
+    }
+    skeleton, parts, summary = split_state(_state([message]))
+    trimmed = skeleton["values"]["messages"][0]
+    assert trimmed["content"] == [{"type": "reasoning", "reasoning": ""}, message["content"][1]]
+    assert LAZY_MARKER_KEY not in (trimmed.get("additional_kwargs") or {})
+    assert parts["reasoning"] == {}
+    assert summary["categories"]["reasoning"] > 2000
+
+
+def test_tool_call_blocks_stay_when_tool_calls_is_empty() -> None:
+    message = {
+        "type": "ai",
+        "id": "a1",
+        "content": [{"type": "tool_call", "id": "c", "name": "read", "args": {}}],
+        "tool_calls": [],
+    }
+    skeleton, _, _ = split_state(_state([message]))
+    assert skeleton["values"]["messages"][0] == message
