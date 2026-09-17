@@ -10,16 +10,11 @@ all: help
 # Local PostgreSQL. An explicit POSTGRES_URI (shell environment, or the gitignored .env
 # that langgraph dev loads) is left alone; without one, `dev` starts a postgres:16 container
 # on loopback port 5433 with a named volume, so `docker rm` does not lose local data.
-# The .env value is read dotenv-style (quotes and inline comments stripped) and handed to
-# langgraph dev through the environment, never re-parsed as shell.
 ifeq ($(origin POSTGRES_URI),undefined)
 POSTGRES_URI := $(shell sh scripts/dotenv_value.sh .env POSTGRES_URI)
 endif
-LOCAL_POSTGRES_URI := postgresql://postgres:postgres@127.0.0.1:5433/postgres
 POSTGRES_CONTAINER := open-swe-postgres
-DEV_POSTGRES_URI := $(or $(POSTGRES_URI),$(LOCAL_POSTGRES_URI))
 
-dev: export POSTGRES_URI := $(DEV_POSTGRES_URI)
 dev: $(if $(POSTGRES_URI),,postgres)
 	@if command -v lsof >/dev/null 2>&1 && lsof -nP -iTCP:2024 -sTCP:LISTEN >/dev/null 2>&1; then \
 		echo 'Port 2024 is already in use (a stale container or another backend?):' >&2; \
