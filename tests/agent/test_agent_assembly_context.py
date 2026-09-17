@@ -101,6 +101,7 @@ async def _capture_create_deep_agent_kwargs(
     *,
     profile: dict[str, object] | None = None,
     thread_settings: dict[str, object] | None = None,
+    private_thread: bool = False,
 ) -> dict[str, object]:
     captured: dict[str, object] = {}
     make_model_calls: list[tuple[str, dict[str, object]]] = []
@@ -147,6 +148,11 @@ async def _capture_create_deep_agent_kwargs(
                     "default_agent_routing_performance_reasoning_effort": "high",
                 }
             ),
+        ),
+        patch(
+            "agent.server._private_thread",
+            new_callable=AsyncMock,
+            return_value=private_thread,
         ),
         patch("agent.server.load_profile", new_callable=AsyncMock, return_value=profile),
         patch(
@@ -762,6 +768,35 @@ async def test_general_purpose_subagent_cannot_use_slack_tools() -> None:
     assert parent_only_names <= parent_names
     assert parent_only_names.isdisjoint(subagent_names)
     assert subagent_names == parent_names - parent_only_names
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("private_thread", [True, False])
+async def test_channel_reads_need_a_private_thread(private_thread: bool) -> None:
+    config = _base_config()
+    configurable = config.get("configurable")
+    assert isinstance(configurable, dict)
+    configurable.update(
+        {
+            "source": "slack",
+            "slack_thread": {"channel_id": "C123", "thread_ts": "1700000000.000100"},
+        }
+    )
+
+    captured = await _capture_create_deep_agent_kwargs(config, private_thread=private_thread)
+    tools = captured["tools"]
+    subagents = captured["subagents"]
+    assert isinstance(tools, list)
+    assert isinstance(subagents, list)
+
+    tool_names = {_registered_tool_name(tool) for tool in tools}
+    assert ("slack_read_channel_messages" in tool_names) is private_thread
+    # A thread-bound Slack read is unaffected either way.
+    assert "slack_read_thread_messages" in tool_names
+
+    gp = next(item for item in subagents if item["name"] == "general-purpose")
+    subagent_names = {_registered_tool_name(tool) for tool in gp["tools"]}
+    assert ("slack_read_channel_messages" in subagent_names) is private_thread
 
 
 def test_workspace_slug_reads_workspace_then_environment() -> None:

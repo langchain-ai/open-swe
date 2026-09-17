@@ -606,10 +606,10 @@ async def slack_command(
             "Tag Open SWE in a message instead."
         )
 
-    event_id = f"slack-ask:{value('trigger_id') or hashlib.sha256(body).hexdigest()}"
-    if not await common.claim_slack_event(event_id):
+    invocation = value("trigger_id") or hashlib.sha256(body).hexdigest()
+    if not await common.claim_slack_event(f"slack-ask:{invocation}"):
         return ephemeral("Open SWE is already working on that question.")
-    thread_id = ask_thread_id(channel_id, user_id)
+    thread_id = ask_thread_id(channel_id, user_id, invocation)
     background_tasks.add_task(
         process_slack_ask,
         SlackAskRequest(
