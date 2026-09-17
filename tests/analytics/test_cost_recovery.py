@@ -182,13 +182,14 @@ async def test_rate_limit_pauses_dispatcher(analytics_db, monkeypatch):
     assert recovery.classify_failure(TimeoutError()).retryable
 
 
-async def test_migration_keeps_legacy_markers_unmapped(deployment_db):
+@pytest.mark.parametrize("revision", ["0017", "0018"])
+async def test_migration_keeps_legacy_markers_unmapped(deployment_db, revision):
     from agent.database import postgres
 
     workspace, run = uuid4(), uuid4()
     async with postgres.engine().begin() as conn:
         await conn.execute(text("CREATE SCHEMA open_swe"))
-        await conn.run_sync(postgres.upgrade, postgres.load_migrations(), "open_swe", "0017")
+        await conn.run_sync(postgres.upgrade, postgres.load_migrations(), "open_swe", revision)
         await conn.execute(
             text("INSERT INTO run_cost_refresh VALUES (:workspace, :run, clock_timestamp())"),
             {"workspace": workspace, "run": run},
