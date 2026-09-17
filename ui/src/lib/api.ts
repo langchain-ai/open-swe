@@ -391,6 +391,7 @@ export interface PRMergeRateCohort {
   mature_denominator: number
   mature_cohort_merge_share: number | null
   avg_merge_seconds: number | null
+  avg_delivery_seconds: number | null
   efforts: PRMergeRateEffort[]
 }
 

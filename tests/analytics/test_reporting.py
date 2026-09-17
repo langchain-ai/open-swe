@@ -244,6 +244,132 @@ async def test_merge_rates_keep_efforts_when_all_groups_meet_threshold(reporting
     ]
 
 
+async def test_avg_time_to_pr_measures_opening_run_start_to_pr_creation(reporting_db):
+    from agent.analytics import ingestion
+    from agent.analytics.events import RunStartedPayload
+
+    workspace = database.workspace_id()
+    model_id = uuid4()
+    opened = datetime.now(UTC) - timedelta(days=1)
+    for run_start_offset_hours, open_offset_hours in [(3.0, 1.0), (2.0, 1.0)]:
+        run_id = uuid4()
+        await ingestion.ingest(
+            make_event(
+                workspace_id=workspace,
+                event_name=EventName.RUN_STARTED,
+                producer="test",
+                producer_event_id=str(uuid4()),
+                occurred_at=opened - timedelta(hours=run_start_offset_hours),
+                environment="test",
+                payload=RunStartedPayload(
+                    configured_model_id=model_id,
+                    model_attribution_quality="configured",
+                ),
+                run_id=run_id,
+            )
+        )
+        await ingestion.ingest(
+            make_event(
+                workspace_id=workspace,
+                event_name=EventName.PR_OPENED,
+                producer="test",
+                producer_event_id=str(uuid4()),
+                occurred_at=opened - timedelta(hours=open_offset_hours),
+                environment="test",
+                payload=PROpenedPayload(
+                    opening_run_id=run_id,
+                    originating_model_id=model_id,
+                    model_attribution_quality="configured",
+                ),
+                pr_id=uuid4(),
+                repository_id=uuid4(),
+            )
+        )
+    # Invalid pair: the opening run started after the PR was created.
+    late_run_id = uuid4()
+    await ingestion.ingest(
+        make_event(
+            workspace_id=workspace,
+            event_name=EventName.RUN_STARTED,
+            producer="test",
+            producer_event_id=str(uuid4()),
+            occurred_at=opened,
+            environment="test",
+            payload=RunStartedPayload(
+                configured_model_id=model_id,
+                model_attribution_quality="configured",
+            ),
+            run_id=late_run_id,
+        )
+    )
+    await ingestion.ingest(
+        make_event(
+            workspace_id=workspace,
+            event_name=EventName.PR_OPENED,
+            producer="test",
+            producer_event_id=str(uuid4()),
+            occurred_at=opened - timedelta(hours=1),
+            environment="test",
+            payload=PROpenedPayload(
+                opening_run_id=late_run_id,
+                originating_model_id=model_id,
+                model_attribution_quality="configured",
+            ),
+            pr_id=uuid4(),
+            repository_id=uuid4(),
+        )
+    )
+    # Missing pair: the opening run was never recorded.
+    await ingestion.ingest(
+        make_event(
+            workspace_id=workspace,
+            event_name=EventName.PR_OPENED,
+            producer="test",
+            producer_event_id=str(uuid4()),
+            occurred_at=opened,
+            environment="test",
+            payload=PROpenedPayload(
+                opening_run_id=uuid4(),
+                originating_model_id=model_id,
+                model_attribution_quality="configured",
+            ),
+            pr_id=uuid4(),
+            repository_id=uuid4(),
+        )
+    )
+    report = await queries.pr_merge_rate_by_model(period="all", admin=True)
+    cohort = report["cohorts"][0]
+    assert cohort["cohort_size"] == 4
+    assert cohort["avg_delivery_seconds"] == (2 * 3600 + 3600) / 2
+
+
+async def test_avg_time_to_pr_is_null_without_valid_timing(reporting_db):
+    from agent.analytics import ingestion
+
+    workspace = database.workspace_id()
+    model_id = uuid4()
+    await ingestion.ingest(
+        make_event(
+            workspace_id=workspace,
+            event_name=EventName.PR_OPENED,
+            producer="test",
+            producer_event_id=str(uuid4()),
+            occurred_at=datetime.now(UTC) - timedelta(days=1),
+            environment="test",
+            payload=PROpenedPayload(
+                opening_run_id=uuid4(),
+                originating_model_id=model_id,
+                model_attribution_quality="configured",
+            ),
+            pr_id=uuid4(),
+            repository_id=uuid4(),
+        )
+    )
+    report = await queries.pr_merge_rate_by_model(period="all", admin=True)
+    cohort = report["cohorts"][0]
+    assert cohort["avg_delivery_seconds"] is None
+
+
 async def test_merge_rates_separate_decisions_maturity_and_waiting(reporting_db, monkeypatch):
     from agent.analytics import ingestion
     from agent.analytics.events import PRStatePayload

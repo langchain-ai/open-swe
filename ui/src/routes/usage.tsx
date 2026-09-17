@@ -496,6 +496,14 @@ function PRMergeRateSection({
               period. Unmerged PRs are excluded, and it shows — when a group has
               no merges.
             </p>
+            <p>
+              <strong>Avg time to PR</strong> is the arithmetic mean of elapsed
+              wall-clock time from the start of the run that opened a PR to the
+              PR's creation, across all PRs opened in the selected period
+              regardless of outcome. PRs whose opening run has no recorded start
+              time, or started after the PR was created, are excluded, and it
+              shows — when no PRs in a group have valid timing.
+            </p>
             <ul className="list-disc space-y-1 pl-4">
               <li>
                 Merge rate = merged ÷ (merged + closed without merge + open at
@@ -562,11 +570,28 @@ function AvgTimeToMerge({ cohort }: { cohort: PRMergeRateCohort }) {
   return (
     <Tooltip>
       <TooltipTrigger className="cursor-help rounded-sm underline decoration-dotted underline-offset-2 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring">
-        {formatAvgMergeTime(cohort.avg_merge_seconds)}
+        {formatAvgDuration(cohort.avg_merge_seconds)}
       </TooltipTrigger>
       <TooltipPopup className="max-w-xs">
         Based on {cohort.merged} merged {cohort.merged === 1 ? "PR" : "PRs"};
         unmerged PRs are excluded.
+      </TooltipPopup>
+    </Tooltip>
+  )
+}
+
+function AvgTimeToPR({ cohort }: { cohort: PRMergeRateCohort }) {
+  if (cohort.avg_delivery_seconds == null) {
+    return <span>—</span>
+  }
+  return (
+    <Tooltip>
+      <TooltipTrigger className="cursor-help rounded-sm underline decoration-dotted underline-offset-2 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring">
+        {formatAvgDuration(cohort.avg_delivery_seconds)}
+      </TooltipTrigger>
+      <TooltipPopup className="max-w-xs">
+        Based on PRs whose opening run has a valid start time, regardless of
+        outcome; PRs with missing or invalid timing are excluded.
       </TooltipPopup>
     </Tooltip>
   )
@@ -612,6 +637,7 @@ function PRMergeRateTable({
                 </TooltipPopup>
               </Tooltip>
             </th>
+            <th className="px-4 py-3 text-right font-normal">Avg time to PR</th>
             <th className="px-4 py-3 text-right font-normal">
               Avg time to merge
             </th>
@@ -667,6 +693,9 @@ function PRMergeRateTable({
                     maturityDays={maturityDays}
                   />
                   <td className="px-4 py-3 text-right tabular-nums">
+                    <AvgTimeToPR cohort={cohort} />
+                  </td>
+                  <td className="px-4 py-3 text-right tabular-nums">
                     <AvgTimeToMerge cohort={cohort} />
                   </td>
                 </tr>
@@ -683,6 +712,11 @@ function PRMergeRateTable({
                           cohort={effort}
                           maturityDays={maturityDays}
                         />
+                        <td className="px-4 py-3 text-right tabular-nums">
+                          <span title="Average shown at the model level">
+                            —
+                          </span>
+                        </td>
                         <td className="px-4 py-3 text-right tabular-nums">
                           <span title="Average shown at the model level">
                             —
@@ -1167,7 +1201,7 @@ function formatDuration(value: number): string {
   return `${Math.round(value / 60)}m`
 }
 
-function formatAvgMergeTime(seconds: number): string {
+function formatAvgDuration(seconds: number): string {
   if (seconds < 3600) return `${Math.round(seconds / 60)}m`
   if (seconds < 86400) return `${Math.round(seconds / 3600)}h`
   return `${Math.round(seconds / 86400)}d`
