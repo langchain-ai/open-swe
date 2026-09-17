@@ -26,7 +26,6 @@ from agent.dashboard.oauth import (
     session_user_id,
     valid_handoff_challenge,
 )
-from agent.dashboard.user_mappings import upsert_mapping
 from agent.slack.oauth import (
     SLACK_STATE_COOKIE_NAME,
     SlackIdentity,
@@ -131,13 +130,6 @@ async def slack_callback(
         raise HTTPException(400, "oauth state mismatch — please retry")
 
     identity = await _verified_slack_identity(code)
-    await upsert_mapping(
-        github_login=session["sub"],
-        work_email=identity.email or "",
-        slack_user_id=identity.user_id,
-        source="slack_oauth",
-        status="active",
-    )
     await _link_slack_identity(
         session,
         slack_user_id=identity.user_id,
@@ -198,13 +190,6 @@ async def slack_desktop_exchange(
     if not isinstance(slack_user_id, str) or not isinstance(email, str):
         raise HTTPException(400, "malformed handoff code")
 
-    await upsert_mapping(
-        github_login=session["sub"],
-        work_email=email,
-        slack_user_id=slack_user_id,
-        source="slack_oauth",
-        status="active",
-    )
     await _link_slack_identity(
         session,
         slack_user_id=slack_user_id,

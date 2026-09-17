@@ -66,9 +66,7 @@ def _run_process(
         issue_data = full_issue
     with (
         patch.object(linear_webhook, "linear_issue_thread_id", return_value="thread-1"),
-        patch.object(
-            linear_webhook.common, "resolve_login_from_email_async", side_effect=fake_resolve_login
-        ),
+        patch.object(linear_webhook.User, "login_for_email", side_effect=fake_resolve_login),
         patch.object(linear_webhook.common, "dispatch_agent_run", side_effect=fake_dispatch),
         patch.object(
             linear_webhook.common, "upsert_agent_thread_metadata", side_effect=fake_upsert

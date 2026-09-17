@@ -11,6 +11,7 @@ from agent.prompt import construct_sender_context, construct_system_prompt
 from agent.run_config import RunConfig
 from agent.sandboxes import lifecycle
 from agent.tools import workspaces as env_tools
+from agent.users import User
 from agent.workspaces import refresh
 from agent.workspaces.store import Workspace
 
@@ -173,10 +174,8 @@ async def test_workspace_admin_resolves_email_for_github_login(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv("CONFIGURED_ADMINS", "ramon@langchain.dev")
-    with patch(
-        "agent.tools.admin_gate.email_for_login",
-        new_callable=AsyncMock,
-        return_value="ramon@langchain.dev",
+    with patch.object(
+        User, "email_for_login", new_callable=AsyncMock, return_value="ramon@langchain.dev"
     ):
         assert await server._workspace_admin(_config(github_login="ramonn"), None) is True
 

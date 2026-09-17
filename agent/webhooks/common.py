@@ -21,7 +21,6 @@ from agent.config import ENV
 from agent.dashboard.agent_overrides import (
     get_profile_default_repo,
     resolve_agent_model_id,  # noqa: F401
-    resolve_login_from_email_async,
 )
 from agent.dashboard.oauth import build_settings_url
 from agent.dashboard.options import (
@@ -33,14 +32,6 @@ from agent.dashboard.profiles import (  # noqa: F401
     get_profile,
     get_valid_access_token,
     has_access_token_record,
-)
-from agent.dashboard.user_mappings import (
-    email_for_login,  # noqa: F401
-    login_for_email,  # noqa: F401
-    login_for_slack_id,  # noqa: F401
-)
-from agent.dashboard.user_mappings import (
-    refresh_cache as refresh_user_mapping_cache,  # noqa: F401
 )
 from agent.dashboard.workspace_settings import get_workspace_settings
 from agent.dispatch import dispatch_agent_run
@@ -141,6 +132,7 @@ from agent.slack.stop import process_agent_session_stopped, process_slack_stop_r
 from agent.source_context import SourceContext
 from agent.threads.summary import thread_is_private, thread_is_promptable
 from agent.threads.workflow_approval import decide_workflow_push_approval
+from agent.users import User
 from agent.utils.dashboard_links import dashboard_thread_url  # noqa: F401
 from agent.utils.http import DEFAULT_HTTP_TIMEOUT
 from agent.utils.json_types import ThreadLike, as_thread_dict
@@ -231,7 +223,6 @@ __all__ = [
     "dedupe_urls",
     "default_vision_model_pair",
     "dispatch_agent_run",
-    "email_for_login",
     "extract_image_urls",
     "extract_pr_context",
     "extract_repo_from_text",
@@ -261,8 +252,6 @@ __all__ = [
     "json",
     "list_reviewer_findings",
     "logger",
-    "login_for_email",
-    "login_for_slack_id",
     "lookup_slack_thread_id",
     "model_supports_images",
     "normalize_slack_channel_context",
@@ -278,9 +267,7 @@ __all__ = [
     "react_to_github_comment",
     "reconcile_findings_with_review_threads",
     "repo_context_bar_items",
-    "refresh_user_mapping_cache",
     "resolve_agent_model_id",
-    "resolve_login_from_email_async",
     "resolve_slack_links_in_context",
     "resolve_slack_thread_id",
     "sanitize_github_comment_body",
@@ -606,7 +593,7 @@ async def upsert_agent_thread_metadata(
             != (expected_bot.team_id, expected_bot.triggering_bot_id)
         ):
             return False
-    sender_login = github_login or await resolve_login_from_email_async(user_email) or ""
+    sender_login = github_login or await User.login_for_email(user_email) or ""
     if sender_login:
         metadata[PARTICIPANT_LOGINS_KEY] = merge_participants(
             existing_meta.get(PARTICIPANT_LOGINS_KEY), sender_login
@@ -614,7 +601,7 @@ async def upsert_agent_thread_metadata(
     # Slack human senders with linked Open SWE accounts join the thread as
     # participants on every event, so later conversations credit everyone.
     slack_logins = await asyncio.gather(
-        *(login_for_slack_id(user_id) for user_id in slack_participant_user_ids)
+        *(User.login_for_slack(user_id) for user_id in slack_participant_user_ids)
     )
     resolved_slack_logins = [login for login in slack_logins if isinstance(login, str) and login]
     if resolved_slack_logins:
@@ -785,9 +772,7 @@ async def get_slack_repo_config(
                 if isinstance(slack_user, dict)
                 else None
             )
-            profile_repo = await get_profile_default_repo(
-                await resolve_login_from_email_async(slack_email)
-            )
+            profile_repo = await get_profile_default_repo(await User.login_for_email(slack_email))
             if profile_repo:
                 logger.info(
                     "Applying dashboard default_repo for Slack user %s: %s/%s",
@@ -1058,14 +1043,16 @@ SUPPORTED_GH_COMMENT_ACTIONS = {
 }
 
 
-def build_github_issue_comments_text(comments: list[dict[str, Any]]) -> str:
+def build_github_issue_comments_text(
+    comments: list[dict[str, Any]], *, trusted: Collection[str]
+) -> str:
     lines: list[str] = []
     for comment in comments:
         body = comment.get("body", "")
         if not body or any(body.startswith(prefix) for prefix in _GITHUB_BOT_MESSAGE_PREFIXES):
             continue
         author = comment.get("author", "unknown")
-        formatted_body = format_github_comment_body_for_prompt(author, body)
+        formatted_body = format_github_comment_body_for_prompt(author, body, trusted=trusted)
         lines.append(f"\n**{author}:**\n{formatted_body}\n")
 
     if not lines:

@@ -10,7 +10,6 @@ from agent.dashboard.oauth import require_same_origin_for_mutations
 from agent.dashboard.options_routes import router as options_router
 from agent.dashboard.profiles import router as profiles_router
 from agent.dashboard.user_instructions import router as user_instructions_router
-from agent.dashboard.user_mappings import router as user_mappings_router
 from agent.dashboard.user_preferences import router as user_preferences_router
 from agent.dashboard.workspace_settings import router as workspace_settings_router
 from agent.github.dashboard_routes import router as repos_router
@@ -22,6 +21,7 @@ from agent.schedules.routes import router as schedules_router
 from agent.skill_store.routes import router as skills_router
 from agent.slack.dashboard_routes import router as slack_router
 from agent.threads.routes import router as threads_router
+from agent.users.routes import router as users_router
 from agent.workspaces.routes import router as workspaces_router
 
 router = APIRouter(
@@ -36,7 +36,7 @@ router.include_router(user_instructions_router)
 router.include_router(user_preferences_router)
 router.include_router(options_router)
 router.include_router(profiles_router)
-router.include_router(user_mappings_router)
+router.include_router(users_router)
 router.include_router(notion_router)
 router.include_router(slack_router)
 router.include_router(workspace_settings_router)

@@ -30,7 +30,7 @@ async def configured(fake_store, monkeypatch):
     )
     monkeypatch.setenv("SLACK_BOT_USER_ID", "UBOT")
     monkeypatch.setenv("SLACK_BOT_TOKEN", "xoxb-test")
-    monkeypatch.setattr(channels, "login_for_slack_id", AsyncMock(return_value="sre"))
+    monkeypatch.setattr(channels.User, "login_for_slack", AsyncMock(return_value="sre"))
     monkeypatch.setattr(channels, "post_account_link_prompt", AsyncMock())
     joined = AsyncMock()
 
@@ -262,7 +262,7 @@ async def test_paused_channels_keep_context_without_scheduling(enrolled):
 
 
 async def test_anyone_in_the_channel_can_pause_but_questions_need_a_connected_account(enrolled):
-    channels.login_for_slack_id.return_value = None
+    channels.User.login_for_slack.return_value = None
     paused, _ = await handle(
         {"type": "app_mention", "channel": "C1", "user": "U9", "text": "<@UBOT> pause", "ts": "3.0"}
     )

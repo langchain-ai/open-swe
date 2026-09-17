@@ -7,7 +7,6 @@ from typing import Any
 from fastapi import BackgroundTasks, HTTPException
 
 from agent.config import ENV
-from agent.dashboard.user_mappings import login_for_slack_id
 from agent.incidents import service, turns
 from agent.incidents.models import Incident, IncidentPolicy
 from agent.incidents.presentation import report_message
@@ -24,6 +23,7 @@ from agent.slack.events import claim_slack_event
 from agent.slack.http import slack_client
 from agent.source_context import SlackThreadRef, SourceContext
 from agent.store import store_client
+from agent.users import User
 from agent.utils.dashboard_links import dashboard_incident_url
 from agent.webhooks.common import post_account_link_prompt, upsert_agent_thread_metadata
 
@@ -92,7 +92,7 @@ async def linked_slack_user(user_id: str) -> PersonIdentity | None:
     A question unlocks the agent's tools, so it needs the same connected account as
     mentioning Open SWE anywhere else.
     """
-    login = await login_for_slack_id(user_id)
+    login = await User.login_for_slack(user_id)
     if not login:
         return None
     person = await slack_person(user_id)

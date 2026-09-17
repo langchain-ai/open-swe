@@ -25,6 +25,7 @@ from agent.slack.client import (
 )
 from agent.slack.webhook import workspace_scoped_default_repo
 from agent.source_context import SlackThreadRef, SourceContext
+from agent.users import User
 from agent.webhooks import common
 from agent.workspaces.routing import resolve_workspace
 
@@ -145,8 +146,8 @@ async def _process_slack_ask(request: SlackAskRequest) -> None:
     user_name, user_email = await _slack_user_profile(request.user_id)
     login = await _runnable_login(
         request,
-        await common.login_for_slack_id(request.user_id)
-        or (await common.login_for_email(user_email) if user_email else None),
+        await User.login_for_slack(request.user_id)
+        or (await User.login_for_email(user_email) if user_email else None),
         user_email,
     )
     if login is None:

@@ -96,6 +96,7 @@ export interface SessionUser {
   email: string | null
   avatar_url: string | null
   user_id?: string | null
+  slack_user_id?: string | null
   is_admin: boolean
   slack_oauth_enabled?: boolean
   api_base_url?: string
@@ -249,18 +250,17 @@ export interface NotionCredentialStatus {
   updated_at?: string | null
 }
 
-export interface UserMapping {
+export interface AdminUser {
+  user_id: string
   github_login: string
-  work_email: string
-  slack_user_id?: string | null
-  source?: string
-  status?: string
-  created_at?: string
-  updated_at?: string
+  email: string
+  slack_user_id: string | null
+  display_name: string
+  is_admin: boolean
 }
 
-export interface UserMappingsPage {
-  items: Array<UserMapping>
+export interface AdminUsersPage {
+  items: Array<AdminUser>
   total: number
   page: number
   page_size: number
@@ -947,16 +947,8 @@ export const api = {
     request<PRMergeRatePayload>(
       `/analytics/pr-merge-rate-by-model?period=${encodeURIComponent(period)}${maturityDays == null ? "" : `&maturity_days=${maturityDays}`}`
     ),
-  myMapping: () => request<Partial<UserMapping>>("/my-mapping"),
-  adminListUserMappings: (page = 1, pageSize = 20) =>
-    request<UserMappingsPage>(
-      `/admin/user-mappings?page=${page}&page_size=${pageSize}`
-    ),
-  adminDeleteUserMapping: (github_login: string) =>
-    request<{ deleted: boolean }>(
-      `/admin/user-mappings/${encodeURIComponent(github_login)}`,
-      { method: "DELETE" }
-    ),
+  adminListUsers: (page = 1, pageSize = 20) =>
+    request<AdminUsersPage>(`/admin/users?page=${page}&page_size=${pageSize}`),
   listReviews: (page: number, mine: boolean) =>
     request<ReviewListPayload>(`/reviews?page=${page}&mine=${mine}`),
   getReview: (owner: string, repo: string, number: number) =>

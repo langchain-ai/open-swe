@@ -4,10 +4,10 @@ Tools recheck user admin membership or a system invocation's saved authorization
 """
 
 from agent.dashboard.admin import is_admin
-from agent.dashboard.user_mappings import email_for_login
 from agent.run_config import RunConfig
 from agent.schedules.store import authorized_admin_schedule
 from agent.slack.dm import is_dm_session
+from agent.users import User
 
 
 def configurable() -> RunConfig:
@@ -24,7 +24,7 @@ async def actor_is_admin(cfg: RunConfig, *, login: str | None = None) -> bool:
     login = login or cfg.github_login
     if is_admin(cfg.user_email, login=login):
         return True
-    return is_admin(await email_for_login(login), login=login)
+    return is_admin(await User.email_for_login(login), login=login)
 
 
 def is_private_admin_surface(cfg: RunConfig) -> bool:
