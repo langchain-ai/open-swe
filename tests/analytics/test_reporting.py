@@ -442,3 +442,155 @@ async def test_merge_rates_separate_decisions_maturity_and_waiting(reporting_db,
     assert cohort["cohort_size"] == 1
     assert cohort["decided_merge_rate"] == 0
     assert cohort["avg_merge_seconds"] is None
+
+
+async def test_pr_costs_sum_lifetime_threads_and_weight_prs_across_efforts(reporting_db):
+    workspace = database.workspace_id()
+    model = uuid4()
+    threads = [uuid4(), uuid4(), uuid4()]
+    runs = [uuid4() for _ in range(4)]
+    now = datetime.now(UTC)
+    async with postgres.transaction() as conn:
+        for run, thread, cost, age, effort in [
+            (runs[0], threads[0], 2, 40, "high"),
+            (runs[1], threads[0], 8, 0, "low"),
+            (runs[2], threads[1], 0, 1, "low"),
+            (runs[3], threads[2], 100, 40, "low"),
+        ]:
+            await conn.execute(
+                text(
+                    "INSERT INTO run_projection "
+                    "(workspace_id, run_id, thread_id, started_at, configured_effort, configured_model_id) "
+                    "VALUES (:w, :r, :t, :started, :effort, :model)"
+                ),
+                {
+                    "w": workspace,
+                    "r": run,
+                    "t": thread,
+                    "started": now - timedelta(days=age),
+                    "effort": effort,
+                    "model": model if run != runs[1] else uuid4(),
+                },
+            )
+            await conn.execute(
+                text(
+                    "INSERT INTO latest_cost_projection "
+                    "(workspace_id, run_id, observation_revision, observed_at, status, cost_usd, source, event_id) "
+                    "VALUES (:w, :r, 1, :now, 'complete', :cost, 'test', :event)"
+                ),
+                {"w": workspace, "r": run, "now": now, "cost": cost, "event": uuid4()},
+            )
+        for run, state, age in [
+            (runs[0], "merged", 2),
+            (runs[0], "closed_without_merge", 2),
+            (runs[2], "open", 1),
+            (runs[3], "merged", 40),
+        ]:
+            await conn.execute(
+                text(
+                    "INSERT INTO pr_projection "
+                    "(workspace_id, pr_id, repository_id, opening_run_id, originating_model_id, "
+                    "model_attribution_quality, opened_at, current_state) "
+                    "VALUES (:w, :pr, :repo, :run, :model, 'configured', :opened, :state)"
+                ),
+                {
+                    "w": workspace,
+                    "pr": uuid4(),
+                    "repo": uuid4(),
+                    "run": run,
+                    "model": model,
+                    "opened": now - timedelta(days=age),
+                    "state": state,
+                },
+            )
+    cohort = (await queries.pr_merge_rate_by_model(period="7d", admin=True))["cohorts"][0]
+    assert cohort["cohort_size"] == 3
+    assert cohort["prs_with_complete_cost"] == 3
+    assert cohort["avg_pr_cost_usd"] == pytest.approx(20 / 3)
+    assert [(e["effort"], e["avg_pr_cost_usd"]) for e in cohort["efforts"]] == [
+        ("high", 10),
+        ("low", 0),
+    ]
+    async with postgres.transaction() as conn:
+        await conn.execute(
+            text("UPDATE latest_cost_projection SET cost_usd = 11 WHERE run_id = :run"),
+            {"run": runs[1]},
+        )
+    cohort = (await queries.pr_merge_rate_by_model(period="7d", admin=True))["cohorts"][0]
+    assert cohort["avg_pr_cost_usd"] == pytest.approx(26 / 3)
+    async with postgres.transaction() as conn:
+        await conn.execute(
+            text("UPDATE latest_cost_projection SET status = 'partial' WHERE run_id = :run"),
+            {"run": runs[1]},
+        )
+    cohort = (await queries.pr_merge_rate_by_model(period="7d", admin=True))["cohorts"][0]
+    assert cohort["prs_with_complete_cost"] == 1
+    assert cohort["avg_pr_cost_usd"] is None
+
+
+@pytest.mark.parametrize(
+    "missing", ["observation", "partial", "unavailable", "null_cost", "thread", "run"]
+)
+async def test_pr_average_is_null_when_any_thread_cost_is_incomplete(reporting_db, missing):
+    model, thread, opening, later = [uuid4() for _ in range(4)]
+    workspace = database.workspace_id()
+    now = datetime.now(UTC)
+    async with postgres.transaction() as conn:
+        for run in (opening, later):
+            await conn.execute(
+                text(
+                    "INSERT INTO run_projection (workspace_id, run_id, thread_id, started_at) "
+                    "VALUES (:w, :r, :t, :now)"
+                ),
+                {"w": workspace, "r": run, "t": thread, "now": now},
+            )
+            await conn.execute(
+                text(
+                    "INSERT INTO latest_cost_projection "
+                    "(workspace_id, run_id, observation_revision, observed_at, status, cost_usd, source, event_id) "
+                    "VALUES (:w, :r, 1, :now, 'complete', 3, 'test', :event)"
+                ),
+                {"w": workspace, "r": run, "now": now, "event": uuid4()},
+            )
+        await conn.execute(
+            text(
+                "INSERT INTO pr_projection "
+                "(workspace_id, pr_id, repository_id, opening_run_id, originating_model_id, "
+                "model_attribution_quality, opened_at, current_state) "
+                "VALUES (:w, :pr, :repo, :run, :model, 'configured', :now, 'open')"
+            ),
+            {
+                "w": workspace,
+                "pr": uuid4(),
+                "repo": uuid4(),
+                "run": opening,
+                "model": model,
+                "now": now,
+            },
+        )
+        if missing == "observation":
+            await conn.execute(
+                text("DELETE FROM latest_cost_projection WHERE run_id = :r"), {"r": later}
+            )
+        elif missing in {"partial", "unavailable", "null_cost"}:
+            await conn.execute(
+                text(
+                    "UPDATE latest_cost_projection SET status = :status, cost_usd = :cost WHERE run_id = :r"
+                ),
+                {
+                    "r": later,
+                    "status": "complete" if missing == "null_cost" else missing,
+                    "cost": None if missing == "null_cost" else 3,
+                },
+            )
+        elif missing == "thread":
+            await conn.execute(
+                text("UPDATE run_projection SET thread_id = NULL WHERE run_id = :r"), {"r": opening}
+            )
+        else:
+            await conn.execute(text("DELETE FROM run_projection WHERE run_id = :r"), {"r": opening})
+    cohort = (await queries.pr_merge_rate_by_model(period="all", admin=True))["cohorts"][0]
+    assert cohort["cohort_size"] == 1
+    assert cohort["prs_with_complete_cost"] == 0
+    assert cohort["avg_pr_cost_usd"] is None
+    assert cohort["efforts"][0]["avg_pr_cost_usd"] is None

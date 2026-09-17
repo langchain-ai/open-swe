@@ -69,6 +69,7 @@ type PROutcomesSort =
   | "open"
   | "median_distance"
   | "merge_rate"
+  | "avg_pr_cost_usd"
   | "avg_delivery_seconds"
   | "avg_merge_seconds"
 
@@ -648,6 +649,16 @@ function PRMergeRateSection({
               subagents, or later runs, so these rates do not measure one
               model's independent success.
             </p>
+            <p>
+              <strong>Avg PR cost</strong> averages the full lifetime thread
+              cost across all PR outcomes, including all runs and contributing
+              models, even outside the selected period or after merge. We assume
+              one PR per thread; multiple PRs each carry the whole thread cost
+              without allocation. The average is unavailable unless every PR has
+              a known thread and complete costs for all recorded runs. Coverage
+              shows how many PRs have complete costs; missing or partial costs
+              are not zero.
+            </p>
             {data.suppression_threshold > 1 ? (
               <p>
                 Groups with fewer than {data.suppression_threshold} PRs are
@@ -749,6 +760,7 @@ const PR_OUTCOME_COLUMNS: Array<SortableColumn<PROutcomesSort>> = [
     label: "Merge rate",
     align: "right",
   },
+  { key: "avg_pr_cost_usd", label: "Avg PR cost", align: "right" },
   { key: "avg_delivery_seconds", label: "Avg time to PR", align: "right" },
   {
     key: "avg_merge_seconds",
@@ -774,6 +786,8 @@ function prOutcomeSortValue(cohort: PRMergeRateCohort, sort: PROutcomesSort) {
       return cohort.median_distance_basis_points ?? null
     case "merge_rate":
       return cohort.mature_cohort_merge_share
+    case "avg_pr_cost_usd":
+      return cohort.avg_pr_cost_usd
     case "avg_delivery_seconds":
       return cohort.avg_delivery_seconds
     case "avg_merge_seconds":
@@ -1084,6 +1098,8 @@ function PRMergeRateCells({
     | "mature_cohort_merge_share"
     | "median_distance_basis_points"
     | "distance_sample_size"
+    | "avg_pr_cost_usd"
+    | "prs_with_complete_cost"
   >
   maturityDays: number
 }) {
@@ -1116,6 +1132,17 @@ function PRMergeRateCells({
         {cohort.mature_cohort_merge_share == null
           ? "—"
           : formatPercent(cohort.mature_cohort_merge_share)}
+      </td>
+      <td className="px-4 py-3 text-right tabular-nums">
+        {cohort.avg_pr_cost_usd == null
+          ? "—"
+          : formatCurrency(cohort.avg_pr_cost_usd)}
+        {cohort.avg_pr_cost_usd == null ? (
+          <div className="text-muted-foreground">
+            {cohort.prs_with_complete_cost}/{cohort.cohort_size} PRs with
+            complete costs
+          </div>
+        ) : null}
       </td>
     </>
   )

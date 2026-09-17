@@ -136,6 +136,8 @@ it("shows delivery lag separately from suppression, then refreshes to a populate
       {
         model_id: "example-model",
         model_attribution_quality: "configured",
+        avg_pr_cost_usd: 2.5,
+        prs_with_complete_cost: 5,
         merged: 3,
         closed_without_merge: 1,
         mature_pending: 1,
@@ -150,6 +152,8 @@ it("shows delivery lag separately from suppression, then refreshes to a populate
         efforts: [
           {
             effort: "high",
+            avg_pr_cost_usd: 2.5,
+            prs_with_complete_cost: 5,
             merged: 3,
             closed_without_merge: 1,
             mature_pending: 1,
@@ -242,6 +246,8 @@ it.each([
         {
           model_id: "example-model",
           model_attribution_quality: "configured",
+          avg_pr_cost_usd: 2.5,
+          prs_with_complete_cost: 7,
           merged: 3,
           closed_without_merge: 1,
           mature_pending: 1,
@@ -256,6 +262,8 @@ it.each([
           efforts: [
             {
               effort: "high",
+              avg_pr_cost_usd: 2.5,
+              prs_with_complete_cost: 7,
               merged: 3,
               closed_without_merge: 1,
               mature_pending: 1,
@@ -286,6 +294,7 @@ it.each([
       "3",
       "17.5%",
       "60%",
+      "$2.50",
       "2h",
       "1d",
     ])
@@ -303,6 +312,7 @@ it.each([
       "Open",
       "Median distance",
       "Merge rate",
+      "Avg PR cost",
       "Avg time to PR",
       "Avg time to merge",
     ])
@@ -382,6 +392,8 @@ it("expands model totals into reasoning effort rows", async () => {
       {
         model_id: "example-model",
         model_attribution_quality: "configured",
+        avg_pr_cost_usd: 2.5,
+        prs_with_complete_cost: 4,
         avg_merge_seconds: 172800,
         avg_delivery_seconds: 5400,
         merged: 3,
@@ -396,6 +408,8 @@ it("expands model totals into reasoning effort rows", async () => {
         efforts: [
           {
             effort: "low",
+            avg_pr_cost_usd: 2.5,
+            prs_with_complete_cost: 2,
             merged: 1,
             closed_without_merge: 1,
             mature_pending: 0,
@@ -408,6 +422,8 @@ it("expands model totals into reasoning effort rows", async () => {
           },
           {
             effort: "high",
+            avg_pr_cost_usd: 2.5,
+            prs_with_complete_cost: 2,
             merged: 2,
             closed_without_merge: 0,
             mature_pending: 0,
@@ -441,6 +457,8 @@ it("shows an em dash for avg time to merge when a group has no merges", async ()
       {
         model_id: "example-model",
         model_attribution_quality: "configured",
+        avg_pr_cost_usd: null,
+        prs_with_complete_cost: 0,
         merged: 0,
         closed_without_merge: 2,
         mature_pending: 0,
@@ -473,6 +491,8 @@ it("shortens model paths while preserving providers across usage tables", async 
       {
         model_id: "fireworks:accounts/fireworks/models/glm-5p3-flash",
         model_attribution_quality: "configured",
+        avg_pr_cost_usd: 2.5,
+        prs_with_complete_cost: 5,
         merged: 1,
         closed_without_merge: 0,
         mature_pending: 0,
@@ -487,6 +507,8 @@ it("shortens model paths while preserving providers across usage tables", async 
         efforts: [
           {
             effort: "medium",
+            avg_pr_cost_usd: 2.5,
+            prs_with_complete_cost: 5,
             merged: 1,
             closed_without_merge: 0,
             mature_pending: 0,
@@ -1220,3 +1242,98 @@ it("explains incomplete coverage on focus and removes the indicator when costs r
   expect(screen.queryByRole("button", { name: "Cost incomplete" })).toBeNull()
   client.clear()
 })
+
+it("explains omitted PR costs in the average", async () => {
+  vi.spyOn(api, "prMergeRateByModel").mockResolvedValue({
+    ...captured,
+    status: "ready",
+    cohorts: [
+      {
+        model_id: "cost-model",
+        model_attribution_quality: "configured",
+        avg_merge_seconds: 3600,
+        merged: 1,
+        closed_without_merge: 0,
+        mature_pending: 0,
+        waiting: 2,
+        cohort_size: 3,
+        decided_denominator: 1,
+        decided_merge_rate: 1,
+        mature_denominator: 1,
+        mature_cohort_merge_share: 1,
+        avg_pr_cost_usd: 2.5,
+        prs_with_complete_cost: 2,
+        efforts: [],
+      },
+    ],
+  })
+  const client = mountReport()
+  const warning = await screen.findByRole("button", {
+    name: "Average PR cost incomplete",
+  })
+  act(() => warning.focus())
+  expect(await screen.findByText(/1 of 3 PRs is omitted/)).toBeTruthy()
+  client.clear()
+})
+
+it.each([
+  [0, 2, 2, "$0.00"],
+  [12.345, 2, 2, "$12.35"],
+  [null, 1, 2, "—"],
+  [null, 0, 1, "—"],
+] as const)(
+  "renders PR average %s with coverage %s of %s",
+  async (cost, covered, cohortSize, amount) => {
+    vi.spyOn(api, "prMergeRateByModel").mockResolvedValue({
+      ...captured,
+      status: "ready",
+      cohorts: [
+        {
+          model_id: "cost-model",
+          model_attribution_quality: "configured",
+          merged: 1,
+          closed_without_merge: 0,
+          mature_pending: 0,
+          waiting: cohortSize - 1,
+          cohort_size: cohortSize,
+          decided_denominator: 1,
+          decided_merge_rate: 1,
+          mature_denominator: 1,
+          mature_cohort_merge_share: 1,
+          avg_merge_seconds: 3600,
+          avg_pr_cost_usd: cost,
+          prs_with_complete_cost: covered,
+          efforts: [
+            {
+              effort: "medium",
+              avg_pr_cost_usd: cost,
+              prs_with_complete_cost: covered,
+              merged: 1,
+              closed_without_merge: 0,
+              mature_pending: 0,
+              waiting: cohortSize - 1,
+              cohort_size: cohortSize,
+              decided_denominator: 1,
+              decided_merge_rate: 1,
+              mature_denominator: 1,
+              mature_cohort_merge_share: 1,
+            },
+          ],
+        },
+      ],
+    })
+    const client = mountReport()
+    const row = (await screen.findByText("cost-model")).closest("tr")!
+    expect(within(row).getByText(amount)).toBeTruthy()
+    expect(
+      within(row).queryByRole("button", {
+        name: "Average PR cost incomplete",
+      }) !== null
+    ).toBe(covered < cohortSize)
+    fireEvent.click(screen.getByText("How these numbers work"))
+    expect(
+      screen.getByText(/missing or partial costs are not zero/)
+    ).toBeTruthy()
+    client.clear()
+  }
+)
