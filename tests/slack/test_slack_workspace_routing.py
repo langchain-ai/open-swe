@@ -271,6 +271,56 @@ async def test_a_named_repository_still_outranks_a_bound_channel(
     assert configurable["repo"] == {"owner": "acme", "name": "internal"}
 
 
+@pytest.mark.parametrize(
+    "model_switch",
+    ["/model:", "/model:Fast", "/model:performance", "/model:fastest", "/model:fast /model:nope"],
+)
+async def test_invalid_slack_model_switch_posts_error_without_dispatch_or_persistence(
+    monkeypatch: pytest.MonkeyPatch,
+    model_switch: str,
+) -> None:
+    captured: dict[str, object] = {}
+    _setup_slack_mention_fakes(monkeypatch, captured)
+
+    async def post_thread_reply(
+        channel_id: str,
+        thread_ts: str,
+        text: str,
+        **kwargs: object,
+    ) -> bool:
+        captured["error_reply"] = (channel_id, thread_ts, text, kwargs)
+        return True
+
+    async def upsert_metadata(*args: object, **kwargs: object) -> bool:
+        captured["metadata_persisted"] = (args, kwargs)
+        return True
+
+    monkeypatch.setattr(webhook_common, "post_slack_thread_reply", post_thread_reply)
+    monkeypatch.setattr(webhook_common, "upsert_agent_thread_metadata", upsert_metadata)
+
+    request = SlackRequest.model_validate(
+        {
+            "channel_id": "C0SS",
+            "thread_ts": "1700000000.000100",
+            "event_ts": "1700000000.000200",
+            "user_id": "U123",
+            "text": f"<@UBOT> fix this {model_switch}",
+            "bot_user_id": "UBOT",
+        }
+    )
+
+    await slack_webhooks._process_slack_mention_impl(request, None)
+
+    assert captured["error_reply"] == (
+        "C0SS",
+        "1700000000.000100",
+        "Invalid model switch. Use `/model:fast` or `/model:perf`.",
+        {"agent_thread_id": "mapped-thread"},
+    )
+    assert "run_create" not in captured
+    assert "metadata_persisted" not in captured
+
+
 async def test_slack_model_switch_uses_workspace_route_and_overrides_stored_choice(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

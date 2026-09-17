@@ -59,23 +59,32 @@ class _FakeClient:
 
 
 @pytest.mark.parametrize(
-    ("text", "expected_switch", "expected_text"),
+    ("text", "expected_switch", "expected_text", "invalid"),
     [
-        ("please /model:fast fix this", "fast", "please fix this"),
-        ("/model:perf\ncheck this", "perf", "check this"),
-        ("/model:fast first /model:perf", "perf", "first"),
-        ("/model:perf /model:fast last", "fast", "last"),
-        (
-            "keep /model:Fast /model:performance x/model:fast",
-            None,
-            "keep /model:Fast /model:performance x/model:fast",
-        ),
+        ("please /model:fast fix this", "fast", "please fix this", False),
+        ("/model:perf\ncheck this", "perf", "check this", False),
+        ("/model:fast first /model:perf", "perf", "first", False),
+        ("/model:perf /model:fast last", "fast", "last", False),
+        ("keep x/model:fast and https://example.com/model:perf", None, None, False),
+        ("reject /model:", None, None, True),
+        ("reject /model:Fast", None, None, True),
+        ("reject /model:PERF", None, None, True),
+        ("reject /model:performance", None, None, True),
+        ("reject /model:fastest", None, None, True),
+        ("reject /model:fast /model:invalid", None, None, True),
     ],
 )
 def test_parse_slack_model_switch(
-    text: str, expected_switch: str | None, expected_text: str
+    text: str,
+    expected_switch: str | None,
+    expected_text: str | None,
+    invalid: bool,
 ) -> None:
-    assert slack_webhooks.parse_slack_model_switch(text) == (expected_switch, expected_text)
+    parsed = slack_webhooks.parse_slack_model_switch(text)
+
+    assert parsed.model_switch == expected_switch
+    assert parsed.cleaned_text == (text if expected_text is None else expected_text)
+    assert parsed.invalid is invalid
 
 
 def test_channel_context_preserves_external_sharing_status() -> None:

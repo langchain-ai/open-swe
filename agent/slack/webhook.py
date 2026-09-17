@@ -52,17 +52,32 @@ _UNTAGGED_REPLY_PREAMBLE = f"{load_prompt('runs/slack-untagged-reply.md')}\n\n"
 _CODE_CHANNEL_CONTEXT = load_prompt("runs/slack-code-channel.md")
 _DM_CONTEXT = load_prompt("runs/slack-dm.md")
 _MESSAGE_UPDATE_PREAMBLE = f"{load_prompt('runs/slack-message-update.md')}\n\n"
-_MODEL_SWITCH_RE = re.compile(r"(?<!\S)/model:(fast|perf)(?!\S)")
+_MODEL_SWITCH_RE = re.compile(r"(?<!\S)/model:(\S*)")
 SlackModelSwitch = Literal["fast", "perf"]
+RoutingTier = Literal["fast", "performance"]
+_MODEL_ROUTING_TIERS: dict[SlackModelSwitch, RoutingTier] = {
+    "fast": "fast",
+    "perf": "performance",
+}
 
 
-def parse_slack_model_switch(text: str) -> tuple[SlackModelSwitch | None, str]:
+@dataclass(frozen=True)
+class SlackModelSwitchParse:
+    model_switch: SlackModelSwitch | None
+    cleaned_text: str
+    invalid: bool = False
+
+
+def parse_slack_model_switch(text: str) -> SlackModelSwitchParse:
     matches = list(_MODEL_SWITCH_RE.finditer(text))
     if not matches:
-        return None, text
+        return SlackModelSwitchParse(None, text)
+    values = [match.group(1) for match in matches]
+    if any(value not in _MODEL_ROUTING_TIERS for value in values):
+        return SlackModelSwitchParse(None, text, invalid=True)
     cleaned = _MODEL_SWITCH_RE.sub("", text)
     cleaned = re.sub(r"[ \t]{2,}", " ", cleaned).strip()
-    return cast(SlackModelSwitch, matches[-1].group(1)), cleaned
+    return SlackModelSwitchParse(cast(SlackModelSwitch, values[-1]), cleaned)
 
 
 def _slack_prompt_preamble(untagged_reply: bool, message_update: bool = False) -> str:
@@ -899,8 +914,17 @@ async def _process_slack_mention_impl(
             else "the previous message where I was tagged"
         )
     clean_text = common.strip_bot_mention(text, bot_user_id, bot_username=common.SLACK_BOT_USERNAME)
-    model_switch, clean_text = parse_slack_model_switch(clean_text)
-    clean_text = clean_text or "(no text in mention)"
+    model_switch_parse = parse_slack_model_switch(clean_text)
+    if model_switch_parse.invalid:
+        await common.post_slack_thread_reply(
+            channel_id,
+            reply_thread_ts or thread_ts,
+            "Invalid model switch. Use `/model:fast` or `/model:perf`.",
+            agent_thread_id=thread_id,
+        )
+        return
+    model_switch = model_switch_parse.model_switch
+    clean_text = model_switch_parse.cleaned_text or "(no text in mention)"
     is_first_mention = not await common.thread_exists(thread_id)
     # A `workspace:<name>` (or legacy `env:<name>`) tag on the message that opens
     # a thread is one input to which workspace its sandbox boots from — resolved
@@ -982,7 +1006,7 @@ async def _process_slack_mention_impl(
 
     model_switch_choice: tuple[str, str] | None = None
     if model_switch:
-        routing_tier = "fast" if model_switch == "fast" else "performance"
+        routing_tier = _MODEL_ROUTING_TIERS[model_switch]
         model_switch_choice = (
             await common.get_workspace_settings(thread_workspace)
         ).agent_routing_models[routing_tier]
