@@ -72,6 +72,8 @@ async def pr_merge_rate_by_model(
                     FROM pr_projection
                     WHERE workspace_id = :workspace_id
                       AND opened_at >= :start AND opened_at <= :as_of
+                      AND originating_model_id IS NOT NULL
+                      AND model_attribution_quality <> 'unavailable'
                     GROUP BY originating_model_id, model_attribution_quality
                     HAVING count(*) >= :minimum
                     ORDER BY count(*) DESC, originating_model_id
@@ -149,6 +151,26 @@ async def pr_merge_rate_by_model(
                 }
             )
         cohorts.sort(key=lambda cohort: (-_integer(cohort["cohort_size"]), str(cohort["model_id"])))
+        unavailable_threads = []
+        if admin:
+            unavailable_threads = [
+                str(thread_id)
+                for thread_id in (
+                    await conn.execute(
+                        text(
+                            "SELECT DISTINCT e.thread_id FROM pr_projection p "
+                            "JOIN events e ON e.workspace_id = p.workspace_id "
+                            "AND e.pr_id = p.pr_id AND e.event_name = 'pr_opened' "
+                            "WHERE p.workspace_id = :workspace_id "
+                            "AND p.opened_at >= :start AND p.opened_at <= :as_of "
+                            "AND (p.originating_model_id IS NULL "
+                            "OR p.model_attribution_quality = 'unavailable') "
+                            "AND e.thread_id IS NOT NULL ORDER BY e.thread_id LIMIT 100"
+                        ),
+                        {"workspace_id": workspace_id(), "start": start, "as_of": as_of},
+                    )
+                ).scalars()
+            ]
         metadata = await reporting_metadata(conn)
         if cohorts:
             status = "ready"
@@ -175,6 +197,7 @@ async def pr_merge_rate_by_model(
         "period": period if period in {"7d", "30d", "all"} else "30d",
         "suppression_threshold": minimum,
         "cohorts": cohorts,
+        "unavailable_thread_ids": unavailable_threads,
         **metadata,
         "as_of": as_of.isoformat(),
     }
