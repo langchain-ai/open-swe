@@ -29,6 +29,7 @@ import type { AgentSource, AgentThread } from "@/features/agents/lib/types"
 import type { SidebarThreadItem } from "@/features/agents/lib/sidebarThreads"
 import { Tooltip, TooltipPopup, TooltipTrigger } from "@/components/ui/tooltip"
 import { DeleteThreadDialog } from "@/features/agents/components/DeleteThreadDialog"
+import { ThreadFeedbackDialog } from "@/features/agents/components/ThreadFeedbackDialog"
 import { ThreadMenuItems } from "@/features/agents/components/ThreadMenuItems"
 import { useMarkLocalThreadViewed } from "@/features/agents/lib/desktopLocal"
 import {
@@ -36,6 +37,7 @@ import {
   useDeleteAgentThread,
 } from "@/features/agents/lib/queries"
 import { useQueryClient } from "@tanstack/react-query"
+import { useSession } from "@/lib/session"
 import { cn } from "@/lib/utils"
 
 type Icon = ComponentType<SVGProps<SVGSVGElement>>
@@ -193,10 +195,12 @@ export function SidebarThreadRow({
   onToggleArchived: () => void
 }) {
   const navigate = useNavigate()
+  const session = useSession()
   const queryClient = useQueryClient()
   const markLocalViewed = useMarkLocalThreadViewed()
   const deleteThread = useDeleteAgentThread()
   const [deleteOpen, setDeleteOpen] = useState(false)
+  const [feedbackOpen, setFeedbackOpen] = useState(false)
   const [deletingLocal, setDeletingLocal] = useState(false)
   const [deleteError, setDeleteError] = useState<string | null>(null)
   const [contextMenuOpen, setContextMenuOpen] = useState(false)
@@ -436,12 +440,21 @@ export function SidebarThreadRow({
                 isDeleting={isDeleting}
                 onTogglePin={onTogglePin}
                 onToggleArchived={onToggleArchived}
+                onFeedback={thread ? () => setFeedbackOpen(true) : undefined}
                 onDelete={() => setDeleteOpen(true)}
               />
             </ContextMenu.Popup>
           </ContextMenu.Positioner>
         </ContextMenu.Portal>
       </ContextMenu.Root>
+      {thread && (
+        <ThreadFeedbackDialog
+          open={feedbackOpen}
+          onOpenChange={setFeedbackOpen}
+          threadId={thread.id}
+          login={session.data?.login ?? null}
+        />
+      )}
       <DeleteThreadDialog
         open={deleteOpen}
         onOpenChange={(open) => {
