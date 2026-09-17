@@ -3,6 +3,7 @@
 import asyncio
 import re
 from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 from typing import Any
 
 import httpx2
@@ -21,6 +22,16 @@ _FAILING_CHECK_CONCLUSIONS = frozenset(
     {"failure", "timed_out", "action_required", "startup_failure"}
 )
 _INCONCLUSIVE_CHECK_CONCLUSIONS = frozenset({"cancelled", "stale", "skipped", "neutral"})
+_MERGEABILITY_QUERY = """
+query PullRequestMergeability($owner: String!, $repo: String!, $number: Int!) {
+  repository(owner: $owner, name: $repo) {
+    pullRequest(number: $number) {
+      mergeable
+      mergeStateStatus
+    }
+  }
+}
+"""
 _REVIEW_THREADS_QUERY = """
 query PullRequestReviewThreads($owner: String!, $repo: String!, $number: Int!, $cursor: String) {
   repository(owner: $owner, name: $repo) {
@@ -224,6 +235,54 @@ def _normalize_checks(
                 }
             )
     return failing, pending, inconclusive
+
+
+@dataclass(frozen=True, slots=True)
+class Mergeability:
+    """GitHub's verdict on whether a pull request can merge."""
+
+    mergeable: bool | None
+    merge_state: str
+
+
+async def fetch_mergeability(
+    client: httpx2.AsyncClient, owner: str, repo: str, number: int
+) -> Mergeability | None:
+    """Mergeability over GraphQL, or ``None`` when GitHub could not answer.
+
+    REST answers ``mergeable: null`` whenever its cached verdict has expired,
+    and only starts recomputing it; GraphQL waits for that computation, so a
+    single read usually gets the real answer.
+    """
+    try:
+        response = await github_request(
+            client,
+            "POST",
+            GITHUB_GRAPHQL,
+            json={
+                "query": _MERGEABILITY_QUERY,
+                "variables": {"owner": owner, "repo": repo, "number": number},
+            },
+        )
+        response.raise_for_status()
+        payload = response.json()
+    except httpx2.HTTPError, ValueError:
+        return None
+    if not isinstance(payload, Mapping) or payload.get("errors"):
+        return None
+    data = payload.get("data")
+    repository = data.get("repository") if isinstance(data, Mapping) else None
+    pull = repository.get("pullRequest") if isinstance(repository, Mapping) else None
+    if not isinstance(pull, Mapping):
+        return None
+    mergeable = pull.get("mergeable")
+    merge_state = pull.get("mergeStateStatus")
+    return Mergeability(
+        mergeable={"MERGEABLE": True, "CONFLICTING": False}.get(
+            mergeable if isinstance(mergeable, str) else ""
+        ),
+        merge_state=merge_state.lower() if isinstance(merge_state, str) else "",
+    )
 
 
 async def fetch_unresolved_review_threads(
