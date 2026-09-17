@@ -52,6 +52,8 @@ async def approve_workflow_push(
         metadata,
         "The workflow-file push approval was approved. Retry the blocked git push now; do not alter workflow files before pushing.",
         plan_mode=False,
+        github_login=session["sub"],
+        user_email=session.get("email"),
     )
     return {"status": "approved", "fingerprint": fingerprint}
 

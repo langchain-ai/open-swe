@@ -591,6 +591,7 @@ async def process_slack_plan_approval(request: SlackRequest, repo: Repo | None) 
     try:
         await approve_plan_for_thread(
             request.thread_id or "",
+            github_login=await _slack_login(request.user_id),
             approver=make_plan_approver(
                 actor_id=request.user_id,
                 name=request.user_name or request.user_id or "Slack user",

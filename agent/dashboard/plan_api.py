@@ -225,6 +225,8 @@ async def approve_plan(thread_id: str, session: dict[str, Any] = _SESSION_DEP) -
     actor_id = str(session.get("sub") or "").strip()
     return await approve_plan_for_thread(
         thread_id,
+        github_login=actor_id,
+        user_email=session.get("email"),
         approver=make_plan_approver(
             actor_id=actor_id,
             name=_approval_actor_name(session),
@@ -233,7 +235,13 @@ async def approve_plan(thread_id: str, session: dict[str, Any] = _SESSION_DEP) -
     )
 
 
-async def approve_plan_for_thread(thread_id: str, *, approver: dict[str, str]) -> dict[str, Any]:
+async def approve_plan_for_thread(
+    thread_id: str,
+    *,
+    approver: dict[str, str],
+    github_login: str | None,
+    user_email: str | None = None,
+) -> dict[str, Any]:
     approver = make_plan_approver(
         actor_id=str(approver.get("id") or ""),
         name=str(approver.get("name") or ""),
@@ -280,7 +288,14 @@ async def approve_plan_for_thread(thread_id: str, *, approver: dict[str, str]) -
         if feedback:
             text += "\n\nAlso take this reviewer feedback into account:\n\n" + feedback
         try:
-            run = await dispatch_followup(thread_id, metadata, text, plan_mode=False)
+            run = await dispatch_followup(
+                thread_id,
+                metadata,
+                text,
+                plan_mode=False,
+                github_login=github_login,
+                user_email=user_email,
+            )
         except Exception:
             await set_plan_status(thread_id, PLAN_STATUS_READY, plan_mode=True)
             raise
@@ -321,7 +336,14 @@ async def reject_plan(
         "existing self-contained HTML file under /workspace/plans/, then publish an updated "
         f"artifact with the save_plan tool:\n\n{feedback or '(no specific comments were left)'}"
     )
-    await dispatch_followup(thread_id, metadata, text, plan_mode=True)
+    await dispatch_followup(
+        thread_id,
+        metadata,
+        text,
+        plan_mode=True,
+        github_login=session["sub"],
+        user_email=session.get("email"),
+    )
     return {"status": PLAN_STATUS_REVISING}
 
 
@@ -380,19 +402,21 @@ async def _maybe_post_plan_approved_to_slack(
 
 
 async def dispatch_followup(
-    thread_id: str, metadata: dict[str, Any], text: str, *, plan_mode: bool
+    thread_id: str,
+    metadata: dict[str, Any],
+    text: str,
+    *,
+    plan_mode: bool,
+    github_login: str | None,
+    user_email: str | None = None,
 ) -> Run:
     """Continue the existing thread with the decision as a new instruction run."""
     configurable: dict[str, Any] = {
         "thread_id": thread_id,
         "source": thread_source(metadata) or "slack",
+        "github_login": github_login,
+        "user_email": user_email,
     }
-    email = metadata.get("triggering_user_email")
-    if isinstance(email, str) and email:
-        configurable["user_email"] = email
-    login = metadata.get("github_login")
-    if isinstance(login, str) and login:
-        configurable["github_login"] = login
     repo = repo_config_from_metadata(metadata)
     if repo:
         configurable["repo"] = repo
