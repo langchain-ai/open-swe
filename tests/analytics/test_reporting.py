@@ -169,6 +169,81 @@ async def test_merge_rates_group_efforts_under_model_privacy_cohorts(reporting_d
     ]
 
 
+async def _ingest_model_effort_prs(efforts: list[str]) -> None:
+    from agent.analytics import ingestion
+    from agent.analytics.events import RunStartedPayload
+
+    workspace = database.workspace_id()
+    model_id = uuid4()
+    repository_id = uuid4()
+    for effort in efforts:
+        run_id = uuid4()
+        await ingestion.ingest(
+            make_event(
+                workspace_id=workspace,
+                event_name=EventName.RUN_STARTED,
+                producer="test",
+                producer_event_id=str(uuid4()),
+                occurred_at=datetime.now(UTC) - timedelta(days=1),
+                environment="test",
+                payload=RunStartedPayload(
+                    configured_model_id=model_id,
+                    configured_effort=effort,
+                    model_attribution_quality="configured",
+                ),
+                run_id=run_id,
+            )
+        )
+        await ingestion.ingest(
+            make_event(
+                workspace_id=workspace,
+                event_name=EventName.PR_OPENED,
+                producer="test",
+                producer_event_id=str(uuid4()),
+                occurred_at=datetime.now(UTC) - timedelta(days=1),
+                environment="test",
+                payload=PROpenedPayload(
+                    opening_run_id=run_id,
+                    originating_model_id=model_id,
+                    model_attribution_quality="configured",
+                ),
+                pr_id=uuid4(),
+                repository_id=repository_id,
+            )
+        )
+
+
+async def test_merge_rates_suppress_effort_breakdown_below_threshold(reporting_db, monkeypatch):
+    monkeypatch.setenv("ANALYTICS_MIN_COHORT_SIZE", "3")
+    await _ingest_model_effort_prs(["high", "high", "high", "low"])
+
+    report = await queries.pr_merge_rate_by_model(period="all")
+    cohort = report["cohorts"][0]
+    assert cohort["cohort_size"] == 4
+    assert cohort["efforts"] == []
+
+    report = await queries.pr_merge_rate_by_model(period="all", admin=True)
+    cohort = report["cohorts"][0]
+    assert cohort["cohort_size"] == 4
+    assert [(effort["effort"], effort["cohort_size"]) for effort in cohort["efforts"]] == [
+        ("high", 3),
+        ("low", 1),
+    ]
+
+
+async def test_merge_rates_keep_efforts_when_all_groups_meet_threshold(reporting_db, monkeypatch):
+    monkeypatch.setenv("ANALYTICS_MIN_COHORT_SIZE", "3")
+    await _ingest_model_effort_prs(["high", "high", "high", "low", "low", "low"])
+
+    report = await queries.pr_merge_rate_by_model(period="all")
+    cohort = report["cohorts"][0]
+    assert cohort["cohort_size"] == 6
+    assert [(effort["effort"], effort["cohort_size"]) for effort in cohort["efforts"]] == [
+        ("high", 3),
+        ("low", 3),
+    ]
+
+
 async def test_merge_rates_separate_decisions_maturity_and_waiting(reporting_db, monkeypatch):
     from agent.analytics import ingestion
     from agent.analytics.events import PRStatePayload
