@@ -1,10 +1,18 @@
 from datetime import UTC, datetime, timedelta
 from typing import Any
+from uuid import uuid7
 
 import pytest
 
 from agent.slack import interactive
-from agent.slack.continuations import SlackContinuation, action_id_for, claim, save, token_in
+from agent.slack.continuations import (
+    SlackContinuation,
+    action_id_for,
+    claim,
+    peek,
+    save,
+    token_in,
+)
 from agent.slack.payloads import SlackBlockAction
 from agent.slack.resume import describe_action
 
@@ -180,12 +188,16 @@ def test_the_agent_is_told_what_the_person_did(action: SlackBlockAction, expecte
     assert describe_action(action) == expected
 
 
+_GROUP = uuid7()
+
+
 def _row(**overrides: Any) -> SlackContinuation:
     values: dict[str, Any] = {
         "thread_id": "thread-1",
         "action_id": "rerun_tests",
         "element_type": "button",
         "channel_id": "C1",
+        "group_id": _GROUP,
         "message_ts": "1700000000.000200",
     }
     return SlackContinuation(**{**values, **overrides})
@@ -205,7 +217,8 @@ async def test_only_the_first_click_claims_a_single_use_element() -> None:
 
 @pytest.mark.usefixtures("registry_db")
 async def test_claiming_one_answer_revokes_the_alternatives() -> None:
-    chosen, sibling, elsewhere = _row(), _row(action_id="skip"), _row(message_ts="1700.000300")
+    chosen, sibling = _row(), _row(action_id="skip")
+    elsewhere = _row(group_id=uuid7(), message_ts="1700.000300")
     await save([chosen, sibling, elsewhere])
 
     taken = await claim(chosen.id, slack_user_id="U1")
@@ -215,7 +228,7 @@ async def test_claiming_one_answer_revokes_the_alternatives() -> None:
         {action_id_for(chosen.id), action_id_for(sibling.id)}
     )
     assert await claim(sibling.id, slack_user_id="U1") is None
-    # A different message keeps its own elements.
+    # A set posted separately keeps its own elements.
     assert await claim(elsewhere.id, slack_user_id="U1") is not None
 
 
@@ -250,4 +263,36 @@ async def test_an_expired_element_is_not_claimable() -> None:
     row = _row(expires_at=datetime.now(UTC) - timedelta(seconds=1))
     await save([row])
 
+    assert await peek(row.id) is None
     assert await claim(row.id, slack_user_id="U1") is None
+
+
+@pytest.mark.usefixtures("registry_db")
+async def test_peeking_leaves_the_element_claimable() -> None:
+    row = _row()
+    await save([row])
+
+    seen = await peek(row.id)
+
+    assert seen is not None
+    assert seen.thread_id == "thread-1"
+    assert seen.state == "open"
+    # An unauthorized click reads the row and stops; the owner's answer survives.
+    assert await claim(row.id, slack_user_id="U1") is not None
+
+
+@pytest.mark.usefixtures("registry_db")
+async def test_an_ephemeral_set_is_still_exclusive() -> None:
+    # An ephemeral message has no timestamp, so only the group makes the
+    # alternatives exclusive.
+    chosen = _row(message_ts="")
+    alternative = _row(action_id="skip", message_ts="")
+    await save([chosen, alternative])
+
+    taken = await claim(chosen.id, slack_user_id="U1")
+
+    assert taken is not None
+    assert taken.spent_action_ids == frozenset(
+        {action_id_for(chosen.id), action_id_for(alternative.id)}
+    )
+    assert await claim(alternative.id, slack_user_id="U1") is None

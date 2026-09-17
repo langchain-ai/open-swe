@@ -20,7 +20,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Literal
 from uuid import UUID, uuid7
 
-from sqlalchemy import Boolean, Text, select, update
+from sqlalchemy import Boolean, Text, case, or_, select, update
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -60,6 +60,10 @@ class SlackContinuation(Base):
     channel_id: Mapped[str]
     id: Mapped[UUID] = mapped_column(primary_key=True, default_factory=uuid7)
     label: Mapped[str] = mapped_column(server_default="", default="")
+    # Slack's message timestamp is unknown until the message is posted, and an
+    # ephemeral message never gets one, so exclusivity is keyed on a group the
+    # reply path mints instead.
+    group_id: Mapped[UUID] = mapped_column(default_factory=uuid7)
     thread_ts: Mapped[str] = mapped_column(server_default="", default="")
     message_ts: Mapped[str] = mapped_column(server_default="", default="")
     run_config: Mapped[JsonObject] = mapped_column(JSONB, default_factory=dict)
@@ -94,6 +98,23 @@ async def attach_message(tokens: list[UUID], channel_id: str, message_ts: str) -
         )
 
 
+async def peek(token: UUID) -> SlackContinuation | None:
+    """The open, unexpired row for `token`, consuming nothing.
+
+    Authorization needs the thread the row names, and an unauthorized click
+    must not spend the answer the owner is still expected to give, so the row
+    is read before it is claimed.
+    """
+    async with postgres.session() as session:
+        return await session.scalar(
+            select(SlackContinuation).where(
+                SlackContinuation.id == token,
+                SlackContinuation.state == "open",
+                SlackContinuation.expires_at > datetime.now(UTC),
+            )
+        )
+
+
 @dataclass(frozen=True)
 class Claim:
     """A taken click, and the ``action_id`` values it just spent."""
@@ -121,36 +142,41 @@ async def claim(token: UUID, *, slack_user_id: str) -> Claim | None:
             return None
         if not row.single_use:
             return Claim(row=row, spent_action_ids=frozenset())
-        # `state = 'open'` in the predicate is the gate, and RETURNING says
-        # whether this statement is the one that closed it.
-        claimed = await session.scalar(
-            update(SlackContinuation)
-            .where(SlackContinuation.id == token, SlackContinuation.state == "open")
-            .values(state="used", used_by=slack_user_id, used_at=now, updated_at=now)
-            .returning(SlackContinuation.id)
-        )
-        if claimed is None:
-            return None
-        # The other single-use elements on that message offered alternatives to
-        # this one answer, so they stop being clickable with it. A reusable one
-        # is left alone, in the row and in the message.
-        revoked: list[UUID] = []
-        if row.message_ts:
-            revoked = list(
-                await session.scalars(
-                    update(SlackContinuation)
-                    .where(
-                        SlackContinuation.channel_id == row.channel_id,
-                        SlackContinuation.message_ts == row.message_ts,
-                        SlackContinuation.id != token,
-                        SlackContinuation.single_use.is_(True),
-                        SlackContinuation.state == "open",
-                    )
-                    .values(state="revoked", updated_at=now)
-                    .returning(SlackContinuation.id)
-                )
+        # The clicked element and the alternatives it settles are closed by one
+        # statement, over rows locked in id order. Two people clicking different
+        # buttons on the same message would otherwise each hold their own row and
+        # wait for the other's, which Postgres breaks by killing one as a
+        # deadlock victim; a single ordered lock cannot deadlock against itself.
+        locked = (
+            select(SlackContinuation.id)
+            .where(
+                SlackContinuation.state == "open",
+                SlackContinuation.single_use.is_(True),
+                or_(
+                    SlackContinuation.id == token,
+                    SlackContinuation.group_id == row.group_id,
+                ),
             )
+            .order_by(SlackContinuation.id)
+            .with_for_update()
+            .subquery()
+        )
+        spent = list(
+            await session.scalars(
+                update(SlackContinuation)
+                .where(SlackContinuation.id.in_(select(locked.c.id)))
+                .values(
+                    state=case((SlackContinuation.id == token, "used"), else_="revoked"),
+                    used_by=case((SlackContinuation.id == token, slack_user_id), else_=""),
+                    used_at=case((SlackContinuation.id == token, now), else_=None),
+                    updated_at=now,
+                )
+                .returning(SlackContinuation.id)
+            )
+        )
+        if token not in spent:
+            return None
         return Claim(
             row=row,
-            spent_action_ids=frozenset(action_id_for(spent) for spent in [token, *revoked]),
+            spent_action_ids=frozenset(action_id_for(item) for item in spent),
         )

@@ -12,6 +12,7 @@ def upgrade() -> None:
         CREATE TABLE slack_continuation (
             id uuid PRIMARY KEY,
             thread_id text NOT NULL,
+            group_id uuid NOT NULL,
             action_id text NOT NULL,
             element_type text NOT NULL,
             label text NOT NULL DEFAULT '',
@@ -29,12 +30,14 @@ def upgrade() -> None:
         )
         """
     )
-    # Claiming one single-use element closes its siblings, which is a lookup by
-    # the message they were posted on.
+    # Claiming one single-use element closes the alternatives posted with it,
+    # which is a lookup by the group the reply path minted for that set. Slack's
+    # message timestamp cannot serve: it is unknown until the message is posted
+    # and an ephemeral message never has one.
     op.execute(
         """
-        CREATE INDEX slack_continuation_message_idx
-            ON slack_continuation (channel_id, message_ts)
+        CREATE INDEX slack_continuation_group_idx
+            ON slack_continuation (group_id)
             WHERE state = 'open'
         """
     )

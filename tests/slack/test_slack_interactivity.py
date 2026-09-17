@@ -282,6 +282,10 @@ async def test_a_continuation_click_resumes_its_own_thread(
 
     claim = AsyncMock(return_value=Claim(row=row, spent_action_ids=frozenset({_aid(row.id)})))
     monkeypatch.setattr(slack_routes.continuations, "claim", claim)
+    monkeypatch.setattr(slack_routes.continuations, "peek", AsyncMock(return_value=row))
+    monkeypatch.setattr(
+        slack_routes.slack_resume, "clicker_may_resume", AsyncMock(return_value=True)
+    )
     lookup = AsyncMock(return_value="thread-other")
     monkeypatch.setattr(slack_routes.common, "lookup_slack_thread_id", lookup)
     background_tasks = BackgroundTasks()
@@ -309,7 +313,9 @@ async def test_a_spent_continuation_says_so_and_dispatches_nothing(
 
     from agent.slack.continuations import action_id_for
 
-    monkeypatch.setattr(slack_routes.continuations, "claim", AsyncMock(return_value=None))
+    monkeypatch.setattr(slack_routes.continuations, "peek", AsyncMock(return_value=None))
+    claim = AsyncMock(return_value=None)
+    monkeypatch.setattr(slack_routes.continuations, "claim", claim)
     background_tasks = BackgroundTasks()
 
     result = await slack_routes.slack_interactivity(
@@ -319,4 +325,38 @@ async def test_a_spent_continuation_says_so_and_dispatches_nothing(
     assert result == {"status": "ignored", "reason": "Slack continuation is no longer open"}
     assert [task.func for task in background_tasks.tasks] == [
         slack_routes.slack_resume.refuse_spent
+    ]
+    # Nothing was consumed to discover it was spent.
+    claim.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("eligible_channel")
+async def test_an_unauthorized_click_consumes_nothing(monkeypatch: pytest.MonkeyPatch) -> None:
+    from agent.slack.continuations import SlackContinuation, action_id_for
+
+    row = SlackContinuation(
+        thread_id="thread-9",
+        action_id="rerun_tests",
+        element_type="button",
+        channel_id="C1",
+        message_ts="2.0",
+    )
+    claim = AsyncMock()
+    monkeypatch.setattr(slack_routes.continuations, "peek", AsyncMock(return_value=row))
+    monkeypatch.setattr(slack_routes.continuations, "claim", claim)
+    monkeypatch.setattr(
+        slack_routes.slack_resume, "clicker_may_resume", AsyncMock(return_value=False)
+    )
+    background_tasks = BackgroundTasks()
+
+    result = await slack_routes.slack_interactivity(
+        _request(_continuation_payload(action_id_for(row.id))), background_tasks
+    )
+
+    assert result["status"] == "ignored"
+    # The owner's pending answer is still theirs to give.
+    claim.assert_not_awaited()
+    assert [task.func for task in background_tasks.tasks] == [
+        slack_routes.slack_resume.refuse_not_yours
     ]

@@ -734,6 +734,17 @@ async def slack_interactivity(
     # A continuation carries everything in its row, so it answers here rather
     # than through the repository and thread resolution the option path needs.
     if (token := continuations.token_in(action.action_id)) is not None:
+        # Read, authorize, then claim: a click nobody is allowed to make must
+        # not spend the answer the thread's owner still owes.
+        pending = await continuations.peek(token)
+        if pending is None:
+            background_tasks.add_task(slack_resume.refuse_spent, channel_id, interaction.user.id)
+            return ignored("Slack continuation is no longer open")
+        if not await slack_resume.clicker_may_resume(pending, interaction.user.id):
+            background_tasks.add_task(
+                slack_resume.refuse_not_yours, channel_id, interaction.user.id
+            )
+            return ignored("Slack continuation belongs to another thread's owner")
         claimed = await continuations.claim(token, slack_user_id=interaction.user.id)
         if claimed is None:
             background_tasks.add_task(slack_resume.refuse_spent, channel_id, interaction.user.id)

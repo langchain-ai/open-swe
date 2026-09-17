@@ -13,7 +13,7 @@ refused, because a text input is only submitted through a modal.
 """
 
 from typing import Any
-from uuid import UUID
+from uuid import UUID, uuid7
 
 from agent.slack.continuations import SlackContinuation, action_id_for
 from agent.utils.json_types import JsonObject
@@ -97,16 +97,21 @@ def prepare(
 ) -> tuple[list[dict[str, Any]], list[SlackContinuation]]:
     """``blocks`` with interactive elements registered, and the rows to store.
 
+    Every element in one call shares a group, so answering one of them settles
+    the alternatives it was posted beside.
+
     Raises :class:`UnsupportedBlocks` for an element no interaction can reach.
     """
     prepared: list[dict[str, Any]] = []
     rows: list[SlackContinuation] = []
+    group_id = uuid7()
 
     def register(element: dict[str, Any]) -> dict[str, Any]:
         if not _needs_continuation(element):
             return element
         row = SlackContinuation(
             thread_id=thread_id,
+            group_id=group_id,
             action_id=str(element.get("action_id") or "").strip() or "unnamed",
             element_type=str(element.get("type") or "element"),
             label=_element_label(element),

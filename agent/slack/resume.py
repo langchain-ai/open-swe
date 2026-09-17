@@ -68,6 +68,25 @@ async def refuse_spent(channel_id: str, slack_user_id: str) -> None:
     await post_slack_ephemeral_message(channel_id, slack_user_id, _SPENT)
 
 
+async def refuse_not_yours(channel_id: str, slack_user_id: str) -> None:
+    await post_slack_ephemeral_message(channel_id, slack_user_id, _NOT_YOURS)
+
+
+async def clicker_may_resume(row: SlackContinuation, slack_user_id: str) -> bool:
+    """Whether this person may prompt the thread the element belongs to.
+
+    Asked before the click is claimed: a private thread's card can sit in a
+    channel other people can see, and their click must not spend the answer its
+    owner is still expected to give.
+    """
+    login = await common.login_for_slack_id(slack_user_id) or ""
+    try:
+        await common.authorize_github_thread(row.thread_id, login)
+    except HTTPException:
+        return False
+    return True
+
+
 async def resume(
     row: SlackContinuation, interaction: SlackInteraction, action: SlackBlockAction
 ) -> None:
@@ -89,12 +108,6 @@ async def _resume(
     row: SlackContinuation, interaction: SlackInteraction, action: SlackBlockAction
 ) -> None:
     slack_user_id = interaction.user.id
-    login = await common.login_for_slack_id(slack_user_id) or ""
-    try:
-        await common.authorize_github_thread(row.thread_id, login)
-    except HTTPException:
-        await post_slack_ephemeral_message(row.channel_id, slack_user_id, _NOT_YOURS)
-        return
 
     prompt = render_prompt(
         "runs/slack-continuation.md",
