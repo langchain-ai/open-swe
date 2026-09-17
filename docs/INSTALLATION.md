@@ -216,6 +216,8 @@ SLACK_BOT_USER_ID=""      # the bot's member id (open the bot's profile in Slack
 SLACK_BOT_USERNAME=""     # the bot's handle, e.g. open-swe
 ```
 
+Untagged replies in otherwise eligible two-party threads keep their existing behavior by default. As an experimental opt-in, set `SLACK_INTENT_CLASSIFIER=jev` and `TYPESAFE_API_KEY` to let [TypeSafe Jev](https://docs.typesafe.ai/introduction/quickstart) suppress messages that are not directed at Open SWE. Explicit mentions, DMs, code channels, and ready-plan replies bypass this classifier. Jev receives up to 20 Slack messages and 8,000 characters of thread text, including Slack user IDs, directly from Open SWE; review TypeSafe's data-handling terms before enabling it. The initial `0.6` confidence threshold is experimental. Missing configuration, low confidence, timeouts, API errors, and malformed responses all preserve the current reply behavior.
+
 `/oswe <request or question>` answers or carries out a request without starting a Slack thread: replies are ephemeral, visible only to whoever asked, and the immediate acknowledgement links to the thread in the web dashboard. Each person's commands in a channel share one private scratch thread, kept out of everyone's thread list; continuing it on the web makes it an ordinary thread. Substantial work belongs in a thread of its own, which Open SWE starts in the channel.
 
 Both Slack URLs must point at the Open SWE deployment, and Block Kit buttons only work with Interactivity enabled and pointed at `/webhooks/slack/interactivity`. Slack messages are routed to the thread's repository, a `repo:owner/name` token in the message, or the team default repository. Open SWE refuses Slack Connect channels (`is_ext_shared`) and fails closed when it cannot verify a channel.
@@ -245,6 +247,8 @@ SLACK_BOT_TOKEN=""                    # step 5
 SLACK_SIGNING_SECRET=""
 SLACK_BOT_USER_ID=""
 SLACK_BOT_USERNAME=""
+SLACK_INTENT_CLASSIFIER=""             # optional: jev (experimental untagged-reply filtering)
+TYPESAFE_API_KEY=""                    # required only when SLACK_INTENT_CLASSIFIER=jev
 
 TOKEN_ENCRYPTION_KEY=""               # openssl rand -base64 32  (encrypts stored GitHub and Slack tokens)
 DASHBOARD_JWT_SECRET=""               # openssl rand -hex 32     (signs the session cookie and OAuth state)

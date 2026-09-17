@@ -1,6 +1,8 @@
+import json
 from typing import Any
 from unittest.mock import AsyncMock
 
+import httpx2
 import pytest
 
 from agent.run_config import Repo
@@ -169,6 +171,136 @@ async def test_untagged_reply_allowed_for_two_party_thread(
     assert await slack_webhook.slack_thread_allows_untagged_reply(
         "C1", "123.45", "no worries, keep going", "BOT"
     )
+
+
+@pytest.mark.asyncio
+async def test_jev_uses_explicit_current_message_and_ignores_later_fetched_messages(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    seen: httpx2.Request | None = None
+
+    def handle(request: httpx2.Request) -> httpx2.Response:
+        nonlocal seen
+        seen = request
+        return httpx2.Response(
+            200,
+            json={
+                "answers": {
+                    "intent": {
+                        "type": "choice",
+                        "choice": "not_directed",
+                        "probabilities": {"directed": 0.1, "not_directed": 0.9},
+                        "confidence": 0.8,
+                    }
+                }
+            },
+        )
+
+    real_client = httpx2.AsyncClient
+    messages = [
+        {"ts": f"1.{index:02d}", "user": "UHUMAN", "text": f"prior {index}"} for index in range(21)
+    ]
+    messages.extend(
+        [
+            {"ts": "1.21", "user": "BOT", "text": "Done"},
+            {"ts": "2.0", "user": "UHUMAN", "text": "fetched current text"},
+            {"ts": "3.0", "user": "UHUMAN", "text": "future request"},
+        ]
+    )
+    monkeypatch.setenv("SLACK_INTENT_CLASSIFIER", "jev")
+    monkeypatch.setenv("TYPESAFE_API_KEY", "secret")
+    monkeypatch.setattr(
+        slack_webhook.common,
+        "fetch_slack_thread_messages",
+        AsyncMock(return_value=messages),
+    )
+    monkeypatch.setattr(
+        slack_webhook.httpx2,
+        "AsyncClient",
+        lambda **kwargs: real_client(**kwargs, transport=httpx2.MockTransport(handle)),
+    )
+
+    assert not await slack_webhook.slack_thread_allows_untagged_reply(
+        "C1", "123.45", "explicit current text", "BOT", "UHUMAN", "2.0"
+    )
+    assert seen is not None
+    assert seen.headers["Authorization"] == "Bearer secret"
+    payload = json.loads(seen.read())
+    turns = payload["state"].splitlines()
+    assert len(turns) == 20
+    assert "Open SWE: Done" in turns
+    assert turns[-1] == "Current message (UHUMAN): explicit current text"
+    assert "fetched current text" not in payload["state"]
+    assert "future request" not in payload["state"]
+    assert len(payload["state"]) <= 8_000
+
+
+@pytest.mark.parametrize(
+    "result",
+    [
+        httpx2.Response(503),
+        httpx2.TimeoutException("timed out"),
+        httpx2.Response(
+            200,
+            json={
+                "answers": {
+                    "intent": {
+                        "type": "choice",
+                        "choice": "not_directed",
+                        "probabilities": {"directed": 0.4, "not_directed": 0.6},
+                        "confidence": 0.59,
+                    }
+                }
+            },
+        ),
+    ],
+)
+async def test_jev_error_or_low_confidence_preserves_existing_untagged_behavior(
+    monkeypatch: pytest.MonkeyPatch,
+    result: httpx2.Response | httpx2.TimeoutException,
+) -> None:
+    def handle(_request: httpx2.Request) -> httpx2.Response:
+        if isinstance(result, httpx2.TimeoutException):
+            raise result
+        return result
+
+    real_client = httpx2.AsyncClient
+    monkeypatch.setenv("SLACK_INTENT_CLASSIFIER", "jev")
+    monkeypatch.setenv("TYPESAFE_API_KEY", "secret")
+    monkeypatch.setattr(
+        slack_webhook.common,
+        "fetch_slack_thread_messages",
+        AsyncMock(return_value=_thread("UHUMAN", "BOT", "UHUMAN")),
+    )
+    monkeypatch.setattr(
+        slack_webhook.httpx2,
+        "AsyncClient",
+        lambda **kwargs: real_client(**kwargs, transport=httpx2.MockTransport(handle)),
+    )
+
+    assert await slack_webhook.slack_thread_allows_untagged_reply(
+        "C1", "123.45", "thanks", "BOT", "UHUMAN", "1.2"
+    )
+
+
+async def test_jev_requires_toggle_and_key(monkeypatch: pytest.MonkeyPatch) -> None:
+    messages = _thread("UHUMAN", "BOT", "UHUMAN")
+    monkeypatch.setattr(
+        slack_webhook.common, "fetch_slack_thread_messages", AsyncMock(return_value=messages)
+    )
+    client = AsyncMock()
+    monkeypatch.setattr(slack_webhook.httpx2, "AsyncClient", client)
+
+    monkeypatch.setenv("TYPESAFE_API_KEY", "secret")
+    assert await slack_webhook.slack_thread_allows_untagged_reply(
+        "C1", "123.45", "thanks", "BOT", "UHUMAN", "1.2"
+    )
+    monkeypatch.setenv("SLACK_INTENT_CLASSIFIER", "jev")
+    monkeypatch.delenv("TYPESAFE_API_KEY")
+    assert await slack_webhook.slack_thread_allows_untagged_reply(
+        "C1", "123.45", "thanks", "BOT", "UHUMAN", "1.2"
+    )
+    client.assert_not_called()
 
 
 @pytest.mark.asyncio

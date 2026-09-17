@@ -268,6 +268,11 @@ ENV.var("SLACK_BOT_TOKEN", "Slack bot user OAuth token (xoxb-...).", secret=True
 ENV.var("SLACK_SIGNING_SECRET", "HMAC secret for Slack webhook deliveries.", secret=True)
 ENV.var("SLACK_BOT_USER_ID", "Slack user id of the bot, for mention detection.")
 ENV.var("SLACK_BOT_USERNAME", "Slack handle of the bot, for plain-text mention detection.")
+ENV.var(
+    "SLACK_INTENT_CLASSIFIER",
+    "Optional classifier for untagged Slack replies; set to jev to enable TypeSafe Jev.",
+)
+ENV.var("TYPESAFE_API_KEY", "TypeSafe API key used by opt-in classifiers.", secret=True)
 ENV.var("SLACK_CLIENT_ID", "Slack app client id for Sign in with Slack.")
 ENV.var("SLACK_CLIENT_SECRET", "Slack app client secret for Sign in with Slack.", secret=True)
 ENV.var("SLACK_TEAM_ID", "Restrict Sign in with Slack to one workspace.")
