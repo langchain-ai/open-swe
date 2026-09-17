@@ -122,7 +122,8 @@ async def maintain_jobs() -> None:
             text("""
             UPDATE run_cost_refresh j SET state = 'complete', completed_at = clock_timestamp(),
                 claim_token = NULL, lease_until = NULL, error_code = NULL
-            WHERE j.workspace_id = :workspace AND j.state IN ('pending', 'leased', 'awaiting_delivery')
+            WHERE j.workspace_id = :workspace
+              AND j.state IN ('pending', 'leased', 'awaiting_delivery', 'needs_attention')
               AND EXISTS (SELECT 1 FROM latest_cost_projection p WHERE p.workspace_id = j.workspace_id
                   AND p.run_id = j.run_id AND p.cost_usd IS NOT NULL);
         """),

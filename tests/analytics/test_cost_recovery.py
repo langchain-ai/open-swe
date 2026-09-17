@@ -136,6 +136,9 @@ async def test_dead_letter_repair_exhaustion_and_retention(analytics_db, monkeyp
         )
     await recovery.maintain_jobs()
     assert (await state(transaction))["invocation_id"] is None
+    await outbox.deliver_batch()
+    await recovery.maintain_jobs()
+    assert (await state(transaction))["state"] == "complete"
 
 
 async def test_terminal_enqueue_rolls_back_with_job_failure(analytics_db, monkeypatch):
