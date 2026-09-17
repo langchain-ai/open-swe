@@ -589,6 +589,7 @@ async def _enrich_run_start_command(
             else None
         ),
         injected_dynamic_context_hashes=injected,
+        binding_key=thread_id,
     )
     if metadata.get("source") == "slack":
         structured.insert(

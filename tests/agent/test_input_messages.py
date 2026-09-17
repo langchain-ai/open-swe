@@ -3,6 +3,7 @@ from xml.etree import ElementTree
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage
 
+from agent.credential_redaction import resolve_credentials
 from agent.input_messages import (
     build_input_messages,
     build_run_input,
@@ -105,6 +106,27 @@ def test_run_input_preserves_files() -> None:
 def test_entity_ids_must_be_namespaced() -> None:
     with pytest.raises(ValueError):
         human_input("hello", {"sender_id": "octocat", "surface": "web", "kind": "human"})
+
+
+def test_human_input_redacts_supported_credentials_and_keeps_references_resolvable() -> None:
+    credentials = (
+        "lsv2_pt_token lsv2_sk_secret ghp_github sk-openai "
+        "xoxb-slack AKIA1234567890ABCDEF "
+        "-----BEGIN PRIVATE KEY-----\nsecret\n-----END PRIVATE KEY-----"
+    )
+    message = human_input(
+        credentials,
+        {"sender_id": "github:octocat", "surface": "web", "kind": "human"},
+        binding_key="thread-redaction-test",
+    )
+
+    serialized = message["content"]
+    assert isinstance(serialized, str)
+    assert credentials not in serialized
+    content = _parse(serialized).findtext("content")
+    assert content is not None
+    assert content.count("<redacted-credential id=") == 7
+    assert resolve_credentials(content, "thread-redaction-test") == credentials
 
 
 def _person_intro_message(entity_id: str) -> HumanMessage:

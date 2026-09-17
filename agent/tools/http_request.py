@@ -4,6 +4,8 @@ from typing import Any
 
 import httpx2
 
+from agent.credential_redaction import resolve_credentials
+from agent.run_config import RunConfig
 from agent.tools.sandbox_output import chunk_output_as_jsonl, write_sandbox_output
 from agent.utils.url_safety import (
     request_with_safe_redirects as _request_with_safe_redirects,
@@ -24,6 +26,11 @@ async def http_request(
 ) -> dict[str, Any]:
     """Implement the `http_request` tool."""
     try:
+        binding_key = RunConfig.from_runtime().thread_id
+        headers = resolve_credentials(headers, binding_key)
+        data = resolve_credentials(data, binding_key)
+        params = resolve_credentials(params, binding_key)
+        url = resolve_credentials(url, binding_key)
         kwargs: dict[str, Any] = {}
 
         if headers:

@@ -24,6 +24,7 @@ from deepagents.backends.sandbox import BaseSandbox
 from langgraph.config import get_config
 from langgraph_sdk import get_client
 
+from agent.credential_redaction import resolve_credentials
 from agent.sandboxes.providers.registry import create_sandbox
 
 logger = logging.getLogger(__name__)
@@ -274,6 +275,7 @@ class SandboxBackendProxy(BaseSandbox):
 
     async def aexecute(self, command: str, *, timeout: int | None = None) -> ExecuteResponse:
         effective_timeout = timeout if timeout is not None else _DEFAULT_EXECUTE_TIMEOUT_SECONDS
+        command = resolve_credentials(command, self._thread_id)
         return await (await self._aget_backend()).aexecute(command, timeout=effective_timeout)
 
     def execute_with_offload(

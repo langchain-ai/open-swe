@@ -8,6 +8,8 @@ from xml.etree import ElementTree
 
 from langchain_core.messages import AnyMessage, BaseMessage
 
+from agent.credential_redaction import redact_credentials
+
 INJECTED_DYNAMIC_CONTEXT_HASHES_KEY = "injected_dynamic_context_hashes"
 # Written by the deepagents summarization middleware; the prompt it builds is the
 # summary message followed by messages[cutoff_index:].
@@ -254,7 +256,11 @@ def _data_element(name: str, value: object) -> str:
     return f"<{name}>{_xml_text(value)}</{name}>"
 
 
-def _serialize_message(text: str, context: InputMessageContext) -> str:
+def _serialize_message(
+    text: str, context: InputMessageContext, *, binding_key: str | None = None
+) -> str:
+    if context["kind"] == "human":
+        text, _ = redact_credentials(text, binding_key)
     sender_id = _validate_entity_id(context["sender_id"])
     attributes = [
         f'sender="{_xml_attr(sender_id)}"',
@@ -303,23 +309,39 @@ def append_message_data(
 
 
 def _structured_content(
-    content: str | list[dict[str, Any]], context: InputMessageContext
+    content: str | list[dict[str, Any]],
+    context: InputMessageContext,
+    *,
+    binding_key: str | None = None,
 ) -> str | list[dict[str, Any]]:
     if isinstance(content, str):
-        return _serialize_message(content, context)
+        return _serialize_message(content, context, binding_key=binding_key)
     blocks: list[dict[str, Any]] = []
     for block in content:
         if block.get("type") == "text" and isinstance(block.get("text"), str):
-            blocks.append({**block, "text": _serialize_message(block["text"], context)})
+            blocks.append(
+                {
+                    **block,
+                    "text": _serialize_message(block["text"], context, binding_key=binding_key),
+                }
+            )
         else:
             blocks.append(block)
     return blocks
 
 
-def human_input(content: str | list[dict[str, Any]], context: InputMessageContext) -> RunMessage:
+def human_input(
+    content: str | list[dict[str, Any]],
+    context: InputMessageContext,
+    *,
+    binding_key: str | None = None,
+) -> RunMessage:
     if context["kind"] != "human":
         raise ValueError("human_input requires kind='human'")
-    return {"role": "user", "content": _structured_content(content, context)}
+    return {
+        "role": "user",
+        "content": _structured_content(content, context, binding_key=binding_key),
+    }
 
 
 def system_input(content: str | list[dict[str, Any]], context: InputMessageContext) -> RunMessage:
@@ -356,6 +378,7 @@ def build_input_messages(
     channels: list[ChannelIdentity] | None = None,
     systems: list[SystemIdentity] | None = None,
     injected_dynamic_context_hashes: set[str] | None = None,
+    binding_key: str | None = None,
 ) -> list[RunMessage]:
     injected = (
         injected_dynamic_context_hashes if injected_dynamic_context_hashes is not None else set()
@@ -373,7 +396,7 @@ def build_input_messages(
         messages.append(message)
         injected.add(context_hash)
     if context["kind"] == "human":
-        messages.append(human_input(content, context))
+        messages.append(human_input(content, context, binding_key=binding_key))
     else:
         messages.append(system_input(content, context))
     return messages
@@ -388,6 +411,7 @@ def build_run_input(
     systems: list[SystemIdentity] | None = None,
     injected_dynamic_context_hashes: set[str] | None = None,
     files: dict[str, Any] | None = None,
+    binding_key: str | None = None,
 ) -> RunInput:
     result: RunInput = {
         "messages": build_input_messages(
@@ -397,6 +421,7 @@ def build_run_input(
             channels=channels,
             systems=systems,
             injected_dynamic_context_hashes=injected_dynamic_context_hashes,
+            binding_key=binding_key,
         )
     }
     if files is not None:
