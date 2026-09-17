@@ -41,7 +41,7 @@ from langchain_core.messages import AIMessage
 from langsmith import trace
 
 from agent.middleware.trace import OpenSWEMiddleware
-from agent.utils.errors import error_tracking_fields, exception_fields
+from agent.utils.errors import classify_exception, error_tracking_fields, exception_fields
 
 logger = logging.getLogger(__name__)
 
@@ -96,6 +96,8 @@ def _should_fallback(exc: BaseException) -> bool:
         status = getattr(exc, "status_code", None)
         if isinstance(status, int) and status in _RETRYABLE_STATUS_CODES:
             return True
+    if type(exc) is openai.APIError:
+        return classify_exception(exc) == "provider_overloaded"
     return False
 
 
