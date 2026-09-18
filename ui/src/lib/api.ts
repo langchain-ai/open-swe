@@ -292,6 +292,22 @@ export interface AdminUsersPage {
 }
 
 export type UsageLeaderboardPeriod = "7d" | "30d" | "all"
+export type UsageLeaderboardSort =
+  | "rank"
+  | "user"
+  | "favorite_model"
+  | "invocations"
+  | "threads"
+  | "avg_invocations_per_thread"
+  | "total_tokens"
+  | "total_cost_usd"
+  | "avg_invocation_seconds"
+  | "avg_thread_seconds"
+  | "prs_opened"
+  | "merged_prs"
+  | "merged_prs_per_thread"
+  | "agent_loc"
+export type SortDirection = "asc" | "desc"
 
 export interface AnalyticsMetadata {
   reporting_cutover_at: string
@@ -320,6 +336,7 @@ export interface UsageLeaderboardRow {
   agent_runs?: number
   prs_opened: number
   merged_prs: number
+  merged_prs_per_thread?: number
   agent_loc: number
   additions: number
   deletions: number
@@ -391,7 +408,10 @@ export interface PRMergeRateCohort {
   mature_denominator: number
   mature_cohort_merge_share: number | null
   avg_merge_seconds: number | null
+  avg_delivery_seconds: number | null
   efforts: PRMergeRateEffort[]
+  median_distance_basis_points?: number | null
+  distance_sample_size?: number
 }
 
 export interface PRMergeRatePayload extends AnalyticsMetadata {
@@ -488,15 +508,6 @@ export interface SkillsPage {
 export interface OrganizationSkillsPage {
   items: Array<Skill>
   next_cursor: string | null
-}
-
-export interface SandboxSettings {
-  base_snapshot_id: string | null
-  env_base_snapshot_id: string | null
-  effective_base_snapshot_id: string | null
-  base_snapshot_source: "admin" | "env" | "unset"
-  updated_at: string | null
-  updated_by: string | null
 }
 
 /** What a non-admin needs to pick a workspace for a new thread. */
@@ -650,6 +661,8 @@ export interface OpenPullRequest {
   headSha: string | null
   headRef: string | null
   reviewDecision: "approved" | "changes_requested" | "none" | null
+  // Branch protection still wants an approval this PR does not have.
+  reviewRequired: boolean
   statusAvailable: boolean
   createdAt: string | null
   updatedAt: string | null
@@ -757,12 +770,7 @@ export interface ReviewDiffPayload {
 export interface ReviewChatMeta {
   available: boolean
   assistant_id: string
-}
-
-export interface ReviewChatThread {
   thread_id: string
-  title: string
-  updated_at?: string | null
 }
 
 /**
@@ -962,12 +970,6 @@ export const api = {
     request<void>(`/agent-instructions/${encodeURIComponent(full_name)}`, {
       method: "DELETE",
     }),
-  getSandboxSettings: () => request<SandboxSettings>("/sandbox-settings"),
-  saveSandboxSettings: (base_snapshot_id: string | null) =>
-    request<SandboxSettings>("/sandbox-settings", {
-      method: "PUT",
-      body: JSON.stringify({ base_snapshot_id }),
-    }),
   listWorkspaceOptions: () =>
     request<WorkspaceOptionList>("/workspaces/options"),
   getTeamSettings: () => request<TeamSettings>("/team-settings"),
@@ -1051,10 +1053,12 @@ export const api = {
   usageLeaderboard: (
     period: UsageLeaderboardPeriod = "7d",
     limit = 10,
-    cursor?: string
+    cursor?: string,
+    sort: UsageLeaderboardSort = "rank",
+    direction: SortDirection = "asc"
   ) =>
     request<UsageLeaderboardPayload>(
-      `/agent-usage-leaderboard?period=${encodeURIComponent(period)}&limit=${limit}${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`
+      `/agent-usage-leaderboard?period=${encodeURIComponent(period)}&limit=${limit}&sort=${sort}&direction=${direction}${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`
     ).then((payload) => ({
       ...payload,
       rows: payload.rows.map((row) => ({
@@ -1131,20 +1135,6 @@ export const api = {
   getReviewChat: (owner: string, repo: string, number: number) =>
     request<ReviewChatMeta>(
       `/reviews/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}/chat`
-    ),
-  listReviewChatThreads: (owner: string, repo: string, number: number) =>
-    request<{ threads: Array<ReviewChatThread> }>(
-      `/reviews/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}/chat/threads`
-    ),
-  deleteReviewChatThread: (
-    owner: string,
-    repo: string,
-    number: number,
-    threadId: string
-  ) =>
-    request<void>(
-      `/reviews/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}/chat/threads/${encodeURIComponent(threadId)}`,
-      { method: "DELETE" }
     ),
   reReview: (owner: string, repo: string, number: number) =>
     request<{

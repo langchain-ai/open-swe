@@ -320,6 +320,17 @@ async def test_thread_status_refreshes_until_the_run_ends(monkeypatch) -> None:
     ]
 
 
+async def test_early_status_survives_while_another_run_is_active(monkeypatch) -> None:
+    set_status = AsyncMock(return_value=True)
+    monkeypatch.setattr(slack_thinking, "set_slack_thread_status", set_status)
+    client = _status_client(_AnchorStore(), "run-1")
+    client.runs.list = AsyncMock(return_value=[{"id": "run-2"}])
+
+    await slack_thinking.clear_slack_thinking_status_if_idle(client, "thread-1", "C1", "1.0")
+
+    set_status.assert_not_awaited()
+
+
 async def test_thread_status_survives_while_another_run_is_active(monkeypatch) -> None:
     """A completion landing mid-run leaves the active run's indicator alone."""
     set_status = AsyncMock(return_value=True)

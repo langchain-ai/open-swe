@@ -19,7 +19,11 @@ import httpx2
 from agent.baby_sit import aggregate_check_state
 from agent.github.ci import fetch_pr, list_check_runs, list_commit_statuses
 from agent.github.http import GITHUB_API_BASE, github_client, github_request
-from agent.github.pull_request_status import fetch_unresolved_review_threads
+from agent.github.pull_request_status import (
+    Mergeability,
+    fetch_mergeability,
+    fetch_unresolved_review_threads,
+)
 from agent.github.pull_requests import PullRequest
 from agent.review.enabled_repos import is_review_repo_enabled
 
@@ -133,6 +137,18 @@ async def _fetch_reviews(
         return None
 
 
+def _resolve_mergeability(
+    pr: Mapping[str, Any], live: Mergeability | None
+) -> tuple[bool | None, str]:
+    """GraphQL's verdict where it has one, falling back to what REST returned."""
+    rest = pr.get("mergeable")
+    rest_mergeable = rest if isinstance(rest, bool) else None
+    rest_state = str(pr.get("mergeable_state") or "")
+    if live is None or live.mergeable is None:
+        return rest_mergeable, rest_state
+    return live.mergeable, live.merge_state or rest_state
+
+
 def _merge_methods(pr: Mapping[str, Any]) -> list[str]:
     base = pr.get("base")
     base_repo = base.get("repo") if isinstance(base, Mapping) else None
@@ -163,7 +179,6 @@ async def assess_readiness(
         return None
     user = pr.get("user")
     author = user.get("login") if isinstance(user, Mapping) else None
-    mergeable = pr.get("mergeable")
 
     check_runs = await list_check_runs(owner=owner, repo=repo, ref=head_sha, token=token)
     statuses = await list_commit_statuses(owner=owner, repo=repo, ref=head_sha, token=token)
@@ -172,8 +187,10 @@ async def assess_readiness(
     async with github_client(token=token) as client:
         threads = await fetch_unresolved_review_threads(client, owner, repo, pr_number)
         reviews = await _fetch_reviews(client, owner, repo, pr_number)
+        mergeability = await fetch_mergeability(client, owner, repo, pr_number)
     if threads is None or reviews is None:
         return None
+    mergeable, mergeable_state = _resolve_mergeability(pr, mergeability)
 
     review_required = await is_review_repo_enabled(owner, repo)
     reviewed_head = False
@@ -193,7 +210,6 @@ async def assess_readiness(
 
     check_state, failures = aggregate_check_state(check_runs, statuses)
     author_login = author if isinstance(author, str) else ""
-    mergeable_state = str(pr.get("mergeable_state") or "")
     snapshot = PullRequestSnapshot(
         state=str(pr.get("state") or ""),
         merged=bool(pr.get("merged")) or isinstance(pr.get("merged_at"), str),
@@ -201,7 +217,7 @@ async def assess_readiness(
         head_sha=head_sha,
         title=str(pr.get("title") or ""),
         author=author_login,
-        mergeable=mergeable if isinstance(mergeable, bool) else None,
+        mergeable=mergeable,
         mergeable_state=mergeable_state,
         check_state=check_state,
         unresolved_threads=len(threads),

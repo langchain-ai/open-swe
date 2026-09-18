@@ -131,7 +131,10 @@ test.describe("my pull requests", () => {
       .click();
 
     await expect(page.getByText(`Closed ${DEMO}#${mine.number}`)).toBeVisible();
-    await expect(card(page, mine)).toHaveCount(0);
+    await expect(card(page, mine)).toContainText("Closed ·");
+    await expect(
+      card(page, mine).getByRole("button", { name: "Close", exact: true }),
+    ).toHaveCount(0);
 
     expect(
       (await readPullRequest(page, "fakeorg", "demo", mine.number)).state,
@@ -261,7 +264,10 @@ test.describe("my pull requests", () => {
       .click();
 
     await expect(page.getByText(`Merged ${DEMO}#${mine.number}`)).toBeVisible();
-    await expect(card(page, mine)).toHaveCount(0);
+    await expect(card(page, mine)).toContainText("Merged ·");
+    await expect(
+      card(page, mine).getByRole("button", { name: "Merge", exact: true }),
+    ).toHaveCount(0);
 
     const merged = await readPullRequest(page, "fakeorg", "demo", mine.number);
     expect(merged.merged).toBe(true);

@@ -4,7 +4,7 @@ import base64
 import binascii
 import json
 from datetime import UTC, datetime, timedelta
-from typing import Any
+from typing import Any, Literal
 from uuid import UUID
 
 from sqlalchemy import text
@@ -14,6 +14,28 @@ from sqlalchemy.ext.asyncio import AsyncConnection
 from agent.config import ENV
 from agent.database import connection
 from agent.database.analytics import reporting_metadata, workspace_id
+
+UsageSort = Literal[
+    "rank",
+    "user",
+    "favorite_model",
+    "invocations",
+    "threads",
+    "avg_invocations_per_thread",
+    "total_tokens",
+    "total_cost_usd",
+    "avg_invocation_seconds",
+    "avg_thread_seconds",
+    "prs_opened",
+    "merged_prs",
+    "merged_prs_per_thread",
+    "agent_loc",
+]
+SortDirection = Literal["asc", "desc"]
+
+
+class InvalidUsageCursor(ValueError):
+    """Raised when a usage leaderboard cursor cannot be decoded."""
 
 
 def period_start(period: str | None) -> datetime:
@@ -90,7 +112,27 @@ async def pr_merge_rate_by_model(
                     count(*) AS cohort_size,
                     avg(EXTRACT(EPOCH FROM p.outcome_at - p.opened_at))
                         FILTER (WHERE p.current_state = 'merged' AND p.outcome_at IS NOT NULL)
-                        AS avg_merge_seconds
+                        AS avg_merge_seconds,
+                    avg(EXTRACT(EPOCH FROM p.opened_at - r.started_at))
+                        FILTER (WHERE r.started_at IS NOT NULL AND p.opened_at >= r.started_at)
+                        AS avg_delivery_seconds,
+                    count(*) FILTER (WHERE r.started_at IS NOT NULL
+                        AND p.opened_at >= r.started_at) AS delivery_samples,
+                    (SELECT percentile_cont(0.5) WITHIN GROUP
+                        (ORDER BY distance_basis_points)
+                     FROM pr_projection d
+                     WHERE d.workspace_id = :workspace_id
+                       AND d.originating_model_id IS NOT DISTINCT FROM p.originating_model_id
+                       AND d.model_attribution_quality = p.model_attribution_quality
+                       AND d.opened_at >= :start AND d.opened_at <= :as_of
+                       AND d.current_state = 'merged') AS median_distance_basis_points,
+                    (SELECT count(distance_basis_points)
+                     FROM pr_projection d
+                     WHERE d.workspace_id = :workspace_id
+                       AND d.originating_model_id IS NOT DISTINCT FROM p.originating_model_id
+                       AND d.model_attribution_quality = p.model_attribution_quality
+                       AND d.opened_at >= :start AND d.opened_at <= :as_of
+                       AND d.current_state = 'merged') AS distance_sample_size
                 FROM pr_projection p
                 JOIN eligible_models e
                   ON e.originating_model_id IS NOT DISTINCT FROM p.originating_model_id
@@ -116,6 +158,8 @@ async def pr_merge_rate_by_model(
         )
         grouped: dict[tuple[object, object], dict[str, Any]] = {}
         merge_seconds_totals: dict[tuple[object, object], float] = {}
+        delivery_seconds_totals: dict[tuple[object, object], float] = {}
+        delivery_sample_counts: dict[tuple[object, object], int] = {}
         for row in result.mappings():
             key = (row["originating_model_id"], row["model_attribution_quality"])
             cohort = grouped.setdefault(
@@ -129,6 +173,12 @@ async def pr_merge_rate_by_model(
                     "waiting": 0,
                     "cohort_size": 0,
                     "efforts": [],
+                    "median_distance_basis_points": (
+                        int(row["median_distance_basis_points"])
+                        if row["median_distance_basis_points"] is not None
+                        else None
+                    ),
+                    "distance_sample_size": int(row["distance_sample_size"] or 0),
                 },
             )
             effort = _pr_outcome_counts(row)
@@ -141,6 +191,14 @@ async def pr_merge_rate_by_model(
             if isinstance(avg_merge_seconds, float) and isinstance(merged_count, int):
                 merge_seconds_totals[key] = (
                     merge_seconds_totals.get(key, 0.0) + avg_merge_seconds * merged_count
+                )
+            if row["avg_delivery_seconds"] is not None and row["delivery_samples"]:
+                delivery_seconds_totals[key] = (
+                    delivery_seconds_totals.get(key, 0.0)
+                    + float(row["avg_delivery_seconds"]) * row["delivery_samples"]
+                )
+                delivery_sample_counts[key] = (
+                    delivery_sample_counts.get(key, 0) + row["delivery_samples"]
                 )
             for field in (
                 "merged",
@@ -155,6 +213,12 @@ async def pr_merge_rate_by_model(
             merge_seconds_total = merge_seconds_totals.get(key, 0.0)
             cohort["avg_merge_seconds"] = (
                 merge_seconds_total / cohort["merged"] if cohort["merged"] else None
+            )
+            delivery_samples = delivery_sample_counts.get(key, 0)
+            cohort["avg_delivery_seconds"] = (
+                delivery_seconds_totals.get(key, 0.0) / delivery_samples
+                if delivery_samples
+                else None
             )
             decided = cohort["merged"] + cohort["closed_without_merge"]
             mature = decided + cohort["mature_pending"]
@@ -227,20 +291,35 @@ async def pr_merge_rate_by_model(
     }
 
 
-def _encode_usage_cursor(as_of: datetime, offset: int, workspace: UUID, period: str) -> str:
+def _encode_usage_cursor(
+    as_of: datetime,
+    offset: int,
+    workspace: UUID,
+    period: str,
+    sort: UsageSort,
+    direction: SortDirection,
+) -> str:
     payload = json.dumps(
         {
             "as_of": as_of.isoformat(),
             "offset": offset,
             "period": period,
             "workspace_id": str(workspace),
+            "sort": sort,
+            "direction": direction,
         },
         separators=(",", ":"),
     ).encode()
     return base64.urlsafe_b64encode(payload).decode().rstrip("=")
 
 
-def _decode_usage_cursor(cursor: str, workspace: UUID, period: str) -> tuple[datetime, int]:
+def _decode_usage_cursor(
+    cursor: str,
+    workspace: UUID,
+    period: str,
+    sort: UsageSort,
+    direction: SortDirection,
+) -> tuple[datetime, int]:
     try:
         encoded = cursor.encode("ascii")
         payload = json.loads(
@@ -251,6 +330,8 @@ def _decode_usage_cursor(cursor: str, workspace: UUID, period: str) -> tuple[dat
             "offset",
             "period",
             "workspace_id",
+            "sort",
+            "direction",
         }:
             raise ValueError
         as_of = datetime.fromisoformat(payload["as_of"])
@@ -258,6 +339,8 @@ def _decode_usage_cursor(cursor: str, workspace: UUID, period: str) -> tuple[dat
         if (
             payload["workspace_id"] != str(workspace)
             or payload["period"] != period
+            or payload["sort"] != sort
+            or payload["direction"] != direction
             or as_of.tzinfo is None
             or not isinstance(offset, int)
             or isinstance(offset, bool)
@@ -273,7 +356,7 @@ def _decode_usage_cursor(cursor: str, workspace: UUID, period: str) -> tuple[dat
         json.JSONDecodeError,
         ValueError,
     ):
-        raise ValueError("invalid usage leaderboard cursor") from None
+        raise InvalidUsageCursor("invalid usage leaderboard cursor") from None
 
 
 _USAGE_SQL = """
@@ -350,6 +433,9 @@ WITH runs AS (
           OR (:current_email <> '' AND lower(d.email) = :current_email)) IS TRUE AS is_current,
         COALESCE(r.invocations, 0) AS invocations,
         COALESCE(r.threads, 0) AS threads,
+        CASE WHEN COALESCE(r.threads, 0) > 0
+            THEN r.invocations::numeric / r.threads ELSE 0 END
+            AS avg_invocations_per_thread,
         COALESCE(r.total_tokens, 0) AS total_tokens,
         COALESCE(r.total_cost_usd, 0) AS total_cost_usd,
         COALESCE(r.invocations_without_cost, 0) AS invocations_without_cost,
@@ -360,6 +446,9 @@ WITH runs AS (
         e.configured_effort AS favorite_model_effort,
         COALESCE(pr.prs_opened, 0) AS prs_opened,
         COALESCE(pr.merged_prs, 0) AS merged_prs,
+        CASE WHEN COALESCE(r.threads, 0) > 0
+            THEN COALESCE(pr.merged_prs, 0)::numeric / r.threads ELSE 0
+        END AS merged_prs_per_thread,
         COALESCE(pr.additions, 0) AS additions,
         COALESCE(pr.deletions, 0) AS deletions,
         COALESCE(pr.agent_loc, 0) AS agent_loc
@@ -371,17 +460,63 @@ WITH runs AS (
     LEFT JOIN models m ON m.person_id = p.person_id
     LEFT JOIN efforts e
       ON e.person_id = p.person_id AND e.provider_model_id = m.provider_model_id
+), labeled AS (
+    SELECT *, regexp_replace(favorite_model, '[^A-Za-z0-9._:/+-]', '-', 'g')
+        AS sanitized_model
+    FROM metrics
 ), ranked AS (
-    SELECT *, row_number() OVER (
-        ORDER BY merged_prs DESC, agent_loc DESC, prs_opened DESC, name, person_id
-    ) AS rank FROM metrics
+    SELECT *,
+        -- Sorting and disclosure must agree, so derive each displayed label once here
+        -- and let both the ordering and the emitted row read the same column.
+        CASE WHEN :admin OR is_current OR NULLIF(github_login, '') IS NOT NULL
+            THEN name ELSE 'Open SWE user' END AS display_name,
+        -- Mirrors safeModelLabel in ui/src/lib/modelLabel.ts and the usage table's
+        -- empty-label fallback.
+        COALESCE(NULLIF(btrim(left(
+            left(sanitized_model, strpos(sanitized_model, ':')) ||
+            split_part(substr(sanitized_model, strpos(sanitized_model, ':') + 1), '/', -1),
+            48
+        ), '-'), ''), 'Unavailable') AS favorite_model_label,
+        row_number() OVER (
+            ORDER BY merged_prs DESC, agent_loc DESC, prs_opened DESC, name, person_id
+        ) AS rank FROM labeled
+), keyed AS (
+    SELECT *,
+        -- One key per sortable type: the inactive key is NULL for every row, so it
+        -- ties and drops out of the ordering. Adding a column is a single line.
+        CASE :sort
+            WHEN 'user' THEN lower(display_name)
+            WHEN 'favorite_model' THEN lower(favorite_model_label)
+        END AS text_key,
+        CASE :sort
+            WHEN 'rank' THEN rank::numeric
+            WHEN 'invocations' THEN invocations::numeric
+            WHEN 'threads' THEN threads::numeric
+            WHEN 'avg_invocations_per_thread' THEN avg_invocations_per_thread
+            WHEN 'total_tokens' THEN total_tokens::numeric
+            WHEN 'total_cost_usd' THEN total_cost_usd::numeric
+            WHEN 'avg_invocation_seconds' THEN avg_invocation_seconds::numeric
+            WHEN 'avg_thread_seconds' THEN avg_thread_seconds::numeric
+            WHEN 'prs_opened' THEN prs_opened::numeric
+            WHEN 'merged_prs' THEN merged_prs::numeric
+            WHEN 'merged_prs_per_thread' THEN merged_prs_per_thread
+            WHEN 'agent_loc' THEN agent_loc::numeric
+        END AS numeric_key
+    FROM ranked
+), ordered AS (
+    SELECT *, row_number() OVER (ORDER BY
+        CASE WHEN :direction = 'asc' THEN text_key END ASC,
+        CASE WHEN :direction = 'desc' THEN text_key END DESC,
+        CASE WHEN :direction = 'asc' THEN numeric_key END ASC,
+        CASE WHEN :direction = 'desc' THEN numeric_key END DESC,
+        rank
+    ) AS position FROM keyed
 ), selected AS (
-    SELECT rank,
+    SELECT position,
         jsonb_build_object(
             'rank', rank,
             'user', jsonb_build_object(
-                'name', CASE WHEN :admin OR is_current OR NULLIF(github_login, '') IS NOT NULL
-                    THEN name ELSE 'Open SWE user' END,
+                'name', display_name,
                 'github_login', CASE WHEN :admin OR is_current THEN NULLIF(github_login, '') END,
                 'email', CASE WHEN is_current THEN NULLIF(email, '') END,
                 'avatar_url', CASE WHEN NULLIF(github_login, '') IS NOT NULL
@@ -392,15 +527,17 @@ WITH runs AS (
             'avg_thread_seconds', avg_thread_seconds,
             'avg_run_seconds', avg_invocation_seconds,
             'agent_runs', invocations, 'invocations', invocations, 'threads', threads,
+            'avg_invocations_per_thread', avg_invocations_per_thread,
             'prs_opened', prs_opened, 'merged_prs', merged_prs,
+            'merged_prs_per_thread', merged_prs_per_thread,
             'agent_loc', agent_loc, 'additions', additions, 'deletions', deletions,
             'total_tokens', total_tokens, 'total_cost_usd', total_cost_usd,
             'invocations_without_cost', invocations_without_cost,
             'invocations_with_partial_cost', invocations_with_partial_cost
         ) AS row
-    FROM ranked WHERE rank > :offset AND rank <= :offset + :limit
+    FROM ordered WHERE position > :offset AND position <= :offset + :limit
 )
-SELECT (SELECT COALESCE(jsonb_agg(row ORDER BY rank), '[]'::jsonb) FROM selected) AS rows,
+SELECT (SELECT COALESCE(jsonb_agg(row ORDER BY position), '[]'::jsonb) FROM selected) AS rows,
     count(*) AS total_members,
     min(rank) FILTER (WHERE is_current) AS current_user_rank,
     COALESCE(sum(invocations_without_cost), 0)::bigint AS invocations_without_cost,
@@ -453,13 +590,15 @@ async def usage_leaderboard(
     current_email: str | None,
     offset: int = 0,
     cursor: str | None = None,
+    sort: UsageSort = "rank",
+    direction: SortDirection = "asc",
     admin: bool = False,
 ) -> dict[str, Any]:
     """Read usage and review cohorts from one bounded PostgreSQL snapshot."""
     normalized = period if period in {"7d", "30d", "all"} else "30d"
     workspace = workspace_id()
     if cursor:
-        as_of, offset = _decode_usage_cursor(cursor, workspace, normalized)
+        as_of, offset = _decode_usage_cursor(cursor, workspace, normalized, sort, direction)
     else:
         as_of = datetime.now(UTC)
     generated_at_ms = int(as_of.timestamp() * 1000)
@@ -471,6 +610,8 @@ async def usage_leaderboard(
         "current_login": (current_login or "").strip().lower(),
         "current_email": (current_email or "").strip().lower(),
         "admin": admin,
+        "sort": sort,
+        "direction": direction,
     }
     async with connection() as conn:
         await conn.execute(text("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY"))
@@ -494,7 +635,12 @@ async def usage_leaderboard(
         **usage,
         "next_cursor": (
             _encode_usage_cursor(
-                as_of, parameters["offset"] + len(usage["rows"]), workspace, normalized
+                as_of,
+                parameters["offset"] + len(usage["rows"]),
+                workspace,
+                normalized,
+                sort,
+                direction,
             )
             if len(usage["rows"]) == parameters["limit"]
             and parameters["offset"] + len(usage["rows"]) < usage["total_members"]

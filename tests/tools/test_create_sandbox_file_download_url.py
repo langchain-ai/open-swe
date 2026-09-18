@@ -119,8 +119,9 @@ async def test_create_download_url_rejects_paths_outside_work_dir(
     backend = _Backend()
     client = _configure(monkeypatch, backend)
 
-    with pytest.raises(ValueError, match="must resolve within the sandbox work directory"):
-        await download_tool.create_sandbox_file_download_url(file_path)
+    result = await download_tool.create_sandbox_file_download_url(file_path)
+
+    assert "must resolve within the sandbox work directory" in result["error"]
 
     assert client.calls == []
 
@@ -131,8 +132,9 @@ async def test_create_download_url_rejects_symlink_outside_work_dir(
     backend = _Backend()
     client = _configure(monkeypatch, backend)
 
-    with pytest.raises(ValueError, match="must resolve within the sandbox work directory"):
-        await download_tool.create_sandbox_file_download_url("link-to-secret")
+    result = await download_tool.create_sandbox_file_download_url("link-to-secret")
+
+    assert "must resolve within the sandbox work directory" in result["error"]
 
     assert client.calls == []
 
@@ -145,7 +147,8 @@ async def test_create_download_url_rejects_invalid_expiry(
     backend = _Backend()
     _configure(monkeypatch, backend)
 
-    with pytest.raises(ValueError, match="must be positive"):
-        await download_tool.create_sandbox_file_download_url(
-            "result.bin", expires_in_seconds=expires_in_seconds
-        )
+    result = await download_tool.create_sandbox_file_download_url(
+        "result.bin", expires_in_seconds=expires_in_seconds
+    )
+
+    assert "must be positive" in result["error"]

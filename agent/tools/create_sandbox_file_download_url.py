@@ -1,3 +1,4 @@
+import logging
 import posixpath
 import shlex
 from typing import Any, Literal
@@ -6,6 +7,8 @@ from agent.run_config import RunConfig
 from agent.sandboxes.paths import resolve_sandbox_work_dir
 from agent.sandboxes.providers.langsmith import get_async_sandbox_client
 from agent.sandboxes.state import get_sandbox_backend, unwrap_sandbox_backend
+
+logger = logging.getLogger(__name__)
 
 
 async def resolve_sandbox_file(file_path: str) -> tuple[Any, str, str]:
@@ -41,14 +44,18 @@ async def create_sandbox_file_download_url(
     content_disposition: Literal["attachment", "inline"] = "attachment",
 ) -> dict[str, Any]:
     """Implement the `create_sandbox_file_download_url` tool."""
-    if expires_in_seconds is not None and expires_in_seconds < 1:
-        raise ValueError("expires_in_seconds must be positive or null")
-    if content_type is not None:
-        content_type = content_type.strip()
-        if not content_type or "\r" in content_type or "\n" in content_type:
-            raise ValueError("content_type must be a valid non-empty media type")
+    try:
+        if expires_in_seconds is not None and expires_in_seconds < 1:
+            raise ValueError("expires_in_seconds must be positive or null")
+        if content_type is not None:
+            content_type = content_type.strip()
+            if not content_type or "\r" in content_type or "\n" in content_type:
+                raise ValueError("content_type must be a valid non-empty media type")
 
-    backend_proxy, path, _ = await resolve_sandbox_file(file_path)
+        backend_proxy, path, _ = await resolve_sandbox_file(file_path)
+    except ValueError as exc:
+        logger.warning("Sandbox download request rejected", extra={"error": str(exc)})
+        return {"error": str(exc)}
     backend = unwrap_sandbox_backend(backend_proxy)
     async with get_async_sandbox_client() as client:
         download = await client.generate_download_url(

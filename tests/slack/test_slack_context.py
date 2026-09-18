@@ -1402,6 +1402,7 @@ def test_process_slack_mention_creates_thread_first_run_without_trace_reply(
             SlackRequest.model_validate(
                 {
                     "channel_id": "C123",
+                    "channel_context": {"is_im": False},
                     "thread_ts": thread_ts,
                     "event_ts": event_ts,
                     "user_id": "U123",
@@ -1431,7 +1432,9 @@ def test_process_slack_mention_creates_thread_first_run_without_trace_reply(
     assert kwargs["if_not_exists"] == "create"
     assert kwargs["multitask_strategy"] == "interrupt"
     assert kwargs["durability"] == "sync"
-    slack_thread_context = kwargs["config"]["configurable"]["slack_thread"]
+    configurable = kwargs["config"]["configurable"]
+    assert "admin_thread" not in configurable
+    slack_thread_context = configurable["slack_thread"]
     assert slack_thread_context["thread_ts"] == thread_ts
     assert slack_thread_context["triggering_user_timezone"] == "America/New_York"
     messages = kwargs["input"]["messages"]
@@ -1466,8 +1469,14 @@ def test_process_slack_mention_creates_thread_first_run_without_trace_reply(
     assert request == "continue on the branch"
 
 
+@pytest.mark.parametrize(
+    ("thread_ts", "dm_session"),
+    [("1700000000.000100", False), ("0", True)],
+)
 def test_process_slack_mention_treats_direct_message_as_implicit_mention(
     monkeypatch: pytest.MonkeyPatch,
+    thread_ts: str,
+    dm_session: bool,
 ) -> None:
     captured: dict[str, object] = {}
     _setup_slack_mention_fakes(monkeypatch, captured)
@@ -1498,12 +1507,14 @@ def test_process_slack_mention_treats_direct_message_as_implicit_mention(
             SlackRequest.model_validate(
                 {
                     "channel_id": "D123",
-                    "thread_ts": "1700000000.000100",
+                    "channel_context": {"is_im": True},
+                    "thread_ts": thread_ts,
                     "event_ts": "1700000000.000200",
                     "user_id": "U123",
                     "text": "continue on the branch",
                     "bot_user_id": "UBOT",
                     "treat_all_messages_as_mentions": True,
+                    "dm_session": dm_session,
                 }
             ),
             webhook_common.SlackRepoResolution(
@@ -1514,6 +1525,9 @@ def test_process_slack_mention_treats_direct_message_as_implicit_mention(
 
     run_create = captured["run_create"]
     assert isinstance(run_create, dict)
+    configurable = run_create["kwargs"]["config"]["configurable"]
+    assert configurable["admin_thread"] is True
+    assert configurable["slack_thread"]["channel_context"]["is_im"] is True
     messages = run_create["kwargs"]["input"]["messages"]
     prompt_message = next(
         message
@@ -1533,6 +1547,58 @@ def test_process_slack_mention_treats_direct_message_as_implicit_mention(
         "1700000000.000150",
         "1700000000.000200",
     ]
+
+
+@pytest.mark.parametrize("explicitly_tagged", [True, False])
+def test_slack_followup_publishes_as_requester_and_preserves_owner(
+    monkeypatch: pytest.MonkeyPatch, explicitly_tagged: bool, fake_store
+) -> None:
+    import importlib
+
+    import langgraph_sdk
+
+    from agent.dashboard import profiles
+
+    opr = importlib.import_module("agent.tools.open_pull_request")
+    captured: dict[str, object] = {}
+    _setup_slack_mention_fakes(monkeypatch, captured)
+    client = slack_webhooks.get_langgraph_client()
+    client.store = fake_store
+    saved_metadata = {"visibility": "public", "owner_type": "user", "owner_login": "alice"}
+    client.threads = _FakeThreadsClient(thread={"metadata": saved_metadata})
+    monkeypatch.setattr(langgraph_sdk, "get_client", lambda: client)
+    monkeypatch.setattr(webhook_common, "thread_exists", AsyncMock(return_value=True))
+    monkeypatch.setattr(webhook_common.User, "login_for_slack", AsyncMock(return_value="bob"))
+    monkeypatch.setattr(
+        profiles,
+        "get_valid_access_token",
+        AsyncMock(side_effect={"alice": "alice-token", "bob": "bob-token"}.get),
+    )
+    asyncio.run(
+        slack_webhooks.process_slack_mention(
+            SlackRequest(
+                channel_id="C123",
+                thread_ts="1700000000.000100",
+                event_ts="1700000000.000300",
+                user_id="U456",
+                text="<@UBOT> create the PR" if explicitly_tagged else "create the PR",
+                bot_user_id="UBOT",
+            ),
+            webhook_common.SlackRepoResolution(
+                Repo(owner="langchain-ai", name="open-swe"), explicit=True
+            ),
+        )
+    )
+    run_create = captured["run_create"]
+    assert isinstance(run_create, dict)
+    kwargs = run_create["kwargs"]
+    assert kwargs["multitask_strategy"] == ("interrupt" if explicitly_tagged else "enqueue")
+    run_config = kwargs["config"]
+    run_config["configurable"]["thread_id"] = run_create["thread_id"]
+    monkeypatch.setattr("agent.run_config.get_config", lambda: run_config)
+
+    assert asyncio.run(opr._resolve_pr_author_token()) == ("bob-token", "user")
+    assert saved_metadata["owner_login"] == "alice"
 
 
 def test_process_slack_mention_skips_trace_reply_on_followup_mention(

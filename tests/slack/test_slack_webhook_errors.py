@@ -46,8 +46,12 @@ async def test_slack_processing_error_marks_thread_and_replies_with_error_id(
     client = _FakeClient()
     upsert = AsyncMock()
     post_reply = AsyncMock(return_value=True)
+    show_status = AsyncMock(return_value=True)
+    clear_status = AsyncMock(return_value=True)
 
     monkeypatch.setattr(slack_webhook, "_process_slack_mention_impl", fail_processing)
+    monkeypatch.setattr(slack_webhook, "restore_slack_thinking_status", show_status)
+    monkeypatch.setattr(slack_webhook, "clear_slack_thinking_status_if_idle", clear_status)
     monkeypatch.setattr(
         slack_webhook.common, "lookup_slack_thread_id", AsyncMock(return_value="t1")
     )
@@ -71,12 +75,30 @@ async def test_slack_processing_error_marks_thread_and_replies_with_error_id(
     assert update["metadata"]["latest_run_status"] == "error"
     assert "failure_reply_posted" not in update["metadata"]
     assert isinstance(update["metadata"]["updated_at_ms"], int)
+    show_status.assert_awaited_once_with("C1", "123.45")
+    clear_status.assert_awaited_once_with(client, "t1", "C1", "123.45")
     post_reply.assert_awaited_once()
     await_args = post_reply.await_args
     assert await_args is not None
     assert await_args.args[:2] == ("C1", "123.45")
     assert "Error ID: `" in await_args.args[2]
     assert await_args.kwargs["agent_thread_id"] == "t1"
+
+
+@pytest.mark.asyncio
+async def test_slack_message_update_does_not_claim_thinking_status(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    process = AsyncMock(return_value=False)
+    show_status = AsyncMock(return_value=True)
+    monkeypatch.setattr(slack_webhook, "_process_slack_mention_impl", process)
+    monkeypatch.setattr(slack_webhook, "restore_slack_thinking_status", show_status)
+
+    await slack_webhook.process_slack_mention(
+        _event_data().model_copy(update={"message_update": True}), None
+    )
+
+    show_status.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -109,6 +131,7 @@ async def test_slack_processing_error_replies_even_without_an_agent_thread(
 async def test_slack_plan_button_uses_verified_actor(monkeypatch: pytest.MonkeyPatch) -> None:
     approve = AsyncMock(return_value={"status": "approved", "run_id": "run-1"})
     monkeypatch.setattr(plan_api, "approve_plan_for_thread", approve)
+    monkeypatch.setattr(slack_webhook, "_slack_login", AsyncMock(return_value="alice"))
     event_data = SlackRequest(
         channel_id="C1", thread_ts="123.45", thread_id="t1", user_id="U1", user_name="Alice"
     )
@@ -118,6 +141,7 @@ async def test_slack_plan_button_uses_verified_actor(monkeypatch: pytest.MonkeyP
     approve.assert_awaited_once_with(
         "t1",
         approver={"id": "U1", "name": "Alice", "source": "slack"},
+        github_login="alice",
     )
 
 
@@ -144,6 +168,7 @@ async def test_slack_plan_button_failure_notifies_user(
     approve = AsyncMock(side_effect=RuntimeError("store down"))
     notify = AsyncMock()
     monkeypatch.setattr(plan_api, "approve_plan_for_thread", approve)
+    monkeypatch.setattr(slack_webhook, "_slack_login", AsyncMock(return_value="alice"))
     monkeypatch.setattr(slack_webhook, "_notify_slack_processing_error", notify)
     event_data = SlackRequest(
         thread_id="t1", channel_id="C1", thread_ts="123.45", user_id="U1", user_name="Alice"

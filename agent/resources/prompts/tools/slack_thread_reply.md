@@ -9,11 +9,14 @@ question. Omit greetings, preambles, headings, recaps, implementation
 details, and redundant context; use bullets only when multiple items are
 essential. End the run by posting a concise final outcome here.
 
-Format messages using Slack's mrkdwn format, NOT standard Markdown.
-Key differences: *bold*, _italic_, ~strikethrough~, <url|link text>,
-bullet lists with "• ", ```code blocks```, > blockquotes. Code fences must be
-bare triple backticks; do not add a language identifier such as ```sql.
-Do NOT use **bold**, [link](url), or other standard Markdown syntax.
+Format `message` using standard Markdown: **bold**, _italic_, ~~strikethrough~~,
+[link text](url), and Markdown lists. Replies use Slack's native Markdown blocks.
+Use fenced code blocks with a language identifier such as ```python or ```sql
+for syntax highlighting, preserving the code's original whitespace.
+Messages over 12,000 characters fall back to Slack's legacy mrkdwn and may lose
+less-common Markdown formatting. A message with `options` must stay within 12,000
+characters so its buttons are not hidden; shorten it or share the body as an artifact.
+If supplying explicit `blocks`, use the formatting required by each block type.
 
 To ask a user to choose from predefined options, pass `options`. Slack will
 render interactive buttons and the web UI will render the same choices.
