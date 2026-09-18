@@ -35,6 +35,7 @@ from agent.slack.failures import report_slack_failure
 from agent.slack.payloads import SlackChannelContext
 from agent.slack.request import SlackRequest
 from agent.slack.thinking import (
+    clear_slack_thinking_status_if_idle,
     restore_slack_thinking_status,
     show_slack_thinking_status,
     stream_slack_thinking_steps,
@@ -579,6 +580,24 @@ def _slack_context_input(
     return {"messages": run_messages}
 
 
+async def _clear_early_status_if_idle(request: SlackRequest, status_ts: str) -> None:
+    thread_id = request.thread_id
+    if not thread_id:
+        try:
+            thread_id = await common.lookup_slack_thread_id(
+                get_langgraph_client(), request.channel_id, request.thread_ts
+            )
+        except Exception:  # noqa: BLE001
+            common.logger.warning("Could not determine whether Slack thread status is still owned")
+            return
+    if thread_id:
+        await clear_slack_thinking_status_if_idle(
+            get_langgraph_client(), thread_id, request.channel_id, status_ts
+        )
+    else:
+        await slack_utils.set_slack_thread_status(request.channel_id, status_ts, "")
+
+
 async def process_slack_mention(
     request: SlackRequest, repo: common.SlackRepoResolution | None
 ) -> None:
@@ -594,10 +613,10 @@ async def process_slack_mention(
     try:
         status_handed_off = await _process_slack_mention_impl(request, repo)
         if show_status and not status_handed_off:
-            await slack_utils.set_slack_thread_status(request.channel_id, status_ts, "")
+            await _clear_early_status_if_idle(request, status_ts)
     except Exception as exc:  # noqa: BLE001
         if show_status:
-            await slack_utils.set_slack_thread_status(request.channel_id, status_ts, "")
+            await _clear_early_status_if_idle(request, status_ts)
         await _notify_slack_processing_error(request, repo.repo if repo else None, exc)
 
 

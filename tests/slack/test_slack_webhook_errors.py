@@ -51,7 +51,7 @@ async def test_slack_processing_error_marks_thread_and_replies_with_error_id(
 
     monkeypatch.setattr(slack_webhook, "_process_slack_mention_impl", fail_processing)
     monkeypatch.setattr(slack_webhook, "restore_slack_thinking_status", show_status)
-    monkeypatch.setattr(slack_webhook.slack_utils, "set_slack_thread_status", clear_status)
+    monkeypatch.setattr(slack_webhook, "clear_slack_thinking_status_if_idle", clear_status)
     monkeypatch.setattr(
         slack_webhook.common, "lookup_slack_thread_id", AsyncMock(return_value="t1")
     )
@@ -76,7 +76,7 @@ async def test_slack_processing_error_marks_thread_and_replies_with_error_id(
     assert "failure_reply_posted" not in update["metadata"]
     assert isinstance(update["metadata"]["updated_at_ms"], int)
     show_status.assert_awaited_once_with("C1", "123.45")
-    clear_status.assert_awaited_once_with("C1", "123.45", "")
+    clear_status.assert_awaited_once_with(client, "t1", "C1", "123.45")
     post_reply.assert_awaited_once()
     await_args = post_reply.await_args
     assert await_args is not None
