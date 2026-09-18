@@ -14,10 +14,10 @@ import asyncio
 import logging
 from collections.abc import Mapping
 from datetime import UTC, datetime, timedelta
-from typing import Any, TypedDict
+from typing import Any
 
 from fastapi import APIRouter, Depends
-from pydantic import BaseModel, TypeAdapter, model_validator
+from pydantic import BaseModel, model_validator
 
 from agent.dashboard.oauth import (
     expires_at_from_github_response,
@@ -48,30 +48,23 @@ PROFILES_NAMESPACE: list[str] = ["profiles"]
 OAUTH_TOKENS_NAMESPACE: list[str] = ["oauth_tokens"]
 
 
-class Profile(TypedDict, total=False):
-    login: str
-    email: str
-    default_model: str
-    reasoning_effort: str
-    default_subagent_model: str | None
-    subagent_reasoning_effort: str | None
-    default_repo: str | None
-    base_branch: str | None
-    branch_prefix: str | None
-    auto_fix_ci: bool
-    model_routing_enabled: bool | None
-    dm_session_enabled: bool
-    disable_subagents: bool
-    draft_prs: bool | None
-    review_draft_prs: bool | None
-    updated_at: str
-
-
-_PROFILE_ADAPTER = TypeAdapter(Profile)
-
-
-def parse_profile(value: object) -> Profile:
-    return _PROFILE_ADAPTER.validate_python(value, strict=True)
+class Profile(BaseModel):
+    login: str = ""
+    email: str = ""
+    default_model: str | None = None
+    reasoning_effort: str | None = None
+    default_subagent_model: str | None = None
+    subagent_reasoning_effort: str | None = None
+    default_repo: str | None = None
+    base_branch: str | None = None
+    branch_prefix: str | None = None
+    auto_fix_ci: bool = True
+    model_routing_enabled: bool | None = None
+    dm_session_enabled: bool = False
+    disable_subagents: bool = False
+    draft_prs: bool = True
+    review_draft_prs: bool | None = None
+    updated_at: str = ""
 
 
 class ProfileUpdate(BaseModel):
@@ -160,9 +153,9 @@ def normalize_profile_for_response(profile: Mapping[str, object]) -> dict[str, A
     return value
 
 
-async def get_profile(login: str) -> Profile | None:
+async def get_profile(login: str) -> Profile:
     value = await get_value(PROFILES_NAMESPACE, login)
-    return parse_profile(value) if value is not None else None
+    return Profile.model_validate(value or {}, strict=True)
 
 
 async def get_oauth_token_record(login: str) -> dict[str, Any] | None:
@@ -189,7 +182,7 @@ async def upsert_profile(login: str, email: str, update: ProfileUpdate) -> dict[
     is untouched, so a concurrent re-login can't be clobbered by this write
     and vice versa.
     """
-    existing = await get_profile(login) or {}
+    existing = (await get_profile(login)).model_dump(exclude_unset=True)
     value: dict[str, Any] = {
         **existing,
         "login": login,
@@ -432,9 +425,7 @@ async def get_my_profile(
     session: dict[str, Any] = _SESSION_DEP,
 ) -> dict[str, Any]:
     profile = await get_profile(session["sub"])
-    if not profile:
-        return {}
-    return normalize_profile_for_response(profile)
+    return normalize_profile_for_response(profile.model_dump(exclude_unset=True))
 
 
 @router.put("/profile")

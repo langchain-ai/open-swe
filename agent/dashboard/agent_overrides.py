@@ -11,7 +11,7 @@ from agent.dashboard.options import (
     model_supports_effort,
     provider_fallback_pair,
 )
-from agent.dashboard.profiles import PROFILES_NAMESPACE, Profile, parse_profile
+from agent.dashboard.profiles import PROFILES_NAMESPACE, Profile
 from agent.dashboard.workspace_settings import get_workspace_settings
 from agent.store import get_value
 from agent.users import User
@@ -39,7 +39,7 @@ async def get_profile_default_repo(login: str | None) -> dict[str, str] | None:
     profile = await load_profile(login)
     if not profile:
         return None
-    default_repo = profile.get("default_repo")
+    default_repo = profile.default_repo
     if not isinstance(default_repo, str):
         return None
     parts = default_repo.strip().split("/", 1)
@@ -51,44 +51,14 @@ async def get_profile_default_repo(login: str | None) -> dict[str, str] | None:
     return {"owner": owner, "name": name}
 
 
-async def load_profile(login: str) -> Profile | None:
-    """The user's profile record, or ``None`` when it is missing or unreadable.
-
-    Fail-soft on purpose: every caller — ``agent.server.get_agent``,
-    :func:`get_profile_default_repo`, :func:`resolve_agent_model_id` — is on the
-    path that starts an agent run, and a store blip must cost the run its
-    per-user overrides, not the run itself. Dashboard reads that should surface
-    a failure use :func:`agent.dashboard.profiles.get_profile` instead.
-    """
+async def load_profile(login: str) -> Profile:
+    """Load validated preferences, falling back to defaults when unavailable."""
     try:
         value = await get_value(PROFILES_NAMESPACE, login)
-        return parse_profile(value) if value is not None else None
+        return Profile.model_validate(value or {}, strict=True)
     except Exception:
         logger.warning("profile lookup failed for %s", login, exc_info=True)
-        return None
-
-
-def profile_draft_prs(profile: Mapping[str, object] | None) -> bool:
-    """Return whether new PRs should be drafts. Defaults to True."""
-    value = profile.get("draft_prs") if isinstance(profile, dict) else None
-    return value if isinstance(value, bool) else True
-
-
-def profile_dm_session_enabled(profile: Mapping[str, object] | None) -> bool:
-    """Whether this person's Open SWE DM is one continuous session. Defaults to False."""
-    value = profile.get("dm_session_enabled") if isinstance(profile, dict) else None
-    return value is True
-
-
-def profile_model_routing_enabled(profile: Mapping[str, object] | None) -> bool | None:
-    """The user's adaptive model routing preference, or ``None`` to inherit the org default."""
-    value = profile.get("model_routing_enabled") if isinstance(profile, dict) else None
-    return value if isinstance(value, bool) else None
-
-
-def profile_disable_subagents(profile: Profile | None) -> bool:
-    """Whether this person's main agent should run without subagents. Defaults to False."""
-    return profile.get("disable_subagents", False) if profile is not None else False
+        return Profile()
 
 
 def _normalize_profile_model_pair(
@@ -155,7 +125,7 @@ async def resolve_agent_model_id(
     if github_login:
         profile = await load_profile(github_login)
         if profile:
-            overridden_model, _ = normalize_profile_overrides(profile)
+            overridden_model, _ = normalize_profile_overrides(profile.model_dump())
             if overridden_model:
                 model_id = overridden_model
     if isinstance(per_thread_model_id, str):

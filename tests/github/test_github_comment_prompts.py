@@ -6,7 +6,6 @@ from langchain_core.language_models.base import LangSmithParams
 from langchain_core.messages import AIMessage, BaseMessage
 from langchain_core.outputs import ChatGeneration, ChatResult
 
-from agent.dashboard.agent_overrides import profile_draft_prs
 from agent.github import comments as github_comments
 from agent.github import webhook as github_webhooks
 from agent.prompt import construct_sender_context, construct_system_prompt
@@ -141,13 +140,6 @@ def test_todo_tool_and_prompt_are_hidden_from_model_request_by_default() -> None
     system_text = "\n".join(_content_text(message.content) for message in model.captured_messages)
     assert "write_todos" not in tool_names
     assert "You have access to the `write_todos` tool" not in system_text
-
-
-def test_profile_draft_prs_defaults_to_draft_policy() -> None:
-    assert profile_draft_prs(None) is True
-    assert profile_draft_prs({}) is True
-    assert profile_draft_prs({"draft_prs": False}) is False
-    assert profile_draft_prs({"draft_prs": True}) is True
 
 
 def test_construct_system_prompt_shell_escapes_user_name() -> None:

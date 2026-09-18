@@ -28,7 +28,7 @@ async def update_user_preferences(
         return {"ok": False, "error": f"Unknown preferences: {', '.join(sorted(unknown))}"}
     try:
         if category == "profile":
-            current = await get_profile(login) or {}
+            current = (await get_profile(login)).model_dump(exclude_unset=True)
             model, effort = default_model_pair()
             update = ProfileUpdate.model_validate(
                 {"default_model": model, "reasoning_effort": effort, **current, **settings}

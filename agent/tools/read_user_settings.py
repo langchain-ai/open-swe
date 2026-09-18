@@ -40,7 +40,7 @@ async def _settings_for_login(login: str) -> dict[str, Any]:
     instructions = instruction_record.get("instructions") if instruction_record else ""
     return {
         "login": login,
-        "profile": _safe_profile_settings(profile),
+        "profile": _safe_profile_settings(profile.model_dump(exclude_unset=True)),
         "instructions": instructions if isinstance(instructions, str) else "",
         "connections": {
             "notion": notion.get("notion", {"connected": False}),

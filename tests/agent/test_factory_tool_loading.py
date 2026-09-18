@@ -11,6 +11,7 @@ from langchain.agents.middleware.types import ModelRequest
 from langchain_core.tools import StructuredTool
 from langgraph.graph.state import RunnableConfig
 
+from agent.dashboard.profiles import Profile
 from agent.dashboard.workspace_settings import WorkspaceSettings
 from agent.middleware.dynamic_tools import DynamicToolMiddleware
 from agent.middleware.plan_mode import PlanModeMiddleware
@@ -106,7 +107,11 @@ async def test_workspace_mcps_load_for_non_admins_and_respect_plan_mode(
             new_callable=AsyncMock,
             return_value=WorkspaceSettings(_MODEL_DEFAULTS),
         ),
-        patch("agent.server.load_profile", new_callable=AsyncMock, return_value=None),
+        patch(
+            "agent.server.load_profile",
+            new_callable=AsyncMock,
+            return_value=Profile.model_validate(None or {}),
+        ),
         patch("agent.server.load_thread_settings", new_callable=AsyncMock, return_value={}),
         patch("agent.server.fallback_model_id_for", return_value=None),
         patch("agent.server.make_model", return_value=MagicMock()),

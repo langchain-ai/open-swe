@@ -2,6 +2,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
+from agent.dashboard.profiles import Profile
 from agent.tools.update_user_preferences import update_user_preferences
 
 
@@ -16,7 +17,10 @@ async def test_public_thread_cannot_write_preferences() -> None:
 async def test_update_preserves_unspecified_preferences() -> None:
     with (
         patch("agent.tools.update_user_preferences.private_credential_login", return_value="alice"),
-        patch("agent.tools.update_user_preferences.get_profile", return_value={"draft_prs": False}),
+        patch(
+            "agent.tools.update_user_preferences.get_profile",
+            return_value=Profile.model_validate({"draft_prs": False} or {}),
+        ),
         patch("agent.tools.update_user_preferences.upsert_profile", new_callable=AsyncMock) as save,
     ):
         result = await update_user_preferences({"disable_subagents": True})

@@ -3,6 +3,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from agent.dashboard.profiles import (
+    Profile,
     ProfileUpdate,
     normalize_profile_for_response,
     upsert_profile,
@@ -18,7 +19,9 @@ async def test_omitted_draft_preference_preserves_existing_value() -> None:
         patch(
             "agent.dashboard.profiles.get_profile",
             new_callable=AsyncMock,
-            return_value={"draft_prs": False, "model_routing_enabled": False},
+            return_value=Profile.model_validate(
+                {"draft_prs": False, "model_routing_enabled": False} or {}
+            ),
         ),
         patch("agent.store.store_client") as client,
     ):
@@ -41,7 +44,7 @@ async def test_omitted_disable_subagents_preserves_existing_value() -> None:
         patch(
             "agent.dashboard.profiles.get_profile",
             new_callable=AsyncMock,
-            return_value={"disable_subagents": True},
+            return_value=Profile.model_validate({"disable_subagents": True} or {}),
         ),
         patch("agent.store.store_client") as client,
     ):
@@ -58,7 +61,11 @@ async def test_disable_subagents_defaults_false_and_persists_explicit_value() ->
     put_item = AsyncMock()
 
     with (
-        patch("agent.dashboard.profiles.get_profile", new_callable=AsyncMock, return_value=None),
+        patch(
+            "agent.dashboard.profiles.get_profile",
+            new_callable=AsyncMock,
+            return_value=Profile.model_validate(None or {}),
+        ),
         patch("agent.store.store_client") as client,
     ):
         client.return_value.store.put_item = put_item
@@ -91,7 +98,11 @@ async def test_explicit_model_routing_preference_is_persisted() -> None:
     put_item = AsyncMock()
 
     with (
-        patch("agent.dashboard.profiles.get_profile", new_callable=AsyncMock, return_value=None),
+        patch(
+            "agent.dashboard.profiles.get_profile",
+            new_callable=AsyncMock,
+            return_value=Profile.model_validate(None or {}),
+        ),
         patch("agent.store.store_client") as client,
     ):
         client.return_value.store.put_item = put_item
@@ -112,7 +123,11 @@ async def test_explicit_draft_preference_is_persisted() -> None:
     put_item = AsyncMock()
 
     with (
-        patch("agent.dashboard.profiles.get_profile", new_callable=AsyncMock, return_value=None),
+        patch(
+            "agent.dashboard.profiles.get_profile",
+            new_callable=AsyncMock,
+            return_value=Profile.model_validate(None or {}),
+        ),
         patch("agent.store.store_client") as client,
     ):
         client.return_value.store.put_item = put_item
@@ -138,7 +153,7 @@ async def test_profile_save_removes_legacy_create_prs_setting() -> None:
         patch(
             "agent.dashboard.profiles.get_profile",
             new_callable=AsyncMock,
-            return_value={"create_prs": True},
+            return_value=Profile.model_validate({"create_prs": True} or {}),
         ),
         patch("agent.store.store_client") as client,
     ):

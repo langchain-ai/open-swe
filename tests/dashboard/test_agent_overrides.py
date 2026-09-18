@@ -1,17 +1,29 @@
+from unittest.mock import AsyncMock, patch
+
 import pytest
 from pydantic import ValidationError
 
-from agent.dashboard.agent_overrides import profile_disable_subagents
-from agent.dashboard.profiles import parse_profile
+from agent.dashboard.agent_overrides import load_profile
+from agent.dashboard.profiles import Profile, get_profile
 
 
-def test_profile_disable_subagents_defaults_false() -> None:
-    assert profile_disable_subagents(None) is False
-    assert profile_disable_subagents({}) is False
-    with pytest.raises(ValidationError):
-        parse_profile({"disable_subagents": "true"})
+@pytest.mark.asyncio
+async def test_missing_profile_has_defaults_without_overriding_workspace_models() -> None:
+    with patch("agent.dashboard.profiles.get_value", new_callable=AsyncMock, return_value=None):
+        profile = await get_profile("alice")
+    assert profile.disable_subagents is False
+    assert profile.draft_prs is True
+    assert profile.model_routing_enabled is None
+    assert profile.default_model is None
+    assert profile.model_dump(exclude_unset=True) == {}
 
 
-def test_profile_disable_subagents_reads_true() -> None:
-    assert profile_disable_subagents({"disable_subagents": True}) is True
-    assert profile_disable_subagents({"disable_subagents": False}) is False
+@pytest.mark.asyncio
+async def test_invalid_stored_profile_is_rejected_but_run_loading_falls_back() -> None:
+    with patch("agent.dashboard.profiles.get_value", return_value={"disable_subagents": "true"}):
+        with pytest.raises(ValidationError):
+            await get_profile("alice")
+    with patch(
+        "agent.dashboard.agent_overrides.get_value", return_value={"disable_subagents": "true"}
+    ):
+        assert await load_profile("alice") == Profile()

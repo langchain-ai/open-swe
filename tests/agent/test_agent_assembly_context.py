@@ -18,6 +18,7 @@ from deepagents.backends.composite import CompositeBackend
 from deepagents.backends.state import StateBackend
 from langgraph.graph.state import RunnableConfig
 
+from agent.dashboard.profiles import Profile
 from agent.dashboard.workspace_settings import WorkspaceSettings
 from agent.run_config import RunConfig
 from agent.sandboxes.read_only_backend import ReadOnlyBackend
@@ -154,7 +155,11 @@ async def _capture_create_deep_agent_kwargs(
             new_callable=AsyncMock,
             return_value=private_thread,
         ),
-        patch("agent.server.load_profile", new_callable=AsyncMock, return_value=profile),
+        patch(
+            "agent.server.load_profile",
+            new_callable=AsyncMock,
+            return_value=Profile.model_validate(profile or {}),
+        ),
         patch(
             "agent.server.load_thread_settings",
             new_callable=AsyncMock,
@@ -226,7 +231,11 @@ async def test_agent_starts_sandbox_while_loading_settings() -> None:
     with (
         patch("agent.server.ensure_sandbox_for_thread", side_effect=ensure_sandbox),
         patch("agent.server.cached_workspace_settings", side_effect=load_defaults),
-        patch("agent.server._cached_profile", new_callable=AsyncMock, return_value=None),
+        patch(
+            "agent.server._cached_profile",
+            new_callable=AsyncMock,
+            return_value=Profile.model_validate(None or {}),
+        ),
         patch("agent.server._mcp_tools_for", new_callable=AsyncMock, return_value=[]),
         patch("agent.server._notion_tools_for", new_callable=AsyncMock, return_value=[]),
         patch("agent.server.make_model", return_value=MagicMock()),
@@ -850,6 +859,9 @@ async def test_subagent_preference_follows_thread_owner(saved_thread_scope, visi
 
     saved_thread_scope.update(visibility=visibility, owner_login="alice")
     with patch("agent.server._cached_profile", new_callable=AsyncMock) as profiles:
-        profiles.side_effect = lambda login: {"disable_subagents": login == "alice"}
+        profiles.side_effect = lambda login: Profile(disable_subagents=login == "alice")
         captured = await _capture_create_deep_agent_kwargs()
-    assert any(isinstance(item, NoSubagentsMiddleware) for item in captured["middleware"])
+    assert any(
+        isinstance(item, NoSubagentsMiddleware)
+        for item in cast(list[object], captured["middleware"])
+    )
