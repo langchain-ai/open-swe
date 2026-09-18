@@ -21,7 +21,7 @@ import {
 } from "@/lib/api"
 import { TooltipProvider } from "@/components/ui/tooltip"
 
-import { UsageAnalytics } from "./usage"
+import { UsageAnalytics, UsageDateRange } from "./usage"
 
 const captured: PRMergeRatePayload = {
   status: "no_prs",
@@ -71,19 +71,15 @@ beforeEach(() => {
   vi.spyOn(api, "usageLeaderboard").mockResolvedValue(emptyUsage)
 })
 
-function mountReport() {
+function mountReport(onPeriodChange = (_period: string) => {}) {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false, gcTime: 0 } },
   })
   render(
     <QueryClientProvider client={client}>
       <TooltipProvider>
-        <UsageAnalytics
-          period="30d"
-          login="reader"
-          isAdmin={false}
-          onPeriodChange={() => {}}
-        />
+        <UsageDateRange period="30d" onPeriodChange={onPeriodChange} />
+        <UsageAnalytics period="30d" login="reader" isAdmin={false} />
       </TooltipProvider>
     </QueryClientProvider>
   )
@@ -93,6 +89,26 @@ function mountReport() {
 afterEach(() => {
   cleanup()
   vi.restoreAllMocks()
+})
+
+it("labels the shared date range and changes it independently of usage scope", async () => {
+  vi.spyOn(api, "prMergeRateByModel").mockResolvedValue(captured)
+  const onPeriodChange = vi.fn()
+  mountReport(onPeriodChange)
+  const range = screen.getByRole("combobox", { name: "Date range" })
+  const outcomes = screen.getByText("PR outcomes", { selector: "h2" })
+  expect(
+    range.compareDocumentPosition(outcomes) & Node.DOCUMENT_POSITION_FOLLOWING
+  ).toBeTruthy()
+  expect(
+    screen.getByRole("group", { name: "Usage scope" }).contains(range)
+  ).toBe(false)
+  fireEvent.click(range)
+  const option = await screen.findByRole("option", { name: "Last 7 days" })
+  fireEvent.keyDown(option, { key: "Enter" })
+  expect(onPeriodChange).toHaveBeenCalledWith("7d")
+  fireEvent.click(screen.getByRole("button", { name: "threads" }))
+  expect(onPeriodChange).toHaveBeenCalledTimes(1)
 })
 
 it("shows delivery lag separately from suppression, then refreshes to a populated report", async () => {
@@ -573,12 +589,7 @@ it("resets leaderboard pagination when the period changes outside the selector",
   const view = render(
     <QueryClientProvider client={client}>
       <TooltipProvider>
-        <UsageAnalytics
-          period="30d"
-          login="reader"
-          isAdmin={false}
-          onPeriodChange={() => {}}
-        />
+        <UsageAnalytics period="30d" login="reader" isAdmin={false} />
       </TooltipProvider>
     </QueryClientProvider>
   )
@@ -588,12 +599,7 @@ it("resets leaderboard pagination when the period changes outside the selector",
   view.rerender(
     <QueryClientProvider client={client}>
       <TooltipProvider>
-        <UsageAnalytics
-          period="7d"
-          login="reader"
-          isAdmin={false}
-          onPeriodChange={() => {}}
-        />
+        <UsageAnalytics period="7d" login="reader" isAdmin={false} />
       </TooltipProvider>
     </QueryClientProvider>
   )

@@ -9,6 +9,7 @@ import { cn } from "@/lib/utils"
 interface AppShellProps {
   user: SessionUser
   title: string
+  action?: ReactNode
   description?: string
   backTo?: { to: string; label: string }
   className?: string
@@ -18,6 +19,7 @@ interface AppShellProps {
 export function AppShell({
   user,
   title,
+  action,
   description,
   backTo,
   className,
@@ -42,15 +44,18 @@ export function AppShell({
               {backTo.label}
             </Link>
           )}
-          <header className="mb-10">
-            <h1 className="font-heading text-xl font-medium tracking-tight">
-              {title}
-            </h1>
-            {description && (
-              <p className="mt-1.5 max-w-2xl text-xs text-muted-foreground">
-                {description}
-              </p>
-            )}
+          <header className="mb-10 flex flex-wrap items-center justify-between gap-4">
+            <div>
+              <h1 className="font-heading text-xl font-medium tracking-tight">
+                {title}
+              </h1>
+              {description && (
+                <p className="mt-1.5 max-w-2xl text-xs text-muted-foreground">
+                  {description}
+                </p>
+              )}
+            </div>
+            {action}
           </header>
           <div className="space-y-10">{children}</div>
         </div>
