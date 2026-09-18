@@ -1,6 +1,7 @@
 """Open a GitHub pull request using the thread's credential scope."""
 
 import logging
+from datetime import UTC, datetime
 from typing import Any
 from urllib.parse import quote
 
@@ -585,10 +586,41 @@ async def _record_pr_telemetry(
     pr: dict[str, Any],
     resolves_thread: bool = False,
     record_opening: bool = True,
+    creation_response: dict[str, Any] | None = None,
 ) -> None:
     pr_number = pr.get("number")
     if not isinstance(pr_number, int):
         return
+    creation_base = creation_response.get("base") if creation_response else None
+    creation_head = creation_response.get("head") if creation_response else None
+    opening_base_sha = creation_base.get("sha") if isinstance(creation_base, dict) else None
+    opening_head_sha = creation_head.get("sha") if isinstance(creation_head, dict) else None
+    if record_opening and isinstance(opening_base_sha, str) and isinstance(opening_head_sha, str):
+        from agent.analytics.revisions import capture_pr_revision
+
+        try:
+            await capture_pr_revision(
+                owner=owner,
+                repo=repo,
+                number=pr_number,
+                endpoint_kind="opening",
+                base_sha=opening_base_sha,
+                head_sha=opening_head_sha,
+                endpoint_at=(
+                    datetime.fromisoformat(
+                        str(creation_response["created_at"]).replace("Z", "+00:00")
+                    )
+                    if creation_response is not None and creation_response.get("created_at")
+                    else datetime.now(UTC)
+                ),
+                source_kind="creation_response",
+            )
+        except Exception:
+            logger.warning(
+                "Failed to retain pull request opening revisions",
+                extra={"pr_repo_full_name": f"{owner}/{repo}", "pr_number": pr_number},
+                exc_info=True,
+            )
     try:
         details = await _fetch_pr_details(client, token, owner, repo, pr_number)
         config = get_config()
@@ -603,10 +635,6 @@ async def _record_pr_telemetry(
         merged = bool(details.get("merged"))
         is_draft = bool(details.get("draft", pr.get("draft")))
         state = details.get("state") if isinstance(details.get("state"), str) else "open"
-        base_details = details.get("base")
-        head_details = details.get("head")
-        opening_base_sha = base_details.get("sha") if isinstance(base_details, dict) else None
-        opening_head_sha = head_details.get("sha") if isinstance(head_details, dict) else None
         additions_value = details.get("additions")
         additions = additions_value if isinstance(additions_value, int) else 0
         deletions_value = details.get("deletions")
@@ -964,6 +992,7 @@ async def _open_pull_request(
                     base=base,
                     pr=pr,
                     resolves_thread=resolves_thread,
+                    creation_response=pr,
                 )
             return {
                 "success": True,
