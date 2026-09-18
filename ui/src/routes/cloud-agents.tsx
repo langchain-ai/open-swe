@@ -360,13 +360,6 @@ function CloudAgentsPage() {
           label="Repository Instructions"
           description="Per-repo custom instructions injected into the agent's system prompt."
         />
-        {session.data.is_admin && (
-          <SettingsNavRow
-            to="/agents/sandbox"
-            label="Sandbox"
-            description="The snapshot new sandboxes boot from when their workspace has none."
-          />
-        )}
       </SettingsSection>
 
       {error && <p className="text-xs text-destructive">{error}</p>}

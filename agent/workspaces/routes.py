@@ -1,21 +1,16 @@
-"""Dashboard API for instance-wide sandbox settings and named workspaces."""
+"""Dashboard API for named workspaces."""
 
 from typing import Any
 
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import Response
 
-from agent.dashboard.deps import ADMIN_DEP, ADMIN_OR_TOKEN_DEP, SESSION_DEP, session_is_admin
+from agent.dashboard.deps import ADMIN_DEP, SESSION_DEP, session_is_admin
 from agent.dashboard.workspace_settings import delete_workspace_settings
 from agent.workspaces.refresh import (
     ensure_refresh_cron,
     is_refresh_in_flight,
     start_refresh_run,
-)
-from agent.workspaces.sandbox_settings import (
-    SandboxSettingsUpdate,
-    get_sandbox_settings,
-    upsert_sandbox_settings,
 )
 from agent.workspaces.store import (
     DEFAULT_WORKSPACE_SLUG,
@@ -29,21 +24,6 @@ from agent.workspaces.store import (
 )
 
 router = APIRouter(tags=["workspaces"])
-
-
-@router.get("/sandbox-settings")
-async def api_get_sandbox_settings(
-    _admin: dict[str, Any] = ADMIN_OR_TOKEN_DEP,
-) -> dict[str, Any]:
-    return await get_sandbox_settings()
-
-
-@router.put("/sandbox-settings")
-async def api_set_sandbox_settings(
-    body: SandboxSettingsUpdate,
-    _admin: dict[str, Any] = ADMIN_OR_TOKEN_DEP,
-) -> dict[str, Any]:
-    return await upsert_sandbox_settings(body, updated_by=_admin.get("sub"))
 
 
 def _normalized_slug(raw: str) -> str:

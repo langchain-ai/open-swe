@@ -21,7 +21,7 @@ from slack_sdk.errors import SlackApiError
 from slack_sdk.web.async_slack_response import AsyncSlackResponse
 
 from agent.config import ENV
-from agent.slack.http import SLACK_REQUEST_ERRORS, slack_client, slack_error, slack_retry_after
+from agent.slack.http import SLACK_REQUEST_ERRORS, SlackClient, slack_error, slack_retry_after
 from agent.source_context import SlackThreadRef, SourceContext
 from agent.thread_ids import slack_thread_id
 from agent.utils.dashboard_links import dashboard_thread_url
@@ -394,7 +394,7 @@ def _threaded_under(data: AsyncSlackResponse, reply_ts: str) -> bool:
 
 async def _slack_thread_exists(channel_id: str, thread_ts: str) -> bool:
     try:
-        async with slack_client(token=SLACK_BOT_TOKEN) as client:
+        async with SlackClient.bot() as client:
             await client.conversations_replies(channel=channel_id, ts=thread_ts, limit=1)
     except SLACK_REQUEST_ERRORS as exc:
         error = slack_error(exc)
@@ -409,7 +409,7 @@ async def _slack_thread_exists(channel_id: str, thread_ts: str) -> bool:
 
 async def _delete_slack_message(channel_id: str, message_ts: str) -> None:
     try:
-        async with slack_client(token=SLACK_BOT_TOKEN) as client:
+        async with SlackClient.bot() as client:
             await client.chat_delete(channel=channel_id, ts=message_ts)
     except SLACK_REQUEST_ERRORS as exc:
         logger.warning(
@@ -436,7 +436,7 @@ async def _post_slack_message_with_ts(
     reply_ts = None if is_code_channel_session(thread_ts) else thread_ts
 
     try:
-        async with slack_client(token=SLACK_BOT_TOKEN) as client:
+        async with SlackClient.bot() as client:
             data = await client.chat_postMessage(
                 channel=channel_id,
                 text=text,
@@ -795,7 +795,7 @@ async def _slack_stream_call(method: str, payload: dict[str, Any]) -> dict[str, 
     if not SLACK_BOT_TOKEN:
         raise SlackStreamError("missing_slack_bot_token")
     try:
-        async with slack_client(token=SLACK_BOT_TOKEN) as client:
+        async with SlackClient.bot() as client:
             response = await client.api_call(method, json=payload)
         if not isinstance(response.data, dict):
             raise SlackStreamError("invalid_response")
@@ -898,7 +898,7 @@ async def update_slack_message(
         return False, "missing_slack_bot_token"
 
     try:
-        async with slack_client(token=SLACK_BOT_TOKEN) as client:
+        async with SlackClient.bot() as client:
             await client.chat_update(
                 channel=channel_id,
                 ts=message_ts,
@@ -932,7 +932,7 @@ async def upload_slack_thread_file(
         return None, "file_too_large"
 
     try:
-        async with slack_client(token=SLACK_BOT_TOKEN) as client:
+        async with SlackClient.bot() as client:
             ticket = await client.files_getUploadURLExternal(filename=filename, length=len(content))
             upload_url = ticket.get("upload_url")
             file_id = ticket.get("file_id")
@@ -1076,7 +1076,7 @@ async def post_slack_ephemeral_message(
         return False
 
     try:
-        async with slack_client(token=SLACK_BOT_TOKEN) as client:
+        async with SlackClient.bot() as client:
             await client.chat_postEphemeral(
                 channel=channel_id,
                 user=user_id,
@@ -1121,7 +1121,7 @@ async def invite_to_slack_channel(
     if not SLACK_BOT_TOKEN or not channel_id or not users:
         return [], "" if users else "no_users"
     try:
-        async with slack_client(token=SLACK_BOT_TOKEN) as client:
+        async with SlackClient.bot() as client:
             response = await client.conversations_invite(
                 channel=channel_id, users=users, force=True
             )
@@ -1201,7 +1201,7 @@ async def open_slack_modal(trigger_id: str, view: dict[str, Any]) -> bool:
     if not SLACK_BOT_TOKEN:
         return False
     try:
-        async with slack_client(token=SLACK_BOT_TOKEN, timeout=2) as client:
+        async with asyncio.timeout(2), SlackClient.bot() as client:
             await client.views_open(trigger_id=trigger_id, view=view)
         return True
     except SLACK_REQUEST_ERRORS as exc:
@@ -1214,7 +1214,7 @@ async def add_slack_reaction(channel_id: str, message_ts: str, emoji: str = "eye
     if not SLACK_BOT_TOKEN:
         return False
     try:
-        async with slack_client(token=SLACK_BOT_TOKEN) as client:
+        async with SlackClient.bot() as client:
             await client.reactions_add(channel=channel_id, timestamp=message_ts, name=emoji)
         return True
     except SLACK_REQUEST_ERRORS as exc:
@@ -1230,7 +1230,7 @@ async def get_slack_user_info(user_id: str) -> dict[str, Any] | None:
     if not SLACK_BOT_TOKEN:
         return None
     try:
-        async with slack_client(token=SLACK_BOT_TOKEN) as client:
+        async with SlackClient.bot() as client:
             data = await client.users_info(user=user_id)
         user = data.get("user")
         return user if isinstance(user, dict) else None
@@ -1273,7 +1273,7 @@ async def fetch_slack_thread_messages(channel_id: str, thread_ts: str) -> list[d
     cursor: str | None = None
     truncated = False
 
-    async with slack_client(token=SLACK_BOT_TOKEN) as client:
+    async with SlackClient.bot() as client:
         while True:
             try:
                 payload = (
@@ -1367,7 +1367,7 @@ async def fetch_slack_thread_message_by_ts(
 
     session_channel = is_code_channel_session(thread_ts)
     try:
-        async with slack_client(token=SLACK_BOT_TOKEN) as client:
+        async with SlackClient.bot() as client:
             payload = (
                 await client.conversations_history(
                     channel=channel_id,
@@ -1450,7 +1450,7 @@ async def fetch_slack_message_by_ts(channel_id: str, message_ts: str) -> dict[st
     if not SLACK_BOT_TOKEN:
         return None
     try:
-        async with slack_client(token=SLACK_BOT_TOKEN) as client:
+        async with SlackClient.bot() as client:
             data = await client.conversations_history(
                 channel=channel_id, latest=message_ts, oldest=message_ts, inclusive=True, limit=1
             )
@@ -1473,7 +1473,7 @@ async def get_slack_permalink(channel_id: str, message_ts: str) -> str | None:
         return None
 
     try:
-        async with slack_client(token=SLACK_BOT_TOKEN) as client:
+        async with SlackClient.bot() as client:
             data = await client.chat_getPermalink(channel=channel_id, message_ts=message_ts)
         permalink = data.get("permalink")
         return permalink if isinstance(permalink, str) and permalink else None

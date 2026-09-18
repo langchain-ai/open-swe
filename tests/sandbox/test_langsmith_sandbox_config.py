@@ -59,13 +59,8 @@ def test_nothing_deletes_sandboxes() -> None:
 
 
 def test_defaults_when_env_unset() -> None:
-    with patch.dict(
-        "os.environ",
-        {"DEFAULT_SANDBOX_SNAPSHOT_ID": "snap-1"},
-        clear=True,
-    ):
-        snapshot_id, fs, vcpus, mem, idle, delete_after = _get_sandbox_snapshot_config()
-    assert snapshot_id == "snap-1"
+    with patch.dict("os.environ", {}, clear=True):
+        fs, vcpus, mem, idle, delete_after = _get_sandbox_snapshot_config()
     assert fs == DEFAULT_SNAPSHOT_FS_CAPACITY_BYTES
     assert vcpus == DEFAULT_SANDBOX_VCPUS
     assert mem == DEFAULT_SANDBOX_MEM_BYTES
@@ -78,13 +73,12 @@ def test_overrides_from_env() -> None:
     with patch.dict(
         "os.environ",
         {
-            "DEFAULT_SANDBOX_SNAPSHOT_ID": "snap-2",
             "DEFAULT_SANDBOX_IDLE_TTL_SECONDS": "120",
             "DEFAULT_SANDBOX_DELETE_AFTER_STOP_SECONDS": "3600",
         },
         clear=True,
     ):
-        _, _, _, _, idle, delete_after = _get_sandbox_snapshot_config()
+        _, _, _, idle, delete_after = _get_sandbox_snapshot_config()
     assert idle == 120
     assert delete_after == 3600
 
@@ -96,7 +90,7 @@ async def test_create_langsmith_sandbox_prefers_resource_overrides() -> None:
     with (
         patch(
             "agent.sandboxes.providers.langsmith._get_sandbox_snapshot_config",
-            return_value=("default-snap", 100, 2, 200, 300, 400),
+            return_value=(100, 2, 200, 300, 400),
         ),
         patch("agent.sandboxes.providers.langsmith.LangSmithProvider", return_value=provider),
     ):
@@ -127,7 +121,7 @@ async def test_create_langsmith_sandbox_uses_root_snapshot_when_unset() -> None:
     with (
         patch(
             "agent.sandboxes.providers.langsmith._get_sandbox_snapshot_config",
-            return_value=(None, 100, 2, 200, 300, 400),
+            return_value=(100, 2, 200, 300, 400),
         ),
         patch("agent.sandboxes.providers.langsmith.LangSmithProvider", return_value=provider),
     ):
@@ -155,7 +149,7 @@ async def test_create_langsmith_sandbox_derives_partial_cpu_memory_overrides(
     with (
         patch(
             "agent.sandboxes.providers.langsmith._get_sandbox_snapshot_config",
-            return_value=("default-snap", 100, 2, 200, 300, 400),
+            return_value=(100, 2, 200, 300, 400),
         ),
         patch("agent.sandboxes.providers.langsmith.LangSmithProvider", return_value=provider),
     ):
@@ -173,13 +167,12 @@ def test_zero_disables_ttls() -> None:
     with patch.dict(
         "os.environ",
         {
-            "DEFAULT_SANDBOX_SNAPSHOT_ID": "snap-3",
             "DEFAULT_SANDBOX_IDLE_TTL_SECONDS": "0",
             "DEFAULT_SANDBOX_DELETE_AFTER_STOP_SECONDS": "0",
         },
         clear=True,
     ):
-        _, _, _, _, idle, delete_after = _get_sandbox_snapshot_config()
+        _, _, _, idle, delete_after = _get_sandbox_snapshot_config()
     assert idle == 0
     assert delete_after == 0
 
@@ -187,10 +180,7 @@ def test_zero_disables_ttls() -> None:
 def test_validate_startup_rejects_non_integer_ttl() -> None:
     with patch.dict(
         "os.environ",
-        {
-            "DEFAULT_SANDBOX_SNAPSHOT_ID": "snap-4",
-            "DEFAULT_SANDBOX_IDLE_TTL_SECONDS": "not-a-number",
-        },
+        {"DEFAULT_SANDBOX_IDLE_TTL_SECONDS": "not-a-number"},
         clear=True,
     ):
         with pytest.raises(ValueError, match="DEFAULT_SANDBOX_IDLE_TTL_SECONDS"):
@@ -200,10 +190,7 @@ def test_validate_startup_rejects_non_integer_ttl() -> None:
 def test_validate_startup_rejects_negative_ttl() -> None:
     with patch.dict(
         "os.environ",
-        {
-            "DEFAULT_SANDBOX_SNAPSHOT_ID": "snap-5",
-            "DEFAULT_SANDBOX_DELETE_AFTER_STOP_SECONDS": "-1",
-        },
+        {"DEFAULT_SANDBOX_DELETE_AFTER_STOP_SECONDS": "-1"},
         clear=True,
     ):
         with pytest.raises(ValueError, match=">= 0"):
@@ -214,7 +201,6 @@ def test_validate_startup_accepts_valid_config() -> None:
     with patch.dict(
         "os.environ",
         {
-            "DEFAULT_SANDBOX_SNAPSHOT_ID": "snap-6",
             "DEFAULT_SANDBOX_IDLE_TTL_SECONDS": "1800",
             "DEFAULT_SANDBOX_DELETE_AFTER_STOP_SECONDS": "86400",
         },

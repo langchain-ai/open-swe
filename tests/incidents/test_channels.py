@@ -36,10 +36,10 @@ async def configured(fake_store, monkeypatch):
     joined = AsyncMock()
 
     @asynccontextmanager
-    async def slack(token: str):
+    async def slack():
         yield SimpleNamespace(conversations_join=joined)
 
-    monkeypatch.setattr(channels, "slack_client", slack)
+    monkeypatch.setattr(channels.SlackClient, "bot", slack)
     monkeypatch.setattr(channels, "claim_slack_event", AsyncMock(return_value=True))
     monkeypatch.setattr(
         channels,

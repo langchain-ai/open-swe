@@ -425,6 +425,16 @@ def _subagent_middleware(
     return middleware
 
 
+def _subagent_guard_middleware(local_run: bool) -> list[AgentMiddleware[Any, Any, Any]]:
+    """Shell guards mirroring the parent stack for delegated tool calls.
+
+    Local desktop runs skip the PR-creation guard the same way the parent does.
+    """
+    if local_run:
+        return []
+    return [PullRequestCreationGuardMiddleware()]
+
+
 def _is_subagent_excluded_tool(tool: Any) -> bool:
     """Return whether a tool depends on parent-only source context."""
     name = getattr(tool, "name", None) or getattr(tool, "__name__", "")
@@ -455,6 +465,7 @@ def _general_purpose_subagent(
     offloading: ConversationOffloadingMiddleware | None = None,
     workspace_skills: WorkspaceSkillsMiddleware | None = None,
     incident_middleware: AgentMiddleware | None = None,
+    guard_middleware: Sequence[AgentMiddleware[Any, Any, Any]] = (),
 ) -> SubAgent:
     subagent: SubAgent = {
         "name": GENERAL_PURPOSE_SUBAGENT["name"],
@@ -476,6 +487,7 @@ def _general_purpose_subagent(
                 *([incident_middleware] if incident_middleware else []),
                 *([workspace_skills] if workspace_skills else []),
                 *_subagent_middleware(dynamic_tools),
+                *guard_middleware,
                 *([offloading] if offloading else []),
             ],
         ),
@@ -1184,7 +1196,6 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         )
 
     slack_tools = [
-        expedite_pr_approval,
         manage_code_channel,
         manage_incident,
         slack_add_reaction,
@@ -1254,6 +1265,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         ]
     if (
         local_run
+        or not ENV.SLACK_BOT_TOKEN.get()
         or not (await cached_workspace_settings(settings_workspace)).expedited_review_enabled
     ):
         static_tools = [tool for tool in static_tools if tool is not expedite_pr_approval]
@@ -1373,6 +1385,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
                 incident_middleware=IncidentMiddleware(incident_session)
                 if incident_session is not None
                 else None,
+                guard_middleware=_subagent_guard_middleware(local_run),
             ),
         ],
         skills=skill_sources,

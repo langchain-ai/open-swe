@@ -33,7 +33,6 @@ from agent.sandboxes.state import (
 from agent.utils.authorship import OPEN_SWE_BOT_EMAIL, OPEN_SWE_BOT_NAME
 from agent.utils.startup_trace import aphase
 from agent.workspaces.refresh import is_snapshot_stale, maybe_start_update
-from agent.workspaces.sandbox_settings import get_admin_base_snapshot_id
 from agent.workspaces.store import (
     SandboxResources,
     Workspace,
@@ -82,9 +81,9 @@ class SandboxCreateConfig:
         # `default` workspace, so "base" has to skip the lookup outright.
         workspace = None if source == "base" else await load_workspace(workspace_slug)
         if workspace is None:
-            return cls(snapshot_id=await get_admin_base_snapshot_id())
+            return cls(snapshot_id=None)
         return cls(
-            snapshot_id=workspace.ready_snapshot_id or await get_admin_base_snapshot_id(),
+            snapshot_id=workspace.ready_snapshot_id,
             resources=workspace.sandbox_resources(),
             create_params=workspace.sandbox_create_params(),
             workspace=workspace,
@@ -384,8 +383,7 @@ async def ensure_sandbox_for_thread(
 
     For LangSmith sandboxes, also refreshes the GitHub App proxy auth. Newly
     created sandboxes boot from the workspace's snapshot when one is ready,
-    otherwise the base snapshot (admin setting, else
-    ``DEFAULT_SANDBOX_SNAPSHOT_ID``).
+    otherwise LangSmith's own base snapshot.
     Re-applies git identity every run because reused/reconnected sandboxes can
     lose their ``--global`` config, and Vercel preview deploys reject commits
     whose author email can't be resolved to a GitHub account.

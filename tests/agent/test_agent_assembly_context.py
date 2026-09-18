@@ -737,12 +737,14 @@ async def test_task_retry_wraps_inside_tool_error_middleware() -> None:
 
 
 @pytest.mark.asyncio
-async def test_general_purpose_subagent_guards_workflow_pushes() -> None:
+async def test_general_purpose_subagent_gets_shell_guards() -> None:
     captured = await _capture_create_deep_agent_kwargs()
     subagents = captured["subagents"]
     assert isinstance(subagents, list)
     gp = next(s for s in subagents if s["name"] == "general-purpose")
-    assert any(type(m).__name__ == "WorkflowPushGuardMiddleware" for m in gp["middleware"])
+    names = [type(m).__name__ for m in gp["middleware"]]
+    assert "WorkflowPushGuardMiddleware" in names
+    assert "PullRequestCreationGuardMiddleware" in names
 
 
 @pytest.mark.asyncio
