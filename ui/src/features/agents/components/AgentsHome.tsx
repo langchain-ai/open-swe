@@ -36,6 +36,7 @@ import {
   localThreadKeys,
 } from "@/features/agents/lib/desktopLocal"
 import { useDesktopThreadSource } from "@/features/agents/lib/desktopThreadSource"
+import { agentsApi } from "@/features/agents/lib/api"
 import { modelConfigurable } from "@/features/agents/lib/stream/promptMessage"
 import { runStartCommand, startRun } from "@/features/agents/lib/transcript/api"
 import {
@@ -345,6 +346,15 @@ export function AgentsHome({
 
   const abortPendingSubmit = () => {
     pendingRun.current?.abort()
+    const threadId = pendingThreadId
+    // The command may already have been dispatched before the fetch was
+    // aborted, so the run is cancelled server-side too. A thread the server
+    // never created has nothing to cancel, which is the only expected failure.
+    if (threadId) {
+      void agentsApi.cancelThread(threadId).catch((error: unknown) => {
+        console.warn("Could not cancel the thread being created", error)
+      })
+    }
     resetPendingSubmit()
   }
 
@@ -463,7 +473,7 @@ export function AgentsHome({
     setPendingThreadId(threadId)
     void (async () => {
       try {
-        await startRun(
+        const started = await startRun(
           threadId,
           runStartCommand({
             threadId,
@@ -474,12 +484,12 @@ export function AgentsHome({
         )
         if (abort.signal.aborted) return
         // Seeded so the thread route renders the prompt immediately; the real
-        // record lands with the next detail fetch. Every thread created here
-        // is served by the transcript log, which the page has to know before
-        // it mounts a source.
+        // record lands with the next detail fetch. The server says which
+        // reader serves the thread, which the page has to know before it
+        // mounts a source.
         const thread: AgentThread = {
           ...optimisticThread(threadId, draft),
-          transcript: "v2",
+          ...(started.transcript ? { transcript: started.transcript } : {}),
         }
         queryClient.setQueryData(agentThreadKeys.detail(threadId), thread)
         seedAgentThreadLists(queryClient, thread)

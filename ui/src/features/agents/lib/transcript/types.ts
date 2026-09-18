@@ -56,11 +56,24 @@ export interface TranscriptSender {
   display_name?: string | null
 }
 
-/** A human attachment. The log stores metadata only — never base64 payloads. */
+/**
+ * An image attached to a message. The log stores metadata only — never base64
+ * payloads: `attachment_id` addresses the bytes on the transcript attachments
+ * endpoint, and is null for an image whose bytes were never captured (a `url`
+ * without an attachment is a remote image reference).
+ */
 export interface TranscriptImage {
   mime_type: string
-  file_name?: string | null
-  url?: string | null
+  file_name: string | null
+  url: string | null
+  attachment_id: string | null
+}
+
+/** Token accounting for one AI message, as the provider reported it. */
+export interface TranscriptUsage {
+  input_tokens?: number | null
+  output_tokens?: number | null
+  total_tokens?: number | null
 }
 
 /** A subagent's position in the run tree: `[]` at the root, `[task_tool_call_id, …]` below it. */
@@ -83,7 +96,7 @@ export interface TranscriptTurnRow {
   started_at: string | null
   completed_at: string | null
   error: string | null
-  head_commit?: string | null
+  head_commit: string | null
 }
 
 export interface TranscriptMessageRow {
@@ -94,8 +107,10 @@ export interface TranscriptMessageRow {
   reasoning: string
   streaming: boolean
   namespace: Namespace
-  sender?: TranscriptSender | null
-  images?: ReadonlyArray<TranscriptImage> | null
+  sender: TranscriptSender | null
+  images: ReadonlyArray<TranscriptImage> | null
+  /** Set on AI messages the provider reported usage for; null otherwise. */
+  usage: TranscriptUsage | null
   created_at: string
 }
 
@@ -121,6 +136,14 @@ export interface TranscriptNoticeRow {
   data: JsonObject
 }
 
+/**
+ * The newest window of a thread. `version` is the head of the log whatever the
+ * window holds — live events only ever concern the newest turn or the thread
+ * row — so `after=version` remains the right subscription point.
+ *
+ * `older_cursor` is an opaque keyset cursor for the adjacent page of older
+ * turns, or null once the window reaches the first turn.
+ */
 export interface TranscriptSnapshot {
   thread_id: string
   version: number
@@ -129,6 +152,20 @@ export interface TranscriptSnapshot {
   messages: ReadonlyArray<TranscriptMessageRow>
   tool_calls: ReadonlyArray<TranscriptToolCallRow>
   notices: ReadonlyArray<TranscriptNoticeRow>
+  older_cursor: string | null
+}
+
+/**
+ * One page of turns strictly older than the cursor that asked for it. Settled
+ * turns are immutable, so a page never has to be refetched — and carries no
+ * notices or thread row, both of which describe the newest turn only.
+ */
+export interface TranscriptTurnPage {
+  thread_id: string
+  turns: ReadonlyArray<TranscriptTurnRow>
+  messages: ReadonlyArray<TranscriptMessageRow>
+  tool_calls: ReadonlyArray<TranscriptToolCallRow>
+  older_cursor: string | null
 }
 
 export interface ToolOutputResponse {
@@ -140,25 +177,41 @@ export interface SynchronizedFrame {
   version: number
 }
 
+/**
+ * The last frame of a stream whose thread no longer exists. The server ends the
+ * stream after it, so there is nothing to reconnect to.
+ */
+export interface DeletedFrame {
+  thread_id: string
+}
+
 export interface ThreadCreatedPayload {
-  title: string | null
+  title: string
   kind: TranscriptKind
   source: string
-  owner_login: string | null
+  owner_login: string
   visibility: "public" | "private"
-  repo_owner?: string | null
-  repo_name?: string | null
-  model_id?: string | null
-  effort?: string | null
+  repo_owner: string | null
+  repo_name: string | null
+  model_id: string | null
+  effort: string | null
   metadata: JsonObject
 }
 
+/**
+ * A change to the mirrored thread row.
+ *
+ * The server distinguishes "unset" from "null" through pydantic's
+ * `model_fields_set`, which `model_dump` does not carry: every key is present
+ * on the wire, null for the fields the patch left alone. A client therefore
+ * reads a null as "no change" — the turn events are what clear `active_run_id`.
+ */
 export interface ThreadMetaUpdatedPayload {
   patch: {
-    title?: string | null
-    status?: TranscriptThreadStatus
-    active_run_id?: string | null
-    metadata?: JsonObject
+    title: string | null
+    status: TranscriptThreadStatus | null
+    active_run_id: string | null
+    metadata: JsonObject | null
   }
 }
 
@@ -167,9 +220,9 @@ export interface TurnRequestedPayload {
   message_id: string
   text: string
   sender: TranscriptSender
-  images?: ReadonlyArray<TranscriptImage> | null
-  model_id?: string | null
-  effort?: string | null
+  images: ReadonlyArray<TranscriptImage>
+  model_id: string | null
+  effort: string | null
   plan_mode: boolean
 }
 
@@ -181,9 +234,9 @@ export interface TurnStartedPayload {
 export interface TurnCompletedPayload {
   turn_id: string
   run_id: string | null
-  head_commit?: string | null
-  base_commit?: string | null
-  changed_files?: JsonValue
+  head_commit: string | null
+  base_commit: string | null
+  changed_files: ReadonlyArray<string> | null
 }
 
 export interface TurnFailedPayload {
@@ -202,8 +255,8 @@ export interface MessageAppendedPayload {
   turn_id: string
   message_id: string
   namespace: Namespace
-  text?: string
-  reasoning?: string
+  text: string | null
+  reasoning: string | null
 }
 
 /** The canonical message, which replaces whatever the fragments accumulated. */
@@ -214,15 +267,16 @@ export interface MessageCompletedPayload {
   role: MessageRole
   text: string
   reasoning: string
-  sender?: TranscriptSender | null
-  images?: ReadonlyArray<TranscriptImage> | null
+  sender: TranscriptSender | null
+  images: ReadonlyArray<TranscriptImage> | null
+  usage: TranscriptUsage | null
   created_at: string
 }
 
 export interface ToolStartedPayload {
   turn_id: string
   tool_call_id: string
-  message_id?: string | null
+  message_id: string | null
   name: string
   input: JsonObject
   namespace: Namespace
@@ -255,6 +309,11 @@ interface StoredEventEnvelope {
   occurred_at: string
 }
 
+/**
+ * One stored event. Each `payload` also repeats the body's own `type`
+ * discriminator, which duplicates `event_type` exactly and is deliberately not
+ * modelled: `event_type` is the discriminator the reducer narrows on.
+ */
 type Stored<EventType extends string, Payload> = StoredEventEnvelope & {
   event_type: EventType
   payload: Payload

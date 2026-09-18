@@ -159,12 +159,35 @@ export interface TodoChunk {
   todos: Array<TodoItem>
 }
 
+/** An image carried inline, which is what a composer upload produces. */
 export interface ImageChunk {
   kind: "image"
   base64: string
   mimeType: string
   fileName?: string
 }
+
+/**
+ * An image the transcript references rather than inlines: the log stores
+ * metadata plus either an attachment id addressing bytes on our own API, or a
+ * third-party URL recorded with the message.
+ *
+ * `credentials` says how the bytes are reachable — `"session"` needs the
+ * session cookie, so the URL is fetched and shown through a blob URL rather
+ * than handed to `<img src>` (a cross-origin dashboard deployment would
+ * otherwise depend on the browser sending a third-party cookie for an image);
+ * `"none"` is a plain URL the browser loads itself.
+ */
+export interface RemoteImageChunk {
+  kind: "image"
+  url: string
+  credentials: "session" | "none"
+  mimeType?: string
+  fileName?: string
+}
+
+/** Either image form, as a renderer receives it from `Chunk`. */
+export type AnyImageChunk = ImageChunk | RemoteImageChunk
 
 export type Chunk =
   | TextChunk
@@ -175,6 +198,7 @@ export type Chunk =
   | ToolExecutionChunk
   | TodoChunk
   | ImageChunk
+  | RemoteImageChunk
 
 export interface Message {
   id: string

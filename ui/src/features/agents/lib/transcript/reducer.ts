@@ -26,9 +26,11 @@ import {
   collectStructuredEntities,
   parseStructuredInput,
 } from "@/features/agents/lib/structuredInputMessages"
-import { fetchToolOutput } from "./api"
+import { contextTokensFromUsageMetadata } from "@/features/agents/lib/contextUsage"
+import { attachmentUrl, fetchToolOutput } from "./api"
 import type { StructuredEntity } from "@/features/agents/lib/structuredInputMessages"
 import type {
+  AnyImageChunk,
   Chunk,
   Message,
   ToolExecutionChunk,
@@ -40,9 +42,15 @@ import type {
   NoticeKind,
   StoredEvent,
   ToolCallStatus,
+  TranscriptImage,
+  TranscriptMessageRow,
   TranscriptSender,
   TranscriptSnapshot,
   TranscriptThreadStatus,
+  TranscriptToolCallRow,
+  TranscriptTurnPage,
+  TranscriptTurnRow,
+  TranscriptUsage,
   TurnState,
 } from "./types"
 
@@ -55,6 +63,9 @@ export interface TranscriptMessageState {
   streaming: boolean
   namespace: Namespace
   sender: TranscriptSender | null
+  images: ReadonlyArray<TranscriptImage>
+  /** Token accounting for an AI message, when the provider reported any. */
+  usage: TranscriptUsage | null
   createdAt: string
 }
 
@@ -111,8 +122,19 @@ export interface TranscriptState {
   turns: Readonly<Record<string, TranscriptTurnState>>
   messages: Readonly<Record<string, TranscriptMessageState>>
   toolCalls: Readonly<Record<string, TranscriptToolCallState>>
-  /** Latest notice per kind; the server only replays them for the active turn. */
+  /**
+   * Latest notice per kind, for the newest turn only — the same window the
+   * snapshot serves, so a reload and a live stream agree.
+   */
   notices: Readonly<Partial<Record<NoticeKind, TranscriptNoticeState>>>
+  /**
+   * Cursor for the page of turns older than the oldest one loaded, or null
+   * when the whole thread is here. Older pages, once loaded, are kept: their
+   * turns have settled and can no longer change.
+   */
+  olderCursor: string | null
+  /** Context size the newest AI message reported, for the composer's meter. */
+  contextTokens: number | null
   /** Sender entities parsed out of human message text, rebuilt only when that text changes. */
   entities: ReadonlyMap<string, StructuredEntity>
 }
@@ -150,41 +172,79 @@ function humanTexts(
     .map((message) => message.text)
 }
 
-export function fromSnapshot(snapshot: TranscriptSnapshot): TranscriptState {
+/**
+ * Context size as the composer's meter reads it: what the newest AI message's
+ * usage says, which is the same rule {@link latestContextTokens} applies to the
+ * SDK's messages.
+ */
+function contextTokensOf(
+  messages: ReadonlyArray<{ role: MessageRole; usage: TranscriptUsage | null }>
+): number | null {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index]
+    if (!message || message.role !== "ai") continue
+    return contextTokensFromUsageMetadata(message.usage)
+  }
+  return null
+}
+
+function messageState(row: TranscriptMessageRow): TranscriptMessageState {
+  return {
+    messageId: row.message_id,
+    turnId: row.turn_id,
+    role: row.role,
+    text: row.text,
+    reasoning: row.reasoning,
+    streaming: row.streaming,
+    namespace: row.namespace,
+    sender: row.sender ?? null,
+    images: row.images ?? [],
+    usage: row.usage ?? null,
+    createdAt: row.created_at,
+  }
+}
+
+function toolCallState(row: TranscriptToolCallRow): TranscriptToolCallState {
+  return {
+    toolCallId: row.tool_call_id,
+    turnId: row.turn_id,
+    messageId: row.message_id,
+    name: row.name,
+    input: row.input,
+    status: row.status,
+    output: row.output_preview,
+    outputTruncated: row.output_truncated,
+    outputComplete: false,
+    hasOutput: row.has_output,
+    namespace: row.namespace,
+    startedAt: row.started_at,
+    endedAt: row.ended_at,
+  }
+}
+
+function indexMessages(
+  rows: ReadonlyArray<TranscriptMessageRow>
+): Record<string, TranscriptMessageState> {
   const messages: Record<string, TranscriptMessageState> = {}
-  for (const row of snapshot.messages) {
-    messages[row.message_id] = {
-      messageId: row.message_id,
-      turnId: row.turn_id,
-      role: row.role,
-      text: row.text,
-      reasoning: row.reasoning,
-      streaming: row.streaming,
-      namespace: row.namespace,
-      sender: row.sender ?? null,
-      createdAt: row.created_at,
-    }
-  }
+  for (const row of rows) messages[row.message_id] = messageState(row)
+  return messages
+}
+
+function indexToolCalls(
+  rows: ReadonlyArray<TranscriptToolCallRow>
+): Record<string, TranscriptToolCallState> {
   const toolCalls: Record<string, TranscriptToolCallState> = {}
-  for (const row of snapshot.tool_calls) {
-    toolCalls[row.tool_call_id] = {
-      toolCallId: row.tool_call_id,
-      turnId: row.turn_id,
-      messageId: row.message_id,
-      name: row.name,
-      input: row.input,
-      status: row.status,
-      output: row.output_preview,
-      outputTruncated: row.output_truncated,
-      outputComplete: false,
-      hasOutput: row.has_output,
-      namespace: row.namespace,
-      startedAt: row.started_at,
-      endedAt: row.ended_at,
-    }
-  }
+  for (const row of rows) toolCalls[row.tool_call_id] = toolCallState(row)
+  return toolCalls
+}
+
+function turnStates(
+  rows: ReadonlyArray<TranscriptTurnRow>,
+  messages: Readonly<Record<string, TranscriptMessageState>>,
+  toolCalls: Readonly<Record<string, TranscriptToolCallState>>
+): Record<string, TranscriptTurnState> {
   const turns: Record<string, TranscriptTurnState> = {}
-  for (const row of snapshot.turns) {
+  for (const row of rows) {
     turns[row.turn_id] = {
       turnId: row.turn_id,
       runId: row.run_id,
@@ -202,6 +262,30 @@ export function fromSnapshot(snapshot: TranscriptSnapshot): TranscriptState {
       revision: 0,
     }
   }
+  return turns
+}
+
+/**
+ * Turn ids in transcript order — `(requested_at, turn_id)`, the server's own
+ * ordering — whatever order the turns were merged in. Pages arrive newest
+ * first and older pages are prepended later, so insertion order says nothing.
+ */
+function sortedTurnOrder(
+  turns: Readonly<Record<string, TranscriptTurnState>>
+): Array<string> {
+  return Object.values(turns)
+    .sort(
+      (a, b) =>
+        a.requestedAt.localeCompare(b.requestedAt) ||
+        a.turnId.localeCompare(b.turnId)
+    )
+    .map((turn) => turn.turnId)
+}
+
+export function fromSnapshot(snapshot: TranscriptSnapshot): TranscriptState {
+  const messages = indexMessages(snapshot.messages)
+  const toolCalls = indexToolCalls(snapshot.tool_calls)
+  const turns = turnStates(snapshot.turns, messages, toolCalls)
   const notices: Partial<Record<NoticeKind, TranscriptNoticeState>> = {}
   for (const row of snapshot.notices) {
     notices[row.kind] = {
@@ -215,11 +299,77 @@ export function fromSnapshot(snapshot: TranscriptSnapshot): TranscriptState {
     version: snapshot.version,
     status: snapshot.thread.status,
     activeRunId: snapshot.thread.active_run_id,
-    turnOrder: snapshot.turns.map((turn) => turn.turn_id),
+    turnOrder: sortedTurnOrder(turns),
     turns,
     messages,
     toolCalls,
     notices,
+    olderCursor: snapshot.older_cursor,
+    // `snapshot.messages` is ordered by `created_at`, so the last AI row is the
+    // newest one.
+    contextTokens: contextTokensOf(snapshot.messages),
+    entities: collectStructuredEntities(humanTexts(messages)),
+  }
+}
+
+/**
+ * Take a fresh snapshot without losing the history around it.
+ *
+ * The server sends one when a subscriber's replay gap is too large, and it
+ * carries the newest window only. Turns older than that window have settled
+ * and are immutable, so whatever the client already loaded stays loaded and
+ * the cursor that reaches furthest back is the one that survives.
+ */
+export function applySnapshot(
+  state: TranscriptState | null,
+  snapshot: TranscriptSnapshot
+): TranscriptState {
+  const fresh = fromSnapshot(snapshot)
+  if (!state || state.threadId !== snapshot.thread_id) return fresh
+  const messages = { ...state.messages, ...fresh.messages }
+  const toolCalls = { ...state.toolCalls, ...fresh.toolCalls }
+  const turns = { ...state.turns, ...fresh.turns }
+  const turnOrder = sortedTurnOrder(turns)
+  const freshOldest = fresh.turnOrder[0]
+  const keptOlderHistory =
+    freshOldest === undefined || turnOrder[0] !== freshOldest
+  return {
+    ...fresh,
+    turnOrder,
+    turns,
+    messages,
+    toolCalls,
+    olderCursor: keptOlderHistory ? state.olderCursor : fresh.olderCursor,
+    // A window whose AI messages reported no usage leaves the last known
+    // context size in place rather than blanking the composer's meter.
+    contextTokens: fresh.contextTokens ?? state.contextTokens,
+    entities: collectStructuredEntities(humanTexts(messages)),
+  }
+}
+
+/**
+ * Merge a page of older turns in and advance the cursor. Nothing already in
+ * state is overwritten: the page is strictly older, and a settled turn the
+ * client holds is already final.
+ */
+export function prependTurns(
+  state: TranscriptState,
+  page: TranscriptTurnPage
+): TranscriptState {
+  if (page.thread_id !== state.threadId) return state
+  const messages = { ...indexMessages(page.messages), ...state.messages }
+  const toolCalls = { ...indexToolCalls(page.tool_calls), ...state.toolCalls }
+  const turns = {
+    ...turnStates(page.turns, messages, toolCalls),
+    ...state.turns,
+  }
+  return {
+    ...state,
+    turnOrder: sortedTurnOrder(turns),
+    turns,
+    messages,
+    toolCalls,
+    olderCursor: page.older_cursor,
     entities: collectStructuredEntities(humanTexts(messages)),
   }
 }
@@ -277,7 +427,16 @@ function addItem(draft: Draft, turnId: string, item: TurnItem): void {
   patchTurn(draft, turnId, { items: [...turn.items, item] })
 }
 
-function putMessage(draft: Draft, message: TranscriptMessageState): void {
+function putMessage(draft: Draft, next: TranscriptMessageState): void {
+  const previous = draft.state.messages[next.messageId]
+  // The server's upsert keys on (thread_id, message_id) and leaves `turn_id`
+  // as first written, so writing a message twice — the same human message as
+  // the turn opens and again as the graph receives it — updates one row in one
+  // turn rather than adding a second.
+  const message =
+    previous && previous.turnId !== next.turnId
+      ? { ...next, turnId: previous.turnId }
+      : next
   draft.state = {
     ...draft.state,
     messages: { ...draft.state.messages, [message.messageId]: message },
@@ -315,6 +474,18 @@ function settleStreaming(draft: Draft, turnId: string): void {
   draft.touched.add(turnId)
 }
 
+/**
+ * Offloading describes what a run is doing right now, so it dies with its turn
+ * — the snapshot drops it for a settled turn, and so does the live stream.
+ */
+function dropTransientNotices(draft: Draft, turnId: string): void {
+  const notice = draft.state.notices["conversation_offloading"]
+  if (!notice || notice.turnId !== turnId) return
+  const notices = { ...draft.state.notices }
+  delete notices["conversation_offloading"]
+  draft.state = { ...draft.state, notices }
+}
+
 function commit(draft: Draft, version: number): TranscriptState {
   if (!draft.touched.size) return { ...draft.state, version }
   const turns = { ...draft.state.turns }
@@ -347,9 +518,9 @@ export function applyEvent(
       draft.state = {
         ...draft.state,
         ...(patch.status ? { status: patch.status } : {}),
-        ...("active_run_id" in patch
-          ? { activeRunId: patch.active_run_id ?? null }
-          : {}),
+        // Every key is on the wire whether or not the patch set it, so a null
+        // is "unchanged"; the turn events are what clear a finished run.
+        ...(patch.active_run_id ? { activeRunId: patch.active_run_id } : {}),
       }
       break
     }
@@ -376,6 +547,9 @@ export function applyEvent(
         },
       }
       draft.touched.add(payload.turn_id)
+      // Notices describe the newest turn, which this event opens; the snapshot
+      // serves them the same way, so a reload never resurrects an older turn's.
+      draft.state = { ...draft.state, notices: {} }
       putMessage(draft, {
         messageId: payload.message_id,
         turnId: payload.turn_id,
@@ -385,6 +559,8 @@ export function applyEvent(
         streaming: false,
         namespace: [],
         sender: payload.sender,
+        images: payload.images,
+        usage: null,
         createdAt: at,
       })
       break
@@ -412,6 +588,7 @@ export function applyEvent(
         completedAt: at,
       })
       settleStreaming(draft, payload.turn_id)
+      dropTransientNotices(draft, payload.turn_id)
       draft.state = { ...draft.state, status: "idle", activeRunId: null }
       break
     }
@@ -424,6 +601,7 @@ export function applyEvent(
         error: payload.error,
       })
       settleStreaming(draft, payload.turn_id)
+      dropTransientNotices(draft, payload.turn_id)
       draft.state = { ...draft.state, status: "error", activeRunId: null }
       break
     }
@@ -435,6 +613,7 @@ export function applyEvent(
         completedAt: at,
       })
       settleStreaming(draft, payload.turn_id)
+      dropTransientNotices(draft, payload.turn_id)
       draft.state = { ...draft.state, status: "idle", activeRunId: null }
       break
     }
@@ -451,6 +630,8 @@ export function applyEvent(
         streaming: true,
         namespace: payload.namespace,
         sender: existing?.sender ?? null,
+        images: existing?.images ?? [],
+        usage: existing?.usage ?? null,
         createdAt: existing?.createdAt ?? at,
       })
       break
@@ -468,8 +649,18 @@ export function applyEvent(
         streaming: false,
         namespace: payload.namespace,
         sender: payload.sender ?? existing?.sender ?? null,
+        images: payload.images ?? existing?.images ?? [],
+        usage: payload.usage ?? existing?.usage ?? null,
         createdAt: payload.created_at || existing?.createdAt || at,
       })
+      if (payload.role === "ai") {
+        // Events arrive in order, so the message that just completed is the
+        // newest one. A message the provider reported no usage for leaves the
+        // last known size in place rather than blanking the meter.
+        const tokens = contextTokensFromUsageMetadata(payload.usage)
+        if (tokens !== null)
+          draft.state = { ...draft.state, contextTokens: tokens }
+      }
       break
     }
     case "tool.started": {
@@ -629,6 +820,37 @@ function senderNote(entity: StructuredEntity | undefined): string | undefined {
   return undefined
 }
 
+/**
+ * The images a message carries, as chunks a renderer can show: an attachment
+ * is fetched from our own API with the session, a bare `url` is a remote
+ * reference the browser loads itself, and an image with neither has no bytes
+ * to show.
+ */
+function imageChunks(
+  threadId: string,
+  images: ReadonlyArray<TranscriptImage>
+): Array<AnyImageChunk> {
+  const chunks: Array<AnyImageChunk> = []
+  for (const image of images) {
+    const source = image.attachment_id
+      ? {
+          url: attachmentUrl(threadId, image.attachment_id),
+          credentials: "session" as const,
+        }
+      : image.url
+        ? { url: image.url, credentials: "none" as const }
+        : null
+    if (!source) continue
+    chunks.push({
+      kind: "image",
+      ...source,
+      ...(image.mime_type ? { mimeType: image.mime_type } : {}),
+      ...(image.file_name ? { fileName: image.file_name } : {}),
+    })
+  }
+  return chunks
+}
+
 interface HumanCacheEntry {
   entities: ReadonlyMap<string, StructuredEntity>
   /** `null` when the message is one the transcript deliberately hides. */
@@ -637,18 +859,22 @@ interface HumanCacheEntry {
 
 const humanCache = new WeakMap<TranscriptMessageState, HumanCacheEntry>()
 
+// `threadId` is not part of the cache key: a message row belongs to exactly
+// one thread for its whole life.
 function humanMessage(
+  threadId: string,
   row: TranscriptMessageState,
   entities: ReadonlyMap<string, StructuredEntity>
 ): Message | null {
   const cached = humanCache.get(row)
   if (cached && cached.entities === entities) return cached.message
-  const message = buildHumanMessage(row, entities)
+  const message = buildHumanMessage(threadId, row, entities)
   humanCache.set(row, { entities, message })
   return message
 }
 
 function buildHumanMessage(
+  threadId: string,
   row: TranscriptMessageState,
   entities: ReadonlyMap<string, StructuredEntity>
 ): Message | null {
@@ -662,7 +888,9 @@ function buildHumanMessage(
   // context, once as the `slack_thread_reply` call that sent them.
   if (entity?.senderType === "self") return null
   const text = parsed.content
-  if (!text.trim()) return null
+  const chunks: Array<Chunk> = imageChunks(threadId, row.images)
+  if (text.trim()) chunks.push({ kind: "text", text })
+  if (!chunks.length) return null
   return {
     id: row.messageId,
     author:
@@ -670,7 +898,7 @@ function buildHumanMessage(
         ? "system"
         : "user",
     timestamp: row.createdAt,
-    chunks: [{ kind: "text", text }],
+    chunks,
     ...(parsed.type === "message"
       ? {
           structuredSenderId: parsed.sender,
@@ -760,7 +988,7 @@ function turnMessages(
       if (!row || row.namespace.length) continue
       if (row.role === "human") {
         flush()
-        const message = humanMessage(row, state.entities)
+        const message = humanMessage(state.threadId, row, state.entities)
         if (!message) continue
         turnKey = row.messageId
         out.push(message)
@@ -769,6 +997,7 @@ function turnMessages(
       const chunks: Array<Chunk> = []
       const reasoning = row.reasoning.trim()
       if (reasoning) chunks.push({ kind: "reasoning", text: reasoning })
+      chunks.push(...imageChunks(state.threadId, row.images))
       const text = row.text.trim()
       if (text) chunks.push({ kind: "text", text })
       append(row.messageId, row.createdAt, chunks)

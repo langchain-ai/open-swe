@@ -21,6 +21,7 @@ from sqlalchemy import ARRAY, Text, bindparam, text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from agent.database import postgres
+from agent.transcript import attachments as attachment_store
 from agent.transcript import listener, projections
 from agent.transcript.events import (
     SCHEMA_VERSION,
@@ -37,7 +38,12 @@ NOTIFY_CHANNEL = "open_swe_thread_events"
 
 @dataclass(frozen=True, kw_only=True)
 class Command:
-    """One event to append, with the id that makes appending it idempotent."""
+    """One event to append, with the id that makes appending it idempotent.
+
+    ``attachments`` are the bytes the event refers to by ``attachment_id``.
+    They are written by the same transaction as the event, and only when the
+    event is actually appended — a replayed command writes neither again.
+    """
 
     command_id: str
     event: TranscriptEvent
@@ -45,6 +51,7 @@ class Command:
     run_id: str | None = None
     turn_id: uuid.UUID | None = None
     occurred_at: datetime | None = None
+    attachments: tuple[attachment_store.PendingAttachment, ...] = ()
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -77,7 +84,9 @@ async def append(thread_id: str, commands: Sequence[Command]) -> AppendResult:
             text("SELECT pg_advisory_xact_lock(hashtext(:thread_id))"),
             {"thread_id": thread_id},
         )
-        accepted = await _accepted_versions(conn, [command.command_id for command in commands])
+        accepted = await _accepted_versions(
+            conn, thread_id, [command.command_id for command in commands]
+        )
         head = await _head_version(conn, thread_id)
         pending = [command for command in commands if command.command_id not in accepted]
         if head is None and pending and pending[0].event.type != "thread.created":
@@ -126,6 +135,45 @@ async def append(thread_id: str, commands: Sequence[Command]) -> AppendResult:
     return AppendResult(thread_id=thread_id, versions=versions, events=events)
 
 
+async def delete_transcript(thread_id: str) -> bool:
+    """Drop the thread's transcript, and tell its subscribers the thread is gone.
+
+    Everything else — events, turns, messages, tool calls, attachments —
+    cascades from the ``thread`` row. The receipts go too: they are keyed by
+    ``command_id`` alone, so leaving them behind would deduplicate a thread
+    recreated under the same id out of ever being created. Returns whether a
+    transcript was deleted.
+    """
+    if not postgres.configured():
+        return False
+    async with postgres.transaction() as conn:
+        await conn.execute(
+            text("SELECT pg_advisory_xact_lock(hashtext(:thread_id))"),
+            {"thread_id": thread_id},
+        )
+        result = await conn.execute(
+            text("DELETE FROM thread WHERE thread_id = :thread_id RETURNING thread_id"),
+            {"thread_id": thread_id},
+        )
+        deleted = result.scalar_one_or_none() is not None
+        await conn.execute(
+            text("DELETE FROM thread_command_receipt WHERE thread_id = :thread_id"),
+            {"thread_id": thread_id},
+        )
+        if deleted:
+            await conn.execute(
+                text("SELECT pg_notify(:channel, :payload)"),
+                {"channel": NOTIFY_CHANNEL, "payload": f"{thread_id}:{listener.DELETED}"},
+            )
+    if deleted:
+        listener.publish(thread_id, listener.DELETED_VERSION)
+        logger.info(
+            "Deleted a thread transcript",
+            extra={"transcript": {"thread_id": thread_id}},
+        )
+    return deleted
+
+
 async def has_transcript(thread_id: str) -> bool:
     """Whether the thread is served by the event log rather than by LangGraph state."""
     if not postgres.configured():
@@ -138,16 +186,32 @@ async def has_transcript(thread_id: str) -> bool:
         return result.scalar_one_or_none() is not None
 
 
-async def _accepted_versions(conn: AsyncConnection, command_ids: Sequence[str]) -> dict[str, int]:
+async def has_message(thread_id: str, message_id: str) -> bool:
+    """Whether the thread's transcript already holds ``message_id``."""
+    if not postgres.configured():
+        return False
+    async with postgres.read_only_transaction() as conn:
+        result = await conn.execute(
+            text(
+                "SELECT 1 FROM thread_message WHERE thread_id = :thread_id AND message_id = :message_id"
+            ),
+            {"thread_id": thread_id, "message_id": message_id},
+        )
+        return result.scalar_one_or_none() is not None
+
+
+async def _accepted_versions(
+    conn: AsyncConnection, thread_id: str, command_ids: Sequence[str]
+) -> dict[str, int]:
     result = await conn.execute(
         text(
             """
             SELECT command_id, result_version FROM thread_command_receipt
-            WHERE command_id = ANY(:command_ids) AND status = 'accepted'
-              AND result_version IS NOT NULL
+            WHERE thread_id = :thread_id AND command_id = ANY(:command_ids)
+              AND status = 'accepted' AND result_version IS NOT NULL
             """
         ).bindparams(bindparam("command_ids", type_=ARRAY(Text))),
-        {"command_ids": list(command_ids)},
+        {"thread_id": thread_id, "command_ids": list(command_ids)},
     )
     return {row.command_id: row.result_version for row in result}
 
@@ -199,6 +263,7 @@ async def _write(
         },
     )
     occurred_at = result.scalar_one()
+    await attachment_store.write(conn, thread_id, command.attachments)
     await projections.apply(
         conn,
         thread_id=thread_id,

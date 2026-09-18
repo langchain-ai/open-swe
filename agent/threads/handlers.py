@@ -44,6 +44,8 @@ from agent.threads.summary import (
     _thread_summary,
     thread_source,
 )
+from agent.transcript.engine import delete_transcript
+from agent.transcript.mirror import mirror_thread_metadata
 from agent.utils.json_types import as_json_object, as_thread_dict, thread_metadata
 from agent.utils.thread_ops import (
     get_thread_active_status,
@@ -287,6 +289,7 @@ async def send_dashboard_message(
         if metadata.get("attention_reason"):
             metadata_update["attention_reason"] = None
         await client.threads.update(thread_id=thread_id, metadata=metadata_update)
+    await mirror_thread_metadata(thread_id, metadata_update)
     queue_payload: dict[str, Any] = {
         "text": prompt,
         "source": DASHBOARD_SOURCE,
@@ -440,6 +443,16 @@ async def delete_dashboard_thread(thread_id: str, login: str, *, email: str | No
             logger.debug("Could not cancel run %s for thread %s", run_id, thread_id, exc_info=True)
 
     await client.threads.delete(thread_id)
+    # The mirrored transcript outlives the LangGraph thread otherwise, and the
+    # read path authorizes against the mirror rather than against LangGraph.
+    try:
+        await delete_transcript(thread_id)
+    except Exception:  # noqa: BLE001
+        logger.warning(
+            "Could not delete the thread transcript",
+            exc_info=True,
+            extra={"transcript": {"thread_id": thread_id}},
+        )
 
 
 async def rename_dashboard_thread(
@@ -453,6 +466,7 @@ async def rename_dashboard_thread(
     except Exception as exc:  # noqa: BLE001
         logger.debug("Could not rename thread", extra={"thread_id": thread_id}, exc_info=True)
         raise HTTPException(502, "failed to update thread") from exc
+    await mirror_thread_metadata(thread_id, metadata_update)
     thread = {
         **as_thread_dict(thread),
         "metadata": {**thread_metadata(thread), **metadata_update},

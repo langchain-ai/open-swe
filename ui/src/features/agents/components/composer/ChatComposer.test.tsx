@@ -26,12 +26,20 @@ const stream = {
   hydrationPromise: Promise.resolve(),
   error: null,
   stop: vi.fn(),
+  submit: vi.fn(),
   disconnect: vi.fn(),
+  getThread: () => null,
 }
 
-vi.mock("@/features/agents/lib/stream/AgentStreamProvider", () => ({
-  useAgentStream: () => stream,
-  useAgentStreamConnection: () => ({ status: "live" }),
+vi.mock("@langchain/react", () => ({
+  useStream: () => stream,
+  useChannelEffect: () => {},
+}))
+
+vi.mock("@/lib/langgraph-client", () => ({
+  createDashboardClient: () => ({}),
+  createLocalGraphClient: () => ({}),
+  dashboardFetch: fetch,
 }))
 
 const cancelThread = vi.fn((threadId: string) =>

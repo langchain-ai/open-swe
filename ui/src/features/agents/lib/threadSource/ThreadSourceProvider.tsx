@@ -56,7 +56,9 @@ function TranscriptSource({
 
 /**
  * Picks the thread's source. The component identity differs per kind, so each
- * implementation owns its own hooks and neither runs for the other's threads.
+ * implementation owns its own hooks and neither runs for the other's threads:
+ * a transcript thread never opens an SDK stream, because only `StreamSource`
+ * mounts one and the page renders this once the thread detail has resolved.
  */
 export function ThreadSourceProvider({
   threadId,

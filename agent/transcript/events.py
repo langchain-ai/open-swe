@@ -11,7 +11,14 @@ from datetime import datetime
 from typing import Annotated, Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, JsonValue
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    JsonValue,
+    SerializerFunctionWrapHandler,
+    model_serializer,
+)
 
 SCHEMA_VERSION = 1
 """``thread_event.schema_version`` written by this release."""
@@ -42,13 +49,35 @@ class MessageSender(BaseModel):
 
 
 class MessageImage(BaseModel):
-    """An image attached to a human message — metadata only, never base64."""
+    """An image attached to a human message — metadata only, never base64.
+
+    ``attachment_id`` addresses the bytes, which are stored in
+    ``thread_attachment`` by the same transaction that appended the event and
+    are served by
+    ``GET /dashboard/api/threads/{thread_id}/transcript/attachments/{attachment_id}``.
+    It is unset only for an image whose bytes were not captured.
+    """
 
     model_config = ConfigDict(extra="forbid")
 
     mime_type: str
     file_name: str | None = None
     url: str | None = None
+    attachment_id: UUID | None = None
+
+
+class MessageUsage(BaseModel):
+    """Token accounting for one AI message, as the provider reported it.
+
+    The UI reads context usage as ``input_tokens + output_tokens`` of the
+    newest AI message, falling back to ``total_tokens``.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    input_tokens: int | None = None
+    output_tokens: int | None = None
+    total_tokens: int | None = None
 
 
 class ThreadCreated(_Body):
@@ -79,8 +108,22 @@ class ThreadMetaPatch(BaseModel):
     active_run_id: str | None = None
     metadata: JsonObject | None = None
 
+    @model_serializer(mode="wrap")
+    def _only_set_fields(self, handler: SerializerFunctionWrapHandler) -> dict[str, object]:
+        # An unset field must not reach a reader as ``null``: to a reader that
+        # would be an instruction to clear it.
+        dumped = handler(self)
+        return {key: value for key, value in dumped.items() if key in self.model_fields_set}
+
 
 class ThreadMetaUpdated(_Body):
+    """A change to the mirrored thread row.
+
+    Emitted by ``agent.transcript.mirror`` whenever a LangGraph metadata write
+    changes a key the transcript read path authorizes against, or the title the
+    snapshot serves. ``patch.metadata`` merges key by key.
+    """
+
     type: Literal["thread.meta_updated"] = "thread.meta_updated"
     patch: ThreadMetaPatch
 
@@ -152,6 +195,7 @@ class MessageCompleted(_Body):
     reasoning: str = ""
     sender: MessageSender | None = None
     images: list[MessageImage] | None = None
+    usage: MessageUsage | None = None
     created_at: datetime
 
 
@@ -176,10 +220,13 @@ class ToolCompleted(_Body):
 
 
 class RunNotice(_Body):
-    """A live-only hint about how the run is being executed.
+    """A hint about how the run is being executed.
 
     Notices have no projection: the snapshot serves the latest one per kind for
-    the active turn, read straight from the log.
+    the thread's newest turn, read straight from the log, so ``model_routed``
+    and ``step_limit`` survive a reload. ``conversation_offloading`` describes
+    what a run is doing right now, so the snapshot drops it once its turn has
+    settled.
     """
 
     type: Literal["run.notice"] = "run.notice"

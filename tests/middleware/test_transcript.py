@@ -1,5 +1,6 @@
 """Transcript middleware: paragraph batching and the emitted event sequence."""
 
+import base64
 import itertools
 from collections.abc import Sequence
 from typing import Any
@@ -51,9 +52,11 @@ def _install(
     *,
     transcribed: bool,
     turn_id: UUID | None = None,
+    postgres_configured: bool = True,
 ) -> FakeEngine:
     engine = FakeEngine()
     monkeypatch.setattr(mw, "append", engine.append)
+    monkeypatch.setattr(mw.postgres, "configured", lambda: postgres_configured)
 
     async def _has_transcript(thread_id: str) -> bool:
         return transcribed
@@ -347,3 +350,118 @@ async def test_streamed_fragments_keep_one_message_id(monkeypatch: pytest.Monkey
         command for command in engine.commands if command.event.type == "tool.started"
     )
     assert tool_started.event.message_id == next(iter(used_ids))
+
+
+async def test_without_postgres_the_middleware_writes_nothing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """No database means no transcript: the run must not be stamped as one."""
+    engine = _install(monkeypatch, transcribed=False, postgres_configured=False)
+    stamped: list[str] = []
+
+    async def _stamp(thread_id: str) -> dict[str, object]:
+        stamped.append(thread_id)
+        return {}
+
+    monkeypatch.setattr(mw, "_thread_metadata", _stamp)
+    middleware = mw.TranscriptMiddleware()
+    human = HumanMessage(content="hi", id="human-1")
+
+    await middleware.abefore_agent({"messages": [human]}, None)
+
+    async def model_handler(request: ModelRequest) -> ModelResponse:
+        return ModelResponse(result=[AIMessage(content="hello", id="ai-1")])
+
+    await middleware.awrap_model_call(_model_request([human]), model_handler)
+    await middleware.aafter_agent({"messages": []}, None)
+
+    assert engine.commands == []
+    assert stamped == []
+
+
+async def test_earlier_human_messages_are_not_rewritten_into_this_turn(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A follow-up turn must not re-stamp the previous turn's human message."""
+    engine = _install(monkeypatch, transcribed=True, turn_id=uuid7())
+    middleware = mw.TranscriptMiddleware()
+    history = [
+        HumanMessage(content="first ask", id="human-1"),
+        AIMessage(content="done", id="ai-1"),
+        HumanMessage(content="second ask", id="human-2"),
+    ]
+    await middleware.abefore_agent({"messages": history}, None)
+
+    async def model_handler(request: ModelRequest) -> ModelResponse:
+        return ModelResponse(result=[AIMessage(content="ok", id="ai-2")])
+
+    await middleware.awrap_model_call(_model_request(history), model_handler)
+    await middleware.aafter_agent({"messages": history}, None)
+
+    assert [
+        command.command_id for command in engine.commands if "human" in command.command_id
+    ] == []
+
+
+async def test_ai_usage_is_recorded_on_completion(monkeypatch: pytest.MonkeyPatch) -> None:
+    engine = _install(monkeypatch, transcribed=True, turn_id=uuid7())
+    middleware = mw.TranscriptMiddleware()
+    await middleware.abefore_agent({"messages": [HumanMessage(content="hi", id="h")]}, None)
+
+    ai = AIMessage(
+        content="done",
+        id="ai-1",
+        usage_metadata={"input_tokens": 120, "output_tokens": 30, "total_tokens": 150},
+    )
+
+    async def model_handler(request: ModelRequest) -> ModelResponse:
+        return ModelResponse(result=[ai])
+
+    await middleware.awrap_model_call(_model_request([]), model_handler)
+    await middleware.aafter_agent({"messages": []}, None)
+
+    completed = next(
+        command for command in engine.commands if command.event.type == "message.completed"
+    )
+    assert completed.event.usage is not None
+    assert completed.event.usage.input_tokens == 120
+    assert completed.event.usage.output_tokens == 30
+    assert completed.event.usage.total_tokens == 150
+
+
+async def test_injected_human_images_become_attachments(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    engine = _install(monkeypatch, transcribed=True, turn_id=uuid7())
+    middleware = mw.TranscriptMiddleware()
+    await middleware.abefore_agent({"messages": [HumanMessage(content="hi", id="h")]}, None)
+
+    injected = HumanMessage(
+        content=[
+            {"type": "text", "text": "look at this"},
+            {
+                "type": "image",
+                "base64": base64.b64encode(b"pretend-png").decode("ascii"),
+                "mime_type": "image/png",
+                "file_name": "shot.png",
+            },
+        ],
+        id="human-queued",
+    )
+
+    async def model_handler(request: ModelRequest) -> ModelResponse:
+        return ModelResponse(result=[AIMessage(content="ok", id="ai-1")])
+
+    await middleware.awrap_model_call(_model_request([injected]), model_handler)
+    await middleware.aafter_agent({"messages": []}, None)
+
+    human = next(
+        command for command in engine.commands if command.command_id == "human:human-queued"
+    )
+    assert len(human.attachments) == 1
+    attachment = human.attachments[0]
+    assert attachment.mime_type == "image/png"
+    assert attachment.file_name == "shot.png"
+    assert attachment.data == b"pretend-png"
+    assert human.event.images is not None
+    assert human.event.images[0].attachment_id == attachment.attachment_id

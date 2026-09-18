@@ -14,6 +14,8 @@ background writer per run, so the model stream never waits on Postgres.
 """
 
 import asyncio
+import base64
+import binascii
 import contextlib
 import logging
 import re
@@ -38,14 +40,18 @@ from langgraph_sdk import get_client
 from pydantic import JsonValue
 from pydantic_core import PydanticSerializationError, to_jsonable_python
 
+from agent.database import postgres
 from agent.input_messages import input_message_text, message_sender_id
 from agent.middleware.trace import OpenSWEMiddleware
+from agent.transcript.attachments import PendingAttachment, UnsupportedAttachment
 from agent.transcript.engine import Command, append, has_transcript
 from agent.transcript.events import (
     JsonObject,
     MessageAppended,
     MessageCompleted,
+    MessageImage,
     MessageSender,
+    MessageUsage,
     NoticeKind,
     RunNotice,
     ThreadCreated,
@@ -64,6 +70,11 @@ HARD_FLUSH_CHARS = 24_000
 TOOL_OUTPUT_CAP_BYTES = 256 * 1024
 ERROR_TEXT_CAP = 2_000
 _WRITER_BATCH = 32
+# How far the writer may fall behind the model stream before streamed text
+# fragments are shed. Only ``message.appended`` is dropped: the canonical
+# ``message.completed`` restores the text, whereas a dropped turn or tool event
+# would leave a hole no later event repairs.
+_WRITER_QUEUE_LIMIT = 4096
 # Model calls a middleware makes for its own bookkeeping (routing classifier,
 # conversation offloading) are tagged out of the user-facing stream. Their
 # tokens must not become transcript fragments.
@@ -173,6 +184,21 @@ class RunState:
         if not self.enabled or self.queue is None:
             return
         for command in commands:
+            if (
+                command.event.type == "message.appended"
+                and self.queue.qsize() >= _WRITER_QUEUE_LIMIT
+            ):
+                logger.warning(
+                    "Dropped a transcript fragment: the writer queue is full",
+                    extra={
+                        "transcript": {
+                            "thread_id": self.thread_id,
+                            "run_id": self.run_id,
+                            "event_type": command.event.type,
+                        }
+                    },
+                )
+                continue
             self.queue.put_nowait(command)
 
 
@@ -297,6 +323,93 @@ def _human_text(message: HumanMessage) -> str:
     """The user's own words, unwrapping the ``<input-message>`` envelope."""
     authored = input_message_text(message.content)
     return (authored or _message_text(message)).strip()
+
+
+def _usage(message: AIMessage) -> MessageUsage | None:
+    """Token accounting for one AI message, when the provider reported any."""
+    usage = message.usage_metadata
+    if not isinstance(usage, Mapping):
+        return None
+    counts = {
+        key: value
+        for key in ("input_tokens", "output_tokens", "total_tokens")
+        if isinstance(value := usage.get(key), int)
+    }
+    return MessageUsage(**counts) if counts else None
+
+
+def _image_bytes(block: Mapping[str, object]) -> tuple[str, bytes] | None:
+    """``(mime_type, data)`` for a standard base64 image content block."""
+    mime_type = block.get("mime_type")
+    encoded = block.get("base64")
+    if not isinstance(mime_type, str) or not isinstance(encoded, str):
+        return None
+    try:
+        return mime_type, base64.b64decode(encoded, validate=True)
+    except binascii.Error:
+        logger.warning("Skipping an undecodable transcript image attachment", exc_info=True)
+        return None
+
+
+def _human_images(
+    message: HumanMessage, message_id: str
+) -> tuple[list[MessageImage], tuple[PendingAttachment, ...]]:
+    """Images on a human message, as event metadata plus the bytes to store.
+
+    Only standard base64 image blocks are captured. A remote-URL image is
+    referenced rather than copied, and anything else is skipped with a log so a
+    missing attachment is never silent.
+    """
+    try:
+        blocks = message.content_blocks
+    except Exception:
+        logger.debug("Could not read content blocks for images", exc_info=True)
+        return [], ()
+    images: list[MessageImage] = []
+    attachments: list[PendingAttachment] = []
+    for block in blocks:
+        if not isinstance(block, Mapping) or block.get("type") != "image":
+            continue
+        url = block.get("url")
+        decoded = _image_bytes(block)
+        if decoded is None:
+            if isinstance(url, str) and url:
+                images.append(MessageImage(mime_type="image/*", url=url))
+            else:
+                logger.warning(
+                    "Skipping a transcript image attachment with no bytes and no url",
+                    extra={"transcript": {"message_id": message_id}},
+                )
+            continue
+        mime_type, data = decoded
+        file_name = block.get("file_name")
+        attachment_id = uuid.uuid7()
+        try:
+            attachments.append(
+                PendingAttachment(
+                    attachment_id=attachment_id,
+                    message_id=message_id,
+                    position=len(images),
+                    mime_type=mime_type,
+                    file_name=file_name if isinstance(file_name, str) else None,
+                    data=data,
+                )
+            )
+        except UnsupportedAttachment:
+            logger.warning(
+                "Skipping an unsupported transcript image attachment",
+                exc_info=True,
+                extra={"transcript": {"message_id": message_id, "mime_type": mime_type}},
+            )
+            continue
+        images.append(
+            MessageImage(
+                mime_type=mime_type,
+                file_name=file_name if isinstance(file_name, str) else None,
+                attachment_id=attachment_id,
+            )
+        )
+    return images, tuple(attachments)
 
 
 def _tool_output(content: object) -> tuple[str, bool]:
@@ -486,7 +599,7 @@ async def _drain(state: RunState) -> None:
         return
     try:
         await asyncio.wait_for(state.queue.join(), timeout=30)
-    except TimeoutError, asyncio.CancelledError:
+    except TimeoutError:
         logger.warning(
             "Transcript drain timed out",
             exc_info=True,
@@ -495,13 +608,20 @@ async def _drain(state: RunState) -> None:
 
 
 async def _finish(state: RunState) -> None:
-    await _drain(state)
-    if state.writer is not None:
-        state.writer.cancel()
-        with contextlib.suppress(asyncio.CancelledError):
-            await state.writer
-        state.writer = None
-    _runs.pop(_run_key(state.thread_id, state.run_id), None)
+    """Flush the queue, then stop the writer — even if the drain is cancelled.
+
+    A cancellation during the drain is the process shutting down; it has to
+    propagate, but the writer task must not be left running behind it.
+    """
+    try:
+        await _drain(state)
+    finally:
+        if state.writer is not None:
+            state.writer.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await state.writer
+            state.writer = None
+        _runs.pop(_run_key(state.thread_id, state.run_id), None)
 
 
 def _last_human(messages: Sequence[BaseMessage]) -> HumanMessage | None:
@@ -522,7 +642,7 @@ def _thread_created(metadata: Mapping[str, object], title: str) -> ThreadCreated
         kind="agent",
         source=_string(metadata.get("source")) or _string(metadata.get("origin")) or "unknown",
         owner_login=_string(metadata.get("owner_login")) or "",
-        visibility=cast(Any, _string(metadata.get("visibility")) or "public"),
+        visibility="private" if metadata.get("visibility") == "private" else "public",
         repo_owner=_string(metadata.get("repo_owner")),
         repo_name=_string(metadata.get("repo_name")),
         model_id=_string(metadata.get("resolved_model")) or _string(metadata.get("model")),
@@ -563,8 +683,14 @@ class TranscriptMiddleware(OpenSWEMiddleware):
             return
 
         messages = cast(Sequence[BaseMessage], state.get("messages") or [])
-        transcribed = await has_transcript(ids.thread_id)
-        if not transcribed and any(isinstance(message, AIMessage) for message in messages):
+        transcribed = postgres.configured() and await has_transcript(ids.thread_id)
+        # Without PostgreSQL there is nowhere to keep a transcript, so the run
+        # must not be stamped as one: the UI would switch to a read path that
+        # has no rows behind it.
+        untranscribable = not postgres.configured() or (
+            not transcribed and any(isinstance(message, AIMessage) for message in messages)
+        )
+        if untranscribable:
             # A thread that already has agent turns but no transcript row predates
             # the event log. Stay out of it for the whole run.
             _runs[key] = RunState(
@@ -605,8 +731,14 @@ class TranscriptMiddleware(OpenSWEMiddleware):
                 turn_id=turn_id,
             )
         )
-        if human is not None and isinstance(human.id, str):
-            run_state.seen_human_ids.add(human.id)
+        # Every human message already in state belongs to a turn that is over.
+        # Only a message injected after the run started is new, and recording
+        # an older one again would move it into this turn.
+        run_state.seen_human_ids.update(
+            message.id
+            for message in messages
+            if isinstance(message, HumanMessage) and isinstance(message.id, str) and message.id
+        )
         run_state.enqueue(*commands)
 
     async def awrap_model_call(
@@ -634,7 +766,11 @@ class TranscriptMiddleware(OpenSWEMiddleware):
             response = await handler(request)
         except Exception as exc:
             _detach(manager, sniffer)
-            await self._fail_turn(state, exc)
+            # A subagent's model error surfaces to the parent as a failed
+            # ``task`` tool call, which keeps running; only the root settles
+            # the turn.
+            if not namespace:
+                await self._fail_turn(state, exc)
             raise
         _detach(manager, sniffer)
         try:
@@ -653,7 +789,8 @@ class TranscriptMiddleware(OpenSWEMiddleware):
                 continue
             state.seen_human_ids.add(message_id)
             text = _human_text(message)
-            if not text:
+            images, attachments = _human_images(message, message_id)
+            if not text and not images:
                 continue
             state.enqueue(
                 Command(
@@ -666,11 +803,13 @@ class TranscriptMiddleware(OpenSWEMiddleware):
                         role="human",
                         text=text,
                         reasoning="",
+                        images=images or None,
                         created_at=datetime.now(UTC),
                     ),
                     actor_kind="user",
                     run_id=state.run_id,
                     turn_id=state.turn_id,
+                    attachments=attachments,
                 )
             )
 
@@ -737,6 +876,7 @@ class TranscriptMiddleware(OpenSWEMiddleware):
                         role="ai",
                         text=_message_text(message).strip(),
                         reasoning=_reasoning_text(message).strip(),
+                        usage=_usage(message),
                         created_at=datetime.now(UTC),
                     ),
                     actor_kind="agent",

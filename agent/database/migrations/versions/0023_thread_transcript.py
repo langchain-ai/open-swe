@@ -91,6 +91,9 @@ def upgrade() -> None:
         """
     )
 
+    # Serves both the ascending read and the backwards keyset walk a windowed
+    # read pages with: (requested_at, turn_id) < (:before_at, :before_turn)
+    # ordered DESC is this index scanned in reverse.
     op.execute(
         """
         CREATE INDEX thread_turn_thread_idx ON thread_turn (thread_id, requested_at, turn_id)
@@ -100,8 +103,8 @@ def upgrade() -> None:
     op.execute(
         """
         CREATE TABLE thread_message (
-            message_id text PRIMARY KEY,
             thread_id text NOT NULL REFERENCES thread (thread_id) ON DELETE CASCADE,
+            message_id text NOT NULL,
             turn_id uuid NOT NULL,
             version bigint NOT NULL,
             role text NOT NULL CHECK (role IN ('human', 'ai')),
@@ -111,22 +114,27 @@ def upgrade() -> None:
             namespace text[] NOT NULL DEFAULT '{}',
             sender jsonb,
             images jsonb,
-            created_at timestamptz NOT NULL
+            usage jsonb,
+            created_at timestamptz NOT NULL,
+            PRIMARY KEY (thread_id, message_id)
         )
         """
     )
 
+    # A windowed read fetches the messages of one page of turns, so the index
+    # is keyed by turn and then by the order they are returned in.
     op.execute(
         """
-        CREATE INDEX thread_message_thread_idx ON thread_message (thread_id, created_at, message_id)
+        CREATE INDEX thread_message_turn_idx
+        ON thread_message (thread_id, turn_id, created_at, message_id)
         """
     )
 
     op.execute(
         """
         CREATE TABLE thread_tool_call (
-            tool_call_id text PRIMARY KEY,
             thread_id text NOT NULL REFERENCES thread (thread_id) ON DELETE CASCADE,
+            tool_call_id text NOT NULL,
             turn_id uuid NOT NULL,
             message_id text,
             version bigint NOT NULL,
@@ -138,14 +146,50 @@ def upgrade() -> None:
             output_truncated boolean NOT NULL DEFAULT false,
             namespace text[] NOT NULL DEFAULT '{}',
             started_at timestamptz NOT NULL,
-            ended_at timestamptz
+            ended_at timestamptz,
+            PRIMARY KEY (thread_id, tool_call_id)
         )
         """
     )
 
     op.execute(
         """
-        CREATE INDEX thread_tool_call_thread_idx ON thread_tool_call (thread_id, started_at, tool_call_id)
+        CREATE INDEX thread_tool_call_turn_idx
+        ON thread_tool_call (thread_id, turn_id, started_at, tool_call_id)
+        """
+    )
+
+    # The snapshot serves the newest notice per kind for the newest turn, which
+    # is a backwards scan over this index rather than over the whole log.
+    op.execute(
+        """
+        CREATE INDEX thread_event_notice_idx
+        ON thread_event (thread_id, turn_id, version DESC)
+        WHERE event_type = 'run.notice'
+        """
+    )
+
+    # Attachment bytes live outside ``thread_event`` so the log a subscriber
+    # replays stays small; an event carries the ``attachment_id`` only.
+    op.execute(
+        """
+        CREATE TABLE thread_attachment (
+            attachment_id uuid PRIMARY KEY,
+            thread_id text NOT NULL REFERENCES thread (thread_id) ON DELETE CASCADE,
+            message_id text NOT NULL,
+            position int NOT NULL,
+            mime_type text NOT NULL,
+            file_name text,
+            data bytea NOT NULL,
+            created_at timestamptz NOT NULL DEFAULT clock_timestamp()
+        )
+        """
+    )
+
+    op.execute(
+        """
+        CREATE INDEX thread_attachment_message_idx
+        ON thread_attachment (thread_id, message_id, position)
         """
     )
 

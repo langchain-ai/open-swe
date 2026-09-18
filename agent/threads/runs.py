@@ -54,7 +54,8 @@ from agent.threads.summary import (
     repo_config_from_metadata,
     thread_source,
 )
-from agent.transcript.engine import Command, append, has_transcript
+from agent.transcript.attachments import PendingAttachment
+from agent.transcript.engine import Command, append, has_message, has_transcript
 from agent.transcript.events import MessageImage, MessageSender, ThreadCreated, TurnRequested
 from agent.utils.dashboard_handoff import DASHBOARD_HANDOFF_BODY
 from agent.utils.json_types import JsonObject, as_thread_dict, thread_metadata
@@ -459,6 +460,38 @@ def _dashboard_images_from_content(content: Any) -> list[DashboardImageBody]:
     return images
 
 
+def _transcript_attachments(
+    images: list[DashboardImageBody], message_id: str
+) -> tuple[list[MessageImage], tuple[PendingAttachment, ...]]:
+    """Attachment rows for a command's images, and the metadata the event carries.
+
+    ``_decode_dashboard_image`` re-applies the type allowlist and the 10MB cap
+    the run already validated, so nothing reaches the database unchecked.
+    """
+    metadata: list[MessageImage] = []
+    attachments: list[PendingAttachment] = []
+    for position, image in enumerate(images):
+        attachment_id = uuid.uuid7()
+        attachments.append(
+            PendingAttachment(
+                attachment_id=attachment_id,
+                message_id=message_id,
+                position=position,
+                mime_type=image.mime_type,
+                file_name=image.file_name,
+                data=_decode_dashboard_image(image),
+            )
+        )
+        metadata.append(
+            MessageImage(
+                mime_type=image.mime_type,
+                file_name=image.file_name,
+                attachment_id=attachment_id,
+            )
+        )
+    return metadata, tuple(attachments)
+
+
 def _validate_command_images(content: Any, *, model_id: str | None) -> None:
     """Reject images for text-only models / oversize attachments (raises 422)."""
     images = _dashboard_images_from_content(content)
@@ -642,7 +675,11 @@ async def _enrich_run_start_command(
     transcribed = (creating and postgres.configured()) or await has_transcript(thread_id)
     client_message_id = _command_message_id(params)
     message_id: str | None = None
-    if client_message_id and client_message_id not in persisted_message_ids:
+    if (
+        client_message_id
+        and client_message_id not in persisted_message_ids
+        and not (transcribed and await has_message(thread_id, client_message_id))
+    ):
         message_id = client_message_id
     elif transcribed:
         message_id = str(uuid.uuid7())
@@ -704,6 +741,7 @@ async def _enrich_run_start_command(
     if turn_id is not None:
         overrides["transcript_turn_id"] = str(turn_id)
         if message_id is not None and not offload_requested:
+            images, attachments = _transcript_attachments(command_images, message_id)
             await append(
                 thread_id,
                 [
@@ -714,16 +752,14 @@ async def _enrich_run_start_command(
                             message_id=message_id,
                             text=_command_prompt_text(content),
                             sender=MessageSender(login=login, kind=DASHBOARD_SOURCE),
-                            images=[
-                                MessageImage(mime_type=image.mime_type, file_name=image.file_name)
-                                for image in command_images
-                            ],
+                            images=images,
                             model_id=run_model,
                             effort=run_effort,
                             plan_mode=plan_mode_requested,
                         ),
                         actor_kind="user",
                         turn_id=turn_id,
+                        attachments=attachments,
                     )
                 ],
             )

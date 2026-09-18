@@ -10,6 +10,7 @@ canonical text so a fragment that never arrived heals itself.
 
 import json
 from datetime import datetime
+from uuid import UUID
 
 from pydantic import BaseModel
 from sqlalchemy import ARRAY, Text, TextClause, bindparam, text
@@ -172,11 +173,7 @@ async def _turn_requested(
                 :message_id, :thread_id, :turn_id, :version, 'human', :text, '',
                 false, :namespace, CAST(:sender AS jsonb), CAST(:images AS jsonb), :created_at
             )
-            ON CONFLICT (message_id) DO UPDATE SET
-                version = EXCLUDED.version,
-                text = EXCLUDED.text,
-                sender = EXCLUDED.sender,
-                images = EXCLUDED.images
+            ON CONFLICT (thread_id, message_id) DO NOTHING
             """
         ),
         {
@@ -207,6 +204,7 @@ async def _turn_started(
                 state = 'running',
                 run_id = EXCLUDED.run_id,
                 started_at = COALESCE(thread_turn.started_at, EXCLUDED.started_at)
+            WHERE thread_turn.thread_id = EXCLUDED.thread_id
             """
         ),
         {
@@ -246,10 +244,12 @@ async def _turn_completed(
                 base_commit = COALESCE(:base_commit, base_commit),
                 head_commit = COALESCE(:head_commit, head_commit),
                 changed_files = COALESCE(CAST(:changed_files AS jsonb), changed_files)
-            WHERE turn_id = :turn_id
+            WHERE turn_id = :turn_id AND thread_id = :thread_id
+              AND state IN ('requested', 'running')
             """
         ),
         {
+            "thread_id": thread_id,
             "turn_id": event.turn_id,
             "run_id": event.run_id or run_id,
             "completed_at": occurred_at,
@@ -285,10 +285,12 @@ async def _turn_failed(
                 run_id = COALESCE(:run_id, run_id),
                 completed_at = :completed_at,
                 error = :error
-            WHERE turn_id = :turn_id
+            WHERE turn_id = :turn_id AND thread_id = :thread_id
+              AND state IN ('requested', 'running')
             """
         ),
         {
+            "thread_id": thread_id,
             "turn_id": event.turn_id,
             "run_id": event.run_id or run_id,
             "completed_at": occurred_at,
@@ -312,10 +314,12 @@ async def _turn_interrupted(
                 state = 'interrupted',
                 run_id = COALESCE(:run_id, run_id),
                 completed_at = :completed_at
-            WHERE turn_id = :turn_id
+            WHERE turn_id = :turn_id AND thread_id = :thread_id
+              AND state IN ('requested', 'running')
             """
         ),
         {
+            "thread_id": thread_id,
             "turn_id": event.turn_id,
             "run_id": event.run_id or run_id,
             "completed_at": occurred_at,
@@ -337,6 +341,29 @@ async def _settle_thread(conn: AsyncConnection, thread_id: str, *, status: str) 
     )
 
 
+async def _ensure_turn(
+    conn: AsyncConnection, thread_id: str, turn_id: UUID, occurred_at: datetime
+) -> None:
+    """The turn a message or tool call belongs to, materialised if it is missing.
+
+    The turn row is what a windowed read pages over, so a message whose turn
+    was never announced — a run started outside the dashboard, a replay that
+    begins mid-turn — would otherwise be invisible rather than merely
+    unlabelled. ``requested_at`` falls back to the event's own time, which is
+    the same anchor the client's reducer invents for an unseen turn.
+    """
+    await conn.execute(
+        text(
+            """
+            INSERT INTO thread_turn (turn_id, thread_id, state, requested_at)
+            VALUES (:turn_id, :thread_id, 'running', :requested_at)
+            ON CONFLICT (turn_id) DO NOTHING
+            """
+        ),
+        {"turn_id": turn_id, "thread_id": thread_id, "requested_at": occurred_at},
+    )
+
+
 async def _message_appended(
     conn: AsyncConnection,
     thread_id: str,
@@ -344,6 +371,7 @@ async def _message_appended(
     event: MessageAppended,
     occurred_at: datetime,
 ) -> None:
+    await _ensure_turn(conn, thread_id, event.turn_id, occurred_at)
     await conn.execute(
         _with_namespace(
             """
@@ -355,7 +383,7 @@ async def _message_appended(
                 :message_id, :thread_id, :turn_id, :version, 'ai', :text, :reasoning,
                 true, :namespace, :created_at
             )
-            ON CONFLICT (message_id) DO UPDATE SET
+            ON CONFLICT (thread_id, message_id) DO UPDATE SET
                 version = EXCLUDED.version,
                 text = thread_message.text || EXCLUDED.text,
                 reasoning = thread_message.reasoning || EXCLUDED.reasoning,
@@ -378,18 +406,20 @@ async def _message_appended(
 async def _message_completed(
     conn: AsyncConnection, thread_id: str, version: int, event: MessageCompleted
 ) -> None:
+    await _ensure_turn(conn, thread_id, event.turn_id, event.created_at)
     await conn.execute(
         _with_namespace(
             """
             INSERT INTO thread_message (
                 message_id, thread_id, turn_id, version, role, text, reasoning,
-                streaming, namespace, sender, images, created_at
+                streaming, namespace, sender, images, usage, created_at
             )
             VALUES (
                 :message_id, :thread_id, :turn_id, :version, :role, :text, :reasoning,
-                false, :namespace, CAST(:sender AS jsonb), CAST(:images AS jsonb), :created_at
+                false, :namespace, CAST(:sender AS jsonb), CAST(:images AS jsonb),
+                CAST(:usage AS jsonb), :created_at
             )
-            ON CONFLICT (message_id) DO UPDATE SET
+            ON CONFLICT (thread_id, message_id) DO UPDATE SET
                 version = EXCLUDED.version,
                 role = EXCLUDED.role,
                 text = EXCLUDED.text,
@@ -397,7 +427,8 @@ async def _message_completed(
                 streaming = false,
                 namespace = EXCLUDED.namespace,
                 sender = COALESCE(EXCLUDED.sender, thread_message.sender),
-                images = COALESCE(EXCLUDED.images, thread_message.images)
+                images = COALESCE(EXCLUDED.images, thread_message.images),
+                usage = COALESCE(EXCLUDED.usage, thread_message.usage)
             """
         ),
         {
@@ -411,6 +442,7 @@ async def _message_completed(
             "namespace": list(event.namespace),
             "sender": _model_json(event.sender),
             "images": _models_json(event.images),
+            "usage": _model_json(event.usage),
             "created_at": event.created_at,
         },
     )
@@ -423,6 +455,7 @@ async def _tool_started(
     event: ToolStarted,
     occurred_at: datetime,
 ) -> None:
+    await _ensure_turn(conn, thread_id, event.turn_id, occurred_at)
     await conn.execute(
         _with_namespace(
             """
@@ -434,7 +467,7 @@ async def _tool_started(
                 :tool_call_id, :thread_id, :turn_id, :message_id, :version, :name,
                 CAST(:input AS jsonb), 'in_progress', :namespace, :started_at
             )
-            ON CONFLICT (tool_call_id) DO UPDATE SET
+            ON CONFLICT (thread_id, tool_call_id) DO UPDATE SET
                 version = EXCLUDED.version,
                 message_id = COALESCE(EXCLUDED.message_id, thread_tool_call.message_id),
                 name = EXCLUDED.name,

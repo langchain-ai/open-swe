@@ -11,14 +11,18 @@ from agent.transcript.engine import (
     Command,
     ThreadNotTranscribed,
     append,
+    delete_transcript,
     has_transcript,
 )
+from agent.transcript.mirror import mirror_thread_metadata
 
 __all__ = [
     "AppendResult",
     "Command",
     "ThreadNotTranscribed",
     "append",
+    "delete_transcript",
     "has_transcript",
+    "mirror_thread_metadata",
     "rows",
 ]

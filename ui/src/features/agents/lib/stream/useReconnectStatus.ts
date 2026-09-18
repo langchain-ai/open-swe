@@ -1,8 +1,7 @@
 import { useEffect, useState } from "react"
 
-import { useAgentStreamConnection } from "./AgentStreamProvider"
 import { reconnectLabel } from "./reconnectLabel"
-import type { AgentThreadTransport, StreamConnection } from "./streamPool"
+import type { StreamConnection } from "./connection"
 
 export interface ReconnectStatus {
   /** Activity-line text while the stream is down; `null` once it is serving. */
@@ -26,12 +25,4 @@ export function useConnectionStatus(
   }, [connection])
 
   return { label: reconnectLabel(connection, now) }
-}
-
-/** The countdown for a pooled SDK stream. */
-export function useReconnectStatus(
-  transport: AgentThreadTransport,
-  threadId: string | null
-): ReconnectStatus {
-  return useConnectionStatus(useAgentStreamConnection(transport, threadId))
 }

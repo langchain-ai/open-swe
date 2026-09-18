@@ -3,19 +3,20 @@ import { useCallback, useMemo } from "react"
 import { latestContextTokens } from "@/features/agents/lib/contextUsage"
 import { messageArrivalTimestamp } from "@/features/agents/lib/messageTimestamps"
 import { streamMessagesToUi } from "@/features/agents/lib/streamMessagesToUi"
-import { useAgentStream } from "@/features/agents/lib/stream/AgentStreamProvider"
-import { useAgentStreamConnection } from "@/features/agents/lib/stream/AgentStreamProvider"
 import { promptMessage } from "@/features/agents/lib/stream/promptMessage"
+import { useAgentThreadStream } from "@/features/agents/lib/stream/useAgentThreadStream"
 import { runTranscriptBuilt } from "@/lib/perf/streaming"
 import { threadTranscriptBuilt } from "@/lib/perf/threadLoad"
 import { perfNow } from "@/lib/perf/trace"
 import { useCancelRun } from "./useCancelRun"
 import type { StreamThreadSource, ThreadRunInput } from "./types"
 
-/** The existing SDK stream, behind the source interface. */
+/** The SDK stream, behind the source interface. */
 export function useAgentStreamSource(threadId: string): StreamThreadSource {
-  const stream = useAgentStream()
-  const connection = useAgentStreamConnection("cloud", threadId)
+  const { stream, connection } = useAgentThreadStream({
+    transport: "cloud",
+    threadId,
+  })
   const disconnect = useCallback(async () => {
     // `stream.stop()` only cancels server-side when this client dispatched the
     // run, so the cancel endpoint runs first and this only detaches.
@@ -63,6 +64,9 @@ export function useAgentStreamSource(threadId: string): StreamThreadSource {
     [stream.messages]
   )
 
+  // `useStream` hydrates the whole thread in one go; there is no older page.
+  const loadOlder = useCallback(() => {}, [])
+
   return {
     kind: "stream",
     stream,
@@ -78,5 +82,8 @@ export function useAgentStreamSource(threadId: string): StreamThreadSource {
     contextTokens,
     startRun,
     stop,
+    hasOlder: false,
+    isLoadingOlder: false,
+    loadOlder,
   }
 }

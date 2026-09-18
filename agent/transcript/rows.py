@@ -14,7 +14,7 @@ from datetime import datetime
 from uuid import UUID, uuid7
 
 from pydantic import JsonValue
-from sqlalchemy import ARRAY, BigInteger, ForeignKey, SmallInteger, Text, text
+from sqlalchemy import ARRAY, BigInteger, ForeignKey, LargeBinary, SmallInteger, Text, text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -93,8 +93,10 @@ class ThreadTurnRow(Base):
 class ThreadMessageRow(Base):
     __tablename__ = "thread_message"
 
+    thread_id: Mapped[str] = mapped_column(
+        ForeignKey("thread.thread_id", ondelete="CASCADE"), primary_key=True
+    )
     message_id: Mapped[str] = mapped_column(primary_key=True)
-    thread_id: Mapped[str] = mapped_column(ForeignKey("thread.thread_id", ondelete="CASCADE"))
     turn_id: Mapped[UUID]
     version: Mapped[int] = mapped_column(BigInteger)
     role: Mapped[str]
@@ -107,13 +109,16 @@ class ThreadMessageRow(Base):
     )
     sender: Mapped[dict[str, JsonValue] | None] = mapped_column(JSONB, default=None)
     images: Mapped[list[dict[str, JsonValue]] | None] = mapped_column(JSONB, default=None)
+    usage: Mapped[dict[str, JsonValue] | None] = mapped_column(JSONB, default=None)
 
 
 class ThreadToolCallRow(Base):
     __tablename__ = "thread_tool_call"
 
+    thread_id: Mapped[str] = mapped_column(
+        ForeignKey("thread.thread_id", ondelete="CASCADE"), primary_key=True
+    )
     tool_call_id: Mapped[str] = mapped_column(primary_key=True)
-    thread_id: Mapped[str] = mapped_column(ForeignKey("thread.thread_id", ondelete="CASCADE"))
     turn_id: Mapped[UUID]
     version: Mapped[int] = mapped_column(BigInteger)
     name: Mapped[str]
@@ -128,3 +133,16 @@ class ThreadToolCallRow(Base):
         ARRAY(Text), server_default=_EMPTY_ARRAY, default_factory=list
     )
     ended_at: Mapped[datetime | None] = mapped_column(default=None)
+
+
+class ThreadAttachmentRow(Base):
+    __tablename__ = "thread_attachment"
+
+    attachment_id: Mapped[UUID] = mapped_column(primary_key=True)
+    thread_id: Mapped[str] = mapped_column(ForeignKey("thread.thread_id", ondelete="CASCADE"))
+    message_id: Mapped[str]
+    position: Mapped[int]
+    mime_type: Mapped[str]
+    data: Mapped[bytes] = mapped_column(LargeBinary)
+    file_name: Mapped[str | None] = mapped_column(default=None)
+    created_at: Mapped[datetime | None] = mapped_column(server_default=NOW, init=False)

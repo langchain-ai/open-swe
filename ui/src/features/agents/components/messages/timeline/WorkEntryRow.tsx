@@ -96,6 +96,24 @@ function StatusIndicator({ status }: { status: WorkEntryView["status"] }) {
   )
 }
 
+/** What the row learned by expanding, for a body that renders output itself. */
+export interface WorkEntryBodyDetail {
+  /** The call's full output, once the lazy fetch returned it. */
+  loadedText: string | null
+  /** Why that fetch failed, when it did. */
+  loadError: string | null
+}
+
+/**
+ * A custom expanded body: either fixed content, or a function that also gets
+ * the output fetched on expand — a body that renders the output itself has to
+ * be handed it, or the row's own fallback would be the only thing that ever
+ * showed more than the snapshot's preview.
+ */
+export type WorkEntryBody =
+  | ReactNode
+  | ((detail: WorkEntryBodyDetail) => ReactNode)
+
 /**
  * One line in the agent's work log: icon, heading, dimmed argument, status.
  * Expanding reveals `body` when a tool has a richer renderer (a diff, terminal
@@ -111,7 +129,7 @@ export function WorkEntryRow({
 }: {
   entry: WorkEntryView
   timestamp?: string
-  body?: ReactNode
+  body?: WorkEntryBody
   trailing?: ReactNode
   /** Clicking the row runs this instead of expanding it (e.g. reveal a file). */
   onActivate?: () => void
@@ -284,14 +302,16 @@ export function WorkEntryRow({
           onClick={stopRowToggle}
           onPointerDown={stopRowToggle}
         >
-          {body ??
-            (detailText != null ? (
-              <ToolResultBody value={detailText} />
-            ) : (
-              <p className="text-[12px] text-muted-foreground">
-                {loadError ?? "Loading output…"}
-              </p>
-            ))}
+          {typeof body === "function"
+            ? body({ loadedText, loadError })
+            : (body ??
+              (detailText != null ? (
+                <ToolResultBody value={detailText} />
+              ) : (
+                <p className="text-[12px] text-muted-foreground">
+                  {loadError ?? "Loading output…"}
+                </p>
+              )))}
         </div>
       )}
     </div>

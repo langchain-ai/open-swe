@@ -1,7 +1,7 @@
 import type {
   AgentStream,
   StreamConnection,
-} from "@/features/agents/lib/stream/streamPool"
+} from "@/features/agents/lib/stream/connection"
 import type { SubagentToolCall } from "@/features/agents/lib/transcript/reducer"
 import type { ImageChunk, Message } from "@/features/agents/lib/types"
 
@@ -41,6 +41,15 @@ interface ThreadSourceShared {
   startRun: (input: ThreadRunInput) => Promise<void>
   /** Cancel the live run. Resolves once the attempt settled, either way. */
   stop: () => Promise<void>
+  /**
+   * The thread has turns older than the window that is loaded. Sources that
+   * always hold the whole thread report false and a `loadOlder` that does
+   * nothing, so a reader never has to branch on `kind`.
+   */
+  hasOlder: boolean
+  isLoadingOlder: boolean
+  /** Load the next page of older turns. A no-op while one is in flight. */
+  loadOlder: () => void
 }
 
 /** The thread is served by the SDK's `useStream`. */

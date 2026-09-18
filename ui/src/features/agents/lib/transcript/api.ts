@@ -11,10 +11,12 @@ import { dashboardApiUrl } from "@/lib/dashboard-fetch"
 import { withRequestTiming } from "@/lib/perf/fetchTiming"
 import type { ImageChunk } from "@/features/agents/lib/types"
 import type {
+  DeletedFrame,
   StoredEvent,
   SynchronizedFrame,
   ToolOutputResponse,
   TranscriptSnapshot,
+  TranscriptTurnPage,
 } from "./types"
 
 const timedFetch = withRequestTiming((input, init) => fetch(input, init))
@@ -23,10 +25,11 @@ function transcriptPath(threadId: string, suffix = ""): string {
   return `/threads/${encodeURIComponent(threadId)}/transcript${suffix}`
 }
 
-async function readJson<T>(path: string): Promise<T> {
+async function readJson<T>(path: string, signal?: AbortSignal): Promise<T> {
   const response = await timedFetch(dashboardApiUrl(path), {
     credentials: "include",
     headers: { Accept: "application/json" },
+    ...(signal ? { signal } : {}),
   })
   if (!response.ok) throw await apiError(response)
   return (await response.json()) as T
@@ -53,6 +56,22 @@ export function fetchTranscript(threadId: string): Promise<TranscriptSnapshot> {
   return readJson<TranscriptSnapshot>(transcriptPath(threadId))
 }
 
+/**
+ * The page of turns immediately older than `cursor`. The cursor is opaque and
+ * thread-scoped: the server rejects one minted for another thread rather than
+ * serving a first page that would duplicate history.
+ */
+export function fetchOlderTurns(
+  threadId: string,
+  cursor: string,
+  signal?: AbortSignal
+): Promise<TranscriptTurnPage> {
+  return readJson<TranscriptTurnPage>(
+    transcriptPath(threadId, `/turns?before=${encodeURIComponent(cursor)}`),
+    signal
+  )
+}
+
 /** Full output for one tool call. The snapshot carries only a preview. */
 export function fetchToolOutput(
   threadId: string,
@@ -66,12 +85,32 @@ export function fetchToolOutput(
   )
 }
 
+/** Where one image attachment's bytes are served from. */
+export function attachmentUrl(threadId: string, attachmentId: string): string {
+  return dashboardApiUrl(
+    transcriptPath(threadId, `/attachments/${encodeURIComponent(attachmentId)}`)
+  )
+}
+
+/**
+ * The bytes behind a dashboard image URL, fetched with the session cookie. An
+ * `<img src>` would carry it only same-origin (a split deployment's images are
+ * a third-party request), so the caller shows the blob instead.
+ */
+export async function fetchImageBlob(url: string): Promise<Blob> {
+  const response = await timedFetch(url, { credentials: "include" })
+  if (!response.ok) throw await apiError(response)
+  return await response.blob()
+}
+
 export interface TranscriptEventHandlers {
   onEvent: (event: StoredEvent) => void
   /** The replay gap was too large to send event by event; reset to this. */
   onSnapshot: (snapshot: TranscriptSnapshot) => void
   /** Replay finished and the connection is now live. */
   onSynchronized: (frame: SynchronizedFrame) => void
+  /** The thread is gone. The server ends the stream; do not reopen it. */
+  onDeleted: (frame: DeletedFrame) => void
   onOpen?: () => void
   /** The connection dropped or a frame was unreadable. Reopening is the caller's call. */
   onError: (error: unknown) => void
@@ -121,6 +160,14 @@ export function openTranscriptEvents(
   )
   source.addEventListener("synchronized", (event) =>
     parse<SynchronizedFrame>(event, handlers.onSynchronized)
+  )
+  source.addEventListener("deleted", (event) =>
+    parse<DeletedFrame>(event, (frame) => {
+      // The stream ends here, and `EventSource` would treat that end as a drop
+      // worth retrying, so it is closed before the handler can ask for more.
+      close()
+      handlers.onDeleted(frame)
+    })
   )
   source.addEventListener("open", () => {
     if (!closed) handlers.onOpen?.()
@@ -196,6 +243,14 @@ export function runStartCommand({
 
 export interface RunStartResult {
   runId: string | null
+  /** Set when this command created the thread and the event log serves it. */
+  transcript: "v2" | null
+}
+
+const TRANSCRIPT_HEADER = "X-Open-SWE-Transcript"
+
+function transcriptOf(response: Response): "v2" | null {
+  return response.headers.get(TRANSCRIPT_HEADER) === "v2" ? "v2" : null
 }
 
 interface ProtocolSuccess {
@@ -244,7 +299,9 @@ export async function startRun(
     }
   )
   if (!response.ok) throw await apiError(response)
-  if (response.status === 202 || response.status === 204) return { runId: null }
+  const transcript = transcriptOf(response)
+  if (response.status === 202 || response.status === 204)
+    return { runId: null, transcript }
   const payload: unknown = await response.json().catch(() => null)
   if (isProtocolFailure(payload)) {
     throw new AgentsApiError(
@@ -252,5 +309,5 @@ export async function startRun(
       payload.message ?? payload.error ?? "run.start failed"
     )
   }
-  return { runId: runIdOf(payload) }
+  return { runId: runIdOf(payload), transcript }
 }

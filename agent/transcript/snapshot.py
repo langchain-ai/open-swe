@@ -1,8 +1,9 @@
 """The read model: one snapshot of a thread, and the log reads a subscriber needs.
 
 Everything here reads the projections rather than folding the log, and the whole
-snapshot comes out of a single ``read_only_transaction`` so the turns, messages
-and tool calls a client reduces are all consistent with ``version``. LangGraph
+snapshot comes out of a single ``snapshot_transaction`` — REPEATABLE READ, so
+every statement sees one database snapshot and the turns, messages and tool
+calls a client reduces are all consistent with ``version``. LangGraph
 is never consulted: ``thread.metadata`` mirrors its thread metadata precisely so
 the read path can authorize a caller on its own.
 """
@@ -12,10 +13,11 @@ from datetime import datetime
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, JsonValue
-from sqlalchemy import text
+from sqlalchemy import ARRAY, DateTime, Uuid, bindparam, text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from agent.database import postgres
+from agent.transcript.cursor import TurnPageCursor, encode_turn_cursor
 from agent.transcript.events import (
     JsonObject,
     MessageRole,
@@ -28,6 +30,19 @@ MAX_REPLAY_EVENTS = 1000
 """Replaying more events than this is slower than sending a fresh snapshot."""
 
 MAX_REPLAY_BYTES = 8 * 1024 * 1024
+
+TURN_PAGE_SIZE = 40
+"""Turns in one window.
+
+Measured against our own threads: a turn is one user request and the agent's
+answer, and the overwhelming majority of threads never reach forty of them, so
+the default window is the whole conversation for almost every reader while the
+long tail — a scheduled thread that has been answering for weeks — stops
+costing a megabyte of tool-call previews on first paint.
+"""
+
+MAX_TURN_PAGE_SIZE = 200
+"""A client may ask for a larger page, but not for the whole log at once."""
 
 
 class ThreadView(BaseModel):
@@ -66,6 +81,7 @@ class MessageView(BaseModel):
     namespace: list[str]
     sender: JsonObject | None
     images: list[JsonValue] | None
+    usage: JsonObject | None
     created_at: datetime
 
 
@@ -95,6 +111,14 @@ class NoticeView(BaseModel):
 
 
 class TranscriptSnapshot(BaseModel):
+    """The newest window of a thread, as of ``version``.
+
+    ``version`` is the head of the log at read time whatever the window holds:
+    live events only ever concern the newest turn or the thread row, so a
+    subscription resumed with ``after=version`` stays correct for a windowed
+    read. ``older_cursor`` is ``None`` once the window reaches the first turn.
+    """
+
     model_config = ConfigDict(extra="forbid")
 
     thread_id: str
@@ -104,6 +128,23 @@ class TranscriptSnapshot(BaseModel):
     messages: list[MessageView]
     tool_calls: list[ToolCallView]
     notices: list[NoticeView]
+    older_cursor: str | None
+
+
+class TranscriptTurnPage(BaseModel):
+    """One page of turns strictly older than the cursor that asked for it.
+
+    No notices and no thread row: both describe the newest turn, which an older
+    page by definition does not hold.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    thread_id: str
+    turns: list[TurnView]
+    messages: list[MessageView]
+    tool_calls: list[ToolCallView]
+    older_cursor: str | None
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -117,15 +158,24 @@ class TranscriptAccess:
 
 @dataclass(frozen=True, kw_only=True)
 class ReplayGap:
-    """The distance between a subscriber's cursor and the head of the log."""
+    """The distance between a subscriber's cursor and the head of the log.
 
-    head: int
+    ``head`` is ``None`` for a thread with no transcript — deleted, or never
+    transcribed — which a subscriber has to be told about rather than waiting
+    out in silence.
+    """
+
+    head: int | None
     events: int
     payload_bytes: int
 
+    @property
+    def missing(self) -> bool:
+        return self.head is None
+
     def needs_snapshot(self, after: int) -> bool:
         return (
-            after > self.head
+            after > (self.head or 0)
             or self.events > MAX_REPLAY_EVENTS
             or self.payload_bytes > MAX_REPLAY_BYTES
         )
@@ -139,7 +189,7 @@ class ToolOutput:
 
 async def load_access(thread_id: str) -> TranscriptAccess | None:
     """The thread's mirrored metadata and head version, or ``None`` when untranscribed."""
-    async with postgres.read_only_transaction() as conn:
+    async with postgres.snapshot_transaction() as conn:
         return await _load_access(conn, thread_id)
 
 
@@ -158,9 +208,130 @@ async def _load_access(conn: AsyncConnection, thread_id: str) -> TranscriptAcces
     )
 
 
-async def load_snapshot(thread_id: str) -> TranscriptSnapshot | None:
-    """Everything needed to render the thread, as of one consistent read."""
-    async with postgres.read_only_transaction() as conn:
+_TURN_COLUMNS = """
+    turn_id, run_id, state, requested_at, started_at, completed_at, error, head_commit
+"""
+
+_MESSAGE_COLUMNS = """
+    message_id, turn_id, role, text, reasoning, streaming, namespace,
+    sender, images, usage, created_at
+"""
+
+_TOOL_CALL_COLUMNS = """
+    tool_call_id, turn_id, message_id, name, input, status,
+    output_preview, output_truncated, output IS NOT NULL AS has_output,
+    namespace, started_at, ended_at
+"""
+
+
+def _page_size(limit: int | None) -> int:
+    return max(1, min(limit or TURN_PAGE_SIZE, MAX_TURN_PAGE_SIZE))
+
+
+async def _load_turns(
+    conn: AsyncConnection,
+    thread_id: str,
+    *,
+    before: TurnPageCursor | None,
+    limit: int,
+) -> tuple[list[TurnView], str | None]:
+    """The newest ``limit`` turns before the cursor, oldest first, and the next cursor.
+
+    The scan walks ``(thread_id, requested_at, turn_id)`` backwards and reads
+    one row past the page, which is what says whether an older page exists
+    without a second query. The page is reversed on the way out so callers see
+    the same ``(requested_at, turn_id)`` order the unwindowed read produced.
+    """
+    bound = "" if before is None else " AND (requested_at, turn_id) < (:before_at, :before_turn)"
+    statement = text(
+        f"""
+        SELECT {_TURN_COLUMNS}
+        FROM thread_turn
+        WHERE thread_id = :thread_id{bound}
+        ORDER BY requested_at DESC, turn_id DESC
+        LIMIT :limit
+        """
+    )
+    parameters: dict[str, object] = {"thread_id": thread_id, "limit": limit + 1}
+    if before is not None:
+        statement = statement.bindparams(
+            bindparam("before_at", type_=DateTime(timezone=True)),
+            bindparam("before_turn", type_=Uuid),
+        )
+        parameters["before_at"] = before.before_requested_at
+        parameters["before_turn"] = before.before_turn_id
+    rows = (await conn.execute(statement, parameters)).mappings().all()
+    turns = [TurnView.model_validate(dict(row)) for row in reversed(rows[:limit])]
+    if len(rows) <= limit or not turns:
+        return turns, None
+    oldest = turns[0]
+    return turns, encode_turn_cursor(
+        TurnPageCursor(
+            thread_id=thread_id,
+            before_requested_at=oldest.requested_at,
+            before_turn_id=oldest.turn_id,
+        )
+    )
+
+
+async def _load_turn_contents(
+    conn: AsyncConnection,
+    thread_id: str,
+    turn_ids: list[UUID],
+) -> tuple[list[MessageView], list[ToolCallView]]:
+    """Every message and tool call belonging to the turns of one page."""
+    if not turn_ids:
+        return [], []
+    parameters = {"thread_id": thread_id, "turn_ids": turn_ids}
+    messages = (
+        (
+            await conn.execute(
+                text(
+                    f"""
+                    SELECT {_MESSAGE_COLUMNS}
+                    FROM thread_message
+                    WHERE thread_id = :thread_id AND turn_id = ANY(:turn_ids)
+                    ORDER BY created_at, message_id
+                    """
+                ).bindparams(bindparam("turn_ids", type_=ARRAY(Uuid))),
+                parameters,
+            )
+        )
+        .mappings()
+        .all()
+    )
+    tool_calls = (
+        (
+            await conn.execute(
+                text(
+                    f"""
+                    SELECT {_TOOL_CALL_COLUMNS}
+                    FROM thread_tool_call
+                    WHERE thread_id = :thread_id AND turn_id = ANY(:turn_ids)
+                    ORDER BY started_at, tool_call_id
+                    """
+                ).bindparams(bindparam("turn_ids", type_=ARRAY(Uuid))),
+                parameters,
+            )
+        )
+        .mappings()
+        .all()
+    )
+    return (
+        [MessageView.model_validate(dict(message)) for message in messages],
+        [ToolCallView.model_validate(dict(call)) for call in tool_calls],
+    )
+
+
+async def load_snapshot(thread_id: str, *, limit: int | None = None) -> TranscriptSnapshot | None:
+    """The newest window of the thread, as of one consistent read.
+
+    Older turns are reached through ``older_cursor`` and
+    :func:`load_turn_page`; they are settled and immutable, so a client that
+    already holds them keeps them rather than refetching.
+    """
+    page_size = _page_size(limit)
+    async with postgres.snapshot_transaction() as conn:
         thread = (
             (
                 await conn.execute(
@@ -179,75 +350,37 @@ async def load_snapshot(thread_id: str) -> TranscriptSnapshot | None:
         )
         if thread is None:
             return None
-        turns = (
-            (
-                await conn.execute(
-                    text(
-                        """
-                    SELECT turn_id, run_id, state, requested_at, started_at, completed_at,
-                           error, head_commit
-                    FROM thread_turn WHERE thread_id = :thread_id
-                    ORDER BY requested_at, turn_id
-                    """
-                    ),
-                    {"thread_id": thread_id},
-                )
-            )
-            .mappings()
-            .all()
-        )
-        messages = (
-            (
-                await conn.execute(
-                    text(
-                        """
-                    SELECT message_id, turn_id, role, text, reasoning, streaming, namespace,
-                           sender, images, created_at
-                    FROM thread_message WHERE thread_id = :thread_id
-                    ORDER BY created_at, message_id
-                    """
-                    ),
-                    {"thread_id": thread_id},
-                )
-            )
-            .mappings()
-            .all()
-        )
-        tool_calls = (
-            (
-                await conn.execute(
-                    text(
-                        """
-                    SELECT tool_call_id, turn_id, message_id, name, input, status,
-                           output_preview, output_truncated, output IS NOT NULL AS has_output,
-                           namespace, started_at, ended_at
-                    FROM thread_tool_call WHERE thread_id = :thread_id
-                    ORDER BY started_at, tool_call_id
-                    """
-                    ),
-                    {"thread_id": thread_id},
-                )
-            )
-            .mappings()
-            .all()
+        turns, older_cursor = await _load_turns(conn, thread_id, before=None, limit=page_size)
+        messages, tool_calls = await _load_turn_contents(
+            conn, thread_id, [turn.turn_id for turn in turns]
         )
         notices = (
             (
                 await conn.execute(
                     text(
                         """
-                    SELECT DISTINCT ON (payload ->> 'kind')
-                           turn_id, payload ->> 'kind' AS kind, payload -> 'data' AS data
-                    FROM thread_event
-                    WHERE thread_id = :thread_id
-                      AND event_type = 'run.notice'
-                      AND turn_id = (
-                          SELECT turn_id FROM thread_turn
-                          WHERE thread_id = :thread_id AND state IN ('requested', 'running')
-                          ORDER BY requested_at DESC, turn_id DESC
-                          LIMIT 1
+                    WITH newest_turn AS (
+                        SELECT turn_id, state FROM thread_turn
+                        WHERE thread_id = :thread_id
+                        ORDER BY requested_at DESC, turn_id DESC
+                        LIMIT 1
+                    )
+                    SELECT DISTINCT ON (event.payload ->> 'kind')
+                           event.turn_id,
+                           event.payload ->> 'kind' AS kind,
+                           event.payload -> 'data' AS data
+                    FROM thread_event AS event
+                    JOIN newest_turn ON newest_turn.turn_id = event.turn_id
+                    WHERE event.thread_id = :thread_id
+                      AND event.event_type = 'run.notice'
+                      -- Offloading describes what a run is doing right now, so
+                      -- it dies with its turn; routing and limits describe how
+                      -- the turn was executed and outlive it.
+                      AND (
+                          event.payload ->> 'kind' <> 'conversation_offloading'
+                          OR newest_turn.state IN ('requested', 'running')
                       )
-                    ORDER BY payload ->> 'kind', version DESC
+                    ORDER BY event.payload ->> 'kind', event.version DESC
                     """
                     ),
                     {"thread_id": thread_id},
@@ -267,16 +400,41 @@ async def load_snapshot(thread_id: str) -> TranscriptSnapshot | None:
             created_at=thread["created_at"],
             updated_at=thread["updated_at"],
         ),
-        turns=[TurnView.model_validate(dict(turn)) for turn in turns],
-        messages=[MessageView.model_validate(dict(message)) for message in messages],
-        tool_calls=[ToolCallView.model_validate(dict(call)) for call in tool_calls],
+        turns=turns,
+        messages=messages,
+        tool_calls=tool_calls,
         notices=[NoticeView.model_validate(dict(notice)) for notice in notices],
+        older_cursor=older_cursor,
+    )
+
+
+async def load_turn_page(
+    thread_id: str, *, before: TurnPageCursor, limit: int | None = None
+) -> TranscriptTurnPage:
+    """The page of turns immediately older than ``before``.
+
+    Disjoint from and adjacent to the page the cursor came from: the bound is
+    exclusive and the ordering is the snapshot's, so paging the whole way back
+    visits every turn exactly once.
+    """
+    page_size = _page_size(limit)
+    async with postgres.snapshot_transaction() as conn:
+        turns, older_cursor = await _load_turns(conn, thread_id, before=before, limit=page_size)
+        messages, tool_calls = await _load_turn_contents(
+            conn, thread_id, [turn.turn_id for turn in turns]
+        )
+    return TranscriptTurnPage(
+        thread_id=thread_id,
+        turns=turns,
+        messages=messages,
+        tool_calls=tool_calls,
+        older_cursor=older_cursor,
     )
 
 
 async def measure_gap(thread_id: str, after: int) -> ReplayGap:
     """How much log stands between ``after`` and the head, in events and in bytes."""
-    async with postgres.read_only_transaction() as conn:
+    async with postgres.snapshot_transaction() as conn:
         row = (
             (
                 await conn.execute(
@@ -297,7 +455,7 @@ async def measure_gap(thread_id: str, after: int) -> ReplayGap:
             .one()
         )
     return ReplayGap(
-        head=row["head"] or 0,
+        head=row["head"],
         events=row["events"],
         payload_bytes=row["payload_bytes"],
     )
@@ -305,7 +463,7 @@ async def measure_gap(thread_id: str, after: int) -> ReplayGap:
 
 async def load_events(thread_id: str, *, after: int, limit: int) -> list[StoredEvent]:
     """Stored events with ``version > after``, oldest first."""
-    async with postgres.read_only_transaction() as conn:
+    async with postgres.snapshot_transaction() as conn:
         rows = (
             (
                 await conn.execute(
@@ -329,7 +487,7 @@ async def load_events(thread_id: str, *, after: int, limit: int) -> list[StoredE
 
 
 async def load_tool_output(thread_id: str, tool_call_id: str) -> ToolOutput | None:
-    async with postgres.read_only_transaction() as conn:
+    async with postgres.snapshot_transaction() as conn:
         row = (
             (
                 await conn.execute(

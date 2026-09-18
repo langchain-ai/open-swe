@@ -12,17 +12,25 @@ missing in-process publish only ever costs latency.
 """
 
 import asyncio
+import contextlib
 import logging
 from collections.abc import AsyncGenerator
 
 import asyncpg
-from sqlalchemy import make_url
+from sqlalchemy import ARRAY, Text, bindparam, make_url, text
 
 from agent.database import postgres
 
 logger = logging.getLogger(__name__)
 
 CHANNEL = "open_swe_thread_events"
+
+DELETED = "deleted"
+"""Notification payload suffix for a thread whose transcript was deleted."""
+
+DELETED_VERSION = -1
+"""The version a subscriber receives when the thread it follows is deleted."""
+
 _QUEUE_LIMIT = 256
 _RECONNECT_DELAY_SECONDS = 0.5
 _MAX_RECONNECT_DELAY_SECONDS = 30.0
@@ -58,11 +66,21 @@ def subscribe(thread_id: str) -> AsyncGenerator[int]:
 
 
 def publish(thread_id: str, version: int) -> None:
-    """Hand ``version`` to this process's subscribers for ``thread_id``."""
+    """Hand ``version`` to this process's subscribers for ``thread_id``.
+
+    ``DELETED_VERSION`` is the one value a subscriber must not miss, so a full
+    queue is drained of a slot for it rather than dropping it.
+    """
     for queue in tuple(_SUBSCRIBERS.get(thread_id, ())):
         try:
             queue.put_nowait(version)
         except asyncio.QueueFull:
+            if version == DELETED_VERSION:
+                with contextlib.suppress(asyncio.QueueEmpty):
+                    queue.get_nowait()
+                with contextlib.suppress(asyncio.QueueFull):
+                    queue.put_nowait(version)
+                continue
             # The subscriber is behind; it reads rows by version, so the next
             # notification it does receive carries it past everything it missed.
             logger.warning(
@@ -114,6 +132,9 @@ def _on_notify(
     _connection: object, _pid: int, _channel: str, payload: str
 ) -> None:  # pragma: no cover - driven by Postgres
     thread_id, _, version = payload.rpartition(":")
+    if thread_id and version == DELETED:
+        publish(thread_id, DELETED_VERSION)
+        return
     if not thread_id or not version.isdigit():
         logger.warning(
             "Ignored an unreadable transcript notification",
@@ -121,6 +142,28 @@ def _on_notify(
         )
         return
     publish(thread_id, int(version))
+
+
+async def _resync_subscribers() -> None:
+    """Publish each subscribed thread's head after a gap in the notifications.
+
+    While the listener was disconnected, an append in another process notified
+    nobody here. A subscriber reads rows by version, so handing it the current
+    head is enough to carry it past everything it missed.
+    """
+    thread_ids = tuple(_SUBSCRIBERS)
+    if not thread_ids:
+        return
+    async with postgres.read_only_transaction() as conn:
+        rows = await conn.execute(
+            text(
+                "SELECT thread_id, version FROM thread WHERE thread_id = ANY(:thread_ids)"
+            ).bindparams(bindparam("thread_ids", type_=ARRAY(Text))),
+            {"thread_ids": list(thread_ids)},
+        )
+        heads = [(row.thread_id, row.version) for row in rows]
+    for thread_id, version in heads:
+        publish(thread_id, version)
 
 
 async def _listen_forever() -> None:
@@ -132,6 +175,12 @@ async def _listen_forever() -> None:
             await connection.add_listener(CHANNEL, _on_notify)
             delay = _RECONNECT_DELAY_SECONDS
             logger.info("Transcript listener connected", extra={"transcript_channel": CHANNEL})
+            try:
+                await _resync_subscribers()
+            except Exception:  # noqa: BLE001
+                # A failed catch-up costs a live reader its latency, not its
+                # correctness, and must not tear down a healthy listener.
+                logger.warning("Could not resync transcript subscribers", exc_info=True)
             while not _STOP.is_set() and not connection.is_closed():
                 try:
                     await asyncio.wait_for(_STOP.wait(), timeout=_HEALTH_CHECK_SECONDS)

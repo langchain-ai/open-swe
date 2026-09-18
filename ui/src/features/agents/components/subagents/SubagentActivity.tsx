@@ -3,7 +3,7 @@ import { Check, Loader2, X } from "lucide-react"
 
 import { humanizeToolName } from "@/features/agents/lib/toolNames"
 import { useThreadSource } from "@/features/agents/lib/threadSource/ThreadSourceProvider"
-import type { AgentStream } from "@/features/agents/lib/stream/streamPool"
+import type { AgentStream } from "@/features/agents/lib/stream/connection"
 
 type ActivityStatus = "in_progress" | "completed" | "error"
 

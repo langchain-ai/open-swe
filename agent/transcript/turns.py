@@ -20,6 +20,7 @@ from agent.transcript.events import TurnCompleted, TurnFailed, TurnInterrupted
 logger = logging.getLogger(__name__)
 
 type TurnOutcome = Literal["completed", "failed", "interrupted"]
+_OPEN_STATES = frozenset({"requested", "running"})
 
 
 async def settle_run_turn(
@@ -73,25 +74,39 @@ async def settle_run_turn(
 
 
 async def _open_turn(thread_id: str, run_id: str | None) -> UUID | None:
-    """The turn this run is still executing, preferring an exact ``run_id`` match.
+    """The turn this run is still executing.
 
-    A turn whose ``turn.started`` never landed has no ``run_id`` yet, so the
-    newest open turn on the thread is the fallback rather than nothing at all.
+    With a ``run_id``, the turn that reported it wins, and once that turn is
+    closed there is nothing to settle: a run must never close the next turn
+    that is still waiting to start. Only a run that never reported
+    ``turn.started`` falls back to the newest open turn without a run, and a
+    settlement with no ``run_id`` (a whole-thread cancel) takes the newest open
+    turn regardless.
     """
     async with postgres.read_only_transaction() as conn:
+        if run_id is not None:
+            owned = await conn.execute(
+                text(
+                    """
+                    SELECT turn_id, state FROM thread_turn
+                    WHERE thread_id = :thread_id AND run_id = :run_id
+                    ORDER BY requested_at DESC, turn_id DESC
+                    LIMIT 1
+                    """
+                ),
+                {"thread_id": thread_id, "run_id": run_id},
+            )
+            row = owned.mappings().one_or_none()
+            if row is not None:
+                return row["turn_id"] if row["state"] in _OPEN_STATES else None
         result = await conn.execute(
             text(
                 """
                 SELECT turn_id FROM thread_turn
                 WHERE thread_id = :thread_id
                   AND state IN ('requested', 'running')
-                  AND (
-                      CAST(:run_id AS text) IS NULL
-                      OR run_id IS NULL
-                      OR run_id = CAST(:run_id AS text)
-                  )
-                ORDER BY (run_id IS NOT NULL AND run_id = CAST(:run_id AS text)) DESC,
-                         requested_at DESC, turn_id DESC
+                  AND (CAST(:run_id AS text) IS NULL OR run_id IS NULL)
+                ORDER BY requested_at DESC, turn_id DESC
                 LIMIT 1
                 """
             ),

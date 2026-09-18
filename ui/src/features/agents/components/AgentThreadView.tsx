@@ -387,6 +387,9 @@ export function AgentThreadView({
                     </div>
                   }
                   onOpenFile={handleOpenFile}
+                  hasOlder={source.hasOlder}
+                  isLoadingOlder={source.isLoadingOlder}
+                  onLoadOlder={source.loadOlder}
                   queuedMessages={queuedMessages}
                   isStreaming={isStreaming}
                   streamIsLoading={source.isRunning}

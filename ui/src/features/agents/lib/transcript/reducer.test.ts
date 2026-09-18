@@ -1,18 +1,34 @@
 import { describe, expect, it, vi } from "vitest"
 
-import { applyEvent, fromSnapshot, toMessages } from "./reducer"
+import {
+  applyEvent,
+  applySnapshot,
+  fromSnapshot,
+  isOffloading,
+  prependTurns,
+  routedNotice,
+  toMessages,
+} from "./reducer"
 import type { Message, ToolExecutionChunk } from "@/features/agents/lib/types"
+import type { AnyImageChunk } from "@/features/agents/lib/types"
 import type {
+  MessageCompletedPayload,
+  RunNoticePayload,
   StoredEvent,
+  TranscriptImage,
   TranscriptMessageRow,
   TranscriptSnapshot,
   TranscriptToolCallRow,
+  TranscriptTurnPage,
   TranscriptTurnRow,
 } from "./types"
 
 // The reducer only reaches the network to lazily load a tool's full output,
-// which no test here expands.
-vi.mock("./api", () => ({ fetchToolOutput: vi.fn() }))
+// which no test here expands; attachment URLs are built, never fetched.
+vi.mock(import("./api"), async (importOriginal) => ({
+  ...(await importOriginal()),
+  fetchToolOutput: vi.fn(),
+}))
 
 function turn(
   turnId: string,
@@ -27,6 +43,7 @@ function turn(
     started_at: requestedAt,
     completed_at: state === "completed" ? requestedAt : null,
     error: null,
+    head_commit: null,
   }
 }
 
@@ -43,6 +60,9 @@ function messageRow(
     reasoning: "",
     streaming: false,
     namespace: [],
+    sender: null,
+    images: null,
+    usage: null,
     ...row,
   }
 }
@@ -86,11 +106,14 @@ function snapshot(
     messages: [],
     tool_calls: [],
     notices: [],
+    older_cursor: null,
     ...overrides,
   }
 }
 
-function twoTurnSnapshot(): TranscriptSnapshot {
+function twoTurnSnapshot(
+  overrides: Partial<TranscriptSnapshot> = {}
+): TranscriptSnapshot {
   return snapshot({
     turns: [
       turn("turn-1", "2026-01-01T00:00:00Z"),
@@ -157,6 +180,7 @@ function twoTurnSnapshot(): TranscriptSnapshot {
         started_at: "2026-01-01T00:01:04Z",
       }),
     ],
+    ...overrides,
   })
 }
 
@@ -218,7 +242,31 @@ function appended(
       turn_id: "turn-2",
       message_id: "ai-3",
       namespace: [],
-      ...fragment,
+      text: fragment.text ?? null,
+      reasoning: fragment.reasoning ?? null,
+    },
+  }
+}
+
+function completed(
+  version: number,
+  payload: Partial<MessageCompletedPayload> = {}
+): StoredEvent {
+  return {
+    ...appended(version, {}),
+    event_type: "message.completed",
+    payload: {
+      turn_id: "turn-2",
+      message_id: "ai-3",
+      namespace: [],
+      role: "ai",
+      text: "",
+      reasoning: "",
+      sender: null,
+      images: null,
+      usage: null,
+      created_at: "2026-01-01T00:02:00Z",
+      ...payload,
     },
   }
 }
@@ -234,23 +282,11 @@ describe("transcript events", () => {
     expect(streamed.messages["ai-3"]?.text).toBe("Hello")
     expect(streamed.messages["ai-3"]?.streaming).toBe(true)
 
-    const completed = applyEvent(streamed, {
-      ...appended(13, {}),
-      event_type: "message.completed",
-      payload: {
-        turn_id: "turn-2",
-        message_id: "ai-3",
-        namespace: [],
-        role: "ai",
-        text: "Hello there",
-        reasoning: "",
-        created_at: "2026-01-01T00:02:00Z",
-      },
-    })
+    const settled = applyEvent(streamed, completed(13, { text: "Hello there" }))
 
-    expect(completed.messages["ai-3"]?.text).toBe("Hello there")
-    expect(completed.messages["ai-3"]?.streaming).toBe(false)
-    expect(completed.version).toBe(13)
+    expect(settled.messages["ai-3"]?.text).toBe("Hello there")
+    expect(settled.messages["ai-3"]?.streaming).toBe(false)
+    expect(settled.version).toBe(13)
   })
 
   it("drops events at or below the version already applied", () => {
@@ -272,5 +308,324 @@ describe("transcript events", () => {
     // The changed turn's human message survives too; only its agent row is rebuilt.
     expect(after[2]).toBe(before[2])
     expect(after[3]).not.toBe(before[3])
+  })
+})
+
+function notice(
+  version: number,
+  payload: RunNoticePayload,
+  turnId = payload.turn_id
+): StoredEvent {
+  return {
+    ...appended(version, {}),
+    turn_id: turnId,
+    event_type: "run.notice",
+    payload,
+  }
+}
+
+function image(overrides: Partial<TranscriptImage> = {}): TranscriptImage {
+  return {
+    mime_type: "image/png",
+    file_name: "shot.png",
+    url: null,
+    attachment_id: null,
+    ...overrides,
+  }
+}
+
+function imagesOf(entry: Message | undefined): Array<AnyImageChunk> {
+  return (entry?.chunks ?? []).filter(
+    (chunk): chunk is AnyImageChunk => chunk.kind === "image"
+  )
+}
+
+describe("context usage", () => {
+  it("reads the newest AI message's usage out of the snapshot", () => {
+    const state = fromSnapshot(
+      snapshot({
+        turns: [turn("turn-1", "2026-01-01T00:00:00Z")],
+        messages: [
+          messageRow({
+            message_id: "ai-1",
+            turn_id: "turn-1",
+            created_at: "2026-01-01T00:00:01Z",
+            usage: { input_tokens: 10, output_tokens: 5 },
+          }),
+          messageRow({
+            message_id: "ai-2",
+            turn_id: "turn-1",
+            created_at: "2026-01-01T00:00:02Z",
+            usage: { input_tokens: 90_000, output_tokens: 1_000 },
+          }),
+        ],
+      })
+    )
+
+    expect(state.contextTokens).toBe(91_000)
+  })
+
+  it("updates on a completed AI message and keeps the last known size otherwise", () => {
+    const base = fromSnapshot(twoTurnSnapshot())
+    expect(base.contextTokens).toBeNull()
+
+    const measured = applyEvent(
+      base,
+      completed(11, { usage: { total_tokens: 42_000 } })
+    )
+    expect(measured.contextTokens).toBe(42_000)
+
+    const unmeasured = applyEvent(
+      measured,
+      completed(12, { message_id: "ai-4", usage: null })
+    )
+    expect(unmeasured.contextTokens).toBe(42_000)
+  })
+})
+
+describe("notices", () => {
+  it("keeps a routed badge from the snapshot and drops it when a new turn opens", () => {
+    const reloaded = fromSnapshot(
+      snapshot({
+        turns: [turn("turn-2", "2026-01-01T00:01:00Z")],
+        notices: [
+          {
+            turn_id: "turn-2",
+            kind: "model_routed",
+            data: { route: "deep", model_id: "opus" },
+          },
+        ],
+      })
+    )
+    expect(routedNotice(reloaded)).toEqual({ route: "deep", modelId: "opus" })
+
+    const nextTurn = applyEvent(reloaded, {
+      ...appended(11, {}),
+      turn_id: "turn-3",
+      event_type: "turn.requested",
+      payload: {
+        turn_id: "turn-3",
+        message_id: "human-3",
+        text: "again",
+        sender: { login: "me", kind: "dashboard" },
+        images: [],
+        model_id: null,
+        effort: null,
+        plan_mode: false,
+      },
+    })
+
+    expect(routedNotice(nextTurn)).toBeNull()
+  })
+
+  it("stops reporting offloading once the turn it described settles", () => {
+    const started = applyEvent(
+      fromSnapshot(twoTurnSnapshot()),
+      notice(11, {
+        turn_id: "turn-2",
+        kind: "conversation_offloading",
+        data: { status: "started" },
+      })
+    )
+    expect(isOffloading(started)).toBe(true)
+
+    const settled = applyEvent(started, {
+      ...appended(12, {}),
+      event_type: "turn.completed",
+      payload: {
+        turn_id: "turn-2",
+        run_id: "run-turn-2",
+        head_commit: null,
+        base_commit: null,
+        changed_files: null,
+      },
+    })
+
+    expect(isOffloading(settled)).toBe(false)
+  })
+})
+
+describe("message images", () => {
+  it("renders an attachment as an image chunk pointing at the transcript API", () => {
+    const messages = toMessages(
+      fromSnapshot(
+        snapshot({
+          turns: [turn("turn-1", "2026-01-01T00:00:00Z")],
+          messages: [
+            messageRow({
+              message_id: "human-1",
+              turn_id: "turn-1",
+              role: "human",
+              text: "look at this",
+              created_at: "2026-01-01T00:00:00Z",
+              images: [
+                image({
+                  attachment_id: "11111111-2222-3333-4444-555555555555",
+                }),
+                image({
+                  file_name: null,
+                  url: "https://example.test/remote.png",
+                }),
+                // No bytes were ever captured for this one.
+                image({ file_name: "lost.png" }),
+              ],
+            }),
+          ],
+        })
+      )
+    )
+
+    expect(imagesOf(messages[0])).toEqual([
+      {
+        kind: "image",
+        url: expect.stringContaining(
+          "/threads/thread-1/transcript/attachments/11111111-2222-3333-4444-555555555555"
+        ) as unknown as string,
+        credentials: "session",
+        mimeType: "image/png",
+        fileName: "shot.png",
+      },
+      {
+        kind: "image",
+        url: "https://example.test/remote.png",
+        credentials: "none",
+        mimeType: "image/png",
+      },
+    ])
+  })
+
+  it("keeps an image-only human message, and its images, across a second write", () => {
+    const base = fromSnapshot(
+      snapshot({
+        turns: [turn("turn-1", "2026-01-01T00:00:00Z", "running")],
+        messages: [],
+      })
+    )
+    const requested = applyEvent(base, {
+      ...appended(11, {}),
+      turn_id: "turn-1",
+      event_type: "turn.requested",
+      payload: {
+        turn_id: "turn-1",
+        message_id: "human-1",
+        text: "",
+        sender: { login: "me", kind: "dashboard" },
+        images: [
+          image({ attachment_id: "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee" }),
+        ],
+        model_id: null,
+        effort: null,
+        plan_mode: false,
+      },
+    })
+
+    expect(imagesOf(toMessages(requested)[0])).toHaveLength(1)
+
+    // The same human message, written again as it reaches the graph — under
+    // another turn, which must not give it a second row.
+    const rewritten = applyEvent(
+      requested,
+      completed(12, {
+        turn_id: "turn-2",
+        message_id: "human-1",
+        role: "human",
+        text: "",
+        created_at: "2026-01-01T00:00:00Z",
+      })
+    )
+    const messages = toMessages(rewritten)
+
+    expect(messages.map((entry) => entry.id)).toEqual(["human-1"])
+    expect(imagesOf(messages[0])).toHaveLength(1)
+  })
+})
+
+describe("windowed reads", () => {
+  function olderPage(
+    overrides: Partial<TranscriptTurnPage> = {}
+  ): TranscriptTurnPage {
+    return {
+      thread_id: "thread-1",
+      turns: [turn("turn-0", "2025-12-31T23:00:00Z")],
+      messages: [
+        messageRow({
+          message_id: "human-0",
+          turn_id: "turn-0",
+          role: "human",
+          text: "the oldest ask",
+          created_at: "2025-12-31T23:00:00Z",
+        }),
+      ],
+      tool_calls: [],
+      older_cursor: null,
+      ...overrides,
+    }
+  }
+
+  it("orders a prepended page ahead of the window it was loaded from", () => {
+    const state = fromSnapshot(twoTurnSnapshot())
+    const merged = prependTurns(state, olderPage())
+
+    expect(merged.turnOrder).toEqual(["turn-0", "turn-1", "turn-2"])
+    expect(toMessages(merged)[0]?.chunks).toEqual([
+      { kind: "text", text: "the oldest ask" },
+    ])
+    expect(merged.olderCursor).toBeNull()
+  })
+
+  it("keeps the turns already loaded and advances the cursor", () => {
+    const state = fromSnapshot(twoTurnSnapshot({ older_cursor: "page-2" }))
+    const merged = prependTurns(state, olderPage({ older_cursor: "page-3" }))
+
+    expect(Object.keys(merged.turns).sort()).toEqual([
+      "turn-0",
+      "turn-1",
+      "turn-2",
+    ])
+    expect(merged.olderCursor).toBe("page-3")
+    // Settled turns are immutable, so their rendered rows are kept as-is.
+    expect(merged.turns["turn-1"]).toBe(state.turns["turn-1"])
+  })
+
+  it("a snapshot frame keeps history older than the window it carries", () => {
+    const loaded = prependTurns(
+      fromSnapshot(twoTurnSnapshot({ older_cursor: "page-2" })),
+      olderPage({ older_cursor: "page-3" })
+    )
+    const refreshed = applySnapshot(
+      loaded,
+      snapshot({
+        version: 42,
+        turns: [turn("turn-2", "2026-01-01T00:01:00Z")],
+        messages: [
+          messageRow({
+            message_id: "ai-2",
+            turn_id: "turn-2",
+            text: "the newest answer",
+            created_at: "2026-01-01T00:01:30Z",
+          }),
+        ],
+        older_cursor: "page-fresh",
+      })
+    )
+
+    expect(refreshed.version).toBe(42)
+    expect(refreshed.turnOrder).toEqual(["turn-0", "turn-1", "turn-2"])
+    expect(refreshed.messages["human-0"]?.text).toBe("the oldest ask")
+    expect(refreshed.messages["ai-2"]?.text).toBe("the newest answer")
+    // The window's own cursor points at history this client already holds.
+    expect(refreshed.olderCursor).toBe("page-3")
+  })
+
+  it("a snapshot frame for a thread with no loaded history takes its cursor", () => {
+    const refreshed = applySnapshot(
+      null,
+      snapshot({
+        turns: [turn("turn-2", "2026-01-01T00:01:00Z")],
+        older_cursor: "page-fresh",
+      })
+    )
+
+    expect(refreshed.olderCursor).toBe("page-fresh")
   })
 })

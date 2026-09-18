@@ -456,14 +456,16 @@ async def api_thread_commands(
     session: dict[str, Any] = SESSION_DEP,
 ) -> Response:
     body = await request.body()
-    status_code, content, media_type = await proxy_dashboard_thread_commands(
+    status_code, content, media_type, headers = await proxy_dashboard_thread_commands(
         thread_id,
         session["sub"],
         body,
         email=session.get("email"),
         content_type=request.headers.get("content-type", "application/json"),
     )
-    return Response(content=content, status_code=status_code, media_type=media_type)
+    return Response(
+        content=content, status_code=status_code, media_type=media_type, headers=headers
+    )
 
 
 @router.post("/threads/{thread_id}/history")
