@@ -474,14 +474,11 @@ function AnalyticsCoverage({
         }
       : {
           label: "Event processing is up to date",
-          description: latest.last_processed_at
-            ? `Last event processed ${new Date(latest.last_processed_at).toLocaleString()}.`
-            : "No events have been processed yet.",
           icon: CheckCircleIcon,
           tone: "text-emerald-600 dark:text-emerald-400",
         }
   const StatusIcon = status.icon
-  const api = describeApiBase(apiBaseUrl)
+  const apiBase = describeApiBase(apiBaseUrl)
 
   return (
     <div role="status" aria-label="Analytics coverage">
@@ -565,7 +562,7 @@ function AnalyticsCoverage({
               : ""}
           </p>
           <p>
-            API: {api.origin ?? "same origin"} {api.path}
+            API: {apiBase.origin ?? "same origin"} {apiBase.path}
           </p>
           <BuildIdentityDetails buildInfo={buildInfo} />
         </div>
