@@ -7,6 +7,7 @@ to the old read path.
 """
 
 import asyncio
+import contextlib
 import json
 import logging
 import re
@@ -203,7 +204,12 @@ async def _stream(thread_id: str, after: int) -> AsyncIterator[str]:
                         break
         finally:
             if pending is not None:
+                # Let the cancelled ``anext`` leave the generator before
+                # ``aclosing`` closes it, or aclose() raises "already running"
+                # and the subscriber is never removed.
                 pending.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await pending
 
 
 async def _next_version(notifications: AsyncIterator[int]) -> int:
