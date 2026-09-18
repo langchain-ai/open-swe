@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router"
-import { useQuery } from "@tanstack/react-query"
+import { useQuery, useQueryClient } from "@tanstack/react-query"
 import {
   ArrowClockwiseIcon,
   CaretDownIcon,
@@ -217,6 +217,7 @@ function UsageAnalyticsPeriod({
   // Keyed alongside the leaderboard queries: rows fetched under one identity
   // policy (or viewer role) are never served to another audience, and the
   // notice renders from the same payload field the rows were read with.
+  const queryClient = useQueryClient()
   const [audience, setAudience] = useState<Audience | null>(null)
   const leaderboard = useQuery({
     queryKey: [
@@ -247,6 +248,17 @@ function UsageAnalyticsPeriod({
         privacy: payload.usage_leaderboard_privacy_enabled,
         isAdmin,
       }
+      if (next.privacy && !isAdmin) {
+        queryClient.removeQueries({
+          queryKey: ["usageLeaderboard"],
+          predicate: (query) => {
+            const data = query.state.data as
+              | { usage_leaderboard_privacy_enabled?: boolean }
+              | undefined
+            return data?.usage_leaderboard_privacy_enabled === false
+          },
+        })
+      }
       if (
         audience?.privacy !== next.privacy ||
         audience?.isAdmin !== next.isAdmin
@@ -260,7 +272,9 @@ function UsageAnalyticsPeriod({
     // the cache, so identified rows are never served to another audience.
     placeholderData: (previousData, previousQuery) =>
       previousQuery?.queryKey[2] === login &&
-      previousQuery.queryKey[3] === isAdmin
+      previousQuery.queryKey[3] === isAdmin &&
+      (audience?.privacy !== true ||
+        previousData?.usage_leaderboard_privacy_enabled === true)
         ? previousData
         : undefined,
     staleTime: 60 * 1000,

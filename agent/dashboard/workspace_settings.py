@@ -475,9 +475,12 @@ async def patch_instance_settings(update: WorkspaceSettingsUpdate) -> dict[str, 
     for single-concern writers (the leaderboard privacy toggle) that must not
     blank fields they know nothing about.
     """
-    update.apply_fable_policy(fable_enabled=bool(update.fable_enabled))
     record = await get_value(INSTANCE_SETTINGS_NAMESPACE, INSTANCE_SETTINGS_KEY) or {}
-    value = {**record, **update.model_dump(exclude_unset=True), "updated_at": now_iso()}
+    value = {
+        **record,
+        **update.model_dump(include={"usage_leaderboard_privacy_enabled"}, exclude_unset=True),
+        "updated_at": now_iso(),
+    }
     await put_value(INSTANCE_SETTINGS_NAMESPACE, INSTANCE_SETTINGS_KEY, value)
     return value
 
