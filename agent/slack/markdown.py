@@ -73,7 +73,7 @@ def _render_inline(tokens: list[Token]) -> str:
         elif token.type == "code_inline":
             output.append(f"`{escape(token.content, quote=False)}`")
         elif token.type == "link_open":
-            links.append(escape(token.attrGet("href") or "", quote=False))
+            links.append(escape(str(token.attrGet("href") or ""), quote=False))
             output.append("<" + links[-1] + "|")
         elif token.type == "link_close":
             output.append(">")
@@ -82,7 +82,7 @@ def _render_inline(tokens: list[Token]) -> str:
             output.append("\n")
         elif token.type == "image":
             output.append(
-                f"<{escape(token.attrGet('src') or '', quote=False)}|{escape(token.content, quote=False)}>"
+                f"<{escape(str(token.attrGet('src') or ''), quote=False)}|{escape(token.content, quote=False)}>"
             )
         elif token.type == "html_inline":
             output.append(escape(token.content, quote=False))
