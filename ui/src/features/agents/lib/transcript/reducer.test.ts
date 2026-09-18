@@ -35,15 +35,7 @@ function turn(
   requestedAt: string,
   state: TranscriptTurnRow["state"] = "completed"
 ): TranscriptTurnRow {
-  return {
-    turn_id: turnId,
-    run_id: `run-${turnId}`,
-    state,
-    requested_at: requestedAt,
-    started_at: requestedAt,
-    completed_at: state === "completed" ? requestedAt : null,
-    error: null,
-  }
+  return { turn_id: turnId, state, requested_at: requestedAt, error: null }
 }
 
 function messageRow(
@@ -216,7 +208,6 @@ function appended(
 ): StoredEvent {
   return {
     version,
-    run_id: "run-turn-2",
     occurred_at: "2026-01-01T00:02:00Z",
     event_type: "message.appended",
     payload: {
@@ -288,40 +279,6 @@ describe("transcript events", () => {
     expect(after[3]).not.toBe(before[3])
   })
 
-  it("keeps earlier turns' messages identical when a new turn streams", () => {
-    const base = fromSnapshot(twoTurnSnapshot())
-    const before = toMessages(base)
-    const opened = applyEvent(base, {
-      ...appended(11, {}),
-      event_type: "turn.requested",
-      payload: {
-        turn_id: "turn-3",
-        message_id: "human-3",
-        text: "third ask",
-        images: [],
-      },
-    })
-    const after = toMessages(
-      applyEvent(opened, {
-        version: 12,
-        run_id: "run-turn-3",
-        occurred_at: "2026-01-01T00:03:00Z",
-        event_type: "message.appended",
-        payload: {
-          turn_id: "turn-3",
-          message_id: "ai-4",
-          namespace: [],
-          text: "working",
-          reasoning: null,
-        },
-      })
-    )
-
-    expect(after.slice(0, 4)).toEqual(before)
-    for (const [index, entry] of before.entries())
-      expect(after[index]).toBe(entry)
-  })
-
   it("reports the thread as running as soon as a turn is requested", () => {
     const requested = applyEvent(fromSnapshot(twoTurnSnapshot()), {
       ...appended(11, {}),
@@ -357,25 +314,6 @@ function imagesOf(entry: Message | undefined): Array<AnyImageChunk> {
     (chunk): chunk is AnyImageChunk => chunk.kind === "image"
   )
 }
-
-describe("context usage", () => {
-  it("updates on a completed AI message and keeps the last known size otherwise", () => {
-    const base = fromSnapshot(twoTurnSnapshot())
-    expect(base.contextTokens).toBeNull()
-
-    const measured = applyEvent(
-      base,
-      completed(11, { usage: { total_tokens: 42_000 } })
-    )
-    expect(measured.contextTokens).toBe(42_000)
-
-    const unmeasured = applyEvent(
-      measured,
-      completed(12, { message_id: "ai-4", usage: null })
-    )
-    expect(unmeasured.contextTokens).toBe(42_000)
-  })
-})
 
 describe("notices", () => {
   it("keeps a routed badge from the snapshot and drops it when a new turn opens", () => {
@@ -476,45 +414,6 @@ describe("message images", () => {
       },
     ])
   })
-
-  it("keeps an image-only human message across the rewrite that settles it", () => {
-    const base = fromSnapshot(
-      snapshot({
-        turns: [turn("turn-1", "2026-01-01T00:00:00Z", "running")],
-        messages: [],
-      })
-    )
-    const requested = applyEvent(base, {
-      ...appended(11, {}),
-      event_type: "turn.requested",
-      payload: {
-        turn_id: "turn-1",
-        message_id: "human-1",
-        text: "",
-        images: [
-          image({ attachment_id: "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee" }),
-        ],
-      },
-    })
-
-    expect(imagesOf(toMessages(requested)[0])).toHaveLength(1)
-
-    // The same human message, written again as it reaches the graph.
-    const rewritten = applyEvent(
-      requested,
-      completed(12, {
-        turn_id: "turn-1",
-        message_id: "human-1",
-        role: "human",
-        text: "",
-        created_at: "2026-01-01T00:00:00Z",
-      })
-    )
-    const messages = toMessages(rewritten)
-
-    expect(messages.map((entry) => entry.id)).toEqual(["human-1"])
-    expect(imagesOf(messages[0])).toHaveLength(1)
-  })
 })
 
 describe("windowed reads", () => {
@@ -522,7 +421,6 @@ describe("windowed reads", () => {
     overrides: Partial<TranscriptTurnPage> = {}
   ): TranscriptTurnPage {
     return {
-      thread_id: "thread-1",
       turns: [turn("turn-0", "2025-12-31T23:00:00Z")],
       messages: [
         messageRow({

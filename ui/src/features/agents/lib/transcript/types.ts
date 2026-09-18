@@ -7,7 +7,7 @@
  * the way in.
  */
 
-export type JsonValue =
+type JsonValue =
   | string
   | number
   | boolean
@@ -61,11 +61,8 @@ export interface TranscriptThreadRow {
 
 export interface TranscriptTurnRow {
   turn_id: string
-  run_id: string | null
   state: TurnState
   requested_at: string
-  started_at: string | null
-  completed_at: string | null
   error: string | null
 }
 
@@ -126,7 +123,6 @@ export interface TranscriptSnapshot {
  * notices or thread row, both of which describe the newest turn only.
  */
 export interface TranscriptTurnPage {
-  thread_id: string
   turns: ReadonlyArray<TranscriptTurnRow>
   messages: ReadonlyArray<TranscriptMessageRow>
   tool_calls: ReadonlyArray<TranscriptToolCallRow>
@@ -137,17 +133,6 @@ export interface ToolOutputResponse {
   output: string
 }
 
-/**
- * A change to the mirrored thread row: the title and the thread's metadata
- * blob, neither of which the transcript renders.
- */
-export interface ThreadMetaUpdatedPayload {
-  patch: {
-    title?: string | null
-    metadata?: JsonObject | null
-  }
-}
-
 export interface TurnRequestedPayload {
   turn_id: string
   message_id: string
@@ -155,16 +140,11 @@ export interface TurnRequestedPayload {
   images: ReadonlyArray<TranscriptImage>
 }
 
-export interface TurnStartedPayload {
-  turn_id: string
-  run_id: string
-}
-
-export interface TurnEndedPayload {
+export interface TurnPayload {
   turn_id: string
 }
 
-export interface TurnFailedPayload extends TurnEndedPayload {
+export interface TurnFailedPayload extends TurnPayload {
   error: string
 }
 
@@ -206,7 +186,6 @@ export interface ToolCompletedPayload {
   output_preview: string | null
   output_truncated: boolean
   has_output: boolean
-  namespace: Namespace
 }
 
 export interface RunNoticePayload {
@@ -217,7 +196,6 @@ export interface RunNoticePayload {
 
 interface StoredEventEnvelope {
   version: number
-  run_id: string | null
   occurred_at: string
 }
 
@@ -232,12 +210,11 @@ type Stored<EventType extends string, Payload> = StoredEventEnvelope & {
 }
 
 export type StoredEvent =
-  | Stored<"thread.meta_updated", ThreadMetaUpdatedPayload>
   | Stored<"turn.requested", TurnRequestedPayload>
-  | Stored<"turn.started", TurnStartedPayload>
-  | Stored<"turn.completed", TurnEndedPayload>
+  | Stored<"turn.started", TurnPayload>
+  | Stored<"turn.completed", TurnPayload>
   | Stored<"turn.failed", TurnFailedPayload>
-  | Stored<"turn.interrupted", TurnEndedPayload>
+  | Stored<"turn.interrupted", TurnPayload>
   | Stored<"message.appended", MessageAppendedPayload>
   | Stored<"message.completed", MessageCompletedPayload>
   | Stored<"tool.started", ToolStartedPayload>
