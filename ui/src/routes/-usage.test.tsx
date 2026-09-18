@@ -21,7 +21,7 @@ import {
 } from "@/lib/api"
 import { TooltipProvider } from "@/components/ui/tooltip"
 
-import { UsageAnalytics } from "./usage"
+import { UsageAnalytics, UsageDateRange } from "./usage"
 
 const captured: PRMergeRatePayload = {
   status: "no_prs",
@@ -78,12 +78,8 @@ function mountReport(onPeriodChange = (_period: string) => {}) {
   render(
     <QueryClientProvider client={client}>
       <TooltipProvider>
-        <UsageAnalytics
-          period="30d"
-          login="reader"
-          isAdmin={false}
-          onPeriodChange={onPeriodChange}
-        />
+        <UsageDateRange period="30d" onPeriodChange={onPeriodChange} />
+        <UsageAnalytics period="30d" login="reader" isAdmin={false} />
       </TooltipProvider>
     </QueryClientProvider>
   )
@@ -587,12 +583,7 @@ it("resets leaderboard pagination when the period changes outside the selector",
   const view = render(
     <QueryClientProvider client={client}>
       <TooltipProvider>
-        <UsageAnalytics
-          period="30d"
-          login="reader"
-          isAdmin={false}
-          onPeriodChange={() => {}}
-        />
+        <UsageAnalytics period="30d" login="reader" isAdmin={false} />
       </TooltipProvider>
     </QueryClientProvider>
   )
@@ -602,12 +593,7 @@ it("resets leaderboard pagination when the period changes outside the selector",
   view.rerender(
     <QueryClientProvider client={client}>
       <TooltipProvider>
-        <UsageAnalytics
-          period="7d"
-          login="reader"
-          isAdmin={false}
-          onPeriodChange={() => {}}
-        />
+        <UsageAnalytics period="7d" login="reader" isAdmin={false} />
       </TooltipProvider>
     </QueryClientProvider>
   )

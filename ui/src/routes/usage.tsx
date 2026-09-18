@@ -89,16 +89,58 @@ function UsagePage() {
   if (!session.data) return <RequireLogin />
 
   return (
-    <AppShell user={session.data} title="Usage" className="max-w-5xl">
+    <AppShell
+      user={session.data}
+      title="Usage"
+      className="max-w-5xl"
+      action={
+        <UsageDateRange
+          period={activePeriod}
+          onPeriodChange={(value) =>
+            navigate({ to: "/usage", search: { period: value } })
+          }
+        />
+      }
+    >
       <UsageAnalytics
         period={activePeriod}
         login={session.data.login}
         isAdmin={session.data.is_admin}
-        onPeriodChange={(value) =>
-          navigate({ to: "/usage", search: { period: value } })
-        }
       />
     </AppShell>
+  )
+}
+
+export function UsageDateRange({
+  period: activePeriod,
+  onPeriodChange,
+}: {
+  period: UsageLeaderboardPeriod
+  onPeriodChange: (period: UsageLeaderboardPeriod) => void
+}) {
+  return (
+    <div className="flex flex-wrap items-center gap-3">
+      <label htmlFor="usage-date-range" className="text-sm font-medium">
+        Date range
+      </label>
+      <Select
+        value={activePeriod}
+        onValueChange={(value) =>
+          onPeriodChange(value as UsageLeaderboardPeriod)
+        }
+      >
+        <SelectTrigger id="usage-date-range" className="w-36">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          {Object.entries(PERIOD_LABELS).map(([value, label]) => (
+            <SelectItem key={value} value={value}>
+              {label}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+    </div>
   )
 }
 
@@ -106,12 +148,10 @@ export function UsageAnalytics({
   period: activePeriod,
   login,
   isAdmin,
-  onPeriodChange,
 }: {
   period: UsageLeaderboardPeriod
   login: string
   isAdmin: boolean
-  onPeriodChange: (period: UsageLeaderboardPeriod) => void
 }) {
   const [leaderboardPageSize, setLeaderboardPageSize] = useState(10)
 
@@ -123,7 +163,6 @@ export function UsageAnalytics({
       isAdmin={isAdmin}
       pageSize={leaderboardPageSize}
       onPageSizeChange={setLeaderboardPageSize}
-      onPeriodChange={onPeriodChange}
     />
   )
 }
@@ -134,14 +173,12 @@ function UsageAnalyticsPeriod({
   isAdmin,
   pageSize: leaderboardPageSize,
   onPageSizeChange: setLeaderboardPageSize,
-  onPeriodChange,
 }: {
   period: UsageLeaderboardPeriod
   login: string
   isAdmin: boolean
   pageSize: number
   onPageSizeChange: (pageSize: number) => void
-  onPeriodChange: (period: UsageLeaderboardPeriod) => void
 }) {
   const [leaderboardPage, setLeaderboardPage] = useState(1)
   const [sort, setSort] = useState<UsageLeaderboardSort>("rank")
@@ -193,29 +230,6 @@ function UsageAnalyticsPeriod({
 
   return (
     <>
-      <div className="flex flex-wrap items-center gap-3">
-        <label htmlFor="usage-date-range" className="text-sm font-medium">
-          Date range
-        </label>
-        <Select
-          value={activePeriod}
-          onValueChange={(value) =>
-            onPeriodChange(value as UsageLeaderboardPeriod)
-          }
-        >
-          <SelectTrigger id="usage-date-range" className="w-36">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {Object.entries(PERIOD_LABELS).map(([value, label]) => (
-              <SelectItem key={value} value={value}>
-                {label}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      </div>
-
       <PRMergeRateSection report={report} />
 
       <SettingsSection
