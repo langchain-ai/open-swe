@@ -21,6 +21,9 @@ from agent.utils.dashboard_ui import dashboard_static_dir
 logger = logging.getLogger(__name__)
 
 _BUILD_INFO_NAME = "open-swe-build-info.json"
+# Image builds stamp here (scripts/stamp_build_info.py); the directory must be
+# created explicitly because custom dockerfile_lines run before the source copy.
+_IMAGE_BUILD_INFO_DIR = Path("/opt/open-swe-backend")
 
 
 def _read_build_info(path: Path) -> dict[str, str]:
@@ -48,10 +51,18 @@ def _package_version() -> str | None:
         return None
 
 
+def _backend_sidecar_path() -> Path:
+    override = ENV.OPEN_SWE_BUILD_INFO_DIR.optional()
+    directory = Path(override) if override else _IMAGE_BUILD_INFO_DIR
+    stamped = directory / _BUILD_INFO_NAME
+    # In-repo sidecar kept for local builds that stamp next to this module.
+    return stamped if stamped.exists() else Path(__file__).resolve().parent / _BUILD_INFO_NAME
+
+
 @functools.lru_cache(maxsize=1)
 def backend_build_info() -> dict[str, str | None]:
     """Identifiers the backend knows its own running code by; values never assumed."""
-    info = _read_build_info(Path(__file__).resolve().parent / _BUILD_INFO_NAME)
+    info = _read_build_info(_backend_sidecar_path())
     return {
         # Never a git SHA: LangGraph Platform assigns an opaque id per revision.
         "revision_id": ENV.LANGCHAIN_REVISION_ID.optional(),

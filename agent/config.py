@@ -207,6 +207,10 @@ ENV.var(
     "LANGCHAIN_REVISION_ID", "Revision id LangGraph Platform injects; attached to run metadata."
 )
 ENV.var(
+    "OPEN_SWE_BUILD_INFO_DIR",
+    "Directory of the backend's build-identity sidecar; image builds stamp /opt/open-swe-backend.",
+)
+ENV.var(
     "LANGSMITH_TRACING",
     "Enables LangSmith tracing; read by the LangSmith SDK and injected by LangGraph Platform.",
 )

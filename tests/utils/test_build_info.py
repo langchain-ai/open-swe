@@ -10,7 +10,9 @@ from agent.utils.build_info import backend_build_info, build_info, dashboard_bui
 
 
 @pytest.fixture(autouse=True)
-def _fresh_caches():
+def _fresh_caches(monkeypatch: pytest.MonkeyPatch):
+    # Never read the image stamp location from tests.
+    monkeypatch.setenv("OPEN_SWE_BUILD_INFO_DIR", "/nonexistent-build-info-dir")
     build_info_module.backend_build_info.cache_clear()
     build_info_module.dashboard_build_info.cache_clear()
     yield
@@ -32,6 +34,29 @@ def write_backend_sidecar():
     yield write
     if written:
         path.unlink()
+
+
+def test_backend_sidecar_comes_from_the_configured_directory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("LANGCHAIN_REVISION_ID", raising=False)
+    (tmp_path / "open-swe-build-info.json").write_text(
+        json.dumps({"commit": "img999", "built_at": "2026-03-03T00:00:00Z"})
+    )
+    monkeypatch.setenv("OPEN_SWE_BUILD_INFO_DIR", str(tmp_path))
+    info = backend_build_info()
+    assert info["commit"] == "img999"
+    assert info["built_at"] == "2026-03-03T00:00:00Z"
+
+
+def test_configured_directory_sidecar_wins_over_in_repo_stamp(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, write_backend_sidecar
+) -> None:
+    monkeypatch.delenv("LANGCHAIN_REVISION_ID", raising=False)
+    (tmp_path / "open-swe-build-info.json").write_text(json.dumps({"commit": "img999"}))
+    monkeypatch.setenv("OPEN_SWE_BUILD_INFO_DIR", str(tmp_path))
+    write_backend_sidecar({"commit": "local111"})
+    assert backend_build_info()["commit"] == "img999"
 
 
 def test_backend_reports_only_discovered_identifiers(
