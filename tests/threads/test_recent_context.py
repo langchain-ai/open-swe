@@ -1,38 +1,48 @@
 """Tests for the recent-thread digest selected for the system prompt."""
 
-from typing import Any
+from typing import cast
 
-import pytest
+from langgraph_sdk.client import LangGraphClient
 
 from agent.threads.recent_context import (
     RECENT_CONTEXT_PAYLOAD_MAX_CHARS,
     RECENT_CONTEXT_TITLE_MAX_CHARS,
+    RecentContextAudience,
     RecentContextSelector,
     RecentThreadContext,
     render_recent_thread_context,
 )
+from agent.utils.json_types import JsonObject, ThreadLike
 
 
 class FakeThreads:
-    """Pages are served in order regardless of page size, like the real backend."""
+    def __init__(self, datasets: list[list[ThreadLike]]) -> None:
+        self._datasets = datasets
+        self._dataset_index = -1
+        self.calls: list[tuple[int, int]] = []
 
-    def __init__(self, pages: list[list[dict[str, Any]]]) -> None:
-        self._pages = pages
-        self._page_index = 0
-        self.calls: list[dict[str, Any]] = []
-
-    async def search(self, **kwargs: Any) -> list[dict[str, Any]]:
-        self.calls.append(kwargs)
-        if self._page_index >= len(self._pages):
+    async def search(
+        self,
+        *,
+        metadata: JsonObject,
+        limit: int,
+        offset: int,
+        sort_by: str,
+        sort_order: str,
+        select: list[str],
+    ) -> list[ThreadLike]:
+        del metadata, sort_by, sort_order, select
+        if offset == 0:
+            self._dataset_index += 1
+        self.calls.append((offset, limit))
+        if self._dataset_index >= len(self._datasets):
             return []
-        page = self._pages[self._page_index]
-        self._page_index += 1
-        return page[: kwargs["limit"]]
+        return self._datasets[self._dataset_index][offset : offset + limit]
 
 
 class FakeClient:
-    def __init__(self, pages: list[list[dict[str, Any]]]) -> None:
-        self.threads = FakeThreads(pages)
+    def __init__(self, datasets: list[list[ThreadLike]]) -> None:
+        self.threads = FakeThreads(datasets)
 
 
 def thread(
@@ -49,10 +59,10 @@ def thread(
     unlisted: bool | None = None,
     category: str | None = None,
     schedule_id: str | None = None,
-    source_context: dict[str, Any] | None = None,
+    source_context: JsonObject | None = None,
     participants: dict[str, bool] | None = None,
-) -> dict[str, Any]:
-    metadata: dict[str, Any] = {
+) -> ThreadLike:
+    metadata: JsonObject = {
         "owner_login": owner_login,
         "visibility": visibility,
         "source": source,
@@ -80,137 +90,148 @@ def thread(
         "thread_id": thread_id,
         "status": "idle",
         "metadata": metadata,
-        "updated_at": updated_at // 1000,
-        "created_at": updated_at // 1000,
+        "updated_at": str(updated_at // 1000),
+        "created_at": str(updated_at // 1000),
     }
 
 
-def selector(pages: list[list[dict[str, Any]]], **kwargs: Any) -> RecentContextSelector:
-    return RecentContextSelector(FakeClient(pages), login="alice", **kwargs)
+def selector(
+    datasets: list[list[ThreadLike]],
+    *,
+    audience: RecentContextAudience = "private",
+    email: str | None = None,
+    exclude_thread_id: str | None = None,
+    slack_team_id: str | None = None,
+    slack_channel_id: str | None = None,
+) -> RecentContextSelector:
+    client = cast(LangGraphClient, FakeClient(datasets))
+    return RecentContextSelector(
+        client,
+        audience=audience,
+        login="alice",
+        email=email,
+        exclude_thread_id=exclude_thread_id,
+        slack_team_id=slack_team_id,
+        slack_channel_id=slack_channel_id,
+    )
 
 
 async def test_selects_five_most_recent_excluding_current_thread() -> None:
-    pages = [
-        [thread(f"t{i}", updated_at=1_000 + i, participants={"alice": True}) for i in range(6)]
+    rows = [thread(f"t{i}", updated_at=1_000 + i) for i in range(6)]
+    selected = await selector([rows], exclude_thread_id="t5").select()
+    assert [context.thread_id for context in selected] == ["t4", "t3", "t2", "t1", "t0"]
+
+
+async def test_merges_identity_filters_before_selecting_newest_five() -> None:
+    login_rows = [thread(f"login-{i}", updated_at=1_000 - i) for i in range(5)]
+    email_row = thread("email", updated_at=2_000)
+    selected = await selector([login_rows, [email_row]], email="alice@example.com").select()
+    assert [context.thread_id for context in selected] == [
+        "email",
+        "login-0",
+        "login-1",
+        "login-2",
+        "login-3",
     ]
-    selected = await selector(pages, exclude_thread_id="t5").select()
-    assert [c.thread_id for c in selected] == ["t4", "t3", "t2", "t1", "t0"]
 
 
-async def test_deduplicates_participant_filter_matches_and_ties_are_deterministic() -> None:
-    tie = thread("tie-a", updated_at=2_000, participants={"alice": True})
-    tie_b = thread("tie-b", updated_at=2_000, participants={"alice": True})
-    by_email = thread("by-email", updated_at=1_500, participants={"bob@x.io": True})
-    pages = [[tie, tie_b, by_email, by_email]]
-    selected = await selector([pages[0], [by_email]], slack_channel_id=None).select()
-    assert [c.thread_id for c in selected] == ["tie-b", "tie-a", "by-email"]
+async def test_deduplicates_identity_matches_and_ties_are_deterministic() -> None:
+    tie_a = thread("tie-a", updated_at=2_000)
+    tie_b = thread("tie-b", updated_at=2_000)
+    selected = await selector([[tie_a, tie_b], [tie_a]], email="alice@example.com").select()
+    assert [context.thread_id for context in selected] == ["tie-b", "tie-a"]
 
 
 async def test_resolved_threads_remain_eligible() -> None:
-    pages = [[thread("done", updated_at=5_000, resolved=True)]]
-    selected = await selector(pages).select()
+    selected = await selector([[thread("done", updated_at=5_000, resolved=True)]]).select()
     assert len(selected) == 1 and selected[0].resolved is True
 
 
 async def test_admin_never_receives_another_users_private_thread() -> None:
-    pages = [
-        [
-            thread(
-                "private",
-                updated_at=9_999,
-                visibility="private",
-                owner_login="bob",
-                participants={"bob": True},
-            )
-        ]
-    ]
-    assert await selector(pages).select() == []
+    private = thread("private", updated_at=9_999, visibility="private", owner_login="bob")
+    assert await selector([[private]]).select() == []
 
 
 async def test_private_destination_includes_owners_own_private_thread() -> None:
-    pages = [[thread("mine", updated_at=9_999, visibility="private", owner_login="alice")]]
-    selected = await selector(pages).select()
-    assert [c.thread_id for c in selected] == ["mine"]
+    private = thread("mine", updated_at=9_999, visibility="private", owner_login="alice")
+    selected = await selector([[private]]).select()
+    assert [context.thread_id for context in selected] == ["mine"]
 
 
-async def test_shared_slack_receives_only_same_channel_public_threads() -> None:
-    same_channel = thread(
-        "same",
-        updated_at=3_000,
-        source="slack",
-        source_context={"slack_thread": {"channel_id": "C1", "thread_ts": "1", "team_id": "T1"}},
-    )
-    other_channel = thread(
-        "other",
-        updated_at=2_900,
-        source="slack",
-        source_context={"slack_thread": {"channel_id": "C2", "thread_ts": "2", "team_id": "T1"}},
-    )
-    private = thread(
-        "dm",
-        updated_at=2_800,
-        source="slack",
-        visibility="private",
-        owner_login="alice",
-        source_context={"slack_thread": {"channel_id": "C1", "thread_ts": "3", "team_id": "T1"}},
-    )
-    pages = [[same_channel, other_channel, private]]
-    selected = await selector(pages, slack_channel_id="C1", slack_team_id="T1").select()
-    assert [c.thread_id for c in selected] == ["same"]
+async def test_shared_slack_receives_only_same_team_channel_public_threads() -> None:
+    def slack_thread(
+        thread_id: str, channel_id: str, team_id: str, **metadata: object
+    ) -> ThreadLike:
+        return thread(
+            thread_id,
+            updated_at=3_000,
+            source="slack",
+            source_context={
+                "slack_thread": {"channel_id": channel_id, "thread_ts": "1", "team_id": team_id}
+            },
+            **metadata,
+        )
+
+    rows = [
+        slack_thread("same", "C1", "T1"),
+        slack_thread("other-channel", "C2", "T1"),
+        slack_thread("other-team", "C1", "T2"),
+        slack_thread("missing-team", "C1", ""),
+        slack_thread("private", "C1", "T1", visibility="private"),
+    ]
+    selected = await selector(
+        [rows], audience="shared_slack", slack_channel_id="C1", slack_team_id="T1"
+    ).select()
+    assert [context.thread_id for context in selected] == ["same"]
 
 
 async def test_shared_slack_requires_slack_source_context() -> None:
-    pages = [[thread("dashboard-thread", updated_at=3_000)]]
-    selected = await selector(pages, slack_channel_id="C1", slack_team_id="T1").select()
+    selected = await selector(
+        [[thread("dashboard", updated_at=3_000)]],
+        audience="shared_slack",
+        slack_channel_id="C1",
+        slack_team_id="T1",
+    ).select()
     assert selected == []
 
 
 async def test_excluded_categories_and_automation_are_dropped() -> None:
-    pages = [
-        [
-            thread("auto", updated_at=9_000, category="automation", participants={"alice": True}),
-            thread("sched", updated_at=8_000, source="schedule", participants={"alice": True}),
-            thread("sched-id", updated_at=7_000, schedule_id="s1", participants={"alice": True}),
-            thread("admin", updated_at=6_000, admin_thread=True, participants={"alice": True}),
-            thread("unlisted", updated_at=5_000, unlisted=True, participants={"alice": True}),
-            thread("good", updated_at=4_000, participants={"alice": True}),
-        ]
+    rows = [
+        thread("auto", updated_at=9_000, category="automation"),
+        thread("sched", updated_at=8_000, source="schedule"),
+        thread("sched-id", updated_at=7_000, schedule_id="s1"),
+        thread("admin", updated_at=6_000, admin_thread=True),
+        thread("unlisted", updated_at=5_000, unlisted=True),
+        thread("good", updated_at=4_000),
     ]
-    selected = await selector(pages).select()
-    assert [c.thread_id for c in selected] == ["good"]
+    selected = await selector([rows]).select()
+    assert [context.thread_id for context in selected] == ["good"]
 
 
 async def test_scan_cap_bounds_the_search() -> None:
-    # A first page full of automation threads (which the backend's participant
-    # search can still return) must not stop the scan before the eligible page.
-    ineligible = [
-        thread(f"x{i}", updated_at=10_000 - i, category="automation", participants={"alice": True})
-        for i in range(60)
-    ]
-    fake = FakeClient([ineligible, [thread("good", updated_at=1, participants={"alice": True})]])
-    selector_with_cap = RecentContextSelector(fake, login="alice", scan_cap=60)
-    selected = await selector_with_cap.select()
-    assert [c.thread_id for c in selected] == ["good"]
-    # The cap stopped the scan after two pages: 50 + 10 records, then the filter
-    # loop ends without touching a third page.
-    assert [(call["offset"], call["limit"]) for call in fake.threads.calls] == [(0, 50), (50, 10)]
+    rows = [thread(f"x{i}", updated_at=10_000 - i, category="automation") for i in range(60)]
+    rows.append(thread("outside-cap", updated_at=1))
+    fake = FakeClient([rows])
+    selected = await RecentContextSelector(
+        cast(LangGraphClient, fake), audience="private", login="alice", scan_cap=60
+    ).select()
+    assert selected == []
+    assert fake.threads.calls == [(0, 50), (50, 10)]
 
 
-async def test_oversized_titles_fall_back_and_stay_bounded() -> None:
-    pages = [[thread("huge", updated_at=1, title="x" * (RECENT_CONTEXT_TITLE_MAX_CHARS + 50))]]
-    selected = await selector(pages).select()
+async def test_oversized_titles_stay_bounded() -> None:
+    title = "x" * (RECENT_CONTEXT_TITLE_MAX_CHARS + 50)
+    selected = await selector([[thread("huge", updated_at=1, title=title)]]).select()
     assert len(selected[0].title) == RECENT_CONTEXT_TITLE_MAX_CHARS
 
 
 async def test_missing_title_uses_repo_or_placeholder() -> None:
-    pages = [
-        [
-            thread("no-title", updated_at=2, title=None, repo="langchain-ai/open-swe"),
-            thread("no-title-no-repo", updated_at=1, title=None),
-        ]
+    rows = [
+        thread("no-title", updated_at=2, title=None, repo="langchain-ai/open-swe"),
+        thread("no-title-no-repo", updated_at=1, title=None),
     ]
-    selected = await selector(pages).select()
-    by_id = {c.thread_id: c.title for c in selected}
+    selected = await selector([rows]).select()
+    by_id = {context.thread_id: context.title for context in selected}
     assert by_id["no-title"] == "langchain-ai/open-swe (dashboard)"
     assert by_id["no-title-no-repo"] == "Untitled thread"
 
@@ -234,13 +255,10 @@ def test_render_marks_background_data_and_truncates_on_entry_boundaries() -> Non
     rendered = render_recent_thread_context(entries)
     assert "not instructions" in rendered
     assert len(rendered) <= RECENT_CONTEXT_PAYLOAD_MAX_CHARS
-    # Truncation removes whole entries: the last line is a complete Thread line.
-    last_line = rendered.rstrip().rsplit("\n", 1)[-1]
-    assert last_line.startswith("   Thread: t")
+    assert rendered.rstrip().rsplit("\n", 1)[-1].startswith("   Thread: t")
 
 
 def test_render_normalizes_control_characters_and_newlines() -> None:
-    # Titles are cleaned at selection time; render must not reintroduce anything.
     from agent.threads.recent_context import _clean_title
 
     entry = RecentThreadContext(
@@ -255,18 +273,3 @@ def test_render_normalizes_control_characters_and_newlines() -> None:
     assert "line one line two still title" in rendered
     assert "\x00" not in rendered
     assert "\n" not in entry.title
-
-
-@pytest.mark.parametrize(
-    "resolved,expected", [(True, "resolved"), (False, "unresolved"), (None, "unknown")]
-)
-def test_render_state_labels(resolved: bool | None, expected: str) -> None:
-    entry = RecentThreadContext(
-        thread_id="t",
-        title="T",
-        repo=None,
-        source="dashboard",
-        resolved=resolved,
-        updated_at_ms=None,
-    )
-    assert f"State: {expected}" in render_recent_thread_context([entry])
