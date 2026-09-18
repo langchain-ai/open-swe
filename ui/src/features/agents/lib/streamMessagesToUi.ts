@@ -60,10 +60,7 @@ export function toolKind(name: string): ToolKind {
   return "other"
 }
 
-export function toolTitle(
-  name: string,
-  args: Record<string, unknown>
-): string {
+export function toolTitle(name: string, args: Record<string, unknown>): string {
   const path = args.path ?? args.file_path ?? args.target_file
   if (typeof path === "string" && path.trim()) return `${name} ${path.trim()}`
   const command = args.command

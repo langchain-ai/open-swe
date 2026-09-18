@@ -68,7 +68,9 @@ function toolCall(
   }
 }
 
-function snapshot(overrides: Partial<TranscriptSnapshot> = {}): TranscriptSnapshot {
+function snapshot(
+  overrides: Partial<TranscriptSnapshot> = {}
+): TranscriptSnapshot {
   return {
     thread_id: "thread-1",
     version: 10,

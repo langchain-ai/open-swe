@@ -580,7 +580,9 @@ export function subagentToolCalls(
       if (item.kind !== "tool") continue
       const call = state.toolCalls[item.id]
       if (!call || call.namespace.length < namespace.length) continue
-      if (namespace.every((segment, index) => call.namespace[index] === segment))
+      if (
+        namespace.every((segment, index) => call.namespace[index] === segment)
+      )
         calls.push(call)
     }
   }

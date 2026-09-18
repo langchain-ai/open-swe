@@ -14,7 +14,8 @@ const ThreadSourceContext = createContext<ThreadSource | null>(null)
  */
 export function useThreadSource(): ThreadSource {
   const source = useContext(ThreadSourceContext)
-  if (!source) throw new Error("useThreadSource requires a ThreadSourceProvider")
+  if (!source)
+    throw new Error("useThreadSource requires a ThreadSourceProvider")
   return source
 }
 

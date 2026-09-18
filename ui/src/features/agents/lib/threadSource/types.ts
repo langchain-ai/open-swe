@@ -1,4 +1,7 @@
-import type { AgentStream, StreamConnection } from "@/features/agents/lib/stream/streamPool"
+import type {
+  AgentStream,
+  StreamConnection,
+} from "@/features/agents/lib/stream/streamPool"
 import type { SubagentToolCall } from "@/features/agents/lib/transcript/reducer"
 import type { ImageChunk, Message } from "@/features/agents/lib/types"
 
@@ -50,7 +53,9 @@ export interface StreamThreadSource extends ThreadSourceShared {
 export interface TranscriptThreadSource extends ThreadSourceShared {
   kind: "transcript"
   /** Nested tool calls under a subagent namespace, for the subagent card. */
-  subagentToolCalls: (namespace: ReadonlyArray<string>) => Array<SubagentToolCall>
+  subagentToolCalls: (
+    namespace: ReadonlyArray<string>
+  ) => Array<SubagentToolCall>
 }
 
 export type ThreadSource = StreamThreadSource | TranscriptThreadSource

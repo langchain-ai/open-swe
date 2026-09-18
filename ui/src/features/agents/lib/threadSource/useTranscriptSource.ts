@@ -1,7 +1,10 @@
 import { useCallback, useEffect, useMemo, useState } from "react"
 
 import { RunTracker } from "@/lib/perf/streaming"
-import { runStartCommand, startRun as postRunStart } from "@/features/agents/lib/transcript/api"
+import {
+  runStartCommand,
+  startRun as postRunStart,
+} from "@/features/agents/lib/transcript/api"
 import { subagentToolCalls } from "@/features/agents/lib/transcript/reducer"
 import { useThreadTranscript } from "@/features/agents/lib/transcript/useThreadTranscript"
 import { useCancelRun } from "./useCancelRun"

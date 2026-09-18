@@ -35,8 +35,9 @@ export function useCancelRun(
     }
     await after?.()
     if (cancelled.status === "running") return
-    queryClient.setQueryData<AgentThread>(agentThreadKeys.detail(threadId), (prev) =>
-      prev ? { ...prev, status: "interrupted" as const } : prev
+    queryClient.setQueryData<AgentThread>(
+      agentThreadKeys.detail(threadId),
+      (prev) => (prev ? { ...prev, status: "interrupted" as const } : prev)
     )
     invalidateAgentThreadLists(queryClient)
   }, [after, cancelThread, queryClient, threadId])

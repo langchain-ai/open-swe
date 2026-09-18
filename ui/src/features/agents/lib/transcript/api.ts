@@ -181,7 +181,10 @@ export function runStartCommand({
       input: message
         ? {
             messages: [
-              { ...promptMessage(message.text, message.images), id: message.id },
+              {
+                ...promptMessage(message.text, message.images),
+                id: message.id,
+              },
             ],
           }
         : null,

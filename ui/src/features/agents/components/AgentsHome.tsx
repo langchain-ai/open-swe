@@ -37,10 +37,7 @@ import {
 } from "@/features/agents/lib/desktopLocal"
 import { useDesktopThreadSource } from "@/features/agents/lib/desktopThreadSource"
 import { modelConfigurable } from "@/features/agents/lib/stream/promptMessage"
-import {
-  runStartCommand,
-  startRun,
-} from "@/features/agents/lib/transcript/api"
+import { runStartCommand, startRun } from "@/features/agents/lib/transcript/api"
 import {
   readStoredPanelCollapsed,
   writeStoredPanelCollapsed,
@@ -181,7 +178,8 @@ export function AgentsHome({
   const pendingRun = useRef<AbortController | null>(null)
 
   useEffect(() => {
-    if (pendingThreadId) writeStoredPanelCollapsed(pendingThreadId, panelCollapsed)
+    if (pendingThreadId)
+      writeStoredPanelCollapsed(pendingThreadId, panelCollapsed)
   }, [panelCollapsed, pendingThreadId])
 
   useEffect(() => {
