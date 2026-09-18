@@ -3,12 +3,22 @@
 import asyncio
 import hashlib
 from time import time_ns
+from typing import Literal, TypedDict, cast
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Response
 from langgraph_sdk.client import LangGraphClient
 
+from agent.expedited_review import slack as expedited_review
 from agent.slack import webhook as service
-from agent.slack.client import SlackChannelContext
+from agent.slack.allowed_bots import resolve_allowed_slack_bot
+from agent.slack.ask import (
+    ASK_COMMAND,
+    MAX_QUESTION_CHARS,
+    SlackAskRequest,
+    ask_thread_id,
+    process_slack_ask,
+)
+from agent.slack.dm import DM_SESSION_TS, dm_session_enabled, is_dm_channel
 from agent.slack.failures import (
     SlackRequestError,
     SlackRequestTarget,
@@ -18,6 +28,7 @@ from agent.slack.failures import (
 from agent.slack.payloads import (
     SlackBlockAction,
     SlackButtonValue,
+    SlackChannelContext,
     SlackEventEnvelope,
     SlackInteraction,
     SlackInteractionMessage,
@@ -41,6 +52,11 @@ from agent.utils.thread_ops import langgraph_client as get_langgraph_client
 from agent.webhooks import common
 
 router = APIRouter()
+
+
+class DuplicateIncidentResponse(TypedDict):
+    status: Literal["duplicate"]
+
 
 _MESSAGE_UPDATE_RETRY_DELAYS = (0.1, 0.2, 0.5, 1, 2, 4, 8, 14)
 _MEMBERSHIP_SUBTYPES = frozenset(
@@ -227,7 +243,7 @@ async def _process_slack_message_update_impl(request: SlackRequest) -> None:
     channel_context = await common.resolve_slack_channel_context(
         request.channel_id, use_cache=False
     )
-    if not common.slack_channel_allows_operations(channel_context):
+    if not channel_context.allows_operations:
         common.logger.warning(
             "Blocked Slack message update in ineligible channel=%s", request.channel_id
         )
@@ -248,7 +264,7 @@ async def _process_slack_message_update_impl(request: SlackRequest) -> None:
 @router.post("/webhooks/slack")
 async def slack_webhook(
     request: common.Request, background_tasks: common.BackgroundTasks
-) -> WebhookResponse | ChallengeResponse:
+) -> WebhookResponse | ChallengeResponse | DuplicateIncidentResponse:
     """Handle Slack Event API webhooks for app mentions."""
     body = await request.body()
     _verify_signature(request, body, "events")
@@ -272,14 +288,20 @@ async def slack_webhook(
     if not isinstance(raw_event, dict):
         return ignored("Invalid Slack event")
 
+    from agent.incidents import channels as incidents
+
+    incident_response = await incidents.handle_slack_event(payload, background_tasks)
+    if incident_response is not None:
+        return cast(WebhookResponse | DuplicateIncidentResponse, incident_response)
+
     event_id = envelope.event_id
     team_id = envelope.team_id or event.team
     channel_id = event.resolve_channel_id()
     channel_context: SlackChannelContext | None = None
     if channel_id:
         channel_context = await common.resolve_slack_channel_context(channel_id, use_cache=False)
-        if not common.slack_channel_allows_operations(channel_context):
-            is_external = channel_context.get("is_ext_shared") is True
+        if not channel_context.allows_operations:
+            is_external = channel_context.is_ext_shared is True
             event_ts = event.event_ts or event.ts
             thread_ts = event.thread_ts or event.ts
             if (
@@ -365,9 +387,30 @@ async def slack_webhook(
     user_id = updated_message.user if isinstance(updated_message.user, str) else ""
     text = updated_message.text
     attachments = updated_message.attachments
-    if not (channel_id and event_ts and original_message_ts and thread_ts and user_id) or (
-        text is None
-    ):
+    allowed_bot = None
+    if event.is_from_bot or updated_message.is_from_bot:
+        if (
+            is_message_update
+            or event.type not in {"message", "app_mention"}
+            or event.subtype not in {"", "bot_message"}
+            or text is None
+            or not bot_user_id
+            or f"<@{bot_user_id}>" not in text
+            or user_id == bot_user_id
+            or (event.app_id and event.app_id == envelope.api_app_id)
+        ):
+            return ignored("Event from a bot")
+        allowed_bot = await resolve_allowed_slack_bot(
+            team_id,
+            updated_message.bot_id,
+            user_id=user_id,
+            app_id=updated_message.app_id,
+        )
+        if allowed_bot is None:
+            return ignored("Event from a bot")
+    if not (
+        channel_id and event_ts and original_message_ts and thread_ts and (user_id or allowed_bot)
+    ) or (text is None):
         return ignored("Missing channel/message fields")
     if is_message_update:
         previous_message = event.previous_message
@@ -391,9 +434,25 @@ async def slack_webhook(
     if in_code_channel:
         thread_ts = common.CODE_CHANNEL_SESSION_TS
 
-    is_direct_message = not is_message_update and event.channel_type == "im" and bool(user_id)
+    in_dm_channel = not in_code_channel and (
+        event.channel_type == "im" or is_dm_channel(channel_context)
+    )
+    # Only for someone who turned it on: their DM is one private session for as
+    # long as it exists, so every message routes to the same agent thread rather
+    # than opening a Slack thread per request. Everyone else keeps a thread per
+    # message. Untagged messages count as requests in a DM either way.
+    in_dm = in_dm_channel and await dm_session_enabled(user_id)
+    if in_dm:
+        thread_ts = DM_SESSION_TS
+
+    is_direct_message = not is_message_update and in_dm_channel and bool(user_id)
     is_untagged_two_party_reply = False
-    if event.type != "app_mention" and not is_message_update and not in_code_channel:
+    if (
+        event.type != "app_mention"
+        and not is_message_update
+        and not in_code_channel
+        and allowed_bot is None
+    ):
         has_username_mention = bool(
             common.SLACK_BOT_USERNAME and f"@{common.SLACK_BOT_USERNAME}" in text
         )
@@ -405,7 +464,7 @@ async def slack_webhook(
             )
         )
         is_untagged_two_party_reply = bool(
-            not event.subtype
+            event.subtype in {"", "file_share"}
             and not is_direct_message
             and not has_username_mention
             and not has_id_mention
@@ -429,9 +488,6 @@ async def slack_webhook(
         )
         if not should_handle_message:
             return ignored("Not an app mention, DM, or plan reply")
-
-    if event.is_from_bot or updated_message.is_from_bot:
-        return ignored("Event from a bot")
 
     if {event.subtype, updated_message.subtype} & _MEMBERSHIP_SUBTYPES:
         if in_code_channel and await common.claim_slack_event(event_id, channel_id, event_ts):
@@ -461,7 +517,8 @@ async def slack_webhook(
                         bot_user_id=bot_user_id,
                         message_update=True,
                         code_channel=in_code_channel,
-                        reply_thread_ts=reply_thread_ts if in_code_channel else "",
+                        dm_session=in_dm,
+                        reply_thread_ts=reply_thread_ts if in_code_channel or in_dm else "",
                     ),
                 )
                 return accepted("Slack update queued")
@@ -504,8 +561,11 @@ async def slack_webhook(
                     treat_all_messages_as_mentions=is_direct_message or in_code_channel,
                     untagged_reply=is_untagged_two_party_reply,
                     code_channel=in_code_channel,
-                    reply_thread_ts=reply_thread_ts if in_code_channel else "",
+                    dm_session=in_dm,
+                    reply_thread_ts=reply_thread_ts if in_code_channel or in_dm else "",
                     team_id=team_id,
+                    triggering_bot_id=allowed_bot.bot_id if allowed_bot else "",
+                    triggering_bot_app_id=updated_message.app_id if allowed_bot else "",
                 ),
                 repo,
             )
@@ -515,6 +575,50 @@ async def slack_webhook(
         return ignored("Duplicate Slack event delivery")
 
     return await answer_slack_request(target, dispatch)
+
+
+@router.post("/webhooks/slack/commands", response_model=None)
+async def slack_command(
+    request: common.Request, background_tasks: common.BackgroundTasks
+) -> SlashCommandResponse | Response:
+    """Answer a single `/oswe` question, ephemerally and without a Slack thread."""
+    body = await request.body()
+    _verify_signature(request, body, "commands")
+
+    form = common.parse_qs(body.decode("utf-8"))
+    value = lambda key: str((form.get(key) or [""])[0]).strip()  # noqa: E731
+    channel_id = value("channel_id")
+    user_id = value("user_id")
+    command = value("command")
+    question = value("text")
+    if not (channel_id and user_id):
+        return ephemeral("That command was invalid.")
+    if not question:
+        return ephemeral(
+            f"Ask a question: `{command or ASK_COMMAND} how does thread routing work?`"
+        )
+    if len(question) > MAX_QUESTION_CHARS:
+        return ephemeral(
+            f"That question is too long for `{command or ASK_COMMAND}`. "
+            "Tag Open SWE in a message instead."
+        )
+
+    invocation = value("trigger_id") or hashlib.sha256(body).hexdigest()
+    if not await common.claim_slack_event(f"slack-ask:{invocation}"):
+        return ephemeral("Open SWE is already working on that question.")
+    thread_id = ask_thread_id(channel_id, user_id, invocation)
+    background_tasks.add_task(
+        process_slack_ask,
+        SlackAskRequest(
+            channel_id=channel_id,
+            user_id=user_id,
+            question=question,
+            thread_id=thread_id,
+            command=command or ASK_COMMAND,
+            team_id=value("team_id"),
+        ),
+    )
+    return Response(status_code=200)
 
 
 @router.post("/webhooks/slack/code-channel-commands")
@@ -570,6 +674,8 @@ async def slack_interactivity(
         return {"status": "error", "message": "Invalid payload"}
     if is_slack_feedback_payload(payload):
         return await handle_slack_feedback_interaction(payload, background_tasks)
+    if expedited_review.is_expedited_review_submission(payload):
+        return await expedited_review.handle_submission(payload, background_tasks)
 
     interaction = SlackInteraction.parse(payload)
     if interaction is None:
@@ -614,7 +720,7 @@ async def slack_interactivity(
     if not channel_id:
         return ignored("Slack channel is not eligible")
     channel_context = await common.resolve_slack_channel_context(channel_id, use_cache=False)
-    if not common.slack_channel_allows_operations(channel_context):
+    if not channel_context.allows_operations:
         common.logger.warning("Blocked Slack interaction in ineligible channel=%s", channel_id)
         return ignored("Slack channel is not eligible")
 
@@ -624,12 +730,23 @@ async def slack_interactivity(
 
     user_id = interaction.user.id
     action_ts = action.action_ts or interaction.message_ts
-    thread_ts = interaction.thread_ts
+    # A DM's buttons hang off unthreaded messages, so the clicked message's own
+    # timestamp maps to nothing: the whole DM is one session. A button clicked
+    # inside a Slack thread still has to be answered in that thread.
+    in_dm = is_dm_channel(channel_context) and await dm_session_enabled(user_id)
+    thread_ts = DM_SESSION_TS if in_dm else interaction.thread_ts
+    reply_thread_ts = (
+        (interaction.message.thread_ts or interaction.container.thread_ts) if in_dm else ""
+    )
+    reply_ts = reply_thread_ts or thread_ts
 
     # From here on the interaction is addressed to Open SWE: any failure is reported to the thread.
-    target = SlackRequestTarget(channel_id=channel_id, thread_ts=thread_ts or action_ts)
+    target = SlackRequestTarget(channel_id=channel_id, thread_ts=reply_ts or action_ts)
 
     async def dispatch() -> WebhookResponse:
+        if button.type == expedited_review.card.BUTTON_TYPE:
+            return await expedited_review.handle_button(interaction, button, background_tasks)
+
         if button.type == "workflow_push_approval":
             if not channel_id or not thread_ts or not button.fingerprint:
                 return ignored("Missing workflow approval context")
@@ -648,7 +765,7 @@ async def slack_interactivity(
             if record is None:
                 await common.post_slack_thread_reply(
                     channel_id=channel_id,
-                    thread_ts=thread_ts,
+                    thread_ts=reply_ts,
                     text="I couldn't find that workflow approval request. Trigger the push again to create a fresh approval.",
                     agent_thread_id=thread_id,
                 )
@@ -662,7 +779,7 @@ async def slack_interactivity(
             if not approved:
                 await common.post_slack_thread_reply(
                     channel_id=channel_id,
-                    thread_ts=thread_ts,
+                    thread_ts=reply_ts,
                     text=f"Workflow push rejected for fingerprint `{button.fingerprint}`. No workflow files will be pushed.",
                     agent_thread_id=thread_id,
                 )
@@ -670,7 +787,7 @@ async def slack_interactivity(
 
             await common.post_slack_thread_reply(
                 channel_id=channel_id,
-                thread_ts=thread_ts,
+                thread_ts=reply_ts,
                 text=f"Workflow push approved for fingerprint `{button.fingerprint}`. Open SWE will retry the blocked push.",
                 agent_thread_id=thread_id,
             )
@@ -695,6 +812,8 @@ async def slack_interactivity(
                     ),
                     bot_user_id=common.SLACK_BOT_USER_ID,
                     thread_id=thread_id,
+                    dm_session=in_dm,
+                    reply_thread_ts=reply_thread_ts,
                 ),
                 repo,
             )
@@ -716,7 +835,7 @@ async def slack_interactivity(
                 )
                 await common.post_slack_thread_reply(
                     channel_id=channel_id,
-                    thread_ts=thread_ts,
+                    thread_ts=reply_ts,
                     text="Plan cancelled. No changes will be made.",
                     agent_thread_id=thread_id,
                 )
@@ -727,9 +846,14 @@ async def slack_interactivity(
                 background_tasks.add_task(
                     _update_selected_option_message, interaction, action, "Approve plan"
                 )
-                repo = await common.get_slack_repo_config(
-                    channel_id, thread_ts, slack_user_id=user_id, channel_context=channel_context
-                )
+                repo = (
+                    await common.get_slack_repo_config(
+                        channel_id,
+                        thread_ts,
+                        slack_user_id=user_id,
+                        channel_context=channel_context,
+                    )
+                ).repo
                 background_tasks.add_task(
                     service.process_slack_plan_approval,
                     SlackRequest(
@@ -742,6 +866,8 @@ async def slack_interactivity(
                         user_name=user_name,
                         text="approve",
                         bot_user_id=common.SLACK_BOT_USER_ID,
+                        dm_session=in_dm,
+                        reply_thread_ts=reply_thread_ts,
                     ),
                     repo,
                 )
@@ -787,6 +913,8 @@ async def slack_interactivity(
                 text=response,
                 bot_user_id=common.SLACK_BOT_USER_ID,
                 thread_id=thread_id,
+                dm_session=in_dm,
+                reply_thread_ts=reply_thread_ts,
             ),
             repo,
         )

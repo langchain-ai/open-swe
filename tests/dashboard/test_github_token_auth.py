@@ -8,7 +8,7 @@ import pytest
 from fastapi import HTTPException
 from starlette.requests import Request
 
-from agent.dashboard import oauth, routes
+from agent.dashboard import deps, oauth
 from agent.github import token_auth as github_token_auth
 
 
@@ -145,7 +145,7 @@ async def test_admin_dep_prefers_bearer_over_missing_cookie(
         new_callable=AsyncMock,
         return_value=("octo", "octo@example.com"),
     ):
-        session = await routes._admin_session_or_ci_token(_request(authorization="Bearer gh-tok"))
+        session = await deps.admin_session_or_ci_token(_request(authorization="Bearer gh-tok"))
 
     assert session["sub"] == "octo"
 
@@ -153,16 +153,16 @@ async def test_admin_dep_prefers_bearer_over_missing_cookie(
 async def test_admin_dep_routes_oidc_tokens_to_oidc_verifier() -> None:
     """An Actions OIDC token must never be treated as a user token."""
     with (
-        patch.object(routes, "is_actions_oidc_token", return_value=True),
+        patch.object(deps, "is_actions_oidc_token", return_value=True),
         patch.object(
-            routes,
+            deps,
             "admin_session_for_actions_oidc",
             new_callable=AsyncMock,
             return_value={"sub": "actions:acme/images", "auth": "actions_oidc"},
         ) as verify_oidc,
         patch.object(github_token_auth, "_github_identity", new_callable=AsyncMock) as user_lookup,
     ):
-        session = await routes._admin_session_or_ci_token(_request(authorization="Bearer oidc-jwt"))
+        session = await deps.admin_session_or_ci_token(_request(authorization="Bearer oidc-jwt"))
 
     assert session["auth"] == "actions_oidc"
     verify_oidc.assert_awaited_once_with("oidc-jwt")
@@ -171,7 +171,7 @@ async def test_admin_dep_routes_oidc_tokens_to_oidc_verifier() -> None:
 
 async def test_admin_dep_requires_a_credential() -> None:
     with pytest.raises(HTTPException) as exc:
-        await routes._admin_session_or_ci_token(_request())
+        await deps.admin_session_or_ci_token(_request())
 
     assert exc.value.status_code == 401
 

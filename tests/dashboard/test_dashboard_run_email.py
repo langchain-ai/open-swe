@@ -1,61 +1,27 @@
-from typing import Any
+"""PostgreSQL regressions for the email a run is attributed to."""
 
 import pytest
 
-from agent import store as agent_store
-from agent.dashboard import user_mappings as um
-from agent.dashboard.threads import access as thread_access
+from agent.threads import access as thread_access
+from agent.users import User
+
+pytestmark = pytest.mark.usefixtures("registry_db")
 
 
-class _FakeStore:
-    def __init__(self) -> None:
-        self.items: dict[tuple[tuple[str, ...], str], dict[str, Any]] = {}
-
-    async def get_item(self, namespace: list[str], key: str):
-        value = self.items.get((tuple(namespace), key))
-        return {"value": value} if value is not None else None
-
-    async def put_item(self, namespace: list[str], key: str, value: dict[str, Any]) -> None:
-        self.items[(tuple(namespace), key)] = value
-
-    async def search_items(
-        self,
-        namespace: list[str],
-        *,
-        filter: dict[str, Any] | None = None,
-        limit: int = 1000,
-        offset: int = 0,
-    ):
-        ns = tuple(namespace)
-        items = [{"value": v} for (n, _k), v in self.items.items() if n == ns]
-        return {"items": items[offset : offset + limit]}
+@pytest.fixture(autouse=True)
+def _authorized_logins(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("ALLOWED_GITHUB_USERS", "johannes117")
 
 
-class _FakeClient:
-    def __init__(self, store: _FakeStore) -> None:
-        self.store = store
-
-
-@pytest.fixture()
-def fake_store(monkeypatch: pytest.MonkeyPatch) -> _FakeStore:
-    store = _FakeStore()
-    monkeypatch.setattr(agent_store, "store_client", lambda: _FakeClient(store))
-    um.clear_cache()
-    return store
-
-
-@pytest.mark.asyncio
-async def test_run_email_prefers_github_mapping(fake_store: _FakeStore) -> None:
-    await um.upsert_mapping(
-        github_login="johannes117",
-        work_email="johannes@langchain.dev",
-    )
+async def test_run_email_prefers_the_users_row() -> None:
+    await User.sign_in("github", "117", login="johannes117", email="johannes@langchain.dev")
     # OAuth profile carries a personal account that isn't an org member.
     profile = {"email": "johannesduplessis117@gmail.com"}
+
     assert await thread_access.resolve_run_email("johannes117", profile) == "johannes@langchain.dev"
 
 
-@pytest.mark.asyncio
-async def test_run_email_falls_back_to_profile_when_unmapped(fake_store: _FakeStore) -> None:
+async def test_run_email_falls_back_to_profile_for_an_unknown_login() -> None:
     profile = {"email": "someone@example.com"}
-    assert await thread_access.resolve_run_email("nomapping", profile) == "someone@example.com"
+
+    assert await thread_access.resolve_run_email("nobody", profile) == "someone@example.com"

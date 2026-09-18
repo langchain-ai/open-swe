@@ -27,9 +27,9 @@ async def test_replaces_unreachable_sandbox_when_replacement_allowed() -> None:
 
     with (
         patch(
-            "agent.sandboxes.lifecycle.get_sandbox_id_from_metadata",
+            "agent.sandboxes.lifecycle.get_sandbox_metadata",
             new_callable=AsyncMock,
-            return_value="sandbox-deleted",
+            return_value={"sandbox_id": "sandbox-deleted"},
         ),
         patch(
             "agent.sandboxes.lifecycle.create_sandbox",
@@ -48,7 +48,7 @@ async def test_replaces_unreachable_sandbox_when_replacement_allowed() -> None:
     ):
         result = await ensure_sandbox_for_thread(
             thread_id,
-            environment_slug="large",
+            workspace_slug="large",
             allow_replacement=True,
         )
 
@@ -57,7 +57,7 @@ async def test_replaces_unreachable_sandbox_when_replacement_allowed() -> None:
         None,
         thread_id=thread_id,
         github_proxy_repositories=None,
-        environment_slug="large",
+        workspace_slug="large",
     )
     # The stale id is cleared by persisting the replacement, so later runs stop
     # reconnecting to a sandbox that no longer exists.
@@ -80,9 +80,9 @@ async def test_replaces_unreachable_cached_sandbox_when_replacement_allowed() ->
 
     with (
         patch(
-            "agent.sandboxes.lifecycle.get_sandbox_id_from_metadata",
+            "agent.sandboxes.lifecycle.get_sandbox_metadata",
             new_callable=AsyncMock,
-            return_value="sandbox-cached-dead",
+            return_value={"sandbox_id": "sandbox-cached-dead"},
         ),
         patch(
             "agent.sandboxes.lifecycle._refresh_github_proxy",
@@ -113,9 +113,9 @@ async def test_failed_replacement_still_raises_sandbox_unreachable() -> None:
 
     with (
         patch(
-            "agent.sandboxes.lifecycle.get_sandbox_id_from_metadata",
+            "agent.sandboxes.lifecycle.get_sandbox_metadata",
             new_callable=AsyncMock,
-            return_value="sandbox-deleted",
+            return_value={"sandbox_id": "sandbox-deleted"},
         ),
         patch(
             "agent.sandboxes.lifecycle.create_sandbox",
@@ -146,9 +146,9 @@ async def test_unreachable_sandbox_still_fails_by_default() -> None:
 
     with (
         patch(
-            "agent.sandboxes.lifecycle.get_sandbox_id_from_metadata",
+            "agent.sandboxes.lifecycle.get_sandbox_metadata",
             new_callable=AsyncMock,
-            return_value="sandbox-deleted",
+            return_value={"sandbox_id": "sandbox-deleted"},
         ),
         patch(
             "agent.sandboxes.lifecycle.create_sandbox",
@@ -230,9 +230,9 @@ async def test_deleted_sandbox_is_replaced_without_opting_in() -> None:
 
     with (
         patch(
-            "agent.sandboxes.lifecycle.get_sandbox_id_from_metadata",
+            "agent.sandboxes.lifecycle.get_sandbox_metadata",
             new_callable=AsyncMock,
-            return_value="sandbox-deleted",
+            return_value={"sandbox_id": "sandbox-deleted"},
         ),
         patch(
             "agent.sandboxes.lifecycle.create_sandbox",

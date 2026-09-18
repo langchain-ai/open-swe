@@ -12,14 +12,12 @@ from langchain.agents.middleware import AgentMiddleware, AgentState
 from langchain_core.runnables import RunnableConfig
 from langgraph.runtime import Runtime
 
-from agent.dashboard.environments import Environment
 from agent.sandboxes.providers.langsmith import (
     PROXY_GH_TOKEN_PLACEHOLDER,
-    PROXY_MODEL_KEY_PLACEHOLDER,
-    _stagehand_proxy_rules,
     configure_github_proxy,
 )
 from agent.sandboxes.state import SandboxBackendProxy
+from agent.workspaces.store import Workspace
 
 
 def _mock_async_client(mock_client_cls: MagicMock, inner: MagicMock) -> None:
@@ -76,19 +74,6 @@ class TestSandboxFactoryLoading:
             fs_capacity_bytes=128,
             create_params={"_internal_runtime": "v2"},
         )
-
-
-def test_stagehand_proxy_rule_keeps_model_key_opaque() -> None:
-    with patch.dict(
-        "os.environ",
-        {"STAGEHAND_MODEL": "anthropic/claude-sonnet-4-5", "STAGEHAND_MODEL_API_KEY": "secret"},
-        clear=True,
-    ):
-        rule = _stagehand_proxy_rules()[0]
-
-    assert rule["headers"] == [{"name": "x-api-key", "type": "opaque", "value": "secret"}]
-    assert rule["env_vars"] == {"MODEL_API_KEY": PROXY_MODEL_KEY_PLACEHOLDER}
-    assert "secret" not in rule["env_vars"].values()
 
 
 class TestConfigureGithubProxy:
@@ -165,8 +150,9 @@ class TestConfigureGithubProxy:
         assert proxy_config["rules"][0] == custom_rule
         assert [rule["name"] for rule in proxy_config["rules"][1:3]] == ["github-api", "github"]
 
-    async def test_removes_retired_langsmith_rule(self) -> None:
-        stale_rule = {"name": "open-swe-langsmith", "headers": [{"value": "old-secret"}]}
+    @pytest.mark.parametrize("rule_name", ["open-swe-langsmith", "stagehand-model"])
+    async def test_removes_retired_provider_rule(self, rule_name: str) -> None:
+        stale_rule = {"name": rule_name, "headers": [{"value": "old-secret"}]}
         with (
             patch("agent.sandboxes.providers.langsmith.httpx2.AsyncClient") as mock_client_cls,
             patch.dict("os.environ", {"LANGSMITH_API_KEY": "control-key"}, clear=True),
@@ -183,7 +169,7 @@ class TestConfigureGithubProxy:
             )
 
         rules = mock_client.patch.call_args.kwargs["json"]["proxy_config"]["rules"]
-        assert "open-swe-langsmith" not in [rule["name"] for rule in rules]
+        assert rule_name not in [rule["name"] for rule in rules]
         assert "old-secret" not in str(rules)
         assert "LANGSMITH_API_KEY" not in str(rules)
         assert "control-key" not in str(rules)
@@ -461,8 +447,8 @@ class TestCreateSandboxWithProxy:
             mock_get_token.assert_awaited_once_with()
 
     @pytest.mark.asyncio
-    async def test_passes_environment_resources_to_sandbox_creation(self) -> None:
-        environment = Environment(
+    async def test_passes_workspace_resources_to_sandbox_creation(self) -> None:
+        workspace = Workspace(
             slug="env",
             snapshot_status="ready",
             snapshot_id="env-snap",
@@ -476,9 +462,9 @@ class TestCreateSandboxWithProxy:
         )
         with (
             patch(
-                "agent.sandboxes.lifecycle.resolve_environment",
+                "agent.sandboxes.lifecycle.load_workspace",
                 new_callable=AsyncMock,
-                return_value=environment,
+                return_value=workspace,
             ),
             patch(
                 "agent.sandboxes.lifecycle.create_sandbox", new_callable=AsyncMock
@@ -497,19 +483,19 @@ class TestCreateSandboxWithProxy:
 
             from agent.sandboxes.lifecycle import _create_sandbox_with_proxy
 
-            await _create_sandbox_with_proxy(environment_slug="large")
+            await _create_sandbox_with_proxy(workspace_slug="large")
 
         mock_create.assert_awaited_once_with(
             snapshot_id="env-snap",
             mem_bytes=16,
             vcpus=8,
             fs_capacity_bytes=128,
-            create_params=environment.create_params,
+            create_params=workspace.create_params,
         )
         mock_configure_proxy.assert_awaited_once_with(
             "sandbox-123",
             "ghs_install",
-            base_proxy_config=environment.create_params["proxy_config"],
+            base_proxy_config=workspace.create_params["proxy_config"],
         )
 
     @pytest.mark.asyncio
@@ -630,9 +616,9 @@ class TestRefreshProxyOnSandboxReuse:
                 return_value=("ghp", None),
             ),
             patch(
-                "agent.server.resolve_environment",
+                "agent.server.load_workspace",
                 new_callable=AsyncMock,
-                return_value=Environment(slug="env", create_params={"proxy_config": {}}),
+                return_value=Workspace(slug="env", create_params={"proxy_config": {}}),
             ),
             patch(
                 "agent.sandboxes.lifecycle.get_sandbox_id_from_metadata",
@@ -666,6 +652,11 @@ class TestRefreshProxyOnSandboxReuse:
             patch.dict(
                 "agent.sandboxes.lifecycle.SANDBOX_BACKENDS",
                 {"thread-123": SandboxBackendProxy(mock_sandbox, thread_id="thread-123")},
+                clear=True,
+            ),
+            patch.dict(
+                "agent.sandboxes.lifecycle.SANDBOX_CONNECTIONS",
+                {"sandbox-cached": mock_sandbox},
                 clear=True,
             ),
             patch.dict("os.environ", {"SANDBOX_TYPE": "langsmith"}),

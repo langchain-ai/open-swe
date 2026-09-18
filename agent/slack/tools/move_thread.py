@@ -4,7 +4,6 @@ from typing import Any
 
 from langgraph.config import get_config
 
-from agent.dashboard.threads.summary import thread_is_private
 from agent.slack.client import (
     append_slack_web_link_footer,
     bind_slack_thread_id,
@@ -16,6 +15,7 @@ from agent.slack.client import (
     store_slack_run_mapping,
 )
 from agent.source_context import SourceContext
+from agent.threads.summary import thread_is_private
 from agent.utils.dashboard_links import dashboard_thread_url
 from agent.utils.json_types import thread_metadata
 from agent.utils.thread_ops import langgraph_client
@@ -44,6 +44,11 @@ def _new_slack_context(
         "triggering_user_name": current.get("triggering_user_name", ""),
         "triggering_user_email": current.get("triggering_user_email", ""),
         "triggering_event_ts": thread_ts,
+        **{
+            key: current[key]
+            for key in ("team_id", "triggering_bot_id", "triggering_bot_app_id")
+            if key in current
+        },
     }
 
 

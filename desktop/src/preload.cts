@@ -37,6 +37,8 @@ contextBridge.exposeInMainWorld("openSweDesktop", {
     ipcRenderer.invoke("desktop:checkout-project-branch", { ...input }),
   addProject: () => ipcRenderer.invoke("desktop:add-project"),
   removeProject: (cwd) => ipcRenderer.invoke("desktop:remove-project", cwd),
+  writeClipboard: (value) =>
+    ipcRenderer.invoke("desktop:write-clipboard", value),
   getVersion: () => ipcRenderer.invoke("desktop:version"),
   getUpdateState: () => ipcRenderer.invoke("desktop:update-state"),
   installUpdate: () => ipcRenderer.invoke("desktop:install-update"),
@@ -52,6 +54,8 @@ contextBridge.exposeInMainWorld("openSweDesktop", {
     ipcRenderer.invoke("desktop:resolve-local-project-path", { ...input }),
   localModelCredentialStatus: (modelId) =>
     ipcRenderer.invoke("desktop:local-model-credential-status", modelId),
+  openLocalTrace: (threadId) =>
+    ipcRenderer.invoke("desktop:open-local-trace", threadId),
   signInLocalOpenAI: () => ipcRenderer.invoke("desktop:local-openai-sign-in"),
   startLocalThread: (input) =>
     ipcRenderer.invoke("desktop:start-local-thread", input),

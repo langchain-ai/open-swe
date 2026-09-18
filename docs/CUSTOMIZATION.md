@@ -67,7 +67,7 @@ Set the `SANDBOX_TYPE` environment variable to switch providers. Each provider h
 
 > **Warning**: `local` runs commands directly on your host with no sandboxing. Only use for local development with human-in-the-loop enabled.
 
-For `langsmith`, sandbox provisioning, connection, proxy configuration, and environment snapshot captures use the deployment’s `LANGSMITH_API_KEY` and `LANGSMITH_ENDPOINT`. The `DEFAULT_SANDBOX_SNAPSHOT_ID` must exist in that LangSmith workspace. The former `SANDBOX_LANGSMITH_API_KEY` and `SANDBOX_LANGSMITH_ENDPOINT` overrides are no longer used.
+For `langsmith`, sandbox provisioning, connection, proxy configuration, and workspace snapshot captures use the deployment’s `LANGSMITH_API_KEY` and `LANGSMITH_ENDPOINT`. The `DEFAULT_SANDBOX_SNAPSHOT_ID` must exist in that LangSmith workspace. The former `SANDBOX_LANGSMITH_API_KEY` and `SANDBOX_LANGSMITH_ENDPOINT` overrides are no longer used.
 
 ### Adding a new sandbox provider
 
@@ -210,7 +210,7 @@ Routing is opt-in and off by default. Enable it either way:
 | `LANGSMITH_GATEWAY_BASE_URL` | `https://gateway.smith.langchain.com` | Override for a regional or self-hosted gateway host. |
 | `LANGSMITH_GATEWAY_OPENAI_USE_RESPONSES` | `true` | Use the OpenAI Responses API through the gateway. Set to `false` only to force Chat Completions for OpenAI models. |
 
-The admin panel (**Admin → LLM Gateway**) exposes a per-workspace toggle stored in team settings; when set it overrides the `LANGSMITH_GATEWAY_ENABLED` env default (a `None`/unset team value inherits the env default).
+The admin panel (**Admin → LLM Gateway**) exposes a toggle stored in workspace settings; when set it overrides the `LANGSMITH_GATEWAY_ENABLED` env default (a `None`/unset value inherits the env default).
 
 Routing is applied centrally in `make_model` (`agent/utils/model.py`), which resolves the effective on/off and delegates URL/key wiring to `agent/utils/gateway.py`. **OpenAI, Anthropic, Baseten, Fireworks, and Google Gemini** are routed; Google Vertex (service-account auth) and any other provider call the provider directly with a logged warning. Baseten uses `BASETEN_API_KEY` from LangSmith workspace Provider Secrets through Gateway, or the runtime environment for direct calls.
 
@@ -480,20 +480,6 @@ else:
 return create_deep_agent(tools=tools, ...)
 ```
 
-### Browser automation (Stagehand)
-
-The main agent can dynamically load `browser_navigate`, `browser_act`, `browser_observe`, `browser_extract`, and `browser_close` to drive Chromium inside the task sandbox via the [Stagehand](https://github.com/browserbase/stagehand-python) SDK. Because the browser shares the sandbox network namespace, it can test development servers on `localhost`. Static reads should still use `fetch_url`.
-
-The browser schemas appear in the `load_integration_tools` catalog only when the tools are available, and remain out of the model context until loaded. The tools require a LangSmith sandbox and a supported model credential. The real credential remains outside the sandbox and is injected by the sandbox egress proxy; only a placeholder is visible to sandbox processes.
-
-| Variable | Default | Purpose |
-| --- | --- | --- |
-| `STAGEHAND_MODEL_API_KEY` | falls back to `MODEL_API_KEY`, then `ANTHROPIC_API_KEY` | Model key used by Stagehand. |
-| `STAGEHAND_MODEL` | `anthropic/claude-sonnet-4-5` | Stagehand model; Anthropic and OpenAI are supported. |
-| `STAGEHAND_HEADLESS` | `true` | Run Chromium headless. |
-
-The sandbox snapshot must include Chromium and Stagehand, install `agent/resources/stagehand_runtime.py` at `/opt/open-swe/stagehand_runtime.py`, and set `STAGEHAND_LOCAL_CHROME_PATH` to the Chromium executable (usually `/usr/bin/chromium`).
-
 ---
 
 ## 4. Triggers
@@ -543,7 +529,7 @@ Slack repo resolution (`get_slack_repo_config` in `agent/webapp.py`) checks, in 
 1. Repo carried over from the existing Slack thread's metadata.
 2. A `repo:owner/name` (or GitHub URL) token in the channel's **topic or purpose** (its "description"). This lets a channel be pinned to a repo without anyone repeating it per-message.
 3. The triggering user's dashboard `default_repo`.
-4. The team default repo.
+4. The workspace's default repository (its own override, else the instance's).
 5. `SLACK_REPO_OWNER`/`SLACK_REPO_NAME`, falling back to `DEFAULT_REPO_OWNER`/`DEFAULT_REPO_NAME`.
 
 Users can still override per-message with `repo:owner/name` syntax in their Slack message (this is read from the message text by the agent). A shorthand `repo:name` (without the org) is also supported — the org defaults to `DEFAULT_REPO_OWNER`.

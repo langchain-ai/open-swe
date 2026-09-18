@@ -122,11 +122,34 @@ async def test_create_durable_run_applies_defaults(monkeypatch: pytest.MonkeyPat
         "kind": "test",
         "invocation_id": invocation_id,
         "prepare_run_id": invocation_id,
+        "invocation_started_at": created["config"]["configurable"]["invocation_started_at"],
     }
     assert created["metadata"] == created["config"]["metadata"]
     assert created["config"]["configurable"]["thread_id"] == "thread-1"
     assert created["config"]["configurable"]["prepare_run_id"] == invocation_id
     assert isinstance(invocation_id, str)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("is_im", "conversation_type"),
+    [(True, "dm"), (False, "channel")],
+)
+async def test_create_durable_run_records_slack_conversation_type(
+    is_im: bool, conversation_type: str
+) -> None:
+    client = _FakeClient()
+
+    await dispatch.create_durable_run(
+        "thread-1",
+        "agent",
+        input={"messages": []},
+        source="slack",
+        config={"configurable": {"slack_thread": {"channel_context": {"is_im": is_im}}}},
+        client=client,
+    )
+
+    assert client.runs.created[0]["metadata"]["slack_conversation_type"] == conversation_type
 
 
 @pytest.mark.asyncio

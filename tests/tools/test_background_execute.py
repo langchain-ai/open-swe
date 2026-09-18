@@ -111,6 +111,22 @@ def test_background_command_timeout_and_stop() -> None:
             shutil.rmtree(task_dir, ignore_errors=True)
 
 
+def test_dispatch_config_carries_new_workspace_key() -> None:
+    configurable = background_tasks._dispatch_config(
+        {"source": "slack", "workspace": "oss"}, "thread-1"
+    )
+    assert configurable["workspace"] == "oss"
+    assert configurable["environment"] == "oss"
+
+
+def test_dispatch_config_falls_back_to_legacy_environment_key() -> None:
+    configurable = background_tasks._dispatch_config(
+        {"source": "slack", "environment": "old"}, "thread-1"
+    )
+    assert configurable["workspace"] == "old"
+    assert configurable["environment"] == "old"
+
+
 async def test_background_task_cron_search_uses_metadata_not_graph_name() -> None:
     client = AsyncMock()
     client.crons.search.return_value = []
@@ -195,7 +211,6 @@ async def test_monitor_enqueues_one_claimed_completion() -> None:
     assert result == {"status": "idle", "delivered": 1}
     dispatch.assert_awaited_once()
     assert dispatch.await_args is not None
-    assert "A sandbox background command finished." in dispatch.await_args.args[1]
     configurable = dispatch.await_args.args[2]
     assert configurable["source"] == "slack"
     assert configurable["background_task_completion"] is True

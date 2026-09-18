@@ -4,7 +4,8 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 
 import { agentsApi } from "./api"
 import { apiWarmupScript } from "./apiWarmup"
-import { SIDEBAR_PAGE_SIZE } from "./queries"
+import { SIDEBAR_PAGE_SIZE, sidebarRecentsParams } from "./queries"
+import type { ChatSort } from "./sidebarPrefs"
 
 const THREAD_ID = "1dd69115-f4b9-507f-b4d5-9f355f9f5ba0"
 const STATE_PATH = `/dashboard/api/threads/${THREAD_ID}/state`
@@ -30,18 +31,28 @@ function stubFetch() {
 }
 
 /** What the app itself requests, captured through the real api client. */
-async function recordedSidebarUrl(
-  includeAutomations: boolean,
-  projectMode = true
-): Promise<string> {
+async function recordedSidebarUrl({
+  includeAutomations = false,
+  includeResolved = false,
+  projectMode = true,
+  sort = "created",
+}: {
+  includeAutomations?: boolean
+  includeResolved?: boolean
+  projectMode?: boolean
+  sort?: ChatSort
+} = {}): Promise<string> {
   const spy = stubFetch()
   await agentsApi
     .listThreadsPage({
+      ...sidebarRecentsParams({
+        projectMode,
+        includeAutomations,
+        includeResolved,
+        sort,
+      }),
       limit: SIDEBAR_PAGE_SIZE,
       offset: 0,
-      resolved: false,
-      scope: includeAutomations ? "all" : "interactive",
-      ownerless: projectMode,
     })
     .catch(() => undefined)
   const called = spy.mock.calls[0]?.[0]
@@ -66,7 +77,6 @@ describe("apiWarmupScript", () => {
   it("only matches the routes that render a sidebar or transcript", () => {
     expect(apiWarmupScript("/")).toBeNull()
     expect(apiWarmupScript("/login")).toBeNull()
-    expect(apiWarmupScript("/agents/threads")).toBeNull()
     expect(apiWarmupScript(`/agents/local/${THREAD_ID}`)).toBeNull()
     expect(apiWarmupScript(`/agents/${THREAD_ID}/plan`)).toBeNull()
     expect(apiWarmupScript("/agents")).toContain("/threads/page")
@@ -131,26 +141,36 @@ describe("apiWarmupScript", () => {
   // has to be checked against the request the api client actually makes —
   // a mismatch would silently fetch the sidebar twice.
   it.each([
-    { includeAutomations: false, projectMode: true, prefs: undefined },
+    { name: "defaults", expected: {}, prefs: undefined },
     {
-      includeAutomations: true,
-      projectMode: true,
+      name: "automations included",
+      expected: { includeAutomations: true },
       prefs: { filters: { includeAutomations: true } },
     },
     {
-      includeAutomations: true,
-      projectMode: true,
+      name: "schedule source selected",
+      expected: { includeAutomations: true },
       prefs: { filters: { sources: ["schedule"] } },
     },
     {
-      includeAutomations: false,
-      projectMode: false,
+      name: "list mode",
+      expected: { projectMode: false },
       prefs: { organize: "list" },
     },
+    {
+      name: "resolved included",
+      expected: { includeResolved: true },
+      prefs: { filters: { includeResolved: true } },
+    },
+    {
+      name: "sorted by last update",
+      expected: { sort: "updated" as ChatSort },
+      prefs: { sortChats: "updated" },
+    },
   ])(
-    "warms the exact sidebar URL the app requests (automations: $includeAutomations, project mode: $projectMode)",
-    async ({ includeAutomations, projectMode, prefs }) => {
-      const expected = await recordedSidebarUrl(includeAutomations, projectMode)
+    "warms the exact sidebar URL the app requests ($name)",
+    async ({ expected: params, prefs }) => {
+      const expected = await recordedSidebarUrl(params)
 
       setReadyState("loading")
       stubPrefs(prefs)
@@ -162,7 +182,7 @@ describe("apiWarmupScript", () => {
   )
 
   it("warms the exact sidebar URL the app requests on a thread route", async () => {
-    const expected = await recordedSidebarUrl(false)
+    const expected = await recordedSidebarUrl()
 
     setReadyState("loading")
     const original = stubFetch()

@@ -3,9 +3,10 @@ import pytest
 from cryptography.fernet import Fernet
 from fastapi import FastAPI
 
-from agent.dashboard import routes, workspace_mcps
-from agent.dashboard import user_mcps as mcps
+from agent.dashboard import oauth, routes
 from agent.mcp import MCPConnectionUpdate, load_mcp_tools
+from agent.mcp import user as mcps
+from agent.mcp import workspace as workspace_mcps
 
 
 @pytest.fixture(autouse=True)
@@ -20,7 +21,9 @@ def update(**fields):
 async def test_saved_credentials_are_reused_only_from_the_same_user(fake_store):
     await mcps.save_user_mcp("bob", "linear", update(headers={"Authorization": "bob-secret"}))
     await workspace_mcps.save_workspace_mcp(
-        "linear", update(headers={"Authorization": "workspace-secret"}, allowed_tools=["search"])
+        "default",
+        "linear",
+        update(headers={"Authorization": "workspace-secret"}, allowed_tools=["search"]),
     )
     saved = await mcps.save_user_mcp(" Alice ", "linear", update(enabled=False))
     assert saved["header_names"] == []
@@ -28,7 +31,9 @@ async def test_saved_credentials_are_reused_only_from_the_same_user(fake_store):
     assert await mcps.list_user_mcps("bob") != [saved]
     assert await mcps.list_user_mcps("ALICE") == [saved]
     assert (
-        await load_mcp_tools(workspace_mcps.workspace_mcp_source, mcps.user_mcp_source("alice"))
+        await load_mcp_tools(
+            workspace_mcps.workspace_mcp_source("default"), mcps.user_mcp_source("alice")
+        )
         == []
     )
     record = await mcps.user_mcp_source("ALICE").get_connection("linear")
@@ -42,7 +47,7 @@ async def test_routes_serve_only_the_signed_in_users_connections(fake_store, mon
     app = FastAPI()
     app.include_router(routes.router)
     session = {"sub": "alice", "email": "alice@example.com"}
-    app.dependency_overrides[routes.require_session] = lambda: session
+    app.dependency_overrides[oauth.require_session] = lambda: session
     body = {
         "name": "linear",
         "url": "https://mcp.linear.app/mcp",

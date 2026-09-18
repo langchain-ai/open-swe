@@ -162,6 +162,19 @@ function setPrefs(update: (prev: SidebarPrefs) => SidebarPrefs) {
   notifyListeners()
 }
 
+/**
+ * False until hydration finishes, because the server render cannot read the
+ * stored preferences. Requests keyed by a preference must wait for this, or the
+ * placeholder defaults fetch a page the user never asked for.
+ */
+export function useSidebarPrefsHydrated(): boolean {
+  return useSyncExternalStore(
+    subscribe,
+    () => true,
+    () => false
+  )
+}
+
 export function useSidebarPrefs() {
   const prefs = useSyncExternalStore(
     subscribe,

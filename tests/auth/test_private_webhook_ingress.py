@@ -152,7 +152,6 @@ async def test_private_slack_edit_rejects_non_owner(monkeypatch):
     )
     monkeypatch.setattr(webhook, "get_langgraph_client", lambda: client)
     monkeypatch.setattr(webhook.common, "get_client", lambda **kwargs: client)
-    monkeypatch.setattr(webhook.common, "refresh_user_mapping_cache", AsyncMock())
     monkeypatch.setattr(webhook.common, "get_slack_user_info", AsyncMock(return_value={}))
     monkeypatch.setattr(webhook, "_slack_login", AsyncMock(return_value="bob"))
     queue = AsyncMock()

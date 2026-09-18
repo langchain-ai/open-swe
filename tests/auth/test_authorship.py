@@ -25,12 +25,13 @@ def test_build_pr_attribution_footer_includes_model_details() -> None:
         model_id="openai:gpt-5.6-luna",
         reasoning_effort="xhigh",
     ) == (
-        "Made by [Open SWE](https://openswe.vercel.app/agents/abc-123)"
+        "Made by [Open SWE](https://github.com/langchain-ai/open-swe)"
+        " · [view thread](https://openswe.vercel.app/agents/abc-123)"
         " · openai:gpt-5.6-luna (xhigh)"
     )
 
 
-def test_resolve_identity_from_config_uses_user_noreply_email() -> None:
+async def test_resolve_identity_from_config_uses_user_noreply_email() -> None:
     config = {
         "configurable": {
             "source": "slack",
@@ -39,8 +40,9 @@ def test_resolve_identity_from_config_uses_user_noreply_email() -> None:
             "slack_thread": {"triggering_user_name": "Mason"},
         }
     }
-    identity = resolve_triggering_user_identity(config)
+    identity = await resolve_triggering_user_identity(config)
     assert identity is not None
     assert identity.commit_name == "Mason"
     assert identity.commit_email == "4321+mason-gh@users.noreply.github.com"
     assert identity.github_login == "mason-gh"
+    assert not identity.github_profile

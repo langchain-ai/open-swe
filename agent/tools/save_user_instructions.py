@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 
 async def save_user_instructions(instructions: str) -> dict[str, Any]:
     """Implement the `save_user_instructions` tool."""
-    login = resolve_github_login(as_json_object(get_config()))
+    login = await resolve_github_login(as_json_object(get_config()))
     if not login:
         return {
             "ok": False,

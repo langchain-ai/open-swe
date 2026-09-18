@@ -73,55 +73,49 @@ async def test_public_threads_never_resolve_personal_github_auth(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("source", ["dashboard", "slack", "linear", "github"])
 @pytest.mark.parametrize("actor", ["alice", "bob"])
-async def test_public_pr_is_opened_as_initiator(monkeypatch, thread_metadata, credentials, actor):
+async def test_public_pr_is_opened_as_run_requester(
+    monkeypatch, thread_metadata, credentials, actor, source
+):
     opr = importlib.import_module("agent.tools.open_pull_request")
-    monkeypatch.setattr("agent.run_config.get_config", lambda: config(login=actor))
+    monkeypatch.setattr("agent.run_config.get_config", lambda: config(source=source, login=actor))
+    credentials.side_effect = {"alice": "alice-token", "bob": "bob-token"}.get
     bot = AsyncMock(return_value="bot-token")
     monkeypatch.setattr(opr, "get_github_app_installation_token", bot)
-    assert await opr._resolve_pr_author_token() == ("personal-token", "user")
-    credentials.assert_awaited_once_with("alice")
+    assert await opr._resolve_pr_author_token() == (f"{actor}-token", "user")
+    assert thread_metadata["owner_login"] == "alice"
     bot.assert_not_awaited()
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("actor", ["bob", "alice"])
-async def test_public_pr_preserves_initiator_login_case(
-    monkeypatch, thread_metadata, credentials, actor
-):
+async def test_public_pr_preserves_requester_login_case(monkeypatch, thread_metadata, credentials):
     opr = importlib.import_module("agent.tools.open_pull_request")
     thread_metadata.update(owner_type="user", owner_login="Alice")
-    credentials.side_effect = lambda login: "personal-token" if login == "Alice" else None
-    monkeypatch.setattr("agent.run_config.get_config", lambda: config(login=actor))
-    assert await opr._resolve_pr_author_token() == ("personal-token", "user")
-    credentials.assert_awaited_once_with("Alice")
+    credentials.side_effect = {"Alice": "alice-token", "Bob": "bob-token"}.get
+    monkeypatch.setattr("agent.run_config.get_config", lambda: config(login="Bob"))
+    assert await opr._resolve_pr_author_token() == ("bob-token", "user")
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("actor", ["Alice", "bob"])
-async def test_older_public_owner_resolves_oauth_key_independently_of_participant(
-    monkeypatch, thread_metadata, credentials, actor
-):
+async def test_older_public_owned_pr_uses_requester(monkeypatch, thread_metadata, credentials):
     opr = importlib.import_module("agent.tools.open_pull_request")
     thread_metadata.pop("owner_type")
-    credentials.side_effect = lambda login: "personal-token" if login == "Alice" else None
-    monkeypatch.setattr("agent.run_config.get_config", lambda: config(login=actor))
+    credentials.side_effect = {"alice": "alice-token", "Bob": "bob-token"}.get
     monkeypatch.setattr(
-        profiles,
-        "search_all_values",
-        AsyncMock(return_value=[{"login": "Bob"}, {"login": "Alice"}]),
-        raising=False,
+        profiles, "get_oauth_token_record", AsyncMock(return_value={"login": "alice"})
     )
-
-    assert await opr._resolve_pr_author_token() == ("personal-token", "user")
-    credentials.assert_awaited_once_with("Alice")
+    monkeypatch.setattr("agent.run_config.get_config", lambda: config(login="Bob"))
+    assert await opr._resolve_pr_author_token() == ("bob-token", "user")
 
 
 @pytest.mark.asyncio
-async def test_public_pr_does_not_fall_back_to_bot(monkeypatch, thread_metadata, credentials):
+async def test_public_pr_does_not_fall_back_to_owner_or_bot(
+    monkeypatch, thread_metadata, credentials
+):
     opr = importlib.import_module("agent.tools.open_pull_request")
     monkeypatch.setattr("agent.run_config.get_config", lambda: config(login="bob"))
-    credentials.return_value = None
+    credentials.side_effect = {"alice": "alice-token"}.get
     bot = AsyncMock(return_value="bot-token")
     monkeypatch.setattr(opr, "get_github_app_installation_token", bot)
     with pytest.raises(auth.GitHubUserAuthRequired):
@@ -130,17 +124,74 @@ async def test_public_pr_does_not_fall_back_to_bot(monkeypatch, thread_metadata,
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("actor", [None, "", " "])
+async def test_public_owned_pr_requires_authenticated_requester(
+    monkeypatch, thread_metadata, credentials, actor
+):
+    opr = importlib.import_module("agent.tools.open_pull_request")
+    monkeypatch.setattr("agent.run_config.get_config", lambda: config(login=actor))
+    with pytest.raises(RuntimeError, match="requester"):
+        await opr._resolve_pr_author_token()
+    credentials.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_private_pr_rejects_another_requester(monkeypatch, thread_metadata, credentials):
+    opr = importlib.import_module("agent.tools.open_pull_request")
+    thread_metadata["visibility"] = "private"
+    monkeypatch.setattr("agent.run_config.get_config", lambda: config(login="bob"))
+    with pytest.raises(RuntimeError, match="private thread owner"):
+        await opr._resolve_pr_author_token()
+    credentials.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("scope", ["public", "private", "legacy", "system", "unowned"])
+async def test_background_completion_cannot_publish_with_saved_user_identity(
+    monkeypatch, thread_metadata, credentials, scope
+):
+    opr = importlib.import_module("agent.tools.open_pull_request")
+    if scope == "private":
+        thread_metadata["visibility"] = "private"
+    elif scope == "system":
+        thread_metadata.update(owner_type="system")
+        thread_metadata.pop("owner_login")
+    elif scope in ("legacy", "unowned"):
+        thread_metadata.pop("owner_type")
+        if scope == "unowned":
+            thread_metadata.pop("owner_login")
+    run_config = config()
+    run_config["configurable"]["background_task_completion"] = True
+    monkeypatch.setattr("agent.run_config.get_config", lambda: run_config)
+    monkeypatch.setattr(
+        opr, "get_github_app_installation_token", AsyncMock(return_value="bot-token")
+    )
+    if scope in ("system", "unowned"):
+        assert await opr._resolve_pr_author_token() == ("bot-token", "bot")
+    else:
+        with pytest.raises(RuntimeError, match="Background"):
+            await opr._resolve_pr_author_token()
+    credentials.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("removed_bot", [False, True])
 async def test_system_pr_uses_bot_even_with_a_triggering_user(
-    monkeypatch, thread_metadata, credentials
+    monkeypatch, thread_metadata, credentials, fake_store, removed_bot
 ):
     opr = importlib.import_module("agent.tools.open_pull_request")
     thread_metadata.update(owner_type="system")
     thread_metadata.pop("owner_login")
+    if removed_bot:
+        thread_metadata["source_context"] = {
+            "slack_thread": {"team_id": "T123", "triggering_bot_id": "B123"}
+        }
     monkeypatch.setattr("agent.run_config.get_config", config)
     monkeypatch.setattr(
         opr, "get_github_app_installation_token", AsyncMock(return_value="bot-token")
     )
     assert await opr._resolve_pr_author_token() == ("bot-token", "bot")
+    assert await auth.resolve_github_token(config(), "thread-1") == ("bot-token", None)
     credentials.assert_not_awaited()
 
 

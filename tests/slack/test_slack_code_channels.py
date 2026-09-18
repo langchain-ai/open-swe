@@ -1,6 +1,6 @@
 import json
-from typing import Any, Self, cast
-from unittest.mock import AsyncMock, MagicMock
+from typing import Any, cast
+from unittest.mock import AsyncMock
 from urllib.parse import urlencode
 
 import pytest
@@ -12,6 +12,7 @@ from agent.slack import code_channels as slack_code_channels
 from agent.slack import events as slack_events
 from agent.slack import routes as slack_routes
 from agent.slack import webhook as slack_service
+from agent.slack.payloads import SlackChannelContext
 from agent.slack.request import SlackRequest
 from agent.webhooks import common as webhook_common
 
@@ -39,11 +40,9 @@ def code_channel_route(monkeypatch: pytest.MonkeyPatch) -> AsyncMock:
         webhook_common,
         "resolve_slack_channel_context",
         AsyncMock(
-            return_value={
-                "name": "code-task",
-                "is_ext_shared": False,
-                "is_pending_ext_shared": False,
-            }
+            return_value=SlackChannelContext(
+                name="code-task", is_ext_shared=False, is_pending_ext_shared=False
+            )
         ),
     )
     monkeypatch.setattr(
@@ -197,9 +196,10 @@ async def test_untagged_code_channel_message_routes_to_the_channel_session(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     slack_events.reset_slack_event_claims()
+    monkeypatch.setattr("agent.incidents.channels.handle_slack_event", AsyncMock(return_value=None))
 
-    async def channel_context(_channel_id: str, *, use_cache: bool = True) -> dict[str, Any]:
-        return {"is_ext_shared": False, "is_pending_ext_shared": False}
+    async def channel_context(_channel_id: str, *, use_cache: bool = True) -> SlackChannelContext:
+        return SlackChannelContext(is_ext_shared=False, is_pending_ext_shared=False)
 
     monkeypatch.setattr(webhook_common, "verify_slack_signature", lambda **_kwargs: True)
     monkeypatch.setattr(webhook_common, "claim_slack_event", AsyncMock(return_value=True))
@@ -245,21 +245,12 @@ async def test_untagged_code_channel_message_routes_to_the_channel_session(
     assert request.reply_thread_ts == "1786573300.000000"
 
 
-async def test_code_channel_replies_are_posted_top_level(monkeypatch: pytest.MonkeyPatch) -> None:
-    response = MagicMock(status_code=200)
-    response.json.return_value = {"ok": True, "ts": "1786573400.000000"}
-    client = AsyncMock()
-    client.__aenter__.return_value = client
-    client.post.return_value = response
-
-    monkeypatch.setattr(slack_utils, "SLACK_BOT_TOKEN", "xoxb-test")
-    monkeypatch.setattr(slack_utils.httpx2, "AsyncClient", lambda **_kwargs: client)
-
-    await slack_utils._post_slack_message_with_ts(
-        "C-code", "done", thread_ts=webhook_common.CODE_CHANNEL_SESSION_TS
+async def test_code_channel_replies_are_posted_top_level(slack_api):
+    assert await slack_utils._post_slack_message_with_ts("C-code", "done", thread_ts="0") == (
+        "1.0",
+        None,
     )
-
-    assert "thread_ts" not in client.post.await_args.kwargs["json"]
+    assert "thread_ts" not in slack_api.calls[0][1]
 
 
 @pytest.mark.parametrize(
@@ -279,32 +270,15 @@ def test_slack_user_ids_reads_ids_however_they_were_written(
 
 
 @pytest.fixture
-def invite_call(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
-    """Capture what `conversations.invite` was sent, and script its answer."""
+def invite_call(slack_api) -> dict[str, Any]:
     captured: dict[str, Any] = {"payload": None, "response": {"ok": True}}
 
-    class _Response:
-        status_code = 200
+    def handle(method, params, headers):
+        assert method == "conversations.invite"
+        captured["payload"] = params
+        return 200, captured["response"], {}
 
-        def raise_for_status(self) -> None:
-            return None
-
-        def json(self) -> Any:
-            return captured["response"]
-
-    class _Client:
-        async def __aenter__(self) -> Self:
-            return self
-
-        async def __aexit__(self, *_args: Any) -> None:
-            return None
-
-        async def post(self, _url: str, **kwargs: Any) -> _Response:
-            captured["payload"] = kwargs.get("json")
-            return _Response()
-
-    monkeypatch.setattr(slack_utils, "SLACK_BOT_TOKEN", "xoxb-test")
-    monkeypatch.setattr(slack_utils.httpx2, "AsyncClient", lambda **_: _Client())
+    slack_api.handler = handle
     return captured
 
 
@@ -312,7 +286,7 @@ async def test_an_invite_forces_past_the_ids_slack_refuses(invite_call: dict[str
     """Without `force` Slack drops the whole batch when one user fails."""
     invited, error = await slack_utils.invite_to_slack_channel("C1", ["U1", "U2"])
 
-    assert invite_call["payload"] == {"channel": "C1", "users": "U1,U2", "force": True}
+    assert invite_call["payload"] == {"channel": "C1", "users": "U1,U2", "force": "1"}
     assert (invited, error) == (["U1", "U2"], "")
 
 

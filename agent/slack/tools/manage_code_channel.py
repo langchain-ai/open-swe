@@ -2,7 +2,6 @@ from collections.abc import Mapping
 from contextlib import suppress
 from typing import Any, Literal
 
-from agent.dashboard.threads.summary import thread_is_private
 from agent.run_config import RunConfig
 from agent.slack.client import (
     bind_slack_thread_id,
@@ -39,6 +38,7 @@ from agent.slack.code_channels import (
     store_block_suggestions,
 )
 from agent.source_context import SourceContext
+from agent.threads.summary import thread_is_private
 from agent.tools.create_sandbox_file_download_url import resolve_sandbox_file
 from agent.utils.dashboard_links import dashboard_thread_url
 from agent.utils.json_types import thread_metadata
@@ -306,7 +306,14 @@ async def _create(
     new_slack = {
         **{
             key: active.get(key, "")
-            for key in ("triggering_user_id", "triggering_user_name", "triggering_user_email")
+            for key in (
+                "triggering_user_id",
+                "triggering_user_name",
+                "triggering_user_email",
+                "team_id",
+                "triggering_bot_id",
+                "triggering_bot_app_id",
+            )
         },
         "channel_id": channel_id,
         "thread_ts": CODE_CHANNEL_SESSION_TS,

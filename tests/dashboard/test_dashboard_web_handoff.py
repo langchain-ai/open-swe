@@ -4,8 +4,8 @@ from typing import Any, cast
 import pytest
 from fastapi import HTTPException
 
-from agent.dashboard.threads import api as thread_api
-from agent.dashboard.threads import runs as thread_runs
+from agent.threads import handlers
+from agent.threads import runs as thread_runs
 from tests.conftest import patch_thread_module
 
 
@@ -109,7 +109,7 @@ async def test_dashboard_followup_on_slack_thread_uses_dashboard_source(
     patch_thread_module(monkeypatch, "resolve_run_email", _run_email)
 
     with pytest.raises(HTTPException) as exc_info:
-        await thread_api.send_dashboard_message(
+        await handlers.send_dashboard_message(
             "thread-1",
             "octocat",
             thread_runs.ThreadMessageBody(content="continue in web"),
@@ -143,7 +143,7 @@ async def test_dashboard_followup_sends_image_content_blocks(
     )
 
     with pytest.raises(HTTPException) as exc_info:
-        await thread_api.send_dashboard_message(
+        await handlers.send_dashboard_message(
             "thread-1",
             "octocat",
             thread_runs.ThreadMessageBody(
@@ -182,7 +182,7 @@ async def test_dashboard_followup_on_busy_thread_queues_dashboard_handoff(
     patch_thread_module(monkeypatch, "queue_message_for_thread", fake_queue_message_for_thread)
 
     client_message_id = uuid.UUID("8a60896d-65ca-4e40-8a2d-1fbe81777001")
-    await thread_api.send_dashboard_message(
+    await handlers.send_dashboard_message(
         "thread-1",
         "octocat",
         thread_runs.ThreadMessageBody(
@@ -242,7 +242,7 @@ async def test_dashboard_followup_on_busy_slack_thread_updates_trace_reply(
         monkeypatch, "update_slack_trace_reply_for_web_handoff", fake_update_trace_reply
     )
 
-    await thread_api.send_dashboard_message(
+    await handlers.send_dashboard_message(
         "thread-1",
         "octocat",
         thread_runs.ThreadMessageBody(content="continue in web"),
@@ -301,7 +301,7 @@ async def test_dashboard_followup_uses_stored_trace_reply_timestamp(
         monkeypatch, "update_slack_trace_reply_for_web_handoff", fake_update_trace_reply
     )
 
-    await thread_api.send_dashboard_message(
+    await handlers.send_dashboard_message(
         "thread-1",
         "octocat",
         thread_runs.ThreadMessageBody(content="continue in web"),
@@ -338,7 +338,7 @@ async def test_dashboard_followup_on_busy_thread_queues_images(
         lambda *, base64, mime_type: {"type": "image", "data": base64, "mime_type": mime_type},
     )
 
-    await thread_api.send_dashboard_message(
+    await handlers.send_dashboard_message(
         "thread-1",
         "octocat",
         thread_runs.ThreadMessageBody(
@@ -381,7 +381,7 @@ async def test_dashboard_followup_on_busy_text_only_thread_rejects_images(
     patch_thread_module(monkeypatch, "queue_message_for_thread", fake_queue_message_for_thread)
 
     with pytest.raises(HTTPException) as exc_info:
-        await thread_api.send_dashboard_message(
+        await handlers.send_dashboard_message(
             "thread-1",
             "octocat",
             thread_runs.ThreadMessageBody(
@@ -412,7 +412,7 @@ async def test_dashboard_followup_on_busy_unknown_model_rejects_images(
     patch_thread_module(monkeypatch, "get_thread_active_status", _active_thread)
 
     with pytest.raises(HTTPException) as exc_info:
-        await thread_api.send_dashboard_message(
+        await handlers.send_dashboard_message(
             "thread-1",
             "octocat",
             thread_runs.ThreadMessageBody(
@@ -444,7 +444,7 @@ async def test_dashboard_followup_preserves_explicit_repo_less_thread(
     patch_thread_module(monkeypatch, "resolve_run_email", _run_email)
 
     with pytest.raises(HTTPException) as exc_info:
-        await thread_api.send_dashboard_message(
+        await handlers.send_dashboard_message(
             "thread-1",
             "octocat",
             thread_runs.ThreadMessageBody(content="continue in web"),
@@ -470,7 +470,7 @@ async def test_dashboard_followup_without_repo_metadata_allows_team_default(
     patch_thread_module(monkeypatch, "resolve_run_email", _run_email)
 
     with pytest.raises(HTTPException) as exc_info:
-        await thread_api.send_dashboard_message(
+        await handlers.send_dashboard_message(
             "thread-1",
             "octocat",
             thread_runs.ThreadMessageBody(content="continue in web"),
