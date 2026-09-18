@@ -7,12 +7,13 @@ lookup hit / null-name / failure / cache paths.
 
 import json
 from typing import Any, cast
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from langgraph.runtime import Runtime
 
 import agent.server as server
+from agent.middleware.model_selection import ModelSelectionMiddleware
 from agent.middleware.prepare_run import PrepareRunState
 from agent.utils import ttl_cache
 
@@ -65,13 +66,21 @@ def github_client(monkeypatch: pytest.MonkeyPatch) -> _FakeGitHubClient:
     return client
 
 
-def _middleware(config: dict[str, Any], *, credential_login: str | None = None) -> Any:
+def _middleware(
+    config: dict[str, Any],
+    *,
+    credential_login: str | None = None,
+    model_id: str = "openai:gpt-5",
+    plan_mode: bool = False,
+    model_selection: ModelSelectionMiddleware | None = None,
+    routing_defaults: dict[str, tuple[str, str | None]] | None = None,
+) -> Any:
     return server.PrepareAgentRunMiddleware(
         thread_id="thread-1",
         config=cast(Any, config),
         profile_login=config["configurable"].get("github_login"),
         repo_instructions=None,
-        model_id="openai:gpt-5",
+        model_id=model_id,
         effort=None,
         title_model=MagicMock(),
         source=config["configurable"]["source"],
@@ -79,9 +88,11 @@ def _middleware(config: dict[str, Any], *, credential_login: str | None = None) 
         linear_project_id="",
         linear_issue_number="",
         draft_prs=False,
-        plan_mode=False,
+        plan_mode=plan_mode,
         admin_workspaces=False,
         credential_login=credential_login,
+        model_selection=model_selection,
+        routing_defaults=routing_defaults,
     )
 
 
@@ -162,6 +173,40 @@ async def _prepare(middleware: Any) -> dict[str, Any]:
     return await middleware._prepare(
         cast(PrepareRunState, {"messages": []}), cast(Runtime[Any], MagicMock())
     )
+
+
+async def test_prepare_records_manual_model_in_state(prepare_harness: dict[str, Any]) -> None:
+    prepare_harness["thread_metadata"] = {"visibility": "public"}
+
+    prepared = await _prepare(_middleware(_slack_config(), model_id="anthropic:claude-opus-5"))
+
+    assert prepared["resolved_agent_model_id"] == "anthropic:claude-opus-5"
+
+
+@pytest.mark.parametrize("plan_mode", [False, True])
+async def test_prepare_records_routed_model_in_state(
+    prepare_harness: dict[str, Any], plan_mode: bool
+) -> None:
+    prepare_harness["thread_metadata"] = {"visibility": "public"}
+    model_selection = MagicMock()
+    model_selection.select_route = AsyncMock(return_value="performance" if plan_mode else "fast")
+    routing_defaults = {
+        "fast": ("openai:gpt-5.6-sol", "medium"),
+        "performance": ("anthropic:claude-opus-5", "high"),
+    }
+
+    prepared = await _prepare(
+        _middleware(
+            _slack_config(),
+            plan_mode=plan_mode,
+            model_selection=model_selection,
+            routing_defaults=routing_defaults,
+        )
+    )
+
+    expected_model = "anthropic:claude-opus-5" if plan_mode else "openai:gpt-5.6-sol"
+    assert prepared["resolved_agent_model_id"] == expected_model
+    assert prepared.get("model_route") == (None if plan_mode else "fast")
 
 
 async def test_private_scope_uses_oauth_identity_and_skips_public_lookup(

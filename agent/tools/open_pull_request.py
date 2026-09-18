@@ -6,6 +6,7 @@ from typing import Any
 from urllib.parse import quote
 
 import httpx2
+from langchain.tools import ToolRuntime
 from langgraph.config import get_config
 from langgraph_sdk import get_client
 
@@ -15,6 +16,7 @@ from agent.github.app import get_github_app_installation_token
 from agent.github.comments import derive_pr_state
 from agent.github.pull_requests import PullRequest, ThreadLink
 from agent.github.token import GitHubUserAuthRequired
+from agent.middleware.prepare_run import PrepareRunState
 from agent.run_config import RunConfig
 from agent.slack.client import (
     get_active_slack_thread,
@@ -587,6 +589,7 @@ async def _record_pr_telemetry(
     resolves_thread: bool = False,
     record_opening: bool = True,
     creation_response: dict[str, Any] | None = None,
+    resolved_agent_model_id: str | None = None,
 ) -> None:
     pr_number = pr.get("number")
     if not isinstance(pr_number, int):
@@ -659,7 +662,7 @@ async def _record_pr_telemetry(
             created_at=details.get("created_at") or pr.get("created_at"),
             merged_at=details.get("merged_at") or pr.get("merged_at"),
             invocation_id=cfg.invocation_id,
-            model_id=cfg.resolved_agent_model_id,
+            model_id=resolved_agent_model_id or cfg.resolved_agent_model_id,
             source=cfg.source,
             repository_private=(
                 details.get("base", {}).get("repo", {}).get("private")
@@ -921,6 +924,7 @@ async def _open_pull_request(
     body: str,
     draft: bool,
     resolves_thread: bool = False,
+    resolved_agent_model_id: str | None = None,
 ) -> dict[str, Any]:
     token, kind = await _resolve_pr_author_token()
     if not token:
@@ -993,6 +997,7 @@ async def _open_pull_request(
                     pr=pr,
                     resolves_thread=resolves_thread,
                     creation_response=pr,
+                    resolved_agent_model_id=resolved_agent_model_id,
                 )
             return {
                 "success": True,
@@ -1018,6 +1023,7 @@ async def _open_pull_request(
                     pr=existing,
                     resolves_thread=resolves_thread,
                     record_opening=False,
+                    resolved_agent_model_id=resolved_agent_model_id,
                 )
                 return {
                     "success": True,
@@ -1065,6 +1071,7 @@ async def open_pull_request(
     base: str,
     title: str,
     body: str,
+    runtime: ToolRuntime[None, PrepareRunState],
     draft: bool = True,
     resolves_thread: bool = False,
 ) -> dict[str, Any]:
@@ -1078,4 +1085,5 @@ async def open_pull_request(
         body=body,
         draft=draft,
         resolves_thread=resolves_thread,
+        resolved_agent_model_id=runtime.state.get("resolved_agent_model_id"),
     )
