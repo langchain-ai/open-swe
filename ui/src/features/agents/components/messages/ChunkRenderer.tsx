@@ -6,12 +6,12 @@ import { ToolExecution } from "@/features/agents/components/chat/ToolExecution"
 
 export function ChunkRenderer({
   chunk,
-  projectPath,
+  repoPath,
   isMarkdownLive,
   ...callbacks
 }: {
   chunk: Chunk
-  projectPath?: string
+  repoPath?: string
   isMarkdownLive?: boolean
 } & ApprovalCallbacks) {
   switch (chunk.kind) {
@@ -37,7 +37,7 @@ export function ChunkRenderer({
       return (
         <ToolExecution
           chunk={chunk}
-          projectPath={projectPath}
+          repoPath={repoPath}
           onApprove={callbacks.onApprove}
           onReject={callbacks.onReject}
           onAutoApprove={callbacks.onAutoApprove}
