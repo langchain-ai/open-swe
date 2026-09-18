@@ -47,6 +47,16 @@ from langchain.agents.middleware.types import AgentMiddleware
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import HumanMessage
 
+
+class _DisableInheritedMiddleware(AgentMiddleware):
+    def __init__(self, name: str) -> None:
+        self._name = name
+
+    @property
+    def name(self) -> str:
+        return self._name
+
+
 from agent.analytics.usage import record_agent_invocation_usage
 from agent.credential_scope import private_credential_login
 from agent.dashboard.agent_overrides import (
@@ -113,11 +123,7 @@ from agent.middleware.conversation_offloading import ConversationOffloadingMiddl
 from agent.middleware.model_selection import ModelSelectionState, RoutingMode
 from agent.middleware.prepare_run import PrepareRunState
 from agent.middleware.sandbox_circuit_breaker import post_sandbox_unreachable_notification
-from agent.prompt import (
-    construct_sender_context,
-    construct_system_prompt,
-    render_open_swe_shared_base,
-)
+from agent.prompt import construct_sender_context, construct_system_prompt
 from agent.prompts import apply_tool_descriptions, load_prompt
 from agent.run_config import RunConfig
 from agent.runtime.constants import (
@@ -458,14 +464,13 @@ def _is_subagent_excluded_tool(tool: Any) -> bool:
 def _general_purpose_subagent(
     model: BaseChatModel,
     tools: Sequence[Any],
-    skills: list[str] | None = None,
     dynamic_tools: DynamicToolMiddleware | None = None,
     *,
-    sandbox_file_downloads: bool = False,
     offloading: ConversationOffloadingMiddleware | None = None,
     workspace_skills: WorkspaceSkillsMiddleware | None = None,
     incident_middleware: AgentMiddleware | None = None,
     guard_middleware: Sequence[AgentMiddleware[Any, Any, Any]] = (),
+    inherited_middleware_exclusions: Sequence[str] = (),
 ) -> SubAgent:
     subagent: SubAgent = {
         "name": GENERAL_PURPOSE_SUBAGENT["name"],
@@ -473,17 +478,14 @@ def _general_purpose_subagent(
             f"{GENERAL_PURPOSE_SUBAGENT['description']} "
             f"{load_prompt('system/general-purpose-subagent-suffix.md')}"
         ),
-        # Deep Agents' default GP prompt covers only task mechanics; the shared
-        # base carries the Open SWE identity and conventions (gh proxy usage,
-        # tool-call cadence) that delegated work also needs.
-        "system_prompt": render_open_swe_shared_base(sandbox_file_downloads=sandbox_file_downloads)
-        + "\n\n"
-        + GENERAL_PURPOSE_SUBAGENT["system_prompt"],
+        "mode": "fork",
+        "system_prompt": GENERAL_PURPOSE_SUBAGENT["system_prompt"],
         "model": model,
         "tools": [tool for tool in tools if not _is_subagent_excluded_tool(tool)],
         "middleware": cast(
             list[AgentMiddleware[Any, Any, Any]],
             [
+                *(_DisableInheritedMiddleware(name) for name in inherited_middleware_exclusions),
                 *([incident_middleware] if incident_middleware else []),
                 *([workspace_skills] if workspace_skills else []),
                 *_subagent_middleware(dynamic_tools),
@@ -492,8 +494,6 @@ def _general_purpose_subagent(
             ],
         ),
     }
-    if skills:
-        subagent["skills"] = skills
     return subagent
 
 
@@ -1388,15 +1388,17 @@ async def get_agent(config: RunnableConfig) -> Pregel:
             _general_purpose_subagent(
                 subagent_model,
                 tools=subagent_tools,
-                skills=skill_sources,
                 workspace_skills=workspace_skills,
                 dynamic_tools=dynamic_tool_middleware,
-                sandbox_file_downloads=sandbox_file_downloads,
                 offloading=ConversationOffloadingMiddleware(subagent_model, agent_backend),
                 incident_middleware=IncidentMiddleware(incident_session)
                 if incident_session is not None
                 else None,
                 guard_middleware=_subagent_guard_middleware(local_run),
+                inherited_middleware_exclusions=(
+                    check_message_queue_before_model.name,
+                    *((model_selection.name,) if model_selection else ()),
+                ),
             ),
         ],
         skills=skill_sources,
