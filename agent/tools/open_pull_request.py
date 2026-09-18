@@ -1,5 +1,6 @@
 """Open a GitHub pull request using the thread's credential scope."""
 
+import asyncio
 import logging
 from typing import Any
 from urllib.parse import quote
@@ -556,21 +557,23 @@ PR_OPENED_FEEDBACK_KEY = "pr_opened"
 
 
 async def _record_pr_opened_feedback(thread_id: str, *, pr_url: str) -> None:
-    """Record ``pr_opened`` feedback so LangSmith can count it against ``pr_merged``.
-
-    One row per thread, so a thread opening several PRs collapses to the last
-    write. Deliberate for now: it keeps the aggregate simple.
-
-    Args:
-        thread_id: LangGraph thread the PR was opened from.
-        pr_url: Stored as the feedback comment.
-    """
-    await create_langsmith_thread_feedback(
-        thread_id,
-        PR_OPENED_FEEDBACK_KEY,
-        score=1.0,
-        comment=pr_url,
-        source_info={"source": "open_pull_request", "thread_id": thread_id, "pr_url": pr_url},
+    """Record aggregate and detailed ``pr_opened`` feedback on the thread's trace."""
+    source_info = {"source": "open_pull_request", "thread_id": thread_id, "pr_url": pr_url}
+    await asyncio.gather(
+        create_langsmith_thread_feedback(
+            thread_id,
+            f"github_pr_opened:{pr_url}",
+            score=1.0,
+            comment=f"Agent-authored pull request opened: {pr_url}",
+            source_info=source_info,
+        ),
+        create_langsmith_thread_feedback(
+            thread_id,
+            PR_OPENED_FEEDBACK_KEY,
+            score=1.0,
+            comment=pr_url,
+            source_info=source_info,
+        ),
     )
 
 
