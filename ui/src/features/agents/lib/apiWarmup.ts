@@ -26,13 +26,13 @@ function warmApiRequests(
   if (sidebarPath) {
     let includeAutomations = false
     let includeResolved = false
-    let projectMode = true
+    let repoMode = true
     let sortByCreated = true
     try {
       const raw = localStorage.getItem(prefsKey)
       const prefs = raw ? JSON.parse(raw) : null
       const filters = prefs?.filters
-      projectMode = prefs?.organize !== "list"
+      repoMode = prefs?.organize !== "list"
       sortByCreated = prefs?.sortChats !== "updated"
       if (filters) {
         includeAutomations =
@@ -51,7 +51,7 @@ function warmApiRequests(
     search.set("offset", "0")
     if (!includeResolved) search.set("resolved", "false")
     search.set("scope", includeAutomations ? "all" : "interactive")
-    if (projectMode) search.set("ownerless", "true")
+    if (repoMode) search.set("ownerless", "true")
     search.set("sort_by", sortByCreated ? "created_at" : "updated_at")
     targets.push(sidebarPath + "?" + search.toString())
   }

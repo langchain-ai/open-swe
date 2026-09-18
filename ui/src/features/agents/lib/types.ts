@@ -190,7 +190,7 @@ export interface Message {
   hidden?: boolean
 }
 
-export interface Project {
+export interface LocalRepo {
   id: string
   path: string
   name: string
