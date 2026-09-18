@@ -391,10 +391,13 @@ Shared backend startup requires at least one entry in `ALLOWED_GITHUB_ORGS` or `
 ### Thread credential scope
 
 Public threads use the GitHub App installation identity for agent GitHub
-operations. PRs from user-owned threads are opened with the original initiator's
-stored GitHub OAuth token, even when another participant starts the run. If that
-token is unavailable, the initiator must sign in again; PR creation does not fall
-back to the bot. Public PR creation first verifies that the target repository is
+operations. PRs from user-owned threads are opened with the authenticated current
+run requester's stored GitHub OAuth token. For example, if Alice starts a Slack
+task and Bob triggers a follow-up run asking to create the PR, the new PR is
+opened as Bob. Alice remains the task owner, and existing PR authors are unchanged.
+If the requester's identity or token is unavailable, PR creation fails without
+falling back to the task owner or bot. The requester must have access to the target
+repository. Public PR creation first verifies that the target repository is
 accessible through the configured workspace installation. System-owned threads, including scheduled automations, open PRs
 as the GitHub App. Existing threads without recorded ownership retain bot PR
 authorship. Scheduled runs check repository access with the workspace GitHub App.
@@ -404,6 +407,18 @@ Admin schedules retain their management tools through authorization tied to the
 scheduled invocation. The graph and tools recheck the creator's current admin
 status; later participants do not inherit that authorization. Automation management
 from these system runs also uses workspace credentials.
+
+Authorship is bound to the publishing run, not inferred from conversation text.
+Slack follow-ups carry their own requester identity whether they interrupt or
+queue behind an active run. Dashboard messages and Slack edits injected into an
+existing run do not change its identity. A collaborator must start a new run to
+publish under their own account. Plan approval, revision requests, and workflow
+push approval start runs with the authenticated actor's identity. Background-task
+completion runs cannot reliably identify the launching requester, so PR creation
+from user-owned threads is blocked in those runs. Start a direct user-triggered
+run to publish. System-owned and legacy unowned threads retain bot authorship.
+This prevents the publisher from approving their
+own PR; it does not prevent other task participants from approving it.
 
 Public threads load workspace MCP connections and organization skills. Personal
 Notion connections, user skills, and user custom instructions are available only in a private thread
