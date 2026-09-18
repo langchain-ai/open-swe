@@ -320,7 +320,7 @@ async def test_ttl_cache_exception_without_stale_is_not_cached():
 
 
 def test_recent_context_audience_fails_closed_for_shared_destinations() -> None:
-    middleware = cast(Any, object.__new__(PrepareAgentRunMiddleware))
+    middleware = object.__new__(PrepareAgentRunMiddleware)
     middleware._profile_login = "alice"
     middleware._credential_login = "alice"
     middleware._source = "github"
@@ -333,7 +333,7 @@ def test_recent_context_audience_fails_closed_for_shared_destinations() -> None:
 
 
 def test_recent_context_audience_distinguishes_dm_and_shared_slack() -> None:
-    middleware = cast(Any, object.__new__(PrepareAgentRunMiddleware))
+    middleware = object.__new__(PrepareAgentRunMiddleware)
     middleware._profile_login = "alice"
     middleware._credential_login = "alice"
     middleware._source = "slack"
