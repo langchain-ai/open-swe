@@ -15,7 +15,7 @@ import type {
   MessageCompletedPayload,
   RunNoticePayload,
   StoredEvent,
-  TranscriptImage,
+  TranscriptAttachment,
   TranscriptMessageRow,
   TranscriptSnapshot,
   TranscriptToolCallRow,
@@ -50,7 +50,7 @@ function messageRow(
     text: "",
     reasoning: "",
     namespace: [],
-    images: null,
+    attachments: null,
     usage: null,
     ...row,
   }
@@ -234,7 +234,7 @@ function completed(
       role: "ai",
       text: "",
       reasoning: "",
-      images: null,
+      attachments: null,
       usage: null,
       created_at: "2026-01-01T00:02:00Z",
       ...payload,
@@ -287,7 +287,7 @@ describe("transcript events", () => {
         turn_id: "turn-3",
         message_id: "human-3",
         text: "third ask",
-        images: [],
+        attachments: [],
       },
     })
 
@@ -299,7 +299,9 @@ function notice(version: number, payload: RunNoticePayload): StoredEvent {
   return { ...appended(version, {}), event_type: "run.notice", payload }
 }
 
-function image(overrides: Partial<TranscriptImage> = {}): TranscriptImage {
+function attachment(
+  overrides: Partial<TranscriptAttachment> = {}
+): TranscriptAttachment {
   return {
     mime_type: "image/png",
     file_name: "shot.png",
@@ -338,7 +340,7 @@ describe("notices", () => {
         turn_id: "turn-3",
         message_id: "human-3",
         text: "again",
-        images: [],
+        attachments: [],
       },
     })
 
@@ -379,16 +381,16 @@ describe("message images", () => {
               role: "human",
               text: "look at this",
               created_at: "2026-01-01T00:00:00Z",
-              images: [
-                image({
+              attachments: [
+                attachment({
                   attachment_id: "11111111-2222-3333-4444-555555555555",
                 }),
-                image({
+                attachment({
                   file_name: null,
                   url: "https://example.test/remote.png",
                 }),
                 // No bytes were ever captured for this one.
-                image({ file_name: "lost.png" }),
+                attachment({ file_name: "lost.png" }),
               ],
             }),
           ],

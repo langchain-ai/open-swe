@@ -33,12 +33,12 @@ export type ToolCallStatus = "in_progress" | "completed" | "error"
 export type NoticeKind = "model_routed" | "conversation_offloading"
 
 /**
- * An image attached to a message. The log stores metadata only — never base64
+ * A file attached to a message. The log stores metadata only — never base64
  * payloads: `attachment_id` addresses the bytes on the transcript attachments
- * endpoint, and is null for an image whose bytes were never captured (a `url`
- * without an attachment is a remote image reference).
+ * endpoint, and is null for an attachment whose bytes were never captured (a
+ * `url` without an attachment is a remote reference).
  */
-export interface TranscriptImage {
+export interface TranscriptAttachment {
   mime_type: string
   file_name: string | null
   url: string | null
@@ -73,7 +73,7 @@ export interface TranscriptMessageRow {
   text: string
   reasoning: string
   namespace: Namespace
-  images: ReadonlyArray<TranscriptImage> | null
+  attachments: ReadonlyArray<TranscriptAttachment> | null
   /** Set on AI messages the provider reported usage for; null otherwise. */
   usage: TranscriptUsage | null
   created_at: string
@@ -137,7 +137,7 @@ export interface TurnRequestedPayload {
   turn_id: string
   message_id: string
   text: string
-  images: ReadonlyArray<TranscriptImage>
+  attachments: ReadonlyArray<TranscriptAttachment>
 }
 
 export interface TurnPayload {
@@ -165,7 +165,7 @@ export interface MessageCompletedPayload {
   role: MessageRole
   text: string
   reasoning: string
-  images: ReadonlyArray<TranscriptImage> | null
+  attachments: ReadonlyArray<TranscriptAttachment> | null
   usage: TranscriptUsage | null
   created_at: string
 }
