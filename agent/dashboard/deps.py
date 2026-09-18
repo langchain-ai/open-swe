@@ -2,14 +2,11 @@
 
 from typing import Any, Protocol
 
-from fastapi import Depends, HTTPException, Request
-from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from fastapi import Depends, HTTPException
 
 from agent.dashboard.admin import is_admin
-from agent.dashboard.oauth import SESSION_COOKIE, require_session
-from agent.dashboard.oidc_auth import admin_session_for_actions_oidc, is_actions_oidc_token
+from agent.dashboard.oauth import require_session
 from agent.dashboard.repo_access import require_repo_access_for_user
-from agent.github.token_auth import admin_session_for_github_token, bearer_github_token
 
 
 def session_is_admin(session: dict[str, Any]) -> bool:
@@ -30,31 +27,6 @@ def admin_session(session: dict[str, Any] = SESSION_DEP) -> dict[str, Any]:
 
 
 ADMIN_DEP = Depends(admin_session)
-_ADMIN_BEARER_DEP = Depends(
-    HTTPBearer(
-        scheme_name="AdminBearer",
-        description="An admin's GitHub user token or an allowlisted GitHub Actions OIDC token.",
-        auto_error=False,
-    )
-)
-
-
-async def admin_session_or_ci_token(
-    request: Request,
-    _cookie: str | None = Depends(SESSION_COOKIE),
-    _bearer: HTTPAuthorizationCredentials | None = _ADMIN_BEARER_DEP,
-) -> dict[str, Any]:
-    """Admin gate that also accepts CI credentials: an Actions OIDC token, or an
-    admin's GitHub personal access token."""
-    token = bearer_github_token(request)
-    if token:
-        if is_actions_oidc_token(token):
-            return await admin_session_for_actions_oidc(token)
-        return await admin_session_for_github_token(token)
-    return require_admin(require_session(request))
-
-
-ADMIN_OR_TOKEN_DEP = Depends(admin_session_or_ci_token)
 
 
 async def filter_repo_records_for_user(

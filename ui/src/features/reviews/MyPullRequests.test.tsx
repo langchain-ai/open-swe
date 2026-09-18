@@ -77,6 +77,7 @@ const pull = (
   headSha: "a".repeat(40),
   headRef: "feature/example",
   reviewDecision: "none",
+  reviewRequired: false,
   statusAvailable: true,
   createdAt: `2026-09-0${number}T00:00:00Z`,
   updatedAt: `2026-09-0${4 - number}T00:00:00Z`,
@@ -255,7 +256,7 @@ describe("My PRs", () => {
     expect(navigate).not.toHaveBeenCalled()
   })
 
-  it("merges in the background and removes only confirmed merges", async () => {
+  it("merges in the background and keeps the merged card in place", async () => {
     vi.mocked(api.myPullRequests).mockResolvedValue({
       ...payload,
       pullRequests: [pull(1, { reviewDecision: "approved" }), pull(2)],
@@ -279,8 +280,11 @@ describe("My PRs", () => {
       "squash"
     )
     finish({ action: "merge", done: true })
-    await waitFor(() => expect(screen.queryByText("Change 1")).toBeNull())
-    expect(screen.getByText("Change 2")).toBeTruthy()
+    await waitFor(() =>
+      expect(within(card).getByText(/^Merged ·/)).toBeTruthy()
+    )
+    expect(titles()).toEqual(["Change 1", "Change 2"])
+    expect(within(card).queryByRole("button", { name: "Merge" })).toBeNull()
     expect(toast.success).toHaveBeenCalledWith("Merged acme/app#1")
     expect(navigate).not.toHaveBeenCalled()
   })
@@ -420,7 +424,7 @@ describe("My PRs", () => {
     )
   })
 
-  it("shows ten lightweight rows before their details finish and loads the next page on demand", async () => {
+  it("reads details for the first rows only, leaving the rest to scrolling", async () => {
     vi.mocked(api.myPullRequests).mockResolvedValue({
       ...payload,
       pullRequests: Array.from({ length: 12 }, (_, index) =>
@@ -441,22 +445,15 @@ describe("My PRs", () => {
     await waitFor(() =>
       expect(api.myPullRequestDetails).toHaveBeenCalledTimes(10)
     )
-    fireEvent.click(screen.getByRole("button", { name: "Next" }))
-    await screen.findByText("Change 11")
-    expect(screen.queryByText("Change 1")).toBeNull()
-    expect(cards()).toHaveLength(2)
-    await waitFor(() =>
-      expect(api.myPullRequestDetails).toHaveBeenCalledTimes(12)
-    )
-    resolve(pull(12))
+    resolve(pull(10))
     await waitFor(() =>
       expect(
-        screen.getByLabelText("12 lines added, 3 lines deleted")
+        screen.getByLabelText("10 lines added, 3 lines deleted")
       ).toBeTruthy()
     )
   })
 
-  it("loads the next GitHub page when paging past the loaded rows", async () => {
+  it("loads the next GitHub page as soon as the loaded rows run out", async () => {
     vi.mocked(api.myPullRequests).mockImplementation(
       async (_repo, _sort, _direction, page = 1) => ({
         ...payload,
@@ -477,9 +474,9 @@ describe("My PRs", () => {
       )
     )
     await screen.findByText(/10 of 20 PRs/)
-    fireEvent.click(screen.getByRole("button", { name: "Next" }))
-    await screen.findByText("Change 11")
-    expect(screen.queryByText("Change 1")).toBeNull()
+    expect(titles()).toEqual(
+      Array.from({ length: 10 }, (_, index) => `Change ${index + 1}`)
+    )
     expect(api.myPullRequests).toHaveBeenCalledTimes(2)
   })
 
@@ -953,7 +950,10 @@ describe("My PRs", () => {
         name: "Close pull request",
       })
     )
-    await waitFor(() => expect(screen.queryByText("Change 1")).toBeNull())
+    await waitFor(() =>
+      expect(within(card).getByText(/^Closed ·/)).toBeTruthy()
+    )
+    expect(within(card).queryByRole("button", { name: "Close" })).toBeNull()
     expect(api.closePullRequest).toHaveBeenCalledWith(
       expect.objectContaining({ number: 1 })
     )
