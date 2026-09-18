@@ -19,6 +19,7 @@ import { Fragment, useState } from "react"
 import type {
   AnalyticsMetadata,
   PRMergeRateCohort,
+  PRMergeRatePayload,
   PRMergeRateResponse,
   ReviewerStatsPayload,
   SortDirection,
@@ -26,6 +27,7 @@ import type {
   UsageLeaderboardRow,
   UsageLeaderboardSort,
 } from "@/lib/api"
+import { CopyDiagnosticsButton } from "@/components/CopyDiagnosticsButton"
 import { AppShell, SettingsSection } from "@/components/AppShell"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Badge } from "@/components/ui/badge"
@@ -42,6 +44,11 @@ import { Tooltip, TooltipPopup, TooltipTrigger } from "@/components/ui/tooltip"
 import { api, ApiError } from "@/lib/api"
 import { RequireLogin } from "@/lib/auth-redirect"
 import { safeModelLabel } from "@/lib/modelLabel"
+import {
+  buildUsageDiagnostics,
+  metricAvailability,
+  type MetricAvailability,
+} from "@/lib/usage-diagnostics"
 import { useSession } from "@/lib/session"
 
 export const Route = createFileRoute("/usage")({
@@ -402,10 +409,12 @@ function UsageAnalyticsPeriod({
       </SettingsSection>
       <AnalyticsCoverage
         reports={metadata}
+        reportPayload={report.data?.payload ?? null}
         refreshing={refreshing}
         onRefresh={refreshNow}
         period={activePeriod}
         reportFetchedAt={report.data?.fetchedAt ?? null}
+        reportServerAsOf={report.data?.payload.as_of ?? null}
         reportRefreshError={report.isError && !report.data ? null : reportError}
       />
     </>
@@ -414,18 +423,24 @@ function UsageAnalyticsPeriod({
 
 function AnalyticsCoverage({
   reports,
+  reportPayload,
   refreshing,
   onRefresh,
   period,
   reportFetchedAt,
+  reportServerAsOf,
   reportRefreshError,
 }: {
   reports: AnalyticsMetadata[]
+  /** The retained PR report payload; survives a failed refresh even when `reports` excludes it. */
+  reportPayload: PRMergeRatePayload | null
   refreshing: boolean
   onRefresh: () => void
   period: UsageLeaderboardPeriod
   /** When this browser last received the PR report; separate from the server-side `as_of`. */
   reportFetchedAt: string | null
+  /** The PR report's own server-side as_of; never another report's. */
+  reportServerAsOf: string | null
   /** Failed manual refresh while the last good report stays on screen. */
   reportRefreshError: ApiError | null
 }) {
@@ -507,9 +522,15 @@ function AnalyticsCoverage({
         </summary>
         <div className="space-y-1 border-t border-border px-4 py-3 text-muted-foreground">
           <p>
-            Period: {PERIOD_LABELS[period]} · Reports checked{" "}
-            {new Date(latest.as_of).toLocaleString()} (server). PR report last
-            fetched by this browser:{" "}
+            Period: {PERIOD_LABELS[period]} · PR report as of{" "}
+            {reportServerAsOf ? (
+              <time dateTime={reportServerAsOf}>
+                {new Date(reportServerAsOf).toLocaleString()}
+              </time>
+            ) : (
+              "Unavailable"
+            )}{" "}
+            (server); last fetched by this browser:{" "}
             {reportFetchedAt
               ? new Date(reportFetchedAt).toLocaleString()
               : "Unavailable"}
@@ -542,10 +563,39 @@ function AnalyticsCoverage({
               ? "Some events could not be processed. Reports may be incomplete. "
               : ""}
           </p>
+          <CopyDiagnosticsButton
+            getDiagnostics={() =>
+              buildUsageDiagnostics({
+                period,
+                reports,
+                reportServerAsOf,
+                reportFetchedAt,
+                reportRefreshError,
+                avgDeliverySeconds: avgDeliveryAvailability(reportPayload),
+              })
+            }
+          />
         </div>
       </details>
     </div>
   )
+}
+
+/** Delivery-timing availability of the retained PR report, even while a refresh fails. */
+function avgDeliveryAvailability(
+  payload: PRMergeRatePayload | null
+): MetricAvailability | null {
+  if (!payload || payload.status !== "ready" || !payload.cohorts.length) {
+    return null
+  }
+  const cohorts = payload.cohorts
+  const supported = cohorts.some((cohort) => "avg_delivery_seconds" in cohort)
+  const values = cohorts
+    .map((cohort) =>
+      "avg_delivery_seconds" in cohort ? cohort.avg_delivery_seconds : null
+    )
+    .filter((value): value is number => typeof value === "number")
+  return metricAvailability(supported, values[0] ?? null)
 }
 
 function usePRMergeRateReport(
