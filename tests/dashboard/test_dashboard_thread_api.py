@@ -2244,6 +2244,50 @@ async def test_list_dashboard_threads_page_pages_beyond_first_search_batch(monke
     assert run_list_calls == 0
 
 
+async def test_interactive_thread_pages_push_source_filters_into_search(monkeypatch) -> None:
+    searches: list[dict[str, object]] = []
+    interactive = {
+        "thread_id": "interactive",
+        "metadata": {
+            "source": "dashboard",
+            "github_login": "octocat",
+            "latest_run_status": "success",
+            "updated_at_ms": 1,
+        },
+    }
+
+    class FakeThreads:
+        async def search(self, *, metadata, limit, offset, sort_by, sort_order, select):
+            searches.append(metadata)
+            if metadata.get("source") == "dashboard":
+                return [interactive]
+            return []
+
+    class FakeRuns:
+        async def list(self, thread_id, limit=1):
+            return []
+
+    class FakeClient:
+        threads = FakeThreads()
+        runs = FakeRuns()
+
+    patch_thread_module(monkeypatch, "langgraph_client", lambda: FakeClient())
+
+    result = await thread_listing.list_dashboard_threads_page(
+        "octocat", email=None, scope="interactive"
+    )
+
+    assert [item["id"] for item in result["items"]] == ["interactive"]
+    assert searches
+    assert all(search.get("source") != "schedule" for search in searches)
+    assert {search.get("source") for search in searches} == {
+        "dashboard",
+        "github",
+        "slack",
+        "linear",
+    }
+
+
 async def test_list_dashboard_threads_page_scopes_automation_runs(monkeypatch) -> None:
     threads = _make_threads(3, resolved_before=0)
     for thread in threads:
