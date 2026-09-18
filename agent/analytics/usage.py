@@ -15,11 +15,13 @@ from agent.analytics import directory, distance, emitter
 from agent.analytics.capture import fail_soft
 from agent.analytics.events import (
     EventName,
+    PRDistanceMeasuredPayload,
     RunCanceledPayload,
     RunCompletedPayload,
     RunCostRecordedPayload,
     RunFailedPayload,
     StrictPayload,
+    event_uuid,
 )
 from agent.analytics.identity import opaque_id
 from agent.database import analytics as analytics_db
@@ -311,7 +313,22 @@ async def update_agent_pr_usage_from_webhook(payload: dict[str, Any]) -> None:
     action = payload.get("action")
     if action in {"closed", "reopened"}:
         merged = pr.get("merged") is True
-        distance_basis_points = None
+        outcome_at = (
+            _timestamp(pr.get("merged_at"))
+            if merged
+            else _timestamp(pr.get("closed_at"))
+            if action == "closed"
+            else None
+        ) or observed_at
+        await emitter.pr_state(
+            owner=owner,
+            repo=repo,
+            number=number,
+            action=action,
+            merged=merged,
+            source_version=None,
+            occurred_at=outcome_at,
+        )
         if merged:
             from agent.github.pull_requests import PullRequest
 
@@ -320,37 +337,44 @@ async def update_agent_pr_usage_from_webhook(payload: dict[str, Any]) -> None:
                 base_data = as_json_object(pr.get("base"))
                 head_data = as_json_object(pr.get("head"))
                 if stored is not None:
-                    distance_basis_points = await distance.post_open_distance_basis_points(
+                    final_base_sha = str(base_data.get("sha") or "")
+                    final_head_sha = str(head_data.get("sha") or "")
+                    basis_points = await distance.post_open_distance_basis_points(
                         owner=owner,
                         repo=repo,
                         opening_base_sha=stored.opening_base_sha,
                         opening_head_sha=stored.opening_head_sha,
-                        final_base_sha=str(base_data.get("sha") or ""),
-                        final_head_sha=str(head_data.get("sha") or ""),
+                        final_base_sha=final_base_sha,
+                        final_head_sha=final_head_sha,
                     )
-            except Exception:  # noqa: BLE001
+                    if basis_points is not None:
+                        pr_key = f"{owner.lower()}/{repo.lower()}#{number}"
+                        await emitter.pr_distance_measured(
+                            PRDistanceMeasuredPayload(
+                                repository_full_name=f"{owner.lower()}/{repo.lower()}",
+                                pr_number=number,
+                                distance_basis_points=basis_points,
+                                algorithm_revision="myers-line-v1",
+                                opening_base_sha=stored.opening_base_sha,
+                                opening_head_sha=stored.opening_head_sha,
+                                final_base_sha=final_base_sha,
+                                final_head_sha=final_head_sha,
+                                opening_evidence_ref=stored.id,
+                                final_evidence_ref=event_uuid(
+                                    analytics_db.workspace_id(),
+                                    "open-swe",
+                                    f"github:pr:{pr_key}:{outcome_at.isoformat()}:pr.merged",
+                                    EventName.PR_MERGED,
+                                ),
+                            ),
+                            measured_at=datetime.now(UTC),
+                        )
+            except Exception:
                 logger.warning(
                     "Failed to measure merged pull request distance",
                     extra={"repository": f"{owner}/{repo}", "pr_number": number},
                     exc_info=True,
                 )
-        await emitter.pr_state(
-            owner=owner,
-            repo=repo,
-            number=number,
-            action=action,
-            merged=merged,
-            source_version=None,
-            occurred_at=(
-                _timestamp(pr.get("merged_at"))
-                if merged
-                else _timestamp(pr.get("closed_at"))
-                if action == "closed"
-                else None
-            )
-            or observed_at,
-            distance_basis_points=distance_basis_points,
-        )
 
 
 def _surfaced(finding: Mapping[str, Any]) -> bool:
