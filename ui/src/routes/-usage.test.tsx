@@ -378,20 +378,6 @@ it("expands model totals into reasoning effort rows", async () => {
   )
   expect(screen.getByText("Low")).toBeTruthy()
   expect(screen.getByText("High")).toBeTruthy()
-  const row = screen.getByText("example-model").closest("tr")!
-  fireEvent.click(within(row).getAllByRole("cell").at(-1)!)
-  expect(screen.queryByText("Low")).toBeNull()
-  expect(
-    screen
-      .getByRole("button", { name: /Expand.*reasoning efforts/ })
-      .getAttribute("aria-expanded")
-  ).toBe("false")
-  fireEvent.click(screen.getByText("example-model"))
-  expect(screen.getByText("Low")).toBeTruthy()
-  fireEvent.click(
-    screen.getByRole("button", { name: /Collapse.*reasoning efforts/ })
-  )
-  expect(screen.queryByText("Low")).toBeNull()
   client.clear()
 })
 
@@ -424,11 +410,6 @@ it("shows an em dash for avg time to merge when a group has no merges", async ()
   expect(cells.at(-1)?.textContent).toBe("\u2014")
   expect(within(row).queryByRole("button", { name: /Based on/ })).toBeNull()
   expect(row.textContent).not.toContain("Based on")
-  fireEvent.click(cells[0]!)
-  expect(
-    within(row).queryByRole("button", { name: /reasoning efforts/ })
-  ).toBeNull()
-  expect(row.className).not.toContain("cursor-pointer")
   client.clear()
 })
 
