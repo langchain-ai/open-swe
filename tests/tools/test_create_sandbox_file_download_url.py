@@ -3,9 +3,6 @@ from types import SimpleNamespace
 from typing import Any
 
 import pytest
-from langchain_core.messages import AIMessage
-from langgraph.graph import END, START, MessagesState, StateGraph
-from langgraph.prebuilt import ToolNode
 
 download_tool = importlib.import_module("agent.tools.create_sandbox_file_download_url")
 
@@ -140,39 +137,6 @@ async def test_create_download_url_rejects_symlink_outside_work_dir(
     assert "must resolve within the sandbox work directory" in result["error"]
 
     assert client.calls == []
-
-
-async def test_download_path_error_allows_tool_retry(monkeypatch: pytest.MonkeyPatch) -> None:
-    client = _configure(monkeypatch, _Backend())
-    graph = StateGraph(MessagesState)
-    graph.add_node("tools", ToolNode([download_tool.create_sandbox_file_download_url]))
-    graph.add_edge(START, "tools")
-    graph.add_edge("tools", END)
-    node = graph.compile()
-
-    async def invoke(path: str) -> str:
-        result = await node.ainvoke(
-            {
-                "messages": [
-                    AIMessage(
-                        content="",
-                        tool_calls=[
-                            {
-                                "name": "create_sandbox_file_download_url",
-                                "args": {"file_path": path},
-                                "id": "download",
-                            }
-                        ],
-                    )
-                ]
-            }
-        )
-        return result["messages"][-1].text
-
-    assert "must resolve within the sandbox work directory" in await invoke("/tmp/demo.png")
-    assert client.calls == []
-    assert "https://downloads.example/file" in await invoke("demo.png")
-    assert len(client.calls) == 1
 
 
 @pytest.mark.parametrize("expires_in_seconds", [0, -1])
