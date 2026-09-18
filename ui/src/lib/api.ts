@@ -776,12 +776,7 @@ export interface ReviewDiffPayload {
 export interface ReviewChatMeta {
   available: boolean
   assistant_id: string
-}
-
-export interface ReviewChatThread {
   thread_id: string
-  title: string
-  updated_at?: string | null
 }
 
 /**
@@ -1152,20 +1147,6 @@ export const api = {
   getReviewChat: (owner: string, repo: string, number: number) =>
     request<ReviewChatMeta>(
       `/reviews/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}/chat`
-    ),
-  listReviewChatThreads: (owner: string, repo: string, number: number) =>
-    request<{ threads: Array<ReviewChatThread> }>(
-      `/reviews/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}/chat/threads`
-    ),
-  deleteReviewChatThread: (
-    owner: string,
-    repo: string,
-    number: number,
-    threadId: string
-  ) =>
-    request<void>(
-      `/reviews/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}/chat/threads/${encodeURIComponent(threadId)}`,
-      { method: "DELETE" }
     ),
   reReview: (owner: string, repo: string, number: number) =>
     request<{
