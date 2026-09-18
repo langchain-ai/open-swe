@@ -600,7 +600,7 @@ function PRMergeRateSection({
               <strong>Median distance</strong> is the median normalized line
               edit distance between each merged PR’s opening diff and final
               diff. It is calculated only for merged PRs with complete text
-              patches; lower means less post-open editing.
+              patches; higher means more post-open editing.
             </p>
             <p>
               <strong>Merge rate</strong> includes only PRs old enough to have a
@@ -743,8 +743,9 @@ function PRMergeRateTable({
                     Median distance
                   </TooltipTrigger>
                   <TooltipPopup className="max-w-xs">
-                    Median post-open line edit distance across merged PRs. Lower
-                    means the final diff changed less after the PR opened.
+                    Median post-open line edit distance across merged PRs.
+                    Higher means the final diff changed more after the PR
+                    opened.
                   </TooltipPopup>
                 </Tooltip>
               </th>
