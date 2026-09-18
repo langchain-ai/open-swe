@@ -430,6 +430,14 @@ async def show_slack_thinking_status(
             await asyncio.shield(set_slack_thread_status(channel_id, thread_ts, ""))
 
 
+async def clear_slack_thinking_status_if_idle(
+    client: LangGraphClient, thread_id: str, channel_id: str, thread_ts: str
+) -> None:
+    """Clear the indicator only when no queued or running work owns it."""
+    if not await _thread_has_active_runs(client, thread_id):
+        await set_slack_thread_status(channel_id, thread_ts, "")
+
+
 async def _thread_has_active_runs(client: LangGraphClient, thread_id: str) -> bool:
     try:
         for status in ("pending", "running"):

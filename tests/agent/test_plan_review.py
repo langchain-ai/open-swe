@@ -831,7 +831,13 @@ async def test_any_participant_can_approve_and_dispatch_published_html(
         dispatched.update(status=status, approved_by=approved_by)
 
     async def fake_dispatch(
-        thread_id: str, metadata: dict[str, Any], text: str, *, plan_mode: bool
+        thread_id: str,
+        metadata: dict[str, Any],
+        text: str,
+        *,
+        plan_mode: bool,
+        github_login: str | None,
+        user_email: str | None = None,
     ) -> dict[str, Any]:
         dispatched.update(text=text, plan_mode=plan_mode)
         return {"run_id": "run-1"}
@@ -881,7 +887,13 @@ async def test_concurrent_plan_approvals_dispatch_once(monkeypatch: pytest.Monke
         state.update(plan_mode=plan_mode, plan_status=status)
 
     async def fake_dispatch(
-        thread_id: str, metadata: dict[str, Any], text: str, *, plan_mode: bool
+        thread_id: str,
+        metadata: dict[str, Any],
+        text: str,
+        *,
+        plan_mode: bool,
+        github_login: str | None,
+        user_email: str | None = None,
     ) -> dict[str, Any]:
         dispatches.append(thread_id)
         return {"run_id": "run-1"}
@@ -895,8 +907,8 @@ async def test_concurrent_plan_approvals_dispatch_once(monkeypatch: pytest.Monke
 
     approver = {"id": "reviewer", "name": "Reviewer", "source": "dashboard"}
     results = await asyncio.gather(
-        plan_api.approve_plan_for_thread("t1", approver=approver),
-        plan_api.approve_plan_for_thread("t1", approver=approver),
+        plan_api.approve_plan_for_thread("t1", approver=approver, github_login="reviewer"),
+        plan_api.approve_plan_for_thread("t1", approver=approver, github_login="reviewer"),
     )
 
     assert dispatches == ["t1"]
@@ -936,7 +948,13 @@ async def test_failed_approval_dispatch_rolls_back_and_can_retry(
         state.update(plan_mode=plan_mode, plan_status=status)
 
     async def fake_dispatch(
-        thread_id: str, metadata: dict[str, Any], text: str, *, plan_mode: bool
+        thread_id: str,
+        metadata: dict[str, Any],
+        text: str,
+        *,
+        plan_mode: bool,
+        github_login: str | None,
+        user_email: str | None = None,
     ) -> dict[str, Any]:
         nonlocal dispatch_attempts
         dispatch_attempts += 1
@@ -953,10 +971,12 @@ async def test_failed_approval_dispatch_rolls_back_and_can_retry(
 
     approver = {"id": "reviewer", "name": "Reviewer", "source": "dashboard"}
     with pytest.raises(RuntimeError, match="dispatch unavailable"):
-        await plan_api.approve_plan_for_thread("t1", approver=approver)
+        await plan_api.approve_plan_for_thread("t1", approver=approver, github_login="reviewer")
 
     assert status_updates == [("approved", False), ("ready", True)]
-    result = await plan_api.approve_plan_for_thread("t1", approver=approver)
+    result = await plan_api.approve_plan_for_thread(
+        "t1", approver=approver, github_login="reviewer"
+    )
     assert result == {"status": "approved", "run_id": "run-2"}
     assert dispatch_attempts == 2
 
@@ -1013,7 +1033,13 @@ async def test_approve_plan_posts_slack_approval_notice(
         return True
 
     async def fake_dispatch(
-        thread_id: str, metadata: dict[str, Any], text: str, *, plan_mode: bool
+        thread_id: str,
+        metadata: dict[str, Any],
+        text: str,
+        *,
+        plan_mode: bool,
+        github_login: str | None,
+        user_email: str | None = None,
     ) -> dict[str, Any]:
         dispatched.update(text=text, plan_mode=plan_mode)
         return {"run_id": "run-1"}

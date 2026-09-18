@@ -25,7 +25,8 @@ def test_build_pr_attribution_footer_includes_model_details() -> None:
         model_id="openai:gpt-5.6-luna",
         reasoning_effort="xhigh",
     ) == (
-        "Made by [Open SWE](https://openswe.vercel.app/agents/abc-123)"
+        "Made by [Open SWE](https://github.com/langchain-ai/open-swe)"
+        " · [view thread](https://openswe.vercel.app/agents/abc-123)"
         " · openai:gpt-5.6-luna (xhigh)"
     )
 

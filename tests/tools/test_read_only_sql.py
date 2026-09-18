@@ -29,7 +29,7 @@ async def test_read_only_sql_requires_private_admin_surface(
             github_login="admin",
             slack_thread={
                 "channel_id": "C123",
-                "thread_ts": "0",
+                "thread_ts": "1700000000.000100",
                 "channel_context": {"is_im": False},
             },
         ),
@@ -67,7 +67,7 @@ async def test_read_only_sql_allows_admin_slack_dm(monkeypatch: pytest.MonkeyPat
             github_login="admin",
             slack_thread={
                 "channel_id": "D123",
-                "thread_ts": "0",
+                "thread_ts": "1700000000.000100",
                 "channel_context": {"is_im": True},
             },
         ),

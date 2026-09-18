@@ -30,11 +30,16 @@ from agent.prompts import load_prompt
 from agent.run_config import Repo
 from agent.slack import client as slack_utils
 from agent.slack.allowed_bots import AllowedSlackBot, resolve_allowed_slack_bot
-from agent.slack.dm import dm_thread_title, is_dm_session
+from agent.slack.dm import dm_thread_title, is_dm_channel, is_dm_session
 from agent.slack.failures import report_slack_failure
 from agent.slack.payloads import SlackChannelContext
 from agent.slack.request import SlackRequest
-from agent.slack.thinking import show_slack_thinking_status, stream_slack_thinking_steps
+from agent.slack.thinking import (
+    clear_slack_thinking_status_if_idle,
+    restore_slack_thinking_status,
+    show_slack_thinking_status,
+    stream_slack_thinking_steps,
+)
 from agent.source_context import SlackThreadRef, SourceContext
 from agent.users import User
 from agent.utils.json_types import as_json_object
@@ -575,13 +580,45 @@ def _slack_context_input(
     return {"messages": run_messages}
 
 
+async def _clear_early_status_if_idle(request: SlackRequest, status_ts: str) -> None:
+    thread_id = request.thread_id
+    if not thread_id:
+        try:
+            thread_id = await common.lookup_slack_thread_id(
+                get_langgraph_client(), request.channel_id, request.thread_ts
+            )
+        except Exception:  # noqa: BLE001
+            common.logger.warning("Could not determine whether Slack thread status is still owned")
+            return
+    if thread_id:
+        await clear_slack_thinking_status_if_idle(
+            get_langgraph_client(), thread_id, request.channel_id, status_ts
+        )
+    else:
+        await slack_utils.set_slack_thread_status(request.channel_id, status_ts, "")
+
+
 async def process_slack_mention(
     request: SlackRequest, repo: common.SlackRepoResolution | None
 ) -> None:
     """Process a Slack request by creating a run or queuing a mid-run message."""
+    status_ts = (
+        (request.reply_thread_ts or request.original_message_ts or request.event_ts)
+        if request.dm_session
+        else request.thread_ts
+    )
+    show_status = bool(
+        request.channel_id and status_ts and not request.code_channel and not request.message_update
+    )
+    if show_status:
+        await restore_slack_thinking_status(request.channel_id, status_ts)
     try:
-        await _process_slack_mention_impl(request, repo)
+        status_handed_off = await _process_slack_mention_impl(request, repo)
+        if show_status and not status_handed_off:
+            await _clear_early_status_if_idle(request, status_ts)
     except Exception as exc:  # noqa: BLE001
+        if show_status:
+            await _clear_early_status_if_idle(request, status_ts)
         await _notify_slack_processing_error(request, repo.repo if repo else None, exc)
 
 
@@ -592,6 +629,7 @@ async def process_slack_plan_approval(request: SlackRequest, repo: Repo | None) 
     try:
         await approve_plan_for_thread(
             request.thread_id or "",
+            github_login=await _slack_login(request.user_id),
             approver=make_plan_approver(
                 actor_id=request.user_id,
                 name=request.user_name or request.user_id or "Slack user",
@@ -720,7 +758,7 @@ async def _mark_slack_thread_errored(
 
 async def _process_slack_mention_impl(
     request: SlackRequest, repo_resolution: common.SlackRepoResolution | None
-) -> None:
+) -> bool:
     resolution = repo_resolution or common.SlackRepoResolution()
     repo = resolution.repo
     channel_id = request.channel_id
@@ -750,7 +788,7 @@ async def _process_slack_mention_impl(
             thread_ts,
             event_ts,
         )
-        return
+        return False
 
     langgraph_client = get_langgraph_client()
     thread_id = request.thread_id or await common.resolve_slack_thread_id(
@@ -765,9 +803,9 @@ async def _process_slack_mention_impl(
             app_id=request.triggering_bot_app_id,
         )
         if allowed_bot is None:
-            return
+            return False
         if _slack_thread_visibility(channel_context) == "private":
-            return
+            return False
         try:
             existing_thread = await langgraph_client.threads.get(thread_id)
         except Exception as exc:
@@ -787,7 +825,7 @@ async def _process_slack_mention_impl(
                     "Ignoring Slack bot mention in a thread with another owner",
                     extra={"agent_thread_id": thread_id, "slack_bot_id": allowed_bot.bot_id},
                 )
-                return
+                return False
     user_email = None
     user_name = allowed_bot.name if allowed_bot is not None else ""
     user_timezone = ""
@@ -1032,7 +1070,7 @@ async def _process_slack_mention_impl(
                 reason=reason,
                 agent_thread_id=thread_id,
             )
-        return
+        return False
 
     slack_thread_context: dict[str, Any] = {
         "channel_id": channel_id,
@@ -1086,7 +1124,7 @@ async def _process_slack_mention_impl(
     # A DM is reachable by exactly one person, so the admin capability cannot leak
     # to anyone else; the factory still rechecks the sender against the configured
     # admins, and a non-admin's DM gets nothing extra.
-    if dm_session:
+    if is_dm_channel(channel_context):
         configurable["admin_thread"] = True
     if thread_workspace:
         configurable["workspace"] = thread_workspace
@@ -1143,7 +1181,7 @@ async def _process_slack_mention_impl(
         thread_id, [{"type": "text", "text": _MESSAGE_UPDATE_PREAMBLE.strip()}, *content_blocks]
     ):
         common.logger.info("Queued Slack message edit for thread %s", thread_id)
-        return
+        return False
 
     if persisted:
         staged_files = await _download_slack_files_to_sandbox(
@@ -1258,3 +1296,4 @@ async def _process_slack_mention_impl(
             thread_ts=(reply_thread_ts or original_message_ts) if dm_session else thread_ts,
             session_ts=thread_ts if dm_session else "",
         )
+    return bool(isinstance(run_id, str) and run_id)

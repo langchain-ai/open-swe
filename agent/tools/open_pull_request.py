@@ -53,7 +53,7 @@ _REPORTED_RESPONSE_HEADERS = (
 
 
 async def _resolve_pr_author_token() -> tuple[str | None, str]:
-    """Use the initiator's OAuth for user-owned threads and the bot for system threads."""
+    """Use the run requester's OAuth for user-owned threads and the bot for system threads."""
     login = await pr_author_login()
     if login is None:
         return await get_github_app_installation_token(), "bot"
