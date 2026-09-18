@@ -432,12 +432,11 @@ export interface PRMergeRateCohort {
 }
 
 export interface PRMergeRatePayload extends AnalyticsMetadata {
-  status: "ready" | "not_started" | "no_prs" | "suppressed"
+  status: "ready" | "not_started" | "no_prs"
   metric: "pr_outcomes_by_opening_invocation_configured_model"
   definition: string
   maturity_days: number
   period: UsageLeaderboardPeriod
-  suppression_threshold: number
   cohorts: PRMergeRateCohort[]
   unavailable_thread_ids: string[]
 }
