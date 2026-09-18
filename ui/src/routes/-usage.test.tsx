@@ -71,7 +71,7 @@ beforeEach(() => {
   vi.spyOn(api, "usageLeaderboard").mockResolvedValue(emptyUsage)
 })
 
-function mountReport() {
+function mountReport(onPeriodChange = (_period: string) => {}) {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false, gcTime: 0 } },
   })
@@ -82,7 +82,7 @@ function mountReport() {
           period="30d"
           login="reader"
           isAdmin={false}
-          onPeriodChange={() => {}}
+          onPeriodChange={onPeriodChange}
         />
       </TooltipProvider>
     </QueryClientProvider>
@@ -93,6 +93,26 @@ function mountReport() {
 afterEach(() => {
   cleanup()
   vi.restoreAllMocks()
+})
+
+it("labels the shared date range and changes it independently of usage scope", async () => {
+  vi.spyOn(api, "prMergeRateByModel").mockResolvedValue(captured)
+  const onPeriodChange = vi.fn()
+  mountReport(onPeriodChange)
+  const range = screen.getByRole("combobox", { name: "Date range" })
+  const outcomes = screen.getByText("PR outcomes", { selector: "h2" })
+  expect(
+    range.compareDocumentPosition(outcomes) & Node.DOCUMENT_POSITION_FOLLOWING
+  ).toBeTruthy()
+  expect(
+    screen.getByRole("group", { name: "Usage scope" }).contains(range)
+  ).toBe(false)
+  fireEvent.click(range)
+  const option = await screen.findByRole("option", { name: "Last 7 days" })
+  fireEvent.keyDown(option, { key: "Enter" })
+  expect(onPeriodChange).toHaveBeenCalledWith("7d")
+  fireEvent.click(screen.getByRole("button", { name: "threads", exact: true }))
+  expect(onPeriodChange).toHaveBeenCalledTimes(1)
 })
 
 it("shows delivery lag separately from suppression, then refreshes to a populated report", async () => {

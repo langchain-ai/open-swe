@@ -193,6 +193,29 @@ function UsageAnalyticsPeriod({
 
   return (
     <>
+      <div className="flex flex-wrap items-center gap-3">
+        <label htmlFor="usage-date-range" className="text-sm font-medium">
+          Date range
+        </label>
+        <Select
+          value={activePeriod}
+          onValueChange={(value) =>
+            onPeriodChange(value as UsageLeaderboardPeriod)
+          }
+        >
+          <SelectTrigger id="usage-date-range" className="w-36">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {Object.entries(PERIOD_LABELS).map(([value, label]) => (
+              <SelectItem key={value} value={value}>
+                {label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+
       <PRMergeRateSection report={report} />
 
       <SettingsSection
@@ -235,23 +258,6 @@ function UsageAnalyticsPeriod({
                 </Button>
               ))}
             </div>
-            <Select
-              value={activePeriod}
-              onValueChange={(value) =>
-                onPeriodChange(value as UsageLeaderboardPeriod)
-              }
-            >
-              <SelectTrigger className="w-36">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {Object.entries(PERIOD_LABELS).map(([value, label]) => (
-                  <SelectItem key={value} value={value}>
-                    {label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
           </div>
         }
       >
