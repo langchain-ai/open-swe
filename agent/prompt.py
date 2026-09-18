@@ -263,9 +263,7 @@ def construct_system_prompt(
             load_prompt("system/admin-workspace.md") if admin_workspaces else ""
         ),
         shared_base_section=(
-            "- If a user asks to change the workspace's sandbox setup, direct them to start "
-            "an admin thread in the Web UI and require them to be a workspace admin. Admin threads "
-            "cannot be started from Slack or with agent thread tools.\n\n"
+            load_prompt("system/workspace-admin-required.md") + "\n\n"
             if not admin_workspaces
             else ""
         )
