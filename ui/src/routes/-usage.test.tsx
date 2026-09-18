@@ -15,6 +15,7 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest"
 import {
   api,
   ApiError,
+  type PRMergeRateCohort,
   type PRMergeRatePayload,
   type UsageLeaderboardPayload,
   type UsageLeaderboardRow,
@@ -172,6 +173,57 @@ it("shows delivery lag separately from suppression, then refreshes to a populate
     screen.getByLabelText("Analytics coverage").querySelector("details")?.open
   ).toBe(true)
   expect(screen.getAllByText(/Last event processed/).length).toBe(1)
+  client.clear()
+})
+
+it("sorts PR outcomes before pagination and toggles column direction", async () => {
+  const cohort = (model: string, size: number): PRMergeRateCohort => ({
+    model_id: model,
+    model_attribution_quality: "configured",
+    merged: size,
+    closed_without_merge: 0,
+    mature_pending: 0,
+    waiting: 0,
+    cohort_size: size,
+    decided_denominator: size,
+    decided_merge_rate: 1,
+    mature_denominator: size,
+    mature_cohort_merge_share: 1,
+    avg_merge_seconds: size,
+    avg_delivery_seconds: size,
+    efforts: [],
+  })
+  vi.spyOn(api, "prMergeRateByModel").mockResolvedValue({
+    ...captured,
+    status: "ready",
+    cohorts: [
+      cohort("z-model", 20),
+      cohort("a-model", 1),
+      ...Array.from({ length: 9 }, (_, index) =>
+        cohort(`m-${index}`, index + 2)
+      ),
+    ],
+  })
+  const client = mountReport()
+  expect(await screen.findByText("z-model")).toBeTruthy()
+  expect(screen.queryByText("a-model")).toBeNull()
+
+  fireEvent.click(screen.getByRole("button", { name: "Opening model" }))
+  expect(await screen.findByText("a-model")).toBeTruthy()
+  expect(screen.queryByText("z-model")).toBeNull()
+  expect(
+    screen
+      .getByRole("columnheader", { name: "Opening model" })
+      .getAttribute("aria-sort")
+  ).toBe("ascending")
+
+  fireEvent.click(screen.getByRole("button", { name: "Opening model" }))
+  expect(await screen.findByText("z-model")).toBeTruthy()
+  expect(
+    screen
+      .getByRole("columnheader", { name: "Opening model" })
+      .getAttribute("aria-sort")
+  ).toBe("descending")
   client.clear()
 })
 
