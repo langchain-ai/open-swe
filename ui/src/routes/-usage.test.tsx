@@ -255,9 +255,9 @@ it("sorts PR outcomes before pagination and toggles column direction", async () 
       status: "ready",
       cohorts: [
         cohort("z-model", 20),
-        cohort("a-model", 1),
+        cohort("a-model", 5),
         ...Array.from({ length: 9 }, (_, index) =>
-          cohort(`m-${index}`, index + 2)
+          cohort(`m-${index}`, index + 6)
         ),
       ],
     })
@@ -727,7 +727,7 @@ function modelCohort(
 }
 
 it("hides small model groups by default and reveals them with the toggle", async () => {
-  vi.spyOn(api, "prMergeRateByModel").mockResolvedValue({
+  vi.spyOn(api, "prMergeRateByModel").mockResolvedValue(report({
     ...captured,
     status: "ready",
     has_pending_events: false,
@@ -751,13 +751,13 @@ it("hides small model groups by default and reveals them with the toggle", async
         }),
       ]),
     ],
-  })
+  }))
   const client = mountReport()
   // The large group shows with its totals unchanged; the small group is hidden.
   const row = (await screen.findByText("large-model")).closest("tr")!
   const cells = within(row).getAllByRole("cell")
   expect(cells.at(1)?.textContent).toBe("7")
-  expect(cells.at(5)?.textContent).toBe("100%")
+  expect(cells.at(6)?.textContent).toBe("100%")
   expect(screen.queryByText("small-model")).toBeNull()
   expect(row.textContent).not.toContain("small sample")
 
@@ -767,15 +767,15 @@ it("hides small model groups by default and reveals them with the toggle", async
   const smallCells = within(smallRow).getAllByRole("cell")
   expect(smallCells.at(1)?.textContent).toContain("2")
   expect(smallCells.at(1)?.textContent).toContain("small sample")
-  expect(smallCells.at(5)?.textContent).toContain("100%")
-  expect(smallCells.at(5)?.textContent).toContain("small sample")
+  expect(smallCells.at(6)?.textContent).toContain("100%")
+  expect(smallCells.at(6)?.textContent).toContain("small sample")
   // The large group's totals and rates are unchanged by the toggle.
   expect(within(row).getAllByRole("cell").at(1)?.textContent).toBe("7")
   client.clear()
 })
 
 it("hides only the small effort groups of a kept model until the toggle", async () => {
-  vi.spyOn(api, "prMergeRateByModel").mockResolvedValue({
+  vi.spyOn(api, "prMergeRateByModel").mockResolvedValue(report({
     ...captured,
     status: "ready",
     has_pending_events: false,
@@ -797,16 +797,21 @@ it("hides only the small effort groups of a kept model until the toggle", async 
         }),
       ]),
     ],
-  })
+  }))
   const client = mountReport()
   const row = (await screen.findByText("mixed-model")).closest("tr")!
   // The model's own group is large, so its totals stay; only the small
   // effort group is hidden, and the label discloses the partial breakdown.
   expect(row.textContent).toContain("Shown efforts")
   expect(within(row).getAllByRole("cell").at(1)?.textContent).toBe("8")
-  expect(
-    within(row).queryByRole("button", { name: /Expand mixed-model/ })
-  ).toBeNull()
+  fireEvent.click(
+    within(row).getByRole("button", { name: /Expand mixed-model/ })
+  )
+  expect(await screen.findByText("High")).toBeTruthy()
+  expect(screen.queryByText("Low")).toBeNull()
+  fireEvent.click(
+    within(row).getByRole("button", { name: /Collapse mixed-model/ })
+  )
 
   fireEvent.click(screen.getByRole("switch", { name: "Show small samples" }))
   expect(
@@ -819,7 +824,7 @@ it("hides only the small effort groups of a kept model until the toggle", async 
 })
 
 it("distinguishes filtered-only small samples from no data and offers to reveal them", async () => {
-  vi.spyOn(api, "prMergeRateByModel").mockResolvedValue({
+  vi.spyOn(api, "prMergeRateByModel").mockResolvedValue(report({
     ...captured,
     status: "ready",
     has_pending_events: false,
@@ -834,7 +839,7 @@ it("distinguishes filtered-only small samples from no data and offers to reveal 
         }),
       ]),
     ],
-  })
+  }))
   const client = mountReport()
   expect(
     await screen.findByText(/Only PR groups with fewer than 5 PRs/)
@@ -849,7 +854,7 @@ it("distinguishes filtered-only small samples from no data and offers to reveal 
 })
 
 it("keeps the small-sample choice across period changes", async () => {
-  vi.spyOn(api, "prMergeRateByModel").mockResolvedValue({
+  vi.spyOn(api, "prMergeRateByModel").mockResolvedValue(report({
     ...captured,
     status: "ready",
     has_pending_events: false,
@@ -864,19 +869,14 @@ it("keeps the small-sample choice across period changes", async () => {
         }),
       ]),
     ],
-  })
+  }))
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false, gcTime: 0 } },
   })
   const view = render(
     <QueryClientProvider client={client}>
       <TooltipProvider>
-        <UsageAnalytics
-          period="30d"
-          login="reader"
-          isAdmin={false}
-          onPeriodChange={() => {}}
-        />
+        <UsageAnalytics period="30d" login="reader" isAdmin={false} />
       </TooltipProvider>
     </QueryClientProvider>
   )
@@ -888,12 +888,7 @@ it("keeps the small-sample choice across period changes", async () => {
   view.rerender(
     <QueryClientProvider client={client}>
       <TooltipProvider>
-        <UsageAnalytics
-          period="7d"
-          login="reader"
-          isAdmin={false}
-          onPeriodChange={() => {}}
-        />
+        <UsageAnalytics period="7d" login="reader" isAdmin={false} />
       </TooltipProvider>
     </QueryClientProvider>
   )
@@ -908,12 +903,12 @@ it("keeps the small-sample choice across period changes", async () => {
 })
 
 it("explains that small-sample percentages are unstable", async () => {
-  vi.spyOn(api, "prMergeRateByModel").mockResolvedValue({
+  vi.spyOn(api, "prMergeRateByModel").mockResolvedValue(report({
     ...captured,
     status: "ready",
     has_pending_events: false,
     cohorts: [modelCohort("some-model", 12, [])],
-  })
+  }))
   const client = mountReport()
   await screen.findByText("some-model")
   fireEvent.click(screen.getByText("How these numbers work"))
