@@ -1,6 +1,6 @@
 """ORM mappings for the transcript tables, one mapped dataclass per table.
 
-``0020_thread_transcript`` is the source of truth for the schema; these classes
+``0023_thread_transcript`` is the source of truth for the schema; these classes
 match it column for column. The engine and the read path write and read through
 raw SQL — a projection is an upsert whose conflict clause is the behaviour, not
 something an ORM flush can express — so these mappings exist to keep the schema
