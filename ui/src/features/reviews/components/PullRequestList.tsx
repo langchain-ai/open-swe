@@ -14,10 +14,15 @@ const rowGap = 12
  */
 export function PullRequestList({
   rows,
+  available,
   children,
   onEndReached,
 }: {
   rows: OpenPullRequest[]
+  // Rows that could be shown, loaded or not. Rows arriving while the end is
+  // already in view have to resume growth on their own: nothing moves on
+  // screen, so no further scrolling would ask for them.
+  available: number
   children: (pr: OpenPullRequest) => ReactNode
   onEndReached: () => void
 }) {
@@ -48,8 +53,9 @@ export function PullRequestList({
     reachedEnd.current = onEndReached
   })
   useEffect(() => {
-    if (lastRendered >= rows.length - 2) reachedEnd.current()
-  }, [lastRendered, rows.length])
+    if (lastRendered >= rows.length - 2 && available > rows.length)
+      reachedEnd.current()
+  }, [lastRendered, rows.length, available])
 
   return (
     <div ref={setScroller} className="min-h-0 flex-1 overflow-y-auto">

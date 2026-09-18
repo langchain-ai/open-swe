@@ -77,8 +77,11 @@ export function MyPullRequests({
     direction,
   ].join("|")
   const requested = growth.key === listKey ? growth.rows : chunkSize
+  // A search or a status filter is matched against loaded rows only, so both
+  // have to pull the rest of the pages in before they can answer at all.
   const needsMorePages =
-    query.hasNextPage && (Boolean(filter?.length) || requested >= rows.length)
+    query.hasNextPage &&
+    (Boolean(filter?.length) || Boolean(search) || requested >= rows.length)
   useEffect(() => {
     if (needsMorePages && !isFetching) void fetchNextPage()
   }, [needsMorePages, isFetching, fetchNextPage])
@@ -303,14 +306,12 @@ export function MyPullRequests({
             ) : (
               <PullRequestList
                 rows={visible}
+                available={matchingRows.length}
+                // Unclamped: asking for more rows than are loaded is what
+                // makes the next GitHub page arrive, and reaching the end
+                // again is the only other thing that would grow it.
                 onEndReached={() =>
-                  setGrowth({
-                    key: listKey,
-                    rows:
-                      requested < matchingRows.length
-                        ? requested + chunkSize
-                        : requested,
-                  })
+                  setGrowth({ key: listKey, rows: requested + chunkSize })
                 }
               >
                 {card}
