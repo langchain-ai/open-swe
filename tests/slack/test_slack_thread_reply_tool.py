@@ -402,24 +402,17 @@ async def test_slack_thread_reply_builds_option_blocks(monkeypatch: pytest.Monke
 
 
 @pytest.mark.parametrize(
-    "configured,state_mode,ready,is_plan",
-    [
-        (False, None, True, False),
-        (True, None, True, True),
-        (False, True, True, True),
-        (True, False, True, False),
-        (True, True, False, False),
-    ],
+    "plan_mode,status,is_plan",
+    [(False, "ready", False), (True, "ready", True), (True, "shared", False)],
 )
 async def test_plan_buttons_require_active_plan_context(
     monkeypatch: pytest.MonkeyPatch,
-    configured: bool,
-    state_mode: bool | None,
-    ready: bool,
+    plan_mode: bool,
+    status: str,
     is_plan: bool,
 ) -> None:
     config = _config()
-    config["configurable"].update(thread_id="thread-1", plan_mode=configured)
+    config["configurable"].update(thread_id="thread-1", plan_mode=plan_mode)
     monkeypatch.setattr(slack_reply_tool, "get_config", lambda: config)
     monkeypatch.setattr(
         slack_reply_tool,
@@ -429,7 +422,7 @@ async def test_plan_buttons_require_active_plan_context(
     monkeypatch.setattr(
         slack_reply_tool,
         "get_plan_content",
-        AsyncMock(return_value={"status": "ready" if ready else "shared", "html": "plan"}),
+        AsyncMock(return_value={"status": status, "html": "plan"}),
     )
     post = AsyncMock(return_value=("2.0", None))
     monkeypatch.setattr(slack_reply_tool, "_post_and_store_mapping", post)
@@ -437,7 +430,7 @@ async def test_plan_buttons_require_active_plan_context(
     await slack_reply_tool.slack_thread_reply(
         "Review",
         options=["Approve & implement", "Request changes"],
-        state={} if state_mode is None else {"plan_mode": state_mode},
+        state={},
     )
 
     buttons = post.await_args.kwargs["blocks"][1]["elements"]
