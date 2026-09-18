@@ -7,6 +7,7 @@ from typing import Any, Literal
 
 from fastapi import HTTPException
 
+from agent.slack.channels import SLACK_CHANNEL_NONE, SlackChannel, SlackChannelSummary
 from agent.threads.pins import list_thread_pin_ids, pin_thread, unpin_thread
 from agent.threads.summary import (
     _SURFACED_SOURCES,
@@ -28,7 +29,6 @@ from agent.threads.summary import (
     thread_slack_channel,
     thread_source,
 )
-from agent.slack.channels import SLACK_CHANNEL_NONE, SlackChannel, SlackChannelSummary
 from agent.utils.json_types import JsonObject, ThreadLike
 from agent.utils.thread_ops import langgraph_client
 from agent.utils.thread_participants import participant_search_filters

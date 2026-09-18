@@ -203,14 +203,14 @@ def thread_slack_channel(metadata: Mapping[str, Any]) -> SlackChannelRef | None:
     slack_thread = SourceContext.from_metadata(metadata).slack_thread
     if slack_thread is None or not slack_thread.channel_id.strip():
         return None
-    channel_context = slack_thread.channel_context or {}
-    if channel_context.get("is_im") is True or channel_context.get("is_mpim") is True:
+    channel_context = slack_thread.channel_context
+    if channel_context is not None and channel_context.is_im is True:
         return None
-    name = channel_context.get("name") or channel_context.get("name_normalized")
+    name = channel_context.label if channel_context is not None else ""
     return SlackChannelRef(
         id=slack_thread.channel_id.strip(),
         teamId=slack_thread.team_id.strip() or SLACK_TEAM_ID.strip(),
-        name=name.strip() if isinstance(name, str) else "",
+        name=name.strip(),
     )
 
 

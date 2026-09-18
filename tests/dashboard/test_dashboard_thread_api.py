@@ -2532,10 +2532,9 @@ async def test_list_dashboard_slack_channels_scopes_and_enriches(monkeypatch) ->
             searches.append(metadata)
             return threads[offset : offset + limit]
 
-    async def get_channel(channel_id: str, *, team_id: str):
-        assert team_id == "T1"
+    async def load_channel(channel_id: str):
         if channel_id == "C123":
-            return SimpleNamespace(label="renamed-channel")
+            return SimpleNamespace(details=SimpleNamespace(name="renamed-channel"))
         return None
 
     patch_thread_module(
@@ -2543,7 +2542,7 @@ async def test_list_dashboard_slack_channels_scopes_and_enriches(monkeypatch) ->
         "langgraph_client",
         lambda: SimpleNamespace(threads=FakeThreads()),
     )
-    patch_thread_module(monkeypatch, "get_slack_channel", get_channel)
+    monkeypatch.setattr(thread_listing.SlackChannel, "load", load_channel)
 
     result = await thread_listing.list_dashboard_thread_slack_channels("octocat")
 
