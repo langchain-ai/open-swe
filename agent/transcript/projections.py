@@ -110,12 +110,10 @@ async def apply(
             await _turn_requested(conn, thread_id, version, event, occurred_at)
         case TurnStarted():
             await _turn_started(conn, thread_id, event, occurred_at)
-        case TurnCompleted():
-            await _turn_completed(conn, thread_id, version, event, run_id, occurred_at)
+        case TurnCompleted() | TurnFailed() | TurnInterrupted():
+            await _turn_ended(conn, thread_id, version, event, run_id, occurred_at)
         case TurnCheckpointCompleted():
             await _turn_checkpoint(conn, thread_id, event, occurred_at)
-        case TurnFailed() | TurnInterrupted():
-            await _turn_ended(conn, thread_id, event, run_id, occurred_at)
         case MessageAppended():
             await _message_appended(conn, thread_id, version, event, occurred_at)
         case MessageCompleted():
@@ -163,15 +161,7 @@ async def _turn_requested(
     )
     # The thread is busy from the moment a turn is asked for: the run that will
     # serve it does not exist yet, and a reader must not see the thread idle.
-    await conn.execute(
-        text(
-            """
-            UPDATE thread SET status = 'running', updated_at = clock_timestamp()
-            WHERE thread_id = :thread_id
-            """
-        ),
-        {"thread_id": thread_id},
-    )
+    await _set_thread_status(conn, thread_id, status="running")
     await conn.execute(
         _with_namespace(
             """
@@ -224,53 +214,7 @@ async def _turn_started(
             "started_at": occurred_at,
         },
     )
-    await conn.execute(
-        text(
-            """
-            UPDATE thread SET status = 'running', updated_at = clock_timestamp()
-            WHERE thread_id = :thread_id
-            """
-        ),
-        {"thread_id": thread_id},
-    )
-
-
-async def _turn_completed(
-    conn: AsyncConnection,
-    thread_id: str,
-    version: int,
-    event: TurnCompleted,
-    run_id: str | None,
-    occurred_at: datetime,
-) -> None:
-    await conn.execute(
-        text(
-            """
-            UPDATE thread_turn SET
-                state = 'completed',
-                run_id = COALESCE(:run_id, run_id),
-                completed_at = :completed_at
-            WHERE turn_id = :turn_id AND thread_id = :thread_id
-              AND state IN ('requested', 'running')
-            """
-        ),
-        {
-            "thread_id": thread_id,
-            "turn_id": event.turn_id,
-            "run_id": event.run_id or run_id,
-            "completed_at": occurred_at,
-        },
-    )
-    await _settle_thread(conn, thread_id, status="idle")
-    await conn.execute(
-        text(
-            """
-            UPDATE thread_message SET streaming = false, version = :version
-            WHERE thread_id = :thread_id AND turn_id = :turn_id AND streaming
-            """
-        ),
-        {"thread_id": thread_id, "turn_id": event.turn_id, "version": version},
-    )
+    await _set_thread_status(conn, thread_id, status="running")
 
 
 async def _turn_checkpoint(
@@ -352,12 +296,14 @@ async def _turn_checkpoint(
 async def _turn_ended(
     conn: AsyncConnection,
     thread_id: str,
-    event: TurnFailed | TurnInterrupted,
+    version: int,
+    event: TurnCompleted | TurnFailed | TurnInterrupted,
     run_id: str | None,
     occurred_at: datetime,
 ) -> None:
-    """Close a turn that did not complete. Only an open turn is ever moved."""
+    """Close a turn. Only an open turn is ever moved."""
     failed = isinstance(event, TurnFailed)
+    completed = isinstance(event, TurnCompleted)
     await conn.execute(
         text(
             """
@@ -373,16 +319,26 @@ async def _turn_ended(
         {
             "thread_id": thread_id,
             "turn_id": event.turn_id,
-            "state": "failed" if failed else "interrupted",
+            "state": "completed" if completed else "failed" if failed else "interrupted",
             "run_id": event.run_id or run_id,
             "completed_at": occurred_at,
             "error": event.error if failed else None,
         },
     )
-    await _settle_thread(conn, thread_id, status="error" if failed else "idle")
+    await _set_thread_status(conn, thread_id, status="error" if failed else "idle")
+    if completed:
+        await conn.execute(
+            text(
+                """
+                UPDATE thread_message SET streaming = false, version = :version
+                WHERE thread_id = :thread_id AND turn_id = :turn_id AND streaming
+                """
+            ),
+            {"thread_id": thread_id, "turn_id": event.turn_id, "version": version},
+        )
 
 
-async def _settle_thread(conn: AsyncConnection, thread_id: str, *, status: str) -> None:
+async def _set_thread_status(conn: AsyncConnection, thread_id: str, *, status: str) -> None:
     await conn.execute(
         text(
             """

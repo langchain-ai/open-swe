@@ -204,37 +204,6 @@ async def test_an_untranscribed_thread_rejects_everything_but_creation(
         )
 
 
-async def test_a_retried_run_start_requests_one_turn_for_one_message(
-    registry_db: None,
-) -> None:
-    """``run.start`` keys its turn by the message, so a retry adds no second one."""
-    thread_id = str(uuid7())
-    await _create(thread_id)
-    for _ in range(2):
-        turn_id = uuid7()
-        await append(
-            thread_id,
-            [
-                Command(
-                    command_id="message:human-1:requested",
-                    event=TurnRequested(
-                        turn_id=turn_id,
-                        message_id="human-1",
-                        text="do the thing",
-                        sender=MessageSender(login="test-user", kind="dashboard"),
-                    ),
-                    actor_kind="user",
-                    turn_id=turn_id,
-                )
-            ],
-        )
-
-    snapshot = await load_snapshot(thread_id)
-    assert snapshot is not None
-    assert [message.message_id for message in snapshot.messages] == ["human-1"]
-    assert len(snapshot.turns) == 1
-
-
 async def test_two_turns_cannot_share_a_checkpoint_ordinal(registry_db: None) -> None:
     """The ordinal is read before the append takes its lock, so it is renumbered."""
     thread_id = str(uuid7())

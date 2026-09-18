@@ -231,13 +231,16 @@ async def _replay(thread_id: str, after: int) -> tuple[int, list[str]] | None:
     deleted between the authorization read and this one, or the cursor is past
     the head because the thread was recreated under the same id. Either way the
     stream ends instead of waiting.
+
     Each page is read in its own transaction, which is safe because versions
     are assigned under a per-thread advisory lock and therefore commit in
     order: the cursor only ever advances to a version actually read, so the
     live loop resumes from it without a gap or a repeat.
     """
     gap = await measure_gap(thread_id, after)
-    if gap.missing or gap.recreated(after):
+    # No head at all, or a cursor past it: the transcript the subscriber was
+    # reading is gone rather than merely behind.
+    if gap.head is None or after > gap.head:
         return None
     if gap.needs_snapshot:
         snapshot = await load_snapshot(thread_id)

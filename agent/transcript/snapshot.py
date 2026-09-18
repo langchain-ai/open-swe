@@ -175,14 +175,6 @@ class ReplayGap:
     payload_bytes: int
 
     @property
-    def missing(self) -> bool:
-        return self.head is None
-
-    def recreated(self, after: int) -> bool:
-        """The cursor is past the head: this thread is not the one it was reading."""
-        return after > (self.head or 0)
-
-    @property
     def needs_snapshot(self) -> bool:
         return self.events > MAX_REPLAY_EVENTS or self.payload_bytes > MAX_REPLAY_BYTES
 

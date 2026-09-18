@@ -88,7 +88,12 @@ async def append(thread_id: str, commands: Sequence[Command]) -> AppendResult:
         accepted = await _accepted_versions(
             conn, thread_id, [command.command_id for command in commands]
         )
-        head = await _head_version(conn, thread_id)
+        head = (
+            await conn.execute(
+                text("SELECT version FROM thread WHERE thread_id = :thread_id"),
+                {"thread_id": thread_id},
+            )
+        ).scalar_one_or_none()
         pending = [command for command in commands if command.command_id not in accepted]
         if head is None and pending and pending[0].event.type != "thread.created":
             raise ThreadNotTranscribed(thread_id)
@@ -189,14 +194,6 @@ async def _accepted_versions(
         {"thread_id": thread_id, "command_ids": list(command_ids)},
     )
     return {row.command_id: row.result_version for row in result}
-
-
-async def _head_version(conn: AsyncConnection, thread_id: str) -> int | None:
-    result = await conn.execute(
-        text("SELECT version FROM thread WHERE thread_id = :thread_id"),
-        {"thread_id": thread_id},
-    )
-    return result.scalar_one_or_none()
 
 
 async def _write(

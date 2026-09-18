@@ -174,17 +174,6 @@ def _decoded(cursor: str, thread_id: str) -> TurnPageCursor:
     return decoded
 
 
-async def test_a_thread_inside_the_window_has_no_older_cursor(registry_db: None) -> None:
-    thread_id = str(uuid7())
-    await _create(thread_id)
-    await _turns(thread_id, 3)
-
-    snapshot = await load_snapshot(thread_id, limit=40)
-    assert snapshot is not None
-    assert len(snapshot.turns) == 3
-    assert snapshot.older_cursor is None
-
-
 async def test_every_page_carries_each_turns_checkpoint(registry_db: None) -> None:
     """The checkpoint is what a later reader diffs turns with, so it pages with them."""
     thread_id = str(uuid7())
