@@ -33,7 +33,6 @@ from agent.threads.summary import (
     DASHBOARD_SOURCE,
     _assert_thread_postable,
     _assert_thread_promptable,
-    _assert_thread_readable,
     _is_thread_resolved,
     _metadata_model_id,
     _now_ms,
@@ -42,6 +41,7 @@ from agent.threads.summary import (
     _thread_is_busy,
     _thread_run_id,
     _thread_summary,
+    assert_thread_readable,
     thread_source,
 )
 from agent.utils.json_types import as_json_object, as_thread_dict, thread_metadata
@@ -186,7 +186,7 @@ async def get_dashboard_thread(
             raise HTTPException(404, "thread not found") from exc
 
     metadata = thread_metadata(thread)
-    _assert_thread_readable(metadata, login, email)
+    assert_thread_readable(metadata, login, email)
 
     # The transcript is hydrated client-side by the SDK (`StreamProvider` reads
     # `GET …/state` → `stream.messages`), so the detail endpoint returns
@@ -406,7 +406,7 @@ async def admin_cancel_dashboard_thread(
         raise HTTPException(404, "thread not found")
 
     if thread_metadata(thread).get("visibility", "public") != "public":
-        _assert_thread_readable(thread_metadata(thread), login, email)
+        assert_thread_readable(thread_metadata(thread), login, email)
 
     try:
         await _cancel_active_thread_runs(client, thread_id)
@@ -694,7 +694,7 @@ async def get_dashboard_thread_state(
         except Exception as exc:  # noqa: BLE001
             raise HTTPException(404, "thread not found") from exc
     metadata = thread_metadata(thread)
-    _assert_thread_readable(metadata, login, email)
+    assert_thread_readable(metadata, login, email)
     thread, latest_run_status, _ = await _refresh_latest_run_metadata(
         client, thread, timings=record
     )
