@@ -8,7 +8,6 @@ import {
 
 import { AgentsShell } from "@/features/agents/components/AgentsSidebar"
 import { Skeleton } from "@/components/ui/skeleton"
-import { AgentStreamProvider } from "@/features/agents/lib/stream/AgentStreamProvider"
 import { RequireLogin } from "@/lib/auth-redirect"
 import { useSession } from "@/lib/session"
 import { isDesktopLocalModeEnabled } from "@/lib/desktop-local-mode"
@@ -35,7 +34,6 @@ function useAgentsTheme() {
 function AgentsLayout() {
   useAgentsTheme()
   const session = useSession()
-  const navigate = Route.useNavigate()
   const threadMatch = useMatch({
     from: "/agents/$threadId",
     shouldThrow: false,
@@ -77,17 +75,7 @@ function AgentsLayout() {
       activeThreadId={activeThreadId}
       activeLocalSessionId={activeLocalSessionId}
     >
-      <AgentStreamProvider
-        threadId={activeLocalSessionId ?? activeThreadId ?? null}
-        transport={activeLocalSessionId ? "local" : "cloud"}
-        onThreadCreated={(id) => {
-          if (!activeThreadId) {
-            void navigate({ to: "/agents/$threadId", params: { threadId: id } })
-          }
-        }}
-      >
-        <Outlet />
-      </AgentStreamProvider>
+      <Outlet />
     </AgentsShell>
   )
 }
