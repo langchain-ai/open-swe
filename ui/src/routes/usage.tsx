@@ -58,6 +58,8 @@ interface SortableColumn {
   align: "left" | "right"
   /** Direction applied on the first click. Counts read best highest-first. */
   defaultDirection?: SortDirection
+  /** Metric definition shown on hover/focus of the header. */
+  tooltip?: string
 }
 
 type UsageScope = "invocations" | "threads"
@@ -923,6 +925,8 @@ function usageColumns(scope: UsageScope): Array<SortableColumn> {
       key: "merged_prs_per_thread",
       label: "Merged PRs / Thread",
       align: "right",
+      tooltip:
+        "Merged PRs ÷ distinct threads in the period — an aggregate ratio, not a per-thread outcome. One thread can open several PRs and many threads open none, so 1.00 does not mean every thread merged a PR.",
     },
     { key: "agent_loc", label: "Agent LOC", align: "right" },
   ]
@@ -953,25 +957,40 @@ function SortableHeader({
       : "descending"
     : undefined
 
+  const button = (
+    <button
+      type="button"
+      onClick={() => onSort(column.key, column.defaultDirection ?? "desc")}
+      className={`flex w-full items-center gap-1 rounded-sm px-2 py-3 hover:bg-muted/50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring ${
+        column.align === "right" ? "justify-end" : "justify-start"
+      } ${isActive ? "text-foreground" : ""} ${
+        column.tooltip
+          ? "cursor-help underline decoration-dotted underline-offset-2"
+          : ""
+      }`}
+    >
+      {column.label}
+      <Icon
+        className={`size-3 shrink-0 ${isActive ? "" : "text-muted-foreground/50"}`}
+        aria-hidden
+      />
+    </button>
+  )
+
   return (
     <th
       scope="col"
       aria-sort={ariaSort}
       className={`${className} p-0 font-normal`}
     >
-      <button
-        type="button"
-        onClick={() => onSort(column.key, column.defaultDirection ?? "desc")}
-        className={`flex w-full items-center gap-1 rounded-sm px-2 py-3 hover:bg-muted/50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring ${
-          column.align === "right" ? "justify-end" : "justify-start"
-        } ${isActive ? "text-foreground" : ""}`}
-      >
-        {column.label}
-        <Icon
-          className={`size-3 shrink-0 ${isActive ? "" : "text-muted-foreground/50"}`}
-          aria-hidden
-        />
-      </button>
+      {column.tooltip ? (
+        <Tooltip>
+          <TooltipTrigger render={button} />
+          <TooltipPopup className="max-w-xs">{column.tooltip}</TooltipPopup>
+        </Tooltip>
+      ) : (
+        button
+      )}
     </th>
   )
 }
