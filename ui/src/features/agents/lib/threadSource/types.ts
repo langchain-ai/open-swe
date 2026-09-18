@@ -3,6 +3,7 @@ import type {
   RoutedModel,
   StreamConnection,
 } from "@/features/agents/lib/stream/connection"
+import type { SubagentToolCall } from "@/features/agents/lib/transcript/reducer"
 import type { ImageChunk, Message } from "@/features/agents/lib/types"
 
 /** The human message and run configuration a new run starts from. */
@@ -58,4 +59,13 @@ export interface StreamThreadSource extends ThreadSourceShared {
   stream: AgentStream
 }
 
-export type ThreadSource = StreamThreadSource
+/** The thread is served by the append-only transcript event log. */
+export interface TranscriptThreadSource extends ThreadSourceShared {
+  kind: "transcript"
+  /** Nested tool calls under a subagent namespace, for the subagent card. */
+  subagentToolCalls: (
+    namespace: ReadonlyArray<string>
+  ) => Array<SubagentToolCall>
+}
+
+export type ThreadSource = StreamThreadSource | TranscriptThreadSource

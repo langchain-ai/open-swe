@@ -17,7 +17,19 @@ type ActivityStatus = "in_progress" | "completed" | "error"
  */
 export function SubagentActivity({ namespace }: { namespace: Array<string> }) {
   const source = useThreadSource()
-  return <StreamActivity stream={source.stream} namespace={namespace} />
+  if (source.kind === "stream") {
+    return <StreamActivity stream={source.stream} namespace={namespace} />
+  }
+  const calls = source.subagentToolCalls(namespace)
+  const current = calls[calls.length - 1]
+  if (!current) return null
+  return (
+    <ActivityLine
+      name={current.name}
+      status={current.status}
+      steps={calls.length}
+    />
+  )
 }
 
 /**

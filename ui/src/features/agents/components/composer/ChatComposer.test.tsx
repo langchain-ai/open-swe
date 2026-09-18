@@ -72,7 +72,7 @@ function renderComposer(
   render(
     <QueryClientProvider client={client}>
       <AgentThreadStreamBoundary>
-        <ThreadSourceProvider threadId="thread-1">
+        <ThreadSourceProvider threadId="thread-1" transcript={false}>
           <ChatComposer
             activeRun={{ threadId: "thread-1", running }}
             {...props}
