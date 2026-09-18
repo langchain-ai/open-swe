@@ -1184,7 +1184,6 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         )
 
     slack_tools = [
-        expedite_pr_approval,
         manage_code_channel,
         manage_incident,
         slack_add_reaction,
@@ -1254,6 +1253,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         ]
     if (
         local_run
+        or not ENV.SLACK_BOT_TOKEN.get()
         or not (await cached_workspace_settings(settings_workspace)).expedited_review_enabled
     ):
         static_tools = [tool for tool in static_tools if tool is not expedite_pr_approval]
