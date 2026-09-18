@@ -12,7 +12,10 @@ from langgraph.runtime import Runtime
 
 from agent.input_messages import human_input, system_input, system_introduction
 from agent.middleware.prepare_run import BasePrepareRunMiddleware, PrepareRunState
+from agent.run_config import RunConfig
 from agent.server import PrepareAgentRunMiddleware
+from agent.slack.payloads import SlackChannelContext
+from agent.source_context import SlackThreadRef
 from agent.utils import ttl_cache
 
 
@@ -314,3 +317,45 @@ async def test_ttl_cache_exception_without_stale_is_not_cached():
     with pytest.raises(RuntimeError):
         await ttl_cache.cached("k", 60, failing_loader)
     assert calls == 2
+
+
+def test_recent_context_audience_fails_closed_for_shared_destinations() -> None:
+    middleware = object.__new__(PrepareAgentRunMiddleware)
+    middleware._profile_login = "alice"
+    middleware._credential_login = "alice"
+    middleware._source = "github"
+
+    assert middleware._recent_context_audience(RunConfig()) is None
+
+    middleware._source = "dashboard"
+    middleware._credential_login = None
+    assert middleware._recent_context_audience(RunConfig()) is None
+
+
+def test_recent_context_audience_distinguishes_dm_and_shared_slack() -> None:
+    middleware = object.__new__(PrepareAgentRunMiddleware)
+    middleware._profile_login = "alice"
+    middleware._credential_login = "alice"
+    middleware._source = "slack"
+
+    dm = RunConfig(slack_thread=SlackThreadRef(channel_context=SlackChannelContext(is_im=True)))
+    assert middleware._recent_context_audience(dm) == "private"
+
+    shared = RunConfig(
+        slack_thread=SlackThreadRef(
+            channel_id="C1",
+            team_id="T1",
+            channel_context=SlackChannelContext(is_im=False, is_mpim=False),
+        )
+    )
+    assert middleware._recent_context_audience(shared) == "shared_slack"
+
+    group_dm = RunConfig(
+        slack_thread=SlackThreadRef(
+            channel_id="G1",
+            team_id="T1",
+            channel_context=SlackChannelContext(is_im=False, is_mpim=True),
+        )
+    )
+    assert middleware._recent_context_audience(group_dm) is None
+    assert middleware._recent_context_audience(RunConfig(background_task_completion=True)) is None
