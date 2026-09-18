@@ -154,7 +154,12 @@ export interface DesktopTerminalBridge {
 }
 
 declare global {
+  const __OPEN_SWE_BUNDLE_COMMIT__: string | null
+  const __OPEN_SWE_BUNDLE_BUILT_AT__: string
+
   interface Window {
+    /** This bundle's own build identity, stamped by vite.config.ts at build time. */
+    __OPEN_SWE_BUNDLE__?: { commit: string | null; built_at: string }
     openSweDesktop?: {
       isDesktop: true
       writeClipboard: (value: string) => Promise<void>

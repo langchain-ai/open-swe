@@ -92,20 +92,25 @@ def test_dashboard_without_bundle_or_stamp_is_unavailable(
     assert dashboard["built_at"] is None
 
 
-def test_no_bundle_at_all_reports_not_served(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("DASHBOARD_STATIC_DIR", "/nonexistent/path")
+def test_no_bundle_at_all_reports_not_served(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # A named, existing directory with no build, so the outcome cannot depend
+    # on whether an in-repo bundle happens to be present on this machine.
+    monkeypatch.setenv("DASHBOARD_STATIC_DIR", str(tmp_path))
     assert dashboard_build_info()["served"] is False
 
 
 @pytest.mark.asyncio
-async def test_me_exposes_build_info(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_me_exposes_build_info(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     import httpx
     from fastapi import FastAPI
 
     from agent.dashboard import oauth, routes
 
     monkeypatch.delenv("LANGCHAIN_REVISION_ID", raising=False)
-    monkeypatch.delenv("DASHBOARD_STATIC_DIR", raising=False)
+    # An empty directory, so the outcome cannot depend on an in-repo bundle.
+    monkeypatch.setenv("DASHBOARD_STATIC_DIR", str(tmp_path))
     app = FastAPI()
     app.include_router(routes.router)
     app.dependency_overrides[oauth.require_session] = lambda: {"sub": "user"}

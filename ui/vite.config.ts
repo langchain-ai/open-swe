@@ -242,38 +242,46 @@ const BASE_PATH = process.env.DASHBOARD_BASE_PATH || "/"
 // client is told to open it against this port whatever page origin it loaded from.
 const DEV_PORT = Number(process.env.PORT) || 3000
 
-// Stamp the emitted bundle with what built it so a served dashboard can report
-// its own identity instead of borrowing the backend's. The in-repo git HEAD is
-// trustworthy here because this stamp is written by the build itself, never
-// read back from a deployment's filesystem. Missing values stay absent (the
-// backend then reports them unavailable) rather than guessed.
+// The bundle's own identity, discovered by the build that emits it: CI or a
+// platform can pass SOURCE_COMMIT explicitly, a local build can prove the
+// checkout's HEAD, and otherwise the value stays null (rendered Unavailable)
+// rather than guessed.
+const BUNDLE_BUILD_AT = new Date().toISOString()
+
+function sourceCommit(): string | null {
+  const fromEnv = process.env.SOURCE_COMMIT?.trim()
+  if (fromEnv) return fromEnv
+  try {
+    return execSync("git rev-parse HEAD", { stdio: ["ignore", "pipe", "ignore"] })
+      .toString()
+      .trim()
+  } catch {
+    return null // Not a git checkout (source archive); no trustworthy commit.
+  }
+}
+
+// Writes the sidecar the backend reads when it serves this bundle.
 function buildInfoStamp(): Plugin {
   return {
     name: "build-info-stamp",
     apply: "build",
     closeBundle() {
-      const info: Record<string, string> = {}
-      try {
-        info.commit = execSync("git rev-parse HEAD", {
-          stdio: ["ignore", "pipe", "ignore"],
-        })
-          .toString()
-          .trim()
-      } catch {
-        // Not a git checkout (source archive); no trustworthy commit exists.
-      }
-      info.built_at = new Date().toISOString()
-      const out = process.env.NITRO_PRESET
-        ? ".output/public"
-        : ".output/public"
-      mkdirSync(out, { recursive: true })
-      writeFileSync(`${out}/open-swe-build-info.json`, JSON.stringify(info))
+      const info: Record<string, string> = { built_at: BUNDLE_BUILD_AT }
+      const commit = sourceCommit()
+      if (commit) info.commit = commit
+      mkdirSync(".output/public", { recursive: true })
+      writeFileSync(".output/public/open-swe-build-info.json", JSON.stringify(info))
     },
   }
 }
 
 const config = defineConfig({
   base: BASE_PATH,
+  define: {
+    // Read by window.__OPEN_SWE_BUNDLE__ in the emitted bundle.
+    __OPEN_SWE_BUNDLE_COMMIT__: JSON.stringify(sourceCommit()),
+    __OPEN_SWE_BUNDLE_BUILT_AT__: JSON.stringify(BUNDLE_BUILD_AT),
+  },
   server: { port: DEV_PORT, strictPort: true, hmr: { clientPort: DEV_PORT } },
   resolve: { tsconfigPaths: true },
   optimizeDeps: {

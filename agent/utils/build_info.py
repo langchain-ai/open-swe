@@ -1,12 +1,11 @@
-"""Build and deploy identity of the running backend and its bundled dashboard.
+"""Build identity of the running backend and its bundled dashboard.
 
-Every value is discovered through the actual build or deployment path that
-produced the artifact, or reported as ``None`` (shown as "Unavailable"):
-``LANGCHAIN_REVISION_ID`` is a LangGraph Platform revision id, never a git SHA,
-and a locally checked-out ``.git`` does not describe the deployed image, so
-neither is treated as a source of truth. The backend's identifier and the
-dashboard bundle's are discovered independently, so a mixed deployment shows
-both without claiming whether they are compatible.
+Every value is discovered through the path that produced the artifact or
+reported as ``None`` (shown as "Unavailable"): ``LANGCHAIN_REVISION_ID`` is an
+opaque platform revision id, never a git SHA, and a local ``.git`` checkout
+does not describe a deployed image, so neither is assumed as a source of
+truth. The two artifacts are discovered independently so a mixed deployment
+shows both without claiming compatibility.
 """
 
 import functools
