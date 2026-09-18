@@ -142,6 +142,7 @@ from agent.sandboxes.state import (
 from agent.skill_store.store import ORGANIZATION_SKILLS_NAMESPACE, SKILLS_NAMESPACE
 from agent.slack.dm import is_dm_session
 from agent.thread_title import TITLE_GENERATION_MAX_TOKENS, schedule_thread_title_generation
+from agent.threads.recent_context import recent_thread_context_section
 from agent.threads.summary import thread_is_private
 from agent.tool_loaders.notion_mcp import load_notion_tools
 from agent.tools import (
@@ -802,6 +803,23 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
                 _resolve_user_custom_instructions(self._credential_login),
                 _thread_participant_identities(self._thread_id),
             )
+            recent_context_task = asyncio.create_task(
+                recent_thread_context_section(
+                    login=self._profile_login,
+                    email=self._user_email or None,
+                    exclude_thread_id=self._thread_id,
+                    slack_team_id=(
+                        cfg.slack_thread.team_id
+                        if self._source == "slack" and cfg.slack_thread
+                        else None
+                    ),
+                    slack_channel_id=(
+                        cfg.slack_thread.channel_id
+                        if self._source == "slack" and cfg.slack_thread
+                        else None
+                    ),
+                )
+            )
             attribution_model_id = self._model_id
             attribution_effort = self._effort
             attribution_route = None
@@ -820,6 +838,7 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
                 workspace_admin=await _workspace_admin(self._config or {}, self._profile_login),
                 participant_identities=participant_identities,
             )
+        recent_thread_context = await recent_context_task
         bot_id = (
             cfg.slack_thread.triggering_bot_id
             if self._source == "slack" and cfg.slack_thread
@@ -888,6 +907,7 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
                 slack_ask=_slack_ask_mode(cfg),
                 sandbox_file_downloads=_sandbox_file_downloads_enabled(cfg),
                 continued_from_collaborative=bool(cfg.continued_from_thread_id),
+                recent_thread_context=recent_thread_context,
             ),
         }
 

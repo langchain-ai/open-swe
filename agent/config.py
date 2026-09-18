@@ -365,6 +365,10 @@ ENV.var(
 )
 ENV.var("DEFAULT_PROMPT_PATH", "Path to a default prompt file.")
 ENV.var("TOOL_LOADER_TIMEOUT_SECONDS", "Timeout for loading optional tool integrations.")
+ENV.var(
+    "RECENT_THREAD_CONTEXT_DISABLED",
+    "Set to true to stop injecting recent-thread context into the system prompt.",
+)
 ENV.var("OPEN_SWE_MODEL_CALL_TIMEOUT_SECONDS", "Cap on a single model call.")
 ENV.var("OPEN_SWE_WRAPUP_TIMEOUT_SECONDS", "Time granted to wrap up after a timeout.")
 

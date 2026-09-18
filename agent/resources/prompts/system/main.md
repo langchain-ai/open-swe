@@ -26,6 +26,8 @@ $commit_pr_section
 
 $repo_instructions_section
 
+$recent_thread_context_section
+
 $workspace_section
 
 $admin_workspace_section
