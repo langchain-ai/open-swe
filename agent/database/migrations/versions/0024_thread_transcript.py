@@ -61,20 +61,12 @@ def upgrade() -> None:
     op.execute(
         """
         CREATE TABLE thread_command_receipt (
-            command_id text PRIMARY KEY,
             thread_id text NOT NULL,
+            command_id text NOT NULL,
             result_version bigint,
-            accepted_at timestamptz NOT NULL DEFAULT clock_timestamp()
+            accepted_at timestamptz NOT NULL DEFAULT clock_timestamp(),
+            PRIMARY KEY (thread_id, command_id)
         )
-        """
-    )
-
-    # Receipts are looked up by thread and command, and dropped by thread when
-    # a transcript is deleted.
-    op.execute(
-        """
-        CREATE INDEX thread_command_receipt_thread_idx
-        ON thread_command_receipt (thread_id)
         """
     )
 
@@ -122,8 +114,8 @@ def upgrade() -> None:
         """
     )
 
-    # The ordinal names the hidden ref a reader diffs against, so two turns of
-    # one thread may never share it.
+    # The ordinal is the order a reader shows checkpoints in, and it is
+    # assigned under the thread's lock, so two turns of one thread never share it.
     op.execute(
         """
         CREATE UNIQUE INDEX thread_turn_checkpoint_count_idx

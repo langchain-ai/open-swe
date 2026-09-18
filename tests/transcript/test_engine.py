@@ -126,6 +126,75 @@ async def test_a_replayed_command_reports_its_stored_version(registry_db: None) 
     assert events == 2
 
 
+async def test_a_command_repeated_within_one_batch_is_appended_once(registry_db: None) -> None:
+    thread_id = str(uuid7())
+    turn_id = uuid7()
+    await _create(thread_id)
+    command = Command(
+        command_id="flush-1",
+        event=MessageAppended(turn_id=turn_id, message_id="ai-1", text="Hello"),
+        actor_kind="agent",
+        turn_id=turn_id,
+    )
+
+    result = await append(thread_id, [command, command])
+
+    assert result.versions == [2, 2]
+    assert [event.version for event in result.events] == [2]
+
+    snapshot = await load_snapshot(thread_id)
+    assert snapshot is not None
+    assert snapshot.version == 2
+    assert [m.text for m in snapshot.messages] == ["Hello"]
+
+
+async def test_one_command_id_in_two_threads_is_two_events(registry_db: None) -> None:
+    first_thread = str(uuid7())
+    second_thread = str(uuid7())
+    turn_id = uuid7()
+    await _create(first_thread)
+    await _create(second_thread)
+    command = Command(
+        command_id="flush-1",
+        event=MessageAppended(turn_id=turn_id, message_id="ai-1", text="Hello"),
+        actor_kind="agent",
+        turn_id=turn_id,
+    )
+
+    first = await append(first_thread, [command])
+    # The second thread is a version ahead, so the two threads disagree about
+    # the version the shared command id produced.
+    await append(
+        second_thread,
+        [
+            Command(
+                command_id="flush-2",
+                event=MessageAppended(turn_id=turn_id, message_id="ai-1", text=" world"),
+                actor_kind="agent",
+                turn_id=turn_id,
+            )
+        ],
+    )
+    second = await append(second_thread, [command])
+
+    assert first.versions == [2]
+    assert second.versions == [3]
+    assert [event.version for event in second.events] == [3]
+
+    assert (await append(first_thread, [command])).versions == [2]
+    assert (await append(second_thread, [command])).versions == [3]
+
+    for thread_id, expected in ((first_thread, 2), (second_thread, 3)):
+        async with postgres.read_only_transaction() as conn:
+            events = (
+                await conn.execute(
+                    text("SELECT count(*) FROM thread_event WHERE thread_id = :t"),
+                    {"t": thread_id},
+                )
+            ).scalar_one()
+        assert events == expected
+
+
 async def test_fragments_concatenate_until_the_canonical_text_replaces_them(
     registry_db: None,
 ) -> None:

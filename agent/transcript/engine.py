@@ -75,7 +75,9 @@ async def append(thread_id: str, commands: Sequence[Command]) -> AppendResult:
 
     Returns one version per command in order; a command whose receipt says it
     was already accepted reports the version it produced the first time and is
-    not appended again.
+    not appended again. A ``command_id`` repeated within one batch is treated
+    the same way: only its first occurrence is appended, and the later copies
+    report that occurrence's version.
     """
     if not commands:
         return AppendResult(thread_id=thread_id, versions=[], events=[])
@@ -94,7 +96,13 @@ async def append(thread_id: str, commands: Sequence[Command]) -> AppendResult:
                 {"thread_id": thread_id},
             )
         ).scalar_one_or_none()
-        pending = [command for command in commands if command.command_id not in accepted]
+        seen: set[str] = set(accepted)
+        pending: list[Command] = []
+        for command in commands:
+            if command.command_id in seen:
+                continue
+            seen.add(command.command_id)
+            pending.append(command)
         if head is None and pending and pending[0].event.type != "thread.created":
             raise ThreadNotTranscribed(thread_id)
 
@@ -145,10 +153,10 @@ async def delete_transcript(thread_id: str) -> bool:
     """Drop the thread's transcript, and tell its subscribers the thread is gone.
 
     Everything else — events, turns, messages, tool calls, attachments —
-    cascades from the ``thread`` row. The receipts go too: they are keyed by
-    ``command_id`` alone, so leaving them behind would deduplicate a thread
-    recreated under the same id out of ever being created. Returns whether a
-    transcript was deleted.
+    cascades from the ``thread`` row. The receipts do not — they carry no
+    foreign key — so they are deleted explicitly here: leaving them behind
+    would deduplicate a thread recreated under the same id out of ever being
+    created. Returns whether a transcript was deleted.
     """
     if not postgres.configured():
         return False
@@ -200,6 +208,9 @@ async def _write(
     conn: AsyncConnection, thread_id: str, version: int, command: Command
 ) -> StoredEvent:
     event = command.event
+    # Identity a writer could only guess at outside the thread's lock is
+    # settled here, so the log, the receipt and the projection all agree.
+    event = await projections.resolve(conn, thread_id, event)
     payload = event.model_dump(mode="json")
     run_id = command.run_id or _payload_run_id(payload)
     turn_id = command.turn_id or _payload_turn_id(payload)
@@ -248,9 +259,9 @@ async def _write(
     await conn.execute(
         text(
             """
-            INSERT INTO thread_command_receipt (command_id, thread_id, result_version)
-            VALUES (:command_id, :thread_id, :result_version)
-            ON CONFLICT (command_id) DO UPDATE SET
+            INSERT INTO thread_command_receipt (thread_id, command_id, result_version)
+            VALUES (:thread_id, :command_id, :result_version)
+            ON CONFLICT (thread_id, command_id) DO UPDATE SET
                 result_version = EXCLUDED.result_version,
                 accepted_at = clock_timestamp()
             """
