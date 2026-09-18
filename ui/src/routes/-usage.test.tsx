@@ -22,6 +22,7 @@ import {
   type UsageLeaderboardRow,
 } from "@/lib/api"
 import { TooltipProvider } from "@/components/ui/tooltip"
+import { makeQueryClient } from "@/lib/query"
 
 import { UsageAnalytics, UsageDateRange } from "./usage"
 
@@ -100,7 +101,7 @@ afterEach(() => {
 })
 
 it("labels the shared date range and changes it independently of usage scope", async () => {
-  vi.spyOn(api, "prMergeRateByModel").mockResolvedValue(captured)
+  vi.spyOn(api, "prMergeRateByModel").mockResolvedValue(report(captured))
   const onPeriodChange = vi.fn()
   mountReport(onPeriodChange)
   const range = screen.getByRole("combobox", { name: "Date range" })
@@ -670,7 +671,6 @@ it("announces a failed refresh while keeping the last good PR report", async () 
           period="30d"
           login="reader"
           isAdmin={false}
-          onPeriodChange={() => {}}
         />
       </TooltipProvider>
     </QueryClientProvider>
@@ -697,8 +697,61 @@ it("announces a failed refresh while keeping the last good PR report", async () 
   client.clear()
 })
 
-it("shows backend and dashboard build identifiers without judging compatibility", async () => {
-  vi.spyOn(api, "prMergeRateByModel").mockResolvedValue(report(captured))
+it("clears a failed refresh announcement when an automatic refetch succeeds", async () => {
+  const query = vi
+    .spyOn(api, "prMergeRateByModel")
+    .mockResolvedValue(report(captured))
+  const client = makeQueryClient()
+  render(
+    <QueryClientProvider client={client}>
+      <TooltipProvider>
+        <UsageAnalytics
+          period="30d"
+          login="reader"
+          isAdmin={false}
+        />
+      </TooltipProvider>
+    </QueryClientProvider>
+  )
+  expect(await screen.findByText(/No PRs have been recorded/)).toBeTruthy()
+
+  fireEvent.click(screen.getByText("Details"))
+  query.mockRejectedValue(new ApiError(503, "unavailable"))
+  fireEvent.click(screen.getByRole("button", { name: "Refresh now" }))
+  expect(await screen.findByText(/Last PR report refresh failed/)).toBeTruthy()
+
+  // A success the user did not trigger (interval/focus refetch) also clears it.
+  query.mockResolvedValue(report(captured))
+  await act(() => client.refetchQueries({ queryKey: ["prMergeRateByModel"] }))
+  await waitFor(() =>
+    expect(screen.queryByText(/Last PR report refresh failed/)).toBeNull()
+  )
+  client.clear()
+})
+
+it("shows the report's backend identifiers beside this bundle's own identity", async () => {
+  vi.spyOn(api, "prMergeRateByModel").mockResolvedValue(
+    report({
+      ...captured,
+      build_info: {
+        backend: {
+          revision_id: "rev-42",
+          commit: "abc123",
+          built_at: "2026-09-10T10:00:00Z",
+          package_version: "0.1.0",
+        },
+        dashboard: {
+          commit: "def456",
+          built_at: "2026-09-10T11:00:00Z",
+          served: true,
+        },
+      },
+    })
+  )
+  Object.defineProperty(window, "__OPEN_SWE_BUNDLE__", {
+    configurable: true,
+    value: { commit: "fedcba", built_at: "2026-09-11T09:00:00Z" },
+  })
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false, gcTime: 0 } },
   })
@@ -710,20 +763,6 @@ it("shows backend and dashboard build identifiers without judging compatibility"
           login="reader"
           isAdmin={false}
           apiBaseUrl="https://backend.example.com"
-          sessionBuildInfo={{
-            backend: {
-              revision_id: "rev-42",
-              commit: "abc123",
-              built_at: "2026-09-10T10:00:00Z",
-              package_version: "0.1.0",
-            },
-            dashboard: {
-              commit: "def456",
-              built_at: "2026-09-10T11:00:00Z",
-              served: true,
-            },
-          }}
-          onPeriodChange={() => {}}
         />
       </TooltipProvider>
     </QueryClientProvider>
@@ -734,7 +773,52 @@ it("shows backend and dashboard build identifiers without judging compatibility"
   expect(screen.getByText("def456")).toBeTruthy()
   expect(screen.getByText("0.1.0")).toBeTruthy()
   expect(screen.getByText(/https:\/\/backend\.example\.com/)).toBeTruthy()
-  expect(screen.queryByText(/incompatib|mismatch/i)).toBeNull()
+  expect(screen.getByText(/This browser is running:/)).toBeTruthy()
+  expect(screen.getByText("fedcba")).toBeTruthy()
+  // The running bundle differs from the one the backend reports serving.
+  expect(screen.getByText(/different from the bundle/)).toBeTruthy()
+  expect(screen.queryByText(/incompatib/i)).toBeNull()
+  delete window.__OPEN_SWE_BUNDLE__
+  client.clear()
+})
+
+it("never reports unknown commits as different from the served bundle", async () => {
+  vi.spyOn(api, "prMergeRateByModel").mockResolvedValue(
+    report({
+      ...captured,
+      build_info: {
+        backend: {
+          revision_id: null,
+          commit: null,
+          built_at: null,
+          package_version: null,
+        },
+        dashboard: { commit: null, built_at: null, served: true },
+      },
+    })
+  )
+  Object.defineProperty(window, "__OPEN_SWE_BUNDLE__", {
+    configurable: true,
+    value: { commit: null, built_at: "2026-09-11T09:00:00Z" },
+  })
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false, gcTime: 0 } },
+  })
+  render(
+    <QueryClientProvider client={client}>
+      <TooltipProvider>
+        <UsageAnalytics
+          period="30d"
+          login="reader"
+          isAdmin={false}
+        />
+      </TooltipProvider>
+    </QueryClientProvider>
+  )
+  fireEvent.click(await screen.findByText("Details"))
+  expect(screen.queryByText(/different from the bundle/)).toBeNull()
+  expect(screen.getByText(/comparison .* unavailable/)).toBeTruthy()
+  delete window.__OPEN_SWE_BUNDLE__
   client.clear()
 })
 
@@ -750,8 +834,6 @@ it("marks build identifiers unavailable when the backend does not report them", 
           period="30d"
           login="reader"
           isAdmin={false}
-          sessionBuildInfo={null}
-          onPeriodChange={() => {}}
         />
       </TooltipProvider>
     </QueryClientProvider>
@@ -760,6 +842,8 @@ it("marks build identifiers unavailable when the backend does not report them", 
   expect(
     screen.getByText(/does not report them/, { exact: false })
   ).toBeTruthy()
+  // No /me fallback: nothing else can supply these identifiers.
+  expect(screen.queryByText(/This browser is running:/)).toBeNull()
   client.clear()
 })
 

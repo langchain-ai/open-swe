@@ -111,10 +111,6 @@ function UsagePage() {
         login={session.data.login}
         isAdmin={session.data.is_admin}
         apiBaseUrl={session.data.api_base_url}
-        sessionBuildInfo={normalizeBuildInfo(session.data.build_info)}
-        onPeriodChange={(value) =>
-          navigate({ to: "/usage", search: { period: value } })
-        }
       />
     </AppShell>
   )
@@ -158,16 +154,11 @@ export function UsageAnalytics({
   login,
   isAdmin,
   apiBaseUrl,
-  sessionBuildInfo,
-  onPeriodChange,
 }: {
   period: UsageLeaderboardPeriod
   login: string
   isAdmin: boolean
   apiBaseUrl?: string
-  /** `/me`'s build identity, or null on a backend too old to send one. */
-  sessionBuildInfo?: BuildInfo | null
-  onPeriodChange: (period: UsageLeaderboardPeriod) => void
 }) {
   const [leaderboardPageSize, setLeaderboardPageSize] = useState(10)
 
@@ -178,7 +169,6 @@ export function UsageAnalytics({
       login={login}
       isAdmin={isAdmin}
       apiBaseUrl={apiBaseUrl}
-      sessionBuildInfo={sessionBuildInfo ?? null}
       pageSize={leaderboardPageSize}
       onPageSizeChange={setLeaderboardPageSize}
     />
@@ -190,7 +180,6 @@ function UsageAnalyticsPeriod({
   login,
   isAdmin,
   apiBaseUrl,
-  sessionBuildInfo,
   pageSize: leaderboardPageSize,
   onPageSizeChange: setLeaderboardPageSize,
 }: {
@@ -198,7 +187,6 @@ function UsageAnalyticsPeriod({
   login: string
   isAdmin: boolean
   apiBaseUrl?: string
-  sessionBuildInfo: BuildInfo | null
   pageSize: number
   onPageSizeChange: (pageSize: number) => void
 }) {
@@ -239,11 +227,17 @@ function UsageAnalyticsPeriod({
     retry: (count, error) =>
       !(error instanceof ApiError && error.status >= 400) && count < 2,
   })
-  const report = usePRMergeRateReport(activePeriod, login, isAdmin)
-  const refreshing = leaderboard.isFetching || report.isFetching
   // A refresh that fails keeps the last successful report visible, but the
-  // failure stays announced in the coverage details until one succeeds.
+  // failure stays announced in the coverage details until one succeeds —
+  // manual or automatic (the query also refetches on interval/focus).
   const [reportError, setReportError] = useState<ApiError | null>(null)
+  const report = usePRMergeRateReport(
+    activePeriod,
+    login,
+    isAdmin,
+    setReportError
+  )
+  const refreshing = leaderboard.isFetching || report.isFetching
   const refreshNow = () => {
     void leaderboard.refetch()
     // refetch() resolves on failure too, so the error has to come off the result.
@@ -412,7 +406,7 @@ function UsageAnalyticsPeriod({
         period={activePeriod}
         reportFetchedAt={report.data?.fetchedAt ?? null}
         reportRefreshError={report.isError && !report.data ? null : reportError}
-        buildInfo={normalizeBuildInfo(report.data?.payload.build_info) ?? sessionBuildInfo}
+        buildInfo={normalizeBuildInfo(report.data?.payload.build_info)}
         apiBaseUrl={apiBaseUrl}
       />
     </>
@@ -621,6 +615,39 @@ function BuildIdentityDetails({ buildInfo }: { buildInfo: BuildInfo | null }) {
           "not served by this backend"
         )}
       </p>
+      {(() => {
+        const bundle = window.__OPEN_SWE_BUNDLE__
+        if (!bundle) return null
+        // Only comparable identifiers can differ; an unknown side means the
+        // comparison is unavailable, never a mismatch.
+        const comparable =
+          buildInfo.dashboard.served &&
+          bundle.commit != null &&
+          buildInfo.dashboard.commit != null
+        const differs =
+          comparable && bundle.commit !== buildInfo.dashboard.commit
+        return (
+          <p>
+            This browser is running: commit{" "}
+            <IdentityValue value={bundle.commit} />
+            {" · "}built{" "}
+            <time dateTime={bundle.built_at}>
+              {new Date(bundle.built_at).toLocaleString()}
+            </time>
+            {differs ? (
+              <span className="text-amber-600 dark:text-amber-400">
+                {" "}
+                — different from the bundle the backend reports serving.
+              </span>
+            ) : buildInfo.dashboard.served && !comparable ? (
+              <span className="text-muted-foreground">
+                {" "}
+                — comparison with the backend-served bundle unavailable.
+              </span>
+            ) : null}
+          </p>
+        )
+      })()}
     </>
   )
 }
@@ -628,7 +655,8 @@ function BuildIdentityDetails({ buildInfo }: { buildInfo: BuildInfo | null }) {
 function usePRMergeRateReport(
   period: UsageLeaderboardPeriod,
   login: string,
-  isAdmin: boolean
+  isAdmin: boolean,
+  onRefreshErrorChange: (error: ApiError | null) => void
 ) {
   return useQuery({
     queryKey: ["prMergeRateByModel", period, login, isAdmin],
@@ -637,6 +665,9 @@ function usePRMergeRateReport(
     refetchInterval: 60 * 1000,
     retry: (count, error) =>
       !(error instanceof ApiError && error.status >= 400) && count < 2,
+    // Manual refreshes are not the only successes: automatic interval/focus
+    // fetches must also clear a retained failure announcement.
+    meta: { onRefreshErrorChange },
   })
 }
 
