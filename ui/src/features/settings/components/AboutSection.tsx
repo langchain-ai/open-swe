@@ -7,6 +7,7 @@ import {
   type BuildInfo,
   type SessionUser,
 } from "@/lib/api"
+import { useIsHydrated } from "@/lib/hydration"
 
 export function AboutSection({ user }: { user: SessionUser }) {
   const [version, setVersion] = useState<string>()
@@ -48,6 +49,8 @@ function IdentityValue({ value }: { value: string | null | undefined }) {
 }
 
 function BuildIdentityDetails({ buildInfo }: { buildInfo: BuildInfo | null }) {
+  const hydrated = useIsHydrated()
+
   return (
     <>
       {buildInfo ? (
@@ -93,8 +96,7 @@ function BuildIdentityDetails({ buildInfo }: { buildInfo: BuildInfo | null }) {
         </p>
       )}
       {(() => {
-        const bundle =
-          typeof window === "undefined" ? undefined : window.__OPEN_SWE_BUNDLE__
+        const bundle = hydrated ? window.__OPEN_SWE_BUNDLE__ : undefined
         if (!bundle) return null
         const comparable =
           buildInfo?.dashboard.served &&
