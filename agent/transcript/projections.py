@@ -25,6 +25,7 @@ from agent.transcript.events import (
     ToolCompleted,
     ToolStarted,
     TranscriptEvent,
+    TurnCheckpointCompleted,
     TurnCompleted,
     TurnFailed,
     TurnInterrupted,
@@ -107,6 +108,8 @@ async def apply(
             await _turn_started(conn, thread_id, event, occurred_at)
         case TurnCompleted():
             await _turn_completed(conn, thread_id, version, event, run_id, occurred_at)
+        case TurnCheckpointCompleted():
+            await _turn_checkpoint(conn, thread_id, event, occurred_at)
         case TurnFailed() | TurnInterrupted():
             await _turn_ended(conn, thread_id, event, run_id, occurred_at)
         case MessageAppended():
@@ -238,10 +241,7 @@ async def _turn_completed(
             UPDATE thread_turn SET
                 state = 'completed',
                 run_id = COALESCE(:run_id, run_id),
-                completed_at = :completed_at,
-                base_commit = COALESCE(:base_commit, base_commit),
-                head_commit = COALESCE(:head_commit, head_commit),
-                changed_files = COALESCE(CAST(:changed_files AS jsonb), changed_files)
+                completed_at = :completed_at
             WHERE turn_id = :turn_id AND thread_id = :thread_id
               AND state IN ('requested', 'running')
             """
@@ -251,9 +251,6 @@ async def _turn_completed(
             "turn_id": event.turn_id,
             "run_id": event.run_id or run_id,
             "completed_at": occurred_at,
-            "base_commit": event.base_commit,
-            "head_commit": event.head_commit,
-            "changed_files": _json(event.changed_files),
         },
     )
     await _settle_thread(conn, thread_id, status="idle")
@@ -265,6 +262,58 @@ async def _turn_completed(
             """
         ),
         {"thread_id": thread_id, "turn_id": event.turn_id, "version": version},
+    )
+
+
+async def _turn_checkpoint(
+    conn: AsyncConnection,
+    thread_id: str,
+    event: TurnCheckpointCompleted,
+    occurred_at: datetime,
+) -> None:
+    """Record the turn's checkpoint, overwriting a weaker earlier attempt.
+
+    A turn is checkpointed once, but two writers may try: the middleware at the
+    end of the run and ``agent.transcript.turns`` when the run died without it.
+    The row keeps whichever attempt actually produced a commit.
+    """
+    await conn.execute(
+        text(
+            """
+            INSERT INTO thread_turn_checkpoint (
+                thread_id, turn_id, checkpoint_turn_count, checkpoint_ref, commit,
+                status, files, assistant_message_id, error, completed_at
+            )
+            VALUES (
+                :thread_id, :turn_id, :checkpoint_turn_count, :checkpoint_ref, :commit,
+                :status, CAST(:files AS jsonb), :assistant_message_id, :error, :completed_at
+            )
+            ON CONFLICT (thread_id, turn_id) DO UPDATE SET
+                checkpoint_turn_count = EXCLUDED.checkpoint_turn_count,
+                checkpoint_ref = EXCLUDED.checkpoint_ref,
+                commit = EXCLUDED.commit,
+                status = EXCLUDED.status,
+                files = EXCLUDED.files,
+                assistant_message_id = COALESCE(
+                    EXCLUDED.assistant_message_id, thread_turn_checkpoint.assistant_message_id
+                ),
+                error = EXCLUDED.error,
+                completed_at = EXCLUDED.completed_at
+            WHERE thread_turn_checkpoint.commit IS NULL
+            """
+        ),
+        {
+            "thread_id": thread_id,
+            "turn_id": event.turn_id,
+            "checkpoint_turn_count": event.checkpoint_turn_count,
+            "checkpoint_ref": event.checkpoint_ref,
+            "commit": event.commit,
+            "status": event.status,
+            "files": json.dumps([file.model_dump(mode="json") for file in event.files]),
+            "assistant_message_id": event.assistant_message_id,
+            "error": event.error,
+            "completed_at": occurred_at,
+        },
     )
 
 

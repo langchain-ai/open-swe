@@ -43,6 +43,7 @@ from pydantic_core import PydanticSerializationError, to_jsonable_python
 from agent.database import postgres
 from agent.input_messages import input_message_text, message_sender_id
 from agent.middleware.trace import OpenSWEMiddleware
+from agent.transcript import checkpoints
 from agent.transcript.attachments import PendingAttachment, UnsupportedAttachment
 from agent.transcript.engine import Command, append, has_transcript
 from agent.transcript.events import (
@@ -69,11 +70,6 @@ HARD_FLUSH_CHARS = 24_000
 TOOL_OUTPUT_CAP_BYTES = 256 * 1024
 ERROR_TEXT_CAP = 2_000
 _WRITER_BATCH = 32
-# How far the writer may fall behind the model stream before streamed text
-# fragments are shed. Only ``message.appended`` is dropped: the canonical
-# ``message.completed`` restores the text, whereas a dropped turn or tool event
-# would leave a hole no later event repairs.
-_WRITER_QUEUE_LIMIT = 4096
 # Model calls a middleware makes for its own bookkeeping (routing classifier,
 # conversation offloading) are tagged out of the user-facing stream. Their
 # tokens must not become transcript fragments.
@@ -171,6 +167,7 @@ class RunState:
     run_id: str
     turn_id: UUID
     enabled: bool
+    start_head: str | None = None
     seen_human_ids: set[str] = field(default_factory=set)
     buffers: dict[str, MessageBuffers] = field(default_factory=dict)
     message_alias: dict[str, str] = field(default_factory=dict)
@@ -180,24 +177,11 @@ class RunState:
     terminal: bool = False
 
     def enqueue(self, *commands: Command) -> None:
+        """Queue commands for the writer. Nothing is ever shed: the queue is
+        bounded by the run's own output, and the turn end waits for the drain."""
         if not self.enabled or self.queue is None:
             return
         for command in commands:
-            if (
-                command.event.type == "message.appended"
-                and self.queue.qsize() >= _WRITER_QUEUE_LIMIT
-            ):
-                logger.warning(
-                    "Dropped a transcript fragment: the writer queue is full",
-                    extra={
-                        "transcript": {
-                            "thread_id": self.thread_id,
-                            "run_id": self.run_id,
-                            "event_type": command.event.type,
-                        }
-                    },
-                )
-                continue
             self.queue.put_nowait(command)
 
 
@@ -699,6 +683,10 @@ class TranscriptMiddleware(OpenSWEMiddleware):
             if isinstance(message, HumanMessage) and isinstance(message.id, str) and message.id
         )
         run_state.enqueue(*commands)
+        # The baseline the turn's checkpoint is diffed against when the thread
+        # has no earlier one. Read after the queue is primed: it is one sandbox
+        # round trip, and nothing before it has to wait on it.
+        run_state.start_head = await checkpoints.read_head(ids.thread_id)
 
     async def awrap_model_call(
         self,
@@ -928,11 +916,35 @@ class TranscriptMiddleware(OpenSWEMiddleware):
                 extra={"transcript_tool_call_id": tool_call_id},
             )
 
+    async def _capture_checkpoint(self, state: RunState) -> None:
+        """Record what the turn left in the sandbox, ahead of the event that ends it.
+
+        Enqueued before ``turn.completed`` (or ``turn.failed``) so a reader
+        that sees a turn settle already holds its checkpoint, rather than
+        briefly seeing a finished turn with nothing to diff.
+        """
+        try:
+            state.enqueue(
+                await checkpoints.checkpoint_command(
+                    state.thread_id,
+                    state.turn_id,
+                    run_id=state.run_id,
+                    start_head=state.start_head,
+                )
+            )
+        except Exception:
+            logger.warning(
+                "Transcript turn checkpoint failed",
+                exc_info=True,
+                extra={"transcript_thread_id": state.thread_id},
+            )
+
     async def _fail_turn(self, state: RunState, exc: BaseException) -> None:
         if state.terminal:
             return
         state.terminal = True
         try:
+            await self._capture_checkpoint(state)
             state.enqueue(
                 Command(
                     command_id=f"turn:{state.turn_id}:failed",
@@ -964,6 +976,7 @@ class TranscriptMiddleware(OpenSWEMiddleware):
         try:
             if not run_state.terminal:
                 run_state.terminal = True
+                await self._capture_checkpoint(run_state)
                 run_state.enqueue(
                     Command(
                         command_id=f"turn:{run_state.turn_id}:completed",

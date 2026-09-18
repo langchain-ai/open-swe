@@ -83,10 +83,7 @@ def upgrade() -> None:
             requested_at timestamptz NOT NULL,
             started_at timestamptz,
             completed_at timestamptz,
-            error text,
-            base_commit text,
-            head_commit text,
-            changed_files jsonb
+            error text
         )
         """
     )
@@ -97,6 +94,26 @@ def upgrade() -> None:
     op.execute(
         """
         CREATE INDEX thread_turn_thread_idx ON thread_turn (thread_id, requested_at, turn_id)
+        """
+    )
+
+    # The commit each turn left behind in its sandbox, so a later reader can
+    # diff one turn against another without the sandbox being alive to ask.
+    op.execute(
+        """
+        CREATE TABLE thread_turn_checkpoint (
+            thread_id text NOT NULL REFERENCES thread (thread_id) ON DELETE CASCADE,
+            turn_id uuid NOT NULL,
+            checkpoint_turn_count int NOT NULL,
+            checkpoint_ref text NOT NULL,
+            commit text,
+            status text NOT NULL CHECK (status IN ('ready', 'missing', 'error')),
+            files jsonb NOT NULL DEFAULT '[]'::jsonb,
+            assistant_message_id text,
+            error text,
+            completed_at timestamptz NOT NULL,
+            PRIMARY KEY (thread_id, turn_id)
+        )
         """
     )
 

@@ -20,6 +20,8 @@ from sqlalchemy.ext.asyncio import AsyncConnection
 from agent.database import postgres
 from agent.transcript.cursor import TurnPageCursor, encode_turn_cursor
 from agent.transcript.events import (
+    CheckpointFile,
+    CheckpointStatus,
     JsonObject,
     MessageRole,
     StoredEvent,
@@ -57,6 +59,20 @@ class ThreadView(BaseModel):
     updated_at: datetime
 
 
+class CheckpointView(BaseModel):
+    """The commit a turn left behind, as ``turn.checkpoint.completed`` recorded it."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    checkpoint_turn_count: int
+    checkpoint_ref: str
+    commit: str | None
+    status: CheckpointStatus
+    files: list[CheckpointFile]
+    assistant_message_id: str | None
+    error: str | None
+
+
 class TurnView(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -67,7 +83,7 @@ class TurnView(BaseModel):
     started_at: datetime | None
     completed_at: datetime | None
     error: str | None
-    head_commit: str | None
+    checkpoint: CheckpointView | None
 
 
 class MessageView(BaseModel):
@@ -211,9 +227,37 @@ async def load_access(thread_id: str) -> JsonObject | None:
     return None if row is None else dict(row["metadata"])
 
 
+# The checkpoint is joined in rather than fetched per page: it is one row per
+# turn, and every reader that wants a turn wants what it changed.
 _TURN_COLUMNS = """
-    turn_id, run_id, state, requested_at, started_at, completed_at, error, head_commit
+    turn.turn_id, turn.run_id, turn.state, turn.requested_at, turn.started_at,
+    turn.completed_at, turn.error,
+    checkpoint.checkpoint_turn_count, checkpoint.checkpoint_ref, checkpoint.commit,
+    checkpoint.status AS checkpoint_status, checkpoint.files,
+    checkpoint.assistant_message_id, checkpoint.error AS checkpoint_error
 """
+
+
+def _turn_view(row: RowMapping) -> TurnView:
+    columns = dict(row)
+    checkpoint = {
+        "checkpoint_turn_count": columns.pop("checkpoint_turn_count"),
+        "checkpoint_ref": columns.pop("checkpoint_ref"),
+        "commit": columns.pop("commit"),
+        "status": columns.pop("checkpoint_status"),
+        "files": columns.pop("files"),
+        "assistant_message_id": columns.pop("assistant_message_id"),
+        "error": columns.pop("checkpoint_error"),
+    }
+    return TurnView(
+        **columns,
+        checkpoint=(
+            None
+            if checkpoint["checkpoint_ref"] is None
+            else CheckpointView.model_validate(checkpoint)
+        ),
+    )
+
 
 _MESSAGE_COLUMNS = """
     message_id, turn_id, role, text, reasoning, streaming, namespace,
@@ -249,7 +293,8 @@ async def _load_turns(
     statement = text(
         f"""
         SELECT {_TURN_COLUMNS}
-        FROM thread_turn
+        FROM thread_turn AS turn
+        LEFT JOIN thread_turn_checkpoint AS checkpoint USING (thread_id, turn_id)
         WHERE thread_id = :thread_id{bound}
         ORDER BY requested_at DESC, turn_id DESC
         LIMIT :limit
@@ -264,7 +309,7 @@ async def _load_turns(
         parameters["before_at"] = before.before_requested_at
         parameters["before_turn"] = before.before_turn_id
     rows = await _rows(conn, statement, parameters)
-    turns = [TurnView.model_validate(dict(row)) for row in reversed(rows[:limit])]
+    turns = [_turn_view(row) for row in reversed(rows[:limit])]
     if len(rows) <= limit or not turns:
         return turns, None
     oldest = turns[0]

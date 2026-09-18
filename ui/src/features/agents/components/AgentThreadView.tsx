@@ -36,7 +36,10 @@ import {
   writeStoredPanelCollapsed,
 } from "@/features/agents/lib/gitPanelPreferences"
 import { Messages } from "@/features/agents/components/messages"
-import type { MessagesScrollControl } from "@/features/agents/components/messages"
+import type {
+  LoadEarlier,
+  MessagesScrollControl,
+} from "@/features/agents/components/messages"
 import { useSubmitAgentMessage } from "@/features/agents/lib/provider/useSubmitAgentMessage"
 import { useModelOptions } from "@/features/agents/lib/provider/useModelOptions"
 import {
@@ -227,6 +230,13 @@ export function AgentThreadView({
   // The only file list the UI has: whatever the agent has already touched in
   // this thread. Those are also the paths a follow-up is most likely about.
   const mentionPaths = useMemo(() => editedPaths(baseMessages), [baseMessages])
+  const loadEarlier = useMemo<LoadEarlier | null>(
+    () =>
+      source.hasOlder
+        ? { loading: source.isLoadingOlder, onLoadEarlier: source.loadOlder }
+        : null,
+    [source.hasOlder, source.isLoadingOlder, source.loadOlder]
+  )
   const isThinking = source.isRunning
   const settingUpSandbox = isThinking && baseMessages.length === 0
   const reconnect = useConnectionStatus(source.connection)
@@ -387,9 +397,7 @@ export function AgentThreadView({
                     </div>
                   }
                   onOpenFile={handleOpenFile}
-                  hasOlder={source.hasOlder}
-                  isLoadingOlder={source.isLoadingOlder}
-                  onLoadOlder={source.loadOlder}
+                  loadEarlier={loadEarlier}
                   queuedMessages={queuedMessages}
                   isStreaming={isStreaming}
                   streamIsLoading={source.isRunning}

@@ -1,6 +1,6 @@
 /** @vitest-environment jsdom */
 
-import { cleanup, render, screen } from "@testing-library/react"
+import { cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
 import { Messages } from "./Messages"
@@ -116,6 +116,32 @@ describe("Messages", () => {
       fold.compareDocumentPosition(groupedWork) &
         Node.DOCUMENT_POSITION_FOLLOWING
     ).toBeTruthy()
+  })
+
+  it("asks for earlier turns once per click and not while loading", () => {
+    const onLoadEarlier = vi.fn()
+    const { rerender } = render(
+      <Messages
+        messages={[]}
+        isStreaming={false}
+        loadEarlier={{ loading: false, onLoadEarlier }}
+      />
+    )
+
+    fireEvent.click(screen.getByRole("button", { name: "Load earlier turns" }))
+    expect(onLoadEarlier).toHaveBeenCalledTimes(1)
+
+    rerender(
+      <Messages
+        messages={[]}
+        isStreaming={false}
+        loadEarlier={{ loading: true, onLoadEarlier }}
+      />
+    )
+    fireEvent.click(
+      screen.getByRole("button", { name: "Loading earlier turns…" })
+    )
+    expect(onLoadEarlier).toHaveBeenCalledTimes(1)
   })
 
   it("keeps workflow approval available alongside an empty-state error", () => {

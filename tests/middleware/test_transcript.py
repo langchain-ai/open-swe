@@ -16,6 +16,7 @@ from langgraph.prebuilt.tool_node import ToolCallRequest
 
 from agent.middleware import transcript as mw
 from agent.transcript.engine import Command
+from agent.transcript.events import TurnFailed
 
 THREAD_ID = "thread-under-test"
 RUN_ID = "run-under-test"
@@ -62,6 +63,11 @@ def _install(
         return transcribed
 
     monkeypatch.setattr(mw, "has_transcript", _has_transcript)
+
+    async def _turn_context(thread_id: str, turn_id: UUID) -> tuple[int, str | None, str | None]:
+        return 1, None, None
+
+    monkeypatch.setattr(mw.checkpoints, "_turn_context", _turn_context)
     configurable: dict[str, Any] = {"thread_id": THREAD_ID, "run_id": RUN_ID}
     if turn_id is not None:
         configurable["transcript_turn_id"] = str(turn_id)
@@ -178,6 +184,7 @@ async def test_hook_sequence_for_a_transcribed_turn(monkeypatch: pytest.MonkeyPa
         "message.completed",
         "tool.started",
         "tool.completed",
+        "turn.checkpoint.completed",
         "turn.completed",
     ]
     assert engine.command_ids[0] == f"turn:{turn_id}:started:{RUN_ID}"
@@ -200,7 +207,12 @@ async def test_follow_up_without_a_turn_id_mints_one(monkeypatch: pytest.MonkeyP
     await middleware.abefore_agent({"messages": [AIMessage(content="old"), human]}, None)
     await middleware.aafter_agent({"messages": []}, None)
 
-    assert engine.types == ["turn.requested", "turn.started", "turn.completed"]
+    assert engine.types == [
+        "turn.requested",
+        "turn.started",
+        "turn.checkpoint.completed",
+        "turn.completed",
+    ]
     requested = engine.commands[0]
     assert requested.event.message_id == "human-2"
     assert requested.event.text == "follow up"
@@ -264,8 +276,10 @@ async def test_model_failure_records_turn_failed(monkeypatch: pytest.MonkeyPatch
     with pytest.raises(RuntimeError):
         await middleware.awrap_model_call(_model_request([]), model_handler)
 
-    assert engine.types == ["turn.started", "turn.failed"]
-    assert "provider exploded" in engine.commands[-1].event.error
+    assert engine.types == ["turn.started", "turn.checkpoint.completed", "turn.failed"]
+    failed = engine.commands[-1].event
+    assert isinstance(failed, TurnFailed)
+    assert "provider exploded" in failed.error
 
 
 async def test_subagent_tool_calls_carry_the_parent_namespace(
@@ -443,3 +457,24 @@ async def test_injected_human_images_become_attachments(
     assert attachment.data == b"pretend-png"
     assert human.event.images is not None
     assert human.event.images[0].attachment_id == attachment.attachment_id
+
+
+async def test_a_thread_without_a_sandbox_checkpoints_as_missing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """No sandbox, no git: the turn still records that it has nothing to diff."""
+    engine = _install(monkeypatch, transcribed=True, turn_id=uuid7())
+    monkeypatch.setattr(mw.checkpoints, "SANDBOX_BACKENDS", {})
+    middleware = mw.TranscriptMiddleware()
+
+    await middleware.abefore_agent({"messages": [HumanMessage(content="hi", id="h")]}, None)
+    await middleware.aafter_agent({"messages": []}, None)
+
+    # Ahead of ``turn.completed``: a settled turn always already has its checkpoint.
+    assert engine.types == ["turn.started", "turn.checkpoint.completed", "turn.completed"]
+    checkpoint = engine.commands[-2].event
+    assert checkpoint.status == "missing"
+    assert checkpoint.commit is None
+    assert checkpoint.error is None
+    assert checkpoint.checkpoint_turn_count == 1
+    assert checkpoint.checkpoint_ref == f"refs/open-swe/checkpoints/{THREAD_ID}/turn/1"

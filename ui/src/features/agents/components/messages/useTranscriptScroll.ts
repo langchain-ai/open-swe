@@ -7,7 +7,6 @@ import {
 } from "react"
 
 const BOTTOM_LOCK_THRESHOLD_PX = 24
-const TOP_LOAD_THRESHOLD_PX = 200
 const REMEMBERED_TRANSCRIPTS = 200
 
 interface RememberedPosition {
@@ -52,8 +51,6 @@ interface ScrollState {
    * user is reading can be put back under their eyes once it prepends.
    */
   prependAnchor: { scrollHeight: number; scrollTop: number } | null
-  /** One page per visit to the top; the user has to leave and come back. */
-  topHitHandled: boolean
 }
 
 /**
@@ -65,17 +62,10 @@ export function useTranscriptScroll({
   scrollKey,
   messages,
   isStreaming,
-  hasOlder = false,
-  isLoadingOlder = false,
-  onLoadOlder,
 }: {
   scrollKey?: string
   messages: ReadonlyArray<unknown>
   isStreaming: boolean
-  /** Older turns remain on the server and can be paged in at the top. */
-  hasOlder?: boolean
-  isLoadingOlder?: boolean
-  onLoadOlder?: () => void
 }) {
   const scrollRef = useRef<HTMLDivElement>(null)
   const contentRef = useRef<HTMLDivElement>(null)
@@ -86,13 +76,7 @@ export function useTranscriptScroll({
     frame: null,
     pendingRestoreTop: null,
     prependAnchor: null,
-    topHitHandled: false,
   })
-  // Read inside the scroll listener, which is registered once per transcript.
-  const paging = useRef({ hasOlder, isLoadingOlder, onLoadOlder })
-  useEffect(() => {
-    paging.current = { hasOlder, isLoadingOlder, onLoadOlder }
-  }, [hasOlder, isLoadingOlder, onLoadOlder])
   const [showScrollToBottom, setShowScrollToBottom] = useState(false)
 
   const settle = useCallback((el: HTMLElement, top: number) => {
@@ -152,6 +136,16 @@ export function useTranscriptScroll({
     },
     [settle]
   )
+
+  /** Called when an older page is asked for, so the prepend can be undone. */
+  const capturePrependAnchor = useCallback(() => {
+    const el = scrollRef.current
+    if (!el) return
+    state.current.prependAnchor = {
+      scrollHeight: el.scrollHeight,
+      scrollTop: el.scrollTop,
+    }
+  }, [])
 
   const scrollToBottom = useCallback(() => {
     state.current.followTail = true
@@ -220,24 +214,6 @@ export function useTranscriptScroll({
       } else if (nearBottom) {
         state.current.followTail = true
       }
-      if (top > TOP_LOAD_THRESHOLD_PX) {
-        state.current.topHitHandled = false
-      } else if (
-        !state.current.topHitHandled &&
-        paging.current.hasOlder &&
-        !paging.current.isLoadingOlder &&
-        paging.current.onLoadOlder
-      ) {
-        // One page per approach to the top: a transcript still shorter than
-        // the viewport afterwards would otherwise page the whole thread in
-        // without the user asking for any of it.
-        state.current.topHitHandled = true
-        state.current.prependAnchor = {
-          scrollHeight: el.scrollHeight,
-          scrollTop: top,
-        }
-        paging.current.onLoadOlder()
-      }
       settle(el, top)
       if (scrollKey) remember(scrollKey, { top, atBottom: nearBottom })
     }
@@ -272,5 +248,11 @@ export function useTranscriptScroll({
     return () => observer.disconnect()
   }, [applyPendingRestore, restoreAfterPrepend, scheduleJumpToBottom])
 
-  return { scrollRef, contentRef, showScrollToBottom, scrollToBottom }
+  return {
+    scrollRef,
+    contentRef,
+    showScrollToBottom,
+    scrollToBottom,
+    capturePrependAnchor,
+  }
 }

@@ -29,6 +29,8 @@ type ThreadStatus = Literal["idle", "running", "error"]
 type MessageRole = Literal["human", "ai"]
 type ToolOutcome = Literal["completed", "error"]
 type NoticeKind = Literal["model_routed", "conversation_offloading", "step_limit"]
+type CheckpointStatus = Literal["ready", "missing", "error"]
+type FileChangeKind = Literal["added", "removed", "modified"]
 type JsonObject = dict[str, JsonValue]
 
 
@@ -150,9 +152,44 @@ class TurnCompleted(_Body):
     type: Literal["turn.completed"] = "turn.completed"
     turn_id: UUID
     run_id: str | None = None
-    head_commit: str | None = None
-    base_commit: str | None = None
-    changed_files: list[str] | None = None
+
+
+class CheckpointFile(BaseModel):
+    """One file a turn changed, as ``git diff --numstat`` counted it."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    path: str
+    additions: int
+    deletions: int
+    status: FileChangeKind
+
+
+class TurnCheckpointCompleted(_Body):
+    """The commit that records what the sandbox's working tree held at turn end.
+
+    ``commit`` is a parentless commit object no branch points at, written by
+    ``agent.transcript.checkpoints`` without touching HEAD, the index or the
+    working tree, and named by ``checkpoint_ref``. The sandbox is ephemeral, so
+    the sha is what outlives it: the ref only resolves while the sandbox is
+    alive, but the sha still identifies the tree if the ref is ever pushed or
+    compared against a pull request. ``files`` is the diff against the previous
+    turn's checkpoint, or against the head the turn started from.
+
+    ``status`` is ``missing`` when there was nothing to checkpoint (no sandbox,
+    or no repository in it) and ``error`` when the capture itself failed, with
+    the reason in ``error``.
+    """
+
+    type: Literal["turn.checkpoint.completed"] = "turn.checkpoint.completed"
+    turn_id: UUID
+    checkpoint_turn_count: int
+    checkpoint_ref: str
+    commit: str | None = None
+    status: CheckpointStatus
+    files: list[CheckpointFile] = Field(default_factory=list)
+    assistant_message_id: str | None = None
+    error: str | None = None
 
 
 class TurnFailed(_Body):
@@ -241,6 +278,7 @@ type TranscriptEvent = Annotated[
     | TurnRequested
     | TurnStarted
     | TurnCompleted
+    | TurnCheckpointCompleted
     | TurnFailed
     | TurnInterrupted
     | MessageAppended
