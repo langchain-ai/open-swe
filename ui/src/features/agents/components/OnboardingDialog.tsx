@@ -1,5 +1,4 @@
 import { Dialog } from "@base-ui/react/dialog"
-import { useQuery } from "@tanstack/react-query"
 import { useEffect, useState } from "react"
 import { IoLogoSlack } from "react-icons/io5"
 
@@ -12,7 +11,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { api, connectService } from "@/lib/api"
+import { connectService } from "@/lib/api"
 import {
   buildProfileUpdate,
   useOptions,
@@ -34,7 +33,6 @@ const SLACK_ONBOARDING_DISMISSED_KEY = "open-swe.slack-onboarding-dismissed"
  */
 export function OnboardingDialog() {
   const session = useSession()
-  const mapping = useQuery({ queryKey: ["myMapping"], queryFn: api.myMapping })
   const profile = useProfile()
   const options = useOptions()
   const save = useSaveProfile()
@@ -78,7 +76,7 @@ export function OnboardingDialog() {
   }, [currentModel, effort])
 
   const slackEnabled = session.data?.slack_oauth_enabled ?? false
-  const slackConnected = !!mapping.data?.slack_user_id
+  const slackConnected = !!session.data?.slack_user_id
   const hasDefaultModel = !!profile.data?.default_model
 
   const needsModel =
@@ -87,8 +85,8 @@ export function OnboardingDialog() {
     slackEnabled &&
     !slackConnected &&
     !slackDismissed &&
-    !mapping.isLoading &&
-    !mapping.isError
+    !session.isLoading &&
+    !session.isError
   const open = !dismissed && (needsModel || needsSlack)
   const step: "model" | "slack" = needsModel ? "model" : "slack"
 
@@ -217,7 +215,7 @@ export function OnboardingDialog() {
                   size="sm"
                   onClick={() =>
                     void connectService("slack")?.finally(
-                      () => void mapping.refetch()
+                      () => void session.refetch()
                     )
                   }
                 >

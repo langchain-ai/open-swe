@@ -38,7 +38,7 @@ export function SandboxSettingsPanel() {
     base?.base_snapshot_source === "admin"
       ? `Overrides DEFAULT_SANDBOX_SNAPSHOT_ID${
           base.env_base_snapshot_id ? ` (${base.env_base_snapshot_id})` : ""
-        }. New sandboxes boot from this unless their environment has a ready snapshot.`
+        }. New sandboxes boot from this unless their workspace has a ready snapshot.`
       : base?.base_snapshot_source === "env"
         ? "Using DEFAULT_SANDBOX_SNAPSHOT_ID. Set a value here to change it without a redeploy."
         : "No base snapshot configured — new sandboxes cannot start until one is set here or in DEFAULT_SANDBOX_SNAPSHOT_ID."

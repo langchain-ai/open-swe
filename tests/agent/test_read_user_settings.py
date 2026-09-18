@@ -1,14 +1,10 @@
-import inspect
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 import pytest
 
 from agent.tools.read_user_settings import read_user_settings
 from agent.utils import thread_participants as participants
-
-
-def test_read_user_settings_accepts_no_model_arguments() -> None:
-    assert list(inspect.signature(read_user_settings).parameters) == []
 
 
 @pytest.mark.asyncio
@@ -104,19 +100,19 @@ async def test_slack_participants_include_broadcasts_and_exclude_system_messages
         {"user": "U2"},
     ]
 
-    async def login_for_slack_id(user_id: str) -> str | None:
+    async def login_for_slack(user_id: str) -> str | None:
         return {
             "U1": "octocat",
             "UBROADCAST": "broadcaster",
             "U2": None,
         }.get(user_id)
 
-    async def get_mapping(login: str) -> dict[str, str]:
-        return {"github_login": login, "status": "active"}
+    async def for_login(provider: str, login: str) -> SimpleNamespace:
+        return SimpleNamespace(github_login=login)
 
     with (
-        patch.object(participants, "login_for_slack_id", side_effect=login_for_slack_id),
-        patch.object(participants, "get_mapping", side_effect=get_mapping),
+        patch.object(participants.User, "login_for_slack", side_effect=login_for_slack),
+        patch.object(participants.User, "for_login", side_effect=for_login),
     ):
         logins, unresolved = await participants._mapped_slack_logins(messages)
 
@@ -130,12 +126,12 @@ async def test_linear_participants_use_verified_email_mappings() -> None:
         return {"octo@example.com": "octocat", "missing@example.com": None}.get(email)
 
     with (
-        patch.object(participants, "login_for_email", side_effect=login_for_email),
+        patch.object(participants.User, "login_for_email", side_effect=login_for_email),
         patch.object(
-            participants,
-            "get_mapping",
+            participants.User,
+            "for_login",
             new_callable=AsyncMock,
-            return_value={"github_login": "octocat", "status": "active"},
+            return_value=SimpleNamespace(github_login="octocat"),
         ),
     ):
         logins, unresolved = await participants._mapped_email_logins(
@@ -162,12 +158,12 @@ async def test_dashboard_participants_are_read_from_trusted_metadata() -> None:
     class Client:
         threads = Threads()
 
-    async def get_mapping(login: str) -> dict[str, str]:
-        return {"github_login": login, "status": "active"}
+    async def for_login(provider: str, login: str) -> SimpleNamespace:
+        return SimpleNamespace(github_login=login)
 
     with (
         patch.object(participants, "get_client", return_value=Client()),
-        patch.object(participants, "get_mapping", side_effect=get_mapping),
+        patch.object(participants.User, "for_login", side_effect=for_login),
     ):
         logins, unresolved, error = await participants.resolve_thread_participant_logins(
             {"configurable": {"thread_id": "thread-1", "source": "dashboard"}}

@@ -49,6 +49,7 @@ async def _flush_in_traced_node(thread_id: str) -> _FakeClient:
 
 @pytest.fixture(autouse=True)
 def _clean_phases() -> Any:
+    startup_trace._PHASES.clear()
     yield
     startup_trace._PHASES.clear()
 

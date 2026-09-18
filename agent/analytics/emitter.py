@@ -107,6 +107,7 @@ async def run_started(
     run_key: str,
     thread_key: str,
     model: str | None,
+    effort: str | None = None,
     source: str | None,
     immutable_person_key: str | int | None,
     repository_key: str | None,
@@ -120,6 +121,7 @@ async def run_started(
         f"run:{run_key}:started",
         RunStartedPayload(
             configured_model_id=model_id,
+            configured_effort=effort,
             # Configuration alone is not an observation; routing, fallback, and
             # subagents may execute other models. Effective attribution waits
             # for an authoritative provider signal and stays unknown here.
@@ -277,6 +279,7 @@ async def pr_state(
     merged: bool,
     source_version: int | None,
     occurred_at: datetime,
+    distance_basis_points: int | None = None,
 ) -> None:
     name = (
         EventName.PR_MERGED
@@ -289,7 +292,7 @@ async def pr_state(
     await emit(
         name,
         f"github:pr:{pr_key}:{source_version or occurred_at.isoformat()}:{name.value}",
-        PRStatePayload(previous_state=None),
+        PRStatePayload(previous_state=None, distance_basis_points=distance_basis_points),
         occurred_at=occurred_at,
         source="github",
         source_version=source_version,

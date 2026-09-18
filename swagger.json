@@ -69,6 +69,68 @@
         "title": "AgentInstructionsUpdate",
         "type": "object"
       },
+      "AllowSlackBot": {
+        "additionalProperties": false,
+        "properties": {
+          "bot_id": {
+            "title": "Bot Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "bot_id"
+        ],
+        "title": "AllowSlackBot",
+        "type": "object"
+      },
+      "AllowedSlackBot": {
+        "properties": {
+          "app_id": {
+            "default": "",
+            "title": "App Id",
+            "type": "string"
+          },
+          "bot_id": {
+            "title": "Bot Id",
+            "type": "string"
+          },
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "created_by": {
+            "default": "",
+            "title": "Created By",
+            "type": "string"
+          },
+          "image_url": {
+            "default": "",
+            "title": "Image Url",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "team_id": {
+            "title": "Team Id",
+            "type": "string"
+          },
+          "user_id": {
+            "default": "",
+            "title": "User Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "team_id",
+          "bot_id",
+          "name",
+          "created_at"
+        ],
+        "title": "AllowedSlackBot",
+        "type": "object"
+      },
       "BlockSuggestionResponse": {
         "properties": {
           "options": {
@@ -202,6 +264,20 @@
         "title": "DesktopHandoffExchange",
         "type": "object"
       },
+      "DuplicateIncidentResponse": {
+        "properties": {
+          "status": {
+            "const": "duplicate",
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status"
+        ],
+        "title": "DuplicateIncidentResponse",
+        "type": "object"
+      },
       "EnabledReviewRepoUpdate": {
         "properties": {
           "enabled": {
@@ -218,318 +294,6 @@
           "enabled"
         ],
         "title": "EnabledReviewRepoUpdate",
-        "type": "object"
-      },
-      "Environment": {
-        "properties": {
-          "create_params": {
-            "additionalProperties": {
-              "$ref": "#/components/schemas/JsonValue"
-            },
-            "title": "Create Params",
-            "type": "object"
-          },
-          "created_at": {
-            "default": "",
-            "title": "Created At",
-            "type": "string"
-          },
-          "created_by": {
-            "default": "",
-            "title": "Created By",
-            "type": "string"
-          },
-          "fs_capacity_bytes": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Fs Capacity Bytes"
-          },
-          "last_captured_at": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Last Captured At"
-          },
-          "mem_bytes": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Mem Bytes"
-          },
-          "name": {
-            "default": "",
-            "title": "Name",
-            "type": "string"
-          },
-          "prompt": {
-            "default": "",
-            "title": "Prompt",
-            "type": "string"
-          },
-          "repos": {
-            "items": {
-              "type": "string"
-            },
-            "title": "Repos",
-            "type": "array"
-          },
-          "slug": {
-            "title": "Slug",
-            "type": "string"
-          },
-          "snapshot_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Snapshot Id"
-          },
-          "snapshot_name": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Snapshot Name"
-          },
-          "snapshot_status": {
-            "default": "none",
-            "enum": [
-              "none",
-              "capturing",
-              "ready",
-              "failed"
-            ],
-            "title": "Snapshot Status",
-            "type": "string"
-          },
-          "source_sandbox_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Source Sandbox Id"
-          },
-          "status_message": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Status Message"
-          },
-          "updated_at": {
-            "default": "",
-            "title": "Updated At",
-            "type": "string"
-          },
-          "vcpus": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Vcpus"
-          }
-        },
-        "required": [
-          "slug"
-        ],
-        "title": "Environment",
-        "type": "object"
-      },
-      "EnvironmentCreate": {
-        "properties": {
-          "create_params": {
-            "additionalProperties": {
-              "$ref": "#/components/schemas/JsonValue"
-            },
-            "title": "Create Params",
-            "type": "object"
-          },
-          "fs_capacity_bytes": {
-            "anyOf": [
-              {
-                "exclusiveMinimum": 0.0,
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Fs Capacity Bytes"
-          },
-          "mem_bytes": {
-            "anyOf": [
-              {
-                "exclusiveMinimum": 0.0,
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Mem Bytes"
-          },
-          "name": {
-            "title": "Name",
-            "type": "string"
-          },
-          "prompt": {
-            "default": "",
-            "title": "Prompt",
-            "type": "string"
-          },
-          "repos": {
-            "items": {
-              "type": "string"
-            },
-            "title": "Repos",
-            "type": "array"
-          },
-          "vcpus": {
-            "anyOf": [
-              {
-                "exclusiveMinimum": 0.0,
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Vcpus"
-          }
-        },
-        "required": [
-          "name"
-        ],
-        "title": "EnvironmentCreate",
-        "type": "object"
-      },
-      "EnvironmentUpdate": {
-        "description": "Partial update: only the fields present are written.",
-        "properties": {
-          "create_params": {
-            "anyOf": [
-              {
-                "additionalProperties": {
-                  "$ref": "#/components/schemas/JsonValue"
-                },
-                "type": "object"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Create Params"
-          },
-          "fs_capacity_bytes": {
-            "anyOf": [
-              {
-                "exclusiveMinimum": 0.0,
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Fs Capacity Bytes"
-          },
-          "mem_bytes": {
-            "anyOf": [
-              {
-                "exclusiveMinimum": 0.0,
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Mem Bytes"
-          },
-          "name": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Name"
-          },
-          "prompt": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Prompt"
-          },
-          "repos": {
-            "anyOf": [
-              {
-                "items": {
-                  "type": "string"
-                },
-                "type": "array"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Repos"
-          },
-          "vcpus": {
-            "anyOf": [
-              {
-                "exclusiveMinimum": 0.0,
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Vcpus"
-          }
-        },
-        "title": "EnvironmentUpdate",
         "type": "object"
       },
       "FeedbackResponse": {
@@ -617,6 +381,68 @@
           "message"
         ],
         "title": "HealthResponse",
+        "type": "object"
+      },
+      "IncidentCommandBody": {
+        "additionalProperties": false,
+        "properties": {
+          "action": {
+            "enum": [
+              "ask",
+              "investigate_again",
+              "pause",
+              "resume",
+              "complete",
+              "reopen"
+            ],
+            "title": "Action",
+            "type": "string"
+          },
+          "request_id": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Request Id",
+            "type": "string"
+          },
+          "text": {
+            "anyOf": [
+              {
+                "maxLength": 8000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Text"
+          }
+        },
+        "required": [
+          "request_id",
+          "action"
+        ],
+        "title": "IncidentCommandBody",
+        "type": "object"
+      },
+      "IncidentSettingsBody": {
+        "additionalProperties": false,
+        "properties": {
+          "expected_version": {
+            "minimum": 0.0,
+            "title": "Expected Version",
+            "type": "integer"
+          },
+          "policy": {
+            "additionalProperties": true,
+            "title": "Policy",
+            "type": "object"
+          }
+        },
+        "required": [
+          "expected_version",
+          "policy"
+        ],
+        "title": "IncidentSettingsBody",
         "type": "object"
       },
       "JsonObject": {
@@ -968,6 +794,11 @@
             ],
             "title": "Default Subagent Model"
           },
+          "dm_session_enabled": {
+            "default": false,
+            "title": "Dm Session Enabled",
+            "type": "boolean"
+          },
           "draft_prs": {
             "anyOf": [
               {
@@ -1094,6 +925,68 @@
           "state"
         ],
         "title": "PullRequestState",
+        "type": "object"
+      },
+      "RefreshStep": {
+        "description": "One stage of a refresh \u2014 booting the builder, a script, the capture.\n\nRecorded as it happens so a poll mid-rebuild can say how far it got. A\nrebuild is minutes to an hour, and a single terminal status at the end is\nnot enough to tell slow from wedged.",
+        "properties": {
+          "exit_code": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Exit Code"
+          },
+          "finished_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Finished At"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "log_path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Log Path"
+          },
+          "started_at": {
+            "default": "",
+            "title": "Started At",
+            "type": "string"
+          },
+          "status": {
+            "default": "running",
+            "enum": [
+              "running",
+              "success",
+              "failed"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "label"
+        ],
+        "title": "RefreshStep",
         "type": "object"
       },
       "ReviewCommentCreate": {
@@ -1402,10 +1295,17 @@
             "title": "Repo"
           },
           "schedule": {
-            "maxLength": 120,
-            "minLength": 1,
-            "title": "Schedule",
-            "type": "string"
+            "anyOf": [
+              {
+                "maxLength": 120,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Schedule"
           },
           "slack_channel_id": {
             "anyOf": [
@@ -1426,11 +1326,19 @@
             ],
             "title": "Slack Notification Mode",
             "type": "string"
+          },
+          "trigger": {
+            "default": "schedule",
+            "enum": [
+              "schedule",
+              "github_issue_opened"
+            ],
+            "title": "Trigger",
+            "type": "string"
           }
         },
         "required": [
-          "prompt",
-          "schedule"
+          "prompt"
         ],
         "title": "ScheduleCreateBody",
         "type": "object"
@@ -1555,6 +1463,21 @@
               }
             ],
             "title": "Slack Notification Mode"
+          },
+          "trigger": {
+            "anyOf": [
+              {
+                "enum": [
+                  "schedule",
+                  "github_issue_opened"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Trigger"
           }
         },
         "title": "ScheduleUpdateBody",
@@ -1609,6 +1532,39 @@
         "title": "SkillUpdate",
         "type": "object"
       },
+      "SlackBotOption": {
+        "properties": {
+          "bot_id": {
+            "title": "Bot Id",
+            "type": "string"
+          },
+          "image_url": {
+            "default": "",
+            "title": "Image Url",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "team_id": {
+            "title": "Team Id",
+            "type": "string"
+          },
+          "user_id": {
+            "title": "User Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "team_id",
+          "bot_id",
+          "user_id",
+          "name"
+        ],
+        "title": "SlackBotOption",
+        "type": "object"
+      },
       "SlashCommandResponse": {
         "properties": {
           "response_type": {
@@ -1631,7 +1587,713 @@
         "title": "SlashCommandResponse",
         "type": "object"
       },
-      "TeamSettingsUpdate": {
+      "TextAnchor": {
+        "properties": {
+          "context_after": {
+            "default": "",
+            "maxLength": 1000,
+            "title": "Context After",
+            "type": "string"
+          },
+          "context_before": {
+            "default": "",
+            "maxLength": 1000,
+            "title": "Context Before",
+            "type": "string"
+          },
+          "end": {
+            "exclusiveMinimum": 0.0,
+            "maximum": 2000000.0,
+            "title": "End",
+            "type": "integer"
+          },
+          "exact": {
+            "maxLength": 1000,
+            "minLength": 1,
+            "title": "Exact",
+            "type": "string"
+          },
+          "prefix": {
+            "maxLength": 64,
+            "title": "Prefix",
+            "type": "string"
+          },
+          "start": {
+            "maximum": 2000000.0,
+            "minimum": 0.0,
+            "title": "Start",
+            "type": "integer"
+          },
+          "suffix": {
+            "maxLength": 64,
+            "title": "Suffix",
+            "type": "string"
+          }
+        },
+        "required": [
+          "exact",
+          "prefix",
+          "suffix",
+          "start",
+          "end"
+        ],
+        "title": "TextAnchor",
+        "type": "object"
+      },
+      "ThreadFeedbackResponse": {
+        "properties": {
+          "comment": {
+            "default": "",
+            "title": "Comment",
+            "type": "string"
+          },
+          "rating": {
+            "anyOf": [
+              {
+                "enum": [
+                  "bad",
+                  "good",
+                  "other"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rating"
+          },
+          "status": {
+            "enum": [
+              "unavailable",
+              "ready",
+              "completed",
+              "dismissed"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status"
+        ],
+        "title": "ThreadFeedbackResponse",
+        "type": "object"
+      },
+      "ThreadMessageBody": {
+        "properties": {
+          "client_message_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Client Message Id"
+          },
+          "content": {
+            "default": "",
+            "maxLength": 20000,
+            "title": "Content",
+            "type": "string"
+          },
+          "effort": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Effort"
+          },
+          "images": {
+            "items": {
+              "$ref": "#/components/schemas/DashboardImageBody"
+            },
+            "title": "Images",
+            "type": "array"
+          },
+          "model_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model Id"
+          },
+          "plan_mode": {
+            "default": false,
+            "title": "Plan Mode",
+            "type": "boolean"
+          }
+        },
+        "title": "ThreadMessageBody",
+        "type": "object"
+      },
+      "ThreadRenameBody": {
+        "properties": {
+          "title": {
+            "maxLength": 80,
+            "minLength": 1,
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "title"
+        ],
+        "title": "ThreadRenameBody",
+        "type": "object"
+      },
+      "ThreadResolveBody": {
+        "properties": {
+          "resolved": {
+            "default": true,
+            "title": "Resolved",
+            "type": "boolean"
+          }
+        },
+        "title": "ThreadResolveBody",
+        "type": "object"
+      },
+      "UserInstructionsUpdate": {
+        "properties": {
+          "instructions": {
+            "default": "",
+            "maxLength": 20000,
+            "title": "Instructions",
+            "type": "string"
+          }
+        },
+        "title": "UserInstructionsUpdate",
+        "type": "object"
+      },
+      "UserPreferencesUpdate": {
+        "properties": {
+          "default_visibility": {
+            "enum": [
+              "public",
+              "private"
+            ],
+            "title": "Default Visibility",
+            "type": "string"
+          },
+          "default_workspace": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Default Workspace"
+          },
+          "local_tracing_project": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Local Tracing Project"
+          }
+        },
+        "required": [
+          "default_visibility"
+        ],
+        "title": "UserPreferencesUpdate",
+        "type": "object"
+      },
+      "ValidationError": {
+        "properties": {
+          "ctx": {
+            "title": "Context",
+            "type": "object"
+          },
+          "input": {
+            "title": "Input"
+          },
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "title": "Location",
+            "type": "array"
+          },
+          "msg": {
+            "title": "Message",
+            "type": "string"
+          },
+          "type": {
+            "title": "Error Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError",
+        "type": "object"
+      },
+      "WebhookResponse": {
+        "properties": {
+          "error_id": {
+            "title": "Error Id",
+            "type": "string"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "reason": {
+            "title": "Reason",
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "accepted",
+              "ignored",
+              "error"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status"
+        ],
+        "title": "WebhookResponse",
+        "type": "object"
+      },
+      "Workspace": {
+        "properties": {
+          "base_snapshot_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Base Snapshot Id"
+          },
+          "create_params": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/JsonValue"
+            },
+            "title": "Create Params",
+            "type": "object"
+          },
+          "created_at": {
+            "default": "",
+            "title": "Created At",
+            "type": "string"
+          },
+          "created_by": {
+            "default": "",
+            "title": "Created By",
+            "type": "string"
+          },
+          "fs_capacity_bytes": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fs Capacity Bytes"
+          },
+          "last_captured_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Captured At"
+          },
+          "mem_bytes": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mem Bytes"
+          },
+          "name": {
+            "default": "",
+            "title": "Name",
+            "type": "string"
+          },
+          "prompt": {
+            "default": "",
+            "title": "Prompt",
+            "type": "string"
+          },
+          "refresh_cron_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Refresh Cron Id"
+          },
+          "refresh_error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Refresh Error"
+          },
+          "refresh_finished_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Refresh Finished At"
+          },
+          "refresh_kind": {
+            "anyOf": [
+              {
+                "enum": [
+                  "full",
+                  "update"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Refresh Kind"
+          },
+          "refresh_log": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Refresh Log"
+          },
+          "refresh_run_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Refresh Run Id"
+          },
+          "refresh_sandbox_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Refresh Sandbox Id"
+          },
+          "refresh_started_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Refresh Started At"
+          },
+          "refresh_status": {
+            "default": "never",
+            "enum": [
+              "never",
+              "refreshing",
+              "success",
+              "failed"
+            ],
+            "title": "Refresh Status",
+            "type": "string"
+          },
+          "refresh_steps": {
+            "items": {
+              "$ref": "#/components/schemas/RefreshStep"
+            },
+            "title": "Refresh Steps",
+            "type": "array"
+          },
+          "repos": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Repos",
+            "type": "array"
+          },
+          "setup_script": {
+            "default": "",
+            "title": "Setup Script",
+            "type": "string"
+          },
+          "slack_channel_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Slack Channel Ids",
+            "type": "array"
+          },
+          "slug": {
+            "title": "Slug",
+            "type": "string"
+          },
+          "snapshot_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Snapshot Id"
+          },
+          "snapshot_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Snapshot Name"
+          },
+          "snapshot_status": {
+            "default": "none",
+            "enum": [
+              "none",
+              "capturing",
+              "ready",
+              "failed"
+            ],
+            "title": "Snapshot Status",
+            "type": "string"
+          },
+          "snapshot_tag": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Snapshot Tag"
+          },
+          "source_sandbox_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Sandbox Id"
+          },
+          "status_message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Status Message"
+          },
+          "update_script": {
+            "default": "",
+            "title": "Update Script",
+            "type": "string"
+          },
+          "updated_at": {
+            "default": "",
+            "title": "Updated At",
+            "type": "string"
+          },
+          "vcpus": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Vcpus"
+          }
+        },
+        "required": [
+          "slug"
+        ],
+        "title": "Workspace",
+        "type": "object"
+      },
+      "WorkspaceCreate": {
+        "properties": {
+          "base_snapshot_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Base Snapshot Id"
+          },
+          "create_params": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/JsonValue"
+            },
+            "title": "Create Params",
+            "type": "object"
+          },
+          "fs_capacity_bytes": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fs Capacity Bytes"
+          },
+          "mem_bytes": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mem Bytes"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "prompt": {
+            "default": "",
+            "title": "Prompt",
+            "type": "string"
+          },
+          "repos": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Repos",
+            "type": "array"
+          },
+          "setup_script": {
+            "default": "",
+            "title": "Setup Script",
+            "type": "string"
+          },
+          "slack_channel_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Slack Channel Ids",
+            "type": "array"
+          },
+          "snapshot_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Snapshot Name"
+          },
+          "update_script": {
+            "default": "",
+            "title": "Update Script",
+            "type": "string"
+          },
+          "vcpus": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Vcpus"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "WorkspaceCreate",
+        "type": "object"
+      },
+      "WorkspaceSettingsUpdate": {
+        "description": "A settings record at either tier.\n\nEvery field is optional. On the instance record, None means the hardcoded\ndefault; on a workspace's record, None inherits the instance value.",
         "properties": {
           "default_agent_model": {
             "anyOf": [
@@ -1864,10 +2526,27 @@
             ],
             "title": "Default Thread Title Reasoning Effort"
           },
+          "expedited_review_enabled": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expedited Review Enabled"
+          },
           "fable_enabled": {
-            "default": false,
-            "title": "Fable Enabled",
-            "type": "boolean"
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fable Enabled"
           },
           "gateway_enabled": {
             "anyOf": [
@@ -1879,6 +2558,17 @@
               }
             ],
             "title": "Gateway Enabled"
+          },
+          "model_routing_enabled": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model Routing Enabled"
           },
           "org_guidelines": {
             "anyOf": [
@@ -1892,298 +2582,212 @@
             "title": "Org Guidelines"
           },
           "pr_summaries": {
-            "default": true,
-            "title": "Pr Summaries",
-            "type": "boolean"
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pr Summaries"
           },
           "review_draft_prs": {
-            "default": false,
-            "title": "Review Draft Prs",
-            "type": "boolean"
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Review Draft Prs"
           },
           "review_trace_links": {
-            "default": true,
-            "title": "Review Trace Links",
-            "type": "boolean"
-          }
-        },
-        "title": "TeamSettingsUpdate",
-        "type": "object"
-      },
-      "TextAnchor": {
-        "properties": {
-          "context_after": {
-            "default": "",
-            "maxLength": 1000,
-            "title": "Context After",
-            "type": "string"
-          },
-          "context_before": {
-            "default": "",
-            "maxLength": 1000,
-            "title": "Context Before",
-            "type": "string"
-          },
-          "end": {
-            "exclusiveMinimum": 0.0,
-            "maximum": 2000000.0,
-            "title": "End",
-            "type": "integer"
-          },
-          "exact": {
-            "maxLength": 1000,
-            "minLength": 1,
-            "title": "Exact",
-            "type": "string"
-          },
-          "prefix": {
-            "maxLength": 64,
-            "title": "Prefix",
-            "type": "string"
-          },
-          "start": {
-            "maximum": 2000000.0,
-            "minimum": 0.0,
-            "title": "Start",
-            "type": "integer"
-          },
-          "suffix": {
-            "maxLength": 64,
-            "title": "Suffix",
-            "type": "string"
-          }
-        },
-        "required": [
-          "exact",
-          "prefix",
-          "suffix",
-          "start",
-          "end"
-        ],
-        "title": "TextAnchor",
-        "type": "object"
-      },
-      "ThreadFeedbackResponse": {
-        "properties": {
-          "comment": {
-            "default": "",
-            "title": "Comment",
-            "type": "string"
-          },
-          "rating": {
             "anyOf": [
               {
-                "enum": [
-                  "bad",
-                  "good",
-                  "other"
-                ],
-                "type": "string"
+                "type": "boolean"
               },
               {
                 "type": "null"
               }
             ],
-            "title": "Rating"
-          },
-          "status": {
-            "enum": [
-              "unavailable",
-              "ready",
-              "completed",
-              "dismissed"
-            ],
-            "title": "Status",
-            "type": "string"
+            "title": "Review Trace Links"
           }
         },
-        "required": [
-          "status"
-        ],
-        "title": "ThreadFeedbackResponse",
+        "title": "WorkspaceSettingsUpdate",
         "type": "object"
       },
-      "ThreadMessageBody": {
+      "WorkspaceSettingsView": {
+        "description": "What a workspace's settings editor needs: the effective values and which of them it set.",
         "properties": {
-          "client_message_id": {
-            "anyOf": [
-              {
-                "format": "uuid",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Client Message Id"
-          },
-          "content": {
-            "default": "",
-            "maxLength": 20000,
-            "title": "Content",
-            "type": "string"
-          },
-          "effort": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Effort"
-          },
-          "images": {
-            "items": {
-              "$ref": "#/components/schemas/DashboardImageBody"
-            },
-            "title": "Images",
-            "type": "array"
-          },
-          "model_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Model Id"
-          },
-          "plan_mode": {
-            "default": false,
-            "title": "Plan Mode",
-            "type": "boolean"
-          }
-        },
-        "title": "ThreadMessageBody",
-        "type": "object"
-      },
-      "ThreadRenameBody": {
-        "properties": {
-          "title": {
-            "maxLength": 80,
-            "minLength": 1,
-            "title": "Title",
-            "type": "string"
-          }
-        },
-        "required": [
-          "title"
-        ],
-        "title": "ThreadRenameBody",
-        "type": "object"
-      },
-      "ThreadResolveBody": {
-        "properties": {
-          "resolved": {
-            "default": true,
-            "title": "Resolved",
-            "type": "boolean"
-          }
-        },
-        "title": "ThreadResolveBody",
-        "type": "object"
-      },
-      "UserInstructionsUpdate": {
-        "properties": {
-          "instructions": {
-            "default": "",
-            "maxLength": 20000,
-            "title": "Instructions",
-            "type": "string"
-          }
-        },
-        "title": "UserInstructionsUpdate",
-        "type": "object"
-      },
-      "UserPreferencesUpdate": {
-        "properties": {
-          "default_visibility": {
-            "enum": [
-              "public",
-              "private"
-            ],
-            "title": "Default Visibility",
-            "type": "string"
-          }
-        },
-        "required": [
-          "default_visibility"
-        ],
-        "title": "UserPreferencesUpdate",
-        "type": "object"
-      },
-      "ValidationError": {
-        "properties": {
-          "ctx": {
-            "title": "Context",
+          "effective": {
+            "additionalProperties": true,
+            "title": "Effective",
             "type": "object"
           },
-          "input": {
-            "title": "Input"
-          },
-          "loc": {
-            "items": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "integer"
-                }
-              ]
-            },
-            "title": "Location",
-            "type": "array"
-          },
-          "msg": {
-            "title": "Message",
-            "type": "string"
-          },
-          "type": {
-            "title": "Error Type",
-            "type": "string"
+          "overrides": {
+            "additionalProperties": true,
+            "title": "Overrides",
+            "type": "object"
           }
         },
         "required": [
-          "loc",
-          "msg",
-          "type"
+          "effective",
+          "overrides"
         ],
-        "title": "ValidationError",
+        "title": "WorkspaceSettingsView",
         "type": "object"
       },
-      "WebhookResponse": {
+      "WorkspaceUpdate": {
+        "description": "Partial update: only the fields present are written.",
         "properties": {
-          "error_id": {
-            "title": "Error Id",
-            "type": "string"
-          },
-          "message": {
-            "title": "Message",
-            "type": "string"
-          },
-          "reason": {
-            "title": "Reason",
-            "type": "string"
-          },
-          "status": {
-            "enum": [
-              "accepted",
-              "ignored",
-              "error"
+          "base_snapshot_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
             ],
-            "title": "Status",
-            "type": "string"
+            "title": "Base Snapshot Id"
+          },
+          "create_params": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "$ref": "#/components/schemas/JsonValue"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Create Params"
+          },
+          "fs_capacity_bytes": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fs Capacity Bytes"
+          },
+          "mem_bytes": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mem Bytes"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "prompt": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Prompt"
+          },
+          "repos": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Repos"
+          },
+          "setup_script": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Setup Script"
+          },
+          "slack_channel_ids": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Slack Channel Ids"
+          },
+          "snapshot_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Snapshot Name"
+          },
+          "update_script": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Update Script"
+          },
+          "vcpus": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Vcpus"
           }
         },
-        "required": [
-          "status"
-        ],
-        "title": "WebhookResponse",
+        "title": "WorkspaceUpdate",
         "type": "object"
       }
     },
@@ -2231,7 +2835,8 @@
         ],
         "summary": "Admin Get Reviewer Eval",
         "tags": [
-          "dashboard"
+          "dashboard",
+          "review"
         ]
       }
     },
@@ -2280,7 +2885,8 @@
         ],
         "summary": "Admin Cancel Thread",
         "tags": [
-          "dashboard"
+          "dashboard",
+          "threads"
         ]
       }
     },
@@ -2340,7 +2946,8 @@
         ],
         "summary": "Admin List User Mappings",
         "tags": [
-          "dashboard"
+          "dashboard",
+          "user-mappings"
         ]
       }
     },
@@ -2391,7 +2998,8 @@
         ],
         "summary": "Admin Delete User Mapping",
         "tags": [
-          "dashboard"
+          "dashboard",
+          "user-mappings"
         ]
       }
     },
@@ -2421,7 +3029,8 @@
         ],
         "summary": "Api List Agent Instructions",
         "tags": [
-          "dashboard"
+          "dashboard",
+          "agent-instructions"
         ]
       },
       "post": {
@@ -2465,7 +3074,8 @@
         ],
         "summary": "Api Create Agent Instructions",
         "tags": [
-          "dashboard"
+          "dashboard",
+          "agent-instructions"
         ]
       }
     },
@@ -2510,7 +3120,8 @@
         ],
         "summary": "Api Delete Agent Instructions",
         "tags": [
-          "dashboard"
+          "dashboard",
+          "agent-instructions"
         ]
       },
       "get": {
@@ -2555,7 +3166,8 @@
         ],
         "summary": "Api Get Agent Instructions",
         "tags": [
-          "dashboard"
+          "dashboard",
+          "agent-instructions"
         ]
       },
       "put": {
@@ -2610,7 +3222,8 @@
         ],
         "summary": "Api Update Agent Instructions",
         "tags": [
-          "dashboard"
+          "dashboard",
+          "agent-instructions"
         ]
       }
     },
@@ -2641,8 +3254,26 @@
             "required": false,
             "schema": {
               "default": 10,
+              "maximum": 100,
+              "minimum": 1,
               "title": "Limit",
               "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
             }
           }
         ],
@@ -2677,7 +3308,142 @@
         ],
         "summary": "Api Agent Usage Leaderboard",
         "tags": [
-          "dashboard"
+          "dashboard",
+          "analytics"
+        ]
+      }
+    },
+    "/dashboard/api/analytics/outbox-status": {
+      "get": {
+        "operationId": "api_analytics_outbox_status_dashboard_api_analytics_outbox_status_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Api Analytics Outbox Status Dashboard Api Analytics Outbox Status Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Analytics Outbox Status",
+        "tags": [
+          "dashboard",
+          "analytics"
+        ]
+      }
+    },
+    "/dashboard/api/analytics/pr-merge-rate-by-model": {
+      "get": {
+        "operationId": "api_pr_merge_rate_by_model_dashboard_api_analytics_pr_merge_rate_by_model_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "period",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": "30d",
+              "title": "Period"
+            }
+          },
+          {
+            "in": "query",
+            "name": "maturity_days",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maximum": 365,
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Maturity Days"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Api Pr Merge Rate By Model Dashboard Api Analytics Pr Merge Rate By Model Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Pr Merge Rate By Model",
+        "tags": [
+          "dashboard",
+          "analytics"
+        ]
+      }
+    },
+    "/dashboard/api/analytics/readiness": {
+      "get": {
+        "operationId": "api_analytics_readiness_dashboard_api_analytics_readiness_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Api Analytics Readiness Dashboard Api Analytics Readiness Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Analytics Readiness",
+        "tags": [
+          "dashboard",
+          "analytics"
         ]
       }
     },
@@ -2726,7 +3492,8 @@
         },
         "summary": "Auth Callback",
         "tags": [
-          "dashboard"
+          "dashboard",
+          "auth"
         ]
       }
     },
@@ -2769,7 +3536,8 @@
         },
         "summary": "Auth Desktop Exchange",
         "tags": [
-          "dashboard"
+          "dashboard",
+          "auth"
         ]
       }
     },
@@ -2860,7 +3628,8 @@
         },
         "summary": "Auth Login",
         "tags": [
-          "dashboard"
+          "dashboard",
+          "auth"
         ]
       }
     },
@@ -2879,7 +3648,8 @@
         },
         "summary": "Auth Logout",
         "tags": [
-          "dashboard"
+          "dashboard",
+          "auth"
         ]
       }
     },
@@ -2912,7 +3682,8 @@
         ],
         "summary": "Api List Enabled Review Repos",
         "tags": [
-          "dashboard"
+          "dashboard",
+          "review"
         ]
       },
       "put": {
@@ -2963,55 +3734,68 @@
         ],
         "summary": "Api Set Enabled Review Repo",
         "tags": [
-          "dashboard"
+          "dashboard",
+          "review"
         ]
       }
     },
-    "/dashboard/api/environments": {
+    "/dashboard/api/incidents/documents/history": {
       "get": {
-        "operationId": "api_list_environments_dashboard_api_environments_get",
+        "operationId": "search_history_dashboard_api_incidents_documents_history_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Q"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 25,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {
               "application/json": {
                 "schema": {
                   "additionalProperties": true,
-                  "title": "Response Api List Environments Dashboard Api Environments Get",
+                  "title": "Response Search History Dashboard Api Incidents Documents History Get",
                   "type": "object"
-                }
-              }
-            },
-            "description": "Successful Response"
-          }
-        },
-        "security": [
-          {
-            "DashboardSession": []
-          }
-        ],
-        "summary": "Api List Environments",
-        "tags": [
-          "dashboard"
-        ]
-      },
-      "post": {
-        "operationId": "api_create_environment_dashboard_api_environments_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/EnvironmentCreate"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Environment"
                 }
               }
             },
@@ -3033,23 +3817,289 @@
             "DashboardSession": []
           }
         ],
-        "summary": "Api Create Environment",
+        "summary": "Search History",
         "tags": [
-          "dashboard"
+          "dashboard",
+          "incidents"
         ]
       }
     },
-    "/dashboard/api/environments/options": {
+    "/dashboard/api/incidents/documents/{incident_id}": {
       "get": {
-        "description": "Pickable environments for any signed-in user: names only, no prompts.",
-        "operationId": "api_environment_options_dashboard_api_environments_options_get",
+        "operationId": "get_document_dashboard_api_incidents_documents__incident_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "incident_id",
+            "required": true,
+            "schema": {
+              "title": "Incident Id",
+              "type": "string"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {
               "application/json": {
                 "schema": {
                   "additionalProperties": true,
-                  "title": "Response Api Environment Options Dashboard Api Environments Options Get",
+                  "title": "Response Get Document Dashboard Api Incidents Documents  Incident Id  Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Get Document",
+        "tags": [
+          "dashboard",
+          "incidents"
+        ]
+      }
+    },
+    "/dashboard/api/incidents/records": {
+      "get": {
+        "operationId": "list_incidents_dashboard_api_incidents_records_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "view",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "active",
+                    "inactive",
+                    "all"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "View"
+            }
+          },
+          {
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Q"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 25,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response List Incidents Dashboard Api Incidents Records Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "List Incidents",
+        "tags": [
+          "dashboard",
+          "incidents"
+        ]
+      }
+    },
+    "/dashboard/api/incidents/records/{incident_id}": {
+      "get": {
+        "operationId": "get_incident_dashboard_api_incidents_records__incident_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "incident_id",
+            "required": true,
+            "schema": {
+              "title": "Incident Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Get Incident Dashboard Api Incidents Records  Incident Id  Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Get Incident",
+        "tags": [
+          "dashboard",
+          "incidents"
+        ]
+      }
+    },
+    "/dashboard/api/incidents/records/{incident_id}/commands": {
+      "post": {
+        "operationId": "submit_command_dashboard_api_incidents_records__incident_id__commands_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "incident_id",
+            "required": true,
+            "schema": {
+              "title": "Incident Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IncidentCommandBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Submit Command Dashboard Api Incidents Records  Incident Id  Commands Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Submit Command",
+        "tags": [
+          "dashboard",
+          "incidents"
+        ]
+      }
+    },
+    "/dashboard/api/incidents/settings": {
+      "get": {
+        "operationId": "get_settings_dashboard_api_incidents_settings_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Get Settings Dashboard Api Incidents Settings Get",
                   "type": "object"
                 }
               }
@@ -3062,22 +4112,263 @@
             "DashboardSession": []
           }
         ],
-        "summary": "Api Environment Options",
+        "summary": "Get Settings",
+        "tags": [
+          "dashboard",
+          "incidents"
+        ]
+      },
+      "patch": {
+        "operationId": "update_settings_dashboard_api_incidents_settings_patch",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IncidentSettingsBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Update Settings Dashboard Api Incidents Settings Patch",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Update Settings",
+        "tags": [
+          "dashboard",
+          "incidents"
+        ]
+      }
+    },
+    "/dashboard/api/mcps": {
+      "get": {
+        "operationId": "api_list_instance_mcps_dashboard_api_mcps_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/MCPConnectionPublic"
+                  },
+                  "title": "Response Api List Instance Mcps Dashboard Api Mcps Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api List Instance Mcps",
         "tags": [
           "dashboard"
         ]
       }
     },
-    "/dashboard/api/environments/{slug}": {
+    "/dashboard/api/mcps/{name}": {
       "delete": {
-        "operationId": "api_delete_environment_dashboard_api_environments__slug__delete",
+        "operationId": "api_delete_instance_mcp_dashboard_api_mcps__name__delete",
         "parameters": [
           {
             "in": "path",
-            "name": "slug",
+            "name": "name",
             "required": true,
             "schema": {
-              "title": "Slug",
+              "title": "Name",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Delete Instance Mcp",
+        "tags": [
+          "dashboard"
+        ]
+      },
+      "put": {
+        "operationId": "api_save_instance_mcp_dashboard_api_mcps__name__put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "title": "Name",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MCPConnectionUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MCPConnectionPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Save Instance Mcp",
+        "tags": [
+          "dashboard"
+        ]
+      }
+    },
+    "/dashboard/api/mcps/{name}/discover": {
+      "post": {
+        "operationId": "api_discover_instance_mcp_dashboard_api_mcps__name__discover_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "title": "Name",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/MCPConnectionUpdate"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Update"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/MCPToolDescription"
+                  },
+                  "title": "Response Api Discover Instance Mcp Dashboard Api Mcps  Name  Discover Post",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Discover Instance Mcp",
+        "tags": [
+          "dashboard"
+        ]
+      }
+    },
+    "/dashboard/api/mcps/{name}/headers/reveal": {
+      "post": {
+        "operationId": "api_reveal_instance_mcp_headers_dashboard_api_mcps__name__headers_reveal_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "title": "Name",
               "type": "string"
             }
           }
@@ -3107,107 +4398,7 @@
             "DashboardSession": []
           }
         ],
-        "summary": "Api Delete Environment",
-        "tags": [
-          "dashboard"
-        ]
-      },
-      "get": {
-        "operationId": "api_get_environment_dashboard_api_environments__slug__get",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "slug",
-            "required": true,
-            "schema": {
-              "title": "Slug",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Environment"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "DashboardSession": []
-          }
-        ],
-        "summary": "Api Get Environment",
-        "tags": [
-          "dashboard"
-        ]
-      },
-      "put": {
-        "operationId": "api_update_environment_dashboard_api_environments__slug__put",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "slug",
-            "required": true,
-            "schema": {
-              "title": "Slug",
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/EnvironmentUpdate"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Environment"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "DashboardSession": []
-          }
-        ],
-        "summary": "Api Update Environment",
+        "summary": "Api Reveal Instance Mcp Headers",
         "tags": [
           "dashboard"
         ]
@@ -3237,7 +4428,8 @@
         ],
         "summary": "Me",
         "tags": [
-          "dashboard"
+          "dashboard",
+          "auth"
         ]
       }
     },
@@ -3261,7 +4453,8 @@
         ],
         "summary": "Api Delete My Instructions",
         "tags": [
-          "dashboard"
+          "dashboard",
+          "user-instructions"
         ]
       },
       "get": {
@@ -3287,7 +4480,8 @@
         ],
         "summary": "Api Get My Instructions",
         "tags": [
-          "dashboard"
+          "dashboard",
+          "user-instructions"
         ]
       },
       "put": {
@@ -3333,7 +4527,68 @@
         ],
         "summary": "Api Put My Instructions",
         "tags": [
-          "dashboard"
+          "dashboard",
+          "user-instructions"
+        ]
+      }
+    },
+    "/dashboard/api/me/local-trace-url/{thread_id}": {
+      "get": {
+        "operationId": "api_get_local_trace_url_dashboard_api_me_local_trace_url__thread_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "thread_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Thread Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "title": "Response Api Get Local Trace Url Dashboard Api Me Local Trace Url  Thread Id  Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Get Local Trace Url",
+        "tags": [
+          "dashboard",
+          "threads"
         ]
       }
     },
@@ -3361,7 +4616,8 @@
         ],
         "summary": "Api Get My Preferences",
         "tags": [
-          "dashboard"
+          "dashboard",
+          "user-preferences"
         ]
       },
       "put": {
@@ -3407,7 +4663,8 @@
         ],
         "summary": "Api Put My Preferences",
         "tags": [
-          "dashboard"
+          "dashboard",
+          "user-preferences"
         ]
       }
     },
@@ -3435,7 +4692,8 @@
         ],
         "summary": "Disconnect My Notion",
         "tags": [
-          "dashboard"
+          "dashboard",
+          "notion"
         ]
       },
       "get": {
@@ -3461,7 +4719,8 @@
         ],
         "summary": "Get My Notion Status",
         "tags": [
-          "dashboard"
+          "dashboard",
+          "notion"
         ]
       }
     },
@@ -3490,7 +4749,8 @@
         ],
         "summary": "Get My Mapping",
         "tags": [
-          "dashboard"
+          "dashboard",
+          "user-mappings"
         ]
       }
     },
@@ -3816,7 +5076,8 @@
         },
         "summary": "Notion Callback",
         "tags": [
-          "dashboard"
+          "dashboard",
+          "notion"
         ]
       }
     },
@@ -3865,7 +5126,8 @@
         ],
         "summary": "Notion Desktop Exchange",
         "tags": [
-          "dashboard"
+          "dashboard",
+          "notion"
         ]
       }
     },
@@ -3935,13 +5197,27 @@
         ],
         "summary": "Notion Login",
         "tags": [
-          "dashboard"
+          "dashboard",
+          "notion"
         ]
       }
     },
     "/dashboard/api/options": {
       "get": {
+        "description": "The models and defaults a composer may offer for ``workspace``.\n\nModel defaults and the Fable flag resolve per workspace (the instance record\nplus the workspace's overrides), so a picker that asked without one would\nadvertise the default workspace's values wherever the run will not land there.",
         "operationId": "options_dashboard_api_options_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "workspace",
+            "required": false,
+            "schema": {
+              "default": "default",
+              "title": "Workspace",
+              "type": "string"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {
@@ -3954,11 +5230,22 @@
               }
             },
             "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
           }
         },
         "summary": "Options",
         "tags": [
-          "dashboard"
+          "dashboard",
+          "options"
         ]
       }
     },
@@ -4589,7 +5876,8 @@
         ],
         "summary": "Get My Profile",
         "tags": [
-          "dashboard"
+          "dashboard",
+          "profiles"
         ]
       },
       "put": {
@@ -4635,7 +5923,8 @@
         ],
         "summary": "Put My Profile",
         "tags": [
-          "dashboard"
+          "dashboard",
+          "profiles"
         ]
       }
     },
@@ -4686,7 +5975,8 @@
         ],
         "summary": "List Repos",
         "tags": [
-          "dashboard"
+          "dashboard",
+          "github"
         ]
       }
     },
@@ -4716,7 +6006,8 @@
         ],
         "summary": "Api List Review Styles",
         "tags": [
-          "dashboard"
+          "dashboard",
+          "review"
         ]
       },
       "post": {
@@ -4760,7 +6051,8 @@
         ],
         "summary": "Api Create Review Style",
         "tags": [
-          "dashboard"
+          "dashboard",
+          "review"
         ]
       }
     },
@@ -4805,7 +6097,8 @@
         ],
         "summary": "Api Delete Review Style",
         "tags": [
-          "dashboard"
+          "dashboard",
+          "review"
         ]
       },
       "get": {
@@ -4850,7 +6143,8 @@
         ],
         "summary": "Api Get Review Style",
         "tags": [
-          "dashboard"
+          "dashboard",
+          "review"
         ]
       },
       "put": {
@@ -4905,7 +6199,8 @@
         ],
         "summary": "Api Update Review Style Prompt",
         "tags": [
-          "dashboard"
+          "dashboard",
+          "review"
         ]
       }
     },
@@ -4952,7 +6247,8 @@
         ],
         "summary": "Api Analyze Review Style",
         "tags": [
-          "dashboard"
+          "dashboard",
+          "review"
         ]
       }
     },
@@ -4999,7 +6295,8 @@
         ],
         "summary": "Api Cancel Review Style",
         "tags": [
-          "dashboard"
+          "dashboard",
+          "review"
         ]
       }
     },
@@ -5059,7 +6356,8 @@
         ],
         "summary": "Api List Reviews",
         "tags": [
-          "dashboard"
+          "dashboard",
+          "review"
         ]
       }
     },
@@ -5126,7 +6424,8 @@
         ],
         "summary": "Api Get Review",
         "tags": [
-          "dashboard"
+          "dashboard",
+          "review"
         ]
       }
     },
@@ -5193,7 +6492,8 @@
         ],
         "summary": "Api Get Review Chat",
         "tags": [
-          "dashboard"
+          "dashboard",
+          "review"
         ]
       }
     },
@@ -5260,7 +6560,8 @@
         ],
         "summary": "Api List Review Chat Threads",
         "tags": [
-          "dashboard"
+          "dashboard",
+          "review"
         ]
       }
     },
@@ -5332,7 +6633,8 @@
         ],
         "summary": "Api Delete Review Chat Thread",
         "tags": [
-          "dashboard"
+          "dashboard",
+          "review"
         ]
       }
     },
@@ -5404,7 +6706,8 @@
         ],
         "summary": "Api Review Chat Commands",
         "tags": [
-          "dashboard"
+          "dashboard",
+          "review"
         ]
       }
     },
@@ -5476,7 +6779,8 @@
         ],
         "summary": "Api Review Chat History",
         "tags": [
-          "dashboard"
+          "dashboard",
+          "review"
         ]
       }
     },
@@ -5548,7 +6852,8 @@
         ],
         "summary": "Api Review Chat State",
         "tags": [
-          "dashboard"
+          "dashboard",
+          "review"
         ]
       }
     },
@@ -5620,7 +6925,8 @@
         ],
         "summary": "Api Review Chat Stream Events",
         "tags": [
-          "dashboard"
+          "dashboard",
+          "review"
         ]
       }
     },
@@ -5687,7 +6993,8 @@
         ],
         "summary": "Api List Review Comments",
         "tags": [
-          "dashboard"
+          "dashboard",
+          "review"
         ]
       },
       "post": {
@@ -5762,7 +7069,8 @@
         ],
         "summary": "Api Create Review Comment",
         "tags": [
-          "dashboard"
+          "dashboard",
+          "review"
         ]
       }
     },
@@ -5848,7 +7156,8 @@
         ],
         "summary": "Api Update Review Comment",
         "tags": [
-          "dashboard"
+          "dashboard",
+          "review"
         ]
       }
     },
@@ -5915,7 +7224,8 @@
         ],
         "summary": "Api Get Review Diff",
         "tags": [
-          "dashboard"
+          "dashboard",
+          "review"
         ]
       }
     },
@@ -5987,7 +7297,8 @@
         ],
         "summary": "Api Get Review Image",
         "tags": [
-          "dashboard"
+          "dashboard",
+          "review"
         ]
       }
     },
@@ -6054,7 +7365,8 @@
         ],
         "summary": "Api Re Review",
         "tags": [
-          "dashboard"
+          "dashboard",
+          "review"
         ]
       }
     },
@@ -6085,7 +7397,8 @@
         ],
         "summary": "Api Get Sandbox Settings",
         "tags": [
-          "dashboard"
+          "dashboard",
+          "workspaces"
         ]
       },
       "put": {
@@ -6134,7 +7447,8 @@
         ],
         "summary": "Api Set Sandbox Settings",
         "tags": [
-          "dashboard"
+          "dashboard",
+          "workspaces"
         ]
       }
     },
@@ -6366,6 +7680,83 @@
         ]
       }
     },
+    "/dashboard/api/settings": {
+      "get": {
+        "description": "The instance record: what every workspace inherits.",
+        "operationId": "api_get_instance_settings_dashboard_api_settings_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Api Get Instance Settings Dashboard Api Settings Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Get Instance Settings",
+        "tags": [
+          "dashboard",
+          "settings"
+        ]
+      },
+      "put": {
+        "operationId": "api_put_instance_settings_dashboard_api_settings_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WorkspaceSettingsUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Api Put Instance Settings Dashboard Api Settings Put",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Put Instance Settings",
+        "tags": [
+          "dashboard",
+          "settings"
+        ]
+      }
+    },
     "/dashboard/api/skills": {
       "get": {
         "operationId": "api_list_skills_dashboard_api_skills_get",
@@ -6577,6 +7968,174 @@
         ]
       }
     },
+    "/dashboard/api/slack/allowed-bots": {
+      "get": {
+        "operationId": "api_list_allowed_slack_bots_dashboard_api_slack_allowed_bots_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/AllowedSlackBot"
+                  },
+                  "title": "Response Api List Allowed Slack Bots Dashboard Api Slack Allowed Bots Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api List Allowed Slack Bots",
+        "tags": [
+          "dashboard",
+          "slack"
+        ]
+      },
+      "post": {
+        "operationId": "api_allow_slack_bot_dashboard_api_slack_allowed_bots_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AllowSlackBot"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AllowedSlackBot"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Allow Slack Bot",
+        "tags": [
+          "dashboard",
+          "slack"
+        ]
+      }
+    },
+    "/dashboard/api/slack/allowed-bots/{team_id}/{bot_id}": {
+      "delete": {
+        "operationId": "api_remove_allowed_slack_bot_dashboard_api_slack_allowed_bots__team_id___bot_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "team_id",
+            "required": true,
+            "schema": {
+              "title": "Team Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "bot_id",
+            "required": true,
+            "schema": {
+              "title": "Bot Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "boolean"
+                  },
+                  "title": "Response Api Remove Allowed Slack Bot Dashboard Api Slack Allowed Bots  Team Id   Bot Id  Delete",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Remove Allowed Slack Bot",
+        "tags": [
+          "dashboard",
+          "slack"
+        ]
+      }
+    },
+    "/dashboard/api/slack/bots": {
+      "get": {
+        "operationId": "api_list_slack_bots_dashboard_api_slack_bots_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/SlackBotOption"
+                  },
+                  "title": "Response Api List Slack Bots Dashboard Api Slack Bots Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api List Slack Bots",
+        "tags": [
+          "dashboard",
+          "slack"
+        ]
+      }
+    },
     "/dashboard/api/slack/callback": {
       "get": {
         "description": "Link the verified Slack identity to the logged-in GitHub user.\n\nThe Slack member id and email come from Slack's verified OIDC claims, so a\nuser can only ever link their own Slack account \u2014 no self-asserted values.",
@@ -6623,7 +8182,9 @@
         },
         "summary": "Slack Callback",
         "tags": [
-          "dashboard"
+          "dashboard",
+          "slack",
+          "slack"
         ]
       }
     },
@@ -6672,7 +8233,9 @@
         ],
         "summary": "Slack Desktop Exchange",
         "tags": [
-          "dashboard"
+          "dashboard",
+          "slack",
+          "slack"
         ]
       }
     },
@@ -6743,81 +8306,9 @@
         ],
         "summary": "Slack Login",
         "tags": [
-          "dashboard"
-        ]
-      }
-    },
-    "/dashboard/api/team-settings": {
-      "get": {
-        "operationId": "api_get_team_settings_dashboard_api_team_settings_get",
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Api Get Team Settings Dashboard Api Team Settings Get",
-                  "type": "object"
-                }
-              }
-            },
-            "description": "Successful Response"
-          }
-        },
-        "security": [
-          {
-            "DashboardSession": []
-          }
-        ],
-        "summary": "Api Get Team Settings",
-        "tags": [
-          "dashboard"
-        ]
-      },
-      "put": {
-        "operationId": "api_put_team_settings_dashboard_api_team_settings_put",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/TeamSettingsUpdate"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Api Put Team Settings Dashboard Api Team Settings Put",
-                  "type": "object"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "DashboardSession": []
-          }
-        ],
-        "summary": "Api Put Team Settings",
-        "tags": [
-          "dashboard"
+          "dashboard",
+          "slack",
+          "slack"
         ]
       }
     },
@@ -6870,7 +8361,8 @@
         ],
         "summary": "Api List Threads",
         "tags": [
-          "dashboard"
+          "dashboard",
+          "threads"
         ]
       }
     },
@@ -7091,7 +8583,8 @@
         ],
         "summary": "Api List Threads Page",
         "tags": [
-          "dashboard"
+          "dashboard",
+          "threads"
         ]
       }
     },
@@ -7122,7 +8615,8 @@
         ],
         "summary": "Api List Pinned Threads",
         "tags": [
-          "dashboard"
+          "dashboard",
+          "threads"
         ]
       }
     },
@@ -7195,7 +8689,8 @@
         ],
         "summary": "Api List Thread Projects",
         "tags": [
-          "dashboard"
+          "dashboard",
+          "threads"
         ]
       }
     },
@@ -7245,7 +8740,39 @@
         ],
         "summary": "Api Get Pull Request Checks",
         "tags": [
-          "dashboard"
+          "dashboard",
+          "threads"
+        ]
+      }
+    },
+    "/dashboard/api/threads/resolve-all": {
+      "post": {
+        "operationId": "api_resolve_all_threads_dashboard_api_threads_resolve_all_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "integer"
+                  },
+                  "title": "Response Api Resolve All Threads Dashboard Api Threads Resolve All Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Resolve All Threads",
+        "tags": [
+          "dashboard",
+          "threads"
         ]
       }
     },
@@ -7290,7 +8817,8 @@
         ],
         "summary": "Api Delete Thread",
         "tags": [
-          "dashboard"
+          "dashboard",
+          "threads"
         ]
       },
       "get": {
@@ -7320,11 +8848,7 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Api Get Thread Dashboard Api Threads  Thread Id  Get",
-                  "type": "object"
-                }
+                "schema": {}
               }
             },
             "description": "Successful Response"
@@ -7347,7 +8871,8 @@
         ],
         "summary": "Api Get Thread",
         "tags": [
-          "dashboard"
+          "dashboard",
+          "threads"
         ]
       },
       "patch": {
@@ -7404,7 +8929,8 @@
         ],
         "summary": "Api Rename Thread",
         "tags": [
-          "dashboard"
+          "dashboard",
+          "threads"
         ]
       }
     },
@@ -7453,7 +8979,8 @@
         ],
         "summary": "Api Get Thread Branch Diff",
         "tags": [
-          "dashboard"
+          "dashboard",
+          "threads"
         ]
       }
     },
@@ -7502,7 +9029,8 @@
         ],
         "summary": "Api Cancel Thread",
         "tags": [
-          "dashboard"
+          "dashboard",
+          "threads"
         ]
       }
     },
@@ -7547,7 +9075,8 @@
         ],
         "summary": "Api Thread Commands",
         "tags": [
-          "dashboard"
+          "dashboard",
+          "threads"
         ]
       }
     },
@@ -7596,7 +9125,8 @@
         ],
         "summary": "Api Continue Thread Privately",
         "tags": [
-          "dashboard"
+          "dashboard",
+          "threads"
         ]
       }
     },
@@ -7644,6 +9174,7 @@
         "summary": "Get Thread Feedback",
         "tags": [
           "dashboard",
+          "threads",
           "thread-feedback"
         ]
       },
@@ -7700,6 +9231,7 @@
         "summary": "Submit Thread Feedback",
         "tags": [
           "dashboard",
+          "threads",
           "thread-feedback"
         ]
       }
@@ -7745,7 +9277,8 @@
         ],
         "summary": "Api Thread History",
         "tags": [
-          "dashboard"
+          "dashboard",
+          "threads"
         ]
       }
     },
@@ -7804,7 +9337,8 @@
         ],
         "summary": "Api Send Thread Message",
         "tags": [
-          "dashboard"
+          "dashboard",
+          "threads"
         ]
       }
     },
@@ -7844,7 +9378,8 @@
         ],
         "summary": "Api Unpin Thread",
         "tags": [
-          "dashboard"
+          "dashboard",
+          "threads"
         ]
       },
       "post": {
@@ -7882,7 +9417,8 @@
         ],
         "summary": "Api Pin Thread",
         "tags": [
-          "dashboard"
+          "dashboard",
+          "threads"
         ]
       }
     },
@@ -7931,7 +9467,8 @@
         ],
         "summary": "Api Get Thread Pr Diff",
         "tags": [
-          "dashboard"
+          "dashboard",
+          "threads"
         ]
       }
     },
@@ -7998,7 +9535,8 @@
         ],
         "summary": "Api Get Thread Pull Request Context",
         "tags": [
-          "dashboard"
+          "dashboard",
+          "threads"
         ]
       }
     },
@@ -8047,7 +9585,8 @@
         ],
         "summary": "Api Get Thread Pull Request Status",
         "tags": [
-          "dashboard"
+          "dashboard",
+          "threads"
         ]
       }
     },
@@ -8092,7 +9631,8 @@
         ],
         "summary": "Api Get Thread Recovery Patch",
         "tags": [
-          "dashboard"
+          "dashboard",
+          "threads"
         ]
       }
     },
@@ -8151,7 +9691,8 @@
         ],
         "summary": "Api Resolve Thread",
         "tags": [
-          "dashboard"
+          "dashboard",
+          "threads"
         ]
       }
     },
@@ -8225,7 +9766,71 @@
         ],
         "summary": "Api Cancel Thread Run",
         "tags": [
-          "dashboard"
+          "dashboard",
+          "threads"
+        ]
+      }
+    },
+    "/dashboard/api/threads/{thread_id}/service-url": {
+      "get": {
+        "description": "Mint a sandbox service credential for the dashboard's service proxy.\n\nThe token, not the ``browser_url`` that carries it, so it stays server-side:\nthe dashboard app attaches it as a header and the browser never holds it.",
+        "operationId": "api_thread_service_url_dashboard_api_threads__thread_id__service_url_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "thread_id",
+            "required": true,
+            "schema": {
+              "title": "Thread Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "port",
+            "required": true,
+            "schema": {
+              "title": "Port",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "title": "Response Api Thread Service Url Dashboard Api Threads  Thread Id  Service Url Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Thread Service Url",
+        "tags": [
+          "dashboard",
+          "threads",
+          "threads"
         ]
       }
     },
@@ -8270,7 +9875,8 @@
         ],
         "summary": "Api Get Thread State",
         "tags": [
-          "dashboard"
+          "dashboard",
+          "threads"
         ]
       }
     },
@@ -8315,7 +9921,8 @@
         ],
         "summary": "Api Thread Stream Events",
         "tags": [
-          "dashboard"
+          "dashboard",
+          "threads"
         ]
       }
     },
@@ -8366,7 +9973,9 @@
         ],
         "summary": "Api Thread Terminal Connection",
         "tags": [
-          "dashboard"
+          "dashboard",
+          "threads",
+          "threads"
         ]
       }
     },
@@ -8415,7 +10024,8 @@
         ],
         "summary": "Api Get Thread Working Tree Diff",
         "tags": [
-          "dashboard"
+          "dashboard",
+          "threads"
         ]
       }
     },
@@ -8584,9 +10194,323 @@
         ]
       }
     },
-    "/dashboard/api/workspace-mcps": {
+    "/dashboard/api/workspaces": {
       "get": {
-        "operationId": "api_list_workspace_mcps_dashboard_api_workspace_mcps_get",
+        "operationId": "api_list_workspaces_dashboard_api_workspaces_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Api List Workspaces Dashboard Api Workspaces Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api List Workspaces",
+        "tags": [
+          "dashboard",
+          "workspaces"
+        ]
+      },
+      "post": {
+        "operationId": "api_create_workspace_dashboard_api_workspaces_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WorkspaceCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Workspace"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Create Workspace",
+        "tags": [
+          "dashboard",
+          "workspaces"
+        ]
+      }
+    },
+    "/dashboard/api/workspaces/options": {
+      "get": {
+        "description": "Pickable workspaces for any signed-in user; refresh logs only for admins.",
+        "operationId": "api_workspace_options_dashboard_api_workspaces_options_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Api Workspace Options Dashboard Api Workspaces Options Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Workspace Options",
+        "tags": [
+          "dashboard",
+          "workspaces"
+        ]
+      }
+    },
+    "/dashboard/api/workspaces/{slug}": {
+      "delete": {
+        "operationId": "api_delete_workspace_dashboard_api_workspaces__slug__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "title": "Slug",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Delete Workspace",
+        "tags": [
+          "dashboard",
+          "workspaces"
+        ]
+      },
+      "get": {
+        "operationId": "api_get_workspace_dashboard_api_workspaces__slug__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "title": "Slug",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Workspace"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Get Workspace",
+        "tags": [
+          "dashboard",
+          "workspaces"
+        ]
+      },
+      "put": {
+        "operationId": "api_update_workspace_dashboard_api_workspaces__slug__put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "title": "Slug",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WorkspaceUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Workspace"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Update Workspace",
+        "tags": [
+          "dashboard",
+          "workspaces"
+        ]
+      }
+    },
+    "/dashboard/api/workspaces/{slug}/refresh": {
+      "post": {
+        "description": "Start a snapshot rebuild from the workspace's scripts.\n\nStarted in the background rather than awaited: a rebuild takes minutes, and\nthe outcome lands on the record for the dashboard to poll.",
+        "operationId": "api_refresh_workspace_dashboard_api_workspaces__slug__refresh_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "title": "Slug",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Api Refresh Workspace Dashboard Api Workspaces  Slug  Refresh Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Refresh Workspace",
+        "tags": [
+          "dashboard",
+          "workspaces"
+        ]
+      }
+    },
+    "/dashboard/api/workspaces/{workspace}/mcps": {
+      "get": {
+        "operationId": "api_list_workspace_mcps_dashboard_api_workspaces__workspace__mcps_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace",
+            "required": true,
+            "schema": {
+              "title": "Workspace",
+              "type": "string"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {
@@ -8595,12 +10519,22 @@
                   "items": {
                     "$ref": "#/components/schemas/MCPConnectionPublic"
                   },
-                  "title": "Response Api List Workspace Mcps Dashboard Api Workspace Mcps Get",
+                  "title": "Response Api List Workspace Mcps Dashboard Api Workspaces  Workspace  Mcps Get",
                   "type": "array"
                 }
               }
             },
             "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
           }
         },
         "security": [
@@ -8614,10 +10548,19 @@
         ]
       }
     },
-    "/dashboard/api/workspace-mcps/{name}": {
+    "/dashboard/api/workspaces/{workspace}/mcps/{name}": {
       "delete": {
-        "operationId": "api_delete_workspace_mcp_dashboard_api_workspace_mcps__name__delete",
+        "operationId": "api_delete_workspace_mcp_dashboard_api_workspaces__workspace__mcps__name__delete",
         "parameters": [
+          {
+            "in": "path",
+            "name": "workspace",
+            "required": true,
+            "schema": {
+              "title": "Workspace",
+              "type": "string"
+            }
+          },
           {
             "in": "path",
             "name": "name",
@@ -8654,8 +10597,17 @@
         ]
       },
       "put": {
-        "operationId": "api_save_workspace_mcp_dashboard_api_workspace_mcps__name__put",
+        "operationId": "api_save_workspace_mcp_dashboard_api_workspaces__workspace__mcps__name__put",
         "parameters": [
+          {
+            "in": "path",
+            "name": "workspace",
+            "required": true,
+            "schema": {
+              "title": "Workspace",
+              "type": "string"
+            }
+          },
           {
             "in": "path",
             "name": "name",
@@ -8709,10 +10661,19 @@
         ]
       }
     },
-    "/dashboard/api/workspace-mcps/{name}/discover": {
+    "/dashboard/api/workspaces/{workspace}/mcps/{name}/discover": {
       "post": {
-        "operationId": "api_discover_workspace_mcp_dashboard_api_workspace_mcps__name__discover_post",
+        "operationId": "api_discover_workspace_mcp_dashboard_api_workspaces__workspace__mcps__name__discover_post",
         "parameters": [
+          {
+            "in": "path",
+            "name": "workspace",
+            "required": true,
+            "schema": {
+              "title": "Workspace",
+              "type": "string"
+            }
+          },
           {
             "in": "path",
             "name": "name",
@@ -8748,7 +10709,7 @@
                   "items": {
                     "$ref": "#/components/schemas/MCPToolDescription"
                   },
-                  "title": "Response Api Discover Workspace Mcp Dashboard Api Workspace Mcps  Name  Discover Post",
+                  "title": "Response Api Discover Workspace Mcp Dashboard Api Workspaces  Workspace  Mcps  Name  Discover Post",
                   "type": "array"
                 }
               }
@@ -8777,10 +10738,19 @@
         ]
       }
     },
-    "/dashboard/api/workspace-mcps/{name}/headers/reveal": {
+    "/dashboard/api/workspaces/{workspace}/mcps/{name}/headers/reveal": {
       "post": {
-        "operationId": "api_reveal_workspace_mcp_headers_dashboard_api_workspace_mcps__name__headers_reveal_post",
+        "operationId": "api_reveal_workspace_mcp_headers_dashboard_api_workspaces__workspace__mcps__name__headers_reveal_post",
         "parameters": [
+          {
+            "in": "path",
+            "name": "workspace",
+            "required": true,
+            "schema": {
+              "title": "Workspace",
+              "type": "string"
+            }
+          },
           {
             "in": "path",
             "name": "name",
@@ -8819,6 +10789,110 @@
         "summary": "Api Reveal Workspace Mcp Headers",
         "tags": [
           "dashboard"
+        ]
+      }
+    },
+    "/dashboard/api/workspaces/{workspace}/settings": {
+      "get": {
+        "operationId": "api_get_workspace_settings_dashboard_api_workspaces__workspace__settings_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace",
+            "required": true,
+            "schema": {
+              "title": "Workspace",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceSettingsView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Get Workspace Settings",
+        "tags": [
+          "dashboard",
+          "settings"
+        ]
+      },
+      "put": {
+        "operationId": "api_put_workspace_settings_dashboard_api_workspaces__workspace__settings_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace",
+            "required": true,
+            "schema": {
+              "title": "Workspace",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WorkspaceSettingsUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceSettingsView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Put Workspace Settings",
+        "tags": [
+          "dashboard",
+          "settings"
         ]
       }
     },
@@ -8963,6 +11037,9 @@
                     },
                     {
                       "$ref": "#/components/schemas/ChallengeResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/DuplicateIncidentResponse"
                     }
                   ],
                   "title": "Response Slack Webhook Webhooks Slack Post"
@@ -8992,6 +11069,25 @@
           }
         },
         "summary": "Slack Code Channel Command"
+      }
+    },
+    "/webhooks/slack/commands": {
+      "post": {
+        "description": "Answer a single `/oswe` question, ephemerally and without a Slack thread.",
+        "operationId": "slack_command_webhooks_slack_commands_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SlashCommandResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Slack Command"
       }
     },
     "/webhooks/slack/interactivity": {

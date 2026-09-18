@@ -17,6 +17,7 @@ async def test_manage_baby_sit_starts_cross_repo_watch_from_github_issue(
         "github_login": "octocat",
         "repo": {"owner": "acme", "name": "default"},
         "github_issue": {"number": 12, "url": "https://github.com/acme/default/issues/12"},
+        "workspace": "oss",
     }
     monkeypatch.setattr(manage_tool, "get_config", lambda: {"configurable": configurable})
     monkeypatch.setattr(
@@ -56,6 +57,8 @@ async def test_manage_baby_sit_starts_cross_repo_watch_from_github_issue(
         "name": "default",
     }
     assert start.await_args.kwargs["run_config"]["source_installation_id"] == 84
+    # The watch's own runs must boot from the same workspace as the thread.
+    assert start.await_args.kwargs["run_config"]["workspace"] == "oss"
     assert start.await_args.kwargs["source_context"].dump() == {
         "github_issue": {
             "number": 12,

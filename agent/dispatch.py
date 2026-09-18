@@ -25,6 +25,7 @@ busy-check and the custom store-queue) with one function that uses:
 """
 
 import logging
+from datetime import UTC, datetime
 from typing import Any
 from urllib.parse import urlparse
 
@@ -96,15 +97,15 @@ def _dispatch_input(content: ContentBlocks, source: str, configurable: dict[str,
             channel_id = f"slack:{slack_thread.channel_id}"
             channel: ChannelIdentity = {"id": channel_id, "platform": "slack"}
             channel_context = slack_thread.channel_context
-            if isinstance(channel_context, dict):
-                name = channel_context.get("name") or channel_context.get("name_normalized")
-                topic = channel_context.get("topic")
-                purpose = channel_context.get("purpose")
-                if isinstance(name, str) and name:
+            if channel_context is not None:
+                name = channel_context.label
+                topic = channel_context.topic
+                purpose = channel_context.purpose
+                if name:
                     channel["name"] = name
-                if isinstance(topic, str) and topic:
+                if topic:
                     channel["topic"] = topic
-                if isinstance(purpose, str) and purpose:
+                if purpose:
                     channel["purpose"] = purpose
             if slack_thread.thread_ts:
                 channel["thread_id"] = slack_thread.thread_ts
@@ -201,6 +202,24 @@ def dispatch_client() -> LangGraphClient:
     return get_client(url=_langgraph_url())
 
 
+def _slack_conversation_type(source: str, config: LangGraphRunConfig | None) -> str | None:
+    if source != "slack" or not isinstance(config, dict):
+        return None
+    configurable = config.get("configurable")
+    if not isinstance(configurable, dict):
+        return None
+    slack_thread = configurable.get("slack_thread")
+    if not isinstance(slack_thread, dict):
+        return None
+    channel_context = slack_thread.get("channel_context")
+    if not isinstance(channel_context, dict):
+        return None
+    is_im = channel_context.get("is_im")
+    if not isinstance(is_im, bool):
+        return None
+    return "dm" if is_im else "channel"
+
+
 def prepare_run_config(
     config: LangGraphRunConfig | None,
     metadata: dict[str, Any] | None,
@@ -213,7 +232,9 @@ def prepare_run_config(
     if metadata is not None:
         merged_metadata.update(metadata)
     invocation_id = resolve_invocation_id(configurable, merged_metadata) or new_invocation_id()
+    started_at = merged_metadata.setdefault("invocation_started_at", datetime.now(UTC).isoformat())
     configurable = with_invocation_id(configurable, invocation_id)
+    configurable.setdefault("invocation_started_at", started_at)
     configurable[V3_STREAMING_CONFIG_KEY] = True
     run_config["configurable"] = configurable
     run_config["metadata"] = with_invocation_id(merged_metadata, invocation_id)
@@ -224,7 +245,7 @@ async def create_durable_run(
     thread_id: str,
     assistant_id: str,
     *,
-    input: RunInput,
+    input: RunInput | dict[str, Any],
     source: str,
     config: LangGraphRunConfig | None = None,
     metadata: dict[str, Any] | None = None,
@@ -237,7 +258,11 @@ async def create_durable_run(
 ) -> Run:
     """Create a run with Open SWE's durable LangGraph defaults."""
     client = client or dispatch_client()
-    run_config = prepare_run_config(config, metadata)
+    run_metadata = dict(metadata or {})
+    conversation_type = _slack_conversation_type(source, config)
+    if conversation_type is not None:
+        run_metadata["slack_conversation_type"] = conversation_type
+    run_config = prepare_run_config(config, run_metadata)
     create_kwargs: dict[str, Any] = {
         "input": input,
         "config": run_config,

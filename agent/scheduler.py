@@ -11,13 +11,15 @@ from agent.agent_cost import run_agent_cost_refresh
 from agent.baby_sit import evaluate_watch
 from agent.background_tasks import CRON_KIND as BACKGROUND_TASK_CRON_KIND
 from agent.background_tasks import monitor_background_tasks
-from agent.dashboard.environment_refresh import REFRESH_TASK as ENVIRONMENT_REFRESH_TASK
-from agent.dashboard.environment_refresh import run_environment_refresh_tick
-from agent.dashboard.schedules import launch_scheduled_agent_run
+from agent.expedited_review.watch import CRON_TASK as EXPEDITED_REVIEW_TASK
+from agent.expedited_review.watch import evaluate_approval
 from agent.reconcile import reconcile_stale_runs
 from agent.run_config import RunConfig
+from agent.schedules.store import launch_scheduled_agent_run
 from agent.session_cost import run_session_cost_refresh
 from agent.thread_feedback import run_feedback_prompt
+from agent.workspaces.refresh import LEGACY_REFRESH_TASK, run_workspace_refresh_tick
+from agent.workspaces.refresh import REFRESH_TASK as WORKSPACE_REFRESH_TASK
 
 logger = logging.getLogger(__name__)
 
@@ -27,6 +29,8 @@ class SchedulerState(BaseModel):
 
     schedule_id: str | None = None
     task: str | None = None
+    workspace_slug: str | None = None
+    # Crons created before the rename still send this key.
     environment_slug: str | None = None
     refresh_kind: str | None = None
     watch_key: str | None = None
@@ -35,6 +39,7 @@ class SchedulerState(BaseModel):
     run_id: str | None = None
     invocation_id: str | None = None
     prepare_run_id: str | None = None
+    invocation_started_at: str | None = None
     channel_id: str | None = None
     thread_ts: str | None = None
     attempt: int | None = None
@@ -52,15 +57,20 @@ async def _launch(state: SchedulerState, config: RunnableConfig) -> dict[str, An
         if not key:
             return {"result": {"status": "missing_watch_key"}}
         return {"result": {"status": await evaluate_watch(key)}}
+    if task == EXPEDITED_REVIEW_TASK:
+        key = state.watch_key or cfg.watch_key
+        if not key:
+            return {"result": {"status": "missing_watch_key"}}
+        return {"result": {"status": await evaluate_approval(key)}}
     if task == BACKGROUND_TASK_CRON_KIND:
         thread_id = state.thread_id or cfg.thread_id
         if not thread_id:
             return {"result": {"status": "missing_thread_id"}}
         return {"result": await monitor_background_tasks(thread_id)}
-    if task == ENVIRONMENT_REFRESH_TASK:
-        slug = state.environment_slug or cfg.environment
+    if task in (WORKSPACE_REFRESH_TASK, LEGACY_REFRESH_TASK):
+        slug = state.workspace_slug or state.environment_slug or cfg.workspace_slug
         kind = "update" if state.refresh_kind == "update" else "full"
-        return {"result": await run_environment_refresh_tick(slug or None, kind)}
+        return {"result": await run_workspace_refresh_tick(slug or None, kind)}
     if task == "session_cost":
         return {"result": await run_session_cost_refresh(state.model_dump(exclude_none=True))}
     if task == "thread_feedback":

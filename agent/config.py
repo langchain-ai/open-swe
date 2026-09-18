@@ -276,6 +276,7 @@ ENV.var(
     "Public URL for Slack webhooks and the Sign in with Slack callback; defaults to "
     "DASHBOARD_API_BASE_URL. Use the ngrok URL when the dashboard runs on localhost.",
 )
+ENV.var("SLACK_APP_ID", "Slack app id (A...) whose event deliveries Incidents accepts.")
 ENV.var("LINEAR_WEBHOOK_SECRET", "HMAC secret for Linear webhook deliveries.", secret=True)
 
 # --- Dashboard ------------------------------------------------------------------------------
@@ -324,6 +325,11 @@ ENV.var("COMPLETION_WEBHOOK_URL", "Where LangGraph posts run-completion webhooks
 ENV.var(
     "POSTGRES_URI", "LangGraph deployment PostgreSQL URI available to custom code.", secret=True
 )
+ENV.var(
+    "LANGSMITH_LANGGRAPH_API_VARIANT",
+    "LangGraph API runtime variant.",
+    default="",
+)
 ENV.var("ANALYTICS_ENVIRONMENT", "Analytics producer environment.", default="production")
 ENV.var("ANALYTICS_SUMMARY_VERSION", "Active metric semantics version.", default="1")
 ENV.var("ANALYTICS_PR_MATURITY_DAYS", "PR cohort maturity period.", default="14")
@@ -350,7 +356,7 @@ ENV.var("BASETEN_API_KEY", "Baseten API key.", secret=True)
 ENV.var("LLM_MODEL_ID", "Default model in provider:model form.")
 ENV.var(
     "LLM_REASONING_EFFORT",
-    "Reasoning effort for the default model (low, medium, high, max) when no team or profile setting applies.",
+    "Reasoning effort for the default model (low, medium, high, max) when no workspace or profile setting applies.",
 )
 ENV.var("LLM_FALLBACK_MODEL_ID", "Fallback model in provider:model form.")
 ENV.var("EXA_API_KEY", "Exa API key enabling web search.", secret=True)
@@ -378,30 +384,45 @@ ENV.var(
 )
 ENV.var("SANDBOX_EXECUTE_CLIENT_GRACE_SECONDS", "Client-side grace past a command's own timeout.")
 ENV.var("SANDBOX_CREATE_EXTRA_JSON", "JSON object merged into the sandbox create body.")
-ENV.var("ENVIRONMENT_SNAPSHOT_PREFIX", "Prefix for environment snapshot names.", default="openswe")
+ENV.var(
+    "WORKSPACE_SNAPSHOT_PREFIX",
+    "Prefix for workspace snapshot names.",
+    default="openswe",
+    aliases=("ENVIRONMENT_SNAPSHOT_PREFIX",),
+)
+ENV.var(
+    "OPEN_SWE_UNASSIGNED_REPO_WORKSPACE",
+    "Where GitHub events for a repository no workspace owns go: 'default' routes them to the "
+    "default workspace, 'ignore' drops them.",
+    default="default",
+)
 ENV.var(
     "OPENSWE_SCRIPT_ROOT",
-    "Where an environment's setup/update scripts and their logs live inside a sandbox. "
+    "Where a workspace's setup/update scripts and their logs live inside a sandbox. "
     "The default assumes a sandbox where the agent is root; the local provider runs on a "
     "developer's own machine, whose filesystem root is not writable.",
     default="/open-swe/environment",
 )
 ENV.var(
-    "ENVIRONMENT_REFRESH_TIMEOUT_SECONDS",
-    "Deadline for an environment's setup script on a builder sandbox.",
+    "WORKSPACE_REFRESH_TIMEOUT_SECONDS",
+    "Deadline for a workspace's setup script on a builder sandbox.",
+    aliases=("ENVIRONMENT_REFRESH_TIMEOUT_SECONDS",),
 )
 ENV.var(
-    "ENVIRONMENT_UPDATE_TIMEOUT_SECONDS",
-    "Deadline for an environment's update script on a builder sandbox.",
+    "WORKSPACE_UPDATE_TIMEOUT_SECONDS",
+    "Deadline for a workspace's update script on a builder sandbox.",
+    aliases=("ENVIRONMENT_UPDATE_TIMEOUT_SECONDS",),
 )
 ENV.var(
-    "ENVIRONMENT_SANDBOX_UPDATE_TIMEOUT_SECONDS",
+    "WORKSPACE_SANDBOX_UPDATE_TIMEOUT_SECONDS",
     "Deadline for the update script when it runs in a run's own sandbox, before the first "
     "model call. Tighter than the builder's on purpose.",
+    aliases=("ENVIRONMENT_SANDBOX_UPDATE_TIMEOUT_SECONDS",),
 )
 ENV.var(
-    "ENVIRONMENT_CAPTURE_TIMEOUT_SECONDS",
-    "Deadline for capturing a builder sandbox as an environment's snapshot.",
+    "WORKSPACE_CAPTURE_TIMEOUT_SECONDS",
+    "Deadline for capturing a builder sandbox as a workspace's snapshot.",
+    aliases=("ENVIRONMENT_CAPTURE_TIMEOUT_SECONDS",),
 )
 ENV.var("LOCAL_SANDBOX_ROOT_DIR", "Root directory for the local sandbox provider.")
 ENV.var(

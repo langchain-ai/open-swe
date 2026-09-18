@@ -8,11 +8,11 @@ import httpx2
 from langgraph.config import get_config
 from langgraph_sdk import get_client
 
+from agent.analytics.usage import record_agent_pr_usage
 from agent.credential_scope import pr_author_login, private_credential_login
-from agent.dashboard.agent_usage import record_agent_pr_usage
-from agent.dashboard.plan_store import get_plan_content
 from agent.github.app import get_github_app_installation_token
 from agent.github.comments import derive_pr_state
+from agent.github.pull_requests import PullRequest, ThreadLink
 from agent.github.token import GitHubUserAuthRequired
 from agent.run_config import RunConfig
 from agent.slack.client import (
@@ -27,7 +27,10 @@ from agent.slack.code_channels import (
     set_context_bar,
     set_view,
 )
+from agent.threads.plan_store import get_plan_content
+from agent.utils.authorship import PR_ATTRIBUTION_TEXT
 from agent.utils.dashboard_links import dashboard_plan_url, dashboard_thread_url
+from agent.utils.langsmith import create_langsmith_thread_feedback
 
 logger = logging.getLogger(__name__)
 
@@ -51,7 +54,7 @@ _REPORTED_RESPONSE_HEADERS = (
 
 
 async def _resolve_pr_author_token() -> tuple[str | None, str]:
-    """Use the initiator's OAuth for user-owned threads and the bot for system threads."""
+    """Use the run requester's OAuth for user-owned threads and the bot for system threads."""
     login = await pr_author_login()
     if login is None:
         return await get_github_app_installation_token(), "bot"
@@ -549,6 +552,28 @@ async def _thread_pull_requests(thread_id: str) -> list[dict[str, Any]]:
     ]
 
 
+PR_OPENED_FEEDBACK_KEY = "pr_opened"
+
+
+async def _record_pr_opened_feedback(thread_id: str, *, pr_url: str) -> None:
+    """Record ``pr_opened`` feedback so LangSmith can count it against ``pr_merged``.
+
+    One row per thread, so a thread opening several PRs collapses to the last
+    write. Deliberate for now: it keeps the aggregate simple.
+
+    Args:
+        thread_id: LangGraph thread the PR was opened from.
+        pr_url: Stored as the feedback comment.
+    """
+    await create_langsmith_thread_feedback(
+        thread_id,
+        PR_OPENED_FEEDBACK_KEY,
+        score=1.0,
+        comment=pr_url,
+        source_info={"source": "open_pull_request", "thread_id": thread_id, "pr_url": pr_url},
+    )
+
+
 async def _record_pr_telemetry(
     *,
     client: httpx2.AsyncClient,
@@ -559,6 +584,7 @@ async def _record_pr_telemetry(
     base: str,
     pr: dict[str, Any],
     resolves_thread: bool = False,
+    record_opening: bool = True,
 ) -> None:
     pr_number = pr.get("number")
     if not isinstance(pr_number, int):
@@ -570,13 +596,17 @@ async def _record_pr_telemetry(
         thread_id = cfg.thread_id
         github_login = cfg.github_login
         if not (github_login or "").strip():
-            from agent.dashboard.user_mappings import login_for_email
+            from agent.users import User
 
-            github_login = await login_for_email(cfg.user_email) or ""
+            github_login = await User.login_for_email(cfg.user_email) or ""
         pr_url = details.get("html_url") or pr.get("html_url")
         merged = bool(details.get("merged"))
         is_draft = bool(details.get("draft", pr.get("draft")))
         state = details.get("state") if isinstance(details.get("state"), str) else "open"
+        base_details = details.get("base")
+        head_details = details.get("head")
+        opening_base_sha = base_details.get("sha") if isinstance(base_details, dict) else None
+        opening_head_sha = head_details.get("sha") if isinstance(head_details, dict) else None
         additions_value = details.get("additions")
         additions = additions_value if isinstance(additions_value, int) else 0
         deletions_value = details.get("deletions")
@@ -600,7 +630,20 @@ async def _record_pr_telemetry(
             merged=merged,
             created_at=details.get("created_at") or pr.get("created_at"),
             merged_at=details.get("merged_at") or pr.get("merged_at"),
+            invocation_id=cfg.invocation_id,
+            model_id=cfg.resolved_agent_model_id,
+            source=cfg.source,
+            repository_private=(
+                details.get("base", {}).get("repo", {}).get("private")
+                if isinstance(details.get("base"), dict)
+                else None
+            ),
+            record_opening=record_opening,
         )
+        if record_opening and isinstance(thread_id, str) and thread_id:
+            await _record_pr_opened_feedback(
+                thread_id, pr_url=pr_url if isinstance(pr_url, str) else ""
+            )
         if isinstance(thread_id, str) and thread_id:
             repo_private = None
             base_repo = details.get("base", {}).get("repo")
@@ -610,6 +653,7 @@ async def _record_pr_telemetry(
             pr_title = details.get("title") or pr.get("title")
             pr_user = details.get("user") or pr.get("user")
             author = pr_user.get("login") if isinstance(pr_user, dict) else None
+            author_id = pr_user.get("id") if isinstance(pr_user, dict) else None
             author_avatar_url = pr_user.get("avatar_url") if isinstance(pr_user, dict) else None
             diff_stats = {
                 "files": changed_files,
@@ -664,6 +708,38 @@ async def _record_pr_telemetry(
             if repo_private is not None:
                 metadata["repo_private"] = repo_private
             await get_client().threads.update(thread_id=thread_id, metadata=metadata)
+            try:
+                await PullRequest(
+                    owner=owner,
+                    repo=repo,
+                    number=pr_number,
+                    state=pr_state,
+                    title=pr_title if isinstance(pr_title, str) else "",
+                    head_ref=head,
+                    base_ref=base,
+                    opening_base_sha=(
+                        opening_base_sha
+                        if record_opening and isinstance(opening_base_sha, str)
+                        else ""
+                    ),
+                    opening_head_sha=(
+                        opening_head_sha
+                        if record_opening and isinstance(opening_head_sha, str)
+                        else ""
+                    ),
+                    author=author if isinstance(author, str) else "",
+                    author_github_id=author_id if isinstance(author_id, int) else None,
+                    resolves_thread=resolves_thread,
+                    threads=[ThreadLink(thread_id=thread_id, source="open_pull_request")],
+                ).save(repository_private=repo_private)
+            except Exception:  # noqa: BLE001
+                # The PR exists on GitHub either way; failing the tool over the
+                # registry write would lose the agent's work.
+                logger.warning(
+                    "Failed to record pull request",
+                    extra={"pr_repo_full_name": f"{owner}/{repo}", "pr_number": pr_number},
+                    exc_info=True,
+                )
             active = await get_active_slack_thread(
                 get_client(),
                 thread_id,
@@ -795,7 +871,13 @@ async def _maybe_append_references(
             logger.debug("Failed to append source references to PR body", exc_info=True)
         if not lines:
             return body
-        return f"{body.rstrip()}\n\n{_REFERENCES_HEADING}\n" + "\n".join(lines)
+        references = f"{_REFERENCES_HEADING}\n" + "\n".join(lines)
+        footer_start = body.find(PR_ATTRIBUTION_TEXT)
+        if footer_start < 0:
+            return f"{body.rstrip()}\n\n{references}"
+        before_footer = body[:footer_start].rstrip()
+        footer = body[footer_start:].lstrip()
+        return f"{before_footer}\n\n{references}\n\n{footer}"
     except Exception:
         logger.debug("Failed to append references to PR body", exc_info=True)
         return body
@@ -906,6 +988,7 @@ async def _open_pull_request(
                     base=base,
                     pr=existing,
                     resolves_thread=resolves_thread,
+                    record_opening=False,
                 )
                 return {
                     "success": True,

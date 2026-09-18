@@ -5,7 +5,8 @@ import hashlib
 import hmac
 import logging
 import re
-from typing import Any
+from collections.abc import Collection
+from typing import Any, Literal
 
 import httpx2
 
@@ -19,7 +20,9 @@ logger = logging.getLogger(__name__)
 __all__ = [
     "GitHubAuthError",
     "OPEN_SWE_TAGS",
+    "PrState",
     "build_pr_prompt",
+    "derive_pr_state",
     "describe_open_swe_tags",
     "extract_pr_context",
     "fetch_github_thread_participants",
@@ -45,6 +48,8 @@ def _load_open_swe_tags() -> tuple[str, ...]:
 
 
 OPEN_SWE_TAGS = _load_open_swe_tags()
+
+PrState = Literal["open", "draft", "merged", "closed"]
 
 # Deployments sharing a workspace each own a distinct handle, so a tag must not
 # match when it is only a prefix of a longer one (@openswe vs @openswe-preview).
@@ -103,7 +108,7 @@ def verify_github_signature(body: bytes, signature: str, *, secret: str) -> bool
     return hmac.compare_digest(expected, signature)
 
 
-def derive_pr_state(*, state: str | None, merged: bool, draft: bool) -> str:
+def derive_pr_state(*, state: str | None, merged: bool, draft: bool) -> PrState:
     """Map GitHub PR fields to the dashboard's pr_state vocabulary."""
     if merged:
         return "merged"
@@ -128,12 +133,16 @@ def sanitize_github_comment_body(body: str) -> str:
     return sanitized
 
 
-def format_github_comment_body_for_prompt(author: str, body: str) -> str:
-    """Format a GitHub comment body for prompt inclusion."""
-    sanitized_body = sanitize_github_comment_body(body)
-    from agent.dashboard.user_mappings import is_login_mapped
+def format_github_comment_body_for_prompt(
+    author: str, body: str, *, trusted: Collection[str]
+) -> str:
+    """Format a GitHub comment body for prompt inclusion.
 
-    if is_login_mapped(author):
+    ``trusted`` is the lowercased GitHub logins of known Open SWE users; anyone
+    else's words are fenced as untrusted.
+    """
+    sanitized_body = sanitize_github_comment_body(body)
+    if author.strip().lower() in trusted:
         return sanitized_body
 
     return (
@@ -544,12 +553,14 @@ def build_pr_prompt(
     comments: list[dict[str, Any]],
     pr_url: str,
     repo_config: dict[str, str] | None = None,
+    *,
+    trusted: Collection[str],
 ) -> str:
     """Format PR comments into a human message for the agent."""
     lines: list[str] = []
     for c in comments:
         author = c.get("author", "unknown")
-        body = format_github_comment_body_for_prompt(author, c.get("body", ""))
+        body = format_github_comment_body_for_prompt(author, c.get("body", ""), trusted=trusted)
         if c.get("type") == "review_comment":
             path = c.get("path", "")
             line = c.get("line", "")

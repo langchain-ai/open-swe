@@ -11,6 +11,7 @@ from agent.slack import events as slack_events
 from agent.slack import failures as slack_failures
 from agent.slack import routes as slack_routes
 from agent.slack import webhook as slack_service
+from agent.slack.payloads import SlackChannelContext
 from agent.webhooks import common as webhook_common
 
 
@@ -93,9 +94,10 @@ async def _post(
 def _patch_slack_webhook(monkeypatch: pytest.MonkeyPatch) -> _FakeClient:
     slack_events.reset_slack_event_claims()
     client = _FakeClient()
+    monkeypatch.setattr("agent.incidents.channels.handle_slack_event", AsyncMock(return_value=None))
 
-    async def channel_context(_channel_id: str, *, use_cache: bool = True) -> dict[str, Any]:
-        return {"is_ext_shared": False, "is_pending_ext_shared": False}
+    async def channel_context(_channel_id: str, *, use_cache: bool = True) -> SlackChannelContext:
+        return SlackChannelContext(is_ext_shared=False, is_pending_ext_shared=False)
 
     async def repo_config(*_args: Any, **_kwargs: Any) -> dict[str, str]:
         return {"owner": "langchain-ai", "name": "open-swe"}
@@ -292,7 +294,7 @@ async def test_external_channel_refuses_without_starting_a_run(
     monkeypatch.setattr(
         webhook_common,
         "resolve_slack_channel_context",
-        AsyncMock(return_value={"is_ext_shared": True}),
+        AsyncMock(return_value=SlackChannelContext(is_ext_shared=True)),
     )
     monkeypatch.setattr(webhook_common, "post_slack_thread_reply", post_reply)
 
@@ -318,7 +320,7 @@ async def test_unverified_channel_fails_closed_without_reply_or_run(
     monkeypatch.setattr(
         webhook_common,
         "resolve_slack_channel_context",
-        AsyncMock(return_value={"is_ext_shared": None}),
+        AsyncMock(return_value=SlackChannelContext(is_ext_shared=None)),
     )
     monkeypatch.setattr(webhook_common, "post_slack_thread_reply", post_reply)
 

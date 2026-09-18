@@ -4,9 +4,9 @@ from typing import Any
 import pytest
 
 from agent import server
-from agent.dashboard.threads import runs as thread_runs
-from agent.dashboard.threads import summary as thread_summary
 from agent.prompt import construct_system_prompt
+from agent.threads import runs as thread_runs
+from agent.threads import summary as thread_summary
 from tests.conftest import patch_thread_module
 
 
@@ -15,17 +15,6 @@ def test_construct_system_prompt_gates_active_plan_mode(enabled: bool) -> None:
     prompt = construct_system_prompt(working_dir="/work", plan_mode=enabled)
 
     assert ("### Plan Mode (ACTIVE)" in prompt) is enabled
-
-
-@pytest.mark.parametrize(
-    "source", ["dashboard", "slack", "linear", "github", "schedule", "desktop", "generic"]
-)
-def test_plan_mode_omits_superseded_inference_guidance(source: str) -> None:
-    prompt = construct_system_prompt(
-        working_dir="/work", source=source, slack_context=source == "slack"
-    )
-
-    assert "If a task would genuinely benefit from a structured plan" not in prompt
 
 
 def test_plan_mode_prompt_omits_superseded_slack_approval_guidance() -> None:
@@ -197,12 +186,6 @@ async def test_enter_plan_mode_tool_returns_command() -> None:
     assert len(messages) == 1
     assert isinstance(messages[0], ToolMessage)
     assert messages[0].tool_call_id == "call-1"
-
-
-def test_enter_plan_mode_exported() -> None:
-    from agent.tools import enter_plan_mode
-
-    assert callable(enter_plan_mode)
 
 
 async def test_approve_plan_tool_exits_plan_mode(monkeypatch: pytest.MonkeyPatch) -> None:

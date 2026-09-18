@@ -4,6 +4,16 @@ type PublicEnv = Record<string, string | boolean | undefined>
 type RumClient = {
   init: (configuration: RumInitConfiguration) => void
   getInternalContext: () => { session_id?: string } | undefined
+  addDurationVital?: (
+    name: string,
+    options: {
+      /** Epoch milliseconds. */
+      startTime: number
+      duration: number
+      context?: Record<string, string | number | boolean | null>
+    }
+  ) => void
+  setGlobalContextProperty?: (key: string, value: string) => void
 }
 type RumLoader = () => Promise<RumClient>
 
@@ -46,6 +56,10 @@ export function isDatadogRumInitialized(): boolean {
   return initializedRum !== undefined
 }
 
+export function getDatadogRum(): RumClient | undefined {
+  return initializedRum
+}
+
 export function subscribeToDatadogInitialization(
   listener: () => void
 ): () => void {
@@ -64,7 +78,7 @@ function templateDashboardPath(pathname: string): string {
     return "/agents/:threadId/plan"
   if (
     /^\/agents\/[^/]+\/?$/.test(pathname) &&
-    !/^\/agents\/(automations|environments|instructions|local|reviews|sandbox|skills|threads)\/?$/.test(
+    !/^\/agents\/(automations|instructions|local|reviews|sandbox|skills|threads|workspaces)\/?$/.test(
       pathname
     )
   )

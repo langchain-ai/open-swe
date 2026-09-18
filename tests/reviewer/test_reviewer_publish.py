@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from agent.dashboard.workspace_settings import WorkspaceSettings
 from agent.review.findings import Finding, new_finding
 from agent.review.publish import (
     clear_review_started_comment,
@@ -573,8 +574,8 @@ async def test_resolve_review_trace_url_enabled_by_team_setting() -> None:
 
     with (
         patch(
-            "agent.tools.publish_review.get_team_review_trace_links_enabled",
-            AsyncMock(return_value=True),
+            "agent.tools.publish_review.get_workspace_settings",
+            AsyncMock(return_value=WorkspaceSettings({"review_trace_links": True})),
         ),
         patch(
             "agent.tools.publish_review.get_langsmith_trace_url",
@@ -593,8 +594,8 @@ async def test_resolve_review_trace_url_disabled_by_team_setting() -> None:
     trace_url = MagicMock(return_value="https://smith/t")
     with (
         patch(
-            "agent.tools.publish_review.get_team_review_trace_links_enabled",
-            AsyncMock(return_value=False),
+            "agent.tools.publish_review.get_workspace_settings",
+            AsyncMock(return_value=WorkspaceSettings({"review_trace_links": False})),
         ),
         patch("agent.tools.publish_review.get_langsmith_trace_url", trace_url),
     ):
@@ -608,16 +609,16 @@ async def test_resolve_review_trace_url_disabled_by_team_setting() -> None:
 async def test_resolve_review_trace_url_config_override_skips_team_lookup() -> None:
     from agent.tools.publish_review import _resolve_review_trace_url
 
-    team_lookup = AsyncMock(return_value=True)
+    settings_lookup = AsyncMock(return_value=WorkspaceSettings({"review_trace_links": True}))
     trace_url = MagicMock(return_value="https://smith/t")
     with (
-        patch("agent.tools.publish_review.get_team_review_trace_links_enabled", team_lookup),
+        patch("agent.tools.publish_review.get_workspace_settings", settings_lookup),
         patch("agent.tools.publish_review.get_langsmith_trace_url", trace_url),
     ):
         url = await _resolve_review_trace_url("reviewer-thread-id", False)
 
     assert url is None
-    team_lookup.assert_not_called()
+    settings_lookup.assert_not_called()
     trace_url.assert_not_called()
 
 

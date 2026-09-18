@@ -2,7 +2,7 @@
 
 import logging
 from collections.abc import Mapping
-from typing import Any, Literal, TypedDict
+from typing import Any, Literal, NotRequired, TypedDict
 
 from langgraph_sdk.client import LangGraphClient
 
@@ -12,6 +12,7 @@ from agent.slack.client import (
     format_slack_session_cost,
     lookup_slack_run_message_mapping,
     update_slack_message,
+    with_slack_pending_session_cost,
     with_slack_session_cost,
 )
 from agent.utils.langsmith import LangSmithCostUnavailable, get_langsmith_thread_cost
@@ -28,6 +29,7 @@ class SessionCostRefresh(TypedDict):
     run_id: str
     invocation_id: str
     prepare_run_id: str
+    invocation_started_at: NotRequired[str]
     channel_id: str
     thread_ts: str
     attempt: int
@@ -48,7 +50,7 @@ def _payload(state: Mapping[str, Any], attempt: int) -> SessionCostRefresh | Non
         return None
     if invocation_id is None or any(value is None for value in values.values()):
         return None
-    return {
+    payload: SessionCostRefresh = {
         "task": "session_cost",
         "agent_thread_id": values["agent_thread_id"] or "",
         "run_id": values["run_id"] or "",
@@ -58,6 +60,49 @@ def _payload(state: Mapping[str, Any], attempt: int) -> SessionCostRefresh | Non
         "thread_ts": values["thread_ts"] or "",
         "attempt": attempt,
     }
+    if started_at := _value(state, "invocation_started_at"):
+        payload["invocation_started_at"] = started_at
+    return payload
+
+
+async def _mark_slack_reply_cost_pending(
+    payload: SessionCostRefresh, client: LangGraphClient, *, clear: bool = False
+) -> None:
+    """Best-effort: flag the mapped final reply as awaiting its deferred cost."""
+    mapping = await lookup_slack_run_message_mapping(
+        client, payload["channel_id"], payload["run_id"]
+    )
+    if not mapping or mapping.get("thread_ts") != payload["thread_ts"]:
+        return
+    message_ts = mapping.get("message_ts")
+    if not isinstance(message_ts, str) or not message_ts:
+        return
+    message = await fetch_slack_thread_message_by_ts(
+        payload["channel_id"], payload["thread_ts"], message_ts
+    )
+    if message is None:
+        return
+    text = message.get("text")
+    blocks = message.get("blocks")
+    if not isinstance(text, str) or (blocks is not None and not isinstance(blocks, list)):
+        return
+    updated_text, updated_blocks = with_slack_pending_session_cost(text, blocks, clear=clear)
+    if updated_text == text and updated_blocks == blocks:
+        return
+    updated, error = await update_slack_message(
+        payload["channel_id"], message_ts, updated_text, blocks=updated_blocks
+    )
+    if not updated:
+        logger.warning("Could not update pending cost label", extra={"slack_error": error})
+
+
+async def _clear_pending_cost(state: Mapping[str, object], client: LangGraphClient) -> None:
+    try:
+        payload = _payload(state, 0)
+        if payload is not None:
+            await _mark_slack_reply_cost_pending(payload, client, clear=True)
+    except Exception:
+        logger.warning("Could not clear pending cost label", exc_info=True)
 
 
 async def schedule_session_cost_refresh(
@@ -85,6 +130,15 @@ async def schedule_session_cost_refresh(
     except Exception:  # noqa: BLE001
         logger.warning("Could not schedule session-cost refresh", exc_info=True)
         return False
+    if attempt == 0:
+        try:
+            await _mark_slack_reply_cost_pending(payload, client)
+        except Exception:  # noqa: BLE001
+            logger.warning(
+                "Could not mark Slack reply cost pending",
+                extra={"run_id": payload["run_id"]},
+                exc_info=True,
+            )
     return True
 
 
@@ -120,8 +174,11 @@ async def _refresh_once(
         return "unavailable", "run has no Slack response"
 
     try:
+        cost_kwargs: dict[str, Any] = {}
+        if started_at := payload.get("invocation_started_at"):
+            cost_kwargs["lookup_start"] = started_at
         snapshot = await get_langsmith_thread_cost(
-            payload["agent_thread_id"], payload["invocation_id"]
+            payload["agent_thread_id"], payload["invocation_id"], **cost_kwargs
         )
     except LangSmithCostUnavailable as exc:
         return "unavailable", str(exc)
@@ -163,6 +220,7 @@ async def run_session_cost_refresh(
         raw_attempt if isinstance(raw_attempt, int) and not isinstance(raw_attempt, bool) else -1
     )
     if attempt < 0 or attempt >= len(_RETRY_DELAYS_SECONDS):
+        await _clear_pending_cost(state, client)
         return {"status": "unavailable", "reason": "invalid attempt"}
 
     try:
@@ -172,6 +230,7 @@ async def run_session_cost_refresh(
         status, reason = "pending", "refresh attempt failed"
     if status != "pending":
         if status == "unavailable":
+            await _clear_pending_cost(state, client)
             logger.info(
                 "Session-cost refresh unavailable for run %s: %s", state.get("run_id"), reason
             )
@@ -179,8 +238,11 @@ async def run_session_cost_refresh(
     next_attempt = attempt + 1
     if next_attempt >= len(_RETRY_DELAYS_SECONDS):
         logger.info("Session-cost refresh exhausted for run %s: %s", state.get("run_id"), reason)
+        await _clear_pending_cost(state, client)
         return {"status": "exhausted", "reason": reason}
     scheduled = await schedule_session_cost_refresh(state, attempt=next_attempt, client=client)
+    if not scheduled:
+        await _clear_pending_cost(state, client)
     return {
         "status": "retry_scheduled" if scheduled else "unavailable",
         "reason": reason,
