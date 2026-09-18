@@ -177,7 +177,9 @@ class BackendSupervisor {
   }
 
   start() {
-    if (this.ready && this.child && !this.failure) return this.ready;
+    // A start still awaiting its port or tracing settings has no child yet;
+    // callers in that window must join it rather than spawn a second backend.
+    if (this.ready && !this.failure) return this.ready;
     this.ready = this.startOnce().catch((error) => {
       this.ready = null;
       throw error;
@@ -208,6 +210,7 @@ class BackendSupervisor {
         ...process.env,
         ...this.options.env,
         ...this.gatewayEnvironment(),
+        ...(await this.options.tracingEnv?.()),
         ...this.options.providerEnv?.(),
         OPEN_SWE_LOCAL_AUTH_TOKEN: this.token,
         OPEN_SWE_LOCAL_PROJECTS_FILE: this.options.projectsFile,
@@ -217,6 +220,10 @@ class BackendSupervisor {
               OPEN_SWE_LOCAL_ARTIFACTS_DIR: path.join(
                 this.options.stateDir,
                 "artifacts",
+              ),
+              OPEN_SWE_LOCAL_CHECKPOINT_DB: path.join(
+                this.options.stateDir,
+                "checkpoints.sqlite",
               ),
             }
           : {}),

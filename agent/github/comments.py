@@ -5,7 +5,8 @@ import hashlib
 import hmac
 import logging
 import re
-from typing import Any
+from collections.abc import Collection
+from typing import Any, Literal
 
 import httpx2
 
@@ -19,7 +20,9 @@ logger = logging.getLogger(__name__)
 __all__ = [
     "GitHubAuthError",
     "OPEN_SWE_TAGS",
+    "PrState",
     "build_pr_prompt",
+    "derive_pr_state",
     "describe_open_swe_tags",
     "extract_pr_context",
     "fetch_github_thread_participants",
@@ -45,6 +48,8 @@ def _load_open_swe_tags() -> tuple[str, ...]:
 
 
 OPEN_SWE_TAGS = _load_open_swe_tags()
+
+PrState = Literal["open", "draft", "merged", "closed"]
 
 # Deployments sharing a workspace each own a distinct handle, so a tag must not
 # match when it is only a prefix of a longer one (@openswe vs @openswe-preview).
@@ -103,7 +108,7 @@ def verify_github_signature(body: bytes, signature: str, *, secret: str) -> bool
     return hmac.compare_digest(expected, signature)
 
 
-def derive_pr_state(*, state: str | None, merged: bool, draft: bool) -> str:
+def derive_pr_state(*, state: str | None, merged: bool, draft: bool) -> PrState:
     """Map GitHub PR fields to the dashboard's pr_state vocabulary."""
     if merged:
         return "merged"
@@ -128,12 +133,16 @@ def sanitize_github_comment_body(body: str) -> str:
     return sanitized
 
 
-def format_github_comment_body_for_prompt(author: str, body: str) -> str:
-    """Format a GitHub comment body for prompt inclusion."""
-    sanitized_body = sanitize_github_comment_body(body)
-    from agent.dashboard.user_mappings import is_login_mapped
+def format_github_comment_body_for_prompt(
+    author: str, body: str, *, trusted: Collection[str]
+) -> str:
+    """Format a GitHub comment body for prompt inclusion.
 
-    if is_login_mapped(author):
+    ``trusted`` is the lowercased GitHub logins of known Open SWE users; anyone
+    else's words are fenced as untrusted.
+    """
+    sanitized_body = sanitize_github_comment_body(body)
+    if author.strip().lower() in trusted:
         return sanitized_body
 
     return (
@@ -341,7 +350,12 @@ async def fetch_issue_comments(
 
 
 async def fetch_pr_comments_since_last_tag(
-    repo_config: dict[str, str], pr_number: int, *, token: str
+    repo_config: dict[str, str],
+    pr_number: int,
+    *,
+    token: str,
+    event_comment: dict[str, Any] | None = None,
+    authorized_login: str | None = None,
 ) -> list[dict[str, Any]]:
     """Fetch all PR comments/reviews since the last @open-swe tag.
 
@@ -408,6 +422,7 @@ async def fetch_pr_comments_since_last_tag(
                 "created_at": c.get("created_at", ""),
                 "type": "review_comment",
                 "comment_id": c.get("id"),
+                "review_id": c.get("pull_request_review_id"),
                 "path": c.get("path", ""),
                 "line": c.get("line") or c.get("original_line"),
             }
@@ -426,8 +441,33 @@ async def fetch_pr_comments_since_last_tag(
             }
         )
 
+    if event_comment is not None:
+        event_at = event_comment.get("event_at") or event_comment["created_at"]
+        all_comments = [
+            c
+            for c in all_comments
+            if (c["type"], c.get("comment_id"))
+            != (event_comment["type"], event_comment["comment_id"])
+            and (
+                c.get("created_at", "") < event_at
+                or (
+                    event_comment["type"] == "review"
+                    and c.get("review_id") == event_comment["comment_id"]
+                )
+                or (
+                    c["type"] == event_comment["type"]
+                    and c.get("created_at", "") == event_at
+                    and c.get("comment_id", 0) < event_comment["comment_id"]
+                )
+            )
+        ]
+        all_comments.append(event_comment)
+
+    if authorized_login is not None:
+        all_comments = [c for c in all_comments if c["author"].lower() == authorized_login.lower()]
+
     # Sort all comments chronologically
-    all_comments.sort(key=lambda c: c.get("created_at", ""))
+    all_comments.sort(key=lambda c: c.get("event_at") or c.get("created_at", ""))
 
     tag_indices = [
         i for i, comment in enumerate(all_comments) if mentions_open_swe(comment.get("body"))
@@ -513,12 +553,14 @@ def build_pr_prompt(
     comments: list[dict[str, Any]],
     pr_url: str,
     repo_config: dict[str, str] | None = None,
+    *,
+    trusted: Collection[str],
 ) -> str:
     """Format PR comments into a human message for the agent."""
     lines: list[str] = []
     for c in comments:
         author = c.get("author", "unknown")
-        body = format_github_comment_body_for_prompt(author, c.get("body", ""))
+        body = format_github_comment_body_for_prompt(author, c.get("body", ""), trusted=trusted)
         if c.get("type") == "review_comment":
             path = c.get("path", "")
             line = c.get("line", "")

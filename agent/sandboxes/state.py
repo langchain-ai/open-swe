@@ -48,6 +48,7 @@ class SandboxUnreachableError(RuntimeError):
 
 
 _SYNC_UNSUPPORTED = "SandboxBackendProxy is async-only; use the a-prefixed method instead."
+_DEFAULT_EXECUTE_TIMEOUT_SECONDS = 300
 
 
 class SandboxBackendProxy(BaseSandbox):
@@ -178,6 +179,7 @@ class SandboxBackendProxy(BaseSandbox):
         async with self._get_lock():
             if self._startup_task is startup_task:
                 self._backend = unwrap_sandbox_backend(sandbox_backend)
+                remember_connection(self._backend)
                 self._startup_task = None
                 SANDBOX_BACKENDS[self._thread_id] = self
             backend = self._backend
@@ -271,7 +273,8 @@ class SandboxBackendProxy(BaseSandbox):
         raise NotImplementedError(_SYNC_UNSUPPORTED)
 
     async def aexecute(self, command: str, *, timeout: int | None = None) -> ExecuteResponse:
-        return await (await self._aget_backend()).aexecute(command, timeout=timeout)
+        effective_timeout = timeout if timeout is not None else _DEFAULT_EXECUTE_TIMEOUT_SECONDS
+        return await (await self._aget_backend()).aexecute(command, timeout=effective_timeout)
 
     def execute_with_offload(
         self,
@@ -294,17 +297,19 @@ class SandboxBackendProxy(BaseSandbox):
         timeout: int | None = None,  # noqa: ASYNC109 - forwarded to backend, not an asyncio contract
     ) -> ExecuteOffloadResult:
         backend = await self._aget_backend()
+        effective_timeout = timeout if timeout is not None else _DEFAULT_EXECUTE_TIMEOUT_SECONDS
         offload = getattr(backend, "aexecute_with_offload", None)
         if offload is None:
             return ExecuteOffloadResult(
-                offloaded=False, response=await self._aplain(backend, command, timeout)
+                offloaded=False,
+                response=await self._aplain(backend, command, effective_timeout),
             )
         return await offload(
             command,
             capture_path,
             max_inline_bytes=max_inline_bytes,
             max_capture_bytes=max_capture_bytes,
-            timeout=timeout,
+            timeout=effective_timeout,
         )
 
     @staticmethod
@@ -318,6 +323,14 @@ class SandboxBackendProxy(BaseSandbox):
 
 # Thread ID -> stable SandboxBackendProxy, shared between server.py and middleware.
 SANDBOX_BACKENDS: dict[str, SandboxBackendProxy] = {}
+
+# Sandbox ID -> live connection to it. Keyed by sandbox rather than thread so a
+# thread rebound on another worker can never be handed the box it left.
+SANDBOX_CONNECTIONS: dict[str, SandboxBackendProtocol] = {}
+
+
+def remember_connection(sandbox_backend: SandboxBackendProtocol) -> None:
+    SANDBOX_CONNECTIONS[sandbox_backend.id] = sandbox_backend
 
 
 def unwrap_sandbox_backend(sandbox_backend: SandboxBackendProtocol) -> SandboxBackendProtocol:
@@ -335,6 +348,10 @@ def set_sandbox_backend(
         return sandbox_backend
 
     existing = SANDBOX_BACKENDS.get(thread_id)
+    previous = existing.current if existing is not None and existing.has_backend else None
+    if previous is not None and previous.id != sandbox_backend.id:
+        SANDBOX_CONNECTIONS.pop(previous.id, None)
+    remember_connection(sandbox_backend)
     if isinstance(existing, SandboxBackendProxy):
         existing.replace_backend(sandbox_backend)
         return existing
@@ -375,13 +392,9 @@ async def get_sandbox_metadata(thread_id: str) -> dict[str, Any]:
             exc_info=True,
         )
 
-    try:
-        client = get_client()
-        thread = await client.threads.get(thread_id)
-    except Exception:
-        logger.exception("Failed to fetch live thread metadata for sandbox")
-        return {}
-
+    # A failed lookup must not read as "unbound": the caller would create a
+    # replacement and bind it over the thread's real sandbox.
+    thread = await get_client().threads.get(thread_id)
     metadata = thread.get("metadata", {}) if isinstance(thread, dict) else {}
     return metadata if isinstance(metadata, dict) else {}
 

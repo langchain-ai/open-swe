@@ -7,7 +7,7 @@ the repository over the GitHub API.
 
 PR context (diff, findings, overview) is seeded as virtual files under ``/pr/``
 into the ``files`` state channel by the dashboard chat proxy
-(``agent/dashboard/review_chat_api.py``); the built-in ``read_file``/``grep``
+(``agent/review/chat.py``); the built-in ``read_file``/``grep``
 tools operate over those. Repo coordinates and the reviewer thread id arrive in
 ``configurable``; a repo-scoped GitHub App token is resolved here so the
 GitHub-backed tools never receive a user credential.
@@ -38,11 +38,7 @@ from agent.dashboard.options import (
     gate_fable_model,
     model_supports_effort,
 )
-from agent.dashboard.team_settings import (
-    get_effective_gateway_enabled,
-    get_team_default_model,
-    get_team_fable_enabled,
-)
+from agent.dashboard.workspace_settings_cache import cached_workspace_settings
 from agent.github.app import get_github_app_installation_token
 from agent.middleware import (
     BasePrepareRunMiddleware,
@@ -70,7 +66,6 @@ from agent.tools import (
     search_repo_code,
     web_search,
 )
-from agent.utils import ttl_cache
 from agent.utils.deferred_model import make_deferred_error_model
 from agent.utils.model import DEFAULT_LLM_REASONING, make_model, provider_model_kwargs
 
@@ -107,22 +102,6 @@ def _chat_general_purpose_subagent() -> SubAgent:
 CHAT_PROMPT = load_prompt("chat/main.md")
 
 
-async def _cached_gateway_enabled() -> bool:
-    return await ttl_cache.cached(
-        "team:gateway-enabled",
-        60,
-        get_effective_gateway_enabled,
-    )
-
-
-async def _cached_team_chat_model() -> tuple[str, str]:
-    return await ttl_cache.cached(
-        "team-default-model:chat",
-        60,
-        lambda: get_team_default_model("chat"),
-    )
-
-
 def _make_model_or_defer(model_id: str, *, use_gateway: bool, **kwargs: Any) -> BaseChatModel:
     try:
         return make_model(model_id, use_gateway=use_gateway, **kwargs)
@@ -138,7 +117,7 @@ class PrepareChatRunMiddleware(BasePrepareRunMiddleware):
     def _prepare_config_fingerprint(self) -> object:
         cfg = RunConfig.from_config(self._config)
         return {
-            "prepare_run_id": cfg.prepare_run_id,
+            "invocation_id": cfg.invocation_id,
             "repo_owner": cfg.chat_repo_owner,
             "repo_name": cfg.chat_repo_name,
             "pr_number": cfg.chat_pr_number,
@@ -176,8 +155,8 @@ async def _resolve_chat_model(cfg: RunConfig) -> tuple[str, str]:
     canonical = canonical_model_pair(model_id, effort)
     if canonical is not None:
         return canonical
-    # Team review-chat default, which itself inherits the Agent default if unset.
-    return await _cached_team_chat_model()
+    # Workspace review-chat default, which itself inherits the Agent default if unset.
+    return (await cached_workspace_settings(cfg.workspace_slug)).default_model("chat")
 
 
 async def get_chat_agent(config: RunnableConfig) -> Pregel:
@@ -191,11 +170,10 @@ async def get_chat_agent(config: RunnableConfig) -> Pregel:
     if cfg.thread_id is None or not graph_loaded_for_execution(config):
         return create_deep_agent(system_prompt="", tools=[]).with_config(bindable_config(config))
 
+    settings = await cached_workspace_settings(cfg.workspace_slug)
     model_id, effort = await _resolve_chat_model(cfg)
-    model_id, effort = gate_fable_model(
-        model_id, effort, fable_enabled=await get_team_fable_enabled()
-    )
-    use_gateway = await _cached_gateway_enabled()
+    model_id, effort = gate_fable_model(model_id, effort, fable_enabled=settings.fable_enabled)
+    use_gateway = settings.effective_gateway_enabled
     model_kwargs = provider_model_kwargs(
         model_id,
         effort,

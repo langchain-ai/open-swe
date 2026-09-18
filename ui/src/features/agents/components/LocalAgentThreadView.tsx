@@ -1,4 +1,11 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react"
 import { useQueryClient } from "@tanstack/react-query"
 import { CircleAlert, X } from "lucide-react"
 import { Link } from "@tanstack/react-router"
@@ -54,6 +61,11 @@ import { messageArrivalTimestamp } from "@/features/agents/lib/messageTimestamps
 import { useIsMobile } from "@/lib/useIsMobile"
 import { useSession } from "@/lib/session"
 import { useAgentStream } from "@/features/agents/lib/stream/AgentStreamProvider"
+import {
+  threadHydrated,
+  threadHydrationFailed,
+  threadTranscriptPainted,
+} from "@/lib/perf/threadLoad"
 
 function skillFiles(skills: DesktopLocalPromptInput["skills"]) {
   return Object.fromEntries(
@@ -86,10 +98,12 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
   } = useModelOptions()
   const [sessionSelection, setSessionSelection] = useState<{
     sessionId: string
-    selection: ModelSelection | null
-  }>({ sessionId, selection: null })
+    selection: ModelSelection | null | undefined
+  }>({ sessionId, selection: undefined })
   const selection =
-    sessionSelection.sessionId === sessionId ? sessionSelection.selection : null
+    sessionSelection.sessionId === sessionId
+      ? sessionSelection.selection
+      : undefined
   const setSelection = (next: ModelSelection | null) =>
     setSessionSelection({ sessionId, selection: next })
   const threadModelId = thread?.modelId
@@ -103,7 +117,8 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
       ? { modelId: threadModelId, effort: threadEffort }
       : null
   }, [models, threadEffort, threadModelId])
-  const activeSelection = selection ?? threadSelection ?? defaultSelection
+  const activeSelection =
+    selection === undefined ? (threadSelection ?? defaultSelection) : selection
   const initialPromptRef = useRef<string | null>(null)
   const scrollControlRef = useRef<MessagesScrollControl | null>(null)
   const streamRef = useRef(stream)
@@ -225,6 +240,34 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
       } satisfies Message,
     ]
   }, [sessionId, stream.messages, stream.toolCalls, thread])
+
+  // A rejected state fetch also clears `isThreadLoading`, so abandon the span
+  // before the hooks below could record it as a fast, empty load.
+  useEffect(() => {
+    let active = true
+    stream.hydrationPromise.catch(() => {
+      if (active) threadHydrationFailed(sessionId)
+    })
+    return () => {
+      active = false
+    }
+  }, [sessionId, stream.hydrationPromise])
+  useEffect(() => {
+    if (!stream.isThreadLoading) threadHydrated(sessionId)
+  }, [sessionId, stream.isThreadLoading])
+  // The transcript's first frame: one rAF after the commit that replaced the
+  // hydration placeholder. A commit before the frame fires cancels and
+  // reschedules it, so the frame recorded is the one that reached the screen.
+  const paintedSessionId = useRef<string | null>(null)
+  useLayoutEffect(() => {
+    if (stream.isThreadLoading || paintedSessionId.current === sessionId) return
+    const chunks = messages.reduce((sum, m) => sum + m.chunks.length, 0)
+    const frame = requestAnimationFrame(() => {
+      paintedSessionId.current = sessionId
+      threadTranscriptPainted(sessionId, { messages: messages.length, chunks })
+    })
+    return () => cancelAnimationFrame(frame)
+  }, [messages, sessionId, stream.isThreadLoading])
 
   const rememberSelection = useCallback(
     async (model?: ModelSelection | null) => {

@@ -10,19 +10,48 @@ import type { ReactNode } from "react"
 
 interface StreamOptions {
   threadId: string | null
+  maxReconnectAttempts: number
+  reconnectDelayMs: (attempt: number) => number
+  onReconnect: (options: { attempt: number; delayMs: number }) => void
+  onConnected: () => void
   onThreadId: (threadId: string) => void
   onCreated: () => void
-  onCompleted: () => void
+  onCompleted: (info: { reason: "success" }) => void
+}
+
+interface StreamHandle {
+  threadId: string | null
+  isLoading: boolean
+  getThread: () => { onError: (listener: (error: Error) => void) => () => void }
 }
 
 const mocks = vi.hoisted(() => ({
   streams: [] as Array<StreamOptions>,
+  threadErrors: [] as Array<(error: Error) => void>,
+  onEvent: (_event: unknown) => {},
 }))
 
 vi.mock("@langchain/react", () => ({
+  useChannelEffect: (
+    _stream: unknown,
+    channels: Array<string>,
+    options: { onEvent: (event: unknown) => void }
+  ) => {
+    // The provider also subscribes lifecycle/messages for perf tracking.
+    if (channels.includes("custom")) mocks.onEvent = options.onEvent
+  },
   useStream: (options: StreamOptions) => {
     mocks.streams.push(options)
-    return { threadId: options.threadId, isLoading: false }
+    return {
+      threadId: options.threadId,
+      isLoading: false,
+      getThread: () => ({
+        onError: (listener: (error: Error) => void) => {
+          mocks.threadErrors.push(listener)
+          return () => {}
+        },
+      }),
+    } satisfies StreamHandle
   },
 }))
 
@@ -37,6 +66,12 @@ function Probe() {
   return <output>{stream.threadId ?? "new"}</output>
 }
 
+function OffloadingProbe() {
+  return (
+    <output>{useAgentStream().isOffloading ? "offloading" : "idle"}</output>
+  )
+}
+
 function wrapper(children: ReactNode) {
   const client = new QueryClient()
   return <QueryClientProvider client={client}>{children}</QueryClientProvider>
@@ -44,6 +79,7 @@ function wrapper(children: ReactNode) {
 
 beforeEach(() => {
   mocks.streams.length = 0
+  mocks.threadErrors.length = 0
   useStreamPool.setState({
     entries: [],
     handles: {},
@@ -55,9 +91,106 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup()
+  vi.useRealTimers()
 })
 
 describe("AgentStreamProvider", () => {
+  it("tracks only root offloading events and clears on completion", () => {
+    const view = render(
+      wrapper(
+        <AgentStreamProvider threadId="one">
+          <OffloadingProbe />
+        </AgentStreamProvider>
+      )
+    )
+    const emit = (status: string, namespace: string[] = []) =>
+      act(() =>
+        mocks.onEvent({
+          method: "custom",
+          params: {
+            namespace,
+            data: {
+              payload: {
+                type: "conversation_offloading",
+                status,
+                trigger: "manual",
+              },
+            },
+          },
+        })
+      )
+    emit("started", ["subagent:one"])
+    expect(view.container.textContent).toBe("idle")
+    for (const status of ["completed", "skipped", "failed"]) {
+      emit("started")
+      expect(view.container.textContent).toBe("offloading")
+      emit(status)
+      expect(view.container.textContent).toBe("idle")
+    }
+    emit("started")
+    act(() => mocks.streams.at(-1)?.onCompleted({ reason: "success" }))
+    expect(view.container.textContent).toBe("idle")
+  })
+
+  it("clears reconnect state when the stream gives up", () => {
+    vi.useFakeTimers()
+    render(
+      wrapper(
+        <AgentStreamProvider threadId="one">
+          <Probe />
+        </AgentStreamProvider>
+      )
+    )
+    const stream = mocks.streams[0]
+    if (!stream) throw new Error("stream was not mounted")
+
+    act(() => stream.onReconnect({ attempt: 12, delayMs: 300_000 }))
+    act(() => vi.advanceTimersByTime(3_000))
+    expect(useStreamPool.getState().entries[0]?.connection.status).toBe(
+      "reconnecting"
+    )
+
+    act(() => mocks.threadErrors[0]?.(new Error("stream closed")))
+    expect(useStreamPool.getState().entries[0]?.connection).toEqual({
+      status: "live",
+    })
+  })
+
+  it("waits before surfacing reconnect attempts and clears brief interruptions", () => {
+    vi.useFakeTimers()
+    render(
+      wrapper(
+        <AgentStreamProvider threadId="one">
+          <Probe />
+        </AgentStreamProvider>
+      )
+    )
+    const stream = mocks.streams[0]
+    if (!stream) throw new Error("stream was not mounted")
+
+    expect(stream.maxReconnectAttempts).toBe(12)
+    expect(stream.reconnectDelayMs(12)).toBe(300_000)
+    act(() => stream.onReconnect({ attempt: 1, delayMs: 1_000 }))
+    act(() => vi.advanceTimersByTime(2_000))
+    act(() => stream.onConnected())
+    act(() => vi.advanceTimersByTime(1_000))
+    expect(useStreamPool.getState().entries[0]?.connection).toEqual({
+      status: "live",
+    })
+
+    act(() => stream.onReconnect({ attempt: 2, delayMs: 2_000 }))
+    act(() => vi.advanceTimersByTime(3_000))
+    expect(useStreamPool.getState().entries[0]?.connection).toMatchObject({
+      status: "reconnecting",
+      attempt: 2,
+    })
+
+    act(() => stream.onConnected())
+    expect(useStreamPool.getState().entries[0]?.connection).toEqual({
+      status: "live",
+    })
+  })
+
   it("serves the stream bound to the requested thread", () => {
     const view = render(
       wrapper(
@@ -77,24 +210,6 @@ describe("AgentStreamProvider", () => {
     )
     expect(view.container.textContent).toBe("two")
     expect(useStreamPool.getState().entries).toHaveLength(2)
-  })
-
-  it("remounts a kicked thread's stream while keeping it served", () => {
-    const view = render(
-      wrapper(
-        <AgentStreamProvider threadId="one">
-          <Probe />
-        </AgentStreamProvider>
-      )
-    )
-    expect(mocks.streams).toHaveLength(1)
-
-    act(() => useStreamPool.getState().kick("cloud", "one"))
-
-    expect(mocks.streams).toHaveLength(2)
-    expect(mocks.streams[1]?.threadId).toBe("one")
-    expect(view.container.textContent).toBe("one")
-    expect(useStreamPool.getState().entries).toHaveLength(1)
   })
 
   it("announces a lazy cloud thread only once the server accepts its run", () => {

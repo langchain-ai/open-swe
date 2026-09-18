@@ -1,6 +1,6 @@
 // Read per request, not at build time: which backend an instance fronts is a
 // property of the deployment, so it lives in the pod's environment.
-function backendOrigin(): string {
+export function backendOrigin(): string {
   const configured = (process.env.DASHBOARD_API_URL ?? "").replace(/\/$/, "")
   if (!configured) {
     throw new Error(
@@ -11,7 +11,7 @@ function backendOrigin(): string {
   return configured
 }
 
-const HOP_BY_HOP = new Set([
+export const HOP_BY_HOP = new Set([
   "connection",
   "keep-alive",
   "proxy-authenticate",
@@ -25,13 +25,13 @@ const HOP_BY_HOP = new Set([
 // `fetch` hands back a decoded body while leaving the upstream's encoding and
 // length headers in place, so forwarding those would describe bytes the client
 // never receives.
-const REFRAMED = new Set(["content-encoding", "content-length"])
+export const REFRAMED = new Set(["content-encoding", "content-length"])
 
 // undici rejects a request that carries `transfer-encoding` outright; it frames
 // the streamed body itself. `content-length` stays: with it undici sends a
 // fixed-length body, without it a chunked one, and the backend must see the
 // same framing the client used.
-function requestHeaders(incoming: Headers): Headers {
+export function requestHeaders(incoming: Headers): Headers {
   const headers = new Headers()
   for (const [name, value] of incoming) {
     if (HOP_BY_HOP.has(name)) {

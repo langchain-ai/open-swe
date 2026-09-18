@@ -13,7 +13,12 @@ import type { DesktopCommandId } from "@/desktop"
 import { AppCommandPalette } from "@/components/AppCommandPalette"
 import { AppShortcutReference } from "@/components/AppShortcutReference"
 import { useSession } from "@/lib/session"
-import { eventMatchesShortcut, shouldIgnoreHotkey } from "@/lib/hotkeys"
+import {
+  eventMatchesShortcut,
+  isTypingContext,
+  isTypingSafeShortcut,
+  shouldIgnoreHotkey,
+} from "@/lib/hotkeys"
 import { useTheme } from "@/lib/theme"
 
 export interface AppCommand {
@@ -112,17 +117,6 @@ export function AppCommandProvider({
         run: () => void navigate({ to: "/agents" }),
       },
       {
-        id: "open-kanban",
-        label: "Open Kanban",
-        aliases: ["board", "all threads"],
-        group: "Navigation",
-        run: () =>
-          void navigate({
-            to: "/agents/threads",
-            search: { page: 1, layout: "board", group: "focus" },
-          }),
-      },
-      {
         id: "open-skills",
         label: "Open skills",
         group: "Navigation",
@@ -209,6 +203,11 @@ export function AppCommandProvider({
           )
       )
       if (!command?.run) return
+      if (
+        !command.shortcuts?.some(isTypingSafeShortcut) &&
+        isTypingContext(event.target)
+      )
+        return
       event.preventDefault()
       void command.run()
     }

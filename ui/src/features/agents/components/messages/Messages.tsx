@@ -68,6 +68,8 @@ export const Messages = memo(function MessagesComponent({
   streamIsLoading,
   isThinking,
   settingUpSandbox,
+  isOffloading = false,
+  reconnectLabel = null,
   project,
   contentWidthClass = "max-w-[42rem]",
   contentPaddingClass = "px-6",
@@ -147,7 +149,7 @@ export const Messages = memo(function MessagesComponent({
                 <AgentTurn
                   key={message.id}
                   message={message}
-                  isStreaming={messageIsStreaming}
+                  isStreaming={messageIsStreaming && !isOffloading}
                   isMarkdownLive={messageIsMarkdownLive}
                   projectPath={projectPath}
                   activityLabel={messageIsStreaming ? activityLabel : undefined}
@@ -171,15 +173,22 @@ export const Messages = memo(function MessagesComponent({
             {footer}
             <ThinkingSpinner
               isActive={
-                !!(isThinking || streamIsLoading || isStreaming) &&
-                !(
-                  isStreaming &&
-                  lastAgentIndex >= 0 &&
-                  lastAgentIndex === visibleMessages.length - 1
-                )
+                !!reconnectLabel ||
+                isOffloading ||
+                (!!(isThinking || streamIsLoading || isStreaming) &&
+                  !(
+                    isStreaming &&
+                    lastAgentIndex >= 0 &&
+                    lastAgentIndex === visibleMessages.length - 1
+                  ))
               }
-              settingUpSandbox={settingUpSandbox}
-              label={activityLabel}
+              settingUpSandbox={
+                settingUpSandbox && !isOffloading && !reconnectLabel
+              }
+              label={
+                reconnectLabel ??
+                (isOffloading ? "Offloading conversation..." : activityLabel)
+              }
             />
           </div>
         </div>

@@ -4,12 +4,21 @@ type PublicEnv = Record<string, string | boolean | undefined>
 type RumClient = {
   init: (configuration: RumInitConfiguration) => void
   getInternalContext: () => { session_id?: string } | undefined
-  addAction?: (name: string, context?: Record<string, unknown>) => void
+  addDurationVital?: (
+    name: string,
+    options: {
+      /** Epoch milliseconds. */
+      startTime: number
+      duration: number
+      context?: Record<string, string | number | boolean | null>
+    }
+  ) => void
+  setGlobalContextProperty?: (key: string, value: string) => void
 }
 type RumLoader = () => Promise<RumClient>
 
 let initializedRum: RumClient | undefined
-let initializedSite = "datadoghq.com"
+let initializedSite = "us5.datadoghq.com"
 const initializationListeners = new Set<() => void>()
 
 function envString(env: PublicEnv, name: string): string | undefined {
@@ -43,16 +52,12 @@ export function getDatadogSessionLink(): string | undefined {
   return `${datadogAppOrigin(initializedSite)}/rum/explorer?query=${query}&tab=session`
 }
 
-/** Record a custom RUM action; a no-op until RUM is initialized. */
-export function trackDatadogAction(
-  name: string,
-  context?: Record<string, unknown>
-): void {
-  initializedRum?.addAction?.(name, context)
-}
-
 export function isDatadogRumInitialized(): boolean {
   return initializedRum !== undefined
+}
+
+export function getDatadogRum(): RumClient | undefined {
+  return initializedRum
 }
 
 export function subscribeToDatadogInitialization(
@@ -73,7 +78,7 @@ function templateDashboardPath(pathname: string): string {
     return "/agents/:threadId/plan"
   if (
     /^\/agents\/[^/]+\/?$/.test(pathname) &&
-    !/^\/agents\/(automations|environments|instructions|local|reviews|sandbox|skills|threads)\/?$/.test(
+    !/^\/agents\/(automations|instructions|local|reviews|sandbox|skills|threads|workspaces)\/?$/.test(
       pathname
     )
   )
@@ -162,7 +167,7 @@ export async function initializeDatadogRum(
   const rum = await loadRum().catch(() => undefined)
   if (!rum) return
 
-  const site = envString(env, "VITE_DATADOG_SITE") ?? "datadoghq.com"
+  const site = envString(env, "VITE_DATADOG_SITE") ?? "us5.datadoghq.com"
 
   if (typeof window !== "undefined") {
     const globalRum = window as Window & { DD_RUM?: RumClient }

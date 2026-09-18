@@ -12,6 +12,9 @@
     "path": "agent.local_auth:auth",
     "disable_studio_auth": true
   },
+  "checkpointer": {
+    "path": "agent.local_checkpointer.create_checkpointer"
+  },
   "http": {
     "disable_ui": true
   }

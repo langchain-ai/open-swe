@@ -180,8 +180,6 @@ async def test_stop_reaction_on_mapped_reply_interrupts_all_runs_and_dispatches_
     assert dispatched[0]["configurable"]["github_login"] == "owner"
     assert dispatched[0]["configurable"]["stop_summary"] is True
     assert dispatched[0]["configurable"]["slack_thread"]["triggering_user_id"] == "UOWNER"
-    assert "first and only user-facing action" in dispatched[0]["content"]
-    assert "active runs were interrupted" in dispatched[0]["content"]
     thread_mapping = client.store.items[(("slack_run_map", "C123"), "thread:1.000")]
     assert thread_mapping["value"]["run_id"] == "run-summary"
 
@@ -198,7 +196,6 @@ async def test_stop_reaction_on_root_dispatches_no_active_run_summary(
     assert claimed == ["EvRoot"]
     assert client.runs.cancelled == []
     assert dispatched[0]["thread_id"] == thread_id
-    assert "No active run was present" in dispatched[0]["content"]
 
 
 async def test_stop_reaction_from_non_owner_is_allowed(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -342,3 +339,15 @@ async def test_failed_queue_cleanup_does_not_dispatch_summary(
 
     assert dispatched == []
     assert client.threads.updates == []
+
+
+def test_summary_configurable_carries_new_workspace_key() -> None:
+    configurable = slack_stop._summary_configurable({"workspace": "oss"}, {})
+    assert configurable["workspace"] == "oss"
+    assert configurable["environment"] == "oss"
+
+
+def test_summary_configurable_falls_back_to_legacy_environment_key() -> None:
+    configurable = slack_stop._summary_configurable({"environment": "old"}, {})
+    assert configurable["workspace"] == "old"
+    assert configurable["environment"] == "old"

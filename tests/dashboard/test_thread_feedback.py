@@ -7,8 +7,9 @@ import pytest
 from fastapi import FastAPI
 
 from agent import thread_feedback
-from agent.dashboard import feedback, routes
 from agent.dashboard.oauth import require_session
+from agent.threads import feedback
+from agent.threads.routes import router as threads_router
 
 
 @pytest.fixture
@@ -30,7 +31,7 @@ async def api(monkeypatch, fake_store):
     monkeypatch.setattr(feedback, "langgraph_client", lambda: None)
     await thread_feedback.feedback_store().put("t1", thread_feedback.Feedback(status="ready"))
     app = FastAPI()
-    app.include_router(routes.router)
+    app.include_router(threads_router, prefix="/dashboard/api")
     app.dependency_overrides[require_session] = lambda: session
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=app),
@@ -77,7 +78,7 @@ async def test_only_verified_initiator_gets_feedback(api, monkeypatch, identity,
         api.metadata["participant_logins"] = {"owner": True}
         if identity == "slack_initiator":
             api.metadata["source_context"] = {"slack_thread": {"triggering_user_id": "U1"}}
-            monkeypatch.setattr(feedback, "login_for_slack_id", AsyncMock(return_value="owner"))
+            monkeypatch.setattr(feedback.User, "login_for_slack", AsyncMock(return_value="owner"))
     visible = await api.client.get("/dashboard/api/threads/t1/feedback")
     submitted = await api.client.post("/dashboard/api/threads/t1/feedback", json=payload)
     assert visible.json() == {
@@ -86,6 +87,17 @@ async def test_only_verified_initiator_gets_feedback(api, monkeypatch, identity,
         "comment": "",
     }
     assert submitted.status_code == (200 if identity == "slack_initiator" else 403)
+
+
+async def test_private_thread_owner_can_give_feedback(api):
+    api.metadata.update({"visibility": "private", "owner_login": "owner"})
+    visible = await api.client.get("/dashboard/api/threads/t1/feedback")
+    assert visible.json()["status"] == "ready"
+    submitted = await api.client.post("/dashboard/api/threads/t1/feedback", json={"rating": "good"})
+    assert submitted.status_code == 200
+
+    api.session["sub"] = "other"
+    assert (await api.client.get("/dashboard/api/threads/t1/feedback")).status_code == 404
 
 
 @pytest.mark.parametrize(

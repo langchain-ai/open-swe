@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 from agent.config import ENV, Registry
+from agent.run_config import RunConfig
 
 
 def test_current_name_wins_over_alias(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -55,10 +56,12 @@ def test_typed_getters(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("DEBUG_TRACEMALLOC_FRAMES", "40")
     monkeypatch.setenv("LANGSMITH_GATEWAY_ENABLED", "yes")
     monkeypatch.setenv("ALLOWED_GITHUB_ORGS", " acme, ,widgets ,")
+    monkeypatch.setenv("ALLOWED_GITHUB_USERS", " alice, ,bob ,")
 
     assert ENV.DEBUG_TRACEMALLOC_FRAMES.get_int(25) == 40
     assert ENV.LANGSMITH_GATEWAY_ENABLED.get_bool() is True
     assert ENV.ALLOWED_GITHUB_ORGS.get_list() == ["acme", "widgets"]
+    assert ENV.ALLOWED_GITHUB_USERS.get_list() == ["alice", "bob"]
 
     monkeypatch.setenv("LANGSMITH_GATEWAY_ENABLED", "off")
     assert ENV.LANGSMITH_GATEWAY_ENABLED.get_bool(default=True) is False
@@ -138,3 +141,10 @@ def test_no_configuration_is_read_outside_the_registry() -> None:
         if pattern.search(line)
     ]
     assert offenders == []
+
+
+def test_workspace_slug_prefers_workspace_and_falls_back_to_environment() -> None:
+    assert RunConfig(workspace="oss", environment="old").workspace_slug == "oss"
+    assert RunConfig(environment="old").workspace_slug == "old"
+    assert RunConfig(workspace="  ").workspace_slug is None
+    assert RunConfig().workspace_slug is None

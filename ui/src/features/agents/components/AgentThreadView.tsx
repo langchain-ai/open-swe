@@ -1,10 +1,19 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import {
+  Profiler,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react"
 import {
   ArrowUpRight,
   CircleAlert as CircleAlertIcon,
   GitMerge as GitMergeIcon,
 } from "lucide-react"
 import { IoLogoSlack } from "react-icons/io5"
+import { LoadError, useLoadTimedOut } from "@/components/LoadError"
 
 import type {
   AgentPullRequest,
@@ -19,6 +28,7 @@ import { AgentThreadHeader } from "@/features/agents/components/AgentThreadHeade
 import { SIBLING_COLUMN_MIN_WIDTH } from "@/features/agents/components/panel/RightPanelShell"
 import { AgentPromptBar } from "@/features/agents/components/AgentPromptBar"
 import { AgentComposerDock } from "@/features/agents/components/composer/AgentComposerDock"
+import { PullRequestPreviewProvider } from "@/features/agents/components/PullRequestPreview"
 import { ThreadPullRequests } from "@/features/agents/components/ThreadPullRequests"
 import { ThreadFeedbackCard } from "@/features/agents/components/ThreadFeedbackCard"
 import {
@@ -45,9 +55,19 @@ import { agentsApi } from "@/features/agents/lib/api"
 import { rejectPlan } from "@/lib/plan"
 import { useSession } from "@/lib/session"
 import { useIsMobile } from "@/lib/useIsMobile"
-import { cn } from "@/lib/utils"
 import { useAgentStream } from "@/features/agents/lib/stream/AgentStreamProvider"
-import { useReconcileStream } from "@/features/agents/lib/stream/useReconcileStream"
+import { useReconnectStatus } from "@/features/agents/lib/stream/useReconnectStatus"
+import {
+  runTranscriptBuilt,
+  runTranscriptCommitted,
+} from "@/lib/perf/streaming"
+import {
+  threadHydrated,
+  threadHydrationFailed,
+  threadTranscriptBuilt,
+  threadTranscriptPainted,
+} from "@/lib/perf/threadLoad"
+import { perfNow } from "@/lib/perf/trace"
 
 interface AgentThreadViewProps {
   thread: AgentThread
@@ -77,7 +97,7 @@ function CodeChannelLink({ url }: { url?: string | null }) {
       className="mb-2 flex w-fit items-center gap-1.5 rounded-md px-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
     >
       <IoLogoSlack className="size-3.5" />
-      Open code channel
+      Open in Slack
       <ArrowUpRight className="size-3" />
     </a>
   )
@@ -90,7 +110,6 @@ export function AgentThreadView({
   const renameThread = useRenameAgentThread()
   const sendMessage = useSubmitAgentMessage(thread.id)
   const stream = useAgentStream()
-  useReconcileStream(thread.id, thread.status === "running")
   const isMobile = useIsMobile()
   const skills = useAgentSkills()
   const session = useSession()
@@ -115,12 +134,23 @@ export function AgentThreadView({
     return { modelId: thread.model, effort: thread.effort }
   }, [models, thread.model, thread.effort])
   const [selection, setSelection] = useState<ModelSelection | null>(null)
-  const activeSelection = selection ?? threadSelection ?? defaultSelection
+  const [autoSelected, setAutoSelected] = useState(false)
+  const activeSelection = autoSelected
+    ? null
+    : (selection ??
+      (thread.modelSelection === "auto"
+        ? null
+        : (threadSelection ?? defaultSelection)))
+  const handleSelectionChange = (next: ModelSelection | null) => {
+    setAutoSelected(next === null)
+    setSelection(next)
+  }
   const [planMode, setPlanMode] = useState<boolean | null>(null)
   const [planFeedbackPending, setPlanFeedbackPending] =
     useState(autoFocusComposer)
   const scrollControlRef = useRef<MessagesScrollControl | null>(null)
   const activePlanMode = planMode ?? thread.planMode ?? false
+  const routed = stream.routed ?? null
   const activeModel = models.find(
     (model) => model.id === activeSelection?.modelId
   )
@@ -184,15 +214,18 @@ export function AgentThreadView({
     [handlePanelCollapsedChange]
   )
 
-  const baseMessages = useMemo<Array<Message>>(
-    () =>
-      streamMessagesToUi(
-        stream.messages,
-        stream.toolCalls,
-        messageArrivalTimestamp
-      ),
-    [stream.messages, stream.toolCalls]
-  )
+  const baseMessages = useMemo<Array<Message>>(() => {
+    const started = perfNow()
+    const built = streamMessagesToUi(
+      stream.messages,
+      stream.toolCalls,
+      messageArrivalTimestamp
+    )
+    const elapsed = perfNow() - started
+    threadTranscriptBuilt(thread.id, elapsed)
+    runTranscriptBuilt(thread.id, elapsed)
+    return built
+  }, [stream.messages, stream.toolCalls, thread.id])
 
   const isStreaming = thread.status === "running" || stream.isLoading
   const activeRun = useMemo(
@@ -218,33 +251,54 @@ export function AgentThreadView({
   const mentionPaths = useMemo(() => editedPaths(baseMessages), [baseMessages])
   const isThinking = stream.isLoading
   const settingUpSandbox = isThinking && baseMessages.length === 0
+  const reconnect = useReconnectStatus("cloud", thread.id)
   // The transcript hydrates from the SDK (`GET …/state` → `stream.messages`).
   // Show a loading state during that one-time fetch instead of the empty state.
   const isHydrating = stream.isThreadLoading && !hasMessages
+  const hydrationTimedOut = useLoadTimedOut(isHydrating)
   // A failed hydrate is indistinguishable from an empty thread in the snapshot,
   // so say so rather than claiming the thread has no messages. `stream.error`
   // also carries run failures, hence the dedicated hydration signal.
-  const [hydrateRejected, setHydrateRejected] = useState(false)
+  const [hydrateError, setHydrateError] = useState<unknown>(null)
   useEffect(() => {
     let active = true
     // oxlint-disable-next-line react/set-state-in-effect
-    setHydrateRejected(false)
-    stream.hydrationPromise.catch(() => {
-      if (active) setHydrateRejected(true)
+    setHydrateError(null)
+    stream.hydrationPromise.catch((error: unknown) => {
+      if (!active) return
+      setHydrateError(error)
+      threadHydrationFailed(thread.id)
     })
     return () => {
       active = false
     }
-  }, [stream.hydrationPromise])
-  const hydrationFailed = !isHydrating && !hasMessages && hydrateRejected
+  }, [stream.hydrationPromise, thread.id])
+  const hydrationFailed = !hasMessages && hydrateError !== null
+
+  useEffect(() => {
+    if (!stream.isThreadLoading) threadHydrated(thread.id)
+  }, [stream.isThreadLoading, thread.id])
+
+  // The transcript's first frame: one rAF after the commit that replaced the
+  // hydration placeholder. A commit before the frame fires cancels and
+  // reschedules it, so the frame recorded is the one that actually reached the
+  // screen; the ref is only set once it has.
+  const paintedThreadId = useRef<string | null>(null)
+  useLayoutEffect(() => {
+    if (isHydrating || paintedThreadId.current === thread.id) return
+    const messages = visibleMessages.length
+    const chunks = visibleMessages.reduce((sum, m) => sum + m.chunks.length, 0)
+    const frame = requestAnimationFrame(() => {
+      paintedThreadId.current = thread.id
+      threadTranscriptPainted(thread.id, { messages, chunks })
+    })
+    return () => cancelAnimationFrame(frame)
+  }, [isHydrating, thread.id, visibleMessages])
 
   return (
     <div className="flex min-w-0 flex-1">
       <div
-        className={cn(
-          "flex min-w-0 flex-1 flex-col",
-          thread.adminThread && "bg-destructive/4"
-        )}
+        className="flex min-w-0 flex-1 flex-col"
         style={isMobile ? undefined : { minWidth: SIBLING_COLUMN_MIN_WIDTH }}
       >
         <AgentThreadHeader
@@ -257,7 +311,7 @@ export function AgentThreadView({
           panelCollapsed={panelCollapsed}
           thread={thread}
         />
-        {thread.status === "error" && (
+        {thread.status === "error" && !reconnect.label && (
           <div className="mx-auto w-full max-w-3xl shrink-0 px-4 pt-3">
             <Alert variant="error" controlAlignment="first-line">
               <CircleAlertIcon />
@@ -297,7 +351,17 @@ export function AgentThreadView({
           </div>
         )}
         <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
-          {isHydrating ? (
+          {hydrationFailed || hydrationTimedOut ? (
+            <LoadError
+              title="Unable to load messages"
+              context={`Thread: ${thread.id}`}
+              error={
+                hydrateError !== null
+                  ? hydrateError
+                  : "Message loading took longer than 30 seconds."
+              }
+            />
+          ) : isHydrating ? (
             <div className="flex flex-1 items-center justify-center px-6">
               <img
                 src={`${import.meta.env.BASE_URL}logo-mark.png`}
@@ -306,53 +370,69 @@ export function AgentThreadView({
               />
             </div>
           ) : (
-            <Messages
-              messages={visibleMessages}
-              threadId={thread.id}
-              scrollKey={thread.id}
-              showPlanArtifact={
-                thread.planStatus === "ready" || thread.planStatus === "shared"
-              }
-              emptyState={
-                <div className="flex min-h-60 items-center justify-center">
-                  {hydrationFailed ? (
-                    <Alert variant="error" className="max-w-3xl">
-                      <CircleAlertIcon />
-                      <AlertDescription>
-                        <span>
-                          This thread&apos;s messages could not be loaded.
-                          Reload to try again.
-                        </span>
-                      </AlertDescription>
-                    </Alert>
-                  ) : (
-                    <p className="text-xs text-muted-foreground/70">
-                      This thread has no messages yet.
-                    </p>
-                  )}
-                </div>
-              }
-              onOpenFile={handleOpenFile}
-              queuedMessages={queuedMessages}
-              isStreaming={isStreaming}
-              streamIsLoading={stream.isLoading}
-              scrollControlRef={scrollControlRef}
-              isThinking={isThinking}
-              settingUpSandbox={settingUpSandbox}
-              pollWorkflowApprovalsWhileActive={isStreaming}
-              contentWidthClass="max-w-3xl"
-              footer={
-                !isStreaming &&
-                !sendMessage.isPending &&
-                queuedMessages.length === 0 && (
-                  <ThreadFeedbackCard
-                    key={`${thread.id}:${session.data?.login ?? ""}`}
-                    threadId={thread.id}
-                    login={session.data?.login ?? null}
-                  />
-                )
-              }
-            />
+            <PullRequestPreviewProvider
+              pullRequests={thread.pullRequests ?? []}
+              health={pullRequestHealth}
+              healthUnavailable={pullRequestStatus.isError}
+            >
+              <Profiler
+                id="transcript"
+                onRender={(_id, _phase, actualDuration) =>
+                  runTranscriptCommitted(thread.id, actualDuration)
+                }
+              >
+                <Messages
+                  messages={visibleMessages}
+                  threadId={thread.id}
+                  scrollKey={thread.id}
+                  showPlanArtifact={
+                    thread.planStatus === "ready" ||
+                    thread.planStatus === "shared"
+                  }
+                  emptyState={
+                    <div className="flex min-h-60 items-center justify-center">
+                      {hydrationFailed ? (
+                        <Alert variant="error" className="max-w-3xl">
+                          <CircleAlertIcon />
+                          <AlertDescription>
+                            <span>
+                              This thread&apos;s messages could not be loaded.
+                              Reload to try again.
+                            </span>
+                          </AlertDescription>
+                        </Alert>
+                      ) : (
+                        <p className="text-xs text-muted-foreground/70">
+                          This thread has no messages yet.
+                        </p>
+                      )}
+                    </div>
+                  }
+                  onOpenFile={handleOpenFile}
+                  queuedMessages={queuedMessages}
+                  isStreaming={isStreaming}
+                  streamIsLoading={stream.isLoading}
+                  scrollControlRef={scrollControlRef}
+                  isThinking={isThinking}
+                  isOffloading={stream.isOffloading}
+                  reconnectLabel={reconnect.label}
+                  settingUpSandbox={settingUpSandbox}
+                  pollWorkflowApprovalsWhileActive={isStreaming}
+                  contentWidthClass="max-w-3xl"
+                  footer={
+                    !isStreaming &&
+                    !sendMessage.isPending &&
+                    queuedMessages.length === 0 && (
+                      <ThreadFeedbackCard
+                        key={`${thread.id}:${session.data?.login ?? ""}`}
+                        threadId={thread.id}
+                        login={session.data?.login ?? null}
+                      />
+                    )
+                  }
+                />
+              </Profiler>
+            </PullRequestPreviewProvider>
           )}
           {!isHydrating && (
             <AgentComposerDock>
@@ -373,14 +453,16 @@ export function AgentThreadView({
                     : "Only workspace admins can send messages in this thread"
                 }
                 autoFocus={autoFocusComposer}
+                canOffload={!isStreaming}
                 compact
                 disabled={!canPost}
                 busy={isStreaming}
                 activeRun={activeRun}
                 onSubmit={submitMessage}
                 models={models}
+                routed={routed}
                 selection={activeSelection}
-                onSelectionChange={setSelection}
+                onSelectionChange={handleSelectionChange}
                 planMode={activePlanMode}
                 onPlanModeChange={setPlanMode}
                 mentionPaths={mentionPaths}

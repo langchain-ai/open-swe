@@ -73,18 +73,6 @@ describe("streamPool", () => {
     expect(activeEntry()?.threadId).toBe("minted")
   })
 
-  it("kicks a thread by bumping its generation without dropping the handle", () => {
-    pool().activate("cloud", "stuck")
-    const entry = activeEntry()
-    if (!entry) throw new Error("no active entry")
-    pool().publish(entry.id, handle(true))
-
-    pool().kick("cloud", "stuck")
-
-    expect(activeEntry()?.generation).toBe(entry.generation + 1)
-    expect(pool().handles[entry.id]).toBeDefined()
-  })
-
   it("drops idle instances after the TTL but never a running one", () => {
     pool().activate("cloud", "running")
     const running = activeEntry()
@@ -146,5 +134,30 @@ describe("streamPool", () => {
     expect(retained).toContain(`thread-${MAX_IDLE_STREAMS}`)
     expect(retained).toContain("current")
     expect(retained).toHaveLength(MAX_IDLE_STREAMS + 1)
+  })
+
+  describe("connection", () => {
+    it("reports each retry with the deadline its delay implies", () => {
+      pool().activate("cloud", "one")
+      const id = activeEntry()!.id
+
+      pool().streamReconnecting(id, 3, NOW + 4_000)
+
+      expect(activeEntry()!.connection).toEqual({
+        status: "reconnecting",
+        attempt: 3,
+        retryAt: NOW + 4_000,
+      })
+    })
+
+    it("returns to live once a stream opens again", () => {
+      pool().activate("cloud", "one")
+      const id = activeEntry()!.id
+      pool().streamReconnecting(id, 1, NOW)
+
+      pool().streamLive(id)
+
+      expect(activeEntry()!.connection).toEqual({ status: "live" })
+    })
   })
 })

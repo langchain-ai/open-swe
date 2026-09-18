@@ -5,7 +5,8 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from agent.slack.client import extract_channel_description_text
+from agent.dashboard.workspace_settings import WorkspaceSettings
+from agent.slack.payloads import SlackChannelPayload
 from agent.utils.repo import extract_repo_from_text
 
 
@@ -63,21 +64,23 @@ class TestExtractChannelDescriptionText:
             "topic": {"value": "repo:my-org/my-repo"},
             "purpose": {"value": "Team channel"},
         }
-        assert extract_channel_description_text(channel) == "repo:my-org/my-repo\nTeam channel"
+        assert (
+            SlackChannelPayload.of(channel).topic_and_purpose == "repo:my-org/my-repo\nTeam channel"
+        )
 
     def test_handles_missing_sections(self) -> None:
-        assert extract_channel_description_text({"topic": {"value": "hi"}}) == "hi"
+        assert SlackChannelPayload.of({"topic": {"value": "hi"}}).topic_and_purpose == "hi"
 
     def test_empty_for_none(self) -> None:
-        assert extract_channel_description_text(None) == ""
+        assert SlackChannelPayload.of(None).topic_and_purpose == ""
 
     def test_empty_for_blank_values(self) -> None:
         channel = {"topic": {"value": "  "}, "purpose": {"value": ""}}
-        assert extract_channel_description_text(channel) == ""
+        assert SlackChannelPayload.of(channel).topic_and_purpose == ""
 
     def test_repo_token_extractable_from_description(self) -> None:
         channel = {"topic": {"value": "Use repo:langchain-ai/open-swe here"}, "purpose": {}}
-        description = extract_channel_description_text(channel)
+        description = SlackChannelPayload.of(channel).topic_and_purpose
         assert extract_repo_from_text(description) == {
             "owner": "langchain-ai",
             "name": "open-swe",
@@ -109,19 +112,6 @@ class TestLinearWebhookRepoOverride:
 
         with (
             patch("agent.webhooks.common.verify_linear_signature", return_value=True),
-            patch(
-                "agent.webhooks.common.fetch_linear_issue_details",
-                new_callable=AsyncMock,
-                return_value={
-                    "id": "issue-456",
-                    "title": "Test issue",
-                    "identifier": "TEST-1",
-                    "url": "https://linear.app/test/issue/TEST-1",
-                    "team": {"id": "t1", "name": "Some Team", "key": "ST"},
-                    "project": {"id": "p1", "name": "Some Project"},
-                    "comments": {"nodes": []},
-                },
-            ),
             patch("agent.webhooks.common.is_repo_allowed", return_value=True),
             patch("agent.webhooks.common.BackgroundTasks"),
         ):
@@ -140,37 +130,32 @@ class TestLinearWebhookRepoOverride:
             assert repo_config == {"owner": "custom-org", "name": "custom-repo"}
 
     @pytest.mark.asyncio
-    async def test_falls_back_to_team_mapping_when_no_repo_in_comment(self) -> None:
+    async def test_falls_back_to_default_repo_with_standard_comment_payload(self) -> None:
         from agent.linear.routes import linear_webhook
 
         payload = {
             "type": "Comment",
             "action": "create",
+            "actor": {
+                "id": "user-1",
+                "name": "Test User",
+                "email": "test@test.com",
+            },
             "data": {
                 "id": "comment-123",
                 "body": "@openswe please fix this bug",
-                "issue": {
-                    "id": "issue-456",
-                    "title": "Test issue",
-                },
-                "user": {"id": "user-1", "name": "Test User", "email": "test@test.com"},
+                "issueId": "issue-456",
+                "userId": "user-1",
             },
         }
 
         with (
             patch("agent.webhooks.common.verify_linear_signature", return_value=True),
             patch(
-                "agent.webhooks.common.fetch_linear_issue_details",
-                new_callable=AsyncMock,
-                return_value={
-                    "id": "issue-456",
-                    "title": "Test issue",
-                    "identifier": "TEST-1",
-                    "url": "https://linear.app/test/issue/TEST-1",
-                    "team": {"id": "t1", "name": "Open SWE", "key": "OS"},
-                    "project": None,
-                    "comments": {"nodes": []},
-                },
+                "agent.webhooks.common.get_workspace_settings",
+                AsyncMock(
+                    return_value=WorkspaceSettings({"default_repo": "langchain-ai/open-swe"})
+                ),
             ),
             patch("agent.webhooks.common.is_repo_allowed", return_value=True),
         ):

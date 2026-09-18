@@ -20,6 +20,7 @@ from agent.input_messages import (
 from agent.prompts import render_prompt
 from agent.source_context import SourceContext
 from agent.thread_ids import linear_issue_thread_id
+from agent.users import User
 from agent.webhooks import common
 
 
@@ -40,15 +41,9 @@ async def process_linear_issue(  # noqa: PLR0912, PLR0915
         repo_config.get("name"),
     )
 
-    triggering_comment_id = issue_data.get("triggering_comment_id", "")
-    if triggering_comment_id:
-        await common.react_to_linear_comment(triggering_comment_id, "👀")
-
     thread_id = linear_issue_thread_id(issue_id)
 
-    full_issue = await common.fetch_linear_issue_details(issue_id)
-    if not full_issue:
-        full_issue = issue_data
+    full_issue = issue_data
 
     user_email = None
     user_name = None
@@ -165,11 +160,6 @@ async def process_linear_issue(  # noqa: PLR0912, PLR0915
     ticket_url_line = f"## Linear Ticket URL: {ticket_url}\n\n" if ticket_url else ""
 
     triggered_by_line = f"## Triggered by: {user_name}\n\n" if user_name else ""
-    tag_instruction = (
-        f"When calling linear_comment, tag @{user_name} if you are asking them a question, need their input, or are notifying them of something important (e.g. a completed PR). For simple answers, tagging is not required."
-        if user_name
-        else ""
-    )
     prompt = render_prompt(
         "runs/linear-issue.md",
         repository=f"{repo_config.get('owner')}/{repo_config.get('name')}",
@@ -179,20 +169,21 @@ async def process_linear_issue(  # noqa: PLR0912, PLR0915
         issue_id=issue_id,
         ticket_url_line=ticket_url_line,
         description=description,
-        tag_instruction=tag_instruction,
     )
     description_blocks: list[dict[str, Any]] = [cast(dict[str, Any], create_text_block(prompt))]
     image_blocks_by_url: dict[str, dict[str, Any]] = {}
 
-    # Resolve the GitHub login from the Linear email via the same user-mapping
-    # store Slack uses, so PRs open *as the triggering user* and the thread is
-    # tagged for the dashboard.
-    mapped_login = await common.resolve_login_from_email_async(user_email) if user_email else None
+    # Resolve the GitHub login from the Linear email the same way Slack does, so
+    # PRs open *as the triggering user* and the thread is tagged for the dashboard.
+    mapped_login = await User.login_for_email(user_email) if user_email else None
+    # The repository's workspace is the one this run lands in, so its
+    # default model and Fable flag are the ones the vision fallback checks.
+    workspace = await common.workspace_for_repo_config(repo_config)
 
     image_model_override: tuple[str, str] | None = None
     if image_urls:
         image_urls = common.dedupe_urls(image_urls)
-        resolved_model_id = await common.resolve_agent_model_id(mapped_login)
+        resolved_model_id = await common.resolve_agent_model_id(mapped_login, workspace=workspace)
         if not common.model_supports_images(resolved_model_id):
             fallback_model_id, fallback_effort = common.default_vision_model_pair()
             common.logger.info(
@@ -246,6 +237,9 @@ async def process_linear_issue(  # noqa: PLR0912, PLR0915
         configurable["agent_model_id"] = image_model_override[0]
         configurable["agent_effort"] = image_model_override[1]
 
+    configurable["workspace"] = workspace
+    configurable["environment"] = workspace
+
     await common.upsert_agent_thread_metadata(
         thread_id,
         source="linear",
@@ -254,6 +248,7 @@ async def process_linear_issue(  # noqa: PLR0912, PLR0915
         user_email=user_email or "",
         title=title or identifier or "Linear issue",
         source_context=SourceContext.parse({"linear_issue": configurable["linear_issue"]}),
+        workspace=workspace,
     )
 
     run_messages = [
@@ -330,4 +325,3 @@ async def process_linear_issue(  # noqa: PLR0912, PLR0915
         thread_id,
         run.get("run_id") if isinstance(run, dict) else None,
     )
-    await common.post_linear_trace_comment(issue_id, thread_id, triggering_comment_id)

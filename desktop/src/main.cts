@@ -5,19 +5,29 @@ const path = require("node:path");
 const { pathToFileURL } = require("node:url");
 const {
   app,
+  autoUpdater: nativeAutoUpdater,
   BrowserWindow,
+  clipboard,
   ipcMain,
   Menu,
   dialog,
   nativeTheme,
   net,
   protocol,
+  powerMonitor,
   safeStorage,
   session,
   shell,
 } = require("electron");
 const { autoUpdater } = require("electron-updater");
 const { BackendSupervisor } = require("./backend-supervisor.cjs");
+const {
+  ConsoleLogBuffer,
+  buildDiagnosticsReport,
+  captureProcessConsole,
+  diagnosticsFileName,
+  normalizeConsoleMessage,
+} = require("./diagnostics.cjs");
 const { LocalThreadStore } = require("./local-thread-store.cjs");
 const {
   addWorktree,
@@ -100,6 +110,11 @@ protocol.registerSchemesAsPrivileged([
 
 let backendUrl = null;
 let mainWindow = null;
+
+// Installed builds have no terminal; "Save Diagnostics Report…" exports these.
+const rendererConsole = new ConsoleLogBuffer(2000);
+const mainConsole = new ConsoleLogBuffer(500);
+captureProcessConsole(mainConsole);
 let setupWindow = null;
 let loginFlow = null;
 const connectFlows = new Map();
@@ -124,6 +139,45 @@ function setUpdateState(
   }
 }
 
+let lastUpdateCheck = 0;
+let updateCheck: ReturnType<typeof autoUpdater.checkForUpdates> | null = null;
+
+function checkForUpdates() {
+  lastUpdateCheck = Date.now();
+  updateCheck ??= autoUpdater.checkForUpdates().finally(() => {
+    updateCheck = null;
+  });
+  return updateCheck;
+}
+
+function checkForUpdatesInBackground() {
+  if (
+    updateState.status !== "idle" ||
+    Date.now() - lastUpdateCheck < 60 * 60 * 1000
+  )
+    return;
+  void checkForUpdates().catch((error) =>
+    console.warn("Could not check for desktop updates", error),
+  );
+}
+
+let updateInstallTimer: ReturnType<typeof setTimeout> | undefined;
+
+function failDesktopUpdate(error: unknown) {
+  console.warn("Desktop update failed", error);
+  const installing = updateState.status === "installing";
+  clearTimeout(updateInstallTimer);
+  setUpdateState("idle");
+  if (!installing) return;
+  quitting = false;
+  dialog.showErrorBox(
+    "Could not install the update",
+    "The update did not complete. Quit and reopen Open SWE before continuing. " +
+      "If updating still fails, install the latest release from https://github.com/langchain-ai/open-swe/releases/latest.\n\n" +
+      String(error),
+  );
+}
+
 function configureAutoUpdater() {
   if (!app.isPackaged) return;
   autoUpdater.autoDownload = true;
@@ -132,23 +186,29 @@ function configureAutoUpdater() {
   autoUpdater.on("update-available", (info) =>
     setUpdateState("downloading", info.version),
   );
-  autoUpdater.on("update-downloaded", (info) =>
-    setUpdateState("ready", info.version),
-  );
-  autoUpdater.on("error", (error) => {
-    console.warn("Desktop update failed", error);
-    setUpdateState("idle", undefined);
-  });
-  void autoUpdater
-    .checkForUpdates()
-    .catch((error) =>
-      console.warn("Could not check for desktop updates", error),
+  if (process.platform === "darwin") {
+    nativeAutoUpdater.on("update-downloaded", () =>
+      setUpdateState("ready", updateState.version),
     );
+  } else {
+    autoUpdater.on("update-downloaded", (info) =>
+      setUpdateState("ready", info.version),
+    );
+  }
+  autoUpdater.on("error", failDesktopUpdate);
+  checkForUpdatesInBackground();
+  const timer = setInterval(checkForUpdatesInBackground, 4 * 60 * 60 * 1000);
+  timer.unref();
+  powerMonitor.on("resume", checkForUpdatesInBackground);
+  app.on("activate", checkForUpdatesInBackground);
+  app.on("browser-window-focus", checkForUpdatesInBackground);
 }
 
 async function checkForDesktopUpdates() {
   try {
-    const result = await autoUpdater.checkForUpdates();
+    if (updateState.status === "ready" || updateState.status === "installing")
+      return;
+    const result = await checkForUpdates();
     if (result?.isUpdateAvailable) {
       await dialog.showMessageBox({
         type: "info",
@@ -408,6 +468,10 @@ async function discardThreadWorktree(thread) {
 }
 
 function configureDesktopIpc() {
+  ipcMain.handle("desktop:write-clipboard", (event, value) => {
+    requireTrustedDesktopIpc(event);
+    if (typeof value === "string") clipboard.writeText(value);
+  });
   ipcMain.handle("desktop:version", (event) => {
     requireTrustedDesktopIpc(event);
     return app.getVersion();
@@ -423,18 +487,26 @@ function configureDesktopIpc() {
     const version = updateState.version;
     setUpdateState("installing", version);
     quitting = true;
+    updateInstallTimer = setTimeout(
+      () =>
+        failDesktopUpdate(
+          new Error("Installation timed out after 60 seconds."),
+        ),
+      60_000,
+    );
+    updateInstallTimer.unref();
     try {
       await Promise.all([
         closeAllTerminals(),
         backendSupervisor?.close(),
         openAiOAuth?.close(),
       ]);
+      if (!quitting) return false;
       autoUpdater.quitAndInstall(false, true);
       return true;
     } catch (error) {
-      quitting = false;
-      setUpdateState("ready", version);
-      throw error;
+      failDesktopUpdate(error);
+      return false;
     }
   });
 
@@ -571,6 +643,37 @@ function configureDesktopIpc() {
     requireTrustedDesktopIpc(event);
     return backendSupervisor.credentialStatus(modelId);
   });
+  ipcMain.handle("desktop:open-local-trace", async (event, threadId) => {
+    requireTrustedDesktopIpc(event);
+    try {
+      if (!backendUrl || typeof threadId !== "string" || !threadId)
+        throw new Error("The local trace is unavailable.");
+      const response = await backendFetch(
+        new URL(
+          `/dashboard/api/me/local-trace-url/${encodeURIComponent(threadId)}`,
+          backendUrl,
+        ).toString(),
+      );
+      if (!response.ok) throw new Error("Could not load the local trace.");
+      const payload = await response.json();
+      if (typeof payload?.trace_url !== "string" || !payload.trace_url)
+        throw new Error("No trace is available for this thread yet.");
+      const url = new URL(payload.trace_url);
+      if (url.protocol !== "http:" && url.protocol !== "https:")
+        throw new Error("The trace URL must use HTTP or HTTPS.");
+      await shell.openExternal(url.href);
+      return true;
+    } catch (error) {
+      await dialog.showMessageBox({
+        type: "error",
+        title: "Open trace",
+        message: "Unable to open trace",
+        detail: error instanceof Error ? error.message : "Please try again.",
+      });
+      return false;
+    }
+  });
+
   ipcMain.handle("desktop:local-openai-sign-in", async (event) => {
     requireTrustedDesktopIpc(event);
     if (!openAiOAuth) throw new Error("ChatGPT sign-in is unavailable");
@@ -1067,7 +1170,8 @@ function createMenu() {
             else void loadApp(mainWindow);
           },
         },
-        ...(isDevelopment ? [{ role: "toggleDevTools" }] : []),
+        // Installed builds too: the renderer is sandboxed with no Node access.
+        { role: "toggleDevTools" },
         { type: "separator" },
         { role: "resetZoom" },
         { role: "zoomIn" },
@@ -1096,6 +1200,11 @@ function createMenu() {
           label: "Open SWE on GitHub",
           click: () =>
             void shell.openExternal("https://github.com/langchain-ai/open-swe"),
+        },
+        { type: "separator" },
+        {
+          label: "Save Diagnostics Report…",
+          click: () => void saveDiagnosticsReport(),
         },
       ],
     },
@@ -1322,9 +1431,62 @@ function createWindow() {
   window.on("leave-full-screen", () =>
     window.webContents.send("desktop:fullscreen-change", false),
   );
+  window.webContents.on("console-message", (_event, details) =>
+    rendererConsole.push(normalizeConsoleMessage(details)),
+  );
   mainWindow = window;
   void loadApp(window);
   return window;
+}
+
+async function collectPerfSpans(window) {
+  if (!window || window.isDestroyed()) return null;
+  try {
+    const exported = await window.webContents.executeJavaScript(
+      "window.__openSwePerf ? window.__openSwePerf.export() : null",
+      true,
+    );
+    return typeof exported === "string" ? exported : null;
+  } catch {
+    return null;
+  }
+}
+
+async function saveDiagnosticsReport() {
+  const window = mainWindow && !mainWindow.isDestroyed() ? mainWindow : null;
+  const report = buildDiagnosticsReport({
+    app: {
+      name: appRuntime.name,
+      version: app.getVersion(),
+      isPackaged: app.isPackaged,
+      electron: process.versions.electron,
+      chrome: process.versions.chrome,
+      node: process.versions.node,
+      platform: process.platform,
+      arch: process.arch,
+      osRelease: require("node:os").release(),
+      locale: app.getLocale(),
+    },
+    backendHost: backendUrl ? new URL(backendUrl).host : null,
+    renderer: rendererConsole.entries(),
+    main: mainConsole.entries(),
+    perf: await collectPerfSpans(window),
+  });
+  const options = {
+    title: "Save diagnostics report",
+    defaultPath: path.join(app.getPath("downloads"), diagnosticsFileName()),
+    filters: [{ name: "Text", extensions: ["txt"] }],
+  };
+  const result = window
+    ? await dialog.showSaveDialog(window, options)
+    : await dialog.showSaveDialog(options);
+  if (result.canceled || !result.filePath) return;
+  try {
+    fs.writeFileSync(result.filePath, report, "utf8");
+    shell.showItemInFolder(result.filePath);
+  } catch (error) {
+    dialog.showErrorBox("Could not save the diagnostics report", error.message);
+  }
 }
 
 function createSetupWindow() {
@@ -1390,14 +1552,13 @@ function configurePermissions() {
         isTrustedPermissionRequest(
           permission,
           details.requestingUrl || webContents.getURL(),
-          details,
         ),
       );
     },
   );
   session.defaultSession.setPermissionCheckHandler(
-    (_webContents, permission, requestingOrigin, details) =>
-      isTrustedPermissionRequest(permission, requestingOrigin, details),
+    (_webContents, permission, requestingOrigin) =>
+      isTrustedPermissionRequest(permission, requestingOrigin),
   );
 }
 
@@ -1457,6 +1618,25 @@ if (!hasSingleInstanceLock) {
       stateDir: path.join(app.getPath("userData"), "local-backend"),
       projectsFile: projectsPath(),
       worktreesDir: worktreesPath(),
+      tracingEnv: async () => {
+        if (!backendUrl) return {};
+        try {
+          const response = await backendFetch(
+            new URL("/dashboard/api/me/preferences", backendUrl).toString(),
+            { signal: AbortSignal.timeout(2_000) },
+          );
+          if (!response.ok) return {};
+          const preferences = await response.json();
+          const project =
+            preferences.local_tracing_project ||
+            preferences.default_local_tracing_project;
+          return project
+            ? { LANGSMITH_PROJECT: project, LANGSMITH_TRACING: "true" }
+            : {};
+        } catch {
+          return {};
+        }
+      },
       providerEnv: () => openAiOAuth?.backendEnv() || {},
       openAiOAuthAvailable: () =>
         openAiOAuth?.status().signedIn === true &&
@@ -1467,6 +1647,13 @@ if (!hasSingleInstanceLock) {
     configureDesktopIpc();
     createMenu();
     createWindow();
+    // Otherwise the first local thread opened after launch waits behind the
+    // backend's boot, showing a blank page for seconds.
+    if (localThreadStore.list().length) {
+      backendSupervisor.start().catch((error) => {
+        console.warn("Could not start the local backend ahead of use", error);
+      });
+    }
     configureAutoUpdater();
     configureTerminalIpc({
       ipcMain,

@@ -12,7 +12,7 @@ if model_id == DEFAULT_LLM_MODEL_ID:
 return create_deep_agent(
     model=make_model(model_id, **model_kwargs),
     system_prompt=construct_system_prompt(...),
-    tools=[http_request, fetch_url, linear_comment, slack_thread_reply],
+    tools=[http_request, fetch_url, slack_thread_reply],
     backend=sandbox_backend,
     middleware=[
         ToolErrorMiddleware(),
@@ -67,7 +67,7 @@ Set the `SANDBOX_TYPE` environment variable to switch providers. Each provider h
 
 > **Warning**: `local` runs commands directly on your host with no sandboxing. Only use for local development with human-in-the-loop enabled.
 
-For `langsmith`, sandbox provisioning, connection, proxy configuration, and environment snapshot captures use the deployment’s `LANGSMITH_API_KEY` and `LANGSMITH_ENDPOINT`. The `DEFAULT_SANDBOX_SNAPSHOT_ID` must exist in that LangSmith workspace. The former `SANDBOX_LANGSMITH_API_KEY` and `SANDBOX_LANGSMITH_ENDPOINT` overrides are no longer used.
+For `langsmith`, sandbox provisioning, connection, proxy configuration, and workspace snapshot captures use the deployment’s `LANGSMITH_API_KEY` and `LANGSMITH_ENDPOINT`. The `DEFAULT_SANDBOX_SNAPSHOT_ID` must exist in that LangSmith workspace. The former `SANDBOX_LANGSMITH_API_KEY` and `SANDBOX_LANGSMITH_ENDPOINT` overrides are no longer used.
 
 ### Adding a new sandbox provider
 
@@ -210,7 +210,7 @@ Routing is opt-in and off by default. Enable it either way:
 | `LANGSMITH_GATEWAY_BASE_URL` | `https://gateway.smith.langchain.com` | Override for a regional or self-hosted gateway host. |
 | `LANGSMITH_GATEWAY_OPENAI_USE_RESPONSES` | `true` | Use the OpenAI Responses API through the gateway. Set to `false` only to force Chat Completions for OpenAI models. |
 
-The admin panel (**Admin → LLM Gateway**) exposes a per-workspace toggle stored in team settings; when set it overrides the `LANGSMITH_GATEWAY_ENABLED` env default (a `None`/unset team value inherits the env default).
+The admin panel (**Admin → LLM Gateway**) exposes a toggle stored in workspace settings; when set it overrides the `LANGSMITH_GATEWAY_ENABLED` env default (a `None`/unset value inherits the env default).
 
 Routing is applied centrally in `make_model` (`agent/utils/model.py`), which resolves the effective on/off and delegates URL/key wiring to `agent/utils/gateway.py`. **OpenAI, Anthropic, Baseten, Fireworks, and Google Gemini** are routed; Google Vertex (service-account auth) and any other provider call the provider directly with a logged warning. Baseten uses `BASETEN_API_KEY` from LangSmith workspace Provider Secrets through Gateway, or the runtime environment for direct calls.
 
@@ -226,7 +226,6 @@ Open SWE ships with a small set of custom tools on top of the built-in Deep Agen
 |---|---|---|
 | `fetch_url` | `agent/tools/fetch_url.py` | Fetch web pages as markdown |
 | `http_request` | `agent/tools/http_request.py` | HTTP API calls |
-| `linear_comment` | `agent/linear/tools/comment.py` | Post comments on Linear tickets |
 | `slack_attach_html` | `agent/slack/tools/attach_html.py` | Attach sandbox HTML previews to Slack threads |
 | `slack_thread_reply` | `agent/slack/tools/thread_reply.py` | Reply in Slack threads |
 
@@ -291,8 +290,12 @@ header. The Currents REST API URL itself does not speak MCP, and the local
 Optional reviewer trace resolution and personal LangSmith credential proxying
 have been removed. Configure agent access to LangSmith through Workspace MCPs.
 Sandbox provisioning uses the deployment's `LANGSMITH_API_KEY` and
-`LANGSMITH_ENDPOINT`. Linear webhook intake and replies continue to use the
-existing Linear app setup.
+`LANGSMITH_ENDPOINT`. Linear webhook intake uses the signed webhook setup;
+configure Linear replies and other agent operations through Workspace MCPs.
+Automatic failure notices use the workspace connection named `linear` and its
+selected `save_comment` tool (`create_comment` is also supported). These notices
+run independently of the agent and honor the connection's enabled state and tool
+selection. Delivery failures are logged without marking the run as notified.
 
 Use the endpoint for your Datadog site (this example uses US5). Replace the key
 placeholders directly in the dashboard. Import supports multiple named servers,
@@ -354,7 +357,7 @@ Datadog documents its headers and site-specific endpoints in the
 Enter Datadog key values directly, without a `Bearer` prefix. The `core` toolset
 includes logs, metrics, traces, dashboards, monitors, and incidents.
 
-Allowed tools appear in the agent's **Workspace MCPs** tool group with connection
+Allowed tools appear in the agent's **MCPs** tool group with connection
 prefixes such as `mcp_incident_incident_list_…` and a suffix to prevent naming
 collisions. Catalogs are cached for ten minutes
 per settings revision. Changing a connection causes the next run to discover its
@@ -385,12 +388,32 @@ Saved secrets must only be preserved from the previous record in the same scope.
 Catalog and token caches include the source namespace. Each tool call resolves the
 current winning connection again, checks its allowlist, and refuses to switch scopes
 mid-run. Source lookup errors must raise instead of returning an empty result, so a
-failed lookup cannot expose a lower-precedence connection. Only workspace sources
-are wired into the product today; user-scoped storage, authorization, and UI can use
-this package when added.
+failed lookup cannot expose a lower-precedence connection. The product wires the
+workspace source and the triggering user's personal source (below) into every remote
+coding-agent run.
 An unavailable server omits its tools without preventing other connections from
 loading. This catalog is not attached to the separate read-only reviewer or
 Investigate graphs.
+
+### Personal MCP servers
+
+Any signed-in user can connect remote MCP servers with their own credentials under
+**My settings → Personal MCPs**. The form, JSON import, OAuth, header handling, and
+tool discovery work exactly like workspace connections. Records live in the Store
+under `["user_mcps", <trimmed lowercase github login>]`, so one user's connections and credentials are
+never visible to, reused by, or revealed to another user. The dashboard API is
+`/dashboard/api/my-mcps` and requires only a signed-in session.
+
+Personal connections load only inside a **private thread owned by the triggering
+user**, the same rule that applies to personal Notion connections. Collaborative
+(workspace or Slack channel) threads can be prompted by anyone, so they run without
+personal credentials; to use yours, continue the thread privately from the dashboard.
+Both scopes share the **MCPs** tool group. A personal connection with the same name as a
+workspace connection replaces it entirely for that user's runs, and a disabled personal
+connection hides the workspace one rather than falling back to it.
+Desktop (local) runs do not load MCP connections yet. GitHub PR follow-ups targeting a
+private thread are rejected unless the commenter owns that thread, before credentials
+are read or a run is dispatched.
 
 ### Adding a Python tool
 
@@ -421,14 +444,14 @@ def datadog_search(query: str, time_range: str = "1h") -> dict[str, Any]:
 Then register it in `agent/server.py`:
 
 ```python
-from .tools import fetch_url, http_request, linear_comment, slack_thread_reply
+from .tools import fetch_url, http_request, slack_thread_reply
 from .tools.datadog_search import datadog_search
 
 return create_deep_agent(
     ...
     tools=[
         http_request, fetch_url,
-        linear_comment, slack_thread_reply,
+        slack_thread_reply,
         datadog_search,  # new tool
     ],
     ...
@@ -439,7 +462,7 @@ The agent will automatically see the tool's name, docstring, and parameter types
 
 ### Removing tools
 
-If you only use Linear (not Slack), remove `slack_thread_reply` from the tools list and vice versa. If you don't need web fetching, remove `fetch_url`.
+If you don't use Slack, remove `slack_thread_reply` from the tools list. If you don't need web fetching, remove `fetch_url`.
 
 ### Conditional tools
 
@@ -449,29 +472,13 @@ You can vary the toolset based on the trigger source:
 base_tools = [http_request, fetch_url]
 source = config["configurable"].get("source")
 
-if source == "linear":
-    tools = [*base_tools, linear_comment]
-elif source == "slack":
+if source == "slack":
     tools = [*base_tools, slack_thread_reply]
 else:
-    tools = [*base_tools, linear_comment, slack_thread_reply]
+    tools = base_tools
 
 return create_deep_agent(tools=tools, ...)
 ```
-
-### Browser automation (Stagehand)
-
-The main agent can dynamically load `browser_navigate`, `browser_act`, `browser_observe`, `browser_extract`, and `browser_close` to drive Chromium inside the task sandbox via the [Stagehand](https://github.com/browserbase/stagehand-python) SDK. Because the browser shares the sandbox network namespace, it can test development servers on `localhost`. Static reads should still use `fetch_url`.
-
-The browser schemas appear in the `load_integration_tools` catalog only when the tools are available, and remain out of the model context until loaded. The tools require a LangSmith sandbox and a supported model credential. The real credential remains outside the sandbox and is injected by the sandbox egress proxy; only a placeholder is visible to sandbox processes.
-
-| Variable | Default | Purpose |
-| --- | --- | --- |
-| `STAGEHAND_MODEL_API_KEY` | falls back to `MODEL_API_KEY`, then `ANTHROPIC_API_KEY` | Model key used by Stagehand. |
-| `STAGEHAND_MODEL` | `anthropic/claude-sonnet-4-5` | Stagehand model; Anthropic and OpenAI are supported. |
-| `STAGEHAND_HEADLESS` | `true` | Run Chromium headless. |
-
-The sandbox snapshot must include Chromium and Stagehand, install `agent/resources/stagehand_runtime.py` at `/opt/open-swe/stagehand_runtime.py`, and set `STAGEHAND_LOCAL_CHROME_PATH` to the Chromium executable (usually `/usr/bin/chromium`).
 
 ---
 
@@ -499,7 +506,7 @@ DEFAULT_REPO_NAME="my-repo"      # Default GitHub repo (used everywhere)
 
 These are used as the fallback when:
 - A Slack message doesn't specify a repo (and no thread metadata exists)
-- A Linear issue's team/project isn't in the `LINEAR_TEAM_TO_REPO` mapping
+- A Linear comment doesn't specify a repo
 - A user writes `repo:name` without an org prefix — the org defaults to `DEFAULT_REPO_OWNER`
 
 ### Repository extraction from messages
@@ -513,21 +520,7 @@ Both Slack and Linear support specifying a target repo directly in the message o
 
 ### Customizing Linear routing
 
-The `LINEAR_TEAM_TO_REPO` dict in `agent/linear/team_repo_map.py` maps Linear teams and projects to GitHub repos:
-
-```python
-LINEAR_TEAM_TO_REPO = {
-    "Engineering": {
-        "projects": {
-            "backend": {"owner": "my-org", "name": "backend"},
-            "frontend": {"owner": "my-org", "name": "frontend"},
-        },
-        "default": {"owner": "my-org", "name": "monorepo"},
-    },
-}
-```
-
-Users can also override the team/project mapping on a per-comment basis by including `repo:owner/name` in their `@openswe` comment. This takes priority over the mapping — the mapping is used as a fallback when no repo is specified in the comment. If the team/project isn't found in the mapping either, `DEFAULT_REPO_OWNER`/`DEFAULT_REPO_NAME` is used.
+Linear comments use the triggering user's dashboard default repository, then the workspace default repository. Users can override either on a per-comment basis by including `repo:owner/name` in their `@openswe` comment.
 
 ### Customizing Slack routing
 
@@ -536,7 +529,7 @@ Slack repo resolution (`get_slack_repo_config` in `agent/webapp.py`) checks, in 
 1. Repo carried over from the existing Slack thread's metadata.
 2. A `repo:owner/name` (or GitHub URL) token in the channel's **topic or purpose** (its "description"). This lets a channel be pinned to a repo without anyone repeating it per-message.
 3. The triggering user's dashboard `default_repo`.
-4. The team default repo.
+4. The workspace's default repository (its own override, else the instance's).
 5. `SLACK_REPO_OWNER`/`SLACK_REPO_NAME`, falling back to `DEFAULT_REPO_OWNER`/`DEFAULT_REPO_NAME`.
 
 Users can still override per-message with `repo:owner/name` syntax in their Slack message (this is read from the message text by the agent). A shorthand `repo:name` (without the org) is also supported — the org defaults to `DEFAULT_REPO_OWNER`.

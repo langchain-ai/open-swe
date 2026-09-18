@@ -16,6 +16,7 @@ import httpx2
 from fastapi import HTTPException
 
 from agent.config import ENV
+from agent.utils.dashboard_links import dashboard_api_base_url
 from agent.utils.http import DEFAULT_HTTP_TIMEOUT
 
 logger = logging.getLogger(__name__)
@@ -37,6 +38,11 @@ _TEAM_ID_CLAIM = "https://slack.com/team_id"
 
 def slack_oauth_configured() -> bool:
     return bool(SLACK_CLIENT_ID and SLACK_CLIENT_SECRET)
+
+
+def slack_base_url() -> str:
+    """Public origin Slack must reach, which a tunnel can point away from the API."""
+    return (ENV.SLACK_PUBLIC_BASE_URL.get() or dashboard_api_base_url()).rstrip("/")
 
 
 @dataclass(frozen=True)

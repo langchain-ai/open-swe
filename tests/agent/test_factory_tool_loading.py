@@ -1,20 +1,30 @@
 """The graph factory tool loaders must overlap, not run back-to-back."""
 
 import asyncio
+from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import langgraph_sdk
 import pytest
 from langchain.agents.middleware.types import ModelRequest
 from langchain_core.tools import StructuredTool
 from langgraph.graph.state import RunnableConfig
 
+from agent.dashboard.workspace_settings import WorkspaceSettings
 from agent.middleware.dynamic_tools import DynamicToolMiddleware
 from agent.middleware.plan_mode import PlanModeMiddleware
 from agent.sandboxes.state import SANDBOX_BACKENDS
 from agent.server import get_agent
 
 _START_TIMEOUT_SECONDS = 2.0
+
+_MODEL_DEFAULTS = {
+    "default_agent_model": "openai:gpt-5.6-sol",
+    "default_agent_reasoning_effort": "medium",
+    "default_agent_subagent_model": "openai:gpt-5.6-sol",
+    "default_agent_subagent_reasoning_effort": "low",
+}
 
 
 class _DummyAgent:
@@ -43,7 +53,15 @@ async def test_workspace_mcps_load_for_non_admins_and_respect_plan_mode(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv("CONFIGURED_ADMINS", "workspace-admin")
-    monkeypatch.setenv("OBSERVABILITY_AUTHORIZED_EMAILS", "other@example.com")
+    monkeypatch.setattr(
+        langgraph_sdk,
+        "get_client",
+        lambda: SimpleNamespace(
+            threads=SimpleNamespace(
+                get=AsyncMock(return_value={"metadata": {"visibility": "public"}})
+            )
+        ),
+    )
     barrier = asyncio.Barrier(2)
 
     async def delete_incident() -> str:
@@ -84,9 +102,9 @@ async def test_workspace_mcps_load_for_non_admins_and_respect_plan_mode(
             return_value="/workspace",
         ),
         patch(
-            "agent.server.get_team_default_model_pair",
+            "agent.server.cached_workspace_settings",
             new_callable=AsyncMock,
-            return_value=(("openai:gpt-5.6-sol", "medium"), ("openai:gpt-5.6-sol", "low")),
+            return_value=WorkspaceSettings(_MODEL_DEFAULTS),
         ),
         patch("agent.server.load_profile", new_callable=AsyncMock, return_value=None),
         patch("agent.server.load_thread_settings", new_callable=AsyncMock, return_value={}),
@@ -94,8 +112,8 @@ async def test_workspace_mcps_load_for_non_admins_and_respect_plan_mode(
         patch("agent.server.make_model", return_value=MagicMock()),
         patch("agent.server.construct_system_prompt", return_value="prompt"),
         patch("agent.server.create_deep_agent", return_value=_DummyAgent()) as build_agent,
-        patch("agent.server.email_for_login", new_callable=AsyncMock, return_value=None),
-        patch("agent.server.load_workspace_mcp_tools", side_effect=rendezvous([mcp_tool])),
+        patch("agent.users.User.email_for_login", new_callable=AsyncMock, return_value=None),
+        patch("agent.server._mcp_tools_for", side_effect=rendezvous([mcp_tool])),
         patch("agent.server._notion_tools_for", side_effect=rendezvous([])),
     ):
         config = _config()
@@ -107,9 +125,9 @@ async def test_workspace_mcps_load_for_non_admins_and_respect_plan_mode(
         tool.name if hasattr(tool, "name") else tool.__name__
         for tool in build_agent.call_args.kwargs["tools"]
     }
-    assert "linear_comment" in tool_names
     assert not tool_names.intersection(
         {
+            "linear_comment",
             "linear_create_issue",
             "linear_delete_issue",
             "linear_get_issue",

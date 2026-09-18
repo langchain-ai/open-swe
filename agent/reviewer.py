@@ -40,13 +40,8 @@ from langchain.agents.middleware.types import AgentMiddleware
 from langchain_core.language_models.chat_models import BaseChatModel
 
 from agent.dashboard.options import gate_fable_model
-from agent.dashboard.team_settings import (
-    get_effective_gateway_enabled,
-    get_org_review_guidelines,
-    get_team_default_grouping_model,
-    get_team_default_model_pair,
-    get_team_fable_enabled,
-)
+from agent.dashboard.workspace_settings import get_workspace_settings
+from agent.dashboard.workspace_settings_cache import cached_workspace_settings
 from agent.github.app import get_github_app_installation_token_with_expiry
 from agent.github.thread_token import cache_github_token_for_thread
 from agent.middleware import (
@@ -580,17 +575,16 @@ async def _resolve_grouping_model(cfg: RunConfig, *, use_gateway: bool) -> BaseC
     """Resolve the model for the diff-grouping pass.
 
     Per-run override (``grouping_model_id``/``grouping_reasoning_effort``) wins;
-    otherwise the team default, which itself inherits the reviewer subagent
+    otherwise the workspace default, which itself inherits the reviewer subagent
     model when no grouping-specific model is configured.
     """
+    settings = await get_workspace_settings(cfg.workspace_slug)
     if cfg.grouping_model_id:
         model_id = cfg.grouping_model_id
         effort = cfg.grouping_reasoning_effort
     else:
-        model_id, effort = await get_team_default_grouping_model()
-    model_id, effort = gate_fable_model(
-        model_id, effort, fable_enabled=await get_team_fable_enabled()
-    )
+        model_id, effort = settings.default_grouping_model
+    model_id, effort = gate_fable_model(model_id, effort, fable_enabled=settings.fable_enabled)
     model_kwargs = provider_model_kwargs(
         model_id,
         effort,
@@ -598,30 +592,6 @@ async def _resolve_grouping_model(cfg: RunConfig, *, use_gateway: bool) -> BaseC
         openai_reasoning_default=DEFAULT_LLM_REASONING,
     )
     return _make_model_or_defer(model_id, use_gateway=use_gateway, **model_kwargs)
-
-
-async def _cached_reviewer_team_defaults():
-    return await ttl_cache.cached(
-        "team-default-model-pair:reviewer",
-        60,
-        lambda: get_team_default_model_pair("reviewer"),
-    )
-
-
-async def _cached_gateway_enabled() -> bool:
-    return await ttl_cache.cached(
-        "team:gateway-enabled",
-        60,
-        get_effective_gateway_enabled,
-    )
-
-
-async def _cached_org_review_guidelines() -> str | None:
-    return await ttl_cache.cached(
-        "reviewer:org-guidelines",
-        300,
-        get_org_review_guidelines,
-    )
 
 
 async def _cached_api_standards_skill() -> str | None:
@@ -635,6 +605,10 @@ async def _cached_api_standards_skill() -> str | None:
 class PrepareReviewerRunState(PrepareRunState):
     diff_text: NotRequired[str]
     diff_line_set: NotRequired[dict[str, dict[str, set[int]]] | None]
+
+
+async def _cached_org_guidelines(workspace: str | None) -> str | None:
+    return (await cached_workspace_settings(workspace)).org_review_guidelines
 
 
 async def _ensure_reviewer_sandbox_for_thread(
@@ -658,6 +632,7 @@ async def _ensure_reviewer_sandbox_for_thread(
     return (
         await ensure_sandbox_for_thread(
             thread_id,
+            workspace_slug=cfg.workspace_slug,
             github_proxy_token=github_token,
             github_proxy_repositories=[repo_name] if repo_name else None,
             # A reviewer sandbox holds nothing but a checkout `prepare_review_repo`
@@ -687,7 +662,7 @@ class PrepareReviewerRunMiddleware(BasePrepareRunMiddleware):
     def _prepare_config_fingerprint(self) -> Any:
         cfg = RunConfig.from_config(self._config)
         return {
-            "prepare_run_id": cfg.prepare_run_id,
+            "invocation_id": cfg.invocation_id,
             "thread_id": self._thread_id,
             "repo": cfg.repo.model_dump() if cfg.repo else None,
             "pr_number": cfg.pr_number,
@@ -853,7 +828,7 @@ class PrepareReviewerRunMiddleware(BasePrepareRunMiddleware):
         existing_threads_task = asyncio.create_task(_fetch_existing_threads_block())
         repo_style_task = asyncio.create_task(_fetch_repo_style_prompt())
         agents_md_task = asyncio.create_task(_fetch_agents_md_context())
-        org_guidelines_task = asyncio.create_task(_cached_org_review_guidelines())
+        org_guidelines_task = asyncio.create_task(_cached_org_guidelines(cfg.workspace_slug))
         api_standards_task = asyncio.create_task(_cached_api_standards_skill())
         diff_context = await diff_context_task
         pr_diff_text, pr_diff_line_set = diff_context
@@ -1011,21 +986,22 @@ async def get_reviewer_agent(config: RunnableConfig) -> Pregel:
         (
             (model_id, reasoning_effort),
             (subagent_model_id, subagent_effort),
-        ) = await _cached_reviewer_team_defaults()
+        ) = (await cached_workspace_settings(cfg.workspace_slug)).default_model_pair("reviewer")
         logger.info(
-            "Using team default reviewer model: model=%s effort=%s",
+            "Using workspace default reviewer model: model=%s effort=%s",
             model_id,
             reasoning_effort,
         )
         logger.info(
-            "Using team default reviewer subagent model: model=%s effort=%s",
+            "Using workspace default reviewer subagent model: model=%s effort=%s",
             subagent_model_id,
             subagent_effort,
         )
     if cfg.reviewer_subagent_model_id:
         subagent_model_id = cfg.reviewer_subagent_model_id
         subagent_effort = cfg.reviewer_subagent_reasoning_effort
-    fable_enabled = await get_team_fable_enabled()
+    settings = await cached_workspace_settings(cfg.workspace_slug)
+    fable_enabled = settings.fable_enabled
     model_id, reasoning_effort = gate_fable_model(
         model_id, reasoning_effort, fable_enabled=fable_enabled
     )
@@ -1045,7 +1021,7 @@ async def get_reviewer_agent(config: RunnableConfig) -> Pregel:
         openai_reasoning_default=DEFAULT_LLM_REASONING,
     )
 
-    use_gateway = await _cached_gateway_enabled()
+    use_gateway = settings.effective_gateway_enabled
     reviewer_model = _make_model_or_defer(model_id, use_gateway=use_gateway, **model_kwargs)
     reviewer_subagent_model = _make_model_or_defer(
         subagent_model_id, use_gateway=use_gateway, **subagent_model_kwargs

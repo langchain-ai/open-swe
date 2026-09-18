@@ -7,6 +7,8 @@ from typing import Any, cast
 from unittest.mock import AsyncMock
 
 import pytest
+from deepagents.backends.composite import CompositeBackend
+from deepagents.backends.protocol import ExecuteResponse
 from langsmith.sandbox import (
     CommandTimeoutError,
     SandboxConnectionError,
@@ -143,6 +145,27 @@ async def test_aexecute_midstream_ws_drop_falls_back_to_base(
 def test_execute_is_async_only() -> None:
     with pytest.raises(NotImplementedError):
         _backend(_FakeHandle()).execute("echo hi", timeout=5)
+
+
+async def test_composite_backend_deletes_through_async_langsmith_backend(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sb = _backend(_FakeHandle())
+    commands: list[str] = []
+
+    async def execute(command: str, *, timeout: int | None = None) -> ExecuteResponse:
+        commands.append(command)
+        return ExecuteResponse(output="", exit_code=0)
+
+    monkeypatch.setattr(sb, "aexecute", execute)
+    result = await CompositeBackend(default=sb, routes={}).adelete("/workspace/repo/obsolete.txt")
+
+    assert result.path == "/workspace/repo/obsolete.txt"
+    assert result.error is None
+    assert commands == [
+        "test -e /workspace/repo/obsolete.txt || test -L /workspace/repo/obsolete.txt",
+        "rm -rf /workspace/repo/obsolete.txt",
+    ]
 
 
 async def test_aexecute_retries_a_transient_rejection(monkeypatch: pytest.MonkeyPatch) -> None:

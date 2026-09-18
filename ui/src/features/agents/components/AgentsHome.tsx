@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react"
-import { useQueryClient } from "@tanstack/react-query"
+import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { useNavigate, useRouterState } from "@tanstack/react-router"
 
 import type {
@@ -24,7 +24,7 @@ import {
   optimisticThread,
   seedAgentThreadLists,
   useAgentSkills,
-  useEnvironmentOptions,
+  useWorkspaceOptions,
 } from "@/features/agents/lib/queries"
 import {
   persistModelSelection,
@@ -46,6 +46,7 @@ import {
   writeStoredPanelCollapsed,
 } from "@/features/agents/lib/gitPanelPreferences"
 import { useTerminalGroups } from "@/features/agents/lib/terminalGroups"
+import { api } from "@/lib/api"
 import { useProfile, useRepos } from "@/lib/profile"
 import { useSession } from "@/lib/session"
 import {
@@ -78,25 +79,38 @@ export function AgentsHome({
   })
   const { models, defaultSelection } = useModelOptions()
   const [selection, setSelection] = useState<ModelSelection | null>(null)
-  const activeSelection = selection ?? defaultSelection
-  const handleSelectionChange = (next: ModelSelection) => {
+  const [autoSelected, setAutoSelected] = useState(false)
+  const activeSelection = autoSelected ? null : (selection ?? defaultSelection)
+  const handleSelectionChange = (next: ModelSelection | null) => {
+    setAutoSelected(next === null)
     setSelection(next)
     persistModelSelection(next, session.data?.login ?? "")
   }
   const [planMode, setPlanMode] = useState(false)
-  const [adminThread, setAdminThread] = useState(false)
   const cloudEnabled = Boolean(session.data)
-  const environmentOptions = useEnvironmentOptions(cloudEnabled)
-  const environments = environmentOptions.data?.environments ?? []
-  // undefined = untouched, so the run falls back to the default environment.
-  const [environmentOverride, setEnvironmentOverride] = useState<string | null>(
+  const preferences = useQuery({
+    queryKey: ["myPreferences"],
+    queryFn: api.getMyPreferences,
+    enabled: cloudEnabled,
+  })
+  // Visibility is fixed once a thread exists, so the only choice is made here,
+  // seeded from the user's default and overridable per thread.
+  const [visibilityOverride, setVisibilityOverride] = useState<
+    "public" | "private" | null
+  >(null)
+  const visibility =
+    visibilityOverride ?? preferences.data?.default_visibility ?? "private"
+  const workspaceOptions = useWorkspaceOptions(cloudEnabled)
+  const workspaces = workspaceOptions.data?.workspaces ?? []
+  // undefined = untouched, so the run falls back to the default workspace.
+  const [workspaceOverride, setWorkspaceOverride] = useState<string | null>(
     null
   )
-  const defaultEnvironmentSlug = environmentOptions.data?.default_slug ?? null
-  const selectedEnvironment =
-    environmentOverride ??
-    (environments.some((env) => env.slug === defaultEnvironmentSlug)
-      ? defaultEnvironmentSlug
+  const defaultWorkspaceSlug = workspaceOptions.data?.default_slug ?? null
+  const selectedWorkspace =
+    workspaceOverride ??
+    (workspaces.some((env) => env.slug === defaultWorkspaceSlug)
+      ? defaultWorkspaceSlug
       : null)
   const [submittedDraft, setSubmittedDraft] =
     useState<CreateAgentThreadVariables | null>(null)
@@ -424,6 +438,7 @@ export function AgentsHome({
       prompt,
       images,
       repo,
+      visibility,
       repo_explicitly_none: repoOverride === null,
       model_id: activeSelection?.modelId ?? null,
       effort: activeSelection?.effort ?? null,
@@ -436,9 +451,9 @@ export function AgentsHome({
       modelConfigurable(activeSelection)
     if (repo) configurable.repo = repo
     if (repoOverride === null) configurable.repo_explicitly_none = true
+    configurable.visibility = visibility
     if (planMode) configurable.plan_mode = true
-    if (adminThread) configurable.admin_thread = true
-    if (selectedEnvironment) configurable.environment = selectedEnvironment
+    if (selectedWorkspace) configurable.environment = selectedWorkspace
 
     const handleCloudSubmitError = (error: unknown) => {
       resetPendingSubmit()
@@ -476,13 +491,15 @@ export function AgentsHome({
     <>
       <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
         {session.data && !routePending && <OnboardingDialog />}
-        {optimisticDraftThread && (
-          <AgentThreadHeader
-            title={optimisticDraftThread.title}
-            target={runTarget === "local" ? "This Mac" : "Cloud"}
-            panelCollapsed={panelCollapsed}
-          />
-        )}
+        <AgentThreadHeader
+          title={optimisticDraftThread?.title}
+          target={runTarget === "local" ? "This Mac" : "Cloud"}
+          panelCollapsed={panelCollapsed}
+          visibility={runTarget === "cloud" ? visibility : undefined}
+          onVisibilityChange={
+            submittedDraft ? undefined : setVisibilityOverride
+          }
+        />
         {optimisticDraftThread ? (
           <Messages
             messages={optimisticDraftThread.messages}
@@ -556,17 +573,11 @@ export function AgentsHome({
             onLocalWorkspaceModeChange={selectLocalWorkspaceMode}
             planMode={planMode}
             onPlanModeChange={runTarget === "cloud" ? setPlanMode : undefined}
-            environments={environments}
-            selectedEnvironment={selectedEnvironment}
-            onEnvironmentChange={
+            workspaces={workspaces}
+            selectedWorkspace={selectedWorkspace}
+            onWorkspaceChange={
               !optimisticDraftThread && runTarget === "cloud"
-                ? setEnvironmentOverride
-                : undefined
-            }
-            adminThread={adminThread}
-            onAdminThreadChange={
-              runTarget === "cloud" && session.data?.is_admin
-                ? setAdminThread
+                ? setWorkspaceOverride
                 : undefined
             }
             skills={skills.data}

@@ -24,6 +24,8 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, ValidationError
 
+from agent.slack.payloads import SlackChannelContext
+
 logger = logging.getLogger(__name__)
 
 
@@ -39,8 +41,11 @@ class SlackThreadRef(BaseModel):
     triggering_user_email: str = ""
     triggering_user_timezone: str = ""
     triggering_event_ts: str = ""
+    triggering_bot_id: str = ""
+    triggering_bot_app_id: str = ""
+    team_id: str = ""
     permalink: str = ""
-    channel_context: dict[str, Any] | None = None
+    channel_context: SlackChannelContext | None = None
 
     @property
     def location(self) -> tuple[str, str] | None:

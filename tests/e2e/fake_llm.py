@@ -82,6 +82,45 @@ Greeting helpers are available.
 EOF
 """.strip()
 
+# The expedited-review flow needs a change small enough to qualify (at most ten
+# changed lines, no protected paths), so it touches one line of one file.
+EXPEDITE_MARKER = "E2E_EXPEDITE"
+EXPEDITE_NOW_MARKER = "E2E_EXPEDITE_NOW"
+EXPEDITE_PR_TITLE = "Fix the greeting punctuation"
+
+# The seeded remote holds only a README, so the first turn writes the file. Two
+# added lines keeps the pull request inside the ten-line eligibility limit.
+_EXPEDITE_SETUP_SCRIPT = f"""
+set -e
+rm -rf repo
+git clone "$E2E_REMOTE" repo
+cd repo
+git config user.email "dev@example.com"
+git config user.name "Dev User"
+git checkout -b {FEATURE_BRANCH}
+cat > {FEATURE_FILE} <<'EOF'
+def greet(name):
+    return "Hello!!"
+EOF
+git add -A
+git commit -m "{EXPEDITE_PR_TITLE}"
+git push origin {FEATURE_BRANCH}
+echo PUSHED_OK
+""".strip()
+
+_EXPEDITE_FIX_SCRIPT = f"""
+set -e
+cd repo
+cat > {FEATURE_FILE} <<'EOF'
+def greet(name):
+    return "Hello!"
+EOF
+git add -A
+git commit -m "Restore the expected greeting"
+git push origin {FEATURE_BRANCH}
+echo FIXED_OK
+""".strip()
+
 _COMMIT_SCRIPT = f"""
 set -e
 cd repo
@@ -181,7 +220,7 @@ curl --fail --silent --show-error \
 """.strip()
 
 # The system prompt of the most recent model call, so specs can assert what the
-# agent was actually told (e.g. the environment section) rather than infer it.
+# agent was actually told (e.g. the workspace section) rather than infer it.
 LAST_SYSTEM_PROMPT: dict[str, str] = {"text": ""}
 
 _BUSY_HOLD_RE = re.compile(r"E2E_BUSY_HOLD(?::(\d+(?:\.\d+)?))?")
@@ -374,6 +413,95 @@ def _reply_step(messages: list[BaseMessage]) -> AIMessage:
     )
 
 
+def _expedite_watch_step(messages: list[BaseMessage]) -> AIMessage:
+    """Ask for the durable CI watch on the PR the previous step opened."""
+    url = _pr_url_from_messages(messages) or ""
+    return AIMessage(
+        content="Watching the pull request until CI settles.",
+        tool_calls=[
+            {
+                "name": "manage_baby_sit",
+                "args": {"pr_url": url, "action": "start"},
+                "id": "call-expedite-watch",
+            }
+        ],
+        response_metadata={"model_name": "fake-scripted-model"},
+    )
+
+
+def _expedite_request_step(messages: list[BaseMessage]) -> AIMessage:
+    """Nominate the PR for expedited review in the Slack thread."""
+    url = _pr_url_from_messages(messages) or ""
+    return AIMessage(
+        content="Asking for an expedited review in the thread.",
+        tool_calls=[
+            {
+                "name": "expedite_pr_approval",
+                "args": {"pr_url": url},
+                "id": f"call-expedite-{len(messages)}",
+            }
+        ],
+        response_metadata={"model_name": "fake-scripted-model"},
+    )
+
+
+def _expedite_opened_reply_step(messages: list[BaseMessage]) -> AIMessage:
+    url = _pr_url_from_messages(messages) or "(PR url unavailable)"
+    text = (
+        f"Opened <{url}|{EXPEDITE_PR_TITLE}> and I'm watching its checks. "
+        "I'll ask for an expedited review once they are green."
+    )
+    return AIMessage(
+        content="Reporting the pull request in the Slack thread.",
+        tool_calls=[
+            {
+                "name": "slack_thread_reply",
+                "args": {"message": text},
+                "id": f"call-expedite-opened-{len(messages)}",
+            }
+        ],
+        response_metadata={"model_name": "fake-scripted-model"},
+    )
+
+
+def _expedite_reply_step(messages: list[BaseMessage]) -> AIMessage:
+    url = _pr_url_from_messages(messages) or "(PR url unavailable)"
+    text = (
+        f"Asked for an expedited review of <{url}|{EXPEDITE_PR_TITLE}>. "
+        "Two approvals in this thread will merge it."
+    )
+    return AIMessage(
+        content="Replying in the Slack thread.",
+        tool_calls=[
+            {
+                "name": "slack_thread_reply",
+                "args": {"message": text},
+                "id": f"call-expedite-reply-{len(messages)}",
+            }
+        ],
+        response_metadata={"model_name": "fake-scripted-model"},
+    )
+
+
+def _expedite_fixed_reply_step(messages: list[BaseMessage]) -> AIMessage:
+    url = _pr_url_from_messages(messages) or "(PR url unavailable)"
+    text = (
+        f"Fixed the failing check on <{url}|{EXPEDITE_PR_TITLE}> and pushed. "
+        "Waiting for CI to go green before asking for approvals again."
+    )
+    return AIMessage(
+        content="Reporting the fix in the Slack thread.",
+        tool_calls=[
+            {
+                "name": "slack_thread_reply",
+                "args": {"message": text},
+                "id": f"call-expedite-fix-reply-{len(messages)}",
+            }
+        ],
+        response_metadata={"model_name": "fake-scripted-model"},
+    )
+
+
 def _multi_pr_reply_step(messages: list[BaseMessage]) -> AIMessage:
     url = _pr_url_from_messages(messages) or "(PR url unavailable)"
     return AIMessage(
@@ -544,14 +672,14 @@ def _plan_complete_step(messages: list[BaseMessage]) -> AIMessage:
     )
 
 
-ENVIRONMENT_NAME = "default"
-ENVIRONMENT_PROMPT = (
+WORKSPACE_NAME = "default"
+WORKSPACE_PROMPT = (
     "Checkouts live in /workspace/repos. Build with `make build`, test with `make test`."
 )
-ENVIRONMENT_SETUP_SCRIPT = (
+WORKSPACE_SETUP_SCRIPT = (
     "set -euo pipefail\nmkdir -p repos && echo provisioned > repos/.provisioned && ls -a repos"
 )
-ENVIRONMENT_UPDATE_SCRIPT = "echo refreshed >> repos/.provisioned"
+WORKSPACE_UPDATE_SCRIPT = "echo refreshed >> repos/.provisioned"
 
 FOLLOW_UP_REPLY = "Thanks! The PR is ready for review — anything else you'd like changed?"
 
@@ -608,11 +736,11 @@ def _inspected_thread_id(messages: list[BaseMessage]) -> str:
     return thread_id
 
 
-def _environment_poll_step(messages: list[BaseMessage]) -> AIMessage:
+def _workspace_poll_step(messages: list[BaseMessage]) -> AIMessage:
     """Follow the reproducibility rebuild through the one poll tool."""
-    task_id = _tool_payload(messages, "refresh_environment_start").get("task_id")
+    task_id = _tool_payload(messages, "refresh_workspace_start").get("task_id")
     if not isinstance(task_id, str):
-        raise ValueError("refresh_environment_start did not return a task id")
+        raise ValueError("refresh_workspace_start did not return a task id")
     return AIMessage(
         content="Following the rebuild.",
         tool_calls=[
@@ -959,6 +1087,60 @@ SCRIPT_LIBRARY: dict[str, tuple[StepSpec, ...]] = {
         ),
         _dynamic_step(_reply_step),
     ),
+    # Expedited review, turn 1: implement a one-line change, open a ready PR,
+    # start the durable CI watch, and nominate it for approval in Slack. The
+    # card cannot appear yet — checks have not reported.
+    "expedite": (
+        _tool_step(
+            "Acknowledging the request.",
+            "slack_thread_reply",
+            {"message": "On it — this is a one-liner, I'll ask for an expedited review."},
+            "call-expedite-ack",
+        ),
+        _tool_step(
+            "Making the change and pushing the branch.",
+            "execute",
+            {"command": _EXPEDITE_SETUP_SCRIPT},
+            "call-expedite-setup",
+        ),
+        _tool_step(
+            "Opening a pull request that is ready for review.",
+            "open_pull_request",
+            {
+                "owner": OWNER,
+                "repo": REPO,
+                "head": FEATURE_BRANCH,
+                "base": BASE_BRANCH,
+                "title": EXPEDITE_PR_TITLE,
+                "body": "Restores the single exclamation mark in the greeting.",
+                "draft": False,
+                "resolves_thread": True,
+            },
+            "call-expedite-pr",
+        ),
+        _dynamic_step(_expedite_watch_step),
+        _dynamic_step(_expedite_opened_reply_step),
+    ),
+    # Turn 2: a failing check woke the watch. Fix the code and push; the next
+    # green webhook is what lets the pending approval post its card.
+    "expedite_fix": (
+        _tool_step(
+            "Fixing the failing check and pushing.",
+            "execute",
+            {"command": _EXPEDITE_FIX_SCRIPT},
+            "call-expedite-fix",
+        ),
+        # Ask in the same turn. The check is still red, so the request has to
+        # park until CI reports green rather than posting a card now.
+        _dynamic_step(_expedite_request_step),
+        _dynamic_step(_expedite_fixed_reply_step),
+    ),
+    # Turn 3: checks are green (or an earlier round was withdrawn). Ask for the
+    # expedited review now that the pull request is clean.
+    "expedite_retry": (
+        _dynamic_step(_expedite_request_step),
+        _dynamic_step(_expedite_reply_step),
+    ),
     "multi_pr": (
         _tool_step(
             "Acknowledging the cross-repository request before starting work.",
@@ -1073,22 +1255,22 @@ SCRIPT_LIBRARY: dict[str, tuple[StepSpec, ...]] = {
         _dynamic_step(_plan_complete_step),
         StepSpec(content="I'll wait for your review and approval before implementing."),
     ),
-    "environment": (
+    "workspace": (
         # Build here, with ordinary tools, then publish this sandbox as the image.
         _tool_step(
             "Provisioning this sandbox.",
             "execute",
-            {"command": ENVIRONMENT_SETUP_SCRIPT},
+            {"command": WORKSPACE_SETUP_SCRIPT},
             "call-env-provision",
         ),
         _tool_step(
-            "Publishing this sandbox as the environment.",
-            "publish_environment",
+            "Publishing this sandbox as the workspace image.",
+            "publish_workspace",
             {
-                "name": ENVIRONMENT_NAME,
-                "prompt": ENVIRONMENT_PROMPT,
-                "setup_script": ENVIRONMENT_SETUP_SCRIPT,
-                "update_script": ENVIRONMENT_UPDATE_SCRIPT,
+                "name": WORKSPACE_NAME,
+                "prompt": WORKSPACE_PROMPT,
+                "setup_script": WORKSPACE_SETUP_SCRIPT,
+                "update_script": WORKSPACE_UPDATE_SCRIPT,
                 "repos": [f"{OWNER}/{REPO}"],
             },
             "call-env-publish",
@@ -1096,12 +1278,12 @@ SCRIPT_LIBRARY: dict[str, tuple[StepSpec, ...]] = {
         # Then prove the script reproduces it, the way the nightly cron will.
         _tool_step(
             "Checking the setup script reproduces the image.",
-            "refresh_environment_start",
-            {"name": ENVIRONMENT_NAME},
+            "refresh_workspace_start",
+            {"name": WORKSPACE_NAME},
             "call-env-refresh",
         ),
-        _dynamic_step(_environment_poll_step),
-        StepSpec(content=f"The `{ENVIRONMENT_NAME}` environment is captured and live."),
+        _dynamic_step(_workspace_poll_step),
+        StepSpec(content=f"The `{WORKSPACE_NAME}` workspace is captured and live."),
     ),
     "followup": (_dynamic_step(_followup_step),),
 }
@@ -1119,8 +1301,9 @@ def _is_plan_request(text: str) -> bool:
     return "plan" in text.lower()
 
 
-def _is_environment_request(text: str) -> bool:
-    return "environment" in text.lower()
+def _is_workspace_request(text: str) -> bool:
+    lowered = text.lower()
+    return "workspace" in lowered or "environment" in lowered
 
 
 def _is_breakout_request(text: str) -> bool:
@@ -1134,6 +1317,14 @@ def _is_move_request(text: str) -> bool:
 
 def _is_move_followup(text: str) -> bool:
     return "E2E_DESTINATION_FOLLOWUP" in text or "E2E_SOURCE_RETAG" in text
+
+
+def _is_pull_request_fix(text: str) -> bool:
+    """A dashboard PR-fix dispatch, whose prompt names an existing PR to repair.
+
+    Without this it lands on the catch-all implement script and opens a *new* PR,
+    which renumbers the fake store under whichever spec runs next."""
+    return "Fix merge conflicts and failing CI checks on" in text
 
 
 def _is_approval(text: str) -> bool:
@@ -1180,8 +1371,23 @@ SCRIPT_RULES: tuple[ScriptRule, ...] = (
         lambda ctx: ctx.human_count <= 1 and "E2E_DESKTOP_LOCAL" in ctx.first_text,
     ),
     ScriptRule(
-        "environment", lambda ctx: ctx.human_count <= 1 and _is_environment_request(ctx.first_text)
+        "workspace", lambda ctx: ctx.human_count <= 1 and _is_workspace_request(ctx.first_text)
     ),
+    ScriptRule(
+        "expedite_fix",
+        lambda ctx: EXPEDITE_MARKER in ctx.first_text and "/baby-sit --continue" in ctx.last_text,
+    ),
+    ScriptRule(
+        "expedite_retry",
+        lambda ctx: (
+            EXPEDITE_MARKER in ctx.first_text
+            and (
+                EXPEDITE_NOW_MARKER in ctx.last_text
+                or "was withdrawn before it could merge" in ctx.last_text
+            )
+        ),
+    ),
+    ScriptRule("expedite", lambda ctx: EXPEDITE_MARKER in ctx.first_text),
     ScriptRule("followup", lambda ctx: _is_move_followup(ctx.last_text)),
     ScriptRule("move", lambda ctx: _is_move_request(ctx.first_text)),
     ScriptRule("implement", lambda ctx: _is_approval(ctx.last_text)),
@@ -1198,6 +1404,7 @@ SCRIPT_RULES: tuple[ScriptRule, ...] = (
         "many_files", lambda ctx: ctx.human_count <= 1 and "E2E_MANY_FILES" in ctx.first_text
     ),
     ScriptRule("move", lambda ctx: ctx.human_count <= 1 and _is_move_request(ctx.first_text)),
+    ScriptRule("followup", lambda ctx: _is_pull_request_fix(ctx.first_text)),
     ScriptRule("implement", lambda ctx: ctx.human_count <= 1),
     ScriptRule("followup", lambda _ctx: True),
 )

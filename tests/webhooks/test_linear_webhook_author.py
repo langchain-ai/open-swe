@@ -50,6 +50,7 @@ def _run_process(
         user_email="",
         title="",
         source_context=None,
+        workspace=None,
     ):
         captured["upsert"] = {"github_login": github_login, "user_email": user_email}
         return None
@@ -58,24 +59,18 @@ def _run_process(
         captured["resolved_email"] = email
         return "zhen" if email == "zhen@example.com" else None
 
+    if full_issue is not None:
+        full_issue["comment_author"] = issue_data.get("comment_author", {})
+        full_issue["triggering_comment_id"] = issue_data.get("triggering_comment_id", "")
+        full_issue["triggering_comment"] = issue_data.get("triggering_comment", "")
+        issue_data = full_issue
     with (
-        patch.object(linear_webhook.common, "react_to_linear_comment", new_callable=AsyncMock),
         patch.object(linear_webhook, "linear_issue_thread_id", return_value="thread-1"),
-        patch.object(
-            linear_webhook.common,
-            "fetch_linear_issue_details",
-            new_callable=AsyncMock,
-            return_value=full_issue
-            or _full_issue(user_email=issue_data.get("comment_author", {}).get("email")),
-        ),
-        patch.object(
-            linear_webhook.common, "resolve_login_from_email_async", side_effect=fake_resolve_login
-        ),
+        patch.object(linear_webhook.User, "login_for_email", side_effect=fake_resolve_login),
         patch.object(linear_webhook.common, "dispatch_agent_run", side_effect=fake_dispatch),
         patch.object(
             linear_webhook.common, "upsert_agent_thread_metadata", side_effect=fake_upsert
         ),
-        patch.object(linear_webhook.common, "post_linear_trace_comment", new_callable=AsyncMock),
         patch.object(linear_webhook.common, "resolve_agent_model_id", new_callable=AsyncMock),
         patch.object(linear_webhook.common, "model_supports_images", return_value=True),
         patch.object(
@@ -95,7 +90,7 @@ def _run_process(
     )
 
 
-def test_linear_configurable_carries_github_login() -> None:
+def test_linear_configurable_carries_github_login(fake_store: Any) -> None:
     configurable, _upsert, resolved_email, _content = _run_process(
         _issue_data(user_email="zhen@example.com"),
         {"owner": "langchain-ai", "name": "open-swe"},
@@ -107,7 +102,7 @@ def test_linear_configurable_carries_github_login() -> None:
     assert configurable["user_email"] == "zhen@example.com"
 
 
-def test_linear_upsert_tags_thread_with_login() -> None:
+def test_linear_upsert_tags_thread_with_login(fake_store: Any) -> None:
     _configurable, upsert, _email, _content = _run_process(
         _issue_data(user_email="zhen@example.com"),
         {"owner": "langchain-ai", "name": "open-swe"},
@@ -117,7 +112,7 @@ def test_linear_upsert_tags_thread_with_login() -> None:
     assert upsert["user_email"] == "zhen@example.com"
 
 
-def test_linear_omits_login_when_unmapped() -> None:
+def test_linear_omits_login_when_unmapped(fake_store: Any) -> None:
     configurable, upsert, resolved_email, _content = _run_process(
         _issue_data(user_email="nobody@example.com"),
         {"owner": "langchain-ai", "name": "open-swe"},
@@ -128,7 +123,7 @@ def test_linear_omits_login_when_unmapped() -> None:
     assert upsert["github_login"] == ""
 
 
-def test_linear_description_images_stay_with_issue_without_comments() -> None:
+def test_linear_description_images_stay_with_issue_without_comments(fake_store: Any) -> None:
     issue = _full_issue()
     issue["description"] = "See ![issue](https://example.com/issue.png)"
     _configurable, _upsert, _email, content = _run_process(
@@ -142,7 +137,7 @@ def test_linear_description_images_stay_with_issue_without_comments() -> None:
     assert messages[1]["content"][1]["image_url"]["url"] == "https://example.com/issue.png"
 
 
-def test_linear_comment_images_stay_with_their_comments() -> None:
+def test_linear_comment_images_stay_with_their_comments(fake_store: Any) -> None:
     issue = _full_issue()
     issue["comments"]["nodes"] = [
         {

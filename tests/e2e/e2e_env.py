@@ -49,7 +49,7 @@ _DEFAULTS = {
     # Sandbox: real local provider, rooted in a throwaway temp dir.
     "SANDBOX_TYPE": "local",
     "LOCAL_SANDBOX_ROOT_DIR": str(_WORK_DIR),
-    # Environment scripts write themselves and their logs here. The default,
+    # Workspace scripts write themselves and their logs here. The default,
     # /open-swe/environment, assumes a sandbox where the agent is root; this
     # provider runs on the developer's own machine, whose root is not writable.
     "OPENSWE_SCRIPT_ROOT": str(TMP / "open-swe" / "environment"),
@@ -59,6 +59,10 @@ _DEFAULTS = {
     # Path the scripted agent clones from (a local bare repo = "fake GitHub").
     "E2E_REMOTE": str(BARE_REMOTE),
     "E2E_SECOND_REMOTE": str(SECOND_BARE_REMOTE),
+    # Pull requests, repositories and users live in PostgreSQL, and the server
+    # refuses to start without it. CI provides a service on this URI; locally
+    # any PostgreSQL on 5432 works. Export POSTGRES_URI to point elsewhere.
+    "POSTGRES_URI": "postgresql://postgres:postgres@localhost:5432/postgres",
     # Webhook signing + bot identity.
     "GITHUB_WEBHOOK_SECRET": "test-github-secret",
     "SLACK_SIGNING_SECRET": "test-slack-secret",
@@ -91,14 +95,31 @@ _DEFAULTS = {
 # a dashboard login with a matching email, so the Slack thread's owner (resolved
 # by email) is the same person when they sign in. The first (Alice) is the
 # default Slack sender, hence the default thread owner.
+# ``github_id`` is the immutable numeric id GitHub keys an account on, which is
+# what a ``user_identity`` row stores; the login is only a display handle.
 TEST_USERS = [
-    {"name": "Alice", "slack_id": "U_ALICE", "login": "alice", "email": "alice@example.com"},
-    {"name": "Bob", "slack_id": "U_BOB", "login": "bob", "email": "bob@example.com"},
+    {
+        "name": "Alice",
+        "slack_id": "U_ALICE",
+        "login": "alice",
+        "email": "alice@example.com",
+        "github_id": "1001",
+    },
+    {
+        "name": "Bob",
+        "slack_id": "U_BOB",
+        "login": "bob",
+        "email": "bob@example.com",
+        "github_id": "1002",
+    },
 ]
 
-# Alice is the workspace admin (so admin threads + the environments dashboard are
+# Alice is the workspace admin (so admin threads + the workspaces dashboard are
 # reachable); Bob is a plain member, which is what the deny-side assertions use.
 ADMIN_USER = TEST_USERS[0]
+_DEFAULTS["ALLOWED_GITHUB_USERS"] = ",".join(
+    [*(user["login"] for user in TEST_USERS), "thread-tools-e2e", "threads-workspace-e2e"]
+)
 _DEFAULTS["CONFIGURED_ADMINS"] = ADMIN_USER["email"]
 
 # The default Slack sender / thread owner; a session with this email may continue

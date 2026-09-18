@@ -6,6 +6,7 @@ from typing import Any, cast
 
 from langchain_core.tools import BaseTool
 
+from agent.credential_scope import private_credential_login
 from agent.dashboard.notion_oauth import NOTION_MCP_URL
 from agent.dashboard.user_credentials import get_notion_access_token
 from agent.utils.thread_participants import resolve_participant
@@ -34,7 +35,10 @@ async def _build_mcp_tools(access_token: str) -> list[BaseTool]:
 
 
 async def _fresh_mcp_tool(login: str, tool_name: str) -> BaseTool:
-    access_token = await get_notion_access_token(login)
+    owner = await private_credential_login()
+    if owner is None or owner.lower() != login.strip().lower():
+        raise RuntimeError("Personal Notion MCP tools require the private thread owner")
+    access_token = await get_notion_access_token(owner)
     if not access_token:
         raise RuntimeError(
             "Notion MCP authorization unavailable; reconnect Notion in Profile Settings"
@@ -107,14 +111,11 @@ def _refreshing_tool(tool: BaseTool) -> BaseTool:
 
 
 async def load_notion_tools(login: str) -> list[BaseTool]:
-    """Return Notion MCP tool definitions, keyed to no particular user.
-
-    ``login`` only supplies a token to read the hosted server's tool list; the
-    resulting definitions are identical for every user, so the agent's tool
-    schema does not change when a different person replies in a thread. Each
-    call names the participant to act for and resolves that person's token then.
-    """
-    access_token = await get_notion_access_token(login)
+    """Load the private owner's personal Notion tools."""
+    owner = await private_credential_login()
+    if owner is None or owner.lower() != login.strip().lower():
+        return []
+    access_token = await get_notion_access_token(owner)
     if not access_token:
         return []
     try:

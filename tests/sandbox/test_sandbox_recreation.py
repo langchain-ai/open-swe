@@ -44,7 +44,8 @@ async def test_recreate_sandbox_hands_off_after_metadata_persists() -> None:
     assert result == ("sandbox-old", "sandbox-new")
     create.assert_awaited_once_with(
         thread_id=thread_id,
-        environment_slug=None,
+        workspace_slug=None,
+        source="workspace",
     )
     configure.assert_awaited_once_with(new_sandbox)
     update.assert_awaited_once_with(
@@ -54,6 +55,58 @@ async def test_recreate_sandbox_hands_off_after_metadata_persists() -> None:
     assert SANDBOX_BACKENDS[thread_id] is proxy
     assert proxy.current is new_sandbox
     SANDBOX_BACKENDS.clear()
+
+
+@pytest.mark.asyncio
+async def test_recreate_sandbox_base_source_skips_workspace_snapshot() -> None:
+    thread_id = "thread-recreate-base"
+    SANDBOX_BACKENDS.clear()
+    set_sandbox_backend(thread_id, MagicMock(id="sandbox-old"))
+
+    with (
+        patch(
+            "agent.sandboxes.lifecycle.get_sandbox_id_from_metadata",
+            new_callable=AsyncMock,
+            return_value="sandbox-old",
+        ),
+        patch(
+            "agent.sandboxes.lifecycle._create_sandbox_with_proxy",
+            new_callable=AsyncMock,
+            return_value=MagicMock(id="sandbox-new"),
+        ) as create,
+        patch("agent.sandboxes.lifecycle.configure_git_identity", new_callable=AsyncMock),
+        patch("agent.sandboxes.lifecycle.client.threads.update", new_callable=AsyncMock),
+    ):
+        result = await recreate_sandbox_for_thread(
+            thread_id, workspace_slug="langchainplus", source="base"
+        )
+
+    assert result == ("sandbox-old", "sandbox-new")
+    create.assert_awaited_once_with(
+        thread_id=thread_id, workspace_slug="langchainplus", source="base"
+    )
+    SANDBOX_BACKENDS.clear()
+
+
+@pytest.mark.asyncio
+async def test_base_source_skips_workspace_lookup_entirely() -> None:
+    """An absent slug still resolves the `default` workspace, so base must not rely on it."""
+    from agent.sandboxes.lifecycle import SandboxCreateConfig
+
+    with (
+        patch("agent.sandboxes.lifecycle.load_workspace", new_callable=AsyncMock) as load_workspace,
+        patch(
+            "agent.sandboxes.lifecycle.get_admin_base_snapshot_id",
+            new_callable=AsyncMock,
+            return_value="snapshot-base",
+        ),
+    ):
+        config = await SandboxCreateConfig.resolve("langchainplus", source="base")
+
+    load_workspace.assert_not_awaited()
+    assert config.snapshot_id == "snapshot-base"
+    assert config.workspace is None
+    assert config.create_params == {}
 
 
 @pytest.mark.asyncio
