@@ -538,6 +538,7 @@ def test_post_slack_thread_reply_adds_web_context_block(monkeypatch: pytest.Monk
         unfurl_links: bool = True,
         unfurl_media: bool = True,
         blocks: list[dict] | None = None,
+        reply_broadcast: bool = False,
     ) -> tuple[str | None, str | None]:
         captured.update(
             {
@@ -593,6 +594,7 @@ def test_post_slack_thread_reply_keeps_long_messages_text_only(
         unfurl_links: bool = True,
         unfurl_media: bool = True,
         blocks: list[dict] | None = None,
+        reply_broadcast: bool = False,
     ) -> tuple[str | None, str | None]:
         captured.update({"text": text, "blocks": blocks})
         return "1.1", None
@@ -630,6 +632,7 @@ def test_post_slack_thread_reply_appends_web_context_block_to_blocks(
         unfurl_links: bool = True,
         unfurl_media: bool = True,
         blocks: list[dict] | None = None,
+        reply_broadcast: bool = False,
     ) -> tuple[str | None, str | None]:
         captured.update({"text": text, "blocks": blocks})
         return "1.1", None

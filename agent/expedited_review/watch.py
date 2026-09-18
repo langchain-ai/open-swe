@@ -6,6 +6,7 @@ fallback. Network reads happen unlocked; the state transition is applied under
 a row lock with the expected prior state as a precondition.
 """
 
+import asyncio
 import logging
 from typing import Any
 from uuid import UUID
@@ -20,6 +21,7 @@ from agent.expedited_review.approvals import (
     ApprovalState,
     ExpeditedApproval,
 )
+from agent.expedited_review.diff_image import render_diff_png
 from agent.expedited_review.eligibility import (
     ChangedFile,
     Ineligible,
@@ -40,6 +42,7 @@ from agent.slack.client import (
     post_slack_thread_reply,
     post_slack_thread_reply_with_ts,
     update_slack_message,
+    upload_slack_thread_file,
 )
 
 logger = logging.getLogger(__name__)
@@ -150,17 +153,47 @@ async def _files_for(approval: ExpeditedApproval, token: str) -> list[ChangedFil
     return files or []
 
 
+async def _diff_image_id(approval: ExpeditedApproval, files: list[ChangedFile]) -> str | None:
+    """A hosted-but-unposted PNG of the diff, which the card renders inline."""
+    if not files:
+        return None
+    try:
+        png = await asyncio.to_thread(render_diff_png, files)
+    except (ValueError, OSError) as exc:
+        logger.warning(
+            "Failed to render expedited review diff image",
+            extra={"approval_id": str(approval.id), "render_error": str(exc)},
+        )
+        return None
+    file_id, error = await upload_slack_thread_file(
+        None, None, f"diff-{approval.head_sha[:12]}.png", png, title="Diff"
+    )
+    if not file_id:
+        logger.warning(
+            "Failed to upload expedited review diff image",
+            extra={"approval_id": str(approval.id), "slack_error": error},
+        )
+    return file_id
+
+
 async def _update_card(
     approval: ExpeditedApproval, *, title: str, files: list[ChangedFile], outcome: str | None
 ) -> None:
     if not approval.slack_channel_id or not approval.slack_message_ts:
         return
+    diff_image_id = await _diff_image_id(approval, files)
     if outcome is None:
         text, blocks = card.open_card(
-            approval, title=title, files=files, failing_checks=approval.advisory_failures
+            approval,
+            title=title,
+            files=files,
+            failing_checks=approval.advisory_failures,
+            diff_image_id=diff_image_id,
         )
     else:
-        text, blocks = card.closed_card(approval, title=title, files=files, outcome=outcome)
+        text, blocks = card.closed_card(
+            approval, title=title, files=files, outcome=outcome, diff_image_id=diff_image_id
+        )
     ok, error = await update_slack_message(
         approval.slack_channel_id, approval.slack_message_ts, text, blocks=block_payload(blocks)
     )
@@ -241,7 +274,11 @@ async def _post_card(
         return "failed"
     advisory = [] if readiness.snapshot.failures_are_required else readiness.snapshot.failing_checks
     text, blocks = card.open_card(
-        approval, title=readiness.snapshot.title, files=files, failing_checks=advisory
+        approval,
+        title=readiness.snapshot.title,
+        files=files,
+        failing_checks=advisory,
+        diff_image_id=await _diff_image_id(approval, files),
     )
     message_ts, error = await post_slack_thread_reply_with_ts(
         location[0],
@@ -249,6 +286,7 @@ async def _post_card(
         text,
         blocks=block_payload(blocks),
         agent_thread_id=approval.thread_id or None,
+        reply_broadcast=True,
     )
     if not message_ts:
         logger.warning(
