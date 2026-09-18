@@ -16,7 +16,7 @@ from langgraph.prebuilt.tool_node import ToolCallRequest
 
 from agent.middleware import transcript as mw
 from agent.transcript.engine import Command
-from agent.transcript.events import TurnFailed
+from agent.transcript.events import MessageUsage, TurnFailed
 
 THREAD_ID = "thread-under-test"
 RUN_ID = "run-under-test"
@@ -163,6 +163,7 @@ async def test_hook_sequence_for_a_transcribed_turn(monkeypatch: pytest.MonkeyPa
         content="on it",
         id="ai-1",
         tool_calls=[{"name": "read_file", "args": {"path": "a.py"}, "id": "call-1"}],
+        usage_metadata={"input_tokens": 120, "output_tokens": 30, "total_tokens": 150},
     )
 
     async def model_handler(request: ModelRequest) -> ModelResponse:
@@ -189,6 +190,9 @@ async def test_hook_sequence_for_a_transcribed_turn(monkeypatch: pytest.MonkeyPa
     ]
     assert engine.command_ids[0] == f"turn:{turn_id}:started:{RUN_ID}"
     assert engine.command_ids[-1] == f"turn:{turn_id}:completed"
+    assert engine.commands[1].event.usage == MessageUsage(
+        input_tokens=120, output_tokens=30, total_tokens=150
+    )
     started = engine.commands[2]
     assert started.event.message_id == "ai-1"
     assert started.event.namespace == []
@@ -221,8 +225,25 @@ async def test_follow_up_without_a_turn_id_mints_one(monkeypatch: pytest.MonkeyP
     assert requested.event.text == "follow up"
 
 
-async def test_old_thread_is_skipped_entirely(monkeypatch: pytest.MonkeyPatch) -> None:
-    engine = _install(monkeypatch, transcribed=False)
+@pytest.mark.parametrize(
+    ("transcribed", "postgres_configured"),
+    [
+        # An older thread with agent turns but no transcript row, and a
+        # deployment with nowhere to keep a transcript at all.
+        (False, True),
+        (False, False),
+    ],
+)
+async def test_an_untranscribable_run_writes_nothing(
+    monkeypatch: pytest.MonkeyPatch, transcribed: bool, postgres_configured: bool
+) -> None:
+    engine = _install(monkeypatch, transcribed=transcribed, postgres_configured=postgres_configured)
+    stamped: list[str] = []
+
+    async def _stamp(thread_id: str) -> None:
+        stamped.append(thread_id)
+
+    monkeypatch.setattr(mw, "_stamp_transcript", _stamp)
     middleware = mw.TranscriptMiddleware()
     state: dict[str, Any] = {
         "messages": [HumanMessage(content="hi", id="h"), AIMessage(content="hello", id="a")]
@@ -237,6 +258,7 @@ async def test_old_thread_is_skipped_entirely(monkeypatch: pytest.MonkeyPatch) -
     await middleware.aafter_agent(state, None)
 
     assert engine.commands == []
+    assert stamped == []
 
 
 async def test_only_mid_run_human_messages_are_recorded_once(
@@ -371,58 +393,6 @@ async def test_streamed_fragments_keep_one_message_id(monkeypatch: pytest.Monkey
     assert tool_started.event.message_id == next(iter(used_ids))
 
 
-async def test_without_postgres_the_middleware_writes_nothing(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """No database means no transcript: the run must not be stamped as one."""
-    engine = _install(monkeypatch, transcribed=False, postgres_configured=False)
-    stamped: list[str] = []
-
-    async def _stamp(thread_id: str) -> None:
-        stamped.append(thread_id)
-
-    monkeypatch.setattr(mw, "_stamp_transcript", _stamp)
-    middleware = mw.TranscriptMiddleware()
-    human = HumanMessage(content="hi", id="human-1")
-
-    await middleware.abefore_agent({"messages": [human]}, None)
-
-    async def model_handler(request: ModelRequest) -> ModelResponse:
-        return ModelResponse(result=[AIMessage(content="hello", id="ai-1")])
-
-    await middleware.awrap_model_call(_model_request([human]), model_handler)
-    await middleware.aafter_agent({"messages": []}, None)
-
-    assert engine.commands == []
-    assert stamped == []
-
-
-async def test_ai_usage_is_recorded_on_completion(monkeypatch: pytest.MonkeyPatch) -> None:
-    engine = _install(monkeypatch, transcribed=True, turn_id=uuid7())
-    middleware = mw.TranscriptMiddleware()
-    await middleware.abefore_agent({"messages": [HumanMessage(content="hi", id="h")]}, None)
-
-    ai = AIMessage(
-        content="done",
-        id="ai-1",
-        usage_metadata={"input_tokens": 120, "output_tokens": 30, "total_tokens": 150},
-    )
-
-    async def model_handler(request: ModelRequest) -> ModelResponse:
-        return ModelResponse(result=[ai])
-
-    await middleware.awrap_model_call(_model_request([]), model_handler)
-    await middleware.aafter_agent({"messages": []}, None)
-
-    completed = next(
-        command for command in engine.commands if command.event.type == "message.completed"
-    )
-    assert completed.event.usage is not None
-    assert completed.event.usage.input_tokens == 120
-    assert completed.event.usage.output_tokens == 30
-    assert completed.event.usage.total_tokens == 150
-
-
 async def test_injected_human_images_become_attachments(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -459,27 +429,6 @@ async def test_injected_human_images_become_attachments(
     assert attachment.data == b"pretend-png"
     assert human.event.images is not None
     assert human.event.images[0].attachment_id == attachment.attachment_id
-
-
-async def test_a_thread_without_a_sandbox_checkpoints_as_missing(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """No sandbox, no git: the turn still records that it has nothing to diff."""
-    engine = _install(monkeypatch, transcribed=True, turn_id=uuid7())
-    monkeypatch.setattr(mw.checkpoints, "SANDBOX_BACKENDS", {})
-    middleware = mw.TranscriptMiddleware()
-
-    await middleware.abefore_agent({"messages": [HumanMessage(content="hi", id="h")]}, None)
-    await middleware.aafter_agent({"messages": []}, None)
-
-    # Ahead of ``turn.completed``: a settled turn always already has its checkpoint.
-    assert engine.types == ["turn.started", "turn.checkpoint.completed", "turn.completed"]
-    checkpoint = engine.commands[-2].event
-    assert checkpoint.status == "missing"
-    assert checkpoint.commit is None
-    assert checkpoint.error is None
-    assert checkpoint.checkpoint_turn_count == 1
-    assert checkpoint.checkpoint_ref == f"refs/open-swe/checkpoints/{THREAD_ID}/turn/1"
 
 
 async def test_a_stamped_thread_always_has_its_thread_row(

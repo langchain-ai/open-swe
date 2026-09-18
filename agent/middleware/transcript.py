@@ -150,10 +150,10 @@ class ParagraphBuffer:
             return None
         return self._cut(boundary, now)
 
-    def _cut(self, index: int, now: float) -> str | None:
+    def _cut(self, index: int, now: float) -> str:
         fragment, self.pending = self.pending[:index], self.pending[index:]
         self.last_flush = now
-        return fragment or None
+        return fragment
 
 
 @dataclass
@@ -570,13 +570,6 @@ async def _finish(state: RunState) -> None:
         _runs.pop(_run_key(state.thread_id, state.run_id), None)
 
 
-def _last_human(messages: Sequence[BaseMessage]) -> HumanMessage | None:
-    for message in reversed(messages):
-        if isinstance(message, HumanMessage):
-            return message
-    return None
-
-
 def _string(value: object) -> str | None:
     return value if isinstance(value, str) and value else None
 
@@ -655,7 +648,7 @@ class TranscriptMiddleware(OpenSWEMiddleware):
             )
             return
 
-        human = _last_human(messages)
+        human = next((m for m in reversed(messages) if isinstance(m, HumanMessage)), None)
         metadata: Mapping[str, object] = {}
         if not transcribed:
             metadata = await _thread_metadata(ids.thread_id)
@@ -900,7 +893,11 @@ class TranscriptMiddleware(OpenSWEMiddleware):
             result = await handler(request)
         except Exception as exc:
             self._complete_tool(
-                state, tool_call_id, namespace, "error", f"{type(exc).__name__}: {exc}"
+                state,
+                tool_call_id,
+                namespace,
+                "error",
+                *_tool_output(f"{type(exc).__name__}: {exc}"),
             )
             raise
         finally:
@@ -914,9 +911,9 @@ class TranscriptMiddleware(OpenSWEMiddleware):
         tool_call_id: str,
         namespace: list[str],
         status: Literal["completed", "error"],
-        output: str,
+        text: str,
+        truncated: bool,
     ) -> None:
-        text, truncated = _tool_output(output)
         try:
             state.enqueue(
                 Command(
@@ -1123,26 +1120,25 @@ def _json_object(value: object) -> JsonObject:
 
 def _result_output(
     result: ToolMessage | GraphCommand[Any], tool_call_id: str
-) -> tuple[Literal["completed", "error"], str]:
+) -> tuple[Literal["completed", "error"], str, bool]:
+    """The tool's status, its capped output text, and whether capping cut it."""
     if isinstance(result, ToolMessage):
-        status: Literal["completed", "error"] = "error" if result.status == "error" else "completed"
-        return status, _tool_output(result.content)[0]
-    for update in _command_messages(result):
-        if isinstance(update, ToolMessage) and update.tool_call_id == tool_call_id:
-            return (
-                "error" if update.status == "error" else "completed",
-                _tool_output(update.content)[0],
-            )
-    return "completed", ""
-
-
-def _command_messages(command: GraphCommand[Any]) -> Sequence[BaseMessage]:
-    update = command.update
-    if isinstance(update, Mapping):
-        messages = update.get("messages")
-        if isinstance(messages, Sequence):
-            return [m for m in messages if isinstance(m, BaseMessage)]
-    return []
+        message: ToolMessage | None = result
+    else:
+        update = result.update
+        updates = update.get("messages") if isinstance(update, Mapping) else None
+        message = next(
+            (
+                item
+                for item in (updates if isinstance(updates, Sequence) else ())
+                if isinstance(item, ToolMessage) and item.tool_call_id == tool_call_id
+            ),
+            None,
+        )
+    if message is None:
+        return "completed", "", False
+    status: Literal["completed", "error"] = "error" if message.status == "error" else "completed"
+    return status, *_tool_output(message.content)
 
 
 def _attach(handler: AsyncCallbackHandler) -> CallbackManager | AsyncCallbackManager | None:

@@ -261,7 +261,8 @@ async def proxy_dashboard_thread_commands(
                 thread_id,
                 exc_info=True,
             )
-    return response.status_code, response.content, response.headers.get("content-type")
+    media_type = response.headers.get("content-type")
+    return response.status_code, response.content, media_type
 
 
 async def proxy_dashboard_thread_history(
