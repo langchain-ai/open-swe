@@ -698,6 +698,7 @@ it("shows usage metrics but removes stale results when a refresh becomes unavail
         invocations: 12,
         prs_opened: 8,
         merged_prs: 4,
+        merged_prs_per_thread: 0.25,
         agent_loc: 35,
         additions: 50,
         deletions: 15,
@@ -716,6 +717,7 @@ it("shows usage metrics but removes stale results when a refresh becomes unavail
   expect(screen.getByText("1,234")).toBeTruthy()
   expect(screen.getByText("$2.50")).toBeTruthy()
   expect(screen.getByText("2m")).toBeTruthy()
+  expect(screen.getByText("0.25")).toBeTruthy()
   expect(screen.getByTitle("50 additions, 15 deletions").textContent).toBe("35")
   expect(screen.getByText("7 human replies tracked")).toBeTruthy()
 
@@ -972,6 +974,7 @@ it("keeps sort controls focused while loading and prevents using a stale page cu
 // Counts are most interesting highest-first; names and ranks read best ascending.
 it.each([
   ["Invocations", "invocations", "desc", "asc"],
+  ["Merged PRs / Thread", "merged_prs_per_thread", "desc", "asc"],
   ["User", "user", "asc", "desc"],
 ] as const)(
   "sorts %s from its natural direction and toggles on the next click",
