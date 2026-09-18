@@ -8,9 +8,20 @@ from typing import Any
 
 import httpx2
 
+from agent.analytics.identity import DisplayNameSource
 from agent.users import User
+from agent.utils import ttl_cache
+from agent.utils.http import DEFAULT_HTTP_TIMEOUT
 
 logger = logging.getLogger(__name__)
+
+_GITHUB_API_HEADERS = {
+    "Accept": "application/vnd.github+json",
+    "X-GitHub-Api-Version": "2022-11-28",
+}
+_PUBLIC_PROFILE_CACHE_TTL_SECONDS = 3600.0
+_GITHUB_LOGIN_MAX_CHARS = 39
+_GITHUB_LOGIN_ALLOWED = frozenset("abcdefghijklmnopqrstuvwxyz0123456789-")
 
 OPEN_SWE_BOT_NAME = "open-swe[bot]"
 # Use the open-swe user noreply address: the bot's numeric noreply
@@ -45,13 +56,16 @@ def build_pr_attribution_footer(
 
 @dataclass(frozen=True)
 class CollaboratorIdentity:
-    """Identity used for git trailers and PR attribution."""
+    """Identity used for git trailers, PR attribution, and analytics."""
 
     display_name: str
     commit_name: str
     commit_email: str
     github_login: str = ""
     github_profile: bool = False
+    github_user_id: int | None = None
+    display_name_source: DisplayNameSource | None = None
+    analytics_display_name: str = ""
 
     @property
     def pr_attribution_name(self) -> str:
@@ -110,9 +124,93 @@ async def _identity_from_github_token(github_token: str | None) -> CollaboratorI
             commit_email=commit_email,
             github_login=login,
             github_profile=True,
+            github_user_id=_positive_int(payload.get("id")),
+            display_name_source="github",
+            analytics_display_name=display_name,
         )
     except httpx2.HTTPError:
         logger.debug("Failed to resolve GitHub user identity from token", exc_info=True)
+        return None
+
+
+def _positive_int(value: Any) -> int | None:
+    if isinstance(value, bool):
+        return None
+    return value if isinstance(value, int) and value > 0 else None
+
+
+def _is_valid_github_login(login: str) -> bool:
+    return (
+        0 < len(login) <= _GITHUB_LOGIN_MAX_CHARS
+        and not login.startswith("-")
+        and not login.endswith("-")
+        and all(char in _GITHUB_LOGIN_ALLOWED for char in login.lower())
+    )
+
+
+@dataclass(frozen=True)
+class GitHubPublicProfile:
+    """Public GitHub profile for a login, fetched without user OAuth."""
+
+    user_id: int
+    name: str
+
+
+async def _fetch_public_github_profile(login: str) -> GitHubPublicProfile | None:
+    from agent.github.app import get_github_app_installation_token
+
+    token = await get_github_app_installation_token(log_errors=False)
+    if not token:
+        return None
+    try:
+        async with httpx2.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as client:
+            response = await client.get(
+                f"https://api.github.com/users/{login}",
+                headers={
+                    "Authorization": f"Bearer {token}",
+                    **_GITHUB_API_HEADERS,
+                },
+            )
+        if response.status_code != 200:  # noqa: PLR2004
+            logger.debug(
+                "GitHub public profile lookup for %s returned %s", login, response.status_code
+            )
+            return None
+        payload = response.json()
+    except httpx2.HTTPError, ValueError:
+        logger.debug("Failed to resolve GitHub public profile for %s", login, exc_info=True)
+        return None
+    user_id = _positive_int(payload.get("id"))
+    if user_id is None or _normalize_text(payload.get("login")).lower() != login.lower():
+        return None
+    name = payload.get("name")
+    if name is not None and not isinstance(name, str):
+        return None
+    return GitHubPublicProfile(user_id=user_id, name=_normalize_text(name))
+
+
+async def resolve_public_github_profile(login: str) -> GitHubPublicProfile | None:
+    """Cached ``GET /users/{login}`` via the installation token; misses never raise.
+
+    Payloads are trusted only after strict validation: a positive numeric id, a
+    ``login`` echoing the request (case-insensitively), and a ``name`` that is a
+    string or null. Anything else is treated as a miss.
+    """
+    normalized = login.strip()
+    if not _is_valid_github_login(normalized):
+        return None
+
+    async def _load() -> GitHubPublicProfile | None:
+        return await _fetch_public_github_profile(normalized)
+
+    try:
+        return await ttl_cache.cached(
+            f"github-public-profile:{normalized.lower()}",
+            _PUBLIC_PROFILE_CACHE_TTL_SECONDS,
+            _load,
+        )
+    except Exception:
+        logger.debug("Failed to resolve GitHub public profile for %s", normalized, exc_info=True)
         return None
 
 
@@ -135,11 +233,30 @@ async def _identity_from_config(config: dict[str, Any]) -> CollaboratorIdentity 
         )
         if commit_email:
             commit_name = display_name or github_login
+            github_profile = await resolve_public_github_profile(github_login)
+            if github_profile is not None and github_profile.name:
+                analytics_display_name = github_profile.name
+                display_name_source: DisplayNameSource | None = "github"
+            elif slack_thread.get("triggering_user_name"):
+                # Slack names are only trusted server-side; the webhook fetches
+                # them via users.info, never from the event payload.
+                analytics_display_name = display_name
+                display_name_source = "slack" if display_name else None
+            else:
+                analytics_display_name = ""
+                display_name_source = None
             return CollaboratorIdentity(
                 display_name=commit_name,
                 commit_name=commit_name,
                 commit_email=commit_email,
                 github_login=github_login,
+                github_user_id=(
+                    github_profile.user_id
+                    if github_profile is not None
+                    else _positive_int(github_user_id)
+                ),
+                display_name_source=display_name_source,
+                analytics_display_name=analytics_display_name,
             )
     commit_email = _normalize_text(configurable.get("user_email")) or _normalize_text(
         slack_thread.get("triggering_user_email")
