@@ -186,13 +186,58 @@ async def test_report_tool_records_posts_and_dedupes_by_digest(incident):
 
     latest = await service.REPORTS.get("incident")
     assert latest.report.summary == "Errors reported [slack:1.0]"
-    assert first == {"recorded": True, "posted": True, "omitted_claims": True}
+    assert first == {
+        "recorded": True,
+        "posted": True,
+        "omitted_claims": True,
+        "omissions": {
+            "items": [
+                {"kind": "summary", "text": "Invented cause", "unknown_evidence_ids": ["nope"]}
+            ],
+            "known_evidence_ids": ["slack:1.0"],
+        },
+    }
     assert second["posted"] is False
     runtime.post_slack_thread_reply_with_ts.assert_awaited_once()
     assert runtime.post_slack_thread_reply_with_ts.await_args.args[:2] == ("C1", "0")
     postmortem = (await documents.document_context("incident"))["postmortem"]["markdown"]
     assert "Errors reported" in postmortem
     assert latest.activity[-1].summary == "Errors reported [slack:1.0]"
+
+
+async def test_report_tool_returns_current_evidence_for_all_dropped_claims(incident):
+    session = await runtime.load_incident_session(config())
+    await runtime.IncidentMiddleware(session).awrap_model_call(
+        request(context_message("1.0")), AsyncMock()
+    )
+
+    result = await session._record_incident_report(
+        summary=[{"text": "Everything is healthy", "evidence_ids": ["older:1"]}],
+        impact=[{"text": "No customer impact", "evidence_ids": ["older:2"]}],
+        next_steps=[{"text": "Watch the service", "evidence_ids": ["older:3"]}],
+        hypotheses=[{"title": "A transient issue", "evidence_ids": ["older:4"]}],
+    )
+
+    latest = await service.REPORTS.get("incident")
+    assert result["omitted_claims"] is True
+    assert result["omissions"] == {
+        "items": [
+            {
+                "kind": "summary",
+                "text": "Everything is healthy",
+                "unknown_evidence_ids": ["older:1"],
+            },
+            {"kind": "impact", "text": "No customer impact", "unknown_evidence_ids": ["older:2"]},
+            {"kind": "next_step", "text": "Watch the service", "unknown_evidence_ids": ["older:3"]},
+            {
+                "kind": "hypothesis",
+                "text": "A transient issue",
+                "unknown_evidence_ids": ["older:4"],
+            },
+        ],
+        "known_evidence_ids": ["slack:1.0"],
+    }
+    assert latest.report.summary == "No evidence-backed conclusion was established."
 
 
 async def test_explicit_answers_always_post_into_their_thread(incident):
