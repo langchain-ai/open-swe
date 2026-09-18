@@ -51,9 +51,6 @@ _SSE_HEADERS = {
 }
 
 
-_StreamAccess = Literal["ok", "deleted", "revoked"]
-
-
 async def _readable_transcript(thread_id: str, session: dict[str, Any]) -> None:
     """Raise unless ``session`` may read this thread's transcript."""
     metadata = await load_access(thread_id)
@@ -62,7 +59,9 @@ async def _readable_transcript(thread_id: str, session: dict[str, Any]) -> None:
     assert_thread_readable(metadata, session["sub"], session.get("email"))
 
 
-async def _stream_access(thread_id: str, session: dict[str, Any]) -> _StreamAccess:
+async def _stream_access(
+    thread_id: str, session: dict[str, Any]
+) -> Literal["ok", "deleted", "revoked"]:
     """Whether a live subscriber may still be served this thread.
 
     ``assert_thread_readable`` answers a lost thread and a lost permission with

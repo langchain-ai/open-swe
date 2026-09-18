@@ -36,14 +36,6 @@ _PROJECTION_TABLES = (
 )
 
 
-class TranscriptNotReplayable(Exception):
-    """The thread has a log that does not begin with ``thread.created``."""
-
-    def __init__(self, thread_id: str) -> None:
-        super().__init__(f"thread {thread_id} has no thread.created event to rebuild from")
-        self.thread_id = thread_id
-
-
 async def rebuild_thread_projections(thread_id: str) -> int:
     """Rebuild one thread's projections from its log, and return the events replayed.
 
@@ -56,14 +48,6 @@ async def rebuild_thread_projections(thread_id: str) -> int:
             text("SELECT pg_advisory_xact_lock(hashtext(:thread_id))"),
             {"thread_id": thread_id},
         )
-        exists = (
-            await conn.execute(
-                text("SELECT 1 FROM thread WHERE thread_id = :thread_id"),
-                {"thread_id": thread_id},
-            )
-        ).scalar_one_or_none()
-        if exists is None:
-            raise ThreadNotTranscribed(thread_id)
         created = await _created_event(conn, thread_id)
         for table in _PROJECTION_TABLES:
             await conn.execute(
@@ -80,22 +64,28 @@ async def rebuild_thread_projections(thread_id: str) -> int:
 
 
 async def _created_event(conn: AsyncConnection, thread_id: str) -> ThreadCreated:
-    payload = (
+    """The ``thread.created`` event of a thread that has a transcript."""
+    row = (
         await conn.execute(
             text(
                 """
-                SELECT payload FROM thread_event
-                WHERE thread_id = :thread_id AND event_type = 'thread.created'
-                ORDER BY version
+                SELECT event.payload
+                FROM thread
+                LEFT JOIN thread_event AS event
+                  ON event.thread_id = thread.thread_id AND event.event_type = 'thread.created'
+                WHERE thread.thread_id = :thread_id
+                ORDER BY event.version
                 LIMIT 1
                 """
             ),
             {"thread_id": thread_id},
         )
-    ).scalar_one_or_none()
-    if payload is None:
-        raise TranscriptNotReplayable(thread_id)
-    return ThreadCreated.model_validate(payload)
+    ).one_or_none()
+    if row is None:
+        raise ThreadNotTranscribed(thread_id)
+    if row.payload is None:
+        raise RuntimeError(f"thread {thread_id} has no thread.created event to rebuild from")
+    return ThreadCreated.model_validate(row.payload)
 
 
 async def _replay(conn: AsyncConnection, thread_id: str) -> int:

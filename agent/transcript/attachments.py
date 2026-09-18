@@ -6,7 +6,6 @@ append that references it, so a client that sees the event can always fetch the
 bytes, and a rolled-back append leaves no orphan row.
 """
 
-import logging
 from collections.abc import Sequence
 from dataclasses import dataclass
 from uuid import UUID
@@ -15,8 +14,6 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from agent.database import postgres
-
-logger = logging.getLogger(__name__)
 
 MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024
 """Matches the per-attachment cap the dashboard command path already enforces."""

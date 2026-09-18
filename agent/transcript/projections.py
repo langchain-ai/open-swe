@@ -111,12 +111,10 @@ async def reset_thread_row(conn: AsyncConnection, thread_id: str, event: ThreadC
 async def resolve(conn: AsyncConnection, thread_id: str, event: TranscriptEvent) -> TranscriptEvent:
     """The event as it will be stored, with identity only the log can settle.
 
-    A ``turn.checkpoint.completed`` proposes its ``checkpoint_turn_count``
-    before the append takes the thread's lock, so a turn settled meanwhile may
-    have taken the number. Resolving it here — inside the append transaction,
-    under that lock — keeps the stored event, the projection and every reader
-    on the same ordinal. The git ref is named by turn id, so nothing in the
-    sandbox depends on the number.
+    A ``turn.checkpoint.completed`` is written without an ordinal: it is
+    assigned here, inside the append transaction under the thread's lock, so
+    the stored event, the projection and every reader agree on it. A turn
+    checkpointed a second time keeps the number it already has.
     """
     if not isinstance(event, TurnCheckpointCompleted):
         return event

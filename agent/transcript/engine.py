@@ -59,7 +59,6 @@ class Command:
 
 @dataclass(frozen=True, kw_only=True)
 class AppendResult:
-    thread_id: str
     versions: list[int]
     events: list[StoredEvent]
 
@@ -82,7 +81,7 @@ async def append(thread_id: str, commands: Sequence[Command]) -> AppendResult:
     report that occurrence's version.
     """
     if not commands:
-        return AppendResult(thread_id=thread_id, versions=[], events=[])
+        return AppendResult(versions=[], events=[])
 
     async with postgres.transaction() as conn:
         await conn.execute(
@@ -148,7 +147,7 @@ async def append(thread_id: str, commands: Sequence[Command]) -> AppendResult:
                 }
             },
         )
-    return AppendResult(thread_id=thread_id, versions=versions, events=events)
+    return AppendResult(versions=versions, events=events)
 
 
 async def delete_transcript(thread_id: str) -> bool:

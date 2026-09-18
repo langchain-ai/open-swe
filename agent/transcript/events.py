@@ -173,11 +173,11 @@ class TurnCheckpointCompleted(_Body):
     working tree, and named by ``checkpoint_ref``. The sandbox is ephemeral, so
     the sha is what outlives it: the ref only resolves while the sandbox is
     alive, but the sha still identifies the tree if the ref is ever pushed or
-    compared against a pull request. The ref is named by the turn's id, so it
-    is stable however ``checkpoint_turn_count`` — the 1-based ordinal the
-    append resolves under the thread's lock — comes out. ``files`` is the diff
-    against the previous turn's checkpoint, or against the head the turn
-    started from.
+    compared against a pull request. ``checkpoint_turn_count`` is the 1-based
+    ordinal ``append`` assigns under the thread's lock; a writer leaves it at
+    ``0``, and the ref is named by turn id so it does not depend on it.
+    ``files`` is the diff against the previous turn's checkpoint, or against
+    the head the turn started from.
 
     ``status`` is ``missing`` when there was nothing to checkpoint (no sandbox,
     or no repository in it) and ``error`` when the capture itself failed, with
@@ -186,7 +186,7 @@ class TurnCheckpointCompleted(_Body):
 
     type: Literal["turn.checkpoint.completed"] = "turn.checkpoint.completed"
     turn_id: UUID
-    checkpoint_turn_count: int
+    checkpoint_turn_count: int = 0
     checkpoint_ref: str
     commit: str | None = None
     status: CheckpointStatus

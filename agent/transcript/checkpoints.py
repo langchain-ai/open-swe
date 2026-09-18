@@ -69,8 +69,8 @@ def _live_backend(thread_id: str) -> SandboxBackendProxy | None:
 def checkpoint_ref(thread_id: str, turn_id: UUID) -> str | None:
     """The hidden ref for a turn's checkpoint.
 
-    Named by the turn's id, which is ref-safe and unique, so the ref survives
-    the ordinal being resolved later and differently by the append.
+    Named by the turn's id, which is ref-safe and unique, so the ref does not
+    depend on the ordinal the append assigns.
     """
     if not _REF_SAFE_THREAD_ID.fullmatch(thread_id):
         return None
@@ -205,22 +205,13 @@ async def _capture(
     )
 
 
-async def _turn_context(thread_id: str, turn_id: UUID) -> tuple[int, str | None, str | None]:
-    """``(checkpoint_turn_count, previous_ref, assistant_message_id)`` for a turn.
-
-    The count is 1-based over the thread's checkpointed turns, and is only a
-    proposal: ``agent.transcript.projections.resolve`` settles it inside the
-    append's transaction, where the thread's lock is held.
-    """
+async def _turn_context(thread_id: str, turn_id: UUID) -> tuple[str | None, str | None]:
+    """``(previous_ref, assistant_message_id)`` for a turn about to be checkpointed."""
     async with postgres.read_only_transaction() as conn:
         result = await conn.execute(
             text(
                 """
                 SELECT
-                    (SELECT checkpoint_turn_count FROM thread_turn_checkpoint
-                     WHERE thread_id = :thread_id AND turn_id = :turn_id) AS existing_count,
-                    COALESCE((SELECT max(checkpoint_turn_count) FROM thread_turn_checkpoint
-                              WHERE thread_id = :thread_id), 0) AS highest_count,
                     (SELECT checkpoint_ref FROM thread_turn_checkpoint
                      WHERE thread_id = :thread_id AND turn_id <> :turn_id
                        AND commit IS NOT NULL
@@ -233,11 +224,7 @@ async def _turn_context(thread_id: str, turn_id: UUID) -> tuple[int, str | None,
             {"thread_id": thread_id, "turn_id": turn_id},
         )
         row = result.mappings().one()
-    return (
-        row["existing_count"] or row["highest_count"] + 1,
-        row["previous_ref"],
-        row["assistant_message_id"],
-    )
+    return row["previous_ref"], row["assistant_message_id"]
 
 
 async def checkpoint_command(
@@ -250,11 +237,10 @@ async def checkpoint_command(
     to record, and a future reader has to be able to tell that apart from a
     turn that was never checkpointed.
     """
-    turn_count, previous_ref, assistant_message_id = await _turn_context(thread_id, turn_id)
+    previous_ref, assistant_message_id = await _turn_context(thread_id, turn_id)
     ref = checkpoint_ref(thread_id, turn_id)
     event = TurnCheckpointCompleted(
         turn_id=turn_id,
-        checkpoint_turn_count=turn_count,
         checkpoint_ref=ref or "",
         status="missing",
         assistant_message_id=assistant_message_id,

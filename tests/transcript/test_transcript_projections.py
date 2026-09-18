@@ -72,12 +72,11 @@ async def _end_turn(thread_id: str, turn_id: UUID, *, interrupted: bool = False,
 
 
 def _checkpoint(thread_id: str, turn_id: UUID) -> Command:
-    """A checkpoint that proposes the first ordinal, as every writer does."""
+    """A checkpoint as a writer emits it: the ordinal is the append's to assign."""
     return Command(
         command_id=f"turn:{turn_id}:checkpoint",
         event=TurnCheckpointCompleted(
             turn_id=turn_id,
-            checkpoint_turn_count=1,
             checkpoint_ref=f"refs/open-swe/checkpoints/{thread_id}/turn/{turn_id}",
             status="ready",
             commit="0" * 40,
@@ -87,7 +86,7 @@ def _checkpoint(thread_id: str, turn_id: UUID) -> Command:
     )
 
 
-async def test_two_checkpoints_proposing_one_ordinal_are_numbered_apart(
+async def test_two_checkpoints_are_numbered_apart(
     registry_db: None,
 ) -> None:
     thread_id = str(uuid7())

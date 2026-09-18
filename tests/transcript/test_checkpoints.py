@@ -64,9 +64,9 @@ def _sandbox(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
         checkpoints.SANDBOX_BACKENDS, THREAD_ID, cast(SandboxBackendProxy, _LocalSandbox(repo))
     )
 
-    async def _turn_context(thread_id: str, turn_id: UUID) -> tuple[int, str | None, str | None]:
+    async def _turn_context(thread_id: str, turn_id: UUID) -> tuple[str | None, str | None]:
         del thread_id, turn_id
-        return 1, None, None
+        return None, None
 
     monkeypatch.setattr(checkpoints, "_turn_context", _turn_context)
     return repo

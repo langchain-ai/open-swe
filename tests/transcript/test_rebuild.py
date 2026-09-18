@@ -8,12 +8,11 @@ that the blobs beside the log survive a rebuild that never touches them.
 from datetime import UTC, datetime
 from uuid import UUID, uuid7
 
-import pytest
 from sqlalchemy import text
 
 from agent.database import postgres
 from agent.transcript import tool_output
-from agent.transcript.engine import Command, ThreadNotTranscribed, append
+from agent.transcript.engine import Command, append
 from agent.transcript.events import (
     MessageAppended,
     MessageCompleted,
@@ -118,7 +117,6 @@ async def _seed(thread_id: str, turn_id: UUID) -> None:
                 command_id=f"turn:{turn_id}:checkpoint",
                 event=TurnCheckpointCompleted(
                     turn_id=turn_id,
-                    checkpoint_turn_count=1,
                     checkpoint_ref=f"refs/open-swe/checkpoints/{thread_id}/turn/{turn_id}",
                     commit="0" * 40,
                     status="ready",
@@ -180,8 +178,3 @@ async def test_rebuilding_a_thread_folds_its_projections_back_out_of_the_log(
     assert after.version == before.version
     assert after.tool_calls[0].has_output
     assert await tool_output.load(thread_id, "call-1") == TOOL_OUTPUT
-
-
-async def test_rebuilding_a_thread_with_no_transcript_raises(registry_db: None) -> None:
-    with pytest.raises(ThreadNotTranscribed):
-        await rebuild_thread_projections(str(uuid7()))

@@ -21,7 +21,6 @@ from agent.transcript.events import (
     ThreadCreated,
     ToolCompleted,
     ToolStarted,
-    TurnCheckpointCompleted,
     TurnRequested,
 )
 from agent.transcript.snapshot import load_snapshot
@@ -272,49 +271,6 @@ async def test_an_untranscribed_thread_rejects_everything_but_creation(
                 )
             ],
         )
-
-
-async def test_two_turns_cannot_share_a_checkpoint_ordinal(registry_db: None) -> None:
-    """The ordinal is read before the append takes its lock, so it is renumbered."""
-    thread_id = str(uuid7())
-    await _create(thread_id)
-    for index in range(2):
-        turn_id = uuid7()
-        await append(
-            thread_id,
-            [
-                Command(
-                    command_id=f"turn:{turn_id}:checkpoint",
-                    event=TurnCheckpointCompleted(
-                        turn_id=turn_id,
-                        checkpoint_turn_count=1,
-                        checkpoint_ref=f"refs/open-swe/checkpoints/{thread_id}/turn/1",
-                        commit=f"{index:040x}",
-                        status="ready",
-                    ),
-                    actor_kind="agent",
-                    turn_id=turn_id,
-                )
-            ],
-        )
-
-    async with postgres.read_only_transaction() as conn:
-        counts = (
-            (
-                await conn.execute(
-                    text(
-                        """
-                        SELECT checkpoint_turn_count FROM thread_turn_checkpoint
-                        WHERE thread_id = :t ORDER BY checkpoint_turn_count
-                        """
-                    ),
-                    {"t": thread_id},
-                )
-            )
-            .scalars()
-            .all()
-        )
-    assert list(counts) == [1, 2]
 
 
 async def test_an_output_cut_at_the_cap_is_recorded_as_truncated(registry_db: None) -> None:

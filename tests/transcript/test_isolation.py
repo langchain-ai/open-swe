@@ -192,8 +192,8 @@ async def test_deleting_a_transcript_removes_everything_it_owned(registry_db: No
             assert remaining == 0, table
     assert not await delete_transcript(thread_id)
 
-    # The receipts are keyed by command id alone, so a thread recreated under
-    # the same id must not be deduplicated out of existence.
+    # The receipts are not cascaded, so a thread recreated under the same id
+    # must not be deduplicated out of existence.
     await _create(thread_id)
     assert await load_snapshot(thread_id) is not None
 
