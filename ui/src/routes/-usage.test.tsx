@@ -50,6 +50,7 @@ const emptyUsage: UsageLeaderboardPayload = {
   total_members: 0,
   current_user_rank: null,
   generated_at_ms: null,
+  usage_leaderboard_privacy_enabled: true,
   reviewer_stats: {
     period: "30d",
     reviewed_prs: 0,
@@ -814,6 +815,123 @@ it("hides a GitHub login when it duplicates the user name", async () => {
   })
   const client = mountReport()
   expect(await screen.findAllByText("reader")).toHaveLength(1)
+  client.clear()
+})
+
+it("discloses the policy to a non-admin and re-keys the cache when it flips", async () => {
+  vi.spyOn(api, "prMergeRateByModel").mockResolvedValue(captured)
+  const client = mountReport()
+  expect(await screen.findByText(/other members are anonymous/)).toBeTruthy()
+  const audienceOf = (query: { queryKey: readonly unknown[] }) =>
+    (query.queryKey[4] as { privacy: boolean; isAdmin: boolean } | null)
+      ?.privacy
+  await waitFor(() =>
+    expect(
+      client
+        .getQueryCache()
+        .findAll({ queryKey: ["usageLeaderboard"] })
+        .some((query) => audienceOf(query) === true)
+    ).toBe(true)
+  )
+
+  vi.mocked(api.usageLeaderboard).mockResolvedValue({
+    ...emptyUsage,
+    usage_leaderboard_privacy_enabled: false,
+  })
+  await act(() => client.invalidateQueries({ queryKey: ["usageLeaderboard"] }))
+  expect(
+    await screen.findByText(/visible to everyone who can sign in/)
+  ).toBeTruthy()
+  expect(screen.queryByText(/other members are anonymous/)).toBeNull()
+  await waitFor(() =>
+    expect(
+      client
+        .getQueryCache()
+        .findAll({ queryKey: ["usageLeaderboard"] })
+        .some((query) => audienceOf(query) === false)
+    ).toBe(true)
+  )
+  client.clear()
+})
+
+it("does not retain identified rows as placeholders when the policy flips", async () => {
+  vi.spyOn(api, "prMergeRateByModel").mockResolvedValue(captured)
+  vi.mocked(api.usageLeaderboard).mockResolvedValue({
+    ...emptyUsage,
+    usage_leaderboard_privacy_enabled: false,
+    total_members: 1,
+    current_user_rank: 1,
+    rows: [
+      {
+        ...costRow,
+        user: {
+          name: "Named Member",
+          github_login: "named",
+          email: "named@example.com",
+          avatar_url: "https://github.com/named.png?size=80",
+        },
+      },
+    ],
+  })
+  const client = mountReport()
+  expect(await screen.findByText("Named Member")).toBeTruthy()
+
+  // The policy flips on: the re-audienced query hangs, and the identified
+  // rows from the previous audience must not fill in as placeholder data.
+  vi.mocked(api.usageLeaderboard)
+    .mockResolvedValueOnce({
+      ...emptyUsage,
+      usage_leaderboard_privacy_enabled: true,
+    })
+    .mockImplementation(() => new Promise<UsageLeaderboardPayload>(() => {}))
+  await act(() => client.invalidateQueries({ queryKey: ["usageLeaderboard"] }))
+  await waitFor(() =>
+    expect(
+      client
+        .getQueryCache()
+        .findAll({ queryKey: ["usageLeaderboard"] })
+        .some(
+          (query) =>
+            (query.queryKey[4] as { privacy: boolean } | null)?.privacy ===
+            true
+        )
+    ).toBe(true)
+  )
+  await waitFor(() => expect(screen.queryByText("Named Member")).toBeNull())
+  client.clear()
+})
+
+it("discloses to an admin that other members stay identified for them", async () => {
+  vi.spyOn(api, "prMergeRateByModel").mockResolvedValue(captured)
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false, gcTime: 0 } },
+  })
+  render(
+    <QueryClientProvider client={client}>
+      <TooltipProvider>
+        <UsageAnalytics
+          period="30d"
+          login="admin"
+          isAdmin={true}
+          onPeriodChange={() => {}}
+        />
+      </TooltipProvider>
+    </QueryClientProvider>
+  )
+  expect(
+    await screen.findByText(/you see every member because you are an admin/)
+  ).toBeTruthy()
+  client.clear()
+})
+
+it("shows no privacy disclosure until the policy is known", async () => {
+  vi.spyOn(api, "prMergeRateByModel").mockResolvedValue(captured)
+  vi.mocked(api.usageLeaderboard).mockImplementation(
+    () => new Promise<UsageLeaderboardPayload>(() => {})
+  )
+  const client = mountReport()
+  expect(await screen.findByText(/No PRs have been recorded/)).toBeTruthy()
+  expect(screen.queryByText(/Leaderboard privacy is/)).toBeNull()
   client.clear()
 })
 
