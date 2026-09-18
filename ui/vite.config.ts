@@ -1,4 +1,6 @@
 import http from "node:http"
+import { execSync } from "node:child_process"
+import { mkdirSync, writeFileSync } from "node:fs"
 import { defineConfig } from "vite"
 import { devtools } from "@tanstack/devtools-vite"
 import { tanstackStart } from "@tanstack/react-start/plugin/vite"
@@ -240,6 +242,36 @@ const BASE_PATH = process.env.DASHBOARD_BASE_PATH || "/"
 // client is told to open it against this port whatever page origin it loaded from.
 const DEV_PORT = Number(process.env.PORT) || 3000
 
+// Stamp the emitted bundle with what built it so a served dashboard can report
+// its own identity instead of borrowing the backend's. The in-repo git HEAD is
+// trustworthy here because this stamp is written by the build itself, never
+// read back from a deployment's filesystem. Missing values stay absent (the
+// backend then reports them unavailable) rather than guessed.
+function buildInfoStamp(): Plugin {
+  return {
+    name: "build-info-stamp",
+    apply: "build",
+    closeBundle() {
+      const info: Record<string, string> = {}
+      try {
+        info.commit = execSync("git rev-parse HEAD", {
+          stdio: ["ignore", "pipe", "ignore"],
+        })
+          .toString()
+          .trim()
+      } catch {
+        // Not a git checkout (source archive); no trustworthy commit exists.
+      }
+      info.built_at = new Date().toISOString()
+      const out = process.env.NITRO_PRESET
+        ? ".output/public"
+        : ".output/public"
+      mkdirSync(out, { recursive: true })
+      writeFileSync(`${out}/open-swe-build-info.json`, JSON.stringify(info))
+    },
+  }
+}
+
 const config = defineConfig({
   base: BASE_PATH,
   server: { port: DEV_PORT, strictPort: true, hmr: { clientPort: DEV_PORT } },
@@ -313,6 +345,7 @@ const config = defineConfig({
     }),
     tailwindcss(),
     tanstackStart({ pages: [SHELL_PAGE] }),
+    buildInfoStamp(),
     // React Compiler via oxc-transform-react, the Rust port. Upstream still
     // marks it experimental; the fallback is `@rolldown/plugin-babel` with
     // plugin-react's `reactCompilerPreset()`, which runs the Babel compiler.
