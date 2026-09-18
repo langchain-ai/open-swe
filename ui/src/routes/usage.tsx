@@ -193,65 +193,67 @@ function UsageAnalyticsPeriod({
 
   return (
     <>
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-xs text-muted-foreground">Period</span>
+        <Select
+          value={activePeriod}
+          onValueChange={(value) =>
+            onPeriodChange(value as UsageLeaderboardPeriod)
+          }
+        >
+          <SelectTrigger aria-label="Usage period" className="w-36">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {Object.entries(PERIOD_LABELS).map(([value, label]) => (
+              <SelectItem key={value} value={value}>
+                {label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+
       <PRMergeRateSection report={report} />
 
       <SettingsSection
         title="Agent leaderboard"
         description="Ranked by merged PRs, then agent lines of code and PRs opened."
         action={
-          <div className="flex items-center gap-2">
-            <div
-              className="flex rounded-md bg-muted p-0.5"
-              role="group"
-              aria-label="Usage scope"
-            >
-              {(["invocations", "threads"] as const).map((scope) => (
-                <Button
-                  key={scope}
-                  type="button"
-                  size="sm"
-                  variant={usageScope === scope ? "secondary" : "ghost"}
-                  aria-pressed={usageScope === scope}
-                  className="capitalize"
-                  onClick={() => {
-                    setUsageScope(scope)
-                    if (sort === "invocations" || sort === "threads") {
-                      setSort(scope)
-                    } else if (
-                      sort === "avg_invocation_seconds" ||
-                      sort === "avg_thread_seconds"
-                    ) {
-                      setSort(
-                        scope === "threads"
-                          ? "avg_thread_seconds"
-                          : "avg_invocation_seconds"
-                      )
-                    }
-                    setLeaderboardPage(1)
-                    setLeaderboardCursors([undefined])
-                  }}
-                >
-                  {scope}
-                </Button>
-              ))}
-            </div>
-            <Select
-              value={activePeriod}
-              onValueChange={(value) =>
-                onPeriodChange(value as UsageLeaderboardPeriod)
-              }
-            >
-              <SelectTrigger className="w-36">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {Object.entries(PERIOD_LABELS).map(([value, label]) => (
-                  <SelectItem key={value} value={value}>
-                    {label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+          <div
+            className="flex rounded-md bg-muted p-0.5"
+            role="group"
+            aria-label="Usage scope"
+          >
+            {(["invocations", "threads"] as const).map((scope) => (
+              <Button
+                key={scope}
+                type="button"
+                size="sm"
+                variant={usageScope === scope ? "secondary" : "ghost"}
+                aria-pressed={usageScope === scope}
+                className="capitalize"
+                onClick={() => {
+                  setUsageScope(scope)
+                  if (sort === "invocations" || sort === "threads") {
+                    setSort(scope)
+                  } else if (
+                    sort === "avg_invocation_seconds" ||
+                    sort === "avg_thread_seconds"
+                  ) {
+                    setSort(
+                      scope === "threads"
+                        ? "avg_thread_seconds"
+                        : "avg_invocation_seconds"
+                    )
+                  }
+                  setLeaderboardPage(1)
+                  setLeaderboardCursors([undefined])
+                }}
+              >
+                {scope}
+              </Button>
+            ))}
           </div>
         }
       >

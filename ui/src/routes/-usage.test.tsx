@@ -95,6 +95,78 @@ afterEach(() => {
   vi.restoreAllMocks()
 })
 
+it("labels and renders the page-level period control above PR outcomes", async () => {
+  vi.spyOn(api, "prMergeRateByModel").mockResolvedValue(captured)
+  const client = mountReport()
+  await screen.findByText("PR outcomes")
+  const prSection = screen.getByText("PR outcomes").closest("section")!
+  const leaderboard = screen.getByText("Agent leaderboard").closest("section")!
+
+  expect(screen.getByText("Period")).toBeTruthy()
+  const periodSelect = screen.getByRole("combobox", { name: "Usage period" })
+  expect(periodSelect.textContent).toContain("30d")
+  // It controls every section, so it belongs at page level: outside both,
+  // before the first section it feeds.
+  expect(prSection.contains(periodSelect)).toBe(false)
+  expect(leaderboard.contains(periodSelect)).toBe(false)
+  expect(
+    periodSelect.compareDocumentPosition(prSection) &
+      Node.DOCUMENT_POSITION_FOLLOWING
+  ).toBeTruthy()
+  client.clear()
+})
+
+it("moves the period control to the leaderboard when changing its value", async () => {
+  vi.spyOn(api, "prMergeRateByModel").mockResolvedValue(captured)
+  vi.mocked(api.usageLeaderboard).mockResolvedValue({
+    ...emptyUsage,
+    total_members: 1,
+    rows: [costRow],
+  })
+  const onPeriodChange = vi.fn()
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false, gcTime: 0 } },
+  })
+  render(
+    <QueryClientProvider client={client}>
+      <TooltipProvider>
+        <UsageAnalytics
+          period="30d"
+          login="reader"
+          isAdmin={false}
+          onPeriodChange={onPeriodChange}
+        />
+      </TooltipProvider>
+    </QueryClientProvider>
+  )
+  await screen.findByText("PR outcomes")
+
+  fireEvent.click(screen.getByRole("combobox", { name: "Usage period" }))
+  const option = await screen.findByRole("option", { name: "Last 7 days" })
+  fireEvent.pointerDown(option, { pointerType: "mouse" })
+  fireEvent.click(option)
+  expect(onPeriodChange).toHaveBeenCalledWith("7d")
+  client.clear()
+})
+
+it("keeps the usage scope toggle beside the agent leaderboard only", async () => {
+  vi.spyOn(api, "prMergeRateByModel").mockResolvedValue(captured)
+  vi.mocked(api.usageLeaderboard).mockResolvedValue({
+    ...emptyUsage,
+    total_members: 1,
+    rows: [costRow],
+  })
+  const client = mountReport()
+  await screen.findByText("Cost Reader")
+  const group = screen.getByRole("group", { name: "Usage scope" })
+  const leaderboard = screen.getByText("Agent leaderboard").closest("section")!
+  expect(leaderboard.contains(group)).toBe(true)
+  expect(
+    screen.getByText("PR outcomes").closest("section")!.contains(group)
+  ).toBe(false)
+  client.clear()
+})
+
 it("shows delivery lag separately from suppression, then refreshes to a populated report", async () => {
   const query = vi.spyOn(api, "prMergeRateByModel").mockResolvedValue(captured)
   const client = mountReport()
