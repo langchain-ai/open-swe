@@ -5,7 +5,7 @@ import { EyeIcon, EyeSlashIcon } from "@phosphor-icons/react"
 import { SettingsSection } from "@/components/AppShell"
 import { Button, IconButton } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { api } from "@/lib/api"
+import { api, DEFAULT_WORKSPACE_SLUG } from "@/lib/api"
 import type { MCPConnection, MCPConnectionUpdate } from "@/lib/api"
 import { MCPImport } from "./MCPImport"
 import type { ImportedMCP } from "./MCPImport"
@@ -15,7 +15,7 @@ type Header = { name: string; value: string; revealed?: boolean }
 type Draft = Omit<MCPConnectionUpdate, "headers"> & { existing: boolean }
 type Catalog = { name: string; description: string }[]
 
-export type MCPScope = "workspace" | "user"
+export type MCPScope = "instance" | "workspace" | "user"
 
 type MCPScopeConfig = {
   title: string
@@ -28,36 +28,66 @@ type MCPScopeConfig = {
   discover: (body: MCPConnectionUpdate) => Promise<Catalog>
 }
 
-const scopes: Record<MCPScope, MCPScopeConfig> = {
-  workspace: {
-    title: "Workspace MCPs",
-    description:
-      "Connect remote MCP servers for authorized coding-agent runs. New connections preselect all discovered tools; review the selection and save to enable them.",
-    queryKey: ["workspaceMCPs"],
-    // Hard-coded to the default workspace until a workspace selector lands.
-    list: () => api.getWorkspaceMCPs("default"),
-    save: (body) => api.saveWorkspaceMCP("default", body),
-    remove: (name) => api.deleteWorkspaceMCP("default", name),
-    revealHeaders: (name) => api.revealWorkspaceMCPHeaders("default", name),
-    discover: (body) => api.discoverWorkspaceMCP("default", body),
-  },
-  user: {
-    title: "Personal MCPs",
-    description:
-      "Connect remote MCP servers with your own credentials. They load only in your private threads, never in threads other people can prompt. A personal connection replaces a workspace connection with the same name in your runs. New connections preselect all discovered tools; review the selection and save to enable them.",
-    queryKey: ["myMCPs"],
-    list: api.getMyMCPs,
-    save: api.saveMyMCP,
-    remove: api.deleteMyMCP,
-    revealHeaders: api.revealMyMCPHeaders,
-    discover: api.discoverMyMCP,
-  },
+function scopeConfig(scope: MCPScope, workspace: string): MCPScopeConfig {
+  const scopes: Record<MCPScope, MCPScopeConfig> = {
+    instance: {
+      title: "Instance MCPs",
+      description:
+        "Connect remote MCP servers that every workspace inherits. A workspace or personal connection with the same name replaces one of these in its runs. New connections preselect all discovered tools; review the selection and save to enable them.",
+      queryKey: ["instanceMCPs"],
+      list: api.getInstanceMCPs,
+      save: api.saveInstanceMCP,
+      remove: api.deleteInstanceMCP,
+      revealHeaders: api.revealInstanceMCPHeaders,
+      discover: api.discoverInstanceMCP,
+    },
+    workspace: {
+      title: "Workspace MCPs",
+      description:
+        "Connect remote MCP servers for this workspace's runs. A connection here replaces an inherited instance connection with the same name. New connections preselect all discovered tools; review the selection and save to enable them.",
+      queryKey: ["workspaceMCPs", workspace],
+      list: () => api.getWorkspaceMCPs(workspace),
+      save: (body) => api.saveWorkspaceMCP(workspace, body),
+      remove: (name) => api.deleteWorkspaceMCP(workspace, name),
+      revealHeaders: (name) => api.revealWorkspaceMCPHeaders(workspace, name),
+      discover: (body) => api.discoverWorkspaceMCP(workspace, body),
+    },
+    user: {
+      title: "Personal MCPs",
+      description:
+        "Connect remote MCP servers with your own credentials. They load only in your private threads, never in threads other people can prompt. A personal connection replaces a workspace connection with the same name in your runs. New connections preselect all discovered tools; review the selection and save to enable them.",
+      queryKey: ["myMCPs"],
+      list: api.getMyMCPs,
+      save: api.saveMyMCP,
+      remove: api.deleteMyMCP,
+      revealHeaders: api.revealMyMCPHeaders,
+      discover: api.discoverMyMCP,
+    },
+  }
+  return scopes[scope]
 }
 
-export function MCPConnectionsSection({ scope }: { scope: MCPScope }) {
-  const { title, description, queryKey, ...client } = scopes[scope]
+export function MCPConnectionsSection({
+  scope,
+  workspace = DEFAULT_WORKSPACE_SLUG,
+}: {
+  scope: MCPScope
+  /** Only meaningful for `scope: "workspace"`; ignored for personal MCPs. */
+  workspace?: string
+}) {
+  const { title, description, queryKey, ...client } = scopeConfig(
+    scope,
+    workspace
+  )
   const qc = useQueryClient()
   const connections = useQuery({ queryKey, queryFn: client.list })
+  // What this workspace inherits; shown so an admin can see what a same-named
+  // connection here would replace.
+  const inherited = useQuery({
+    queryKey: ["instanceMCPs"],
+    queryFn: api.getInstanceMCPs,
+    enabled: scope === "workspace",
+  })
   const [draft, setDraft] = useState<Draft | null>(null)
   const [headers, setHeaders] = useState<Header[]>([])
   const [replaceHeaders, setReplaceHeaders] = useState(false)
@@ -629,6 +659,49 @@ export function MCPConnectionsSection({ scope }: { scope: MCPScope }) {
             {connections.error?.message || error}
           </p>
         )}
+        {scope === "workspace" &&
+          inherited.data &&
+          inherited.data.length > 0 && (
+            <section
+              aria-label="Inherited instance MCP connections"
+              className="rounded-md border border-dashed"
+            >
+              <p className="px-3 pt-3 text-xs font-medium text-muted-foreground">
+                Inherited from the instance
+              </p>
+              <ul className="divide-y divide-border">
+                {inherited.data.map((connection) => {
+                  const replaced = connections.data?.some(
+                    (own) => own.name === connection.name
+                  )
+                  return (
+                    <li
+                      key={connection.name}
+                      className="flex flex-wrap items-center justify-between gap-3 p-3"
+                    >
+                      <div className="min-w-0">
+                        <p className="text-sm">
+                          {connection.name}{" "}
+                          <span className="text-muted-foreground">
+                            · {connection.enabled ? "Enabled" : "Disabled"} ·{" "}
+                            {connection.allowed_tools.length} tools
+                          </span>
+                        </p>
+                        <p className="text-xs break-all text-muted-foreground">
+                          {connection.url}
+                        </p>
+                      </div>
+                      <span className="text-xs text-muted-foreground">
+                        {replaced
+                          ? "Replaced by this workspace's connection"
+                          : "Edit under Admin"}
+                      </span>
+                    </li>
+                  )
+                })}
+              </ul>
+            </section>
+          )}
         {connections.data?.map((connection) => {
           const isEditing = draft?.existing && draft.name === connection.name
           return (

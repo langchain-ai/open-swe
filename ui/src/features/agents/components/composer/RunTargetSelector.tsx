@@ -65,28 +65,26 @@ export function RunTargetSelector({
   )
 }
 
-export function LocalProjectSelector({
-  projects,
-  selectedProjectPath,
-  onSelectProject,
-  onAddProject,
-  onRemoveProject,
-  placeholder = "Select project",
+export function LocalRepoSelector({
+  repos,
+  selectedRepoPath,
+  onSelectRepo,
+  onAddRepo,
+  onRemoveRepo,
+  placeholder = "Select repository",
   triggerClassName,
   side = "bottom",
 }: {
-  projects: Array<DesktopProject>
-  selectedProjectPath: string | null
-  onSelectProject: (cwd: string) => void
-  onAddProject: () => void
-  onRemoveProject: (cwd: string) => void
+  repos: Array<DesktopProject>
+  selectedRepoPath: string | null
+  onSelectRepo: (cwd: string) => void
+  onAddRepo: () => void
+  onRemoveRepo: (cwd: string) => void
   placeholder?: string
   triggerClassName?: string
   side?: "top" | "bottom"
 }) {
-  const selectedProject = projects.find(
-    (project) => project.cwd === selectedProjectPath
-  )
+  const selectedRepo = repos.find((repo) => repo.cwd === selectedRepoPath)
   return (
     <Menu>
       <MenuTrigger
@@ -94,55 +92,53 @@ export function LocalProjectSelector({
           "flex max-w-[260px] items-center gap-1 text-muted-foreground transition-opacity hover:opacity-80",
           triggerClassName
         )}
-        title={selectedProject?.cwd}
+        title={selectedRepo?.cwd}
       >
         <FolderOpen className="size-3.5 shrink-0" />
-        <span className="truncate">{selectedProject?.name ?? placeholder}</span>
+        <span className="truncate">{selectedRepo?.name ?? placeholder}</span>
         <ComposerControlChevron />
       </MenuTrigger>
       <MenuPopup align="start" className="w-64" side={side} sideOffset={7}>
         <MenuGroup>
-          <MenuGroupLabel>Projects</MenuGroupLabel>
-          {projects.length === 0 && (
-            <MenuItem disabled>No projects added</MenuItem>
+          <MenuGroupLabel>Repositories</MenuGroupLabel>
+          {repos.length === 0 && (
+            <MenuItem disabled>No repositories added</MenuItem>
           )}
-          {projects.map((project) => (
+          {repos.map((repo) => (
             <MenuItem
-              key={project.cwd}
-              onClick={() => onSelectProject(project.cwd)}
-              title={project.cwd}
+              key={repo.cwd}
+              onClick={() => onSelectRepo(repo.cwd)}
+              title={repo.cwd}
             >
               <FolderOpen />
-              <span className="min-w-0 flex-1 truncate">{project.name}</span>
-              {selectedProjectPath === project.cwd && (
-                <Check className="ml-auto" />
-              )}
+              <span className="min-w-0 flex-1 truncate">{repo.name}</span>
+              {selectedRepoPath === repo.cwd && <Check className="ml-auto" />}
             </MenuItem>
           ))}
         </MenuGroup>
         <MenuSeparator />
         <MenuGroup>
-          <MenuItem onClick={onAddProject}>
+          <MenuItem onClick={onAddRepo}>
             <FolderPlus />
-            Add project…
+            Add repository…
           </MenuItem>
-          {projects.length > 0 && (
+          {repos.length > 0 && (
             <MenuSub>
               <MenuSubTrigger>
                 <Trash2 />
-                Remove project…
+                Remove repository…
               </MenuSubTrigger>
               <MenuSubPopup className="w-64">
                 <MenuGroup>
-                  {projects.map((project) => (
+                  {repos.map((repo) => (
                     <MenuItem
-                      key={project.cwd}
-                      onClick={() => onRemoveProject(project.cwd)}
-                      title={project.cwd}
+                      key={repo.cwd}
+                      onClick={() => onRemoveRepo(repo.cwd)}
+                      title={repo.cwd}
                       variant="destructive"
                     >
                       <FolderOpen />
-                      <span className="truncate">{project.name}</span>
+                      <span className="truncate">{repo.name}</span>
                     </MenuItem>
                   ))}
                 </MenuGroup>

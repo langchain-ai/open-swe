@@ -37,7 +37,7 @@ from agent.threads.handlers import (
 )
 from agent.threads.listing import (
     list_dashboard_pinned_threads,
-    list_dashboard_thread_projects,
+    list_dashboard_thread_repos,
     list_dashboard_threads,
     list_dashboard_threads_page,
     pin_dashboard_thread,
@@ -92,8 +92,8 @@ async def api_resolve_all_threads(
     }
 
 
-@router.get("/threads/projects")
-async def api_list_thread_projects(
+@router.get("/threads/repos")
+async def api_list_thread_repos(
     include_resolved: bool = False,
     include_automations: bool = False,
     all: bool = False,
@@ -101,7 +101,7 @@ async def api_list_thread_projects(
 ) -> list[dict[str, Any]]:
     if all and not session_is_admin(session):
         raise HTTPException(403, "admin only")
-    return await list_dashboard_thread_projects(
+    return await list_dashboard_thread_repos(
         session["sub"],
         email=session.get("email"),
         include_resolved=include_resolved,
