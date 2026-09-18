@@ -57,7 +57,14 @@ async def test_public_agent_excludes_personal_skills_and_tools(saved_thread_scop
     assert isinstance(tools, list)
     tool_names = {_registered_tool_name(tool) for tool in tools}
     assert not tool_names.intersection(
-        {"save_user_instructions", "save_user_skill", "delete_user_skill", "read_user_settings"}
+        {
+            "save_user_instructions",
+            "save_user_skill",
+            "delete_user_skill",
+            "read_user_settings",
+            "read_user_preferences",
+            "update_user_preferences",
+        }
     )
     notion.assert_awaited_once_with(None)
     from agent.middleware import WorkspaceSkillsMiddleware
@@ -794,6 +801,7 @@ async def test_general_purpose_subagent_cannot_use_slack_tools() -> None:
         "get_thread",
         "list_threads",
         "manage_thread",
+        "read_user_preferences",
         "read_user_settings",
         "update_user_preferences",
         "submit_thread_feedback",

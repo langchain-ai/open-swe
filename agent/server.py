@@ -172,6 +172,7 @@ from agent.tools import (
     output_iframe,
     publish_workspace,
     read_only_sql,
+    read_user_preferences,
     read_user_settings,
     recreate_sandbox,
     refresh_workspace_start,
@@ -441,6 +442,7 @@ def _is_subagent_excluded_tool(tool: Any) -> bool:
         "notify_automation_channel",
         "read_incident",
         "read_only_sql",
+        "read_user_preferences",
         "read_user_settings",
         "update_user_preferences",
         "record_incident_report",
@@ -1225,6 +1227,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
             if sandbox_file_downloads
             else ()
         ),
+        read_user_preferences,
         read_user_settings,
         update_user_preferences,
         request_pr_review,
@@ -1249,6 +1252,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
             save_user_instructions,
             save_user_skill,
             delete_user_skill,
+            read_user_preferences,
             read_user_settings,
             update_user_preferences,
         )

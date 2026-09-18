@@ -49,6 +49,7 @@ _TOOL_MODULES = {
     "delete_user_skill": ".user_skills",
     "schedule_thread_wakeup": ".schedule_thread_wakeup",
     "search_repo_code": "agent.github.tools.search_repo_code",
+    "read_user_preferences": ".read_user_preferences",
     "update_user_preferences": ".update_user_preferences",
     "slack_add_reaction": "agent.slack.tools.add_reaction",
     "slack_attach_html": "agent.slack.tools.attach_html",
@@ -111,6 +112,7 @@ __all__ = [
     "delete_user_skill",
     "schedule_thread_wakeup",
     "search_repo_code",
+    "read_user_preferences",
     "update_user_preferences",
     "slack_add_reaction",
     "slack_attach_html",
@@ -166,6 +168,7 @@ if TYPE_CHECKING:
     from agent.tools.output_iframe import output_iframe
     from agent.tools.publish_review import publish_review
     from agent.tools.read_only_sql import read_only_sql
+    from agent.tools.read_user_preferences import read_user_preferences
     from agent.tools.read_user_settings import read_user_settings
     from agent.tools.recreate_sandbox import recreate_sandbox
     from agent.tools.reply_to_finding_thread import reply_to_finding_thread
