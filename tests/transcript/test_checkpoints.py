@@ -79,15 +79,16 @@ async def test_a_checkpoint_records_the_worktree_and_changes_nothing(_sandbox: P
     (repo / "added.py").write_text("print('hi')\n")
     status_before = _git(repo, "status", "--porcelain")
 
+    turn_id = uuid7()
     command = await checkpoints.checkpoint_command(
-        THREAD_ID, uuid7(), run_id=None, start_head=start_head
+        THREAD_ID, turn_id, run_id=None, start_head=start_head
     )
     event = command.event
     assert event.type == "turn.checkpoint.completed"
 
     assert event.status == "ready"
     assert event.commit
-    assert event.checkpoint_ref == f"refs/open-swe/checkpoints/{THREAD_ID}/turn/1"
+    assert event.checkpoint_ref == f"refs/open-swe/checkpoints/{THREAD_ID}/turn/{turn_id}"
     # Untracked-but-not-ignored work is part of the turn, so it is checkpointed.
     assert {(file.path, file.status) for file in event.files} == {
         ("seed.txt", "modified"),

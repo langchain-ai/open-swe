@@ -2,9 +2,11 @@
 
 At the end of every turn the sandbox's whole working tree is written into a
 commit object that no branch points at — HEAD, the index and the working tree
-are never touched — and a hidden ref, ``refs/open-swe/checkpoints/<thread>/turn/<n>``,
-records it. The tree is built in a scratch index, so the agent's own git
-commands cannot collide with it, and untracked-but-not-ignored files count.
+are never touched — and a hidden ref, ``refs/open-swe/checkpoints/<thread>/turn/<turn id>``,
+records it. The ref is named by the turn's id rather than by its ordinal, so
+two turns checkpointed concurrently can never name the same ref. The tree is
+built in a scratch index, so the agent's own git commands cannot collide with
+it, and untracked-but-not-ignored files count.
 
 That ref is what a later reader diffs one turn against another with. Our
 sandboxes are ephemeral, so the sha is recorded alongside it: the ref resolves
@@ -64,11 +66,15 @@ def _live_backend(thread_id: str) -> SandboxBackendProxy | None:
     return backend if backend is not None and backend.has_backend else None
 
 
-def checkpoint_ref(thread_id: str, turn_count: int) -> str | None:
-    """The hidden ref for a thread's ``turn_count``-th checkpoint."""
+def checkpoint_ref(thread_id: str, turn_id: UUID) -> str | None:
+    """The hidden ref for a turn's checkpoint.
+
+    Named by the turn's id, which is ref-safe and unique, so the ref survives
+    the ordinal being resolved later and differently by the append.
+    """
     if not _REF_SAFE_THREAD_ID.fullmatch(thread_id):
         return None
-    return f"{CHECKPOINT_REF_PREFIX}/{thread_id}/turn/{turn_count}"
+    return f"{CHECKPOINT_REF_PREFIX}/{thread_id}/turn/{turn_id}"
 
 
 async def read_head(thread_id: str) -> str | None:
@@ -202,9 +208,9 @@ async def _capture(
 async def _turn_context(thread_id: str, turn_id: UUID) -> tuple[int, str | None, str | None]:
     """``(checkpoint_turn_count, previous_ref, assistant_message_id)`` for a turn.
 
-    The count is 1-based over the thread's checkpointed turns, and a turn that
-    was already checkpointed keeps the number it was given, so a second writer
-    cannot push the thread's numbering forward.
+    The count is 1-based over the thread's checkpointed turns, and is only a
+    proposal: ``agent.transcript.projections.resolve`` settles it inside the
+    append's transaction, where the thread's lock is held.
     """
     async with postgres.read_only_transaction() as conn:
         result = await conn.execute(
@@ -245,7 +251,7 @@ async def checkpoint_command(
     turn that was never checkpointed.
     """
     turn_count, previous_ref, assistant_message_id = await _turn_context(thread_id, turn_id)
-    ref = checkpoint_ref(thread_id, turn_count)
+    ref = checkpoint_ref(thread_id, turn_id)
     event = TurnCheckpointCompleted(
         turn_id=turn_id,
         checkpoint_turn_count=turn_count,

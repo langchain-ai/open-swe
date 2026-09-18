@@ -9,13 +9,11 @@ canonical text so a fragment that never arrived heals itself.
 """
 
 import json
-import logging
 from datetime import datetime
 from uuid import UUID
 
 from pydantic import BaseModel
 from sqlalchemy import ARRAY, Text, TextClause, bindparam, text
-from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from agent.transcript.events import (
@@ -35,8 +33,6 @@ from agent.transcript.events import (
     TurnRequested,
     TurnStarted,
 )
-
-logger = logging.getLogger(__name__)
 
 MAX_TOOL_OUTPUT_CHARS = 256 * 1024
 
@@ -84,6 +80,34 @@ async def ensure_thread_row(conn: AsyncConnection, thread_id: str, event: Transc
             "metadata": _json(event.metadata),
         },
     )
+
+
+async def resolve(conn: AsyncConnection, thread_id: str, event: TranscriptEvent) -> TranscriptEvent:
+    """The event as it will be stored, with identity only the log can settle.
+
+    A ``turn.checkpoint.completed`` proposes its ``checkpoint_turn_count``
+    before the append takes the thread's lock, so a turn settled meanwhile may
+    have taken the number. Resolving it here — inside the append transaction,
+    under that lock — keeps the stored event, the projection and every reader
+    on the same ordinal. The git ref is named by turn id, so nothing in the
+    sandbox depends on the number.
+    """
+    if not isinstance(event, TurnCheckpointCompleted):
+        return event
+    result = await conn.execute(
+        text(
+            """
+            SELECT COALESCE(
+                (SELECT checkpoint_turn_count FROM thread_turn_checkpoint
+                 WHERE thread_id = :thread_id AND turn_id = :turn_id),
+                (SELECT COALESCE(max(checkpoint_turn_count), 0) + 1
+                 FROM thread_turn_checkpoint WHERE thread_id = :thread_id)
+            )
+            """
+        ),
+        {"thread_id": thread_id, "turn_id": event.turn_id},
+    )
+    return event.model_copy(update={"checkpoint_turn_count": result.scalar_one()})
 
 
 async def apply(
@@ -229,10 +253,10 @@ async def _turn_checkpoint(
     end of the run and ``agent.transcript.turns`` when the run died without it.
     The row keeps whichever attempt actually produced a commit.
 
-    ``checkpoint_turn_count`` is read before the append takes the thread's lock,
-    so a turn settled concurrently can have taken the number already. The
-    ordinal is then re-read under the lock; the ref still names the commit that
-    was actually written, so only the number moves.
+    ``checkpoint_turn_count`` is already resolved by :func:`resolve` under the
+    thread's lock, so the unique index over it cannot be violated by anything
+    that went through ``append``; a violation here means a writer bypassed it,
+    and the error propagates.
     """
     statement = text(
         """
@@ -270,26 +294,6 @@ async def _turn_checkpoint(
         "error": event.error,
         "completed_at": occurred_at,
     }
-    try:
-        async with conn.begin_nested():
-            await conn.execute(statement, parameters)
-        return
-    except IntegrityError:
-        logger.warning(
-            "Renumbering a turn checkpoint whose ordinal was taken",
-            exc_info=True,
-            extra={"transcript": {"thread_id": thread_id, "turn_id": str(event.turn_id)}},
-        )
-    result = await conn.execute(
-        text(
-            """
-            SELECT COALESCE(max(checkpoint_turn_count), 0) + 1
-            FROM thread_turn_checkpoint WHERE thread_id = :thread_id
-            """
-        ),
-        {"thread_id": thread_id},
-    )
-    parameters["checkpoint_turn_count"] = result.scalar_one()
     await conn.execute(statement, parameters)
 
 
@@ -301,10 +305,16 @@ async def _turn_ended(
     run_id: str | None,
     occurred_at: datetime,
 ) -> None:
-    """Close a turn. Only an open turn is ever moved."""
+    """Close a turn, and settle the thread's status if this closed it.
+
+    Only an open turn is ever moved, so a late completion of a turn that was
+    already interrupted changes nothing — including the thread's status, which
+    by then belongs to whatever happened after the interruption. A thread with
+    another turn still open stays ``running``.
+    """
     failed = isinstance(event, TurnFailed)
     completed = isinstance(event, TurnCompleted)
-    await conn.execute(
+    result = await conn.execute(
         text(
             """
             UPDATE thread_turn SET
@@ -314,6 +324,7 @@ async def _turn_ended(
                 error = COALESCE(:error, error)
             WHERE turn_id = :turn_id AND thread_id = :thread_id
               AND state IN ('requested', 'running')
+            RETURNING turn_id
             """
         ),
         {
@@ -325,7 +336,22 @@ async def _turn_ended(
             "error": event.error if failed else None,
         },
     )
-    await _set_thread_status(conn, thread_id, status="error" if failed else "idle")
+    if result.scalar_one_or_none() is None:
+        return
+    await conn.execute(
+        text(
+            """
+            UPDATE thread SET
+                status = CASE WHEN EXISTS (
+                    SELECT 1 FROM thread_turn
+                    WHERE thread_id = :thread_id AND state IN ('requested', 'running')
+                ) THEN 'running' ELSE :settled END,
+                updated_at = clock_timestamp()
+            WHERE thread_id = :thread_id
+            """
+        ),
+        {"thread_id": thread_id, "settled": "error" if failed else "idle"},
+    )
 
 
 async def _set_thread_status(conn: AsyncConnection, thread_id: str, *, status: str) -> None:
