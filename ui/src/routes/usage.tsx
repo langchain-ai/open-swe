@@ -18,7 +18,6 @@ import { Fragment, useState } from "react"
 
 import type {
   AnalyticsMetadata,
-  BuildInfo,
   PRMergeRateCohort,
   PRMergeRateResponse,
   ReviewerStatsPayload,
@@ -40,7 +39,7 @@ import {
 } from "@/components/ui/select"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Tooltip, TooltipPopup, TooltipTrigger } from "@/components/ui/tooltip"
-import { api, ApiError, describeApiBase, normalizeBuildInfo } from "@/lib/api"
+import { api, ApiError } from "@/lib/api"
 import { RequireLogin } from "@/lib/auth-redirect"
 import { safeModelLabel } from "@/lib/modelLabel"
 import { useSession } from "@/lib/session"
@@ -122,7 +121,6 @@ function UsagePage() {
         period={activePeriod}
         login={session.data.login}
         isAdmin={session.data.is_admin}
-        apiBaseUrl={session.data.api_base_url}
       />
     </AppShell>
   )
@@ -165,12 +163,10 @@ export function UsageAnalytics({
   period: activePeriod,
   login,
   isAdmin,
-  apiBaseUrl,
 }: {
   period: UsageLeaderboardPeriod
   login: string
   isAdmin: boolean
-  apiBaseUrl?: string
 }) {
   const [leaderboardPageSize, setLeaderboardPageSize] = useState(10)
 
@@ -180,7 +176,6 @@ export function UsageAnalytics({
       period={activePeriod}
       login={login}
       isAdmin={isAdmin}
-      apiBaseUrl={apiBaseUrl}
       pageSize={leaderboardPageSize}
       onPageSizeChange={setLeaderboardPageSize}
     />
@@ -191,14 +186,12 @@ function UsageAnalyticsPeriod({
   period: activePeriod,
   login,
   isAdmin,
-  apiBaseUrl,
   pageSize: leaderboardPageSize,
   onPageSizeChange: setLeaderboardPageSize,
 }: {
   period: UsageLeaderboardPeriod
   login: string
   isAdmin: boolean
-  apiBaseUrl?: string
   pageSize: number
   onPageSizeChange: (pageSize: number) => void
 }) {
@@ -418,8 +411,6 @@ function UsageAnalyticsPeriod({
         period={activePeriod}
         reportFetchedAt={report.data?.fetchedAt ?? null}
         reportRefreshError={report.isError && !report.data ? null : reportError}
-        buildInfo={normalizeBuildInfo(report.data?.payload.build_info)}
-        apiBaseUrl={apiBaseUrl}
       />
     </>
   )
@@ -432,8 +423,6 @@ function AnalyticsCoverage({
   period,
   reportFetchedAt,
   reportRefreshError,
-  buildInfo,
-  apiBaseUrl,
 }: {
   reports: AnalyticsMetadata[]
   refreshing: boolean
@@ -443,9 +432,6 @@ function AnalyticsCoverage({
   reportFetchedAt: string | null
   /** Failed manual refresh while the last good report stays on screen. */
   reportRefreshError: ApiError | null
-  /** Backend and dashboard bundle identifiers, or null on a backend too old to send them. */
-  buildInfo: BuildInfo | null
-  apiBaseUrl?: string
 }) {
   if (!reports.length) return null
   const latest = reports.reduce((a, b) => (a.as_of > b.as_of ? a : b))
@@ -478,7 +464,6 @@ function AnalyticsCoverage({
           tone: "text-emerald-600 dark:text-emerald-400",
         }
   const StatusIcon = status.icon
-  const apiBase = describeApiBase(apiBaseUrl)
 
   return (
     <div role="status" aria-label="Analytics coverage">
@@ -561,104 +546,9 @@ function AnalyticsCoverage({
               ? "Some events could not be processed. Reports may be incomplete. "
               : ""}
           </p>
-          <p>
-            API: {apiBase.origin ?? "same origin"} {apiBase.path}
-          </p>
-          <BuildIdentityDetails buildInfo={buildInfo} />
         </div>
       </details>
     </div>
-  )
-}
-
-function IdentityValue({ value }: { value: string | null | undefined }) {
-  return value ? (
-    <code className="select-all">{value}</code>
-  ) : (
-    <span>Unavailable</span>
-  )
-}
-
-function BuildIdentityDetails({ buildInfo }: { buildInfo: BuildInfo | null }) {
-  if (!buildInfo) {
-    return (
-      <p>
-        Build identifiers: Unavailable (the connected backend does not report
-        them).
-      </p>
-    )
-  }
-  // Both sets of identifiers are shown as reported; whether they match says
-  // nothing about compatibility.
-  return (
-    <>
-      <p>
-        Backend: revision{" "}
-        <IdentityValue value={buildInfo.backend.revision_id} />
-        {" · "}commit <IdentityValue value={buildInfo.backend.commit} />
-        {" · "}built{" "}
-        {buildInfo.backend.built_at ? (
-          <time dateTime={buildInfo.backend.built_at}>
-            {new Date(buildInfo.backend.built_at).toLocaleString()}
-          </time>
-        ) : (
-          "Unavailable"
-        )}
-        {" · "}package{" "}
-        <IdentityValue value={buildInfo.backend.package_version} />
-      </p>
-      <p>
-        Dashboard bundle:{" "}
-        {buildInfo.dashboard.served ? (
-          <>
-            commit <IdentityValue value={buildInfo.dashboard.commit} />
-            {" · "}built{" "}
-            {buildInfo.dashboard.built_at ? (
-              <time dateTime={buildInfo.dashboard.built_at}>
-                {new Date(buildInfo.dashboard.built_at).toLocaleString()}
-              </time>
-            ) : (
-              "Unavailable"
-            )}
-          </>
-        ) : (
-          "not served by this backend"
-        )}
-      </p>
-      {(() => {
-        const bundle = window.__OPEN_SWE_BUNDLE__
-        if (!bundle) return null
-        // Only comparable identifiers can differ; an unknown side means the
-        // comparison is unavailable, never a mismatch.
-        const comparable =
-          buildInfo.dashboard.served &&
-          bundle.commit != null &&
-          buildInfo.dashboard.commit != null
-        const differs =
-          comparable && bundle.commit !== buildInfo.dashboard.commit
-        return (
-          <p>
-            This browser is running: commit{" "}
-            <IdentityValue value={bundle.commit} />
-            {" · "}built{" "}
-            <time dateTime={bundle.built_at}>
-              {new Date(bundle.built_at).toLocaleString()}
-            </time>
-            {differs ? (
-              <span className="text-amber-600 dark:text-amber-400">
-                {" "}
-                — different from the bundle the backend reports serving.
-              </span>
-            ) : buildInfo.dashboard.served && !comparable ? (
-              <span className="text-muted-foreground">
-                {" "}
-                — comparison with the backend-served bundle unavailable.
-              </span>
-            ) : null}
-          </p>
-        )
-      })()}
-    </>
   )
 }
 

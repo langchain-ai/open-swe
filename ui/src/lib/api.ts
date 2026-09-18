@@ -124,6 +124,7 @@ export interface SessionUser {
   slack_user_id?: string | null
   is_admin: boolean
   slack_oauth_enabled?: boolean
+  build_info?: BuildInfo
   api_base_url?: string
   slack_base_url?: string
 }
@@ -144,10 +145,7 @@ export interface BuildInfo {
   }
 }
 
-/**
- * Accepts the analytics report's `build_info` shape and returns null for
- * anything else — notably older backends with no field at all.
- */
+/** Normalizes session build identifiers, including older backends with no field. */
 export function normalizeBuildInfo(raw: unknown): BuildInfo | null {
   if (typeof raw !== "object" || raw === null) return null
   const backend = (raw as { backend?: unknown }).backend
