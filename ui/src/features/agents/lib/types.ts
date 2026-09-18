@@ -365,6 +365,7 @@ export interface AgentThread {
   repo: string
   repoFullName: string
   branch: string
+  workspace?: string | null
   model: string
   effort?: string | null
   modelSelection?: "auto" | "explicit" | null

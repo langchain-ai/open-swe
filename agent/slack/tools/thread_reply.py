@@ -7,6 +7,7 @@ from langgraph.config import get_config
 from langgraph.prebuilt import InjectedState
 from langgraph_sdk.client import LangGraphClient
 
+from agent.dashboard.workspace_settings import model_identity_visible
 from agent.run_config import RunConfig
 from agent.slack.client import (
     get_active_slack_thread,
@@ -90,6 +91,7 @@ async def slack_thread_reply(
             message = markdown_to_mrkdwn(message)
             slack_blocks = None
         usage = summarize_run_usage(state)
+        show_model_identity = await model_identity_visible(cfg.workspace_slug)
         message_ts, slack_error = await _post_and_store_mapping(
             channel_id,
             thread_ts,
@@ -103,6 +105,7 @@ async def slack_thread_reply(
             langgraph_client=client,
             run_id=run_id,
             triggering_user_id=_triggering_user_id(cfg),
+            show_model_identity=show_model_identity,
         )
     if message_ts is None:
         if slack_error == "thread_not_found":
@@ -164,6 +167,7 @@ async def _ephemeral_reply(
         else (_build_option_blocks(message, None) if native_markdown else None),
         usage=summarize_run_usage(state),
         agent_thread_id=cfg.thread_id,
+        show_model_identity=await model_identity_visible(cfg.workspace_slug),
     )
     if not posted:
         return {
@@ -329,6 +333,7 @@ async def _post_and_store_mapping(
     run_id: str | None = None,
     triggering_user_id: str | None = None,
     post_thread_ts: str | None = None,
+    show_model_identity: bool = True,
 ) -> tuple[str | None, str | None]:
     message_ts, slack_error = await post_slack_thread_reply_with_ts(
         channel_id,
@@ -337,6 +342,7 @@ async def _post_and_store_mapping(
         blocks=blocks,
         usage=usage,
         agent_thread_id=agent_thread_id,
+        show_model_identity=show_model_identity,
     )
     if message_ts:
         resolved_client = langgraph_client or get_langgraph_client()

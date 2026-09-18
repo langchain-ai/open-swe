@@ -36,6 +36,7 @@ import {
   FableSection,
   LLMGatewaySection,
   ModelDefaultsSection,
+  ModelIdentitySection,
 } from "@/features/settings/components/WorkspaceSettingsSections"
 import { INSTANCE_SCOPE } from "@/features/settings/lib/settingsScope"
 import { useOptions, useRepos } from "@/lib/profile"
@@ -85,6 +86,7 @@ function AdminPage() {
         )}
       />
       <LLMGatewaySection scope={INSTANCE_SCOPE} />
+      <ModelIdentitySection scope={INSTANCE_SCOPE} />
       <FableSection scope={INSTANCE_SCOPE} />
       <ReviewSettings scope={INSTANCE_SCOPE} canEdit />
       <ExpeditedReviewSection scope={INSTANCE_SCOPE} />

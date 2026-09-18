@@ -27,6 +27,7 @@ import {
   FableSection,
   LLMGatewaySection,
   ModelDefaultsSection,
+  ModelIdentitySection,
 } from "./WorkspaceSettingsSections"
 import type { SettingsScope } from "@/features/settings/lib/settingsScope"
 import { useOptions } from "@/lib/profile"
@@ -189,6 +190,7 @@ export function WorkspaceSettingsPanel({
       />
       <DefaultRepoSection scope={scope} repositories={record.data.repos} />
       <LLMGatewaySection scope={scope} />
+      <ModelIdentitySection scope={scope} />
       <FableSection scope={scope} />
       <ReviewSettings scope={scope} canEdit={canEdit} />
       <ExpeditedReviewSection scope={scope} />

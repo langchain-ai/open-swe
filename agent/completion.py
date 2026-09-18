@@ -394,11 +394,13 @@ async def _handle_successful_run(
         return {"status": "ignored", "reason": "no Slack thread"}
     channel_id = slack_thread.channel_id
     thread_ts = slack_thread.thread_ts
+    workspace = metadata.get("workspace") or metadata.get("environment")
 
     scheduled = await schedule_session_cost_refresh(
         {
             "agent_thread_id": thread_id,
             "run_id": run_id,
+            **({"workspace": workspace} if isinstance(workspace, str) and workspace else {}),
             **with_invocation_id(None, invocation_id),
             **(
                 {"invocation_started_at": payload_metadata["invocation_started_at"]}

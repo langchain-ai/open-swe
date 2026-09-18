@@ -135,6 +135,59 @@ export function LLMGatewaySection({ scope }: { scope: SettingsScope }) {
   )
 }
 
+export function ModelIdentitySection({ scope }: { scope: SettingsScope }) {
+  const qc = useQueryClient()
+  const settings = useScopedSettings(scope, () =>
+    qc.invalidateQueries({ queryKey: ["modelIdentity"] })
+  )
+  const mode = gatewayMode(settings.data?.show_model_identity)
+  const scoped = scope.kind === "workspace"
+
+  return (
+    <SettingsSection
+      title="Model identity"
+      description="Name the model behind each run. Hidden workspaces show an anonymous auto selection; a manual model pick is always shown."
+    >
+      <div className="divide-y divide-border">
+        <TierRow
+          settings={settings}
+          fields={["show_model_identity"]}
+          label="Show model identity"
+          description={
+            scoped
+              ? "Inherit follows the instance setting."
+              : "Shown by default; a workspace can override this setting."
+          }
+          control={
+            <Select
+              value={mode}
+              onValueChange={(next) => {
+                const value = gatewayModeValue(next as GatewayMode)
+                if (value === null && scoped)
+                  settings.reset("show_model_identity")
+                else settings.save({ show_model_identity: value })
+              }}
+              disabled={!settings.data || settings.saving}
+            >
+              <SelectTrigger className="w-48">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="inherit">
+                  {scoped ? "Inherit instance setting" : "Shown (default)"}
+                </SelectItem>
+                <SelectItem value="enabled">Shown</SelectItem>
+                <SelectItem value="disabled">Hidden</SelectItem>
+              </SelectContent>
+            </Select>
+          }
+        />
+      </div>
+      <SaveError settings={settings} />
+    </SettingsSection>
+  )
+}
+
 export function FableSection({ scope }: { scope: SettingsScope }) {
   const qc = useQueryClient()
   // Refresh the pickers so Fable appears or disappears.

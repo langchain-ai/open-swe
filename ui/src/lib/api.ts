@@ -203,6 +203,8 @@ export interface WorkspaceSettings {
   review_draft_prs: boolean
   pr_summaries: boolean
   review_trace_links: boolean
+  /** Model identity toggle; undefined on a workspace record inherits the instance. */
+  show_model_identity?: boolean | null
   /** Tri-state adaptive model routing toggle; user preference overrides this org default. */
   model_routing_enabled?: boolean | null
   /** Tri-state LLM Gateway toggle; null inherits the LANGSMITH_GATEWAY_ENABLED default. */
@@ -244,6 +246,11 @@ export type WorkspaceSettingsOverrides = Partial<WorkspaceSettings>
 export interface WorkspaceSettingsView {
   effective: WorkspaceSettings
   overrides: WorkspaceSettingsOverrides
+}
+
+export interface ModelIdentityVisibility {
+  show_model_identity: boolean
+  workspace: string
 }
 
 export interface MCPOAuth {
@@ -1127,6 +1134,15 @@ export const api = {
       `/workspaces/${encodeURIComponent(slug)}/settings`,
       { method: "PUT", body: JSON.stringify(overrides) }
     ),
+  getModelIdentity: (params: { workspace?: string; thread?: string }) => {
+    const search = new URLSearchParams()
+    if (params.workspace) search.set("workspace", params.workspace)
+    if (params.thread) search.set("thread", params.thread)
+    const qs = search.toString()
+    return request<ModelIdentityVisibility>(
+      `/model-identity${qs ? `?${qs}` : ""}`
+    )
+  },
   listSlackBots: () => request<SlackBotOption[]>("/slack/bots"),
   listSlackChannels: () => request<SlackChannelDirectory>("/slack/channels"),
   listAllowedSlackBots: () => request<AllowedSlackBot[]>("/slack/allowed-bots"),

@@ -1,5 +1,7 @@
 """Workspace settings resolve by tier: hardcoded defaults, the instance record, then a workspace's overrides."""
 
+from typing import Any
+
 import pytest
 from fastapi import HTTPException
 
@@ -12,6 +14,7 @@ from agent.dashboard.workspace_settings import (
     delete_workspace_settings,
     get_instance_settings,
     get_workspace_settings,
+    model_identity_visible,
     upsert_instance_settings,
     upsert_workspace_overrides,
 )
@@ -133,6 +136,41 @@ def test_settings_workspace_defaults_outside_a_run(monkeypatch) -> None:
     monkeypatch.setattr(RunConfig, "from_runtime", classmethod(_raise))
     assert workspace_settings.resolve_settings_workspace() == "default"
     assert workspace_settings.resolve_settings_workspace("oss") == "oss"
+
+
+async def test_model_identity_defaults_to_shown(fake_store: FakeStore) -> None:
+    assert (await get_workspace_settings("oss")).show_model_identity is True
+    assert await model_identity_visible("oss") is True
+
+
+async def test_model_identity_inherits_then_overrides(fake_store: FakeStore) -> None:
+    await upsert_instance_settings(WorkspaceSettingsUpdate(show_model_identity=False))
+    assert await model_identity_visible("oss") is False
+    assert (await get_instance_settings())["show_model_identity"] is False
+
+    await upsert_workspace_overrides("oss", WorkspaceSettingsUpdate(show_model_identity=True))
+    assert await model_identity_visible("oss") is True
+    assert await model_identity_visible("core") is False
+    assert await model_identity_visible() is False
+
+    await upsert_workspace_overrides("oss", WorkspaceSettingsUpdate())
+    assert await model_identity_visible("oss") is False
+
+
+async def test_model_identity_hides_on_a_failed_lookup(
+    fake_store: FakeStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    class ExplodingStore(FakeStore):
+        async def get_item(self, namespace: Any, key: str) -> dict[str, Any]:
+            raise ConnectionError("store unreachable")
+
+    import agent.store as agent_store
+
+    class Client:
+        store = ExplodingStore()
+
+    monkeypatch.setattr(agent_store, "store_client", lambda: Client())
+    assert await model_identity_visible("oss") is False
 
 
 async def test_cached_reads_do_not_leak_across_workspaces(fake_store: FakeStore) -> None:
