@@ -6,7 +6,7 @@ Tools recheck user admin membership or a system invocation's saved authorization
 from agent.dashboard.admin import is_admin
 from agent.run_config import RunConfig
 from agent.schedules.store import authorized_admin_schedule
-from agent.slack.dm import is_dm_session
+from agent.slack.dm import is_dm_channel
 from agent.users import User
 
 
@@ -33,7 +33,7 @@ def is_private_admin_surface(cfg: RunConfig) -> bool:
     slack_dm = (
         cfg.source == "slack"
         and cfg.slack_thread is not None
-        and is_dm_session(cfg.slack_thread.channel_context, cfg.slack_thread.thread_ts)
+        and is_dm_channel(cfg.slack_thread.channel_context)
     )
     return cfg.admin_thread is True and (dashboard or slack_dm)
 
