@@ -54,6 +54,7 @@ from agent.threads.runs import (
     ThreadRenameBody,
     ThreadResolveBody,
 )
+from agent.transcript.turns import settle_run_turn
 from agent.utils.langsmith import get_langsmith_trace_url
 from agent.utils.timing import server_timing_header
 
@@ -61,6 +62,19 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["threads"])
 router.include_router(feedback_router)
+
+
+async def _interrupt_transcript_turn(thread_id: str, run_id: str | None = None) -> None:
+    """Record a cancel on the thread's transcript, when it has one."""
+    try:
+        await settle_run_turn(thread_id, run_id, outcome="interrupted")
+    except Exception:  # noqa: BLE001
+        # The runs are already cancelled; the completion webhook closes the turn.
+        logger.warning(
+            "Could not record a cancel on the transcript",
+            exc_info=True,
+            extra={"transcript": {"thread_id": thread_id, "run_id": run_id}},
+        )
 
 
 @router.get("/me/local-trace-url/{thread_id}")
@@ -362,6 +376,8 @@ async def api_cancel_thread_run(
         action=action,
         email=session.get("email"),
     )
+    if status_code < 400:
+        await _interrupt_transcript_turn(thread_id, run_id)
     return Response(content=content, status_code=status_code, media_type=media_type)
 
 
@@ -370,7 +386,9 @@ async def api_cancel_thread(
     thread_id: str,
     session: dict[str, Any] = SESSION_DEP,
 ) -> dict[str, Any]:
-    return await cancel_dashboard_thread(thread_id, session["sub"], email=session.get("email"))
+    cancelled = await cancel_dashboard_thread(thread_id, session["sub"], email=session.get("email"))
+    await _interrupt_transcript_turn(thread_id)
+    return cancelled
 
 
 @router.post("/admin/threads/{thread_id}/cancel")
@@ -378,7 +396,11 @@ async def admin_cancel_thread(
     thread_id: str,
     _admin: dict[str, Any] = ADMIN_DEP,
 ) -> dict[str, Any]:
-    return await admin_cancel_dashboard_thread(thread_id, _admin["sub"], email=_admin.get("email"))
+    cancelled = await admin_cancel_dashboard_thread(
+        thread_id, _admin["sub"], email=_admin.get("email")
+    )
+    await _interrupt_transcript_turn(thread_id)
+    return cancelled
 
 
 @router.delete("/threads/{thread_id}")

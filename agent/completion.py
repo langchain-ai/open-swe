@@ -33,6 +33,7 @@ from agent.slack.client import set_slack_thread_status as clear_slack_thread_sta
 from agent.slack.code_channels import is_code_channel_session, set_session_status
 from agent.source_context import SourceContext
 from agent.thread_feedback import schedule_answer_feedback
+from agent.transcript.turns import TurnOutcome, settle_run_turn
 from agent.utils.errors import LAST_MODEL_ERROR_KEY, code_for_error_type
 from agent.utils.langsmith import get_langsmith_trace_url
 from agent.utils.thread_ops import langgraph_client
@@ -423,6 +424,35 @@ async def _handle_successful_run(
     return {"status": "ok", "reason": "cost refresh scheduled"}
 
 
+async def _settle_transcript_turn(thread_id: str, run_id: str | None, status: object) -> None:
+    """Close the transcript turn of a run that ended without the middleware saying so.
+
+    The middleware emits the same event with the same command id, so whichever
+    of the two arrives second is deduplicated by its receipt.
+    """
+    if status == "success":
+        outcome: TurnOutcome = "completed"
+    elif status in _TERMINAL_FAILURE_STATUSES:
+        outcome = "failed"
+    else:
+        return
+    try:
+        await settle_run_turn(
+            thread_id,
+            run_id,
+            outcome=outcome,
+            error=None if outcome == "completed" else f"run ended as {status}",
+        )
+    except Exception:  # noqa: BLE001
+        # The webhook still has a reply to post; the turn is closed by the
+        # cancel path or by the next run's own events.
+        logger.warning(
+            "Could not settle the transcript turn for a completed run",
+            exc_info=True,
+            extra={"run_completion": {"thread_id": thread_id, "run_id": run_id}},
+        )
+
+
 async def handle_run_completion(payload: dict[str, Any]) -> dict[str, str]:
     """Handle a platform run-completion webhook POST.
 
@@ -435,6 +465,7 @@ async def handle_run_completion(payload: dict[str, Any]) -> dict[str, str]:
     if not isinstance(thread_id, str) or not thread_id:
         return {"status": "ignored", "reason": "missing thread_id"}
     await _finalize_agent_usage_telemetry(thread_id, status, payload)
+    await _settle_transcript_turn(thread_id, run_id, status)
     if status == "success":
         return await _handle_successful_run(thread_id, run_id, payload)
     payload_metadata = payload.get("metadata")
