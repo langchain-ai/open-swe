@@ -293,6 +293,11 @@ async def test_model_routing_is_applied_when_enabled() -> None:
         type(middleware).__name__ for middleware in cast(list[object], agent["middleware"])
     ]
     assert "ModelSelectionMiddleware" in middleware_names
+    subagents = agent["subagents"]
+    assert isinstance(subagents, list)
+    general_purpose = next(item for item in subagents if item["name"] == "general-purpose")
+    subagent_middleware = {item.name for item in general_purpose["middleware"]}
+    assert "ModelSelectionMiddleware" in subagent_middleware
     assert "model_routing_mode" not in config["configurable"]
     assert config["metadata"]["model_routing_mode"] == "auto"
     assert config["metadata"]["model_routing_applied"] is True
@@ -313,6 +318,11 @@ async def test_model_routing_control_uses_performance_model() -> None:
         type(middleware).__name__ for middleware in cast(list[object], agent["middleware"])
     ]
     assert "ModelSelectionMiddleware" in middleware_names
+    subagents = agent["subagents"]
+    assert isinstance(subagents, list)
+    general_purpose = next(item for item in subagents if item["name"] == "general-purpose")
+    subagent_middleware = {item.name for item in general_purpose["middleware"]}
+    assert "ModelSelectionMiddleware" in subagent_middleware
     assert "model_routing_mode" not in config["configurable"]
     assert config["metadata"]["model_routing_mode"] == "performance"
     assert config["metadata"]["model_routing_applied"] is True
@@ -400,7 +410,8 @@ async def test_agent_wires_user_organization_and_bundled_skills_into_agents() ->
     subagents = captured["subagents"]
     assert isinstance(subagents, list)
     gp = next(s for s in subagents if s["name"] == "general-purpose")
-    assert gp["skills"] == sources
+    assert gp["mode"] == "fork"
+    assert "skills" not in gp
 
 
 @pytest.mark.asyncio
@@ -471,6 +482,11 @@ async def test_agent_keeps_message_queue_and_step_limit_middleware() -> None:
     present = {type(m).__name__ for m in middleware}
     assert "check_message_queue_before_model" in present
     assert "notify_step_limit_reached" in present
+    subagents = captured["subagents"]
+    assert isinstance(subagents, list)
+    general_purpose = next(item for item in subagents if item["name"] == "general-purpose")
+    subagent_middleware = {item.name for item in general_purpose["middleware"]}
+    assert "check_message_queue_before_model" in subagent_middleware
 
 
 @pytest.mark.asyncio
@@ -599,7 +615,6 @@ async def test_agent_excludes_sandbox_file_downloads_for_other_providers(
 ) -> None:
     from deepagents.middleware.subagents import GENERAL_PURPOSE_SUBAGENT
 
-    from agent.prompt import OPEN_SWE_SHARED_BASE
     from agent.tools import (
         create_sandbox_file_download_url,
         create_sandbox_service_url,
@@ -619,9 +634,7 @@ async def test_agent_excludes_sandbox_file_downloads_for_other_providers(
     assert create_sandbox_file_download_url not in general_purpose["tools"]
     assert create_sandbox_service_url not in general_purpose["tools"]
     assert output_iframe not in general_purpose["tools"]
-    assert general_purpose["system_prompt"] == (
-        f"{OPEN_SWE_SHARED_BASE}\n\n{GENERAL_PURPOSE_SUBAGENT['system_prompt']}"
-    )
+    assert general_purpose["system_prompt"] == GENERAL_PURPOSE_SUBAGENT["system_prompt"]
 
 
 @pytest.mark.asyncio
