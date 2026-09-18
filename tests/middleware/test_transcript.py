@@ -427,8 +427,8 @@ async def test_injected_human_images_become_attachments(
     assert attachment.mime_type == "image/png"
     assert attachment.file_name == "shot.png"
     assert attachment.data == b"pretend-png"
-    assert human.event.images is not None
-    assert human.event.images[0].attachment_id == attachment.attachment_id
+    assert human.event.attachments is not None
+    assert human.event.attachments[0].attachment_id == attachment.attachment_id
 
 
 async def test_a_stamped_thread_always_has_its_thread_row(

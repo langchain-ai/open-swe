@@ -51,8 +51,8 @@ from agent.transcript.events import (
     TOOL_OUTPUT_PREVIEW_CHARS,
     JsonObject,
     MessageAppended,
+    MessageAttachment,
     MessageCompleted,
-    MessageImage,
     MessageSender,
     MessageUsage,
     RunNotice,
@@ -305,14 +305,14 @@ def _image_bytes(block: Mapping[str, object]) -> tuple[str, bytes] | None:
     try:
         return mime_type, base64.b64decode(encoded, validate=True)
     except binascii.Error:
-        logger.warning("Skipping an undecodable transcript image attachment", exc_info=True)
+        logger.warning("Skipping an undecodable transcript attachment", exc_info=True)
         return None
 
 
-def _human_images(
+def _human_attachments(
     message: HumanMessage, message_id: str
-) -> tuple[list[MessageImage], tuple[PendingAttachment, ...]]:
-    """Images on a human message, as event metadata plus the bytes to store.
+) -> tuple[list[MessageAttachment], tuple[PendingAttachment, ...]]:
+    """Files on a human message, as event metadata plus the bytes to store.
 
     Only standard base64 image blocks are captured. A remote-URL image is
     referenced rather than copied, and anything else is skipped with a log so a
@@ -321,10 +321,10 @@ def _human_images(
     try:
         blocks = message.content_blocks
     except Exception:
-        logger.debug("Could not read content blocks for images", exc_info=True)
+        logger.debug("Could not read content blocks for attachments", exc_info=True)
         return [], ()
-    images: list[MessageImage] = []
-    attachments: list[PendingAttachment] = []
+    attachments: list[MessageAttachment] = []
+    pending: list[PendingAttachment] = []
     for block in blocks:
         if not isinstance(block, Mapping) or block.get("type") != "image":
             continue
@@ -332,10 +332,10 @@ def _human_images(
         decoded = _image_bytes(block)
         if decoded is None:
             if isinstance(url, str) and url:
-                images.append(MessageImage(mime_type="image/*", url=url))
+                attachments.append(MessageAttachment(mime_type="image/*", url=url))
             else:
                 logger.warning(
-                    "Skipping a transcript image attachment with no bytes and no url",
+                    "Skipping a transcript attachment with no bytes and no url",
                     extra={"transcript": {"message_id": message_id}},
                 )
             continue
@@ -343,11 +343,11 @@ def _human_images(
         file_name = block.get("file_name")
         attachment_id = uuid.uuid7()
         try:
-            attachments.append(
+            pending.append(
                 PendingAttachment(
                     attachment_id=attachment_id,
                     message_id=message_id,
-                    position=len(images),
+                    position=len(attachments),
                     mime_type=mime_type,
                     file_name=file_name if isinstance(file_name, str) else None,
                     data=data,
@@ -355,19 +355,19 @@ def _human_images(
             )
         except UnsupportedAttachment:
             logger.warning(
-                "Skipping an unsupported transcript image attachment",
+                "Skipping an unsupported transcript attachment",
                 exc_info=True,
                 extra={"transcript": {"message_id": message_id, "mime_type": mime_type}},
             )
             continue
-        images.append(
-            MessageImage(
+        attachments.append(
+            MessageAttachment(
                 mime_type=mime_type,
                 file_name=file_name if isinstance(file_name, str) else None,
                 attachment_id=attachment_id,
             )
         )
-    return images, tuple(attachments)
+    return attachments, tuple(pending)
 
 
 def _tool_output(content: object) -> tuple[str, bool]:
@@ -755,8 +755,8 @@ class TranscriptMiddleware(OpenSWEMiddleware):
                 continue
             state.seen_human_ids.add(message_id)
             text = _human_text(message)
-            images, attachments = _human_images(message, message_id)
-            if not text and not images:
+            attachments, pending = _human_attachments(message, message_id)
+            if not text and not attachments:
                 continue
             state.enqueue(
                 Command(
@@ -769,13 +769,13 @@ class TranscriptMiddleware(OpenSWEMiddleware):
                         role="human",
                         text=text,
                         reasoning="",
-                        images=images or None,
+                        attachments=attachments or None,
                         created_at=datetime.now(UTC),
                     ),
                     actor_kind="user",
                     run_id=state.run_id,
                     turn_id=state.turn_id,
-                    attachments=attachments,
+                    attachments=pending,
                 )
             )
 
