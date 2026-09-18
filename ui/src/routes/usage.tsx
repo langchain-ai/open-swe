@@ -18,7 +18,9 @@ import { Fragment, useState } from "react"
 
 import type {
   AnalyticsMetadata,
+  BuildInfo,
   PRMergeRateCohort,
+  PRMergeRateResponse,
   ReviewerStatsPayload,
   SortDirection,
   UsageLeaderboardPeriod,
@@ -38,7 +40,7 @@ import {
 } from "@/components/ui/select"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Tooltip, TooltipPopup, TooltipTrigger } from "@/components/ui/tooltip"
-import { api, ApiError } from "@/lib/api"
+import { api, ApiError, describeApiBase } from "@/lib/api"
 import { RequireLogin } from "@/lib/auth-redirect"
 import { safeModelLabel } from "@/lib/modelLabel"
 import { useSession } from "@/lib/session"
@@ -120,6 +122,11 @@ function UsagePage() {
         period={activePeriod}
         login={session.data.login}
         isAdmin={session.data.is_admin}
+        apiBaseUrl={session.data.api_base_url}
+        sessionBuildInfo={session.data.build_info ?? null}
+        onPeriodChange={(value) =>
+          navigate({ to: "/usage", search: { period: value } })
+        }
       />
     </AppShell>
   )
@@ -162,10 +169,17 @@ export function UsageAnalytics({
   period: activePeriod,
   login,
   isAdmin,
+  apiBaseUrl,
+  sessionBuildInfo,
+  onPeriodChange,
 }: {
   period: UsageLeaderboardPeriod
   login: string
   isAdmin: boolean
+  apiBaseUrl?: string
+  /** `/me`'s build identity, or null on a backend too old to send one. */
+  sessionBuildInfo?: BuildInfo | null
+  onPeriodChange: (period: UsageLeaderboardPeriod) => void
 }) {
   const [leaderboardPageSize, setLeaderboardPageSize] = useState(10)
 
@@ -175,6 +189,8 @@ export function UsageAnalytics({
       period={activePeriod}
       login={login}
       isAdmin={isAdmin}
+      apiBaseUrl={apiBaseUrl}
+      sessionBuildInfo={sessionBuildInfo ?? null}
       pageSize={leaderboardPageSize}
       onPageSizeChange={setLeaderboardPageSize}
     />
@@ -185,12 +201,16 @@ function UsageAnalyticsPeriod({
   period: activePeriod,
   login,
   isAdmin,
+  apiBaseUrl,
+  sessionBuildInfo,
   pageSize: leaderboardPageSize,
   onPageSizeChange: setLeaderboardPageSize,
 }: {
   period: UsageLeaderboardPeriod
   login: string
   isAdmin: boolean
+  apiBaseUrl?: string
+  sessionBuildInfo: BuildInfo | null
   pageSize: number
   onPageSizeChange: (pageSize: number) => void
 }) {
@@ -233,13 +253,26 @@ function UsageAnalyticsPeriod({
   })
   const report = usePRMergeRateReport(activePeriod, login, isAdmin)
   const refreshing = leaderboard.isFetching || report.isFetching
+  // A refresh that fails keeps the last successful report visible, but the
+  // failure stays announced in the coverage details until one succeeds.
+  const [reportError, setReportError] = useState<ApiError | null>(null)
   const refreshNow = () => {
     void leaderboard.refetch()
-    void report.refetch()
+    // refetch() resolves on failure too, so the error has to come off the result.
+    void report.refetch().then((result) => {
+      const error = result.error
+      setReportError(
+        error == null
+          ? null
+          : error instanceof ApiError
+            ? error
+            : new ApiError(0, "unknown")
+      )
+    })
   }
   const metadata = [
     leaderboard.isError ? undefined : leaderboard.data,
-    report.isError ? undefined : report.data,
+    report.isError ? undefined : report.data?.payload,
   ].filter((data): data is NonNullable<typeof data> => data != null)
 
   return (
@@ -388,6 +421,11 @@ function UsageAnalyticsPeriod({
         reports={metadata}
         refreshing={refreshing}
         onRefresh={refreshNow}
+        period={activePeriod}
+        reportFetchedAt={report.data?.fetchedAt ?? null}
+        reportRefreshError={report.isError && !report.data ? null : reportError}
+        buildInfo={report.data?.payload.build_info ?? sessionBuildInfo}
+        apiBaseUrl={apiBaseUrl}
       />
     </>
   )
@@ -397,10 +435,23 @@ function AnalyticsCoverage({
   reports,
   refreshing,
   onRefresh,
+  period,
+  reportFetchedAt,
+  reportRefreshError,
+  buildInfo,
+  apiBaseUrl,
 }: {
   reports: AnalyticsMetadata[]
   refreshing: boolean
   onRefresh: () => void
+  period: UsageLeaderboardPeriod
+  /** When this browser last received the PR report; separate from the server-side `as_of`. */
+  reportFetchedAt: string | null
+  /** Failed manual refresh while the last good report stays on screen. */
+  reportRefreshError: ApiError | null
+  /** Backend and dashboard bundle identifiers, or null on a backend too old to send them. */
+  buildInfo: BuildInfo | null
+  apiBaseUrl?: string
 }) {
   if (!reports.length) return null
   const latest = reports.reduce((a, b) => (a.as_of > b.as_of ? a : b))
@@ -413,25 +464,30 @@ function AnalyticsCoverage({
     tone: string
   } = hasFailedEvents
     ? {
-        label: "Analytics need attention",
+        label: "Event processing needs attention",
         description:
-          "Some events could not be processed. Reports may be incomplete.",
+          "Some captured events could not be processed. Reports may be incomplete.",
         icon: WarningCircleIcon,
         tone: "text-destructive",
       }
     : hasPendingEvents
       ? {
-          label: "Analytics are updating",
-          description: "New activity is still being processed.",
+          label: "Event processing is behind",
+          description:
+            "New activity is still waiting to be processed into reports.",
           icon: ClockCountdownIcon,
           tone: "text-amber-600 dark:text-amber-400",
         }
       : {
-          label: "Analytics are up to date",
+          label: "Event processing is up to date",
+          description: latest.last_processed_at
+            ? `Last event processed ${new Date(latest.last_processed_at).toLocaleString()}.`
+            : "No events have been processed yet.",
           icon: CheckCircleIcon,
           tone: "text-emerald-600 dark:text-emerald-400",
         }
   const StatusIcon = status.icon
+  const api = describeApiBase(apiBaseUrl)
 
   return (
     <div role="status" aria-label="Analytics coverage">
@@ -479,6 +535,24 @@ function AnalyticsCoverage({
         </summary>
         <div className="space-y-1 border-t border-border px-4 py-3 text-muted-foreground">
           <p>
+            Period: {PERIOD_LABELS[period]} · Reports checked{" "}
+            {new Date(latest.as_of).toLocaleString()} (server). PR report last
+            fetched by this browser:{" "}
+            {reportFetchedAt
+              ? new Date(reportFetchedAt).toLocaleString()
+              : "Unavailable"}
+            .
+          </p>
+          {reportRefreshError ? (
+            <p className="text-destructive">
+              Last PR report refresh failed (
+              {reportRefreshError.status > 0
+                ? `HTTP ${reportRefreshError.status}`
+                : "network error"}
+              ). The report shown is from the last successful fetch above.
+            </p>
+          ) : null}
+          <p>
             Reporting since{" "}
             <time dateTime={latest.reporting_cutover_at}>
               {new Date(latest.reporting_cutover_at).toLocaleString()}
@@ -495,11 +569,71 @@ function AnalyticsCoverage({
             {hasFailedEvents
               ? "Some events could not be processed. Reports may be incomplete. "
               : ""}
-            Reports checked {new Date(latest.as_of).toLocaleString()}.
           </p>
+          <p>
+            API: {api.origin ?? "same origin"} {api.path}
+          </p>
+          <BuildIdentityDetails buildInfo={buildInfo} />
         </div>
       </details>
     </div>
+  )
+}
+
+function IdentityValue({ value }: { value: string | null | undefined }) {
+  return value ? (
+    <code className="select-all">{value}</code>
+  ) : (
+    <span>Unavailable</span>
+  )
+}
+
+function BuildIdentityDetails({ buildInfo }: { buildInfo: BuildInfo | null }) {
+  if (!buildInfo) {
+    return (
+      <p>
+        Build identifiers: Unavailable (the connected backend does not report
+        them).
+      </p>
+    )
+  }
+  // Both sets of identifiers are shown as reported; whether they match says
+  // nothing about compatibility.
+  return (
+    <>
+      <p>
+        Backend: revision <IdentityValue value={buildInfo.backend.revision_id} />
+        {" · "}commit <IdentityValue value={buildInfo.backend.commit} />
+        {" · "}built{" "}
+        {buildInfo.backend.built_at ? (
+          <time dateTime={buildInfo.backend.built_at}>
+            {new Date(buildInfo.backend.built_at).toLocaleString()}
+          </time>
+        ) : (
+          "Unavailable"
+        )}
+        {" · "}package{" "}
+        <IdentityValue value={buildInfo.backend.package_version} />
+      </p>
+      <p>
+        Dashboard bundle:{" "}
+        {buildInfo.dashboard.served ? (
+          <>
+            commit <IdentityValue value={buildInfo.dashboard.commit} />
+            {" · "}built{" "}
+            {buildInfo.dashboard.built_at ? (
+              <time dateTime={buildInfo.dashboard.built_at}>
+                {new Date(buildInfo.dashboard.built_at).toLocaleString()}
+              </time>
+            ) : (
+              "Unavailable"
+            )}
+          </>
+        ) : (
+          "not served by this backend"
+        )}
+      </p>
+    </>
   )
 }
 
@@ -510,7 +644,7 @@ function usePRMergeRateReport(
 ) {
   return useQuery({
     queryKey: ["prMergeRateByModel", period, login, isAdmin],
-    queryFn: () => api.prMergeRateByModel(period),
+    queryFn: (): Promise<PRMergeRateResponse> => api.prMergeRateByModel(period),
     staleTime: 60 * 1000,
     refetchInterval: 60 * 1000,
     retry: (count, error) =>
@@ -523,7 +657,8 @@ function PRMergeRateSection({
 }: {
   report: ReturnType<typeof usePRMergeRateReport>
 }) {
-  const data = report.isError ? undefined : report.data
+  const data = report.data?.payload
+  const failed = report.isError && !data
   const emptyMessage =
     data?.status === "not_started"
       ? "No analytics records have been captured since the reporting cutover yet."
@@ -545,7 +680,7 @@ function PRMergeRateSection({
           <Skeleton className="h-16 w-full" />
           <Skeleton className="h-16 w-full" />
         </div>
-      ) : report.isError ? (
+      ) : failed ? (
         <div className="space-y-2 p-4 text-xs" role="alert">
           <p className="text-destructive">
             {report.error instanceof ApiError && report.error.status === 503
@@ -706,8 +841,25 @@ function AvgTimeToMerge({ cohort }: { cohort: PRMergeRateCohort }) {
 }
 
 function AvgTimeToPR({ cohort }: { cohort: PRMergeRateCohort }) {
+  if (!("avg_delivery_seconds" in cohort)) {
+    // A backend that predates the metric has no key for it at all.
+    return (
+      <span
+        className="cursor-help rounded-sm underline decoration-dotted underline-offset-2 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+        title="Metric unavailable from this backend"
+        aria-label="Avg time to PR: metric unavailable from this backend"
+        tabIndex={0}
+      >
+        —
+      </span>
+    )
+  }
   if (cohort.avg_delivery_seconds == null) {
-    return <span>—</span>
+    return (
+      <span title="No PRs with valid timing in this group">
+        —
+      </span>
+    )
   }
   return (
     <Tooltip>
