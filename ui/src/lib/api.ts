@@ -126,7 +126,6 @@ export interface SessionUser {
   slack_oauth_enabled?: boolean
   api_base_url?: string
   slack_base_url?: string
-  build_info?: BuildInfo
 }
 
 /** Identifiers an artifact discovered about itself; `null` means unavailable, never assumed. */
@@ -146,9 +145,8 @@ export interface BuildInfo {
 }
 
 /**
- * Accepts the analytics report shape (both artifacts) and the `/me` shape
- * (backend only, dashboard omitted when the backend serves no bundle), and
- * returns null for anything else — notably older backends with no field.
+ * Accepts the analytics report's `build_info` shape and returns null for
+ * anything else — notably older backends with no field at all.
  */
 export function normalizeBuildInfo(raw: unknown): BuildInfo | null {
   if (typeof raw !== "object" || raw === null) return null
