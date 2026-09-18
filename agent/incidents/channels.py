@@ -20,7 +20,7 @@ from agent.slack.client import (
     slack_message_bot_id,
 )
 from agent.slack.events import claim_slack_event
-from agent.slack.http import slack_client
+from agent.slack.http import SlackClient
 from agent.source_context import SlackThreadRef, SourceContext
 from agent.store import store_client
 from agent.users import User
@@ -162,7 +162,7 @@ async def enroll_channel(
         title=channel_name,
     )
     try:
-        async with slack_client(token=ENV.SLACK_BOT_TOKEN.get()) as slack:
+        async with SlackClient.bot() as slack:
             await slack.conversations_join(channel=channel_id)
         info = await SlackChannel.fetch(channel_id, use_cache=False)
         if not info or not service.channel_allowed(info, policy, require_prefix=not manual):

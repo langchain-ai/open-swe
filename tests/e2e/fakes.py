@@ -141,6 +141,8 @@ def update_code_channel(channel_id: str, **values: Any) -> dict[str, Any] | None
 # --- GitHub ----------------------------------------------------------------
 PULLS: list[dict[str, Any]] = []
 REPO_PRIVATE = [False]
+MERGE_METHOD_FLAGS = ("allow_squash_merge", "allow_merge_commit", "allow_rebase_merge")
+REPO_MERGE_METHODS: dict[tuple[str, str], dict[str, bool]] = {}
 _pr_seq = [0]
 _REMOTES = {
     (OWNER, REPO): BARE_REMOTE,
@@ -246,8 +248,22 @@ def branch_exists(owner: str, repo: str, branch: str) -> bool:
         return False
 
 
+def github_timestamp(offset_seconds: float = 0.0) -> str:
+    return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(time.time() + offset_seconds))
+
+
 def create_pull(
-    owner: str, repo: str, *, head: str, base: str, title: str, body: str, draft: bool
+    owner: str,
+    repo: str,
+    *,
+    head: str,
+    base: str,
+    title: str,
+    body: str,
+    draft: bool,
+    author: str = "open-swe[bot]",
+    created_at: str | None = None,
+    updated_at: str | None = None,
 ) -> dict[str, Any]:
     _pr_seq[0] += 1
     number = _pr_seq[0]
@@ -271,10 +287,10 @@ def create_pull(
         "review_threads": [],
         "reviews": [],
         "review_decision": "REVIEW_REQUIRED",
-        "author": "open-swe[bot]",
-        "created_at": time.strftime(
-            "%Y-%m-%dT%H:%M:%SZ", time.gmtime(time.time() - 5 * 24 * 60 * 60)
-        ),
+        "author": author,
+        "merge_method": None,
+        "created_at": created_at or github_timestamp(-5 * 24 * 60 * 60),
+        "updated_at": updated_at or github_timestamp(),
         "files": files,
         "additions": sum(f["additions"] for f in files),
         "deletions": sum(f["deletions"] for f in files),
@@ -307,6 +323,19 @@ def find_pull_by_sha(owner: str, repo: str, sha: str) -> dict[str, Any] | None:
         ),
         None,
     )
+
+
+def pull_node_id(pull: dict[str, Any]) -> str:
+    return f"PR_node_{pull['owner']}_{pull['repo']}_{pull['number']}"
+
+
+def mark_pull_ready(node_id: str) -> dict[str, Any] | None:
+    pull = next((pull for pull in PULLS if pull_node_id(pull) == node_id), None)
+    if pull is None:
+        return None
+    pull["draft"] = False
+    pull["updated_at"] = github_timestamp()
+    return pull
 
 
 def update_pull_health(number: int, values: dict[str, Any]) -> dict[str, Any] | None:
@@ -360,6 +389,16 @@ def review_thread_graphql(thread: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def review_thread_count_graphql(threads: list[dict[str, Any]]) -> dict[str, Any]:
+    """``reviewThreads`` as the unresolved-count query selects it."""
+    return {
+        "nodes": [
+            {"isResolved": review_thread_graphql(thread)["isResolved"]} for thread in threads
+        ],
+        "pageInfo": {"hasNextPage": False, "endCursor": None},
+    }
+
+
 def check_graphql(check: dict[str, Any]) -> dict[str, Any]:
     return {
         "__typename": "CheckRun",
@@ -399,6 +438,35 @@ def pull_health_json(pull: dict[str, Any]) -> dict[str, Any]:
             "review_decision",
         )
     }
+
+
+def review_rest_json(review: dict[str, Any], index: int) -> dict[str, Any]:
+    """A review as the REST ``/pulls/{n}/reviews`` list returns it.
+
+    The GraphQL fix path stores reviews as ``{author, state, body, url}``; accept
+    that shape as well as GitHub's own ``{id, user: {login}, state}``."""
+    user = review.get("user")
+    login = user.get("login") if isinstance(user, dict) else review.get("author")
+    review_id = review.get("id")
+    return {
+        "id": review_id
+        if isinstance(review_id, int) and not isinstance(review_id, bool)
+        else index + 1,
+        "user": {"login": login if isinstance(login, str) else ""},
+        "state": review.get("state", ""),
+        "body": review.get("body", ""),
+        "html_url": review.get("url"),
+    }
+
+
+def set_repo_merge_methods(owner: str, repo: str, flags: dict[str, bool]) -> dict[str, bool]:
+    resolved = {flag: bool(flags.get(flag, True)) for flag in MERGE_METHOD_FLAGS}
+    REPO_MERGE_METHODS[(owner, repo)] = resolved
+    return resolved
+
+
+def repo_merge_methods(owner: str, repo: str) -> dict[str, bool]:
+    return REPO_MERGE_METHODS.get((owner, repo)) or dict.fromkeys(MERGE_METHOD_FLAGS, True)
 
 
 def set_repo_private(value: bool) -> None:
@@ -520,6 +588,7 @@ def reset() -> None:
     EPHEMERALS.clear()
     CODE_CHANNELS.clear()
     PULLS.clear()
+    REPO_MERGE_METHODS.clear()
     SNAPSHOTS.clear()
     DELETED_SNAPSHOTS.clear()
     COLLABORATOR_PERMISSIONS.clear()

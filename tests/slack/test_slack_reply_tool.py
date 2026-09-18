@@ -296,7 +296,7 @@ async def test_slack_reply_restores_thinking_status_after_interim_reply(
     restore_status.assert_awaited_once_with("C1", "1.0")
 
 
-async def test_slack_reply_posts_plain_text_without_options(
+async def test_slack_reply_posts_native_markdown_without_options(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     captured: dict[str, Any] = {}
@@ -315,12 +315,52 @@ async def test_slack_reply_posts_plain_text_without_options(
     monkeypatch.setattr(slack_reply_tool, "get_config", _config)
     monkeypatch.setattr(slack_reply_tool, "_post_and_store_mapping", fake_post_and_store_mapping)
 
-    result = await slack_reply_tool.slack_reply(
-        "Plan ready: review it and reply to approve or request changes."
-    )
+    message = '```python\nfor value in range(3):\n    print("@Name(U123)", value)\n```'
+    result = await slack_reply_tool.slack_reply(message)
 
     assert result == {"success": True}
-    assert captured["blocks"] is None
+    assert captured["message"] == message
+    assert captured["blocks"] == [{"type": "markdown", "text": message}]
+
+
+async def test_slack_reply_falls_back_to_mrkdwn_over_native_limit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    post = AsyncMock(return_value=("2.0", None))
+    message = "# Heading\n\n" + "x" * 12000
+    monkeypatch.setattr(slack_reply_tool, "get_config", _config)
+    monkeypatch.setattr(slack_reply_tool, "_post_and_store_mapping", post)
+
+    assert await slack_reply_tool.slack_reply(message) == {"success": True}
+    assert post.await_args.args[2].startswith("*Heading*\n")
+    assert post.await_args.kwargs["blocks"] is None
+
+
+async def test_slack_reply_rejects_oversized_message_with_options(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    post = AsyncMock()
+    monkeypatch.setattr(slack_reply_tool, "get_config", _config)
+    monkeypatch.setattr(slack_reply_tool, "_post_and_store_mapping", post)
+
+    result = await slack_reply_tool.slack_reply("x" * 12001, options=["Yes"])
+
+    assert result["success"] is False
+    assert result["retry"] is True
+    assert "options" in result["error"]
+    post.assert_not_awaited()
+
+
+async def test_slack_reply_preserves_explicit_blocks_over_limit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    post = AsyncMock(return_value=("2.0", None))
+    blocks = [{"type": "section", "text": {"type": "mrkdwn", "text": "kept"}}]
+    monkeypatch.setattr(slack_reply_tool, "get_config", _config)
+    monkeypatch.setattr(slack_reply_tool, "_post_and_store_mapping", post)
+
+    assert await slack_reply_tool.slack_reply("x" * 12001, blocks=blocks) == {"success": True}
+    assert post.await_args.kwargs["blocks"] is blocks
 
 
 async def test_slack_reply_builds_option_blocks(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -348,6 +388,7 @@ async def test_slack_reply_builds_option_blocks(monkeypatch: pytest.MonkeyPatch)
     assert captured["channel_id"] == "C1"
     assert captured["thread_ts"] == "1.0"
     assert captured["message"] == "Pick one"
+    assert captured["blocks"][0] == {"type": "markdown", "text": "Pick one"}
     actions = captured["blocks"][1]
     assert actions["type"] == "actions"
     assert [button["text"]["text"] for button in actions["elements"]] == ["A", "B"]

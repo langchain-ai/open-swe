@@ -2,8 +2,10 @@ from agent.expedited_review.readiness import (
     PullRequestSnapshot,
     Readiness,
     _latest_reviews_by_user,
+    _resolve_mergeability,
     readiness_blockers,
 )
+from agent.github.pull_request_status import Mergeability
 
 
 def _snapshot(**overrides: object) -> PullRequestSnapshot:
@@ -109,3 +111,23 @@ def test_later_approval_clears_a_request_for_changes_but_a_comment_does_not() ->
     assert cleared == {"grace": "APPROVED"}
     assert standing == {"grace": "CHANGES_REQUESTED"}
     assert own == {}
+
+
+def test_graphql_answers_mergeability_that_rest_left_null() -> None:
+    stale_rest = {"mergeable": None, "mergeable_state": "unknown"}
+
+    assert _resolve_mergeability(
+        stale_rest, Mergeability(mergeable=True, merge_state="blocked")
+    ) == (
+        True,
+        "blocked",
+    )
+    assert readiness_blockers(_snapshot(mergeable=True, mergeable_state="blocked")) == []
+
+
+def test_rest_still_decides_when_graphql_is_unavailable_or_unsure() -> None:
+    rest = {"mergeable": False, "mergeable_state": "dirty"}
+    unsure = Mergeability(mergeable=None, merge_state="unknown")
+
+    assert _resolve_mergeability(rest, None) == (False, "dirty")
+    assert _resolve_mergeability(rest, unsure) == (False, "dirty")

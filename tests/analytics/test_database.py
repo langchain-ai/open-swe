@@ -15,6 +15,20 @@ from agent.database import postgres
 from tests.analytics.conftest import initialize_database
 
 
+def test_local_dev_defaults_to_local_postgres(monkeypatch):
+    monkeypatch.delenv("POSTGRES_URI", raising=False)
+    monkeypatch.setenv("LANGSMITH_LANGGRAPH_API_VARIANT", "local_dev")
+
+    assert postgres.uri() == "postgresql+asyncpg://postgres:postgres@127.0.0.1:5433/postgres"
+
+
+def test_non_local_runtime_requires_postgres_uri(monkeypatch):
+    monkeypatch.delenv("POSTGRES_URI", raising=False)
+    monkeypatch.delenv("LANGSMITH_LANGGRAPH_API_VARIANT", raising=False)
+
+    assert postgres.uri() is None
+
+
 async def test_migrations_allow_nonblocking_startup_and_restart(deployment_db):
     detector = BlockBuster()
     identities = []

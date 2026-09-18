@@ -19,7 +19,7 @@ OPEN_SWE_BOT_NAME = "open-swe[bot]"
 OPEN_SWE_BOT_EMAIL = "open-swe@users.noreply.github.com"
 
 PR_ATTRIBUTION_TEXT = "Made by [Open SWE]"
-PR_ATTRIBUTION_DEFAULT_URL = "https://openswe.vercel.app"
+PR_ATTRIBUTION_DEFAULT_URL = "https://github.com/langchain-ai/open-swe"
 PR_ATTRIBUTION_FOOTER = f"{PR_ATTRIBUTION_TEXT}({PR_ATTRIBUTION_DEFAULT_URL})"
 
 
@@ -31,7 +31,9 @@ def build_pr_attribution_footer(
 ) -> str:
     """Build the Open SWE PR footer with the run's model details."""
     url = thread_url.strip() if isinstance(thread_url, str) and thread_url.strip() else ""
-    footer = f"{PR_ATTRIBUTION_TEXT}({url or PR_ATTRIBUTION_DEFAULT_URL})"
+    footer = PR_ATTRIBUTION_FOOTER
+    if url:
+        footer += f" · [view thread]({url})"
     model = _normalize_text(model_id).replace("`", "")
     effort = _normalize_text(reasoning_effort).replace("`", "")
     if model:
