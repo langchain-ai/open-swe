@@ -11,7 +11,6 @@ const user: SessionUser = {
   email: null,
   avatar_url: null,
   is_admin: false,
-  default_workspace: null,
   api_base_url:
     "https://user:secret@backend.example.com/mount?token=secret#private",
   build_info: {
