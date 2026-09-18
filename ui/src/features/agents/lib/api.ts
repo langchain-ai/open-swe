@@ -3,7 +3,7 @@ import type {
   AgentPullRequestStatusResponse,
   AgentSchedule,
   AgentThread,
-  AutomationThreadMode,
+  AutomationSandboxMode,
   ImageChunk,
   Message,
   SlackNotificationMode,
@@ -20,7 +20,7 @@ import { withRequestTiming } from "@/lib/perf/fetchTiming"
 export type {
   AgentSchedule,
   AgentThread,
-  AutomationThreadMode,
+  AutomationSandboxMode,
   Message,
   SlackNotificationMode,
 }
@@ -52,7 +52,7 @@ export interface ScheduleCreateRequest {
   repo?: string | null
   slack_channel_id?: string | null
   slack_notification_mode?: SlackNotificationMode
-  thread_mode?: AutomationThreadMode
+  sandbox_mode?: AutomationSandboxMode
   admin_thread?: boolean
   model_id?: string | null
   effort?: string | null
@@ -66,7 +66,7 @@ export interface ScheduleUpdateRequest {
   repo?: string | null
   slack_channel_id?: string | null
   slack_notification_mode?: SlackNotificationMode
-  thread_mode?: AutomationThreadMode
+  sandbox_mode?: AutomationSandboxMode
   admin_thread?: boolean
   model_id?: string | null
   effort?: string | null

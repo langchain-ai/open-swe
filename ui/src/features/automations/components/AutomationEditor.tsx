@@ -5,7 +5,7 @@ import { ClockIcon, TrashIcon } from "@phosphor-icons/react"
 import type { ModelOption } from "@/lib/api"
 import type {
   AgentSchedule,
-  AutomationThreadMode,
+  AutomationSandboxMode,
   AutomationTrigger,
   SlackNotificationMode,
 } from "@/features/agents/lib/types"
@@ -89,8 +89,8 @@ export function AutomationEditor({
   )
   const [slackNotificationMode, setSlackNotificationMode] =
     useState<SlackNotificationMode>(schedule?.slackNotificationMode ?? "always")
-  const [threadMode, setThreadMode] = useState<AutomationThreadMode>(
-    schedule?.threadMode ?? "reuse"
+  const [sandboxMode, setSandboxMode] = useState<AutomationSandboxMode>(
+    schedule?.sandboxMode ?? "reuse"
   )
   const [enabled, setEnabled] = useState(schedule?.enabled ?? true)
   const [adminThread, setAdminThread] = useState(schedule?.adminThread ?? false)
@@ -112,7 +112,7 @@ export function AutomationEditor({
       repo !== (schedule?.repo ?? null) ||
       slackChannelId !== (schedule?.slackChannelId ?? "") ||
       slackNotificationMode !== (schedule?.slackNotificationMode ?? "always") ||
-      threadMode !== (schedule?.threadMode ?? "reuse") ||
+      sandboxMode !== (schedule?.sandboxMode ?? "reuse") ||
       enabled !== (schedule?.enabled ?? true) ||
       adminThread !== (schedule?.adminThread ?? false) ||
       activeSelection?.modelId !== initialSelection?.modelId ||
@@ -155,7 +155,7 @@ export function AutomationEditor({
           repo,
           slack_channel_id: slackChannelId.trim() || null,
           slack_notification_mode: slackNotificationMode,
-          thread_mode: threadMode,
+          sandbox_mode: sandboxMode,
           admin_thread: adminThread,
           model_id: modelId,
           effort,
@@ -181,7 +181,7 @@ export function AutomationEditor({
           repo: repo ?? "",
           slack_channel_id: slackChannelId.trim() || null,
           slack_notification_mode: slackNotificationMode,
-          thread_mode: threadMode,
+          sandbox_mode: sandboxMode,
           admin_thread: adminThread,
           model_id: modelId,
           effort,
@@ -345,30 +345,28 @@ export function AutomationEditor({
           )}
         </div>
 
-        <SectionLabel>Thread history</SectionLabel>
+        <SectionLabel>Sandbox persistence</SectionLabel>
         <div className="rounded-xl border border-border bg-card p-3">
           <div className="flex items-center justify-between gap-3">
-            <span className="text-xs text-muted-foreground">
-              On each trigger
-            </span>
+            <span className="text-xs text-muted-foreground">Run threads</span>
             <Select
-              value={threadMode}
-              onValueChange={(value) => value && setThreadMode(value)}
+              value={sandboxMode}
+              onValueChange={(value) => value && setSandboxMode(value)}
               disabled={!canManage}
             >
               <SelectTrigger className="w-52">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="new">Start a new thread</SelectItem>
-                <SelectItem value="reuse">Reuse one thread</SelectItem>
+                <SelectItem value="reuse">Share one sandbox</SelectItem>
+                <SelectItem value="new">Use fresh sandboxes</SelectItem>
               </SelectContent>
             </Select>
           </div>
           <p className="mt-2 text-xs text-muted-foreground/70">
-            {threadMode === "reuse"
-              ? "Each trigger adds a new automation message to the same thread and keeps its sandbox and history."
-              : "Each trigger starts with a fresh thread, sandbox, and history."}
+            {sandboxMode === "reuse"
+              ? "Each trigger starts a new thread that shares files with earlier runs."
+              : "Each trigger starts a new thread with a fresh sandbox."}
           </p>
         </div>
 

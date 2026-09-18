@@ -50,21 +50,20 @@ def _notification_store() -> TypedStore[AutomationNotification]:
     return TypedStore(_NOTIFICATION_NAMESPACE, AutomationNotification)
 
 
-def _notification_lock(notification_id: str) -> asyncio.Lock:
-    lock = _notification_locks.get(notification_id)
+def _notification_lock(thread_id: str) -> asyncio.Lock:
+    lock = _notification_locks.get(thread_id)
     if lock is None:
         lock = asyncio.Lock()
-        _notification_locks[notification_id] = lock
+        _notification_locks[thread_id] = lock
     return lock
 
 
-async def _release_reservation(notification_id: str) -> None:
+async def _release_reservation(thread_id: str) -> None:
     try:
-        await _notification_store().delete(notification_id)
+        await _notification_store().delete(thread_id)
     except Exception:
         logger.exception(
-            "Failed to release automation notification",
-            extra={"notification_id": notification_id},
+            "Failed to release automation notification", extra={"thread_id": thread_id}
         )
 
 
@@ -102,7 +101,6 @@ async def notify_automation_channel(content: str, summary: str = "") -> dict[str
     thread_id = cfg.thread_id
     if not thread_id:
         return {"success": False, "error": "Missing scheduled thread ID"}
-    notification_id = cfg.invocation_id or thread_id
 
     clean_content = content.strip()
     clean_summary = summary.strip()
@@ -130,9 +128,9 @@ async def notify_automation_channel(content: str, summary: str = "") -> dict[str
         }
 
     store = _notification_store()
-    async with _notification_lock(notification_id):
+    async with _notification_lock(thread_id):
         try:
-            existing = await store.get(notification_id)
+            existing = await store.get(thread_id)
         except Exception:
             logger.exception(
                 "Failed to check automation notification", extra={"thread_id": thread_id}
@@ -165,7 +163,7 @@ async def notify_automation_channel(content: str, summary: str = "") -> dict[str
                 status="pending", channel_id=channel_id, schedule_id=schedule_id
             )
             try:
-                await store.put(notification_id, record)
+                await store.put(thread_id, record)
             except Exception:
                 logger.exception(
                     "Failed to reserve automation notification", extra={"thread_id": thread_id}
@@ -185,10 +183,10 @@ async def notify_automation_channel(content: str, summary: str = "") -> dict[str
                 )
             except Exception:
                 logger.exception("Automation Slack post raised", extra={"thread_id": thread_id})
-                await _release_reservation(notification_id)
+                await _release_reservation(thread_id)
                 return {"success": False, "error": "Slack post failed unexpectedly"}
             if posted_ts is None:
-                await _release_reservation(notification_id)
+                await _release_reservation(thread_id)
                 return {
                     "success": False,
                     "error": f"Slack post failed: {slack_error or 'unknown error'}",
@@ -197,7 +195,7 @@ async def notify_automation_channel(content: str, summary: str = "") -> dict[str
 
             record = record.model_copy(update={"status": "posted", "message_ts": posted_ts})
             try:
-                await store.put(notification_id, record)
+                await store.put(thread_id, record)
             except Exception:
                 logger.exception(
                     "Failed to record the automation Slack post",
@@ -236,7 +234,7 @@ async def notify_automation_channel(content: str, summary: str = "") -> dict[str
 
         delivered = record.model_copy(update={"status": "delivered", "notified_at": now_iso()})
         try:
-            await store.put(notification_id, delivered)
+            await store.put(thread_id, delivered)
         except Exception:
             # Slack already has both messages; failing the call here would only invite a
             # duplicate thread reply on the next attempt.
