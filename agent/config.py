@@ -325,6 +325,11 @@ ENV.var("COMPLETION_WEBHOOK_URL", "Where LangGraph posts run-completion webhooks
 ENV.var(
     "POSTGRES_URI", "LangGraph deployment PostgreSQL URI available to custom code.", secret=True
 )
+ENV.var(
+    "LANGSMITH_LANGGRAPH_API_VARIANT",
+    "LangGraph API runtime variant.",
+    default="",
+)
 ENV.var("ANALYTICS_ENVIRONMENT", "Analytics producer environment.", default="production")
 ENV.var("ANALYTICS_SUMMARY_VERSION", "Active metric semantics version.", default="1")
 ENV.var("ANALYTICS_PR_MATURITY_DAYS", "PR cohort maturity period.", default="14")
