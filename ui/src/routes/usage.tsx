@@ -786,24 +786,7 @@ function PRMergeRateTable({
                 : "Unavailable"
               return (
                 <Fragment key={key}>
-                  <tr
-                    className={
-                      hasMultipleEfforts
-                        ? "cursor-pointer hover:bg-muted/35"
-                        : undefined
-                    }
-                    onClick={
-                      hasMultipleEfforts
-                        ? () =>
-                            setExpanded((current) => {
-                              const next = new Set(current)
-                              if (next.has(key)) next.delete(key)
-                              else next.add(key)
-                              return next
-                            })
-                        : undefined
-                    }
-                  >
+                  <tr>
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-2">
                         {hasMultipleEfforts ? (
@@ -812,6 +795,14 @@ function PRMergeRateTable({
                             className="-ml-1 size-5.5 shrink-0 rounded-sm p-1 text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
                             aria-expanded={isExpanded}
                             aria-label={`${isExpanded ? "Collapse" : "Expand"} ${modelLabel} reasoning efforts`}
+                            onClick={() =>
+                              setExpanded((current) => {
+                                const next = new Set(current)
+                                if (next.has(key)) next.delete(key)
+                                else next.add(key)
+                                return next
+                              })
+                            }
                           >
                             {isExpanded ? (
                               <ChevronDown className="size-3.5" />
