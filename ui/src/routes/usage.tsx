@@ -307,6 +307,7 @@ function UsageAnalyticsPeriod({
         ) : (
           <UsageTable
             scope={usageScope}
+            period={activePeriod}
             currentUserRank={leaderboard.data.current_user_rank}
             rows={leaderboard.data.rows}
             totalMembers={leaderboard.data.total_members}
@@ -890,7 +891,10 @@ function PRMergeRateTable({
   )
 }
 
-function usageColumns(scope: UsageScope): Array<SortableColumn> {
+function usageColumns(
+  scope: UsageScope,
+  period: UsageLeaderboardPeriod
+): Array<SortableColumn> {
   return [
     { key: "rank", label: "Rank", align: "left", defaultDirection: "asc" },
     { key: "user", label: "User", align: "left", defaultDirection: "asc" },
@@ -925,8 +929,11 @@ function usageColumns(scope: UsageScope): Array<SortableColumn> {
       key: "merged_prs_per_thread",
       label: "Merged PRs / Thread",
       align: "right",
-      tooltip:
-        "Merged PRs ÷ distinct threads in the period — an aggregate ratio, not a per-thread outcome. One thread can open several PRs and many threads open none, so 1.00 does not mean every thread merged a PR.",
+      tooltip: `Merged PRs ÷ distinct threads ${
+        period === "all"
+          ? "all time"
+          : `in the ${PERIOD_LABELS[period].toLowerCase()}`
+      } — an aggregate ratio, not a per-thread outcome. One thread can open several PRs and many threads open none, so 1.00 does not mean every thread merged a PR.`,
     },
     { key: "agent_loc", label: "Agent LOC", align: "right" },
   ]
@@ -1054,6 +1061,7 @@ function PRMergeRateCells({
 
 function UsageTable({
   scope,
+  period,
   currentUserRank,
   rows,
   totalMembers,
@@ -1067,6 +1075,7 @@ function UsageTable({
   onPageSizeChange,
 }: {
   scope: UsageScope
+  period: UsageLeaderboardPeriod
   currentUserRank: number | null
   rows: Array<UsageLeaderboardRow>
   totalMembers: number
@@ -1088,7 +1097,7 @@ function UsageTable({
           ) : null}
           <thead className="border-b border-border text-xs text-muted-foreground">
             <tr>
-              {usageColumns(scope).map((column, index, columns) => (
+              {usageColumns(scope, period).map((column, index, columns) => (
                 <SortableHeader
                   key={column.key}
                   column={column}
