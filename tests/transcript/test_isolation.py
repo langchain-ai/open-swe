@@ -17,7 +17,7 @@ from agent.database import postgres
 from agent.transcript.attachments import PendingAttachment
 from agent.transcript.engine import Command, append, delete_transcript
 from agent.transcript.events import (
-    MessageImage,
+    MessageAttachment,
     MessageSender,
     RunNotice,
     ThreadCreated,
@@ -339,8 +339,8 @@ async def test_an_attachment_is_served_only_to_a_reader_of_its_own_thread(
                     message_id="human-1",
                     text="look",
                     sender=MessageSender(login=OWNER, kind="dashboard"),
-                    images=[
-                        MessageImage(
+                    attachments=[
+                        MessageAttachment(
                             mime_type="image/png",
                             file_name="../../etc/passwd",
                             attachment_id=attachment_id,

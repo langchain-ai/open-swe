@@ -23,8 +23,8 @@ from sqlalchemy.ext.asyncio import AsyncConnection
 
 from agent.transcript.events import (
     MessageAppended,
+    MessageAttachment,
     MessageCompleted,
-    MessageImage,
     ThreadCreated,
     ThreadMetaUpdated,
     ToolCompleted,
@@ -50,7 +50,7 @@ def _model_json(model: BaseModel | None) -> str | None:
     return None if model is None else model.model_dump_json()
 
 
-def _models_json(models: list[MessageImage] | None) -> str | None:
+def _models_json(models: list[MessageAttachment] | None) -> str | None:
     if not models:
         return None
     return json.dumps([model.model_dump(mode="json") for model in models])
@@ -216,11 +216,11 @@ async def _turn_requested(
             """
             INSERT INTO thread_message (
                 message_id, thread_id, turn_id, version, role, text, reasoning,
-                namespace, sender, images, created_at
+                namespace, sender, attachments, created_at
             )
             VALUES (
                 :message_id, :thread_id, :turn_id, :version, 'human', :text, '',
-                :namespace, CAST(:sender AS jsonb), CAST(:images AS jsonb), :created_at
+                :namespace, CAST(:sender AS jsonb), CAST(:attachments AS jsonb), :created_at
             )
             ON CONFLICT (thread_id, message_id) DO NOTHING
             """
@@ -233,7 +233,7 @@ async def _turn_requested(
             "text": event.text,
             "namespace": [],
             "sender": _model_json(event.sender),
-            "images": _models_json(event.images),
+            "attachments": _models_json(event.attachments),
             "created_at": occurred_at,
         },
     )
@@ -461,11 +461,11 @@ async def _message_completed(
             """
             INSERT INTO thread_message (
                 message_id, thread_id, turn_id, version, role, text, reasoning,
-                namespace, sender, images, usage, created_at
+                namespace, sender, attachments, usage, created_at
             )
             VALUES (
                 :message_id, :thread_id, :turn_id, :version, :role, :text, :reasoning,
-                :namespace, CAST(:sender AS jsonb), CAST(:images AS jsonb),
+                :namespace, CAST(:sender AS jsonb), CAST(:attachments AS jsonb),
                 CAST(:usage AS jsonb), :created_at
             )
             ON CONFLICT (thread_id, message_id) DO UPDATE SET
@@ -475,7 +475,7 @@ async def _message_completed(
                 reasoning = EXCLUDED.reasoning,
                 namespace = EXCLUDED.namespace,
                 sender = COALESCE(EXCLUDED.sender, thread_message.sender),
-                images = COALESCE(EXCLUDED.images, thread_message.images),
+                attachments = COALESCE(EXCLUDED.attachments, thread_message.attachments),
                 usage = COALESCE(EXCLUDED.usage, thread_message.usage)
             """
         ),
@@ -489,7 +489,7 @@ async def _message_completed(
             "reasoning": event.reasoning,
             "namespace": list(event.namespace),
             "sender": _model_json(event.sender),
-            "images": _models_json(event.images),
+            "attachments": _models_json(event.attachments),
             "usage": _model_json(event.usage),
             "created_at": event.created_at,
         },

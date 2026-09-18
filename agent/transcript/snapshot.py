@@ -93,7 +93,7 @@ class MessageView(BaseModel):
     reasoning: str
     namespace: list[str]
     sender: JsonObject | None
-    images: list[JsonValue] | None
+    attachments: list[JsonValue] | None
     usage: JsonObject | None
     created_at: datetime
 
@@ -244,7 +244,7 @@ def _turn_view(row: RowMapping) -> TurnView:
 
 _MESSAGE_COLUMNS = """
     message_id, turn_id, role, text, reasoning, namespace,
-    sender, images, usage, created_at
+    sender, attachments, usage, created_at
 """
 
 _TOOL_CALL_COLUMNS = """

@@ -167,7 +167,7 @@ async def api_get_thread_attachment(
     attachment_id: UUID,
     session: dict[str, Any] = SESSION_DEP,
 ) -> Response:
-    """The bytes of one image attached to a message in this thread."""
+    """The bytes of one file attached to a message in this thread."""
     await _readable_transcript(thread_id, session)
     attachment = await attachments.load(thread_id, attachment_id)
     if attachment is None:

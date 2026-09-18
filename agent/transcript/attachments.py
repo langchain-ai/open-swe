@@ -19,14 +19,14 @@ from agent.database import postgres
 logger = logging.getLogger(__name__)
 
 MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024
-"""Matches the per-image cap the dashboard command path already enforces."""
+"""Matches the per-attachment cap the dashboard command path already enforces."""
 
 ALLOWED_MIME_TYPES = frozenset({"image/png", "image/jpeg", "image/gif", "image/webp"})
 """The bytes are served back with their stored type, so the list is exact."""
 
 
 class UnsupportedAttachment(ValueError):
-    """The attachment is not an image, or is larger than the cap."""
+    """The attachment is not an allowed type, or is larger than the cap."""
 
 
 @dataclass(frozen=True, kw_only=True)

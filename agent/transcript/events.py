@@ -4,7 +4,7 @@ Every event body carries its own ``type`` discriminator, so a payload read back
 out of ``thread_event`` validates into exactly the model that wrote it. The
 bodies are the wire format for the UI as well: they are dumped verbatim into
 ``thread_event.payload`` and streamed to the browser, which is why nothing here
-holds bytes — an image rides as its metadata only, never as base64.
+holds bytes — an attachment rides as its metadata only, never as base64.
 """
 
 from datetime import datetime
@@ -53,14 +53,14 @@ class MessageSender(BaseModel):
     display_name: str | None = None
 
 
-class MessageImage(BaseModel):
-    """An image attached to a human message — metadata only, never base64.
+class MessageAttachment(BaseModel):
+    """A file attached to a message — metadata only, never base64.
 
     ``attachment_id`` addresses the bytes, which are stored in
     ``thread_attachment`` by the same transaction that appended the event and
     are served by
     ``GET /dashboard/api/threads/{thread_id}/transcript/attachments/{attachment_id}``.
-    It is unset only for an image whose bytes were not captured.
+    It is unset only for an attachment whose bytes were not captured.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -136,7 +136,7 @@ class TurnRequested(_Body):
     message_id: str
     text: str
     sender: MessageSender
-    images: list[MessageImage] = Field(default_factory=list)
+    attachments: list[MessageAttachment] = Field(default_factory=list)
     model_id: str | None = None
     effort: str | None = None
     plan_mode: bool = False
@@ -234,7 +234,7 @@ class MessageCompleted(_Body):
     text: str = ""
     reasoning: str = ""
     sender: MessageSender | None = None
-    images: list[MessageImage] | None = None
+    attachments: list[MessageAttachment] | None = None
     usage: MessageUsage | None = None
     created_at: datetime
 

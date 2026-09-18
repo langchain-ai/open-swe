@@ -135,7 +135,7 @@ def upgrade() -> None:
             reasoning text NOT NULL DEFAULT '',
             namespace text[] NOT NULL DEFAULT '{}',
             sender jsonb,
-            images jsonb,
+            attachments jsonb,
             usage jsonb,
             created_at timestamptz NOT NULL,
             PRIMARY KEY (thread_id, message_id)
