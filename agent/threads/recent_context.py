@@ -15,7 +15,6 @@ from typing import Literal
 
 from langgraph_sdk.client import LangGraphClient
 
-from agent.config import ENV
 from agent.prompts import render_prompt
 from agent.source_context import SourceContext
 from agent.threads.summary import (
@@ -283,8 +282,6 @@ async def recent_thread_context_section(
 ) -> str:
     """The prompt section for this sender, or "" when ineligible or unavailable."""
     if not login:
-        return ""
-    if ENV["RECENT_THREAD_CONTEXT_DISABLED"].get_bool(default=False):
         return ""
     if client is None:
         from agent.utils.thread_ops import langgraph_client
