@@ -83,10 +83,10 @@ function ReviewsPage() {
   const items = reviews.data?.reviews ?? []
 
   return (
-    <main className="min-w-0 flex-1 overflow-y-auto">
+    <main className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
       {/* One width for both tabs: switching tabs must not re-centre the page
           under the button being clicked. */}
-      <div className="mx-auto max-w-4xl px-6 py-8">
+      <div className="mx-auto flex min-h-0 w-full max-w-4xl flex-1 flex-col px-6 py-8">
         <h1 className="font-heading text-base font-medium text-foreground">
           Pull Requests
         </h1>
@@ -148,7 +148,7 @@ function ReviewsPage() {
         ) : (
           <div
             aria-busy={reviews.isFetching}
-            className="mt-3 overflow-hidden rounded-lg border border-border bg-card"
+            className="mt-3 min-h-0 flex-1 overflow-y-auto rounded-lg border border-border bg-card"
           >
             {reviews.isFetching && reviews.data && (
               <p
