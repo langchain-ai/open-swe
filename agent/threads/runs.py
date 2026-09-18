@@ -26,6 +26,7 @@ from agent.dashboard.user_preferences import get_user_preferences
 from agent.dashboard.workspace_settings import (
     get_workspace_settings,
 )
+from agent.database import postgres
 from agent.input_messages import (
     PersonIdentity,
     build_input_messages,
@@ -45,6 +46,7 @@ from agent.threads.access import (
 )
 from agent.threads.summary import (
     DASHBOARD_SOURCE,
+    TRANSCRIPT_VERSION,
     _is_thread_resolved,
     _metadata_model_id,
     _now_ms,
@@ -52,6 +54,9 @@ from agent.threads.summary import (
     repo_config_from_metadata,
     thread_source,
 )
+from agent.transcript.attachments import PendingAttachment
+from agent.transcript.engine import Command, append, has_message, has_transcript
+from agent.transcript.events import MessageImage, MessageSender, ThreadCreated, TurnRequested
 from agent.utils.dashboard_handoff import DASHBOARD_HANDOFF_BODY
 from agent.utils.json_types import JsonObject, as_thread_dict, thread_metadata
 from agent.utils.thread_ops import langgraph_client
@@ -285,6 +290,12 @@ async def _create_dashboard_thread_record(
     elif repo_explicitly_none:
         metadata["repo_explicitly_none"] = True
 
+    # A deployment without PostgreSQL has nowhere to keep a transcript, so the
+    # thread is not stamped as one and keeps reading LangGraph state.
+    transcribed = postgres.configured()
+    if transcribed:
+        metadata["transcript"] = TRANSCRIPT_VERSION
+
     client = langgraph_client()
     await client.threads.create(
         thread_id=thread_id,
@@ -292,6 +303,30 @@ async def _create_dashboard_thread_record(
         if_exists="raise",
     )
     thread = await client.threads.get(thread_id)
+    if not transcribed:
+        return as_thread_dict(thread)
+    await append(
+        thread_id,
+        [
+            Command(
+                command_id=f"thread:{thread_id}:created",
+                event=ThreadCreated(
+                    title=initial_title,
+                    source=DASHBOARD_SOURCE,
+                    owner_login=login.strip(),
+                    visibility=visibility,
+                    repo_owner=repo_config["owner"] if has_repo else None,
+                    repo_name=repo_config["name"] if has_repo else None,
+                    model_id=resolved_model,
+                    effort=resolved_effort,
+                    # The mirror the transcript read path authorizes against, so
+                    # it is LangGraph's own metadata rather than a rebuild of it.
+                    metadata=thread_metadata(thread),
+                ),
+                actor_kind="user",
+            )
+        ],
+    )
     return as_thread_dict(thread)
 
 
@@ -423,6 +458,38 @@ def _dashboard_images_from_content(content: Any) -> list[DashboardImageBody]:
             )
         )
     return images
+
+
+def _transcript_attachments(
+    images: list[DashboardImageBody], message_id: str
+) -> tuple[list[MessageImage], tuple[PendingAttachment, ...]]:
+    """Attachment rows for a command's images, and the metadata the event carries.
+
+    ``_decode_dashboard_image`` re-applies the type allowlist and the 10MB cap
+    the run already validated, so nothing reaches the database unchecked.
+    """
+    metadata: list[MessageImage] = []
+    attachments: list[PendingAttachment] = []
+    for position, image in enumerate(images):
+        attachment_id = uuid.uuid7()
+        attachments.append(
+            PendingAttachment(
+                attachment_id=attachment_id,
+                message_id=message_id,
+                position=position,
+                mime_type=image.mime_type,
+                file_name=image.file_name,
+                data=_decode_dashboard_image(image),
+            )
+        )
+        metadata.append(
+            MessageImage(
+                mime_type=image.mime_type,
+                file_name=image.file_name,
+                attachment_id=attachment_id,
+            )
+        )
+    return metadata, tuple(attachments)
 
 
 def _validate_command_images(content: Any, *, model_id: str | None) -> None:
@@ -603,9 +670,21 @@ async def _enrich_run_start_command(
                 injected_dynamic_context_hashes={"system:dashboard-handoff"},
             )[0],
         )
+    # The transcript keys a human message by the id the graph will carry, so the
+    # id is minted here when the client did not send a usable one.
+    transcribed = (creating and postgres.configured()) or await has_transcript(thread_id)
     client_message_id = _command_message_id(params)
-    if client_message_id and client_message_id not in persisted_message_ids:
-        structured[-1]["id"] = client_message_id
+    message_id: str | None = None
+    if (
+        client_message_id
+        and client_message_id not in persisted_message_ids
+        and not (transcribed and await has_message(thread_id, client_message_id))
+    ):
+        message_id = client_message_id
+    elif transcribed:
+        message_id = str(uuid.uuid7())
+    if message_id:
+        structured[-1]["id"] = message_id
     run_input = params.get("input")
     if isinstance(run_input, dict):
         run_input["messages"] = structured
@@ -655,6 +734,35 @@ async def _enrich_run_start_command(
             metadata_update["attention_reason"] = None
         metadata = {**metadata, **metadata_update}
         await client.threads.update(thread_id=thread_id, metadata=metadata_update)
+
+    # Offloading starts a run with no human message, so it has no turn to
+    # request; the middleware's ``turn.started`` opens that turn instead.
+    turn_id = uuid.uuid7() if transcribed else None
+    if turn_id is not None:
+        overrides["transcript_turn_id"] = str(turn_id)
+        if message_id is not None and not offload_requested:
+            images, attachments = _transcript_attachments(command_images, message_id)
+            await append(
+                thread_id,
+                [
+                    Command(
+                        command_id=f"turn:{turn_id}:requested",
+                        event=TurnRequested(
+                            turn_id=turn_id,
+                            message_id=message_id,
+                            text=_command_prompt_text(content),
+                            sender=MessageSender(login=login, kind=DASHBOARD_SOURCE),
+                            images=images,
+                            model_id=run_model,
+                            effort=run_effort,
+                            plan_mode=plan_mode_requested,
+                        ),
+                        actor_kind="user",
+                        turn_id=turn_id,
+                        attachments=attachments,
+                    )
+                ],
+            )
 
     overrides["model_selection"] = model_selection
     merged_configurable = await _build_dashboard_configurable(

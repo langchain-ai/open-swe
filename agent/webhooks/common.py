@@ -129,6 +129,7 @@ from agent.slack.stop import process_agent_session_stopped, process_slack_stop_r
 from agent.source_context import SourceContext
 from agent.threads.summary import thread_is_private, thread_is_promptable
 from agent.threads.workflow_approval import decide_workflow_push_approval
+from agent.transcript.mirror import mirror_thread_metadata
 from agent.users import User
 from agent.utils.dashboard_links import dashboard_thread_url  # noqa: F401
 from agent.utils.http import DEFAULT_HTTP_TIMEOUT
@@ -664,8 +665,10 @@ async def upsert_agent_thread_metadata(
                 )
                 metadata.update(_pr_state_reset_for_user_activity(current_meta))
                 await langgraph_client.threads.update(thread_id=thread_id, metadata=metadata)
+                await mirror_thread_metadata(thread_id, metadata)
         else:
             await langgraph_client.threads.update(thread_id=thread_id, metadata=metadata)
+            await mirror_thread_metadata(thread_id, metadata)
         return True
     except Exception:  # noqa: BLE001
         logger.exception("Failed to persist owner metadata for thread %s", thread_id)

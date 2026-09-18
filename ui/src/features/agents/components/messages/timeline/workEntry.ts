@@ -36,6 +36,11 @@ export interface WorkEntryView {
   status: AcpToolStatus
   /** Plain-text detail for rows that have no richer renderer of their own. */
   expandedText: string | null
+  /**
+   * Fetches the rest of the output when the row is expanded, for sources whose
+   * transcript holds only a preview. Null when there is nothing more to get.
+   */
+  loadExpandedText: (() => Promise<string>) | null
 }
 
 function iconForChunk(chunk: ToolExecutionChunk): WorkEntryIconName {
@@ -164,6 +169,7 @@ export function describeWorkEntry(
       status: chunk.status,
       // The diff itself is the body; a text dump alongside it would be noise.
       expandedText: null,
+      loadExpandedText: null,
     }
   }
 
@@ -187,6 +193,7 @@ export function describeWorkEntry(
     tone: toneForChunk(chunk),
     status: chunk.status,
     expandedText: expandedTextForChunk(chunk, projectPath),
+    loadExpandedText: chunk.loadOutput ?? null,
   }
 }
 

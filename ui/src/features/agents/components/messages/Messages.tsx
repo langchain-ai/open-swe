@@ -1,5 +1,5 @@
 import { memo, useEffect, useMemo } from "react"
-import { ChevronDown } from "lucide-react"
+import { ChevronDown, Loader2 } from "lucide-react"
 
 import { SkillPromptText } from "../SkillBadge"
 import { AgentTurn } from "./timeline/AgentTurn"
@@ -74,6 +74,9 @@ export const Messages = memo(function MessagesComponent({
   contentWidthClass = "max-w-[42rem]",
   contentPaddingClass = "px-6",
   bottomInset = 0,
+  hasOlder = false,
+  isLoadingOlder = false,
+  onLoadOlder,
   scrollButtonSlot = "internal",
   onShowScrollToBottomChange,
   scrollControlRef,
@@ -83,7 +86,14 @@ export const Messages = memo(function MessagesComponent({
   onOpenFile,
 }: MessagesProps) {
   const { scrollRef, contentRef, showScrollToBottom, scrollToBottom } =
-    useTranscriptScroll({ scrollKey, messages, isStreaming })
+    useTranscriptScroll({
+      scrollKey,
+      messages,
+      isStreaming,
+      hasOlder,
+      isLoadingOlder,
+      ...(onLoadOlder ? { onLoadOlder } : {}),
+    })
 
   const visibleMessages = useMemo(
     () => messages.filter((message) => !message.hidden),
@@ -132,6 +142,15 @@ export const Messages = memo(function MessagesComponent({
             className={`w-full ${contentWidthClass} mx-auto min-w-0 ${contentPaddingClass}`}
             style={bottomInset > 0 ? { paddingBottom: bottomInset } : undefined}
           >
+            {isLoadingOlder && (
+              <div
+                className="mb-3 flex items-center justify-center gap-2 text-xs text-muted-foreground"
+                data-testid="loading-earlier-messages"
+              >
+                <Loader2 className="size-3 animate-spin" />
+                <span>Loading earlier messages…</span>
+              </div>
+            )}
             {visibleMessages.length === 0 && emptyState}
             {visibleMessages.map((message, index) => {
               const isLastMessage = index === visibleMessages.length - 1

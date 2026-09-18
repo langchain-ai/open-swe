@@ -11,6 +11,7 @@ from fastapi import HTTPException
 
 from agent.config import ENV
 from agent.dashboard.ttft import AssistantTextEventDetector, record_dashboard_thread_ttft
+from agent.database import postgres
 from agent.threads.access import (
     _authorized_thread_metadata,
     _readable_thread_metadata,
@@ -22,6 +23,7 @@ from agent.threads.runs import (
     _notify_slack_web_handoff,
 )
 from agent.threads.summary import (
+    TRANSCRIPT_VERSION,
     _assert_thread_postable,
     _assert_thread_readable,
     _now_ms,
@@ -138,6 +140,9 @@ async def _observe_dashboard_run_ttft(
         )
 
 
+TRANSCRIPT_HEADER = "X-Open-SWE-Transcript"
+
+
 async def proxy_dashboard_thread_commands(
     thread_id: str,
     login: str,
@@ -145,7 +150,13 @@ async def proxy_dashboard_thread_commands(
     *,
     email: str | None = None,
     content_type: str = "application/json",
-) -> tuple[int, bytes, str | None]:
+) -> tuple[int, bytes, str | None, dict[str, str]]:
+    """Forward a stream command; the fourth element is extra response headers.
+
+    A ``run.start`` that created the thread reports the transcript source it
+    was created with (``TRANSCRIPT_HEADER``), so the client can mount the right
+    reader before the thread record has been fetched.
+    """
     received_at_ms = _now_ms()
     require_json_content_type(content_type)
     try:
@@ -262,7 +273,10 @@ async def proxy_dashboard_thread_commands(
                 exc_info=True,
             )
     media_type = response.headers.get("content-type")
-    return response.status_code, response.content, media_type
+    headers: dict[str, str] = {}
+    if creating and run_start_succeeded and postgres.configured():
+        headers[TRANSCRIPT_HEADER] = TRANSCRIPT_VERSION
+    return response.status_code, response.content, media_type, headers
 
 
 async def proxy_dashboard_thread_history(

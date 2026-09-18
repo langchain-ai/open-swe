@@ -22,6 +22,7 @@ import type { Message, ToolExecutionChunk } from "@/features/agents/lib/types"
 import { OutputIframe } from "@/features/agents/components/chat/OutputIframe"
 import { ReplyCard } from "@/features/agents/components/chat/ReplyCard"
 import { SqlResultTable } from "@/features/agents/components/chat/SqlResultTable"
+import { useToolOutput } from "@/features/agents/lib/useToolOutput"
 import { SubagentGroup } from "@/features/agents/components/subagents"
 import { formatElapsed } from "@/lib/utils"
 
@@ -231,7 +232,13 @@ export function AgentTurn({
             key={item.key}
             entry={describeWorkEntry(item.chunk, projectPath)}
             timestamp={item.chunk.timestamp}
-            body={<ShellEntryBody chunk={item.chunk} />}
+            body={({ loadedText, loadError }) => (
+              <ShellEntryBody
+                chunk={item.chunk}
+                loadedText={loadedText}
+                loadError={loadError}
+              />
+            )}
             defaultExpanded={item.chunk.status === "pending"}
           />
         )
@@ -245,7 +252,7 @@ export function AgentTurn({
         ) : null
 
       case "sql-item":
-        return <SqlResultTable key={item.key} output={item.chunk.output} />
+        return <SqlResultItem key={item.key} chunk={item.chunk} />
 
       case "tool-item":
         return (
@@ -335,4 +342,8 @@ export function AgentTurn({
       </div>
     </div>
   )
+}
+
+function SqlResultItem({ chunk }: { chunk: ToolExecutionChunk }) {
+  return <SqlResultTable output={useToolOutput(chunk)} />
 }

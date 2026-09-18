@@ -868,7 +868,7 @@ async def _send_message(
             "config": {"configurable": configurable},
         },
     }
-    status_code, content, _ = await proxy_dashboard_thread_commands(
+    status_code, content, _, _ = await proxy_dashboard_thread_commands(
         thread_id,
         actor.login,
         json.dumps(command).encode(),
