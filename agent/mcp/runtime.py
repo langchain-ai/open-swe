@@ -24,6 +24,7 @@ from langchain_mcp_adapters.tools import convert_mcp_tool_to_langchain_tool
 from agent.mcp.models import MCPConnection
 from agent.mcp.oauth import MCPOAuthError, connection_auth
 from agent.mcp.transport import mcp_http_client
+from agent.prompts import load_prompt
 from agent.utils import ttl_cache
 from mcp.types import PaginatedRequestParams, Tool
 
@@ -134,6 +135,13 @@ def _tool_name(connection_name: str, tool_name: str) -> str:
     return f"{safe[:53]}_{suffix}"
 
 
+def _tool_description(definition: Tool) -> str:
+    description = definition.description or definition.name
+    if definition.name == "analyze_datadog_logs":
+        description += f"\n\n{load_prompt('tools/analyze_datadog_logs.md')}"
+    return description
+
+
 def _wrap_tool(
     name: str,
     url: str,
@@ -182,7 +190,7 @@ def _wrap_tool(
     return _MCPTool.from_function(
         coroutine=invoke,
         name=_tool_name(name, definition.name),
-        description=definition.description or definition.name,
+        description=_tool_description(definition),
         args_schema=definition.inputSchema,
         response_format="content_and_artifact",
         handle_tool_error=True,
