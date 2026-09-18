@@ -1,11 +1,8 @@
 import { test, expect, type APIRequestContext } from "@playwright/test";
 
-// Feature: while Open SWE is busy, *untagged* follow-ups are debounced —
-// coalesced onto the thread's message queue (for the active run to drain at its
-// next model call) instead of each halting and resuming the run. An explicit
-// @-mention is NOT debounced (it keeps interrupting immediately). Driven through
-// the real webhook + real agent; the LLM is faked and holds a run open so
-// follow-ups land mid-run.
+// Explicitly tagged follow-ups interrupt an active run immediately. Driven
+// through the real webhook + real agent; the LLM is faked and holds a run open
+// so the follow-up lands mid-run.
 
 type SendResult = {
   thread_ts: string;
@@ -40,14 +37,11 @@ async function threadStatus(
   return thread.status ?? "";
 }
 
-test.describe("Slack busy-thread follow-up queueing", () => {
-  test("untagged follow-ups on a busy thread queue behind the active run", async ({
-    request,
-  }) => {
+test.describe("Slack busy-thread follow-ups", () => {
+  test("tagged follow-ups interrupt the active run", async ({ request }) => {
     await request.post("/control/reset");
 
-    // Phase 1: open a two-party thread so Open SWE has participated (a
-    // prerequisite for untagged follow-ups to be accepted).
+    // Phase 1: open a thread so Open SWE has participated.
     const opened = await send(request, {
       text: "<@U0BOT> please add a greet() helper and open a PR",
       mention_bot: true,
@@ -74,8 +68,8 @@ test.describe("Slack busy-thread follow-up queueing", () => {
       .toBe("busy");
 
     const followUp = await send(request, {
-      text: "also rename it to hello()",
-      mention_bot: false,
+      text: "<@U0BOT> also rename it to hello()",
+      mention_bot: true,
       thread_ts: threadTs,
     });
     expect(followUp.webhook.status).toBe("accepted");
