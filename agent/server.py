@@ -140,7 +140,9 @@ from agent.sandboxes.state import (
     get_or_create_sandbox_backend_proxy,
 )
 from agent.skill_store.store import ORGANIZATION_SKILLS_NAMESPACE, SKILLS_NAMESPACE
+from agent.slack.code_channels import is_code_channel_session
 from agent.slack.dm import is_dm_session
+from agent.slack.tools.manage_code_channel import manage_code_channel_create_tool
 from agent.thread_title import TITLE_GENERATION_MAX_TOKENS, schedule_thread_title_generation
 from agent.threads.summary import thread_is_private
 from agent.tool_loaders.notion_mcp import load_notion_tools
@@ -1183,9 +1185,17 @@ async def get_agent(config: RunnableConfig) -> Pregel:
             ),
         )
 
+    thread_ts = cfg.slack_thread.thread_ts if cfg.slack_thread is not None else None
+    code_channel_tool = (
+        manage_code_channel
+        if thread_ts is not None and is_code_channel_session(thread_ts)
+        else manage_code_channel_create_tool
+        if thread_ts is not None
+        else None
+    )
     slack_tools = [
         expedite_pr_approval,
-        manage_code_channel,
+        *((code_channel_tool,) if code_channel_tool is not None else ()),
         manage_incident,
         slack_add_reaction,
         slack_attach_html,
@@ -1223,7 +1233,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         recreate_sandbox,
         report_platform_issue,
         schedule_thread_wakeup,
-        manage_code_channel,
+        *((code_channel_tool,) if code_channel_tool is not None else ()),
         manage_incident,
         slack_add_reaction,
         slack_attach_html,
