@@ -391,7 +391,12 @@ function AnalyticsCoverage({
   const latest = reports.reduce((a, b) => (a.as_of > b.as_of ? a : b))
   const hasPendingEvents = reports.some((data) => data.has_pending_events)
   const hasFailedEvents = reports.some((data) => data.has_failed_events)
-  const status = hasFailedEvents
+  const status: {
+    label: string
+    description?: string
+    icon: typeof WarningCircleIcon
+    tone: string
+  } = hasFailedEvents
     ? {
         label: "Analytics need attention",
         description:
@@ -408,9 +413,6 @@ function AnalyticsCoverage({
         }
       : {
           label: "Analytics are up to date",
-          description: latest.last_processed_at
-            ? `Last event processed ${new Date(latest.last_processed_at).toLocaleString()}.`
-            : "No events have been processed yet.",
           icon: CheckCircleIcon,
           tone: "text-emerald-600 dark:text-emerald-400",
         }
@@ -429,9 +431,11 @@ function AnalyticsCoverage({
             <span className="block font-medium text-foreground">
               {status.label}
             </span>
-            <span className="mt-0.5 block text-muted-foreground">
-              {status.description}
-            </span>
+            {status.description ? (
+              <span className="mt-0.5 block text-muted-foreground">
+                {status.description}
+              </span>
+            ) : null}
           </span>
           <Button
             type="button"

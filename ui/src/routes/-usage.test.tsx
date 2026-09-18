@@ -171,7 +171,7 @@ it("shows delivery lag separately from suppression, then refreshes to a populate
   expect(
     screen.getByLabelText("Analytics coverage").querySelector("details")?.open
   ).toBe(true)
-  expect(screen.getAllByText(/Last event processed/).length).toBeGreaterThan(0)
+  expect(screen.getAllByText(/Last event processed/).length).toBe(1)
   client.clear()
 })
 
