@@ -892,8 +892,7 @@ it("does not retain identified rows as placeholders when the policy flips", asyn
         .findAll({ queryKey: ["usageLeaderboard"] })
         .some(
           (query) =>
-            (query.queryKey[4] as { privacy: boolean } | null)?.privacy ===
-            true
+            (query.queryKey[4] as { privacy: boolean } | null)?.privacy === true
         )
     ).toBe(true)
   )
@@ -909,12 +908,7 @@ it("discloses to an admin that other members stay identified for them", async ()
   render(
     <QueryClientProvider client={client}>
       <TooltipProvider>
-        <UsageAnalytics
-          period="30d"
-          login="admin"
-          isAdmin={true}
-          onPeriodChange={() => {}}
-        />
+        <UsageAnalytics period="30d" login="admin" isAdmin={true} />
       </TooltipProvider>
     </QueryClientProvider>
   )

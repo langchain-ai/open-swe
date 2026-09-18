@@ -543,9 +543,9 @@ WITH runs AS (
             'rank', rank,
             'user', jsonb_build_object(
                 'name', disclosed_name,
-                'github_login', CASE WHEN :admin OR is_current THEN NULLIF(disclosed_login, '') END,
+                'github_login', CASE WHEN NOT :anonymize_others OR :admin OR is_current THEN NULLIF(disclosed_login, '') END,
                 'email', CASE WHEN is_current THEN NULLIF(email, '') END,
-                'avatar_url', CASE WHEN :admin OR is_current
+                'avatar_url', CASE WHEN NOT :anonymize_others OR :admin OR is_current
                     THEN CASE WHEN NULLIF(disclosed_login, '') IS NOT NULL
                         THEN 'https://github.com/' || disclosed_login || '.png?size=80' END
                 END),
