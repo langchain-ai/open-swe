@@ -8,6 +8,7 @@ import { useNavigate } from "@tanstack/react-router"
 import { useEffect, useRef } from "react"
 
 import { agentsApi } from "./api"
+import { useStreamPool } from "./stream/streamPool"
 import type { InfiniteData, QueryClient, QueryKey } from "@tanstack/react-query"
 import type {
   ScheduleUpdateRequest,
@@ -883,6 +884,7 @@ export function useDeleteAgentThread() {
   return useMutation({
     mutationFn: (threadId: string) => agentsApi.deleteThread(threadId),
     onSuccess: (_, threadId) => {
+      useStreamPool.getState().remove("cloud", threadId)
       queryClient.removeQueries({ queryKey: agentThreadKeys.detail(threadId) })
       invalidateAgentThreadLists(queryClient)
       const path = window.location.pathname

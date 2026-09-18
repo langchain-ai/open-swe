@@ -69,7 +69,9 @@ export interface StreamPoolState {
   /** An event stream opened or its run ended, so it is no longer reconnecting. */
   streamLive(id: string): void
   consumeCreatedThread(): void
-  /** Drop idle instances past the TTL or cap; active and running ones stay. */
+  remove(transport: AgentThreadTransport, threadId: string): void
+  clear(): void
+  /** Retain cloud threads; bound idle local streams and unsent drafts. */
   sweep(now: number): void
 }
 
@@ -81,6 +83,7 @@ function isRetained(
   now: number
 ): boolean {
   return (
+    (entry.transport === "cloud" && entry.threadId !== null) ||
     entry.id === state.activeId ||
     Boolean(state.handles[entry.id]?.isLoading) ||
     now - entry.lastActiveAt < IDLE_STREAM_TTL_MS
@@ -201,13 +204,44 @@ export const useStreamPool = create<StreamPoolState>((set, get) => ({
     set({ createdThreadId: null })
   },
 
+  remove(transport, threadId) {
+    set((state) => {
+      const removed = new Set(
+        state.entries
+          .filter(
+            (entry) =>
+              entry.transport === transport && entry.threadId === threadId
+          )
+          .map((entry) => entry.id)
+      )
+      return {
+        entries: state.entries.filter((entry) => !removed.has(entry.id)),
+        handles: Object.fromEntries(
+          Object.entries(state.handles).filter(([id]) => !removed.has(id))
+        ),
+      }
+    })
+  },
+
+  clear() {
+    set({
+      entries: [],
+      handles: {},
+      activeId: null,
+      binding: null,
+      createdThreadId: null,
+    })
+  },
+
   sweep(now) {
     const state = get()
     const kept = state.entries.filter((entry) => isRetained(entry, state, now))
     const idle = kept
       .filter(
         (entry) =>
-          entry.id !== state.activeId && !state.handles[entry.id]?.isLoading
+          (entry.transport !== "cloud" || entry.threadId === null) &&
+          entry.id !== state.activeId &&
+          !state.handles[entry.id]?.isLoading
       )
       .sort((a, b) => a.lastActiveAt - b.lastActiveAt)
     const evicted = new Set(
