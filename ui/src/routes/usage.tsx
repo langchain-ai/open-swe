@@ -596,7 +596,8 @@ function BuildIdentityDetails({ buildInfo }: { buildInfo: BuildInfo | null }) {
   return (
     <>
       <p>
-        Backend: revision <IdentityValue value={buildInfo.backend.revision_id} />
+        Backend: revision{" "}
+        <IdentityValue value={buildInfo.backend.revision_id} />
         {" · "}commit <IdentityValue value={buildInfo.backend.commit} />
         {" · "}built{" "}
         {buildInfo.backend.built_at ? (
@@ -886,11 +887,7 @@ function AvgTimeToPR({ cohort }: { cohort: PRMergeRateCohort }) {
     )
   }
   if (cohort.avg_delivery_seconds == null) {
-    return (
-      <span title="No PRs with valid timing in this group">
-        —
-      </span>
-    )
+    return <span title="No PRs with valid timing in this group">—</span>
   }
   return (
     <Tooltip>
