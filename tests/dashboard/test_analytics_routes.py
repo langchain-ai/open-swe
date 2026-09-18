@@ -7,6 +7,10 @@ from fastapi import FastAPI
 from agent.analytics import queries
 from agent.analytics import routes as analytics_routes
 from agent.dashboard import oauth, routes
+from agent.dashboard.workspace_settings import (
+    WorkspaceSettingsUpdate,
+    upsert_instance_settings,
+)
 from agent.database import analytics as database
 
 
@@ -70,6 +74,39 @@ async def test_pr_report_unavailability_is_distinct_from_empty_data(monkeypatch,
     assert response.json() == {
         "detail": f"{'PR' if report == 'pr' else 'Usage'} analytics is unavailable on this deployment."
     }
+
+
+@pytest.mark.parametrize("viewer", ["admin", "member"])
+@pytest.mark.parametrize("privacy", [True, False])
+async def test_usage_leaderboard_applies_the_instance_policy_fresh_per_request(
+    monkeypatch, fake_store, viewer, privacy
+) -> None:
+    """The route re-reads the instance record on every request (no settings cache),
+    and only the policy-gated non-admin anonymizes other rows."""
+    app = FastAPI()
+    app.include_router(routes.router)
+    monkeypatch.setenv("CONFIGURED_ADMINS", "admin")
+    monkeypatch.setenv("POSTGRES_URI", "postgresql://localhost/test")
+    leaderboard = AsyncMock(return_value={"rows": [], "total_members": 0})
+    monkeypatch.setattr(analytics_routes, "usage_leaderboard", leaderboard)
+    app.dependency_overrides[oauth.require_session] = lambda: {
+        "sub": viewer,
+        "email": f"{viewer}@example.com",
+    }
+    await upsert_instance_settings(
+        WorkspaceSettingsUpdate(usage_leaderboard_privacy_enabled=privacy)
+    )
+
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        response = await client.get("/dashboard/api/agent-usage-leaderboard")
+
+    assert response.status_code == 200
+    assert response.json()["usage_leaderboard_privacy_enabled"] is privacy
+    assert leaderboard.await_args is not None
+    assert leaderboard.await_args.kwargs["admin"] is (viewer == "admin")
+    assert leaderboard.await_args.kwargs["anonymize_others"] is (privacy and viewer != "admin")
 
 
 @pytest.mark.parametrize("report", ["pr", "usage"])

@@ -29,6 +29,7 @@ import {
 import { dashboardApiBase } from "@/lib/api-base"
 import { AllowedSlackBotsSection } from "@/features/settings/components/AllowedSlackBotsSection"
 import { ExpeditedReviewSection } from "@/features/settings/components/ExpeditedReviewSection"
+import { LeaderboardPrivacySection } from "@/features/settings/components/LeaderboardPrivacySection"
 import { MCPConnectionsSection } from "@/features/settings/components/MCPConnectionsSection"
 import { ReviewSettings } from "@/features/settings/components/ReviewSettings"
 import {
@@ -95,6 +96,8 @@ function AdminPage() {
       >
         <AllowedSlackBotsSection />
       </SlackIntegrationSection>
+
+      <LeaderboardPrivacySection />
 
       <TriggerReviewSection />
 
