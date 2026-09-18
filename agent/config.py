@@ -234,6 +234,13 @@ ENV.var(
     "GITHUB_APP_PRIVATE_KEY", "GitHub App private key (PEM) used to sign app JWTs.", secret=True
 )
 ENV.var("GITHUB_APP_INSTALLATION_ID", "GitHub App installation used when a run names none.")
+ENV.var(
+    "GITHUB_DEV_TOKEN",
+    "Local development only: a personal GitHub token (`gh auth token`) used wherever an "
+    "App installation token would be, so the dashboard works without registering a GitHub "
+    "App. Ignored whenever GITHUB_APP_ID and GITHUB_APP_PRIVATE_KEY are both configured.",
+    secret=True,
+)
 ENV.var("GITHUB_WEBHOOK_SECRET", "HMAC secret for GitHub webhook deliveries.", secret=True)
 ENV.var(
     "GITHUB_OAUTH_PROVIDER_ID", "LangSmith OAuth provider id for the legacy brokered GitHub auth."
