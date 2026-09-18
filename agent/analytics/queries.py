@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncConnection
 from agent.config import ENV
 from agent.database import connection
 from agent.database.analytics import reporting_metadata, workspace_id
+from agent.utils.build_info import backend_build_info
 
 UsageSort = Literal[
     "rank",
@@ -288,6 +289,7 @@ async def pr_merge_rate_by_model(
         "unavailable_thread_ids": unavailable_threads,
         **metadata,
         "as_of": as_of.isoformat(),
+        "build_info": backend_build_info(),
     }
 
 
@@ -650,4 +652,5 @@ async def usage_leaderboard(
         "reviewer_stats": reviewer,
         **metadata,
         "as_of": as_of.isoformat(),
+        "build_info": backend_build_info(),
     }

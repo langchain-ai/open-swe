@@ -40,6 +40,7 @@ from agent.dashboard.oauth import (
 from agent.dashboard.profiles import upsert_access_token_from_github_response
 from agent.slack.oauth import slack_base_url, slack_oauth_configured
 from agent.users import User
+from agent.utils.build_info import build_info
 from agent.utils.dashboard_links import dashboard_api_base_url
 
 router = APIRouter(tags=["auth"])
@@ -205,4 +206,5 @@ async def me(session: dict[str, Any] = SESSION_DEP) -> dict[str, Any]:
         "slack_oauth_enabled": slack_oauth_configured(),
         "api_base_url": dashboard_api_base_url(),
         "slack_base_url": slack_base_url(),
+        "build_info": build_info(),
     }
