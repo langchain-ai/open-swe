@@ -59,6 +59,8 @@ export interface StreamPoolState {
   createdThreadId: string | null
   /** Bind the pool to a thread, reusing a retained instance when there is one. */
   activate(transport: AgentThreadTransport, threadId: string | null): void
+  /** Bind nothing: the route's thread is served by something other than the pool. */
+  deactivate(): void
   publish(id: string, handle: AgentStream): void
   /** A lazily created thread received its server id. */
   rekey(id: string, threadId: string): void
@@ -129,6 +131,14 @@ export const useStreamPool = create<StreamPoolState>((set, get) => ({
       entries: [...state.entries.map(touched), entry],
     }))
     get().sweep(now)
+  },
+
+  deactivate() {
+    if (get().activeId === null && get().binding === null) return
+    set({ activeId: null, binding: null })
+    // Nothing is active any more, so the instances left fall under the idle
+    // TTL and are swept unless a run is still streaming on them.
+    get().sweep(Date.now())
   },
 
   publish(id, handle) {

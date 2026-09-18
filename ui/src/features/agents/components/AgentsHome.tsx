@@ -7,7 +7,7 @@ import type {
   DesktopProjectRef,
   DesktopWorkspaceMode,
 } from "@/desktop"
-import type { ImageChunk } from "@/features/agents/lib/types"
+import type { AgentThread, ImageChunk } from "@/features/agents/lib/types"
 import type { CreateAgentThreadVariables } from "@/features/agents/lib/queries"
 import {
   pickComposerRepo,
@@ -41,11 +41,11 @@ import {
   localThreadKeys,
 } from "@/features/agents/lib/desktopLocal"
 import { useDesktopThreadSource } from "@/features/agents/lib/desktopThreadSource"
-import { useAgentStream } from "@/features/agents/lib/stream/AgentStreamProvider"
+import { modelConfigurable } from "@/features/agents/lib/stream/promptMessage"
 import {
-  modelConfigurable,
-  promptMessage,
-} from "@/features/agents/lib/stream/promptMessage"
+  runStartCommand,
+  startRun,
+} from "@/features/agents/lib/transcript/api"
 import {
   readStoredPanelCollapsed,
   writeStoredPanelCollapsed,
@@ -77,7 +77,6 @@ export function AgentsHome({
   initialLocalRepo?: string
   initialNoRepo?: boolean
 }) {
-  const stream = useAgentStream()
   const queryClient = useQueryClient()
   const navigate = useNavigate()
   const session = useSession()
@@ -219,24 +218,14 @@ export function AgentsHome({
   const { models, defaultSelection } = useModelOptions(selectedWorkspace)
   const activeSelection = autoSelected ? null : (selection ?? defaultSelection)
 
-  // Holds the just-submitted prompt until the SDK mints the thread id.
-  const draftRef = useRef<CreateAgentThreadVariables | null>(null)
+  // The thread id is minted here: the first `run.start` posted against it is
+  // what creates the thread server-side.
+  const [pendingThreadId, setPendingThreadId] = useState<string | null>(null)
+  const pendingRun = useRef<AbortController | null>(null)
 
   useEffect(() => {
-    const id = stream.threadId
-    const draft = draftRef.current
-    if (!id || !draft) return
-    const thread = optimisticThread(id, draft)
-    queryClient.setQueryData(agentThreadKeys.detail(id), thread)
-    seedAgentThreadLists(queryClient, thread)
-    invalidateAgentThreadLists(queryClient)
-  }, [stream.threadId, queryClient])
-
-  useEffect(() => {
-    if (stream.threadId) {
-      writeStoredPanelCollapsed(stream.threadId, panelCollapsed)
-    }
-  }, [panelCollapsed, stream.threadId])
+    if (pendingThreadId) writeStoredPanelCollapsed(pendingThreadId, panelCollapsed)
+  }, [panelCollapsed, pendingThreadId])
 
   useEffect(() => {
     if (!isDesktop || !localReposLoaded) return
@@ -396,8 +385,14 @@ export function AgentsHome({
   }
 
   const resetPendingSubmit = () => {
-    draftRef.current = null
+    pendingRun.current = null
+    setPendingThreadId(null)
     setSubmittedDraft(null)
+  }
+
+  const abortPendingSubmit = () => {
+    pendingRun.current?.abort()
+    resetPendingSubmit()
   }
 
   const handleSubmit = (prompt: string, images: Array<ImageChunk>) => {
@@ -490,7 +485,6 @@ export function AgentsHome({
       model_id: activeSelection?.modelId ?? null,
       effort: activeSelection?.effort ?? null,
     }
-    draftRef.current = draft
     setSubmittedDraft(draft)
     setLocalError(null)
 
@@ -503,6 +497,7 @@ export function AgentsHome({
     if (selectedWorkspace) configurable.workspace = selectedWorkspace
 
     const handleCloudSubmitError = (error: unknown) => {
+      if (error instanceof DOMException && error.name === "AbortError") return
       resetPendingSubmit()
       setLocalError(
         error instanceof Error
@@ -510,15 +505,39 @@ export function AgentsHome({
           : "Could not start the cloud Open SWE agent"
       )
     }
-    void stream
-      .submit(
-        { messages: [promptMessage(prompt, images)] },
-        {
-          config: { configurable },
-          onError: handleCloudSubmitError,
+
+    const threadId = crypto.randomUUID()
+    const abort = new AbortController()
+    pendingRun.current = abort
+    setPendingThreadId(threadId)
+    void (async () => {
+      try {
+        await startRun(
+          threadId,
+          runStartCommand({
+            threadId,
+            message: { id: crypto.randomUUID(), text: prompt, images },
+            configurable,
+          }),
+          { signal: abort.signal }
+        )
+        if (abort.signal.aborted) return
+        // Seeded so the thread route renders the prompt immediately; the real
+        // record lands with the next detail fetch. Every thread created here
+        // is served by the transcript log, which the page has to know before
+        // it mounts a source.
+        const thread: AgentThread = {
+          ...optimisticThread(threadId, draft),
+          transcript: "v2",
         }
-      )
-      .catch(handleCloudSubmitError)
+        queryClient.setQueryData(agentThreadKeys.detail(threadId), thread)
+        seedAgentThreadLists(queryClient, thread)
+        invalidateAgentThreadLists(queryClient)
+        await navigate({ to: "/agents/$threadId", params: { threadId } })
+      } catch (error) {
+        handleCloudSubmitError(error)
+      }
+    })()
   }
 
   const handlePanelCollapsedChange = (next: boolean) => {
@@ -576,7 +595,7 @@ export function AgentsHome({
           <AgentPromptBar
             activeRun={
               optimisticDraftThread && runTarget === "cloud"
-                ? { threadId: stream.threadId ?? "", running: true }
+                ? { threadId: pendingThreadId ?? "", running: true }
                 : undefined
             }
             autoFocus
@@ -585,7 +604,7 @@ export function AgentsHome({
             onSubmit={handleSubmit}
             onStop={
               optimisticDraftThread && runTarget === "cloud"
-                ? () => stream.stop().finally(resetPendingSubmit)
+                ? abortPendingSubmit
                 : undefined
             }
             disabled={Boolean(submittedDraft)}
