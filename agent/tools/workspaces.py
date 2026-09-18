@@ -4,7 +4,7 @@ Wired into admin threads; each tool rechecks user or system authorization.
 """
 
 import logging
-from typing import Any
+from typing import Any, Literal
 
 from agent.tools.admin_gate import configurable as _configurable
 from agent.tools.admin_gate import require_admin
@@ -51,7 +51,9 @@ def _summary(record: store.Workspace) -> dict[str, Any]:
     return summary
 
 
-async def _start_refresh(slug: str, name: str) -> dict[str, Any]:
+async def _start_refresh(
+    slug: str, name: str, kind: Literal["full", "update"] = "full"
+) -> dict[str, Any]:
     """Enqueue a refresh and describe the handle, or say why it cannot start."""
     record = await store.WORKSPACES.get(slug)
     if record is None:
@@ -59,8 +61,12 @@ async def _start_refresh(slug: str, name: str) -> dict[str, Any]:
             "status": "error",
             "error": f"no workspace named {name!r}; publish_workspace creates one",
         }
-    if not record.setup_script:
+    if kind == "full" and not record.setup_script:
         return {"status": "error", "error": f"workspace {name!r} has no setup_script to run"}
+    if kind == "update" and not record.update_script:
+        return {"status": "error", "error": f"workspace {name!r} has no update_script to run"}
+    if kind == "update" and record.ready_snapshot_id is None:
+        return {"status": "error", "error": f"workspace {name!r} has no snapshot to update"}
     if refresh.is_refresh_in_flight(record):
         return {
             "status": "error",
@@ -68,7 +74,7 @@ async def _start_refresh(slug: str, name: str) -> dict[str, Any]:
             "task_id": refresh.refresh_task_id(record.refresh_run_id or ""),
         }
 
-    run_id = await refresh.start_refresh_run(slug)
+    run_id = await refresh.start_refresh_run(slug, kind=kind)
     if run_id is None:
         return {"status": "error", "error": "could not start the refresh job"}
     return {"status": "started", "task_id": refresh.refresh_task_id(run_id)}
@@ -223,7 +229,9 @@ async def publish_workspace(
     return {"ok": True, "workspace": _summary(record), "created": existing is None}
 
 
-async def refresh_workspace_start(name: str) -> dict[str, Any]:
+async def refresh_workspace_start(
+    name: str, kind: Literal["full", "update"] = "full"
+) -> dict[str, Any]:
     """Implement the `refresh_workspace_start` tool."""
     if error := await _require_admin():
         return {"status": "error", "error": error}
@@ -231,7 +239,7 @@ async def refresh_workspace_start(name: str) -> dict[str, Any]:
         slug = store.slugify(name)
     except ValueError as exc:
         return {"status": "error", "error": str(exc)}
-    return await _start_refresh(slug, name)
+    return await _start_refresh(slug, name, kind)
 
 
 async def delete_workspace(name: str) -> dict[str, Any]:

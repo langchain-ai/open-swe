@@ -1,11 +1,14 @@
+import { useState } from "react"
 import { createFileRoute } from "@tanstack/react-router"
 
 import { AgentsHome } from "@/features/agents/components/AgentsHome"
+import { consumeWorkspaceRefreshFix } from "@/features/agents/lib/workspaceRefreshFix"
 
 interface AgentsIndexSearch {
   repo?: string
   localProject?: string
   noProject?: boolean
+  fix?: string
 }
 
 export const Route = createFileRoute("/agents/")({
@@ -19,18 +22,25 @@ export const Route = createFileRoute("/agents/")({
     ...(search.noProject === true || search.noProject === "true"
       ? { noProject: true }
       : {}),
+    ...(typeof search.fix === "string" && search.fix.trim()
+      ? { fix: search.fix.trim() }
+      : {}),
   }),
   component: AgentsIndexPage,
 })
 
 function AgentsIndexPage() {
-  const { repo, localProject, noProject } = Route.useSearch()
+  const { repo, localProject, noProject, fix } = Route.useSearch()
+  const [stagedFix] = useState(() => consumeWorkspaceRefreshFix(fix))
   return (
     <AgentsHome
-      key={`${repo ?? ""}:${localProject ?? ""}:${noProject ?? ""}`}
+      key={`${repo ?? ""}:${localProject ?? ""}:${noProject ?? ""}:${fix ?? ""}`}
       initialRepo={repo}
       initialLocalProject={localProject}
       initialNoProject={noProject}
+      initialPrompt={stagedFix?.prompt}
+      initialWorkspace={stagedFix?.workspace}
+      initialVisibility={stagedFix ? "private" : undefined}
     />
   )
 }

@@ -1,7 +1,10 @@
-import { useQuery } from "@tanstack/react-query"
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import { useNavigate } from "@tanstack/react-router"
 
 import { SettingsSection } from "@/components/AppShell"
+import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
+import { stageWorkspaceRefreshFix } from "@/features/agents/lib/workspaceRefreshFix"
 import {
   api,
   type WorkspaceOption,
@@ -77,10 +80,18 @@ function WorkspaceRow({
   workspace,
   isDefault,
   isAdmin,
+  onFix,
+  onRerun,
+  rerunning,
+  rerunError,
 }: {
   workspace: WorkspaceOption
   isDefault: boolean
   isAdmin: boolean
+  onFix: (workspace: WorkspaceOption) => void
+  onRerun: (workspace: WorkspaceOption) => void
+  rerunning: boolean
+  rerunError: boolean
 }) {
   const status = workspace.refresh_status ?? "never"
   const when = refreshedAt(workspace.refresh_finished_at)
@@ -104,10 +115,35 @@ function WorkspaceRow({
             {detail}
           </span>
         </div>
-        <span className={`text-xs sm:shrink-0 ${REFRESH_CLASS[status]}`}>
-          {refreshLabel(status, workspace.refresh_kind)}
-          {status !== "refreshing" && when ? ` ${when}` : ""}
-        </span>
+        <div className="flex items-center gap-2 sm:shrink-0">
+          <span className={`text-xs ${REFRESH_CLASS[status]}`}>
+            {refreshLabel(status, workspace.refresh_kind)}
+            {status !== "refreshing" && when ? ` ${when}` : ""}
+          </span>
+          {isAdmin && status === "failed" && (
+            <>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={() => onFix(workspace)}
+              >
+                Fix
+              </Button>
+              {workspace.has_update_script && workspace.has_snapshot && (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  disabled={rerunning}
+                  onClick={() => onRerun(workspace)}
+                >
+                  {rerunning ? "Starting…" : rerunError ? "Retry" : "Rerun"}
+                </Button>
+              )}
+            </>
+          )}
+        </div>
       </div>
       {steps.length > 0 && <RefreshSteps steps={steps} />}
       {workspace.refresh_error && (
@@ -130,6 +166,15 @@ function WorkspaceRow({
 }
 
 export function WorkspacesSection({ isAdmin }: { isAdmin: boolean }) {
+  const navigate = useNavigate()
+  const queryClient = useQueryClient()
+  const rerun = useMutation({
+    mutationFn: (workspace: WorkspaceOption) =>
+      api.refreshWorkspace(workspace.slug, "update"),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["workspace-options"] })
+    },
+  })
   const workspaces = useQuery({
     queryKey: ["workspace-options"],
     queryFn: api.listWorkspaceOptions,
@@ -137,6 +182,10 @@ export function WorkspacesSection({ isAdmin }: { isAdmin: boolean }) {
     refetchInterval: 5000,
   })
   const options = workspaces.data
+  const fixWorkspace = (workspace: WorkspaceOption) => {
+    const fix = stageWorkspaceRefreshFix(workspace)
+    void navigate({ href: `/agents?fix=${encodeURIComponent(fix)}` })
+  }
 
   return (
     <SettingsSection
@@ -166,6 +215,14 @@ export function WorkspacesSection({ isAdmin }: { isAdmin: boolean }) {
             workspace={workspace}
             isDefault={workspace.slug === options.default_slug}
             isAdmin={isAdmin}
+            onFix={fixWorkspace}
+            onRerun={(item) => rerun.mutate(item)}
+            rerunning={
+              rerun.isPending && rerun.variables?.slug === workspace.slug
+            }
+            rerunError={
+              rerun.isError && rerun.variables?.slug === workspace.slug
+            }
           />
         ))
       )}

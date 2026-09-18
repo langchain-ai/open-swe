@@ -1,9 +1,10 @@
 """Dashboard API for instance-wide sandbox settings and named workspaces."""
 
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import Response
+from pydantic import BaseModel
 
 from agent.dashboard.deps import ADMIN_DEP, ADMIN_OR_TOKEN_DEP, SESSION_DEP, session_is_admin
 from agent.dashboard.workspace_settings import delete_workspace_settings
@@ -125,9 +126,14 @@ async def api_update_workspace(
     return record
 
 
+class WorkspaceRefreshRequest(BaseModel):
+    kind: Literal["full", "update"] = "full"
+
+
 @router.post("/workspaces/{slug}/refresh")
 async def api_refresh_workspace(
     slug: str,
+    body: WorkspaceRefreshRequest | None = None,
     _admin: dict[str, Any] = ADMIN_DEP,
 ) -> dict[str, Any]:
     """Start a snapshot rebuild from the workspace's scripts.
@@ -139,11 +145,16 @@ async def api_refresh_workspace(
     record = await WORKSPACES.get(normalized)
     if not record:
         raise HTTPException(404, "workspace not found")
-    if not record.setup_script:
+    kind = body.kind if body else "full"
+    if kind == "full" and not record.setup_script:
         raise HTTPException(400, "workspace has no setup script to run")
+    if kind == "update" and not record.update_script:
+        raise HTTPException(400, "workspace has no update script to run")
+    if kind == "update" and record.ready_snapshot_id is None:
+        raise HTTPException(400, "workspace has no snapshot to update")
     if is_refresh_in_flight(record):
         raise HTTPException(409, "a refresh of this workspace is already running")
-    run_id = await start_refresh_run(normalized)
+    run_id = await start_refresh_run(normalized, kind=kind)
     if run_id is None:
         raise HTTPException(502, "could not start the refresh job")
     return {"started": True, "run_id": run_id}

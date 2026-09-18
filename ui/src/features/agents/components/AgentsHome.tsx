@@ -65,10 +65,16 @@ export function AgentsHome({
   initialRepo,
   initialLocalProject,
   initialNoProject,
+  initialPrompt,
+  initialWorkspace,
+  initialVisibility,
 }: {
   initialRepo?: string
   initialLocalProject?: string
   initialNoProject?: boolean
+  initialPrompt?: string
+  initialWorkspace?: string
+  initialVisibility?: "public" | "private"
 }) {
   const stream = useAgentStream()
   const queryClient = useQueryClient()
@@ -97,14 +103,14 @@ export function AgentsHome({
   // seeded from the user's default and overridable per thread.
   const [visibilityOverride, setVisibilityOverride] = useState<
     "public" | "private" | null
-  >(null)
+  >(initialVisibility ?? null)
   const visibility =
     visibilityOverride ?? preferences.data?.default_visibility ?? "private"
   const workspaceOptions = useWorkspaceOptions(cloudEnabled)
   const workspaces = workspaceOptions.data?.workspaces ?? []
   // undefined = untouched, so the run falls back to the default workspace.
   const [workspaceOverride, setWorkspaceOverride] = useState<string | null>(
-    null
+    initialWorkspace ?? null
   )
   const defaultWorkspaceSlug = workspaceOptions.data?.default_slug ?? null
   const selectedWorkspace =
@@ -535,6 +541,7 @@ export function AgentsHome({
             autoFocus
             compact
             placeholder="Do anything"
+            initialValue={initialPrompt}
             onSubmit={handleSubmit}
             onStop={
               optimisticDraftThread && runTarget === "cloud"

@@ -1,11 +1,18 @@
 /** @vitest-environment jsdom */
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
-import { cleanup, render, screen } from "@testing-library/react"
+import { cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest"
+import { waitFor } from "@testing-library/dom"
 
 import { WorkspacesSection } from "./WorkspacesSection"
 import { api } from "@/lib/api"
+
+const navigate = vi.fn()
+vi.mock("@tanstack/react-router", () => ({ useNavigate: () => navigate }))
+vi.mock("@/features/agents/lib/workspaceRefreshFix", () => ({
+  stageWorkspaceRefreshFix: () => "fix-id",
+}))
 
 const clients: Array<QueryClient> = []
 
@@ -29,7 +36,11 @@ function renderSection(isAdmin: boolean) {
 }
 
 describe("WorkspacesSection", () => {
-  it("shows refresh outcomes without edit controls", async () => {
+  it("lets admins fix or rerun failed refreshes", async () => {
+    vi.spyOn(api, "refreshWorkspace").mockResolvedValue({
+      started: true,
+      run_id: "run-1",
+    })
     vi.spyOn(api, "listWorkspaceOptions").mockResolvedValue({
       default_slug: "default",
       workspaces: [
@@ -51,7 +62,8 @@ describe("WorkspacesSection", () => {
           repos: [],
           slack_channel_ids: [],
           is_default: false,
-          has_snapshot: false,
+          has_snapshot: true,
+          has_update_script: true,
           refresh_status: "failed",
           refresh_finished_at: new Date(Date.now() - 60_000).toISOString(),
           refresh_error: "setup script exited 1",
@@ -67,7 +79,15 @@ describe("WorkspacesSection", () => {
     expect(screen.getByText(/Refresh failed/)).toBeTruthy()
     expect(screen.getByText("setup script exited 1")).toBeTruthy()
     expect(screen.getByText("Refresh log")).toBeTruthy()
-    expect(view.container.querySelector("button, input, textarea")).toBeNull()
+    expect(screen.getByRole("button", { name: "Fix" })).toBeTruthy()
+    expect(screen.getByRole("button", { name: "Rerun" })).toBeTruthy()
+    fireEvent.click(screen.getByRole("button", { name: "Fix" }))
+    expect(navigate).toHaveBeenCalledWith({ href: "/agents?fix=fix-id" })
+    fireEvent.click(screen.getByRole("button", { name: "Rerun" }))
+    await waitFor(() =>
+      expect(api.refreshWorkspace).toHaveBeenCalledWith("preview", "update")
+    )
+    expect(view.container.querySelector("input, textarea")).toBeNull()
   })
 
   it("never renders a refresh log for non-admins, even if one arrives", async () => {
@@ -83,7 +103,7 @@ describe("WorkspacesSection", () => {
           slack_channel_ids: [],
           is_default: true,
           has_snapshot: true,
-          refresh_status: "success",
+          refresh_status: "failed",
           refresh_kind: "full",
           refresh_finished_at: new Date(Date.now() - 3_600_000).toISOString(),
           refresh_log_excerpt: "+ TOKEN=hunter2",
@@ -93,7 +113,9 @@ describe("WorkspacesSection", () => {
 
     renderSection(false)
 
-    expect(await screen.findByText(/Rebuilt 1 hour ago/)).toBeTruthy()
+    expect(await screen.findByText(/Refresh failed 1 hour ago/)).toBeTruthy()
+    expect(screen.queryByRole("button", { name: "Fix" })).toBeNull()
+    expect(screen.queryByRole("button", { name: "Rerun" })).toBeNull()
     expect(screen.queryByText("Refresh log")).toBeNull()
     expect(screen.queryByText(/hunter2/)).toBeNull()
   })

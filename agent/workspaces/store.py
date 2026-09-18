@@ -666,6 +666,7 @@ class Workspace(BaseModel):
             "slack_channel_ids": list(self.slack_channel_ids),
             "is_default": self.slug == DEFAULT_WORKSPACE_SLUG,
             "has_snapshot": self.snapshot_status == "ready",
+            "has_update_script": bool(self.update_script),
             "refresh_status": self.refresh_status,
             "refresh_kind": self.refresh_kind,
             "refresh_finished_at": self.refresh_finished_at,

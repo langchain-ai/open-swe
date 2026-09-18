@@ -542,6 +542,7 @@ export interface WorkspaceOption {
   slack_channel_ids: Array<string>
   is_default: boolean
   has_snapshot: boolean
+  has_update_script?: boolean
   refresh_status?: WorkspaceRefreshStatus
   refresh_kind?: "full" | "update" | null
   refresh_finished_at?: string | null
@@ -989,6 +990,11 @@ export const api = {
     }),
   listWorkspaceOptions: () =>
     request<WorkspaceOptionList>("/workspaces/options"),
+  refreshWorkspace: (slug: string, kind: "full" | "update") =>
+    request<{ started: true; run_id: string }>(
+      `/workspaces/${encodeURIComponent(slug)}/refresh`,
+      { method: "POST", body: JSON.stringify({ kind }) }
+    ),
   getTeamSettings: () => request<TeamSettings>("/team-settings"),
   listSlackBots: () => request<SlackBotOption[]>("/slack/bots"),
   listAllowedSlackBots: () => request<AllowedSlackBot[]>("/slack/allowed-bots"),

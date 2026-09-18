@@ -6,6 +6,8 @@ import pytest
 from fastapi import FastAPI
 
 from agent.dashboard import deps, oauth, routes
+from agent.workspaces import refresh
+from agent.workspaces.store import WORKSPACES
 
 _ADMIN_SESSION = {"sub": "admin", "email": "admin@example.com"}
 
@@ -72,6 +74,35 @@ async def test_options_carry_repos_channels_and_default_flag(
     assert by_slug["oss"]["repos"] == ["acme/oss"] and by_slug["oss"]["slack_channel_ids"] == [
         "C0SS"
     ]
+
+
+async def test_admin_can_start_an_update_refresh(
+    admin_client: httpx.AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    created = await admin_client.post(
+        "/dashboard/api/workspaces",
+        json={"name": "Default", "update_script": "git pull"},
+    )
+    assert created.status_code == 200
+    record = await WORKSPACES.get("default")
+    assert record is not None
+    record.snapshot_id = "snap-1"
+    record.snapshot_status = "ready"
+    await WORKSPACES.save(record)
+    started: list[tuple[str, str]] = []
+
+    async def start(slug: str, kind: str = "full") -> str:
+        started.append((slug, kind))
+        return "run-1"
+
+    monkeypatch.setattr(refresh, "start_refresh_run", start)
+    response = await admin_client.post(
+        "/dashboard/api/workspaces/default/refresh", json={"kind": "update"}
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"started": True, "run_id": "run-1"}
+    assert started == [("default", "update")]
 
 
 async def test_a_workspace_with_no_repository_is_a_400(admin_client: httpx.AsyncClient) -> None:
