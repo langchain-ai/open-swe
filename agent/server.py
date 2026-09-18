@@ -430,10 +430,9 @@ def _subagent_guard_middleware(local_run: bool) -> list[AgentMiddleware[Any, Any
 
     Local desktop runs skip the PR-creation guard the same way the parent does.
     """
-    return cast(
-        list[AgentMiddleware[Any, Any, Any]],
-        [*([] if local_run else [PullRequestCreationGuardMiddleware()])],
-    )
+    if local_run:
+        return []
+    return [PullRequestCreationGuardMiddleware()]
 
 
 def _is_subagent_excluded_tool(tool: Any) -> bool:
