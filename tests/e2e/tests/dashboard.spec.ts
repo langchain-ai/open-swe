@@ -684,6 +684,7 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
       request.url().includes("slack_channel_id=none"),
     );
     await page.goto("/agents");
+    await dismissOnboardingIfShown(page);
 
     await expect(
       page.getByRole("button", { name: "engineering" }),
