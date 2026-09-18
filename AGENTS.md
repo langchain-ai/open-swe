@@ -35,7 +35,6 @@ The main agent is assembled in `agent/server.py` from the middleware in `agent/m
 - Use absolute imports across packages; same-package imports may start with one dot. Never use parent-relative imports.
 - Keep prompts in markdown files under `agent/resources/prompts/` and load them with `load_prompt`/`render_prompt`; never write prompt text as an inline string literal.
 - Keep comments minimal and only explain non-obvious reasons.
-- Avoid `Any` in Python and `any` in TypeScript; define precise boundary types instead.
 - Use structured logging with a static message and values in `extra`; never interpolate values into log messages. Avoid standard `LogRecord` field names in `extra`.
 - Keep every prompt and user-facing message template (system prompts, tool descriptions, agent wake-up prompts, Slack and GitHub message bodies) in a Markdown file under `agent/resources/prompts/` and load it with `load_prompt` or `render_prompt` (`$name` placeholders). Never inline prose templates in Python.
 - Every new API write operation exposed through UI controls must also be available as an appropriately authorized agent tool. Prefer display-only UI with modifications performed through agent tools unless direct UI controls are explicitly required.

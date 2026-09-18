@@ -33,7 +33,6 @@ class SlackThreadRef(BaseModel):
     model_config = ConfigDict(extra="allow")
 
     channel_id: str = ""
-    team_id: str = ""
     thread_ts: str = ""
     reply_thread_ts: str = ""
     trace_message_ts: str = ""

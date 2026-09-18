@@ -13,6 +13,7 @@ from agent.config import ENV
 from agent.dashboard.deps import ADMIN_DEP, SESSION_DEP, session_is_admin
 from agent.dashboard.user_preferences import get_user_preferences
 from agent.github.pull_request_checks import PullRequestState
+from agent.slack.channels import SlackChannelSummary
 from agent.threads import terminal
 from agent.threads.diffs import (
     get_dashboard_thread_branch_diff,
@@ -38,6 +39,7 @@ from agent.threads.handlers import (
 from agent.threads.listing import (
     list_dashboard_pinned_threads,
     list_dashboard_thread_projects,
+    list_dashboard_thread_slack_channels,
     list_dashboard_threads,
     list_dashboard_threads_page,
     pin_dashboard_thread,
@@ -110,6 +112,24 @@ async def api_list_thread_projects(
     )
 
 
+@router.get("/threads/slack-channels")
+async def api_list_thread_slack_channels(
+    include_resolved: bool = False,
+    include_automations: bool = False,
+    all: bool = False,
+    session: dict[str, Any] = SESSION_DEP,
+) -> list[SlackChannelSummary]:
+    if all and not session_is_admin(session):
+        raise HTTPException(403, "admin only")
+    return await list_dashboard_thread_slack_channels(
+        session["sub"],
+        email=session.get("email"),
+        include_resolved=include_resolved,
+        include_automations=include_automations,
+        include_all=all,
+    )
+
+
 @router.get("/threads/pinned")
 async def api_list_pinned_threads(
     session: dict[str, Any] = SESSION_DEP,
@@ -149,6 +169,7 @@ async def api_list_threads_page(
     automation_id: str | None = None,
     repo: str | None = None,
     ownerless: bool = False,
+    slack_channel_id: str | None = None,
     sort_by: Literal["created_at", "updated_at"] = "updated_at",
     session: dict[str, Any] = SESSION_DEP,
 ) -> dict[str, Any]:
@@ -176,6 +197,7 @@ async def api_list_threads_page(
         automation_id=automation_id,
         repo=repo,
         ownerless=ownerless,
+        slack_channel_id=slack_channel_id,
         sort_by=sort_by,
     )
 

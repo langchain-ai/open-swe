@@ -8,7 +8,7 @@ long a stored payload is trusted before Slack is asked again.
 import logging
 import re
 from datetime import UTC, datetime, timedelta
-from typing import Self
+from typing import Self, TypedDict
 
 from sqlalchemy import func, select
 from sqlalchemy.dialects.postgresql import JSONB, insert
@@ -29,6 +29,18 @@ HISTORY_MAX_MESSAGES = 100
 
 _MENTION = re.compile(r"^<#([A-Z0-9]+)(?:\|[^>]*)?>$")
 _ID_SHAPE = re.compile(r"^[CGD][A-Z0-9]{8,}$")
+
+SLACK_CHANNEL_NONE = "none"
+
+
+class SlackChannelRef(TypedDict):
+    id: str
+    teamId: str
+    name: str
+
+
+class SlackChannelSummary(SlackChannelRef):
+    updatedAt: int
 
 
 class SlackChannel(Base):

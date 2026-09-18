@@ -25,8 +25,10 @@ from agent.threads.summary import (
     _ThreadSortBy,
     thread_is_readable,
     thread_is_unlisted,
+    thread_slack_channel,
     thread_source,
 )
+from agent.slack.channels import SLACK_CHANNEL_NONE, SlackChannel, SlackChannelSummary
 from agent.utils.json_types import JsonObject, ThreadLike
 from agent.utils.thread_ops import langgraph_client
 from agent.utils.thread_participants import participant_search_filters
@@ -63,6 +65,7 @@ def _search_metadata_filter(
     resolved: bool | None = None,
     source: str | None = None,
     automation_id: str | None = None,
+    slack_channel_id: str | None = None,
     admin_threads: bool | None = None,
 ) -> dict[str, Any]:
     metadata = dict(search_filter)
@@ -72,6 +75,8 @@ def _search_metadata_filter(
         metadata["source"] = source
     if automation_id:
         metadata["schedule_id"] = automation_id
+    if slack_channel_id and slack_channel_id != SLACK_CHANNEL_NONE:
+        metadata["source_context"] = {"slack_thread": {"channel_id": slack_channel_id}}
     if admin_threads is True:
         metadata["admin_thread"] = True
     return metadata
@@ -111,6 +116,7 @@ def _metadata_matches_filters(
     automation_id: str | None = None,
     repo: str | None = None,
     ownerless: bool = False,
+    slack_channel_id: str | None = None,
     admin_threads: bool | None = None,
 ) -> bool:
     """Metadata-only filters that don't require fetching the latest run."""
@@ -120,6 +126,15 @@ def _metadata_matches_filters(
     if repo and thread_repo.lower() != repo.lower():
         return False
     if ownerless and thread_repo:
+        return False
+    slack_channel = thread_slack_channel(metadata)
+    if slack_channel_id == SLACK_CHANNEL_NONE and slack_channel is not None:
+        return False
+    if (
+        slack_channel_id
+        and slack_channel_id != SLACK_CHANNEL_NONE
+        and (slack_channel is None or slack_channel["id"] != slack_channel_id)
+    ):
         return False
     if admin_threads is not None and (metadata.get("admin_thread") is True) is not admin_threads:
         return False
@@ -261,6 +276,7 @@ async def _collect_thread_candidates(
     automation_id: str | None = None,
     repo: str | None = None,
     ownerless: bool = False,
+    slack_channel_id: str | None = None,
     admin_threads: bool | None = None,
     viewer_login: str | None = None,
     viewer_email: str | None = None,
@@ -278,6 +294,7 @@ async def _collect_thread_candidates(
             resolved=resolved,
             source=source,
             automation_id=automation_id,
+            slack_channel_id=slack_channel_id,
             admin_threads=admin_threads,
         )
         while offset < _THREADS_PAGE_SCAN_CAP:
@@ -310,6 +327,7 @@ async def _collect_thread_candidates(
                     automation_id=automation_id,
                     repo=repo,
                     ownerless=ownerless,
+                    slack_channel_id=slack_channel_id,
                     admin_threads=admin_threads,
                 ):
                     continue
@@ -433,6 +451,47 @@ async def list_dashboard_thread_projects(
     return sorted(projects.values(), key=lambda project: project["updatedAt"], reverse=True)
 
 
+async def list_dashboard_thread_slack_channels(
+    login: str,
+    *,
+    email: str | None = None,
+    include_resolved: bool = False,
+    include_automations: bool = False,
+    include_all: bool = False,
+) -> list[SlackChannelSummary]:
+    candidates = await _collect_thread_candidates(
+        langgraph_client(),
+        _participant_search_filters(login, email=email, include_all=include_all),
+        viewer_login=login,
+        viewer_email=email,
+        resolved=None if include_resolved else False,
+        scope="all" if include_automations else "interactive",
+    )
+    channels: dict[tuple[str, str], SlackChannelSummary] = {}
+    for thread in candidates:
+        fallback = thread_slack_channel(_thread_metadata(thread))
+        if fallback is None:
+            continue
+        key = fallback["teamId"], fallback["id"]
+        updated_at = _thread_updated_ms(thread)
+        current = channels.get(key)
+        if current is None or updated_at > current["updatedAt"]:
+            channels[key] = SlackChannelSummary(**fallback, updatedAt=updated_at)
+
+    async def enrich(channel: SlackChannelSummary) -> SlackChannelSummary:
+        record = await SlackChannel.load(channel["id"])
+        name = record.details.name.strip() if record is not None else channel["name"]
+        return SlackChannelSummary(
+            id=channel["id"],
+            teamId=channel["teamId"],
+            name=name or channel["id"],
+            updatedAt=channel["updatedAt"],
+        )
+
+    enriched = await asyncio.gather(*(enrich(channel) for channel in channels.values()))
+    return sorted(enriched, key=lambda channel: channel["updatedAt"], reverse=True)
+
+
 async def pin_dashboard_thread(thread_id: str, login: str) -> None:
     client = langgraph_client()
     try:
@@ -465,6 +524,7 @@ async def list_dashboard_threads_page(
     automation_id: str | None = None,
     repo: str | None = None,
     ownerless: bool = False,
+    slack_channel_id: str | None = None,
     filter_participant_login: str | None = None,
     include_private: bool = True,
     surfaced_only: bool = False,
@@ -494,6 +554,7 @@ async def list_dashboard_threads_page(
         automation_id=automation_id,
         repo=repo,
         ownerless=ownerless,
+        slack_channel_id=slack_channel_id,
         admin_threads=admin_threads,
         viewer_login=login,
         viewer_email=email,
