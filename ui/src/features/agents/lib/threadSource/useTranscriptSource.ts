@@ -20,36 +20,17 @@ export function useTranscriptSource(threadId: string): TranscriptThreadSource {
   const transcript = useThreadTranscript(threadId, { runTracker })
   const stop = useCancelRun(threadId)
 
-  // `turn.started` lands seconds after the command is accepted, and until it
-  // does the transcript still reads as idle — long enough for a second
-  // message to be sent as a new run instead of being queued behind this one.
-  const [pendingRun, setPendingRun] = useState(false)
   const startRun = useCallback(
     async ({ message, configurable }: ThreadRunInput) => {
       runTracker.submitted()
-      try {
-        await postRunStart(
-          threadId,
-          runStartCommand({ threadId, message, configurable })
-        )
-      } catch (error) {
-        setPendingRun(false)
-        throw error
-      }
-      setPendingRun(true)
+      await postRunStart(
+        threadId,
+        runStartCommand({ threadId, message, configurable })
+      )
       runTracker.created()
     },
     [runTracker, threadId]
   )
-
-  // Adjusted during render rather than from an effect: the log has taken over
-  // once the run is visibly running, and a thread that went to `error` never
-  // will — either way the guess is spent, and waiting a commit to say so
-  // would leave one render claiming a run that already reported itself.
-  const status = transcript.state?.status ?? null
-  if (pendingRun && (transcript.isRunning || status === "error")) {
-    setPendingRun(false)
-  }
 
   const state = transcript.state
   const contextTokens = state?.contextTokens ?? null
@@ -64,7 +45,7 @@ export function useTranscriptSource(threadId: string): TranscriptThreadSource {
       kind: "transcript",
       threadId,
       messages: transcript.messages,
-      isRunning: transcript.isRunning || pendingRun,
+      isRunning: transcript.isRunning,
       isHydrating: transcript.isHydrating,
       hydration: transcript.hydration,
       error: transcript.error,
@@ -79,6 +60,6 @@ export function useTranscriptSource(threadId: string): TranscriptThreadSource {
       isLoadingOlder: transcript.isLoadingOlder,
       loadOlder: transcript.loadOlder,
     }),
-    [contextTokens, pendingRun, startRun, stop, subagents, threadId, transcript]
+    [contextTokens, startRun, stop, subagents, threadId, transcript]
   )
 }

@@ -23,10 +23,8 @@ def upgrade() -> None:
         """
         CREATE TABLE thread (
             thread_id text PRIMARY KEY,
-            kind text NOT NULL DEFAULT 'agent',
             version bigint NOT NULL DEFAULT 0,
             status text NOT NULL DEFAULT 'idle' CHECK (status IN ('idle', 'running', 'error')),
-            active_run_id text,
             title text,
             metadata jsonb NOT NULL DEFAULT '{}'::jsonb,
             created_at timestamptz NOT NULL DEFAULT clock_timestamp(),
@@ -65,11 +63,18 @@ def upgrade() -> None:
         CREATE TABLE thread_command_receipt (
             command_id text PRIMARY KEY,
             thread_id text NOT NULL,
-            status text NOT NULL CHECK (status IN ('accepted', 'rejected')),
             result_version bigint,
-            error text,
             accepted_at timestamptz NOT NULL DEFAULT clock_timestamp()
         )
+        """
+    )
+
+    # Receipts are looked up by thread and command, and dropped by thread when
+    # a transcript is deleted.
+    op.execute(
+        """
+        CREATE INDEX thread_command_receipt_thread_idx
+        ON thread_command_receipt (thread_id)
         """
     )
 
@@ -114,6 +119,15 @@ def upgrade() -> None:
             completed_at timestamptz NOT NULL,
             PRIMARY KEY (thread_id, turn_id)
         )
+        """
+    )
+
+    # The ordinal names the hidden ref a reader diffs against, so two turns of
+    # one thread may never share it.
+    op.execute(
+        """
+        CREATE UNIQUE INDEX thread_turn_checkpoint_count_idx
+        ON thread_turn_checkpoint (thread_id, checkpoint_turn_count)
         """
     )
 

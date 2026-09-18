@@ -62,7 +62,7 @@ def _install(
     async def _has_transcript(thread_id: str) -> bool:
         return transcribed
 
-    monkeypatch.setattr(mw, "has_transcript", _has_transcript)
+    monkeypatch.setattr(mw, "_has_transcript", _has_transcript)
 
     async def _turn_context(thread_id: str, turn_id: UUID) -> tuple[int, str | None, str | None]:
         return 1, None, None
@@ -194,8 +194,11 @@ async def test_hook_sequence_for_a_transcribed_turn(monkeypatch: pytest.MonkeyPa
     assert started.event.namespace == []
     completed = engine.commands[3]
     assert completed.event.status == "completed"
-    assert completed.event.output == "file body"
+    # The wire carries a preview; the full output rides beside the command.
+    assert completed.event.output_preview == "file body"
+    assert completed.event.has_output is True
     assert completed.event.output_truncated is False
+    assert completed.tool_output == "file body"
 
 
 async def test_follow_up_without_a_turn_id_mints_one(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -375,11 +378,10 @@ async def test_without_postgres_the_middleware_writes_nothing(
     engine = _install(monkeypatch, transcribed=False, postgres_configured=False)
     stamped: list[str] = []
 
-    async def _stamp(thread_id: str) -> dict[str, object]:
+    async def _stamp(thread_id: str) -> None:
         stamped.append(thread_id)
-        return {}
 
-    monkeypatch.setattr(mw, "_thread_metadata", _stamp)
+    monkeypatch.setattr(mw, "_stamp_transcript", _stamp)
     middleware = mw.TranscriptMiddleware()
     human = HumanMessage(content="hi", id="human-1")
 
@@ -478,3 +480,41 @@ async def test_a_thread_without_a_sandbox_checkpoints_as_missing(
     assert checkpoint.error is None
     assert checkpoint.checkpoint_turn_count == 1
     assert checkpoint.checkpoint_ref == f"refs/open-swe/checkpoints/{THREAD_ID}/turn/1"
+
+
+async def test_a_stamped_thread_always_has_its_thread_row(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The UI switches reader on the stamp alone, so the row is committed first."""
+    _install(monkeypatch, transcribed=False)
+    order: list[str] = []
+    middleware = mw.TranscriptMiddleware()
+
+    async def _metadata(thread_id: str) -> dict[str, object]:
+        return {}
+
+    async def _stamp(thread_id: str) -> None:
+        order.append("stamp")
+
+    async def _append(thread_id: str, commands: Sequence[Command]) -> None:
+        order.extend(command.event.type for command in commands)
+
+    monkeypatch.setattr(mw, "_thread_metadata", _metadata)
+    monkeypatch.setattr(mw, "_stamp_transcript", _stamp)
+    monkeypatch.setattr(mw, "append", _append)
+
+    state: dict[str, Any] = {"messages": [HumanMessage(content="hi", id="h")]}
+    await middleware.abefore_agent(state, None)
+    await middleware.aafter_agent(state, None)
+    assert order[:2] == ["thread.created", "stamp"]
+
+    async def _refuses(thread_id: str, commands: Sequence[Command]) -> None:
+        raise RuntimeError("no database")
+
+    mw._runs.clear()
+    order.clear()
+    monkeypatch.setattr(mw, "append", _refuses)
+    await middleware.abefore_agent(state, None)
+
+    assert order == []
+    assert mw._lookup_state().enabled is False

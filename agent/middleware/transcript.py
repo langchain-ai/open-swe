@@ -39,14 +39,16 @@ from langgraph.types import Command as GraphCommand
 from langgraph_sdk import get_client
 from pydantic import JsonValue
 from pydantic_core import PydanticSerializationError, to_jsonable_python
+from sqlalchemy import text as sql
 
 from agent.database import postgres
 from agent.input_messages import input_message_text, message_sender_id
 from agent.middleware.trace import OpenSWEMiddleware
 from agent.transcript import checkpoints
 from agent.transcript.attachments import PendingAttachment, UnsupportedAttachment
-from agent.transcript.engine import Command, append, has_transcript
+from agent.transcript.engine import Command, append
 from agent.transcript.events import (
+    TOOL_OUTPUT_PREVIEW_CHARS,
     JsonObject,
     MessageAppended,
     MessageCompleted,
@@ -59,6 +61,7 @@ from agent.transcript.events import (
     ToolStarted,
     TurnCompleted,
     TurnFailed,
+    TurnInterrupted,
     TurnRequested,
     TurnStarted,
 )
@@ -582,7 +585,6 @@ def _thread_created(metadata: Mapping[str, object], title: str) -> ThreadCreated
     return ThreadCreated(
         type="thread.created",
         title=_string(metadata.get("title")) or title or "New agent",
-        kind="agent",
         source=_string(metadata.get("source")) or _string(metadata.get("origin")) or "unknown",
         owner_login=_string(metadata.get("owner_login")) or "",
         visibility="private" if metadata.get("visibility") == "private" else "public",
@@ -594,16 +596,28 @@ def _thread_created(metadata: Mapping[str, object], title: str) -> ThreadCreated
     )
 
 
+async def _has_transcript(thread_id: str) -> bool:
+    """Whether the thread is served by the event log rather than by LangGraph state."""
+    if not postgres.configured():
+        return False
+    async with postgres.read_only_transaction() as conn:
+        result = await conn.execute(
+            sql("SELECT 1 FROM thread WHERE thread_id = :thread_id"),
+            {"thread_id": thread_id},
+        )
+        return result.scalar_one_or_none() is not None
+
+
 async def _thread_metadata(thread_id: str) -> dict[str, object]:
-    """LangGraph thread metadata, stamping ``transcript`` so the UI can branch."""
-    client = get_client()
-    thread = await client.threads.get(thread_id)
+    """The LangGraph thread metadata a ``thread.created`` event is built from."""
+    thread = await get_client().threads.get(thread_id)
     metadata = thread.get("metadata") if isinstance(thread, Mapping) else None
-    metadata = dict(metadata) if isinstance(metadata, Mapping) else {}
-    if metadata.get("transcript") != "v2":
-        await client.threads.update(thread_id, metadata={"transcript": "v2"})
-        metadata["transcript"] = "v2"
-    return metadata
+    return dict(metadata) if isinstance(metadata, Mapping) else {}
+
+
+async def _stamp_transcript(thread_id: str) -> None:
+    """Point the UI at the transcript reader. Only ever after the row exists."""
+    await get_client().threads.update(thread_id, metadata={"transcript": "v2"})
 
 
 class TranscriptMiddleware(OpenSWEMiddleware):
@@ -626,7 +640,7 @@ class TranscriptMiddleware(OpenSWEMiddleware):
             return
 
         messages = cast(Sequence[BaseMessage], state.get("messages") or [])
-        transcribed = postgres.configured() and await has_transcript(ids.thread_id)
+        transcribed = await _has_transcript(ids.thread_id)
         # Without PostgreSQL there is nowhere to keep a transcript, so the run
         # must not be stamped as one: the UI would switch to a read path that
         # has no rows behind it.
@@ -641,6 +655,27 @@ class TranscriptMiddleware(OpenSWEMiddleware):
             )
             return
 
+        human = _last_human(messages)
+        metadata: Mapping[str, object] = {}
+        if not transcribed:
+            metadata = await _thread_metadata(ids.thread_id)
+            title = _human_text(human) if human is not None else ""
+            # Committed before the stamp, and before the run is enabled: the UI
+            # switches to the transcript reader on the stamp alone, so a failure
+            # here has to leave the thread reading LangGraph state.
+            await append(
+                ids.thread_id,
+                [
+                    Command(
+                        command_id=f"thread:{ids.thread_id}:created",
+                        event=_thread_created(metadata, title[:80]),
+                        actor_kind="system",
+                        run_id=ids.run_id,
+                    )
+                ],
+            )
+            await _stamp_transcript(ids.thread_id)
+
         turn_id = ids.turn_id or uuid.uuid7()
         run_state = RunState(
             thread_id=ids.thread_id, run_id=ids.run_id, turn_id=turn_id, enabled=True
@@ -649,20 +684,7 @@ class TranscriptMiddleware(OpenSWEMiddleware):
         run_state.writer = asyncio.create_task(_writer_loop(run_state))
         _runs[key] = run_state
 
-        human = _last_human(messages)
         commands: list[Command] = []
-        metadata: Mapping[str, object] = {}
-        if not transcribed:
-            metadata = await _thread_metadata(ids.thread_id)
-            text = _human_text(human) if human is not None else ""
-            commands.append(
-                Command(
-                    command_id=f"thread:{ids.thread_id}:created",
-                    event=_thread_created(metadata, text[:80]),
-                    actor_kind="system",
-                    run_id=ids.run_id,
-                )
-            )
         if (not transcribed or ids.turn_id is None) and human is not None:
             commands.append(_turn_requested(run_state, human, ids, metadata))
         commands.append(
@@ -711,13 +733,17 @@ class TranscriptMiddleware(OpenSWEMiddleware):
         manager = _attach(sniffer)
         try:
             response = await handler(request)
-        except Exception as exc:
+        except BaseException as exc:
             _detach(manager, sniffer)
             # A subagent's model error surfaces to the parent as a failed
             # ``task`` tool call, which keeps running; only the root settles
-            # the turn.
+            # the turn. A cancellation never reaches ``aafter_agent`` at all,
+            # so the run's state and writer task are only freed here.
             if not namespace:
-                await self._fail_turn(state, exc)
+                if isinstance(exc, asyncio.CancelledError):
+                    await self._interrupt_turn(state)
+                else:
+                    await self._fail_turn(state, exc)
             raise
         _detach(manager, sniffer)
         try:
@@ -900,13 +926,15 @@ class TranscriptMiddleware(OpenSWEMiddleware):
                         turn_id=state.turn_id,
                         tool_call_id=tool_call_id,
                         status=status,
-                        output=text,
+                        output_preview=text[:TOOL_OUTPUT_PREVIEW_CHARS] or None,
                         output_truncated=truncated,
+                        has_output=bool(text),
                         namespace=namespace,
                     ),
                     actor_kind="agent",
                     run_id=state.run_id,
                     turn_id=state.turn_id,
+                    tool_output=text,
                 )
             )
         except Exception:
@@ -938,6 +966,27 @@ class TranscriptMiddleware(OpenSWEMiddleware):
                 exc_info=True,
                 extra={"transcript_thread_id": state.thread_id},
             )
+
+    async def _interrupt_turn(self, state: RunState) -> None:
+        """End a cancelled turn. The cancel endpoint writes the same command id."""
+        if state.terminal:
+            return
+        state.terminal = True
+        try:
+            state.enqueue(
+                Command(
+                    command_id=f"turn:{state.turn_id}:interrupted",
+                    event=TurnInterrupted(
+                        type="turn.interrupted", turn_id=state.turn_id, run_id=state.run_id
+                    ),
+                    actor_kind="agent",
+                    run_id=state.run_id,
+                    turn_id=state.turn_id,
+                )
+            )
+            await _finish(state)
+        except Exception:
+            logger.warning("Transcript turn interrupt append failed", exc_info=True)
 
     async def _fail_turn(self, state: RunState, exc: BaseException) -> None:
         if state.terminal:

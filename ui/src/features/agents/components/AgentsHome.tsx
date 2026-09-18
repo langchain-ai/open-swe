@@ -473,7 +473,7 @@ export function AgentsHome({
     setPendingThreadId(threadId)
     void (async () => {
       try {
-        const started = await startRun(
+        await startRun(
           threadId,
           runStartCommand({
             threadId,
@@ -484,13 +484,8 @@ export function AgentsHome({
         )
         if (abort.signal.aborted) return
         // Seeded so the thread route renders the prompt immediately; the real
-        // record lands with the next detail fetch. The server says which
-        // reader serves the thread, which the page has to know before it
-        // mounts a source.
-        const thread: AgentThread = {
-          ...optimisticThread(threadId, draft),
-          ...(started.transcript ? { transcript: started.transcript } : {}),
-        }
+        // record lands with the next detail fetch.
+        const thread: AgentThread = optimisticThread(threadId, draft)
         queryClient.setQueryData(agentThreadKeys.detail(threadId), thread)
         seedAgentThreadLists(queryClient, thread)
         invalidateAgentThreadLists(queryClient)

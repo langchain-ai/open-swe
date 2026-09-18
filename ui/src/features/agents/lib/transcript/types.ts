@@ -30,10 +30,7 @@ export type MessageRole = "human" | "ai"
 
 export type ToolCallStatus = "in_progress" | "completed" | "error"
 
-export type NoticeKind =
-  | "model_routed"
-  | "conversation_offloading"
-  | "step_limit"
+export type NoticeKind = "model_routed" | "conversation_offloading"
 
 /**
  * An image attached to a message. The log stores metadata only — never base64
@@ -60,7 +57,6 @@ export type Namespace = ReadonlyArray<string>
 
 export interface TranscriptThreadRow {
   status: TranscriptThreadStatus
-  active_run_id: string | null
 }
 
 export interface TranscriptTurnRow {
@@ -139,33 +135,16 @@ export interface TranscriptTurnPage {
 
 export interface ToolOutputResponse {
   output: string
-  truncated: boolean
-}
-
-export interface SynchronizedFrame {
-  version: number
 }
 
 /**
- * The last frame of a stream whose thread no longer exists. The server ends the
- * stream after it, so there is nothing to reconnect to.
- */
-export interface DeletedFrame {
-  thread_id: string
-}
-
-/**
- * A change to the mirrored thread row.
- *
- * The server distinguishes "unset" from "null" through pydantic's
- * `model_fields_set`, which `model_dump` does not carry: every key is present
- * on the wire, null for the fields the patch left alone. A client therefore
- * reads a null as "no change" — the turn events are what clear `active_run_id`.
+ * A change to the mirrored thread row: the title and the thread's metadata
+ * blob, neither of which the transcript renders.
  */
 export interface ThreadMetaUpdatedPayload {
   patch: {
-    status: TranscriptThreadStatus | null
-    active_run_id: string | null
+    title?: string | null
+    metadata?: JsonObject | null
   }
 }
 
@@ -223,7 +202,10 @@ export interface ToolCompletedPayload {
   turn_id: string
   tool_call_id: string
   status: "completed" | "error"
-  output: string
+  /** The first 2000 characters of the output; the rest is behind the endpoint. */
+  output_preview: string | null
+  output_truncated: boolean
+  has_output: boolean
   namespace: Namespace
 }
 
@@ -234,7 +216,6 @@ export interface RunNoticePayload {
 }
 
 interface StoredEventEnvelope {
-  thread_id: string
   version: number
   run_id: string | null
   occurred_at: string
@@ -251,7 +232,6 @@ type Stored<EventType extends string, Payload> = StoredEventEnvelope & {
 }
 
 export type StoredEvent =
-  | Stored<"thread.created", JsonObject>
   | Stored<"thread.meta_updated", ThreadMetaUpdatedPayload>
   | Stored<"turn.requested", TurnRequestedPayload>
   | Stored<"turn.started", TurnStartedPayload>

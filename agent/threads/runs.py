@@ -55,7 +55,7 @@ from agent.threads.summary import (
     thread_source,
 )
 from agent.transcript.attachments import PendingAttachment
-from agent.transcript.engine import Command, append, has_message, has_transcript
+from agent.transcript.engine import Command, append
 from agent.transcript.events import MessageImage, MessageSender, ThreadCreated, TurnRequested
 from agent.utils.dashboard_handoff import DASHBOARD_HANDOFF_BODY
 from agent.utils.json_types import JsonObject, as_thread_dict, thread_metadata
@@ -672,14 +672,12 @@ async def _enrich_run_start_command(
         )
     # The transcript keys a human message by the id the graph will carry, so the
     # id is minted here when the client did not send a usable one.
-    transcribed = (creating and postgres.configured()) or await has_transcript(thread_id)
+    transcribed = (creating and postgres.configured()) or metadata.get(
+        "transcript"
+    ) == TRANSCRIPT_VERSION
     client_message_id = _command_message_id(params)
     message_id: str | None = None
-    if (
-        client_message_id
-        and client_message_id not in persisted_message_ids
-        and not (transcribed and await has_message(thread_id, client_message_id))
-    ):
+    if client_message_id and client_message_id not in persisted_message_ids:
         message_id = client_message_id
     elif transcribed:
         message_id = str(uuid.uuid7())
@@ -746,7 +744,10 @@ async def _enrich_run_start_command(
                 thread_id,
                 [
                     Command(
-                        command_id=f"turn:{turn_id}:requested",
+                        # Keyed by the message, not the turn: a retried
+                        # ``run.start`` mints a new turn id but asks for the
+                        # same message, and its receipt deduplicates it.
+                        command_id=f"message:{message_id}:requested",
                         event=TurnRequested(
                             turn_id=turn_id,
                             message_id=message_id,

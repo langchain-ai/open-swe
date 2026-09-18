@@ -11,9 +11,7 @@ import { dashboardApiUrl } from "@/lib/dashboard-fetch"
 import { withRequestTiming } from "@/lib/perf/fetchTiming"
 import type { ImageChunk } from "@/features/agents/lib/types"
 import type {
-  DeletedFrame,
   StoredEvent,
-  SynchronizedFrame,
   ToolOutputResponse,
   TranscriptSnapshot,
   TranscriptTurnPage,
@@ -98,9 +96,9 @@ export interface TranscriptEventHandlers {
   /** The replay gap was too large to send event by event; reset to this. */
   onSnapshot: (snapshot: TranscriptSnapshot) => void
   /** Replay finished and the connection is now live. */
-  onSynchronized: (frame: SynchronizedFrame) => void
+  onSynchronized: () => void
   /** The thread is gone. The server ends the stream; do not reopen it. */
-  onDeleted: (frame: DeletedFrame) => void
+  onDeleted: () => void
   onOpen?: () => void
   /** The connection dropped or a frame was unreadable. Reopening is the caller's call. */
   onError: (error: unknown) => void
@@ -148,17 +146,17 @@ export function openTranscriptEvents(
   source.addEventListener("snapshot", (event) =>
     parse<TranscriptSnapshot>(event, handlers.onSnapshot)
   )
-  source.addEventListener("synchronized", (event) =>
-    parse<SynchronizedFrame>(event, handlers.onSynchronized)
-  )
-  source.addEventListener("deleted", (event) =>
-    parse<DeletedFrame>(event, (frame) => {
-      // The stream ends here, and `EventSource` would treat that end as a drop
-      // worth retrying, so it is closed before the handler can ask for more.
-      close()
-      handlers.onDeleted(frame)
-    })
-  )
+  // Both frames carry an empty body; their arrival is the whole signal.
+  source.addEventListener("synchronized", () => {
+    if (!closed) handlers.onSynchronized()
+  })
+  source.addEventListener("deleted", () => {
+    if (closed) return
+    // The stream ends here, and `EventSource` would treat that end as a drop
+    // worth retrying, so it is closed before the handler can ask for more.
+    close()
+    handlers.onDeleted()
+  })
   source.addEventListener("open", () => {
     if (!closed) handlers.onOpen?.()
   })
@@ -231,23 +229,6 @@ export function runStartCommand({
   }
 }
 
-export interface RunStartResult {
-  runId: string | null
-  /** Set when this command created the thread and the event log serves it. */
-  transcript: "v2" | null
-}
-
-const TRANSCRIPT_HEADER = "X-Open-SWE-Transcript"
-
-function transcriptOf(response: Response): "v2" | null {
-  return response.headers.get(TRANSCRIPT_HEADER) === "v2" ? "v2" : null
-}
-
-interface ProtocolSuccess {
-  type: "success"
-  result?: { run_id?: string } | null
-}
-
 interface ProtocolFailure {
   type: "error"
   error?: string
@@ -262,13 +243,6 @@ function isProtocolFailure(value: unknown): value is ProtocolFailure {
   )
 }
 
-function runIdOf(value: unknown): string | null {
-  if (value === null || typeof value !== "object") return null
-  const result = (value as ProtocolSuccess).result
-  const runId = result?.run_id
-  return typeof runId === "string" ? runId : null
-}
-
 /**
  * Post a thread command. The first `run.start` on a client-minted thread id is
  * what creates the thread, so this doubles as the creation call.
@@ -277,7 +251,7 @@ export async function startRun(
   threadId: string,
   command: RunStartCommand,
   options: { signal?: AbortSignal } = {}
-): Promise<RunStartResult> {
+): Promise<void> {
   const response = await timedFetch(
     dashboardApiUrl(`/threads/${encodeURIComponent(threadId)}/commands`),
     {
@@ -289,9 +263,6 @@ export async function startRun(
     }
   )
   if (!response.ok) throw await apiError(response)
-  const transcript = transcriptOf(response)
-  if (response.status === 202 || response.status === 204)
-    return { runId: null, transcript }
   const payload: unknown = await response.json().catch(() => null)
   if (isProtocolFailure(payload)) {
     throw new AgentsApiError(
@@ -299,5 +270,4 @@ export async function startRun(
       payload.message ?? payload.error ?? "run.start failed"
     )
   }
-  return { runId: runIdOf(payload), transcript }
 }

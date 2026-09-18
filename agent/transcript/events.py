@@ -24,14 +24,16 @@ SCHEMA_VERSION = 1
 """``thread_event.schema_version`` written by this release."""
 
 type ActorKind = Literal["user", "agent", "system"]
-type ThreadKind = Literal["agent", "reviewer"]
 type ThreadStatus = Literal["idle", "running", "error"]
 type MessageRole = Literal["human", "ai"]
 type ToolOutcome = Literal["completed", "error"]
-type NoticeKind = Literal["model_routed", "conversation_offloading", "step_limit"]
+type NoticeKind = Literal["model_routed", "conversation_offloading"]
 type CheckpointStatus = Literal["ready", "missing", "error"]
 type FileChangeKind = Literal["added", "removed", "modified"]
 type JsonObject = dict[str, JsonValue]
+
+TOOL_OUTPUT_PREVIEW_CHARS = 2000
+"""How much of a tool's output rides on the wire; the rest is fetched on demand."""
 
 
 class _Body(BaseModel):
@@ -85,7 +87,6 @@ class MessageUsage(BaseModel):
 class ThreadCreated(_Body):
     type: Literal["thread.created"] = "thread.created"
     title: str
-    kind: ThreadKind = "agent"
     source: str
     owner_login: str
     visibility: Literal["public", "private"] = "public"
@@ -106,8 +107,6 @@ class ThreadMetaPatch(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     title: str | None = None
-    status: ThreadStatus | None = None
-    active_run_id: str | None = None
     metadata: JsonObject | None = None
 
     @model_serializer(mode="wrap")
@@ -247,12 +246,21 @@ class ToolStarted(_Body):
 
 
 class ToolCompleted(_Body):
+    """A finished tool call, carrying a preview of its output rather than all of it.
+
+    The full output is written to ``thread_tool_call.output`` out of band — it
+    reaches the projection on the command, not in this payload — and is served
+    on demand by the tool-output endpoint. ``output_truncated`` says the stored
+    output was itself cut at the size cap, so even that endpoint has no more.
+    """
+
     type: Literal["tool.completed"] = "tool.completed"
     turn_id: UUID
     tool_call_id: str
     status: ToolOutcome
-    output: str = ""
+    output_preview: str | None = None
     output_truncated: bool = False
+    has_output: bool = False
     namespace: list[str] = Field(default_factory=list)
 
 
@@ -261,9 +269,8 @@ class RunNotice(_Body):
 
     Notices have no projection: the snapshot serves the latest one per kind for
     the thread's newest turn, read straight from the log, so ``model_routed``
-    and ``step_limit`` survive a reload. ``conversation_offloading`` describes
-    what a run is doing right now, so the snapshot drops it once its turn has
-    settled.
+    survives a reload. ``conversation_offloading`` describes what a run is doing
+    right now, so the snapshot drops it once its turn has settled.
     """
 
     type: Literal["run.notice"] = "run.notice"

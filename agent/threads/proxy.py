@@ -11,7 +11,6 @@ from fastapi import HTTPException
 
 from agent.config import ENV
 from agent.dashboard.ttft import AssistantTextEventDetector, record_dashboard_thread_ttft
-from agent.database import postgres
 from agent.threads.access import (
     _authorized_thread_metadata,
     _readable_thread_metadata,
@@ -23,11 +22,10 @@ from agent.threads.runs import (
     _notify_slack_web_handoff,
 )
 from agent.threads.summary import (
-    TRANSCRIPT_VERSION,
     _assert_thread_postable,
-    _assert_thread_readable,
     _now_ms,
     _thread_is_busy,
+    assert_thread_readable,
 )
 from agent.utils.json_types import thread_metadata
 from agent.utils.streaming import TERMINAL_LIFECYCLE_EVENTS, root_lifecycle
@@ -140,9 +138,6 @@ async def _observe_dashboard_run_ttft(
         )
 
 
-TRANSCRIPT_HEADER = "X-Open-SWE-Transcript"
-
-
 async def proxy_dashboard_thread_commands(
     thread_id: str,
     login: str,
@@ -150,13 +145,7 @@ async def proxy_dashboard_thread_commands(
     *,
     email: str | None = None,
     content_type: str = "application/json",
-) -> tuple[int, bytes, str | None, dict[str, str]]:
-    """Forward a stream command; the fourth element is extra response headers.
-
-    A ``run.start`` that created the thread reports the transcript source it
-    was created with (``TRANSCRIPT_HEADER``), so the client can mount the right
-    reader before the thread record has been fetched.
-    """
+) -> tuple[int, bytes, str | None]:
     received_at_ms = _now_ms()
     require_json_content_type(content_type)
     try:
@@ -193,9 +182,9 @@ async def proxy_dashboard_thread_commands(
         if post_command:
             _assert_thread_postable(metadata, login, email)
         else:
-            _assert_thread_readable(metadata, login, email)
+            assert_thread_readable(metadata, login, email)
         if method != "run.start" and not (post_command and metadata.get("admin_thread") is True):
-            _assert_thread_readable(metadata, login, email)
+            assert_thread_readable(metadata, login, email)
         metadata_run_status = metadata.get("latest_run_status")
         thread_busy = _thread_is_busy(thread) or metadata_run_status in {"pending", "running"}
 
@@ -272,11 +261,7 @@ async def proxy_dashboard_thread_commands(
                 thread_id,
                 exc_info=True,
             )
-    media_type = response.headers.get("content-type")
-    headers: dict[str, str] = {}
-    if creating and run_start_succeeded and postgres.configured():
-        headers[TRANSCRIPT_HEADER] = TRANSCRIPT_VERSION
-    return response.status_code, response.content, media_type, headers
+    return response.status_code, response.content, response.headers.get("content-type")
 
 
 async def proxy_dashboard_thread_history(

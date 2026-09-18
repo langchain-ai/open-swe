@@ -12,12 +12,13 @@ import pytest
 from sqlalchemy import text
 
 from agent.database import postgres
-from agent.transcript.engine import Command, ThreadNotTranscribed, append, has_transcript
+from agent.transcript.engine import Command, ThreadNotTranscribed, append
 from agent.transcript.events import (
     MessageAppended,
     MessageCompleted,
     MessageSender,
     ThreadCreated,
+    TurnCheckpointCompleted,
     TurnRequested,
 )
 from agent.transcript.snapshot import load_snapshot
@@ -74,7 +75,6 @@ async def test_versions_are_gapless_across_appends(registry_db: None) -> None:
 
     assert result.versions == [2, 3]
     assert [event.version for event in result.events] == [2, 3]
-    assert await has_transcript(thread_id)
     async with postgres.read_only_transaction() as conn:
         versions = (
             (
@@ -190,7 +190,6 @@ async def test_an_untranscribed_thread_rejects_everything_but_creation(
     thread_id = str(uuid7())
     turn_id = uuid7()
 
-    assert not await has_transcript(thread_id)
     with pytest.raises(ThreadNotTranscribed):
         await append(
             thread_id,
@@ -203,3 +202,77 @@ async def test_an_untranscribed_thread_rejects_everything_but_creation(
                 )
             ],
         )
+
+
+async def test_a_retried_run_start_requests_one_turn_for_one_message(
+    registry_db: None,
+) -> None:
+    """``run.start`` keys its turn by the message, so a retry adds no second one."""
+    thread_id = str(uuid7())
+    await _create(thread_id)
+    for _ in range(2):
+        turn_id = uuid7()
+        await append(
+            thread_id,
+            [
+                Command(
+                    command_id="message:human-1:requested",
+                    event=TurnRequested(
+                        turn_id=turn_id,
+                        message_id="human-1",
+                        text="do the thing",
+                        sender=MessageSender(login="test-user", kind="dashboard"),
+                    ),
+                    actor_kind="user",
+                    turn_id=turn_id,
+                )
+            ],
+        )
+
+    snapshot = await load_snapshot(thread_id)
+    assert snapshot is not None
+    assert [message.message_id for message in snapshot.messages] == ["human-1"]
+    assert len(snapshot.turns) == 1
+
+
+async def test_two_turns_cannot_share_a_checkpoint_ordinal(registry_db: None) -> None:
+    """The ordinal is read before the append takes its lock, so it is renumbered."""
+    thread_id = str(uuid7())
+    await _create(thread_id)
+    for index in range(2):
+        turn_id = uuid7()
+        await append(
+            thread_id,
+            [
+                Command(
+                    command_id=f"turn:{turn_id}:checkpoint",
+                    event=TurnCheckpointCompleted(
+                        turn_id=turn_id,
+                        checkpoint_turn_count=1,
+                        checkpoint_ref=f"refs/open-swe/checkpoints/{thread_id}/turn/1",
+                        commit=f"{index:040x}",
+                        status="ready",
+                    ),
+                    actor_kind="agent",
+                    turn_id=turn_id,
+                )
+            ],
+        )
+
+    async with postgres.read_only_transaction() as conn:
+        counts = (
+            (
+                await conn.execute(
+                    text(
+                        """
+                        SELECT checkpoint_turn_count FROM thread_turn_checkpoint
+                        WHERE thread_id = :t ORDER BY checkpoint_turn_count
+                        """
+                    ),
+                    {"t": thread_id},
+                )
+            )
+            .scalars()
+            .all()
+        )
+    assert list(counts) == [1, 2]

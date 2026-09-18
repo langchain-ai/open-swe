@@ -1288,7 +1288,7 @@ async def test_proxy_run_start_from_slack_thread_updates_trace_reply(monkeypatch
         monkeypatch, "update_slack_trace_reply_for_web_handoff", fake_update_trace_reply
     )
 
-    status, body, _, _ = await thread_proxy.proxy_dashboard_thread_commands(
+    status, body, _ = await thread_proxy.proxy_dashboard_thread_commands(
         "tid",
         "octocat",
         b'{"method":"run.start","params":{"input":{"messages":[{"role":"user","content":"continue here"}]}}}',
@@ -1563,14 +1563,14 @@ async def test_proxy_commands_preserves_admin_writes_and_owner_reads(monkeypatch
     patch_thread_module(monkeypatch, "langgraph_client", lambda: AdminClient())
     monkeypatch.setattr(thread_proxy.httpx2, "AsyncClient", FakeAsyncClient)
 
-    status_code, _, _, _ = await thread_proxy.proxy_dashboard_thread_commands(
+    status_code, _, _ = await thread_proxy.proxy_dashboard_thread_commands(
         "tid", "another-admin", b'{"method": "input.respond"}'
     )
 
     assert status_code == 200
 
     monkeypatch.setenv("CONFIGURED_ADMINS", "another-admin")
-    status_code, _, _, _ = await thread_proxy.proxy_dashboard_thread_commands(
+    status_code, _, _ = await thread_proxy.proxy_dashboard_thread_commands(
         "tid", "workspace-admin", b'{"method": "agent.getTree"}'
     )
 

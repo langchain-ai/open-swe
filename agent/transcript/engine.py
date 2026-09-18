@@ -40,6 +40,9 @@ class Command:
     ``attachments`` are the bytes the event refers to by ``attachment_id``.
     They are written by the same transaction as the event, and only when the
     event is actually appended — a replayed command writes neither again.
+    ``tool_output`` travels the same way: a ``tool.completed`` event carries
+    only a preview, so the full output reaches the projection here instead of
+    on the wire.
     """
 
     command_id: str
@@ -49,6 +52,7 @@ class Command:
     turn_id: uuid.UUID | None = None
     occurred_at: datetime | None = None
     attachments: tuple[attachment_store.PendingAttachment, ...] = ()
+    tool_output: str | None = None
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -171,32 +175,6 @@ async def delete_transcript(thread_id: str) -> bool:
     return deleted
 
 
-async def has_transcript(thread_id: str) -> bool:
-    """Whether the thread is served by the event log rather than by LangGraph state."""
-    if not postgres.configured():
-        return False
-    async with postgres.read_only_transaction() as conn:
-        result = await conn.execute(
-            text("SELECT 1 FROM thread WHERE thread_id = :thread_id"),
-            {"thread_id": thread_id},
-        )
-        return result.scalar_one_or_none() is not None
-
-
-async def has_message(thread_id: str, message_id: str) -> bool:
-    """Whether the thread's transcript already holds ``message_id``."""
-    if not postgres.configured():
-        return False
-    async with postgres.read_only_transaction() as conn:
-        result = await conn.execute(
-            text(
-                "SELECT 1 FROM thread_message WHERE thread_id = :thread_id AND message_id = :message_id"
-            ),
-            {"thread_id": thread_id, "message_id": message_id},
-        )
-        return result.scalar_one_or_none() is not None
-
-
 async def _accepted_versions(
     conn: AsyncConnection, thread_id: str, command_ids: Sequence[str]
 ) -> dict[str, int]:
@@ -205,7 +183,7 @@ async def _accepted_versions(
             """
             SELECT command_id, result_version FROM thread_command_receipt
             WHERE thread_id = :thread_id AND command_id = ANY(:command_ids)
-              AND status = 'accepted' AND result_version IS NOT NULL
+              AND result_version IS NOT NULL
             """
         ).bindparams(bindparam("command_ids", type_=ARRAY(Text))),
         {"thread_id": thread_id, "command_ids": list(command_ids)},
@@ -268,16 +246,15 @@ async def _write(
         event=event,
         run_id=run_id,
         occurred_at=occurred_at,
+        tool_output=command.tool_output,
     )
     await conn.execute(
         text(
             """
-            INSERT INTO thread_command_receipt (command_id, thread_id, status, result_version)
-            VALUES (:command_id, :thread_id, 'accepted', :result_version)
+            INSERT INTO thread_command_receipt (command_id, thread_id, result_version)
+            VALUES (:command_id, :thread_id, :result_version)
             ON CONFLICT (command_id) DO UPDATE SET
-                status = 'accepted',
                 result_version = EXCLUDED.result_version,
-                error = NULL,
                 accepted_at = clock_timestamp()
             """
         ),

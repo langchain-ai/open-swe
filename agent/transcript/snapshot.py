@@ -25,7 +25,6 @@ from agent.transcript.events import (
     JsonObject,
     MessageRole,
     StoredEvent,
-    ThreadKind,
     ThreadStatus,
 )
 
@@ -51,9 +50,7 @@ MAX_TURN_PAGE_SIZE = 200
 class ThreadView(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    kind: ThreadKind
     status: ThreadStatus
-    active_run_id: str | None
     title: str | None
     created_at: datetime
     updated_at: datetime
@@ -181,18 +178,13 @@ class ReplayGap:
     def missing(self) -> bool:
         return self.head is None
 
-    def needs_snapshot(self, after: int) -> bool:
-        return (
-            after > (self.head or 0)
-            or self.events > MAX_REPLAY_EVENTS
-            or self.payload_bytes > MAX_REPLAY_BYTES
-        )
+    def recreated(self, after: int) -> bool:
+        """The cursor is past the head: this thread is not the one it was reading."""
+        return after > (self.head or 0)
 
-
-@dataclass(frozen=True, kw_only=True)
-class ToolOutput:
-    output: str
-    truncated: bool
+    @property
+    def needs_snapshot(self) -> bool:
+        return self.events > MAX_REPLAY_EVENTS or self.payload_bytes > MAX_REPLAY_BYTES
 
 
 async def _rows(
@@ -374,8 +366,7 @@ async def load_snapshot(thread_id: str, *, limit: int | None = None) -> Transcri
         thread = await _row(
             conn,
             """
-            SELECT thread_id, version, kind, status, active_run_id, title,
-                   created_at, updated_at
+            SELECT thread_id, version, status, title, created_at, updated_at
             FROM thread WHERE thread_id = :thread_id
             """,
             {"thread_id": thread_id},
@@ -403,9 +394,9 @@ async def load_snapshot(thread_id: str, *, limit: int | None = None) -> Transcri
             JOIN newest_turn ON newest_turn.turn_id = event.turn_id
             WHERE event.thread_id = :thread_id
               AND event.event_type = 'run.notice'
-              -- Offloading describes what a run is doing right now, so it dies
-              -- with its turn; routing and limits describe how the turn was
-              -- executed and outlive it.
+              -- Offloading describes what a run is doing right now, so it
+              -- dies with its turn; routing describes how the turn was
+              -- executed and outlives it.
               AND (
                   event.payload ->> 'kind' <> 'conversation_offloading'
                   OR newest_turn.state IN ('requested', 'running')
@@ -418,9 +409,7 @@ async def load_snapshot(thread_id: str, *, limit: int | None = None) -> Transcri
         thread_id=thread["thread_id"],
         version=thread["version"],
         thread=ThreadView(
-            kind=thread["kind"],
             status=thread["status"],
-            active_run_id=thread["active_run_id"],
             title=thread["title"],
             created_at=thread["created_at"],
             updated_at=thread["updated_at"],
@@ -497,16 +486,15 @@ async def load_events(thread_id: str, *, after: int, limit: int) -> list[StoredE
     return [StoredEvent.model_validate(dict(row)) for row in rows]
 
 
-async def load_tool_output(thread_id: str, tool_call_id: str) -> ToolOutput | None:
+async def load_tool_output(thread_id: str, tool_call_id: str) -> str | None:
+    """The stored output of one tool call, or ``None`` when there is no such call."""
     async with postgres.snapshot_transaction() as conn:
         row = await _row(
             conn,
             """
-            SELECT output, output_truncated FROM thread_tool_call
+            SELECT output FROM thread_tool_call
             WHERE thread_id = :thread_id AND tool_call_id = :tool_call_id
             """,
             {"thread_id": thread_id, "tool_call_id": tool_call_id},
         )
-    if row is None:
-        return None
-    return ToolOutput(output=row["output"] or "", truncated=bool(row["output_truncated"]))
+    return None if row is None else row["output"] or ""

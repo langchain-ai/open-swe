@@ -61,8 +61,6 @@ export interface TranscriptMessageState {
   reasoning: string
   namespace: Namespace
   images: ReadonlyArray<TranscriptImage>
-  /** Token accounting for an AI message, when the provider reported any. */
-  usage: TranscriptUsage | null
   createdAt: string
 }
 
@@ -89,11 +87,8 @@ export type TurnItem =
 
 export interface TranscriptTurnState {
   turnId: string
-  runId: string | null
   state: TurnState
   requestedAt: string
-  startedAt: string | null
-  completedAt: string | null
   error: string | null
   items: ReadonlyArray<TurnItem>
   /** Bumped whenever this turn or anything it holds changed; the memo key. */
@@ -111,7 +106,6 @@ export interface TranscriptState {
   /** Version of the last applied event; the resume point for a subscription. */
   version: number
   status: TranscriptThreadStatus
-  activeRunId: string | null
   turnOrder: ReadonlyArray<string>
   turns: Readonly<Record<string, TranscriptTurnState>>
   messages: Readonly<Record<string, TranscriptMessageState>>
@@ -167,6 +161,21 @@ function humanTexts(
 }
 
 /**
+ * The entities after one human message was written. Only that message's own
+ * text can declare one, so a write that declares nothing keeps the very same
+ * Map: every per-turn render cache keys on it, and a fresh Map for an
+ * unchanged set would rebuild the whole transcript.
+ */
+function entitiesWith(
+  previous: ReadonlyMap<string, StructuredEntity>,
+  text: string
+): ReadonlyMap<string, StructuredEntity> {
+  const declared = collectStructuredEntities([text])
+  if (!declared.size) return previous
+  return new Map([...previous, ...declared])
+}
+
+/**
  * Context size as the composer's meter reads it: what the newest AI message's
  * usage says, which is the same rule {@link latestContextTokens} applies to the
  * SDK's messages.
@@ -191,7 +200,6 @@ function messageState(row: TranscriptMessageRow): TranscriptMessageState {
     reasoning: row.reasoning,
     namespace: row.namespace,
     images: row.images ?? [],
-    usage: row.usage ?? null,
     createdAt: row.created_at,
   }
 }
@@ -236,11 +244,8 @@ function turnStates(
   for (const row of rows) {
     turns[row.turn_id] = {
       turnId: row.turn_id,
-      runId: row.run_id,
       state: row.state,
       requestedAt: row.requested_at,
-      startedAt: row.started_at,
-      completedAt: row.completed_at,
       error: row.error,
       items: orderItems(
         Object.values(messages).filter(
@@ -287,7 +292,6 @@ export function fromSnapshot(snapshot: TranscriptSnapshot): TranscriptState {
     threadId: snapshot.thread_id,
     version: snapshot.version,
     status: snapshot.thread.status,
-    activeRunId: snapshot.thread.active_run_id,
     turnOrder: sortedTurnOrder(turns),
     turns,
     messages,
@@ -314,7 +318,7 @@ export function applySnapshot(
   snapshot: TranscriptSnapshot
 ): TranscriptState {
   const fresh = fromSnapshot(snapshot)
-  if (!state || state.threadId !== snapshot.thread_id) return fresh
+  if (!state) return fresh
   const messages = { ...state.messages, ...fresh.messages }
   const toolCalls = { ...state.toolCalls, ...fresh.toolCalls }
   const turns = { ...state.turns, ...fresh.turns }
@@ -345,7 +349,6 @@ export function prependTurns(
   state: TranscriptState,
   page: TranscriptTurnPage
 ): TranscriptState {
-  if (page.thread_id !== state.threadId) return state
   const messages = { ...indexMessages(page.messages), ...state.messages }
   const toolCalls = { ...indexToolCalls(page.tool_calls), ...state.toolCalls }
   const turns = {
@@ -369,84 +372,87 @@ interface Draft {
   touched: Set<string>
 }
 
-function turnOf(draft: Draft, turnId: string, occurredAt: string): void {
-  if (draft.state.turns[turnId]) return
-  // A turn we never saw requested (a run started elsewhere, or a replay that
-  // began mid-turn). Its events still belong somewhere in order.
+/**
+ * The turn `turn.started` opens. Only that event may fabricate one: a run
+ * started elsewhere, or a replay that began mid-turn, still belongs somewhere
+ * in order. Every other turn-scoped event concerns a turn the client has.
+ */
+function startedTurn(
+  draft: Draft,
+  turnId: string,
+  occurredAt: string
+): TranscriptTurnState {
+  const existing = draft.state.turns[turnId]
+  if (existing) return existing
+  const turn: TranscriptTurnState = {
+    turnId,
+    state: "running",
+    requestedAt: occurredAt,
+    error: null,
+    items: [],
+    revision: 0,
+  }
   draft.state = {
     ...draft.state,
     turnOrder: [...draft.state.turnOrder, turnId],
-    turns: {
-      ...draft.state.turns,
-      [turnId]: {
-        turnId,
-        runId: null,
-        state: "running",
-        requestedAt: occurredAt,
-        startedAt: occurredAt,
-        completedAt: null,
-        error: null,
-        items: [],
-        revision: 0,
-      },
-    },
+    turns: { ...draft.state.turns, [turnId]: turn },
   }
   draft.touched.add(turnId)
+  return turn
 }
 
 function patchTurn(
   draft: Draft,
-  turnId: string,
+  turn: TranscriptTurnState,
   patch: Partial<Omit<TranscriptTurnState, "turnId" | "revision">>
 ): void {
-  const turn = draft.state.turns[turnId]
-  if (!turn) return
   draft.state = {
     ...draft.state,
-    turns: { ...draft.state.turns, [turnId]: { ...turn, ...patch } },
+    turns: { ...draft.state.turns, [turn.turnId]: { ...turn, ...patch } },
   }
-  draft.touched.add(turnId)
+  draft.touched.add(turn.turnId)
 }
 
-function addItem(draft: Draft, turnId: string, item: TurnItem): void {
-  const turn = draft.state.turns[turnId]
-  if (!turn) return
+function addItem(
+  draft: Draft,
+  turn: TranscriptTurnState,
+  item: TurnItem
+): void {
   if (turn.items.some((held) => held.kind === item.kind && held.id === item.id))
     return
-  patchTurn(draft, turnId, { items: [...turn.items, item] })
+  patchTurn(draft, turn, { items: [...turn.items, item] })
 }
 
-function putMessage(draft: Draft, next: TranscriptMessageState): void {
-  const previous = draft.state.messages[next.messageId]
-  // The server's upsert keys on (thread_id, message_id) and leaves `turn_id`
-  // as first written, so writing a message twice — the same human message as
-  // the turn opens and again as the graph receives it — updates one row in one
-  // turn rather than adding a second.
-  const message =
-    previous && previous.turnId !== next.turnId
-      ? { ...next, turnId: previous.turnId }
-      : next
+function putMessage(
+  draft: Draft,
+  turn: TranscriptTurnState,
+  message: TranscriptMessageState
+): void {
   draft.state = {
     ...draft.state,
     messages: { ...draft.state.messages, [message.messageId]: message },
   }
-  draft.touched.add(message.turnId)
-  addItem(draft, message.turnId, { kind: "message", id: message.messageId })
+  draft.touched.add(turn.turnId)
+  addItem(draft, turn, { kind: "message", id: message.messageId })
   if (message.role === "human") {
     draft.state = {
       ...draft.state,
-      entities: collectStructuredEntities(humanTexts(draft.state.messages)),
+      entities: entitiesWith(draft.state.entities, message.text),
     }
   }
 }
 
-function putToolCall(draft: Draft, call: TranscriptToolCallState): void {
+function putToolCall(
+  draft: Draft,
+  turn: TranscriptTurnState,
+  call: TranscriptToolCallState
+): void {
   draft.state = {
     ...draft.state,
     toolCalls: { ...draft.state.toolCalls, [call.toolCallId]: call },
   }
-  draft.touched.add(call.turnId)
-  addItem(draft, call.turnId, { kind: "tool", id: call.toolCallId })
+  draft.touched.add(turn.turnId)
+  addItem(draft, turn, { kind: "tool", id: call.toolCallId })
 }
 
 /**
@@ -485,44 +491,31 @@ export function applyEvent(
   const at = event.occurred_at
 
   switch (event.event_type) {
-    case "thread.meta_updated": {
-      const patch = event.payload.patch
-      draft.state = {
-        ...draft.state,
-        ...(patch.status ? { status: patch.status } : {}),
-        // Every key is on the wire whether or not the patch set it, so a null
-        // is "unchanged"; the turn events are what clear a finished run.
-        ...(patch.active_run_id ? { activeRunId: patch.active_run_id } : {}),
-      }
-      break
-    }
     case "turn.requested": {
       const payload = event.payload
-      draft.state = {
-        ...draft.state,
-        turnOrder: draft.state.turns[payload.turn_id]
-          ? draft.state.turnOrder
-          : [...draft.state.turnOrder, payload.turn_id],
-        turns: {
-          ...draft.state.turns,
-          [payload.turn_id]: {
-            turnId: payload.turn_id,
-            runId: event.run_id,
-            state: "requested",
-            requestedAt: at,
-            startedAt: null,
-            completedAt: null,
-            error: null,
-            items: [],
-            revision: 0,
-          },
-        },
+      // The server flips the thread to running as it accepts the command, so
+      // the composer reads as busy without waiting for `turn.started`.
+      let turn = draft.state.turns[payload.turn_id]
+      if (!turn) {
+        turn = {
+          turnId: payload.turn_id,
+          state: "requested",
+          requestedAt: at,
+          error: null,
+          items: [],
+          revision: 0,
+        }
+        draft.state = {
+          ...draft.state,
+          turnOrder: [...draft.state.turnOrder, payload.turn_id],
+          turns: { ...draft.state.turns, [payload.turn_id]: turn },
+        }
+        draft.touched.add(payload.turn_id)
       }
-      draft.touched.add(payload.turn_id)
       // Notices describe the newest turn, which this event opens; the snapshot
       // serves them the same way, so a reload never resurrects an older turn's.
-      draft.state = { ...draft.state, notices: {} }
-      putMessage(draft, {
+      draft.state = { ...draft.state, status: "running", notices: {} }
+      putMessage(draft, turn, {
         messageId: payload.message_id,
         turnId: payload.turn_id,
         role: "human",
@@ -530,65 +523,51 @@ export function applyEvent(
         reasoning: "",
         namespace: [],
         images: payload.images,
-        usage: null,
         createdAt: at,
       })
       break
     }
     case "turn.started": {
       const payload = event.payload
-      turnOf(draft, payload.turn_id, at)
-      patchTurn(draft, payload.turn_id, {
+      patchTurn(draft, startedTurn(draft, payload.turn_id, at), {
         state: "running",
-        runId: payload.run_id,
-        startedAt: at,
       })
-      draft.state = {
-        ...draft.state,
-        status: "running",
-        activeRunId: payload.run_id,
-      }
+      draft.state = { ...draft.state, status: "running" }
       break
     }
     case "turn.completed": {
       const payload = event.payload
-      turnOf(draft, payload.turn_id, at)
-      patchTurn(draft, payload.turn_id, {
-        state: "completed",
-        completedAt: at,
-      })
+      const turn = draft.state.turns[payload.turn_id]
+      if (!turn) break
+      patchTurn(draft, turn, { state: "completed" })
       dropTransientNotices(draft, payload.turn_id)
-      draft.state = { ...draft.state, status: "idle", activeRunId: null }
+      draft.state = { ...draft.state, status: "idle" }
       break
     }
     case "turn.failed": {
       const payload = event.payload
-      turnOf(draft, payload.turn_id, at)
-      patchTurn(draft, payload.turn_id, {
-        state: "failed",
-        completedAt: at,
-        error: payload.error,
-      })
+      const turn = draft.state.turns[payload.turn_id]
+      if (!turn) break
+      patchTurn(draft, turn, { state: "failed", error: payload.error })
       dropTransientNotices(draft, payload.turn_id)
-      draft.state = { ...draft.state, status: "error", activeRunId: null }
+      draft.state = { ...draft.state, status: "error" }
       break
     }
     case "turn.interrupted": {
       const payload = event.payload
-      turnOf(draft, payload.turn_id, at)
-      patchTurn(draft, payload.turn_id, {
-        state: "interrupted",
-        completedAt: at,
-      })
+      const turn = draft.state.turns[payload.turn_id]
+      if (!turn) break
+      patchTurn(draft, turn, { state: "interrupted" })
       dropTransientNotices(draft, payload.turn_id)
-      draft.state = { ...draft.state, status: "idle", activeRunId: null }
+      draft.state = { ...draft.state, status: "idle" }
       break
     }
     case "message.appended": {
       const payload = event.payload
-      turnOf(draft, payload.turn_id, at)
+      const turn = draft.state.turns[payload.turn_id]
+      if (!turn) break
       const existing = draft.state.messages[payload.message_id]
-      putMessage(draft, {
+      putMessage(draft, turn, {
         messageId: payload.message_id,
         turnId: payload.turn_id,
         role: existing?.role ?? "ai",
@@ -596,16 +575,16 @@ export function applyEvent(
         reasoning: (existing?.reasoning ?? "") + (payload.reasoning ?? ""),
         namespace: payload.namespace,
         images: existing?.images ?? [],
-        usage: existing?.usage ?? null,
         createdAt: existing?.createdAt ?? at,
       })
       break
     }
     case "message.completed": {
       const payload = event.payload
-      turnOf(draft, payload.turn_id, at)
+      const turn = draft.state.turns[payload.turn_id]
+      if (!turn) break
       const existing = draft.state.messages[payload.message_id]
-      putMessage(draft, {
+      putMessage(draft, turn, {
         messageId: payload.message_id,
         turnId: payload.turn_id,
         role: payload.role,
@@ -613,7 +592,6 @@ export function applyEvent(
         reasoning: payload.reasoning,
         namespace: payload.namespace,
         images: payload.images ?? existing?.images ?? [],
-        usage: payload.usage ?? existing?.usage ?? null,
         createdAt: payload.created_at || existing?.createdAt || at,
       })
       if (payload.role === "ai") {
@@ -628,8 +606,9 @@ export function applyEvent(
     }
     case "tool.started": {
       const payload = event.payload
-      turnOf(draft, payload.turn_id, at)
-      putToolCall(draft, {
+      const turn = draft.state.turns[payload.turn_id]
+      if (!turn) break
+      putToolCall(draft, turn, {
         toolCallId: payload.tool_call_id,
         turnId: payload.turn_id,
         name: payload.name,
@@ -645,20 +624,16 @@ export function applyEvent(
     }
     case "tool.completed": {
       const payload = event.payload
-      turnOf(draft, payload.turn_id, at)
+      const turn = draft.state.turns[payload.turn_id]
       const existing = draft.state.toolCalls[payload.tool_call_id]
-      putToolCall(draft, {
-        toolCallId: payload.tool_call_id,
-        turnId: payload.turn_id,
-        name: existing?.name ?? payload.tool_call_id,
-        input: existing?.input ?? {},
+      if (!turn || !existing) break
+      putToolCall(draft, turn, {
+        ...existing,
         status: payload.status,
-        output: payload.output,
-        // The event carries the output the server kept, truncation aside.
-        outputComplete: true,
-        hasOutput: payload.output.length > 0,
-        namespace: payload.namespace,
-        startedAt: existing?.startedAt ?? at,
+        output: payload.output_preview,
+        // Anything the preview cut off is fetched from the endpoint on expand.
+        outputComplete: !payload.output_truncated,
+        hasOutput: payload.has_output,
       })
       break
     }
@@ -971,7 +946,18 @@ function turnMessages(
   return out
 }
 
-const messagesCache = new WeakMap<TranscriptState, Array<Message>>()
+interface MessagesCacheEntry {
+  turnOrder: ReadonlyArray<string>
+  entities: ReadonlyMap<string, StructuredEntity>
+  messages: Array<Message>
+}
+
+// Keyed on the turn table rather than the state: a state whose version alone
+// advanced renders identically.
+const messagesCache = new WeakMap<
+  Readonly<Record<string, TranscriptTurnState>>,
+  MessagesCacheEntry
+>()
 
 /**
  * The whole transcript as UI rows. Turns that did not change keep their exact
@@ -979,13 +965,23 @@ const messagesCache = new WeakMap<TranscriptState, Array<Message>>()
  * alone.
  */
 export function toMessages(state: TranscriptState): Array<Message> {
-  const cached = messagesCache.get(state)
-  if (cached) return cached
+  const cached = messagesCache.get(state.turns)
+  if (
+    cached &&
+    cached.turnOrder === state.turnOrder &&
+    cached.entities === state.entities
+  ) {
+    return cached.messages
+  }
   const messages: Array<Message> = []
   for (const turnId of state.turnOrder) {
     const turn = state.turns[turnId]
     if (turn) messages.push(...turnMessages(state, turn))
   }
-  messagesCache.set(state, messages)
+  messagesCache.set(state.turns, {
+    turnOrder: state.turnOrder,
+    entities: state.entities,
+    messages,
+  })
   return messages
 }

@@ -21,7 +21,8 @@ logger = logging.getLogger(__name__)
 MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024
 """Matches the per-image cap the dashboard command path already enforces."""
 
-ALLOWED_MIME_PREFIX = "image/"
+ALLOWED_MIME_TYPES = frozenset({"image/png", "image/jpeg", "image/gif", "image/webp"})
+"""The bytes are served back with their stored type, so the list is exact."""
 
 
 class UnsupportedAttachment(ValueError):
@@ -40,7 +41,7 @@ class PendingAttachment:
     data: bytes
 
     def __post_init__(self) -> None:
-        if not self.mime_type.startswith(ALLOWED_MIME_PREFIX):
+        if self.mime_type not in ALLOWED_MIME_TYPES:
             raise UnsupportedAttachment(f"unsupported attachment type: {self.mime_type}")
         if len(self.data) > MAX_ATTACHMENT_BYTES:
             raise UnsupportedAttachment("attachment exceeds the 10MB limit")

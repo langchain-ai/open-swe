@@ -9,14 +9,17 @@ canonical text so a fragment that never arrived heals itself.
 """
 
 import json
+import logging
 from datetime import datetime
 from uuid import UUID
 
 from pydantic import BaseModel
 from sqlalchemy import ARRAY, Text, TextClause, bindparam, text
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from agent.transcript.events import (
+    TOOL_OUTPUT_PREVIEW_CHARS,
     MessageAppended,
     MessageCompleted,
     MessageImage,
@@ -33,8 +36,9 @@ from agent.transcript.events import (
     TurnStarted,
 )
 
+logger = logging.getLogger(__name__)
+
 MAX_TOOL_OUTPUT_CHARS = 256 * 1024
-TOOL_OUTPUT_PREVIEW_CHARS = 2000
 
 
 def _json(value: object) -> str | None:
@@ -69,14 +73,13 @@ async def ensure_thread_row(conn: AsyncConnection, thread_id: str, event: Transc
     await conn.execute(
         text(
             """
-            INSERT INTO thread (thread_id, kind, version, status, title, metadata)
-            VALUES (:thread_id, :kind, 0, 'idle', :title, CAST(:metadata AS jsonb))
+            INSERT INTO thread (thread_id, version, status, title, metadata)
+            VALUES (:thread_id, 0, 'idle', :title, CAST(:metadata AS jsonb))
             ON CONFLICT (thread_id) DO NOTHING
             """
         ),
         {
             "thread_id": thread_id,
-            "kind": event.kind,
             "title": event.title,
             "metadata": _json(event.metadata),
         },
@@ -91,6 +94,7 @@ async def apply(
     event: TranscriptEvent,
     run_id: str | None,
     occurred_at: datetime,
+    tool_output: str | None = None,
 ) -> None:
     """Project ``event`` onto the read tables.
 
@@ -119,7 +123,7 @@ async def apply(
         case ToolStarted():
             await _tool_started(conn, thread_id, version, event, occurred_at)
         case ToolCompleted():
-            await _tool_completed(conn, thread_id, version, event, occurred_at)
+            await _tool_completed(conn, thread_id, version, event, occurred_at, tool_output)
         case _:
             return
 
@@ -131,12 +135,6 @@ async def _meta_updated(conn: AsyncConnection, thread_id: str, event: ThreadMeta
     if patch.title is not None:
         assignments.append("title = :title")
         params["title"] = patch.title
-    if patch.status is not None:
-        assignments.append("status = :status")
-        params["status"] = patch.status
-    if "active_run_id" in patch.model_fields_set:
-        assignments.append("active_run_id = :active_run_id")
-        params["active_run_id"] = patch.active_run_id
     if patch.metadata is not None:
         assignments.append("metadata = metadata || CAST(:metadata AS jsonb)")
         params["metadata"] = _json(patch.metadata)
@@ -162,6 +160,17 @@ async def _turn_requested(
             """
         ),
         {"turn_id": event.turn_id, "thread_id": thread_id, "requested_at": occurred_at},
+    )
+    # The thread is busy from the moment a turn is asked for: the run that will
+    # serve it does not exist yet, and a reader must not see the thread idle.
+    await conn.execute(
+        text(
+            """
+            UPDATE thread SET status = 'running', updated_at = clock_timestamp()
+            WHERE thread_id = :thread_id
+            """
+        ),
+        {"thread_id": thread_id},
     )
     await conn.execute(
         _with_namespace(
@@ -218,12 +227,11 @@ async def _turn_started(
     await conn.execute(
         text(
             """
-            UPDATE thread
-            SET status = 'running', active_run_id = :run_id, updated_at = clock_timestamp()
+            UPDATE thread SET status = 'running', updated_at = clock_timestamp()
             WHERE thread_id = :thread_id
             """
         ),
-        {"thread_id": thread_id, "run_id": event.run_id},
+        {"thread_id": thread_id},
     )
 
 
@@ -276,10 +284,14 @@ async def _turn_checkpoint(
     A turn is checkpointed once, but two writers may try: the middleware at the
     end of the run and ``agent.transcript.turns`` when the run died without it.
     The row keeps whichever attempt actually produced a commit.
+
+    ``checkpoint_turn_count`` is read before the append takes the thread's lock,
+    so a turn settled concurrently can have taken the number already. The
+    ordinal is then re-read under the lock; the ref still names the commit that
+    was actually written, so only the number moves.
     """
-    await conn.execute(
-        text(
-            """
+    statement = text(
+        """
             INSERT INTO thread_turn_checkpoint (
                 thread_id, turn_id, checkpoint_turn_count, checkpoint_ref, commit,
                 status, files, assistant_message_id, error, completed_at
@@ -301,20 +313,40 @@ async def _turn_checkpoint(
                 completed_at = EXCLUDED.completed_at
             WHERE thread_turn_checkpoint.commit IS NULL
             """
-        ),
-        {
-            "thread_id": thread_id,
-            "turn_id": event.turn_id,
-            "checkpoint_turn_count": event.checkpoint_turn_count,
-            "checkpoint_ref": event.checkpoint_ref,
-            "commit": event.commit,
-            "status": event.status,
-            "files": json.dumps([file.model_dump(mode="json") for file in event.files]),
-            "assistant_message_id": event.assistant_message_id,
-            "error": event.error,
-            "completed_at": occurred_at,
-        },
     )
+    parameters: dict[str, object] = {
+        "thread_id": thread_id,
+        "turn_id": event.turn_id,
+        "checkpoint_turn_count": event.checkpoint_turn_count,
+        "checkpoint_ref": event.checkpoint_ref,
+        "commit": event.commit,
+        "status": event.status,
+        "files": json.dumps([file.model_dump(mode="json") for file in event.files]),
+        "assistant_message_id": event.assistant_message_id,
+        "error": event.error,
+        "completed_at": occurred_at,
+    }
+    try:
+        async with conn.begin_nested():
+            await conn.execute(statement, parameters)
+        return
+    except IntegrityError:
+        logger.warning(
+            "Renumbering a turn checkpoint whose ordinal was taken",
+            exc_info=True,
+            extra={"transcript": {"thread_id": thread_id, "turn_id": str(event.turn_id)}},
+        )
+    result = await conn.execute(
+        text(
+            """
+            SELECT COALESCE(max(checkpoint_turn_count), 0) + 1
+            FROM thread_turn_checkpoint WHERE thread_id = :thread_id
+            """
+        ),
+        {"thread_id": thread_id},
+    )
+    parameters["checkpoint_turn_count"] = result.scalar_one()
+    await conn.execute(statement, parameters)
 
 
 async def _turn_ended(
@@ -354,8 +386,7 @@ async def _settle_thread(conn: AsyncConnection, thread_id: str, *, status: str) 
     await conn.execute(
         text(
             """
-            UPDATE thread
-            SET status = :status, active_run_id = NULL, updated_at = clock_timestamp()
+            UPDATE thread SET status = :status, updated_at = clock_timestamp()
             WHERE thread_id = :thread_id
             """
         ),
@@ -517,9 +548,11 @@ async def _tool_completed(
     version: int,
     event: ToolCompleted,
     occurred_at: datetime,
+    tool_output: str | None,
 ) -> None:
-    output = event.output[:MAX_TOOL_OUTPUT_CHARS]
-    truncated = event.output_truncated or len(output) < len(event.output)
+    full = tool_output or ""
+    output = full[:MAX_TOOL_OUTPUT_CHARS]
+    truncated = event.output_truncated or len(output) < len(full)
     await conn.execute(
         text(
             """

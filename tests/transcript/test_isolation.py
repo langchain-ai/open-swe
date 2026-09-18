@@ -13,7 +13,7 @@ from sqlalchemy import text
 
 from agent.database import postgres
 from agent.transcript.attachments import PendingAttachment
-from agent.transcript.engine import Command, append, delete_transcript, has_transcript
+from agent.transcript.engine import Command, append, delete_transcript
 from agent.transcript.events import (
     MessageImage,
     MessageSender,
@@ -130,8 +130,10 @@ async def test_a_repeated_tool_call_id_cannot_reach_another_thread(registry_db: 
                         turn_id=turn_id,
                         tool_call_id="call_abc",
                         status="completed",
-                        output=output,
+                        output_preview=output,
+                        has_output=True,
                     ),
+                    tool_output=output,
                     actor_kind="agent",
                     turn_id=turn_id,
                 ),
@@ -173,7 +175,6 @@ async def test_deleting_a_transcript_removes_everything_it_owned(registry_db: No
 
     assert await delete_transcript(thread_id)
 
-    assert not await has_transcript(thread_id)
     assert await load_snapshot(thread_id) is None
     assert await load_access(thread_id) is None
     async with postgres.read_only_transaction() as conn:
@@ -190,7 +191,7 @@ async def test_deleting_a_transcript_removes_everything_it_owned(registry_db: No
     # The receipts are keyed by command id alone, so a thread recreated under
     # the same id must not be deduplicated out of existence.
     await _create(thread_id)
-    assert await has_transcript(thread_id)
+    assert await load_snapshot(thread_id) is not None
 
 
 async def test_a_visibility_flip_reaches_the_transcript_read_path(registry_db: None) -> None:

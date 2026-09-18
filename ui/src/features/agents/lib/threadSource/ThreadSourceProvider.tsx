@@ -1,12 +1,5 @@
-import {
-  createContext,
-  useCallback,
-  useContext,
-  useEffect,
-  useState,
-} from "react"
+import { createContext, useContext } from "react"
 
-import { AgentsApiError } from "@/features/agents/lib/api"
 import { useAgentStreamSource } from "./useAgentStreamSource"
 import { useTranscriptSource } from "./useTranscriptSource"
 import type { ReactNode } from "react"
@@ -46,34 +39,14 @@ function StreamSource({
   )
 }
 
-/** The event log has no transcript for a thread whose metadata says it does. */
-function isTranscriptUnavailable(error: unknown): boolean {
-  return (
-    error instanceof AgentsApiError &&
-    error.status === 404 &&
-    error.message === "transcript_unavailable"
-  )
-}
-
 function TranscriptSource({
   threadId,
   children,
-  onUnavailable,
 }: {
   threadId: string
   children: ReactNode
-  onUnavailable: () => void
 }) {
   const source = useTranscriptSource(threadId)
-  useEffect(() => {
-    let active = true
-    source.hydration.catch((error: unknown) => {
-      if (active && isTranscriptUnavailable(error)) onUnavailable()
-    })
-    return () => {
-      active = false
-    }
-  }, [onUnavailable, source.hydration])
   return (
     <ThreadSourceContext.Provider value={source}>
       {children}
@@ -97,15 +70,8 @@ export function ThreadSourceProvider({
   transcript: boolean
   children: ReactNode
 }) {
-  // Metadata can claim a transcript the log does not hold (a row deleted, or
-  // a thread stamped before its first event landed). Such a thread reads
-  // LangGraph state like any thread from before the event log.
-  const [unavailable, setUnavailable] = useState(false)
-  const fallBack = useCallback(() => setUnavailable(true), [])
-  return transcript && !unavailable ? (
-    <TranscriptSource threadId={threadId} onUnavailable={fallBack}>
-      {children}
-    </TranscriptSource>
+  return transcript ? (
+    <TranscriptSource threadId={threadId}>{children}</TranscriptSource>
   ) : (
     <StreamSource threadId={threadId}>{children}</StreamSource>
   )

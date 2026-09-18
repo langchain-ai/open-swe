@@ -88,7 +88,7 @@ function snapshot(
   return {
     thread_id: "thread-1",
     version: 10,
-    thread: { status: "idle", active_run_id: null },
+    thread: { status: "idle" },
     turns: [],
     messages: [],
     tool_calls: [],
@@ -215,7 +215,6 @@ function appended(
   fragment: { text?: string; reasoning?: string }
 ): StoredEvent {
   return {
-    thread_id: "thread-1",
     version,
     run_id: "run-turn-2",
     occurred_at: "2026-01-01T00:02:00Z",
@@ -287,6 +286,55 @@ describe("transcript events", () => {
     // The changed turn's human message survives too; only its agent row is rebuilt.
     expect(after[2]).toBe(before[2])
     expect(after[3]).not.toBe(before[3])
+  })
+
+  it("keeps earlier turns' messages identical when a new turn streams", () => {
+    const base = fromSnapshot(twoTurnSnapshot())
+    const before = toMessages(base)
+    const opened = applyEvent(base, {
+      ...appended(11, {}),
+      event_type: "turn.requested",
+      payload: {
+        turn_id: "turn-3",
+        message_id: "human-3",
+        text: "third ask",
+        images: [],
+      },
+    })
+    const after = toMessages(
+      applyEvent(opened, {
+        version: 12,
+        run_id: "run-turn-3",
+        occurred_at: "2026-01-01T00:03:00Z",
+        event_type: "message.appended",
+        payload: {
+          turn_id: "turn-3",
+          message_id: "ai-4",
+          namespace: [],
+          text: "working",
+          reasoning: null,
+        },
+      })
+    )
+
+    expect(after.slice(0, 4)).toEqual(before)
+    for (const [index, entry] of before.entries())
+      expect(after[index]).toBe(entry)
+  })
+
+  it("reports the thread as running as soon as a turn is requested", () => {
+    const requested = applyEvent(fromSnapshot(twoTurnSnapshot()), {
+      ...appended(11, {}),
+      event_type: "turn.requested",
+      payload: {
+        turn_id: "turn-3",
+        message_id: "human-3",
+        text: "third ask",
+        images: [],
+      },
+    })
+
+    expect(requested.status).toBe("running")
   })
 })
 
@@ -429,7 +477,7 @@ describe("message images", () => {
     ])
   })
 
-  it("keeps an image-only human message, and its images, across a second write", () => {
+  it("keeps an image-only human message across the rewrite that settles it", () => {
     const base = fromSnapshot(
       snapshot({
         turns: [turn("turn-1", "2026-01-01T00:00:00Z", "running")],
@@ -451,12 +499,11 @@ describe("message images", () => {
 
     expect(imagesOf(toMessages(requested)[0])).toHaveLength(1)
 
-    // The same human message, written again as it reaches the graph — under
-    // another turn, which must not give it a second row.
+    // The same human message, written again as it reaches the graph.
     const rewritten = applyEvent(
       requested,
       completed(12, {
-        turn_id: "turn-2",
+        turn_id: "turn-1",
         message_id: "human-1",
         role: "human",
         text: "",

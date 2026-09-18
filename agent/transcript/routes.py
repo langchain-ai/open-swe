@@ -8,7 +8,6 @@ to the old read path.
 
 import asyncio
 import contextlib
-import json
 import logging
 import re
 from collections.abc import AsyncIterator
@@ -22,7 +21,7 @@ from fastapi.responses import JSONResponse, Response, StreamingResponse
 from agent.dashboard.deps import SESSION_DEP
 
 # The ``thread.metadata`` mirror exists so this predicate is reused unchanged.
-from agent.threads.access import _assert_thread_readable  # noqa: PLC2701
+from agent.threads.summary import assert_thread_readable
 from agent.transcript import attachments, listener
 from agent.transcript.cursor import decode_turn_cursor
 from agent.transcript.snapshot import (
@@ -58,7 +57,7 @@ async def _readable_transcript(thread_id: str, session: dict[str, Any]) -> None:
     metadata = await load_access(thread_id)
     if metadata is None:
         raise HTTPException(404, "transcript_unavailable")
-    _assert_thread_readable(metadata, session["sub"], session.get("email"))
+    assert_thread_readable(metadata, session["sub"], session.get("email"))
 
 
 def _frame(event: str, data: str) -> str:
@@ -122,12 +121,12 @@ async def api_get_thread_tool_output(
     thread_id: str,
     tool_call_id: str,
     session: dict[str, Any] = SESSION_DEP,
-) -> dict[str, str | bool]:
+) -> dict[str, str]:
     await _readable_transcript(thread_id, session)
     output = await load_tool_output(thread_id, tool_call_id)
     if output is None:
         raise HTTPException(404, "tool call not found")
-    return {"output": output.output, "truncated": output.truncated}
+    return {"output": output}
 
 
 def _content_disposition(file_name: str | None) -> str:
@@ -165,12 +164,12 @@ async def _stream(thread_id: str, after: int) -> AsyncIterator[str]:
     async with aclosing(listener.subscribe(thread_id)) as notifications:
         replayed = await _replay(thread_id, after)
         if replayed is None:
-            yield _frame("deleted", json.dumps({"thread_id": thread_id}))
+            yield _frame("deleted", "{}")
             return
         last_sent, replay = replayed
         for chunk in replay:
             yield chunk
-        yield _frame("synchronized", json.dumps({"version": last_sent}))
+        yield _frame("synchronized", "{}")
         pending: asyncio.Task[int] | None = None
         try:
             while True:
@@ -186,7 +185,7 @@ async def _stream(thread_id: str, after: int) -> AsyncIterator[str]:
                 except StopAsyncIteration:
                     return
                 if version == listener.DELETED_VERSION:
-                    yield _frame("deleted", json.dumps({"thread_id": thread_id}))
+                    yield _frame("deleted", "{}")
                     return
                 if version <= last_sent:
                     continue
@@ -219,9 +218,8 @@ async def _next_version(notifications: AsyncIterator[int]) -> int:
 async def _replay(thread_id: str, after: int) -> tuple[int, list[str]] | None:
     """The frames that carry a subscriber from ``after`` to the head of the log.
 
-    A cursor that is too far behind — or ahead of the head, which is what a
-    reader of a recreated thread looks like — gets a snapshot instead of a
-    replay it would spend longer applying than rendering.
+    A cursor that is too far behind gets a snapshot instead of a replay it
+    would spend longer applying than rendering.
 
     That ``snapshot`` frame carries the same newest window the snapshot
     endpoint serves, not the whole thread. A client merges it into what it
@@ -229,17 +227,19 @@ async def _replay(thread_id: str, after: int) -> tuple[int, list[str]] | None:
     and is immutable, so older pages it already loaded stay correct and stay
     loaded.
 
-    ``None`` means the transcript is gone: the thread was deleted between the
-    authorization read and this one, and the stream ends instead of waiting.
+    ``None`` means the transcript the subscriber was reading is gone: it was
+    deleted between the authorization read and this one, or the cursor is past
+    the head because the thread was recreated under the same id. Either way the
+    stream ends instead of waiting.
     Each page is read in its own transaction, which is safe because versions
     are assigned under a per-thread advisory lock and therefore commit in
     order: the cursor only ever advances to a version actually read, so the
     live loop resumes from it without a gap or a repeat.
     """
     gap = await measure_gap(thread_id, after)
-    if gap.missing:
+    if gap.missing or gap.recreated(after):
         return None
-    if gap.needs_snapshot(after):
+    if gap.needs_snapshot:
         snapshot = await load_snapshot(thread_id)
         if snapshot is None:
             return None

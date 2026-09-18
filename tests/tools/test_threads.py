@@ -962,7 +962,7 @@ async def test_manage_thread_starts_idle_message_with_fixed_command(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     proxy = AsyncMock(
-        return_value=(200, b'{"type":"success","run_id":"run-1"}', "application/json", {})
+        return_value=(200, b'{"type":"success","run_id":"run-1"}', "application/json")
     )
     monkeypatch.setattr(threads_tool, "_actor", AsyncMock(return_value=_actor()))
     monkeypatch.setattr(

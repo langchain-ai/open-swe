@@ -16,7 +16,6 @@ Capture is observability. Every failure is recorded as the checkpoint's own
 """
 
 import base64
-import binascii
 import logging
 import re
 import shlex
@@ -137,7 +136,7 @@ def _field(output: str, key: str) -> str:
                 return ""
             try:
                 return base64.b64decode(encoded).decode("utf-8", errors="replace")
-            except binascii.Error, ValueError:
+            except ValueError:
                 logger.warning("Undecodable turn checkpoint diff field", extra={"field": key})
                 return ""
     return ""

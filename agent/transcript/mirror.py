@@ -19,7 +19,7 @@ from pydantic import JsonValue
 from pydantic_core import PydanticSerializationError, to_jsonable_python
 
 from agent.database import postgres
-from agent.transcript.engine import Command, ThreadNotTranscribed, append, has_transcript
+from agent.transcript.engine import Command, ThreadNotTranscribed, append
 from agent.transcript.events import JsonObject, ThreadMetaPatch, ThreadMetaUpdated
 
 logger = logging.getLogger(__name__)
@@ -65,8 +65,6 @@ async def mirror_thread_metadata(thread_id: str, patch: Mapping[str, object]) ->
         return
     title = mirrored.get("title")
     try:
-        if not await has_transcript(thread_id):
-            return
         await append(
             thread_id,
             [

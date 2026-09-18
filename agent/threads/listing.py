@@ -11,7 +11,6 @@ from agent.threads.pins import list_thread_pin_ids, pin_thread, unpin_thread
 from agent.threads.summary import (
     _SURFACED_SOURCES,
     DASHBOARD_SOURCE,
-    _assert_thread_readable,
     _is_automation_thread,
     _is_thread_resolved,
     _metadata_repo,
@@ -23,6 +22,7 @@ from agent.threads.summary import (
     _thread_timestamp_ms,
     _thread_updated_ms,
     _ThreadSortBy,
+    assert_thread_readable,
     thread_is_readable,
     thread_is_unlisted,
     thread_source,
@@ -441,7 +441,7 @@ async def pin_dashboard_thread(thread_id: str, login: str) -> None:
         raise HTTPException(404, "thread not found") from exc
     if not isinstance(thread, Mapping):
         raise HTTPException(404, "thread not found")
-    _assert_thread_readable(_thread_metadata(thread), login)
+    assert_thread_readable(_thread_metadata(thread), login)
     await pin_thread(login, thread_id)
 
 

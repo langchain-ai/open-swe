@@ -69,25 +69,19 @@ def subscribe(thread_id: str) -> AsyncGenerator[int]:
 def publish(thread_id: str, version: int) -> None:
     """Hand ``version`` to this process's subscribers for ``thread_id``.
 
-    ``DELETED_VERSION`` is the one value a subscriber must not miss, so a full
-    queue is drained of a slot for it rather than dropping it.
+    A full queue gives up its oldest entry rather than this one. A subscriber
+    reads rows by version, so an older notification it never sees costs it
+    nothing — but the newest, and ``DELETED_VERSION`` above all, has to arrive
+    or it waits on an append that may never come.
     """
     for queue in tuple(_SUBSCRIBERS.get(thread_id, ())):
         try:
             queue.put_nowait(version)
         except asyncio.QueueFull:
-            if version == DELETED_VERSION:
-                with contextlib.suppress(asyncio.QueueEmpty):
-                    queue.get_nowait()
-                with contextlib.suppress(asyncio.QueueFull):
-                    queue.put_nowait(version)
-                continue
-            # The subscriber is behind; it reads rows by version, so the next
-            # notification it does receive carries it past everything it missed.
-            logger.warning(
-                "Dropped a transcript notification for a slow subscriber",
-                extra={"transcript": {"thread_id": thread_id, "version": version}},
-            )
+            with contextlib.suppress(asyncio.QueueEmpty):
+                queue.get_nowait()
+            with contextlib.suppress(asyncio.QueueFull):
+                queue.put_nowait(version)
 
 
 async def start() -> None:
