@@ -304,6 +304,7 @@ export type UsageLeaderboardSort =
   | "avg_thread_seconds"
   | "prs_opened"
   | "merged_prs"
+  | "merged_prs_per_thread"
   | "agent_loc"
 export type SortDirection = "asc" | "desc"
 
@@ -334,6 +335,7 @@ export interface UsageLeaderboardRow {
   agent_runs?: number
   prs_opened: number
   merged_prs: number
+  merged_prs_per_thread?: number
   agent_loc: number
   additions: number
   deletions: number
