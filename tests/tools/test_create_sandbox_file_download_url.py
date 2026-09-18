@@ -3,6 +3,9 @@ from types import SimpleNamespace
 from typing import Any
 
 import pytest
+from langchain_core.messages import AIMessage
+from langgraph.graph import END, START, MessagesState, StateGraph
+from langgraph.prebuilt import ToolNode
 
 download_tool = importlib.import_module("agent.tools.create_sandbox_file_download_url")
 
@@ -119,8 +122,9 @@ async def test_create_download_url_rejects_paths_outside_work_dir(
     backend = _Backend()
     client = _configure(monkeypatch, backend)
 
-    with pytest.raises(ValueError, match="must resolve within the sandbox work directory"):
-        await download_tool.create_sandbox_file_download_url(file_path)
+    result = await download_tool.create_sandbox_file_download_url(file_path)
+
+    assert "must resolve within the sandbox work directory" in result["error"]
 
     assert client.calls == []
 
@@ -131,10 +135,44 @@ async def test_create_download_url_rejects_symlink_outside_work_dir(
     backend = _Backend()
     client = _configure(monkeypatch, backend)
 
-    with pytest.raises(ValueError, match="must resolve within the sandbox work directory"):
-        await download_tool.create_sandbox_file_download_url("link-to-secret")
+    result = await download_tool.create_sandbox_file_download_url("link-to-secret")
+
+    assert "must resolve within the sandbox work directory" in result["error"]
 
     assert client.calls == []
+
+
+async def test_download_path_error_allows_tool_retry(monkeypatch: pytest.MonkeyPatch) -> None:
+    client = _configure(monkeypatch, _Backend())
+    graph = StateGraph(MessagesState)
+    graph.add_node("tools", ToolNode([download_tool.create_sandbox_file_download_url]))
+    graph.add_edge(START, "tools")
+    graph.add_edge("tools", END)
+    node = graph.compile()
+
+    async def invoke(path: str) -> str:
+        result = await node.ainvoke(
+            {
+                "messages": [
+                    AIMessage(
+                        content="",
+                        tool_calls=[
+                            {
+                                "name": "create_sandbox_file_download_url",
+                                "args": {"file_path": path},
+                                "id": "download",
+                            }
+                        ],
+                    )
+                ]
+            }
+        )
+        return result["messages"][-1].text
+
+    assert "must resolve within the sandbox work directory" in await invoke("/tmp/demo.png")
+    assert client.calls == []
+    assert "https://downloads.example/file" in await invoke("demo.png")
+    assert len(client.calls) == 1
 
 
 @pytest.mark.parametrize("expires_in_seconds", [0, -1])
@@ -145,7 +183,8 @@ async def test_create_download_url_rejects_invalid_expiry(
     backend = _Backend()
     _configure(monkeypatch, backend)
 
-    with pytest.raises(ValueError, match="must be positive"):
-        await download_tool.create_sandbox_file_download_url(
-            "result.bin", expires_in_seconds=expires_in_seconds
-        )
+    result = await download_tool.create_sandbox_file_download_url(
+        "result.bin", expires_in_seconds=expires_in_seconds
+    )
+
+    assert "must be positive" in result["error"]
