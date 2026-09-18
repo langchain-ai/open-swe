@@ -227,6 +227,29 @@ async def test_usage_sorting_happens_before_pagination(usage_db):
         )
 
 
+@pytest.mark.parametrize("direction", ["asc", "desc"])
+async def test_avg_invocations_per_thread_sort_handles_members_without_threads(
+    usage_db: UUID, direction: queries.SortDirection
+) -> None:
+    dense = await person("dense", display_name="Dense")
+    sparse = await person("sparse", display_name="Sparse")
+    threadless = await person("threadless", display_name="Threadless")
+    shared_thread = uuid4()
+    await run(dense, thread_id=shared_thread)
+    await run(dense, thread_id=shared_thread)
+    await run(sparse, thread_id=uuid4())
+    await run(threadless)
+    await pr(threadless, state="merged")
+
+    result = await report(sort="avg_invocations_per_thread", direction=direction)
+    averages = {row["user"]["name"]: row["avg_invocations_per_thread"] for row in result["rows"]}
+    assert averages == {"Dense": 2, "Sparse": 1, "Threadless": 0}
+    expected = ["Threadless", "Sparse", "Dense"]
+    if direction == "desc":
+        expected.reverse()
+    assert [row["user"]["name"] for row in result["rows"]] == expected
+
+
 async def test_user_sort_follows_disclosed_names_not_hidden_ones(usage_db):
     # Hidden members are ordered by the label the viewer sees, so their real names
     # cannot be inferred from where they land in the list.

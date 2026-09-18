@@ -21,6 +21,7 @@ UsageSort = Literal[
     "favorite_model",
     "invocations",
     "threads",
+    "avg_invocations_per_thread",
     "total_tokens",
     "total_cost_usd",
     "avg_invocation_seconds",
@@ -431,6 +432,9 @@ WITH runs AS (
           OR (:current_email <> '' AND lower(d.email) = :current_email)) IS TRUE AS is_current,
         COALESCE(r.invocations, 0) AS invocations,
         COALESCE(r.threads, 0) AS threads,
+        CASE WHEN COALESCE(r.threads, 0) > 0
+            THEN r.invocations::numeric / r.threads ELSE 0 END
+            AS avg_invocations_per_thread,
         COALESCE(r.total_tokens, 0) AS total_tokens,
         COALESCE(r.total_cost_usd, 0) AS total_cost_usd,
         COALESCE(r.invocations_without_cost, 0) AS invocations_without_cost,
@@ -484,6 +488,7 @@ WITH runs AS (
             WHEN 'rank' THEN rank::numeric
             WHEN 'invocations' THEN invocations::numeric
             WHEN 'threads' THEN threads::numeric
+            WHEN 'avg_invocations_per_thread' THEN avg_invocations_per_thread
             WHEN 'total_tokens' THEN total_tokens::numeric
             WHEN 'total_cost_usd' THEN total_cost_usd::numeric
             WHEN 'avg_invocation_seconds' THEN avg_invocation_seconds::numeric
@@ -517,6 +522,7 @@ WITH runs AS (
             'avg_thread_seconds', avg_thread_seconds,
             'avg_run_seconds', avg_invocation_seconds,
             'agent_runs', invocations, 'invocations', invocations, 'threads', threads,
+            'avg_invocations_per_thread', avg_invocations_per_thread,
             'prs_opened', prs_opened, 'merged_prs', merged_prs,
             'agent_loc', agent_loc, 'additions', additions, 'deletions', deletions,
             'total_tokens', total_tokens, 'total_cost_usd', total_cost_usd,

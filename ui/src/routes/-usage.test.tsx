@@ -838,6 +838,44 @@ const costRow: UsageLeaderboardRow = {
 }
 
 it.each([
+  [5, 2, "2.5"],
+  [0, 0, "—"],
+  [5, undefined, "—"],
+])(
+  "shows average invocations per thread for %s invocations and %s threads",
+  async (invocations, threads, expected) => {
+    vi.mocked(api.usageLeaderboard).mockResolvedValue({
+      ...emptyUsage,
+      total_members: 1,
+      rows: [{ ...costRow, invocations, threads }],
+    })
+    const client = mountReport()
+    const header = await screen.findByRole("columnheader", {
+      name: "Avg Invocations / Thread",
+    })
+    const table = header.closest("table")!
+    expect(within(table).getAllByRole("row")[1]?.children[4]?.textContent).toBe(
+      expected
+    )
+    fireEvent.click(within(header).getByRole("button"))
+    await waitFor(() =>
+      expect(api.usageLeaderboard).toHaveBeenLastCalledWith(
+        "30d",
+        10,
+        undefined,
+        "avg_invocations_per_thread",
+        "desc"
+      )
+    )
+    fireEvent.click(screen.getByRole("button", { name: "threads" }))
+    expect(within(table).getAllByRole("row")[1]?.children[4]?.textContent).toBe(
+      expected
+    )
+    client.clear()
+  }
+)
+
+it.each([
   ["Invocations", "Threads", "invocations", "threads"],
   [
     "Avg Invocation Duration",
@@ -1081,7 +1119,9 @@ it.each([
     })
     const client = mountReport()
     const row = (await screen.findByText("Cost Reader")).closest("tr")!
-    expect(within(row).getByText(amount)).toBeTruthy()
+    expect(
+      within(row.children[6] as HTMLElement).getByText(amount)
+    ).toBeTruthy()
     const indicator = within(row).queryByRole("button", {
       name: /Cost (unavailable|incomplete)/,
     })
