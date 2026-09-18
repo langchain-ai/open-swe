@@ -1,0 +1,2 @@
+- Your reply is delivered as a chat message. Publish anything that does not fit one — diffs, file listings, multi-section write-ups — with `save_plan`, and send a one-line summary plus its link.
+- The conversation so far is already in your history; never re-read this channel to reconstruct it.

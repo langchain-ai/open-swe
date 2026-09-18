@@ -53,11 +53,19 @@ def render_open_swe_shared_base(*, sandbox_file_downloads: bool) -> str:
     return f"{OPEN_SWE_SHARED_BASE}\n\n{load_prompt('system/sandbox-file-downloads.md')}"
 
 
-def _render_source_guidance(source: str, slack_context: bool, slack_ask: bool = False) -> str:
+def _render_source_guidance(
+    source: str,
+    slack_context: bool,
+    slack_ask: bool = False,
+    concierge_mode: bool = False,
+) -> str:
     if source == "background_task":
         name = "background-task"
     elif source == "slack" and slack_context:
-        name = "slack-ask" if slack_ask else "slack"
+        if concierge_mode:
+            name = "concierge"
+        else:
+            name = "slack-ask" if slack_ask else "slack"
     elif source == "linear":
         name = "linear"
     elif source == "github":
@@ -199,6 +207,7 @@ def construct_system_prompt(
     source: str = "dashboard",
     slack_context: bool = False,
     slack_ask: bool = False,
+    concierge_mode: bool = False,
     sandbox_file_downloads: bool = False,
     continued_from_collaborative: bool = False,
 ) -> str:
@@ -230,7 +239,9 @@ def construct_system_prompt(
         ),
         source_guidance_section=render_prompt(
             "system/source-context.md",
-            source_guidance=_render_source_guidance(source, slack_context, slack_ask),
+            source_guidance=_render_source_guidance(
+                source, slack_context, slack_ask, concierge_mode
+            ),
         ),
         plan_mode_guidance_section=render_prompt(
             "system/plan-mode-guidance.md",

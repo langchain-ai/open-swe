@@ -104,6 +104,7 @@ from agent.middleware import (
     WorkspaceSkillsMiddleware,
     check_message_queue_before_model,
     notify_step_limit_reached,
+    post_concierge_reply,
     record_run_usage,
     refresh_github_proxy_before_model,
     task_on_failure,
@@ -392,10 +393,14 @@ INCIDENT_AUTOMATIC_EXCLUDED_TOOLS: frozenset[str] = PLAN_MODE_EXCLUDED_TOOLS | f
     }
 )
 
-# A reaction signals "seen, working on it" to a room. A DM is a two-person
-# conversation where the reply itself is that signal, so reacting there is only
-# clutter on every message the person sends.
-DM_EXCLUDED_TOOLS: frozenset[str] = frozenset({"slack_add_reaction"})
+# A reaction signals "seen, working on it" to a room, and here the reply itself is
+# the acknowledgement. `post_concierge_reply` delivers that reply, so a
+# reply tool would only post the same answer twice. `manage_code_channel` gates on
+# a session timestamp this mode shares with code channels, so every action but
+# `create` would mistake this conversation for one and rename or retitle it.
+CONCIERGE_EXCLUDED_TOOLS: frozenset[str] = frozenset(
+    {"slack_add_reaction", "slack_thread_reply", "manage_code_channel"}
+)
 
 
 def _subagent_model_middleware() -> list[AgentMiddleware[Any, Any, Any]]:
@@ -609,11 +614,17 @@ def _slack_ask_mode(cfg: RunConfig) -> bool:
     )
 
 
-def _slack_dm_run(cfg: RunConfig) -> bool:
-    """Whether this run answers in a bot DM the owner runs as one session."""
+def _concierge_mode(cfg: RunConfig) -> bool:
+    """Whether this run answers as the owner's concierge.
+
+    Only a DM the owner turned the mode on for reaches this, and a bot-triggered
+    message keeps the ordinary Slack surface: concierge mode assumes one known
+    person, and the webhook scaffolds a bot sender instead.
+    """
     return (
         _slack_tools_enabled(cfg)
         and cfg.slack_thread is not None
+        and not cfg.slack_thread.triggering_bot_id
         and is_dm_session(cfg.slack_thread.channel_context, cfg.slack_thread.thread_ts)
     )
 
@@ -886,6 +897,7 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
                 source="background_task" if cfg.background_task_completion else self._source,
                 slack_context=_slack_tools_enabled(cfg),
                 slack_ask=_slack_ask_mode(cfg),
+                concierge_mode=_concierge_mode(cfg),
                 sandbox_file_downloads=_sandbox_file_downloads_enabled(cfg),
                 continued_from_collaborative=bool(cfg.continued_from_thread_id),
             ),
@@ -1247,9 +1259,11 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         static_tools = [tool for tool in static_tools if tool is not slack_read_channel_messages]
     if not _slack_tools_enabled(cfg):
         static_tools = [tool for tool in static_tools if tool not in slack_tools]
-    elif _slack_dm_run(cfg):
+    elif _concierge_mode(cfg):
         static_tools = [
-            tool for tool in static_tools if _registered_tool_name(tool) not in DM_EXCLUDED_TOOLS
+            tool
+            for tool in static_tools
+            if _registered_tool_name(tool) not in CONCIERGE_EXCLUDED_TOOLS
         ]
     if (
         local_run
@@ -1441,6 +1455,8 @@ async def get_agent(config: RunnableConfig) -> Pregel:
                 *([] if stop_summary_mode else [check_message_queue_before_model]),
                 TimeoutWrapupMiddleware(),
                 notify_step_limit_reached,
+                # Stop-summary mode keeps the reply tool and posts through it.
+                *([post_concierge_reply] if _concierge_mode(cfg) and not stop_summary_mode else []),
                 record_run_usage,
                 *([model_selection] if model_selection else []),
                 *fallback_middleware,

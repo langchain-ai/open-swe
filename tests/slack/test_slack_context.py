@@ -1529,17 +1529,26 @@ def test_process_slack_mention_treats_direct_message_as_implicit_mention(
     assert configurable["admin_thread"] is True
     assert configurable["slack_thread"]["channel_context"]["is_im"] is True
     messages = run_create["kwargs"]["input"]["messages"]
-    prompt_message = next(
-        message
-        for message in messages
-        if isinstance(message["content"], str)
-        and 'sender="system:slack-context"' in message["content"]
-    )
-    prompt = ElementTree.fromstring(prompt_message["content"]).findtext("content") or ""
     request_block = messages[-1]["content"][0]
     request = ElementTree.fromstring(request_block["text"]).findtext("content") or ""
-    assert "Context starts at: the previous direct message" in prompt
     assert request == "continue on the branch"
+    if dm_session:
+        # Concierge mode sends the new message and nothing else: the agent
+        # thread already holds every earlier message, so replaying them here would
+        # append each one a second time.
+        assert [message for message in messages if isinstance(message["content"], str)] == [], (
+            messages
+        )
+        assert len(messages) == 1
+    else:
+        prompt_message = next(
+            message
+            for message in messages
+            if isinstance(message["content"], str)
+            and 'sender="system:slack-context"' in message["content"]
+        )
+        prompt = ElementTree.fromstring(prompt_message["content"]).findtext("content") or ""
+        assert "Context starts at: the previous direct message" in prompt
     context_messages = captured["context_messages"]
     assert isinstance(context_messages, list)
     assert [message["ts"] for message in context_messages] == [
