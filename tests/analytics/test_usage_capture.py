@@ -6,7 +6,7 @@ from uuid import uuid4
 import pytest
 from sqlalchemy import text
 
-from agent.analytics import directory, emitter, identity, ingestion
+from agent.analytics import directory, emitter, identity, ingestion, retention
 from agent.analytics.events import EventName, RunCanceledPayload, RunFailedPayload
 from tests.analytics.helpers import DAY, event
 
@@ -303,3 +303,145 @@ async def test_identity_upgrade_preserves_team_unless_explicitly_replaced(
             )
             == canonical
         )
+
+
+async def test_github_name_outranks_earlier_trusted_slack_name(analytics_db):
+    _, transaction = analytics_db
+    person = await directory.resolve_person(
+        immutable_person_key=123, display_name="Grace (Slack)", display_name_source="slack"
+    )
+    assert (
+        await directory.resolve_person(
+            immutable_person_key=123, display_name="Grace Hopper", display_name_source="github"
+        )
+        == person
+    )
+    async with transaction() as conn:
+        row = (await conn.execute(text("SELECT * FROM identity_directory"))).mappings().one()
+        assert row["display_name"] == "Grace Hopper"
+        assert row["display_name_source"] == "github"
+
+
+async def test_trusted_slack_name_never_overwrites_github_name(analytics_db):
+    _, transaction = analytics_db
+    person = await directory.resolve_person(
+        immutable_person_key=123, display_name="Grace Hopper", display_name_source="github"
+    )
+    assert (
+        await directory.resolve_person(
+            immutable_person_key=123, display_name="Grace (Slack)", display_name_source="slack"
+        )
+        == person
+    )
+    async with transaction() as conn:
+        row = (await conn.execute(text("SELECT * FROM identity_directory"))).mappings().one()
+        assert row["display_name"] == "Grace Hopper"
+        assert row["display_name_source"] == "github"
+
+
+async def test_legacy_unsourced_name_blocks_slack_and_yields_to_github(analytics_db):
+    _, transaction = analytics_db
+    person = await directory.resolve_person(immutable_person_key=123, display_name="Legacy Name")
+    assert await directory.resolve_person(immutable_person_key=123, display_name="  ") == person
+    assert (
+        await directory.resolve_person(
+            immutable_person_key=123, display_name="Grace (Slack)", display_name_source="slack"
+        )
+        == person
+    )
+    async with transaction() as conn:
+        row = (await conn.execute(text("SELECT * FROM identity_directory"))).mappings().one()
+        assert row["display_name"] == "Legacy Name"
+        assert row["display_name_source"] is None
+    assert await directory.resolve_person(immutable_person_key=123, display_name=None) == person
+    async with transaction() as conn:
+        row = (await conn.execute(text("SELECT * FROM identity_directory"))).mappings().one()
+        assert row["display_name"] == "Legacy Name"
+        assert row["display_name_source"] is None
+    assert (
+        await directory.resolve_person(
+            immutable_person_key=123, display_name="Grace Hopper", display_name_source="github"
+        )
+        == person
+    )
+    async with transaction() as conn:
+        row = (await conn.execute(text("SELECT * FROM identity_directory"))).mappings().one()
+        assert row["display_name"] == "Grace Hopper"
+        assert row["display_name_source"] == "github"
+
+
+async def test_unsourced_name_never_displaces_trusted_github_name(analytics_db):
+    _, transaction = analytics_db
+    person = await directory.resolve_person(
+        immutable_person_key=123, display_name="Grace Hopper", display_name_source="github"
+    )
+    assert (
+        await directory.resolve_person(immutable_person_key=123, display_name="Legacy Name")
+        == person
+    )
+    assert (
+        await directory.resolve_person(
+            immutable_person_key=123, display_name="Grace (Slack)", display_name_source="slack"
+        )
+        == person
+    )
+    async with transaction() as conn:
+        row = (await conn.execute(text("SELECT * FROM identity_directory"))).mappings().one()
+        assert row["display_name"] == "Grace Hopper"
+        assert row["display_name_source"] == "github"
+
+
+async def test_github_upsert_person_defaults_name_provenance_to_github(analytics_db):
+    _, transaction = analytics_db
+    await directory.upsert_person(
+        provider="github", immutable_person_key=123, display_name="Grace Hopper"
+    )
+    async with transaction() as conn:
+        row = (await conn.execute(text("SELECT * FROM identity_directory"))).mappings().one()
+        assert row["display_name"] == "Grace Hopper"
+        assert row["display_name_source"] == "github"
+
+
+async def test_retention_clears_name_and_provenance_together(analytics_db):
+    workspace, transaction = analytics_db
+    person = await directory.resolve_person(
+        immutable_person_key=123,
+        github_login="person",
+        display_name="Grace Hopper",
+        display_name_source="github",
+    )
+    async with transaction() as conn:
+        await conn.execute(
+            text(
+                "UPDATE identity_directory SET anonymize_after = clock_timestamp() - interval '1 day' "
+                "WHERE workspace_id = :workspace_id AND person_id = :person_id"
+            ),
+            {"workspace_id": workspace, "person_id": person},
+        )
+    await retention.enforce_retention()
+    async with transaction() as conn:
+        row = (await conn.execute(text("SELECT * FROM identity_directory"))).mappings().one()
+        assert row["github_login"] is None
+        assert row["display_name"] is None
+        assert row["display_name_source"] is None
+
+
+async def test_reused_login_never_merges_durable_identities(analytics_db):
+    _, transaction = analytics_db
+    owner = await directory.resolve_person(
+        immutable_person_key=123, github_login="handle", display_name="Owner"
+    )
+    successor = await directory.resolve_person(
+        immutable_person_key=456, github_login="handle", display_name="Successor"
+    )
+    assert successor is not None
+    assert successor != owner
+    async with transaction() as conn:
+        rows = {
+            row["person_id"]: row
+            for row in (await conn.execute(text("SELECT * FROM identity_directory"))).mappings()
+        }
+        assert rows[successor]["github_login"] == "handle"
+        assert rows[owner]["github_login"] is None
+        assert rows[owner]["identity_kind"] == "immutable"
+        assert rows[successor]["identity_kind"] == "immutable"
