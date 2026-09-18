@@ -126,7 +126,6 @@ export interface SessionUser {
   slack_oauth_enabled?: boolean
   api_base_url?: string
   slack_base_url?: string
-  default_workspace: string | null
 }
 
 export interface ModelOption {
@@ -199,7 +198,8 @@ export interface AllowedSlackBot {
   image_url: string
 }
 
-export interface TeamSettings {
+/** The settings record at either tier: the instance, or what a workspace's runs see. */
+export interface WorkspaceSettings {
   review_draft_prs: boolean
   pr_summaries: boolean
   review_trace_links: boolean
@@ -233,6 +233,15 @@ export interface TeamSettings {
   default_thread_title_model?: string | null
   default_thread_title_reasoning_effort?: string | null
   updated_at?: string | null
+}
+
+/** The fields of a workspace's own settings record; anything absent inherits the instance value. */
+export type WorkspaceSettingsOverrides = Partial<WorkspaceSettings>
+
+/** One workspace's settings: what its runs see, and which of those values it set itself. */
+export interface WorkspaceSettingsView {
+  effective: WorkspaceSettings
+  overrides: WorkspaceSettingsOverrides
 }
 
 export interface MCPOAuth {
@@ -485,6 +494,7 @@ export interface UserPreferences {
   default_visibility: ThreadVisibility
   local_tracing_project: string | null
   default_local_tracing_project: string
+  default_workspace: string | null
 }
 
 export interface Skill {
@@ -527,10 +537,15 @@ export interface WorkspaceRefreshStep {
   log_path?: string | null
 }
 
+/** Slug of the workspace every deployment ships with; matches the backend's `DEFAULT_WORKSPACE_SLUG`. */
+export const DEFAULT_WORKSPACE_SLUG = "default"
+
 export interface WorkspaceOption {
   slug: string
   name: string
   repos: Array<string>
+  /** Effective default repository, withheld when another workspace owns it. */
+  default_repo: string | null
   slack_channel_ids: Array<string>
   is_default: boolean
   has_snapshot: boolean
@@ -542,9 +557,78 @@ export interface WorkspaceOption {
   refresh_steps?: Array<WorkspaceRefreshStep>
 }
 
+/** A channel the Slack bot can see, offered when binding channels to a workspace. */
+export interface SlackChannelOption {
+  id: string
+  name: string
+  is_private: boolean
+  is_member: boolean
+  is_ext_shared: boolean
+  num_members: number | null
+}
+
+/** The channel directory; partial when Slack rate limited the walk over public channels. */
+export interface SlackChannelDirectory {
+  channels: Array<SlackChannelOption>
+  partial: boolean
+}
+
 export interface WorkspaceOptionList {
   workspaces: Array<WorkspaceOption>
   default_slug: string
+}
+
+/** Body for `POST /workspaces`; `name` is the only required field. */
+export interface WorkspaceCreate {
+  name: string
+  prompt?: string
+  repos?: Array<string>
+  slack_channel_ids?: Array<string>
+}
+
+/** Body for `PUT /workspaces/{slug}`. Only the fields present are changed. */
+export interface WorkspaceUpdate {
+  name?: string
+  prompt?: string
+  repos?: Array<string>
+  slack_channel_ids?: Array<string>
+  setup_script?: string
+  update_script?: string
+}
+
+export type WorkspaceSnapshotStatus = "none" | "capturing" | "ready" | "failed"
+
+/**
+ * A workspace as `GET /workspaces/{slug}` returns it. The first five fields
+ * are what `createWorkspace`/`updateWorkspace` guarantee; the rest describe
+ * the sandbox image and its last rebuild.
+ */
+export interface WorkspaceRecord {
+  slug: string
+  name: string
+  prompt: string
+  repos: Array<string>
+  slack_channel_ids: Array<string>
+  setup_script?: string
+  update_script?: string
+  base_snapshot_id?: string | null
+  snapshot_id?: string | null
+  snapshot_name?: string | null
+  snapshot_status?: WorkspaceSnapshotStatus
+  status_message?: string | null
+  mem_bytes?: number | null
+  vcpus?: number | null
+  fs_capacity_bytes?: number | null
+  refresh_status?: WorkspaceRefreshStatus
+  refresh_kind?: "full" | "update" | null
+  refresh_finished_at?: string | null
+  refresh_error?: string | null
+}
+
+/** What `POST /workspaces/{slug}/refresh` answers. */
+export interface WorkspaceRefreshStart {
+  started: boolean
+  run_id: string
 }
 
 export type FindingSeverity = "low" | "medium" | "high" | "critical"
@@ -862,7 +946,11 @@ function pullRequestThread(
 
 export const api = {
   me: () => request<SessionUser>("/me"),
-  options: () => request<OptionsPayload>("/options"),
+  /** Model list and defaults for one workspace; model defaults are per workspace. */
+  options: (workspace: string = DEFAULT_WORKSPACE_SLUG) =>
+    request<OptionsPayload>(
+      `/options?workspace=${encodeURIComponent(workspace)}`
+    ),
   profile: () => request<Profile>("/profile"),
   saveProfile: (body: ProfileUpdate) =>
     request<Profile>("/profile", { method: "PUT", body: JSON.stringify(body) }),
@@ -972,8 +1060,44 @@ export const api = {
     }),
   listWorkspaceOptions: () =>
     request<WorkspaceOptionList>("/workspaces/options"),
-  getTeamSettings: () => request<TeamSettings>("/team-settings"),
+  getWorkspace: (slug: string) =>
+    request<WorkspaceRecord>(`/workspaces/${encodeURIComponent(slug)}`),
+  createWorkspace: (body: WorkspaceCreate) =>
+    request<WorkspaceRecord>("/workspaces", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  refreshWorkspace: (slug: string) =>
+    request<WorkspaceRefreshStart>(
+      `/workspaces/${encodeURIComponent(slug)}/refresh`,
+      { method: "POST" }
+    ),
+  updateWorkspace: (slug: string, body: WorkspaceUpdate) =>
+    request<WorkspaceRecord>(`/workspaces/${encodeURIComponent(slug)}`, {
+      method: "PUT",
+      body: JSON.stringify(body),
+    }),
+  deleteWorkspace: (slug: string) =>
+    request<void>(`/workspaces/${encodeURIComponent(slug)}`, {
+      method: "DELETE",
+    }),
+  /** The instance record every workspace inherits. */
+  getInstanceSettings: () => request<WorkspaceSettings>("/settings"),
+  getWorkspaceSettings: (slug: string) =>
+    request<WorkspaceSettingsView>(
+      `/workspaces/${encodeURIComponent(slug)}/settings`
+    ),
+  /** Replaces the workspace's overrides; a field left out inherits the instance value. */
+  saveWorkspaceSettings: (
+    slug: string,
+    overrides: WorkspaceSettingsOverrides
+  ) =>
+    request<WorkspaceSettingsView>(
+      `/workspaces/${encodeURIComponent(slug)}/settings`,
+      { method: "PUT", body: JSON.stringify(overrides) }
+    ),
   listSlackBots: () => request<SlackBotOption[]>("/slack/bots"),
+  listSlackChannels: () => request<SlackChannelDirectory>("/slack/channels"),
   listAllowedSlackBots: () => request<AllowedSlackBot[]>("/slack/allowed-bots"),
   allowSlackBot: (body: { bot_id: string }) =>
     request<AllowedSlackBot>("/slack/allowed-bots", {
@@ -985,11 +1109,29 @@ export const api = {
       `/slack/allowed-bots/${encodeURIComponent(teamId)}/${encodeURIComponent(botId)}`,
       { method: "DELETE" }
     ),
-  saveTeamSettings: (body: TeamSettings) =>
-    request<TeamSettings>("/team-settings", {
+  saveInstanceSettings: (body: WorkspaceSettings) =>
+    request<WorkspaceSettings>("/settings", {
       method: "PUT",
       body: JSON.stringify(body),
     }),
+  getInstanceMCPs: () => request<MCPConnection[]>("/mcps"),
+  revealInstanceMCPHeaders: (name: string) =>
+    request<Record<string, string>>(
+      `/mcps/${encodeURIComponent(name)}/headers/reveal`,
+      { method: "POST", cache: "no-store" }
+    ),
+  saveInstanceMCP: (body: MCPConnectionUpdate) =>
+    request<MCPConnection>(`/mcps/${encodeURIComponent(body.name)}`, {
+      method: "PUT",
+      body: JSON.stringify(body),
+    }),
+  deleteInstanceMCP: (name: string) =>
+    request<void>(`/mcps/${encodeURIComponent(name)}`, { method: "DELETE" }),
+  discoverInstanceMCP: (body: MCPConnectionUpdate) =>
+    request<{ name: string; description: string }[]>(
+      `/mcps/${encodeURIComponent(body.name)}/discover`,
+      { method: "POST", body: JSON.stringify(body) }
+    ),
   getWorkspaceMCPs: (workspace: string) =>
     request<MCPConnection[]>(
       `/workspaces/${encodeURIComponent(workspace)}/mcps`

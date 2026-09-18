@@ -244,7 +244,7 @@ async def test_refresh_updates_exact_mapped_slack_message_in_place(
             "elements": [
                 {
                     "type": "mrkdwn",
-                    "text": "<https://app/agents/t1|Open in Web> • model-a • calculating cost",
+                    "text": "<https://app/agents/t1|Open in Web> • model-a • calculating cost...",
                 }
             ],
         },
@@ -259,7 +259,7 @@ async def test_refresh_updates_exact_mapped_slack_message_in_place(
         "fetch_slack_thread_message_by_ts",
         AsyncMock(
             return_value={
-                "text": "Done <https://app/agents/t1|Open in Web> • model-a • calculating cost",
+                "text": "Done <https://app/agents/t1|Open in Web> • model-a • calculating cost...",
                 "blocks": blocks,
             }
         ),
@@ -328,7 +328,7 @@ async def test_schedule_marks_mapped_reply_cost_pending(monkeypatch: pytest.Monk
         ],
     }
     pending = {
-        "text": f"{original['text']} • calculating cost",
+        "text": f"{original['text']} • calculating cost...",
         "blocks": [
             original["blocks"][0],
             {
@@ -336,7 +336,7 @@ async def test_schedule_marks_mapped_reply_cost_pending(monkeypatch: pytest.Monk
                 "elements": [
                     {
                         "type": "mrkdwn",
-                        "text": "<https://app/agents/t1|Open in Web> • model-a • calculating cost",
+                        "text": "<https://app/agents/t1|Open in Web> • model-a • calculating cost...",
                     }
                 ],
             },
@@ -357,9 +357,11 @@ async def test_schedule_marks_mapped_reply_cost_pending(monkeypatch: pytest.Monk
     args = update.await_args
     assert args is not None
     assert args.args[:2] == ("C1", "1.1")
-    assert args.args[2] == "Done <https://app/agents/t1|Open in Web> • model-a • calculating cost"
+    assert (
+        args.args[2] == "Done <https://app/agents/t1|Open in Web> • model-a • calculating cost..."
+    )
     footer = args.kwargs["blocks"][-1]["elements"][0]["text"]
-    assert footer == "<https://app/agents/t1|Open in Web> • model-a • calculating cost"
+    assert footer == "<https://app/agents/t1|Open in Web> • model-a • calculating cost..."
 
     # Re-marking the already-pending message is a no-op.
     update.reset_mock()
@@ -447,7 +449,7 @@ async def test_terminal_refresh_clears_pending_footer(
         "fetch_slack_thread_message_by_ts",
         AsyncMock(
             return_value={
-                "text": "Done <https://app/agents/t1|Open in Web> • model-a • calculating cost",
+                "text": "Done <https://app/agents/t1|Open in Web> • model-a • calculating cost...",
                 "blocks": None,
             }
         ),

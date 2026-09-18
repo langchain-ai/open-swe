@@ -318,10 +318,10 @@ async def test_generic_thread_lists_exclude_incidents_for_owners_and_admins(
     patch_thread_module(monkeypatch, "langgraph_client", lambda: client)
 
     page = await listing.list_dashboard_threads_page("admin", include_all=include_all)
-    projects = await listing.list_dashboard_thread_projects("admin", include_all=include_all)
+    repos = await listing.list_dashboard_thread_repos("admin", include_all=include_all)
 
     assert page["items"] == []
-    assert projects == []
+    assert repos == []
 
 
 @pytest.mark.parametrize("source", ["incidents_agent"])

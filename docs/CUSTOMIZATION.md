@@ -209,7 +209,7 @@ Routing is opt-in and off by default. Enable it either way:
 | `LANGSMITH_GATEWAY_BASE_URL` | `https://gateway.smith.langchain.com` | Override for a regional or self-hosted gateway host. |
 | `LANGSMITH_GATEWAY_OPENAI_USE_RESPONSES` | `true` | Use the OpenAI Responses API through the gateway. Set to `false` only to force Chat Completions for OpenAI models. |
 
-The admin panel (**Admin → LLM Gateway**) exposes a toggle stored in workspace settings; when set it overrides the `LANGSMITH_GATEWAY_ENABLED` env default (a `None`/unset value inherits the env default).
+The instance toggle lives under **Admin → LLM Gateway**, and each workspace's settings page (**Workspaces → the workspace → LLM Gateway**) can override it; when set it overrides the `LANGSMITH_GATEWAY_ENABLED` env default (a `None`/unset value inherits the env default).
 
 Routing is applied centrally in `make_model` (`agent/utils/model.py`), which resolves the effective on/off and delegates URL/key wiring to `agent/utils/gateway.py`. **OpenAI, Anthropic, Baseten, Fireworks, and Google Gemini** are routed; Google Vertex (service-account auth) and any other provider call the provider directly with a logged warning. Baseten uses `BASETEN_API_KEY` from LangSmith workspace Provider Secrets through Gateway, or the runtime environment for direct calls.
 
@@ -230,7 +230,7 @@ Open SWE ships with a small set of custom tools on top of the built-in Deep Agen
 
 ### Workspace MCP servers
 
-Admins can connect generic remote MCP servers under **Admin → Workspace MCPs**.
+Admins can connect generic remote MCP servers under **Admin → Instance MCPs**, which every workspace inherits, or under **Workspaces → the workspace → Workspace MCPs** for one workspace; a workspace connection replaces an inherited one with the same name.
 Connections belong to this Open SWE deployment and are shared across repositories
 and remote coding-agent threads. Enabled connections provide baseline tools for
 all users, limited to the tools selected by an admin. Only admins can manage

@@ -858,11 +858,22 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
                         invocation_id=cfg.invocation_id,
                         thread_id=self._thread_id,
                         github_login=self._profile_login,
-                        github_user_id=cfg.github_user_id,
+                        github_user_id=(
+                            triggering_user_identity.github_user_id
+                            if triggering_user_identity
+                            and triggering_user_identity.github_user_id is not None
+                            else cfg.github_user_id
+                        ),
                         user_email=self._user_email,
                         display_name=(
-                            triggering_user_identity.display_name
-                            if triggering_user_identity and triggering_user_identity.github_profile
+                            triggering_user_identity.analytics_display_name
+                            if triggering_user_identity
+                            and triggering_user_identity.analytics_display_name
+                            else None
+                        ),
+                        display_name_source=(
+                            triggering_user_identity.display_name_source
+                            if triggering_user_identity
                             else None
                         ),
                         model_id=attribution_model_id,

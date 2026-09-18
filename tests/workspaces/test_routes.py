@@ -6,6 +6,12 @@ import pytest
 from fastapi import FastAPI
 
 from agent.dashboard import deps, oauth, routes
+from agent.dashboard.workspace_settings import (
+    WorkspaceSettingsUpdate,
+    upsert_instance_settings,
+    upsert_workspace_overrides,
+)
+from tests.conftest import FakeStore
 
 _ADMIN_SESSION = {"sub": "admin", "email": "admin@example.com"}
 
@@ -72,6 +78,31 @@ async def test_options_carry_repos_channels_and_default_flag(
     assert by_slug["oss"]["repos"] == ["acme/oss"] and by_slug["oss"]["slack_channel_ids"] == [
         "C0SS"
     ]
+
+
+async def test_options_carry_each_workspace_default_repository(
+    admin_client: httpx.AsyncClient, fake_store: FakeStore
+) -> None:
+    """The composer preselects a workspace's default repository when the workspace is picked first.
+
+    An inherited default is withheld from a workspace that does not own it.
+    """
+    await admin_client.post("/dashboard/api/workspaces", json={"name": "Default"})
+    await admin_client.post(
+        "/dashboard/api/workspaces", json={"name": "OSS", "repos": ["acme/oss"]}
+    )
+    await admin_client.post(
+        "/dashboard/api/workspaces", json={"name": "Core", "repos": ["acme/api"]}
+    )
+    await upsert_instance_settings(WorkspaceSettingsUpdate(default_repo="acme/oss"))
+    await upsert_workspace_overrides("core", WorkspaceSettingsUpdate(default_repo="acme/api"))
+
+    body = (await admin_client.get("/dashboard/api/workspaces/options")).json()
+
+    by_slug = {item["slug"]: item for item in body["workspaces"]}
+    assert by_slug["oss"]["default_repo"] == "acme/oss"
+    assert by_slug["core"]["default_repo"] == "acme/api"
+    assert by_slug["default"]["default_repo"] is None
 
 
 async def test_a_workspace_with_no_repository_is_a_400(admin_client: httpx.AsyncClient) -> None:

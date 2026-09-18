@@ -7,15 +7,15 @@ import {
   selectThreadRightPanelState,
   useRightPanelStore,
 } from "@/features/agents/lib/rightPanelStore"
-import { useProjectDiff } from "@/features/agents/lib/desktopLocal"
+import { useRepoDiff } from "@/features/agents/lib/desktopLocal"
 import { useTerminalGroups } from "@/features/agents/lib/terminalGroups"
 
 /**
- * Right panel for the new-thread screen on This Mac. The project directory is
+ * Right panel for the new-thread screen on This Mac. The repository directory is
  * already there, so terminals and worktree changes work before a thread exists;
- * both are scoped to the project rather than to a thread.
+ * both are scoped to the repository rather than to a thread.
  */
-export function LocalProjectRightPanel({
+export function LocalRepoRightPanel({
   scopeId,
   cwd,
   collapsed,
@@ -38,7 +38,7 @@ export function LocalProjectRightPanel({
     (state) =>
       selectThreadRightPanelState(state.byThreadKey, threadRef).activeSurfaceId
   )
-  const diff = useProjectDiff(cwd, !collapsed && activeSurfaceId === "diff")
+  const diff = useRepoDiff(cwd, !collapsed && activeSurfaceId === "diff")
   const files = useMemo(
     () => toPanelFiles(diff.data?.files ?? []),
     [diff.data?.files]
