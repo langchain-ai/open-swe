@@ -325,18 +325,31 @@ async def test_slack_thread_reply_posts_native_markdown_without_options(
     assert captured["blocks"] == [{"type": "markdown", "text": message}]
 
 
-async def test_slack_thread_reply_rejects_oversized_default_before_posting(
+async def test_slack_thread_reply_falls_back_to_mrkdwn_over_native_limit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    post = AsyncMock(return_value=("2.0", None))
+    message = "# Heading\n\n" + "x" * 12000
+    monkeypatch.setattr(slack_reply_tool, "get_config", _config)
+    monkeypatch.setattr(slack_reply_tool, "_post_and_store_mapping", post)
+
+    assert await slack_reply_tool.slack_thread_reply(message) == {"success": True}
+    assert post.await_args.args[2].startswith("*Heading*\n")
+    assert post.await_args.kwargs["blocks"] is None
+
+
+async def test_slack_thread_reply_rejects_oversized_message_with_options(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     post = AsyncMock()
     monkeypatch.setattr(slack_reply_tool, "get_config", _config)
     monkeypatch.setattr(slack_reply_tool, "_post_and_store_mapping", post)
 
-    result = await slack_reply_tool.slack_thread_reply("x" * 12001)
+    result = await slack_reply_tool.slack_thread_reply("x" * 12001, options=["Yes"])
 
     assert result["success"] is False
     assert result["retry"] is True
-    assert "12000" in result["error"]
+    assert "options" in result["error"]
     post.assert_not_awaited()
 
 

@@ -262,7 +262,7 @@ async def test_ask_mode_reply_is_ephemeral(monkeypatch: pytest.MonkeyPatch) -> N
 
 
 @pytest.mark.asyncio
-async def test_ask_mode_rejects_oversized_default_before_posting(
+async def test_ask_mode_falls_back_to_mrkdwn_over_native_limit(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     post = AsyncMock()
@@ -278,12 +278,11 @@ async def test_ask_mode_rejects_oversized_default_before_posting(
         },
     )
 
-    result = await slack_thread_reply.slack_thread_reply("x" * 12001)
+    result = await slack_thread_reply.slack_thread_reply("# Heading\n\n" + "x" * 12000)
 
-    assert result["success"] is False
-    assert result["retry"] is True
-    assert "12000" in result["error"]
-    post.assert_not_awaited()
+    assert result == {"success": True}
+    assert post.await_args.args[2].startswith("*Heading*\n")
+    assert post.await_args.kwargs["blocks"] is None
 
 
 @pytest.mark.asyncio

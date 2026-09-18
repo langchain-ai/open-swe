@@ -15,6 +15,7 @@ from agent.slack.client import (
     slack_thread_mutation_lock,
     store_slack_message_run_mapping,
 )
+from agent.slack.markdown import markdown_to_mrkdwn
 from agent.slack.orphan import (
     dashboard_handoff_message,
     move_thread_to_dashboard,
@@ -84,13 +85,10 @@ async def slack_thread_reply(
     async with slack_thread_mutation_lock(client, channel_id, thread_ts):
         slack_blocks = blocks if blocks is not None else _build_option_blocks(message, options)
         if blocks is None and len(message) > _NATIVE_MARKDOWN_MAX_CHARS:
-            return {
-                "success": False,
-                "error": "Message exceeds Slack's 12000-character native Markdown block limit",
-                "message_chars": len(message),
-                "retry": True,
-                "hint": "Retry with a shorter message of at most 12000 characters.",
-            }
+            if options:
+                return _oversized_options_error(message)
+            message = markdown_to_mrkdwn(message)
+            slack_blocks = None
         usage = summarize_run_usage(state)
         message_ts, slack_error = await _post_and_store_mapping(
             channel_id,
@@ -154,19 +152,16 @@ async def _ephemeral_reply(
         return {"success": False, "error": "Missing the Slack channel or user to answer"}
     if not message.strip():
         return {"success": False, "error": "Message cannot be empty"}
-    if blocks is None and len(message) > _NATIVE_MARKDOWN_MAX_CHARS:
-        return {
-            "success": False,
-            "error": "Message exceeds Slack's 12000-character native Markdown block limit",
-            "message_chars": len(message),
-            "retry": True,
-            "hint": "Retry with a shorter message of at most 12000 characters.",
-        }
+    native_markdown = blocks is None and len(message) <= _NATIVE_MARKDOWN_MAX_CHARS
+    if blocks is None and not native_markdown:
+        message = markdown_to_mrkdwn(message)
     posted = await post_slack_ephemeral_reply(
         channel_id,
         user_id,
         message,
-        blocks=blocks if blocks is not None else _build_option_blocks(message, None),
+        blocks=blocks
+        if blocks is not None
+        else (_build_option_blocks(message, None) if native_markdown else None),
         usage=summarize_run_usage(state),
         agent_thread_id=cfg.thread_id,
     )
@@ -223,6 +218,16 @@ def _current_run_id(config: Mapping[str, Any]) -> str | None:
 
 def _triggering_user_id(cfg: RunConfig) -> str | None:
     return (cfg.slack_thread.triggering_user_id or None) if cfg.slack_thread else None
+
+
+def _oversized_options_error(message: str) -> dict[str, str | int | bool]:
+    return {
+        "success": False,
+        "error": "Message with options exceeds Slack's 12000-character native Markdown limit",
+        "message_chars": len(message),
+        "retry": True,
+        "hint": "Retry with the options and a message of at most 12000 characters.",
+    }
 
 
 def _build_option_blocks(message: str, options: list[str] | None) -> list[dict[str, Any]]:
