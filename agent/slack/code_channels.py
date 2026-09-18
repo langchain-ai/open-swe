@@ -11,7 +11,7 @@ from langgraph_sdk.client import LangGraphClient
 
 from agent.slack.channels import SlackChannel
 from agent.slack.client import SLACK_BOT_TOKEN
-from agent.slack.http import SLACK_REQUEST_ERRORS, slack_client, slack_error
+from agent.slack.http import SLACK_REQUEST_ERRORS, SlackClient, slack_error
 
 logger = logging.getLogger(__name__)
 
@@ -73,7 +73,7 @@ async def _call(method: str, payload: dict[str, Any]) -> tuple[dict[str, Any] | 
     if not SLACK_BOT_TOKEN:
         return None, "missing_slack_bot_token"
     try:
-        async with slack_client(token=SLACK_BOT_TOKEN) as client:
+        async with SlackClient.bot() as client:
             response = await client.api_call(method, json=payload)
         if not isinstance(response.data, dict):
             return None, "invalid_response"
