@@ -1,6 +1,7 @@
 """Profile lookup + override helpers consumed by ``agent.server.get_agent``."""
 
 import logging
+from collections.abc import Mapping
 from typing import Any
 
 from agent.dashboard.options import (
@@ -10,7 +11,7 @@ from agent.dashboard.options import (
     model_supports_effort,
     provider_fallback_pair,
 )
-from agent.dashboard.profiles import PROFILES_NAMESPACE
+from agent.dashboard.profiles import PROFILES_NAMESPACE, Profile, parse_profile
 from agent.dashboard.workspace_settings import get_workspace_settings
 from agent.store import get_value
 from agent.users import User
@@ -50,7 +51,7 @@ async def get_profile_default_repo(login: str | None) -> dict[str, str] | None:
     return {"owner": owner, "name": name}
 
 
-async def load_profile(login: str) -> dict[str, Any] | None:
+async def load_profile(login: str) -> Profile | None:
     """The user's profile record, or ``None`` when it is missing or unreadable.
 
     Fail-soft on purpose: every caller — ``agent.server.get_agent``,
@@ -60,38 +61,38 @@ async def load_profile(login: str) -> dict[str, Any] | None:
     a failure use :func:`agent.dashboard.profiles.get_profile` instead.
     """
     try:
-        return await get_value(PROFILES_NAMESPACE, login)
+        value = await get_value(PROFILES_NAMESPACE, login)
+        return parse_profile(value) if value is not None else None
     except Exception:
         logger.warning("profile lookup failed for %s", login, exc_info=True)
         return None
 
 
-def profile_draft_prs(profile: dict[str, Any] | None) -> bool:
+def profile_draft_prs(profile: Mapping[str, object] | None) -> bool:
     """Return whether new PRs should be drafts. Defaults to True."""
     value = profile.get("draft_prs") if isinstance(profile, dict) else None
     return value if isinstance(value, bool) else True
 
 
-def profile_dm_session_enabled(profile: dict[str, Any] | None) -> bool:
+def profile_dm_session_enabled(profile: Mapping[str, object] | None) -> bool:
     """Whether this person's Open SWE DM is one continuous session. Defaults to False."""
     value = profile.get("dm_session_enabled") if isinstance(profile, dict) else None
     return value is True
 
 
-def profile_model_routing_enabled(profile: dict[str, Any] | None) -> bool | None:
+def profile_model_routing_enabled(profile: Mapping[str, object] | None) -> bool | None:
     """The user's adaptive model routing preference, or ``None`` to inherit the org default."""
     value = profile.get("model_routing_enabled") if isinstance(profile, dict) else None
     return value if isinstance(value, bool) else None
 
 
-def profile_disable_subagents(profile: dict[str, Any] | None) -> bool:
+def profile_disable_subagents(profile: Profile | None) -> bool:
     """Whether this person's main agent should run without subagents. Defaults to False."""
-    value = profile.get("disable_subagents") if isinstance(profile, dict) else None
-    return value is True
+    return profile.get("disable_subagents", False) if profile is not None else False
 
 
 def _normalize_profile_model_pair(
-    profile: dict[str, Any],
+    profile: Mapping[str, object],
     *,
     model_key: str,
     effort_key: str,
@@ -117,7 +118,7 @@ def _normalize_profile_model_pair(
     return None, None
 
 
-def normalize_profile_overrides(profile: dict[str, Any]) -> tuple[str | None, str | None]:
+def normalize_profile_overrides(profile: Mapping[str, object]) -> tuple[str | None, str | None]:
     """Return ``(model_id, reasoning_effort)`` if both are valid, else ``(None, None)``."""
     return _normalize_profile_model_pair(
         profile,
@@ -127,7 +128,7 @@ def normalize_profile_overrides(profile: dict[str, Any]) -> tuple[str | None, st
 
 
 def normalize_profile_subagent_overrides(
-    profile: dict[str, Any],
+    profile: Mapping[str, object],
 ) -> tuple[str | None, str | None]:
     """Return the profile's subagent model pair if valid, else ``(None, None)``."""
     return _normalize_profile_model_pair(

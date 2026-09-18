@@ -786,7 +786,7 @@ async def test_general_purpose_subagent_cannot_use_slack_tools() -> None:
         "list_threads",
         "manage_thread",
         "read_user_settings",
-        "set_subagents_enabled",
+        "update_user_preferences",
         "submit_thread_feedback",
     }
     assert parent_only_names <= parent_names
@@ -832,14 +832,24 @@ def test_workspace_slug_reads_workspace_then_environment() -> None:
 @pytest.mark.asyncio
 @pytest.mark.parametrize("disabled", [False, True])
 async def test_subagent_preference_applies_to_existing_threads(disabled: bool) -> None:
-    from agent.middleware import ExcludeToolsMiddleware
+    from agent.middleware.no_subagents import NoSubagentsMiddleware
 
     captured = await _capture_create_deep_agent_kwargs(
         profile={"disable_subagents": disabled},
         thread_settings={"model_id": "openai:gpt-5.6-sol"},
     )
     middleware = cast(list[object], captured["middleware"])
-    exclusion = next(item for item in middleware if isinstance(item, ExcludeToolsMiddleware))
-    assert ("task" in exclusion._excluded) is disabled
-    assert ("task" in exclusion._blocked) is disabled
+    assert any(isinstance(item, NoSubagentsMiddleware) for item in middleware) is disabled
     assert bool(captured["subagents"]) is not disabled
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("visibility", ["private", "public"])
+async def test_subagent_preference_follows_thread_owner(saved_thread_scope, visibility):
+    from agent.middleware.no_subagents import NoSubagentsMiddleware
+
+    saved_thread_scope.update(visibility=visibility, owner_login="alice")
+    with patch("agent.server._cached_profile", new_callable=AsyncMock) as profiles:
+        profiles.side_effect = lambda login: {"disable_subagents": login == "alice"}
+        captured = await _capture_create_deep_agent_kwargs()
+    assert any(isinstance(item, NoSubagentsMiddleware) for item in captured["middleware"])

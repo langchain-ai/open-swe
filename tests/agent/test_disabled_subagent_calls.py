@@ -1,25 +1,15 @@
-from unittest.mock import AsyncMock
+from deepagents import create_deep_agent
+from langchain_core.language_models.fake_chat_models import FakeListChatModel
 
-import pytest
-from langchain.tools.tool_node import ToolCallRequest
-from langchain_core.messages import ToolMessage
-from langgraph.runtime import Runtime
-
-from agent.middleware.exclude_tools import ExcludeToolsMiddleware
+from agent.middleware.no_subagents import NoSubagentsMiddleware
 
 
-@pytest.mark.asyncio
-async def test_disabled_subagent_call_is_rejected_without_execution() -> None:
-    middleware = ExcludeToolsMiddleware(excluded=frozenset({"task"}), blocked=frozenset({"task"}))
-    request = ToolCallRequest(
-        tool_call={"name": "task", "args": {}, "id": "delegation", "type": "tool_call"},
-        tool=None,
-        state={"messages": []},
-        runtime=Runtime(),
+def test_disabled_subagents_never_register_task_tool() -> None:
+    agent = create_deep_agent(
+        model=FakeListChatModel(responses=["done"]),
+        middleware=[NoSubagentsMiddleware()],
+        subagents=[],
     )
-    handler = AsyncMock()
-    result = await middleware.awrap_tool_call(request, handler)
-    assert isinstance(result, ToolMessage)
-    assert result.status == "error"
-    assert result.tool_call_id == "delegation"
-    handler.assert_not_awaited()
+    tools = agent.nodes["tools"].bound.tools_by_name
+    assert "task" not in tools
+    assert "ls" in tools

@@ -48,7 +48,7 @@ from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import HumanMessage
 
 from agent.analytics.usage import record_agent_invocation_usage
-from agent.credential_scope import private_credential_login
+from agent.credential_scope import private_credential_login, thread_owner_login
 from agent.dashboard.agent_overrides import (
     load_profile,
     normalize_profile_overrides,
@@ -112,6 +112,7 @@ from agent.middleware import (
 )
 from agent.middleware.conversation_offloading import ConversationOffloadingMiddleware
 from agent.middleware.model_selection import ModelSelectionState, RoutingMode
+from agent.middleware.no_subagents import NoSubagentsMiddleware
 from agent.middleware.prepare_run import PrepareRunState
 from agent.middleware.sandbox_circuit_breaker import post_sandbox_unreachable_notification
 from agent.prompt import (
@@ -183,7 +184,6 @@ from agent.tools import (
     save_user_instructions,
     save_user_skill,
     schedule_thread_wakeup,
-    set_subagents_enabled,
     slack_add_reaction,
     slack_attach_html,
     slack_move_thread,
@@ -194,6 +194,7 @@ from agent.tools import (
     submit_thread_feedback,
     trigger_automation,
     update_automation,
+    update_user_preferences,
     web_search,
 )
 from agent.tools.admin_gate import actor_has_admin_context, actor_is_admin, is_private_admin_surface
@@ -355,7 +356,7 @@ async def _resolve_user_custom_instructions(login: str | None) -> str | None:
 PLAN_MODE_EXCLUDED_TOOLS: frozenset[str] = frozenset(
     {
         "task",
-        "set_subagents_enabled",
+        "update_user_preferences",
         "background_execute",
         "background_task",
         "create_sandbox_service_url",
@@ -443,7 +444,7 @@ def _is_subagent_excluded_tool(tool: Any) -> bool:
         "read_incident",
         "read_only_sql",
         "read_user_settings",
-        "set_subagents_enabled",
+        "update_user_preferences",
         "record_incident_report",
         "search_incidents",
     }
@@ -1063,7 +1064,11 @@ async def get_agent(config: RunnableConfig) -> Pregel:
     async with aphase(thread_id, "factory.sender_profile"):
         sender_profile = profile if profile is not None else await _cached_profile(profile_login)
     sender_draft_prs = profile_draft_prs(sender_profile)
-    disable_subagents = profile_disable_subagents(sender_profile)
+    owner_login = profile_login if local_run else await thread_owner_login(config)
+    owner_profile = (
+        sender_profile if owner_login == profile_login else await _cached_profile(owner_login)
+    )
+    disable_subagents = profile_disable_subagents(owner_profile)
     configurable["draft_prs"] = sender_draft_prs
     cfg.draft_prs = sender_draft_prs
     if isinstance(thread_settings.get("model_id"), str):
@@ -1223,7 +1228,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
             else ()
         ),
         read_user_settings,
-        set_subagents_enabled,
+        update_user_preferences,
         request_pr_review,
         recreate_sandbox,
         report_platform_issue,
@@ -1247,7 +1252,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
             save_user_skill,
             delete_user_skill,
             read_user_settings,
-            set_subagents_enabled,
+            update_user_preferences,
         )
         static_tools = [tool for tool in static_tools if tool not in personal_tools]
     if not private_thread:
@@ -1390,6 +1395,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         middleware=cast(
             list[AgentMiddleware[Any, Any, Any]],
             [
+                *([NoSubagentsMiddleware()] if disable_subagents else []),
                 ConversationOffloadingMiddleware(
                     main_model, agent_backend, manual=cfg.offload_conversation is True
                 ),
@@ -1433,9 +1439,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
                         else DEEP_AGENT_EXCLUDED_TOOLS | INCIDENT_AUTOMATIC_EXCLUDED_TOOLS
                         if incident_automatic
                         else DEEP_AGENT_EXCLUDED_TOOLS
-                    )
-                    | (frozenset({"task"}) if disable_subagents else frozenset()),
-                    blocked=frozenset({"task"}) if disable_subagents else frozenset(),
+                    ),
                 ),
                 SubdirAgentsReadMiddleware(),
                 ToolRetryMiddleware(

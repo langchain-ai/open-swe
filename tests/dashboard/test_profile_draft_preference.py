@@ -5,7 +5,6 @@ import pytest
 from agent.dashboard.profiles import (
     ProfileUpdate,
     normalize_profile_for_response,
-    set_disable_subagents,
     upsert_profile,
 )
 
@@ -80,31 +79,6 @@ async def test_disable_subagents_defaults_false_and_persists_explicit_value() ->
 
     assert default_profile["disable_subagents"] is False
     assert disabled_profile["disable_subagents"] is True
-
-
-@pytest.mark.asyncio
-async def test_set_disable_subagents_preserves_existing_profile() -> None:
-    put_item = AsyncMock()
-
-    with (
-        patch(
-            "agent.dashboard.profiles.get_profile",
-            new_callable=AsyncMock,
-            return_value={"login": "octocat", "default_model": "openai:gpt-5.6-sol"},
-        ),
-        patch("agent.dashboard.profiles.now_iso", return_value="now"),
-        patch("agent.store.store_client") as client,
-    ):
-        client.return_value.store.put_item = put_item
-        profile = await set_disable_subagents("octocat", True)
-
-    assert profile == {
-        "login": "octocat",
-        "default_model": "openai:gpt-5.6-sol",
-        "disable_subagents": True,
-        "updated_at": "now",
-    }
-    put_item.assert_awaited_once_with(["profiles"], "octocat", profile)
 
 
 @pytest.mark.asyncio

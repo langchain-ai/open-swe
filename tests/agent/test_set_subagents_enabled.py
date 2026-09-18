@@ -2,48 +2,34 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from agent.tools.set_subagents_enabled import set_subagents_enabled
+from agent.tools.update_user_preferences import update_user_preferences
 
 
 @pytest.mark.asyncio
-async def test_set_subagents_enabled_requires_triggering_user() -> None:
-    with patch(
-        "agent.tools.set_subagents_enabled.get_config",
-        return_value={"configurable": {}},
-    ):
-        result = await set_subagents_enabled(False)
-
+async def test_public_thread_cannot_write_preferences() -> None:
+    with patch("agent.tools.update_user_preferences.private_credential_login", return_value=None):
+        result = await update_user_preferences({"disable_subagents": True})
     assert result["ok"] is False
-    assert "GitHub login" in result["error"]
 
 
 @pytest.mark.asyncio
-async def test_set_subagents_enabled_writes_inverse_for_triggering_user() -> None:
-    set_disabled = AsyncMock()
+async def test_update_preserves_unspecified_preferences() -> None:
     with (
-        patch(
-            "agent.tools.set_subagents_enabled.get_config",
-            return_value={"configurable": {"github_login": "octocat"}},
-        ),
-        patch("agent.tools.set_subagents_enabled.set_disable_subagents", set_disabled),
+        patch("agent.tools.update_user_preferences.private_credential_login", return_value="alice"),
+        patch("agent.tools.update_user_preferences.get_profile", return_value={"draft_prs": False}),
+        patch("agent.tools.update_user_preferences.upsert_profile", new_callable=AsyncMock) as save,
     ):
-        result = await set_subagents_enabled(False)
-
-    assert result == {"ok": True, "login": "octocat", "subagents_enabled": False}
-    set_disabled.assert_awaited_once_with("octocat", True)
+        result = await update_user_preferences({"disable_subagents": True})
+    assert result["ok"] is True
+    assert save.await_args.args[0] == "alice"
+    assert save.await_args.args[2].disable_subagents is True
+    assert save.await_args.args[2].draft_prs is False
 
 
 @pytest.mark.asyncio
-async def test_set_subagents_enabled_enables_subagents() -> None:
-    set_disabled = AsyncMock()
-    with (
-        patch(
-            "agent.tools.set_subagents_enabled.get_config",
-            return_value={"configurable": {"github_login": "octocat"}},
-        ),
-        patch("agent.tools.set_subagents_enabled.set_disable_subagents", set_disabled),
+async def test_cannot_write_identity_or_arbitrary_settings() -> None:
+    with patch(
+        "agent.tools.update_user_preferences.private_credential_login", return_value="alice"
     ):
-        result = await set_subagents_enabled(True)
-
-    assert result["subagents_enabled"] is True
-    set_disabled.assert_awaited_once_with("octocat", False)
+        result = await update_user_preferences({"login": "bob"})
+    assert result["ok"] is False

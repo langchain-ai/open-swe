@@ -12,11 +12,12 @@ each other's fields even when they interleave.
 
 import asyncio
 import logging
+from collections.abc import Mapping
 from datetime import UTC, datetime, timedelta
-from typing import Any
+from typing import Any, TypedDict
 
 from fastapi import APIRouter, Depends
-from pydantic import BaseModel, model_validator
+from pydantic import BaseModel, TypeAdapter, model_validator
 
 from agent.dashboard.oauth import (
     expires_at_from_github_response,
@@ -45,6 +46,32 @@ logger = logging.getLogger(__name__)
 
 PROFILES_NAMESPACE: list[str] = ["profiles"]
 OAUTH_TOKENS_NAMESPACE: list[str] = ["oauth_tokens"]
+
+
+class Profile(TypedDict, total=False):
+    login: str
+    email: str
+    default_model: str
+    reasoning_effort: str
+    default_subagent_model: str | None
+    subagent_reasoning_effort: str | None
+    default_repo: str | None
+    base_branch: str | None
+    branch_prefix: str | None
+    auto_fix_ci: bool
+    model_routing_enabled: bool | None
+    dm_session_enabled: bool
+    disable_subagents: bool
+    draft_prs: bool | None
+    review_draft_prs: bool | None
+    updated_at: str
+
+
+_PROFILE_ADAPTER = TypeAdapter(Profile)
+
+
+def parse_profile(value: object) -> Profile:
+    return _PROFILE_ADAPTER.validate_python(value, strict=True)
 
 
 class ProfileUpdate(BaseModel):
@@ -114,7 +141,7 @@ def _normalize_stale_model_pair(model: str, effort: str | None) -> tuple[str, st
     return fallback
 
 
-def normalize_profile_for_response(profile: dict[str, Any]) -> dict[str, Any]:
+def normalize_profile_for_response(profile: Mapping[str, object]) -> dict[str, Any]:
     value = dict(profile)
     value.pop("create_prs", None)
     for model_field, effort_field in (
@@ -133,20 +160,9 @@ def normalize_profile_for_response(profile: dict[str, Any]) -> dict[str, Any]:
     return value
 
 
-async def get_profile(login: str) -> dict[str, Any] | None:
-    return await get_value(PROFILES_NAMESPACE, login)
-
-
-async def set_disable_subagents(login: str, disabled: bool) -> dict[str, Any]:
-    existing = await get_profile(login) or {}
-    value = {
-        **existing,
-        "login": login,
-        "disable_subagents": disabled,
-        "updated_at": now_iso(),
-    }
-    await put_value(PROFILES_NAMESPACE, login, value)
-    return value
+async def get_profile(login: str) -> Profile | None:
+    value = await get_value(PROFILES_NAMESPACE, login)
+    return parse_profile(value) if value is not None else None
 
 
 async def get_oauth_token_record(login: str) -> dict[str, Any] | None:

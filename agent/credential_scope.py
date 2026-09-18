@@ -81,3 +81,12 @@ async def pr_author_login() -> str | None:
     if metadata.get("owner_type") == "user":
         raise RuntimeError("User-owned thread has no GitHub owner for PR creation")
     return None
+
+
+async def thread_owner_login(config: Mapping[str, object]) -> str | None:
+    """Resolve the saved owner for private and user-started workspace threads."""
+    _, metadata = await _thread_scope(config)
+    owner = metadata.get("owner_login")
+    if metadata.get("owner_type") == "system":
+        return None
+    return owner.strip() if isinstance(owner, str) and owner.strip() else None

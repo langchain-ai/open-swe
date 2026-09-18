@@ -49,7 +49,7 @@ _TOOL_MODULES = {
     "delete_user_skill": ".user_skills",
     "schedule_thread_wakeup": ".schedule_thread_wakeup",
     "search_repo_code": "agent.github.tools.search_repo_code",
-    "set_subagents_enabled": ".set_subagents_enabled",
+    "update_user_preferences": ".update_user_preferences",
     "slack_add_reaction": "agent.slack.tools.add_reaction",
     "slack_attach_html": "agent.slack.tools.attach_html",
     "slack_move_thread": "agent.slack.tools.move_thread",
@@ -111,7 +111,7 @@ __all__ = [
     "delete_user_skill",
     "schedule_thread_wakeup",
     "search_repo_code",
-    "set_subagents_enabled",
+    "update_user_preferences",
     "slack_add_reaction",
     "slack_attach_html",
     "slack_move_thread",
@@ -174,10 +174,10 @@ if TYPE_CHECKING:
     from agent.tools.save_plan import save_plan
     from agent.tools.save_user_instructions import save_user_instructions
     from agent.tools.schedule_thread_wakeup import schedule_thread_wakeup
-    from agent.tools.set_subagents_enabled import set_subagents_enabled
     from agent.tools.submit_thread_feedback import submit_thread_feedback
     from agent.tools.threads import get_thread, list_threads, manage_thread
     from agent.tools.update_finding import update_finding
+    from agent.tools.update_user_preferences import update_user_preferences
     from agent.tools.user_skills import delete_user_skill, save_user_skill
     from agent.tools.web_search import web_search
     from agent.tools.workspaces import (
