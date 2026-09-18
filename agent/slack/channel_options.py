@@ -14,8 +14,8 @@ from pydantic import BaseModel
 from slack_sdk.errors import SlackApiError
 
 from agent.slack.http import (
+    SlackClient,
     slack_cache_key,
-    slack_client,
     slack_error,
     slack_http_errors,
     slack_retry_after,
@@ -126,7 +126,7 @@ async def list_slack_channels() -> SlackChannelDirectory:
     briefly. A private channel the bot has not been invited to is absent
     either way, so the picker keeps an id-entry fallback.
     """
-    async with slack_http_errors(), slack_client() as client:
+    async with slack_http_errors(), SlackClient.bot() as client:
         key = f"{slack_cache_key(client)}:channel-directory"
 
         async def load() -> SlackChannelDirectory:

@@ -53,7 +53,7 @@ def _install(monkeypatch: pytest.MonkeyPatch, client: _FakeClient) -> list[float
     async def fake_slack_client(**_kwargs: Any):
         yield client
 
-    monkeypatch.setattr(channel_options, "slack_client", fake_slack_client)
+    monkeypatch.setattr(channel_options.SlackClient, "bot", fake_slack_client)
     slept: list[float] = []
     real_sleep = asyncio.sleep
 
