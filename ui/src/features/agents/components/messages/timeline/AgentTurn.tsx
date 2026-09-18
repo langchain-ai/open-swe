@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react"
 
 import { DiffView } from "../../chat/DiffView"
 import { ChunkRenderer } from "../ChunkRenderer"
@@ -95,7 +95,7 @@ function WorkGroup({
   )
 }
 
-export function AgentTurn({
+export const AgentTurn = memo(function AgentTurn({
   message,
   isStreaming,
   isMarkdownLive,
@@ -335,4 +335,4 @@ export function AgentTurn({
       </div>
     </div>
   )
-}
+})

@@ -1,6 +1,6 @@
 import { ChevronDown, ChevronRight } from "lucide-react"
 import { IoLogoSlack } from "react-icons/io5"
-import { useEffect, useRef, useState } from "react"
+import { memo, useEffect, useRef, useState } from "react"
 
 import { SkillPromptText } from "../SkillBadge"
 import { MessageTimestamp } from "./MessageTimestamp"
@@ -9,7 +9,11 @@ import type { Message } from "@/features/agents/lib/types"
 
 const COLLAPSED_MAX_HEIGHT_PX = 250
 
-export function UserMessage({ message }: { message: Message }) {
+export const UserMessage = memo(function UserMessage({
+  message,
+}: {
+  message: Message
+}) {
   const isSystem = message.structuredSenderKind === "system"
   const isSlack = message.structuredSurface === "slack"
   const text = message.chunks
@@ -154,4 +158,4 @@ export function UserMessage({ message }: { message: Message }) {
       </div>
     </div>
   )
-}
+})
