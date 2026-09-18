@@ -187,7 +187,7 @@ class SlackChannel(Base):
         if not SLACK_BOT_TOKEN:
             return False
         try:
-            async with slack_client(token=SLACK_BOT_TOKEN) as client:
+            async with SlackClient.bot() as client:
                 await client.conversations_join(channel=self.id)
             return True
         except SLACK_REQUEST_ERRORS as exc:
