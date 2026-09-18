@@ -198,9 +198,9 @@ it("sorts PR outcomes before pagination and toggles column direction", async () 
     status: "ready",
     cohorts: [
       cohort("z-model", 20),
-      cohort("a-model", 1),
+      cohort("a-model", 5),
       ...Array.from({ length: 9 }, (_, index) =>
-        cohort(`m-${index}`, index + 2)
+        cohort(`m-${index}`, index + 6)
       ),
     ],
   })
@@ -613,7 +613,7 @@ it("hides small model groups by default and reveals them with the toggle", async
   const row = (await screen.findByText("large-model")).closest("tr")!
   const cells = within(row).getAllByRole("cell")
   expect(cells.at(1)?.textContent).toBe("7")
-  expect(cells.at(5)?.textContent).toBe("100%")
+  expect(cells.at(6)?.textContent).toBe("100%")
   expect(screen.queryByText("small-model")).toBeNull()
   expect(row.textContent).not.toContain("small sample")
 
@@ -623,8 +623,8 @@ it("hides small model groups by default and reveals them with the toggle", async
   const smallCells = within(smallRow).getAllByRole("cell")
   expect(smallCells.at(1)?.textContent).toContain("2")
   expect(smallCells.at(1)?.textContent).toContain("small sample")
-  expect(smallCells.at(5)?.textContent).toContain("100%")
-  expect(smallCells.at(5)?.textContent).toContain("small sample")
+  expect(smallCells.at(6)?.textContent).toContain("100%")
+  expect(smallCells.at(6)?.textContent).toContain("small sample")
   // The large group's totals and rates are unchanged by the toggle.
   expect(within(row).getAllByRole("cell").at(1)?.textContent).toBe("7")
   client.clear()
@@ -660,9 +660,14 @@ it("hides only the small effort groups of a kept model until the toggle", async 
   // effort group is hidden, and the label discloses the partial breakdown.
   expect(row.textContent).toContain("Shown efforts")
   expect(within(row).getAllByRole("cell").at(1)?.textContent).toBe("8")
-  expect(
-    within(row).queryByRole("button", { name: /Expand mixed-model/ })
-  ).toBeNull()
+  fireEvent.click(
+    within(row).getByRole("button", { name: /Expand mixed-model/ })
+  )
+  expect(await screen.findByText("High")).toBeTruthy()
+  expect(screen.queryByText("Low")).toBeNull()
+  fireEvent.click(
+    within(row).getByRole("button", { name: /Collapse mixed-model/ })
+  )
 
   fireEvent.click(screen.getByRole("switch", { name: "Show small samples" }))
   expect(
@@ -727,12 +732,7 @@ it("keeps the small-sample choice across period changes", async () => {
   const view = render(
     <QueryClientProvider client={client}>
       <TooltipProvider>
-        <UsageAnalytics
-          period="30d"
-          login="reader"
-          isAdmin={false}
-          onPeriodChange={() => {}}
-        />
+        <UsageAnalytics period="30d" login="reader" isAdmin={false} />
       </TooltipProvider>
     </QueryClientProvider>
   )
@@ -744,12 +744,7 @@ it("keeps the small-sample choice across period changes", async () => {
   view.rerender(
     <QueryClientProvider client={client}>
       <TooltipProvider>
-        <UsageAnalytics
-          period="7d"
-          login="reader"
-          isAdmin={false}
-          onPeriodChange={() => {}}
-        />
+        <UsageAnalytics period="7d" login="reader" isAdmin={false} />
       </TooltipProvider>
     </QueryClientProvider>
   )

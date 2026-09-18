@@ -965,7 +965,9 @@ function PRMergeRateTable({
           <tbody className="divide-y divide-border">
             {rows.map((cohort) => {
               const key = `${cohort.model_id}-${cohort.model_attribution_quality}`
-              const hasMultipleEfforts = cohort.efforts.length > 1
+              const hasMultipleEfforts =
+                cohort.efforts.length > 1 ||
+                (cohort.partial_efforts && cohort.efforts.length > 0)
               const isExpanded = hasMultipleEfforts && expanded.has(key)
               const modelLabel = cohort.model_id
                 ? safeModelLabel(cohort.model_id) || "Unavailable"
@@ -1017,7 +1019,7 @@ function PRMergeRateTable({
                               : cohort.partial_efforts
                                 ? `Shown efforts · ${cohort.model_attribution_quality} attribution`
                                 : `${formatEffort(cohort.efforts[0]?.effort)} · ${cohort.model_attribution_quality} attribution`}
-
+                          </div>
                         </div>
                       </div>
                     </td>
@@ -1067,7 +1069,7 @@ function PRMergeRateTable({
       <TablePagination
         page={currentPage}
         pageSize={pageSize}
-        total={cohorts.length}
+        total={filtered.length}
         onPageChange={setPage}
         onPageSizeChange={(value) => {
           setPageSize(value)
