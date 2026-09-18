@@ -1,7 +1,8 @@
 /** @vitest-environment jsdom */
 
 import { cleanup, render, screen } from "@testing-library/react"
-import { afterEach, expect, it } from "vitest"
+import { renderToString } from "react-dom/server"
+import { afterEach, expect, it, vi } from "vitest"
 
 import type { SessionUser } from "@/lib/api"
 import { AboutSection } from "./AboutSection"
@@ -56,6 +57,27 @@ it("retains the running bundle identity when an older backend omits build info",
   expect(screen.getByText(/does not report them/)).toBeTruthy()
   expect(screen.getByText("fedcba")).toBeTruthy()
   expect(screen.queryByText(/different from the bundle/)).toBeNull()
+})
+
+it("hydrates server markup before showing the browser bundle identity", () => {
+  const container = document.createElement("div")
+  container.innerHTML = renderToString(<AboutSection user={user} />)
+  document.body.appendChild(container)
+  expect(container.textContent).not.toContain("This browser is running")
+
+  window.__OPEN_SWE_BUNDLE__ = {
+    commit: "fedcba",
+    built_at: "2026-09-11T09:00:00Z",
+  }
+  const onRecoverableError = vi.fn()
+  render(<AboutSection user={user} />, {
+    container,
+    hydrate: true,
+    onRecoverableError,
+  })
+
+  expect(screen.getByText("fedcba")).toBeTruthy()
+  expect(onRecoverableError).not.toHaveBeenCalled()
 })
 
 it("does not claim unknown commits differ from the served bundle", () => {
