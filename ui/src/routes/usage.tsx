@@ -58,6 +58,8 @@ interface SortableColumn {
   align: "left" | "right"
   /** Direction applied on the first click. Counts read best highest-first. */
   defaultDirection?: SortDirection
+  /** Metric definition shown on hover/focus of the header. */
+  tooltip?: string
 }
 
 type UsageScope = "invocations" | "threads"
@@ -305,6 +307,7 @@ function UsageAnalyticsPeriod({
         ) : (
           <UsageTable
             scope={usageScope}
+            period={activePeriod}
             currentUserRank={leaderboard.data.current_user_rank}
             rows={leaderboard.data.rows}
             totalMembers={leaderboard.data.total_members}
@@ -889,7 +892,10 @@ function PRMergeRateTable({
   )
 }
 
-function usageColumns(scope: UsageScope): Array<SortableColumn> {
+function usageColumns(
+  scope: UsageScope,
+  period: UsageLeaderboardPeriod
+): Array<SortableColumn> {
   return [
     { key: "rank", label: "Rank", align: "left", defaultDirection: "asc" },
     { key: "user", label: "User", align: "left", defaultDirection: "asc" },
@@ -924,6 +930,11 @@ function usageColumns(scope: UsageScope): Array<SortableColumn> {
       key: "merged_prs_per_thread",
       label: "Merged PRs / Thread",
       align: "right",
+      tooltip: `Merged PRs ÷ distinct threads ${
+        period === "all"
+          ? "all time"
+          : `in the ${PERIOD_LABELS[period].toLowerCase()}`
+      } — an aggregate ratio, not a per-thread outcome. One thread can open several PRs and many threads open none, so 1.00 does not mean every thread merged a PR.`,
     },
     { key: "agent_loc", label: "Agent LOC", align: "right" },
   ]
@@ -954,25 +965,40 @@ function SortableHeader({
       : "descending"
     : undefined
 
+  const button = (
+    <button
+      type="button"
+      onClick={() => onSort(column.key, column.defaultDirection ?? "desc")}
+      className={`flex w-full items-center gap-1 rounded-sm px-2 py-3 hover:bg-muted/50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring ${
+        column.align === "right" ? "justify-end" : "justify-start"
+      } ${isActive ? "text-foreground" : ""} ${
+        column.tooltip
+          ? "cursor-help underline decoration-dotted underline-offset-2"
+          : ""
+      }`}
+    >
+      {column.label}
+      <Icon
+        className={`size-3 shrink-0 ${isActive ? "" : "text-muted-foreground/50"}`}
+        aria-hidden
+      />
+    </button>
+  )
+
   return (
     <th
       scope="col"
       aria-sort={ariaSort}
       className={`${className} p-0 font-normal`}
     >
-      <button
-        type="button"
-        onClick={() => onSort(column.key, column.defaultDirection ?? "desc")}
-        className={`flex w-full items-center gap-1 rounded-sm px-2 py-3 hover:bg-muted/50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring ${
-          column.align === "right" ? "justify-end" : "justify-start"
-        } ${isActive ? "text-foreground" : ""}`}
-      >
-        {column.label}
-        <Icon
-          className={`size-3 shrink-0 ${isActive ? "" : "text-muted-foreground/50"}`}
-          aria-hidden
-        />
-      </button>
+      {column.tooltip ? (
+        <Tooltip>
+          <TooltipTrigger render={button} />
+          <TooltipPopup className="max-w-xs">{column.tooltip}</TooltipPopup>
+        </Tooltip>
+      ) : (
+        button
+      )}
     </th>
   )
 }
@@ -1036,6 +1062,7 @@ function PRMergeRateCells({
 
 function UsageTable({
   scope,
+  period,
   currentUserRank,
   rows,
   totalMembers,
@@ -1049,6 +1076,7 @@ function UsageTable({
   onPageSizeChange,
 }: {
   scope: UsageScope
+  period: UsageLeaderboardPeriod
   currentUserRank: number | null
   rows: Array<UsageLeaderboardRow>
   totalMembers: number
@@ -1070,7 +1098,7 @@ function UsageTable({
           ) : null}
           <thead className="border-b border-border text-xs text-muted-foreground">
             <tr>
-              {usageColumns(scope).map((column, index, columns) => (
+              {usageColumns(scope, period).map((column, index, columns) => (
                 <SortableHeader
                   key={column.key}
                   column={column}
