@@ -214,13 +214,18 @@ export async function readPullRequest(
 
 // Hold the fake run open long enough to load its busy composer and queue a
 // follow-up. It may finish while the UI observes the next server refresh.
-export async function openRunningThreadViaSlackLink(page: Page) {
+export async function openRunningThreadViaSlackLink(
+  page: Page,
+  holdSeconds = 8,
+) {
   await page.goto("/mock/slack");
   await page.locator("#reset").click();
   await expect(page.locator("#thread")).toContainText("No messages yet");
   await page
     .locator("#text")
-    .fill("<@U0BOT> E2E_BUSY_HOLD:8 please add a greet() helper and open a PR");
+    .fill(
+      `<@U0BOT> E2E_BUSY_HOLD:${holdSeconds} please add a greet() helper and open a PR`,
+    );
   await page.locator("#send").click();
 
   const webLink = page.locator('.msg.bot a[href*="/agents/"]').first();

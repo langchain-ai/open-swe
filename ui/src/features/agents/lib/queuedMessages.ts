@@ -54,8 +54,18 @@ export function visiblePendingMessages(
 export function queueEntryToMessage(
   entry: SubmissionQueueEntry
 ): QueuedThreadMessage | null {
-  const message = (entry.values as QueuedSubmitValues | null | undefined)
-    ?.messages?.[0]
+  // The *last* message, not the first: a locally-dispatched entry carries
+  // just the one message the composer sent, but an entry rehydrated from the
+  // server (a queued run created by another session) carries the full,
+  // attributed message list `build_input_messages` builds — dynamic-context
+  // preambles first, the real user message last. Every backend reader
+  // (`_command_message_content`, `_command_message_id`) treats the last
+  // message as the user's content for the same reason; the preamble
+  // messages also lack an `id`, so reading index 0 here silently dropped
+  // every rehydrated queued message (it has no id to key off of).
+  const messages = (entry.values as QueuedSubmitValues | null | undefined)
+    ?.messages
+  const message = messages?.[messages.length - 1]
   if (!message?.id) return null
   if (typeof message.content === "string") {
     return {
