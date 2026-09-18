@@ -1,6 +1,6 @@
 /** @vitest-environment jsdom */
 
-import { cleanup, render, screen } from "@testing-library/react"
+import { cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { renderToString } from "react-dom/server"
 import { afterEach, expect, it, vi } from "vitest"
 
@@ -27,6 +27,7 @@ const user: SessionUser = {
 
 afterEach(() => {
   cleanup()
+  vi.restoreAllMocks()
   delete window.__OPEN_SWE_BUNDLE__
 })
 
@@ -88,4 +89,42 @@ it("does not claim unknown commits differ from the served bundle", () => {
   render(<AboutSection user={user} />)
   expect(screen.queryByText(/different from the bundle/)).toBeNull()
   expect(screen.getByText(/comparison .* unavailable/)).toBeTruthy()
+})
+
+it("copies only environment diagnostics from session data", async () => {
+  const writeText = vi.fn().mockResolvedValue(undefined)
+  Object.defineProperty(navigator, "clipboard", {
+    configurable: true,
+    value: { writeText },
+  })
+  window.__OPEN_SWE_BUNDLE__ = {
+    commit: "running123",
+    built_at: "2026-09-11T09:00:00Z",
+  }
+  const session = {
+    ...user,
+    token: "private-token",
+    build_info: { ...user.build_info!, secret: "private-build-field" },
+  }
+  render(<AboutSection user={session} />)
+  fireEvent.click(screen.getByRole("button", { name: "Copy diagnostics" }))
+  expect(
+    await screen.findByText("Diagnostics copied to clipboard.")
+  ).toBeTruthy()
+  const text = writeText.mock.calls[0]![0] as string
+  expect(JSON.parse(text)).toMatchObject({
+    report: "open-swe-environment-diagnostics",
+    api: { origin: "https://backend.example.com", path: "/dashboard/api" },
+    build: { backend: { revision_id: "rev-42" } },
+    running_bundle: { commit: "running123" },
+  })
+  for (const excluded of [
+    "private",
+    "secret",
+    "reader",
+    "pr_report",
+    "event_processing",
+  ]) {
+    expect(text).not.toContain(excluded)
+  }
 })
