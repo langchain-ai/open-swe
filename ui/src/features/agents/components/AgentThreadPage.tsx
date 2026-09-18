@@ -94,7 +94,10 @@ function AgentThreadContent({
 
   return (
     <AgentThreadStreamBoundary active={active}>
-      <ThreadSourceProvider threadId={threadId}>
+      <ThreadSourceProvider
+        threadId={threadId}
+        transcript={threadQuery.data.transcript === "v2"}
+      >
         <AgentThreadView
           thread={threadQuery.data}
           autoFocusComposer={autoFocusComposer}
