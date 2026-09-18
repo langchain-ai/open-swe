@@ -19,6 +19,7 @@ import { Fragment, useState } from "react"
 import type {
   AnalyticsMetadata,
   PRMergeRateCohort,
+  PRMergeRateResponse,
   ReviewerStatsPayload,
   SortDirection,
   UsageLeaderboardPeriod,
@@ -227,15 +228,34 @@ function UsageAnalyticsPeriod({
     retry: (count, error) =>
       !(error instanceof ApiError && error.status >= 400) && count < 2,
   })
-  const report = usePRMergeRateReport(activePeriod, login, isAdmin)
+  // A refresh that fails keeps the last successful report visible, but the
+  // failure stays announced in the coverage details until one succeeds —
+  // manual or automatic (the query also refetches on interval/focus).
+  const [reportError, setReportError] = useState<ApiError | null>(null)
+  const report = usePRMergeRateReport(
+    activePeriod,
+    login,
+    isAdmin,
+    setReportError
+  )
   const refreshing = leaderboard.isFetching || report.isFetching
   const refreshNow = () => {
     void leaderboard.refetch()
-    void report.refetch()
+    // refetch() resolves on failure too, so the error has to come off the result.
+    void report.refetch().then((result) => {
+      const error = result.error
+      setReportError(
+        error == null
+          ? null
+          : error instanceof ApiError
+            ? error
+            : new ApiError(0, "unknown")
+      )
+    })
   }
   const metadata = [
     leaderboard.isError ? undefined : leaderboard.data,
-    report.isError ? undefined : report.data,
+    report.isError ? undefined : report.data?.payload,
   ].filter((data): data is NonNullable<typeof data> => data != null)
 
   return (
@@ -384,6 +404,9 @@ function UsageAnalyticsPeriod({
         reports={metadata}
         refreshing={refreshing}
         onRefresh={refreshNow}
+        period={activePeriod}
+        reportFetchedAt={report.data?.fetchedAt ?? null}
+        reportRefreshError={report.isError && !report.data ? null : reportError}
       />
     </>
   )
@@ -393,10 +416,18 @@ function AnalyticsCoverage({
   reports,
   refreshing,
   onRefresh,
+  period,
+  reportFetchedAt,
+  reportRefreshError,
 }: {
   reports: AnalyticsMetadata[]
   refreshing: boolean
   onRefresh: () => void
+  period: UsageLeaderboardPeriod
+  /** When this browser last received the PR report; separate from the server-side `as_of`. */
+  reportFetchedAt: string | null
+  /** Failed manual refresh while the last good report stays on screen. */
+  reportRefreshError: ApiError | null
 }) {
   if (!reports.length) return null
   const latest = reports.reduce((a, b) => (a.as_of > b.as_of ? a : b))
@@ -409,21 +440,22 @@ function AnalyticsCoverage({
     tone: string
   } = hasFailedEvents
     ? {
-        label: "Analytics need attention",
+        label: "Event processing needs attention",
         description:
-          "Some events could not be processed. Reports may be incomplete.",
+          "Some captured events could not be processed. Reports may be incomplete.",
         icon: WarningCircleIcon,
         tone: "text-destructive",
       }
     : hasPendingEvents
       ? {
-          label: "Analytics are updating",
-          description: "New activity is still being processed.",
+          label: "Event processing is behind",
+          description:
+            "New activity is still waiting to be processed into reports.",
           icon: ClockCountdownIcon,
           tone: "text-amber-600 dark:text-amber-400",
         }
       : {
-          label: "Analytics are up to date",
+          label: "Event processing is up to date",
           icon: CheckCircleIcon,
           tone: "text-emerald-600 dark:text-emerald-400",
         }
@@ -475,6 +507,24 @@ function AnalyticsCoverage({
         </summary>
         <div className="space-y-1 border-t border-border px-4 py-3 text-muted-foreground">
           <p>
+            Period: {PERIOD_LABELS[period]} · Reports checked{" "}
+            {new Date(latest.as_of).toLocaleString()} (server). PR report last
+            fetched by this browser:{" "}
+            {reportFetchedAt
+              ? new Date(reportFetchedAt).toLocaleString()
+              : "Unavailable"}
+            .
+          </p>
+          {reportRefreshError ? (
+            <p className="text-destructive">
+              Last PR report refresh failed (
+              {reportRefreshError.status > 0
+                ? `HTTP ${reportRefreshError.status}`
+                : "network error"}
+              ). The report shown is from the last successful fetch above.
+            </p>
+          ) : null}
+          <p>
             Reporting since{" "}
             <time dateTime={latest.reporting_cutover_at}>
               {new Date(latest.reporting_cutover_at).toLocaleString()}
@@ -491,7 +541,6 @@ function AnalyticsCoverage({
             {hasFailedEvents
               ? "Some events could not be processed. Reports may be incomplete. "
               : ""}
-            Reports checked {new Date(latest.as_of).toLocaleString()}.
           </p>
         </div>
       </details>
@@ -502,15 +551,19 @@ function AnalyticsCoverage({
 function usePRMergeRateReport(
   period: UsageLeaderboardPeriod,
   login: string,
-  isAdmin: boolean
+  isAdmin: boolean,
+  onRefreshErrorChange: (error: ApiError | null) => void
 ) {
   return useQuery({
     queryKey: ["prMergeRateByModel", period, login, isAdmin],
-    queryFn: () => api.prMergeRateByModel(period),
+    queryFn: (): Promise<PRMergeRateResponse> => api.prMergeRateByModel(period),
     staleTime: 60 * 1000,
     refetchInterval: 60 * 1000,
     retry: (count, error) =>
       !(error instanceof ApiError && error.status >= 400) && count < 2,
+    // Manual refreshes are not the only successes: automatic interval/focus
+    // fetches must also clear a retained failure announcement.
+    meta: { onRefreshErrorChange },
   })
 }
 
@@ -519,7 +572,8 @@ function PRMergeRateSection({
 }: {
   report: ReturnType<typeof usePRMergeRateReport>
 }) {
-  const data = report.isError ? undefined : report.data
+  const data = report.data?.payload
+  const failed = report.isError && !data
   const emptyMessage =
     data?.status === "not_started"
       ? "No analytics records have been captured since the reporting cutover yet."
@@ -541,7 +595,7 @@ function PRMergeRateSection({
           <Skeleton className="h-16 w-full" />
           <Skeleton className="h-16 w-full" />
         </div>
-      ) : report.isError ? (
+      ) : failed ? (
         <div className="space-y-2 p-4 text-xs" role="alert">
           <p className="text-destructive">
             {report.error instanceof ApiError && report.error.status === 503
@@ -702,8 +756,21 @@ function AvgTimeToMerge({ cohort }: { cohort: PRMergeRateCohort }) {
 }
 
 function AvgTimeToPR({ cohort }: { cohort: PRMergeRateCohort }) {
+  if (!("avg_delivery_seconds" in cohort)) {
+    // A backend that predates the metric has no key for it at all.
+    return (
+      <span
+        className="cursor-help rounded-sm underline decoration-dotted underline-offset-2 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+        title="Metric unavailable from this backend"
+        aria-label="Avg time to PR: metric unavailable from this backend"
+        tabIndex={0}
+      >
+        —
+      </span>
+    )
+  }
   if (cohort.avg_delivery_seconds == null) {
-    return <span>—</span>
+    return <span title="No PRs with valid timing in this group">—</span>
   }
   return (
     <Tooltip>
