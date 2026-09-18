@@ -15,6 +15,7 @@ from agent.analytics.events import (
     FindingObservedPayload,
     FindingStatePayload,
     FindingSurfacedPayload,
+    PRDistanceMeasuredPayload,
     PRObservedPayload,
     PROpenedPayload,
     PRRunLinkedPayload,
@@ -298,6 +299,24 @@ async def pr_state(
         source_version=source_version,
         pr_id=opaque_id("pr", pr_key),
         repository_id=opaque_id("repository", f"{owner.lower()}/{repo.lower()}"),
+    )
+
+
+async def pr_distance_measured(
+    payload: PRDistanceMeasuredPayload, *, measured_at: datetime
+) -> bool:
+    """Enqueue verified evidence without emitting or reordering a lifecycle transition."""
+    repository = payload.repository_full_name
+    pr_key = f"{repository}#{payload.pr_number}"
+    digest = sha256(payload.model_dump_json().encode()).hexdigest()
+    return await enqueue_event(
+        EventName.PR_DISTANCE_MEASURED,
+        f"pr:{pr_key}:distance:{digest}",
+        payload,
+        occurred_at=measured_at,
+        source="github",
+        pr_id=opaque_id("pr", pr_key),
+        repository_id=opaque_id("repository", repository),
     )
 
 
