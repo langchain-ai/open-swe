@@ -187,6 +187,7 @@ async def test_usage_ranks_run_and_pr_cohorts_with_cost_coverage(usage_db):
     assert row["favorite_model_effort"] == "high"
     assert row["prs_opened"] == 1
     assert row["merged_prs"] == 0
+    assert row["merged_prs_per_thread"] == 0
     assert row["agent_loc"] == 20
     assert row["additions"] == 12
     assert row["deletions"] == 8
@@ -225,6 +226,23 @@ async def test_usage_sorting_happens_before_pagination(usage_db):
             sort="user",
             direction="asc",
         )
+
+
+async def test_usage_sorts_by_merged_prs_per_thread(usage_db):
+    alice = await person("alice")
+    bob = await person("bob")
+    await run(alice, thread_id=uuid4())
+    for _ in range(2):
+        await pr(alice, state="merged")
+    for _ in range(2):
+        await run(bob, thread_id=uuid4())
+    for _ in range(3):
+        await pr(bob, state="merged")
+
+    result = await report(sort="merged_prs_per_thread", direction="desc")
+
+    assert [row["user"]["name"] for row in result["rows"]] == ["alice", "bob"]
+    assert [row["merged_prs_per_thread"] for row in result["rows"]] == [2, 1.5]
 
 
 async def test_user_sort_follows_disclosed_names_not_hidden_ones(usage_db):

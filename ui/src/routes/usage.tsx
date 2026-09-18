@@ -897,6 +897,11 @@ function usageColumns(scope: UsageScope): Array<SortableColumn> {
     },
     { key: "prs_opened", label: "PRs Opened", align: "right" },
     { key: "merged_prs", label: "Merged PRs", align: "right" },
+    {
+      key: "merged_prs_per_thread",
+      label: "Merged PRs / Thread",
+      align: "right",
+    },
     { key: "agent_loc", label: "Agent LOC", align: "right" },
   ]
 }
@@ -1100,6 +1105,9 @@ function UsageTable({
               </td>
               <td className="px-2 py-3 text-right tabular-nums">
                 {formatNumber(row.merged_prs)}
+              </td>
+              <td className="px-2 py-3 text-right tabular-nums">
+                {(row.merged_prs_per_thread ?? 0).toFixed(2)}
               </td>
               <td
                 className="px-4 py-3 text-right tabular-nums"
