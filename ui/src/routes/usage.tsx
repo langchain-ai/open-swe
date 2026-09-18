@@ -58,6 +58,8 @@ interface SortableColumn {
   align: "left" | "right"
   /** Direction applied on the first click. Counts read best highest-first. */
   defaultDirection?: SortDirection
+  /** Metric definition shown on hover/focus of the header. */
+  tooltip?: string
 }
 
 type UsageScope = "invocations" | "threads"
@@ -305,6 +307,7 @@ function UsageAnalyticsPeriod({
         ) : (
           <UsageTable
             scope={usageScope}
+            period={activePeriod}
             currentUserRank={leaderboard.data.current_user_rank}
             rows={leaderboard.data.rows}
             totalMembers={leaderboard.data.total_members}
@@ -600,7 +603,7 @@ function PRMergeRateSection({
               <strong>Median distance</strong> is the median normalized line
               edit distance between each merged PR’s opening diff and final
               diff. It is calculated only for merged PRs with complete text
-              patches; lower means less post-open editing.
+              patches; higher means more post-open editing.
             </p>
             <p>
               <strong>Merge rate</strong> includes only PRs old enough to have a
@@ -725,142 +728,156 @@ function PRMergeRateTable({
   )
 
   return (
-    <div className="overflow-x-auto">
-      <table className="w-full min-w-[860px] text-xs">
-        <thead className="border-b border-border text-muted-foreground">
-          <tr>
-            <th className="px-4 py-3 text-left font-normal">Opening model</th>
-            <th className="px-2 py-3 text-right font-normal">PRs opened</th>
-            <th className="px-2 py-3 text-right font-normal">Merged</th>
-            <th className="px-2 py-3 text-right font-normal">
-              Closed without merge
-            </th>
-            <th className="px-2 py-3 text-right font-normal">Open</th>
-            <th className="px-2 py-3 text-right font-medium text-foreground">
-              <Tooltip>
-                <TooltipTrigger className="cursor-help rounded-sm underline decoration-dotted underline-offset-2 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring">
-                  Median distance
-                </TooltipTrigger>
-                <TooltipPopup className="max-w-xs">
-                  Median post-open line edit distance across merged PRs. Lower
-                  means the final diff changed less after the PR opened.
-                </TooltipPopup>
-              </Tooltip>
-            </th>
-            <th className="px-4 py-3 text-right font-medium text-foreground">
-              <Tooltip>
-                <TooltipTrigger className="cursor-help rounded-sm underline decoration-dotted underline-offset-2 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring">
-                  Merge rate
-                </TooltipTrigger>
-                <TooltipPopup className="max-w-xs">
-                  Includes merged and closed PRs, plus PRs open for at least{" "}
-                  {maturityDays} days. Newer open PRs are excluded.
-                </TooltipPopup>
-              </Tooltip>
-            </th>
-            <th className="px-4 py-3 text-right font-normal">Avg time to PR</th>
-            <th className="px-4 py-3 text-right font-normal">
-              <Tooltip>
-                <TooltipTrigger className="cursor-help rounded-sm underline decoration-dotted underline-offset-2 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring">
-                  Avg time to merge
-                </TooltipTrigger>
-                <TooltipPopup>Unmerged PRs are excluded.</TooltipPopup>
-              </Tooltip>
-            </th>
-          </tr>
-        </thead>
-        <tbody className="divide-y divide-border">
-          {rows.map((cohort) => {
-            const key = `${cohort.model_id}-${cohort.model_attribution_quality}`
-            const hasMultipleEfforts = cohort.efforts.length > 1
-            const isExpanded = hasMultipleEfforts && expanded.has(key)
-            const modelLabel = cohort.model_id
-              ? safeModelLabel(cohort.model_id) || "Unavailable"
-              : "Unavailable"
-            return (
-              <Fragment key={key}>
-                <tr>
-                  <td className="px-4 py-3">
-                    <div className="flex items-center gap-2">
-                      {hasMultipleEfforts ? (
-                        <button
-                          type="button"
-                          className="-ml-1 size-5.5 shrink-0 rounded-sm p-1 text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
-                          aria-expanded={isExpanded}
-                          aria-label={`${isExpanded ? "Collapse" : "Expand"} ${modelLabel} reasoning efforts`}
-                          onClick={() =>
+    <div>
+      <div className="overflow-x-auto">
+        <table className="w-full min-w-[860px] text-xs">
+          <thead className="border-b border-border text-muted-foreground">
+            <tr>
+              <th className="px-4 py-3 text-left font-normal">Opening model</th>
+              <th className="px-2 py-3 text-right font-normal">PRs opened</th>
+              <th className="px-2 py-3 text-right font-normal">Merged</th>
+              <th className="px-2 py-3 text-right font-normal">
+                Closed without merge
+              </th>
+              <th className="px-2 py-3 text-right font-normal">Open</th>
+              <th className="px-2 py-3 text-right font-medium text-foreground">
+                <Tooltip>
+                  <TooltipTrigger className="cursor-help rounded-sm underline decoration-dotted underline-offset-2 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring">
+                    Median distance
+                  </TooltipTrigger>
+                  <TooltipPopup className="max-w-xs">
+                    Median post-open line edit distance across merged PRs.
+                    Higher means the final diff changed more after the PR
+                    opened.
+                  </TooltipPopup>
+                </Tooltip>
+              </th>
+              <th className="px-4 py-3 text-right font-medium text-foreground">
+                <Tooltip>
+                  <TooltipTrigger className="cursor-help rounded-sm underline decoration-dotted underline-offset-2 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring">
+                    Merge rate
+                  </TooltipTrigger>
+                  <TooltipPopup className="max-w-xs">
+                    Includes merged and closed PRs, plus PRs open for at least{" "}
+                    {maturityDays} days. Newer open PRs are excluded.
+                  </TooltipPopup>
+                </Tooltip>
+              </th>
+              <th className="px-4 py-3 text-right font-normal">
+                Avg time to PR
+              </th>
+              <th className="px-4 py-3 text-right font-normal">
+                <Tooltip>
+                  <TooltipTrigger className="cursor-help rounded-sm underline decoration-dotted underline-offset-2 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring">
+                    Avg time to merge
+                  </TooltipTrigger>
+                  <TooltipPopup>Unmerged PRs are excluded.</TooltipPopup>
+                </Tooltip>
+              </th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-border">
+            {rows.map((cohort) => {
+              const key = `${cohort.model_id}-${cohort.model_attribution_quality}`
+              const hasMultipleEfforts = cohort.efforts.length > 1
+              const isExpanded = hasMultipleEfforts && expanded.has(key)
+              const modelLabel = cohort.model_id
+                ? safeModelLabel(cohort.model_id) || "Unavailable"
+                : "Unavailable"
+              return (
+                <Fragment key={key}>
+                  <tr
+                    className={
+                      hasMultipleEfforts
+                        ? "cursor-pointer hover:bg-muted/35"
+                        : undefined
+                    }
+                    onClick={
+                      hasMultipleEfforts
+                        ? () =>
                             setExpanded((current) => {
                               const next = new Set(current)
                               if (next.has(key)) next.delete(key)
                               else next.add(key)
                               return next
                             })
-                          }
-                        >
-                          {isExpanded ? (
-                            <ChevronDown className="size-3.5" />
-                          ) : (
-                            <ChevronRight className="size-3.5" />
-                          )}
-                        </button>
-                      ) : (
-                        <span
-                          aria-hidden="true"
-                          className="-ml-1 size-5.5 shrink-0"
-                        />
-                      )}
-                      <div>
-                        <div className="font-medium">{modelLabel}</div>
-                        <div className="text-muted-foreground">
-                          {hasMultipleEfforts
-                            ? `All efforts · ${cohort.model_attribution_quality} attribution`
-                            : `${formatEffort(cohort.efforts[0]?.effort)} · ${cohort.model_attribution_quality} attribution`}
+                        : undefined
+                    }
+                  >
+                    <td className="px-4 py-3">
+                      <div className="flex items-center gap-2">
+                        {hasMultipleEfforts ? (
+                          <button
+                            type="button"
+                            className="-ml-1 size-5.5 shrink-0 rounded-sm p-1 text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+                            aria-expanded={isExpanded}
+                            aria-label={`${isExpanded ? "Collapse" : "Expand"} ${modelLabel} reasoning efforts`}
+                          >
+                            {isExpanded ? (
+                              <ChevronDown className="size-3.5" />
+                            ) : (
+                              <ChevronRight className="size-3.5" />
+                            )}
+                          </button>
+                        ) : (
+                          <span
+                            aria-hidden="true"
+                            className="-ml-1 size-5.5 shrink-0"
+                          />
+                        )}
+                        <div>
+                          <div className="font-medium">{modelLabel}</div>
+                          <div className="text-muted-foreground">
+                            {hasMultipleEfforts
+                              ? `All efforts · ${cohort.model_attribution_quality} attribution`
+                              : `${formatEffort(cohort.efforts[0]?.effort)} · ${cohort.model_attribution_quality} attribution`}
+                          </div>
                         </div>
                       </div>
-                    </div>
-                  </td>
-                  <PRMergeRateCells
-                    cohort={cohort}
-                    maturityDays={maturityDays}
-                  />
-                  <td className="px-4 py-3 text-right tabular-nums">
-                    <AvgTimeToPR cohort={cohort} />
-                  </td>
-                  <td className="px-4 py-3 text-right tabular-nums">
-                    <AvgTimeToMerge cohort={cohort} />
-                  </td>
-                </tr>
-                {isExpanded
-                  ? cohort.efforts.map((effort) => (
-                      <tr
-                        key={`${key}-${effort.effort ?? "unknown"}`}
-                        className="bg-muted/35"
-                      >
-                        <td className="py-3 pr-2 pl-11 font-medium">
-                          {formatEffort(effort.effort)}
-                        </td>
-                        <PRMergeRateCells
-                          cohort={effort}
-                          maturityDays={maturityDays}
-                        />
-                        <td className="px-4 py-3 text-right tabular-nums">
-                          <span title="Average shown at the model level">
-                            —
-                          </span>
-                        </td>
-                        <td className="px-4 py-3 text-right tabular-nums">
-                          <span title="Average shown at the model level">
-                            —
-                          </span>
-                        </td>
-                      </tr>
-                    ))
-                  : null}
-              </Fragment>
-            )
-          })}
-        </tbody>
-      </table>
+                    </td>
+                    <PRMergeRateCells
+                      cohort={cohort}
+                      maturityDays={maturityDays}
+                    />
+                    <td className="px-4 py-3 text-right tabular-nums">
+                      <AvgTimeToPR cohort={cohort} />
+                    </td>
+                    <td className="px-4 py-3 text-right tabular-nums">
+                      <AvgTimeToMerge cohort={cohort} />
+                    </td>
+                  </tr>
+                  {isExpanded
+                    ? cohort.efforts.map((effort) => (
+                        <tr
+                          key={`${key}-${effort.effort ?? "unknown"}`}
+                          className="bg-muted/35"
+                        >
+                          <td className="py-3 pr-2 pl-11 font-medium">
+                            {formatEffort(effort.effort)}
+                          </td>
+                          <PRMergeRateCells
+                            cohort={effort}
+                            maturityDays={maturityDays}
+                          />
+                          <td className="px-4 py-3 text-right tabular-nums">
+                            <span title="Average shown at the model level">
+                              —
+                            </span>
+                          </td>
+                          <td className="px-4 py-3 text-right tabular-nums">
+                            <span title="Average shown at the model level">
+                              —
+                            </span>
+                          </td>
+                        </tr>
+                      ))
+                    : null}
+                </Fragment>
+              )
+            })}
+          </tbody>
+        </table>
+      </div>
       <TablePagination
         page={currentPage}
         pageSize={pageSize}
@@ -875,7 +892,10 @@ function PRMergeRateTable({
   )
 }
 
-function usageColumns(scope: UsageScope): Array<SortableColumn> {
+function usageColumns(
+  scope: UsageScope,
+  period: UsageLeaderboardPeriod
+): Array<SortableColumn> {
   return [
     { key: "rank", label: "Rank", align: "left", defaultDirection: "asc" },
     { key: "user", label: "User", align: "left", defaultDirection: "asc" },
@@ -910,6 +930,11 @@ function usageColumns(scope: UsageScope): Array<SortableColumn> {
       key: "merged_prs_per_thread",
       label: "Merged PRs / Thread",
       align: "right",
+      tooltip: `Merged PRs ÷ distinct threads ${
+        period === "all"
+          ? "all time"
+          : `in the ${PERIOD_LABELS[period].toLowerCase()}`
+      } — an aggregate ratio, not a per-thread outcome. One thread can open several PRs and many threads open none, so 1.00 does not mean every thread merged a PR.`,
     },
     { key: "agent_loc", label: "Agent LOC", align: "right" },
   ]
@@ -940,25 +965,40 @@ function SortableHeader({
       : "descending"
     : undefined
 
+  const button = (
+    <button
+      type="button"
+      onClick={() => onSort(column.key, column.defaultDirection ?? "desc")}
+      className={`flex w-full items-center gap-1 rounded-sm px-2 py-3 hover:bg-muted/50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring ${
+        column.align === "right" ? "justify-end" : "justify-start"
+      } ${isActive ? "text-foreground" : ""} ${
+        column.tooltip
+          ? "cursor-help underline decoration-dotted underline-offset-2"
+          : ""
+      }`}
+    >
+      {column.label}
+      <Icon
+        className={`size-3 shrink-0 ${isActive ? "" : "text-muted-foreground/50"}`}
+        aria-hidden
+      />
+    </button>
+  )
+
   return (
     <th
       scope="col"
       aria-sort={ariaSort}
       className={`${className} p-0 font-normal`}
     >
-      <button
-        type="button"
-        onClick={() => onSort(column.key, column.defaultDirection ?? "desc")}
-        className={`flex w-full items-center gap-1 rounded-sm px-2 py-3 hover:bg-muted/50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring ${
-          column.align === "right" ? "justify-end" : "justify-start"
-        } ${isActive ? "text-foreground" : ""}`}
-      >
-        {column.label}
-        <Icon
-          className={`size-3 shrink-0 ${isActive ? "" : "text-muted-foreground/50"}`}
-          aria-hidden
-        />
-      </button>
+      {column.tooltip ? (
+        <Tooltip>
+          <TooltipTrigger render={button} />
+          <TooltipPopup className="max-w-xs">{column.tooltip}</TooltipPopup>
+        </Tooltip>
+      ) : (
+        button
+      )}
     </th>
   )
 }
@@ -1022,6 +1062,7 @@ function PRMergeRateCells({
 
 function UsageTable({
   scope,
+  period,
   currentUserRank,
   rows,
   totalMembers,
@@ -1035,6 +1076,7 @@ function UsageTable({
   onPageSizeChange,
 }: {
   scope: UsageScope
+  period: UsageLeaderboardPeriod
   currentUserRank: number | null
   rows: Array<UsageLeaderboardRow>
   totalMembers: number
@@ -1048,89 +1090,93 @@ function UsageTable({
   onPageSizeChange: (pageSize: number) => void
 }) {
   return (
-    <div className="overflow-x-auto">
-      <table aria-busy={isUpdating} className="w-full min-w-[1040px] text-xs">
-        {isUpdating ? (
-          <caption className="sr-only">Updating leaderboard</caption>
-        ) : null}
-        <thead className="border-b border-border text-xs text-muted-foreground">
-          <tr>
-            {usageColumns(scope).map((column, index, columns) => (
-              <SortableHeader
-                key={column.key}
-                column={column}
-                sortKey={sort}
-                sortDirection={direction}
-                onSort={onSort}
-                className={`${index === 0 ? "w-14 pr-0 pl-4" : index === columns.length - 1 ? "pr-4 pl-0" : "px-0"} ${column.align === "right" ? "text-right" : "text-left"}`}
-              />
-            ))}
-          </tr>
-        </thead>
-        <tbody
-          className={`divide-y divide-border ${isUpdating ? "opacity-50" : ""}`}
-        >
-          {rows.map((row) => (
-            <tr
-              key={`${row.rank}-${row.user.github_login ?? row.user.email ?? row.user.name}`}
-            >
-              <td className="px-4 py-3 text-muted-foreground">{row.rank}</td>
-              <td className="px-2 py-3">
-                <UserCell
-                  row={row}
-                  isCurrentUser={row.rank === currentUserRank}
+    <div>
+      <div className="overflow-x-auto">
+        <table aria-busy={isUpdating} className="w-full min-w-[1040px] text-xs">
+          {isUpdating ? (
+            <caption className="sr-only">Updating leaderboard</caption>
+          ) : null}
+          <thead className="border-b border-border text-xs text-muted-foreground">
+            <tr>
+              {usageColumns(scope, period).map((column, index, columns) => (
+                <SortableHeader
+                  key={column.key}
+                  column={column}
+                  sortKey={sort}
+                  sortDirection={direction}
+                  onSort={onSort}
+                  className={`${index === 0 ? "w-14 pr-0 pl-4" : index === columns.length - 1 ? "pr-4 pl-0" : "px-0"} ${column.align === "right" ? "text-right" : "text-left"}`}
                 />
-              </td>
-              <td className="max-w-48 px-2 py-3 text-muted-foreground">
-                <div className="truncate">
-                  {safeModelLabel(row.favorite_model) || "Unavailable"}
-                </div>
-                <div className="capitalize">
-                  {row.favorite_model_effort === undefined
-                    ? null
-                    : (row.favorite_model_effort ?? "Unknown")}
-                </div>
-              </td>
-              <td className="px-2 py-3 text-right tabular-nums">
-                {formatNumber(
-                  scope === "threads" ? (row.threads ?? 0) : row.invocations
-                )}
-              </td>
-              <td className="px-2 py-3 text-right tabular-nums">
-                {row.threads ? (row.invocations / row.threads).toFixed(1) : "—"}
-              </td>
-              <td className="px-2 py-3 text-right tabular-nums">
-                {formatNumber(row.total_tokens)}
-              </td>
-              <td className="px-2 py-3 text-right tabular-nums">
-                <UsageCost row={row} />
-              </td>
-              <td className="px-2 py-3 text-right tabular-nums">
-                {formatDuration(
-                  scope === "threads"
-                    ? (row.avg_thread_seconds ?? 0)
-                    : row.avg_invocation_seconds
-                )}
-              </td>
-              <td className="px-2 py-3 text-right tabular-nums">
-                {formatNumber(row.prs_opened)}
-              </td>
-              <td className="px-2 py-3 text-right tabular-nums">
-                {formatNumber(row.merged_prs)}
-              </td>
-              <td className="px-2 py-3 text-right tabular-nums">
-                {(row.merged_prs_per_thread ?? 0).toFixed(2)}
-              </td>
-              <td
-                className="px-4 py-3 text-right tabular-nums"
-                title={`${formatNumber(row.additions)} additions, ${formatNumber(row.deletions)} deletions`}
-              >
-                {formatNumber(row.agent_loc)}
-              </td>
+              ))}
             </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+          <tbody
+            className={`divide-y divide-border ${isUpdating ? "opacity-50" : ""}`}
+          >
+            {rows.map((row) => (
+              <tr
+                key={`${row.rank}-${row.user.github_login ?? row.user.email ?? row.user.name}`}
+              >
+                <td className="px-4 py-3 text-muted-foreground">{row.rank}</td>
+                <td className="px-2 py-3">
+                  <UserCell
+                    row={row}
+                    isCurrentUser={row.rank === currentUserRank}
+                  />
+                </td>
+                <td className="max-w-48 px-2 py-3 text-muted-foreground">
+                  <div className="truncate">
+                    {safeModelLabel(row.favorite_model) || "Unavailable"}
+                  </div>
+                  <div className="capitalize">
+                    {row.favorite_model_effort === undefined
+                      ? null
+                      : (row.favorite_model_effort ?? "Unknown")}
+                  </div>
+                </td>
+                <td className="px-2 py-3 text-right tabular-nums">
+                  {formatNumber(
+                    scope === "threads" ? (row.threads ?? 0) : row.invocations
+                  )}
+                </td>
+                <td className="px-2 py-3 text-right tabular-nums">
+                  {row.threads
+                    ? (row.invocations / row.threads).toFixed(1)
+                    : "—"}
+                </td>
+                <td className="px-2 py-3 text-right tabular-nums">
+                  {formatNumber(row.total_tokens)}
+                </td>
+                <td className="px-2 py-3 text-right tabular-nums">
+                  <UsageCost row={row} />
+                </td>
+                <td className="px-2 py-3 text-right tabular-nums">
+                  {formatDuration(
+                    scope === "threads"
+                      ? (row.avg_thread_seconds ?? 0)
+                      : row.avg_invocation_seconds
+                  )}
+                </td>
+                <td className="px-2 py-3 text-right tabular-nums">
+                  {formatNumber(row.prs_opened)}
+                </td>
+                <td className="px-2 py-3 text-right tabular-nums">
+                  {formatNumber(row.merged_prs)}
+                </td>
+                <td className="px-2 py-3 text-right tabular-nums">
+                  {(row.merged_prs_per_thread ?? 0).toFixed(2)}
+                </td>
+                <td
+                  className="px-4 py-3 text-right tabular-nums"
+                  title={`${formatNumber(row.additions)} additions, ${formatNumber(row.deletions)} deletions`}
+                >
+                  {formatNumber(row.agent_loc)}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
       <TablePagination
         page={page}
         pageSize={pageSize}

@@ -447,7 +447,6 @@ async def slack_webhook(
         thread_ts = DM_SESSION_TS
 
     is_direct_message = not is_message_update and in_dm_channel and bool(user_id)
-    is_untagged_two_party_reply = False
     if (
         event.type != "app_mention"
         and not is_message_update
@@ -458,37 +457,8 @@ async def slack_webhook(
             common.SLACK_BOT_USERNAME and f"@{common.SLACK_BOT_USERNAME}" in text
         )
         has_id_mention = bool(bot_user_id and f"<@{bot_user_id}>" in text)
-        is_ready_plan_reply = bool(
-            not is_direct_message
-            and await service.slack_user_can_reply_to_ready_plan(
-                channel_id, event.thread_ts, user_id
-            )
-        )
-        is_untagged_two_party_reply = bool(
-            event.subtype in {"", "file_share"}
-            and not is_direct_message
-            and not has_username_mention
-            and not has_id_mention
-            and await service.slack_thread_allows_untagged_reply(
-                channel_id,
-                event.thread_ts,
-                text,
-                bot_user_id,
-                user_id,
-                event_ts,
-            )
-        )
-        should_handle_message = any(
-            (
-                has_username_mention,
-                has_id_mention,
-                is_ready_plan_reply,
-                is_direct_message,
-                is_untagged_two_party_reply,
-            )
-        )
-        if not should_handle_message:
-            return ignored("Not an app mention, DM, or plan reply")
+        if not (has_username_mention or has_id_mention or is_direct_message):
+            return ignored("Not an app mention or DM")
 
     if {event.subtype, updated_message.subtype} & _MEMBERSHIP_SUBTYPES:
         if in_code_channel and await common.claim_slack_event(event_id, channel_id, event_ts):
@@ -560,7 +530,6 @@ async def slack_webhook(
                     bot_user_id=bot_user_id,
                     thread_id=thread_id,
                     treat_all_messages_as_mentions=is_direct_message or in_code_channel,
-                    untagged_reply=is_untagged_two_party_reply,
                     code_channel=in_code_channel,
                     dm_session=in_dm,
                     reply_thread_ts=reply_thread_ts if in_code_channel or in_dm else "",

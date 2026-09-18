@@ -22,7 +22,7 @@ from agent.github.app import get_github_app_installation_token
 from agent.review.diff import fetch_pr_diff
 from agent.review.findings import REVIEWER_THREAD_KIND
 from agent.review.reviews import classify_finding, get_pr_head_sha, get_review
-from agent.thread_ids import reviewer_thread_id
+from agent.thread_ids import review_chat_thread_id, reviewer_thread_id
 from agent.threads.proxy import (
     langgraph_proxy_headers,
     require_json_content_type,
@@ -59,70 +59,12 @@ async def _reviewer_thread_exists(owner: str, repo: str, pr_number: int) -> bool
 
 
 async def get_review_chat(owner: str, repo: str, pr_number: int, login: str) -> dict[str, Any]:
-    """Chat availability for this PR. Threads are minted client-side per chat."""
+    """Chat availability for this PR, and the one thread this user chats in."""
     return {
         "available": await _reviewer_thread_exists(owner, repo, pr_number),
         "assistant_id": _CHAT_ASSISTANT_ID,
+        "thread_id": review_chat_thread_id(owner, repo, pr_number, login),
     }
-
-
-def _chat_thread_search_metadata(
-    owner: str, repo: str, pr_number: int, login: str
-) -> dict[str, Any]:
-    return {
-        "kind": _CHAT_SOURCE,
-        "github_login": login,
-        "repo_owner": owner,
-        "repo_name": repo,
-        "pr_number": pr_number,
-    }
-
-
-async def list_review_chat_threads(
-    owner: str, repo: str, pr_number: int, login: str, *, limit: int = 50
-) -> list[dict[str, Any]]:
-    """This user's chat conversations for the PR, newest first."""
-    client = langgraph_client()
-    try:
-        threads = await client.threads.search(
-            metadata=_chat_thread_search_metadata(owner, repo, pr_number, login),
-            limit=limit,
-            sort_by="updated_at",
-            sort_order="desc",
-        )
-    except Exception:  # noqa: BLE001
-        logger.debug(
-            "chat thread search failed for %s/%s#%s", owner, repo, pr_number, exc_info=True
-        )
-        return []
-    out: list[dict[str, Any]] = []
-    for thread in threads or []:
-        if not isinstance(thread, dict):
-            continue
-        metadata = as_json_object(thread.get("metadata"))
-        thread_id = thread.get("thread_id") or thread.get("id")
-        if not isinstance(thread_id, str):
-            continue
-        out.append(
-            {
-                "thread_id": thread_id,
-                "title": metadata.get("title") or "New chat",
-                "updated_at": thread.get("updated_at")
-                if isinstance(thread.get("updated_at"), str)
-                else None,
-            }
-        )
-    return out
-
-
-async def delete_review_chat_thread(
-    owner: str, repo: str, pr_number: int, login: str, thread_id: str
-) -> None:
-    """Delete one of the user's chat threads (scoped + ownership-checked)."""
-    metadata = await assert_chat_thread_access(thread_id, owner, repo, pr_number, login)
-    if metadata is None:
-        return  # already gone; treat as success
-    await langgraph_client().threads.delete(thread_id)
 
 
 def _first_user_text(params: dict[str, Any]) -> str:

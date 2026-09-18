@@ -1,6 +1,7 @@
 import type { ReactNode } from "react"
 
 import type { OpenPullRequest } from "@/lib/api"
+import { cn } from "@/lib/utils"
 import { dateLabel } from "../lib/dateLabel"
 import {
   canAttemptMerge,
@@ -18,21 +19,37 @@ import { PullRequestThreadAction } from "./PullRequestThreadAction"
 import { StatusPill } from "./StatusPill"
 import { UnresolvedConversations } from "./UnresolvedConversations"
 
+export type PullRequestOutcome = "merged" | "closed"
+
+const outcomeLabels: Record<PullRequestOutcome, string> = {
+  merged: "Merged",
+  closed: "Closed",
+}
+
 export function PullRequestCard({
   pr,
   login,
   review,
-  onRemoved,
+  outcome,
+  onSettled,
   onReady,
 }: {
   pr: OpenPullRequest
   login: string
   review: ReactNode
-  onRemoved: () => void
+  // Set once the PR has left GitHub's open list. The card keeps its place
+  // until the next refresh so the rows below it never jump.
+  outcome?: PullRequestOutcome
+  onSettled: (outcome: PullRequestOutcome) => void
   onReady: () => void
 }) {
   return (
-    <li className="rounded-lg border border-border bg-card p-4">
+    <div
+      className={cn(
+        "rounded-lg border border-border bg-card p-4",
+        outcome && "opacity-60"
+      )}
+    >
       <div className="min-w-0 space-y-3">
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5 text-xs text-muted-foreground">
@@ -86,23 +103,37 @@ export function PullRequestCard({
         <PullRequestChecks pr={pr} />
         <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
           <div className="flex flex-wrap items-center gap-x-2 gap-y-2">
-            {isFixable(pr) && (
-              <PullRequestThreadAction pr={pr} login={login} action="fix" />
+            {outcome ? (
+              <span className="text-xs text-muted-foreground">
+                {outcomeLabels[outcome]} · leaves the list on the next refresh
+              </span>
+            ) : (
+              <>
+                {isFixable(pr) && (
+                  <PullRequestThreadAction pr={pr} login={login} action="fix" />
+                )}
+                {hasUnresolvedConversations(pr) && (
+                  <PullRequestThreadAction
+                    pr={pr}
+                    login={login}
+                    action="address-comments"
+                  />
+                )}
+                {pr.draft === true && (
+                  <MarkPullRequestReady pr={pr} onReady={onReady} />
+                )}
+                {canAttemptMerge(pr) && (
+                  <MergePullRequest
+                    pr={pr}
+                    onMerged={() => onSettled("merged")}
+                  />
+                )}
+                <ClosePullRequest
+                  pr={pr}
+                  onClosed={() => onSettled("closed")}
+                />
+              </>
             )}
-            {hasUnresolvedConversations(pr) && (
-              <PullRequestThreadAction
-                pr={pr}
-                login={login}
-                action="address-comments"
-              />
-            )}
-            {pr.draft === true && (
-              <MarkPullRequestReady pr={pr} onReady={onReady} />
-            )}
-            {canAttemptMerge(pr) && (
-              <MergePullRequest pr={pr} onMerged={onRemoved} />
-            )}
-            <ClosePullRequest pr={pr} onClosed={onRemoved} />
           </div>
           <PullRequestLinks
             repo={pr.repo}
@@ -111,6 +142,6 @@ export function PullRequestCard({
           />
         </div>
       </div>
-    </li>
+    </div>
   )
 }
