@@ -25,7 +25,6 @@ const stream = {
   isThreadLoading: false,
   hydrationPromise: Promise.resolve(),
   error: null,
-  stop: vi.fn(),
   submit: vi.fn(),
   disconnect: vi.fn(),
   getThread: () => null,
@@ -59,7 +58,6 @@ afterEach(() => cleanup())
 
 beforeEach(() => {
   stream.isLoading = false
-  stream.stop.mockClear()
   stream.disconnect.mockClear()
   cancelThread.mockClear()
 })

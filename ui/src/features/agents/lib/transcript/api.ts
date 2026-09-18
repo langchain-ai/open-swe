@@ -40,7 +40,7 @@ export async function fetchImageBlob(url: string): Promise<Blob> {
   return await response.blob()
 }
 
-export interface RunStartMessage {
+interface RunStartMessage {
   /** Client-minted id; the graph's HumanMessage and the log's message row share it. */
   id: string
   text: string

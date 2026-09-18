@@ -18,11 +18,6 @@ export function useThreadSource(): ThreadSource {
   return source
 }
 
-/** Null outside a thread page (the home composer), where there is no thread yet. */
-export function useOptionalThreadSource(): ThreadSource | null {
-  return useContext(ThreadSourceContext)
-}
-
 function StreamSource({
   threadId,
   children,

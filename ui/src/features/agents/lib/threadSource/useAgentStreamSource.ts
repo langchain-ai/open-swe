@@ -17,12 +17,9 @@ export function useAgentStreamSource(threadId: string): StreamThreadSource {
     transport: "cloud",
     threadId,
   })
-  const disconnect = useCallback(async () => {
-    // `stream.stop()` only cancels server-side when this client dispatched the
-    // run, so the cancel endpoint runs first and this only detaches.
-    await stream.disconnect()
-  }, [stream])
-  const stop = useCancelRun(threadId, disconnect)
+  // `stream.stop()` only cancels server-side when this client dispatched the
+  // run, so the cancel endpoint runs first and this only detaches.
+  const stop = useCancelRun(threadId, stream.disconnect)
 
   const messages = useMemo(() => {
     const started = perfNow()
@@ -76,8 +73,8 @@ export function useAgentStreamSource(threadId: string): StreamThreadSource {
     isHydrating: stream.isThreadLoading,
     hydration: stream.hydrationPromise,
     error: stream.error,
-    isOffloading: stream.isOffloading ?? false,
-    routed: stream.routed ?? null,
+    isOffloading: stream.isOffloading,
+    routed: stream.routed,
     connection,
     contextTokens,
     startRun,

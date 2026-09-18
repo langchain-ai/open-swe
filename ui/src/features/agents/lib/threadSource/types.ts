@@ -1,5 +1,6 @@
 import type {
   AgentStream,
+  RoutedModel,
   StreamConnection,
 } from "@/features/agents/lib/stream/connection"
 import type { ImageChunk, Message } from "@/features/agents/lib/types"
@@ -28,7 +29,7 @@ interface ThreadSourceShared {
   hydration: Promise<unknown>
   error: unknown
   isOffloading: boolean
-  routed: { route?: string; modelId?: string | null } | null
+  routed: RoutedModel | null
   connection: StreamConnection
   /** Context tokens the last model call reported, when the source knows them. */
   contextTokens: number | null
