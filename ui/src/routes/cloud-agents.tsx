@@ -75,9 +75,10 @@ function CloudAgentsPage() {
     currentModel && !currentModel.efforts.includes(effortChoice)
       ? currentModel.default_effort
       : effortChoice
-  const subagentEffort =
-    currentSubagentModel &&
-    !currentSubagentModel.efforts.includes(subagentEffortChoice)
+  const subagentEffort = subagentInheritsMain
+    ? effort
+    : currentSubagentModel &&
+        !currentSubagentModel.efforts.includes(subagentEffortChoice)
       ? currentSubagentModel.default_effort
       : subagentEffortChoice
 
