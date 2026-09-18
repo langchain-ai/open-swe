@@ -16,7 +16,7 @@ import hmac
 import logging
 from typing import Any
 
-from langchain_core.messages import convert_to_messages
+from langchain_core.messages import AIMessage, convert_to_messages
 from langgraph_sdk.client import LangGraphClient
 
 from agent.agent_cost import finalize_agent_invocation_usage
@@ -275,6 +275,73 @@ def _invocation_id(payload: dict[str, Any]) -> str | None:
         return None
 
 
+def _last_ai_text(state: dict[str, Any] | None) -> str:
+    """Text of the final AI message in a completion payload's state, if any."""
+    if not state:
+        return ""
+    messages = state.get("messages")
+    if not isinstance(messages, list):
+        return ""
+    try:
+        messages = convert_to_messages(messages)
+    except _MESSAGE_CONVERSION_ERRORS:
+        return ""
+    for message in reversed(messages):
+        if not isinstance(message, AIMessage):
+            continue
+        content = message.content
+        if isinstance(content, str):
+            return content.strip()
+        if isinstance(content, list):
+            return " ".join(
+                block.get("text", "")
+                for block in content
+                if isinstance(block, dict) and isinstance(block.get("text"), str)
+            ).strip()
+        return str(content).strip()
+    return ""
+
+
+def _run_posted_slack_reply(payload: dict[str, Any]) -> bool:
+    """Whether the run itself posted a Slack reply via ``slack_thread_reply``.
+
+    Tool calls are recorded as state messages even when their artifacts are
+    evicted, so the tool-call list is the durable signal that the agent reached
+    the thread; the tool's own result is not trusted, since a failed post is
+    indistinguishable from a successful one once dropped.
+    """
+    values = payload.get("values")
+    if not isinstance(values, dict):
+        return False
+    messages = values.get("messages")
+    if not isinstance(messages, list):
+        return False
+    try:
+        messages = convert_to_messages(messages)
+    except _MESSAGE_CONVERSION_ERRORS:
+        return False
+    return any(
+        isinstance(message, AIMessage)
+        and any(
+            call.get("name") == "slack_thread_reply"
+            for call in message.tool_calls
+            if isinstance(call, dict)
+        )
+        for message in messages
+    )
+
+
+_SLACK_SILENT_WARNING = (
+    "Open SWE finished its run, but its answer never reached this thread — the result "
+    "is in LangSmith ({trace_url}). Send another message to have it reposted."
+)
+
+
+def _slack_silent_text(trace_url: str | None) -> str:
+    link = f"<{trace_url}|LangSmith>" if trace_url else "LangSmith"
+    return warning(_SLACK_SILENT_WARNING.format(trace_url=link))
+
+
 async def _finalize_agent_usage_telemetry(
     thread_id: str, status: object, payload: dict[str, Any]
 ) -> None:
@@ -420,6 +487,29 @@ async def _handle_successful_run(
         )
     except Exception:  # noqa: BLE001
         logger.warning("run-complete: could not flag thread %s", thread_id, exc_info=True)
+
+    # Safety net: a successful run whose final answer is stranded in the last
+    # assistant message — no slack_thread_reply call and non-empty terminal text
+    # — leaves the Slack user nothing. Post a pointer rather than stay silent.
+    if (
+        not automated
+        and not _run_posted_slack_reply(payload)
+        and _last_ai_text(
+            payload.get("values") if isinstance(payload.get("values"), dict) else None
+        )
+    ):
+        trace_url = await get_langsmith_trace_url(thread_id)
+        posted = await post_slack_thread_reply(
+            channel_id,
+            thread_ts,
+            _slack_silent_text(trace_url),
+            agent_thread_id=thread_id,
+        )
+        if posted:
+            logger.info(
+                "Posted silent-success Slack notice",
+                extra={"silent_success": {"thread_id": thread_id, "run_id": run_id}},
+            )
     return {"status": "ok", "reason": "cost refresh scheduled"}
 
 
