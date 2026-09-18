@@ -144,6 +144,8 @@ it("shows delivery lag separately from suppression, then refreshes to a populate
             mature_cohort_merge_share: 0.6,
           },
         ],
+        median_distance_basis_points: 1750,
+        distance_sample_size: 3,
       },
     ],
   })
@@ -197,6 +199,8 @@ it.each([
               mature_cohort_merge_share: 0.6,
             },
           ],
+          median_distance_basis_points: 1750,
+          distance_sample_size: 3,
         },
       ],
     })
@@ -212,6 +216,7 @@ it.each([
       "3",
       "1",
       "3",
+      "17.5%",
       "60%",
       "2h",
       "1d",
@@ -228,6 +233,7 @@ it.each([
       "Merged",
       "Closed without merge",
       "Open",
+      "Median distance",
       "Merge rate",
       "Avg time to PR",
       "Avg time to merge",

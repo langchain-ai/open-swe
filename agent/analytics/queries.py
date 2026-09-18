@@ -115,7 +115,22 @@ async def pr_merge_rate_by_model(
                         FILTER (WHERE r.started_at IS NOT NULL AND p.opened_at >= r.started_at)
                         AS avg_delivery_seconds,
                     count(*) FILTER (WHERE r.started_at IS NOT NULL
-                        AND p.opened_at >= r.started_at) AS delivery_samples
+                        AND p.opened_at >= r.started_at) AS delivery_samples,
+                    (SELECT percentile_cont(0.5) WITHIN GROUP
+                        (ORDER BY distance_basis_points)
+                     FROM pr_projection d
+                     WHERE d.workspace_id = :workspace_id
+                       AND d.originating_model_id IS NOT DISTINCT FROM p.originating_model_id
+                       AND d.model_attribution_quality = p.model_attribution_quality
+                       AND d.opened_at >= :start AND d.opened_at <= :as_of
+                       AND d.current_state = 'merged') AS median_distance_basis_points,
+                    (SELECT count(distance_basis_points)
+                     FROM pr_projection d
+                     WHERE d.workspace_id = :workspace_id
+                       AND d.originating_model_id IS NOT DISTINCT FROM p.originating_model_id
+                       AND d.model_attribution_quality = p.model_attribution_quality
+                       AND d.opened_at >= :start AND d.opened_at <= :as_of
+                       AND d.current_state = 'merged') AS distance_sample_size
                 FROM pr_projection p
                 JOIN eligible_models e
                   ON e.originating_model_id IS NOT DISTINCT FROM p.originating_model_id
@@ -156,6 +171,12 @@ async def pr_merge_rate_by_model(
                     "waiting": 0,
                     "cohort_size": 0,
                     "efforts": [],
+                    "median_distance_basis_points": (
+                        int(row["median_distance_basis_points"])
+                        if row["median_distance_basis_points"] is not None
+                        else None
+                    ),
+                    "distance_sample_size": int(row["distance_sample_size"] or 0),
                 },
             )
             effort = _pr_outcome_counts(row)

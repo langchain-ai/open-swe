@@ -407,6 +407,8 @@ export interface PRMergeRateCohort {
   avg_merge_seconds: number | null
   avg_delivery_seconds: number | null
   efforts: PRMergeRateEffort[]
+  median_distance_basis_points?: number | null
+  distance_sample_size?: number
 }
 
 export interface PRMergeRatePayload extends AnalyticsMetadata {

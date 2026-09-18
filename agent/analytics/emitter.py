@@ -279,6 +279,7 @@ async def pr_state(
     merged: bool,
     source_version: int | None,
     occurred_at: datetime,
+    distance_basis_points: int | None = None,
 ) -> None:
     name = (
         EventName.PR_MERGED
@@ -291,7 +292,7 @@ async def pr_state(
     await emit(
         name,
         f"github:pr:{pr_key}:{source_version or occurred_at.isoformat()}:{name.value}",
-        PRStatePayload(previous_state=None),
+        PRStatePayload(previous_state=None, distance_basis_points=distance_basis_points),
         occurred_at=occurred_at,
         source="github",
         source_version=source_version,

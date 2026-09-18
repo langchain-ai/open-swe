@@ -602,6 +602,10 @@ async def _record_pr_telemetry(
         merged = bool(details.get("merged"))
         is_draft = bool(details.get("draft", pr.get("draft")))
         state = details.get("state") if isinstance(details.get("state"), str) else "open"
+        base_details = details.get("base")
+        head_details = details.get("head")
+        opening_base_sha = base_details.get("sha") if isinstance(base_details, dict) else None
+        opening_head_sha = head_details.get("sha") if isinstance(head_details, dict) else None
         additions_value = details.get("additions")
         additions = additions_value if isinstance(additions_value, int) else 0
         deletions_value = details.get("deletions")
@@ -712,6 +716,16 @@ async def _record_pr_telemetry(
                     title=pr_title if isinstance(pr_title, str) else "",
                     head_ref=head,
                     base_ref=base,
+                    opening_base_sha=(
+                        opening_base_sha
+                        if record_opening and isinstance(opening_base_sha, str)
+                        else ""
+                    ),
+                    opening_head_sha=(
+                        opening_head_sha
+                        if record_opening and isinstance(opening_head_sha, str)
+                        else ""
+                    ),
                     author=author if isinstance(author, str) else "",
                     author_github_id=author_id if isinstance(author_id, int) else None,
                     resolves_thread=resolves_thread,
