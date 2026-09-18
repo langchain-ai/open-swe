@@ -6,7 +6,6 @@ from collections.abc import Mapping
 from fastapi import BackgroundTasks, HTTPException
 from pydantic import BaseModel, Field, ValidationError
 
-from agent.prompts import load_prompt
 from agent.slack.blocks import modal, text_input, view_payload
 from agent.slack.channels import SlackChannel
 from agent.slack.client import (
@@ -26,6 +25,13 @@ logger = logging.getLogger(__name__)
 CALLBACK_ID = "open_swe_plan_feedback"
 FEEDBACK_BLOCK = "plan_feedback"
 FEEDBACK_ACTION = "feedback"
+FEEDBACK_ACCEPTED = (
+    "Your feedback was saved and a plan revision was requested. Implementation is still paused."
+)
+FEEDBACK_FAILED = "Your plan revision could not be started. Please retry from the latest plan review. Any feedback already saved remains on the plan."
+FEEDBACK_OPEN_FAILED = "The feedback form could not open. Click Request changes again, or reply in the thread with your feedback."
+FEEDBACK_STALE = "This plan review is no longer available or you do not have access. Open the latest plan review and try again; for an older card, reply in the thread with your requested changes."
+FEEDBACK_REQUIRED = "Enter your requested changes (1–3000 characters)."
 
 
 class PlanFeedbackContext(BaseModel):
@@ -38,18 +44,18 @@ class PlanFeedbackContext(BaseModel):
     fingerprint: str = Field(min_length=64, max_length=64)
 
 
-async def _notify(context: PlanFeedbackContext, template: str) -> None:
+async def _notify(context: PlanFeedbackContext, message: str) -> None:
     await _notify_at(
-        context.channel_id, context.user_id, context.reply_thread_ts or context.thread_ts, template
+        context.channel_id, context.user_id, context.reply_thread_ts or context.thread_ts, message
     )
 
 
-async def _notify_at(channel_id: str, user_id: str, thread_ts: str, template: str) -> None:
+async def _notify_at(channel_id: str, user_id: str, thread_ts: str, message: str) -> None:
     try:
         posted = await post_slack_ephemeral_message(
             channel_id,
             user_id,
-            load_prompt(f"slack/{template}.md"),
+            message,
             thread_ts=None if thread_ts == "0" else thread_ts,
         )
         if not posted:
@@ -87,7 +93,7 @@ async def open_feedback(
             interaction.channel_id,
             interaction.user.id,
             interaction.thread_ts,
-            "plan-feedback-stale",
+            FEEDBACK_STALE,
         )
         return accepted("Plan review expired")
     opened = False
@@ -98,14 +104,14 @@ async def open_feedback(
                 view_payload(
                     modal(
                         callback_id=CALLBACK_ID,
-                        title=load_prompt("slack/plan-feedback-title.md"),
-                        submit=load_prompt("slack/plan-feedback-submit.md"),
+                        title="Request plan changes",
+                        submit="Request changes",
                         private_metadata=context.model_dump_json(),
                         blocks=[
                             text_input(
                                 block_id=FEEDBACK_BLOCK,
                                 action_id=FEEDBACK_ACTION,
-                                label=load_prompt("slack/plan-feedback-label.md"),
+                                label="What should change in the plan?",
                                 multiline=True,
                                 max_length=3000,
                             )
@@ -116,7 +122,7 @@ async def open_feedback(
     except Exception:
         logger.exception("Could not open Slack plan feedback modal")
     if not opened:
-        background_tasks.add_task(_notify, context, "plan-feedback-open-failed")
+        background_tasks.add_task(_notify, context, FEEDBACK_OPEN_FAILED)
     return accepted("Plan feedback requested" if opened else "Plan feedback modal unavailable")
 
 
@@ -128,21 +134,18 @@ async def handle_submission(
         context = PlanFeedbackContext.model_validate(submission.metadata if submission else {})
     except ValidationError:
         logger.warning("Invalid Slack plan feedback context")
-        return _error("plan-feedback-stale")
+        return _error(FEEDBACK_STALE)
     if submission is None or submission.user.id != context.user_id:
-        return _error("plan-feedback-stale")
+        return _error(FEEDBACK_STALE)
     feedback = submission.submitted(FEEDBACK_BLOCK, FEEDBACK_ACTION).strip()
     if not feedback or len(feedback) > 3000:
-        return _error("plan-feedback-required")
+        return _error(FEEDBACK_REQUIRED)
     background_tasks.add_task(_revise, context, submission, feedback)
     return {}
 
 
-def _error(template: str) -> FeedbackResponse:
-    return {
-        "response_action": "errors",
-        "errors": {FEEDBACK_BLOCK: load_prompt(f"slack/{template}.md")},
-    }
+def _error(message: str) -> FeedbackResponse:
+    return {"response_action": "errors", "errors": {FEEDBACK_BLOCK: message}}
 
 
 async def _revise(
@@ -151,13 +154,13 @@ async def _revise(
     try:
         channel = await SlackChannel.context_for(context.channel_id, use_cache=False)
         if not channel.allows_operations:
-            await _notify(context, "plan-feedback-stale")
+            await _notify(context, FEEDBACK_STALE)
             return
         mapped = await lookup_slack_thread_id(
             langgraph_client(), context.channel_id, context.thread_ts
         )
         if mapped != context.thread_id:
-            await _notify(context, "plan-feedback-stale")
+            await _notify(context, FEEDBACK_STALE)
             return
         user = await get_slack_user_info(context.user_id) or {}
         profile = user.get("profile")
@@ -189,11 +192,11 @@ async def _revise(
         logger.warning("Slack plan revision rejected", exc_info=True)
         await _notify(
             context,
-            "plan-feedback-stale" if exc.status_code in {403, 404, 409} else "plan-feedback-failed",
+            FEEDBACK_STALE if exc.status_code in {403, 404, 409} else FEEDBACK_FAILED,
         )
         return
     except Exception:
         logger.exception("Slack plan revision failed", extra={"agent_thread_id": context.thread_id})
-        await _notify(context, "plan-feedback-failed")
+        await _notify(context, FEEDBACK_FAILED)
         return
-    await _notify(context, "plan-feedback-accepted")
+    await _notify(context, FEEDBACK_ACCEPTED)
