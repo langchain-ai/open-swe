@@ -485,6 +485,7 @@ def _safe_model_label(model: str) -> str:
 
 
 SLACK_COST_PENDING_LABEL = "calculating cost..."
+_PENDING_COST_LABEL_RE = re.compile(r"(?: • )?calculating cost(?:\.\.\.)?$")
 
 
 def format_slack_run_usage(usage: RunUsageSummary | None) -> str:
@@ -501,7 +502,7 @@ def format_slack_run_usage(usage: RunUsageSummary | None) -> str:
 
 
 _SESSION_COST_LABEL_RE = re.compile(
-    rf"(?: • )?(?:<\$0\.01|\$[0-9]+(?:\.[0-9]+)?|{re.escape(SLACK_COST_PENDING_LABEL)})(?: session cost)?$"
+    r"(?: • )?(?:<\$0\.01|\$[0-9]+(?:\.[0-9]+)?|calculating cost(?:\.\.\.)?)(?: session cost)?$"
 )
 _MAIN_AGENT_TOKEN_LABEL_RE = re.compile(r"(?: • )?[0-9]+(?:\.[0-9]+)?[KM]? main-agent tokens$")
 
@@ -554,7 +555,7 @@ def with_slack_session_cost(
             if (
                 block.get("block_id") == "open_swe_usage_footer"
                 or "main-agent tokens" in value_text
-                or SLACK_COST_PENDING_LABEL in value_text
+                or _PENDING_COST_LABEL_RE.search(value_text)
             ):
                 candidates.append(value)
             elif SLACK_WEB_LINK_FOOTER_LABEL in value_text:
@@ -590,8 +591,7 @@ def with_slack_pending_session_cost(
 ) -> tuple[str, list[dict[str, Any]] | None]:
     """Append the pending cost label to a live Slack footer awaiting its cost."""
     if clear:
-        suffix = f" • {SLACK_COST_PENDING_LABEL}"
-        updated_text = text.removesuffix(suffix)
+        updated_text = _PENDING_COST_LABEL_RE.sub("", text)
         updated_blocks = copy.deepcopy(blocks)
         for block in updated_blocks or []:
             if block.get("type") != "context":
@@ -599,11 +599,12 @@ def with_slack_pending_session_cost(
             values = [block.get("text"), *(block.get("elements") or [])]
             for value in values:
                 if isinstance(value, dict) and isinstance(value.get("text"), str):
-                    value["text"] = value["text"].removesuffix(suffix)
-                    if value["text"] == SLACK_COST_PENDING_LABEL:
+                    if _PENDING_COST_LABEL_RE.fullmatch(value["text"]):
                         value["text"] = "Cost unavailable"
+                    else:
+                        value["text"] = _PENDING_COST_LABEL_RE.sub("", value["text"])
         return updated_text, updated_blocks
-    if SLACK_COST_PENDING_LABEL in text or SLACK_WEB_LINK_FOOTER_LABEL not in text:
+    if _PENDING_COST_LABEL_RE.search(text) or SLACK_WEB_LINK_FOOTER_LABEL not in text:
         return text, blocks
     updated_text = f"{text} • {SLACK_COST_PENDING_LABEL}"
     if blocks is None:
@@ -625,7 +626,7 @@ def with_slack_pending_session_cost(
             values.extend(item for item in elements if isinstance(item, dict))
         for value in values:
             value_text = value.get("text")
-            if isinstance(value_text, str) and SLACK_COST_PENDING_LABEL not in value_text:
+            if isinstance(value_text, str) and not _PENDING_COST_LABEL_RE.search(value_text):
                 value["text"] = f"{value_text} • {SLACK_COST_PENDING_LABEL}"
                 return updated_text, updated_blocks
     updated_blocks.append(
