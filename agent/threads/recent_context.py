@@ -15,6 +15,7 @@ from typing import Literal
 
 from langgraph_sdk.client import LangGraphClient
 
+from agent.github.comments import format_github_comment_body_for_prompt
 from agent.prompts import render_prompt
 from agent.source_context import SourceContext
 from agent.threads.summary import (
@@ -242,7 +243,7 @@ def _render_entries(entries: list[RecentThreadContext]) -> str:
     lines: list[str] = []
     for index, entry in enumerate(entries, 1):
         state = {True: "resolved", False: "unresolved", None: "unknown"}[entry.resolved]
-        lines.extend(
+        body = "\n".join(
             [
                 f"{index}. Topic: {entry.title}",
                 f"   Repo: {entry.repo or 'unknown'} · Source: {entry.source}",
@@ -250,6 +251,7 @@ def _render_entries(entries: list[RecentThreadContext]) -> str:
                 f"   Thread: {entry.thread_id}",
             ]
         )
+        lines.append(format_github_comment_body_for_prompt("", body, trusted=()))
     return render_prompt("system/recent-thread-context.md", entries="\n".join(lines))
 
 
