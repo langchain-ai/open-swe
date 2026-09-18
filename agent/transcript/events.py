@@ -17,6 +17,7 @@ from pydantic import (
     Field,
     JsonValue,
     SerializerFunctionWrapHandler,
+    TypeAdapter,
     model_serializer,
 )
 
@@ -251,10 +252,11 @@ class ToolStarted(_Body):
 class ToolCompleted(_Body):
     """A finished tool call, carrying a preview of its output rather than all of it.
 
-    The full output is written to ``thread_tool_call.output`` out of band — it
-    reaches the projection on the command, not in this payload — and is served
-    on demand by the tool-output endpoint. ``output_truncated`` says the stored
-    output was itself cut at the size cap, so even that endpoint has no more.
+    The full output is written to ``thread_tool_output`` out of band — it rides
+    on the command, not in this payload, the way attachment bytes do — and is
+    served on demand by the tool-output endpoint. ``output_truncated`` says the
+    stored output was itself cut at the size cap, so even that endpoint has no
+    more.
     """
 
     type: Literal["tool.completed"] = "tool.completed"
@@ -298,6 +300,10 @@ type TranscriptEvent = Annotated[
     | RunNotice,
     Field(discriminator="type"),
 ]
+
+
+TRANSCRIPT_EVENT_ADAPTER: TypeAdapter[TranscriptEvent] = TypeAdapter(TranscriptEvent)
+"""Validates a stored ``thread_event.payload`` back into the body that wrote it."""
 
 
 class StoredEvent(BaseModel):

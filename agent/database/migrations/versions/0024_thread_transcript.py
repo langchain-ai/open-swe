@@ -164,7 +164,6 @@ def upgrade() -> None:
             input jsonb NOT NULL,
             status text NOT NULL CHECK (status IN ('in_progress', 'completed', 'error')),
             output_preview text,
-            output text,
             output_truncated boolean NOT NULL DEFAULT false,
             namespace text[] NOT NULL DEFAULT '{}',
             started_at timestamptz NOT NULL,
@@ -212,6 +211,21 @@ def upgrade() -> None:
         """
         CREATE INDEX thread_attachment_message_idx
         ON thread_attachment (thread_id, message_id, position)
+        """
+    )
+
+    # A tool's full output is a peer of the log, like an attachment: the event
+    # carries a preview only, and the bytes are written out of band by the same
+    # transaction. It is not a projection, so a rebuild leaves it alone.
+    op.execute(
+        """
+        CREATE TABLE thread_tool_output (
+            thread_id text NOT NULL REFERENCES thread (thread_id) ON DELETE CASCADE,
+            tool_call_id text NOT NULL,
+            output text NOT NULL,
+            created_at timestamptz NOT NULL DEFAULT clock_timestamp(),
+            PRIMARY KEY (thread_id, tool_call_id)
+        )
         """
     )
 

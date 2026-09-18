@@ -22,14 +22,13 @@ from agent.dashboard.deps import SESSION_DEP
 
 # The ``thread.metadata`` mirror exists so this predicate is reused unchanged.
 from agent.threads.summary import assert_thread_readable
-from agent.transcript import attachments, listener
+from agent.transcript import attachments, listener, tool_output
 from agent.transcript.cursor import decode_turn_cursor
 from agent.transcript.snapshot import (
     TranscriptTurnPage,
     load_access,
     load_events,
     load_snapshot,
-    load_tool_output,
     load_turn_page,
     measure_gap,
 )
@@ -150,7 +149,7 @@ async def api_get_thread_tool_output(
     session: dict[str, Any] = SESSION_DEP,
 ) -> dict[str, str]:
     await _readable_transcript(thread_id, session)
-    output = await load_tool_output(thread_id, tool_call_id)
+    output = await tool_output.load(thread_id, tool_call_id)
     if output is None:
         raise HTTPException(404, "tool call not found")
     return {"output": output}

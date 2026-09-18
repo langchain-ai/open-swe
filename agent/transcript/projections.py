@@ -6,6 +6,11 @@ event accumulates (``message.appended``), the concatenation lives in the
 conflict clause: the client reducer performs the same concatenation on the same
 fragment, and ``message.completed`` replaces the accumulation with the
 canonical text so a fragment that never arrived heals itself.
+
+Every projection is a function of the log and the blob tables beside it —
+``thread_attachment`` and ``thread_tool_output`` — and of nothing else, which
+is what lets :mod:`agent.transcript.rebuild` throw a thread's read tables away
+and fold them back out of its events.
 """
 
 import json
@@ -17,7 +22,6 @@ from sqlalchemy import ARRAY, Text, TextClause, bindparam, text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from agent.transcript.events import (
-    TOOL_OUTPUT_PREVIEW_CHARS,
     MessageAppended,
     MessageCompleted,
     MessageImage,
@@ -33,8 +37,6 @@ from agent.transcript.events import (
     TurnRequested,
     TurnStarted,
 )
-
-MAX_TOOL_OUTPUT_CHARS = 256 * 1024
 
 
 def _json(value: object) -> str | None:
@@ -82,6 +84,30 @@ async def ensure_thread_row(conn: AsyncConnection, thread_id: str, event: Transc
     )
 
 
+async def reset_thread_row(conn: AsyncConnection, thread_id: str, event: ThreadCreated) -> None:
+    """Put the ``thread`` row back to what ``thread.created`` alone implies.
+
+    :func:`ensure_thread_row` only ever inserts, so a rebuild that is about to
+    replay the log needs the row itself wound back: everything later events say
+    about the title, the metadata and the status is then reapplied by the
+    replay. ``version`` is left alone — it is the head of the log, not a
+    projection of it.
+    """
+    await conn.execute(
+        text(
+            """
+            UPDATE thread SET
+                status = 'idle',
+                title = :title,
+                metadata = CAST(:metadata AS jsonb),
+                updated_at = clock_timestamp()
+            WHERE thread_id = :thread_id
+            """
+        ),
+        {"thread_id": thread_id, "title": event.title, "metadata": _json(event.metadata)},
+    )
+
+
 async def resolve(conn: AsyncConnection, thread_id: str, event: TranscriptEvent) -> TranscriptEvent:
     """The event as it will be stored, with identity only the log can settle.
 
@@ -118,7 +144,6 @@ async def apply(
     event: TranscriptEvent,
     run_id: str | None,
     occurred_at: datetime,
-    tool_output: str | None = None,
 ) -> None:
     """Project ``event`` onto the read tables.
 
@@ -145,7 +170,7 @@ async def apply(
         case ToolStarted():
             await _tool_started(conn, thread_id, version, event, occurred_at)
         case ToolCompleted():
-            await _tool_completed(conn, thread_id, version, event, occurred_at, tool_output)
+            await _tool_completed(conn, thread_id, version, event, occurred_at)
         case _:
             return
 
@@ -518,18 +543,13 @@ async def _tool_completed(
     version: int,
     event: ToolCompleted,
     occurred_at: datetime,
-    tool_output: str | None,
 ) -> None:
-    full = tool_output or ""
-    output = full[:MAX_TOOL_OUTPUT_CHARS]
-    truncated = event.output_truncated or len(output) < len(full)
     await conn.execute(
         text(
             """
             UPDATE thread_tool_call SET
                 version = :version,
                 status = :status,
-                output = :output,
                 output_preview = :output_preview,
                 output_truncated = :output_truncated,
                 ended_at = :ended_at
@@ -541,9 +561,8 @@ async def _tool_completed(
             "thread_id": thread_id,
             "version": version,
             "status": event.status,
-            "output": output,
-            "output_preview": output[:TOOL_OUTPUT_PREVIEW_CHARS],
-            "output_truncated": truncated,
+            "output_preview": event.output_preview,
+            "output_truncated": event.output_truncated,
             "ended_at": occurred_at,
         },
     )

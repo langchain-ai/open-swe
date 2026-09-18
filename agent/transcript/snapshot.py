@@ -248,9 +248,14 @@ _MESSAGE_COLUMNS = """
 """
 
 _TOOL_CALL_COLUMNS = """
-    tool_call_id, turn_id, message_id, name, input, status,
-    output_preview, output_truncated, output IS NOT NULL AS has_output,
-    namespace, started_at, ended_at
+    tool_call.tool_call_id, tool_call.turn_id, tool_call.message_id, tool_call.name,
+    tool_call.input, tool_call.status, tool_call.output_preview, tool_call.output_truncated,
+    EXISTS (
+        SELECT 1 FROM thread_tool_output AS stored
+        WHERE stored.thread_id = tool_call.thread_id
+          AND stored.tool_call_id = tool_call.tool_call_id
+    ) AS has_output,
+    tool_call.namespace, tool_call.started_at, tool_call.ended_at
 """
 
 
@@ -332,9 +337,9 @@ async def _load_turn_contents(
         text(
             f"""
             SELECT {_TOOL_CALL_COLUMNS}
-            FROM thread_tool_call
-            WHERE thread_id = :thread_id AND turn_id = ANY(:turn_ids)
-            ORDER BY started_at, tool_call_id
+            FROM thread_tool_call AS tool_call
+            WHERE tool_call.thread_id = :thread_id AND tool_call.turn_id = ANY(:turn_ids)
+            ORDER BY tool_call.started_at, tool_call.tool_call_id
             """
         ).bindparams(turn_ids_param),
         parameters,
@@ -475,17 +480,3 @@ async def load_events(thread_id: str, *, after: int, limit: int) -> list[StoredE
             {"thread_id": thread_id, "after": after, "limit": limit},
         )
     return [StoredEvent.model_validate(dict(row)) for row in rows]
-
-
-async def load_tool_output(thread_id: str, tool_call_id: str) -> str | None:
-    """The stored output of one tool call, or ``None`` when there is no such call."""
-    async with postgres.snapshot_transaction() as conn:
-        row = await _row(
-            conn,
-            """
-            SELECT output FROM thread_tool_call
-            WHERE thread_id = :thread_id AND tool_call_id = :tool_call_id
-            """,
-            {"thread_id": thread_id, "tool_call_id": tool_call_id},
-        )
-    return None if row is None else row["output"] or ""

@@ -22,11 +22,12 @@ from sqlalchemy.ext.asyncio import AsyncConnection
 
 from agent.database import postgres
 from agent.transcript import attachments as attachment_store
-from agent.transcript import listener, projections
+from agent.transcript import listener, projections, tool_output
 from agent.transcript.events import (
     SCHEMA_VERSION,
     ActorKind,
     StoredEvent,
+    ToolCompleted,
     TranscriptEvent,
 )
 
@@ -41,8 +42,9 @@ class Command:
     They are written by the same transaction as the event, and only when the
     event is actually appended — a replayed command writes neither again.
     ``tool_output`` travels the same way: a ``tool.completed`` event carries
-    only a preview, so the full output reaches the projection here instead of
-    on the wire.
+    only a preview, so the full output reaches ``thread_tool_output`` here
+    instead of on the wire — out of band beside the log, like attachments, and
+    never in a projection a rebuild would throw away.
     """
 
     command_id: str
@@ -247,6 +249,8 @@ async def _write(
     )
     occurred_at = result.scalar_one()
     await attachment_store.write(conn, thread_id, command.attachments)
+    if isinstance(event, ToolCompleted):
+        await tool_output.write(conn, thread_id, event.tool_call_id, command.tool_output)
     await projections.apply(
         conn,
         thread_id=thread_id,
@@ -254,7 +258,6 @@ async def _write(
         event=event,
         run_id=run_id,
         occurred_at=occurred_at,
-        tool_output=command.tool_output,
     )
     await conn.execute(
         text(
