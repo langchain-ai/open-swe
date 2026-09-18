@@ -252,7 +252,9 @@ function sourceCommit(): string | null {
   const fromEnv = process.env.SOURCE_COMMIT?.trim()
   if (fromEnv) return fromEnv
   try {
-    return execSync("git rev-parse HEAD", { stdio: ["ignore", "pipe", "ignore"] })
+    return execSync("git rev-parse HEAD", {
+      stdio: ["ignore", "pipe", "ignore"],
+    })
       .toString()
       .trim()
   } catch {
@@ -270,7 +272,10 @@ function buildInfoStamp(): Plugin {
       const commit = sourceCommit()
       if (commit) info.commit = commit
       mkdirSync(".output/public", { recursive: true })
-      writeFileSync(".output/public/open-swe-build-info.json", JSON.stringify(info))
+      writeFileSync(
+        ".output/public/open-swe-build-info.json",
+        JSON.stringify(info)
+      )
     },
   }
 }
