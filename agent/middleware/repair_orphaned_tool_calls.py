@@ -68,16 +68,35 @@ def _synthetic_tool_message(call_id: str, name: str | None) -> ToolMessage:
 
 
 def _repair_messages(messages: list[Any]) -> list[Any] | None:
-    """Insert synthetic results for orphaned tool calls; return new list or None."""
-    satisfied = {
-        message.tool_call_id
+    """Repair orphaned tool calls and results; return new list or None."""
+    issued_ids = {
+        call_id
         for message in messages
-        if isinstance(message, ToolMessage) and isinstance(message.tool_call_id, str)
+        if isinstance(message, AIMessage)
+        for call_id, _ in _iter_tool_calls(message)
     }
 
+    filtered: list[Any] = []
+    dropped = 0
+    for message in messages:
+        if (
+            isinstance(message, ToolMessage)
+            and isinstance(message.tool_call_id, str)
+            and message.tool_call_id
+            and message.tool_call_id not in issued_ids
+        ):
+            dropped += 1
+            continue
+        filtered.append(message)
+
+    satisfied = {
+        message.tool_call_id
+        for message in filtered
+        if isinstance(message, ToolMessage) and isinstance(message.tool_call_id, str)
+    }
     repaired: list[Any] = []
     inserted = 0
-    for message in messages:
+    for message in filtered:
         repaired.append(message)
         if not isinstance(message, AIMessage):
             continue
@@ -88,9 +107,13 @@ def _repair_messages(messages: list[Any]) -> list[Any] | None:
             satisfied.add(call_id)
             inserted += 1
 
-    if not inserted:
+    if not inserted and not dropped:
         return None
-    logger.warning("Repaired %d orphaned tool call(s) before model call", inserted)
+    logger.warning(
+        "Repaired %d orphaned tool call(s) and dropped %d orphaned tool result(s) before model call",
+        inserted,
+        dropped,
+    )
     return repaired
 
 
