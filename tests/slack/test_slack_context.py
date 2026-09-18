@@ -764,8 +764,9 @@ def test_with_slack_session_cost_preserves_blocks_and_is_idempotent() -> None:
     assert "main-agent tokens" not in updated_blocks[2]["elements"][0]["text"]
 
 
-def test_with_slack_session_cost_replaces_usage_only_pending_footer() -> None:
-    text = "Done <https://app.example/agents/t1|Open in Web> • calculating cost"
+@pytest.mark.parametrize("label", ["calculating cost", "calculating cost..."])
+def test_with_slack_session_cost_replaces_usage_only_pending_footer(label: str) -> None:
+    text = f"Done <https://app.example/agents/t1|Open in Web> • {label}"
     blocks = [
         {
             "type": "section",
@@ -776,7 +777,7 @@ def test_with_slack_session_cost_replaces_usage_only_pending_footer() -> None:
         },
         {
             "type": "context",
-            "elements": [{"type": "mrkdwn", "text": "model-a • calculating cost"}],
+            "elements": [{"type": "mrkdwn", "text": f"model-a • {label}"}],
         },
     ]
 
@@ -786,6 +787,16 @@ def test_with_slack_session_cost_replaces_usage_only_pending_footer() -> None:
     assert updated_blocks is not None
     assert updated_blocks[0] == blocks[0]
     assert updated_blocks[1]["elements"][0]["text"] == "model-a • $0.42"
+
+    assert slack_utils.with_slack_pending_session_cost(text, blocks) == (text, blocks)
+    cleared_text, cleared_blocks = slack_utils.with_slack_pending_session_cost(
+        text, blocks, clear=True
+    )
+    assert cleared_text == "Done <https://app.example/agents/t1|Open in Web>"
+    assert cleared_blocks[1]["elements"][0]["text"] == "model-a"
+    blocks[1]["elements"][0]["text"] = label
+    _, cleared_blocks = slack_utils.with_slack_pending_session_cost(text, blocks, clear=True)
+    assert cleared_blocks[1]["elements"][0]["text"] == "Cost unavailable"
 
 
 def test_post_slack_trace_reply_has_no_tip(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -2452,9 +2463,9 @@ def test_pending_cost_marks_latest_reply_until_cost_arrives() -> None:
     assert "calculating cost" not in text
 
     pending_text, pending_blocks = slack_utils.with_slack_pending_session_cost(text, blocks)
-    assert pending_text.endswith("model-a • calculating cost")
+    assert pending_text.endswith("model-a • calculating cost...")
     assert pending_blocks is not None
-    assert pending_blocks[-1]["elements"][0]["text"].endswith("model-a • calculating cost")
+    assert pending_blocks[-1]["elements"][0]["text"].endswith("model-a • calculating cost...")
 
     # Idempotent while awaiting cost, and the refresh swaps the label for the cost.
     assert slack_utils.with_slack_pending_session_cost(pending_text, pending_blocks) == (
