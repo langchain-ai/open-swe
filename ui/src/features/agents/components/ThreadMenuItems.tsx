@@ -64,6 +64,8 @@ export function ThreadMenuItems({
       {thread?.sourceUrl && (
         <Menu.LinkItem
           href={thread.sourceAppUrl ?? thread.sourceUrl}
+          target="_blank"
+          rel="noreferrer"
           closeOnClick
           className={menuItemClassName}
         >
