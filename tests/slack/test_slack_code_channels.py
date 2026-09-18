@@ -12,6 +12,7 @@ from agent.slack import code_channels as slack_code_channels
 from agent.slack import events as slack_events
 from agent.slack import routes as slack_routes
 from agent.slack import webhook as slack_service
+from agent.slack.payloads import SlackChannelContext
 from agent.slack.request import SlackRequest
 from agent.webhooks import common as webhook_common
 
@@ -39,11 +40,9 @@ def code_channel_route(monkeypatch: pytest.MonkeyPatch) -> AsyncMock:
         webhook_common,
         "resolve_slack_channel_context",
         AsyncMock(
-            return_value={
-                "name": "code-task",
-                "is_ext_shared": False,
-                "is_pending_ext_shared": False,
-            }
+            return_value=SlackChannelContext(
+                name="code-task", is_ext_shared=False, is_pending_ext_shared=False
+            )
         ),
     )
     monkeypatch.setattr(
@@ -199,8 +198,8 @@ async def test_untagged_code_channel_message_routes_to_the_channel_session(
     slack_events.reset_slack_event_claims()
     monkeypatch.setattr("agent.incidents.channels.handle_slack_event", AsyncMock(return_value=None))
 
-    async def channel_context(_channel_id: str, *, use_cache: bool = True) -> dict[str, Any]:
-        return {"is_ext_shared": False, "is_pending_ext_shared": False}
+    async def channel_context(_channel_id: str, *, use_cache: bool = True) -> SlackChannelContext:
+        return SlackChannelContext(is_ext_shared=False, is_pending_ext_shared=False)
 
     monkeypatch.setattr(webhook_common, "verify_slack_signature", lambda **_kwargs: True)
     monkeypatch.setattr(webhook_common, "claim_slack_event", AsyncMock(return_value=True))

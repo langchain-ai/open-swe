@@ -20,6 +20,7 @@ from fastapi import HTTPException
 from agent.github import comments as github_comments
 from agent.github import thread_token as github_token
 from agent.github import webhook as github_webhooks
+from agent.users import User
 from agent.webhooks import common as webhook_common
 
 
@@ -257,9 +258,7 @@ async def test_private_pr_followup_rejected_before_credentials_or_dispatch(monke
             )
         ),
     )
-    monkeypatch.setattr(
-        webhook_common, "email_for_login", AsyncMock(return_value="bob@example.com")
-    )
+    monkeypatch.setattr(User, "email_for_login", AsyncMock(return_value="bob@example.com"))
     token = AsyncMock()
     dispatch = AsyncMock()
     monkeypatch.setattr(webhook_common, "get_or_resolve_thread_github_token", token)
@@ -358,10 +357,11 @@ def test_process_github_pr_comment_invalidates_and_reauths_on_401(
     monkeypatch.setattr(webhook_common, "fetch_pr_comments_since_last_tag", fake_fetch_pr_comments)
     monkeypatch.setattr(webhook_common, "trigger_or_queue_run", fake_trigger_or_queue_run)
     monkeypatch.setattr(
-        webhook_common,
+        User,
         "email_for_login",
         lambda login: asyncio.sleep(0, result="octo@example.com" if login == "octo" else None),
     )
+    monkeypatch.setattr(User, "known_logins", lambda logins: asyncio.sleep(0, result=frozenset()))
 
     asyncio.run(
         github_webhooks.process_github_pr_comment(

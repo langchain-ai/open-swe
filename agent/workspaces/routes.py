@@ -6,6 +6,7 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import Response
 
 from agent.dashboard.deps import ADMIN_DEP, ADMIN_OR_TOKEN_DEP, SESSION_DEP, session_is_admin
+from agent.dashboard.workspace_settings import delete_workspace_settings
 from agent.workspaces.refresh import (
     ensure_refresh_cron,
     is_refresh_in_flight,
@@ -153,6 +154,9 @@ async def api_delete_workspace(
     slug: str,
     _admin: dict[str, Any] = ADMIN_DEP,
 ) -> Response:
-    if not await WORKSPACES.remove(_normalized_slug(slug)):
+    normalized = _normalized_slug(slug)
+    if not await WORKSPACES.remove(normalized):
         raise HTTPException(404, "workspace not found")
+    # A later workspace under the same slug must start from the instance record.
+    await delete_workspace_settings(normalized)
     return Response(status_code=204)

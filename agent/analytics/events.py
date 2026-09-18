@@ -70,6 +70,7 @@ class StrictPayload(BaseModel):
 
 class RunStartedPayload(StrictPayload):
     configured_model_id: UUID | None = None
+    configured_effort: str | None = Field(default=None, max_length=100)
     effective_model_id: UUID | None = None
     model_attribution_quality: Literal["effective", "configured", "unavailable"]
 
@@ -154,6 +155,7 @@ class PRRunLinkedPayload(StrictPayload):
 
 class PRStatePayload(StrictPayload):
     previous_state: Literal["open", "draft", "closed", "merged", "unknown"] | None = None
+    distance_basis_points: int | None = Field(default=None, ge=0, le=10_000)
 
 
 class ReviewPublishedPayload(StrictPayload):

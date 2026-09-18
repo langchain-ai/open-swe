@@ -7,9 +7,9 @@ from fastapi import HTTPException
 from pydantic import BaseModel, ConfigDict, field_validator
 
 from agent.slack.http import (
+    SlackClient,
     slack_bot_members,
     slack_cache_key,
-    slack_client,
     slack_http_errors,
     slack_identity,
 )
@@ -68,7 +68,7 @@ async def resolve_allowed_slack_bot(
 
 async def allow_slack_bot(body: AllowSlackBot, admin: dict[str, Any]) -> AllowedSlackBot:
     login = admin["sub"]
-    async with slack_http_errors(), slack_client() as client:
+    async with slack_http_errors(), SlackClient.bot() as client:
         auth = await slack_identity(client)
         team_id = auth["team_id"]
         bot_id = body.bot_id
@@ -116,7 +116,7 @@ async def allow_slack_bot(body: AllowSlackBot, admin: dict[str, Any]) -> Allowed
 
 
 async def list_slack_bots() -> list[SlackBotOption]:
-    async with slack_http_errors(), slack_client() as client:
+    async with slack_http_errors(), SlackClient.bot() as client:
 
         async def load() -> list[SlackBotOption]:
             auth = await slack_identity(client)

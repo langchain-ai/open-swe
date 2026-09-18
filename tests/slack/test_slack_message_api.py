@@ -233,7 +233,7 @@ async def test_post_slack_thread_reply_with_ts_sends_blocks(slack_api, monkeypat
         "C1", "1.0", "Pick", blocks=blocks, agent_thread_id="mapped-thread"
     ) == ("1.0", None)
     payload = slack_api.calls[0][1]
-    footer = "<https://dashboard.example/agents/mapped-thread|Open in Web> • calculating cost"
+    footer = "<https://dashboard.example/agents/mapped-thread|Open in Web>"
     assert payload["text"] == f"Pick {footer}"
     assert payload["blocks"] == [
         *blocks,

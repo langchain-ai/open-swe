@@ -114,6 +114,8 @@ class PullRequest(Base):
     title: Mapped[str] = mapped_column(server_default="", default="")
     head_ref: Mapped[str] = mapped_column(server_default="", default="")
     base_ref: Mapped[str] = mapped_column(server_default="", default="")
+    opening_base_sha: Mapped[str] = mapped_column(server_default="", default="")
+    opening_head_sha: Mapped[str] = mapped_column(server_default="", default="")
     author: Mapped[str] = mapped_column(server_default="", default="")
     author_github_id: Mapped[int | None] = mapped_column(BigInteger, default=None)
     author_user_id: Mapped[UUID | None] = mapped_column(
@@ -381,6 +383,8 @@ class PullRequest(Base):
             owner=self.owner,
             repo=self.repo,
             **{column: getattr(self, column) for column in _GITHUB_COLUMNS},
+            opening_base_sha=self.opening_base_sha,
+            opening_head_sha=self.opening_head_sha,
             author_github_id=self.author_github_id,
             author_user_id=self.author_user_id,
             resolves_thread=self.resolves_thread,
@@ -392,6 +396,12 @@ class PullRequest(Base):
         github_changes = (
             {
                 **{column: getattr(upsert.excluded, column) for column in _GITHUB_COLUMNS},
+                "opening_base_sha": func.coalesce(
+                    func.nullif(cls.opening_base_sha, ""), upsert.excluded.opening_base_sha
+                ),
+                "opening_head_sha": func.coalesce(
+                    func.nullif(cls.opening_head_sha, ""), upsert.excluded.opening_head_sha
+                ),
                 "author_github_id": func.coalesce(
                     upsert.excluded.author_github_id, cls.author_github_id
                 ),

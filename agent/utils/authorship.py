@@ -8,6 +8,8 @@ from typing import Any
 
 import httpx2
 
+from agent.users import User
+
 logger = logging.getLogger(__name__)
 
 OPEN_SWE_BOT_NAME = "open-swe[bot]"
@@ -17,7 +19,7 @@ OPEN_SWE_BOT_NAME = "open-swe[bot]"
 OPEN_SWE_BOT_EMAIL = "open-swe@users.noreply.github.com"
 
 PR_ATTRIBUTION_TEXT = "Made by [Open SWE]"
-PR_ATTRIBUTION_DEFAULT_URL = "https://openswe.vercel.app"
+PR_ATTRIBUTION_DEFAULT_URL = "https://github.com/langchain-ai/open-swe"
 PR_ATTRIBUTION_FOOTER = f"{PR_ATTRIBUTION_TEXT}({PR_ATTRIBUTION_DEFAULT_URL})"
 
 
@@ -29,7 +31,9 @@ def build_pr_attribution_footer(
 ) -> str:
     """Build the Open SWE PR footer with the run's model details."""
     url = thread_url.strip() if isinstance(thread_url, str) and thread_url.strip() else ""
-    footer = f"{PR_ATTRIBUTION_TEXT}({url or PR_ATTRIBUTION_DEFAULT_URL})"
+    footer = PR_ATTRIBUTION_FOOTER
+    if url:
+        footer += f" · [view thread]({url})"
     model = _normalize_text(model_id).replace("`", "")
     effort = _normalize_text(reasoning_effort).replace("`", "")
     if model:
@@ -72,20 +76,20 @@ def _github_noreply_email(login: str, user_id: Any = None) -> str:
     return f"{normalized_login}@users.noreply.github.com"
 
 
-def _identity_from_github_token(github_token: str | None) -> CollaboratorIdentity | None:
+async def _identity_from_github_token(github_token: str | None) -> CollaboratorIdentity | None:
     if not github_token:
         return None
 
     try:
-        response = httpx2.get(
-            "https://api.github.com/user",
-            headers={
-                "Authorization": f"Bearer {github_token}",
-                "Accept": "application/vnd.github+json",
-                "X-GitHub-Api-Version": "2022-11-28",
-            },
-            timeout=5.0,
-        )
+        async with httpx2.AsyncClient(timeout=5.0) as client:
+            response = await client.get(
+                "https://api.github.com/user",
+                headers={
+                    "Authorization": f"Bearer {github_token}",
+                    "Accept": "application/vnd.github+json",
+                    "X-GitHub-Api-Version": "2022-11-28",
+                },
+            )
         if response.status_code != 200:  # noqa: PLR2004
             logger.debug("GitHub user lookup returned %s", response.status_code)
             return None
@@ -112,7 +116,7 @@ def _identity_from_github_token(github_token: str | None) -> CollaboratorIdentit
         return None
 
 
-def _identity_from_config(config: dict[str, Any]) -> CollaboratorIdentity | None:
+async def _identity_from_config(config: dict[str, Any]) -> CollaboratorIdentity | None:
     configurable = config.get("configurable", {})
     slack_thread = configurable.get("slack_thread", {})
     linear_issue = configurable.get("linear_issue", {})
@@ -126,10 +130,8 @@ def _identity_from_config(config: dict[str, Any]) -> CollaboratorIdentity | None
     github_login = _normalize_text(configurable.get("github_login"))
     if github_login:
         github_user_id = configurable.get("github_user_id")
-        from agent.dashboard.user_mappings import cached_email_for_login
-
         commit_email = _github_noreply_email(github_login, github_user_id) or _normalize_text(
-            cached_email_for_login(github_login)
+            await User.email_for_login(github_login)
         )
         if commit_email:
             commit_name = display_name or github_login
@@ -151,7 +153,7 @@ def _identity_from_config(config: dict[str, Any]) -> CollaboratorIdentity | None
     return None
 
 
-def resolve_triggering_user_identity(
+async def resolve_triggering_user_identity(
     config: dict[str, Any],
     github_token: str | None = None,
 ) -> CollaboratorIdentity | None:
@@ -162,15 +164,13 @@ def resolve_triggering_user_identity(
     Slack/Linear supplied an explicit user name and email.
     """
 
-    return _identity_from_github_token(github_token) or _identity_from_config(config)
+    return await _identity_from_github_token(github_token) or await _identity_from_config(config)
 
 
 async def resolve_participant_identities(logins: Iterable[str]) -> list[CollaboratorIdentity]:
     """Git identities for thread participants the agent may author commits as."""
-    from agent.dashboard.user_mappings import email_for_login
-
     unique = sorted({login.strip() for login in logins if isinstance(login, str) and login.strip()})
-    emails = await asyncio.gather(*(email_for_login(login) for login in unique))
+    emails = await asyncio.gather(*(User.email_for_login(login) for login in unique))
     identities: list[CollaboratorIdentity] = []
     for login, email in zip(unique, emails, strict=True):
         commit_email = _github_noreply_email(login) or _normalize_text(email)

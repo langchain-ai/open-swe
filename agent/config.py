@@ -325,6 +325,11 @@ ENV.var("COMPLETION_WEBHOOK_URL", "Where LangGraph posts run-completion webhooks
 ENV.var(
     "POSTGRES_URI", "LangGraph deployment PostgreSQL URI available to custom code.", secret=True
 )
+ENV.var(
+    "LANGSMITH_LANGGRAPH_API_VARIANT",
+    "LangGraph API runtime variant.",
+    default="",
+)
 ENV.var("ANALYTICS_ENVIRONMENT", "Analytics producer environment.", default="production")
 ENV.var("ANALYTICS_SUMMARY_VERSION", "Active metric semantics version.", default="1")
 ENV.var("ANALYTICS_PR_MATURITY_DAYS", "PR cohort maturity period.", default="14")
@@ -351,7 +356,7 @@ ENV.var("BASETEN_API_KEY", "Baseten API key.", secret=True)
 ENV.var("LLM_MODEL_ID", "Default model in provider:model form.")
 ENV.var(
     "LLM_REASONING_EFFORT",
-    "Reasoning effort for the default model (low, medium, high, max) when no team or profile setting applies.",
+    "Reasoning effort for the default model (low, medium, high, max) when no workspace or profile setting applies.",
 )
 ENV.var("LLM_FALLBACK_MODEL_ID", "Fallback model in provider:model form.")
 ENV.var("EXA_API_KEY", "Exa API key enabling web search.", secret=True)

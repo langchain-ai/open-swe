@@ -28,6 +28,7 @@ from agent.slack.code_channels import (
     set_view,
 )
 from agent.threads.plan_store import get_plan_content
+from agent.utils.authorship import PR_ATTRIBUTION_TEXT
 from agent.utils.dashboard_links import dashboard_plan_url, dashboard_thread_url
 from agent.utils.langsmith import create_langsmith_thread_feedback
 
@@ -53,7 +54,7 @@ _REPORTED_RESPONSE_HEADERS = (
 
 
 async def _resolve_pr_author_token() -> tuple[str | None, str]:
-    """Use the initiator's OAuth for user-owned threads and the bot for system threads."""
+    """Use the run requester's OAuth for user-owned threads and the bot for system threads."""
     login = await pr_author_login()
     if login is None:
         return await get_github_app_installation_token(), "bot"
@@ -595,13 +596,17 @@ async def _record_pr_telemetry(
         thread_id = cfg.thread_id
         github_login = cfg.github_login
         if not (github_login or "").strip():
-            from agent.dashboard.user_mappings import login_for_email
+            from agent.users import User
 
-            github_login = await login_for_email(cfg.user_email) or ""
+            github_login = await User.login_for_email(cfg.user_email) or ""
         pr_url = details.get("html_url") or pr.get("html_url")
         merged = bool(details.get("merged"))
         is_draft = bool(details.get("draft", pr.get("draft")))
         state = details.get("state") if isinstance(details.get("state"), str) else "open"
+        base_details = details.get("base")
+        head_details = details.get("head")
+        opening_base_sha = base_details.get("sha") if isinstance(base_details, dict) else None
+        opening_head_sha = head_details.get("sha") if isinstance(head_details, dict) else None
         additions_value = details.get("additions")
         additions = additions_value if isinstance(additions_value, int) else 0
         deletions_value = details.get("deletions")
@@ -712,6 +717,16 @@ async def _record_pr_telemetry(
                     title=pr_title if isinstance(pr_title, str) else "",
                     head_ref=head,
                     base_ref=base,
+                    opening_base_sha=(
+                        opening_base_sha
+                        if record_opening and isinstance(opening_base_sha, str)
+                        else ""
+                    ),
+                    opening_head_sha=(
+                        opening_head_sha
+                        if record_opening and isinstance(opening_head_sha, str)
+                        else ""
+                    ),
                     author=author if isinstance(author, str) else "",
                     author_github_id=author_id if isinstance(author_id, int) else None,
                     resolves_thread=resolves_thread,
@@ -856,7 +871,13 @@ async def _maybe_append_references(
             logger.debug("Failed to append source references to PR body", exc_info=True)
         if not lines:
             return body
-        return f"{body.rstrip()}\n\n{_REFERENCES_HEADING}\n" + "\n".join(lines)
+        references = f"{_REFERENCES_HEADING}\n" + "\n".join(lines)
+        footer_start = body.find(PR_ATTRIBUTION_TEXT)
+        if footer_start < 0:
+            return f"{body.rstrip()}\n\n{references}"
+        before_footer = body[:footer_start].rstrip()
+        footer = body[footer_start:].lstrip()
+        return f"{before_footer}\n\n{references}\n\n{footer}"
     except Exception:
         logger.debug("Failed to append references to PR body", exc_info=True)
         return body

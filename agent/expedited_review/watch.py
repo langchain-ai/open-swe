@@ -12,7 +12,7 @@ from uuid import UUID
 
 from langgraph_sdk import get_client
 
-from agent.dashboard.team_settings import get_team_expedited_review_enabled
+from agent.dashboard.workspace_settings import get_workspace_settings
 from agent.dispatch import dispatch_agent_run
 from agent.expedited_review import card
 from agent.expedited_review.approvals import (
@@ -303,7 +303,10 @@ async def evaluate_approval(key: str) -> str:
     if not approval.active:
         await _delete_cron(approval.cron_id)
         return approval.state
-    if approval.state != "merging" and not await get_team_expedited_review_enabled():
+    if (
+        approval.state != "merging"
+        and not (await get_workspace_settings()).expedited_review_enabled
+    ):
         await retire(approval, "failed", "Expedited review was disabled for this instance.")
         return "failed"
     pr = approval.pull_request

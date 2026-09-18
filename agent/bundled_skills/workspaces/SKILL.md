@@ -37,9 +37,9 @@ The image you publish is whatever you are sitting on plus your changes, so start
 |---|---|---|
 | **Edit** a workspace's image | in that workspace (composer → Workspace picker) | change it, `publish_workspace` under the **same** name |
 | **Fork** one into a new workspace | in the parent | change what differs, `publish_workspace` under a **new** name |
-| Build **from scratch** | in no workspace, or `sandbox_reset` with the base `snapshot_id` | provision everything, publish |
+| Build **from scratch** | in no workspace, or `recreate_sandbox(source="base")` | provision everything, publish |
 
-Already in a thread and need a different image? `sandbox_reset(snapshot_id=…)` with an id from `list_workspaces`, or `sandbox_reset(snapshot="<prefix>-environment-<slug>:latest")`. The old sandbox is detached, not deleted.
+Already on a private admin surface and need a different image? `recreate_sandbox(workspace=<slug>)` with a slug from `list_workspaces`. The old sandbox is detached, not deleted.
 
 ## `setup_script` — the reproducibility contract
 

@@ -14,6 +14,7 @@ from agent.slack import events as slack_events
 from agent.slack import routes as slack_routes
 from agent.slack import webhook as slack_service
 from agent.slack.dm import DM_SESSION_TS
+from agent.slack.payloads import SlackChannelContext
 from agent.slack.request import SlackRequest
 from agent.webhooks import common as webhook_common
 
@@ -74,8 +75,8 @@ def _patch(monkeypatch: pytest.MonkeyPatch) -> None:
     slack_events.reset_slack_event_claims()
     monkeypatch.setattr("agent.incidents.channels.handle_slack_event", AsyncMock(return_value=None))
 
-    async def channel_context(_channel_id: str, *, use_cache: bool = True) -> dict[str, Any]:
-        return {"is_ext_shared": False, "is_pending_ext_shared": False, "is_im": True}
+    async def channel_context(_channel_id: str, *, use_cache: bool = True) -> SlackChannelContext:
+        return SlackChannelContext(is_ext_shared=False, is_pending_ext_shared=False, is_im=True)
 
     async def repo_config(*_args: Any, **_kwargs: Any) -> dict[str, str]:
         return {"owner": "langchain-ai", "name": "open-swe"}
@@ -146,8 +147,8 @@ async def test_dm_keeps_a_thread_per_message_until_the_person_opts_in(
 async def test_channel_message_still_uses_its_own_slack_thread(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    async def channel_context(_channel_id: str, *, use_cache: bool = True) -> dict[str, Any]:
-        return {"is_ext_shared": False, "is_pending_ext_shared": False, "is_im": False}
+    async def channel_context(_channel_id: str, *, use_cache: bool = True) -> SlackChannelContext:
+        return SlackChannelContext(is_ext_shared=False, is_pending_ext_shared=False, is_im=False)
 
     monkeypatch.setattr(webhook_common, "resolve_slack_channel_context", channel_context)
     payload = _dm_payload("Ev-channel", channel_type="channel")

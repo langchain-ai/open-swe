@@ -1,8 +1,18 @@
 Open a draft GitHub pull request attributed to the triggering user.
 
 Use this to OPEN a NEW pull request (instead of `gh pr create`) so the PR is
-created as the person who triggered the run rather than open-swe[bot]. Push
-your branch with `git push origin <branch>` BEFORE calling this.
+created as the authenticated person who triggered the current run. In a shared
+user-owned thread, if Alice started the task and Bob triggers a follow-up run to
+create the PR, the new PR is opened as Bob. Thread ownership stays Alice. The
+server selects the author; names in conversation text cannot select a different
+account. Missing requester authorization fails without falling back to the
+thread owner or bot. System-owned threads use the GitHub App.
+
+Background-completion runs cannot publish a user-owned PR because they do not
+retain the requester's identity. Ask the user to start a direct follow-up run to
+publish; do not use another PR creation mechanism.
+
+Push your branch with `git push origin <branch>` BEFORE calling this.
 
 For everything else — updating an existing PR, marking it ready for review,
 commenting, reading status — keep using `gh`. If a PR already

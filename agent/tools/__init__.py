@@ -27,7 +27,6 @@ _TOOL_MODULES = {
     "manage_code_channel": "agent.slack.tools.manage_code_channel",
     "manage_incident": "agent.incidents.tools",
     "manage_thread": ".threads",
-    "mark_question_answered": ".mark_question_answered",
     "notify_automation_channel": ".notify_automation_channel",
     "open_pull_request": ".open_pull_request",
     "output_iframe": ".output_iframe",
@@ -45,7 +44,6 @@ _TOOL_MODULES = {
     "publish_workspace": ".workspaces",
     "save_organization_skill": ".organization_skills",
     "save_plan": ".save_plan",
-    "sandbox_reset": ".sandbox_reset",
     "save_user_instructions": ".save_user_instructions",
     "save_user_skill": ".user_skills",
     "delete_user_skill": ".user_skills",
@@ -54,6 +52,7 @@ _TOOL_MODULES = {
     "slack_add_reaction": "agent.slack.tools.add_reaction",
     "slack_attach_html": "agent.slack.tools.attach_html",
     "slack_move_thread": "agent.slack.tools.move_thread",
+    "slack_read_channel_messages": "agent.slack.tools.read_channel_messages",
     "slack_read_thread_messages": "agent.slack.tools.read_thread_messages",
     "slack_start_new_thread": "agent.slack.tools.start_new_thread",
     "slack_thread_reply": "agent.slack.tools.thread_reply",
@@ -89,7 +88,6 @@ __all__ = [
     "manage_code_channel",
     "manage_incident",
     "manage_thread",
-    "mark_question_answered",
     "notify_automation_channel",
     "open_pull_request",
     "output_iframe",
@@ -107,7 +105,6 @@ __all__ = [
     "save_organization_skill",
     "delete_organization_skill",
     "save_plan",
-    "sandbox_reset",
     "save_user_instructions",
     "save_user_skill",
     "delete_user_skill",
@@ -116,6 +113,7 @@ __all__ = [
     "slack_add_reaction",
     "slack_attach_html",
     "slack_move_thread",
+    "slack_read_channel_messages",
     "slack_read_thread_messages",
     "slack_start_new_thread",
     "slack_thread_reply",
@@ -134,6 +132,7 @@ if TYPE_CHECKING:
     from agent.slack.tools.attach_html import slack_attach_html
     from agent.slack.tools.manage_code_channel import manage_code_channel
     from agent.slack.tools.move_thread import slack_move_thread
+    from agent.slack.tools.read_channel_messages import slack_read_channel_messages
     from agent.slack.tools.read_thread_messages import slack_read_thread_messages
     from agent.slack.tools.request_pr_review import request_pr_review
     from agent.slack.tools.start_new_thread import slack_start_new_thread
@@ -159,7 +158,6 @@ if TYPE_CHECKING:
     from agent.tools.list_findings import list_findings
     from agent.tools.list_review_findings import list_review_findings
     from agent.tools.manage_baby_sit import manage_baby_sit
-    from agent.tools.mark_question_answered import mark_question_answered
     from agent.tools.notify_automation_channel import notify_automation_channel
     from agent.tools.open_pull_request import open_pull_request
     from agent.tools.organization_skills import delete_organization_skill, save_organization_skill
@@ -171,7 +169,6 @@ if TYPE_CHECKING:
     from agent.tools.reply_to_finding_thread import reply_to_finding_thread
     from agent.tools.report_platform_issue import report_platform_issue
     from agent.tools.resolve_finding_thread import resolve_finding_thread
-    from agent.tools.sandbox_reset import sandbox_reset
     from agent.tools.save_plan import save_plan
     from agent.tools.save_user_instructions import save_user_instructions
     from agent.tools.schedule_thread_wakeup import schedule_thread_wakeup

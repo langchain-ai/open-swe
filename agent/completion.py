@@ -2,9 +2,9 @@
 
 The platform POSTs a run-completion payload to ``/webhooks/run-complete`` (wired
 as the ``webhook`` on every dispatched run, see ``agent.dispatch``). Successful
-Slack runs enqueue deferred session-cost enrichment and offer private feedback
-when a question was answered. Failures (``error`` / ``timeout``) post a short reply
-so a run that died never leaves the user silent.
+runs schedule a private feedback prompt five quiet minutes later, and successful
+Slack runs enqueue deferred session-cost enrichment. Failures (``error`` /
+``timeout``) post a short reply so a run that died never leaves the user silent.
 
 This decouples "the user gets an answer" from "the agent remembered to reply."
 The reply is idempotent per run when the webhook includes a run id. Older or
@@ -29,6 +29,7 @@ from agent.review.findings import REVIEWER_THREAD_KIND
 from agent.review.publish import settle_review_check_run
 from agent.session_cost import schedule_session_cost_refresh
 from agent.slack.client import post_slack_thread_reply
+from agent.slack.client import set_slack_thread_status as clear_slack_thread_status
 from agent.slack.code_channels import is_code_channel_session, set_session_status
 from agent.source_context import SourceContext
 from agent.thread_feedback import schedule_answer_feedback
@@ -303,6 +304,32 @@ async def _finalize_agent_usage_telemetry(
     )
 
 
+async def _settle_slack_thread_status(
+    client: LangGraphClient, thread_id: str, metadata: dict[str, Any]
+) -> None:
+    """Clear the animated "Thinking..." thread status once no run is left.
+
+    The status persists for a whole run (Slack drops it on each assistant
+    message, so the observer keeps refreshing it); a completion that arrives
+    while another run is still active must not clear that run's status.
+    """
+    try:
+        for status in ("pending", "running"):
+            if await client.runs.list(thread_id, status=status, limit=1):
+                return
+    except Exception:  # noqa: BLE001
+        logger.debug("run-complete: could not list runs for %s", thread_id, exc_info=True)
+        return
+    slack_thread = SourceContext.from_metadata(metadata).slack_thread
+    if slack_thread is None or not slack_thread.channel_id or not slack_thread.thread_ts:
+        return
+    # DM and code-channel sessions keep one status anchored on the newest
+    # message; clearing the session ts would drop a live run's indicator.
+    if slack_thread.thread_ts == "0":
+        return
+    await clear_slack_thread_status(slack_thread.channel_id, slack_thread.thread_ts, "")
+
+
 async def _settle_code_channel_session(
     client: LangGraphClient, thread_id: str, metadata: dict[str, Any]
 ) -> None:
@@ -344,6 +371,7 @@ async def _handle_successful_run(
     if metadata.get("kind") == REVIEWER_THREAD_KIND:
         return {"status": "ignored", "reason": "not an agent Slack run"}
     await _settle_code_channel_session(client, thread_id, metadata)
+    await _settle_slack_thread_status(client, thread_id, metadata)
     payload_metadata = payload.get("metadata")
     automated = (
         isinstance(payload_metadata, dict) and payload_metadata.get("kind") == "thread_wakeup"
@@ -398,7 +426,7 @@ async def _handle_successful_run(
 async def handle_run_completion(payload: dict[str, Any]) -> dict[str, str]:
     """Handle a platform run-completion webhook POST.
 
-    Prompts for Slack feedback, enqueues cost refreshes, and posts failure replies.
+    Schedules feedback prompts, enqueues cost refreshes, and posts failure replies.
     """
     status = payload.get("status")
     thread_id = payload.get("thread_id")
@@ -455,6 +483,7 @@ async def handle_run_completion(payload: dict[str, Any]) -> dict[str, str]:
         return await turns.handle_run_completion(thread_id, run_id, str(status))
     await _settle_failed_reviewer_check(thread_id, metadata)
     await _settle_code_channel_session(client, thread_id, metadata)
+    await _settle_slack_thread_status(client, thread_id, metadata)
     if run_id is None:
         # Payloads without run ids fall back to the old per-thread flag; run-scoped
         # dedupe intentionally does not read it so future runs can still report.

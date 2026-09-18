@@ -8,6 +8,7 @@ import pytest
 from agent import run_config
 from agent.incidents import channels, service, tools
 from agent.incidents.models import Incident, IncidentPolicy
+from agent.slack.channels import SlackChannel
 
 CHANNEL = {
     "id": "C7",
@@ -48,7 +49,7 @@ async def configured(fake_store, monkeypatch):
         IncidentPolicy(enabled=True, workspace_id="T1", slack_app_id="A1", channel_prefix="inc-"),
     )
     use_config(monkeypatch)
-    monkeypatch.setattr(tools, "get_slack_channel_info", AsyncMock(return_value=dict(CHANNEL)))
+    monkeypatch.setattr(SlackChannel, "fetch", AsyncMock(return_value=dict(CHANNEL)))
     monkeypatch.setattr(tools, "current_run_id", lambda: "run-now")
     monkeypatch.setattr(
         tools, "dashboard_incident_url", lambda incident_id: f"https://dash/incidents/{incident_id}"
@@ -83,11 +84,11 @@ async def test_start_needs_a_connected_account_and_an_eligible_channel(configure
     assert denied["success"] is False and "connected Open SWE account" in denied["error"]
 
     use_config(monkeypatch)
-    tools.get_slack_channel_info.return_value = {**CHANNEL, "is_private": True}
+    SlackChannel.fetch.return_value = {**CHANNEL, "is_private": True}
     private = await tools.manage_incident("start")
     assert private["success"] is False and "public internal" in private["error"]
 
-    tools.get_slack_channel_info.return_value = dict(CHANNEL)
+    SlackChannel.fetch.return_value = dict(CHANNEL)
     policy = await service.get_policy()
     await service.POLICIES.put(
         "default", policy.model_copy(update={"excluded_channel_ids": ["C7"]})

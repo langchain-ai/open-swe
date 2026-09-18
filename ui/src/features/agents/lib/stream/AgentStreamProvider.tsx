@@ -21,15 +21,27 @@ import {
   dashboardFetch,
 } from "@/lib/langgraph-client"
 import { RunTracker } from "@/lib/perf/streaming"
-import { selectStreamFor, useStreamPool } from "./streamPool"
+import { useReconnectNotice } from "./useReconnectNotice"
+import {
+  MAX_RECONNECT_ATTEMPTS,
+  reconnectDelayMs,
+  selectConnectionFor,
+  selectStreamFor,
+  useStreamPool,
+} from "./streamPool"
 import type { ReactNode } from "react"
 import type {
   AgentStream,
   AgentThreadTransport,
+  StreamConnection,
   StreamPoolEntry,
 } from "./streamPool"
 
-export type { AgentStream, AgentThreadTransport } from "./streamPool"
+export type {
+  AgentStream,
+  AgentThreadTransport,
+  StreamConnection,
+} from "./streamPool"
 
 const AGENT_ASSISTANT_ID = "agent"
 const SWEEP_INTERVAL_MS = 10_000
@@ -54,6 +66,8 @@ function PooledStream({ entry }: { entry: StreamPoolEntry }) {
     [cloud]
   )
   const pool = useStreamPool.getState
+  const { schedule: scheduleReconnectNotice, clear: clearReconnectNotice } =
+    useReconnectNotice(entry.id)
   const [runTracker] = useState(
     () =>
       new RunTracker({ transport: entry.transport, threadId: entry.threadId })
@@ -70,6 +84,10 @@ function PooledStream({ entry }: { entry: StreamPoolEntry }) {
     assistantId: AGENT_ASSISTANT_ID,
     threadId: entry.threadId,
     fetch: dashboardFetch,
+    maxReconnectAttempts: MAX_RECONNECT_ATTEMPTS,
+    reconnectDelayMs,
+    onReconnect: scheduleReconnectNotice,
+    onConnected: clearReconnectNotice,
     onThreadId: (threadId) => {
       runTracker.bindThread(threadId)
       pool().rekey(entry.id, threadId)
@@ -132,6 +150,16 @@ function PooledStream({ entry }: { entry: StreamPoolEntry }) {
     [entry.id, publish, stream, submit, isOffloading, routed]
   )
 
+  useEffect(() => {
+    if (!stream.isLoading) clearReconnectNotice()
+  }, [clearReconnectNotice, stream.isLoading])
+
+  useEffect(() => {
+    const thread = stream.getThread()
+    if (!thread) return
+    return thread.onError(clearReconnectNotice)
+  }, [clearReconnectNotice, stream])
+
   return null
 }
 
@@ -190,5 +218,15 @@ export function AgentStreamProvider({
         </AgentStreamContext.Provider>
       )}
     </>
+  )
+}
+
+/** Liveness of the bound thread's event stream. */
+export function useAgentStreamConnection(
+  transport: AgentThreadTransport,
+  threadId: string | null
+): StreamConnection {
+  return useStreamPool((state) =>
+    selectConnectionFor(state, transport, threadId)
   )
 }

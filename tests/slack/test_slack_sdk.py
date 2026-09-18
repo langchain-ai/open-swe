@@ -7,13 +7,14 @@ from tests.support.slack_api import slack_api_server
 
 
 async def test_sdk_session_sends_messages_and_closes_on_rate_limit(monkeypatch):
+    monkeypatch.setenv("SLACK_BOT_TOKEN", "test-token")
     with slack_api_server() as api:
         monkeypatch.setattr(http, "SLACK_API_BASE_URL", api.base_url, raising=False)
         api.respond(
             {"ok": False, "error": "ratelimited"}, status=429, headers={"Retry-After": "30"}
         )
         with pytest.raises(SlackApiError) as raised:
-            async with http.slack_client(token="test-token") as client:
+            async with http.SlackClient.bot() as client:
                 session = client.session
                 await client.chat_postMessage(channel="C1", text="Hello", thread_ts="1.0")
         assert raised.value.response.headers["Retry-After"] == "30"
@@ -27,7 +28,7 @@ async def test_sdk_session_sends_messages_and_closes_on_rate_limit(monkeypatch):
 async def test_non_object_slack_responses_are_reported_as_upstream_errors(slack_api, data):
     slack_api.respond(data)
     with pytest.raises(HTTPException) as raised:
-        async with http.slack_http_errors(), http.slack_client(token="test-token") as client:
+        async with http.slack_http_errors(), http.SlackClient.bot() as client:
             await client.users_info(user="U1")
     assert raised.value.status_code == 502
 
@@ -59,6 +60,61 @@ async def test_read_thread_tool_paginates_and_resolves_authors(slack_api):
         ),
         ("users.info", {"user": "U1"}),
     ]
+
+
+_PUBLIC_CHANNEL = {
+    "ok": True,
+    "channel": {
+        "id": "C1",
+        "is_channel": True,
+        "is_private": False,
+        "is_ext_shared": False,
+        "is_pending_ext_shared": False,
+    },
+}
+
+
+async def test_read_channel_tool_marks_threads_and_skips_joins(slack_api):
+    from agent.slack.tools.read_channel_messages import slack_read_channel_messages
+
+    slack_api.respond(_PUBLIC_CHANNEL)
+    slack_api.respond(
+        {
+            "ok": True,
+            "messages": [
+                {
+                    "ts": "2.0",
+                    "user": "U1",
+                    "text": "Opened a PR",
+                    "thread_ts": "2.0",
+                    "reply_count": 2,
+                },
+                {"ts": "1.5", "user": "U2", "text": "joined", "subtype": "channel_join"},
+                {"ts": "1.0", "user": "U1", "text": "Deploys are failing"},
+            ],
+        }
+    )
+    slack_api.respond({"ok": True, "user": {"profile": {"display_name": "Alice"}}})
+    result = await slack_read_channel_messages("C1", limit=5)
+
+    assert result["success"] is True
+    assert result["count"] == 2
+    formatted = result["formatted"]
+    assert formatted.index("Deploys are failing") < formatted.index("Opened a PR")
+    assert "[thread: 2 replies, thread_ts=2.0]" in formatted
+    assert "joined" not in formatted
+    assert ("conversations.history", {"channel": "C1", "limit": "5"}) in slack_api.calls
+
+
+async def test_read_channel_tool_refuses_a_private_channel(slack_api):
+    from agent.slack.tools.read_channel_messages import slack_read_channel_messages
+
+    slack_api.respond({"ok": True, "channel": {"id": "C1", "is_channel": True, "is_private": True}})
+    result = await slack_read_channel_messages("C1")
+
+    assert result["success"] is False
+    assert "public" in result["error"]
+    assert [call[0] for call in slack_api.calls] == ["conversations.info"]
 
 
 @pytest.mark.parametrize(
@@ -121,7 +177,7 @@ async def test_malformed_response_preserves_rate_limit_metadata(
 ):
     slack_api.respond(data, status=status, headers=headers)
     with pytest.raises(HTTPException) as raised:
-        async with http.slack_http_errors(), http.slack_client(token="test-token") as client:
+        async with http.slack_http_errors(), http.SlackClient.bot() as client:
             await client.users_info(user="U1")
     assert raised.value.status_code == expected
     if expected == 429:

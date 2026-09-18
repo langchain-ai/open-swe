@@ -9,14 +9,13 @@ from langgraph_sdk.client import LangGraphClient
 
 from agent.run_config import RunConfig
 from agent.slack.client import (
-    convert_mentions_to_slack_format,
     get_active_slack_thread,
     post_slack_ephemeral_reply,
     post_slack_thread_reply_with_ts,
     slack_thread_mutation_lock,
     store_slack_message_run_mapping,
 )
-from agent.slack.dm import is_dm_session
+from agent.slack.markdown import markdown_to_mrkdwn
 from agent.slack.orphan import (
     dashboard_handoff_message,
     move_thread_to_dashboard,
@@ -29,13 +28,14 @@ from agent.utils.thread_ops import langgraph_client as get_langgraph_client
 
 logger = logging.getLogger(__name__)
 
+_NATIVE_MARKDOWN_MAX_CHARS = 12000
+
 
 async def slack_thread_reply(
     message: str,
     options: list[str] | None = None,
     blocks: list[dict[str, Any]] | None = None,
     state: Annotated[dict[str, Any] | None, InjectedState] = None,
-    should_ask_for_feedback: bool = False,
 ) -> dict[str, Any]:
     """Implement the `slack_thread_reply` tool."""
     config = get_config()
@@ -44,7 +44,7 @@ async def slack_thread_reply(
     slack_thread = cfg.slack_thread.dump() if cfg.slack_thread else {}
     thread_id = cfg.thread_id
     if cfg.slack_ask is True:
-        return await _ephemeral_reply(cfg, message, blocks, state)
+        return await _ephemeral_reply(cfg, message, blocks, options, state)
     client = get_langgraph_client()
     active = await get_active_slack_thread(
         client,
@@ -83,8 +83,12 @@ async def slack_thread_reply(
     )
 
     async with slack_thread_mutation_lock(client, channel_id, thread_ts):
-        message = convert_mentions_to_slack_format(message)
-        slack_blocks = blocks or _build_option_blocks(message, options)
+        slack_blocks = blocks if blocks is not None else _build_option_blocks(message, options)
+        if blocks is None and len(message) > _NATIVE_MARKDOWN_MAX_CHARS:
+            if options:
+                return _oversized_options_error(message)
+            message = markdown_to_mrkdwn(message)
+            slack_blocks = None
         usage = summarize_run_usage(state)
         message_ts, slack_error = await _post_and_store_mapping(
             channel_id,
@@ -99,15 +103,6 @@ async def slack_thread_reply(
             langgraph_client=client,
             run_id=run_id,
             triggering_user_id=_triggering_user_id(cfg),
-            # A DM session is a private back-and-forth, so it never asks for a rating.
-            should_ask_for_feedback=(
-                should_ask_for_feedback
-                and not options
-                and not is_dm_session(
-                    cfg.slack_thread.channel_context if cfg.slack_thread else None,
-                    str(thread_ts),
-                )
-            ),
         )
     if message_ts is None:
         if slack_error == "thread_not_found":
@@ -136,8 +131,20 @@ async def _ephemeral_reply(
     cfg: RunConfig,
     message: str,
     blocks: list[dict[str, Any]] | None,
+    options: list[str] | None,
     state: dict[str, Any] | None,
 ) -> dict[str, Any]:
+    if options:
+        return {
+            "success": False,
+            "error": "options cannot be answered on an ephemeral reply",
+            "retry": True,
+            "hint": (
+                "Slack cannot route a choice button on an ephemeral message back to this run, "
+                "so nothing was posted. Call this tool again without `options`, putting the "
+                "choice in `message` as a question."
+            ),
+        }
     slack_thread = cfg.slack_thread
     channel_id = slack_thread.channel_id if slack_thread else ""
     user_id = slack_thread.triggering_user_id if slack_thread else ""
@@ -145,11 +152,16 @@ async def _ephemeral_reply(
         return {"success": False, "error": "Missing the Slack channel or user to answer"}
     if not message.strip():
         return {"success": False, "error": "Message cannot be empty"}
+    native_markdown = blocks is None and len(message) <= _NATIVE_MARKDOWN_MAX_CHARS
+    if blocks is None and not native_markdown:
+        message = markdown_to_mrkdwn(message)
     posted = await post_slack_ephemeral_reply(
         channel_id,
         user_id,
-        convert_mentions_to_slack_format(message),
-        blocks=blocks,
+        message,
+        blocks=blocks
+        if blocks is not None
+        else (_build_option_blocks(message, None) if native_markdown else None),
         usage=summarize_run_usage(state),
         agent_thread_id=cfg.thread_id,
     )
@@ -208,14 +220,22 @@ def _triggering_user_id(cfg: RunConfig) -> str | None:
     return (cfg.slack_thread.triggering_user_id or None) if cfg.slack_thread else None
 
 
-def _build_option_blocks(message: str, options: list[str] | None) -> list[dict[str, Any]] | None:
-    if not options:
-        return None
-    clean_options = [option.strip() for option in options if option.strip()]
+def _oversized_options_error(message: str) -> dict[str, str | int | bool]:
+    return {
+        "success": False,
+        "error": "Message with options exceeds Slack's 12000-character native Markdown limit",
+        "message_chars": len(message),
+        "retry": True,
+        "hint": "Retry with the options and a message of at most 12000 characters.",
+    }
+
+
+def _build_option_blocks(message: str, options: list[str] | None) -> list[dict[str, Any]]:
+    clean_options = [option.strip() for option in options or [] if option.strip()]
+    blocks: list[dict[str, Any]] = [{"type": "markdown", "text": message}]
     if not clean_options:
-        return None
-    return [
-        {"type": "section", "text": {"type": "mrkdwn", "text": message}},
+        return blocks
+    blocks.append(
         {
             "type": "actions",
             "elements": [
@@ -234,8 +254,9 @@ def _build_option_blocks(message: str, options: list[str] | None) -> list[dict[s
                 }
                 for index, option in enumerate(clean_options[:5])
             ],
-        },
-    ]
+        }
+    )
+    return blocks
 
 
 def build_workflow_approval_blocks(message: str, fingerprint: str) -> list[dict[str, Any]]:
@@ -308,7 +329,6 @@ async def _post_and_store_mapping(
     run_id: str | None = None,
     triggering_user_id: str | None = None,
     post_thread_ts: str | None = None,
-    should_ask_for_feedback: bool = False,
 ) -> tuple[str | None, str | None]:
     message_ts, slack_error = await post_slack_thread_reply_with_ts(
         channel_id,
@@ -327,6 +347,5 @@ async def _post_and_store_mapping(
             message_ts,
             run_id=run_id,
             triggering_user_id=triggering_user_id,
-            should_ask_for_feedback=should_ask_for_feedback,
         )
     return message_ts, slack_error

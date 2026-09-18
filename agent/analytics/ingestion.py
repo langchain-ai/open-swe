@@ -53,7 +53,7 @@ async def ingest(event: EventEnvelope) -> bool:
         elif event.event_name == EventName.FEEDBACK_WITHDRAWN:
             subject_id = event.payload.model_dump()["submission_event_id"]
         opening_run_id: UUID | None = None
-        if event.event_name == EventName.RUN_STARTED:
+        if event.event_name in {EventName.RUN_STARTED, EventName.PR_RUN_LINKED}:
             opening_run_id = event.run_id
         elif event.event_name == EventName.PR_OPENED:
             opening_run_id = cast(PROpenedPayload, event.payload).opening_run_id
@@ -110,6 +110,59 @@ async def ingest(event: EventEnvelope) -> bool:
     return True
 
 
+_CANDIDATES = """
+    SELECT pr.pr_id, run.run_id
+    FROM pr_projection AS pr
+    JOIN run_projection AS run ON run.workspace_id = pr.workspace_id
+    WHERE pr.workspace_id = :workspace_id
+      AND (:pr_id IS NULL OR pr.pr_id = :pr_id)
+      AND (:run_id IS NULL OR run.run_id = :run_id)
+      AND run.started_at > pr.opened_at + interval '24 hours'
+      AND (pr.opening_run_id = run.run_id OR EXISTS (
+          SELECT 1 FROM pr_run_link_projection AS link
+          WHERE link.workspace_id = pr.workspace_id AND link.pr_id = pr.pr_id
+            AND link.run_id = run.run_id AND link.link_role = 'opening'
+      ))
+"""
+
+
+async def _reject_false_openers(
+    conn: AsyncConnection,
+    *,
+    workspace_id: UUID,
+    pr_id: UUID | None = None,
+    run_id: UUID | None = None,
+) -> None:
+    """Clear only contradicted opening provenance, retaining outcomes and other links."""
+    params = {"workspace_id": workspace_id, "pr_id": pr_id, "run_id": run_id}
+    candidates = text(_CANDIDATES).bindparams(
+        bindparam("pr_id", type_=Uuid), bindparam("run_id", type_=Uuid)
+    )
+    rows = (await conn.execute(candidates, params)).tuples().all()
+    for affected_pr, affected_run in rows:
+        identity = {
+            "workspace_id": workspace_id,
+            "pr_id": affected_pr,
+            "run_id": affected_run,
+        }
+        await conn.execute(
+            text(
+                "UPDATE pr_projection SET opening_run_id = NULL, originating_model_id = NULL, "
+                "model_attribution_quality = 'unavailable', updated_at = clock_timestamp() "
+                "WHERE workspace_id = :workspace_id AND pr_id = :pr_id "
+                "AND opening_run_id = :run_id"
+            ),
+            identity,
+        )
+        await conn.execute(
+            text(
+                "DELETE FROM pr_run_link_projection WHERE workspace_id = :workspace_id "
+                "AND pr_id = :pr_id AND run_id = :run_id AND link_role = 'opening'"
+            ),
+            identity,
+        )
+
+
 async def _repair_pr_attribution(
     conn: AsyncConnection,
     *,
@@ -117,6 +170,7 @@ async def _repair_pr_attribution(
     pr_id: UUID | None = None,
     run_id: UUID | None = None,
 ) -> None:
+    await _reject_false_openers(conn, workspace_id=workspace_id, pr_id=pr_id, run_id=run_id)
     await conn.execute(
         text(
             """
@@ -151,15 +205,16 @@ async def _project(conn: AsyncConnection, event: EventEnvelope) -> None:
                 """
                 INSERT INTO run_projection (
                     workspace_id, run_id, preparation_run_id, thread_id, task_id, user_id,
-                    team_id, repository_id, configured_model_id, effective_model_id,
-                    model_attribution_quality, entry_point, started_at
+                    team_id, repository_id, configured_model_id, configured_effort,
+                    effective_model_id, model_attribution_quality, entry_point, started_at
                 ) VALUES (
                     :workspace_id, :run_id, :preparation_run_id, :thread_id, :task_id, :user_id,
-                    :team_id, :repository_id, :configured_model_id, :effective_model_id,
-                    :quality, :entry_point, :occurred_at
+                    :team_id, :repository_id, :configured_model_id, :configured_effort,
+                    :effective_model_id, :quality, :entry_point, :occurred_at
                 ) ON CONFLICT (workspace_id, run_id) DO UPDATE SET
                     started_at = LEAST(run_projection.started_at, EXCLUDED.started_at),
                     configured_model_id = COALESCE(EXCLUDED.configured_model_id, run_projection.configured_model_id),
+                    configured_effort = COALESCE(EXCLUDED.configured_effort, run_projection.configured_effort),
                     effective_model_id = COALESCE(EXCLUDED.effective_model_id, run_projection.effective_model_id),
                     model_attribution_quality = CASE WHEN EXCLUDED.model_attribution_quality = 'effective'
                         OR run_projection.model_attribution_quality = 'unavailable'
@@ -178,6 +233,7 @@ async def _project(conn: AsyncConnection, event: EventEnvelope) -> None:
             {
                 **_identity_params(event),
                 "configured_model_id": payload.get("configured_model_id"),
+                "configured_effort": payload.get("configured_effort"),
                 "effective_model_id": payload.get("effective_model_id"),
                 "quality": payload["model_attribution_quality"],
                 "entry_point": event.entry_point.value,
@@ -274,6 +330,9 @@ async def _project(conn: AsyncConnection, event: EventEnvelope) -> None:
                 "occurred_at": event.occurred_at,
             },
         )
+        await _reject_false_openers(
+            conn, workspace_id=event.workspace_id, pr_id=event.pr_id, run_id=event.run_id
+        )
     elif name == EventName.FEEDBACK_SUBMITTED:
         payload = event.payload.model_dump(mode="json")
         await conn.execute(
@@ -365,20 +424,26 @@ async def _project(conn: AsyncConnection, event: EventEnvelope) -> None:
             EventName.PR_CLOSED_WITHOUT_MERGE: "closed_without_merge",
             EventName.PR_REOPENED: "open",
         }[name]
+        payload = event.payload.model_dump()
         await conn.execute(
             text(
                 "UPDATE pr_projection SET current_state = :state, outcome_at = CASE WHEN "
                 ":state = 'open' THEN NULL ELSE :occurred_at END, source_version = :source_version, "
+                "distance_basis_points = CASE WHEN :state = 'merged' THEN :distance ELSE NULL END, "
                 "latest_transition_at = :occurred_at, updated_at = clock_timestamp() "
                 "WHERE workspace_id = :workspace_id AND pr_id = :pr_id "
                 "AND ((:source_version IS NOT NULL AND (source_version IS NULL OR :source_version > source_version)) "
                 "OR (:source_version IS NULL AND source_version IS NULL AND "
                 "(latest_transition_at IS NULL OR :occurred_at >= latest_transition_at)))"
-            ).bindparams(bindparam("source_version", type_=BigInteger)),
+            ).bindparams(
+                bindparam("source_version", type_=BigInteger),
+                bindparam("distance", type_=BigInteger),
+            ),
             {
                 "state": state,
                 "occurred_at": event.occurred_at,
                 "source_version": event.source_version,
+                "distance": payload.get("distance_basis_points"),
                 "workspace_id": event.workspace_id,
                 "pr_id": event.pr_id,
             },

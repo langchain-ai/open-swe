@@ -11,6 +11,7 @@ from starlette.requests import Request
 from agent.slack import events as slack_events
 from agent.slack import routes as slack_routes
 from agent.slack import webhook as slack_service
+from agent.slack.payloads import SlackChannelContext
 from agent.slack.request import SlackRequest
 from agent.webhooks import common as webhook_common
 
@@ -100,8 +101,8 @@ def _patch(monkeypatch: pytest.MonkeyPatch) -> None:
     slack_events.reset_slack_event_claims()
     monkeypatch.setattr("agent.incidents.channels.handle_slack_event", AsyncMock(return_value=None))
 
-    async def channel_context(_channel_id: str, *, use_cache: bool = True) -> dict[str, Any]:
-        return {"is_ext_shared": False, "is_pending_ext_shared": False}
+    async def channel_context(_channel_id: str, *, use_cache: bool = True) -> SlackChannelContext:
+        return SlackChannelContext(is_ext_shared=False, is_pending_ext_shared=False)
 
     async def repo_config(*_args: Any, **_kwargs: Any) -> dict[str, str]:
         return {"owner": "langchain-ai", "name": "open-swe"}
@@ -153,6 +154,16 @@ async def test_username_mention_is_not_marked_untagged() -> None:
 
 async def test_message_without_a_mention_is_marked_untagged() -> None:
     assert await _untagged_flag_for("how about now", "Ev-plain") is True
+
+
+async def test_file_share_without_a_mention_is_marked_untagged() -> None:
+    payload = _message_payload("the alignment is still wrong", "Ev-file")
+    payload["event"]["subtype"] = "file_share"
+    background_tasks = _FakeBackgroundTasks()
+    response = await slack_routes.slack_webhook(
+        cast(Request, _FakeRequest(payload)), cast(BackgroundTasks, background_tasks)
+    )
+    assert cast(dict[str, object], response)["status"] == "accepted"
 
 
 async def test_message_update_queues_only_the_new_text() -> None:

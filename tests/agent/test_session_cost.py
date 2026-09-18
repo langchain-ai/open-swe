@@ -304,6 +304,92 @@ def _state(attempt: int) -> dict[str, Any]:
     }
 
 
+async def test_schedule_marks_mapped_reply_cost_pending(monkeypatch: pytest.MonkeyPatch) -> None:
+    class _Store:
+        async def get_item(self, namespace: Any, key: str) -> dict[str, Any] | None:
+            if key == "run:run-1":
+                return {"value": {"run_id": "run-1", "thread_ts": "1.0", "message_ts": "1.1"}}
+            return None
+
+    client: Any = SimpleNamespace(store=_Store(), runs=_Runs())
+    original = {
+        "text": "Done <https://app/agents/t1|Open in Web> • model-a",
+        "blocks": [
+            {"type": "section", "text": {"type": "mrkdwn", "text": "Done"}},
+            {
+                "type": "context",
+                "elements": [
+                    {
+                        "type": "mrkdwn",
+                        "text": "<https://app/agents/t1|Open in Web> • model-a",
+                    }
+                ],
+            },
+        ],
+    }
+    pending = {
+        "text": f"{original['text']} • calculating cost",
+        "blocks": [
+            original["blocks"][0],
+            {
+                "type": "context",
+                "elements": [
+                    {
+                        "type": "mrkdwn",
+                        "text": "<https://app/agents/t1|Open in Web> • model-a • calculating cost",
+                    }
+                ],
+            },
+        ],
+    }
+    monkeypatch.setattr(
+        session_cost,
+        "fetch_slack_thread_message_by_ts",
+        AsyncMock(side_effect=[original, pending]),
+    )
+    update = AsyncMock(return_value=(True, None))
+    monkeypatch.setattr(session_cost, "update_slack_message", update)
+
+    assert await session_cost.schedule_session_cost_refresh(_state(0), client=client)
+
+    assert client.runs.created[0]["after_seconds"] == 15
+    update.assert_awaited_once()
+    args = update.await_args
+    assert args is not None
+    assert args.args[:2] == ("C1", "1.1")
+    assert args.args[2] == "Done <https://app/agents/t1|Open in Web> • model-a • calculating cost"
+    footer = args.kwargs["blocks"][-1]["elements"][0]["text"]
+    assert footer == "<https://app/agents/t1|Open in Web> • model-a • calculating cost"
+
+    # Re-marking the already-pending message is a no-op.
+    update.reset_mock()
+    assert await session_cost.schedule_session_cost_refresh(_state(0), client=client)
+    update.assert_not_awaited()
+
+
+async def test_schedule_skips_pending_mark_without_footer(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class _Store:
+        async def get_item(self, namespace: Any, key: str) -> dict[str, Any] | None:
+            if key == "run:run-1":
+                return {"value": {"run_id": "run-1", "thread_ts": "1.0", "message_ts": "1.1"}}
+            return None
+
+    client: Any = SimpleNamespace(store=_Store(), runs=_Runs())
+    monkeypatch.setattr(
+        session_cost,
+        "fetch_slack_thread_message_by_ts",
+        AsyncMock(return_value={"text": "Acknowledged", "blocks": None}),
+    )
+    update = AsyncMock(return_value=(True, None))
+    monkeypatch.setattr(session_cost, "update_slack_message", update)
+
+    assert await session_cost.schedule_session_cost_refresh(_state(0), client=client)
+
+    update.assert_not_awaited()
+
+
 async def test_refresh_schedules_bounded_stateless_retry(monkeypatch: pytest.MonkeyPatch) -> None:
     client: Any = _Client()
     monkeypatch.setattr(
@@ -339,3 +425,45 @@ async def test_refresh_stops_after_final_attempt(monkeypatch: pytest.MonkeyPatch
 
     assert result == {"status": "exhausted", "reason": "LangSmith not ready"}
     assert client.runs.created == []
+
+
+@pytest.mark.parametrize("status,attempt", [("unavailable", 0), ("pending", 4), ("pending", 0)])
+async def test_terminal_refresh_clears_pending_footer(
+    monkeypatch: pytest.MonkeyPatch, status: str, attempt: int
+) -> None:
+    monkeypatch.setattr(
+        session_cost, "_refresh_once", AsyncMock(return_value=(status, "unavailable"))
+    )
+    monkeypatch.setattr(
+        session_cost, "schedule_session_cost_refresh", AsyncMock(return_value=False)
+    )
+    monkeypatch.setattr(
+        session_cost,
+        "lookup_slack_run_message_mapping",
+        AsyncMock(return_value={"thread_ts": "1.0", "message_ts": "1.1"}),
+    )
+    monkeypatch.setattr(
+        session_cost,
+        "fetch_slack_thread_message_by_ts",
+        AsyncMock(
+            return_value={
+                "text": "Done <https://app/agents/t1|Open in Web> • model-a • calculating cost",
+                "blocks": None,
+            }
+        ),
+    )
+    update = AsyncMock(return_value=(True, None))
+    monkeypatch.setattr(session_cost, "update_slack_message", update)
+    await session_cost.run_session_cost_refresh(
+        {
+            "agent_thread_id": "t1",
+            "run_id": "r1",
+            "invocation_id": "i1",
+            "channel_id": "C1",
+            "thread_ts": "1.0",
+            "attempt": attempt,
+        },
+        client=SimpleNamespace(),
+    )
+    update.assert_awaited_once()
+    assert update.call_args.args[2].endswith("model-a")
