@@ -109,6 +109,34 @@ async def test_usage_leaderboard_applies_the_instance_policy_fresh_per_request(
     assert leaderboard.await_args.kwargs["anonymize_others"] is (privacy and viewer != "admin")
 
 
+@pytest.mark.parametrize("viewer", ["admin", "member"])
+async def test_pr_report_exposes_attribution_diagnostics_to_admins_only(
+    monkeypatch, viewer
+) -> None:
+    app = FastAPI()
+    app.include_router(routes.router)
+    monkeypatch.setenv("CONFIGURED_ADMINS", "admin")
+    monkeypatch.setenv("POSTGRES_URI", "postgresql://localhost/test")
+    report = AsyncMock(
+        return_value={
+            "status": "ready",
+            "cohorts": [],
+            "unavailable_thread_ids": ["0190a2f0-0000-7000-8000-000000000001"],
+        }
+    )
+    monkeypatch.setattr(queries, "pr_merge_rate_by_model", report)
+    app.dependency_overrides[oauth.require_session] = lambda: {"sub": viewer}
+
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        response = await client.get("/dashboard/api/analytics/pr-merge-rate-by-model")
+
+    assert response.status_code == 200
+    assert report.await_args is not None
+    assert report.await_args.kwargs["admin"] is (viewer == "admin")
+
+
 @pytest.mark.parametrize("report", ["pr", "usage"])
 async def test_pr_report_requires_session_before_checking_availability(monkeypatch, report):
     app = FastAPI()
