@@ -143,10 +143,12 @@ export interface ThreadsPage {
   hasMore?: boolean
 }
 
-export interface SidebarProject {
+export interface SidebarRepo {
   repoFullName: string
   name: string
   updatedAt: number
+  /** Slug of the workspace that owns this repository; `"default"` when unassigned. */
+  workspace: string
 }
 
 const API_BASE = dashboardApiBase()
@@ -240,7 +242,7 @@ function buildThreadsPageQuery(params: ThreadsPageParams): string {
   return query ? `?${query}` : ""
 }
 
-function buildProjectsQuery(params: {
+function buildReposQuery(params: {
   includeResolved?: boolean
   includeAutomations?: boolean
 }): string {
@@ -295,14 +297,14 @@ export const agentsApi = {
         body: JSON.stringify(body),
       }
     ),
-  listThreadProjects: (
+  listThreadRepos: (
     params: {
       includeResolved?: boolean
       includeAutomations?: boolean
     } = {}
   ) =>
-    agentsRequest<Array<SidebarProject>>(
-      `/threads/projects${buildProjectsQuery(params)}`
+    agentsRequest<Array<SidebarRepo>>(
+      `/threads/repos${buildReposQuery(params)}`
     ),
   listPinnedThreads: () => agentsRequest<Array<AgentThread>>("/threads/pinned"),
   listThreadsPage: (params: ThreadsPageParams = {}) =>

@@ -1565,6 +1565,71 @@
         "title": "SlackBotOption",
         "type": "object"
       },
+      "SlackChannelDirectory": {
+        "properties": {
+          "channels": {
+            "items": {
+              "$ref": "#/components/schemas/SlackChannelOption"
+            },
+            "title": "Channels",
+            "type": "array"
+          },
+          "partial": {
+            "default": false,
+            "title": "Partial",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "channels"
+        ],
+        "title": "SlackChannelDirectory",
+        "type": "object"
+      },
+      "SlackChannelOption": {
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "is_ext_shared": {
+            "title": "Is Ext Shared",
+            "type": "boolean"
+          },
+          "is_member": {
+            "title": "Is Member",
+            "type": "boolean"
+          },
+          "is_private": {
+            "title": "Is Private",
+            "type": "boolean"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "num_members": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Num Members"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "is_private",
+          "is_member",
+          "is_ext_shared"
+        ],
+        "title": "SlackChannelOption",
+        "type": "object"
+      },
       "SlashCommandResponse": {
         "properties": {
           "response_type": {
@@ -8188,6 +8253,34 @@
         ]
       }
     },
+    "/dashboard/api/slack/channels": {
+      "get": {
+        "description": "The channels a workspace can be bound to, for the picker on the Workspaces page.",
+        "operationId": "api_list_slack_channels_dashboard_api_slack_channels_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SlackChannelDirectory"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api List Slack Channels",
+        "tags": [
+          "dashboard",
+          "slack"
+        ]
+      }
+    },
     "/dashboard/api/slack/desktop/exchange": {
       "post": {
         "description": "Finish a desktop Slack link with the app's own session.",
@@ -8620,80 +8713,6 @@
         ]
       }
     },
-    "/dashboard/api/threads/projects": {
-      "get": {
-        "operationId": "api_list_thread_projects_dashboard_api_threads_projects_get",
-        "parameters": [
-          {
-            "in": "query",
-            "name": "include_resolved",
-            "required": false,
-            "schema": {
-              "default": false,
-              "title": "Include Resolved",
-              "type": "boolean"
-            }
-          },
-          {
-            "in": "query",
-            "name": "include_automations",
-            "required": false,
-            "schema": {
-              "default": false,
-              "title": "Include Automations",
-              "type": "boolean"
-            }
-          },
-          {
-            "in": "query",
-            "name": "all",
-            "required": false,
-            "schema": {
-              "default": false,
-              "title": "All",
-              "type": "boolean"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "items": {
-                    "additionalProperties": true,
-                    "type": "object"
-                  },
-                  "title": "Response Api List Thread Projects Dashboard Api Threads Projects Get",
-                  "type": "array"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "DashboardSession": []
-          }
-        ],
-        "summary": "Api List Thread Projects",
-        "tags": [
-          "dashboard",
-          "threads"
-        ]
-      }
-    },
     "/dashboard/api/threads/pull-request-checks": {
       "post": {
         "operationId": "api_get_pull_request_checks_dashboard_api_threads_pull_request_checks_post",
@@ -8739,6 +8758,80 @@
           }
         ],
         "summary": "Api Get Pull Request Checks",
+        "tags": [
+          "dashboard",
+          "threads"
+        ]
+      }
+    },
+    "/dashboard/api/threads/repos": {
+      "get": {
+        "operationId": "api_list_thread_repos_dashboard_api_threads_repos_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "include_resolved",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Include Resolved",
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "include_automations",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Include Automations",
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "all",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "All",
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  "title": "Response Api List Thread Repos Dashboard Api Threads Repos Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api List Thread Repos",
         "tags": [
           "dashboard",
           "threads"
@@ -10270,7 +10363,7 @@
     },
     "/dashboard/api/workspaces/options": {
       "get": {
-        "description": "Pickable workspaces for any signed-in user; refresh logs only for admins.",
+        "description": "Pickable workspaces for any signed-in user; refresh logs only for admins.\n\nEach option carries ``default_repo`` so the composer can preselect it when\nthe workspace is chosen first.",
         "operationId": "api_workspace_options_dashboard_api_workspaces_options_get",
         "responses": {
           "200": {

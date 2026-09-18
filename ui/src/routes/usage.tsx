@@ -52,17 +52,25 @@ export const Route = createFileRoute("/usage")({
 
 const PAGE_SIZES = [10, 25, 50, 100] as const
 
-interface SortableColumn {
-  key: UsageLeaderboardSort
+interface SortableColumn<Key extends string> {
+  key: Key
   label: string
   align: "left" | "right"
-  /** Direction applied on the first click. Counts read best highest-first. */
   defaultDirection?: SortDirection
-  /** Metric definition shown on hover/focus of the header. */
   tooltip?: string
 }
 
 type UsageScope = "invocations" | "threads"
+type PROutcomesSort =
+  | "model"
+  | "prs_opened"
+  | "merged"
+  | "closed_without_merge"
+  | "open"
+  | "median_distance"
+  | "merge_rate"
+  | "avg_delivery_seconds"
+  | "avg_merge_seconds"
 
 const PERIOD_LABELS: Record<UsageLeaderboardPeriod, string> = {
   "7d": "Last 7 days",
@@ -710,6 +718,65 @@ function AvgTimeToPR({ cohort }: { cohort: PRMergeRateCohort }) {
   )
 }
 
+const PR_OUTCOME_COLUMNS: Array<SortableColumn<PROutcomesSort>> = [
+  {
+    key: "model",
+    label: "Opening model",
+    align: "left",
+    defaultDirection: "asc",
+  },
+  { key: "prs_opened", label: "PRs opened", align: "right" },
+  { key: "merged", label: "Merged", align: "right" },
+  {
+    key: "closed_without_merge",
+    label: "Closed without merge",
+    align: "right",
+  },
+  { key: "open", label: "Open", align: "right" },
+  {
+    key: "median_distance",
+    label: "Median distance",
+    align: "right",
+    tooltip:
+      "Median post-open line edit distance across merged PRs. Higher means the final diff changed more after the PR opened.",
+  },
+  {
+    key: "merge_rate",
+    label: "Merge rate",
+    align: "right",
+  },
+  { key: "avg_delivery_seconds", label: "Avg time to PR", align: "right" },
+  {
+    key: "avg_merge_seconds",
+    label: "Avg time to merge",
+    align: "right",
+    tooltip: "Unmerged PRs are excluded.",
+  },
+]
+
+function prOutcomeSortValue(cohort: PRMergeRateCohort, sort: PROutcomesSort) {
+  switch (sort) {
+    case "model":
+      return safeModelLabel(cohort.model_id ?? "") || "Unavailable"
+    case "prs_opened":
+      return cohort.cohort_size
+    case "merged":
+      return cohort.merged
+    case "closed_without_merge":
+      return cohort.closed_without_merge
+    case "open":
+      return cohort.waiting + cohort.mature_pending
+    case "median_distance":
+      return cohort.median_distance_basis_points ?? null
+    case "merge_rate":
+      return cohort.mature_cohort_merge_share
+    case "avg_delivery_seconds":
+      return cohort.avg_delivery_seconds
+    case "avg_merge_seconds":
+      return cohort.avg_merge_seconds
+  }
+}
+
 function PRMergeRateTable({
   cohorts,
   maturityDays,
@@ -719,10 +786,23 @@ function PRMergeRateTable({
 }) {
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(10)
+  const [sort, setSort] = useState<PROutcomesSort>("prs_opened")
+  const [direction, setDirection] = useState<SortDirection>("desc")
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set())
-  const pageCount = Math.max(1, Math.ceil(cohorts.length / pageSize))
+  const sortedCohorts = [...cohorts].sort((a, b) => {
+    const aValue = prOutcomeSortValue(a, sort)
+    const bValue = prOutcomeSortValue(b, sort)
+    if (aValue == null) return bValue == null ? 0 : 1
+    if (bValue == null) return -1
+    const comparison =
+      typeof aValue === "string" && typeof bValue === "string"
+        ? aValue.localeCompare(bValue, undefined, { sensitivity: "base" })
+        : Number(aValue) - Number(bValue)
+    return direction === "asc" ? comparison : -comparison
+  })
+  const pageCount = Math.max(1, Math.ceil(sortedCohorts.length / pageSize))
   const currentPage = Math.min(page, pageCount)
-  const rows = cohorts.slice(
+  const rows = sortedCohorts.slice(
     (currentPage - 1) * pageSize,
     currentPage * pageSize
   )
@@ -733,47 +813,33 @@ function PRMergeRateTable({
         <table className="w-full min-w-[860px] text-xs">
           <thead className="border-b border-border text-muted-foreground">
             <tr>
-              <th className="px-4 py-3 text-left font-normal">Opening model</th>
-              <th className="px-2 py-3 text-right font-normal">PRs opened</th>
-              <th className="px-2 py-3 text-right font-normal">Merged</th>
-              <th className="px-2 py-3 text-right font-normal">
-                Closed without merge
-              </th>
-              <th className="px-2 py-3 text-right font-normal">Open</th>
-              <th className="px-2 py-3 text-right font-medium text-foreground">
-                <Tooltip>
-                  <TooltipTrigger className="cursor-help rounded-sm underline decoration-dotted underline-offset-2 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring">
-                    Median distance
-                  </TooltipTrigger>
-                  <TooltipPopup className="max-w-xs">
-                    Median post-open line edit distance across merged PRs.
-                    Higher means the final diff changed more after the PR
-                    opened.
-                  </TooltipPopup>
-                </Tooltip>
-              </th>
-              <th className="px-4 py-3 text-right font-medium text-foreground">
-                <Tooltip>
-                  <TooltipTrigger className="cursor-help rounded-sm underline decoration-dotted underline-offset-2 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring">
-                    Merge rate
-                  </TooltipTrigger>
-                  <TooltipPopup className="max-w-xs">
-                    Includes merged and closed PRs, plus PRs open for at least{" "}
-                    {maturityDays} days. Newer open PRs are excluded.
-                  </TooltipPopup>
-                </Tooltip>
-              </th>
-              <th className="px-4 py-3 text-right font-normal">
-                Avg time to PR
-              </th>
-              <th className="px-4 py-3 text-right font-normal">
-                <Tooltip>
-                  <TooltipTrigger className="cursor-help rounded-sm underline decoration-dotted underline-offset-2 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring">
-                    Avg time to merge
-                  </TooltipTrigger>
-                  <TooltipPopup>Unmerged PRs are excluded.</TooltipPopup>
-                </Tooltip>
-              </th>
+              {PR_OUTCOME_COLUMNS.map((column, index, columns) => (
+                <SortableHeader
+                  key={column.key}
+                  column={
+                    column.key === "merge_rate"
+                      ? {
+                          ...column,
+                          tooltip: `Includes merged and closed PRs, plus PRs open for at least ${maturityDays} days. Newer open PRs are excluded.`,
+                        }
+                      : column
+                  }
+                  sortKey={sort}
+                  sortDirection={direction}
+                  onSort={(nextSort, defaultDirection) => {
+                    setDirection(
+                      sort === nextSort
+                        ? direction === "asc"
+                          ? "desc"
+                          : "asc"
+                        : defaultDirection
+                    )
+                    setSort(nextSort)
+                    setPage(1)
+                  }}
+                  className={`${index === 0 ? "pr-0 pl-4" : index === columns.length - 1 ? "pr-4 pl-0" : "px-0"} ${column.align === "right" ? "text-right" : "text-left"}`}
+                />
+              ))}
             </tr>
           </thead>
           <tbody className="divide-y divide-border">
@@ -786,24 +852,7 @@ function PRMergeRateTable({
                 : "Unavailable"
               return (
                 <Fragment key={key}>
-                  <tr
-                    className={
-                      hasMultipleEfforts
-                        ? "cursor-pointer hover:bg-muted/35"
-                        : undefined
-                    }
-                    onClick={
-                      hasMultipleEfforts
-                        ? () =>
-                            setExpanded((current) => {
-                              const next = new Set(current)
-                              if (next.has(key)) next.delete(key)
-                              else next.add(key)
-                              return next
-                            })
-                        : undefined
-                    }
-                  >
+                  <tr>
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-2">
                         {hasMultipleEfforts ? (
@@ -812,6 +861,14 @@ function PRMergeRateTable({
                             className="-ml-1 size-5.5 shrink-0 rounded-sm p-1 text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
                             aria-expanded={isExpanded}
                             aria-label={`${isExpanded ? "Collapse" : "Expand"} ${modelLabel} reasoning efforts`}
+                            onClick={() =>
+                              setExpanded((current) => {
+                                const next = new Set(current)
+                                if (next.has(key)) next.delete(key)
+                                else next.add(key)
+                                return next
+                              })
+                            }
                           >
                             {isExpanded ? (
                               <ChevronDown className="size-3.5" />
@@ -895,7 +952,7 @@ function PRMergeRateTable({
 function usageColumns(
   scope: UsageScope,
   period: UsageLeaderboardPeriod
-): Array<SortableColumn> {
+): Array<SortableColumn<UsageLeaderboardSort>> {
   return [
     { key: "rank", label: "Rank", align: "left", defaultDirection: "asc" },
     { key: "user", label: "User", align: "left", defaultDirection: "asc" },
@@ -940,17 +997,17 @@ function usageColumns(
   ]
 }
 
-function SortableHeader({
+function SortableHeader<Key extends string>({
   column,
   sortKey,
   sortDirection,
   onSort,
   className,
 }: {
-  column: SortableColumn
-  sortKey: UsageLeaderboardSort
+  column: SortableColumn<Key>
+  sortKey: Key
   sortDirection: SortDirection
-  onSort: (key: UsageLeaderboardSort, direction: SortDirection) => void
+  onSort: (key: Key, direction: SortDirection) => void
   className: string
 }) {
   const isActive = sortKey === column.key

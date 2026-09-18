@@ -49,6 +49,16 @@ class DividerBlock(TypedDict):
     type: Literal["divider"]
 
 
+class SlackFileRef(TypedDict):
+    id: str
+
+
+class ImageBlock(TypedDict):
+    type: Literal["image"]
+    slack_file: SlackFileRef
+    alt_text: str
+
+
 class ButtonElement(TypedDict):
     type: Literal["button"]
     text: PlainText
@@ -78,7 +88,7 @@ class InputBlock(TypedDict):
     optional: NotRequired[bool]
 
 
-type Block = SectionBlock | ContextBlock | DividerBlock | ActionsBlock | InputBlock
+type Block = SectionBlock | ContextBlock | DividerBlock | ImageBlock | ActionsBlock | InputBlock
 
 
 class ModalView(TypedDict):
@@ -105,6 +115,10 @@ def section(text: str) -> SectionBlock:
 
 def context(*texts: str) -> ContextBlock:
     return {"type": "context", "elements": [mrkdwn(text) for text in texts]}
+
+
+def image(file_id: str, alt_text: str) -> ImageBlock:
+    return {"type": "image", "slack_file": {"id": file_id}, "alt_text": alt_text}
 
 
 def divider() -> DividerBlock:
