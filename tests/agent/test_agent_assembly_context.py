@@ -19,6 +19,7 @@ from deepagents.backends.state import StateBackend
 from langgraph.graph.state import RunnableConfig
 
 from agent.dashboard.workspace_settings import WorkspaceSettings
+from agent.middleware.record_run_usage import set_run_metadata
 from agent.run_config import RunConfig
 from agent.sandboxes.read_only_backend import ReadOnlyBackend
 from agent.sandboxes.state import SANDBOX_BACKENDS, SandboxBackendProxy
@@ -365,6 +366,20 @@ async def test_model_routing_preference_is_snapshotted_for_existing_thread() -> 
     assert "ModelSelectionMiddleware" not in middleware_names
     assert config["metadata"]["model_routing_applied"] is False
     assert "model_routing_mode" not in config["metadata"]
+
+
+def test_model_route_is_updated_on_current_run_without_thread_leakage() -> None:
+    run_tree = SimpleNamespace(metadata={})
+    with patch("langsmith.run_helpers.get_current_run_tree", return_value=run_tree):
+        set_run_metadata({"model_route": "fast"})
+        assert run_tree.metadata["model_route"] == "fast"
+
+        run_tree.metadata["model_route"] = "performance"
+        set_run_metadata({"model_route": "balanced"})
+        assert run_tree.metadata["model_route"] == "balanced"
+
+        set_run_metadata({}, remove_keys=("model_route",))
+        assert "model_route" not in run_tree.metadata
 
 
 @pytest.mark.asyncio

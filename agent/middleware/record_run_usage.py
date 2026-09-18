@@ -1,7 +1,7 @@
 """Persist usage for completed turns and terminal model failures."""
 
 import logging
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Collection, Mapping
 from typing import Any
 
 from langchain.agents.middleware import AgentState, ModelRequest, ModelResponse
@@ -16,8 +16,8 @@ from agent.run_config import RunConfig
 logger = logging.getLogger(__name__)
 
 
-def _tag_run_metadata(extra_metadata: dict[str, Any]) -> None:
-    """Attach ``extra_metadata`` to the current LangSmith run, best-effort."""
+def set_run_metadata(metadata: Mapping[str, Any], *, remove_keys: Collection[str] = ()) -> None:
+    """Update metadata on the current LangSmith run, best-effort."""
     try:
         from langsmith.run_helpers import get_current_run_tree
 
@@ -27,9 +27,16 @@ def _tag_run_metadata(extra_metadata: dict[str, Any]) -> None:
     if run_tree is None:
         return
     try:
-        run_tree.metadata.update(extra_metadata)
+        run_tree.metadata.update(metadata)
+        for key in remove_keys:
+            run_tree.metadata.pop(key, None)
     except Exception:  # noqa: BLE001
         logger.debug("Could not tag run metadata", exc_info=True)
+
+
+def _tag_run_metadata(extra_metadata: dict[str, Any]) -> None:
+    """Attach ``extra_metadata`` to the current LangSmith run, best-effort."""
+    set_run_metadata(extra_metadata)
 
 
 class RecordRunUsageMiddleware(OpenSWEMiddleware):
