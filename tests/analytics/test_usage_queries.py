@@ -117,6 +117,18 @@ async def test_empty_report_exposes_collection_progress(usage_db):
     assert result["reviewer_stats"]["top_categories"] == []
 
 
+async def test_usage_supports_last_24_hours(usage_db):
+    recent = await person("recent")
+    stale = await person("stale")
+    await run(recent, age=0)
+    await run(stale, age=2)
+
+    result = await report(period="24h")
+
+    assert result["period"] == "24h"
+    assert [row["user"]["name"] for row in result["rows"]] == ["recent"]
+
+
 async def test_usage_ranks_run_and_pr_cohorts_with_cost_coverage(usage_db):
     alice = await person("alice", "alice@example.com", display_name="Alice Example")
     bob = await person("bob", "bob@example.com")
