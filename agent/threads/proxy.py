@@ -12,8 +12,8 @@ from fastapi import HTTPException
 from agent.config import ENV
 from agent.dashboard.ttft import AssistantTextEventDetector, record_dashboard_thread_ttft
 from agent.threads.access import (
-    _authorized_thread_metadata,
     _readable_thread_metadata,
+    authorized_thread_metadata,
 )
 from agent.threads.runs import (
     _ASSISTANT_ID,
@@ -303,7 +303,7 @@ async def proxy_dashboard_thread_run_cancel(
     action: str = "interrupt",
     email: str | None = None,
 ) -> tuple[int, bytes, str | None]:
-    await _authorized_thread_metadata(thread_id, login, email=email)
+    await authorized_thread_metadata(thread_id, login, email=email)
     url = f"{langgraph_url().rstrip('/')}/threads/{thread_id}/runs/{run_id}/cancel"
     headers = langgraph_proxy_headers()
     async with httpx2.AsyncClient(timeout=_PROXY_REQUEST_TIMEOUT) as client:

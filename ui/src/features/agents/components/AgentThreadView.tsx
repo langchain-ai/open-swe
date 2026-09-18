@@ -53,6 +53,7 @@ import {
 } from "@/features/agents/lib/queuedMessages"
 import { agentsApi } from "@/features/agents/lib/api"
 import { rejectPlan } from "@/lib/plan"
+import { useModelIdentity } from "@/lib/modelIdentity"
 import { useSession } from "@/lib/session"
 import { useIsMobile } from "@/lib/useIsMobile"
 import { useAgentStream } from "@/features/agents/lib/stream/AgentStreamProvider"
@@ -151,6 +152,10 @@ export function AgentThreadView({
   const scrollControlRef = useRef<MessagesScrollControl | null>(null)
   const activePlanMode = planMode ?? thread.planMode ?? false
   const routed = stream.routed ?? null
+  const identityVisible = useModelIdentity({
+    thread: thread.id,
+    workspace: thread.workspace,
+  })
   const activeModel = models.find(
     (model) => model.id === activeSelection?.modelId
   )
@@ -461,6 +466,7 @@ export function AgentThreadView({
                 onSubmit={submitMessage}
                 models={models}
                 routed={routed}
+                concealAutoModel={!identityVisible}
                 selection={activeSelection}
                 onSelectionChange={handleSelectionChange}
                 planMode={activePlanMode}

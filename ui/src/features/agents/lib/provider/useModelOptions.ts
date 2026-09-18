@@ -87,9 +87,12 @@ export function formatModelSelection(
   models: Array<ModelOption>,
   selection: ModelSelection | null,
   /** Route/model the router picked for this run, shown for Auto. */
-  routed?: { route?: string; modelId?: string | null } | null
+  routed?: { route?: string; modelId?: string | null } | null,
+  /** Conceal the routed tier behind a plain "Auto" label. */
+  conceal?: boolean
 ): string {
   if (!selection) {
+    if (conceal) return "Auto"
     const route = routed?.route
     if (route === "fast" || route === "balanced" || route === "performance") {
       return `Auto ${formatRoute(route)}`

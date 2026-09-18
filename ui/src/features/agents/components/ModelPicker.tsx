@@ -33,6 +33,8 @@ export interface ModelPickerProps {
   onOpenChange?: (next: boolean) => void
   /** Route/model the Auto router picked for the current run. */
   routed?: { route?: string; modelId?: string | null } | null
+  /** Hides the model behind the Auto pick; a manual selection stays visible. */
+  concealAutoModel?: boolean
 }
 
 type Pane = "main" | "models"
@@ -116,6 +118,7 @@ export function ModelPicker({
   open: controlledOpen,
   onOpenChange,
   routed,
+  concealAutoModel = false,
 }: ModelPickerProps) {
   const [uncontrolledOpen, setUncontrolledOpen] = useState(false)
   const open = controlledOpen ?? uncontrolledOpen
@@ -346,8 +349,13 @@ export function ModelPicker({
     typeof selectedModel?.context_window === "number"
       ? selectedModel.context_window
       : null
-  const routedLabel = routedModelLabel(models, routed)
-  const triggerLabel = formatModelSelection(models, selection, routed)
+  const routedLabel = concealAutoModel ? null : routedModelLabel(models, routed)
+  const triggerLabel = formatModelSelection(
+    models,
+    selection,
+    routed,
+    concealAutoModel
+  )
   const triggerTitle =
     !selection && routedLabel ? `Routed model: ${routedLabel}` : undefined
 

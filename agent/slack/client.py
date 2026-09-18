@@ -488,14 +488,19 @@ SLACK_COST_PENDING_LABEL = "calculating cost..."
 _PENDING_COST_LABEL_RE = re.compile(r"(?: • )?calculating cost(?:\.\.\.)?$")
 
 
-def format_slack_run_usage(usage: RunUsageSummary | None) -> str:
+def format_slack_run_usage(
+    usage: RunUsageSummary | None, *, show_model_identity: bool = True
+) -> str:
     if usage is None:
         return ""
-    labels = sorted({label for model in usage.models if (label := _safe_model_label(model))})
-    model_text = " + ".join(labels[:3])
-    if len(labels) > 3:
-        model_text = f"{model_text} +{len(labels) - 3}"
-    parts = [model_text] if model_text else []
+    if show_model_identity:
+        labels = sorted({label for model in usage.models if (label := _safe_model_label(model))})
+        model_text = " + ".join(labels[:3])
+        if len(labels) > 3:
+            model_text = f"{model_text} +{len(labels) - 3}"
+        parts = [model_text] if model_text else []
+    else:
+        parts = []
     if usage.session_cost_usd is not None:
         parts.append(format_slack_session_cost(usage.session_cost_usd))
     return " • ".join(parts)
@@ -505,6 +510,15 @@ _SESSION_COST_LABEL_RE = re.compile(
     r"(?: • )?(?:<\$0\.01|\$[0-9]+(?:\.[0-9]+)?|calculating cost(?:\.\.\.)?)(?: session cost)?$"
 )
 _MAIN_AGENT_TOKEN_LABEL_RE = re.compile(r"(?: • )?[0-9]+(?:\.[0-9]+)?[KM]? main-agent tokens$")
+_MODEL_LABEL = r"[A-Za-z0-9._:/+-]+"
+_FOOTER_MODEL_LIST_RE = re.compile(
+    rf"({re.escape(SLACK_WEB_LINK_FOOTER_LABEL)}>) • {_MODEL_LABEL}"
+    rf"(?: \+ {_MODEL_LABEL})*(?: \+\d+)?"
+)
+
+
+def _strip_slack_model_labels(text: str) -> str:
+    return _FOOTER_MODEL_LIST_RE.sub(lambda match: match.group(1), text)
 
 
 def format_slack_session_cost(cost: float) -> str:
@@ -529,8 +543,12 @@ def with_slack_session_cost(
     text: str,
     blocks: list[dict[str, Any]] | None,
     cost: float,
+    *,
+    show_model_identity: bool = True,
 ) -> tuple[str, list[dict[str, Any]] | None]:
     """Replace the cumulative cost in a live Slack footer without changing its blocks."""
+    if not show_model_identity:
+        text = _strip_slack_model_labels(text)
     updated_text = _replace_slack_session_cost(text, cost, require_web_link=True)
     if blocks is None:
         return updated_text, None
@@ -563,9 +581,10 @@ def with_slack_session_cost(
 
     target = next(iter(candidates or fallback_candidates), None)
     if target is not None:
-        target["text"] = _replace_slack_session_cost(
-            str(target.get("text") or ""), cost, require_web_link=False
-        )
+        target_text = str(target.get("text") or "")
+        if not show_model_identity:
+            target_text = _strip_slack_model_labels(target_text)
+        target["text"] = _replace_slack_session_cost(target_text, cost, require_web_link=False)
     elif (
         updated_text != text
         and updated_blocks
@@ -642,12 +661,14 @@ def with_slack_pending_session_cost(
 def format_slack_web_link_footer(
     dashboard_url: str | None,
     usage: RunUsageSummary | None = None,
+    *,
+    show_model_identity: bool = True,
 ) -> str:
     """Format the compact Slack footer links."""
     if not dashboard_url:
         return ""
     links = [f"<{dashboard_url}|{SLACK_WEB_LINK_FOOTER_LABEL}>"]
-    usage_text = format_slack_run_usage(usage)
+    usage_text = format_slack_run_usage(usage, show_model_identity=show_model_identity)
     if usage_text:
         links.append(usage_text)
     return " • ".join(links)
@@ -657,9 +678,13 @@ def append_slack_web_link_footer(
     text: str,
     dashboard_url: str | None,
     usage: RunUsageSummary | None = None,
+    *,
+    show_model_identity: bool = True,
 ) -> str:
     """Append the compact Slack footer links to fallback text."""
-    footer = format_slack_web_link_footer(dashboard_url, usage)
+    footer = format_slack_web_link_footer(
+        dashboard_url, usage, show_model_identity=show_model_identity
+    )
     if not footer or footer in text:
         return text
     stripped = text.rstrip()
@@ -671,8 +696,12 @@ def append_slack_web_link_footer(
 def _slack_web_link_context_block(
     dashboard_url: str | None,
     usage: RunUsageSummary | None = None,
+    *,
+    show_model_identity: bool = True,
 ) -> dict[str, Any] | None:
-    footer = format_slack_web_link_footer(dashboard_url, usage)
+    footer = format_slack_web_link_footer(
+        dashboard_url, usage, show_model_identity=show_model_identity
+    )
     if not footer:
         return None
     return {"type": "context", "elements": [{"type": "mrkdwn", "text": footer}]}
@@ -695,8 +724,12 @@ def _with_slack_web_link_context_block(
     blocks: list[dict[str, Any]] | None,
     dashboard_url: str | None,
     usage: RunUsageSummary | None = None,
+    *,
+    show_model_identity: bool = True,
 ) -> list[dict[str, Any]] | None:
-    context_block = _slack_web_link_context_block(dashboard_url, usage)
+    context_block = _slack_web_link_context_block(
+        dashboard_url, usage, show_model_identity=show_model_identity
+    )
     if context_block is None:
         return blocks
     if not blocks:
@@ -710,7 +743,7 @@ def _with_slack_web_link_context_block(
     if dashboard_url and any(
         _block_contains_text(block, dashboard_url) for block in updated_blocks
     ):
-        usage_text = format_slack_run_usage(usage)
+        usage_text = format_slack_run_usage(usage, show_model_identity=show_model_identity)
         if not usage_text or any(
             _block_contains_text(block, usage_text) for block in updated_blocks
         ):
@@ -732,6 +765,7 @@ async def post_slack_thread_reply_with_ts(
     usage: RunUsageSummary | None = None,
     agent_thread_id: str | None = None,
     reply_broadcast: bool = False,
+    show_model_identity: bool = True,
 ) -> tuple[str | None, str | None]:
     """Post a reply in a Slack thread and return its Slack timestamp and error."""
     from agent.slack.code_channels import is_code_channel_session
@@ -739,8 +773,12 @@ async def post_slack_thread_reply_with_ts(
     if is_code_channel_session(thread_ts):
         agent_thread_id = None
     dashboard_url = _slack_thread_dashboard_url(channel_id, thread_ts, agent_thread_id)
-    blocks = _with_slack_web_link_context_block(text, blocks, dashboard_url, usage)
-    text = append_slack_web_link_footer(text, dashboard_url, usage)
+    blocks = _with_slack_web_link_context_block(
+        text, blocks, dashboard_url, usage, show_model_identity=show_model_identity
+    )
+    text = append_slack_web_link_footer(
+        text, dashboard_url, usage, show_model_identity=show_model_identity
+    )
     return await _post_slack_message_with_ts(
         channel_id,
         text,
@@ -760,14 +798,19 @@ async def post_slack_ephemeral_reply(
     blocks: list[dict[str, Any]] | None = None,
     usage: RunUsageSummary | None = None,
     agent_thread_id: str | None = None,
+    show_model_identity: bool = True,
 ) -> bool:
     """Answer one person in a channel, carrying the same web link a thread reply would."""
     dashboard_url = dashboard_thread_url(agent_thread_id) if agent_thread_id else None
-    blocks = _with_slack_web_link_context_block(text, blocks, dashboard_url, usage)
+    blocks = _with_slack_web_link_context_block(
+        text, blocks, dashboard_url, usage, show_model_identity=show_model_identity
+    )
     return await post_slack_ephemeral_message(
         channel_id,
         user_id,
-        append_slack_web_link_footer(text, dashboard_url, usage),
+        append_slack_web_link_footer(
+            text, dashboard_url, usage, show_model_identity=show_model_identity
+        ),
         blocks=blocks,
     )
 
