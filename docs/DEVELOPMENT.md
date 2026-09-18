@@ -188,15 +188,13 @@ The dev server then attaches that session to everything it proxies, and presents
 
 ## Test a PR in preview (LangChain maintainers)
 
-The shared [preview environment](https://dev.open-swe.langchain.dev/agents) combines `main`, `preview-manual`, and open PRs labeled `preview` whose branch lives in this repository (anyone with write access; a fork's code stays out); it is not an isolated deployment per PR. (Note: staging follows `main` and is for post-merge testing.)
+The shared [preview environment](https://open-swe-preview-cc53e8fbe667565d843d0843f84ee92c.us.langgraph.app/agents) is one LangSmith deployment that builds the backend and the bundled dashboard from the `preview` branch, which combines `main`, `preview-manual`, and open PRs labeled `preview` whose branch lives in this repository (anyone with write access; a fork's code stays out). It is not an isolated deployment per PR. (Note: staging follows `main` and is for post-merge testing.)
 
-1. Add the **`preview`** label to your PR.
-2. Run [Deploy open-swe preview](https://github.com/langchain-ai/langchainplus/actions/workflows/deploy_open_swe_preview.yaml) on `main` with **force** unchecked, or wait for a scheduled run at :04, :19, :34, or :49 each hour. Labeling alone does not deploy.
-3. In the run summary, confirm your PR and head commit appear under **Preview tree → Merged**, not **Skipped**. A successful run may still omit a PR. Each merged PR gets one comment with the preview link; the run edits it when the backend revision is live (or failed), and again if a later push drops the PR from the preview.
-4. Wait for the dashboard rollout, which follows the langchainplus workflow above rather than the comment.
-5. Open [preview](https://dev.open-swe.langchain.dev/agents) and test with non-production tasks and repositories. For local UI iteration against that backend, see [Dashboard against a deployed backend](#dashboard-against-a-deployed-backend).
+1. Add the **`preview`** label to your PR. That triggers a [Build preview branch](https://github.com/langchain-ai/open-swe/actions/workflows/build_preview_branch.yml) run; pushes to `main` and a schedule at :04, :19, :34, and :49 rebuild it as well.
+2. In the run summary, confirm your PR and head commit appear under **Preview tree → Merged**, not **Skipped**. A successful run may still omit a PR. Each merged PR gets one comment with the preview link; the run edits it when the deployment revision is live (or failed), and again if a later push drops the PR from the preview.
+3. Wait for the revision (about ten minutes), then open the preview and test with non-production tasks and repositories. For local UI iteration against that backend, see [Dashboard against a deployed backend](#dashboard-against-a-deployed-backend).
 
-Conflicting PRs are skipped, unlabeled, and receive resolution instructions for the shared `preview-manual` branch. Resolve the conflict before reapplying the label. Use **force** only to rebuild an unchanged preview tree.
+Conflicting PRs are skipped, unlabeled, and receive resolution instructions for the shared `preview-manual` branch. Resolve the conflict before reapplying the label. A push to a labeled PR removes the label so a maintainer re-approves the new head by reapplying it. Use **force** (a manual run of the workflow) only to rebuild an unchanged preview tree.
 
 To remove a PR, remove its label and trigger or await another run; the current deployment remains until its replacement deploys, and changes in `main` or `preview-manual` remain. Every seven days, a scheduled run between 07:00 and 07:59 `America/New_York` resets preview to `main`, removes labels, and deletes `preview-manual`.
 

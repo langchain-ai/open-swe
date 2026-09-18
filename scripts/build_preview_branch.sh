@@ -9,8 +9,6 @@ PREVIEW_RESET_DAYS="${PREVIEW_RESET_DAYS:-7}"
 PREVIEW_RESET_HOUR="${PREVIEW_RESET_HOUR:-7}"
 PREVIEW_RESET_ZONE="${PREVIEW_RESET_ZONE:-America/New_York}"
 PREVIEW_URL="${PREVIEW_URL:-https://open-swe-preview-cc53e8fbe667565d843d0843f84ee92c.us.langgraph.app/agents}"
-PREVIEW_DASHBOARD_URL="${PREVIEW_DASHBOARD_URL:-https://dev.open-swe.langchain.dev/agents}"
-PREVIEW_DASHBOARD_WORKFLOW_URL="${PREVIEW_DASHBOARD_WORKFLOW_URL:-https://github.com/langchain-ai/langchainplus/actions/workflows/deploy_open_swe_preview.yaml}"
 # The LangSmith deployment that builds on every push to the preview branch.
 PREVIEW_DEPLOYMENT_ID="${PREVIEW_DEPLOYMENT_ID:-c6ef2b27-439d-4926-9dd4-22d3af7cbdd4}"
 PREVIEW_CONTROL_PLANE_URL="${PREVIEW_CONTROL_PLANE_URL:-https://api.host.langchain.com}"
@@ -140,9 +138,8 @@ ${PREVIEW_COMMENT_MARKER}
 
 This PR's \`$(short_sha "$pr_sha")\` is part of the preview tree published as \`${PREVIEW_BRANCH}\` @ \`$(short_sha "$preview_sha")\` (\`main\` @ \`$(short_sha "$base_sha")\`).
 
-- Preview: <${PREVIEW_DASHBOARD_URL}>
-- Backend: ${backend}
-- Dashboard: rolls out on the next [Deploy open-swe preview](${PREVIEW_DASHBOARD_WORKFLOW_URL}) run (:04, :19, :34, :49), reachable on the LangChain network only.
+- Preview: <${PREVIEW_URL}>
+- Deployment: ${backend}
 
 A push to this PR takes it out of the preview until the \`${PREVIEW_LABEL}\` label is re-applied.
 EOF
@@ -165,7 +162,7 @@ announce_publication() {
   shift 2
   for entry in "$@"; do
     upsert_comment "${entry%%:*}" "$(preview_comment "${entry#*:}" "$preview_sha" "$base_sha" \
-      "⏳ revision building — this comment updates when it is live.")" || true
+      "⏳ revision building (backend and bundled dashboard) — this comment updates when it is live.")" || true
   done
 }
 
@@ -386,8 +383,9 @@ reset() {
   done < <(git ls-remote origin 'refs/preview-reset/*')
 }
 
-# Follow the LangSmith revision built from the published tree until it is live
-# (or fails), then finish the status line in every included PR's comment.
+# Follow the LangSmith revision built from the published tree (backend plus the
+# bundled dashboard) until it is live or fails, then finish the status line in
+# every included PR's comment.
 wait_for_backend() {
   local sha="${PREVIEW_SHA:?PREVIEW_SHA is required}" base_sha="${BASE_SHA:-}" entry status message revision code body
   local deadline=$(( $(date +%s) + PREVIEW_DEPLOY_TIMEOUT_MINUTES * 60 )) backend=
@@ -426,7 +424,7 @@ wait_for_backend() {
     fi
     sleep "$PREVIEW_DEPLOY_POLL_SECONDS"
   done
-  summary "Backend for \`$(short_sha "$sha")\`: ${backend}"
+  summary "Deployment for \`$(short_sha "$sha")\`: ${backend}"
   for entry in ${prs[@]+"${prs[@]}"}; do
     upsert_comment "${entry%%:*}" "$(preview_comment "${entry#*:}" "$sha" "$base_sha" "$backend")" || true
   done
