@@ -1159,8 +1159,9 @@ async def invite_to_slack_channel(
     )
 
 
-async def respond_to_slack_interaction(response_url: str, payload: dict[str, Any]) -> bool:
-    """Update or delete an interaction's source message, including ephemeral messages."""
+async def _post_slack_callback(
+    response_url: str, payload: dict[str, Any], path_prefix: str
+) -> bool:
     try:
         parsed = urlparse(response_url)
     except ValueError:
@@ -1168,7 +1169,7 @@ async def respond_to_slack_interaction(response_url: str, payload: dict[str, Any
     if (
         parsed.scheme != "https"
         or parsed.netloc not in {"hooks.slack.com", "hooks.slack-gov.com"}
-        or not parsed.path.startswith("/actions/")
+        or not parsed.path.startswith(path_prefix)
     ):
         return False
     request = httpx2.Request(
@@ -1194,6 +1195,51 @@ async def respond_to_slack_interaction(response_url: str, payload: dict[str, Any
     except httpx2.HTTPError, ValueError:
         logger.warning("Slack interaction response failed")
         return False
+
+
+async def respond_to_slack_interaction(response_url: str, payload: dict[str, Any]) -> bool:
+    """Update or delete an interaction's source message, including ephemeral messages."""
+    return await _post_slack_callback(response_url, payload, "/actions/")
+
+
+async def acknowledge_slack_command(response_url: str, text: str) -> bool:
+    """Post a slash command's acknowledgement so a later reply can replace it.
+
+    `replace_original` only reaches a message sent through `response_url`, never
+    the body of the command's own HTTP response, so the acknowledgement has to
+    come from here for the answer to take its place.
+    """
+    return await _post_slack_callback(
+        response_url,
+        {"response_type": "ephemeral", "text": text},
+        "/commands/",
+    )
+
+
+async def replace_slack_command_message(
+    response_url: str,
+    text: str,
+    *,
+    blocks: list[dict[str, Any]] | None = None,
+    usage: RunUsageSummary | None = None,
+    agent_thread_id: str | None = None,
+) -> bool:
+    """Overwrite a slash command's acknowledgement with the reply it stood in for."""
+    dashboard_url = dashboard_thread_url(agent_thread_id) if agent_thread_id else None
+    payload: dict[str, Any] = {
+        "response_type": "ephemeral",
+        "replace_original": True,
+        "text": append_slack_web_link_footer(text, dashboard_url, usage),
+    }
+    updated_blocks = _with_slack_web_link_context_block(text, blocks, dashboard_url, usage)
+    if updated_blocks:
+        payload["blocks"] = updated_blocks
+    return await _post_slack_callback(response_url, payload, "/commands/")
+
+
+async def clear_slack_command_message(response_url: str) -> bool:
+    """Remove a slash command's acknowledgement when something else answers instead."""
+    return await _post_slack_callback(response_url, {"delete_original": True}, "/commands/")
 
 
 async def open_slack_modal(trigger_id: str, view: dict[str, Any]) -> bool:

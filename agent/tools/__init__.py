@@ -54,8 +54,8 @@ _TOOL_MODULES = {
     "slack_move_thread": "agent.slack.tools.move_thread",
     "slack_read_channel_messages": "agent.slack.tools.read_channel_messages",
     "slack_read_thread_messages": "agent.slack.tools.read_thread_messages",
+    "slack_reply": "agent.slack.tools.reply",
     "slack_start_new_thread": "agent.slack.tools.start_new_thread",
-    "slack_thread_reply": "agent.slack.tools.thread_reply",
     "submit_thread_feedback": ".submit_thread_feedback",
     "trigger_automation": ".automations",
     "update_automation": ".automations",
@@ -115,8 +115,8 @@ __all__ = [
     "slack_move_thread",
     "slack_read_channel_messages",
     "slack_read_thread_messages",
+    "slack_reply",
     "slack_start_new_thread",
-    "slack_thread_reply",
     "submit_thread_feedback",
     "trigger_automation",
     "update_automation",
@@ -134,9 +134,9 @@ if TYPE_CHECKING:
     from agent.slack.tools.move_thread import slack_move_thread
     from agent.slack.tools.read_channel_messages import slack_read_channel_messages
     from agent.slack.tools.read_thread_messages import slack_read_thread_messages
+    from agent.slack.tools.reply import slack_reply
     from agent.slack.tools.request_pr_review import request_pr_review
     from agent.slack.tools.start_new_thread import slack_start_new_thread
-    from agent.slack.tools.thread_reply import slack_thread_reply
     from agent.tools.add_finding import add_finding
     from agent.tools.approve_plan import approve_plan
     from agent.tools.automations import (

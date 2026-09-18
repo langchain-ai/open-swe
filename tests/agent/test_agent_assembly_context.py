@@ -648,7 +648,7 @@ async def test_dashboard_agent_excludes_slack_tools() -> None:
             "slack_move_thread",
             "slack_read_thread_messages",
             "slack_start_new_thread",
-            "slack_thread_reply",
+            "slack_reply",
         }
     )
 
@@ -677,7 +677,7 @@ async def test_slack_source_context_includes_slack_tools(source: str) -> None:
         "slack_move_thread",
         "slack_read_thread_messages",
         "slack_start_new_thread",
-        "slack_thread_reply",
+        "slack_reply",
     } <= tool_names
 
 
@@ -720,7 +720,7 @@ async def test_stop_summary_agent_is_read_only_and_slack_only() -> None:
     assert isinstance(middleware, list)
 
     tool_names = {getattr(tool, "name", None) or getattr(tool, "__name__", None) for tool in tools}
-    assert tool_names == {"slack_read_thread_messages", "slack_thread_reply"}
+    assert tool_names == {"slack_read_thread_messages", "slack_reply"}
     middleware_names = {type(item).__name__ for item in middleware}
     assert "ExcludeToolsMiddleware" in middleware_names
     assert "check_message_queue_before_model" not in middleware_names
@@ -775,7 +775,7 @@ async def test_general_purpose_subagent_cannot_use_slack_tools() -> None:
         "slack_move_thread",
         "slack_read_thread_messages",
         "slack_start_new_thread",
-        "slack_thread_reply",
+        "slack_reply",
     }
 
     parent_only_names = {
