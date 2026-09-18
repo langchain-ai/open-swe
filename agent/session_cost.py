@@ -6,6 +6,7 @@ from typing import Any, Literal, NotRequired, TypedDict
 
 from langgraph_sdk.client import LangGraphClient
 
+from agent.dashboard.workspace_settings import model_identity_visible
 from agent.invocation import resolve_invocation_id
 from agent.slack.client import (
     fetch_slack_thread_message_by_ts,
@@ -33,11 +34,32 @@ class SessionCostRefresh(TypedDict):
     channel_id: str
     thread_ts: str
     attempt: int
+    workspace: NotRequired[str]
 
 
 def _value(state: Mapping[str, Any], key: str) -> str | None:
     value = state.get(key)
     return value if isinstance(value, str) and value else None
+
+
+async def _model_identity_visible(payload: SessionCostRefresh, client: LangGraphClient) -> bool:
+    """The owning workspace's model-identity toggle; a failed lookup hides rather than expose."""
+    workspace = payload.get("workspace")
+    if workspace is None:
+        try:
+            thread = await client.threads.get(payload["agent_thread_id"])
+        except Exception:
+            logger.warning(
+                "Could not load the owning workspace for model identity; hiding it",
+                extra={"run_id": payload["run_id"]},
+                exc_info=True,
+            )
+            return False
+        metadata = thread.get("metadata") if isinstance(thread, dict) else None
+        if isinstance(metadata, dict):
+            value = metadata.get("workspace") or metadata.get("environment")
+            workspace = value if isinstance(value, str) else None
+    return await model_identity_visible(workspace)
 
 
 def _payload(state: Mapping[str, Any], attempt: int) -> SessionCostRefresh | None:
@@ -62,6 +84,8 @@ def _payload(state: Mapping[str, Any], attempt: int) -> SessionCostRefresh | Non
     }
     if started_at := _value(state, "invocation_started_at"):
         payload["invocation_started_at"] = started_at
+    if workspace := _value(state, "workspace"):
+        payload["workspace"] = workspace
     return payload
 
 
@@ -195,7 +219,10 @@ async def _refresh_once(
     if not isinstance(text, str) or (blocks is not None and not isinstance(blocks, list)):
         return "unavailable", "invalid Slack message"
 
-    updated_text, updated_blocks = with_slack_session_cost(text, blocks, snapshot.total_cost)
+    show_model_identity = await _model_identity_visible(payload, client)
+    updated_text, updated_blocks = with_slack_session_cost(
+        text, blocks, snapshot.total_cost, show_model_identity=show_model_identity
+    )
     cost_label = format_slack_session_cost(snapshot.total_cost)
     if cost_label not in updated_text or not _blocks_contain(updated_blocks, cost_label):
         return "unavailable", "Slack usage footer unavailable"

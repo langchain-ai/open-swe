@@ -46,6 +46,7 @@ _TOOL_MODULES = {
     "save_plan": ".save_plan",
     "save_user_instructions": ".save_user_instructions",
     "save_user_skill": ".user_skills",
+    "set_model_identity_visibility": ".workspace_settings",
     "delete_user_skill": ".user_skills",
     "schedule_thread_wakeup": ".schedule_thread_wakeup",
     "search_repo_code": "agent.github.tools.search_repo_code",
@@ -108,6 +109,7 @@ __all__ = [
     "save_user_instructions",
     "save_user_skill",
     "delete_user_skill",
+    "set_model_identity_visibility",
     "schedule_thread_wakeup",
     "search_repo_code",
     "slack_add_reaction",
@@ -177,6 +179,7 @@ if TYPE_CHECKING:
     from agent.tools.update_finding import update_finding
     from agent.tools.user_skills import delete_user_skill, save_user_skill
     from agent.tools.web_search import web_search
+    from agent.tools.workspace_settings import set_model_identity_visibility
     from agent.tools.workspaces import (
         delete_workspace,
         list_workspaces,

@@ -1,11 +1,16 @@
 import asyncio
+from contextlib import asynccontextmanager
 from typing import Any, cast
 from unittest.mock import AsyncMock
 from xml.etree import ElementTree
 
 import pytest
 
-from agent.dashboard.workspace_settings import WorkspaceSettings
+from agent.dashboard.workspace_settings import (
+    WorkspaceSettings,
+    WorkspaceSettingsUpdate,
+    upsert_workspace_overrides,
+)
 from agent.run_config import Repo
 from agent.slack import client as slack_utils
 from agent.slack import webhook as slack_webhooks
@@ -21,6 +26,7 @@ from agent.slack.client import (
 )
 from agent.slack.payloads import SlackChannelContext, SlackChannelPayload
 from agent.slack.request import SlackRequest
+from agent.slack.tools import thread_reply as slack_thread_reply
 from agent.source_context import SourceContext
 from agent.utils.run_usage import RunUsageSummary
 from agent.webhooks import common as webhook_common
@@ -731,6 +737,80 @@ def test_format_slack_run_usage_shortens_model_paths() -> None:
     footer = slack_utils.format_slack_run_usage(usage)
 
     assert footer == "glm-5p3-flash + openai:gpt-5.6-sol"
+
+
+def test_format_slack_run_usage_hides_models_but_keeps_cost() -> None:
+    usage = RunUsageSummary(
+        models=("model-a", "model-b"), total_tokens=12_345, session_cost_usd=0.42
+    )
+
+    hidden = slack_utils.format_slack_run_usage(usage, show_model_identity=False)
+
+    assert hidden == "$0.42"
+    assert "model-a" not in hidden
+    no_cost = RunUsageSummary(models=("model-a",), total_tokens=12_345)
+    assert slack_utils.format_slack_run_usage(no_cost, show_model_identity=False) == ""
+
+
+def test_hidden_identity_slack_footer_omits_models_from_text_and_blocks() -> None:
+    usage = RunUsageSummary(models=("model-a",), total_tokens=123, session_cost_usd=0.42)
+    url = "https://app.example/agents/t1"
+
+    footer = slack_utils.format_slack_web_link_footer(url, usage, show_model_identity=False)
+    text = slack_utils.append_slack_web_link_footer("Done", url, usage, show_model_identity=False)
+
+    assert footer == "<https://app.example/agents/t1|Open in Web> • $0.42"
+    assert text == f"Done {footer}"
+    assert "model-a" not in text
+
+    blocks = slack_utils._with_slack_web_link_context_block(
+        "Done", None, url, usage, show_model_identity=False
+    )
+    assert blocks is not None
+    assert "model-a" not in str(blocks)
+    assert "$0.42" in str(blocks)
+
+
+def test_slack_thread_reply_hides_identity_in_a_hidden_workspace(
+    fake_store: FakeStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async def scenario() -> dict:
+        await upsert_workspace_overrides("oss", WorkspaceSettingsUpdate(show_model_identity=False))
+        posted: dict = {}
+
+        @asynccontextmanager
+        async def no_lock(*args: Any, **kwargs: Any):
+            yield None
+
+        monkeypatch.setattr(slack_thread_reply, "slack_thread_mutation_lock", no_lock)
+        monkeypatch.setattr(slack_thread_reply, "get_langgraph_client", lambda: object())
+        monkeypatch.setattr(
+            slack_thread_reply, "get_config", lambda: {"configurable": {"workspace": "oss"}}
+        )
+        monkeypatch.setattr(
+            slack_thread_reply,
+            "get_active_slack_thread",
+            AsyncMock(return_value={"channel_id": "C1", "thread_ts": "111.222"}),
+        )
+
+        async def fake_post(
+            channel_id: str,
+            thread_ts: str,
+            text: str,
+            **kwargs: Any,
+        ) -> tuple[str, None]:
+            posted.update(kwargs)
+            return "333.444", None
+
+        monkeypatch.setattr(slack_thread_reply, "post_slack_thread_reply_with_ts", fake_post)
+        monkeypatch.setattr(slack_thread_reply, "restore_slack_thinking_status", AsyncMock())
+
+        result = await slack_thread_reply.slack_thread_reply("Done", state=None)
+        assert result == {"success": True}
+        return posted
+
+    posted = asyncio.run(scenario())
+    assert posted["show_model_identity"] is False
 
 
 def test_with_slack_session_cost_preserves_blocks_and_is_idempotent() -> None:

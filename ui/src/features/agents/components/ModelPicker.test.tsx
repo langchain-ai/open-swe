@@ -122,6 +122,38 @@ describe("ModelPicker", () => {
     expect(screen.getByRole("button", { name: "Auto" })).toBeTruthy()
   })
 
+  it("hides the routed model tooltip when identity is concealed", () => {
+    render(
+      <ModelPicker
+        models={MODELS}
+        selection={null}
+        onSelectionChange={vi.fn()}
+        routed={{ route: "fast", modelId: "google_genai:gemini-3.8-flash" }}
+        concealAutoModel
+      />
+    )
+
+    const trigger = screen.getByRole("button", { name: "Auto" })
+    expect(trigger.title).toBe("")
+    expect(screen.queryByRole("button", { name: "Auto Fast" })).toBeNull()
+  })
+
+  it("keeps a manual selection fully visible when identity is concealed", () => {
+    render(
+      <ModelPicker
+        models={MODELS}
+        selection={{ modelId: "openai:gpt-5.6-sol", effort: "xhigh" }}
+        onSelectionChange={vi.fn()}
+        routed={{ route: "fast", modelId: "google_genai:gemini-3.8-flash" }}
+        concealAutoModel
+      />
+    )
+
+    expect(
+      screen.getByRole("button", { name: /GPT-5.6 Sol Extra High/ })
+    ).toBeTruthy()
+  })
+
   it("shows the selected model's context, reasoning and model row", () => {
     const { panel } = openPicker()
 

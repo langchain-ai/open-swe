@@ -185,6 +185,7 @@ export function AgentsHome({
     instanceDefault: defaultWorkspaceSlug,
     workspaces,
   })
+  const identityVisible = useModelIdentity({ workspace: selectedWorkspace })
   // Then the repository, limited to what that workspace may work in.
   const accessibleRepos = reposQuery.data?.repositories
   // Memoized: a fresh array fed straight into the pick below reads as a
@@ -620,6 +621,7 @@ export function AgentsHome({
             onLocalWorkspaceModeChange={selectLocalWorkspaceMode}
             planMode={planMode}
             onPlanModeChange={runTarget === "cloud" ? setPlanMode : undefined}
+            concealAutoModel={!identityVisible}
             workspaceOptions={workspaces}
             selectedWorkspace={selectedWorkspace}
             onWorkspaceChange={

@@ -63,7 +63,11 @@ from agent.dashboard.options import (
     gate_fable_model,
     model_supports_effort,
 )
-from agent.dashboard.workspace_settings import WorkspaceSettings, get_workspace_settings
+from agent.dashboard.workspace_settings import (
+    WorkspaceSettings,
+    get_workspace_settings,
+    model_identity_visible,
+)
 from agent.dashboard.workspace_settings_cache import cached_workspace_settings
 from agent.desktop import create_desktop_backend, desktop_artifact_routes, is_desktop_run
 from agent.desktop_branch import schedule_worktree_branch_rename
@@ -182,6 +186,7 @@ from agent.tools import (
     save_user_instructions,
     save_user_skill,
     schedule_thread_wakeup,
+    set_model_identity_visibility,
     slack_add_reaction,
     slack_attach_html,
     slack_move_thread,
@@ -517,6 +522,7 @@ ADMIN_TOOLS = (
     delete_workspace,
     save_organization_skill,
     delete_organization_skill,
+    set_model_identity_visibility,
 )
 
 
@@ -822,13 +828,17 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
                     cast(ModelSelectionState, state), plan_mode=self._plan_mode
                 )
                 attribution_model_id, attribution_effort = self._routing_defaults[attribution_route]
+            if await model_identity_visible(workspace_slug(cfg)):
+                prompt_model_id, prompt_effort = attribution_model_id, attribution_effort
+            else:
+                prompt_model_id, prompt_effort = None, None
             sender_context = construct_sender_context(
                 triggering_user_identity,
                 user_custom_instructions=sender_instructions,
                 draft_prs=self._draft_prs,
                 thread_url=dashboard_thread_url(self._thread_id),
-                model_id=attribution_model_id,
-                reasoning_effort=attribution_effort,
+                model_id=prompt_model_id,
+                reasoning_effort=prompt_effort,
                 workspace_admin=await _workspace_admin(self._config or {}, self._profile_login),
                 participant_identities=participant_identities,
             )

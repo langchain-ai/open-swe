@@ -30,6 +30,7 @@ from agent.dashboard.options import (
 )
 from agent.run_config import RunConfig
 from agent.store import delete_value, get_value, now_iso, put_value
+from agent.threads.access import authorized_thread_metadata
 from agent.utils.gateway import gateway_overrides, resolve_gateway_enabled
 from agent.workspaces.store import DEFAULT_WORKSPACE_SLUG, WORKSPACES, slugify
 
@@ -63,6 +64,7 @@ class WorkspaceSettingsUpdate(BaseModel):
     review_draft_prs: bool | None = None
     pr_summaries: bool | None = None
     review_trace_links: bool | None = None
+    show_model_identity: bool | None = None
     # Tri-state LLM Gateway toggle: True/False is authoritative. None on the
     # instance inherits the LANGSMITH_GATEWAY_ENABLED deployment default; None on
     # a workspace inherits the instance.
@@ -322,6 +324,7 @@ def _default_settings() -> dict[str, Any]:
         "review_draft_prs": False,
         "pr_summaries": True,
         "review_trace_links": True,
+        "show_model_identity": True,
         "model_routing_enabled": None,
         "gateway_enabled": None,
         "fable_enabled": False,
@@ -432,6 +435,19 @@ async def get_instance_settings() -> WorkspaceSettings:
         logger.warning("instance settings lookup failed; using defaults", exc_info=True)
         return WorkspaceSettings(defaults)
     return _finish({**defaults, **instance})
+
+
+async def model_identity_visible(workspace: str | None = None) -> bool:
+    """Whether model identity shows in ``workspace``; a failed lookup hides rather than expose."""
+    try:
+        slug = resolve_settings_workspace(workspace)
+        instance = await _instance_record()
+        overrides = await _workspace_record(slug)
+    except Exception:
+        logger.warning("model identity lookup failed; hiding it", exc_info=True)
+        return False
+    value = {**instance, **overrides}.get("show_model_identity")
+    return value if isinstance(value, bool) else True
 
 
 async def get_workspace_settings(workspace: str | None = None) -> WorkspaceSettings:
@@ -675,6 +691,12 @@ class WorkspaceSettings(Mapping[str, Any]):
         return bool(self.get("review_trace_links", True))
 
     @property
+    def show_model_identity(self) -> bool:
+        """Whether the dashboard may name the resolved auto model. On unless hidden."""
+        value = self.get("show_model_identity")
+        return value if isinstance(value, bool) else True
+
+    @property
     def model_routing_enabled(self) -> bool:
         value = self.get("model_routing_enabled")
         return value if isinstance(value, bool) else False
@@ -725,6 +747,45 @@ async def _existing_workspace(raw: str) -> str:
     if await WORKSPACES.get(slug) is None:
         raise HTTPException(404, "workspace not found")
     return slug
+
+
+class ModelIdentityVisibility(TypedDict):
+    show_model_identity: bool
+    workspace: str
+
+
+class DashboardSession(TypedDict, total=False):
+    sub: str
+    email: str
+
+
+def _policy_workspace(explicit: str | None, thread_workspace: str | None) -> str:
+    if isinstance(thread_workspace, str) and thread_workspace.strip():
+        return thread_workspace
+    if isinstance(explicit, str) and explicit.strip():
+        return explicit
+    return DEFAULT_WORKSPACE_SLUG
+
+
+@router.get("/model-identity")
+async def api_get_model_identity(
+    workspace: str | None = None,
+    thread: str | None = None,
+    session: DashboardSession = SESSION_DEP,
+) -> ModelIdentityVisibility:
+    """Whether the caller may see model identity; a readable thread's workspace wins over ``workspace``."""
+    thread_workspace: str | None = None
+    if thread and thread.strip():
+        metadata = await authorized_thread_metadata(
+            thread.strip(), session["sub"], email=session.get("email")
+        )
+        value = metadata.get("workspace") or metadata.get("environment")
+        thread_workspace = value if isinstance(value, str) else None
+    slug = _normalized_workspace(_policy_workspace(workspace, thread_workspace))
+    return {
+        "show_model_identity": await model_identity_visible(slug),
+        "workspace": slug,
+    }
 
 
 @router.get("/settings")

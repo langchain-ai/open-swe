@@ -134,6 +134,8 @@ export interface ChatComposerProps {
   }
   /** Route/model the Auto router picked for the current run. */
   routed?: { route?: string; modelId?: string | null } | null
+  /** Hides the model behind the Auto pick; a manual selection stays visible. */
+  concealAutoModel?: boolean
 }
 
 function fileToImageChunk(file: File): Promise<ImageChunk | null> {
@@ -254,6 +256,7 @@ export const ChatComposer = memo(function ChatComposer({
   skills = [],
   contextUsage,
   routed,
+  concealAutoModel = false,
 }: ChatComposerProps) {
   const [value, setValue] = useState("")
   const [cursor, setCursor] = useState(0)
@@ -812,6 +815,7 @@ export const ChatComposer = memo(function ChatComposer({
                 open={modelPickerOpen}
                 requireImageSupport={pendingImages.length > 0}
                 routed={routed}
+                concealAutoModel={concealAutoModel}
                 selection={selection}
                 triggerClassName="h-7 max-w-full rounded-md px-2 text-xs/relaxed text-muted-foreground/70 hover:bg-muted hover:text-foreground/80"
               />

@@ -235,7 +235,10 @@ async def test_refresh_updates_exact_mapped_slack_message_in_place(
                 }
             return None
 
-    client: Any = SimpleNamespace(store=_Store())
+    client: Any = SimpleNamespace(
+        store=_Store(),
+        threads=SimpleNamespace(get=AsyncMock(return_value={"metadata": {}})),
+    )
     blocks = [
         {"type": "section", "text": {"type": "mrkdwn", "text": "Done"}},
         {"type": "actions", "elements": [{"type": "button", "action_id": "approve"}]},
@@ -264,6 +267,7 @@ async def test_refresh_updates_exact_mapped_slack_message_in_place(
             }
         ),
     )
+    monkeypatch.setattr(session_cost, "model_identity_visible", AsyncMock(return_value=True))
     update = AsyncMock(return_value=(True, None))
     monkeypatch.setattr(session_cost, "update_slack_message", update)
 
@@ -277,6 +281,63 @@ async def test_refresh_updates_exact_mapped_slack_message_in_place(
     assert args.args[2].endswith("model-a • $0.42")
     assert "main-agent tokens" not in args.args[2]
     assert args.kwargs["blocks"][1] == blocks[1]
+
+
+async def test_refresh_hides_retained_model_labels_when_identity_off(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class _Store:
+        async def get_item(self, namespace: Any, key: str) -> dict[str, Any] | None:
+            if key == "run:run-1":
+                return {"value": {"run_id": "run-1", "thread_ts": "1.0", "message_ts": "1.1"}}
+            return None
+
+    client: Any = SimpleNamespace(
+        store=_Store(),
+        threads=SimpleNamespace(get=AsyncMock(return_value={"metadata": {}})),
+    )
+    blocks = [
+        {"type": "section", "text": {"type": "mrkdwn", "text": "Done"}},
+        {
+            "type": "context",
+            "elements": [
+                {
+                    "type": "mrkdwn",
+                    "text": "<https://app/agents/t1|Open in Web> • model-a + model-b • calculating cost",
+                }
+            ],
+        },
+    ]
+    monkeypatch.setattr(
+        session_cost,
+        "get_langsmith_thread_cost",
+        AsyncMock(return_value=SimpleNamespace(total_cost=0.42)),
+    )
+    monkeypatch.setattr(
+        session_cost,
+        "fetch_slack_thread_message_by_ts",
+        AsyncMock(
+            return_value={
+                "text": "Done <https://app/agents/t1|Open in Web> • model-a + model-b • calculating cost",
+                "blocks": blocks,
+            }
+        ),
+    )
+    monkeypatch.setattr(session_cost, "model_identity_visible", AsyncMock(return_value=False))
+    update = AsyncMock(return_value=(True, None))
+    monkeypatch.setattr(session_cost, "update_slack_message", update)
+
+    status, reason = await session_cost._refresh_once(_state(0), client)
+
+    assert (status, reason) == ("updated", "Slack footer updated")
+    update.assert_awaited_once()
+    args = update.await_args
+    assert args is not None
+    assert args.args[2].endswith("Open in Web> • $0.42")
+    assert "model-a" not in args.args[2]
+    context_text = args.kwargs["blocks"][1]["elements"][0]["text"]
+    assert "model-a" not in context_text
+    assert context_text.endswith("$0.42")
 
 
 class _Runs:

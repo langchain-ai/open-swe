@@ -53,7 +53,7 @@ async def _authorized_thread(thread_id: str, login: str, *, email: str | None = 
     return thread
 
 
-async def _authorized_thread_metadata(
+async def authorized_thread_metadata(
     thread_id: str, login: str, *, email: str | None = None
 ) -> dict[str, Any]:
     thread = await _authorized_thread(thread_id, login, email=email)
