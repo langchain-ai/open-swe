@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react"
 
 import { SettingsRow, SettingsSection } from "@/components/AppShell"
+import { CopyDiagnosticsButton } from "@/components/CopyDiagnosticsButton"
+import { buildEnvironmentDiagnostics } from "@/lib/environment-diagnostics"
 import {
   describeApiBase,
   normalizeBuildInfo,
@@ -35,6 +37,9 @@ export function AboutSection({ user }: { user: SessionUser }) {
           API: {apiBase.origin ?? "same origin"} {apiBase.path}
         </p>
         <BuildIdentityDetails buildInfo={buildInfo} />
+        <CopyDiagnosticsButton
+          getDiagnostics={() => buildEnvironmentDiagnostics(user, version)}
+        />
       </div>
     </SettingsSection>
   )

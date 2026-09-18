@@ -732,11 +732,9 @@ it("announces a failed refresh while keeping the last good PR report", async () 
   expect(screen.getByText(/HTTP 503/)).toBeTruthy()
   // The retained report and its last successful fetch timestamp stay on screen.
   expect(screen.getByText(/No PRs have been recorded/)).toBeTruthy()
+  expect(screen.getByText(/last fetched by this browser:/)).toBeTruthy()
   expect(
-    screen.getByText(/PR report last fetched by this browser:/)
-  ).toBeTruthy()
-  expect(
-    screen.getByText(/PR report last fetched by this browser:/).textContent
+    screen.getByText(/last fetched by this browser:/).textContent
   ).toContain(new Date(FETCHED_AT).toLocaleString())
 
   query.mockResolvedValue(report(captured))
@@ -1391,5 +1389,130 @@ it("explains incomplete coverage on focus and removes the indicator when costs r
   await act(() => client.invalidateQueries({ queryKey: ["usageLeaderboard"] }))
   expect(await screen.findByText("$3.75")).toBeTruthy()
   expect(screen.queryByRole("button", { name: "Cost incomplete" })).toBeNull()
+  client.clear()
+})
+
+function stubClipboard(
+  writeText: (text: string) => Promise<void> = () => Promise.resolve()
+) {
+  const stub = vi.fn().mockImplementation(writeText)
+  Object.defineProperty(navigator, "clipboard", {
+    configurable: true,
+    value: { writeText: stub },
+  })
+  return stub
+}
+
+it("copies an allowlisted diagnostics snapshot to the clipboard", async () => {
+  const cohort = {
+    model_id: "example-model",
+    model_attribution_quality: "configured",
+    merged: 0,
+    closed_without_merge: 1,
+    mature_pending: 0,
+    waiting: 0,
+    cohort_size: 1,
+    decided_denominator: 1,
+    decided_merge_rate: 0,
+    mature_denominator: 1,
+    mature_cohort_merge_share: 0,
+    avg_merge_seconds: null,
+    efforts: [],
+  } as PRMergeRateCohort
+  vi.spyOn(api, "prMergeRateByModel").mockResolvedValue(
+    report({ ...captured, status: "ready", cohorts: [cohort] })
+  )
+  const writeText = stubClipboard()
+  const client = mountReport()
+  fireEvent.click(await screen.findByText("Details"))
+  const copy = screen.getByRole("button", { name: "Copy diagnostics" })
+  fireEvent.click(copy)
+  expect(
+    await screen.findByText("Diagnostics copied to clipboard.")
+  ).toBeTruthy()
+
+  expect(writeText).toHaveBeenCalledTimes(1)
+  const text = writeText.mock.calls[0]?.[0] as string
+  const copied = JSON.parse(text)
+  expect(copied.report).toBe("open-swe-analytics-diagnostics")
+  expect(copied.period).toBe("30d")
+  expect(copied.pr_report.fetched_at).toBe(FETCHED_AT)
+  expect(copied.pr_report.server_as_of).toBe(captured.as_of)
+  expect(copied.event_processing.status).toBe("pending")
+  expect(copied.event_processing.reporting_since).toBe(
+    captured.reporting_cutover_at
+  )
+  expect(copied.metrics.avg_delivery_seconds).toEqual({
+    state: "unsupported_by_backend",
+  })
+  // Nothing beyond the allowlisted display state leaves the page.
+  expect(text).not.toContain("unavailable_thread_ids")
+  expect(text).not.toContain("login")
+  expect(text).not.toContain("thread")
+  client.clear()
+})
+
+it("keeps retained-report metrics in the copied snapshot after a failed refresh", async () => {
+  const cohort = {
+    model_id: "example-model",
+    model_attribution_quality: "configured",
+    merged: 1,
+    closed_without_merge: 0,
+    mature_pending: 0,
+    waiting: 0,
+    cohort_size: 1,
+    decided_denominator: 1,
+    decided_merge_rate: 1,
+    mature_denominator: 1,
+    mature_cohort_merge_share: 1,
+    avg_merge_seconds: 3600,
+    avg_delivery_seconds: 7200,
+    efforts: [],
+  } as PRMergeRateCohort
+  const query = vi
+    .spyOn(api, "prMergeRateByModel")
+    .mockResolvedValue(
+      report({ ...captured, status: "ready", cohorts: [cohort] })
+    )
+  const writeText = stubClipboard()
+  const client = mountReport()
+  fireEvent.click(await screen.findByText("Details"))
+
+  // The refresh fails, but the report and its metrics stay on screen.
+  query.mockRejectedValue(new ApiError(503, "unavailable"))
+  fireEvent.click(screen.getByRole("button", { name: "Refresh now" }))
+  expect(await screen.findByText(/Last PR report refresh failed/)).toBeTruthy()
+
+  fireEvent.click(screen.getByRole("button", { name: "Copy diagnostics" }))
+  expect(
+    await screen.findByText("Diagnostics copied to clipboard.")
+  ).toBeTruthy()
+  const copied = JSON.parse(writeText.mock.calls[0]?.[0] as string)
+  expect(copied.pr_report.last_refresh_failed).toBe(true)
+  expect(copied.metrics.avg_delivery_seconds).toEqual({
+    state: "numeric",
+    value: 7200,
+  })
+  client.clear()
+})
+
+it("copies diagnostics from the keyboard and reports a denied clipboard", async () => {
+  vi.spyOn(api, "prMergeRateByModel").mockResolvedValue(report(captured))
+  const writeText = stubClipboard(() =>
+    Promise.reject(new DOMException("denied", "NotAllowedError"))
+  )
+  const client = mountReport()
+  fireEvent.click(await screen.findByText("Details"))
+  const copy = screen.getByRole("button", { name: "Copy diagnostics" })
+  act(() => copy.focus())
+  expect(document.activeElement).toBe(copy)
+  fireEvent.keyDown(copy, { key: "Enter" })
+  fireEvent.click(copy)
+  expect(
+    await screen.findByText(
+      "Clipboard unavailable. Check the browser's clipboard permission."
+    )
+  ).toBeTruthy()
+  expect(writeText).toHaveBeenCalled()
   client.clear()
 })
