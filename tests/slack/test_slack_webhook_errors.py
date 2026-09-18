@@ -86,6 +86,22 @@ async def test_slack_processing_error_marks_thread_and_replies_with_error_id(
 
 
 @pytest.mark.asyncio
+async def test_slack_message_update_does_not_claim_thinking_status(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    process = AsyncMock(return_value=False)
+    show_status = AsyncMock(return_value=True)
+    monkeypatch.setattr(slack_webhook, "_process_slack_mention_impl", process)
+    monkeypatch.setattr(slack_webhook, "restore_slack_thinking_status", show_status)
+
+    await slack_webhook.process_slack_mention(
+        _event_data().model_copy(update={"message_update": True}), None
+    )
+
+    show_status.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_slack_processing_error_replies_even_without_an_agent_thread(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

@@ -607,7 +607,9 @@ async def process_slack_mention(
         if request.dm_session
         else request.thread_ts
     )
-    show_status = bool(request.channel_id and status_ts and not request.code_channel)
+    show_status = bool(
+        request.channel_id and status_ts and not request.code_channel and not request.message_update
+    )
     if show_status:
         await restore_slack_thinking_status(request.channel_id, status_ts)
     try:
