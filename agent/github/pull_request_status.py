@@ -1,8 +1,10 @@
 """Live GitHub pull-request health for dashboard threads."""
 
 import asyncio
+import logging
 import re
 from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any, Literal
 
@@ -18,6 +20,8 @@ from agent.github.http import (
     github_request,
 )
 
+logger = logging.getLogger(__name__)
+
 _OWNER_PATTERN = re.compile(r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?")
 _REPO_PATTERN = re.compile(r"[A-Za-z0-9._-]{1,100}")
 _SEARCH_PAGE_SIZE = 100
@@ -30,6 +34,16 @@ _FAILING_CHECK_CONCLUSIONS = frozenset(
     {"failure", "timed_out", "action_required", "startup_failure"}
 )
 _INCONCLUSIVE_CHECK_CONCLUSIONS = frozenset({"cancelled", "stale", "skipped", "neutral"})
+_MERGEABILITY_QUERY = """
+query PullRequestMergeability($owner: String!, $repo: String!, $number: Int!) {
+  repository(owner: $owner, name: $repo) {
+    pullRequest(number: $number) {
+      mergeable
+      mergeStateStatus
+    }
+  }
+}
+"""
 _REVIEW_THREADS_QUERY = """
 query PullRequestReviewThreads($owner: String!, $repo: String!, $number: Int!, $cursor: String) {
   repository(owner: $owner, name: $repo) {
@@ -316,6 +330,71 @@ def _normalize_checks(
                 }
             )
     return failing, pending, inconclusive
+
+
+@dataclass(frozen=True, slots=True)
+class Mergeability:
+    """GitHub's verdict on whether a pull request can merge."""
+
+    mergeable: bool | None
+    merge_state: str
+
+
+async def fetch_mergeability(
+    client: httpx2.AsyncClient, owner: str, repo: str, number: int
+) -> Mergeability | None:
+    """Mergeability over GraphQL, or ``None`` when GitHub could not answer.
+
+    REST answers ``mergeable: null`` whenever its cached verdict has expired,
+    and only starts recomputing it; GraphQL waits for that computation, so a
+    single read usually gets the real answer.
+    """
+    try:
+        response = await github_request(
+            client,
+            "POST",
+            GITHUB_GRAPHQL,
+            json={
+                "query": _MERGEABILITY_QUERY,
+                "variables": {"owner": owner, "repo": repo, "number": number},
+            },
+        )
+        response.raise_for_status()
+        payload = response.json()
+    except httpx2.HTTPError, ValueError:
+        logger.warning(
+            "Mergeability query failed; falling back to what REST reported",
+            extra={"pr_repo_full_name": f"{owner}/{repo}", "pr_number": number},
+            exc_info=True,
+        )
+        return None
+    if not isinstance(payload, Mapping) or payload.get("errors"):
+        logger.warning(
+            "Mergeability query answered with errors; falling back to what REST reported",
+            extra={
+                "pr_repo_full_name": f"{owner}/{repo}",
+                "pr_number": number,
+                "graphql_errors": payload.get("errors") if isinstance(payload, Mapping) else None,
+            },
+        )
+        return None
+    data = payload.get("data")
+    repository = data.get("repository") if isinstance(data, Mapping) else None
+    pull = repository.get("pullRequest") if isinstance(repository, Mapping) else None
+    if not isinstance(pull, Mapping):
+        logger.warning(
+            "Mergeability query answered without a pull request",
+            extra={"pr_repo_full_name": f"{owner}/{repo}", "pr_number": number},
+        )
+        return None
+    mergeable = pull.get("mergeable")
+    merge_state = pull.get("mergeStateStatus")
+    return Mergeability(
+        mergeable={"MERGEABLE": True, "CONFLICTING": False}.get(
+            mergeable if isinstance(mergeable, str) else ""
+        ),
+        merge_state=merge_state.lower() if isinstance(merge_state, str) else "",
+    )
 
 
 async def fetch_unresolved_review_threads(
