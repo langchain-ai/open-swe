@@ -91,7 +91,6 @@ class MessageView(BaseModel):
     role: MessageRole
     text: str
     reasoning: str
-    streaming: bool
     namespace: list[str]
     sender: JsonObject | None
     images: list[JsonValue] | None
@@ -244,7 +243,7 @@ def _turn_view(row: RowMapping) -> TurnView:
 
 
 _MESSAGE_COLUMNS = """
-    message_id, turn_id, role, text, reasoning, streaming, namespace,
+    message_id, turn_id, role, text, reasoning, namespace,
     sender, images, usage, created_at
 """
 

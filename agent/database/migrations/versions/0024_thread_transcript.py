@@ -141,7 +141,6 @@ def upgrade() -> None:
             role text NOT NULL CHECK (role IN ('human', 'ai')),
             text text NOT NULL DEFAULT '',
             reasoning text NOT NULL DEFAULT '',
-            streaming boolean NOT NULL DEFAULT false,
             namespace text[] NOT NULL DEFAULT '{}',
             sender jsonb,
             images jsonb,

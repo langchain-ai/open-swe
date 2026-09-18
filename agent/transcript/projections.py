@@ -167,11 +167,11 @@ async def _turn_requested(
             """
             INSERT INTO thread_message (
                 message_id, thread_id, turn_id, version, role, text, reasoning,
-                streaming, namespace, sender, images, created_at
+                namespace, sender, images, created_at
             )
             VALUES (
                 :message_id, :thread_id, :turn_id, :version, 'human', :text, '',
-                false, :namespace, CAST(:sender AS jsonb), CAST(:images AS jsonb), :created_at
+                :namespace, CAST(:sender AS jsonb), CAST(:images AS jsonb), :created_at
             )
             ON CONFLICT (thread_id, message_id) DO NOTHING
             """
@@ -326,16 +326,6 @@ async def _turn_ended(
         },
     )
     await _set_thread_status(conn, thread_id, status="error" if failed else "idle")
-    if completed:
-        await conn.execute(
-            text(
-                """
-                UPDATE thread_message SET streaming = false, version = :version
-                WHERE thread_id = :thread_id AND turn_id = :turn_id AND streaming
-                """
-            ),
-            {"thread_id": thread_id, "turn_id": event.turn_id, "version": version},
-        )
 
 
 async def _set_thread_status(conn: AsyncConnection, thread_id: str, *, status: str) -> None:
@@ -386,17 +376,16 @@ async def _message_appended(
             """
             INSERT INTO thread_message (
                 message_id, thread_id, turn_id, version, role, text, reasoning,
-                streaming, namespace, created_at
+                namespace, created_at
             )
             VALUES (
                 :message_id, :thread_id, :turn_id, :version, 'ai', :text, :reasoning,
-                true, :namespace, :created_at
+                :namespace, :created_at
             )
             ON CONFLICT (thread_id, message_id) DO UPDATE SET
                 version = EXCLUDED.version,
                 text = thread_message.text || EXCLUDED.text,
-                reasoning = thread_message.reasoning || EXCLUDED.reasoning,
-                streaming = true
+                reasoning = thread_message.reasoning || EXCLUDED.reasoning
             """
         ),
         {
@@ -421,11 +410,11 @@ async def _message_completed(
             """
             INSERT INTO thread_message (
                 message_id, thread_id, turn_id, version, role, text, reasoning,
-                streaming, namespace, sender, images, usage, created_at
+                namespace, sender, images, usage, created_at
             )
             VALUES (
                 :message_id, :thread_id, :turn_id, :version, :role, :text, :reasoning,
-                false, :namespace, CAST(:sender AS jsonb), CAST(:images AS jsonb),
+                :namespace, CAST(:sender AS jsonb), CAST(:images AS jsonb),
                 CAST(:usage AS jsonb), :created_at
             )
             ON CONFLICT (thread_id, message_id) DO UPDATE SET
@@ -433,7 +422,6 @@ async def _message_completed(
                 role = EXCLUDED.role,
                 text = EXCLUDED.text,
                 reasoning = EXCLUDED.reasoning,
-                streaming = false,
                 namespace = EXCLUDED.namespace,
                 sender = COALESCE(EXCLUDED.sender, thread_message.sender),
                 images = COALESCE(EXCLUDED.images, thread_message.images),

@@ -154,9 +154,7 @@ async def test_fragments_concatenate_until_the_canonical_text_replaces_them(
 
     streamed = await load_snapshot(thread_id)
     assert streamed is not None
-    assert [(m.text, m.reasoning, m.streaming) for m in streamed.messages] == [
-        ("Hello world", "thinking", True)
-    ]
+    assert [(m.text, m.reasoning) for m in streamed.messages] == [("Hello world", "thinking")]
 
     await append(
         thread_id,
@@ -179,8 +177,8 @@ async def test_fragments_concatenate_until_the_canonical_text_replaces_them(
 
     completed = await load_snapshot(thread_id)
     assert completed is not None
-    assert [(m.text, m.reasoning, m.streaming) for m in completed.messages] == [
-        ("Hello world!", "thought about it", False)
+    assert [(m.text, m.reasoning) for m in completed.messages] == [
+        ("Hello world!", "thought about it")
     ]
 
 
