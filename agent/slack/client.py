@@ -484,7 +484,7 @@ def _safe_model_label(model: str) -> str:
     return sanitized.rsplit("/", 1)[-1][:48].strip("-")
 
 
-SLACK_COST_PENDING_LABEL = "calculating cost"
+SLACK_COST_PENDING_LABEL = "calculating cost..."
 
 
 def format_slack_run_usage(usage: RunUsageSummary | None) -> str:

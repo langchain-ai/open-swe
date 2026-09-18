@@ -765,7 +765,7 @@ def test_with_slack_session_cost_preserves_blocks_and_is_idempotent() -> None:
 
 
 def test_with_slack_session_cost_replaces_usage_only_pending_footer() -> None:
-    text = "Done <https://app.example/agents/t1|Open in Web> • calculating cost"
+    text = "Done <https://app.example/agents/t1|Open in Web> • calculating cost..."
     blocks = [
         {
             "type": "section",
@@ -776,7 +776,7 @@ def test_with_slack_session_cost_replaces_usage_only_pending_footer() -> None:
         },
         {
             "type": "context",
-            "elements": [{"type": "mrkdwn", "text": "model-a • calculating cost"}],
+            "elements": [{"type": "mrkdwn", "text": "model-a • calculating cost..."}],
         },
     ]
 
@@ -2452,9 +2452,9 @@ def test_pending_cost_marks_latest_reply_until_cost_arrives() -> None:
     assert "calculating cost" not in text
 
     pending_text, pending_blocks = slack_utils.with_slack_pending_session_cost(text, blocks)
-    assert pending_text.endswith("model-a • calculating cost")
+    assert pending_text.endswith("model-a • calculating cost...")
     assert pending_blocks is not None
-    assert pending_blocks[-1]["elements"][0]["text"].endswith("model-a • calculating cost")
+    assert pending_blocks[-1]["elements"][0]["text"].endswith("model-a • calculating cost...")
 
     # Idempotent while awaiting cost, and the refresh swaps the label for the cost.
     assert slack_utils.with_slack_pending_session_cost(pending_text, pending_blocks) == (
