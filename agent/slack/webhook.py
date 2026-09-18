@@ -30,7 +30,7 @@ from agent.prompts import load_prompt
 from agent.run_config import Repo
 from agent.slack import client as slack_utils
 from agent.slack.allowed_bots import AllowedSlackBot, resolve_allowed_slack_bot
-from agent.slack.dm import dm_thread_title, is_dm_session
+from agent.slack.dm import dm_thread_title, is_dm_channel, is_dm_session
 from agent.slack.failures import report_slack_failure
 from agent.slack.payloads import SlackChannelContext
 from agent.slack.request import SlackRequest
@@ -1087,7 +1087,7 @@ async def _process_slack_mention_impl(
     # A DM is reachable by exactly one person, so the admin capability cannot leak
     # to anyone else; the factory still rechecks the sender against the configured
     # admins, and a non-admin's DM gets nothing extra.
-    if dm_session:
+    if is_dm_channel(channel_context):
         configurable["admin_thread"] = True
     if thread_workspace:
         configurable["workspace"] = thread_workspace
