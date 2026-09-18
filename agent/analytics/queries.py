@@ -40,7 +40,7 @@ class InvalidUsageCursor(ValueError):
 
 
 def period_start(period: str | None) -> datetime:
-    days = 7 if period == "7d" else 30
+    days = 1 if period == "24h" else 7 if period == "7d" else 30
     if period == "all":
         return datetime.min.replace(tzinfo=UTC)
     return datetime.now(UTC) - timedelta(days=days)
@@ -283,7 +283,7 @@ async def pr_merge_rate_by_model(
             "this metric does not allocate independent model credit."
         ),
         "maturity_days": days,
-        "period": period if period in {"7d", "30d", "all"} else "30d",
+        "period": period if period in {"24h", "7d", "30d", "all"} else "30d",
         "suppression_threshold": minimum,
         "cohorts": cohorts,
         "unavailable_thread_ids": unavailable_threads,
@@ -597,7 +597,7 @@ async def usage_leaderboard(
     admin: bool = False,
 ) -> dict[str, Any]:
     """Read usage and review cohorts from one bounded PostgreSQL snapshot."""
-    normalized = period if period in {"7d", "30d", "all"} else "30d"
+    normalized = period if period in {"24h", "7d", "30d", "all"} else "30d"
     workspace = workspace_id()
     if cursor:
         as_of, offset = _decode_usage_cursor(cursor, workspace, normalized, sort, direction)

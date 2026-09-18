@@ -73,6 +73,7 @@ type PROutcomesSort =
   | "avg_merge_seconds"
 
 const PERIOD_LABELS: Record<UsageLeaderboardPeriod, string> = {
+  "24h": "Last 24h",
   "7d": "Last 7 days",
   "30d": "Last 30 days",
   all: "All time",
@@ -83,9 +84,12 @@ function UsagePage() {
   const period =
     (Route.useSearch().period as UsageLeaderboardPeriod | undefined) ?? "7d"
   const navigate = Route.useNavigate()
-  const activePeriod: UsageLeaderboardPeriod = ["7d", "30d", "all"].includes(
-    period
-  )
+  const activePeriod: UsageLeaderboardPeriod = [
+    "24h",
+    "7d",
+    "30d",
+    "all",
+  ].includes(period)
     ? period
     : "7d"
 
