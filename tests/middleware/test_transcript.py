@@ -64,8 +64,8 @@ def _install(
 
     monkeypatch.setattr(mw, "_has_transcript", _has_transcript)
 
-    async def _turn_context(thread_id: str, turn_id: UUID) -> tuple[int, str | None, str | None]:
-        return 1, None, None
+    async def _turn_context(thread_id: str, turn_id: UUID) -> tuple[str | None, str | None]:
+        return None, None
 
     monkeypatch.setattr(mw.checkpoints, "_turn_context", _turn_context)
     configurable: dict[str, Any] = {"thread_id": THREAD_ID, "run_id": RUN_ID}
