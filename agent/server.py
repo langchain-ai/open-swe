@@ -159,6 +159,7 @@ from agent.tools import (
     expedite_pr_approval,
     fetch_url,
     get_thread,
+    get_usage_leaderboard_privacy,
     http_request,
     list_automations,
     list_threads,
@@ -182,6 +183,7 @@ from agent.tools import (
     save_user_instructions,
     save_user_skill,
     schedule_thread_wakeup,
+    set_usage_leaderboard_privacy,
     slack_add_reaction,
     slack_attach_html,
     slack_move_thread,
@@ -517,6 +519,8 @@ ADMIN_TOOLS = (
     delete_workspace,
     save_organization_skill,
     delete_organization_skill,
+    get_usage_leaderboard_privacy,
+    set_usage_leaderboard_privacy,
 )
 
 

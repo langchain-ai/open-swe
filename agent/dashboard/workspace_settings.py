@@ -72,6 +72,7 @@ class WorkspaceSettingsUpdate(BaseModel):
     gateway_enabled: bool | None = None
     fable_enabled: bool | None = None
     expedited_review_enabled: bool | None = None
+    usage_leaderboard_privacy_enabled: bool | None = None
     org_guidelines: str | None = None
     default_agent_model: str | None = None
     default_agent_reasoning_effort: str | None = None
@@ -326,6 +327,7 @@ def _default_settings() -> dict[str, Any]:
         "gateway_enabled": None,
         "fable_enabled": False,
         "expedited_review_enabled": False,
+        "usage_leaderboard_privacy_enabled": True,
         "org_guidelines": None,
         "default_agent_model": fallback_model,
         "default_agent_reasoning_effort": fallback_effort,
@@ -477,6 +479,23 @@ async def upsert_instance_settings(update: WorkspaceSettingsUpdate) -> dict[str,
     """Replace the instance record. Raises ``ValueError`` for a Fable model saved as a default."""
     update.apply_fable_policy(fable_enabled=bool(update.fable_enabled))
     value = _record_values(update)
+    await put_value(INSTANCE_SETTINGS_NAMESPACE, INSTANCE_SETTINGS_KEY, value)
+    return value
+
+
+async def patch_instance_settings(update: WorkspaceSettingsUpdate) -> dict[str, Any]:
+    """Merge a partial update into the instance record; fields left unset keep their stored value.
+
+    Unlike :func:`upsert_instance_settings`, which replaces the record, this is
+    for single-concern writers (the leaderboard privacy toggle) that must not
+    blank fields they know nothing about.
+    """
+    record = await get_value(INSTANCE_SETTINGS_NAMESPACE, INSTANCE_SETTINGS_KEY) or {}
+    value = {
+        **record,
+        **update.model_dump(include={"usage_leaderboard_privacy_enabled"}, exclude_unset=True),
+        "updated_at": now_iso(),
+    }
     await put_value(INSTANCE_SETTINGS_NAMESPACE, INSTANCE_SETTINGS_KEY, value)
     return value
 
@@ -702,6 +721,12 @@ class WorkspaceSettings(Mapping[str, Any]):
         return value if isinstance(value, bool) else False
 
     @property
+    def usage_leaderboard_privacy_enabled(self) -> bool:
+        """Whether non-admins see only themselves on the usage leaderboard."""
+        value = self.get("usage_leaderboard_privacy_enabled")
+        return value if isinstance(value, bool) else True
+
+    @property
     def org_review_guidelines(self) -> str | None:
         """The reviewer guidelines supplement, if any."""
         value = self.get("org_guidelines")
@@ -711,6 +736,32 @@ class WorkspaceSettings(Mapping[str, Any]):
 
 
 router = APIRouter(tags=["settings"])
+
+
+class UsageLeaderboardPrivacyUpdate(BaseModel):
+    """The one leaderboard privacy field; the rest of the instance record is untouched."""
+
+    usage_leaderboard_privacy_enabled: bool
+
+
+@router.get("/settings/usage-leaderboard-privacy")
+async def api_get_usage_leaderboard_privacy(
+    _session: dict[str, Any] = SESSION_DEP,
+) -> dict[str, Any]:
+    """Whether the usage leaderboard anonymizes other members for non-admins."""
+    settings = await get_instance_settings()
+    return {"usage_leaderboard_privacy_enabled": settings.usage_leaderboard_privacy_enabled}
+
+
+@router.put("/settings/usage-leaderboard-privacy")
+async def api_put_usage_leaderboard_privacy(
+    body: UsageLeaderboardPrivacyUpdate, _admin: dict[str, Any] = ADMIN_DEP
+) -> dict[str, Any]:
+    return await patch_instance_settings(
+        WorkspaceSettingsUpdate(
+            usage_leaderboard_privacy_enabled=body.usage_leaderboard_privacy_enabled
+        )
+    )
 
 
 def _normalized_workspace(raw: str) -> str:

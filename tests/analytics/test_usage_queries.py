@@ -278,17 +278,21 @@ async def test_user_sort_follows_disclosed_names_not_hidden_ones(usage_db):
         await run(member)
     await pr(zeta, state="merged")
 
-    ordinary = await report(sort="user", direction="asc")
-    assert [row["user"]["name"] for row in ordinary["rows"]] == [
+    ordinary = await report(sort="user", direction="asc", anonymize_others=True)
+    assert [row["user"]["name"] for row in ordinary["rows"]] == ["Open SWE user"] * 3
+    # Masked members tie on their shared label and fall back to rank, not to "alpha"
+    # before "zeta".
+    assert [row["rank"] for row in ordinary["rows"]] == [1, 2, 3]
+
+    own = await report(sort="user", direction="asc", current_login="mid", anonymize_others=True)
+    assert [row["user"]["name"] for row in own["rows"]] == [
         "mid",
         "Open SWE user",
         "Open SWE user",
     ]
-    # Masked members tie on their shared label and fall back to rank, not to "alpha"
-    # before "zeta".
-    assert [row["rank"] for row in ordinary["rows"]] == [3, 1, 2]
+    assert [row["rank"] for row in own["rows"]] == [3, 1, 2]
 
-    admin = await report(sort="user", direction="asc", admin=True)
+    admin = await report(sort="user", direction="asc", admin=True, anonymize_others=True)
     assert [row["user"]["name"] for row in admin["rows"]] == ["alpha", "mid", "zeta"]
 
 
@@ -375,8 +379,10 @@ async def test_aliases_and_pr_only_members_preserve_privacy(usage_db):
     assert ordinary["total_members"] == 2
     assert ordinary["rows"][0]["invocations"] == 2
     assert ordinary["rows"][0]["prs_opened"] == 1
+    # With the policy off a login-less, name-less member's email prefix is the
+    # disclosed label; the full email is still never shown.
     assert ordinary["rows"][1]["user"] == {
-        "name": "Open SWE user",
+        "name": "private",
         "github_login": None,
         "email": None,
         "avatar_url": None,
@@ -389,6 +395,111 @@ async def test_aliases_and_pr_only_members_preserve_privacy(usage_db):
     assert admin["rows"][0]["user"]["github_login"] == "named"
     assert admin["rows"][1]["user"]["name"] == "private"
     assert all(row["user"]["email"] is None for row in admin["rows"])
+
+
+async def test_privacy_enabled_hides_other_members_identities_completely(usage_db):
+    alice = await person("alice", "alice@example.com", display_name="Alice Example")
+    bob = await person("bob", "bob@example.com")
+    carol = await person(email="carol@example.com")
+    dan = await person(email="dan@example.com", display_name="Dan Named")
+    for member in (alice, bob, carol, dan):
+        await run(member)
+
+    own = await report(
+        current_login="alice", current_email="alice@example.com", anonymize_others=True
+    )
+    assert own["total_members"] == 4
+    mine = next(row for row in own["rows"] if row["rank"] == own["current_user_rank"])
+    # The viewer keeps their own identity, avatar and all.
+    assert mine["user"] == {
+        "name": "Alice Example",
+        "github_login": "alice",
+        "email": "alice@example.com",
+        "avatar_url": "https://github.com/alice.png?size=80",
+    }
+    others = [row for row in own["rows"] if row is not mine]
+    # Other members are fully anonymous: no login, email, avatar, or any
+    # name that could single someone out — not even the email-prefix fallback.
+    assert [row["user"] for row in others] == [
+        {"name": "Open SWE user", "github_login": None, "email": None, "avatar_url": None}
+    ] * 3
+    # Metrics, rank, and pagination are untouched by the policy.
+    assert sorted(row["invocations"] for row in own["rows"]) == [1, 1, 1, 1]
+    assert [row["rank"] for row in own["rows"]] == [1, 2, 3, 4]
+    page_two = await report(limit=1, offset=1, anonymize_others=True)
+    assert [row["rank"] for row in page_two["rows"]] == [2]
+
+    # Admins keep seeing everyone, identified, even with the policy on — and a
+    # login-less member's stored display name still identifies them.
+    admin = await report(anonymize_others=True, admin=True)
+    assert sorted(row["user"]["name"] for row in admin["rows"]) == [
+        "Alice Example",
+        "Dan Named",
+        "bob",
+        "carol",
+    ]
+    assert admin["rows"][0]["user"]["avatar_url"] is not None
+
+    # Policy off: a signed-in member sees rows with a login identified; a
+    # login-less row keeps its stored display name (dan) or, without one, the
+    # email prefix (carol) — never the full email. Emails stay own-row only.
+    off = await report(anonymize_others=False)
+    assert sorted(row["user"]["name"] for row in off["rows"]) == [
+        "Alice Example",
+        "Dan Named",
+        "bob",
+        "carol",
+    ]
+    assert all(row["user"]["email"] is None for row in off["rows"])
+    assert all("example.com" not in row["user"]["name"] for row in off["rows"])
+    assert off["rows"][0]["user"]["github_login"] is None
+
+
+async def test_viewer_without_a_login_sees_their_display_name(usage_db):
+    viewer = await person(email="viewer@example.com", display_name="Viewer Name")
+    other = await person(email="other@example.com", display_name="Other Name")
+    for member in (viewer, other):
+        await run(member)
+
+    own = await report(current_email="viewer@example.com", anonymize_others=True)
+    names = sorted(row["user"]["name"] for row in own["rows"])
+    assert names == ["Open SWE user", "Viewer Name"]
+    mine = next(row for row in own["rows"] if row["user"]["name"] == "Viewer Name")
+    assert mine["user"] == {
+        "name": "Viewer Name",
+        "github_login": None,
+        "email": "viewer@example.com",
+        "avatar_url": None,
+    }
+
+
+async def test_privacy_enabled_sorts_by_disclosed_labels_so_hidden_names_do_not_leak(usage_db):
+    zeta = await person(email="zeta@example.com")
+    alpha = await person(email="alpha@example.com")
+    mid = await person("mid")
+    for member in (zeta, alpha, mid):
+        await run(member)
+    await pr(zeta, state="merged")
+
+    result = await report(sort="user", direction="asc", anonymize_others=True)
+    # Without a viewer identity every row anonymizes: they tie on the shared
+    # label and order by rank, never by the hidden alpha-before-zeta names.
+    assert [row["user"]["name"] for row in result["rows"]] == ["Open SWE user"] * 3
+    assert [row["rank"] for row in result["rows"]] == [1, 2, 3]
+
+    own = await report(sort="user", direction="asc", current_login="mid", anonymize_others=True)
+    assert [row["user"]["name"] for row in own["rows"]] == [
+        "mid",
+        "Open SWE user",
+        "Open SWE user",
+    ]
+    assert [row["rank"] for row in own["rows"]] == [3, 1, 2]
+
+    # Policy off: login-less members with no stored display name fall back to
+    # their disclosed email prefixes, which order the report too.
+    off = await report(sort="user", direction="asc")
+    assert [row["user"]["name"] for row in off["rows"]] == ["alpha", "mid", "zeta"]
+    assert [row["rank"] for row in off["rows"]] == [2, 3, 1]
 
 
 async def test_reviewer_uses_publication_recording_and_surfacing_cohorts(usage_db):

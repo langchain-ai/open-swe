@@ -1,4 +1,4 @@
-"""Short-TTL read of the settings one workspace resolves to.
+"""Short-TTL reads of the settings a workspace or the instance resolves to.
 
 Graph factories read these on every run, so they are cached. The cache lives in
 a module-level dict shared by every run in the process, which is why the slug is
@@ -12,6 +12,7 @@ cannot see a ``configurable`` and would silently answer ``default``.
 
 from agent.dashboard.workspace_settings import (
     WorkspaceSettings,
+    get_instance_settings,
     get_workspace_settings,
     resolve_settings_workspace,
 )
@@ -27,3 +28,16 @@ async def cached_workspace_settings(workspace: str | None) -> WorkspaceSettings:
         SETTINGS_TTL_SECONDS,
         lambda: get_workspace_settings(slug),
     )
+
+
+async def cached_instance_settings() -> WorkspaceSettings:
+    return await ttl_cache.cached(
+        "settings:instance",
+        SETTINGS_TTL_SECONDS,
+        get_instance_settings,
+    )
+
+
+def invalidate_settings_cache() -> None:
+    """Drop cached settings so the next read sees a just-saved instance or workspace record."""
+    ttl_cache.clear()
