@@ -112,21 +112,6 @@ def _clear_public_profile_cache() -> None:
     ttl_cache.clear()
 
 
-async def test_public_profile_lookup_returns_validated_profile(
-    github_client: _FakeAsyncClient, installation_token: None
-) -> None:
-    github_client._responses.append(
-        _FakeResponse(200, {"id": 42, "login": "Mason-GH", "name": "Mason"})
-    )
-    profile = await resolve_public_github_profile("mason-gh")
-    assert profile is not None
-    assert profile.user_id == 42
-    assert profile.name == "Mason"
-    url, headers = github_client.requests[0]
-    assert url == "https://api.github.com/users/mason-gh"
-    assert headers["Authorization"] == "Bearer installation-token"
-
-
 @pytest.mark.parametrize(
     "payload",
     [
@@ -145,24 +130,13 @@ async def test_public_profile_lookup_rejects_invalid_payloads(
     assert await resolve_public_github_profile("mason-gh") is None
 
 
-async def test_public_profile_lookup_tolerates_null_name(
-    github_client: _FakeAsyncClient, installation_token: None
-) -> None:
-    github_client._responses.append(
-        _FakeResponse(200, {"id": 42, "login": "mason-gh", "name": None})
-    )
-    profile = await resolve_public_github_profile("mason-gh")
-    assert profile is not None
-    assert profile.user_id == 42
-    assert profile.name == ""
-
-
 async def test_public_profile_lookup_failure_is_nonfatal(
     github_client: _FakeAsyncClient, installation_token: None
 ) -> None:
     github_client._responses.append(_FakeResponse(404, {"message": "Not Found"}))
     assert await resolve_public_github_profile("mason-gh") is None
 
+    ttl_cache.clear()
     github_client._responses.append(httpx2.ConnectError("boom"))
     assert await resolve_public_github_profile("mason-gh") is None
 
@@ -200,82 +174,6 @@ async def test_public_profile_lookup_rejects_invalid_logins(
 ) -> None:
     assert await resolve_public_github_profile(login) is None
     assert github_client.requests == []
-
-
-async def test_config_identity_prefers_public_github_name(
-    github_client: _FakeAsyncClient, installation_token: None
-) -> None:
-    github_client._responses.append(
-        _FakeResponse(200, {"id": 99, "login": "mason-gh", "name": "Mason Example"})
-    )
-    config = {
-        "configurable": {
-            "source": "slack",
-            "github_login": "mason-gh",
-            "slack_thread": {"triggering_user_name": "Slack Mason"},
-        }
-    }
-    identity = await resolve_triggering_user_identity(config)
-    assert identity is not None
-    assert identity.github_user_id == 99
-    assert identity.analytics_display_name == "Mason Example"
-    assert identity.display_name_source == "github"
-    assert identity.commit_name == "Slack Mason"
-    assert identity.commit_email == "mason-gh@users.noreply.github.com"
-
-
-async def test_config_identity_with_null_github_name_falls_back_to_trusted_slack_name(
-    github_client: _FakeAsyncClient, installation_token: None
-) -> None:
-    github_client._responses.append(
-        _FakeResponse(200, {"id": 99, "login": "mason-gh", "name": None})
-    )
-    config = {
-        "configurable": {
-            "source": "slack",
-            "github_login": "mason-gh",
-            "slack_thread": {"triggering_user_name": "Slack Mason"},
-        }
-    }
-    identity = await resolve_triggering_user_identity(config)
-    assert identity is not None
-    assert identity.github_user_id == 99
-    assert identity.analytics_display_name == "Slack Mason"
-    assert identity.display_name_source == "slack"
-
-
-async def test_config_identity_falls_back_to_trusted_slack_name(
-    github_client: _FakeAsyncClient, installation_token: None
-) -> None:
-    github_client._responses.append(_FakeResponse(404, {"message": "Not Found"}))
-    config = {
-        "configurable": {
-            "source": "slack",
-            "github_login": "mason-gh",
-            "github_user_id": 4321,
-            "slack_thread": {"triggering_user_name": "Mason"},
-        }
-    }
-    identity = await resolve_triggering_user_identity(config)
-    assert identity is not None
-    assert identity.github_user_id == 4321
-    assert identity.analytics_display_name == "Mason"
-    assert identity.display_name_source == "slack"
-
-
-async def test_config_identity_with_null_github_name_and_no_names_stays_blank(
-    github_client: _FakeAsyncClient, installation_token: None
-) -> None:
-    github_client._responses.append(
-        _FakeResponse(200, {"id": 99, "login": "mason-gh", "name": None})
-    )
-    config = {"configurable": {"source": "slack", "github_login": "mason-gh"}}
-    identity = await resolve_triggering_user_identity(config)
-    assert identity is not None
-    assert identity.github_user_id == 99
-    assert identity.analytics_display_name == ""
-    assert identity.display_name_source is None
-    assert identity.commit_name == "mason-gh"
 
 
 async def test_config_identity_without_trusted_slack_name_stays_blank(

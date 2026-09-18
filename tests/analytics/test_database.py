@@ -9,6 +9,7 @@ from uuid import UUID, uuid4
 import pytest
 from blockbuster import BlockBuster
 from sqlalchemy import make_url, text
+from sqlalchemy.exc import IntegrityError
 
 from agent.database import analytics as database
 from agent.database import postgres
@@ -144,11 +145,16 @@ async def test_provenance_migration_preserves_legacy_names(deployment_db):
         )
         assert row["display_name"] == "Legacy Name"
         assert row["display_name_source"] is None
-        await conn.execute(
-            text(
-                "UPDATE identity_directory SET display_name = NULL, display_name_source = 'github'"
-            )
-        )
+        for name, source in [(None, "github"), ("  ", "slack"), ("Name", "invalid")]:
+            with pytest.raises(IntegrityError):
+                async with conn.begin_nested():
+                    await conn.execute(
+                        text(
+                            "UPDATE identity_directory SET display_name = :name, "
+                            "display_name_source = :source"
+                        ),
+                        {"name": name, "source": source},
+                    )
 
 
 async def test_standalone_uri_with_sslmode_connects(deployment_db, monkeypatch):

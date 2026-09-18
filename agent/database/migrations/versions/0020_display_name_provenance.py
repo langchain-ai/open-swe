@@ -22,10 +22,11 @@ def upgrade() -> None:
         BEGIN
             IF NOT EXISTS (
                 SELECT 1 FROM pg_constraint
-                WHERE conname = 'identity_directory_display_name_source_check'
+                WHERE conname = 'identity_directory_display_name_present_check'
+                    AND conrelid = 'identity_directory'::regclass
             ) THEN
                 ALTER TABLE identity_directory
-                    ADD CONSTRAINT identity_directory_display_name_source_check
+                    ADD CONSTRAINT identity_directory_display_name_present_check
                     CHECK (
                         display_name_source IS NULL
                         OR NULLIF(btrim(display_name), '') IS NOT NULL

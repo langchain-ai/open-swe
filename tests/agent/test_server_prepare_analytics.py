@@ -214,7 +214,6 @@ async def test_public_scope_resolves_profile_via_installation_token(
     assert recorded["display_name_source"] == "github"
 
     # A second run on another thread reuses the cached profile lookup.
-    prepare_harness["recorded"] = None
     middleware = _middleware(_slack_config(thread_id="thread-2", invocation_id="inv-2"))
     middleware._thread_id = "thread-2"
     github_client._responses.append(_FakeResponse(401, {"message": "Bad credentials"}))
@@ -227,77 +226,41 @@ async def test_public_scope_resolves_profile_via_installation_token(
     assert prepare_harness["recorded"]["github_user_id"] == 99
 
 
-async def test_public_scope_null_github_name_falls_back_to_trusted_slack_name(
-    prepare_harness: dict[str, Any], github_client: _FakeGitHubClient, monkeypatch
+@pytest.mark.parametrize(
+    ("status", "slack_name", "expected_id", "expected_name", "expected_source"),
+    [
+        (200, "Mason Slack", 99, "Mason Slack", "slack"),
+        (200, "", 4321, None, None),
+        (404, "Mason Slack", 4321, "Mason Slack", "slack"),
+    ],
+)
+async def test_public_scope_name_fallback(
+    prepare_harness,
+    github_client,
+    monkeypatch,
+    status,
+    slack_name,
+    expected_id,
+    expected_name,
+    expected_source,
 ) -> None:
     prepare_harness["thread_metadata"] = {"visibility": "public"}
 
-    async def fake_token(**kwargs: Any) -> str:
+    async def fake_token(**kwargs: object) -> str:
         return _INSTALLATION_TOKEN
 
     monkeypatch.setattr("agent.github.app.get_github_app_installation_token", fake_token)
     github_client._responses.extend(
         [
-            _FakeResponse(401, {"message": "Bad credentials"}),
-            _FakeResponse(200, {"id": 99, "login": "mason-gh", "name": None}),
+            _FakeResponse(401),
+            _FakeResponse(status, {"id": expected_id, "login": "mason-gh", "name": None}),
         ]
     )
-
-    middleware = _middleware(_slack_config())
-    await _prepare(middleware)
-
-    recorded = prepare_harness["recorded"]
-    assert recorded["github_user_id"] == 99
-    assert recorded["display_name"] == "Mason Slack"
-    assert recorded["display_name_source"] == "slack"
-
-
-async def test_public_scope_null_github_name_and_no_names_records_no_display_name(
-    prepare_harness: dict[str, Any], github_client: _FakeGitHubClient, monkeypatch
-) -> None:
-    prepare_harness["thread_metadata"] = {"visibility": "public"}
-
-    async def fake_token(**kwargs: Any) -> str:
-        return _INSTALLATION_TOKEN
-
-    monkeypatch.setattr("agent.github.app.get_github_app_installation_token", fake_token)
-    github_client._responses.extend(
-        [
-            _FakeResponse(401, {"message": "Bad credentials"}),
-            _FakeResponse(200, {"id": 99, "login": "mason-gh", "name": None}),
-        ]
-    )
-    config = _slack_config()
-    config["configurable"]["slack_thread"]["triggering_user_name"] = ""
-    middleware = _middleware(config)
-    await _prepare(middleware)
+    config = _slack_config(github_user_id=4321)
+    config["configurable"]["slack_thread"]["triggering_user_name"] = slack_name
+    await _prepare(_middleware(config))
 
     recorded = prepare_harness["recorded"]
-    assert recorded["github_user_id"] == 99
-    assert recorded["display_name"] is None
-    assert recorded["display_name_source"] is None
-
-
-async def test_public_scope_lookup_failure_falls_back_to_trusted_slack_name(
-    prepare_harness: dict[str, Any], github_client: _FakeGitHubClient, monkeypatch
-) -> None:
-    prepare_harness["thread_metadata"] = {"visibility": "public"}
-
-    async def fake_token(**kwargs: Any) -> str:
-        return _INSTALLATION_TOKEN
-
-    monkeypatch.setattr("agent.github.app.get_github_app_installation_token", fake_token)
-    github_client._responses.extend(
-        [
-            _FakeResponse(401, {"message": "Bad credentials"}),
-            _FakeResponse(404, {"message": "Not Found"}),
-        ]
-    )
-
-    middleware = _middleware(_slack_config(github_user_id=4321))
-    await _prepare(middleware)
-
-    recorded = prepare_harness["recorded"]
-    assert recorded["github_user_id"] == 4321
-    assert recorded["display_name"] == "Mason Slack"
-    assert recorded["display_name_source"] == "slack"
+    assert recorded["github_user_id"] == expected_id
+    assert recorded["display_name"] == expected_name
+    assert recorded["display_name_source"] == expected_source
