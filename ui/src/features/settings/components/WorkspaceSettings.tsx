@@ -124,6 +124,10 @@ export function WorkspaceSettingsPanel({
   const record = useQuery({
     queryKey: workspaceRecordKey(slug),
     queryFn: () => api.getWorkspace(slug),
+    // A rebuild runs in the background; keep the image state and the rebuild
+    // button following it until it settles.
+    refetchInterval: (query) =>
+      query.state.data?.refresh_status === "refreshing" ? 5000 : false,
   })
   const options = useWorkspaceOptions(true)
   // Model options follow the workspace: the Fable flag that gates some of
@@ -149,6 +153,17 @@ export function WorkspaceSettingsPanel({
     qc.setQueryData(workspaceRecordKey(slug), saved)
     void qc.invalidateQueries({ queryKey: workspaceOptionKeys.all })
   }
+  const onRebuildStarted = () => {
+    // Show the run as underway at once, then let the poll confirm it, so a
+    // second click cannot slip in before the record catches up.
+    qc.setQueryData(
+      workspaceRecordKey(slug),
+      (current: WorkspaceRecord | undefined) =>
+        current ? { ...current, refresh_status: "refreshing" } : current
+    )
+    void qc.invalidateQueries({ queryKey: workspaceRecordKey(slug) })
+    void qc.invalidateQueries({ queryKey: workspaceOptionKeys.all })
+  }
 
   return (
     <>
@@ -164,6 +179,7 @@ export function WorkspaceSettingsPanel({
         key={`sandbox:${record.data.setup_script ?? ""}:${record.data.update_script ?? ""}`}
         record={record.data}
         onSaved={onSaved}
+        onRebuildStarted={onRebuildStarted}
       />
       <ModelDefaultsSection
         scope={scope}

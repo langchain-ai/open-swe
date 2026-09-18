@@ -186,9 +186,24 @@ describe("WorkspaceSettingsPanel", () => {
       })
     )
 
+    // Once started, the page re-reads the record and follows the run instead
+    // of re-enabling the button on the start request alone.
+    const getWorkspace = vi.spyOn(api, "getWorkspace").mockResolvedValue({
+      ...RECORD,
+      setup_script: "make setup && make build",
+      refresh_status: "refreshing",
+    })
+    const readsBefore = getWorkspace.mock.calls.length
     fireEvent.click(screen.getByRole("button", { name: "Rebuild image" }))
     await waitFor(() => expect(refresh).toHaveBeenCalledWith("oss"))
     expect(await screen.findByText(/Rebuild started/)).toBeTruthy()
+    await waitFor(() =>
+      expect(getWorkspace.mock.calls.length).toBeGreaterThan(readsBefore)
+    )
+    const rebuilding = await screen.findByRole("button", {
+      name: "Rebuilding…",
+    })
+    expect((rebuilding as HTMLButtonElement).disabled).toBe(true)
   })
 
   it("offers only the workspace's own repositories as its default", async () => {

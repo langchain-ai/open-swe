@@ -29,9 +29,11 @@ function gib(bytes: number | null | undefined): string | null {
 export function WorkspaceSandboxSection({
   record,
   onSaved,
+  onRebuildStarted,
 }: {
   record: WorkspaceRecord
   onSaved: (saved: WorkspaceRecord) => void
+  onRebuildStarted: () => void
 }) {
   const [setupScript, setSetupScript] = useState(record.setup_script ?? "")
   const [updateScript, setUpdateScript] = useState(record.update_script ?? "")
@@ -49,6 +51,7 @@ export function WorkspaceSandboxSection({
   })
   const rebuild = useMutation({
     mutationFn: () => api.refreshWorkspace(record.slug),
+    onSuccess: onRebuildStarted,
   })
 
   const status = record.snapshot_status ?? "none"
@@ -122,7 +125,7 @@ export function WorkspaceSandboxSection({
         )}
         {rebuild.isSuccess && (
           <p className="text-xs text-muted-foreground">
-            Rebuild started; the Workspaces page shows its progress.
+            Rebuild started; the image state above follows its progress.
           </p>
         )}
         <div className="flex flex-wrap items-center justify-between gap-2">
