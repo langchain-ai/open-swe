@@ -424,7 +424,7 @@ it("shows an em dash for avg time to merge when a group has no merges", async ()
   expect(cells.at(-1)?.textContent).toBe("\u2014")
   expect(within(row).queryByRole("button", { name: /Based on/ })).toBeNull()
   expect(row.textContent).not.toContain("Based on")
-  fireEvent.click(cells[0])
+  fireEvent.click(cells[0]!)
   expect(
     within(row).queryByRole("button", { name: /reasoning efforts/ })
   ).toBeNull()
