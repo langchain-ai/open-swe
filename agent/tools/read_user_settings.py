@@ -18,6 +18,7 @@ _PROFILE_SETTING_KEYS = (
     "subagent_reasoning_effort",
     "auto_fix_ci",
     "dm_session_enabled",
+    "disable_subagents",
     "draft_prs",
     "review_draft_prs",
 )

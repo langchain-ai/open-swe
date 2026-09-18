@@ -84,6 +84,12 @@ def profile_model_routing_enabled(profile: dict[str, Any] | None) -> bool | None
     return value if isinstance(value, bool) else None
 
 
+def profile_disable_subagents(profile: dict[str, Any] | None) -> bool:
+    """Whether this person's main agent should run without subagents. Defaults to False."""
+    value = profile.get("disable_subagents") if isinstance(profile, dict) else None
+    return value is True
+
+
 def _normalize_profile_model_pair(
     profile: dict[str, Any],
     *,

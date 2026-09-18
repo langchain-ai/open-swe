@@ -53,6 +53,7 @@ from agent.dashboard.agent_overrides import (
     load_profile,
     normalize_profile_overrides,
     normalize_profile_subagent_overrides,
+    profile_disable_subagents,
     profile_draft_prs,
     profile_model_routing_enabled,
     resolve_github_login,
@@ -182,6 +183,7 @@ from agent.tools import (
     save_user_instructions,
     save_user_skill,
     schedule_thread_wakeup,
+    set_subagents_enabled,
     slack_add_reaction,
     slack_attach_html,
     slack_move_thread,
@@ -353,6 +355,7 @@ async def _resolve_user_custom_instructions(login: str | None) -> str | None:
 PLAN_MODE_EXCLUDED_TOOLS: frozenset[str] = frozenset(
     {
         "task",
+        "set_subagents_enabled",
         "background_execute",
         "background_task",
         "create_sandbox_service_url",
@@ -440,6 +443,7 @@ def _is_subagent_excluded_tool(tool: Any) -> bool:
         "read_incident",
         "read_only_sql",
         "read_user_settings",
+        "set_subagents_enabled",
         "record_incident_report",
         "search_incidents",
     }
@@ -1059,6 +1063,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
     async with aphase(thread_id, "factory.sender_profile"):
         sender_profile = profile if profile is not None else await _cached_profile(profile_login)
     sender_draft_prs = profile_draft_prs(sender_profile)
+    disable_subagents = profile_disable_subagents(sender_profile)
     configurable["draft_prs"] = sender_draft_prs
     cfg.draft_prs = sender_draft_prs
     if isinstance(thread_settings.get("model_id"), str):
@@ -1218,6 +1223,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
             else ()
         ),
         read_user_settings,
+        set_subagents_enabled,
         request_pr_review,
         recreate_sandbox,
         report_platform_issue,
@@ -1241,6 +1247,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
             save_user_skill,
             delete_user_skill,
             read_user_settings,
+            set_subagents_enabled,
         )
         static_tools = [tool for tool in static_tools if tool not in personal_tools]
     if not private_thread:
@@ -1361,7 +1368,9 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         model=main_model,
         system_prompt="",
         tools=static_tools,
-        subagents=[
+        subagents=[]
+        if disable_subagents
+        else [
             _general_purpose_subagent(
                 subagent_model,
                 tools=subagent_tools,
@@ -1425,6 +1434,8 @@ async def get_agent(config: RunnableConfig) -> Pregel:
                         if incident_automatic
                         else DEEP_AGENT_EXCLUDED_TOOLS
                     )
+                    | (frozenset({"task"}) if disable_subagents else frozenset()),
+                    blocked=frozenset({"task"}) if disable_subagents else frozenset(),
                 ),
                 SubdirAgentsReadMiddleware(),
                 ToolRetryMiddleware(

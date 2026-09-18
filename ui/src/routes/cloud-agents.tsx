@@ -217,6 +217,19 @@ function CloudAgentsPage() {
             }
           />
           <SettingsRow
+            label="Enable subagents"
+            description="Allow your agent to delegate tasks to specialized subagents"
+            control={
+              <Switch
+                checked={!(profile.data?.disable_subagents ?? false)}
+                onCheckedChange={(enabled) =>
+                  persist({ disable_subagents: !enabled })
+                }
+                disabled={profile.isLoading || save.isPending}
+              />
+            }
+          />
+          <SettingsRow
             label="Default Subagent Model"
             description="Used for delegated tasks launched by your agent"
             control={

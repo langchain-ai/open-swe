@@ -117,6 +117,7 @@ export function buildProfileUpdate(
       current?.subagent_reasoning_effort ??
       current?.reasoning_effort ??
       fallbackEffort,
+    disable_subagents: current?.disable_subagents ?? false,
     default_repo: current?.default_repo ?? null,
     base_branch: current?.base_branch ?? null,
     branch_prefix: current?.branch_prefix ?? null,

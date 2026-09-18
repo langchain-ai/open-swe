@@ -794,6 +794,11 @@
             ],
             "title": "Default Subagent Model"
           },
+          "disable_subagents": {
+            "default": false,
+            "title": "Disable Subagents",
+            "type": "boolean"
+          },
           "dm_session_enabled": {
             "default": false,
             "title": "Dm Session Enabled",

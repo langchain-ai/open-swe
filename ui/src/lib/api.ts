@@ -154,6 +154,7 @@ export interface Profile {
   reasoning_effort?: string
   default_subagent_model?: string | null
   subagent_reasoning_effort?: string | null
+  disable_subagents?: boolean
   default_repo?: string | null
   base_branch?: string | null
   branch_prefix?: string | null
@@ -170,6 +171,7 @@ export interface ProfileUpdate {
   reasoning_effort: string
   default_subagent_model?: string | null
   subagent_reasoning_effort?: string | null
+  disable_subagents?: boolean
   default_repo?: string | null
   base_branch?: string | null
   branch_prefix?: string | null

@@ -58,6 +58,7 @@ class ProfileUpdate(BaseModel):
     auto_fix_ci: bool = True
     model_routing_enabled: bool | None = None
     dm_session_enabled: bool = False
+    disable_subagents: bool = False
     draft_prs: bool | None = None
     review_draft_prs: bool | None = None
 
@@ -136,6 +137,18 @@ async def get_profile(login: str) -> dict[str, Any] | None:
     return await get_value(PROFILES_NAMESPACE, login)
 
 
+async def set_disable_subagents(login: str, disabled: bool) -> dict[str, Any]:
+    existing = await get_profile(login) or {}
+    value = {
+        **existing,
+        "login": login,
+        "disable_subagents": disabled,
+        "updated_at": now_iso(),
+    }
+    await put_value(PROFILES_NAMESPACE, login, value)
+    return value
+
+
 async def get_oauth_token_record(login: str) -> dict[str, Any] | None:
     """The raw encrypted-token record, for callers that need its expiry metadata."""
     return await get_value(OAUTH_TOKENS_NAMESPACE, login)
@@ -182,6 +195,11 @@ async def upsert_profile(login: str, email: str, update: ProfileUpdate) -> dict[
             update.dm_session_enabled
             if "dm_session_enabled" in update.model_fields_set
             else existing.get("dm_session_enabled", False)
+        ),
+        "disable_subagents": (
+            update.disable_subagents
+            if "disable_subagents" in update.model_fields_set
+            else existing.get("disable_subagents", False)
         ),
         "draft_prs": (
             update.draft_prs if update.draft_prs is not None else existing.get("draft_prs", True)

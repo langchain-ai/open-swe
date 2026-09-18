@@ -786,6 +786,7 @@ async def test_general_purpose_subagent_cannot_use_slack_tools() -> None:
         "list_threads",
         "manage_thread",
         "read_user_settings",
+        "set_subagents_enabled",
         "submit_thread_feedback",
     }
     assert parent_only_names <= parent_names
@@ -826,3 +827,19 @@ def test_workspace_slug_reads_workspace_then_environment() -> None:
     assert workspace_slug(RunConfig(workspace="oss")) == "oss"
     assert workspace_slug(RunConfig(environment="legacy")) == "legacy"
     assert workspace_slug(RunConfig()) is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("disabled", [False, True])
+async def test_subagent_preference_applies_to_existing_threads(disabled: bool) -> None:
+    from agent.middleware import ExcludeToolsMiddleware
+
+    captured = await _capture_create_deep_agent_kwargs(
+        profile={"disable_subagents": disabled},
+        thread_settings={"model_id": "openai:gpt-5.6-sol"},
+    )
+    middleware = cast(list[object], captured["middleware"])
+    exclusion = next(item for item in middleware if isinstance(item, ExcludeToolsMiddleware))
+    assert ("task" in exclusion._excluded) is disabled
+    assert ("task" in exclusion._blocked) is disabled
+    assert bool(captured["subagents"]) is not disabled

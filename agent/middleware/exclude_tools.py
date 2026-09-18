@@ -13,9 +13,13 @@ from langchain.agents.middleware.types import (
     ModelRequest,
     ModelResponse,
 )
+from langchain.tools.tool_node import ToolCallRequest
+from langchain_core.messages import ToolMessage
 from langchain_core.tools import BaseTool
+from langgraph.types import Command
 
 from agent.middleware.trace import OpenSWEMiddleware
+from agent.prompts import load_prompt
 
 
 def _tool_name(tool: BaseTool | dict[str, Any] | Any) -> str | None:
@@ -35,8 +39,22 @@ class ExcludeToolsMiddleware(OpenSWEMiddleware):
 
     state_schema = AgentState
 
-    def __init__(self, *, excluded: frozenset[str]) -> None:
+    def __init__(self, *, excluded: frozenset[str], blocked: frozenset[str] = frozenset()) -> None:
         self._excluded = excluded
+        self._blocked = blocked
+
+    async def awrap_tool_call(
+        self,
+        request: ToolCallRequest,
+        handler: Callable[[ToolCallRequest], Awaitable[ToolMessage | Command]],
+    ) -> ToolMessage | Command:
+        if request.tool_call["name"] in self._blocked:
+            return ToolMessage(
+                content=load_prompt("tools/subagents-disabled.md"),
+                tool_call_id=request.tool_call["id"],
+                status="error",
+            )
+        return await handler(request)
 
     def _filter(self, request: ModelRequest) -> ModelRequest:
         if not self._excluded:

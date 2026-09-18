@@ -25,6 +25,7 @@ async def test_read_user_settings_returns_redacted_participant_settings() -> Non
             return_value={
                 "default_model": "openai:gpt-5.6-sol",
                 "reasoning_effort": "high",
+                "disable_subagents": True,
                 "email": "private@example.com",
                 "default_repo": "private/internal",
                 "branch_prefix": "secret-prefix",
@@ -52,6 +53,7 @@ async def test_read_user_settings_returns_redacted_participant_settings() -> Non
                 "profile": {
                     "default_model": "openai:gpt-5.6-sol",
                     "reasoning_effort": "high",
+                    "disable_subagents": True,
                 },
                 "instructions": "Be concise.",
                 "connections": {
