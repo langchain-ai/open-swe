@@ -47,9 +47,10 @@ import {
   useRenameAgentThread,
   useAgentThreadPullRequestStatus,
 } from "@/features/agents/lib/queries"
+import { useSubmissionQueue } from "@langchain/react"
 import {
+  queueEntryToMessage,
   visiblePendingMessages,
-  visibleQueuedMessages,
 } from "@/features/agents/lib/queuedMessages"
 import { agentsApi } from "@/features/agents/lib/api"
 import { rejectPlan } from "@/lib/plan"
@@ -232,17 +233,25 @@ export function AgentThreadView({
     () => ({ threadId: thread.id, running: thread.status === "running" }),
     [thread.id, thread.status]
   )
+  // `thread.queuedMessages` catches producers that bypass `stream.submit()`.
+  const queueEntries = useSubmissionQueue(stream).entries
+  const queuedMessages = useMemo(() => {
+    const fromStream = queueEntries
+      .map(queueEntryToMessage)
+      .filter((message) => message != null)
+    const streamIds = new Set(fromStream.map((message) => message.id))
+    const fromServer = (thread.queuedMessages ?? []).filter(
+      (message) => !streamIds.has(message.id)
+    )
+    return [...fromStream, ...fromServer]
+  }, [queueEntries, thread.queuedMessages])
   const pendingMessages = useMemo(
-    () => visiblePendingMessages(thread.pendingMessages, baseMessages),
-    [baseMessages, thread.pendingMessages]
+    () => visiblePendingMessages(thread.pendingMessages, baseMessages, queuedMessages),
+    [baseMessages, thread.pendingMessages, queuedMessages]
   )
   const visibleMessages = useMemo(
     () => [...baseMessages, ...pendingMessages],
     [baseMessages, pendingMessages]
-  )
-  const queuedMessages = useMemo(
-    () => visibleQueuedMessages(thread.queuedMessages, visibleMessages),
-    [thread.queuedMessages, visibleMessages]
   )
   const hasMessages = visibleMessages.length > 0
   const hasConversation = hasMessages || queuedMessages.length > 0
