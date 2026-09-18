@@ -25,7 +25,6 @@ class SlackRequest(BaseModel):
     team_id: str = ""
     reply_thread_ts: str = ""
     treat_all_messages_as_mentions: bool = False
-    untagged_reply: bool = False
     message_update: bool = False
     code_channel: bool = False
     dm_session: bool = False
