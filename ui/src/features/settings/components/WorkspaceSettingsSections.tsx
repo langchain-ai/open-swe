@@ -219,7 +219,11 @@ interface ModelRowProps {
   description: string
   modelField: StringSettingField
   effortField: StringSettingField
-  /** Label of the picker's "unset" option, for roles that fall back to another role. */
+  /**
+   * Label of the picker's "unset" option on the instance, for roles that fall
+   * back to another role there. On a workspace the same option only clears the
+   * override, so it reads as inheritance instead: the instance may set a model.
+   */
   inheritLabel?: string
 }
 
@@ -251,7 +255,11 @@ function ModelRow({
           effort={settings.data?.[effortField] ?? null}
           onChange={(model, effort) => settings.save(patch(model, effort))}
           disabled={!settings.data || settings.saving}
-          inheritLabel={inheritLabel}
+          inheritLabel={
+            inheritLabel && settings.scope.kind === "workspace"
+              ? "Inherit instance setting"
+              : inheritLabel
+          }
           onInherit={
             inheritLabel
               ? () =>
@@ -369,7 +377,11 @@ export function ModelDefaultsSection({
           settings={settings}
           models={models}
           label="Open SWE Review Diff Grouping"
-          description="Model used for the review's 'AI sorted' view that groups changed files into a logical walkthrough. Falls back to the Reviewer subagent default when unset."
+          description={`Model used for the review's 'AI sorted' view that groups changed files into a logical walkthrough. ${
+            scoped
+              ? "Unset here it follows the instance setting, and only falls back to the Reviewer subagent default when the instance leaves it unset too."
+              : "Falls back to the Reviewer subagent default when unset."
+          }`}
           modelField="default_grouping_model"
           effortField="default_grouping_reasoning_effort"
           inheritLabel="Reviewer subagent default"
@@ -378,7 +390,11 @@ export function ModelDefaultsSection({
           settings={settings}
           models={models}
           label="Open SWE Review Chat"
-          description="Model used by the 'chat with this PR' assistant on the review page. Falls back to the Agent default when unset."
+          description={`Model used by the 'chat with this PR' assistant on the review page. ${
+            scoped
+              ? "Unset here it follows the instance setting, and only falls back to the Agent default when the instance leaves it unset too."
+              : "Falls back to the Agent default when unset."
+          }`}
           modelField="default_chat_model"
           effortField="default_chat_reasoning_effort"
           inheritLabel="Agent default"
