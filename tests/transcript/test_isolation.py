@@ -5,6 +5,8 @@ authorization mirror are all SQL, so an in-memory double would not be testing
 the thing that has to hold.
 """
 
+import asyncio
+from contextlib import aclosing
 from uuid import uuid7
 
 import pytest
@@ -25,9 +27,11 @@ from agent.transcript.events import (
     TurnRequested,
     TurnStarted,
 )
+from agent.transcript.listener import DELETED_VERSION, _resync_subscribers, subscribe
 from agent.transcript.mirror import mirror_thread_metadata
 from agent.transcript.routes import (
     _readable_transcript,
+    _stream,
     api_get_thread_attachment,
 )
 from agent.transcript.snapshot import load_access, load_snapshot
@@ -211,6 +215,51 @@ async def test_a_visibility_flip_reaches_the_transcript_read_path(registry_db: N
     snapshot = await load_snapshot(thread_id)
     assert snapshot is not None
     assert snapshot.thread.title == "Renamed"
+
+
+async def test_a_live_stream_ends_when_its_reader_loses_access(registry_db: None) -> None:
+    """Authorization is granted once per request; the stream outlives it."""
+    thread_id = str(uuid7())
+    await _create(thread_id, visibility="public")
+    stranger = {"sub": "someone-else", "email": "someone-else@example.com"}
+
+    async with aclosing(_stream(thread_id, 0, stranger)) as stream:
+
+        async def frame() -> str:
+            async with asyncio.timeout(10):
+                return await anext(stream)
+
+        assert "event: transcript" in await frame()
+        assert "event: synchronized" in await frame()
+
+        # The flip is itself an appended event, so it wakes the live loop.
+        await mirror_thread_metadata(thread_id, {"visibility": "private"})
+
+        assert await frame() == "event: revoked\ndata: {}\n\n"
+        with pytest.raises(StopAsyncIteration):
+            await frame()
+
+
+async def test_a_resync_reports_a_thread_deleted_while_the_listener_was_down(
+    registry_db: None,
+) -> None:
+    """A delete in another process notifies nobody here; the catch-up must."""
+    alive, gone = str(uuid7()), str(uuid7())
+    await _create(alive)
+    await _create(gone)
+    assert await delete_transcript(gone)
+
+    async with (
+        aclosing(subscribe(alive)) as alive_versions,
+        aclosing(subscribe(gone)) as gone_versions,
+    ):
+        await _resync_subscribers()
+
+        snapshot = await load_snapshot(alive)
+        assert snapshot is not None
+        async with asyncio.timeout(10):
+            assert await anext(alive_versions) == snapshot.version
+            assert await anext(gone_versions) == DELETED_VERSION
 
 
 async def test_a_routing_notice_survives_the_turn_that_produced_it(registry_db: None) -> None:

@@ -12,7 +12,7 @@ import logging
 import re
 from collections.abc import AsyncIterator
 from contextlib import aclosing
-from typing import Any
+from typing import Any, Literal
 from uuid import UUID
 
 from fastapi import APIRouter, HTTPException
@@ -52,6 +52,9 @@ _SSE_HEADERS = {
 }
 
 
+_StreamAccess = Literal["ok", "deleted", "revoked"]
+
+
 async def _readable_transcript(thread_id: str, session: dict[str, Any]) -> None:
     """Raise unless ``session`` may read this thread's transcript."""
     metadata = await load_access(thread_id)
@@ -60,7 +63,29 @@ async def _readable_transcript(thread_id: str, session: dict[str, Any]) -> None:
     assert_thread_readable(metadata, session["sub"], session.get("email"))
 
 
+async def _stream_access(thread_id: str, session: dict[str, Any]) -> _StreamAccess:
+    """Whether a live subscriber may still be served this thread.
+
+    ``assert_thread_readable`` answers a lost thread and a lost permission with
+    the same 404, which a live reader has to tell apart: the metadata row is
+    what says the transcript is gone, so the two are separated here.
+    """
+    metadata = await load_access(thread_id)
+    if metadata is None:
+        return "deleted"
+    try:
+        assert_thread_readable(metadata, session["sub"], session.get("email"))
+    except HTTPException:
+        return "revoked"
+    return "ok"
+
+
 def _frame(event: str, data: str) -> str:
+    """One SSE frame.
+
+    Two event names end a stream: ``deleted`` when the transcript is gone, and
+    ``revoked`` when the caller has lost access to a thread it was reading.
+    """
     return f"event: {event}\ndata: {data}\n\n"
 
 
@@ -108,9 +133,11 @@ async def api_stream_thread_transcript(
     after: int = 0,
     session: dict[str, Any] = SESSION_DEP,
 ) -> StreamingResponse:
+    # Checked here as well as in the loop so a caller that may not read this
+    # thread at all gets an HTTP error rather than a stream that ends at once.
     await _readable_transcript(thread_id, session)
     return StreamingResponse(
-        _stream(thread_id, after),
+        _stream(thread_id, after, session),
         media_type="text/event-stream",
         headers=_SSE_HEADERS,
     )
@@ -159,8 +186,13 @@ async def api_get_thread_attachment(
     )
 
 
-async def _stream(thread_id: str, after: int) -> AsyncIterator[str]:
-    """Replay, then live. Subscribing happens first so nothing falls in the gap."""
+async def _stream(thread_id: str, after: int, session: dict[str, Any]) -> AsyncIterator[str]:
+    """Replay, then live. Subscribing happens first so nothing falls in the gap.
+
+    A live stream outlives the authorization that opened it, so access is read
+    again before every query: a thread flipped to private mid-stream ends the
+    reader's stream with ``revoked`` instead of going on feeding it events.
+    """
     async with aclosing(listener.subscribe(thread_id)) as notifications:
         replayed = await _replay(thread_id, after)
         if replayed is None:
@@ -195,6 +227,10 @@ async def _stream(thread_id: str, after: int) -> AsyncIterator[str]:
                 # remainder waiting on the next append that may never come,
                 # and the ``turn.completed`` that ended the burst with it.
                 while True:
+                    access = await _stream_access(thread_id, session)
+                    if access != "ok":
+                        yield _frame(access, "{}")
+                        return
                     events = await load_events(thread_id, after=last_sent, limit=_REPLAY_PAGE)
                     for event in events:
                         yield _frame("transcript", event.model_dump_json())

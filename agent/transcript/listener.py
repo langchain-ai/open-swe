@@ -145,6 +145,11 @@ async def _resync_subscribers() -> None:
     While the listener was disconnected, an append in another process notified
     nobody here. A subscriber reads rows by version, so handing it the current
     head is enough to carry it past everything it missed.
+
+    A subscribed thread with no row at all lost its ``deleted`` notification
+    the same way, and would otherwise sit on heartbeats forever: a subscriber
+    registers before it replays, so a missing head means the thread is gone
+    rather than not yet written.
     """
     thread_ids = tuple(_SUBSCRIBERS)
     if not thread_ids:
@@ -156,9 +161,9 @@ async def _resync_subscribers() -> None:
             ).bindparams(bindparam("thread_ids", type_=ARRAY(Text))),
             {"thread_ids": list(thread_ids)},
         )
-        heads = [(row.thread_id, row.version) for row in rows]
-    for thread_id, version in heads:
-        publish(thread_id, version)
+        heads = {row.thread_id: row.version for row in rows}
+    for thread_id in thread_ids:
+        publish(thread_id, heads.get(thread_id, DELETED_VERSION))
 
 
 async def _listen_forever() -> None:
