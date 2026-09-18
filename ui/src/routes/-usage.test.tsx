@@ -171,7 +171,7 @@ it("shows delivery lag separately from suppression, then refreshes to a populate
   expect(
     screen.getByLabelText("Analytics coverage").querySelector("details")?.open
   ).toBe(true)
-  expect(screen.getAllByText(/Last event processed/).length).toBeGreaterThan(0)
+  expect(screen.getAllByText(/Last event processed/).length).toBe(1)
   client.clear()
 })
 
@@ -698,6 +698,7 @@ it("shows usage metrics but removes stale results when a refresh becomes unavail
         invocations: 12,
         prs_opened: 8,
         merged_prs: 4,
+        merged_prs_per_thread: 0.25,
         agent_loc: 35,
         additions: 50,
         deletions: 15,
@@ -716,6 +717,7 @@ it("shows usage metrics but removes stale results when a refresh becomes unavail
   expect(screen.getByText("1,234")).toBeTruthy()
   expect(screen.getByText("$2.50")).toBeTruthy()
   expect(screen.getByText("2m")).toBeTruthy()
+  expect(screen.getByText("0.25")).toBeTruthy()
   expect(screen.getByTitle("50 additions, 15 deletions").textContent).toBe("35")
   expect(screen.getByText("7 human replies tracked")).toBeTruthy()
 
@@ -836,6 +838,44 @@ const costRow: UsageLeaderboardRow = {
   invocations_with_partial_cost: 0,
   avg_invocation_seconds: 90,
 }
+
+it.each([
+  [5, 2, "2.5"],
+  [0, 0, "—"],
+  [5, undefined, "—"],
+])(
+  "shows average invocations per thread for %s invocations and %s threads",
+  async (invocations, threads, expected) => {
+    vi.mocked(api.usageLeaderboard).mockResolvedValue({
+      ...emptyUsage,
+      total_members: 1,
+      rows: [{ ...costRow, invocations, threads }],
+    })
+    const client = mountReport()
+    const header = await screen.findByRole("columnheader", {
+      name: "Avg Invocations / Thread",
+    })
+    const table = header.closest("table")!
+    expect(within(table).getAllByRole("row")[1]?.children[4]?.textContent).toBe(
+      expected
+    )
+    fireEvent.click(within(header).getByRole("button"))
+    await waitFor(() =>
+      expect(api.usageLeaderboard).toHaveBeenLastCalledWith(
+        "30d",
+        10,
+        undefined,
+        "avg_invocations_per_thread",
+        "desc"
+      )
+    )
+    fireEvent.click(screen.getByRole("button", { name: "threads" }))
+    expect(within(table).getAllByRole("row")[1]?.children[4]?.textContent).toBe(
+      expected
+    )
+    client.clear()
+  }
+)
 
 it.each([
   ["Invocations", "Threads", "invocations", "threads"],
@@ -972,6 +1012,7 @@ it("keeps sort controls focused while loading and prevents using a stale page cu
 // Counts are most interesting highest-first; names and ranks read best ascending.
 it.each([
   ["Invocations", "invocations", "desc", "asc"],
+  ["Merged PRs / Thread", "merged_prs_per_thread", "desc", "asc"],
   ["User", "user", "asc", "desc"],
 ] as const)(
   "sorts %s from its natural direction and toggles on the next click",
@@ -1081,7 +1122,9 @@ it.each([
     })
     const client = mountReport()
     const row = (await screen.findByText("Cost Reader")).closest("tr")!
-    expect(within(row).getByText(amount)).toBeTruthy()
+    expect(
+      within(row.children[6] as HTMLElement).getByText(amount)
+    ).toBeTruthy()
     const indicator = within(row).queryByRole("button", {
       name: /Cost (unavailable|incomplete)/,
     })

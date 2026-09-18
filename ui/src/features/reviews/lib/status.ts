@@ -25,13 +25,17 @@ export function overallStatus(pr: OpenPullRequest) {
 // author has to act on, and they outlive the draft flag.
 export function statusLabels(pr: OpenPullRequest): string[] {
   const status = overallStatus(pr)
-  if (status !== "Draft") return [status]
+  // The missing approval is why the merge action is gone, so say so alongside
+  // whatever else the PR is waiting on.
+  const review = pr.reviewRequired ? ["Review required"] : []
+  if (status !== "Draft") return [status, ...review]
   return [
     status,
     ...(pr.mergeable === false || pr.mergeState === "dirty"
       ? ["Conflicted"]
       : []),
     ...(pr.ci === "failing" ? ["Failing"] : []),
+    ...review,
   ]
 }
 
@@ -43,6 +47,8 @@ export const statusTones: Record<string, string> = {
   Approved:
     "border-emerald-600/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400",
   Pending:
+    "border-amber-600/30 bg-amber-500/10 text-amber-700 dark:text-amber-400",
+  "Review required":
     "border-amber-600/30 bg-amber-500/10 text-amber-700 dark:text-amber-400",
   Reviewable: "border-sky-600/30 bg-sky-500/10 text-sky-700 dark:text-sky-400",
 }
@@ -62,8 +68,9 @@ export function hasUnresolvedConversations(pr: OpenPullRequest) {
 // Offer the merge unless GitHub has already refused it. It enforces rules the
 // dashboard cannot see — an unresolved conversation, say — so an attempt that
 // only might fail is still worth offering, and its refusal is the answer. A
-// conflict or a draft is not a guess: those merges are certain to be rejected.
+// conflict, a draft, or a missing required approval is not a guess: those
+// merges are certain to be rejected.
 export function canAttemptMerge(pr: OpenPullRequest) {
-  if (pr.draft === true) return false
+  if (pr.draft === true || pr.reviewRequired) return false
   return pr.mergeable !== false && pr.mergeState !== "dirty"
 }

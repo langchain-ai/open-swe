@@ -298,12 +298,14 @@ export type UsageLeaderboardSort =
   | "favorite_model"
   | "invocations"
   | "threads"
+  | "avg_invocations_per_thread"
   | "total_tokens"
   | "total_cost_usd"
   | "avg_invocation_seconds"
   | "avg_thread_seconds"
   | "prs_opened"
   | "merged_prs"
+  | "merged_prs_per_thread"
   | "agent_loc"
 export type SortDirection = "asc" | "desc"
 
@@ -334,6 +336,7 @@ export interface UsageLeaderboardRow {
   agent_runs?: number
   prs_opened: number
   merged_prs: number
+  merged_prs_per_thread?: number
   agent_loc: number
   additions: number
   deletions: number
@@ -507,15 +510,6 @@ export interface OrganizationSkillsPage {
   next_cursor: string | null
 }
 
-export interface SandboxSettings {
-  base_snapshot_id: string | null
-  env_base_snapshot_id: string | null
-  effective_base_snapshot_id: string | null
-  base_snapshot_source: "admin" | "env" | "unset"
-  updated_at: string | null
-  updated_by: string | null
-}
-
 /** What a non-admin needs to pick a workspace for a new thread. */
 export type WorkspaceRefreshStatus =
   | "never"
@@ -667,6 +661,8 @@ export interface OpenPullRequest {
   headSha: string | null
   headRef: string | null
   reviewDecision: "approved" | "changes_requested" | "none" | null
+  // Branch protection still wants an approval this PR does not have.
+  reviewRequired: boolean
   statusAvailable: boolean
   createdAt: string | null
   updatedAt: string | null
@@ -978,12 +974,6 @@ export const api = {
   deleteAgentInstructions: (full_name: string) =>
     request<void>(`/agent-instructions/${encodeURIComponent(full_name)}`, {
       method: "DELETE",
-    }),
-  getSandboxSettings: () => request<SandboxSettings>("/sandbox-settings"),
-  saveSandboxSettings: (base_snapshot_id: string | null) =>
-    request<SandboxSettings>("/sandbox-settings", {
-      method: "PUT",
-      body: JSON.stringify({ base_snapshot_id }),
     }),
   listWorkspaceOptions: () =>
     request<WorkspaceOptionList>("/workspaces/options"),

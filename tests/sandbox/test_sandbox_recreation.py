@@ -93,18 +93,13 @@ async def test_base_source_skips_workspace_lookup_entirely() -> None:
     """An absent slug still resolves the `default` workspace, so base must not rely on it."""
     from agent.sandboxes.lifecycle import SandboxCreateConfig
 
-    with (
-        patch("agent.sandboxes.lifecycle.load_workspace", new_callable=AsyncMock) as load_workspace,
-        patch(
-            "agent.sandboxes.lifecycle.get_admin_base_snapshot_id",
-            new_callable=AsyncMock,
-            return_value="snapshot-base",
-        ),
-    ):
+    with patch(
+        "agent.sandboxes.lifecycle.load_workspace", new_callable=AsyncMock
+    ) as load_workspace:
         config = await SandboxCreateConfig.resolve("langchainplus", source="base")
 
     load_workspace.assert_not_awaited()
-    assert config.snapshot_id == "snapshot-base"
+    assert config.snapshot_id is None
     assert config.workspace is None
     assert config.create_params == {}
 

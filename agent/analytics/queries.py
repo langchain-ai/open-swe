@@ -21,12 +21,14 @@ UsageSort = Literal[
     "favorite_model",
     "invocations",
     "threads",
+    "avg_invocations_per_thread",
     "total_tokens",
     "total_cost_usd",
     "avg_invocation_seconds",
     "avg_thread_seconds",
     "prs_opened",
     "merged_prs",
+    "merged_prs_per_thread",
     "agent_loc",
 ]
 SortDirection = Literal["asc", "desc"]
@@ -431,6 +433,9 @@ WITH runs AS (
           OR (:current_email <> '' AND lower(d.email) = :current_email)) IS TRUE AS is_current,
         COALESCE(r.invocations, 0) AS invocations,
         COALESCE(r.threads, 0) AS threads,
+        CASE WHEN COALESCE(r.threads, 0) > 0
+            THEN r.invocations::numeric / r.threads ELSE 0 END
+            AS avg_invocations_per_thread,
         COALESCE(r.total_tokens, 0) AS total_tokens,
         COALESCE(r.total_cost_usd, 0) AS total_cost_usd,
         COALESCE(r.invocations_without_cost, 0) AS invocations_without_cost,
@@ -441,6 +446,9 @@ WITH runs AS (
         e.configured_effort AS favorite_model_effort,
         COALESCE(pr.prs_opened, 0) AS prs_opened,
         COALESCE(pr.merged_prs, 0) AS merged_prs,
+        CASE WHEN COALESCE(r.threads, 0) > 0
+            THEN COALESCE(pr.merged_prs, 0)::numeric / r.threads ELSE 0
+        END AS merged_prs_per_thread,
         COALESCE(pr.additions, 0) AS additions,
         COALESCE(pr.deletions, 0) AS deletions,
         COALESCE(pr.agent_loc, 0) AS agent_loc
@@ -484,12 +492,14 @@ WITH runs AS (
             WHEN 'rank' THEN rank::numeric
             WHEN 'invocations' THEN invocations::numeric
             WHEN 'threads' THEN threads::numeric
+            WHEN 'avg_invocations_per_thread' THEN avg_invocations_per_thread
             WHEN 'total_tokens' THEN total_tokens::numeric
             WHEN 'total_cost_usd' THEN total_cost_usd::numeric
             WHEN 'avg_invocation_seconds' THEN avg_invocation_seconds::numeric
             WHEN 'avg_thread_seconds' THEN avg_thread_seconds::numeric
             WHEN 'prs_opened' THEN prs_opened::numeric
             WHEN 'merged_prs' THEN merged_prs::numeric
+            WHEN 'merged_prs_per_thread' THEN merged_prs_per_thread
             WHEN 'agent_loc' THEN agent_loc::numeric
         END AS numeric_key
     FROM ranked
@@ -517,7 +527,9 @@ WITH runs AS (
             'avg_thread_seconds', avg_thread_seconds,
             'avg_run_seconds', avg_invocation_seconds,
             'agent_runs', invocations, 'invocations', invocations, 'threads', threads,
+            'avg_invocations_per_thread', avg_invocations_per_thread,
             'prs_opened', prs_opened, 'merged_prs', merged_prs,
+            'merged_prs_per_thread', merged_prs_per_thread,
             'agent_loc', agent_loc, 'additions', additions, 'deletions', deletions,
             'total_tokens', total_tokens, 'total_cost_usd', total_cost_usd,
             'invocations_without_cost', invocations_without_cost,

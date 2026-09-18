@@ -1,8 +1,10 @@
 """Live GitHub pull-request health for dashboard threads."""
 
 import asyncio
+import logging
 import re
 from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any, Literal
 
@@ -18,6 +20,8 @@ from agent.github.http import (
     github_request,
 )
 
+logger = logging.getLogger(__name__)
+
 _OWNER_PATTERN = re.compile(r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?")
 _REPO_PATTERN = re.compile(r"[A-Za-z0-9._-]{1,100}")
 _SEARCH_PAGE_SIZE = 100
@@ -30,6 +34,16 @@ _FAILING_CHECK_CONCLUSIONS = frozenset(
     {"failure", "timed_out", "action_required", "startup_failure"}
 )
 _INCONCLUSIVE_CHECK_CONCLUSIONS = frozenset({"cancelled", "stale", "skipped", "neutral"})
+_MERGEABILITY_QUERY = """
+query PullRequestMergeability($owner: String!, $repo: String!, $number: Int!) {
+  repository(owner: $owner, name: $repo) {
+    pullRequest(number: $number) {
+      mergeable
+      mergeStateStatus
+    }
+  }
+}
+"""
 _REVIEW_THREADS_QUERY = """
 query PullRequestReviewThreads($owner: String!, $repo: String!, $number: Int!, $cursor: String) {
   repository(owner: $owner, name: $repo) {
@@ -58,6 +72,7 @@ _THREAD_COUNT_QUERY = """
 query PullRequestThreadCount($owner: String!, $repo: String!, $number: Int!, $cursor: String) {
   repository(owner: $owner, name: $repo) {
     pullRequest(number: $number) {
+      reviewDecision
       reviewThreads(first: 100, after: $cursor) {
         pageInfo { hasNextPage endCursor }
         nodes { isResolved }
@@ -91,6 +106,7 @@ class OpenPullRequest(BaseModel):
     status_available: bool = False
     ci: CheckState = "unknown"
     review_decision: ReviewDecision | None = None
+    review_required: bool = False
     unresolved_threads: int | None = None
     failing_checks: list[str] = Field(default_factory=list)
     pending_checks: list[str] = Field(default_factory=list)
@@ -318,6 +334,71 @@ def _normalize_checks(
     return failing, pending, inconclusive
 
 
+@dataclass(frozen=True, slots=True)
+class Mergeability:
+    """GitHub's verdict on whether a pull request can merge."""
+
+    mergeable: bool | None
+    merge_state: str
+
+
+async def fetch_mergeability(
+    client: httpx2.AsyncClient, owner: str, repo: str, number: int
+) -> Mergeability | None:
+    """Mergeability over GraphQL, or ``None`` when GitHub could not answer.
+
+    REST answers ``mergeable: null`` whenever its cached verdict has expired,
+    and only starts recomputing it; GraphQL waits for that computation, so a
+    single read usually gets the real answer.
+    """
+    try:
+        response = await github_request(
+            client,
+            "POST",
+            GITHUB_GRAPHQL,
+            json={
+                "query": _MERGEABILITY_QUERY,
+                "variables": {"owner": owner, "repo": repo, "number": number},
+            },
+        )
+        response.raise_for_status()
+        payload = response.json()
+    except httpx2.HTTPError, ValueError:
+        logger.warning(
+            "Mergeability query failed; falling back to what REST reported",
+            extra={"pr_repo_full_name": f"{owner}/{repo}", "pr_number": number},
+            exc_info=True,
+        )
+        return None
+    if not isinstance(payload, Mapping) or payload.get("errors"):
+        logger.warning(
+            "Mergeability query answered with errors; falling back to what REST reported",
+            extra={
+                "pr_repo_full_name": f"{owner}/{repo}",
+                "pr_number": number,
+                "graphql_errors": payload.get("errors") if isinstance(payload, Mapping) else None,
+            },
+        )
+        return None
+    data = payload.get("data")
+    repository = data.get("repository") if isinstance(data, Mapping) else None
+    pull = repository.get("pullRequest") if isinstance(repository, Mapping) else None
+    if not isinstance(pull, Mapping):
+        logger.warning(
+            "Mergeability query answered without a pull request",
+            extra={"pr_repo_full_name": f"{owner}/{repo}", "pr_number": number},
+        )
+        return None
+    mergeable = pull.get("mergeable")
+    merge_state = pull.get("mergeStateStatus")
+    return Mergeability(
+        mergeable={"MERGEABLE": True, "CONFLICTING": False}.get(
+            mergeable if isinstance(mergeable, str) else ""
+        ),
+        merge_state=merge_state.lower() if isinstance(merge_state, str) else "",
+    )
+
+
 async def fetch_unresolved_review_threads(
     client: httpx2.AsyncClient, owner: str, repo: str, number: int
 ) -> list[dict[str, Any]] | None:
@@ -390,11 +471,26 @@ async def fetch_unresolved_review_threads(
         return None
 
 
-async def _fetch_unresolved_thread_count(
+@dataclass(frozen=True, slots=True)
+class ReviewState:
+    """A pull request's outstanding review work.
+
+    ``unresolved_threads`` is ``None`` when the threads could not be read, which
+    is not the same answer as none being unresolved. ``review_required`` says
+    branch protection still wants an approval that the PR does not have; an
+    unreadable answer leaves it false so the merge stays on offer.
+    """
+
+    unresolved_threads: int | None
+    review_required: bool = False
+
+
+async def _fetch_review_state(
     client: httpx2.AsyncClient, owner: str, repo: str, number: int
-) -> int | None:
-    """Count review threads GitHub still considers unresolved, or ``None`` if unreadable."""
+) -> ReviewState:
+    """Read a pull request's review requirement and its unresolved review threads."""
     unresolved = 0
+    review_required = False
     cursor: str | None = None
     seen_cursors: set[str] = set()
     try:
@@ -416,16 +512,18 @@ async def _fetch_unresolved_thread_count(
             response.raise_for_status()
             payload = response.json()
             if not isinstance(payload, dict) or payload.get("errors"):
-                return None
+                return ReviewState(None, review_required)
             data = payload.get("data")
             repository = data.get("repository") if isinstance(data, dict) else None
             pull = repository.get("pullRequest") if isinstance(repository, dict) else None
-            threads = pull.get("reviewThreads") if isinstance(pull, dict) else None
+            if isinstance(pull, Mapping):
+                review_required = pull.get("reviewDecision") == "REVIEW_REQUIRED"
+            threads = pull.get("reviewThreads") if isinstance(pull, Mapping) else None
             if not isinstance(threads, Mapping):
-                return None
+                return ReviewState(None, review_required)
             nodes = threads.get("nodes")
             if not isinstance(nodes, list):
-                return None
+                return ReviewState(None, review_required)
             unresolved += sum(
                 1
                 for thread in nodes
@@ -433,14 +531,14 @@ async def _fetch_unresolved_thread_count(
             )
             page_info = threads.get("pageInfo")
             if not isinstance(page_info, dict) or page_info.get("hasNextPage") is not True:
-                return unresolved
+                return ReviewState(unresolved, review_required)
             next_cursor = page_info.get("endCursor")
             if not isinstance(next_cursor, str) or not next_cursor or next_cursor in seen_cursors:
-                return None
+                return ReviewState(None, review_required)
             seen_cursors.add(next_cursor)
             cursor = next_cursor
     except httpx2.HTTPError, ValueError:
-        return None
+        return ReviewState(None, review_required)
 
 
 async def _pull_request_status(client: httpx2.AsyncClient, record: object) -> dict[str, Any]:
@@ -668,14 +766,15 @@ async def load_open_pull_request(
     if sha is None or not _SHA_PATTERN.fullmatch(sha):
         return result
     result.head_sha = sha
-    runs, statuses, decision, unresolved_threads = await asyncio.gather(
+    runs, statuses, decision, review_state = await asyncio.gather(
         _fetch_check_runs(client, owner, name, sha),
         _fetch_commit_statuses(client, owner, name, sha),
         _fetch_review_decision(client, owner, name, number),
-        _fetch_unresolved_thread_count(client, owner, name, number),
+        _fetch_review_state(client, owner, name, number),
     )
     result.review_decision = decision
-    result.unresolved_threads = unresolved_threads
+    result.review_required = review_state.review_required
+    result.unresolved_threads = review_state.unresolved_threads
     if runs is None or statuses is None:
         return result
     failed, _, _ = _normalize_checks(runs, statuses)

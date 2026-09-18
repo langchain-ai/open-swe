@@ -25,7 +25,6 @@ import { Route as AgentsIndexRouteImport } from './routes/agents/index'
 import { Route as AgentsThreadIdRouteImport } from './routes/agents/$threadId'
 import { Route as AgentsSkillsRouteImport } from './routes/agents/skills'
 import { Route as AgentsInstructionsRouteImport } from './routes/agents_.instructions'
-import { Route as AgentsSandboxRouteImport } from './routes/agents_.sandbox'
 import { Route as AgentsWorkspacesRouteImport } from './routes/agents_.workspaces'
 import { Route as IncidentsIndexRouteImport } from './routes/incidents/index'
 import { Route as IncidentsIncidentIdRouteImport } from './routes/incidents/$incidentId'
@@ -120,11 +119,6 @@ const AgentsInstructionsRoute = AgentsInstructionsRouteImport.update({
   path: '/agents/instructions',
   getParentRoute: () => rootRouteImport,
 } as any)
-const AgentsSandboxRoute = AgentsSandboxRouteImport.update({
-  id: '/agents_/sandbox',
-  path: '/agents/sandbox',
-  getParentRoute: () => rootRouteImport,
-} as any)
 const AgentsWorkspacesRoute = AgentsWorkspacesRouteImport.update({
   id: '/agents_/workspaces',
   path: '/agents/workspaces',
@@ -209,7 +203,6 @@ export interface FileRoutesByFullPath {
   '/agents/$threadId': typeof AgentsThreadIdRoute
   '/agents/skills': typeof AgentsSkillsRoute
   '/agents/instructions': typeof AgentsInstructionsRoute
-  '/agents/sandbox': typeof AgentsSandboxRoute
   '/agents/workspaces': typeof AgentsWorkspacesRoute
   '/incidents/$incidentId': typeof IncidentsIncidentIdRoute
   '/review/styles': typeof ReviewStylesRoute
@@ -239,7 +232,6 @@ export interface FileRoutesByTo {
   '/agents/$threadId': typeof AgentsThreadIdRoute
   '/agents/skills': typeof AgentsSkillsRoute
   '/agents/instructions': typeof AgentsInstructionsRoute
-  '/agents/sandbox': typeof AgentsSandboxRoute
   '/agents/workspaces': typeof AgentsWorkspacesRoute
   '/incidents/$incidentId': typeof IncidentsIncidentIdRoute
   '/review/styles': typeof ReviewStylesRoute
@@ -272,7 +264,6 @@ export interface FileRoutesById {
   '/agents/$threadId': typeof AgentsThreadIdRoute
   '/agents/skills': typeof AgentsSkillsRoute
   '/agents_/instructions': typeof AgentsInstructionsRoute
-  '/agents_/sandbox': typeof AgentsSandboxRoute
   '/agents_/workspaces': typeof AgentsWorkspacesRoute
   '/incidents/$incidentId': typeof IncidentsIncidentIdRoute
   '/review_/styles': typeof ReviewStylesRoute
@@ -306,7 +297,6 @@ export interface FileRouteTypes {
     | '/agents/$threadId'
     | '/agents/skills'
     | '/agents/instructions'
-    | '/agents/sandbox'
     | '/agents/workspaces'
     | '/incidents/$incidentId'
     | '/review/styles'
@@ -336,7 +326,6 @@ export interface FileRouteTypes {
     | '/agents/$threadId'
     | '/agents/skills'
     | '/agents/instructions'
-    | '/agents/sandbox'
     | '/agents/workspaces'
     | '/incidents/$incidentId'
     | '/review/styles'
@@ -368,7 +357,6 @@ export interface FileRouteTypes {
     | '/agents/$threadId'
     | '/agents/skills'
     | '/agents_/instructions'
-    | '/agents_/sandbox'
     | '/agents_/workspaces'
     | '/incidents/$incidentId'
     | '/review_/styles'
@@ -399,7 +387,6 @@ export interface RootRouteChildren {
   WorkspacesRoute: typeof WorkspacesRoute
   AdminEvalsRoute: typeof AdminEvalsRoute
   AgentsInstructionsRoute: typeof AgentsInstructionsRoute
-  AgentsSandboxRoute: typeof AgentsSandboxRoute
   AgentsWorkspacesRoute: typeof AgentsWorkspacesRoute
   ReviewStylesRoute: typeof ReviewStylesRoute
   ReviewRepositoriesOwnerRoute: typeof ReviewRepositoriesOwnerRoute
@@ -518,13 +505,6 @@ declare module '@tanstack/react-router' {
       path: '/agents/instructions'
       fullPath: '/agents/instructions'
       preLoaderRoute: typeof AgentsInstructionsRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/agents_/sandbox': {
-      id: '/agents_/sandbox'
-      path: '/agents/sandbox'
-      fullPath: '/agents/sandbox'
-      preLoaderRoute: typeof AgentsSandboxRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/agents_/workspaces': {
@@ -678,7 +658,6 @@ const rootRouteChildren: RootRouteChildren = {
   WorkspacesRoute: WorkspacesRoute,
   AdminEvalsRoute: AdminEvalsRoute,
   AgentsInstructionsRoute: AgentsInstructionsRoute,
-  AgentsSandboxRoute: AgentsSandboxRoute,
   AgentsWorkspacesRoute: AgentsWorkspacesRoute,
   ReviewStylesRoute: ReviewStylesRoute,
   ReviewRepositoriesOwnerRoute: ReviewRepositoriesOwnerRoute,
