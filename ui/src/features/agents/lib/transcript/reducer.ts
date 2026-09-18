@@ -42,7 +42,7 @@ import type {
   NoticeKind,
   StoredEvent,
   ToolCallStatus,
-  TranscriptImage,
+  TranscriptAttachment,
   TranscriptMessageRow,
   TranscriptSnapshot,
   TranscriptThreadStatus,
@@ -59,7 +59,7 @@ export interface TranscriptMessageState {
   text: string
   reasoning: string
   namespace: Namespace
-  images: ReadonlyArray<TranscriptImage>
+  attachments: ReadonlyArray<TranscriptAttachment>
   createdAt: string
 }
 
@@ -171,7 +171,7 @@ function indexMessages(
       text: row.text,
       reasoning: row.reasoning,
       namespace: row.namespace,
-      images: row.images ?? [],
+      attachments: row.attachments ?? [],
       createdAt: row.created_at,
     }
   }
@@ -478,7 +478,7 @@ export function applyEvent(
         text: payload.text,
         reasoning: "",
         namespace: [],
-        images: payload.images,
+        attachments: payload.attachments,
         createdAt: at,
       })
       break
@@ -530,7 +530,7 @@ export function applyEvent(
         text: (existing?.text ?? "") + (payload.text ?? ""),
         reasoning: (existing?.reasoning ?? "") + (payload.reasoning ?? ""),
         namespace: payload.namespace,
-        images: existing?.images ?? [],
+        attachments: existing?.attachments ?? [],
         createdAt: existing?.createdAt ?? at,
       })
       break
@@ -547,7 +547,7 @@ export function applyEvent(
         text: payload.text,
         reasoning: payload.reasoning,
         namespace: payload.namespace,
-        images: payload.images ?? existing?.images ?? [],
+        attachments: payload.attachments ?? existing?.attachments ?? [],
         createdAt: payload.created_at || existing?.createdAt || at,
       })
       if (payload.role === "ai") {
@@ -699,17 +699,17 @@ function toolChunk(
 }
 
 /**
- * The images a message carries, as chunks a renderer can show: an attachment
- * is fetched from our own API with the session, a bare `url` is a remote
- * reference the browser loads itself, and an image with neither has no bytes
+ * The attachments a message carries, as chunks a renderer can show: an
+ * attachment is fetched from our own API with the session, a bare `url` is a
+ * remote reference the browser loads itself, and one with neither has no bytes
  * to show.
  */
 function imageChunks(
   threadId: string,
-  images: ReadonlyArray<TranscriptImage>
+  attachments: ReadonlyArray<TranscriptAttachment>
 ): Array<AnyImageChunk> {
   const chunks: Array<AnyImageChunk> = []
-  for (const image of images) {
+  for (const image of attachments) {
     const source = image.attachment_id
       ? {
           url: attachmentUrl(threadId, image.attachment_id),
@@ -766,7 +766,7 @@ function buildHumanMessage(
   // context, once as the `slack_thread_reply` call that sent them.
   if (entity?.senderType === "self") return null
   const text = parsed.content
-  const chunks: Array<Chunk> = imageChunks(threadId, row.images)
+  const chunks: Array<Chunk> = imageChunks(threadId, row.attachments)
   if (text.trim()) chunks.push({ kind: "text", text })
   if (!chunks.length) return null
   return {
@@ -880,7 +880,7 @@ function turnMessages(
       const chunks: Array<Chunk> = []
       const reasoning = row.reasoning.trim()
       if (reasoning) chunks.push({ kind: "reasoning", text: reasoning })
-      chunks.push(...imageChunks(state.threadId, row.images))
+      chunks.push(...imageChunks(state.threadId, row.attachments))
       const text = row.text.trim()
       if (text) chunks.push({ kind: "text", text })
       append(row.messageId, row.createdAt, chunks)
