@@ -49,7 +49,6 @@ import type {
   TranscriptToolCallRow,
   TranscriptTurnPage,
   TranscriptTurnRow,
-  TranscriptUsage,
   TurnState,
 } from "./types"
 
@@ -160,70 +159,22 @@ function humanTexts(
     .map((message) => message.text)
 }
 
-/**
- * The entities after one human message was written. Only that message's own
- * text can declare one, so a write that declares nothing keeps the very same
- * Map: every per-turn render cache keys on it, and a fresh Map for an
- * unchanged set would rebuild the whole transcript.
- */
-function entitiesWith(
-  previous: ReadonlyMap<string, StructuredEntity>,
-  text: string
-): ReadonlyMap<string, StructuredEntity> {
-  const declared = collectStructuredEntities([text])
-  if (!declared.size) return previous
-  return new Map([...previous, ...declared])
-}
-
-/**
- * Context size as the composer's meter reads it: what the newest AI message's
- * usage says, which is the same rule {@link latestContextTokens} applies to the
- * SDK's messages.
- */
-function contextTokensOf(
-  messages: ReadonlyArray<{ role: MessageRole; usage: TranscriptUsage | null }>
-): number | null {
-  for (let index = messages.length - 1; index >= 0; index -= 1) {
-    const message = messages[index]
-    if (!message || message.role !== "ai") continue
-    return contextTokensFromUsageMetadata(message.usage)
-  }
-  return null
-}
-
-function messageState(row: TranscriptMessageRow): TranscriptMessageState {
-  return {
-    messageId: row.message_id,
-    turnId: row.turn_id,
-    role: row.role,
-    text: row.text,
-    reasoning: row.reasoning,
-    namespace: row.namespace,
-    images: row.images ?? [],
-    createdAt: row.created_at,
-  }
-}
-
-function toolCallState(row: TranscriptToolCallRow): TranscriptToolCallState {
-  return {
-    toolCallId: row.tool_call_id,
-    turnId: row.turn_id,
-    name: row.name,
-    input: row.input,
-    status: row.status,
-    output: row.output_preview,
-    outputComplete: false,
-    hasOutput: row.has_output,
-    namespace: row.namespace,
-    startedAt: row.started_at,
-  }
-}
-
 function indexMessages(
   rows: ReadonlyArray<TranscriptMessageRow>
 ): Record<string, TranscriptMessageState> {
   const messages: Record<string, TranscriptMessageState> = {}
-  for (const row of rows) messages[row.message_id] = messageState(row)
+  for (const row of rows) {
+    messages[row.message_id] = {
+      messageId: row.message_id,
+      turnId: row.turn_id,
+      role: row.role,
+      text: row.text,
+      reasoning: row.reasoning,
+      namespace: row.namespace,
+      images: row.images ?? [],
+      createdAt: row.created_at,
+    }
+  }
   return messages
 }
 
@@ -231,7 +182,20 @@ function indexToolCalls(
   rows: ReadonlyArray<TranscriptToolCallRow>
 ): Record<string, TranscriptToolCallState> {
   const toolCalls: Record<string, TranscriptToolCallState> = {}
-  for (const row of rows) toolCalls[row.tool_call_id] = toolCallState(row)
+  for (const row of rows) {
+    toolCalls[row.tool_call_id] = {
+      toolCallId: row.tool_call_id,
+      turnId: row.turn_id,
+      name: row.name,
+      input: row.input,
+      status: row.status,
+      output: row.output_preview,
+      outputComplete: false,
+      hasOutput: row.has_output,
+      namespace: row.namespace,
+      startedAt: row.started_at,
+    }
+  }
   return toolCalls
 }
 
@@ -299,8 +263,10 @@ export function fromSnapshot(snapshot: TranscriptSnapshot): TranscriptState {
     notices,
     olderCursor: snapshot.older_cursor,
     // `snapshot.messages` is ordered by `created_at`, so the last AI row is the
-    // newest one.
-    contextTokens: contextTokensOf(snapshot.messages),
+    // newest one, and its usage is what the composer's meter reads.
+    contextTokens: contextTokensFromUsageMetadata(
+      snapshot.messages.findLast((message) => message.role === "ai")?.usage
+    ),
     entities: collectStructuredEntities(humanTexts(messages)),
   }
 }
@@ -373,20 +339,22 @@ interface Draft {
 }
 
 /**
- * The turn `turn.started` opens. Only that event may fabricate one: a run
- * started elsewhere, or a replay that began mid-turn, still belongs somewhere
- * in order. Every other turn-scoped event concerns a turn the client has.
+ * The turn an opening event concerns. Only `turn.requested` and `turn.started`
+ * may fabricate one: a run started elsewhere, or a replay that began mid-turn,
+ * still belongs somewhere in order. Every other turn-scoped event concerns a
+ * turn the client already has.
  */
-function startedTurn(
+function ensureTurn(
   draft: Draft,
   turnId: string,
+  state: TurnState,
   occurredAt: string
 ): TranscriptTurnState {
   const existing = draft.state.turns[turnId]
   if (existing) return existing
   const turn: TranscriptTurnState = {
     turnId,
-    state: "running",
+    state,
     requestedAt: occurredAt,
     error: null,
     items: [],
@@ -434,11 +402,15 @@ function putMessage(
   }
   draft.touched.add(turn.turnId)
   addItem(draft, turn, { kind: "message", id: message.messageId })
-  if (message.role === "human") {
-    draft.state = {
-      ...draft.state,
-      entities: entitiesWith(draft.state.entities, message.text),
-    }
+  if (message.role !== "human") return
+  // Only a human message's own text can declare an entity, and a write that
+  // declares none keeps the very same Map: every per-turn render cache keys on
+  // it, and a fresh Map for an unchanged set would rebuild the whole transcript.
+  const declared = collectStructuredEntities([message.text])
+  if (!declared.size) return
+  draft.state = {
+    ...draft.state,
+    entities: new Map([...draft.state.entities, ...declared]),
   }
 }
 
@@ -493,25 +465,9 @@ export function applyEvent(
   switch (event.event_type) {
     case "turn.requested": {
       const payload = event.payload
+      const turn = ensureTurn(draft, payload.turn_id, "requested", at)
       // The server flips the thread to running as it accepts the command, so
       // the composer reads as busy without waiting for `turn.started`.
-      let turn = draft.state.turns[payload.turn_id]
-      if (!turn) {
-        turn = {
-          turnId: payload.turn_id,
-          state: "requested",
-          requestedAt: at,
-          error: null,
-          items: [],
-          revision: 0,
-        }
-        draft.state = {
-          ...draft.state,
-          turnOrder: [...draft.state.turnOrder, payload.turn_id],
-          turns: { ...draft.state.turns, [payload.turn_id]: turn },
-        }
-        draft.touched.add(payload.turn_id)
-      }
       // Notices describe the newest turn, which this event opens; the snapshot
       // serves them the same way, so a reload never resurrects an older turn's.
       draft.state = { ...draft.state, status: "running", notices: {} }
@@ -529,7 +485,7 @@ export function applyEvent(
     }
     case "turn.started": {
       const payload = event.payload
-      patchTurn(draft, startedTurn(draft, payload.turn_id, at), {
+      patchTurn(draft, ensureTurn(draft, payload.turn_id, "running", at), {
         state: "running",
       })
       draft.state = { ...draft.state, status: "running" }
@@ -691,25 +647,25 @@ export function subagentToolCalls(
   namespace: Namespace
 ): Array<SubagentToolCall> {
   if (!namespace.length) return []
-  const calls: Array<TranscriptToolCallState> = []
+  const calls: Array<SubagentToolCall> = []
   for (const turnId of state.turnOrder) {
     const turn = state.turns[turnId]
     if (!turn) continue
     for (const item of turn.items) {
       if (item.kind !== "tool") continue
       const call = state.toolCalls[item.id]
-      if (!call || call.namespace.length < namespace.length) continue
+      if (!call) continue
       if (
         namespace.every((segment, index) => call.namespace[index] === segment)
       )
-        calls.push(call)
+        calls.push({
+          toolCallId: call.toolCallId,
+          name: call.name,
+          status: call.status,
+        })
     }
   }
-  return calls.map((call) => ({
-    toolCallId: call.toolCallId,
-    name: call.name,
-    status: call.status,
-  }))
+  return calls
 }
 
 function toolChunk(
@@ -724,7 +680,7 @@ function toolChunk(
     title: toolTitle(call.name, call.input),
     toolKind: kind,
     input: call.input,
-    status: call.status === "in_progress" ? "in_progress" : call.status,
+    status: call.status,
   }
   const output = call.output?.trim()
   if (output) chunk.output = output
@@ -740,12 +696,6 @@ function toolChunk(
     chunk.subagentNamespace = [...call.namespace, call.toolCallId]
   }
   return chunk
-}
-
-function senderNote(entity: StructuredEntity | undefined): string | undefined {
-  if (entity?.senderType === "bot") return "bot"
-  if (entity?.openSweAccount === "unlinked") return "not an Open SWE user"
-  return undefined
 }
 
 /**
@@ -835,7 +785,12 @@ function buildHumanMessage(
           structuredSenderName:
             entity?.displayName ??
             (entity?.handle ? `@${entity.handle}` : undefined),
-          structuredSenderNote: senderNote(entity),
+          structuredSenderNote:
+            entity?.senderType === "bot"
+              ? "bot"
+              : entity?.openSweAccount === "unlinked"
+                ? "not an Open SWE user"
+                : undefined,
         }
       : {}),
   }

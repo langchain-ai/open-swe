@@ -51,14 +51,11 @@ interface CacheEntry {
 
 const cache = new Map<string, CacheEntry>()
 
-function sweep(now: number): void {
-  for (const [threadId, entry] of cache) {
-    if (now - entry.touchedAt > CACHE_TTL_MS) cache.delete(threadId)
-  }
-}
-
 function cached(threadId: string): TranscriptState | null {
-  sweep(Date.now())
+  const now = Date.now()
+  for (const [id, entry] of cache) {
+    if (now - entry.touchedAt > CACHE_TTL_MS) cache.delete(id)
+  }
   return cache.get(threadId)?.state ?? null
 }
 
