@@ -99,6 +99,28 @@ async def projection() -> dict[str, object]:
         return dict((await conn.execute(text("SELECT * FROM pr_projection"))).mappings().one())
 
 
+async def ingestion_state() -> dict[str, list[dict[str, object]]]:
+    async with postgres.connection() as conn:
+        return {
+            table: [
+                dict(row)
+                for row in (
+                    await conn.execute(text(f"SELECT * FROM {table} ORDER BY to_jsonb({table})"))
+                ).mappings()
+            ]
+            for table in (
+                "event_ids",
+                "pr_distance_measurements",
+                "events",
+                "ingestion_receipts",
+                "additive_event_projection",
+                "pr_projection",
+                "dirty_summary_partitions",
+                "deployment_metadata",
+            )
+        }
+
+
 @pytest.mark.parametrize("order", list(permutations(range(3))) + ["concurrent"])
 async def test_measurement_delivery_orders_and_actual_reconciliation(
     analytics_db: Database, order: tuple[int, ...] | str
@@ -194,24 +216,19 @@ async def test_later_measurement_does_not_override_lifecycle_and_zero_is_a_sampl
 async def test_conflicts_roll_back_and_duplicates_are_idempotent(
     analytics_db: Database, changed: dict[str, object]
 ) -> None:
-    workspace, transaction = analytics_db
+    workspace, _ = analytics_db
     opened, merged, measured = events(workspace)
     for item in (opened, merged, measured):
         await ingestion.ingest(item)
+    before = await ingestion_state()
     assert not await ingestion.ingest(revise(measured, producer_event_id="duplicate"))
+    assert await ingestion_state() == before
     for producer_id in (measured.producer_event_id, "conflicting-event"):
         with pytest.raises(PRDistanceConflictError):
             await ingestion.ingest(
                 revise(measured, producer_event_id=producer_id, payload=measurement(**changed))
             )
-    assert (await projection())["distance_basis_points"] == 0
-    async with transaction() as conn:
-        assert await conn.scalar(text("SELECT count(*) FROM events")) == 3
-        assert await conn.scalar(text("SELECT count(*) FROM event_ids")) == 3
-        assert await conn.scalar(text("SELECT count(*) FROM ingestion_receipts")) == 3
-        assert (
-            await conn.scalar(text("SELECT sum(event_count) FROM additive_event_projection")) == 3
-        )
+        assert await ingestion_state() == before
 
 
 @pytest.mark.parametrize("retained", [False, True])
@@ -329,29 +346,32 @@ async def test_first_measurement_cannot_turn_nonmerged_pr_into_a_merge(
     assert before["distance_basis_points"] is None
 
 
+@pytest.mark.parametrize("legacy_distance", [None, 0, 250])
 async def test_measurement_and_projection_roll_back_together(
-    analytics_db: Database, monkeypatch: pytest.MonkeyPatch
+    analytics_db: Database, monkeypatch: pytest.MonkeyPatch, legacy_distance: int | None
 ) -> None:
-    workspace, transaction = analytics_db
+    workspace, _ = analytics_db
     opened, merged, measured = events(workspace)
-    for item in (opened, merged):
+    for item in (
+        opened,
+        revise(merged, payload=PRStatePayload(distance_basis_points=legacy_distance)),
+    ):
         await ingestion.ingest(item)
+    measured = revise(measured, payload=measurement(distance_basis_points=legacy_distance or 0))
+    before = await ingestion_state()
+    mark_dirty = ingestion.mark_dirty
+
+    async def fail_after_mark_dirty(conn: AsyncConnection, event: EventEnvelope) -> None:
+        await mark_dirty(conn, event)
+        raise RuntimeError("injected failure")
+
     with monkeypatch.context() as patch:
-        patch.setattr(
-            ingestion, "mark_dirty", AsyncMock(side_effect=RuntimeError("injected failure"))
-        )
+        patch.setattr(ingestion, "mark_dirty", fail_after_mark_dirty)
         with pytest.raises(RuntimeError, match="injected failure"):
             await ingestion.ingest(measured)
-    assert (await projection())["distance_basis_points"] is None
-    async with transaction() as conn:
-        assert await conn.scalar(text("SELECT count(*) FROM pr_distance_measurements")) == 0
-        assert await conn.scalar(text("SELECT count(*) FROM events")) == 2
-        assert await conn.scalar(text("SELECT count(*) FROM event_ids")) == 2
-        assert (
-            await conn.scalar(text("SELECT sum(event_count) FROM additive_event_projection")) == 2
-        )
+    assert await ingestion_state() == before
     assert await ingestion.ingest(measured)
-    assert (await projection())["distance_basis_points"] == 0
+    assert (await projection())["distance_basis_points"] == (legacy_distance or 0)
 
 
 @pytest.mark.parametrize("duplicate_id", [None, "late-duplicate"])
@@ -390,6 +410,54 @@ async def test_retention_before_opening_and_distance_cache_recovery(
         await ingestion.ingest(revise(measured, payload=measurement(distance_basis_points=500)))
     async with transaction() as conn:
         assert await conn.scalar(text("SELECT count(*) FROM events")) == 0
+
+
+@pytest.mark.parametrize("legacy_distance,new_distance", [(250, 0), (0, 250), (250, 500)])
+async def test_legacy_distance_conflict_rolls_back_ingestion(
+    analytics_db: Database, legacy_distance: int, new_distance: int
+) -> None:
+    workspace, _ = analytics_db
+    opened, merged, measured = events(workspace)
+    for item in (
+        opened,
+        revise(merged, payload=PRStatePayload(distance_basis_points=legacy_distance)),
+    ):
+        assert await ingestion.ingest(item)
+    before = await ingestion_state()
+    assert before["pr_distance_measurements"] == []
+    with pytest.raises(PRDistanceConflictError, match="legacy"):
+        await ingestion.ingest(
+            revise(measured, payload=measurement(distance_basis_points=new_distance))
+        )
+    assert await ingestion_state() == before
+
+
+@pytest.mark.parametrize("legacy_distance", [0, 250])
+async def test_matching_legacy_distance_promotes_durable_evidence(
+    analytics_db: Database, legacy_distance: int
+) -> None:
+    workspace, transaction = analytics_db
+    opened, merged, measured = events(workspace)
+    for item in (
+        opened,
+        revise(merged, payload=PRStatePayload(distance_basis_points=legacy_distance)),
+    ):
+        assert await ingestion.ingest(item)
+    before = await projection()
+    measured = revise(measured, payload=measurement(distance_basis_points=legacy_distance))
+    assert await ingestion.ingest(measured)
+    assert not await ingestion.ingest(measured)
+    assert await projection() == before
+    async with transaction() as conn:
+        row = (await conn.execute(text("SELECT * FROM pr_distance_measurements"))).mappings().one()
+        assert row["event_id"] == measured.event_id
+        assert row["measurement"] == measured.payload.model_dump(mode="json")
+        assert await conn.scalar(text("SELECT count(*) FROM events")) == 3
+        assert await conn.scalar(text("SELECT count(*) FROM event_ids")) == 3
+        assert await conn.scalar(text("SELECT count(*) FROM ingestion_receipts")) == 3
+        assert (
+            await conn.scalar(text("SELECT sum(event_count) FROM additive_event_projection")) == 3
+        )
 
 
 async def test_legacy_null_merge_replay_preserves_distance(analytics_db: Database) -> None:

@@ -59,6 +59,18 @@ async def retain_pr_distance(
             ),
             params,
         )
+    if inserted is not None:
+        legacy_distance = await conn.scalar(
+            text(
+                "SELECT distance_basis_points FROM pr_projection "
+                "WHERE workspace_id = :workspace_id AND pr_id = :pr_id"
+            ),
+            params,
+        )
+        if legacy_distance is not None and legacy_distance != payload.distance_basis_points:
+            raise PRDistanceConflictError(
+                "Verified PR distance conflicts with the legacy projection measurement"
+            )
     matches = await conn.scalar(
         text(
             "SELECT measurement = CAST(:measurement AS jsonb) AND repository_id = :repository_id "

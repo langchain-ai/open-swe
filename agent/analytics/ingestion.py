@@ -64,20 +64,23 @@ async def ingest(event: EventEnvelope) -> bool:
                 text("SELECT pg_advisory_xact_lock(hashtextextended(:subject, 0))"),
                 {"subject": f"analytics:{event.workspace_id}:{lock_id}"},
             )
-        duplicate_measurement = False
-        async with conn.begin_nested() as claim:
-            inserted = await conn.scalar(
-                _INSERT_ID, {"event_id": event.event_id, "occurred_at": event.occurred_at}
-            )
-            if event.event_name == EventName.PR_DISTANCE_MEASURED:
+        if event.event_name == EventName.PR_DISTANCE_MEASURED:
+            async with conn.begin_nested() as claim:
+                inserted = await conn.scalar(
+                    _INSERT_ID, {"event_id": event.event_id, "occurred_at": event.occurred_at}
+                )
                 duplicate_measurement = not await retain_pr_distance(
                     conn, event, new_event=inserted is not None
                 )
                 if duplicate_measurement:
                     await claim.rollback()
-        if duplicate_measurement:
-            await _project(conn, event)
-            return False
+            if duplicate_measurement:
+                await _project(conn, event)
+                return False
+        else:
+            inserted = await conn.scalar(
+                _INSERT_ID, {"event_id": event.event_id, "occurred_at": event.occurred_at}
+            )
         if inserted is None:
             return False
         await conn.execute(_INSERT_EVENT, _params(event))
