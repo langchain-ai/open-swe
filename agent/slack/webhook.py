@@ -19,6 +19,7 @@ from agent.input_messages import (
     MessageKind,
     PersonIdentity,
     RunInput,
+    RunMessage,
     SystemIdentity,
     channel_introduction,
     human_input,
@@ -57,8 +58,8 @@ RAPID_FOLLOWUP_SECONDS = 60
 _MENTION_PREAMBLE = f"{load_prompt('runs/slack-mentioned.md')}\n\n"
 _UNTAGGED_REPLY_PREAMBLE = f"{load_prompt('runs/slack-untagged-reply.md')}\n\n"
 _CODE_CHANNEL_CONTEXT = load_prompt("runs/slack-code-channel.md")
-_DM_CONTEXT = load_prompt("runs/slack-dm.md")
 _MESSAGE_UPDATE_PREAMBLE = f"{load_prompt('runs/slack-message-update.md')}\n\n"
+_CONCIERGE_CONTEXT_SYSTEM_ID = "system:concierge-context"
 
 
 def _slack_prompt_preamble(untagged_reply: bool, message_update: bool = False) -> str:
@@ -464,6 +465,80 @@ def _slack_message_text(message: dict[str, Any], bot_user_id: str) -> str:
     )
     _, separator, content = forwarded.partition(": ")
     return content if separator else forwarded
+
+
+def _concierge_input(
+    messages: list[dict[str, Any]],
+    user_names_by_id: dict[str, str],
+    logins_by_user_id: dict[str, str],
+    *,
+    channel_id: str,
+    bot_user_id: str,
+    event_ts: str,
+    trigger_user_id: str,
+    request_text: str,
+    request_blocks: list[dict[str, Any]],
+    operational_context: str,
+    introduce_person: bool,
+) -> RunInput:
+    """Run input for concierge mode: the message, and nothing the thread holds.
+
+    There is one human and one agent, and the thread the run lands on is the whole
+    transcript. Replaying the channel's history here would append every earlier
+    message a second time, so only the new one is sent.
+    """
+    channel_entity_id = f"slack:{channel_id}"
+    person = _slack_person(
+        trigger_user_id,
+        user_names_by_id.get(trigger_user_id, ""),
+        logins_by_user_id.get(trigger_user_id, ""),
+    )
+    current_message = next(
+        (message for message in messages if str(message.get("ts", "")) == str(event_ts)), {}
+    )
+    _, separator, forwarded_context = _slack_message_text(current_message, bot_user_id).partition(
+        "\n"
+    )
+    if separator and forwarded_context:
+        request_text = f"{request_text}\n{forwarded_context}"
+    request_blocks[0] = {**request_blocks[0], "text": request_text}
+    run_messages: list[RunMessage] = []
+    if operational_context.strip():
+        run_messages.append(
+            system_introduction(
+                {
+                    "id": _CONCIERGE_CONTEXT_SYSTEM_ID,
+                    "display_name": "Run context",
+                    "platform": "slack",
+                }
+            )
+        )
+        run_messages.append(
+            system_input(
+                operational_context,
+                {
+                    "sender_id": _CONCIERGE_CONTEXT_SYSTEM_ID,
+                    "channel_id": channel_entity_id,
+                    "surface": "concierge",
+                    "kind": "system",
+                },
+            )
+        )
+    if introduce_person:
+        run_messages.append(person_introduction(person))
+    run_messages.append(
+        human_input(
+            request_blocks,
+            {
+                "sender_id": person["id"],
+                "channel_id": channel_entity_id,
+                "surface": "concierge",
+                "kind": "human",
+                "data": {"timestamp": event_ts},
+            },
+        )
+    )
+    return {"messages": run_messages}
 
 
 def _slack_context_input(
@@ -1100,17 +1175,36 @@ async def _process_slack_mention_impl(
         if repo
         else ""
     )
-    operational_context = (
-        _slack_prompt_preamble(untagged_reply, message_update)
-        + repo_hint_section
-        + f"## Triggered by\n{trigger_user}\n\n"
-        f"{trigger_user_timezone_section}"
-        f"{slack_thread_section}\n\n"
-        f"{await _format_slack_run_links_section(thread_id)}"
-        + (f"\n\n{resolved_links_section}" if resolved_links_section else "")
-        + (f"\n\n{_CODE_CHANNEL_CONTEXT}" if code_channel else "")
-        + (f"\n\n{_DM_CONTEXT}" if dm_session else "")
-    )
+    # `dm_session` is set only for a DM whose owner turned the mode on in their own
+    # settings. A bot sender there still needs the sender scaffold, because only a
+    # person is known up front.
+    concierge_mode = dm_session and allowed_bot is None
+    if concierge_mode:
+        # Everything the multi-party scaffold answers — which channel, who is
+        # talking, what was said before — is already fixed here, and the surface
+        # guidance and default repository are in the system prompt. Only what
+        # changes per message is left, and the time zone stays true for the life
+        # of the thread, so it is stated once.
+        operational_context = "\n\n".join(
+            section
+            for section in (
+                _MESSAGE_UPDATE_PREAMBLE.strip() if message_update else "",
+                trigger_user_timezone_section.strip() if is_first_mention else "",
+                resolved_links_section.strip() if resolved_links_section else "",
+            )
+            if section
+        )
+    else:
+        operational_context = (
+            _slack_prompt_preamble(untagged_reply, message_update)
+            + repo_hint_section
+            + f"## Triggered by\n{trigger_user}\n\n"
+            f"{trigger_user_timezone_section}"
+            f"{slack_thread_section}\n\n"
+            f"{await _format_slack_run_links_section(thread_id)}"
+            + (f"\n\n{resolved_links_section}" if resolved_links_section else "")
+            + (f"\n\n{_CODE_CHANNEL_CONTEXT}" if code_channel else "")
+        )
 
     configurable: dict[str, Any] = {
         "repo": repo_dict,
@@ -1203,18 +1297,34 @@ async def _process_slack_mention_impl(
         message_update=message_update,
         explicit_request=request.explicit_request,
     )
-    run_input = _slack_context_input(
-        context_messages,
-        user_names_by_id,
-        logins_by_user_id,
-        channel_id=channel_id,
-        bot_user_id=bot_user_id,
-        event_ts=event_ts,
-        trigger_user_id=user_id,
-        request_text=clean_text,
-        request_blocks=content_blocks,
-        operational_context=operational_context,
-        trigger_bot=allowed_bot,
+    run_input = (
+        _concierge_input(
+            context_messages,
+            user_names_by_id,
+            logins_by_user_id,
+            channel_id=channel_id,
+            bot_user_id=bot_user_id,
+            event_ts=event_ts,
+            trigger_user_id=user_id,
+            request_text=clean_text,
+            request_blocks=content_blocks,
+            operational_context=operational_context,
+            introduce_person=is_first_mention,
+        )
+        if concierge_mode
+        else _slack_context_input(
+            context_messages,
+            user_names_by_id,
+            logins_by_user_id,
+            channel_id=channel_id,
+            bot_user_id=bot_user_id,
+            event_ts=event_ts,
+            trigger_user_id=user_id,
+            request_text=clean_text,
+            request_blocks=content_blocks,
+            operational_context=operational_context,
+            trigger_bot=allowed_bot,
+        )
     )
     if code_channel:
         await common.set_session_status(channel_id, "processing")

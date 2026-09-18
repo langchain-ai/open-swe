@@ -8,10 +8,13 @@ import { SlackMrkdwn } from "./SlackMrkdwn"
 import type { Message } from "@/features/agents/lib/types"
 
 const COLLAPSED_MAX_HEIGHT_PX = 250
+const SLACK_SURFACES = ["slack", "concierge"] satisfies readonly string[]
 
 export function UserMessage({ message }: { message: Message }) {
   const isSystem = message.structuredSenderKind === "system"
-  const isSlack = message.structuredSurface === "slack"
+  const isSlack = SLACK_SURFACES.some(
+    (surface) => surface === message.structuredSurface
+  )
   const text = message.chunks
     .filter((c) => c.kind === "text")
     .map((c) => c.text)
