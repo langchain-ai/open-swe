@@ -298,6 +298,7 @@ export type UsageLeaderboardSort =
   | "favorite_model"
   | "invocations"
   | "threads"
+  | "avg_invocations_per_thread"
   | "total_tokens"
   | "total_cost_usd"
   | "avg_invocation_seconds"
@@ -660,6 +661,8 @@ export interface OpenPullRequest {
   headSha: string | null
   headRef: string | null
   reviewDecision: "approved" | "changes_requested" | "none" | null
+  // Branch protection still wants an approval this PR does not have.
+  reviewRequired: boolean
   statusAvailable: boolean
   createdAt: string | null
   updatedAt: string | null
