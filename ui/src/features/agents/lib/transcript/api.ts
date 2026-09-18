@@ -97,7 +97,10 @@ export interface TranscriptEventHandlers {
   onSnapshot: (snapshot: TranscriptSnapshot) => void
   /** Replay finished and the connection is now live. */
   onSynchronized: () => void
-  /** The thread is gone. The server ends the stream; do not reopen it. */
+  /**
+   * The thread is gone, or the reader may no longer see it. The server ends
+   * the stream either way; do not reopen it.
+   */
   onDeleted: () => void
   onOpen?: () => void
   /** The connection dropped or a frame was unreadable. Reopening is the caller's call. */
@@ -150,13 +153,17 @@ export function openTranscriptEvents(
   source.addEventListener("synchronized", () => {
     if (!closed) handlers.onSynchronized()
   })
-  source.addEventListener("deleted", () => {
+  // Both end the stream, and `EventSource` would treat that end as a drop
+  // worth retrying, so the source is closed before the handler can ask for
+  // more. A thread the reader can no longer see is surfaced the way a missing
+  // one already is: the read API answers both with a 404.
+  const ended = () => {
     if (closed) return
-    // The stream ends here, and `EventSource` would treat that end as a drop
-    // worth retrying, so it is closed before the handler can ask for more.
     close()
     handlers.onDeleted()
-  })
+  }
+  source.addEventListener("deleted", ended)
+  source.addEventListener("revoked", ended)
   source.addEventListener("open", () => {
     if (!closed) handlers.onOpen?.()
   })
