@@ -161,7 +161,7 @@ async def test_admin_thread_accepts_configured_admin_slack_dm(
         github_login="ramonn",
         slack_thread={
             "channel_id": "D123",
-            "thread_ts": "0",
+            "thread_ts": "1700000000.000100",
             "channel_context": {"is_im": True},
         },
     )
