@@ -21,7 +21,7 @@ from agent.analytics.events import (
     RunFailedPayload,
     StrictPayload,
 )
-from agent.analytics.identity import opaque_id
+from agent.analytics.identity import DisplayNameSource, opaque_id
 from agent.database import analytics as analytics_db
 from agent.review.findings import coerce_finding, is_surfaced
 from agent.utils.json_types import as_json_object
@@ -95,6 +95,7 @@ async def record_agent_invocation_usage(
     source: str | None,
     github_user_id: str | int | None = None,
     display_name: str | None = None,
+    display_name_source: DisplayNameSource | None = None,
     repository: str | None = None,
 ) -> None:
     if not invocation_id or not thread_id:
@@ -104,6 +105,7 @@ async def record_agent_invocation_usage(
         github_login=github_login,
         email=user_email,
         display_name=display_name,
+        display_name_source=display_name_source,
     )
     await emitter.run_started(
         run_key=invocation_id,

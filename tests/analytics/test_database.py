@@ -120,6 +120,37 @@ async def test_migration_preserves_existing_workspace_and_history(deployment_db,
     assert database.workspace_id() == old_workspace
 
 
+async def test_provenance_migration_preserves_legacy_names(deployment_db):
+    migrations = postgres.load_migrations()
+    async with postgres.engine().begin() as conn:
+        await conn.execute(text("CREATE SCHEMA open_swe"))
+        await conn.run_sync(postgres.upgrade, migrations, "open_swe", "0019")
+        await conn.execute(
+            text(
+                "INSERT INTO identity_directory (workspace_id, person_id, display_name, "
+                "anonymize_after) VALUES (:workspace, :person, :name, clock_timestamp())"
+            ),
+            {"workspace": uuid4(), "person": uuid4(), "name": "Legacy Name"},
+        )
+        await conn.run_sync(postgres.upgrade, migrations, "open_swe", "head")
+        row = (
+            (
+                await conn.execute(
+                    text("SELECT display_name, display_name_source FROM identity_directory")
+                )
+            )
+            .mappings()
+            .one()
+        )
+        assert row["display_name"] == "Legacy Name"
+        assert row["display_name_source"] is None
+        await conn.execute(
+            text(
+                "UPDATE identity_directory SET display_name = NULL, display_name_source = 'github'"
+            )
+        )
+
+
 async def test_standalone_uri_with_sslmode_connects(deployment_db, monkeypatch):
     uri = make_url(os.environ["POSTGRES_URI"]).set(drivername="postgresql")
     uri = uri.update_query_dict({"sslmode": "disable"})
