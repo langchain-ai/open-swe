@@ -27,7 +27,7 @@ vi.mock("@/features/agents/lib/sidebarPrefs", () => ({
 }))
 vi.mock("@/features/agents/lib/queries", () => ({
   useSidebarPinnedThreads: () => ({ data: [] }),
-  useSidebarProjects: () => ({ data: [] }),
+  useSidebarRepos: () => ({ data: [] }),
   usePinAgentThread: () => ({ isPending: false, mutate: vi.fn() }),
   useResolveAgentThread: () => ({ isPending: false, mutate: vi.fn() }),
   useDeleteAgentThread: () => ({ isPending: false, mutate: vi.fn() }),

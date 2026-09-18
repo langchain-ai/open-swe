@@ -28,8 +28,8 @@ const THREAD_IDS = {
   dailyScheduled: "73000000-0000-4000-8000-000000000001",
   dailyTest: "73000000-0000-4000-8000-000000000002",
   weeklyRunning: "73000000-0000-4000-8000-000000000003",
-  noProject: "74000000-0000-4000-8000-000000000001",
-  pinnedProject: "74000000-0000-4000-8000-000000000002",
+  noRepo: "74000000-0000-4000-8000-000000000001",
+  pinnedRepo: "74000000-0000-4000-8000-000000000002",
 } as const;
 
 const TITLES = {
@@ -43,8 +43,8 @@ const TITLES = {
   dailyScheduled: "E2E Workspace Daily health scheduled run",
   dailyTest: "E2E Workspace Daily health test run",
   weeklyRunning: "E2E Workspace Weekly cleanup running",
-  noProject: "E2E Workspace No project chat",
-  pinnedProject: "E2E Workspace Pinned project chat",
+  noRepo: "E2E Workspace No repository chat",
+  pinnedRepo: "E2E Workspace Pinned repository chat",
 } as const;
 
 const SCHEDULE_IDS = {
@@ -527,7 +527,7 @@ test.describe("threads workspace", () => {
     expect(flashed).toBe(false);
   });
 
-  test("shows a recency-sorted project list in the sidebar", async ({
+  test("shows a recency-sorted repository list in the sidebar", async ({
     page,
     request,
   }, testInfo) => {
@@ -541,7 +541,7 @@ test.describe("threads workspace", () => {
     await dismissOnboardingIfShown(page);
 
     const sidebar = page.locator("[data-sidebar-frame]");
-    await sidebar.getByRole("button", { name: "Projects options" }).click();
+    await sidebar.getByRole("button", { name: "Repositories options" }).click();
     await page
       .getByRole("menuitemradio", { name: "Last updated", exact: true })
       .click();
@@ -580,7 +580,7 @@ test.describe("threads workspace", () => {
       0,
     );
 
-    // Collapsing a project hides only that project's threads.
+    // Collapsing a repository hides only that repository's threads.
     await betaGroup.click();
     await expect(betaGroup).toHaveAttribute("aria-expanded", "false");
     await expect(workspaceLinks).toHaveCount(4);
@@ -590,7 +590,7 @@ test.describe("threads workspace", () => {
     await betaGroup.click();
     await expect(workspaceLinks).toHaveCount(5);
 
-    await sidebar.getByRole("button", { name: "Projects options" }).click();
+    await sidebar.getByRole("button", { name: "Repositories options" }).click();
     await page
       .getByRole("menuitemcheckbox", { name: "Show archived", exact: true })
       .click();
@@ -622,23 +622,23 @@ test.describe("threads workspace", () => {
     });
   });
 
-  test("groups unprojected chats in a pinnable No project folder", async ({
+  test("groups repository-less chats in a pinnable No repository folder", async ({
     page,
     request,
   }, testInfo) => {
     const now = Date.now();
     await seedThreads(request, [
       {
-        id: THREAD_IDS.noProject,
-        metadata: baseMetadata(now, TITLES.noProject, 1_000, {
+        id: THREAD_IDS.noRepo,
+        metadata: baseMetadata(now, TITLES.noRepo, 1_000, {
           participant_logins: { [ADMIN_USER.login]: true },
           repo_owner: "",
           repo_name: "",
         }),
       },
       {
-        id: THREAD_IDS.pinnedProject,
-        metadata: baseMetadata(now, TITLES.pinnedProject, 2_000, {
+        id: THREAD_IDS.pinnedRepo,
+        metadata: baseMetadata(now, TITLES.pinnedRepo, 2_000, {
           participant_logins: { [ADMIN_USER.login]: true },
         }),
       },
@@ -652,14 +652,14 @@ test.describe("threads workspace", () => {
     await dismissOnboardingIfShown(page);
 
     const sidebar = page.locator("[data-sidebar-frame]");
-    const noProject = sidebar.getByRole("button", {
-      name: "No project",
+    const noRepo = sidebar.getByRole("button", {
+      name: "No repository",
       exact: true,
     });
-    await expect(noProject).toBeVisible();
-    await expect(sidebar).toContainText(TITLES.noProject);
+    await expect(noRepo).toBeVisible();
+    await expect(sidebar).toContainText(TITLES.noRepo);
 
-    await sidebar.getByRole("button", { name: "Projects options" }).click();
+    await sidebar.getByRole("button", { name: "Repositories options" }).click();
     await expect(
       page.getByRole("menuitemradio", { name: "Created", exact: true }),
     ).toBeChecked();
@@ -671,30 +671,30 @@ test.describe("threads workspace", () => {
     });
     await page.keyboard.press("Escape");
 
-    const pinNoProject = sidebar.getByRole("button", {
-      name: "Pin No project",
+    const pinNoRepo = sidebar.getByRole("button", {
+      name: "Pin No repository",
       includeHidden: true,
     });
-    await pinNoProject.locator("..").hover();
-    await pinNoProject.click();
+    await pinNoRepo.locator("..").hover();
+    await pinNoRepo.click();
     await expect(sidebar.getByText("Pinned", { exact: true })).toBeVisible();
     await expect(
-      sidebar.getByRole("button", { name: "No project", exact: true }),
+      sidebar.getByRole("button", { name: "No repository", exact: true }),
     ).toBeVisible();
 
     await page.reload();
     await dismissOnboardingIfShown(page);
-    await expect(sidebar).toContainText(TITLES.noProject);
-    const unpinNoProject = sidebar.getByRole("button", {
-      name: "Unpin No project",
+    await expect(sidebar).toContainText(TITLES.noRepo);
+    const unpinNoRepo = sidebar.getByRole("button", {
+      name: "Unpin No repository",
       includeHidden: true,
     });
-    await unpinNoProject.locator("..").hover();
-    await expect(unpinNoProject).toBeVisible();
+    await unpinNoRepo.locator("..").hover();
+    await expect(unpinNoRepo).toBeVisible();
 
-    const screenshotPath = testInfo.outputPath("pinned-no-project.png");
+    const screenshotPath = testInfo.outputPath("pinned-no-repository.png");
     await sidebar.screenshot({ path: screenshotPath });
-    await testInfo.attach("pinned-no-project", {
+    await testInfo.attach("pinned-no-repository", {
       path: screenshotPath,
       contentType: "image/png",
     });

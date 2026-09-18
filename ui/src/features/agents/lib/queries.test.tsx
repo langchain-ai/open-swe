@@ -13,7 +13,7 @@ import {
   useAgentThreadWorkingTreeDiff,
   useResolveAgentThread,
   useSidebarActiveThread,
-  useSidebarProjectThreads,
+  useSidebarRepoThreads,
   useSidebarRecents,
   useThreadsPage,
 } from "./queries"
@@ -269,7 +269,7 @@ describe("setAgentThreadStatus", () => {
 })
 
 describe("sidebar queries", () => {
-  it("scopes Recents to ownerless threads only in project mode", async () => {
+  it("scopes Recents to ownerless threads only in repository mode", async () => {
     const listThreads = vi
       .spyOn(agentsApi, "listThreadsPage")
       .mockResolvedValue(page)
@@ -278,8 +278,8 @@ describe("sidebar queries", () => {
       <QueryClientProvider client={client}>{children}</QueryClientProvider>
     )
     const { rerender } = renderHook(
-      ({ projectMode }) => useSidebarRecents({ projectMode }),
-      { wrapper, initialProps: { projectMode: true } }
+      ({ repoMode }) => useSidebarRecents({ repoMode }),
+      { wrapper, initialProps: { repoMode: true } }
     )
 
     await waitFor(() =>
@@ -293,7 +293,7 @@ describe("sidebar queries", () => {
       })
     )
 
-    rerender({ projectMode: false })
+    rerender({ repoMode: false })
 
     await waitFor(() =>
       expect(listThreads).toHaveBeenCalledWith({
@@ -306,7 +306,7 @@ describe("sidebar queries", () => {
     )
   })
 
-  it("paginates each project through an independent query", async () => {
+  it("paginates each repository through an independent query", async () => {
     const listThreads = vi
       .spyOn(agentsApi, "listThreadsPage")
       .mockImplementation(async (request) => {
@@ -327,10 +327,10 @@ describe("sidebar queries", () => {
     const client = testClient()
     const { result } = renderHook(
       () => ({
-        first: useSidebarProjectThreads({
+        first: useSidebarRepoThreads({
           repoFullName: "langchain-ai/first",
         }),
-        second: useSidebarProjectThreads({
+        second: useSidebarRepoThreads({
           repoFullName: "langchain-ai/second",
         }),
       }),

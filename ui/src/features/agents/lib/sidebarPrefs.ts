@@ -6,7 +6,7 @@ import type { SidebarFilters } from "./sidebarFilter"
 export const SIDEBAR_PREFS_STORAGE_KEY = "open-swe.agents.sidebar-prefs"
 const STORAGE_KEY = SIDEBAR_PREFS_STORAGE_KEY
 
-const ORGANIZE_MODES = ["project", "list"] as const
+const ORGANIZE_MODES = ["workspace", "repo", "list"] as const
 const CHAT_SORTS = ["created", "updated"] as const
 const PINNED_SORTS = ["updated", "manual"] as const
 
@@ -22,11 +22,11 @@ export interface SidebarPrefs {
    * threads only exist on this machine, so their pins do too.
    */
   pinnedLocalIds: Array<string>
-  /** Projects pinned into the sidebar's Pinned section. Client-side only. */
-  pinnedProjectKeys: Array<string>
-  collapsedProjectKeys: Array<string>
-  expandedProjectKeys: Array<string>
-  /** Which of "pinned" | "projects" | "recents" are collapsed. */
+  /** Repositories pinned into the sidebar's Pinned section. Client-side only. */
+  pinnedRepoKeys: Array<string>
+  collapsedRepoKeys: Array<string>
+  expandedRepoKeys: Array<string>
+  /** Which of "pinned" | "repos" | "recents" are collapsed. */
   collapsedSectionKeys: Array<string>
   organize: OrganizeMode
   sortChats: ChatSort
@@ -37,11 +37,11 @@ export const DEFAULT_SIDEBAR_PREFS: SidebarPrefs = {
   compact: false,
   filters: DEFAULT_SIDEBAR_FILTERS,
   pinnedLocalIds: [],
-  pinnedProjectKeys: [],
-  collapsedProjectKeys: [],
-  expandedProjectKeys: [],
+  pinnedRepoKeys: [],
+  collapsedRepoKeys: [],
+  expandedRepoKeys: [],
   collapsedSectionKeys: [],
-  organize: "project",
+  organize: "workspace",
   sortChats: "created",
   sortPinned: "manual",
 }
@@ -80,6 +80,26 @@ function sanitizeFilters(value: unknown): SidebarFilters {
   }
 }
 
+/**
+ * Stored keys predate repositories replacing "projects" in the sidebar: pins
+ * and folds were saved under `project:` keys and a `"project"` organize mode.
+ * Read them once under their new names so nobody loses their layout.
+ */
+function migrateRepoKey(key: string): string {
+  if (key === "project:no-project") return "repo:no-repo"
+  return key.startsWith("project:")
+    ? `repo:${key.slice("project:".length)}`
+    : key
+}
+
+function repoKeys(
+  raw: Record<string, unknown>,
+  key: string,
+  legacyKey: string
+): Array<string> {
+  return asStringArray(raw[key] ?? raw[legacyKey]).map(migrateRepoKey)
+}
+
 function sanitizePrefs(value: unknown): SidebarPrefs {
   const raw =
     value && typeof value === "object" ? (value as Record<string, unknown>) : {}
@@ -90,12 +110,18 @@ function sanitizePrefs(value: unknown): SidebarPrefs {
         : DEFAULT_SIDEBAR_PREFS.compact,
     filters: sanitizeFilters(raw.filters),
     pinnedLocalIds: asStringArray(raw.pinnedLocalIds),
-    pinnedProjectKeys: asStringArray(raw.pinnedProjectKeys),
-    collapsedProjectKeys: asStringArray(raw.collapsedProjectKeys),
-    expandedProjectKeys: asStringArray(raw.expandedProjectKeys),
-    collapsedSectionKeys: asStringArray(raw.collapsedSectionKeys),
+    pinnedRepoKeys: repoKeys(raw, "pinnedRepoKeys", "pinnedProjectKeys"),
+    collapsedRepoKeys: repoKeys(
+      raw,
+      "collapsedRepoKeys",
+      "collapsedProjectKeys"
+    ),
+    expandedRepoKeys: repoKeys(raw, "expandedRepoKeys", "expandedProjectKeys"),
+    collapsedSectionKeys: asStringArray(raw.collapsedSectionKeys).map((key) =>
+      key === "projects" ? "repos" : key
+    ),
     organize: asEnum(
-      raw.organize,
+      raw.organize === "project" ? "repo" : raw.organize,
       ORGANIZE_MODES,
       DEFAULT_SIDEBAR_PREFS.organize
     ),
@@ -198,28 +224,28 @@ export function useSidebarPrefs() {
       })),
     []
   )
-  const toggleProjectPin = useCallback(
+  const toggleRepoPin = useCallback(
     (key: string) =>
       setPrefs((prev) => ({
         ...prev,
-        pinnedProjectKeys: toggleMembership(prev.pinnedProjectKeys, key),
+        pinnedRepoKeys: toggleMembership(prev.pinnedRepoKeys, key),
       })),
     []
   )
-  const toggleProjectCollapsed = useCallback(
+  const toggleRepoCollapsed = useCallback(
     (key: string) =>
       setPrefs((prev) => ({
         ...prev,
-        collapsedProjectKeys: toggleMembership(prev.collapsedProjectKeys, key),
+        collapsedRepoKeys: toggleMembership(prev.collapsedRepoKeys, key),
       })),
     []
   )
-  const expandProject = useCallback(
+  const expandRepo = useCallback(
     (key: string) =>
       setPrefs((prev) =>
-        prev.expandedProjectKeys.includes(key)
+        prev.expandedRepoKeys.includes(key)
           ? prev
-          : { ...prev, expandedProjectKeys: [...prev.expandedProjectKeys, key] }
+          : { ...prev, expandedRepoKeys: [...prev.expandedRepoKeys, key] }
       ),
     []
   )
@@ -246,10 +272,10 @@ export function useSidebarPrefs() {
     setCompact,
     setFilters,
     toggleLocalPin,
-    toggleProjectPin,
-    toggleProjectCollapsed,
+    toggleRepoPin,
+    toggleRepoCollapsed,
     toggleSectionCollapsed,
-    expandProject,
+    expandRepo,
     setView,
   }
 }

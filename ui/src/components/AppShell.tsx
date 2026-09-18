@@ -104,6 +104,8 @@ interface SettingsRowProps {
   control: ReactNode
   htmlFor?: string
   comingSoon?: boolean
+  /** A short tag after the label, such as where a value comes from. */
+  badge?: string
 }
 
 /** Label + description on the left, a single control on the right. */
@@ -113,6 +115,7 @@ export function SettingsRow({
   control,
   htmlFor,
   comingSoon,
+  badge,
 }: SettingsRowProps) {
   return (
     <div className="flex flex-col gap-2 px-4 py-3.5 sm:flex-row sm:items-center sm:justify-between sm:gap-8">
@@ -126,9 +129,9 @@ export function SettingsRow({
           >
             {label}
           </span>
-          {comingSoon && (
+          {(comingSoon || badge) && (
             <span className="rounded-sm border border-border bg-muted px-1.5 py-0.5 text-[10px] font-normal text-muted-foreground">
-              Coming soon
+              {comingSoon ? "Coming soon" : badge}
             </span>
           )}
         </span>
