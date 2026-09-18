@@ -13,6 +13,7 @@ from pydantic import ValidationError
 from agent import store as agent_store
 from agent.dashboard import repo_access
 from agent.dashboard.options import fable_disabled_fallback
+from agent.dashboard.profiles import Profile
 from agent.dashboard.workspace_settings import WorkspaceSettingsUpdate, upsert_workspace_overrides
 from agent.schedules import store as schedules
 from agent.schedules.store import ScheduleCreateBody, ScheduleUpdateBody
@@ -127,7 +128,7 @@ def auth(monkeypatch) -> None:  # noqa: ANN001
         return "gho_token"
 
     async def fake_get_profile(login: str) -> dict[str, Any]:
-        return {"base_branch": "main", "branch_prefix": "open-swe"}
+        return Profile.model_validate({"base_branch": "main", "branch_prefix": "open-swe"} or {})
 
     async def fake_resolve_run_email(login: str, profile: dict[str, Any]) -> str:
         return "alice@example.com"

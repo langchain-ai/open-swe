@@ -1,0 +1,1 @@
+Read the current user's full editable profile and dashboard preferences, including defaults. Only available in the user's private threads and only reads the verified thread owner's settings. Returns no credentials or other users' profiles. Use this before update_user_preferences to inspect current values.

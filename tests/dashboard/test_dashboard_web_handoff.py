@@ -4,6 +4,7 @@ from typing import Any, cast
 import pytest
 from fastapi import HTTPException
 
+from agent.dashboard.profiles import Profile
 from agent.threads import handlers
 from agent.threads import runs as thread_runs
 from tests.conftest import patch_thread_module
@@ -79,7 +80,7 @@ async def _noop_token_check(login: str) -> None:
 
 
 async def _empty_profile(login: str) -> dict[str, Any]:
-    return {}
+    return Profile.model_validate({} or {})
 
 
 async def _run_email(login: str, profile: dict[str, Any]) -> str:
