@@ -29,8 +29,8 @@ FEEDBACK_ACCEPTED = (
     "Your feedback was saved and a plan revision was requested. Implementation is still paused."
 )
 FEEDBACK_FAILED = "Your plan revision could not be started. Please retry from the latest plan review. Any feedback already saved remains on the plan."
-FEEDBACK_OPEN_FAILED = "The feedback form could not open. Click Request changes again, or reply in the thread with your feedback."
-FEEDBACK_STALE = "This plan review is no longer available or you do not have access. Open the latest plan review and try again; for an older card, reply in the thread with your requested changes."
+FEEDBACK_OPEN_FAILED = "The feedback form could not open. Click Request changes again, or reply in the thread with your feedback and mention Open SWE."
+FEEDBACK_STALE = "This plan review is no longer available or you do not have access. Open the latest plan review and try again; for an older card, reply in the thread with your requested changes and mention Open SWE."
 FEEDBACK_REQUIRED = "Enter your requested changes (1–3000 characters)."
 
 
