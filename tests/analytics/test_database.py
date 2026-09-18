@@ -125,7 +125,7 @@ async def test_provenance_migration_preserves_legacy_names(deployment_db):
     migrations = postgres.load_migrations()
     async with postgres.engine().begin() as conn:
         await conn.execute(text("CREATE SCHEMA open_swe"))
-        await conn.run_sync(postgres.upgrade, migrations, "open_swe", "0019")
+        await conn.run_sync(postgres.upgrade, migrations, "open_swe", "0022")
         await conn.execute(
             text(
                 "INSERT INTO identity_directory (workspace_id, person_id, display_name, "
