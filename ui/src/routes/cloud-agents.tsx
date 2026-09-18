@@ -67,8 +67,10 @@ function CloudAgentsPage() {
     options.data?.default_agent_subagent_reasoning_effort ?? defaultAgentEffort
   const currentModel: ModelOption | undefined =
     defaultModels?.find((m) => m.id === modelId) ?? firstModel
-  const currentSubagentModel: ModelOption | undefined =
-    defaultModels?.find((m) => m.id === subagentModelId) ?? firstModel
+  const subagentInheritsMain = subagentModelId === "inherit"
+  const currentSubagentModel: ModelOption | undefined = subagentInheritsMain
+    ? currentModel
+    : (defaultModels?.find((m) => m.id === subagentModelId) ?? firstModel)
   const effort =
     currentModel && !currentModel.efforts.includes(effortChoice)
       ? currentModel.default_effort
@@ -87,15 +89,11 @@ function CloudAgentsPage() {
     // oxlint-disable-next-line react/set-state-in-effect
     setModelId(profile.data.default_model ?? defaultAgentModel)
     setEffort(profile.data.reasoning_effort ?? defaultAgentEffort)
-    setSubagentModelId(
-      profile.data.default_subagent_model ??
-        profile.data.default_model ??
-        defaultSubagentModel
-    )
+    setSubagentModelId(profile.data.default_subagent_model ?? "inherit")
     setSubagentEffort(
-      profile.data.subagent_reasoning_effort ??
-        profile.data.reasoning_effort ??
-        defaultSubagentEffort
+      profile.data.default_subagent_model == null
+        ? (profile.data.reasoning_effort ?? defaultAgentEffort)
+        : (profile.data.subagent_reasoning_effort ?? defaultSubagentEffort)
     )
     setDefaultRepo(profile.data.default_repo ?? "")
     setBaseBranch(profile.data.base_branch ?? "")
@@ -133,8 +131,8 @@ function CloudAgentsPage() {
     persist({
       default_model: modelId,
       reasoning_effort: effort,
-      default_subagent_model: subagentModelId,
-      subagent_reasoning_effort: subagentEffort,
+      default_subagent_model: subagentInheritsMain ? null : subagentModelId,
+      subagent_reasoning_effort: subagentInheritsMain ? null : subagentEffort,
       default_repo: defaultRepo || null,
       base_branch: baseBranch || null,
       branch_prefix: branchPrefix || null,
@@ -218,7 +216,7 @@ function CloudAgentsPage() {
           />
           <SettingsRow
             label="Default Subagent Model"
-            description="Used for delegated tasks launched by your agent"
+            description="Used for delegated tasks; inherit follows your default model and effort"
             control={
               <Select
                 value={subagentModelId}
@@ -228,6 +226,7 @@ function CloudAgentsPage() {
                   <SelectValue placeholder="Pick a model" />
                 </SelectTrigger>
                 <SelectContent>
+                  <SelectItem value="inherit">Inherit from main</SelectItem>
                   {defaultModels?.map((m) => (
                     <SelectItem key={m.id} value={m.id}>
                       {m.label}
@@ -244,6 +243,7 @@ function CloudAgentsPage() {
               <Select
                 value={subagentEffort}
                 onValueChange={(v) => v && setSubagentEffort(v)}
+                disabled={subagentInheritsMain}
               >
                 <SelectTrigger className="w-32">
                   <SelectValue />
