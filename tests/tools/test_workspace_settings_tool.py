@@ -4,7 +4,14 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from agent.dashboard.workspace_settings import get_workspace_settings, model_identity_visible
+from agent.dashboard.workspace_settings import (
+    WorkspaceSettingsUpdate,
+    get_instance_settings,
+    get_workspace_settings,
+    model_identity_visible,
+    upsert_instance_settings,
+    upsert_workspace_overrides,
+)
 from agent.tools import workspace_settings as settings_tool
 from tests.conftest import FakeStore
 
@@ -36,6 +43,19 @@ async def test_workspace_write_scopes_and_clears(fake_store: FakeStore) -> None:
     cleared = await settings_tool.set_model_identity_visibility(None, workspace="oss")
     assert cleared["settings"]["overrides"] == {}
     assert (await get_workspace_settings("oss")).show_model_identity is False
+
+
+async def test_write_preserves_other_settings(fake_store: FakeStore) -> None:
+    await upsert_instance_settings(WorkspaceSettingsUpdate(org_guidelines="instance rules"))
+    await upsert_workspace_overrides(
+        "oss", WorkspaceSettingsUpdate(org_guidelines="workspace rules")
+    )
+
+    await settings_tool.set_model_identity_visibility(False)
+    await settings_tool.set_model_identity_visibility(False, workspace="oss")
+
+    assert (await get_instance_settings()).org_review_guidelines == "instance rules"
+    assert (await get_workspace_settings("oss")).org_review_guidelines == "workspace rules"
 
 
 async def test_rechecks_admin(fake_store: FakeStore, monkeypatch: pytest.MonkeyPatch) -> None:

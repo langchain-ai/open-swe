@@ -33,12 +33,25 @@ async def set_model_identity_visibility(
     try:
         if workspace and workspace.strip():
             slug = workspace_settings.resolve_settings_workspace(workspace)
+            current = await workspace_settings.workspace_settings_view(slug)
             view = await workspace_settings.upsert_workspace_overrides(
-                slug, WorkspaceSettingsUpdate(show_model_identity=show_model_identity)
+                slug,
+                WorkspaceSettingsUpdate(
+                    **{
+                        **current["overrides"],
+                        "show_model_identity": show_model_identity,
+                    }
+                ),
             )
             return {"ok": True, "workspace": slug, "settings": view}
+        current = await workspace_settings.get_instance_settings()
         await workspace_settings.upsert_instance_settings(
-            WorkspaceSettingsUpdate(show_model_identity=show_model_identity)
+            WorkspaceSettingsUpdate(
+                **{
+                    **dict(current),
+                    "show_model_identity": show_model_identity,
+                }
+            )
         )
         effective: WorkspaceSettings = await workspace_settings.get_instance_settings()
     except ValueError as exc:
