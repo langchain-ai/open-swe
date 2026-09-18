@@ -201,6 +201,7 @@ def construct_system_prompt(
     slack_ask: bool = False,
     sandbox_file_downloads: bool = False,
     continued_from_collaborative: bool = False,
+    recent_thread_context: str | None = None,
 ) -> str:
     del linear_project_id, linear_issue_number
     untrusted_section = EXTERNAL_UNTRUSTED_COMMENTS_SECTION
@@ -258,6 +259,7 @@ def construct_system_prompt(
         external_untrusted_comments_section=untrusted_section,
         commit_pr_section=commit_pr_section,
         repo_instructions_section=_render_repo_instructions_section(repo_custom_instructions),
+        recent_thread_context_section=recent_thread_context or "",
         workspace_section=_render_workspace_section(workspace_name, workspace_instructions),
         admin_workspace_section=(
             load_prompt("system/admin-workspace.md") if admin_workspaces else ""
