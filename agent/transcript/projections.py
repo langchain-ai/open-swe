@@ -107,10 +107,8 @@ async def apply(
             await _turn_started(conn, thread_id, event, occurred_at)
         case TurnCompleted():
             await _turn_completed(conn, thread_id, version, event, run_id, occurred_at)
-        case TurnFailed():
-            await _turn_failed(conn, thread_id, event, run_id, occurred_at)
-        case TurnInterrupted():
-            await _turn_interrupted(conn, thread_id, event, run_id, occurred_at)
+        case TurnFailed() | TurnInterrupted():
+            await _turn_ended(conn, thread_id, event, run_id, occurred_at)
         case MessageAppended():
             await _message_appended(conn, thread_id, version, event, occurred_at)
         case MessageCompleted():
@@ -270,21 +268,23 @@ async def _turn_completed(
     )
 
 
-async def _turn_failed(
+async def _turn_ended(
     conn: AsyncConnection,
     thread_id: str,
-    event: TurnFailed,
+    event: TurnFailed | TurnInterrupted,
     run_id: str | None,
     occurred_at: datetime,
 ) -> None:
+    """Close a turn that did not complete. Only an open turn is ever moved."""
+    failed = isinstance(event, TurnFailed)
     await conn.execute(
         text(
             """
             UPDATE thread_turn SET
-                state = 'failed',
+                state = :state,
                 run_id = COALESCE(:run_id, run_id),
                 completed_at = :completed_at,
-                error = :error
+                error = COALESCE(:error, error)
             WHERE turn_id = :turn_id AND thread_id = :thread_id
               AND state IN ('requested', 'running')
             """
@@ -292,40 +292,13 @@ async def _turn_failed(
         {
             "thread_id": thread_id,
             "turn_id": event.turn_id,
+            "state": "failed" if failed else "interrupted",
             "run_id": event.run_id or run_id,
             "completed_at": occurred_at,
-            "error": event.error,
+            "error": event.error if failed else None,
         },
     )
-    await _settle_thread(conn, thread_id, status="error")
-
-
-async def _turn_interrupted(
-    conn: AsyncConnection,
-    thread_id: str,
-    event: TurnInterrupted,
-    run_id: str | None,
-    occurred_at: datetime,
-) -> None:
-    await conn.execute(
-        text(
-            """
-            UPDATE thread_turn SET
-                state = 'interrupted',
-                run_id = COALESCE(:run_id, run_id),
-                completed_at = :completed_at
-            WHERE turn_id = :turn_id AND thread_id = :thread_id
-              AND state IN ('requested', 'running')
-            """
-        ),
-        {
-            "thread_id": thread_id,
-            "turn_id": event.turn_id,
-            "run_id": event.run_id or run_id,
-            "completed_at": occurred_at,
-        },
-    )
-    await _settle_thread(conn, thread_id, status="idle")
+    await _settle_thread(conn, thread_id, status="error" if failed else "idle")
 
 
 async def _settle_thread(conn: AsyncConnection, thread_id: str, *, status: str) -> None:

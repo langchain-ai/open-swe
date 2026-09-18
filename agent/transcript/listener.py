@@ -24,6 +24,7 @@ from agent.database import postgres
 logger = logging.getLogger(__name__)
 
 CHANNEL = "open_swe_thread_events"
+"""LISTEN/NOTIFY channel carrying ``<thread_id>:<version>`` — ids only, never content."""
 
 DELETED = "deleted"
 """Notification payload suffix for a thread whose transcript was deleted."""

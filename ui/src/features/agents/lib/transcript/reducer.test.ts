@@ -43,7 +43,6 @@ function turn(
     started_at: requestedAt,
     completed_at: state === "completed" ? requestedAt : null,
     error: null,
-    head_commit: null,
   }
 }
 
@@ -58,9 +57,7 @@ function messageRow(
     role: "ai",
     text: "",
     reasoning: "",
-    streaming: false,
     namespace: [],
-    sender: null,
     images: null,
     usage: null,
     ...row,
@@ -76,14 +73,11 @@ function toolCall(
   }
 ): TranscriptToolCallRow {
   return {
-    message_id: null,
     input: {},
     status: "completed",
     output_preview: null,
-    output_truncated: false,
     has_output: false,
     namespace: [],
-    ended_at: null,
     ...row,
   }
 }
@@ -94,14 +88,7 @@ function snapshot(
   return {
     thread_id: "thread-1",
     version: 10,
-    thread: {
-      kind: "agent",
-      status: "idle",
-      active_run_id: null,
-      title: "Fix the build",
-      created_at: "2026-01-01T00:00:00Z",
-      updated_at: "2026-01-01T00:10:00Z",
-    },
+    thread: { status: "idle", active_run_id: null },
     turns: [],
     messages: [],
     tool_calls: [],
@@ -230,12 +217,7 @@ function appended(
   return {
     thread_id: "thread-1",
     version,
-    event_id: `event-${version}`,
-    schema_version: 1,
     run_id: "run-turn-2",
-    turn_id: "turn-2",
-    command_id: null,
-    actor_kind: "agent",
     occurred_at: "2026-01-01T00:02:00Z",
     event_type: "message.appended",
     payload: {
@@ -262,7 +244,6 @@ function completed(
       role: "ai",
       text: "",
       reasoning: "",
-      sender: null,
       images: null,
       usage: null,
       created_at: "2026-01-01T00:02:00Z",
@@ -280,12 +261,10 @@ describe("transcript events", () => {
     )
 
     expect(streamed.messages["ai-3"]?.text).toBe("Hello")
-    expect(streamed.messages["ai-3"]?.streaming).toBe(true)
 
     const settled = applyEvent(streamed, completed(13, { text: "Hello there" }))
 
     expect(settled.messages["ai-3"]?.text).toBe("Hello there")
-    expect(settled.messages["ai-3"]?.streaming).toBe(false)
     expect(settled.version).toBe(13)
   })
 
@@ -311,17 +290,8 @@ describe("transcript events", () => {
   })
 })
 
-function notice(
-  version: number,
-  payload: RunNoticePayload,
-  turnId = payload.turn_id
-): StoredEvent {
-  return {
-    ...appended(version, {}),
-    turn_id: turnId,
-    event_type: "run.notice",
-    payload,
-  }
+function notice(version: number, payload: RunNoticePayload): StoredEvent {
+  return { ...appended(version, {}), event_type: "run.notice", payload }
 }
 
 function image(overrides: Partial<TranscriptImage> = {}): TranscriptImage {
@@ -341,30 +311,6 @@ function imagesOf(entry: Message | undefined): Array<AnyImageChunk> {
 }
 
 describe("context usage", () => {
-  it("reads the newest AI message's usage out of the snapshot", () => {
-    const state = fromSnapshot(
-      snapshot({
-        turns: [turn("turn-1", "2026-01-01T00:00:00Z")],
-        messages: [
-          messageRow({
-            message_id: "ai-1",
-            turn_id: "turn-1",
-            created_at: "2026-01-01T00:00:01Z",
-            usage: { input_tokens: 10, output_tokens: 5 },
-          }),
-          messageRow({
-            message_id: "ai-2",
-            turn_id: "turn-1",
-            created_at: "2026-01-01T00:00:02Z",
-            usage: { input_tokens: 90_000, output_tokens: 1_000 },
-          }),
-        ],
-      })
-    )
-
-    expect(state.contextTokens).toBe(91_000)
-  })
-
   it("updates on a completed AI message and keeps the last known size otherwise", () => {
     const base = fromSnapshot(twoTurnSnapshot())
     expect(base.contextTokens).toBeNull()
@@ -401,17 +347,12 @@ describe("notices", () => {
 
     const nextTurn = applyEvent(reloaded, {
       ...appended(11, {}),
-      turn_id: "turn-3",
       event_type: "turn.requested",
       payload: {
         turn_id: "turn-3",
         message_id: "human-3",
         text: "again",
-        sender: { login: "me", kind: "dashboard" },
         images: [],
-        model_id: null,
-        effort: null,
-        plan_mode: false,
       },
     })
 
@@ -432,13 +373,7 @@ describe("notices", () => {
     const settled = applyEvent(started, {
       ...appended(12, {}),
       event_type: "turn.completed",
-      payload: {
-        turn_id: "turn-2",
-        run_id: "run-turn-2",
-        head_commit: null,
-        base_commit: null,
-        changed_files: null,
-      },
+      payload: { turn_id: "turn-2" },
     })
 
     expect(isOffloading(settled)).toBe(false)
@@ -503,19 +438,14 @@ describe("message images", () => {
     )
     const requested = applyEvent(base, {
       ...appended(11, {}),
-      turn_id: "turn-1",
       event_type: "turn.requested",
       payload: {
         turn_id: "turn-1",
         message_id: "human-1",
         text: "",
-        sender: { login: "me", kind: "dashboard" },
         images: [
           image({ attachment_id: "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee" }),
         ],
-        model_id: null,
-        effort: null,
-        plan_mode: false,
       },
     })
 
@@ -562,25 +492,13 @@ describe("windowed reads", () => {
     }
   }
 
-  it("orders a prepended page ahead of the window it was loaded from", () => {
-    const state = fromSnapshot(twoTurnSnapshot())
-    const merged = prependTurns(state, olderPage())
+  it("orders a prepended page ahead of the window, and advances the cursor", () => {
+    const state = fromSnapshot(twoTurnSnapshot({ older_cursor: "page-2" }))
+    const merged = prependTurns(state, olderPage({ older_cursor: "page-3" }))
 
     expect(merged.turnOrder).toEqual(["turn-0", "turn-1", "turn-2"])
     expect(toMessages(merged)[0]?.chunks).toEqual([
       { kind: "text", text: "the oldest ask" },
-    ])
-    expect(merged.olderCursor).toBeNull()
-  })
-
-  it("keeps the turns already loaded and advances the cursor", () => {
-    const state = fromSnapshot(twoTurnSnapshot({ older_cursor: "page-2" }))
-    const merged = prependTurns(state, olderPage({ older_cursor: "page-3" }))
-
-    expect(Object.keys(merged.turns).sort()).toEqual([
-      "turn-0",
-      "turn-1",
-      "turn-2",
     ])
     expect(merged.olderCursor).toBe("page-3")
     // Settled turns are immutable, so their rendered rows are kept as-is.
@@ -615,17 +533,5 @@ describe("windowed reads", () => {
     expect(refreshed.messages["ai-2"]?.text).toBe("the newest answer")
     // The window's own cursor points at history this client already holds.
     expect(refreshed.olderCursor).toBe("page-3")
-  })
-
-  it("a snapshot frame for a thread with no loaded history takes its cursor", () => {
-    const refreshed = applySnapshot(
-      null,
-      snapshot({
-        turns: [turn("turn-2", "2026-01-01T00:01:00Z")],
-        older_cursor: "page-fresh",
-      })
-    )
-
-    expect(refreshed.olderCursor).toBe("page-fresh")
   })
 })

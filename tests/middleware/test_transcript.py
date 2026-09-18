@@ -108,39 +108,37 @@ def test_paragraph_boundary(text: str, expected: int) -> None:
     assert mw.paragraph_boundary(text) == expected
 
 
-def test_buffer_waits_for_the_flush_interval() -> None:
-    buffer = mw.ParagraphBuffer(last_flush=0.0)
-    buffer.add("para one\n\npara two")
-    assert buffer.take(mw.PARAGRAPH_FLUSH_SECONDS / 2) is None
-    assert buffer.take(mw.PARAGRAPH_FLUSH_SECONDS) == "para one\n\n"
-    assert buffer.pending == "para two"
-
-
-def test_buffer_holds_back_without_a_boundary() -> None:
-    buffer = mw.ParagraphBuffer(last_flush=0.0)
-    buffer.add("a single unfinished paragraph")
-    assert buffer.take(10.0) is None
-
-
-def test_buffer_hard_flushes_ignoring_the_interval() -> None:
-    buffer = mw.ParagraphBuffer(last_flush=100.0)
-    buffer.add("x" * mw.HARD_FLUSH_CHARS)
-    fragment = buffer.take(100.0)
-    assert fragment is not None
-    assert len(fragment) == mw.HARD_FLUSH_CHARS
-    assert buffer.pending == ""
-
-
-def test_buffer_hard_flush_prefers_a_boundary() -> None:
-    buffer = mw.ParagraphBuffer(last_flush=100.0)
-    buffer.add("head\n\n" + "x" * mw.HARD_FLUSH_CHARS)
-    assert buffer.take(100.0) == "head\n\n"
-
-
-def test_buffer_final_flush_takes_everything() -> None:
-    buffer = mw.ParagraphBuffer(last_flush=0.0)
-    buffer.add("trailing words with no boundary")
-    assert buffer.take(0.0, final=True) == "trailing words with no boundary"
+@pytest.mark.parametrize(
+    ("last_flush", "pending", "now", "final", "fragment", "remaining"),
+    [
+        (0.0, "para one\n\npara two", mw.PARAGRAPH_FLUSH_SECONDS / 2, False, None, None),
+        (
+            0.0,
+            "para one\n\npara two",
+            mw.PARAGRAPH_FLUSH_SECONDS,
+            False,
+            "para one\n\n",
+            "para two",
+        ),
+        (0.0, "a single unfinished paragraph", 10.0, False, None, None),
+        (100.0, "x" * mw.HARD_FLUSH_CHARS, 100.0, False, "x" * mw.HARD_FLUSH_CHARS, ""),
+        (100.0, "head\n\n" + "x" * mw.HARD_FLUSH_CHARS, 100.0, False, "head\n\n", None),
+        (0.0, "trailing words", 0.0, True, "trailing words", ""),
+    ],
+)
+def test_paragraph_buffer_flushes(
+    last_flush: float,
+    pending: str,
+    now: float,
+    final: bool,
+    fragment: str | None,
+    remaining: str | None,
+) -> None:
+    buffer = mw.ParagraphBuffer(last_flush=last_flush)
+    buffer.add(pending)
+    assert buffer.take(now, final=final) == fragment
+    if remaining is not None:
+        assert buffer.pending == remaining
 
 
 # --- hook sequence ---------------------------------------------------------
@@ -226,23 +224,27 @@ async def test_old_thread_is_skipped_entirely(monkeypatch: pytest.MonkeyPatch) -
     assert engine.commands == []
 
 
-async def test_queued_human_messages_are_recorded_once(
+async def test_only_mid_run_human_messages_are_recorded_once(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """History belongs to turns that are over; only an injected message is new."""
     engine = _install(monkeypatch, transcribed=True, turn_id=uuid7())
     middleware = mw.TranscriptMiddleware()
-    first = HumanMessage(content="start", id="human-1")
-    await middleware.abefore_agent({"messages": [first]}, None)
+    history = [
+        HumanMessage(content="first ask", id="human-1"),
+        AIMessage(content="done", id="ai-1"),
+        HumanMessage(content="second ask", id="human-2"),
+    ]
+    await middleware.abefore_agent({"messages": history}, None)
 
     injected = HumanMessage(content="also do this", id="human-queued")
-    ai = AIMessage(content="ok", id="ai-1")
 
     async def model_handler(request: ModelRequest) -> ModelResponse:
-        return ModelResponse(result=[ai])
+        return ModelResponse(result=[AIMessage(content="ok", id="ai-2")])
 
     for _ in range(2):
-        await middleware.awrap_model_call(_model_request([first, injected]), model_handler)
-    await middleware.aafter_agent({"messages": []}, None)
+        await middleware.awrap_model_call(_model_request([*history, injected]), model_handler)
+    await middleware.aafter_agent({"messages": history}, None)
 
     human_events = [
         command for command in engine.commands if command.command_id.startswith("human:")
@@ -377,30 +379,6 @@ async def test_without_postgres_the_middleware_writes_nothing(
 
     assert engine.commands == []
     assert stamped == []
-
-
-async def test_earlier_human_messages_are_not_rewritten_into_this_turn(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """A follow-up turn must not re-stamp the previous turn's human message."""
-    engine = _install(monkeypatch, transcribed=True, turn_id=uuid7())
-    middleware = mw.TranscriptMiddleware()
-    history = [
-        HumanMessage(content="first ask", id="human-1"),
-        AIMessage(content="done", id="ai-1"),
-        HumanMessage(content="second ask", id="human-2"),
-    ]
-    await middleware.abefore_agent({"messages": history}, None)
-
-    async def model_handler(request: ModelRequest) -> ModelResponse:
-        return ModelResponse(result=[AIMessage(content="ok", id="ai-2")])
-
-    await middleware.awrap_model_call(_model_request(history), model_handler)
-    await middleware.aafter_agent({"messages": history}, None)
-
-    assert [
-        command.command_id for command in engine.commands if "human" in command.command_id
-    ] == []
 
 
 async def test_ai_usage_is_recorded_on_completion(monkeypatch: pytest.MonkeyPatch) -> None:

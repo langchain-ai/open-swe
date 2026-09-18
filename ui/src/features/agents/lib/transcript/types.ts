@@ -1,9 +1,10 @@
 /**
  * Wire types for the append-only thread transcript event log.
  *
- * Everything here mirrors the server's JSON exactly (snake_case, ISO-8601
- * timestamps), so these types are the contract boundary: nothing downstream of
- * the reducer speaks snake_case, and nothing here is reshaped on the way in.
+ * Everything here mirrors the server's JSON (snake_case, ISO-8601 timestamps)
+ * and is modelled down to the fields the client actually reads: nothing
+ * downstream of the reducer speaks snake_case, and nothing here is reshaped on
+ * the way in.
  */
 
 export type JsonValue =
@@ -15,8 +16,6 @@ export type JsonValue =
   | { [key: string]: JsonValue }
 
 export type JsonObject = { [key: string]: JsonValue }
-
-export type TranscriptKind = "agent" | "reviewer"
 
 export type TranscriptThreadStatus = "idle" | "running" | "error"
 
@@ -31,30 +30,10 @@ export type MessageRole = "human" | "ai"
 
 export type ToolCallStatus = "in_progress" | "completed" | "error"
 
-export type ActorKind = "user" | "agent" | "system"
-
 export type NoticeKind =
   | "model_routed"
   | "conversation_offloading"
   | "step_limit"
-
-/**
- * Known sender kinds. The server may add surfaces without a UI change, so an
- * unknown kind stays readable rather than failing to type-check.
- */
-export type SenderKind =
-  | "dashboard"
-  | "slack"
-  | "github"
-  | "linear"
-  | "schedule"
-  | "system"
-
-export interface TranscriptSender {
-  login: string
-  kind: SenderKind | (string & {})
-  display_name?: string | null
-}
 
 /**
  * An image attached to a message. The log stores metadata only — never base64
@@ -80,12 +59,8 @@ export interface TranscriptUsage {
 export type Namespace = ReadonlyArray<string>
 
 export interface TranscriptThreadRow {
-  kind: TranscriptKind
   status: TranscriptThreadStatus
   active_run_id: string | null
-  title: string | null
-  created_at: string
-  updated_at: string
 }
 
 export interface TranscriptTurnRow {
@@ -96,7 +71,6 @@ export interface TranscriptTurnRow {
   started_at: string | null
   completed_at: string | null
   error: string | null
-  head_commit: string | null
 }
 
 export interface TranscriptMessageRow {
@@ -105,9 +79,7 @@ export interface TranscriptMessageRow {
   role: MessageRole
   text: string
   reasoning: string
-  streaming: boolean
   namespace: Namespace
-  sender: TranscriptSender | null
   images: ReadonlyArray<TranscriptImage> | null
   /** Set on AI messages the provider reported usage for; null otherwise. */
   usage: TranscriptUsage | null
@@ -117,17 +89,14 @@ export interface TranscriptMessageRow {
 export interface TranscriptToolCallRow {
   tool_call_id: string
   turn_id: string
-  message_id: string | null
   name: string
   input: JsonObject
   status: ToolCallStatus
   output_preview: string | null
-  output_truncated: boolean
   /** Whether the full output can be fetched from the tool-output endpoint. */
   has_output: boolean
   namespace: Namespace
   started_at: string
-  ended_at: string | null
 }
 
 export interface TranscriptNoticeRow {
@@ -185,19 +154,6 @@ export interface DeletedFrame {
   thread_id: string
 }
 
-export interface ThreadCreatedPayload {
-  title: string
-  kind: TranscriptKind
-  source: string
-  owner_login: string
-  visibility: "public" | "private"
-  repo_owner: string | null
-  repo_name: string | null
-  model_id: string | null
-  effort: string | null
-  metadata: JsonObject
-}
-
 /**
  * A change to the mirrored thread row.
  *
@@ -208,10 +164,8 @@ export interface ThreadCreatedPayload {
  */
 export interface ThreadMetaUpdatedPayload {
   patch: {
-    title: string | null
     status: TranscriptThreadStatus | null
     active_run_id: string | null
-    metadata: JsonObject | null
   }
 }
 
@@ -219,11 +173,7 @@ export interface TurnRequestedPayload {
   turn_id: string
   message_id: string
   text: string
-  sender: TranscriptSender
   images: ReadonlyArray<TranscriptImage>
-  model_id: string | null
-  effort: string | null
-  plan_mode: boolean
 }
 
 export interface TurnStartedPayload {
@@ -231,23 +181,12 @@ export interface TurnStartedPayload {
   run_id: string
 }
 
-export interface TurnCompletedPayload {
+export interface TurnEndedPayload {
   turn_id: string
-  run_id: string | null
-  head_commit: string | null
-  base_commit: string | null
-  changed_files: ReadonlyArray<string> | null
 }
 
-export interface TurnFailedPayload {
-  turn_id: string
-  run_id: string | null
+export interface TurnFailedPayload extends TurnEndedPayload {
   error: string
-}
-
-export interface TurnInterruptedPayload {
-  turn_id: string
-  run_id: string | null
 }
 
 /** A flush of buffered model output; `text`/`reasoning` are fragments to concatenate. */
@@ -267,7 +206,6 @@ export interface MessageCompletedPayload {
   role: MessageRole
   text: string
   reasoning: string
-  sender: TranscriptSender | null
   images: ReadonlyArray<TranscriptImage> | null
   usage: TranscriptUsage | null
   created_at: string
@@ -276,7 +214,6 @@ export interface MessageCompletedPayload {
 export interface ToolStartedPayload {
   turn_id: string
   tool_call_id: string
-  message_id: string | null
   name: string
   input: JsonObject
   namespace: Namespace
@@ -287,7 +224,6 @@ export interface ToolCompletedPayload {
   tool_call_id: string
   status: "completed" | "error"
   output: string
-  output_truncated: boolean
   namespace: Namespace
 }
 
@@ -300,12 +236,7 @@ export interface RunNoticePayload {
 interface StoredEventEnvelope {
   thread_id: string
   version: number
-  event_id: string
-  schema_version: number
   run_id: string | null
-  turn_id: string | null
-  command_id: string | null
-  actor_kind: ActorKind
   occurred_at: string
 }
 
@@ -320,17 +251,15 @@ type Stored<EventType extends string, Payload> = StoredEventEnvelope & {
 }
 
 export type StoredEvent =
-  | Stored<"thread.created", ThreadCreatedPayload>
+  | Stored<"thread.created", JsonObject>
   | Stored<"thread.meta_updated", ThreadMetaUpdatedPayload>
   | Stored<"turn.requested", TurnRequestedPayload>
   | Stored<"turn.started", TurnStartedPayload>
-  | Stored<"turn.completed", TurnCompletedPayload>
+  | Stored<"turn.completed", TurnEndedPayload>
   | Stored<"turn.failed", TurnFailedPayload>
-  | Stored<"turn.interrupted", TurnInterruptedPayload>
+  | Stored<"turn.interrupted", TurnEndedPayload>
   | Stored<"message.appended", MessageAppendedPayload>
   | Stored<"message.completed", MessageCompletedPayload>
   | Stored<"tool.started", ToolStartedPayload>
   | Stored<"tool.completed", ToolCompletedPayload>
   | Stored<"run.notice", RunNoticePayload>
-
-export type TranscriptEventType = StoredEvent["event_type"]

@@ -32,9 +32,6 @@ from agent.transcript.events import (
 
 logger = logging.getLogger(__name__)
 
-NOTIFY_CHANNEL = "open_swe_thread_events"
-"""LISTEN/NOTIFY channel carrying ``<thread_id>:<version>`` — ids only, never content."""
-
 
 @dataclass(frozen=True, kw_only=True)
 class Command:
@@ -109,7 +106,7 @@ async def append(thread_id: str, commands: Sequence[Command]) -> AppendResult:
             )
             await conn.execute(
                 text("SELECT pg_notify(:channel, :payload)"),
-                {"channel": NOTIFY_CHANNEL, "payload": f"{thread_id}:{version}"},
+                {"channel": listener.CHANNEL, "payload": f"{thread_id}:{version}"},
             )
 
     appended = {event.command_id: event.version for event in events}
@@ -163,7 +160,7 @@ async def delete_transcript(thread_id: str) -> bool:
         if deleted:
             await conn.execute(
                 text("SELECT pg_notify(:channel, :payload)"),
-                {"channel": NOTIFY_CHANNEL, "payload": f"{thread_id}:{listener.DELETED}"},
+                {"channel": listener.CHANNEL, "payload": f"{thread_id}:{listener.DELETED}"},
             )
     if deleted:
         listener.publish(thread_id, listener.DELETED_VERSION)

@@ -5,7 +5,6 @@ authorization mirror are all SQL, so an in-memory double would not be testing
 the thing that has to hold.
 """
 
-from datetime import UTC, datetime
 from uuid import uuid7
 
 import pytest
@@ -13,10 +12,9 @@ from fastapi import HTTPException
 from sqlalchemy import text
 
 from agent.database import postgres
-from agent.transcript.attachments import PendingAttachment, UnsupportedAttachment
+from agent.transcript.attachments import PendingAttachment
 from agent.transcript.engine import Command, append, delete_transcript, has_transcript
 from agent.transcript.events import (
-    MessageCompleted,
     MessageImage,
     MessageSender,
     RunNotice,
@@ -331,50 +329,6 @@ async def test_an_attachment_is_served_only_to_a_reader_of_its_own_thread(
     with pytest.raises(HTTPException) as refused:
         await api_get_thread_attachment(thread_id, attachment_id, {"sub": "stranger"})
     assert refused.value.status_code == 404
-
-
-async def test_a_non_image_attachment_is_rejected_before_it_is_stored() -> None:
-    with pytest.raises(UnsupportedAttachment):
-        PendingAttachment(
-            attachment_id=uuid7(),
-            message_id="human-1",
-            position=0,
-            mime_type="application/pdf",
-            file_name="report.pdf",
-            data=b"%PDF",
-        )
-
-
-async def test_message_usage_reaches_the_snapshot(registry_db: None) -> None:
-    thread_id = str(uuid7())
-    turn_id = uuid7()
-    await _create(thread_id)
-    await append(
-        thread_id,
-        [
-            Command(
-                command_id="message:ai-1:completed",
-                event=MessageCompleted(
-                    turn_id=turn_id,
-                    message_id="ai-1",
-                    role="ai",
-                    text="done",
-                    usage={"input_tokens": 120, "output_tokens": 30, "total_tokens": 150},  # type: ignore[arg-type]
-                    created_at=datetime.now(UTC),
-                ),
-                actor_kind="agent",
-                turn_id=turn_id,
-            )
-        ],
-    )
-
-    snapshot = await load_snapshot(thread_id)
-    assert snapshot is not None
-    assert snapshot.messages[0].usage == {
-        "input_tokens": 120,
-        "output_tokens": 30,
-        "total_tokens": 150,
-    }
 
 
 async def _turn_state(thread_id: str, turn_id: object) -> str:

@@ -5,7 +5,7 @@
  * unchanged.
  */
 
-import { AgentsApiError } from "@/features/agents/lib/api"
+import { AgentsApiError, agentsRequest } from "@/features/agents/lib/api"
 import { promptMessage } from "@/features/agents/lib/stream/promptMessage"
 import { dashboardApiUrl } from "@/lib/dashboard-fetch"
 import { withRequestTiming } from "@/lib/perf/fetchTiming"
@@ -23,16 +23,6 @@ const timedFetch = withRequestTiming((input, init) => fetch(input, init))
 
 function transcriptPath(threadId: string, suffix = ""): string {
   return `/threads/${encodeURIComponent(threadId)}/transcript${suffix}`
-}
-
-async function readJson<T>(path: string, signal?: AbortSignal): Promise<T> {
-  const response = await timedFetch(dashboardApiUrl(path), {
-    credentials: "include",
-    headers: { Accept: "application/json" },
-    ...(signal ? { signal } : {}),
-  })
-  if (!response.ok) throw await apiError(response)
-  return (await response.json()) as T
 }
 
 async function apiError(response: Response): Promise<AgentsApiError> {
@@ -53,7 +43,7 @@ async function apiError(response: Response): Promise<AgentsApiError> {
 
 /** The whole thread as of `version`; 404 for threads that predate the log. */
 export function fetchTranscript(threadId: string): Promise<TranscriptSnapshot> {
-  return readJson<TranscriptSnapshot>(transcriptPath(threadId))
+  return agentsRequest<TranscriptSnapshot>(transcriptPath(threadId))
 }
 
 /**
@@ -66,9 +56,9 @@ export function fetchOlderTurns(
   cursor: string,
   signal?: AbortSignal
 ): Promise<TranscriptTurnPage> {
-  return readJson<TranscriptTurnPage>(
+  return agentsRequest<TranscriptTurnPage>(
     transcriptPath(threadId, `/turns?before=${encodeURIComponent(cursor)}`),
-    signal
+    signal ? { signal } : {}
   )
 }
 
@@ -77,7 +67,7 @@ export function fetchToolOutput(
   threadId: string,
   toolCallId: string
 ): Promise<ToolOutputResponse> {
-  return readJson<ToolOutputResponse>(
+  return agentsRequest<ToolOutputResponse>(
     transcriptPath(
       threadId,
       `/tool-calls/${encodeURIComponent(toolCallId)}/output`

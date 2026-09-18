@@ -52,7 +52,6 @@ from agent.transcript.events import (
     MessageImage,
     MessageSender,
     MessageUsage,
-    NoticeKind,
     RunNotice,
     ThreadCreated,
     ToolCompleted,
@@ -253,34 +252,6 @@ def _lookup_state() -> RunState:
     if ids is None:
         return DISABLED
     return _runs.get(_run_key(ids.thread_id, ids.run_id), DISABLED)
-
-
-async def notice(kind: NoticeKind, data: JsonObject) -> None:
-    """Record a live-only UI hint for the current run (best effort, never raises).
-
-    Exposed for middleware that already streams its own hints through
-    ``get_stream_writer`` and could additionally persist them here.
-    """
-    state = _lookup_state()
-    if not state.enabled:
-        return
-    try:
-        state.enqueue(
-            Command(
-                command_id=str(uuid.uuid7()),
-                event=RunNotice(
-                    type="run.notice",
-                    turn_id=state.turn_id,
-                    kind=kind,
-                    data=dict(data),
-                ),
-                actor_kind="agent",
-                run_id=state.run_id,
-                turn_id=state.turn_id,
-            )
-        )
-    except Exception:
-        logger.warning("Transcript notice failed", exc_info=True, extra={"notice_kind": kind})
 
 
 def _reasoning_text(message: BaseMessage) -> str:
@@ -504,7 +475,12 @@ class _DeltaHandler(AsyncCallbackHandler):
             return
         self.streamed = True
         try:
-            _buffer_delta(self._state, self.message_id, self._namespace, text, reasoning)
+            buffers = _buffers(self._state, self.message_id)
+            if text:
+                buffers.text.add(text)
+            if reasoning:
+                buffers.reasoning.add(reasoning)
+            _flush_message(self._state, self.message_id, self._namespace)
         except Exception:
             logger.warning(
                 "Transcript delta capture failed",
@@ -522,17 +498,6 @@ def _buffers(state: RunState, message_id: str) -> MessageBuffers:
         )
         state.buffers[message_id] = buffers
     return buffers
-
-
-def _buffer_delta(
-    state: RunState, message_id: str, namespace: list[str], text: str, reasoning: str
-) -> None:
-    buffers = _buffers(state, message_id)
-    if text:
-        buffers.text.add(text)
-    if reasoning:
-        buffers.reasoning.add(reasoning)
-    _flush_message(state, message_id, namespace)
 
 
 def _flush_message(
@@ -594,19 +559,6 @@ async def _writer_loop(state: RunState) -> None:
                 queue.task_done()
 
 
-async def _drain(state: RunState) -> None:
-    if state.queue is None:
-        return
-    try:
-        await asyncio.wait_for(state.queue.join(), timeout=30)
-    except TimeoutError:
-        logger.warning(
-            "Transcript drain timed out",
-            exc_info=True,
-            extra={"transcript_thread_id": state.thread_id},
-        )
-
-
 async def _finish(state: RunState) -> None:
     """Flush the queue, then stop the writer — even if the drain is cancelled.
 
@@ -614,7 +566,14 @@ async def _finish(state: RunState) -> None:
     propagate, but the writer task must not be left running behind it.
     """
     try:
-        await _drain(state)
+        if state.queue is not None:
+            await asyncio.wait_for(state.queue.join(), timeout=30)
+    except TimeoutError:
+        logger.warning(
+            "Transcript drain timed out",
+            exc_info=True,
+            extra={"transcript_thread_id": state.thread_id},
+        )
     finally:
         if state.writer is not None:
             state.writer.cancel()
@@ -1156,6 +1115,3 @@ def _detach(
         manager.remove_handler(handler)
     except Exception:
         logger.warning("Could not detach transcript delta handler", exc_info=True)
-
-
-transcript_middleware = TranscriptMiddleware()

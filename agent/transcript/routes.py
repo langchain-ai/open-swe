@@ -25,7 +25,6 @@ from agent.threads.access import _assert_thread_readable  # noqa: PLC2701
 from agent.transcript import attachments, listener
 from agent.transcript.cursor import decode_turn_cursor
 from agent.transcript.snapshot import (
-    TranscriptAccess,
     TranscriptTurnPage,
     load_access,
     load_events,
@@ -53,12 +52,12 @@ _SSE_HEADERS = {
 }
 
 
-async def _readable_transcript(thread_id: str, session: dict[str, Any]) -> TranscriptAccess:
-    access = await load_access(thread_id)
-    if access is None:
+async def _readable_transcript(thread_id: str, session: dict[str, Any]) -> None:
+    """Raise unless ``session`` may read this thread's transcript."""
+    metadata = await load_access(thread_id)
+    if metadata is None:
         raise HTTPException(404, "transcript_unavailable")
-    _assert_thread_readable(access.metadata, session["sub"], session.get("email"))
-    return access
+    _assert_thread_readable(metadata, session["sub"], session.get("email"))
 
 
 def _frame(event: str, data: str) -> str:

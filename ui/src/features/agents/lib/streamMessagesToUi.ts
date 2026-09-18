@@ -38,7 +38,7 @@ const FETCH_TOOLS = new Set(["fetch", "fetch_url", "http_request"])
 /** Bookkeeping calls the transcript never shows. */
 export const INTERNAL_TOOLS = new Set(["confirming_completion", "no_op"])
 
-export type ToolKind = ToolExecutionChunk["toolKind"]
+type ToolKind = ToolExecutionChunk["toolKind"]
 
 export function toolKind(name: string): ToolKind {
   const lowered = name.toLowerCase()
@@ -70,7 +70,7 @@ export function toolTitle(name: string, args: Record<string, unknown>): string {
   return humanizeToolName(name)
 }
 
-export function parseToolArgs(raw: unknown): Record<string, unknown> {
+function parseToolArgs(raw: unknown): Record<string, unknown> {
   if (raw && typeof raw === "object" && !Array.isArray(raw))
     return raw as Record<string, unknown>
   if (typeof raw === "string") {

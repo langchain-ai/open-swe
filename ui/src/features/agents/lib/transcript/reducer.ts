@@ -44,7 +44,6 @@ import type {
   ToolCallStatus,
   TranscriptImage,
   TranscriptMessageRow,
-  TranscriptSender,
   TranscriptSnapshot,
   TranscriptThreadStatus,
   TranscriptToolCallRow,
@@ -60,9 +59,7 @@ export interface TranscriptMessageState {
   role: MessageRole
   text: string
   reasoning: string
-  streaming: boolean
   namespace: Namespace
-  sender: TranscriptSender | null
   images: ReadonlyArray<TranscriptImage>
   /** Token accounting for an AI message, when the provider reported any. */
   usage: TranscriptUsage | null
@@ -72,20 +69,17 @@ export interface TranscriptMessageState {
 export interface TranscriptToolCallState {
   toolCallId: string
   turnId: string
-  messageId: string | null
   name: string
   input: JsonObject
   status: ToolCallStatus
   /** Preview from the snapshot, or the full output when it arrived by event. */
   output: string | null
-  outputTruncated: boolean
   /** Whether {@link output} is everything the server has. */
   outputComplete: boolean
   /** Whether the server holds output worth fetching on expand. */
   hasOutput: boolean
   namespace: Namespace
   startedAt: string
-  endedAt: string | null
 }
 
 /** A turn's contents in event order; messages and tool calls interleave. */
@@ -195,9 +189,7 @@ function messageState(row: TranscriptMessageRow): TranscriptMessageState {
     role: row.role,
     text: row.text,
     reasoning: row.reasoning,
-    streaming: row.streaming,
     namespace: row.namespace,
-    sender: row.sender ?? null,
     images: row.images ?? [],
     usage: row.usage ?? null,
     createdAt: row.created_at,
@@ -208,17 +200,14 @@ function toolCallState(row: TranscriptToolCallRow): TranscriptToolCallState {
   return {
     toolCallId: row.tool_call_id,
     turnId: row.turn_id,
-    messageId: row.message_id,
     name: row.name,
     input: row.input,
     status: row.status,
     output: row.output_preview,
-    outputTruncated: row.output_truncated,
     outputComplete: false,
     hasOutput: row.has_output,
     namespace: row.namespace,
     startedAt: row.started_at,
-    endedAt: row.ended_at,
   }
 }
 
@@ -460,20 +449,6 @@ function putToolCall(draft: Draft, call: TranscriptToolCallState): void {
   addItem(draft, call.turnId, { kind: "tool", id: call.toolCallId })
 }
 
-/** A turn ended, so nothing in it is still streaming. */
-function settleStreaming(draft: Draft, turnId: string): void {
-  const streaming = Object.values(draft.state.messages).filter(
-    (message) => message.turnId === turnId && message.streaming
-  )
-  if (!streaming.length) return
-  const messages = { ...draft.state.messages }
-  for (const message of streaming) {
-    messages[message.messageId] = { ...message, streaming: false }
-  }
-  draft.state = { ...draft.state, messages }
-  draft.touched.add(turnId)
-}
-
 /**
  * Offloading describes what a run is doing right now, so it dies with its turn
  * — the snapshot drops it for a settled turn, and so does the live stream.
@@ -510,9 +485,6 @@ export function applyEvent(
   const at = event.occurred_at
 
   switch (event.event_type) {
-    case "thread.created": {
-      break
-    }
     case "thread.meta_updated": {
       const patch = event.payload.patch
       draft.state = {
@@ -556,9 +528,7 @@ export function applyEvent(
         role: "human",
         text: payload.text,
         reasoning: "",
-        streaming: false,
         namespace: [],
-        sender: payload.sender,
         images: payload.images,
         usage: null,
         createdAt: at,
@@ -587,7 +557,6 @@ export function applyEvent(
         state: "completed",
         completedAt: at,
       })
-      settleStreaming(draft, payload.turn_id)
       dropTransientNotices(draft, payload.turn_id)
       draft.state = { ...draft.state, status: "idle", activeRunId: null }
       break
@@ -600,7 +569,6 @@ export function applyEvent(
         completedAt: at,
         error: payload.error,
       })
-      settleStreaming(draft, payload.turn_id)
       dropTransientNotices(draft, payload.turn_id)
       draft.state = { ...draft.state, status: "error", activeRunId: null }
       break
@@ -612,7 +580,6 @@ export function applyEvent(
         state: "interrupted",
         completedAt: at,
       })
-      settleStreaming(draft, payload.turn_id)
       dropTransientNotices(draft, payload.turn_id)
       draft.state = { ...draft.state, status: "idle", activeRunId: null }
       break
@@ -627,9 +594,7 @@ export function applyEvent(
         role: existing?.role ?? "ai",
         text: (existing?.text ?? "") + (payload.text ?? ""),
         reasoning: (existing?.reasoning ?? "") + (payload.reasoning ?? ""),
-        streaming: true,
         namespace: payload.namespace,
-        sender: existing?.sender ?? null,
         images: existing?.images ?? [],
         usage: existing?.usage ?? null,
         createdAt: existing?.createdAt ?? at,
@@ -646,9 +611,7 @@ export function applyEvent(
         role: payload.role,
         text: payload.text,
         reasoning: payload.reasoning,
-        streaming: false,
         namespace: payload.namespace,
-        sender: payload.sender ?? existing?.sender ?? null,
         images: payload.images ?? existing?.images ?? [],
         usage: payload.usage ?? existing?.usage ?? null,
         createdAt: payload.created_at || existing?.createdAt || at,
@@ -669,17 +632,14 @@ export function applyEvent(
       putToolCall(draft, {
         toolCallId: payload.tool_call_id,
         turnId: payload.turn_id,
-        messageId: payload.message_id ?? null,
         name: payload.name,
         input: payload.input,
         status: "in_progress",
         output: null,
-        outputTruncated: false,
         outputComplete: false,
         hasOutput: false,
         namespace: payload.namespace,
         startedAt: at,
-        endedAt: null,
       })
       break
     }
@@ -690,18 +650,15 @@ export function applyEvent(
       putToolCall(draft, {
         toolCallId: payload.tool_call_id,
         turnId: payload.turn_id,
-        messageId: existing?.messageId ?? null,
         name: existing?.name ?? payload.tool_call_id,
         input: existing?.input ?? {},
         status: payload.status,
         output: payload.output,
-        outputTruncated: payload.output_truncated,
         // The event carries the output the server kept, truncation aside.
         outputComplete: true,
         hasOutput: payload.output.length > 0,
         namespace: payload.namespace,
         startedAt: existing?.startedAt ?? at,
-        endedAt: at,
       })
       break
     }
@@ -723,10 +680,6 @@ export function applyEvent(
   }
 
   return commit(draft, event.version)
-}
-
-export function isRunning(state: TranscriptState): boolean {
-  return state.status === "running"
 }
 
 /** The routed model the Auto router picked for the newest run, when it said. */

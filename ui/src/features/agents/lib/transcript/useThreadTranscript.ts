@@ -11,6 +11,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useQueryClient } from "@tanstack/react-query"
 
 import {
+  LIVE_CONNECTION,
   MAX_RECONNECT_ATTEMPTS,
   reconnectDelayMs,
 } from "@/features/agents/lib/stream/connection"
@@ -60,8 +61,6 @@ function cached(threadId: string): TranscriptState | null {
   sweep(Date.now())
   return cache.get(threadId)?.state ?? null
 }
-
-const LIVE: StreamConnection = { status: "live" }
 
 /** The thread was deleted while this client was reading it. */
 export class ThreadDeletedError extends Error {
@@ -115,7 +114,8 @@ export function useThreadTranscript(
     cached(threadId)
   )
   const [error, setError] = useState<unknown>(null)
-  const [connection, setConnection] = useState<StreamConnection>(LIVE)
+  const [connection, setConnection] =
+    useState<StreamConnection>(LIVE_CONNECTION)
   const [isLoadingOlder, setIsLoadingOlder] = useState(false)
   const stateRef = useRef<TranscriptState | null>(state)
   const olderRequest = useRef<AbortController | null>(null)
@@ -146,7 +146,7 @@ export function useThreadTranscript(
       stream = openTranscriptEvents(threadId, from, {
         onOpen: () => {
           attempt = 0
-          setConnection(LIVE)
+          setConnection(LIVE_CONNECTION)
         },
         onSnapshot: (snapshot) => {
           // The frame carries the newest window, so it is merged rather than
@@ -155,7 +155,7 @@ export function useThreadTranscript(
           if (!disposed) publish(applySnapshot(stateRef.current, snapshot))
         },
         onSynchronized: () => {
-          if (!disposed) setConnection(LIVE)
+          if (!disposed) setConnection(LIVE_CONNECTION)
         },
         onDeleted: () => {
           // The stream is over and there is nothing left to read: drop the
@@ -166,7 +166,7 @@ export function useThreadTranscript(
           stateRef.current = null
           if (disposed) return
           setState(null)
-          setConnection(LIVE)
+          setConnection(LIVE_CONNECTION)
           setError(new ThreadDeletedError())
           queryClient.removeQueries({
             queryKey: agentThreadKeys.detail(threadId),
@@ -199,7 +199,7 @@ export function useThreadTranscript(
           stream?.close()
           stream = null
           if (attempt >= MAX_RECONNECT_ATTEMPTS) {
-            setConnection(LIVE)
+            setConnection(LIVE_CONNECTION)
             setError(streamError)
             return
           }

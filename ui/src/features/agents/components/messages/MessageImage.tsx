@@ -10,7 +10,7 @@ import type { AnyImageChunk } from "@/features/agents/lib/types"
  * those are fetched once and shown through a blob URL that is revoked with the
  * component.
  */
-export function useImageSource(chunk: AnyImageChunk): {
+function useImageSource(chunk: AnyImageChunk): {
   src: string | null
   failed: boolean
 } {

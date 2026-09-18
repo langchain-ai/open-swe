@@ -114,31 +114,6 @@ describe("useAgentThreadStream", () => {
     expect(view.result.current.stream.isOffloading).toBe(false)
   })
 
-  it("reports the route the model router picked", () => {
-    const view = render()
-
-    act(() =>
-      mocks.onEvent({
-        method: "custom",
-        params: {
-          namespace: [],
-          data: {
-            payload: {
-              type: "model_routed",
-              route: "deep",
-              model_id: "claude-opus",
-            },
-          },
-        },
-      })
-    )
-
-    expect(view.result.current.stream.routed).toEqual({
-      route: "deep",
-      modelId: "claude-opus",
-    })
-  })
-
   it("waits before surfacing reconnect attempts and clears brief interruptions", () => {
     vi.useFakeTimers()
     const view = render()
