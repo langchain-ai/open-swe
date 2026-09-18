@@ -6,14 +6,17 @@ object (``common.X``) so tests that monkeypatch them keep working.
 
 import posixpath
 import re
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Any, cast
+from typing import Any, Literal, cast
 from urllib.parse import urlparse
 
 import httpx2
 from langchain_core.messages.content import create_text_block
+from pydantic import BaseModel, Field, ValidationError
 
+from agent.config import ENV
 from agent.input_messages import (
     InputMessageContext,
     MessageKind,
@@ -54,11 +57,35 @@ from agent.workspaces.store import DEFAULT_WORKSPACE_SLUG, WORKSPACES, parse_wor
 
 STALE_PARTICIPANT_SECONDS = 15 * 60
 RAPID_FOLLOWUP_SECONDS = 60
+_TYPESAFE_URL = "https://api.typesafe.ai/v1/systemone"
+_TYPESAFE_TIMEOUT = 3.0
+_TYPESAFE_CONFIDENCE_THRESHOLD = 0.6
+_TYPESAFE_CONTEXT_MESSAGES = 20
+_TYPESAFE_CONTEXT_CHARS = 8_000
+_TYPESAFE_CRITERIA = {
+    "directed": "The latest message asks Open SWE to act, answer, continue, change, investigate, or otherwise respond.",
+    "not_directed": "The latest message is conversation between people, an acknowledgement requiring no response, or context not asking Open SWE to act.",
+}
 _MENTION_PREAMBLE = f"{load_prompt('runs/slack-mentioned.md')}\n\n"
 _UNTAGGED_REPLY_PREAMBLE = f"{load_prompt('runs/slack-untagged-reply.md')}\n\n"
 _CODE_CHANNEL_CONTEXT = load_prompt("runs/slack-code-channel.md")
 _DM_CONTEXT = load_prompt("runs/slack-dm.md")
 _MESSAGE_UPDATE_PREAMBLE = f"{load_prompt('runs/slack-message-update.md')}\n\n"
+
+
+class _TypeSafeIntentAnswer(BaseModel):
+    type: Literal["choice"]
+    choice: Literal["directed", "not_directed"]
+    probabilities: dict[Literal["directed", "not_directed"], float]
+    confidence: float = Field(ge=0, le=1)
+
+
+class _TypeSafeIntentAnswers(BaseModel):
+    intent: _TypeSafeIntentAnswer
+
+
+class _TypeSafeIntentResponse(BaseModel):
+    answers: _TypeSafeIntentAnswers
 
 
 def _slack_prompt_preamble(untagged_reply: bool, message_update: bool = False) -> str:
@@ -102,6 +129,109 @@ def _interrupts_active_run(
         treat_all_messages_as_mentions=treat_all_messages_as_mentions and not code_channel,
         message_update=message_update,
     )
+
+
+def _jev_slack_intent_key() -> str | None:
+    if ENV.SLACK_INTENT_CLASSIFIER.get().lower() != "jev":
+        return None
+    return ENV.TYPESAFE_API_KEY.optional()
+
+
+def _bounded_slack_intent_context(
+    messages: Sequence[Mapping[str, object]],
+    text: str,
+    sender_id: str,
+    bot_user_id: str,
+    now_ts: str,
+) -> str:
+    current_ts = common.parse_slack_ts(now_ts)
+    prior_turns: list[tuple[float, str]] = []
+    for message in messages:
+        message_ts = common.parse_slack_ts(message.get("ts"))
+        author = message.get("user")
+        message_text = message.get("text")
+        if (
+            not isinstance(author, str)
+            or not isinstance(message_text, str)
+            or (current_ts and message_ts >= current_ts)
+        ):
+            continue
+        label = "Open SWE" if author == bot_user_id else author
+        prior_turns.append((message_ts, f"{label}: {message_text}"))
+    prior_turns.sort(key=lambda turn: turn[0])
+    turns = [turn for _, turn in prior_turns[-(_TYPESAFE_CONTEXT_MESSAGES - 1) :]]
+    current_label = f"Current message ({sender_id or 'unknown'}): "
+    current = current_label + text[-(_TYPESAFE_CONTEXT_CHARS - len(current_label)) :]
+    prior_context = "\n".join(turns)
+    prior_budget = max(0, _TYPESAFE_CONTEXT_CHARS - len(current) - 1)
+    if prior_context and prior_budget:
+        return prior_context[-prior_budget:] + "\n" + current
+    return current
+
+
+async def _jev_allows_untagged_reply(
+    messages: Sequence[Mapping[str, object]],
+    text: str,
+    sender_id: str,
+    bot_user_id: str,
+    now_ts: str,
+    api_key: str,
+) -> bool | None:
+    try:
+        async with httpx2.AsyncClient(timeout=_TYPESAFE_TIMEOUT) as client:
+            response = await client.post(
+                _TYPESAFE_URL,
+                headers={"Authorization": f"Bearer {api_key}"},
+                json={
+                    "model": "jev-latest",
+                    "state": _bounded_slack_intent_context(
+                        messages, text, sender_id, bot_user_id, now_ts
+                    ),
+                    "questions": {
+                        "intent": {
+                            "type": "choice",
+                            "instructions": "Decide whether the latest Slack message is directed at Open SWE and expects it to respond. Use prior turns only as context.",
+                            "criteria": _TYPESAFE_CRITERIA,
+                        }
+                    },
+                },
+            )
+            response.raise_for_status()
+            answer = _TypeSafeIntentResponse.model_validate(response.json()).answers.intent
+            probabilities = answer.probabilities
+            if (
+                set(probabilities) != set(_TYPESAFE_CRITERIA)
+                or any(value < 0 or value > 1 for value in probabilities.values())
+                or abs(sum(probabilities.values()) - 1) > 0.01
+                or probabilities[answer.choice] != max(probabilities.values())
+            ):
+                raise ValueError("Jev Slack intent probabilities were malformed")
+            if answer.confidence < _TYPESAFE_CONFIDENCE_THRESHOLD:
+                common.logger.info(
+                    "Jev Slack intent confidence below threshold; using existing behavior",
+                    extra={"confidence": answer.confidence},
+                )
+                return None
+            return answer.choice == "directed"
+    except httpx2.HTTPError, ValidationError, ValueError:
+        common.logger.exception("Jev Slack intent classifier failed; using existing behavior")
+        return None
+
+
+async def _classify_eligible_untagged_reply(
+    messages: Sequence[Mapping[str, object]],
+    text: str,
+    sender_id: str,
+    bot_user_id: str,
+    now_ts: str,
+) -> bool:
+    api_key = _jev_slack_intent_key()
+    if not api_key:
+        return True
+    decision = await _jev_allows_untagged_reply(
+        messages, text, sender_id, bot_user_id, now_ts, api_key
+    )
+    return True if decision is None else decision
 
 
 async def slack_thread_allows_untagged_reply(
@@ -172,15 +302,21 @@ async def slack_thread_allows_untagged_reply(
         if mention_index < 0:
             return False
         followups = timeline[mention_index:]
-        return all(author == sender for _, author, _ in followups) and all(
+        eligible = all(author == sender for _, author, _ in followups) and all(
             0 <= following[0] - previous[0] <= RAPID_FOLLOWUP_SECONDS
             for previous, following in zip(followups, followups[1:], strict=False)
         )
+        return eligible and await _classify_eligible_untagged_reply(
+            messages, text, sender_id, bot_user_id, now_ts
+        )
 
-    return not any(
+    eligible = not any(
         author != sender
         and not (author_ts < bot_last_ts and latest_ts - author_ts > STALE_PARTICIPANT_SECONDS)
         for author, author_ts in last_message_ts.items()
+    )
+    return eligible and await _classify_eligible_untagged_reply(
+        messages, text, sender_id, bot_user_id, now_ts
     )
 
 
