@@ -613,8 +613,16 @@ async def test_duplicate_conflict_out_of_order_and_non_authoritative_actions(
         webhook("opened"), delivery_id="opening-duplicate"
     )
     with pytest.raises(PRRevisionConflictError):
-        await usage.update_agent_pr_usage_from_webhook(
-            webhook("opened", opening_head_sha="e" * 40), delivery_id="conflict"
+        await revisions.capture_pr_revision(
+            owner="owner",
+            repo="repo",
+            number=1,
+            endpoint_kind="opening",
+            base_sha="a" * 40,
+            head_sha="e" * 40,
+            endpoint_at=NOW - timedelta(days=1),
+            source_kind="webhook",
+            source_id="conflict",
         )
     async with transaction() as conn:
         assert await conn.scalar(text("SELECT count(*) FROM pr_revision_evidence")) == 2
