@@ -188,7 +188,7 @@ The dev server then attaches that session to everything it proxies, and presents
 
 ## Test a PR in preview (LangChain maintainers)
 
-The shared [preview environment](https://dev.open-swe.langchain.dev/agents) combines `main`, `preview-manual`, and open organization-member PRs labeled `preview`; it is not an isolated deployment per PR. (Note: staging follows `main` and is for post-merge testing.)
+The shared [preview environment](https://dev.open-swe.langchain.dev/agents) combines `main`, `preview-manual`, and open PRs labeled `preview` whose branch lives in this repository (anyone with write access; a fork's code stays out); it is not an isolated deployment per PR. (Note: staging follows `main` and is for post-merge testing.)
 
 1. Add the **`preview`** label to your PR.
 2. Run [Deploy open-swe preview](https://github.com/langchain-ai/langchainplus/actions/workflows/deploy_open_swe_preview.yaml) on `main` with **force** unchecked, or wait for a scheduled run at :04, :19, :34, or :49 each hour. Labeling alone does not deploy.
