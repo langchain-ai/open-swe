@@ -555,6 +555,33 @@ def test_appends_slack_reference_for_private_repo(monkeypatch: pytest.MonkeyPatc
     assert "- Slack thread: https://slack.example/p1" in sent_body
 
 
+def test_slack_reference_precedes_attribution_footer(monkeypatch: pytest.MonkeyPatch) -> None:
+    _set_config(
+        monkeypatch,
+        {
+            "source": "slack",
+            "slack_thread": {
+                "channel_id": "C123",
+                "thread_ts": "1700000000.000100",
+                "permalink": "https://slack.example/stored",
+            },
+        },
+    )
+    _stub_token(monkeypatch)
+    client = _RoutingClient(
+        post=_FakeResponse(201, {"html_url": "u", "number": 1, "user": {}}),
+        get_routes={"/repos/langchain-ai/open-swe": _FakeResponse(200, {"private": True})},
+    )
+    _install_client(monkeypatch, client)
+
+    _open_with_body("body\n\nMade by [Open SWE](https://dashboard.example/agents/thread-1)")
+
+    assert client.post_calls[0]["json"]["body"] == (
+        "body\n\n## References\n- Slack thread: https://slack.example/stored\n\n"
+        "Made by [Open SWE](https://dashboard.example/agents/thread-1)"
+    )
+
+
 def test_uses_stored_slack_permalink_reference(monkeypatch: pytest.MonkeyPatch) -> None:
     _set_config(
         monkeypatch,

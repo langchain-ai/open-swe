@@ -28,6 +28,7 @@ from agent.slack.code_channels import (
     set_view,
 )
 from agent.threads.plan_store import get_plan_content
+from agent.utils.authorship import PR_ATTRIBUTION_TEXT
 from agent.utils.dashboard_links import dashboard_plan_url, dashboard_thread_url
 from agent.utils.langsmith import create_langsmith_thread_feedback
 
@@ -870,7 +871,13 @@ async def _maybe_append_references(
             logger.debug("Failed to append source references to PR body", exc_info=True)
         if not lines:
             return body
-        return f"{body.rstrip()}\n\n{_REFERENCES_HEADING}\n" + "\n".join(lines)
+        references = f"{_REFERENCES_HEADING}\n" + "\n".join(lines)
+        footer_start = body.find(PR_ATTRIBUTION_TEXT)
+        if footer_start < 0:
+            return f"{body.rstrip()}\n\n{references}"
+        before_footer = body[:footer_start].rstrip()
+        footer = body[footer_start:].lstrip()
+        return f"{before_footer}\n\n{references}\n\n{footer}"
     except Exception:
         logger.debug("Failed to append references to PR body", exc_info=True)
         return body
