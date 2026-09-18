@@ -40,7 +40,7 @@ import {
 } from "@/components/ui/select"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Tooltip, TooltipPopup, TooltipTrigger } from "@/components/ui/tooltip"
-import { api, ApiError, describeApiBase } from "@/lib/api"
+import { api, ApiError, describeApiBase, normalizeBuildInfo } from "@/lib/api"
 import { RequireLogin } from "@/lib/auth-redirect"
 import { safeModelLabel } from "@/lib/modelLabel"
 import { useSession } from "@/lib/session"
@@ -123,7 +123,7 @@ function UsagePage() {
         login={session.data.login}
         isAdmin={session.data.is_admin}
         apiBaseUrl={session.data.api_base_url}
-        sessionBuildInfo={session.data.build_info ?? null}
+        sessionBuildInfo={normalizeBuildInfo(session.data.build_info)}
         onPeriodChange={(value) =>
           navigate({ to: "/usage", search: { period: value } })
         }
@@ -424,7 +424,7 @@ function UsageAnalyticsPeriod({
         period={activePeriod}
         reportFetchedAt={report.data?.fetchedAt ?? null}
         reportRefreshError={report.isError && !report.data ? null : reportError}
-        buildInfo={report.data?.payload.build_info ?? sessionBuildInfo}
+        buildInfo={normalizeBuildInfo(report.data?.payload.build_info) ?? sessionBuildInfo}
         apiBaseUrl={apiBaseUrl}
       />
     </>
