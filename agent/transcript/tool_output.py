@@ -10,9 +10,32 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from agent.database import postgres
+from agent.transcript.events import TOOL_OUTPUT_PREVIEW_CHARS, ToolCompleted
 
 MAX_TOOL_OUTPUT_CHARS = 256 * 1024
 """The cap on what is stored; the endpoint has no more than this either."""
+
+
+def normalize(event: ToolCompleted, output: str | None) -> ToolCompleted:
+    """The event as the log should record it, given the output actually stored.
+
+    The writer describes the output it produced; the cap applied here is what
+    decides whether all of it is kept. Settling ``output_truncated``,
+    ``has_output`` and a missing preview against the stored text before the
+    event is written keeps a replay and a snapshot telling the same story.
+    """
+    if output is None:
+        return event
+    stored = output[:MAX_TOOL_OUTPUT_CHARS]
+    return event.model_copy(
+        update={
+            "output_truncated": event.output_truncated or len(stored) < len(output),
+            "has_output": True,
+            "output_preview": event.output_preview
+            if event.output_preview is not None
+            else stored[:TOOL_OUTPUT_PREVIEW_CHARS] or None,
+        }
+    )
 
 
 async def write(

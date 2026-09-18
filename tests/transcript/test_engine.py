@@ -12,12 +12,15 @@ import pytest
 from sqlalchemy import text
 
 from agent.database import postgres
+from agent.transcript import tool_output
 from agent.transcript.engine import Command, ThreadNotTranscribed, append
 from agent.transcript.events import (
     MessageAppended,
     MessageCompleted,
     MessageSender,
     ThreadCreated,
+    ToolCompleted,
+    ToolStarted,
     TurnCheckpointCompleted,
     TurnRequested,
 )
@@ -312,3 +315,40 @@ async def test_two_turns_cannot_share_a_checkpoint_ordinal(registry_db: None) ->
             .all()
         )
     assert list(counts) == [1, 2]
+
+
+async def test_an_output_cut_at_the_cap_is_recorded_as_truncated(registry_db: None) -> None:
+    thread_id = str(uuid7())
+    turn_id = uuid7()
+    await _create(thread_id)
+    full = "x" * (tool_output.MAX_TOOL_OUTPUT_CHARS + 10)
+    result = await append(
+        thread_id,
+        [
+            Command(
+                command_id="tool:call-1:started",
+                event=ToolStarted(turn_id=turn_id, tool_call_id="call-1", name="shell"),
+                actor_kind="agent",
+                turn_id=turn_id,
+            ),
+            Command(
+                command_id="tool:call-1:completed",
+                event=ToolCompleted(turn_id=turn_id, tool_call_id="call-1", status="completed"),
+                actor_kind="agent",
+                turn_id=turn_id,
+                tool_output=full,
+            ),
+        ],
+    )
+
+    stored = result.events[-1].payload
+    assert stored["output_truncated"] is True
+    assert stored["has_output"] is True
+    assert stored["output_preview"]
+    snapshot = await load_snapshot(thread_id)
+    assert snapshot is not None
+    call = snapshot.tool_calls[0]
+    assert call.output_truncated is True
+    assert call.has_output is True
+    output = await tool_output.load(thread_id, "call-1")
+    assert output is not None and len(output) == tool_output.MAX_TOOL_OUTPUT_CHARS

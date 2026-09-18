@@ -210,9 +210,12 @@ async def _write(
     conn: AsyncConnection, thread_id: str, version: int, command: Command
 ) -> StoredEvent:
     event = command.event
-    # Identity a writer could only guess at outside the thread's lock is
-    # settled here, so the log, the receipt and the projection all agree.
+    # Identity a writer could only guess at outside the thread's lock, and
+    # facts about blobs written beside the event, are settled here so the
+    # log, the projection and the blob tables all agree.
     event = await projections.resolve(conn, thread_id, event)
+    if isinstance(event, ToolCompleted):
+        event = tool_output.normalize(event, command.tool_output)
     payload = event.model_dump(mode="json")
     run_id = command.run_id or _payload_run_id(payload)
     turn_id = command.turn_id or _payload_turn_id(payload)
