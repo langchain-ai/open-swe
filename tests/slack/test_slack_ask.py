@@ -257,7 +257,32 @@ async def test_ask_mode_reply_is_ephemeral(monkeypatch: pytest.MonkeyPatch) -> N
 
     assert result == {"success": True}
     assert post.await_args.args == ("C1", "U1", "the answer")
+    assert post.await_args.kwargs["blocks"] == [{"type": "markdown", "text": "the answer"}]
     assert post.await_args.kwargs["agent_thread_id"] == "thread-1"
+
+
+@pytest.mark.asyncio
+async def test_ask_mode_falls_back_to_mrkdwn_over_native_limit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    post = AsyncMock()
+    monkeypatch.setattr(slack_thread_reply, "post_slack_ephemeral_reply", post)
+    monkeypatch.setattr(
+        slack_thread_reply,
+        "get_config",
+        lambda: {
+            "configurable": {
+                "slack_ask": True,
+                "slack_thread": {"channel_id": "C1", "triggering_user_id": "U1"},
+            }
+        },
+    )
+
+    result = await slack_thread_reply.slack_thread_reply("# Heading\n\n" + "x" * 12000)
+
+    assert result == {"success": True}
+    assert post.await_args.args[2].startswith("*Heading*\n")
+    assert post.await_args.kwargs["blocks"] is None
 
 
 @pytest.mark.asyncio

@@ -9,13 +9,13 @@ from langgraph_sdk.client import LangGraphClient
 
 from agent.run_config import RunConfig
 from agent.slack.client import (
-    convert_mentions_to_slack_format,
     get_active_slack_thread,
     post_slack_ephemeral_reply,
     post_slack_thread_reply_with_ts,
     slack_thread_mutation_lock,
     store_slack_message_run_mapping,
 )
+from agent.slack.markdown import markdown_to_mrkdwn
 from agent.slack.orphan import (
     dashboard_handoff_message,
     move_thread_to_dashboard,
@@ -27,6 +27,8 @@ from agent.utils.run_usage import RunUsageSummary, summarize_run_usage
 from agent.utils.thread_ops import langgraph_client as get_langgraph_client
 
 logger = logging.getLogger(__name__)
+
+_NATIVE_MARKDOWN_MAX_CHARS = 12000
 
 
 async def slack_thread_reply(
@@ -81,8 +83,12 @@ async def slack_thread_reply(
     )
 
     async with slack_thread_mutation_lock(client, channel_id, thread_ts):
-        message = convert_mentions_to_slack_format(message)
-        slack_blocks = blocks or _build_option_blocks(message, options)
+        slack_blocks = blocks if blocks is not None else _build_option_blocks(message, options)
+        if blocks is None and len(message) > _NATIVE_MARKDOWN_MAX_CHARS:
+            if options:
+                return _oversized_options_error(message)
+            message = markdown_to_mrkdwn(message)
+            slack_blocks = None
         usage = summarize_run_usage(state)
         message_ts, slack_error = await _post_and_store_mapping(
             channel_id,
@@ -146,11 +152,16 @@ async def _ephemeral_reply(
         return {"success": False, "error": "Missing the Slack channel or user to answer"}
     if not message.strip():
         return {"success": False, "error": "Message cannot be empty"}
+    native_markdown = blocks is None and len(message) <= _NATIVE_MARKDOWN_MAX_CHARS
+    if blocks is None and not native_markdown:
+        message = markdown_to_mrkdwn(message)
     posted = await post_slack_ephemeral_reply(
         channel_id,
         user_id,
-        convert_mentions_to_slack_format(message),
-        blocks=blocks,
+        message,
+        blocks=blocks
+        if blocks is not None
+        else (_build_option_blocks(message, None) if native_markdown else None),
         usage=summarize_run_usage(state),
         agent_thread_id=cfg.thread_id,
     )
@@ -209,14 +220,22 @@ def _triggering_user_id(cfg: RunConfig) -> str | None:
     return (cfg.slack_thread.triggering_user_id or None) if cfg.slack_thread else None
 
 
-def _build_option_blocks(message: str, options: list[str] | None) -> list[dict[str, Any]] | None:
-    if not options:
-        return None
-    clean_options = [option.strip() for option in options if option.strip()]
+def _oversized_options_error(message: str) -> dict[str, str | int | bool]:
+    return {
+        "success": False,
+        "error": "Message with options exceeds Slack's 12000-character native Markdown limit",
+        "message_chars": len(message),
+        "retry": True,
+        "hint": "Retry with the options and a message of at most 12000 characters.",
+    }
+
+
+def _build_option_blocks(message: str, options: list[str] | None) -> list[dict[str, Any]]:
+    clean_options = [option.strip() for option in options or [] if option.strip()]
+    blocks: list[dict[str, Any]] = [{"type": "markdown", "text": message}]
     if not clean_options:
-        return None
-    return [
-        {"type": "section", "text": {"type": "mrkdwn", "text": message}},
+        return blocks
+    blocks.append(
         {
             "type": "actions",
             "elements": [
@@ -235,8 +254,9 @@ def _build_option_blocks(message: str, options: list[str] | None) -> list[dict[s
                 }
                 for index, option in enumerate(clean_options[:5])
             ],
-        },
-    ]
+        }
+    )
+    return blocks
 
 
 def build_workflow_approval_blocks(message: str, fingerprint: str) -> list[dict[str, Any]]:
