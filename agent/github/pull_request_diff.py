@@ -69,17 +69,10 @@ async def build_pr_diff_files(
     if not isinstance(base_sha, str) or not isinstance(head_sha, str):
         raise HTTPException(502, "github API returned an unexpected pull request payload")
 
-    files_response = await client.get(
-        f"{_GITHUB_API}/repos/{full_name}/pulls/{pr_number}/files",
-        params={"per_page": 100},
-    )
-    if files_response.status_code != 200:
-        raise HTTPException(502, f"github API error ({files_response.status_code})")
-    raw_files = files_response.json()
-    if not isinstance(raw_files, list):
-        raise HTTPException(502, "github API returned an unexpected files payload")
-
-    return await _build_diff_files(client, full_name, raw_files, base_sha, head_sha)
+    # ``base.sha`` is the base branch's tip, not the merge base. Reading original
+    # blobs there would attribute every commit landed on the base branch since
+    # the fork to this PR, as deletions.
+    return await build_compare_diff_files(client, full_name, base_sha, head_sha)
 
 
 async def build_compare_diff_files(
