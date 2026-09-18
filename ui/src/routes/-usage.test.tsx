@@ -207,17 +207,19 @@ it("sorts PR outcomes before pagination and toggles column direction", async () 
     avg_delivery_seconds: size,
     efforts: [],
   })
-  vi.spyOn(api, "prMergeRateByModel").mockResolvedValue({
-    ...captured,
-    status: "ready",
-    cohorts: [
-      cohort("z-model", 20),
-      cohort("a-model", 1),
-      ...Array.from({ length: 9 }, (_, index) =>
-        cohort(`m-${index}`, index + 2)
-      ),
-    ],
-  })
+  vi.spyOn(api, "prMergeRateByModel").mockResolvedValue(
+    report({
+      ...captured,
+      status: "ready",
+      cohorts: [
+        cohort("z-model", 20),
+        cohort("a-model", 1),
+        ...Array.from({ length: 9 }, (_, index) =>
+          cohort(`m-${index}`, index + 2)
+        ),
+      ],
+    })
+  )
   const client = mountReport()
   expect(await screen.findByText("z-model")).toBeTruthy()
   expect(screen.queryByText("a-model")).toBeNull()
