@@ -13,7 +13,7 @@ from pydantic import ValidationError
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
-from agent.analytics import emitter, ingestion, outbox, queries, retention, usage
+from agent.analytics import ingestion, outbox, queries, retention, revisions, usage
 from agent.analytics.events import (
     EventEnvelope,
     EventName,
@@ -25,8 +25,8 @@ from agent.analytics.events import (
     subject_uuid,
 )
 from agent.analytics.measurements import PRDistanceConflictError, restore_pr_distance
+from agent.analytics.revisions import PRRevisionConflictError
 from agent.database import postgres
-from agent.github.pull_requests import PullRequest
 
 Transaction = Callable[[], AbstractAsyncContextManager[AsyncConnection]]
 Database = tuple[UUID, Transaction]
@@ -507,52 +507,174 @@ async def test_measurement_requires_matching_identity_without_lifecycle_version(
         assert await conn.scalar(text("SELECT count(*) FROM pr_distance_measurements")) == 0
 
 
-@pytest.mark.parametrize("result", [0, 10000, None, RuntimeError("comparison unavailable")])
-async def test_webhook_independent_measurement_and_repeated_emission(
-    analytics_db: Database, monkeypatch: pytest.MonkeyPatch, result: int | None | RuntimeError
-) -> None:
-    stored = PullRequest(
-        owner="owner", repo="repo", number=1, opening_base_sha="a" * 40, opening_head_sha="b" * 40
-    )
-    monkeypatch.setattr(PullRequest, "get", AsyncMock(return_value=stored))
-    comparison = (
-        AsyncMock(side_effect=result)
-        if isinstance(result, RuntimeError)
-        else AsyncMock(return_value=result)
-    )
-    monkeypatch.setattr(usage.distance, "post_open_distance_basis_points", comparison)
-    payload = {
+def webhook(
+    action: str, *, merged: bool = False, opening_head_sha: str = "b" * 40
+) -> dict[str, object]:
+    return {
         "repository": {"owner": {"login": "Owner"}, "name": "Repo"},
-        "action": "closed",
+        "action": action,
         "pull_request": {
             "number": 1,
-            "merged": True,
-            "merged_at": NOW.isoformat(),
+            "merged": merged,
+            "created_at": (NOW - timedelta(days=1)).isoformat(),
+            "merged_at": NOW.isoformat() if merged else None,
             "updated_at": NOW.isoformat(),
-            "base": {"sha": "c" * 40},
-            "head": {"sha": "d" * 40},
+            "base": {"sha": ("c" if merged else "a") * 40},
+            "head": {"sha": "d" * 40 if merged else opening_head_sha},
         },
     }
-    await usage.update_agent_pr_usage_from_webhook(payload)
-    await usage.update_agent_pr_usage_from_webhook(payload)
-    async with postgres.connection() as conn:
-        bodies = (await conn.execute(text("SELECT event_body FROM outbox"))).scalars().all()
-    captured = [EventEnvelope.model_validate(body) for body in bodies]
-    lifecycle = [item for item in captured if item.event_name == EventName.PR_MERGED]
-    assert len(lifecycle) == 1
-    assert lifecycle[0].payload == PRStatePayload()
-    measurements = [item for item in captured if item.event_name == EventName.PR_DISTANCE_MEASURED]
+
+
+@pytest.mark.parametrize("result", [0, None, TimeoutError("comparison timed out")])
+async def test_capture_precedes_comparison_and_retry_uses_retained_revisions(
+    analytics_db: Database, monkeypatch: pytest.MonkeyPatch, result: int | None | Exception
+) -> None:
+    _, transaction = analytics_db
+    comparison = (
+        AsyncMock(side_effect=result)
+        if isinstance(result, Exception)
+        else AsyncMock(return_value=result)
+    )
+    monkeypatch.setattr(revisions.distance, "post_open_distance_basis_points", comparison)
+    await usage.update_agent_pr_usage_from_webhook(webhook("opened"), delivery_id="opening")
+    await usage.update_agent_pr_usage_from_webhook(
+        webhook("closed", merged=True), delivery_id="final"
+    )
+    async with transaction() as conn:
+        retained = (
+            (
+                await conn.execute(
+                    text(
+                        "SELECT endpoint_kind, base_sha, head_sha, source_id FROM pr_revision_evidence ORDER BY endpoint_kind"
+                    )
+                )
+            )
+            .mappings()
+            .all()
+        )
+    assert [
+        (row["endpoint_kind"], row["base_sha"], row["head_sha"], row["source_id"])
+        for row in retained
+    ] == [
+        ("final", "c" * 40, "d" * 40, "final"),
+        ("opening", "a" * 40, "b" * 40, "opening"),
+    ]
     if isinstance(result, int):
-        assert len(measurements) == 1
-        measured = measurements[0]
-        assert measured.source_version is None
-        assert isinstance(measured.payload, PRDistanceMeasuredPayload)
-        assert measured.payload.distance_basis_points == result
-        assert measured.payload.opening_evidence_ref == stored.id
-        assert measured.payload.final_evidence_ref == lifecycle[0].event_id
-        assert not await emitter.pr_distance_measured(
-            measured.payload, measured_at=datetime.now(UTC)
+        assert await revisions.retry_pr_distance(owner="owner", repo="repo", number=1) == result
+        distance_events = [
+            EventEnvelope.model_validate(body)
+            for body in (await _outbox_bodies())
+            if EventEnvelope.model_validate(body).event_name == EventName.PR_DISTANCE_MEASURED
+        ]
+        assert len(distance_events) == 1
+        assert isinstance(distance_events[0].payload, PRDistanceMeasuredPayload)
+        assert distance_events[0].payload.distance_basis_points == result
+        assert (
+            len(
+                [
+                    EventEnvelope.model_validate(body)
+                    for body in (await _outbox_bodies())
+                    if EventEnvelope.model_validate(body).event_name == EventName.PR_MERGED
+                ]
+            )
+            == 1
+        )
+        comparison.assert_awaited_with(
+            owner="owner",
+            repo="repo",
+            opening_base_sha="a" * 40,
+            opening_head_sha="b" * 40,
+            final_base_sha="c" * 40,
+            final_head_sha="d" * 40,
         )
     else:
-        assert measurements == []
-    assert await outbox.deliver_batch() == len(captured)
+        assert not [
+            EventEnvelope.model_validate(body)
+            for body in (await _outbox_bodies())
+            if EventEnvelope.model_validate(body).event_name == EventName.PR_DISTANCE_MEASURED
+        ]
+
+
+async def _outbox_bodies() -> list[dict[str, object]]:
+    async with postgres.connection() as conn:
+        return list((await conn.execute(text("SELECT event_body FROM outbox"))).scalars().all())
+
+
+async def test_duplicate_conflict_out_of_order_and_non_authoritative_actions(
+    analytics_db: Database,
+) -> None:
+    _, transaction = analytics_db
+    await usage.update_agent_pr_usage_from_webhook(
+        webhook("closed", merged=True), delivery_id="final"
+    )
+    await usage.update_agent_pr_usage_from_webhook(webhook("ready_for_review"), delivery_id="ready")
+    await usage.update_agent_pr_usage_from_webhook(webhook("opened"), delivery_id="opening")
+    await usage.update_agent_pr_usage_from_webhook(
+        webhook("opened"), delivery_id="opening-duplicate"
+    )
+    with pytest.raises(PRRevisionConflictError):
+        await revisions.capture_pr_revision(
+            owner="owner",
+            repo="repo",
+            number=1,
+            endpoint_kind="opening",
+            base_sha="a" * 40,
+            head_sha="e" * 40,
+            endpoint_at=NOW - timedelta(days=1),
+            source_kind="webhook",
+            source_id="conflict",
+        )
+    async with transaction() as conn:
+        assert await conn.scalar(text("SELECT count(*) FROM pr_revision_evidence")) == 2
+
+
+async def test_retry_ignores_current_pull_request_revision_columns(
+    analytics_db: Database, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _, transaction = analytics_db
+    await usage.update_agent_pr_usage_from_webhook(webhook("opened"), delivery_id="opening")
+    await usage.update_agent_pr_usage_from_webhook(
+        webhook("closed", merged=True), delivery_id="final"
+    )
+    async with transaction() as conn:
+        await conn.execute(
+            text(
+                "INSERT INTO repository (id, key, full_name) VALUES (:id, 'owner/repo', 'owner/repo')"
+            ),
+            {"id": uuid4()},
+        )
+        repository_id = await conn.scalar(
+            text("SELECT id FROM repository WHERE key = 'owner/repo'")
+        )
+        await conn.execute(
+            text(
+                "INSERT INTO pull_request (id, repository_id, number, owner, repo, opening_base_sha, opening_head_sha) "
+                "VALUES (:id, :repository_id, 1, 'owner', 'repo', :base, :head)"
+            ),
+            {"id": uuid4(), "repository_id": repository_id, "base": "e" * 40, "head": "f" * 40},
+        )
+    comparison = AsyncMock(return_value=250)
+    monkeypatch.setattr(revisions.distance, "post_open_distance_basis_points", comparison)
+    assert await revisions.retry_pr_distance(owner="owner", repo="repo", number=1) == 250
+    comparison.assert_awaited_once_with(
+        owner="owner",
+        repo="repo",
+        opening_base_sha="a" * 40,
+        opening_head_sha="b" * 40,
+        final_base_sha="c" * 40,
+        final_head_sha="d" * 40,
+    )
+
+
+async def test_retained_revision_evidence_survives_raw_retention(
+    analytics_db: Database,
+) -> None:
+    _, transaction = analytics_db
+    await usage.update_agent_pr_usage_from_webhook(webhook("opened"), delivery_id="opening")
+    async with transaction() as conn:
+        await conn.execute(
+            text("UPDATE pr_revision_evidence SET captured_at = now() - interval '100 years'")
+        )
+    await retention.enforce_retention()
+    async with transaction() as conn:
+        assert await conn.scalar(text("SELECT count(*) FROM pr_revision_evidence")) == 1

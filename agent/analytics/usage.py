@@ -11,17 +11,15 @@ from uuid import UUID
 from sqlalchemy import text
 
 from agent import database
-from agent.analytics import directory, distance, emitter
+from agent.analytics import directory, emitter, revisions
 from agent.analytics.capture import fail_soft
 from agent.analytics.events import (
     EventName,
-    PRDistanceMeasuredPayload,
     RunCanceledPayload,
     RunCompletedPayload,
     RunCostRecordedPayload,
     RunFailedPayload,
     StrictPayload,
-    event_uuid,
 )
 from agent.analytics.identity import opaque_id
 from agent.database import analytics as analytics_db
@@ -291,7 +289,9 @@ async def record_agent_pr_usage(
 
 
 @fail_soft
-async def update_agent_pr_usage_from_webhook(payload: dict[str, Any]) -> None:
+async def update_agent_pr_usage_from_webhook(
+    payload: dict[str, Any], *, delivery_id: str | None = None
+) -> None:
     pr = as_json_object(payload.get("pull_request"))
     repository = as_json_object(payload.get("repository"))
     owner = as_json_object(repository.get("owner")).get("login")
@@ -311,6 +311,21 @@ async def update_agent_pr_usage_from_webhook(payload: dict[str, Any]) -> None:
         changed_files=_count(pr.get("changed_files")),
     )
     action = payload.get("action")
+    base_data = as_json_object(pr.get("base"))
+    head_data = as_json_object(pr.get("head"))
+    if action == "opened":
+        opened_at = _timestamp(pr.get("created_at")) or observed_at
+        await revisions.capture_pr_revision(
+            owner=owner,
+            repo=repo,
+            number=number,
+            endpoint_kind="opening",
+            base_sha=str(base_data.get("sha") or ""),
+            head_sha=str(head_data.get("sha") or ""),
+            endpoint_at=opened_at,
+            source_kind="webhook",
+            source_id=delivery_id,
+        )
     if action in {"closed", "reopened"}:
         merged = pr.get("merged") is True
         outcome_at = (
@@ -330,45 +345,19 @@ async def update_agent_pr_usage_from_webhook(payload: dict[str, Any]) -> None:
             occurred_at=outcome_at,
         )
         if merged:
-            from agent.github.pull_requests import PullRequest
-
+            await revisions.capture_pr_revision(
+                owner=owner,
+                repo=repo,
+                number=number,
+                endpoint_kind="final",
+                base_sha=str(base_data.get("sha") or ""),
+                head_sha=str(head_data.get("sha") or ""),
+                endpoint_at=outcome_at,
+                source_kind="webhook",
+                source_id=delivery_id,
+            )
             try:
-                stored = await PullRequest.get(owner, repo, number)
-                base_data = as_json_object(pr.get("base"))
-                head_data = as_json_object(pr.get("head"))
-                if stored is not None:
-                    final_base_sha = str(base_data.get("sha") or "")
-                    final_head_sha = str(head_data.get("sha") or "")
-                    basis_points = await distance.post_open_distance_basis_points(
-                        owner=owner,
-                        repo=repo,
-                        opening_base_sha=stored.opening_base_sha,
-                        opening_head_sha=stored.opening_head_sha,
-                        final_base_sha=final_base_sha,
-                        final_head_sha=final_head_sha,
-                    )
-                    if basis_points is not None:
-                        pr_key = f"{owner.lower()}/{repo.lower()}#{number}"
-                        await emitter.pr_distance_measured(
-                            PRDistanceMeasuredPayload(
-                                repository_full_name=f"{owner.lower()}/{repo.lower()}",
-                                pr_number=number,
-                                distance_basis_points=basis_points,
-                                algorithm_revision="myers-line-v1",
-                                opening_base_sha=stored.opening_base_sha,
-                                opening_head_sha=stored.opening_head_sha,
-                                final_base_sha=final_base_sha,
-                                final_head_sha=final_head_sha,
-                                opening_evidence_ref=stored.id,
-                                final_evidence_ref=event_uuid(
-                                    analytics_db.workspace_id(),
-                                    "open-swe",
-                                    f"github:pr:{pr_key}:{outcome_at.isoformat()}:pr.merged",
-                                    EventName.PR_MERGED,
-                                ),
-                            ),
-                            measured_at=datetime.now(UTC),
-                        )
+                await revisions.retry_pr_distance(owner=owner, repo=repo, number=number)
             except Exception:
                 logger.warning(
                     "Failed to measure merged pull request distance",

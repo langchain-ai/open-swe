@@ -105,8 +105,9 @@ async def github_webhook(
             }
         if action in common.GH_PR_AGENT_STATE_ACTIONS:
             background_tasks.add_task(common.update_agent_thread_pr_state, payload)
+        if action == "opened" or action in common.GH_PR_AGENT_STATE_ACTIONS:
             try:
-                await common.update_agent_pr_usage_from_webhook(payload)
+                await common.update_agent_pr_usage_from_webhook(payload, delivery_id=delivery_id)
             except Exception:  # noqa: BLE001
                 common.logger.debug("Failed to update Agent PR usage", exc_info=True)
         if action in common.GH_PR_WATCH_TOGGLE_ACTIONS:
