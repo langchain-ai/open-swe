@@ -298,6 +298,7 @@ export type UsageLeaderboardSort =
   | "favorite_model"
   | "invocations"
   | "threads"
+  | "avg_invocations_per_thread"
   | "total_tokens"
   | "total_cost_usd"
   | "avg_invocation_seconds"

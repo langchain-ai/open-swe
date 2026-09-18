@@ -890,6 +890,11 @@ function usageColumns(scope: UsageScope): Array<SortableColumn> {
       label: scope === "threads" ? "Threads" : "Invocations",
       align: "right",
     },
+    {
+      key: "avg_invocations_per_thread",
+      label: "Avg Invocations / Thread",
+      align: "right",
+    },
     { key: "total_tokens", label: "Tokens", align: "right" },
     { key: "total_cost_usd", label: "Cost", align: "right" },
     {
@@ -1090,6 +1095,9 @@ function UsageTable({
                 {formatNumber(
                   scope === "threads" ? (row.threads ?? 0) : row.invocations
                 )}
+              </td>
+              <td className="px-2 py-3 text-right tabular-nums">
+                {row.threads ? (row.invocations / row.threads).toFixed(1) : "—"}
               </td>
               <td className="px-2 py-3 text-right tabular-nums">
                 {formatNumber(row.total_tokens)}
