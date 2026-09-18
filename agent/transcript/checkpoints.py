@@ -21,12 +21,12 @@ import base64
 import logging
 import re
 import shlex
+from typing import TYPE_CHECKING
 from uuid import UUID
 
 from sqlalchemy import text
 
 from agent.database import postgres
-from agent.sandboxes.state import SANDBOX_BACKENDS, SandboxBackendProxy
 from agent.transcript.engine import Command
 from agent.transcript.events import CheckpointFile, TurnCheckpointCompleted
 from agent.utils.turn_checkpoint import (
@@ -35,6 +35,9 @@ from agent.utils.turn_checkpoint import (
     parse_name_status,
     parse_numstat,
 )
+
+if TYPE_CHECKING:
+    from agent.sandboxes.state import SandboxBackendProxy
 
 logger = logging.getLogger(__name__)
 
@@ -62,6 +65,10 @@ def _live_backend(thread_id: str) -> SandboxBackendProxy | None:
     wake a sandbox back up, and the tree it would come back with is not the
     tree the turn left behind.
     """
+    # Imported here because the registry module pulls in the whole agent
+    # stack, which the web app that also settles turns must not load.
+    from agent.sandboxes.state import SANDBOX_BACKENDS
+
     backend = SANDBOX_BACKENDS.get(thread_id)
     return backend if backend is not None and backend.has_backend else None
 

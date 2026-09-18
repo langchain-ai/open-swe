@@ -13,6 +13,7 @@ from uuid import UUID, uuid7
 import pytest
 from deepagents.backends.protocol import ExecuteResponse
 
+from agent.sandboxes import state as sandbox_state
 from agent.sandboxes.state import SandboxBackendProxy
 from agent.transcript import checkpoints
 
@@ -61,7 +62,7 @@ def _repo(path: Path) -> Path:
 def _sandbox(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     repo = _repo(tmp_path / "repo")
     monkeypatch.setitem(
-        checkpoints.SANDBOX_BACKENDS, THREAD_ID, cast(SandboxBackendProxy, _LocalSandbox(repo))
+        sandbox_state.SANDBOX_BACKENDS, THREAD_ID, cast(SandboxBackendProxy, _LocalSandbox(repo))
     )
 
     async def _turn_context(thread_id: str, turn_id: UUID) -> tuple[str | None, str | None]:
