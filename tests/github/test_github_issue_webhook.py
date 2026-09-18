@@ -898,61 +898,10 @@ def test_slack_webhook_accepts_unmentioned_direct_message(monkeypatch) -> None:
     assert event_data.treat_all_messages_as_mentions is True
 
 
-def test_slack_webhook_accepts_unmentioned_ready_plan_reply(monkeypatch) -> None:
-    captured: dict[str, object] = {}
-
-    async def fake_ready_plan_reply(channel_id: str, thread_ts: str, user_id: str) -> bool:
-        captured["plan_reply_check"] = (channel_id, thread_ts, user_id)
-        return True
-
-    async def fake_get_slack_repo_config(*args: object, **kwargs: object) -> dict[str, str]:
-        return {"owner": "langchain-ai", "name": "open-swe"}
-
-    async def fake_process_slack_mention(
-        event_data: dict[str, object], repo_config: dict[str, str]
-    ) -> None:
-        captured["event_data"] = event_data
-
+def test_slack_webhook_ignores_unmentioned_thread_reply(monkeypatch) -> None:
     monkeypatch.setattr(webhook_common, "SLACK_SIGNING_SECRET", _TEST_SLACK_SECRET)
     monkeypatch.setattr(webhook_common, "SLACK_BOT_USER_ID", "UBOT")
     monkeypatch.setattr(slack_utils.time, "time", lambda: 1700000000)
-    monkeypatch.setattr(slack_webhooks, "slack_user_can_reply_to_ready_plan", fake_ready_plan_reply)
-    monkeypatch.setattr(webhook_common, "get_slack_repo_config", fake_get_slack_repo_config)
-    monkeypatch.setattr(slack_webhooks, "process_slack_mention", fake_process_slack_mention)
-    monkeypatch.setattr(
-        User, "login_for_slack", lambda slack_user_id: asyncio.sleep(0, result=None)
-    )
-
-    response = _post_slack_webhook(
-        TestClient(app),
-        {
-            "type": "event_callback",
-            "event": {
-                "type": "message",
-                "channel": "C123",
-                "ts": "1700000000.000200",
-                "thread_ts": "1700000000.000100",
-                "user": "U123",
-                "text": "looks good, go ahead",
-            },
-        },
-    )
-
-    assert response.status_code == 200
-    assert response.json()["message"] == "Slack mention queued"
-    assert captured["plan_reply_check"] == ("C123", "1700000000.000100", "U123")
-    event_data = cast(dict[str, object], captured["event_data"])
-    assert event_data.text == "looks good, go ahead"
-
-
-def test_slack_webhook_ignores_unmentioned_non_plan_reply(monkeypatch) -> None:
-    async def fake_ready_plan_reply(channel_id: str, thread_ts: str, user_id: str) -> bool:
-        return False
-
-    monkeypatch.setattr(webhook_common, "SLACK_SIGNING_SECRET", _TEST_SLACK_SECRET)
-    monkeypatch.setattr(webhook_common, "SLACK_BOT_USER_ID", "UBOT")
-    monkeypatch.setattr(slack_utils.time, "time", lambda: 1700000000)
-    monkeypatch.setattr(slack_webhooks, "slack_user_can_reply_to_ready_plan", fake_ready_plan_reply)
 
     response = _post_slack_webhook(
         TestClient(app),
@@ -972,7 +921,7 @@ def test_slack_webhook_ignores_unmentioned_non_plan_reply(monkeypatch) -> None:
     assert response.status_code == 200
     assert response.json() == {
         "status": "ignored",
-        "reason": "Not an app mention, DM, or plan reply",
+        "reason": "Not an app mention or DM",
     }
 
 

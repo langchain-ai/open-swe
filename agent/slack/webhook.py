@@ -52,25 +52,14 @@ from agent.webhooks import common
 from agent.workspaces.routing import resolve_workspace, workspace_for_repo
 from agent.workspaces.store import DEFAULT_WORKSPACE_SLUG, WORKSPACES, parse_workspace_tag
 
-STALE_PARTICIPANT_SECONDS = 15 * 60
-RAPID_FOLLOWUP_SECONDS = 60
 _MENTION_PREAMBLE = f"{load_prompt('runs/slack-mentioned.md')}\n\n"
-_UNTAGGED_REPLY_PREAMBLE = f"{load_prompt('runs/slack-untagged-reply.md')}\n\n"
 _CODE_CHANNEL_CONTEXT = load_prompt("runs/slack-code-channel.md")
 _DM_CONTEXT = load_prompt("runs/slack-dm.md")
 _MESSAGE_UPDATE_PREAMBLE = f"{load_prompt('runs/slack-message-update.md')}\n\n"
 
 
-def _slack_prompt_preamble(untagged_reply: bool, message_update: bool = False) -> str:
-    if message_update:
-        return _MESSAGE_UPDATE_PREAMBLE
-    return _UNTAGGED_REPLY_PREAMBLE if untagged_reply else _MENTION_PREAMBLE
-
-
-def _slack_request_heading(untagged_reply: bool, message_update: bool = False) -> str:
-    if message_update:
-        return "## Updated Slack Message"
-    return "## Untagged Message" if untagged_reply else "## Latest Mention Request"
+def _slack_prompt_preamble(message_update: bool = False) -> str:
+    return _MESSAGE_UPDATE_PREAMBLE if message_update else _MENTION_PREAMBLE
 
 
 def _is_explicit_slack_request(
@@ -104,86 +93,6 @@ def _interrupts_active_run(
     )
 
 
-async def slack_thread_allows_untagged_reply(
-    channel_id: str,
-    thread_ts: str,
-    text: str,
-    bot_user_id: str,
-    sender_id: str = "",
-    now_ts: str = "",
-) -> bool:
-    """Allow an untagged follow-up when the sender and Open SWE are the live participants."""
-    if not channel_id or not thread_ts or not bot_user_id:
-        return False
-
-    mentioned = set(re.findall(r"<@([A-Z0-9_]+)", text or ""))
-    if any(user_id != bot_user_id for user_id in mentioned):
-        return False
-
-    messages = await common.fetch_slack_thread_messages(channel_id, thread_ts)
-    bot_last_ts = 0.0
-    current_ts = common.parse_slack_ts(now_ts)
-    latest_ts = current_ts
-    last_message_ts: dict[str, float] = {}
-    human_messages: list[tuple[float, str, str]] = []
-    for message in messages:
-        message_ts = common.parse_slack_ts(message.get("ts"))
-        latest_ts = max(latest_ts, message_ts)
-        author = message.get("user")
-        if author == bot_user_id:
-            bot_last_ts = max(bot_last_ts, message_ts)
-            continue
-        if message.get("bot_id") or message.get("subtype"):
-            continue
-        if isinstance(author, str) and author:
-            last_message_ts[author] = max(last_message_ts.get(author, 0.0), message_ts)
-            message_text = message.get("text")
-            human_messages.append(
-                (message_ts, author, message_text if isinstance(message_text, str) else "")
-            )
-
-    if not last_message_ts:
-        return False
-
-    sender = sender_id or max(last_message_ts, key=lambda author: last_message_ts[author])
-    if not bot_last_ts:
-        if not sender or not current_ts:
-            return False
-        timeline = sorted(
-            (message for message in human_messages if message[0] <= current_ts),
-            key=lambda message: message[0],
-        )
-        if not any(
-            message_ts == current_ts and author == sender for message_ts, author, _ in timeline
-        ):
-            timeline.append((current_ts, sender, text))
-        mention_tokens = [f"<@{bot_user_id}>"]
-        if common.SLACK_BOT_USERNAME:
-            mention_tokens.append(f"@{common.SLACK_BOT_USERNAME}")
-        mention_index = next(
-            (
-                index
-                for index in range(len(timeline) - 1, -1, -1)
-                if timeline[index][1] == sender
-                and any(token in timeline[index][2] for token in mention_tokens)
-            ),
-            -1,
-        )
-        if mention_index < 0:
-            return False
-        followups = timeline[mention_index:]
-        return all(author == sender for _, author, _ in followups) and all(
-            0 <= following[0] - previous[0] <= RAPID_FOLLOWUP_SECONDS
-            for previous, following in zip(followups, followups[1:], strict=False)
-        )
-
-    return not any(
-        author != sender
-        and not (author_ts < bot_last_ts and latest_ts - author_ts > STALE_PARTICIPANT_SECONDS)
-        for author, author_ts in last_message_ts.items()
-    )
-
-
 async def _dispatch_or_queue_slack_run(
     client: Any,
     thread_id: str,
@@ -207,30 +116,6 @@ async def _dispatch_or_queue_slack_run(
             multitask_strategy="interrupt" if explicitly_tagged else "enqueue",
         )
     )
-
-
-async def slack_user_can_reply_to_ready_plan(
-    channel_id: str, thread_ts: str, slack_user_id: str
-) -> bool:
-    if not channel_id or not thread_ts or not slack_user_id:
-        return False
-    from agent.threads.plan_api import fetch_thread_metadata
-
-    try:
-        thread_id = await common.lookup_slack_thread_id(
-            get_langgraph_client(), channel_id, thread_ts
-        )
-    except Exception:  # noqa: BLE001
-        return False
-    if not thread_id:
-        return False
-    try:
-        metadata = await fetch_thread_metadata(thread_id)
-    except Exception:  # noqa: BLE001
-        # A brand-new thread has no metadata (fetch_thread_metadata raises 404); an
-        # untagged message there simply isn't a plan reply — don't abort the gate.
-        return False
-    return metadata.get("plan_mode") is True and metadata.get("plan_status") == "ready"
 
 
 def _format_slack_thread_section(
@@ -777,7 +662,6 @@ async def _process_slack_mention_impl(
         else SlackChannelContext(id=channel_id)
     )
     treat_all_messages_as_mentions = request.treat_all_messages_as_mentions
-    untagged_reply = request.untagged_reply
     code_channel = request.code_channel
     dm_session = request.dm_session or is_dm_session(channel_context, thread_ts)
 
@@ -1101,7 +985,7 @@ async def _process_slack_mention_impl(
         else ""
     )
     operational_context = (
-        _slack_prompt_preamble(untagged_reply, message_update)
+        _slack_prompt_preamble(message_update)
         + repo_hint_section
         + f"## Triggered by\n{trigger_user}\n\n"
         f"{trigger_user_timezone_section}"
