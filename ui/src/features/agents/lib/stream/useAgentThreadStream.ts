@@ -18,6 +18,7 @@ import { useReconnectNotice } from "./useReconnectNotice"
 import type {
   AgentStream,
   AgentThreadTransport,
+  RoutedModel,
   StreamConnection,
 } from "./connection"
 
@@ -53,10 +54,7 @@ export function useAgentThreadStream({
   const [runTracker] = useState(() => new RunTracker({ transport, threadId }))
   useEffect(() => () => runTracker.dispose(), [runTracker])
   const [isOffloading, setIsOffloading] = useState(false)
-  const [routed, setRouted] = useState<{
-    route?: string
-    modelId?: string | null
-  } | null>(null)
+  const [routed, setRouted] = useState<RoutedModel | null>(null)
 
   const stream = useStream({
     client,

@@ -1,10 +1,15 @@
 import type { UseStreamReturn } from "@langchain/react"
 
+/** Route/model the Auto router picked for a run, when known. */
+export interface RoutedModel {
+  route?: string
+  modelId?: string | null
+}
+
 /** The SDK stream handle, plus the run facts we track outside its state. */
 export type AgentStream = UseStreamReturn & {
-  isOffloading?: boolean
-  /** Route/model the Auto router picked for the latest run, when known. */
-  routed?: { route?: string; modelId?: string | null } | null
+  isOffloading: boolean
+  routed: RoutedModel | null
 }
 
 export type AgentThreadTransport = "cloud" | "local"

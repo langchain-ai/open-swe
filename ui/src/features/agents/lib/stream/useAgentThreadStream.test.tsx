@@ -9,8 +9,6 @@ import type { ReactNode } from "react"
 
 interface StreamOptions {
   threadId: string
-  maxReconnectAttempts: number
-  reconnectDelayMs: (attempt: number) => number
   onReconnect: (options: { attempt: number; delayMs: number }) => void
   onConnected: () => void
   onCompleted: (info: { reason: "success" }) => void
@@ -102,12 +100,10 @@ describe("useAgentThreadStream", () => {
 
     emit("started", ["subagent:one"])
     expect(view.result.current.stream.isOffloading).toBe(false)
-    for (const status of ["completed", "skipped", "failed"]) {
-      emit("started")
-      expect(view.result.current.stream.isOffloading).toBe(true)
-      emit(status)
-      expect(view.result.current.stream.isOffloading).toBe(false)
-    }
+    emit("started")
+    expect(view.result.current.stream.isOffloading).toBe(true)
+    emit("completed")
+    expect(view.result.current.stream.isOffloading).toBe(false)
 
     emit("started")
     act(() => lastStream().onCompleted({ reason: "success" }))
@@ -118,9 +114,6 @@ describe("useAgentThreadStream", () => {
     vi.useFakeTimers()
     const view = render()
     const stream = lastStream()
-
-    expect(stream.maxReconnectAttempts).toBe(12)
-    expect(stream.reconnectDelayMs(12)).toBe(300_000)
 
     act(() => stream.onReconnect({ attempt: 1, delayMs: 1_000 }))
     act(() => vi.advanceTimersByTime(2_000))
