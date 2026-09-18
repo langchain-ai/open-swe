@@ -65,7 +65,9 @@ jobs:
           --health-timeout 5s
           --health-retries 10
     env:
-      TEST_ANALYTICS_POSTGRES_URI: postgresql+asyncpg://postgres:postgres@localhost:5432/postgres
+      # The bare scheme on purpose: it is what POSTGRES_URI is documented as, so it is what
+      # gets copied across, and it keeps the fixtures' normalization on a tested path.
+      TEST_ANALYTICS_POSTGRES_URI: postgresql://postgres:postgres@localhost:5432/postgres
     steps:
       - uses: actions/checkout@v7.0.1
       - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1

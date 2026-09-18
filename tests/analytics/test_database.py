@@ -29,6 +29,22 @@ def test_non_local_runtime_requires_postgres_uri(monkeypatch):
     assert postgres.uri() is None
 
 
+@pytest.mark.parametrize("scheme", ["postgres", "postgresql", "postgresql+asyncpg"])
+def test_every_postgres_scheme_normalizes_to_asyncpg(scheme):
+    """Whichever spelling an operator exports, the fixtures get an asyncpg URL."""
+    uri = f"{scheme}://postgres:postgres@127.0.0.1:5433/postgres"
+
+    assert (
+        postgres.normalize_uri(uri)
+        == "postgresql+asyncpg://postgres:postgres@127.0.0.1:5433/postgres"
+    )
+
+
+def test_non_postgres_scheme_is_rejected():
+    with pytest.raises(ValueError, match="PostgreSQL scheme"):
+        postgres.normalize_uri("mysql://postgres:postgres@127.0.0.1:3306/postgres")
+
+
 async def test_migrations_allow_nonblocking_startup_and_restart(deployment_db):
     detector = BlockBuster()
     identities = []

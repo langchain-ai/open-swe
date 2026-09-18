@@ -28,12 +28,8 @@ MIGRATION_DIR = Path(__file__).with_name("migrations")
 MIGRATION_LOCK = 557314367248862439
 
 
-def uri() -> str | None:
-    value = ENV.POSTGRES_URI.optional()
-    if value is None and ENV.LANGSMITH_LANGGRAPH_API_VARIANT.get() == "local_dev":
-        value = "postgresql://postgres:postgres@127.0.0.1:5433/postgres"
-    if value is None:
-        return None
+def normalize_uri(value: str) -> str:
+    """Rewrite any PostgreSQL URI spelling as the asyncpg one the engine needs."""
     if value.startswith("postgres://"):
         value = "postgresql://" + value.removeprefix("postgres://")
     if value.startswith("postgresql://"):
@@ -49,6 +45,15 @@ def uri() -> str | None:
             raise ValueError("PostgreSQL URI must specify only one SSL mode")
         url = url.update_query_dict({"ssl": sslmode}).difference_update_query(["sslmode"])
     return url.render_as_string(hide_password=False)
+
+
+def uri() -> str | None:
+    value = ENV.POSTGRES_URI.optional()
+    if value is None and ENV.LANGSMITH_LANGGRAPH_API_VARIANT.get() == "local_dev":
+        value = "postgresql://postgres:postgres@127.0.0.1:5433/postgres"
+    if value is None:
+        return None
+    return normalize_uri(value)
 
 
 def configured() -> bool:
