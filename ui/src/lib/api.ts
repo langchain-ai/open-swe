@@ -300,7 +300,7 @@ export interface AdminUsersPage {
   page_size: number
 }
 
-export type UsageLeaderboardPeriod = "7d" | "30d" | "all"
+export type UsageLeaderboardPeriod = "24h" | "7d" | "30d" | "all"
 export type UsageLeaderboardSort =
   | "rank"
   | "user"
