@@ -252,6 +252,8 @@ def control_script(action: str, task_id: str | None) -> str:
                 os.killpg(state["pid"], signal.SIGTERM)
             except (ProcessLookupError, PermissionError, KeyError, TypeError):
                 pass
+            if not os.path.isdir(os.path.join(task_dir, "notify.claim")):
+                os.makedirs(os.path.join(task_dir, "notify.done"), exist_ok=True)
             deadline = time.time() + 3
             while state.get("status") == "running" and time.time() < deadline:
                 time.sleep(.1)
