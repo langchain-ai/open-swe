@@ -13,6 +13,13 @@ from agent.dashboard.repo_access import require_repo_access_for_user
 from agent.github.pull_request_status import pull_request_identity
 from agent.github.repos import accessible_repo_full_names
 from agent.review.analyzer_cron import remove_continual_cron
+from agent.review.assessment_feedback import (
+    AssessmentFeedback,
+    FeedbackSubmission,
+    feedback_store,
+    require_assessment_access,
+    save_feedback,
+)
 from agent.review.chat import (
     get_review_chat,
     proxy_review_chat_commands,
@@ -158,6 +165,31 @@ async def api_get_review(
 ) -> dict[str, Any]:
     await require_repo_access_for_user(session["sub"], f"{owner}/{repo}")
     return await get_review(owner, repo, pr_number)
+
+
+@router.get("/reviews/{owner}/{repo}/{pr_number}/feedback/{review_id}")
+async def get_assessment_feedback(
+    owner: str,
+    repo: str,
+    pr_number: int,
+    review_id: int,
+    session: dict[str, object] = SESSION_DEP,
+) -> AssessmentFeedback | None:
+    login = str(session["sub"])
+    await require_assessment_access(owner, repo, pr_number, review_id, login)
+    return await feedback_store(review_id).get(login.lower())
+
+
+@router.put("/reviews/{owner}/{repo}/{pr_number}/feedback/{review_id}")
+async def submit_assessment_feedback(
+    owner: str,
+    repo: str,
+    pr_number: int,
+    review_id: int,
+    submission: FeedbackSubmission,
+    session: dict[str, object] = SESSION_DEP,
+) -> AssessmentFeedback:
+    return await save_feedback(owner, repo, pr_number, review_id, str(session["sub"]), submission)
 
 
 @router.get("/reviews/{owner}/{repo}/{pr_number}/diff")
@@ -415,7 +447,11 @@ async def api_update_review_style_prompt(
     await require_repo_access_for_user(session["sub"], full_name)
     if not await REVIEW_STYLES.get(full_name):
         raise HTTPException(404, "review style not found")
-    return await REVIEW_STYLES.set_custom_prompt(full_name, body.custom_prompt)
+    if "approval_policy" in body.model_fields_set:
+        from agent.dashboard.deps import require_admin
+
+        require_admin(session)
+    return await REVIEW_STYLES.update_prompts(full_name, body)
 
 
 @router.post("/review-styles/{full_name:path}/analyze")
@@ -461,6 +497,10 @@ async def api_delete_review_style(
     record = await REVIEW_STYLES.get(full_name)
     if not record:
         raise HTTPException(404, "review style not found")
+    if record.approval_policy:
+        from agent.dashboard.deps import require_admin
+
+        require_admin(session)
     if record.status == "running":
         await cancel_review_style_analysis(full_name)
     await remove_continual_cron(full_name)

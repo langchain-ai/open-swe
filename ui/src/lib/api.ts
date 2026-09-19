@@ -211,6 +211,7 @@ export interface WorkspaceSettings {
   /** Experimental: approve and merge tiny PRs from their Slack thread. Off by default. */
   expedited_review_enabled?: boolean
   org_guidelines?: string | null
+  approval_policy?: string | null
   default_agent_model?: string | null
   default_agent_reasoning_effort?: string | null
   default_agent_subagent_model?: string | null
@@ -458,6 +459,7 @@ export interface ReviewStyle {
   name?: string
   status: ReviewStyleStatus
   custom_prompt: string | null
+  approval_policy?: string | null
   analysis_summary: string | null
   top_reviewers: Array<string>
   prs_sampled: number
@@ -826,11 +828,30 @@ export interface ReviewDiffGroup {
 }
 
 export interface ReviewDetail extends ReviewSummary {
+  assessment?: PublishedReviewAssessment | null
   pr: ReviewPrDetails
   checks: Array<ReviewCheckRun>
   findings: Array<ReviewFinding>
   diff_groups: Array<ReviewDiffGroup>
   diff_groups_stale: boolean
+}
+
+export interface PublishedReviewAssessment {
+  review_id: number
+  head_sha: string
+  risk_score: number
+  decision: "would_approve" | "needs_human_review"
+  explanation: string
+}
+
+export interface ReviewAssessmentFeedbackInput {
+  rating: "helpful" | "unhelpful"
+  comment: string
+}
+
+export interface ReviewAssessmentFeedback extends ReviewAssessmentFeedbackInput {
+  login: string
+  updated_at: string
 }
 
 export interface ReviewDiffFile {
@@ -968,6 +989,14 @@ export const api = {
     request<ReviewStyle>(`/review-styles/${encodeURIComponent(full_name)}`, {
       method: "PUT",
       body: JSON.stringify({ custom_prompt }),
+    }),
+  saveReviewApprovalPolicy: (
+    full_name: string,
+    approval_policy: string | null
+  ) =>
+    request<ReviewStyle>(`/review-styles/${encodeURIComponent(full_name)}`, {
+      method: "PUT",
+      body: JSON.stringify({ approval_policy }),
     }),
   analyzeReviewStyle: (full_name: string) =>
     request<ReviewStyle>(
@@ -1269,6 +1298,26 @@ export const api = {
   getReview: (owner: string, repo: string, number: number) =>
     request<ReviewDetail>(
       `/reviews/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}`
+    ),
+  getAssessmentFeedback: (
+    owner: string,
+    repo: string,
+    number: number,
+    reviewId: number
+  ) =>
+    request<ReviewAssessmentFeedback | null>(
+      `/reviews/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}/feedback/${reviewId}`
+    ),
+  saveAssessmentFeedback: (
+    owner: string,
+    repo: string,
+    number: number,
+    reviewId: number,
+    feedback: ReviewAssessmentFeedbackInput
+  ) =>
+    request<ReviewAssessmentFeedback>(
+      `/reviews/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}/feedback/${reviewId}`,
+      { method: "PUT", body: JSON.stringify(feedback) }
     ),
   getReviewDiff: (owner: string, repo: string, number: number) =>
     request<ReviewDiffPayload>(

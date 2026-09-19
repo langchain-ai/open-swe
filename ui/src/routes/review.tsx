@@ -41,7 +41,7 @@ function ReviewPage() {
         <SettingsNavRow
           to="/review/styles"
           label="Review Style Prompts"
-          description="Per-repo style guides learned from past PR review feedback."
+          description="Per-repo review style guides and approval policy overrides."
         />
         <SettingsNavRow
           to="/workspaces"

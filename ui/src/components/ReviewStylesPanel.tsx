@@ -19,6 +19,7 @@ import { Textarea } from "@/components/ui/textarea"
 import { api, isGithubReauthError, loginUrl } from "@/lib/api"
 import { useRepos } from "@/lib/profile"
 import { normalizeRepoFullName } from "@/lib/repo"
+import { useSession } from "@/lib/session"
 
 function formatMutationError(e: Error): string {
   return isGithubReauthError(e)
@@ -40,11 +41,13 @@ function statusVariant(status: ReviewStyle["status"]) {
 }
 
 export function ReviewStylesPanel() {
+  const session = useSession()
   const qc = useQueryClient()
   const [error, setError] = useState<string | null>(null)
   const [addRepo, setAddRepo] = useState("")
   const [selected, setSelected] = useState<string | null>(null)
   const [draftPrompt, setDraftPrompt] = useState("")
+  const [draftPolicy, setDraftPolicy] = useState("")
 
   const styles = useQuery({
     queryKey: ["reviewStyles"],
@@ -74,6 +77,22 @@ export function ReviewStylesPanel() {
       setDraftPrompt("")
     }
   }, [detail.data?.custom_prompt, detail.data?.full_name])
+
+  useEffect(() => {
+    // oxlint-disable-next-line react/set-state-in-effect
+    setDraftPolicy(detail.data?.approval_policy ?? "")
+  }, [detail.data?.approval_policy, detail.data?.full_name])
+
+  const savePolicy = useMutation({
+    mutationFn: ({ repo, policy }: { repo: string; policy: string | null }) =>
+      api.saveReviewApprovalPolicy(repo, policy),
+    onSuccess: (record) => {
+      qc.setQueryData(["reviewStyle", record.full_name], record)
+      void qc.invalidateQueries({ queryKey: ["reviewStyles"] })
+      setError(null)
+    },
+    onError: (e: Error) => setError(formatMutationError(e)),
+  })
 
   const createStyle = useMutation({
     mutationFn: (full_name: string) => api.createReviewStyle(full_name),
@@ -340,7 +359,10 @@ export function ReviewStylesPanel() {
               <Button
                 size="sm"
                 variant="destructive"
-                disabled={removeStyle.isPending}
+                disabled={
+                  removeStyle.isPending ||
+                  (!!active.approval_policy && !session.data?.is_admin)
+                }
                 onClick={() => {
                   if (
                     !window.confirm(
@@ -366,6 +388,42 @@ export function ReviewStylesPanel() {
               }
               disabled={active.status === "running"}
             />
+            <Label htmlFor="repo-approval-policy">
+              Approval policy override
+            </Label>
+            <p className="text-xs text-muted-foreground">
+              Replaces the shared approval policy for this repository. Leave
+              blank to inherit. Review style analysis does not change this
+              policy.
+            </p>
+            <Textarea
+              id="repo-approval-policy"
+              className="min-h-[160px] w-full font-mono text-xs"
+              value={draftPolicy}
+              onChange={(e) => setDraftPolicy(e.target.value)}
+              placeholder="Inherit the shared approval policy"
+              maxLength={10000}
+              disabled={!session.data?.is_admin || !detail.data}
+            />
+            {session.data?.is_admin && (
+              <Button
+                size="sm"
+                disabled={
+                  !detail.data ||
+                  savePolicy.isPending ||
+                  draftPolicy.trim() ===
+                    (detail.data.approval_policy ?? "").trim()
+                }
+                onClick={() =>
+                  savePolicy.mutate({
+                    repo: active.full_name,
+                    policy: draftPolicy.trim() || null,
+                  })
+                }
+              >
+                Save approval policy
+              </Button>
+            )}
           </>
         )}
         {error && <p className="text-xs text-destructive">{error}</p>}
