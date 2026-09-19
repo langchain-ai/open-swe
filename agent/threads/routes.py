@@ -2,10 +2,10 @@
 
 import logging
 from time import perf_counter
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 from uuid import UUID
 
-from fastapi import APIRouter, HTTPException, Request, Response
+from fastapi import APIRouter, HTTPException, Query, Request, Response
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
@@ -47,6 +47,8 @@ from agent.threads.proxy import (
     proxy_dashboard_thread_commands,
     proxy_dashboard_thread_history,
     proxy_dashboard_thread_run_cancel,
+    proxy_dashboard_thread_run_enqueue,
+    proxy_dashboard_thread_runs_list,
     proxy_dashboard_thread_stream_events,
 )
 from agent.threads.runs import (
@@ -343,6 +345,43 @@ async def api_resolve_thread(
         session["sub"],
         resolved=body.resolved,
         email=session.get("email"),
+    )
+
+
+@router.get("/threads/{thread_id}/runs")
+async def api_list_thread_runs(
+    thread_id: str,
+    limit: int = 10,
+    offset: int = 0,
+    status: str | None = None,
+    select: Annotated[list[str] | None, Query()] = None,
+    session: dict[str, Any] = SESSION_DEP,
+) -> Response:
+    status_code, content, media_type = await proxy_dashboard_thread_runs_list(
+        thread_id,
+        session["sub"],
+        limit=limit,
+        offset=offset,
+        status=status,
+        select=select,
+        email=session.get("email"),
+    )
+    return Response(content=content, status_code=status_code, media_type=media_type)
+
+
+@router.post("/threads/{thread_id}/runs")
+async def api_create_thread_run(
+    thread_id: str,
+    request: Request,
+    session: dict[str, Any] = SESSION_DEP,
+) -> dict[str, Any]:
+    body = await request.body()
+    return await proxy_dashboard_thread_run_enqueue(
+        thread_id,
+        session["sub"],
+        body,
+        email=session.get("email"),
+        content_type=request.headers.get("content-type", "application/json"),
     )
 
 

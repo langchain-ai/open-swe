@@ -753,6 +753,11 @@ async def get_thread(
         plan_comments = plan_comments_task.result()
         approvals = approvals_task.result()
         queued_count = queued_count_task.result()
+        # `queued_count` only sees the legacy in-run injection queue (Slack
+        # context, the `send_dashboard_message` tool). A composer follow-up
+        # enqueued via the server-backed queue adapter is a genuine
+        # LangGraph run instead, already in `runs` — count it too.
+        queued_count += sum(1 for run in runs if _value(run, "status") == "pending")
     except HTTPException as exc:
         return _http_failure(exc)
     except Exception:

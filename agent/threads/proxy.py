@@ -4,22 +4,32 @@ import asyncio
 import json
 import logging
 from collections.abc import AsyncIterator
+from datetime import UTC, datetime
 from typing import Any
 
 import httpx2
 from fastapi import HTTPException
+from langgraph_sdk.errors import NotFoundError
 
 from agent.config import ENV
 from agent.dashboard.ttft import AssistantTextEventDetector, record_dashboard_thread_ttft
+from agent.dispatch import create_durable_run
+from agent.invocation import new_invocation_id, with_invocation_id
 from agent.threads.access import (
     _authorized_thread_metadata,
+    _ensure_dashboard_github_token,
     _readable_thread_metadata,
 )
 from agent.threads.runs import (
     _ASSISTANT_ID,
+    _command_message_content,
+    _command_message_id,
+    _dashboard_images_from_content,
+    _enrich_existing_thread_run,
     _enrich_run_start_command,
     _extract_run_id_from_command_response,
     _notify_slack_web_handoff,
+    _resolve_client_model_choice,
 )
 from agent.threads.summary import (
     _assert_thread_postable,
@@ -30,6 +40,7 @@ from agent.threads.summary import (
 from agent.utils.json_types import thread_metadata
 from agent.utils.streaming import TERMINAL_LIFECYCLE_EVENTS, root_lifecycle
 from agent.utils.thread_ops import langgraph_client, langgraph_url
+from agent.utils.thread_pr_state import agent_thread_enqueue_lock
 
 logger = logging.getLogger(__name__)
 
@@ -292,6 +303,185 @@ async def proxy_dashboard_thread_history(
         response = await client.post(url, json=payload, headers=headers)
     media_type = response.headers.get("content-type")
     return response.status_code, response.content, media_type
+
+
+async def proxy_dashboard_thread_runs_list(
+    thread_id: str,
+    login: str,
+    *,
+    limit: int = 10,
+    offset: int = 0,
+    status: str | None = None,
+    select: list[str] | None = None,
+    email: str | None = None,
+) -> tuple[int, bytes, str | None]:
+    """Read-only passthrough for the SDK's ``runs.list()``.
+
+    Backs ``AgentServerQueueAdapter.hydrate()``/``#refreshPending()``, which
+    call this directly (not through ``commands``) to read a thread's pending
+    runs.
+    """
+    await _readable_thread_metadata(thread_id, login=login, email=email)
+    url = f"{langgraph_url().rstrip('/')}/threads/{thread_id}/runs"
+    headers = langgraph_proxy_headers()
+    params: list[tuple[str, str | int | float | None]] = [
+        ("limit", str(limit)),
+        ("offset", str(offset)),
+    ]
+    if status:
+        params.append(("status", status))
+    for field in select or []:
+        params.append(("select", field))
+    async with httpx2.AsyncClient(timeout=_PROXY_REQUEST_TIMEOUT) as client:
+        response = await client.get(url, headers=headers, params=params)
+    media_type = response.headers.get("content-type")
+    return response.status_code, response.content, media_type
+
+
+async def _get_thread_tolerating_create_race(client: Any, thread_id: str) -> dict[str, Any] | None:
+    """Fetch a thread, tolerating the brief window where a concurrent
+    ``run.start`` on this same thread is still lazily creating it.
+
+    ``AgentServerQueueAdapter.enqueue()`` only fires once the client believes
+    a run is already active on ``thread_id`` — meaning a ``run.start``
+    dispatch for that very thread just went out. On a brand-new thread,
+    that dispatch is what creates the thread row; a fast enough follow-up
+    can reach here before it lands. Retry briefly rather than 404 what
+    should resolve within one HTTP round trip.
+
+    Only retries a genuine ``NotFoundError`` (404). Anything else — an
+    outage, a timeout, an auth failure — is a real error, not "not found
+    yet", and must propagate instead of being silently retried and then
+    reported as a 404.
+    """
+    for delay in (0.0, 0.15, 0.3, 0.6):
+        if delay:
+            await asyncio.sleep(delay)
+        try:
+            return await client.threads.get(thread_id)
+        except NotFoundError:
+            continue
+    return None
+
+
+async def proxy_dashboard_thread_run_enqueue(
+    thread_id: str,
+    login: str,
+    body: bytes,
+    *,
+    email: str | None = None,
+    content_type: str = "application/json",
+) -> dict[str, Any]:
+    """Create a genuinely durable, attributed ``multitask_strategy="enqueue"`` run.
+
+    Backs ``AgentServerQueueAdapter.enqueue()``, which calls the raw
+    ``client.runs.create()`` REST endpoint directly instead of the
+    ``commands`` protocol's ``run.start`` normal dispatch uses. Reuses
+    ``_enrich_existing_thread_run`` — the same attribution/model-resolution/
+    bookkeeping core `run.start` uses — so a queued follow-up gets identical
+    sender attribution rather than raw, unattributed text.
+    """
+    require_json_content_type(content_type)
+    try:
+        body_dict = json.loads(body)
+    except json.JSONDecodeError as exc:
+        raise HTTPException(400, "run body must be a JSON object") from exc
+    if not isinstance(body_dict, dict):
+        raise HTTPException(400, "run body must be a JSON object")
+
+    client = langgraph_client()
+    thread = await _get_thread_tolerating_create_race(client, thread_id)
+    if thread is None:
+        raise HTTPException(404, "thread not found")
+    metadata = thread_metadata(thread)
+    _assert_thread_postable(metadata, login, email)
+    await _ensure_dashboard_github_token(login)
+
+    client_config = body_dict.get("config")
+    if not isinstance(client_config, dict):
+        client_config = {}
+    client_configurable = client_config.get("configurable")
+    if not isinstance(client_configurable, dict):
+        client_configurable = {}
+
+    chosen_model, chosen_effort, plan_mode_requested, model_selection = (
+        _resolve_client_model_choice(client_configurable, metadata, creating=False)
+    )
+    content = _command_message_content(body_dict)
+    command_images = _dashboard_images_from_content(content)
+    invocation_id = new_invocation_id()
+    invocation_started_at = datetime.now(UTC).isoformat()
+    overrides = with_invocation_id(None, invocation_id)
+    overrides["invocation_started_at"] = invocation_started_at
+
+    run_metadata_in = body_dict.get("metadata")
+    if not isinstance(run_metadata_in, dict):
+        run_metadata_in = None
+
+    # Serialize concurrent enqueues on this thread: two calls racing here
+    # would otherwise compute their dedup snapshot (persisted_message_ids /
+    # dynamic-context hashes) from the same pre-dispatch state, since
+    # neither queued message has been persisted yet.
+    async with agent_thread_enqueue_lock(client, thread_id):
+        structured, merged_configurable, run_metadata = await _enrich_existing_thread_run(
+            thread_id,
+            login,
+            content=content,
+            chosen_model=chosen_model,
+            chosen_effort=chosen_effort,
+            command_images=command_images,
+            plan_mode_requested=plan_mode_requested,
+            model_selection=model_selection,
+            overrides=overrides,
+            client_message_id=_command_message_id(body_dict),
+            run_metadata_in=run_metadata_in,
+            metadata=metadata,
+            invocation_id=invocation_id,
+            invocation_started_at=invocation_started_at,
+            email=email,
+        )
+
+        run_input = body_dict.get("input")
+        if not isinstance(run_input, dict):
+            run_input = {}
+        run_input["messages"] = structured
+
+        run = await create_durable_run(
+            thread_id,
+            _ASSISTANT_ID,
+            input=run_input,
+            config={**client_config, "configurable": merged_configurable},
+            metadata=run_metadata,
+            source="web",
+            client=client,
+            # Force-enqueue server-side: the client's own `multitask_strategy`
+            # (if any) is never trusted — this endpoint must not become a
+            # backdoor around `commands`'s busy-conflict check.
+            multitask_strategy="enqueue",
+        )
+    run_id = run.get("run_id") if isinstance(run, dict) else None
+    if run_id is not None:
+        try:
+            await client.threads.update(
+                thread_id=thread_id,
+                metadata={
+                    "latest_run_id": run_id,
+                    "latest_run_status": "pending",
+                    "updated_at_ms": _now_ms(),
+                },
+            )
+        except Exception:
+            logger.warning(
+                "Failed to persist enqueued dashboard run %s on thread %s",
+                run_id,
+                thread_id,
+                exc_info=True,
+            )
+    try:
+        await _notify_slack_web_handoff(thread_id, metadata, client)
+    except Exception:
+        logger.exception("Failed to update Slack message for dashboard handoff on %s", thread_id)
+    return dict(run)
 
 
 async def proxy_dashboard_thread_run_cancel(

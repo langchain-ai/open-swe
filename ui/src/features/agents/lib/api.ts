@@ -3,7 +3,6 @@ import type {
   AgentPullRequestStatusResponse,
   AgentSchedule,
   AgentThread,
-  ImageChunk,
   Message,
   SlackNotificationMode,
   AutomationTrigger,
@@ -26,15 +25,6 @@ export class AgentsApiError extends Error {
     super(message)
     this.name = "AgentsApiError"
   }
-}
-
-export interface ThreadMessageRequest {
-  content: string
-  images?: Array<ImageChunk>
-  model_id?: string | null
-  effort?: string | null
-  plan_mode?: boolean
-  client_message_id?: string
 }
 
 export interface ScheduleCreateRequest {
@@ -401,14 +391,6 @@ export const agentsApi = {
     agentsRequest<{ status: string; fingerprint: string }>(
       `/workflow-approval/${encodeURIComponent(threadId)}/${encodeURIComponent(fingerprint)}/reject`,
       { method: "POST" }
-    ),
-  queueMessage: (threadId: string, body: ThreadMessageRequest) =>
-    agentsRequest<AgentThread>(
-      `/threads/${encodeURIComponent(threadId)}/messages`,
-      {
-        method: "POST",
-        body: JSON.stringify(body),
-      }
     ),
   cancelThread: (threadId: string) =>
     agentsRequest<AgentThread>(

@@ -318,13 +318,25 @@ async def send_dashboard_message(
 
 
 async def _cancel_active_thread_runs(client: Any, thread_id: str) -> None:
+    """Interrupt whatever is active or about to become active on this thread.
+
+    Excludes ``pending`` runs with ``multitask_strategy="enqueue"``: those are
+    follow-ups the user deliberately queued behind the active run, not part
+    of what "Stop run" means to stop. Canceling them here would silently
+    drop a queued follow-up the instant its predecessor was stopped, instead
+    of letting it start next as intended.
+    """
     run_ids: set[str] = set()
     for status in ("pending", "running"):
         offset = 0
         while True:
             runs = await client.runs.list(thread_id, status=status, limit=100, offset=offset)
             run_ids.update(
-                run_id for run in runs if isinstance((run_id := run.get("run_id")), str) and run_id
+                run_id
+                for run in runs
+                if run.get("multitask_strategy") != "enqueue"
+                and isinstance((run_id := run.get("run_id")), str)
+                and run_id
             )
             if len(runs) < 100:
                 break

@@ -1,15 +1,33 @@
 import { ChevronDown, ChevronRight } from "lucide-react"
 import { IoLogoSlack } from "react-icons/io5"
 import { useEffect, useRef, useState } from "react"
+import { useMessageMetadata } from "@langchain/react"
 
 import { SkillPromptText } from "../SkillBadge"
 import { MessageTimestamp } from "./MessageTimestamp"
 import { SlackMrkdwn } from "./SlackMrkdwn"
+import { useAgentStream } from "@/features/agents/lib/stream/AgentStreamProvider"
 import type { Message } from "@/features/agents/lib/types"
 
 const COLLAPSED_MAX_HEIGHT_PX = 250
 
 export function UserMessage({ message }: { message: Message }) {
+  const stream = useAgentStream()
+  // A message dispatched to an idle thread paints via the SDK's own
+  // optimistic mechanism (stream.messages), not the pendingMessages path
+  // visiblePendingMessages drives — so it never gets a deliveryStatus from
+  // there. Fall back to the SDK's own per-message optimistic status for
+  // that case; a busy/queued send still sets deliveryStatus explicitly and
+  // takes precedence.
+  const optimisticStatus = useMessageMetadata(stream, message.id)
+    ?.optimisticStatus
+  const deliveryStatus =
+    message.deliveryStatus ??
+    (optimisticStatus === "pending"
+      ? "sending"
+      : optimisticStatus === "failed"
+        ? "failed"
+        : undefined)
   const isSystem = message.structuredSenderKind === "system"
   const isSlack = message.structuredSurface === "slack"
   const text = message.chunks
@@ -38,7 +56,7 @@ export function UserMessage({ message }: { message: Message }) {
       className={`group/turn my-4 flex flex-col gap-1 ${isSystem ? "items-start" : "items-end"}`}
       data-testid="user-message"
       data-message-id={message.id}
-      data-message-delivery-status={message.deliveryStatus}
+      data-message-delivery-status={deliveryStatus}
       data-message-sender-kind={message.structuredSenderKind}
       data-message-surface={message.structuredSurface}
     >
@@ -133,15 +151,15 @@ export function UserMessage({ message }: { message: Message }) {
             )}
           </div>
         )}
-        {message.deliveryStatus && (
+        {deliveryStatus && (
           <div
             className={`mt-1 pr-1 text-right text-[11px] ${
-              message.deliveryStatus === "failed"
+              deliveryStatus === "failed"
                 ? "text-destructive"
                 : "text-muted-foreground"
             }`}
           >
-            {message.deliveryStatus === "failed" ? "Failed to send" : "Sending"}
+            {deliveryStatus === "failed" ? "Failed to send" : "Sending"}
           </div>
         )}
         {!message.timestampIsFallback && (!isSystem || expanded) && (

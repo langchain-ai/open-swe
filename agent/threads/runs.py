@@ -28,6 +28,7 @@ from agent.dashboard.workspace_settings import (
 )
 from agent.input_messages import (
     PersonIdentity,
+    RunMessage,
     build_input_messages,
     dynamic_context_hashes_from_messages,
     injected_dynamic_context_hashes_from_metadata,
@@ -432,6 +433,260 @@ def _validate_command_images(content: Any, *, model_id: str | None) -> None:
         _image_blocks(images, model_id=model_id)
 
 
+def _resolve_client_model_choice(
+    client_configurable: Mapping[str, Any], metadata: Mapping[str, Any], *, creating: bool
+) -> tuple[str | None, str | None, bool, str | None]:
+    """(chosen_model, chosen_effort, plan_mode_requested, model_selection) from client config."""
+    chosen_model, chosen_effort = normalize_model_choice(
+        client_configurable.get("agent_model_id"),
+        client_configurable.get("agent_effort"),
+    )
+    plan_mode_requested = client_configurable.get("plan_mode") is True
+    model_selection = client_configurable.get("model_selection")
+    if model_selection not in {"auto", "explicit"}:
+        if client_configurable.get("agent_model_id"):
+            model_selection = "explicit"
+        else:
+            model_selection = "auto" if creating else metadata.get("model_selection")
+    return chosen_model, chosen_effort, plan_mode_requested, model_selection
+
+
+def _build_dashboard_run_metadata(
+    run_metadata_in: dict[str, Any] | None,
+    invocation_id: str,
+    invocation_started_at: str,
+) -> dict[str, Any]:
+    """Run metadata for a dispatched dashboard run, stripped of client-forgeable keys.
+
+    Shared by the ``run.start`` command path (both its creating and
+    existing-thread branches) and the enqueue proxy.
+    """
+    run_metadata_in = run_metadata_in if isinstance(run_metadata_in, dict) else {}
+    return with_invocation_id(
+        {
+            **{
+                key: value
+                for key, value in run_metadata_in.items()
+                if key not in {"visibility", "owner_type", "owner_login", "system_authorization"}
+            },
+            **agent_version_metadata(),
+            "invocation_started_at": invocation_started_at,
+        },
+        invocation_id,
+    )
+
+
+async def _persist_dashboard_run_metadata(
+    thread_id: str,
+    login: str,
+    *,
+    metadata: dict[str, Any],
+    plan_mode_requested: bool,
+    model_selection: str | None,
+    command_images: list[DashboardImageBody],
+    run_model: str | None,
+    run_effort: str | None,
+    chosen_model: str | None,
+    chosen_effort: str | None,
+    injected: set[str],
+    overrides: dict[str, Any],
+    email: str | None,
+    client: Any,
+) -> dict[str, Any]:
+    """Bookkeep dashboard metadata for a dispatched run and resolve its configurable.
+
+    Shared tail of the ``run.start`` command path (both its creating and
+    existing-thread branches) and the enqueue proxy: builds the thread
+    ``metadata_update`` (source/participants/model/PR-resolution reopening),
+    persists it — reopening under the PR-state lock when the thread already
+    has linked PRs — and resolves ``merged_configurable`` via
+    ``_build_dashboard_configurable``.
+
+    Returns the resolved ``merged_configurable``, ready for the run's config.
+    """
+    metadata_update: dict[str, Any] = {
+        "source": DASHBOARD_SOURCE,
+        # Continuing on the web promotes a `/oswe` question thread for good.
+        "unlisted": False,
+        "plan_mode": plan_mode_requested,
+        "model_selection": model_selection,
+        PARTICIPANT_LOGINS_KEY: merge_participants(metadata.get(PARTICIPANT_LOGINS_KEY), login),
+        PARTICIPANT_EMAILS_KEY: merge_participants(metadata.get(PARTICIPANT_EMAILS_KEY), email),
+        "injected_dynamic_context_hashes": sorted(injected),
+    }
+    if command_images and run_model and run_effort:
+        overrides["agent_model_id"] = run_model
+        overrides["agent_effort"] = run_effort
+        metadata_update["model"] = run_model
+        metadata_update["effort"] = run_effort
+        metadata_update["resolved_model"] = run_model
+        metadata_update["resolved_effort"] = run_effort
+    elif chosen_model and chosen_effort:
+        overrides["agent_model_id"] = chosen_model
+        overrides["agent_effort"] = chosen_effort
+        metadata_update["model"] = chosen_model
+        metadata_update["effort"] = chosen_effort
+    metadata_update["updated_at_ms"] = _now_ms()
+    metadata_update["feedback_last_activity_at_ms"] = metadata_update["updated_at_ms"]
+
+    pr_linked = any(metadata.get(key) for key in ("pr_url", "pr_urls", "pull_requests"))
+    if pr_linked or metadata.get("auto_resolved_by_prs") is True:
+        async with agent_thread_pr_state_lock(client, thread_id):
+            current = await client.threads.get(thread_id)
+            metadata = thread_metadata(current)
+            if _is_thread_resolved(metadata):
+                metadata_update["resolved"] = False
+                metadata_update["resolved_at_ms"] = None
+            if metadata.get("auto_resolved_by_prs") is True:
+                metadata_update["auto_resolved_by_prs"] = False
+            if metadata.get("attention_reason"):
+                metadata_update["attention_reason"] = None
+            metadata = {**metadata, **metadata_update}
+            await client.threads.update(thread_id=thread_id, metadata=metadata_update)
+    else:
+        if _is_thread_resolved(metadata):
+            metadata_update["resolved"] = False
+            metadata_update["resolved_at_ms"] = None
+        if metadata.get("attention_reason"):
+            metadata_update["attention_reason"] = None
+        metadata = {**metadata, **metadata_update}
+        await client.threads.update(thread_id=thread_id, metadata=metadata_update)
+
+    overrides["model_selection"] = model_selection
+    return await _build_dashboard_configurable(
+        thread_id,
+        login,
+        metadata,
+        overrides=overrides,
+    )
+
+
+async def _enrich_existing_thread_run(
+    thread_id: str,
+    login: str,
+    *,
+    content: Any,
+    chosen_model: str | None,
+    chosen_effort: str | None,
+    command_images: list[DashboardImageBody],
+    plan_mode_requested: bool,
+    model_selection: str | None,
+    overrides: dict[str, Any],
+    client_message_id: str | None,
+    run_metadata_in: dict[str, Any] | None,
+    metadata: dict[str, Any],
+    invocation_id: str,
+    invocation_started_at: str,
+    email: str | None = None,
+) -> tuple[list[RunMessage], dict[str, Any], dict[str, Any]]:
+    """Attribute, resolve the model, and bookkeep a run on an EXISTING (non-creating) thread.
+
+    Shared by ``_enrich_run_start_command`` (the ``commands`` protocol normal
+    dispatch uses) and the plain ``POST /threads/{id}/runs`` enqueue proxy, so
+    a queued follow-up gets the same sender attribution, dynamic-context
+    dedup, and thread-metadata bookkeeping (participants, PR-resolution
+    reopening) a normally-dispatched message does.
+
+    Returns ``(structured_messages, merged_configurable, run_metadata)`` ready
+    for ``client.runs.create``/``create_durable_run``. Persists the thread
+    metadata bookkeeping as a side effect.
+    """
+    client = langgraph_client()
+
+    run_model = chosen_model or _metadata_model_id(metadata)
+    run_effort = chosen_effort
+    if not run_effort:
+        for key in ("resolved_effort", "effort"):
+            value = metadata.get(key)
+            if isinstance(value, str):
+                run_effort = value
+                break
+    if command_images and run_model and run_effort:
+        run_model, run_effort = _with_vision_fallback(run_model, run_effort, has_images=True)
+    _validate_command_images(content, model_id=run_model)
+
+    if content is None:
+        content = ""
+    sender_id = f"github:{login}"
+    injected = injected_dynamic_context_hashes_from_metadata(metadata)
+    persisted_message_ids: set[str] = set()
+    try:
+        prior_state = await client.threads.get_state(thread_id)
+        values = prior_state.get("values") if isinstance(prior_state, dict) else None
+        if isinstance(values, dict):
+            messages = values.get("messages")
+            injected.update(dynamic_context_hashes_from_messages(messages))
+            if isinstance(messages, list):
+                persisted_message_ids = {
+                    message_id
+                    for message in messages
+                    if isinstance(message, Mapping)
+                    and isinstance(message_id := message.get("id"), str)
+                }
+    except Exception:
+        logger.debug("Could not read dashboard thread history for %s", thread_id, exc_info=True)
+    person: PersonIdentity = {
+        "id": sender_id,
+        "platform": "github",
+        "github_login": login,
+    }
+    if email:
+        person["email"] = email
+    structured = build_input_messages(
+        content,
+        {"sender_id": sender_id, "surface": "web", "kind": "human"},
+        people=[person],
+        systems=(
+            [
+                {
+                    "id": "system:dashboard-handoff",
+                    "display_name": "Dashboard handoff",
+                    "platform": "open-swe",
+                }
+            ]
+            if metadata.get("source") == "slack"
+            else None
+        ),
+        injected_dynamic_context_hashes=injected,
+    )
+    if metadata.get("source") == "slack":
+        structured.insert(
+            -1,
+            build_input_messages(
+                DASHBOARD_HANDOFF_BODY,
+                {
+                    "sender_id": "system:dashboard-handoff",
+                    "surface": "automation",
+                    "kind": "system",
+                },
+                injected_dynamic_context_hashes={"system:dashboard-handoff"},
+            )[0],
+        )
+    if client_message_id and client_message_id not in persisted_message_ids:
+        structured[-1]["id"] = client_message_id
+
+    merged_configurable = await _persist_dashboard_run_metadata(
+        thread_id,
+        login,
+        metadata=metadata,
+        plan_mode_requested=plan_mode_requested,
+        model_selection=model_selection,
+        command_images=command_images,
+        run_model=run_model,
+        run_effort=run_effort,
+        chosen_model=chosen_model,
+        chosen_effort=chosen_effort,
+        injected=injected,
+        overrides=overrides,
+        email=email,
+        client=client,
+    )
+    run_metadata = _build_dashboard_run_metadata(
+        run_metadata_in, invocation_id, invocation_started_at
+    )
+    return structured, merged_configurable, run_metadata
+
+
 async def _enrich_run_start_command(
     thread_id: str,
     login: str,
@@ -463,17 +718,9 @@ async def _enrich_run_start_command(
     if not isinstance(client_configurable, dict):
         client_configurable = {}
 
-    chosen_model, chosen_effort = normalize_model_choice(
-        client_configurable.get("agent_model_id"),
-        client_configurable.get("agent_effort"),
+    chosen_model, chosen_effort, plan_mode_requested, model_selection = (
+        _resolve_client_model_choice(client_configurable, metadata, creating=creating)
     )
-    plan_mode_requested = client_configurable.get("plan_mode") is True
-    model_selection = client_configurable.get("model_selection")
-    if model_selection not in {"auto", "explicit"}:
-        if client_configurable.get("agent_model_id"):
-            model_selection = "explicit"
-        else:
-            model_selection = "auto" if creating else metadata.get("model_selection")
     offload_requested = client_configurable.get("offload_conversation") is True
     content = _command_message_content(params)
     if isinstance(content, str) and content.strip() == "/offload":
@@ -532,153 +779,80 @@ async def _enrich_run_start_command(
         elif chosen_model and chosen_effort:
             overrides["agent_model_id"] = chosen_model
             overrides["agent_effort"] = chosen_effort
-    else:
-        run_model = chosen_model or _metadata_model_id(metadata)
-        run_effort = chosen_effort
-        if not run_effort:
-            for key in ("resolved_effort", "effort"):
-                value = metadata.get(key)
-                if isinstance(value, str):
-                    run_effort = value
-                    break
-        if command_images and run_model and run_effort:
-            run_model, run_effort = _with_vision_fallback(run_model, run_effort, has_images=True)
-        _validate_command_images(content, model_id=run_model)
-
-    if content is None:
-        content = ""
-    sender_id = f"github:{login}"
-    injected = injected_dynamic_context_hashes_from_metadata(metadata)
-    persisted_message_ids: set[str] = set()
-    if not creating:
-        try:
-            prior_state = await client.threads.get_state(thread_id)
-            values = prior_state.get("values") if isinstance(prior_state, dict) else None
-            if isinstance(values, dict):
-                messages = values.get("messages")
-                injected.update(dynamic_context_hashes_from_messages(messages))
-                if isinstance(messages, list):
-                    persisted_message_ids = {
-                        message_id
-                        for message in messages
-                        if isinstance(message, Mapping)
-                        and isinstance(message_id := message.get("id"), str)
-                    }
-        except Exception:
-            logger.debug("Could not read dashboard thread history for %s", thread_id, exc_info=True)
-    person: PersonIdentity = {
-        "id": sender_id,
-        "platform": "github",
-        "github_login": login,
-    }
-    if email:
-        person["email"] = email
-    structured = build_input_messages(
-        content,
-        {"sender_id": sender_id, "surface": "web", "kind": "human"},
-        people=[person],
-        systems=(
-            [
-                {
-                    "id": "system:dashboard-handoff",
-                    "display_name": "Dashboard handoff",
-                    "platform": "open-swe",
-                }
-            ]
-            if metadata.get("source") == "slack"
-            else None
-        ),
-        injected_dynamic_context_hashes=injected,
-    )
-    if metadata.get("source") == "slack":
-        structured.insert(
-            -1,
-            build_input_messages(
-                DASHBOARD_HANDOFF_BODY,
-                {
-                    "sender_id": "system:dashboard-handoff",
-                    "surface": "automation",
-                    "kind": "system",
-                },
-                injected_dynamic_context_hashes={"system:dashboard-handoff"},
-            )[0],
+        if content is None:
+            content = ""
+        sender_id = f"github:{login}"
+        injected = injected_dynamic_context_hashes_from_metadata(metadata)
+        person: PersonIdentity = {
+            "id": sender_id,
+            "platform": "github",
+            "github_login": login,
+        }
+        if email:
+            person["email"] = email
+        structured = build_input_messages(
+            content,
+            {"sender_id": sender_id, "surface": "web", "kind": "human"},
+            people=[person],
+            injected_dynamic_context_hashes=injected,
         )
-    client_message_id = _command_message_id(params)
-    if client_message_id and client_message_id not in persisted_message_ids:
-        structured[-1]["id"] = client_message_id
-    run_input = params.get("input")
-    if isinstance(run_input, dict):
-        run_input["messages"] = structured
-    metadata_update: dict[str, Any] = {
-        "source": DASHBOARD_SOURCE,
-        # Continuing on the web promotes a `/oswe` question thread for good.
-        "unlisted": False,
-        "plan_mode": plan_mode_requested,
-        "model_selection": model_selection,
-        PARTICIPANT_LOGINS_KEY: merge_participants(metadata.get(PARTICIPANT_LOGINS_KEY), login),
-        PARTICIPANT_EMAILS_KEY: merge_participants(metadata.get(PARTICIPANT_EMAILS_KEY), email),
-        "injected_dynamic_context_hashes": sorted(injected),
-    }
-    if command_images and run_model and run_effort:
-        overrides["agent_model_id"] = run_model
-        overrides["agent_effort"] = run_effort
-        metadata_update["model"] = run_model
-        metadata_update["effort"] = run_effort
-        metadata_update["resolved_model"] = run_model
-        metadata_update["resolved_effort"] = run_effort
-    elif chosen_model and chosen_effort:
-        overrides["agent_model_id"] = chosen_model
-        overrides["agent_effort"] = chosen_effort
-        metadata_update["model"] = chosen_model
-        metadata_update["effort"] = chosen_effort
-    metadata_update["updated_at_ms"] = _now_ms()
-    metadata_update["feedback_last_activity_at_ms"] = metadata_update["updated_at_ms"]
-    pr_linked = any(metadata.get(key) for key in ("pr_url", "pr_urls", "pull_requests"))
-    if not creating and (pr_linked or metadata.get("auto_resolved_by_prs") is True):
-        async with agent_thread_pr_state_lock(client, thread_id):
-            current = await client.threads.get(thread_id)
-            metadata = thread_metadata(current)
-            if _is_thread_resolved(metadata):
-                metadata_update["resolved"] = False
-                metadata_update["resolved_at_ms"] = None
-            if metadata.get("auto_resolved_by_prs") is True:
-                metadata_update["auto_resolved_by_prs"] = False
-            if metadata.get("attention_reason"):
-                metadata_update["attention_reason"] = None
-            metadata = {**metadata, **metadata_update}
-            await client.threads.update(thread_id=thread_id, metadata=metadata_update)
+        client_message_id = _command_message_id(params)
+        if client_message_id:
+            structured[-1]["id"] = client_message_id
+
+        # A just-created thread can't have PR links yet, so
+        # `_persist_dashboard_run_metadata`'s PR-reopening branch is
+        # naturally a no-op here — safe to share with the existing-thread
+        # path's tail.
+        merged_configurable = await _persist_dashboard_run_metadata(
+            thread_id,
+            login,
+            metadata=metadata,
+            plan_mode_requested=plan_mode_requested,
+            model_selection=model_selection,
+            command_images=command_images,
+            run_model=run_model,
+            run_effort=run_effort,
+            chosen_model=chosen_model,
+            chosen_effort=chosen_effort,
+            injected=injected,
+            overrides=overrides,
+            email=email,
+            client=client,
+        )
+        creating_run_metadata_in = params.get("metadata")
+        if not isinstance(creating_run_metadata_in, dict):
+            creating_run_metadata_in = None
+        run_metadata = _build_dashboard_run_metadata(
+            creating_run_metadata_in, invocation_id, invocation_started_at
+        )
+        run_input = params.get("input")
+        if isinstance(run_input, dict):
+            run_input["messages"] = structured
     else:
-        if _is_thread_resolved(metadata):
-            metadata_update["resolved"] = False
-            metadata_update["resolved_at_ms"] = None
-        if metadata.get("attention_reason"):
-            metadata_update["attention_reason"] = None
-        metadata = {**metadata, **metadata_update}
-        await client.threads.update(thread_id=thread_id, metadata=metadata_update)
-
-    overrides["model_selection"] = model_selection
-    merged_configurable = await _build_dashboard_configurable(
-        thread_id,
-        login,
-        metadata,
-        overrides=overrides,
-    )
-
-    run_metadata = params.get("metadata")
-    if not isinstance(run_metadata, dict):
-        run_metadata = {}
-    run_metadata = with_invocation_id(
-        {
-            **{
-                key: value
-                for key, value in run_metadata.items()
-                if key not in {"visibility", "owner_type", "owner_login", "system_authorization"}
-            },
-            **agent_version_metadata(),
-            "invocation_started_at": invocation_started_at,
-        },
-        invocation_id,
-    )
+        client_run_metadata = params.get("metadata")
+        if not isinstance(client_run_metadata, dict):
+            client_run_metadata = None
+        structured, merged_configurable, run_metadata = await _enrich_existing_thread_run(
+            thread_id,
+            login,
+            content=content,
+            chosen_model=chosen_model,
+            chosen_effort=chosen_effort,
+            command_images=command_images,
+            plan_mode_requested=plan_mode_requested,
+            model_selection=model_selection,
+            overrides=overrides,
+            client_message_id=_command_message_id(params),
+            run_metadata_in=client_run_metadata,
+            metadata=metadata,
+            invocation_id=invocation_id,
+            invocation_started_at=invocation_started_at,
+            email=email,
+        )
+        run_input = params.get("input")
+        if isinstance(run_input, dict):
+            run_input["messages"] = structured
 
     if offload_requested:
         merged_configurable["offload_conversation"] = True

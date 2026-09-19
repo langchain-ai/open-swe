@@ -34,8 +34,11 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
     await expect(composer.prompt).toBeVisible();
     // Continue from the web — a new agent reply streams into the same thread.
     await typeIntoComposer(page, "Looks good — can you also add a docstring?");
+    // `.first()`: a streaming-text animation can leave a duplicate
+    // (`data-sd-animated`) paragraph with the same text mounted briefly
+    // alongside the settled one — a strict-mode violation without it.
     await expect(
-      page.getByText(/anything else you'd like changed/),
+      page.getByText(/anything else you'd like changed/).first(),
     ).toBeVisible();
 
     // The transcript that started in Slack is here too (incl. the PR link).
@@ -65,8 +68,12 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
     const probeReceived = new Promise<void>((resolve) => {
       probeStarted = resolve;
     });
+    // Sending on an idle thread now always goes through stream.submit(),
+    // which dispatches via the commands endpoint (run.start) rather than
+    // the old dedicated /messages endpoint the composer used before the
+    // server-backed queue adapter migration.
     await page.route(
-      `**/dashboard/api/threads/${threadId}/messages`,
+      `**/dashboard/api/threads/${threadId}/commands`,
       async (route) => {
         probeStarted();
         await probeReleased;
@@ -471,7 +478,10 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
       .getByTestId("user-message")
       .filter({ hasText: queuedText });
     await expect(sentFollowUp).toBeVisible({ timeout: 30_000 });
-    const reply = page.getByText(/anything else you'd like changed/);
+    // `.first()`: a streaming-text animation can leave a duplicate
+    // (`data-sd-animated`) paragraph with the same text mounted briefly
+    // alongside the settled one — a strict-mode violation without it.
+    const reply = page.getByText(/anything else you'd like changed/).first();
     await expect(reply).toBeVisible({ timeout: 30_000 });
     expect(
       await sentFollowUp.evaluate(
@@ -519,9 +529,73 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
     await expect(
       page.getByTestId("user-message").filter({ hasText: queuedText }),
     ).toBeVisible({ timeout: 30_000 });
+    // `.first()`: a streaming-text animation can leave a duplicate
+    // (`data-sd-animated`) paragraph with the same text mounted briefly
+    // alongside the settled one — a strict-mode violation without it.
     await expect(
-      page.getByText(/anything else you'd like changed/),
+      page.getByText(/anything else you'd like changed/).first(),
     ).toBeVisible({ timeout: 30_000 });
+  });
+
+  // The old queue lived on the client; this one lives on the server. Prove
+  // it: read the pending run straight from the LangGraph API, then hydrate
+  // the same thread in a browser session that never enqueued anything.
+  test("a queued follow-up is a real server-side pending run, visible to a fresh browser session", async ({
+    page,
+    browser,
+    baseURL,
+  }) => {
+    await loginAs(page, SAME_USER);
+    await openRunningThreadViaSlackLink(page, 25);
+    const threadId = threadIdFromUrl(page);
+
+    const queuedText = "Please pick this up from a totally different browser.";
+    const busyComposer = composerFor(page, /Send a message to queue next/);
+    await expect(async () => {
+      await page.reload();
+      await expect(busyComposer.prompt).toBeVisible({ timeout: 8000 });
+    }).toPass({ timeout: 60000 });
+    await typeIntoComposer(page, queuedText);
+    await expect(
+      page.getByTestId("queued-message").filter({ hasText: queuedText }),
+    ).toBeVisible();
+
+    // The composer's "queued" chip is driven by optimistic local state that
+    // lands before the enqueue POST resolves server-side (the SDK adds it to
+    // its store, then awaits runs.create()) — so a single immediate check
+    // here can race ahead of the run actually landing. Poll instead.
+    let pendingEnqueued: unknown;
+    await expect(async () => {
+      const runsResponse = await page.request.get(`/threads/${threadId}/runs`);
+      expect(runsResponse.ok()).toBeTruthy();
+      const runs = (await runsResponse.json()) as Array<{
+        status: string;
+        multitask_strategy?: string;
+        kwargs?: { input?: { messages?: Array<{ content?: unknown }> } };
+      }>;
+      pendingEnqueued = runs.find(
+        (run) =>
+          run.status === "pending" &&
+          run.multitask_strategy === "enqueue" &&
+          JSON.stringify(run.kwargs?.input?.messages ?? []).includes(queuedText),
+      );
+      expect(pendingEnqueued).toBeDefined();
+    }).toPass({ timeout: 10_000 });
+
+    // Simulate the browser that queued it disappearing entirely.
+    await page.close();
+
+    // A fresh session, with zero local state, must hydrate the queue purely
+    // from the server.
+    const freshContext = await browser.newContext({ baseURL });
+    const freshPage = await freshContext.newPage();
+    await loginAs(freshPage, SAME_USER);
+    await freshPage.goto(`/agents/${threadId}`);
+    await expect(
+      freshPage.getByTestId("queued-message").filter({ hasText: queuedText }),
+    ).toBeVisible({ timeout: 15_000 });
+
+    await freshContext.close();
   });
 
   test("stops a Slack-started run from the web app", async ({ page }) => {

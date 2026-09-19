@@ -1,47 +1,62 @@
 import { describe, expect, it } from "vitest"
+import type { SubmissionQueueEntry } from "@langchain/react"
 
 import type {
-  Message,
   PendingThreadMessage,
   QueuedThreadMessage,
 } from "@/features/agents/lib/types"
 import {
+  queueEntryToMessage,
   visiblePendingMessages,
-  visibleQueuedMessages,
 } from "@/features/agents/lib/queuedMessages"
 
-describe("visibleQueuedMessages", () => {
-  it("reconciles a queued follow-up by exact message id", () => {
-    const queued: QueuedThreadMessage = {
-      id: "queued-1",
-      content: "same text",
-      createdAt: 2_000,
-    }
-    const streamed: Message = {
-      id: "queued-1",
-      author: "user",
-      timestamp: new Date(500).toISOString(),
-      chunks: [{ kind: "text", text: "different server envelope" }],
-    }
+function entry(
+  values: SubmissionQueueEntry["values"]
+): SubmissionQueueEntry {
+  return { id: "entry-1", values, createdAt: new Date(2_000) }
+}
 
-    expect(visibleQueuedMessages([queued], [streamed])).toEqual([])
+describe("queueEntryToMessage", () => {
+  it("extracts text and image blocks from the submitted message", () => {
+    const message = queueEntryToMessage(
+      entry({
+        messages: [
+          {
+            id: "message-1",
+            content: [
+              { type: "image", base64: "img", mime_type: "image/png" },
+              { type: "text", text: "follow up" },
+            ],
+          },
+        ],
+      })
+    )
+
+    expect(message).toEqual({
+      id: "message-1",
+      content: "follow up",
+      images: [{ kind: "image", base64: "img", mimeType: "image/png" }],
+      createdAt: 2_000,
+    })
   })
 
-  it("retains timestamp reconciliation for legacy queued records", () => {
-    const queued: QueuedThreadMessage = {
-      id: "queued-legacy-1",
-      content: "follow up",
-      createdAt: 2_000,
-    }
-    const streamed: Message = {
-      id: "message-1",
-      author: "user",
-      timestamp: new Date(3_000).toISOString(),
-      timestampIsFallback: true,
-      chunks: [{ kind: "text", text: "follow up" }],
-    }
+  it("returns null when the queued entry has no message id", () => {
+    expect(
+      queueEntryToMessage(entry({ messages: [{ content: "no id" }] }))
+    ).toBeNull()
+  })
 
-    expect(visibleQueuedMessages([queued], [streamed])).toEqual([])
+  it("handles plain string content", () => {
+    const message = queueEntryToMessage(
+      entry({ messages: [{ id: "message-1", content: "just text" }] })
+    )
+
+    expect(message).toEqual({
+      id: "message-1",
+      content: "just text",
+      images: [],
+      createdAt: 2_000,
+    })
   })
 })
 
@@ -82,5 +97,19 @@ describe("visiblePendingMessages", () => {
         ]
       )
     ).toEqual([])
+  })
+
+  it("excludes a pending message once it appears in the queue", () => {
+    const pending: PendingThreadMessage = {
+      id: "message-1",
+      content: "hi",
+      createdAt: 2_000,
+      status: "sending",
+    }
+    const queued: Array<QueuedThreadMessage> = [
+      { id: "message-1", content: "hi", images: [], createdAt: 2_000 },
+    ]
+
+    expect(visiblePendingMessages([pending], [], queued)).toEqual([])
   })
 })

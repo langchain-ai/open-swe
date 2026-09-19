@@ -55,8 +55,8 @@ import {
   modelConfigurable,
   promptMessage,
 } from "@/features/agents/lib/stream/promptMessage"
-import { useLocalPromptQueue } from "@/features/agents/lib/stream/useLocalPromptQueue"
-import { visibleQueuedMessages } from "@/features/agents/lib/queuedMessages"
+import { useSubmissionQueue } from "@langchain/react"
+import { queueEntryToMessage } from "@/features/agents/lib/queuedMessages"
 import { messageArrivalTimestamp } from "@/features/agents/lib/messageTimestamps"
 import { useIsMobile } from "@/lib/useIsMobile"
 import { useSession } from "@/lib/session"
@@ -85,7 +85,6 @@ function errorMessage(error: unknown): string {
 
 export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
   const session = useSession()
-  const login = session.data?.login
   const stream = useAgentStream()
   const threadQuery = useDesktopLocalThread(sessionId)
   const thread = threadQuery.data
@@ -326,9 +325,13 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
       }
       try {
         await rememberSelection(activeSelection)
+        // `submit()` never rejects; failures are routed through `onError`.
+        let submitError: unknown
         await stream.submit(
           {
-            messages: [promptMessage(prompt, images)],
+            messages: [
+              { ...promptMessage(prompt, images), id: crypto.randomUUID() },
+            ],
             ...(promptSkills.length ? { files: skillFiles(promptSkills) } : {}),
           },
           {
@@ -339,8 +342,17 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
                 ...modelConfigurable(activeSelection),
               },
             },
+            // Only matters if a run is already active; queued server-side.
+            multitaskStrategy: "enqueue",
+            onError: (cause) => {
+              submitError = cause
+            },
           }
         )
+        if (submitError !== undefined) {
+          setError(errorMessage(submitError))
+          return false
+        }
         return true
       } catch (cause) {
         setError(errorMessage(cause))
@@ -350,14 +362,8 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
     [activeSelection, rememberSelection, stream, thread]
   )
 
-  const queue = useLocalPromptQueue({
-    client: stream.client,
-    sessionId,
-    login,
-    isRunning,
-    submit,
-  })
-  const shownError = error ?? (queue.error ? errorMessage(queue.error) : null)
+  const queuedMessages = useSubmissionQueue(stream).entries
+  const shownError = error
 
   useEffect(() => {
     if (modelsLoading || !thread || initialPromptRef.current === sessionId)
@@ -467,9 +473,9 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
             messages={messages}
             scrollKey={sessionId}
             onOpenFile={handleOpenFile}
-            queuedMessages={
-              isRunning ? visibleQueuedMessages(queue.queued, messages) : []
-            }
+            queuedMessages={queuedMessages
+              .map(queueEntryToMessage)
+              .filter((message) => message != null)}
             streamIsLoading={stream.isLoading}
             scrollControlRef={scrollControlRef}
           />
@@ -521,15 +527,7 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
                 const text = terminalContext
                   ? `${prompt}\n\nTerminal selection:\n\`\`\`\n${terminalContext}\n\`\`\``
                   : prompt
-                if (!isRunning) {
-                  await submit(text, images)
-                  return
-                }
-                try {
-                  await queue.enqueue(text, images)
-                } catch (cause) {
-                  setError(errorMessage(cause))
-                }
+                await submit(text, images)
               }}
               placeholder="Add a follow up"
               skills={skills.data}
