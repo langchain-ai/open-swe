@@ -134,6 +134,7 @@ from agent.sandboxes.lifecycle import (
     get_cached_sandbox_backend,
 )
 from agent.sandboxes.paths import resolve_sandbox_work_dir
+from agent.sandboxes.providers.langsmith import service_identity_jwks_url
 from agent.sandboxes.read_only_backend import ReadOnlyBackend
 from agent.sandboxes.state import (
     SandboxUnreachableError,
@@ -1289,7 +1290,10 @@ async def get_agent(config: RunnableConfig) -> Pregel:
             for tool in static_tools
             if _registered_tool_name(tool) not in INCIDENT_AUTOMATIC_EXCLUDED_TOOLS
         ]
-    static_tools = apply_tool_descriptions(static_tools)
+    static_tools = apply_tool_descriptions(
+        static_tools,
+        {"create_sandbox_service_url": {"jwks_url": service_identity_jwks_url()}},
+    )
     if local_run:
         static_tools = apply_tool_descriptions([http_request, fetch_url, web_search])
     elif stop_summary_mode:

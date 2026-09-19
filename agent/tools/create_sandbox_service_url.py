@@ -1,10 +1,7 @@
 from typing import Any
 
 from agent.run_config import RunConfig
-from agent.sandboxes.providers.langsmith import (
-    create_login_service_url,
-    service_identity_jwks_url,
-)
+from agent.sandboxes.providers.langsmith import create_login_service_url
 from agent.sandboxes.state import get_sandbox_backend, unwrap_sandbox_backend
 
 
@@ -23,9 +20,4 @@ async def create_sandbox_service_url(port: int) -> dict[str, Any]:
     if unwrap_sandbox_backend(backend_proxy) is not backend:
         raise RuntimeError("sandbox changed while creating the service URL; retry")
 
-    return {
-        "url": service.browser_url,
-        "port": port,
-        "access": service.access,
-        "jwks_url": service_identity_jwks_url(),
-    }
+    return {"url": service.browser_url, "port": port, "access": service.access}

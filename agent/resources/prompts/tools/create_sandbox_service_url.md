@@ -10,8 +10,8 @@ LangSmith session, and any member of this sandbox's LangSmith workspace gets thr
 Every request reaches the service with the viewer's identity in one header,
 `X-Langsmith-User-Token`: an EdDSA-signed JWT minted per request and good for ten minutes, with
 `sub` (the LangSmith user id), `email`, `name`, `iss` (the LangSmith app URL) and `aud` (the
-service host). Verify it against the returned `jwks_url` — the keys live on the LangSmith API
-host, not on the app URL the token names as its issuer. Any inbound copy of that header is
+service host). Verify it against `$jwks_url` — the keys live on the LangSmith API host, not on
+the app URL the token names as its issuer. Any inbound copy of that header is
 stripped first, so a verified token is the only identity a client cannot forge, and there is no
 other identity header. The credential that authenticated the request never reaches the service.
 
