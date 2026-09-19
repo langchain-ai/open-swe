@@ -19,13 +19,17 @@ permissions:
   issues: write
   pull-requests: write
 
-concurrency:
-  group: build-preview-branch
-  cancel-in-progress: false
-
 jobs:
   build:
     name: Rebuild preview from main and labeled PRs
+    concurrency:
+      group: build-preview-branch
+      cancel-in-progress: false
+    outputs:
+      changed: ${{ steps.build.outputs.changed }}
+      preview_sha: ${{ steps.build.outputs.preview_sha }}
+      base_sha: ${{ steps.build.outputs.base_sha }}
+      included_prs: ${{ steps.build.outputs.included_prs }}
     if: >-
       github.event_name != 'pull_request_target'
       || contains(github.event.pull_request.labels.*.name, 'preview')
@@ -43,9 +47,11 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_REPO: ${{ github.repository }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           if [[ "${{ contains(github.event.pull_request.labels.*.name, 'preview') }}" == true ]]; then
             gh api --method DELETE "repos/${GH_REPO}/issues/${PR_NUMBER}/labels/preview"
+            ./scripts/build_preview_branch.sh dropped "$PR_NUMBER" "$PR_HEAD_SHA" || echo "warning: could not update the preview comment" >&2
           fi
       - name: Reset the preview to main when due
         if: github.event_name == 'schedule'
@@ -54,9 +60,35 @@ jobs:
           GH_REPO: ${{ github.repository }}
         run: ./scripts/build_preview_branch.sh reset
       - name: Assemble and publish the preview tree
+        id: build
         env:
           EXCLUDE_PR_NUMBER: ${{ github.event.action == 'synchronize' && github.event.pull_request.number || '' }}
           FORCE: ${{ inputs.force }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_REPO: ${{ github.repository }}
         run: ./scripts/build_preview_branch.sh build
+
+  wait:
+    name: Wait for the preview backend to go live
+    needs: build
+    if: needs.build.outputs.changed == 'true'
+    # A newer publish supersedes this wait; the build job's own group keeps it
+    # from blocking the next rebuild meanwhile.
+    concurrency:
+      group: build-preview-branch-wait
+      cancel-in-progress: true
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          ref: main
+      - name: Follow the LangSmith revision and finish the PR comments
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          LANGSMITH_API_KEY: ${{ secrets.LANGSMITH_API_KEY }}
+          PREVIEW_SHA: ${{ needs.build.outputs.preview_sha }}
+          BASE_SHA: ${{ needs.build.outputs.base_sha }}
+          INCLUDED_PRS: ${{ needs.build.outputs.included_prs }}
+        run: ./scripts/build_preview_branch.sh wait

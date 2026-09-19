@@ -9,6 +9,12 @@ PREVIEW_RESET_DAYS="${PREVIEW_RESET_DAYS:-7}"
 PREVIEW_RESET_HOUR="${PREVIEW_RESET_HOUR:-7}"
 PREVIEW_RESET_ZONE="${PREVIEW_RESET_ZONE:-America/New_York}"
 PREVIEW_URL="${PREVIEW_URL:-https://open-swe-preview-cc53e8fbe667565d843d0843f84ee92c.us.langgraph.app/agents}"
+# The LangSmith deployment that builds on every push to the preview branch.
+PREVIEW_DEPLOYMENT_ID="${PREVIEW_DEPLOYMENT_ID:-c6ef2b27-439d-4926-9dd4-22d3af7cbdd4}"
+PREVIEW_CONTROL_PLANE_URL="${PREVIEW_CONTROL_PLANE_URL:-https://api.host.langchain.com}"
+PREVIEW_DEPLOY_TIMEOUT_MINUTES="${PREVIEW_DEPLOY_TIMEOUT_MINUTES:-30}"
+PREVIEW_DEPLOY_POLL_SECONDS="${PREVIEW_DEPLOY_POLL_SECONDS:-30}"
+PREVIEW_COMMENT_MARKER="<!-- preview-deployment -->"
 CONFLICT_LIMIT=10
 
 summary() {
@@ -107,6 +113,59 @@ comment_and_unlabel() {
   return 1
 }
 
+# One comment per PR carries its preview status; later runs edit it in place.
+upsert_comment() {
+  local number="$1" body="$2" comment_id
+  if ! comment_id="$(gh api --paginate "repos/${GH_REPO}/issues/${number}/comments" \
+    --jq ".[] | select(.body | contains(\"${PREVIEW_COMMENT_MARKER}\")) | .id" | head -1)"; then
+    printf 'warning: could not list comments on #%s\n' "$number" >&2
+    return 1
+  fi
+  if [[ -n "$comment_id" ]]; then
+    gh api --method PATCH "repos/${GH_REPO}/issues/comments/${comment_id}" -f body="$body" >/dev/null && return 0
+  else
+    gh api --method POST "repos/${GH_REPO}/issues/${number}/comments" -f body="$body" >/dev/null && return 0
+  fi
+  printf 'warning: could not comment on #%s\n' "$number" >&2
+  return 1
+}
+
+preview_comment() {
+  local pr_sha="$1" preview_sha="$2" base_sha="$3" backend="$4"
+  cat <<EOF
+${PREVIEW_COMMENT_MARKER}
+### In the ${GH_REPO} preview
+
+This PR's \`$(short_sha "$pr_sha")\` is part of the preview tree published as \`${PREVIEW_BRANCH}\` @ \`$(short_sha "$preview_sha")\` (\`main\` @ \`$(short_sha "$base_sha")\`).
+
+- Preview: <${PREVIEW_URL}>
+- Deployment: ${backend}
+
+A push to this PR takes it out of the preview until the \`${PREVIEW_LABEL}\` label is re-applied.
+EOF
+}
+
+dropped_comment() {
+  local new_sha="$1"
+  cat <<EOF
+${PREVIEW_COMMENT_MARKER}
+### Out of the ${GH_REPO} preview
+
+\`$(short_sha "$new_sha")\` was pushed after this PR was approved for the preview, so the \`${PREVIEW_LABEL}\` label was removed and the next preview build leaves this PR out. Re-apply the label to include the new head.
+EOF
+}
+
+# Comment the preview link on every PR the published tree contains; the
+# deployment status starts out pending and the wait step fills it in.
+announce_publication() {
+  local preview_sha="$1" base_sha="$2" entry
+  shift 2
+  for entry in "$@"; do
+    upsert_comment "${entry%%:*}" "$(preview_comment "${entry#*:}" "$preview_sha" "$base_sha" \
+      "⏳ revision building (backend and bundled dashboard) — this comment updates when it is live.")" || true
+  done
+}
+
 merge_ref() {
   local sha="$1" message="$2"
   MERGE_CONFLICTS=()
@@ -131,7 +190,7 @@ merge_ref() {
 
 build() {
   local force="${FORCE:-false}" base_sha published_tree assembled_tree
-  local included=() skipped=() conflicted=false
+  local included=() included_prs=() skipped=() conflicted=false preview_sha
   local number head_sha head_repo login url title ref fetched reason unlabelled path output status pulls
 
   git config user.name github-actions[bot]
@@ -198,6 +257,7 @@ build() {
     fi
     if merge_ref "$fetched" "preview: merge PR #${number} from @${login}"; then
       included+=("[#${number} ${title}](${url}) — @${login} — \`$(short_sha "$fetched")\`")
+      included_prs+=("${number}:${fetched}")
       continue
     else
       status=$?
@@ -252,7 +312,12 @@ build() {
     git commit --allow-empty -m "preview: force deployment"
   fi
   git push --force origin "HEAD:refs/heads/${PREVIEW_BRANCH}"
-  [[ -n "${GITHUB_OUTPUT:-}" ]] && printf 'changed=true\n' >>"$GITHUB_OUTPUT"
+  preview_sha="$(git rev-parse HEAD)"
+  if [[ -n "${GITHUB_OUTPUT:-}" ]]; then
+    printf 'changed=true\npreview_sha=%s\nbase_sha=%s\nincluded_prs=%s\n' \
+      "$preview_sha" "$base_sha" "${included_prs[*]+"${included_prs[*]}"}" >>"$GITHUB_OUTPUT"
+  fi
+  announce_publication "$preview_sha" "$base_sha" ${included_prs[@]+"${included_prs[@]}"}
 }
 
 reset() {
@@ -318,8 +383,58 @@ reset() {
   done < <(git ls-remote origin 'refs/preview-reset/*')
 }
 
+# Follow the LangSmith revision built from the published tree (backend plus the
+# bundled dashboard) until it is live or fails, then finish the status line in
+# every included PR's comment.
+wait_for_backend() {
+  local sha="${PREVIEW_SHA:?PREVIEW_SHA is required}" base_sha="${BASE_SHA:-}" entry status message revision code body
+  local deadline=$(( $(date +%s) + PREVIEW_DEPLOY_TIMEOUT_MINUTES * 60 )) backend=
+  read -r -a prs <<<"${INCLUDED_PRS:-}"
+  if [[ -z "${LANGSMITH_API_KEY:-}" ]]; then
+    backend="❔ status unknown — this workflow has no LANGSMITH_API_KEY to read the deployment."
+  fi
+  while [[ -z "$backend" ]]; do
+    body="$(curl -sS --max-time 20 -o /dev/stdout -w '\n%{http_code}' \
+      -H "X-Api-Key: ${LANGSMITH_API_KEY}" \
+      "${PREVIEW_CONTROL_PLANE_URL}/v2/deployments/${PREVIEW_DEPLOYMENT_ID}/revisions?limit=20")" || body=$'\n000'
+    code="${body##*$'\n'}"
+    body="${body%$'\n'*}"
+    case "$code" in
+      200) ;;
+      401 | 403) backend="❔ status unknown — the workflow's LANGSMITH_API_KEY cannot read the open-swe-preview deployment."; break ;;
+      *) printf 'control plane answered %s; retrying\n' "$code" >&2 ;;
+    esac
+    if [[ "$code" == 200 ]]; then
+      revision="$(jq -c --arg sha "$sha" '[.resources[] | select(.source_revision_config.repo_commit_sha == $sha)] | first // empty' <<<"$body")"
+      status="$(jq -r '.status // "PENDING"' <<<"${revision:-null}")"
+      case "$status" in
+        DEPLOYED)
+          backend="✅ live since $(date -u +%H:%M) UTC (revision \`$(jq -r .id <<<"$revision" | cut -c1-8)\`)."
+          break ;;
+        FAILED | INTERRUPTED)
+          message="$(jq -r '.status_message // "no details"' <<<"$revision")"
+          backend="❌ revision ${status}: ${message} — see open-swe-preview in LangSmith Deployments."
+          break ;;
+        *) printf '%s revision is %s\n' "$(short_sha "$sha")" "$status" ;;
+      esac
+    fi
+    if (( $(date +%s) >= deadline )); then
+      backend="⏰ not live after ${PREVIEW_DEPLOY_TIMEOUT_MINUTES} minutes — see open-swe-preview in LangSmith Deployments."
+      break
+    fi
+    sleep "$PREVIEW_DEPLOY_POLL_SECONDS"
+  done
+  summary "Deployment for \`$(short_sha "$sha")\`: ${backend}"
+  for entry in ${prs[@]+"${prs[@]}"}; do
+    upsert_comment "${entry%%:*}" "$(preview_comment "${entry#*:}" "$sha" "$base_sha" "$backend")" || true
+  done
+  [[ "$backend" == ✅* || "$backend" == ❔* ]]
+}
+
 case "${1:-build}" in
   build) build ;;
   reset) reset ;;
-  *) printf 'usage: %s [build|reset]\n' "$0" >&2; exit 2 ;;
+  wait) wait_for_backend ;;
+  dropped) upsert_comment "${2:?pr number}" "$(dropped_comment "${3:?new head sha}")" ;;
+  *) printf 'usage: %s [build|reset|wait|dropped <pr> <sha>]\n' "$0" >&2; exit 2 ;;
 esac
