@@ -17,6 +17,8 @@ import type {
   ToolExecutionChunk,
 } from "./types"
 
+const stableMessageCache = new WeakMap<BaseMessage, Message>()
+
 function senderNote(entity: StructuredEntity | undefined): string | undefined {
   if (entity?.senderType === "bot") return "bot"
   if (entity?.openSweAccount === "unlinked") return "not an Open SWE user"
@@ -118,6 +120,7 @@ type AgentTurn = {
   startedAt: string
   timestampIsFallback?: boolean
   chunks: Array<Chunk>
+  sources: Array<BaseMessage>
 }
 
 type MessageTimestamp = {
@@ -347,7 +350,17 @@ export function streamMessagesToUi(
 
   const flushAgentTurn = () => {
     if (!agentTurn) return
-    uiMessages.push({ ...agentTurn, chunks: mergeTextChunks(agentTurn.chunks) })
+    const cached = agentTurn.sources
+      .map((source) => stableMessageCache.get(source))
+      .find(Boolean)
+    if (cached) {
+      uiMessages.push(cached)
+    } else {
+      const { sources, ...turn } = agentTurn
+      const message = { ...turn, chunks: mergeTextChunks(turn.chunks) }
+      for (const source of sources) stableMessageCache.set(source, message)
+      uiMessages.push(message)
+    }
     agentTurn = null
   }
 
@@ -355,7 +368,8 @@ export function streamMessagesToUi(
     msgId: string,
     timestamp: string,
     timestampIsFallback: boolean,
-    chunks: Array<Chunk>
+    chunks: Array<Chunk>,
+    source: BaseMessage
   ) => {
     if (!agentTurn) {
       agentTurn = {
@@ -366,12 +380,14 @@ export function streamMessagesToUi(
         startedAt: timestamp,
         timestampIsFallback,
         chunks: [...chunks],
+        sources: [source],
       }
     } else {
       agentTurn.timestamp = timestamp
       agentTurn.timestampIsFallback =
         agentTurn.timestampIsFallback || timestampIsFallback
       agentTurn.chunks.push(...chunks)
+      agentTurn.sources.push(source)
     }
   }
 
@@ -403,7 +419,12 @@ export function streamMessagesToUi(
       const text = parsed.content
       if (text.trim()) chunks.push({ kind: "text", text })
       if (!chunks.length) return
-      uiMessages.push({
+      const cached = stableMessageCache.get(raw)
+      if (cached) {
+        uiMessages.push(cached)
+        return
+      }
+      const message: Message = {
         id: msgId,
         author:
           parsed.type === "message" && parsed.senderKind === "system"
@@ -423,7 +444,9 @@ export function streamMessagesToUi(
               structuredSenderNote: senderNote(entity),
             }
           : {}),
-      })
+      }
+      stableMessageCache.set(raw, message)
+      uiMessages.push(message)
       return
     }
 
@@ -461,7 +484,7 @@ export function streamMessagesToUi(
       }
 
       if (chunks.length) {
-        appendAgentChunks(msgId, timestamp, timestampIsFallback, chunks)
+        appendAgentChunks(msgId, timestamp, timestampIsFallback, chunks, raw)
       }
     }
 
