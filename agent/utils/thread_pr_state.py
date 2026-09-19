@@ -22,9 +22,7 @@ _LOCK_RETRY_SECONDS = 0.1
 
 
 @asynccontextmanager
-async def _thread_scoped_lock(
-    client: Any, thread_id: str, scope: str
-) -> AsyncIterator[None]:
+async def _thread_scoped_lock(client: Any, thread_id: str, scope: str) -> AsyncIterator[None]:
     lock_id = str(uuid.uuid5(uuid.NAMESPACE_URL, f"open-swe:{scope}:{thread_id}"))
     deadline = asyncio.get_running_loop().time() + _LOCK_TIMEOUT_SECONDS
     while True:
@@ -48,15 +46,11 @@ async def _thread_scoped_lock(
             )
 
 
-def agent_thread_pr_state_lock(
-    client: Any, thread_id: str
-) -> AbstractAsyncContextManager[None]:
+def agent_thread_pr_state_lock(client: Any, thread_id: str) -> AbstractAsyncContextManager[None]:
     return _thread_scoped_lock(client, thread_id, "pr-state-lock")
 
 
-def agent_thread_enqueue_lock(
-    client: Any, thread_id: str
-) -> AbstractAsyncContextManager[None]:
+def agent_thread_enqueue_lock(client: Any, thread_id: str) -> AbstractAsyncContextManager[None]:
     """Serialize ``POST /threads/{id}/runs`` enqueue dispatches for one thread.
 
     Without this, two enqueue calls racing on the same busy thread each

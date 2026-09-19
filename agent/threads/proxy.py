@@ -9,6 +9,7 @@ from typing import Any
 
 import httpx2
 from fastapi import HTTPException
+from langgraph_sdk.errors import NotFoundError
 
 from agent.config import ENV
 from agent.dashboard.ttft import AssistantTextEventDetector, record_dashboard_thread_ttft
@@ -337,9 +338,7 @@ async def proxy_dashboard_thread_runs_list(
     return response.status_code, response.content, media_type
 
 
-async def _get_thread_tolerating_create_race(
-    client: Any, thread_id: str
-) -> dict[str, Any] | None:
+async def _get_thread_tolerating_create_race(client: Any, thread_id: str) -> dict[str, Any] | None:
     """Fetch a thread, tolerating the brief window where a concurrent
     ``run.start`` on this same thread is still lazily creating it.
 
@@ -349,13 +348,18 @@ async def _get_thread_tolerating_create_race(
     that dispatch is what creates the thread row; a fast enough follow-up
     can reach here before it lands. Retry briefly rather than 404 what
     should resolve within one HTTP round trip.
+
+    Only retries a genuine ``NotFoundError`` (404). Anything else — an
+    outage, a timeout, an auth failure — is a real error, not "not found
+    yet", and must propagate instead of being silently retried and then
+    reported as a 404.
     """
     for delay in (0.0, 0.15, 0.3, 0.6):
         if delay:
             await asyncio.sleep(delay)
         try:
             return await client.threads.get(thread_id)
-        except Exception:
+        except NotFoundError:
             continue
     return None
 
@@ -476,9 +480,7 @@ async def proxy_dashboard_thread_run_enqueue(
     try:
         await _notify_slack_web_handoff(thread_id, metadata, client)
     except Exception:
-        logger.exception(
-            "Failed to update Slack message for dashboard handoff on %s", thread_id
-        )
+        logger.exception("Failed to update Slack message for dashboard handoff on %s", thread_id)
     return dict(run)
 
 
