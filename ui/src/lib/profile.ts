@@ -10,10 +10,15 @@ import {
 import { useSession } from "./session"
 import type { Profile, ProfileUpdate, ReposPayload } from "./api"
 
+const profileQueryKey = (login: string | undefined) => [
+  "profile",
+  login ?? null,
+]
+
 export function useProfile() {
   const session = useSession()
   return useQuery({
-    queryKey: ["profile"],
+    queryKey: profileQueryKey(session.data?.login),
     queryFn: api.profile,
     enabled: !!session.data,
   })
@@ -92,10 +97,12 @@ export function useRefreshRepos() {
 
 export function useSaveProfile() {
   const qc = useQueryClient()
+  const session = useSession()
+  const key = profileQueryKey(session.data?.login)
   return useMutation({
     mutationFn: (body: ProfileUpdate) => api.saveProfile(body),
     onSuccess: (saved) => {
-      qc.setQueryData(["profile"], saved)
+      qc.setQueryData(key, saved)
     },
   })
 }
@@ -127,6 +134,15 @@ export function buildProfileUpdate(
     dm_session_enabled: current?.dm_session_enabled ?? false,
     draft_prs: current?.draft_prs ?? true,
     review_draft_prs: current?.review_draft_prs ?? null,
+    experimental_assistant_ui: current?.experimental_assistant_ui ?? null,
     ...patch,
   }
+}
+
+export function useExperimentalAssistantUi(): boolean {
+  const profile = useProfile()
+  return (
+    profile.data?.experimental_assistant_ui ??
+    import.meta.env.VITE_EXPERIMENTAL_ASSISTANT_UI === "true"
+  )
 }

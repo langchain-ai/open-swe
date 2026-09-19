@@ -37,6 +37,7 @@ import {
 } from "@/features/agents/lib/queries"
 import { useQueryClient } from "@tanstack/react-query"
 import { cn } from "@/lib/utils"
+import { useChatRoutes } from "@/lib/chatRoutes"
 
 type Icon = ComponentType<SVGProps<SVGSVGElement>>
 
@@ -193,6 +194,7 @@ export function SidebarThreadRow({
   onToggleArchived: () => void
 }) {
   const navigate = useNavigate()
+  const chat = useChatRoutes()
   const queryClient = useQueryClient()
   const markLocalViewed = useMarkLocalThreadViewed()
   const deleteThread = useDeleteAgentThread()
@@ -383,7 +385,7 @@ export function SidebarThreadRow({
   const link =
     item.location === "cloud" ? (
       <Link
-        to="/agents/$threadId"
+        to={chat.thread}
         params={{ threadId: item.id }}
         onClick={handleNavigate}
         onKeyDown={openContextMenuFromKeyboard}

@@ -46,7 +46,7 @@ export type {
 const AGENT_ASSISTANT_ID = "agent"
 const SWEEP_INTERVAL_MS = 10_000
 
-const AgentStreamContext = createContext<AgentStream | null>(null)
+export const AgentStreamContext = createContext<AgentStream | null>(null)
 
 export function useAgentStream(): AgentStream {
   const stream = useContext(AgentStreamContext)

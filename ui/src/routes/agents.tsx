@@ -1,6 +1,7 @@
 import { useEffect } from "react"
 import {
   Outlet,
+  Navigate,
   createFileRoute,
   useMatch,
   useRouterState,
@@ -9,10 +10,12 @@ import {
 import { AgentsShell } from "@/features/agents/components/AgentsSidebar"
 import { Skeleton } from "@/components/ui/skeleton"
 import { AgentStreamProvider } from "@/features/agents/lib/stream/AgentStreamProvider"
+import { useExperimentalAssistantUi, useProfile } from "@/lib/profile"
 import { RequireLogin } from "@/lib/auth-redirect"
 import { useSession } from "@/lib/session"
 import { isDesktopLocalModeEnabled } from "@/lib/desktop-local-mode"
 import { rememberAppLocation } from "@/lib/appLocation"
+import { useDesktopThreadSource } from "@/features/agents/lib/desktopThreadSource"
 
 export const Route = createFileRoute("/agents")({
   component: AgentsLayout,
@@ -35,6 +38,8 @@ function useAgentsTheme() {
 function AgentsLayout() {
   useAgentsTheme()
   const session = useSession()
+  const profile = useProfile()
+  const experimentalAssistantUi = useExperimentalAssistantUi()
   const navigate = Route.useNavigate()
   const threadMatch = useMatch({
     from: "/agents/$threadId",
@@ -46,10 +51,30 @@ function AgentsLayout() {
   })
   const activeThreadId = threadMatch?.params.threadId
   const activeLocalSessionId = localMatch?.params.sessionId
+  const homeMatch = useMatch({ from: "/agents/", shouldThrow: false })
+  const [desktopSource] = useDesktopThreadSource()
+  const localHome =
+    Boolean(homeMatch) &&
+    (!session.data ||
+      Boolean(homeMatch?.search.localProject) ||
+      (typeof window !== "undefined" &&
+        Boolean(window.openSweDesktop) &&
+        desktopSource === "local" &&
+        !homeMatch?.search.repo &&
+        !homeMatch?.search.noProject))
+  const runtimeThreadId = activeLocalSessionId ?? activeThreadId ?? null
+  // Only a thread route has to wait for the profile: mounting the runtime the
+  // profile does not select hydrates that thread's transcript a second time.
   const location = useRouterState({
     select: (state) => state.location,
   })
   const pathname = location.pathname
+  const awaitingRuntimeChoice =
+    Boolean(session.data) &&
+    profile.isPending &&
+    (runtimeThreadId !== null ||
+      pathname === "/agents" ||
+      pathname === "/agents/")
   const localOnly = !session.data && isDesktopLocalModeEnabled()
   const isLocalRoute =
     pathname === "/agents" ||
@@ -69,6 +94,27 @@ function AgentsLayout() {
   }
 
   if (!session.data && (!localOnly || !isLocalRoute)) return <RequireLogin />
+  if (!awaitingRuntimeChoice && experimentalAssistantUi && !localHome) {
+    if (activeThreadId)
+      return (
+        <Navigate
+          to="/assistant/$threadId"
+          params={{ threadId: activeThreadId }}
+          replace
+        />
+      )
+    if (pathname === "/agents" || pathname === "/agents/")
+      return (
+        <Navigate
+          to="/assistant"
+          search={{
+            repo: homeMatch?.search.repo,
+            noProject: homeMatch?.search.noProject,
+          }}
+          replace
+        />
+      )
+  }
 
   return (
     <AgentsShell
@@ -77,17 +123,26 @@ function AgentsLayout() {
       activeThreadId={activeThreadId}
       activeLocalSessionId={activeLocalSessionId}
     >
-      <AgentStreamProvider
-        threadId={activeLocalSessionId ?? activeThreadId ?? null}
-        transport={activeLocalSessionId ? "local" : "cloud"}
-        onThreadCreated={(id) => {
-          if (!activeThreadId) {
-            void navigate({ to: "/agents/$threadId", params: { threadId: id } })
-          }
-        }}
-      >
-        <Outlet />
-      </AgentStreamProvider>
+      {awaitingRuntimeChoice ? (
+        <main className="flex min-w-0 flex-1 items-center justify-center p-6">
+          <Skeleton className="h-40 w-full max-w-md" />
+        </main>
+      ) : (
+        <AgentStreamProvider
+          threadId={runtimeThreadId}
+          transport={activeLocalSessionId ? "local" : "cloud"}
+          onThreadCreated={(id) => {
+            if (!activeThreadId) {
+              void navigate({
+                to: "/agents/$threadId",
+                params: { threadId: id },
+              })
+            }
+          }}
+        >
+          <Outlet />
+        </AgentStreamProvider>
+      )}
     </AgentsShell>
   )
 }

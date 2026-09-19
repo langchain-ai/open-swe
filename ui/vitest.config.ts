@@ -13,6 +13,7 @@ export default defineConfig({
   plugins: [tanstackStart(), viteReact({ compiler: true })],
   resolve: { tsconfigPaths: true },
   test: {
+    server: { deps: { inline: ["@assistant-ui/react-langchain"] } },
     // Per-file `@vitest-environment jsdom` docblocks pick the environment;
     // node stays the default so the tests that read files off disk keep a
     // `file:` `import.meta.url`.

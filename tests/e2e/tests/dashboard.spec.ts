@@ -230,12 +230,7 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
   }) => {
     await loginAs(page, SAME_USER);
     await page.goto("/agents");
-    const dismissOnboarding = page.getByRole("button", {
-      name: "Maybe later",
-    });
-    await expect(dismissOnboarding).toBeVisible();
-    await dismissOnboarding.click();
-    await expect(dismissOnboarding).toBeHidden();
+    await dismissOnboardingIfShown(page);
 
     const prompt = "list my open langchainplus PRs";
     await typeIntoComposer(page, prompt);

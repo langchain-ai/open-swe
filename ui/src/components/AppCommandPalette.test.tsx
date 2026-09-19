@@ -28,6 +28,10 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("@tanstack/react-router", () => ({
   useNavigate: () => mocks.navigate,
+  useRouterState: () => ({
+    home: "/agents",
+    thread: "/agents/$threadId",
+  }),
 }))
 vi.mock("@/features/agents/lib/queries", () => ({
   useInfiniteThreadsPages: () => ({
