@@ -17,6 +17,16 @@ import {
 } from "@/lib/api"
 import { ApprovalPolicyPanel } from "./ApprovalPolicyPanel"
 
+vi.mock("@/lib/profile", () => ({
+  useRepos: () => ({
+    data: {
+      installations: [],
+      repositories: [{ full_name: "acme/widgets", private: true }],
+    },
+    isLoading: false,
+  }),
+}))
+
 afterEach(() => {
   cleanup()
   vi.restoreAllMocks()
@@ -47,13 +57,13 @@ function view(overrides: Partial<PolicySettingsView> = {}): PolicySettingsView {
   }
 }
 
-function renderPanel(repository: string | null = null) {
+function renderPanel() {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   })
   render(
     <QueryClientProvider client={client}>
-      <ApprovalPolicyPanel repository={repository} />
+      <ApprovalPolicyPanel />
     </QueryClientProvider>
   )
   return client
@@ -309,7 +319,11 @@ it("explains inherited shared requirements and the repository's stricter effecti
           })
         : view()
   )
-  renderPanel("acme/widgets")
+  renderPanel()
+
+  fireEvent.change(await screen.findByLabelText("Policy scope"), {
+    target: { value: "acme/widgets" },
+  })
 
   expect(
     await screen.findByText(

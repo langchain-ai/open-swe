@@ -5,209 +5,138 @@ import { Switch } from "@/components/ui/switch"
 import { Textarea } from "@/components/ui/textarea"
 import {
   useScopedSettings,
-  type ScopedSettings,
   type SettingsScope,
 } from "@/features/settings/lib/settingsScope"
 import { TierRow } from "./WorkspaceSettingsSections"
 
-interface ReviewSettingsProps {
+/** Review guidelines and toggles at one tier: the instance, or one workspace's overrides. */
+export function ReviewSettings({
+  scope,
+  canEdit,
+}: {
   scope: SettingsScope
   canEdit: boolean
-  onDirtyChange?: (dirty: boolean) => void
-}
-
-export function ReviewInstructionsSettings({
-  scope,
-  canEdit,
-}: ReviewSettingsProps) {
+}) {
   const settings = useScopedSettings(scope)
-  return (
-    <ReviewInstructionsSettingsView
-      scope={scope}
-      canEdit={canEdit}
-      settings={settings}
-    />
-  )
-}
+  const [guidelinesDraft, setGuidelinesDraft] = useState("")
 
-export function ReviewInstructionsSettingsView({
-  scope,
-  canEdit,
-  settings,
-  onDirtyChange,
-}: ReviewSettingsProps & { settings: ScopedSettings }) {
-  const [dirty, setDirty] = useState(false)
-  const [draft, setDraft] = useState("")
-  useEffect(() => onDirtyChange?.(dirty), [dirty, onDirtyChange])
-  const saved = settings.data?.org_guidelines ?? ""
-  const [observedSaved, setObservedSaved] = useState<string | null>(null)
-  if (dirty && draft.trim() === saved.trim()) {
-    setDirty(false)
-  } else if (!dirty && observedSaved !== saved) {
-    setObservedSaved(saved)
-    setDraft(saved)
-  }
+  useEffect(() => {
+    if (settings.data) {
+      // oxlint-disable-next-line react/set-state-in-effect
+      setGuidelinesDraft(settings.data.org_guidelines ?? "")
+    }
+  }, [settings.data])
+
+  // Until the settings arrive a toggle would write a value nobody chose.
   const editable = canEdit && settings.data !== undefined
-  const inherited = settings.inherits("org_guidelines")
-  const trimmed = draft.trim()
-  return (
-    <SettingsSection
-      title="Review guidelines"
-      description={
-        scope.kind === "workspace"
-          ? "Instructions injected into every review this workspace runs. Repository instructions take precedence when they conflict."
-          : "Shared instructions injected into every review. Repository instructions take precedence when they conflict."
-      }
-    >
-      <div className="flex flex-col gap-2 p-4">
-        {scope.kind === "workspace" && (
-          <p className="text-xs text-muted-foreground">
-            {inherited
-              ? "Inherited from the instance."
-              : "Overridden for this workspace."}
-          </p>
-        )}
-        <Textarea
-          aria-label="Shared review guidelines"
-          className="min-h-[200px] w-full font-mono text-xs"
-          value={draft}
-          onChange={(event) => {
-            setDraft(event.target.value)
-            setDirty(true)
-          }}
-          disabled={!editable || settings.saving}
-          placeholder="e.g. Always flag missing input validation on new API endpoints."
-        />
-        {canEdit && (
-          <div className="flex items-center gap-2">
-            <Button
-              size="sm"
-              disabled={!editable || !dirty || settings.saving}
-              onClick={() => settings.save({ org_guidelines: trimmed || null })}
-            >
-              Save guidelines
-            </Button>
-            {scope.kind === "workspace" && settings.data && !inherited && (
-              <Button
-                size="sm"
-                variant="ghost"
-                disabled={!editable || settings.saving}
-                onClick={() => {
-                  void settings
-                    .resetAndWait("org_guidelines")
-                    .then((effective) => {
-                      if (!effective) return
-                      const inheritedGuidelines = effective.org_guidelines ?? ""
-                      setObservedSaved(inheritedGuidelines)
-                      setDraft(inheritedGuidelines)
-                      setDirty(false)
-                    })
-                    .catch(() => undefined)
-                }}
-              >
-                Reset to instance
-              </Button>
-            )}
-            {dirty && (
-              <Button
-                size="sm"
-                variant="ghost"
-                disabled={settings.saving}
-                onClick={() => {
-                  setDraft(settings.data?.org_guidelines ?? "")
-                  setDirty(false)
-                }}
-              >
-                Reload saved
-              </Button>
-            )}
-            {dirty && (
-              <span className="text-xs text-muted-foreground">
-                Unsaved changes
-              </span>
-            )}
-          </div>
-        )}
-        {settings.error && (
-          <p className="text-xs text-destructive">{settings.error}</p>
-        )}
-      </div>
-    </SettingsSection>
-  )
-}
+  const scoped = scope.kind === "workspace"
+  const guidelinesInherited = settings.inherits("org_guidelines")
 
-export function ReviewAutomationSettings({
-  scope,
-  canEdit,
-}: ReviewSettingsProps) {
-  const settings = useScopedSettings(scope)
-  return (
-    <ReviewAutomationSettingsView
-      scope={scope}
-      canEdit={canEdit}
-      settings={settings}
-    />
-  )
-}
+  const trimmedGuidelines = guidelinesDraft.trim()
+  const savedGuidelines = (settings.data?.org_guidelines ?? "").trim()
+  const guidelinesDirty = trimmedGuidelines !== savedGuidelines
 
-export function ReviewAutomationSettingsView({
-  canEdit,
-  settings,
-}: ReviewSettingsProps & { settings: ScopedSettings }) {
-  const editable = canEdit && settings.data !== undefined
   const toggle = (
     field: "review_draft_prs" | "pr_summaries" | "review_trace_links"
   ) => (
     <Switch
       checked={!!settings.data?.[field]}
-      onCheckedChange={(value) => settings.save({ [field]: value })}
+      onCheckedChange={(v) => settings.save({ [field]: v })}
       disabled={!editable || settings.saving}
     />
   )
-  return (
-    <SettingsSection title="Review automation">
-      <div className="divide-y divide-border">
-        <TierRow
-          settings={settings}
-          fields={["review_draft_prs"]}
-          label="Review Draft PRs"
-          description="Whether Open SWE Review runs on draft PRs."
-          control={toggle("review_draft_prs")}
-        />
-        <TierRow
-          settings={settings}
-          fields={["pr_summaries"]}
-          label="PR Summaries"
-          description="Generate descriptions on pull requests"
-          control={toggle("pr_summaries")}
-        />
-        <TierRow
-          settings={settings}
-          fields={["review_trace_links"]}
-          label="Reviewer trace links"
-          description="Link review comments to the reviewer LangSmith run."
-          control={toggle("review_trace_links")}
-        />
-      </div>
-      {!canEdit && (
-        <p className="p-4 text-xs text-muted-foreground">
-          These settings are read-only.
-        </p>
-      )}
-      {settings.error && (
-        <p className="p-4 text-xs text-destructive">{settings.error}</p>
-      )}
-    </SettingsSection>
-  )
-}
 
-/** Compatibility layout used by existing admin and workspace settings pages. */
-export function ReviewSettings(props: ReviewSettingsProps) {
-  const settings = useScopedSettings(props.scope)
   return (
     <>
-      <ReviewInstructionsSettingsView {...props} settings={settings} />
-      <ReviewAutomationSettingsView {...props} settings={settings} />
+      <SettingsSection
+        title="Review Guidelines"
+        description={
+          scoped
+            ? "Instructions injected into every review this workspace runs, across all of its repositories. Until this workspace sets its own, the instance guidelines apply. Repository-specific style prompts take precedence when they conflict."
+            : "Instructions injected into every review, in every workspace that does not set its own. Repository-specific style prompts take precedence when they conflict."
+        }
+      >
+        <div className="flex flex-col gap-2 p-4">
+          {scoped && (
+            <p className="text-xs text-muted-foreground">
+              {guidelinesInherited
+                ? "Inherited from the instance."
+                : "Overridden for this workspace."}
+            </p>
+          )}
+          <Textarea
+            className="min-h-[200px] w-full font-mono text-xs"
+            value={guidelinesDraft}
+            onChange={(e) => setGuidelinesDraft(e.target.value)}
+            placeholder="e.g. Always flag missing input validation on new API endpoints. Prefer structured logging over print statements."
+            disabled={!editable}
+          />
+          {canEdit && (
+            <div className="flex items-center gap-2">
+              <Button
+                size="sm"
+                disabled={!editable || !guidelinesDirty || settings.saving}
+                onClick={() =>
+                  settings.save({ org_guidelines: trimmedGuidelines || null })
+                }
+              >
+                Save guidelines
+              </Button>
+              {scoped && !guidelinesInherited && (
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  disabled={!editable || settings.saving}
+                  onClick={() => settings.reset("org_guidelines")}
+                >
+                  Reset to instance
+                </Button>
+              )}
+              {guidelinesDirty && (
+                <span className="text-xs text-muted-foreground">
+                  Unsaved changes
+                </span>
+              )}
+            </div>
+          )}
+        </div>
+      </SettingsSection>
+
+      <SettingsSection title="Review configuration">
+        <div className="divide-y divide-border">
+          <TierRow
+            settings={settings}
+            fields={["review_draft_prs"]}
+            label="Review Draft PRs"
+            description="Whether Open SWE Review runs on draft PRs. Each user can override it in Profile Settings."
+            control={toggle("review_draft_prs")}
+          />
+          <TierRow
+            settings={settings}
+            fields={["pr_summaries"]}
+            label="PR Summaries"
+            description="Generate descriptions on pull requests"
+            control={toggle("pr_summaries")}
+          />
+          <TierRow
+            settings={settings}
+            fields={["review_trace_links"]}
+            label="Reviewer trace links"
+            description="Link each review comment to the reviewer's own LangSmith run. Only members of your LangSmith workspace can open it."
+            control={toggle("review_trace_links")}
+          />
+        </div>
+      </SettingsSection>
+
+      {!canEdit && (
+        <p className="text-xs text-muted-foreground">
+          These settings are read-only. Ask a workspace admin to change them.
+        </p>
+      )}
+
+      {settings.error && (
+        <p className="text-xs text-destructive">{settings.error}</p>
+      )}
     </>
   )
 }
