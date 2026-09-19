@@ -279,6 +279,82 @@ async def test_approve_plan_tool_exits_plan_mode(monkeypatch: pytest.MonkeyPatch
     assert "source of truth" not in messages[0].content
 
 
+async def test_approve_plan_tool_accepts_already_approved_plan(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import importlib
+
+    from langgraph.types import Command
+
+    approve_plan_tool = importlib.import_module("agent.tools.approve_plan")
+    status_updates: list[dict[str, Any]] = []
+
+    monkeypatch.setattr(
+        "agent.run_config.get_config",
+        lambda: {"configurable": {"thread_id": "t1", "plan_mode": False}},
+    )
+
+    async def fake_thread_metadata(thread_id: str) -> dict[str, Any]:
+        return {"plan_mode": False, "plan_status": "approved"}
+
+    async def fake_get_content(thread_id: str, *, raise_on_error: bool = False) -> dict[str, Any]:
+        return {"markdown": "# Approved plan", "status": "approved"}
+
+    async def fake_list_comments(
+        thread_id: str, *, raise_on_error: bool = False
+    ) -> list[dict[str, Any]]:
+        return []
+
+    async def fake_set_status(
+        thread_id: str,
+        status: str,
+        *,
+        plan_mode: Any = None,
+        approved_by: Any = None,
+    ) -> None:
+        status_updates.append({"status": status, "plan_mode": plan_mode})
+
+    monkeypatch.setattr(approve_plan_tool, "_thread_metadata", fake_thread_metadata)
+    monkeypatch.setattr(approve_plan_tool, "get_plan_content", fake_get_content)
+    monkeypatch.setattr(approve_plan_tool, "list_plan_comments", fake_list_comments)
+    monkeypatch.setattr(approve_plan_tool, "set_plan_status", fake_set_status)
+
+    result = await approve_plan_tool.approve_plan(state={"plan_mode": False}, tool_call_id="call-1")
+
+    assert isinstance(result, Command)
+    assert result.update is not None
+    assert result.update["plan_mode"] is False
+    assert "already approved" in result.update["messages"][0].content
+    assert "already inactive" in result.update["messages"][0].content
+    assert status_updates == []
+
+
+async def test_approve_plan_tool_rejects_thread_without_plan(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import importlib
+
+    approve_plan_tool = importlib.import_module("agent.tools.approve_plan")
+
+    monkeypatch.setattr(
+        "agent.run_config.get_config",
+        lambda: {"configurable": {"thread_id": "t1", "plan_mode": False}},
+    )
+
+    async def fake_thread_metadata(thread_id: str) -> dict[str, Any]:
+        return {}
+
+    async def fake_get_content(thread_id: str, *, raise_on_error: bool = False) -> dict[str, Any]:
+        return {}
+
+    monkeypatch.setattr(approve_plan_tool, "_thread_metadata", fake_thread_metadata)
+    monkeypatch.setattr(approve_plan_tool, "get_plan_content", fake_get_content)
+
+    result = await approve_plan_tool.approve_plan(state={"plan_mode": False}, tool_call_id="call-1")
+
+    assert result == {"success": False, "error": "plan mode is not active for this thread"}
+
+
 async def test_approve_plan_tool_ignores_stale_state_approver(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
