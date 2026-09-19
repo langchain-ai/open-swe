@@ -29,6 +29,18 @@ Follow [Create a GitHub App](INSTALLATION.md#3-create-a-github-app) in the insta
 
 Use a name of your own (GitHub App names are unique), and give it a distinct mention handle (`OPEN_SWE_MENTION_TAGS`) if a shared deployment already answers to `@openswe` in the same repositories.
 
+### Skipping the App with a personal token
+
+To read PRs, reviews, and repositories without registering an App, set `GITHUB_DEV_TOKEN` instead:
+
+```bash
+echo "GITHUB_DEV_TOKEN=\"$(gh auth token)\"" >> .env
+```
+
+Open SWE then uses that token wherever it would use an App installation token, and `http://localhost:2024/dashboard/api/auth/dev-login` signs you in — the usual "Sign in with GitHub" button needs `GITHUB_APP_CLIENT_ID`, which you do not have in this mode. `uv run python scripts/dev_login.py --curl` prints the same session as a `curl` flag. Both are off whenever `GITHUB_APP_ID` is set, so a real deployment can never reach them.
+
+This covers the dashboard, the reviews pages, and anything else that only reads GitHub. Webhooks still need an App, and so does anything that acts *as* the App rather than as you.
+
 ## 3. Tunnel for webhooks
 
 Always run an ngrok tunnel when starting Open SWE locally. GitHub and Slack need a public HTTPS hostname that stays the same across restarts. Reuse an existing tunnel and its exact configured domain, forwarding to the active backend (normally localhost:2024). If no tunnel is running, recover the domain from configuration or prior local runtime notes in the primary checkout before starting one; an automatically assigned hostname will not match existing webhook settings.

@@ -20,6 +20,7 @@ logger = logging.getLogger(__name__)
 GITHUB_APP_ID = ENV.GITHUB_APP_ID.get()
 GITHUB_APP_PRIVATE_KEY = ENV.GITHUB_APP_PRIVATE_KEY.get()
 GITHUB_APP_INSTALLATION_ID = ENV.GITHUB_APP_INSTALLATION_ID.get()
+GITHUB_DEV_TOKEN = ENV.GITHUB_DEV_TOKEN.get()
 
 # Installation tokens are valid for 1 hour. Reuse a minted token until it is
 # within this window of expiring so chat/review requests don't pay a fresh
@@ -159,12 +160,13 @@ async def get_github_app_installation_token_with_expiry(
     resolved_installation_id = str(
         GITHUB_APP_INSTALLATION_ID if installation_id is None else installation_id
     ).strip()
-    if (
-        not GITHUB_APP_ID
-        or not GITHUB_APP_PRIVATE_KEY
-        or not resolved_installation_id.isdigit()
-        or int(resolved_installation_id) <= 0
-    ):
+    if not GITHUB_APP_ID or not GITHUB_APP_PRIVATE_KEY:
+        if GITHUB_DEV_TOKEN:
+            logger.warning("Using GITHUB_DEV_TOKEN in place of a GitHub App installation token")
+            return GITHUB_DEV_TOKEN, None
+        logger.debug("GitHub App env vars not fully configured, skipping app token")
+        return None, None
+    if not resolved_installation_id.isdigit() or int(resolved_installation_id) <= 0:
         logger.debug("GitHub App env vars not fully configured, skipping app token")
         return None, None
 

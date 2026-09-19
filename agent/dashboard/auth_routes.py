@@ -37,7 +37,10 @@ from agent.dashboard.oauth import (
     set_state_cookie,
     valid_handoff_challenge,
 )
-from agent.dashboard.profiles import upsert_access_token_from_github_response
+from agent.dashboard.profiles import (
+    upsert_access_token,
+    upsert_access_token_from_github_response,
+)
 from agent.slack.oauth import slack_base_url, slack_oauth_configured
 from agent.users import User
 from agent.utils.build_info import build_info
@@ -144,6 +147,36 @@ async def auth_callback(request: Request, code: str, state: str) -> Response:
     response = RedirectResponse(redirect_to, status_code=302)
     set_session_cookie(response, session_jwt)
     clear_state_cookie(response)
+    return response
+
+
+@router.get("/auth/dev-login")
+async def auth_dev_login(request: Request) -> Response:
+    """Sign in with GITHUB_DEV_TOKEN, for local setups with no GitHub App.
+
+    The OAuth flow needs a registered App, and the Store that holds a user's
+    token lives inside this process under ``langgraph dev``, so neither the
+    browser nor a standalone script can establish a session without this.
+    """
+    dev_token = ENV.GITHUB_DEV_TOKEN.get()
+    if not dev_token or ENV.GITHUB_APP_ID.get():
+        raise HTTPException(404, "not found")
+
+    user, email = await fetch_github_user(dev_token)
+    if not user.login:
+        raise HTTPException(400, "could not resolve GitHub login")
+    await enforce_github_login_gate(user.login)
+    await upsert_access_token(user.login, email or "", dev_token)
+    user_id = await _signed_in_user_id(user, email)
+
+    redirect_to = sanitize_redirect_to(request.query_params.get("redirect_to")) or (
+        frontend_base_url()
+    )
+    response = RedirectResponse(redirect_to, status_code=302)
+    set_session_cookie(
+        response,
+        issue_session(login=user.login, email=email, avatar_url=user.avatar_url, user_id=user_id),
+    )
     return response
 
 
