@@ -46,6 +46,7 @@ from agent.threads.summary import (
 )
 from agent.transcript.engine import delete_transcript
 from agent.transcript.mirror import mirror_thread_metadata
+from agent.transcript.turns import settle_run_turn
 from agent.utils.json_types import as_json_object, as_thread_dict, thread_metadata
 from agent.utils.thread_ops import (
     get_thread_active_status,
@@ -320,7 +321,8 @@ async def send_dashboard_message(
     return await _thread_summary(thread)
 
 
-async def _cancel_active_thread_runs(client: Any, thread_id: str) -> None:
+async def _cancel_active_thread_runs(client: Any, thread_id: str) -> list[str]:
+    """Interrupt every live run on the thread, and report which ones those were."""
     run_ids: set[str] = set()
     for status in ("pending", "running"):
         offset = 0
@@ -332,12 +334,33 @@ async def _cancel_active_thread_runs(client: Any, thread_id: str) -> None:
             if len(runs) < 100:
                 break
             offset += len(runs)
-    if run_ids:
+    cancelled = sorted(run_ids)
+    if cancelled:
         await client.runs.cancel_many(
             thread_id=thread_id,
-            run_ids=sorted(run_ids),
+            run_ids=cancelled,
             action="interrupt",
         )
+    return cancelled
+
+
+async def _interrupt_transcript_turns(thread_id: str, run_ids: Sequence[str]) -> None:
+    """Close the transcript turn of each cancelled run.
+
+    Scoped to the runs that were actually cancelled: a queued follow-up
+    dispatched right after this must not have its own freshly opened turn
+    settled as interrupted.
+    """
+    for run_id in run_ids:
+        try:
+            await settle_run_turn(thread_id, run_id, outcome="interrupted")
+        except Exception:  # noqa: BLE001
+            # The run is already cancelled; the completion webhook closes the turn.
+            logger.warning(
+                "Could not record a cancel on the transcript",
+                exc_info=True,
+                extra={"transcript": {"thread_id": thread_id, "run_id": run_id}},
+            )
 
 
 async def cancel_dashboard_thread(
@@ -361,10 +384,11 @@ async def cancel_dashboard_thread(
     _assert_thread_postable(metadata, login, email)
 
     try:
-        await _cancel_active_thread_runs(client, thread_id)
+        cancelled_run_ids = await _cancel_active_thread_runs(client, thread_id)
     except Exception as exc:  # noqa: BLE001
         logger.exception("Failed to cancel active runs for thread %s", thread_id)
         raise HTTPException(502, "failed to request thread cancellation") from exc
+    await _interrupt_transcript_turns(thread_id, cancelled_run_ids)
 
     metadata_update: dict[str, Any] = {
         "latest_run_status": "interrupted",
@@ -412,10 +436,11 @@ async def admin_cancel_dashboard_thread(
         assert_thread_readable(thread_metadata(thread), login, email)
 
     try:
-        await _cancel_active_thread_runs(client, thread_id)
+        cancelled_run_ids = await _cancel_active_thread_runs(client, thread_id)
     except Exception as exc:  # noqa: BLE001
         logger.exception("Failed to cancel active runs for thread %s", thread_id)
         raise HTTPException(502, "failed to request thread cancellation") from exc
+    await _interrupt_transcript_turns(thread_id, cancelled_run_ids)
 
     await client.threads.update(
         thread_id=thread_id,

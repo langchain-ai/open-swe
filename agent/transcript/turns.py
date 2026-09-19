@@ -80,6 +80,28 @@ async def settle_run_turn(
     return turn_id
 
 
+async def recorded_turn_id(thread_id: str, command_id: str) -> UUID | None:
+    """The turn of the event ``command_id`` already appended, if it did.
+
+    A command that was deduplicated by its receipt leaves the caller holding a
+    turn id nothing was written under; this recovers the one that was.
+    """
+    if not postgres.configured():
+        return None
+    async with postgres.read_only_transaction() as conn:
+        result = await conn.execute(
+            text(
+                """
+                SELECT turn_id FROM thread_event
+                WHERE thread_id = :thread_id AND command_id = :command_id
+                LIMIT 1
+                """
+            ),
+            {"thread_id": thread_id, "command_id": command_id},
+        )
+        return result.scalar_one_or_none()
+
+
 async def _open_turn(thread_id: str, run_id: str | None) -> UUID | None:
     """The turn this run is still executing.
 

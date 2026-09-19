@@ -64,8 +64,8 @@ router = APIRouter(tags=["threads"])
 router.include_router(feedback_router)
 
 
-async def _interrupt_transcript_turn(thread_id: str, run_id: str | None = None) -> None:
-    """Record a cancel on the thread's transcript, when it has one."""
+async def _interrupt_transcript_turn(thread_id: str, run_id: str) -> None:
+    """Record a cancel of one run on the thread's transcript, when it has one."""
     try:
         await settle_run_turn(thread_id, run_id, outcome="interrupted")
     except Exception:  # noqa: BLE001
@@ -386,9 +386,7 @@ async def api_cancel_thread(
     thread_id: str,
     session: dict[str, Any] = SESSION_DEP,
 ) -> dict[str, Any]:
-    cancelled = await cancel_dashboard_thread(thread_id, session["sub"], email=session.get("email"))
-    await _interrupt_transcript_turn(thread_id)
-    return cancelled
+    return await cancel_dashboard_thread(thread_id, session["sub"], email=session.get("email"))
 
 
 @router.post("/admin/threads/{thread_id}/cancel")
@@ -396,11 +394,7 @@ async def admin_cancel_thread(
     thread_id: str,
     _admin: dict[str, Any] = ADMIN_DEP,
 ) -> dict[str, Any]:
-    cancelled = await admin_cancel_dashboard_thread(
-        thread_id, _admin["sub"], email=_admin.get("email")
-    )
-    await _interrupt_transcript_turn(thread_id)
-    return cancelled
+    return await admin_cancel_dashboard_thread(thread_id, _admin["sub"], email=_admin.get("email"))
 
 
 @router.delete("/threads/{thread_id}")

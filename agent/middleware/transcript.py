@@ -891,6 +891,15 @@ class TranscriptMiddleware(OpenSWEMiddleware):
         token = _namespace.set((*_namespace.get(), tool_call_id))
         try:
             result = await handler(request)
+        except asyncio.CancelledError:
+            # Cancelling a run that is awaiting a tool never reaches
+            # ``aafter_agent``, so the root run settles its turn and releases
+            # its writer here. A nested cancellation belongs to the ``task``
+            # tool call above it, whose parent run keeps going.
+            self._complete_tool(state, tool_call_id, namespace, "error", *_tool_output("cancelled"))
+            if not namespace:
+                await self._interrupt_turn(state)
+            raise
         except Exception as exc:
             self._complete_tool(
                 state,
@@ -1068,6 +1077,9 @@ def _turn_requested(
     state: RunState, human: HumanMessage, ids: RunIds, metadata: Mapping[str, object]
 ) -> Command:
     message_id = human.id if isinstance(human.id, str) and human.id else str(uuid.uuid7())
+    # ``_start_run`` marks this message as seen, so its images can never be
+    # recovered by ``_record_injected_humans``; they travel with the request.
+    attachments, pending = _human_attachments(human, message_id)
     return Command(
         command_id=f"turn:{state.turn_id}:requested",
         event=TurnRequested(
@@ -1076,6 +1088,7 @@ def _turn_requested(
             message_id=message_id,
             text=_human_text(human),
             sender=_sender(human, ids, metadata),
+            attachments=attachments,
             model_id=_string(ids.configurable.get("resolved_agent_model_id"))
             or _string(ids.configurable.get("agent_model_id")),
             effort=_string(ids.configurable.get("agent_effort")),
@@ -1084,6 +1097,7 @@ def _turn_requested(
         actor_kind="user",
         run_id=state.run_id,
         turn_id=state.turn_id,
+        attachments=pending,
     )
 
 

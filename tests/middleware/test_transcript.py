@@ -1,5 +1,6 @@
 """Transcript middleware: paragraph batching and the emitted event sequence."""
 
+import asyncio
 import base64
 import itertools
 from collections.abc import Sequence
@@ -429,6 +430,80 @@ async def test_injected_human_images_become_attachments(
     assert attachment.data == b"pretend-png"
     assert human.event.attachments is not None
     assert human.event.attachments[0].attachment_id == attachment.attachment_id
+
+
+async def test_an_external_turn_request_keeps_its_images(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Slack and GitHub runs are recorded by ``turn.requested`` alone."""
+    engine = _install(monkeypatch, transcribed=True)
+    middleware = mw.TranscriptMiddleware()
+    human = HumanMessage(
+        content=[
+            {"type": "text", "text": "what is wrong here"},
+            {
+                "type": "image",
+                "base64": base64.b64encode(b"pretend-png").decode("ascii"),
+                "mime_type": "image/png",
+                "file_name": "screenshot.png",
+            },
+        ],
+        id="human-slack",
+    )
+
+    await middleware.abefore_agent({"messages": [AIMessage(content="old"), human]}, None)
+    await middleware.aafter_agent({"messages": []}, None)
+
+    requested = engine.commands[0]
+    assert requested.event.type == "turn.requested"
+    assert len(requested.attachments) == 1
+    assert requested.attachments[0].data == b"pretend-png"
+    assert requested.event.attachments[0].file_name == "screenshot.png"
+    assert requested.event.attachments[0].attachment_id == requested.attachments[0].attachment_id
+
+
+async def test_tool_cancellation_settles_the_turn(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Cancelling while a tool runs never reaches ``aafter_agent``."""
+    turn_id = uuid7()
+    engine = _install(monkeypatch, transcribed=True, turn_id=turn_id)
+    middleware = mw.TranscriptMiddleware()
+    await middleware.abefore_agent({"messages": [HumanMessage(content="hi", id="h")]}, None)
+
+    async def cancelled_tool(request: ToolCallRequest) -> ToolMessage:
+        raise asyncio.CancelledError
+
+    with pytest.raises(asyncio.CancelledError):
+        await middleware.awrap_tool_call(_tool_request("call-1", {"messages": []}), cancelled_tool)
+
+    assert engine.types == ["turn.started", "tool.started", "tool.completed", "turn.interrupted"]
+    assert engine.commands[2].event.status == "error"
+    # The run's writer and registry entry are released, not left blocked.
+    assert mw._runs == {}
+
+
+async def test_a_cancelled_subagent_tool_leaves_the_parent_running(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    engine = _install(monkeypatch, transcribed=True, turn_id=uuid7())
+    parent = mw.TranscriptMiddleware()
+    subagent = mw.TranscriptMiddleware()
+    await parent.abefore_agent({"messages": [HumanMessage(content="hi", id="h")]}, None)
+
+    async def cancelled_tool(request: ToolCallRequest) -> ToolMessage:
+        raise asyncio.CancelledError
+
+    async def task_tool(request: ToolCallRequest) -> ToolMessage:
+        with pytest.raises(asyncio.CancelledError):
+            await subagent.awrap_tool_call(
+                _tool_request("inner-1", {"messages": []}), cancelled_tool
+            )
+        return ToolMessage(content="recovered", tool_call_id="task-1")
+
+    await parent.awrap_tool_call(_tool_request("task-1", {"messages": []}), task_tool)
+    await parent.aafter_agent({"messages": []}, None)
+
+    assert "turn.interrupted" not in engine.types
+    assert engine.types[-1] == "turn.completed"
 
 
 async def test_a_stamped_thread_always_has_its_thread_row(

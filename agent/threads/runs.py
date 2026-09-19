@@ -62,6 +62,7 @@ from agent.transcript.events import (
     ThreadCreated,
     TurnRequested,
 )
+from agent.transcript.turns import recorded_turn_id
 from agent.utils.dashboard_handoff import DASHBOARD_HANDOFF_BODY
 from agent.utils.json_types import JsonObject, as_thread_dict, thread_metadata
 from agent.utils.thread_ops import langgraph_client
@@ -742,17 +743,18 @@ async def _enrich_run_start_command(
     # request; the middleware's ``turn.started`` opens that turn instead.
     turn_id = uuid.uuid7() if transcribed else None
     if turn_id is not None:
-        overrides["transcript_turn_id"] = str(turn_id)
         if message_id is not None and not offload_requested:
+            # Keyed by the message, not the turn: a retried ``run.start`` mints
+            # a new turn id but asks for the same message, so its receipt
+            # deduplicates it — and the run then has to join the turn that was
+            # recorded the first time rather than one nothing was written under.
+            command_id = f"message:{message_id}:requested"
             attachments, pending = _transcript_attachments(command_images, message_id)
-            await append(
+            appended = await append(
                 thread_id,
                 [
                     Command(
-                        # Keyed by the message, not the turn: a retried
-                        # ``run.start`` mints a new turn id but asks for the
-                        # same message, and its receipt deduplicates it.
-                        command_id=f"message:{message_id}:requested",
+                        command_id=command_id,
                         event=TurnRequested(
                             turn_id=turn_id,
                             message_id=message_id,
@@ -769,6 +771,9 @@ async def _enrich_run_start_command(
                     )
                 ],
             )
+            if not any(event.command_id == command_id for event in appended.events):
+                turn_id = await recorded_turn_id(thread_id, command_id) or turn_id
+        overrides["transcript_turn_id"] = str(turn_id)
 
     overrides["model_selection"] = model_selection
     merged_configurable = await _build_dashboard_configurable(
