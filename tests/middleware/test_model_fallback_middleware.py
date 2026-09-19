@@ -103,6 +103,59 @@ class TestShouldFallback:
 
 class TestModelFallbackMiddleware:
     @pytest.mark.asyncio
+    async def test_dead_primary_is_evicted_and_fallback_is_first_on_next_call(self) -> None:
+        primary = MagicMock(model_name="primary")
+        fallback = MagicMock(model_name="fallback")
+        request = ModelRequest(model=primary, messages=[], state={"messages": []})
+        response = ModelResponse(result=[AIMessage(content="done")])
+        calls: list[object] = []
+        dead_error = ModelConnectionError("provider request failed")
+        dead_error.__cause__ = RuntimeError("Cannot send a request, as the client has been closed")
+
+        async def handler(req: ModelRequest[None]) -> ModelResponse[Any]:
+            calls.append(req.model)
+            if len(calls) == 1:
+                raise dead_error
+            return response
+
+        with (
+            patch(
+                "agent.middleware.model_fallback.evict_cached_model",
+                new_callable=AsyncMock,
+            ) as evict,
+            patch("agent.middleware.model_fallback.asyncio.sleep", new_callable=AsyncMock) as sleep,
+        ):
+            middleware = ModelFallbackMiddleware(fallback, backoff_schedule=(10.0,))
+            assert await middleware.awrap_model_call(request, handler) is response
+            assert await middleware.awrap_model_call(request, handler) is response
+
+        assert calls == [primary, fallback, fallback]
+        evict.assert_awaited_once_with(primary)
+        sleep.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_expired_dead_primary_mark_reprobes_primary(self) -> None:
+        primary = MagicMock(model_name="primary")
+        fallback = MagicMock(model_name="fallback")
+        request = ModelRequest(
+            model=primary,
+            messages=[],
+            state={"messages": [], "_model_fallback_bad_models": {id(primary): 0.0}},
+        )
+        response = ModelResponse(result=[AIMessage(content="done")])
+        calls: list[object] = []
+
+        async def handler(req: ModelRequest[None]) -> ModelResponse[Any]:
+            calls.append(req.model)
+            return response
+
+        middleware = ModelFallbackMiddleware(fallback, backoff_schedule=(0.0,))
+        assert await middleware.awrap_model_call(request, handler) is response
+
+        assert calls == [primary]
+        assert request.state["_model_fallback_bad_models"] == {}
+
+    @pytest.mark.asyncio
     async def test_retry_spans_cover_backoff_and_attempt_without_error_body(self) -> None:
         primary = MagicMock(model_name="primary")
         fallback = MagicMock(model_name="fallback")

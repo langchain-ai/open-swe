@@ -1,5 +1,9 @@
 import asyncio
+import inspect
+import itertools
+import logging
 from typing import Any, Literal, TypedDict, Unpack, cast
+from weakref import WeakKeyDictionary
 
 from langchain.chat_models import init_chat_model
 
@@ -35,13 +39,21 @@ _TIMEOUT_PROVIDER_PREFIXES = (
 _MODEL_CACHE: dict[
     tuple[str, bool | None, int | None, tuple[tuple[str, str], ...], int | None], Any
 ] = {}
+_LOOP_GENERATIONS: WeakKeyDictionary[asyncio.AbstractEventLoop, int] = WeakKeyDictionary()
+_NEXT_LOOP_GENERATION = itertools.count(1)
+logger = logging.getLogger(__name__)
 
 
 def _loop_cache_key() -> int | None:
     try:
-        return id(asyncio.get_running_loop())
+        loop = asyncio.get_running_loop()
     except RuntimeError:
         return None
+    generation = _LOOP_GENERATIONS.get(loop)
+    if generation is None:
+        generation = next(_NEXT_LOOP_GENERATION)
+        _LOOP_GENERATIONS[loop] = generation
+    return generation
 
 
 def _freeze_model_kwargs(kwargs: dict[str, object]) -> tuple[tuple[str, str], ...]:
@@ -52,17 +64,52 @@ async def close_cached_models() -> None:
     models = list(_MODEL_CACHE.values())
     _MODEL_CACHE.clear()
     for model in models:
-        close = getattr(model, "aclose", None)
-        if callable(close):
-            result = close()
-            if asyncio.iscoroutine(result):
-                await result
-            continue
+        await _close_model(model, suppress_errors=False)
+
+
+async def _close_model(model: object, *, suppress_errors: bool) -> None:
+    close = getattr(model, "aclose", None)
+    if not callable(close):
         close = getattr(model, "close", None)
-        if callable(close):
-            result = close()
-            if asyncio.iscoroutine(result):
-                await result
+    if not callable(close):
+        return
+    try:
+        result = close()
+        if inspect.isawaitable(result):
+            await result
+    except Exception:
+        if not suppress_errors:
+            raise
+        logger.warning("Failed to close cached model", extra={"model_type": type(model).__name__})
+
+
+async def evict_cached_model(model: object) -> None:
+    """Evict and best-effort close a cached model by identity."""
+    for key, cached_model in list(_MODEL_CACHE.items()):
+        if cached_model is model:
+            del _MODEL_CACHE[key]
+    await _close_model(model, suppress_errors=True)
+
+
+def is_dead_client_error(exc: BaseException) -> bool:
+    """Return whether an exception chain identifies a closed client."""
+    seen: set[int] = set()
+    current: BaseException | None = exc
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        try:
+            message = str(current).lower()
+        except Exception:
+            message = ""
+        class_name = type(current).__name__.lower()
+        if (
+            "client has been closed" in message
+            or ("client" in message and "closed" in message)
+            or ("client" in class_name and "closed" in class_name)
+        ):
+            return True
+        current = current.__cause__ or current.__context__
+    return False
 
 
 OpenAIReasoningEffort = Literal["none", "low", "medium", "high", "xhigh", "max"]
