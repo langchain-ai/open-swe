@@ -291,6 +291,7 @@ def render_review_body(
     out_of_diff_findings: list[Finding] | None = None,
     additional_findings_count: int = 0,
     assessment: ReviewAssessment | None = None,
+    approved: bool = False,
 ) -> str:
     """Compose the top-level review body.
 
@@ -321,12 +322,20 @@ def render_review_body(
         decision = (
             "Would approve" if assessment.decision == "would_approve" else "Needs human review"
         )
-        parts.append(f"**Risk: {assessment.risk_score}/5 · {decision}** (advisory)")
+        if approved:
+            decision = "Approved"
+        suffix = "automatic approval" if approved else "advisory"
+        parts.append(f"**Risk: {assessment.risk_score}/5 · {decision}** ({suffix})")
         parts.append(
             "<details>\n<summary>Why?</summary>\n\n"
             f"{escape(assessment.explanation)}\n\n"
             f"Reviewed commit: `{assessment.head_sha}`. Risk ranges from 1 (low) to 5 (high). "
-            "This assessment does not approve or merge the PR.\n\n</details>"
+            + (
+                "Approved automatically under the configured policy. No merge is performed."
+                if approved
+                else "This assessment does not approve or merge the PR."
+            )
+            + "\n\n</details>"
         )
         feedback_link = (
             f", or [rate the latest assessment in Open SWE]({ui_url}#assessment-feedback)"
@@ -568,6 +577,26 @@ async def open_swe_review_exists(
             params["page"] += 1
 
 
+async def approval_allowed_for_head(
+    *, owner: str, repo: str, pr_number: int, head_sha: str, token: str
+) -> bool:
+    async with github_client(token=token) as client:
+        response = await github_request(
+            client, "GET", f"{_GITHUB_API_BASE}/repos/{owner}/{repo}/pulls/{pr_number}"
+        )
+        response.raise_for_status()
+        pr = response.json()
+    if not isinstance(pr, dict):
+        return False
+    head = pr.get("head")
+    return (
+        pr.get("state") == "open"
+        and pr.get("draft") is False
+        and isinstance(head, dict)
+        and head.get("sha") == head_sha
+    )
+
+
 async def post_pull_request_review(
     *,
     owner: str,
@@ -577,12 +606,13 @@ async def post_pull_request_review(
     body: str,
     inline_comments: list[dict[str, Any]],
     token: str,
+    event: Literal["COMMENT", "APPROVE"] = "COMMENT",
 ) -> dict[str, Any] | None:
     """POST one GitHub PR Review with inline comments. Returns the API response or None."""
     url = f"{_GITHUB_API_BASE}/repos/{owner}/{repo}/pulls/{pr_number}/reviews"
     payload: dict[str, Any] = {
         "commit_id": head_sha,
-        "event": "COMMENT",
+        "event": event,
         "body": body,
         "comments": inline_comments,
     }

@@ -15,12 +15,13 @@ Args:
         ``head_sha`` inspected, integer ``risk_score`` (1 = low, 5 = high),
         ``decision`` (``would_approve`` or ``needs_human_review``), and a short
         ``explanation`` (up to 1500 characters). Include it after completing a
-        review. Use the approval policy in the reviewer instructions, including
+        review only when an approval policy is configured. Use the approval policy in the reviewer instructions, including
         organization and repository overrides. The commit must match the live
         reviewed head. Unresolved findings force ``needs_human_review``. A new
         assessment is published even when a re-review has no new findings.
-        GitHub keeps native thumbs-up/down feedback on the review. No approval
-        or merge is performed. Assessments are omitted in eval mode and when
+        GitHub keeps native thumbs-up/down feedback on the review. The host may
+        submit an approval only when the admin has explicitly enabled automatic
+        approval and the reviewed commit is still current. No merge is performed. Assessments are omitted in eval mode and when
         publication retries with only a subset of findings.
     severity_threshold: Lowest severity to surface as inline GitHub comments
         (default ``medium``). Lower-severity findings stay in state and are

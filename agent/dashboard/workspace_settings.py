@@ -28,7 +28,6 @@ from agent.dashboard.options import (
     model_supports_effort,
     provider_fallback_pair,
 )
-from agent.prompts import load_prompt
 from agent.run_config import RunConfig
 from agent.store import delete_value, get_value, now_iso, put_value
 from agent.utils.gateway import gateway_overrides, resolve_gateway_enabled
@@ -75,6 +74,7 @@ class WorkspaceSettingsUpdate(BaseModel):
     expedited_review_enabled: bool | None = None
     org_guidelines: str | None = None
     approval_policy: str | None = None
+    review_auto_approve: bool | None = None
     default_agent_model: str | None = None
     default_agent_reasoning_effort: str | None = None
     default_agent_subagent_model: str | None = None
@@ -329,7 +329,8 @@ def _default_settings() -> dict[str, Any]:
         "fable_enabled": False,
         "expedited_review_enabled": False,
         "org_guidelines": None,
-        "approval_policy": load_prompt("reviewer/approval-policy.md"),
+        "approval_policy": None,
+        "review_auto_approve": False,
         "default_agent_model": fallback_model,
         "default_agent_reasoning_effort": fallback_effort,
         "default_agent_subagent_model": fallback_model,

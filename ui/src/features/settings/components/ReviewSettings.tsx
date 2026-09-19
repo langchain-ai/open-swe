@@ -44,7 +44,11 @@ export function ReviewSettings({
   const guidelinesDirty = trimmedGuidelines !== savedGuidelines
 
   const toggle = (
-    field: "review_draft_prs" | "pr_summaries" | "review_trace_links"
+    field:
+      | "review_draft_prs"
+      | "pr_summaries"
+      | "review_trace_links"
+      | "review_auto_approve"
   ) => (
     <Switch
       checked={!!settings.data?.[field]}
@@ -112,11 +116,12 @@ export function ReviewSettings({
 
       <SettingsSection
         title="Approval policy"
-        description="Criteria for the advisory approval assessment, separate from review guidelines. Repository policies override these criteria. No automatic approval or merge."
+        description="Configure criteria to enable approval assessments. With no applicable policy, reviews have no approval assessment. Repository policies override these criteria."
       >
         <div className="flex flex-col gap-2 p-4">
           <Textarea
             aria-label="Approval policy"
+            placeholder="e.g. Recommend approval only for low-risk, well-tested changes with no unresolved findings."
             className="min-h-[160px] w-full font-mono text-xs"
             value={policyDraft}
             onChange={(e) => setPolicyDraft(e.target.value)}
@@ -155,7 +160,7 @@ export function ReviewSettings({
               >
                 {scoped
                   ? "Reset approval policy to instance"
-                  : "Reset approval policy to default"}
+                  : "Clear approval policy"}
               </Button>
             </div>
           )}
@@ -164,6 +169,13 @@ export function ReviewSettings({
 
       <SettingsSection title="Review configuration">
         <div className="divide-y divide-border">
+          <TierRow
+            settings={settings}
+            fields={["review_auto_approve"]}
+            label="Submit GitHub approvals"
+            description="Off by default. When enabled, submit an approval if the configured policy is satisfied, no findings remain, and the reviewed commit is still current. Requires an applicable approval policy. Never merges the PR."
+            control={toggle("review_auto_approve")}
+          />
           <TierRow
             settings={settings}
             fields={["review_draft_prs"]}

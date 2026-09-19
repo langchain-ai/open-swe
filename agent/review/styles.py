@@ -5,6 +5,7 @@ analysis metadata, and the status of the background style-analysis run.
 """
 
 import logging
+from collections.abc import Mapping
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -16,6 +17,13 @@ logger = logging.getLogger(__name__)
 REVIEW_STYLES_NAMESPACE: list[str] = ["review_styles"]
 
 AnalysisStatus = Literal["idle", "running", "completed", "failed"]
+
+
+async def get_approval_policy(owner: str, repo: str, settings: Mapping[str, object]) -> str | None:
+    record = await REVIEW_STYLES.get(f"{owner}/{repo}") if owner and repo else None
+    policy = (record.approval_policy if record else None) or settings.get("approval_policy")
+    return policy.strip() or None if isinstance(policy, str) else None
+
 
 _TERMINAL_SUCCESS = frozenset({"success", "completed"})
 _TERMINAL_FAILURE = frozenset({"error", "failed", "timeout", "interrupted", "cancelled"})

@@ -47,6 +47,7 @@ from agent.review.findings import (
 )
 from agent.review.publish import (
     ReviewAssessment,
+    approval_allowed_for_head,
     clear_review_started_comment,
     fetch_pr_review_threads,
     fetch_review_comments,
@@ -62,6 +63,7 @@ from agent.review.publish import (
     settle_review_check_run,
 )
 from agent.review.reconcile import reconcile_findings_with_review_threads
+from agent.review.styles import get_approval_policy
 from agent.run_config import RunConfig
 from agent.slack.client import post_slack_thread_reply
 from agent.utils.dashboard_links import dashboard_review_url
@@ -225,6 +227,21 @@ async def _publish_review_async(
     assessment: ReviewAssessment | None = None,
 ) -> dict[str, Any]:
     thread_id = get_thread_id_from_runtime()
+    auto_approve = False
+    if assessment is not None:
+        settings = await get_workspace_settings()
+        policy = await get_approval_policy(owner, repo, settings)
+        if not policy:
+            assessment = None
+        elif state and state.get("review_approval_policy") != policy:
+            return {
+                "success": False,
+                "error": "Approval policy changed. Start a new review before publishing an assessment.",
+            }
+        else:
+            auto_approve = settings.get("review_auto_approve") is True and bool(
+                state and state.get("review_approval_policy") == policy
+            )
     # The run config's head_sha is frozen at run creation; a push that arrived
     # mid-run updated the live head in thread metadata. Prefer that so the
     # review anchors to (and last_reviewed_sha advances to) the commit actually
@@ -351,6 +368,14 @@ async def _publish_review_async(
             "skipped_empty_re_review": True,
         }
 
+    approved = (
+        auto_approve
+        and assessment is not None
+        and assessment.decision == "would_approve"
+        and await approval_allowed_for_head(
+            owner=owner, repo=repo, pr_number=pr_number, head_sha=head_sha, token=token
+        )
+    )
     review_body = render_review_body(
         pr_number=pr_number,
         surfaced_count=len(inline_comments),
@@ -358,6 +383,7 @@ async def _publish_review_async(
         ui_url=review_ui_url,
         additional_findings_count=additional_findings_count,
         assessment=assessment,
+        approved=approved,
     )
 
     review_response = await post_pull_request_review(
@@ -368,6 +394,7 @@ async def _publish_review_async(
         body=review_body,
         inline_comments=inline_comments,
         token=token,
+        event="APPROVE" if approved else "COMMENT",
     )
     # If GitHub rejected the batch because one or more inline comments anchor
     # to a file/line that's not in the PR diff, drop just those findings and
@@ -463,6 +490,7 @@ async def _publish_review_async(
                     owner=owner,
                     repo=repo,
                     pr_number=pr_number,
+                    approved=approved,
                 ),
             )
             await set_reviewer_thread_metadata(thread_id, extra={"review_assessment_id": review_id})

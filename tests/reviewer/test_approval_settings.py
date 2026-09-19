@@ -86,7 +86,7 @@ async def test_instance_reset_returns_the_effective_default(fake_store: FakeStor
         WorkspaceSettingsUpdate(approval_policy=None), {"sub": "admin"}
     )
     assert reset["approval_policy"] == original["approval_policy"]
-    assert reset["approval_policy"]
+    assert reset["approval_policy"] is None
 
 
 async def test_tool_rechecks_private_admin_and_repo_access(fake_store: FakeStore) -> None:
@@ -115,3 +115,44 @@ async def test_tool_rechecks_private_admin_and_repo_access(fake_store: FakeStore
     ):
         await manage_review_approval_policy("save", policy="Any change", repository="private/repo")
     assert await REVIEW_STYLES.get("private/repo") is None
+
+
+async def test_automatic_approvals_are_separate_and_opt_in(fake_store: FakeStore) -> None:
+    settings = await get_workspace_settings()
+    assert settings["approval_policy"] is None
+    assert settings["review_auto_approve"] is False
+    with patch(
+        "agent.tools.manage_review_approval_policy.require_private_admin_surface",
+        AsyncMock(return_value=None),
+    ):
+        await manage_review_approval_policy("save", policy="Docs only")
+        assert (await get_workspace_settings())["review_auto_approve"] is False
+        await manage_review_approval_policy("save", auto_approve=True)
+        settings = await get_workspace_settings()
+        assert settings["approval_policy"] == "Docs only"
+        assert settings["review_auto_approve"] is True
+        await manage_review_approval_policy("save", auto_approve=False)
+        assert (await get_workspace_settings())["review_auto_approve"] is False
+
+
+async def test_approval_toggle_tool_can_restore_workspace_inheritance(
+    fake_store: FakeStore,
+) -> None:
+    from agent.workspaces.store import WORKSPACES, Workspace
+
+    with (
+        patch.object(
+            WORKSPACES,
+            "get",
+            AsyncMock(return_value=Workspace(name="team", slug="team", prompt="")),
+        ),
+        patch(
+            "agent.tools.manage_review_approval_policy.require_private_admin_surface",
+            AsyncMock(return_value=None),
+        ),
+    ):
+        await manage_review_approval_policy("save", auto_approve=True)
+        await manage_review_approval_policy("save", workspace="team", auto_approve=False)
+        assert (await get_workspace_settings("team"))["review_auto_approve"] is False
+        await manage_review_approval_policy("save", workspace="team", auto_approve="inherit")
+        assert (await get_workspace_settings("team"))["review_auto_approve"] is True

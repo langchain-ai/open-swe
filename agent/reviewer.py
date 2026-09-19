@@ -78,6 +78,7 @@ from agent.review.findings import (
 from agent.review.groups import maybe_generate_and_store_diff_groups
 from agent.review.publish import fetch_pr_review_threads
 from agent.review.reconcile import reconcile_findings_with_review_threads
+from agent.review.styles import get_approval_policy
 from agent.run_config import RunConfig
 from agent.runtime import (
     DEFAULT_LLM_MAX_TOKENS,
@@ -183,7 +184,11 @@ def _reviewer_system_prompt(
         repo_name=repo_name or "<repo>",
         pr_number=pr_number if pr_number != "" else "<pr_number>",
         historical_review_guidance="" if reviewer_eval else HISTORICAL_REVIEW_GUIDANCE,
-        approval_policy=approval_policy or load_prompt("reviewer/approval-policy.md"),
+        approval_assessment=(
+            render_prompt("reviewer/approval-assessment.md", approval_policy=approval_policy)
+            if approval_policy and not reviewer_eval
+            else ""
+        ),
         repo_checkout_note=_repo_checkout_note(
             repo_ready=repo_ready,
             working_dir=working_dir,
@@ -607,22 +612,15 @@ async def _cached_api_standards_skill() -> str | None:
 class PrepareReviewerRunState(PrepareRunState):
     diff_text: NotRequired[str]
     diff_line_set: NotRequired[dict[str, dict[str, set[int]]] | None]
+    review_approval_policy: NotRequired[str | None]
 
 
 async def _cached_org_guidelines(workspace: str | None) -> str | None:
     return (await cached_workspace_settings(workspace)).org_review_guidelines
 
 
-async def _review_approval_policy(owner: str, repo: str, workspace: str | None) -> str:
-    from agent.review.styles import REVIEW_STYLES
-
-    record = await REVIEW_STYLES.get(f"{owner}/{repo}") if owner and repo else None
-    if record and record.approval_policy:
-        return record.approval_policy
-    policy = (await cached_workspace_settings(workspace)).get("approval_policy")
-    return (
-        policy if isinstance(policy, str) and policy else load_prompt("reviewer/approval-policy.md")
-    )
+async def _review_approval_policy(owner: str, repo: str, workspace: str | None) -> str | None:
+    return await get_approval_policy(owner, repo, await cached_workspace_settings(workspace))
 
 
 async def _ensure_reviewer_sandbox_for_thread(
@@ -979,6 +977,7 @@ class PrepareReviewerRunMiddleware(BasePrepareRunMiddleware):
         return {
             "work_dir": work_dir,
             "rendered_system_prompt": system_prompt,
+            "review_approval_policy": approval_policy,
             "diff_text": pr_diff_text,
             "diff_line_set": pr_diff_line_set,
         }

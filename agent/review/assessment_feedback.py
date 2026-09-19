@@ -15,6 +15,7 @@ class PublishedAssessment(ReviewAssessment):
     owner: str
     repo: str
     pr_number: int
+    approved: bool = False
 
 
 class FeedbackSubmission(BaseModel):
