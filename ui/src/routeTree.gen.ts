@@ -28,6 +28,7 @@ import { Route as AgentsInstructionsRouteImport } from './routes/agents_.instruc
 import { Route as AgentsWorkspacesRouteImport } from './routes/agents_.workspaces'
 import { Route as IncidentsIndexRouteImport } from './routes/incidents/index'
 import { Route as IncidentsIncidentIdRouteImport } from './routes/incidents/$incidentId'
+import { Route as ReviewApprovalRouteImport } from './routes/review_.approval'
 import { Route as ReviewStylesRouteImport } from './routes/review_.styles'
 import { Route as WorkspacesSlugRouteImport } from './routes/workspaces_.$slug'
 import { Route as AgentsThreadIdPlanRouteImport } from './routes/agents/$threadId_.plan'
@@ -135,6 +136,11 @@ const IncidentsIncidentIdRoute = IncidentsIncidentIdRouteImport.update({
   path: '/$incidentId',
   getParentRoute: () => IncidentsRoute,
 } as any)
+const ReviewApprovalRoute = ReviewApprovalRouteImport.update({
+  id: '/review_/approval',
+  path: '/review/approval',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ReviewStylesRoute = ReviewStylesRouteImport.update({
   id: '/review_/styles',
   path: '/review/styles',
@@ -211,6 +217,7 @@ export interface FileRoutesByFullPath {
   '/agents/instructions': typeof AgentsInstructionsRoute
   '/agents/workspaces': typeof AgentsWorkspacesRoute
   '/incidents/$incidentId': typeof IncidentsIncidentIdRoute
+  '/review/approval': typeof ReviewApprovalRoute
   '/review/styles': typeof ReviewStylesRoute
   '/workspaces/$slug': typeof WorkspacesSlugRoute
   '/agents/': typeof AgentsIndexRoute
@@ -241,6 +248,7 @@ export interface FileRoutesByTo {
   '/agents/instructions': typeof AgentsInstructionsRoute
   '/agents/workspaces': typeof AgentsWorkspacesRoute
   '/incidents/$incidentId': typeof IncidentsIncidentIdRoute
+  '/review/approval': typeof ReviewApprovalRoute
   '/review/styles': typeof ReviewStylesRoute
   '/workspaces/$slug': typeof WorkspacesSlugRoute
   '/agents': typeof AgentsIndexRoute
@@ -274,6 +282,7 @@ export interface FileRoutesById {
   '/agents_/instructions': typeof AgentsInstructionsRoute
   '/agents_/workspaces': typeof AgentsWorkspacesRoute
   '/incidents/$incidentId': typeof IncidentsIncidentIdRoute
+  '/review_/approval': typeof ReviewApprovalRoute
   '/review_/styles': typeof ReviewStylesRoute
   '/workspaces_/$slug': typeof WorkspacesSlugRoute
   '/agents/': typeof AgentsIndexRoute
@@ -308,6 +317,7 @@ export interface FileRouteTypes {
     | '/agents/instructions'
     | '/agents/workspaces'
     | '/incidents/$incidentId'
+    | '/review/approval'
     | '/review/styles'
     | '/workspaces/$slug'
     | '/agents/'
@@ -338,6 +348,7 @@ export interface FileRouteTypes {
     | '/agents/instructions'
     | '/agents/workspaces'
     | '/incidents/$incidentId'
+    | '/review/approval'
     | '/review/styles'
     | '/workspaces/$slug'
     | '/agents'
@@ -370,6 +381,7 @@ export interface FileRouteTypes {
     | '/agents_/instructions'
     | '/agents_/workspaces'
     | '/incidents/$incidentId'
+    | '/review_/approval'
     | '/review_/styles'
     | '/workspaces_/$slug'
     | '/agents/'
@@ -400,6 +412,7 @@ export interface RootRouteChildren {
   AdminEvalsRoute: typeof AdminEvalsRoute
   AgentsInstructionsRoute: typeof AgentsInstructionsRoute
   AgentsWorkspacesRoute: typeof AgentsWorkspacesRoute
+  ReviewApprovalRoute: typeof ReviewApprovalRoute
   ReviewStylesRoute: typeof ReviewStylesRoute
   WorkspacesSlugRoute: typeof WorkspacesSlugRoute
   ReviewRepositoriesOwnerRoute: typeof ReviewRepositoriesOwnerRoute
@@ -541,6 +554,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IncidentsIncidentIdRouteImport
       parentRoute: typeof IncidentsRoute
     }
+    '/review_/approval': {
+      id: '/review_/approval'
+      path: '/review/approval'
+      fullPath: '/review/approval'
+      preLoaderRoute: typeof ReviewApprovalRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/review_/styles': {
       id: '/review_/styles'
       path: '/review/styles'
@@ -679,6 +699,7 @@ const rootRouteChildren: RootRouteChildren = {
   AdminEvalsRoute: AdminEvalsRoute,
   AgentsInstructionsRoute: AgentsInstructionsRoute,
   AgentsWorkspacesRoute: AgentsWorkspacesRoute,
+  ReviewApprovalRoute: ReviewApprovalRoute,
   ReviewStylesRoute: ReviewStylesRoute,
   WorkspacesSlugRoute: WorkspacesSlugRoute,
   ReviewRepositoriesOwnerRoute: ReviewRepositoriesOwnerRoute,

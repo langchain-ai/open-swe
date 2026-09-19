@@ -115,9 +115,7 @@ def test_failed_criterion_routes_to_human_even_when_another_is_unknown() -> None
     assert result.decision == "needs_human_review"
 
 
-@pytest.mark.parametrize(
-    "path", ["auth/session.py", "APPROVAL_POLICY.md", "subdir/APPROVAL_POLICY.md"]
-)
+@pytest.mark.parametrize("path", ["auth/session.py", "auth/keys/session.py"])
 def test_protected_paths_require_humans_even_with_passing_model_evidence(path: str) -> None:
     result = evaluation(
         facts=ApprovalFacts(

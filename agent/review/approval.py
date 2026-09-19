@@ -12,6 +12,7 @@ from agent.store import now_iso
 
 CriterionStatus = Literal["pass", "fail", "unknown"]
 ApprovalDecision = Literal["would_approve", "needs_human_review", "insufficient_evidence"]
+PolicySource = Literal["default", "repository", "settings", "repository_settings"]
 
 
 class StrictModel(BaseModel):
@@ -21,15 +22,15 @@ class StrictModel(BaseModel):
 class PolicyRules(StrictModel):
     max_risk_score: int = Field(default=2, ge=1, le=5, strict=True)
     minimum_confidence: Literal["low", "medium", "high"] = "high"
-    required_checks: list[str] = Field(default_factory=list, max_length=100)
-    human_review_paths: list[str] = Field(default_factory=list, max_length=100)
+    required_checks: list[str] = Field(default_factory=list, max_length=200)
+    human_review_paths: list[str] = Field(default_factory=list, max_length=200)
 
     @field_validator("required_checks", "human_review_paths")
     @classmethod
     def nonempty_entries(cls, values: list[str]) -> list[str]:
         if any(not value.strip() for value in values):
             raise ValueError("Policy entries cannot be blank")
-        return values
+        return list(dict.fromkeys(value.strip() for value in values))
 
 
 class PolicyCriterion(StrictModel):
@@ -39,13 +40,14 @@ class PolicyCriterion(StrictModel):
 
 
 class PolicySnapshot(StrictModel):
-    source: Literal["default", "repository"]
+    source: PolicySource
     version: str
     base_sha: str
     head_sha: str
     content: str
     rules: PolicyRules
     criteria: list[PolicyCriterion]
+    settings_revisions: dict[str, str] = Field(default_factory=dict)
 
 
 class CriterionEvidence(StrictModel):
@@ -59,7 +61,7 @@ class ApprovalEvidence(StrictModel):
     base_sha: str = Field(pattern=r"^[0-9a-f]{40}$")
     head_sha: str = Field(pattern=r"^[0-9a-f]{40}$")
     review_complete: bool
-    criteria: list[CriterionEvidence] = Field(max_length=20)
+    criteria: list[CriterionEvidence] = Field(max_length=40)
 
     @field_validator("criteria")
     @classmethod
@@ -100,7 +102,7 @@ class ApprovalFacts(StrictModel):
 
 class ApprovalEvaluation(StrictModel):
     mode: Literal["shadow"] = "shadow"
-    evaluator_version: str = "1"
+    evaluator_version: str = "2"
     evaluated_at: str = Field(default_factory=now_iso)
     policy: PolicySnapshot | None = None
     decision: ApprovalDecision
@@ -108,7 +110,7 @@ class ApprovalEvaluation(StrictModel):
 
 
 def parse_policy(
-    content: str, *, source: Literal["default", "repository"], base_sha: str, head_sha: str
+    content: str, *, source: PolicySource, base_sha: str, head_sha: str
 ) -> PolicySnapshot:
     if len(content.encode()) > 24_000:
         raise ValueError("Approval policy exceeds 24 KB")
@@ -207,7 +209,7 @@ def evaluate_policy(
         "policy_binding",
         "Evidence matches policy",
         "pass" if bound else "unknown",
-        "Evidence matches the base-branch policy."
+        "Evidence matches the current approval policy version."
         if bound
         else "Read the current policy and assess its criteria.",
     )
@@ -253,10 +255,7 @@ def evaluate_policy(
         else [
             path
             for path in paths
-            if (
-                path.rsplit("/", 1)[-1] == "APPROVAL_POLICY.md"
-                or any(fnmatchcase(path, pattern) for pattern in policy.rules.human_review_paths)
-            )
+            if any(fnmatchcase(path, pattern) for pattern in policy.rules.human_review_paths)
         ]
     )
     add(

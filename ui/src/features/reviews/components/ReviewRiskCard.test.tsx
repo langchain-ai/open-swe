@@ -63,6 +63,7 @@ it("opens feedback immediately while keeping policy evidence collapsed", async (
     </QueryClientProvider>
   )
   await screen.findByText("Approval: Needs human review")
+  expect(screen.getByText(/historical repository policy/)).toBeTruthy()
   expect(screen.getByText("0123456789ab")).toBeTruthy()
   expect(screen.getByText("auth/session.py requires an owner.")).toBeTruthy()
   expect(

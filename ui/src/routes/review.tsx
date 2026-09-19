@@ -39,6 +39,11 @@ function ReviewPage() {
 
       <SettingsSection title="Rules">
         <SettingsNavRow
+          to="/review/approval"
+          label="Approval Policy"
+          description="Configure shared and repository-specific rules for shadow approval evaluation."
+        />
+        <SettingsNavRow
           to="/review/styles"
           label="Review Style Prompts"
           description="Per-repo style guides learned from past PR review feedback."

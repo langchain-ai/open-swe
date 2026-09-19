@@ -1,7 +1,6 @@
-"""Read base-branch policies and live GitHub evidence for shadow approval."""
+"""Read app-managed policies and live GitHub evidence for shadow approval."""
 
 import asyncio
-import base64
 import logging
 from datetime import datetime
 from typing import Literal
@@ -11,7 +10,6 @@ from pydantic import AwareDatetime, BaseModel, Field, TypeAdapter
 
 from agent.github.http import GITHUB_API_BASE, github_client, github_request
 from agent.github.thread_token import GitHubAuthError
-from agent.prompts import load_prompt
 from agent.review.approval import (
     ApprovalEvaluation,
     ApprovalEvidence,
@@ -19,9 +17,9 @@ from agent.review.approval import (
     Gate,
     PolicySnapshot,
     evaluate_policy,
-    parse_policy,
     unavailable_evaluation,
 )
+from agent.review.approval_settings import load_policy_snapshot
 
 logger = logging.getLogger(__name__)
 _OBJECTS = TypeAdapter(list[dict[str, object]])
@@ -68,41 +66,15 @@ async def _pages(
     raise ValueError("Approval evidence pagination was incomplete")
 
 
-async def _load_policy(client: httpx2.AsyncClient, root: str, pull: PullSnapshot) -> PolicySnapshot:
-    # A readable directory proves absence; a contents 404 could also mean missing permission.
-    entries = _OBJECTS.validate_python(
-        await _get(client, f"{root}/contents", {"ref": pull.base.sha})
-    )
-    entry = next((item for item in entries if item.get("path") == "APPROVAL_POLICY.md"), None)
-    source: Literal["default", "repository"] = "default"
-    content = load_prompt("reviewer/approval-policy.md")
-    if entry is not None:
-        if entry.get("type") != "file":
-            raise ValueError("APPROVAL_POLICY.md must be a regular file")
-        payload = await _get(client, f"{root}/contents/APPROVAL_POLICY.md", {"ref": pull.base.sha})
-        if (
-            not isinstance(payload, dict)
-            or payload.get("type") != "file"
-            or payload.get("encoding") != "base64"
-        ):
-            raise ValueError("Cannot read APPROVAL_POLICY.md")
-        encoded = payload.get("content")
-        if not isinstance(encoded, str) or len(encoded) > 40_000:
-            raise ValueError("Approval policy content is missing or too large")
-        content = base64.b64decode("".join(encoded.split()), validate=True).decode("utf-8")
-        source = "repository"
-    elif len(entries) >= 1000:
-        raise ValueError("Cannot establish policy absence from a truncated directory")
-    return parse_policy(content, source=source, base_sha=pull.base.sha, head_sha=pull.head.sha)
-
-
 async def fetch_approval_policy(
     owner: str, repo: str, pr_number: int, token: str
 ) -> PolicySnapshot:
     root = f"repos/{owner}/{repo}"
     async with github_client(token=token) as client:
         pull = PullSnapshot.model_validate(await _get(client, f"{root}/pulls/{pr_number}"))
-        return await _load_policy(client, root, pull)
+        return await load_policy_snapshot(
+            f"{owner}/{repo}", base_sha=pull.base.sha, head_sha=pull.head.sha
+        )
 
 
 async def _checks(
@@ -249,15 +221,19 @@ async def evaluate_pr_approval(
     async with github_client(token=token) as client:
         try:
             pull = PullSnapshot.model_validate(await _get(client, f"{root}/pulls/{pr_number}"))
-            policy = await _load_policy(client, root, pull)
-        except httpx2.HTTPError, ValueError:
+            policy = await load_policy_snapshot(
+                f"{owner}/{repo}", base_sha=pull.base.sha, head_sha=pull.head.sha
+            )
+        except GitHubAuthError:
+            raise
+        except Exception:
             logger.warning(
                 "Approval policy unavailable",
                 extra={"approval_repo": root, "pr_number": pr_number},
                 exc_info=True,
             )
             return unavailable_evaluation(
-                "The base-branch policy could not be read or is invalid. No default was substituted."
+                "The approval settings could not be read or are invalid. No default was substituted."
             )
         ci, reviews, paths = await asyncio.gather(
             _checks(client, root, head_sha, policy.rules.required_checks, review_check_run_id),
@@ -274,6 +250,30 @@ async def evaluate_pr_approval(
                 exc_info=True,
             )
             current = None
+        try:
+            latest_policy = await load_policy_snapshot(
+                f"{owner}/{repo}", base_sha=pull.base.sha, head_sha=pull.head.sha
+            )
+        except Exception:
+            logger.warning(
+                "Approval policy recheck unavailable",
+                extra={"approval_repo": root, "pr_number": pr_number},
+                exc_info=True,
+            )
+            latest_policy = None
+        if latest_policy is None or latest_policy.version != policy.version:
+            return ApprovalEvaluation(
+                policy=policy,
+                decision="insufficient_evidence",
+                criteria=[
+                    Gate(
+                        id="policy_current",
+                        title="Current approval policy",
+                        status="unknown",
+                        evidence="Approval settings changed or could not be rechecked. Read the policy and review again.",
+                    )
+                ],
+            )
         facts = ApprovalFacts(
             current_head_sha=current.head.sha if current else None,
             current_base_sha=current.base.sha if current else None,

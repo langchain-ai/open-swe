@@ -59,6 +59,7 @@ _TOOL_MODULES = {
     "slack_thread_reply": "agent.slack.tools.thread_reply",
     "submit_thread_feedback": ".submit_thread_feedback",
     "submit_review_risk_feedback": ".submit_review_risk_feedback",
+    "manage_review_approval_policy": ".manage_review_approval_policy",
     "trigger_automation": ".automations",
     "update_automation": ".automations",
     "update_finding": ".update_finding",
@@ -122,6 +123,7 @@ __all__ = [
     "slack_thread_reply",
     "submit_thread_feedback",
     "submit_review_risk_feedback",
+    "manage_review_approval_policy",
     "trigger_automation",
     "update_automation",
     "update_finding",
@@ -163,6 +165,7 @@ if TYPE_CHECKING:
     from agent.tools.list_findings import list_findings
     from agent.tools.list_review_findings import list_review_findings
     from agent.tools.manage_baby_sit import manage_baby_sit
+    from agent.tools.manage_review_approval_policy import manage_review_approval_policy
     from agent.tools.notify_automation_channel import notify_automation_channel
     from agent.tools.open_pull_request import open_pull_request
     from agent.tools.organization_skills import delete_organization_skill, save_organization_skill

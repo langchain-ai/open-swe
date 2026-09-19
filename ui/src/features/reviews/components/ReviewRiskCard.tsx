@@ -305,7 +305,11 @@ function RiskFeedbackForm({
                 </p>
                 {evaluation.policy && (
                   <p>
-                    Policy: {evaluation.policy.source} · Version{" "}
+                    Policy:{" "}
+                    {evaluation.policy.source === "repository"
+                      ? "historical repository policy"
+                      : evaluation.policy.source.replace("_", " ")}{" "}
+                    · Version{" "}
                     <code>{evaluation.policy.version.slice(0, 12)}</code> · Base{" "}
                     <code>{evaluation.policy.base_sha.slice(0, 12)}</code>
                   </p>

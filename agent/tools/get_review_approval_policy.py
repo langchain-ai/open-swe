@@ -1,11 +1,10 @@
-"""Read the approval policy from a PR's base commit."""
+"""Read the app-managed approval policy for a PR."""
 
 import logging
 
-import httpx2
 from pydantic import BaseModel
 
-from agent.github.thread_token import get_github_token
+from agent.github.thread_token import GitHubAuthError, get_github_token
 from agent.review.approval import PolicySnapshot
 from agent.review.approval_github import fetch_approval_policy
 from agent.run_config import RunConfig
@@ -19,7 +18,7 @@ class ApprovalPolicyResult(BaseModel):
 
 
 async def get_review_approval_policy() -> dict[str, object]:
-    """Read the current base-branch approval policy for this review."""
+    """Read the current app-managed approval policy for this review."""
     cfg = RunConfig.from_runtime()
     token = get_github_token()
     if cfg.is_eval:
@@ -32,7 +31,9 @@ async def get_review_approval_policy() -> dict[str, object]:
         ).model_dump()
     try:
         policy = await fetch_approval_policy(cfg.repo.owner, cfg.repo.name, cfg.pr_number, token)
-    except httpx2.HTTPError, ValueError:
+    except GitHubAuthError:
+        raise
+    except Exception:
         logger.warning(
             "Could not load review approval policy",
             extra={"pr_number": cfg.pr_number},

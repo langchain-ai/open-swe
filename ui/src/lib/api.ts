@@ -835,12 +835,36 @@ export interface ReviewDetail extends ReviewSummary {
 
 export type ReviewApprovalFeedback = "safe" | "needs_review" | "unsure"
 
+export interface PolicyRules {
+  max_risk_score: number
+  minimum_confidence: "low" | "medium" | "high"
+  required_checks: string[]
+  human_review_paths: string[]
+}
+
+export interface PolicyDefinition {
+  rules: PolicyRules
+  criteria_markdown: string
+}
+
+export interface PolicySettingsView {
+  repository: string | null
+  policy: PolicyDefinition | null
+  shared_policy: PolicyDefinition
+  effective_rules: PolicyRules
+  effective_version: string
+  revision: string | null
+  updated_by: string | null
+  updated_at: string | null
+  can_edit: boolean
+}
+
 export interface ReviewApprovalEvaluation {
   mode: "shadow"
   decision: "would_approve" | "needs_human_review" | "insufficient_evidence"
   evaluated_at: string
   policy: {
-    source: "default" | "repository"
+    source: "default" | "repository" | "settings" | "repository_settings"
     version: string
     base_sha: string
   } | null
@@ -1038,6 +1062,22 @@ export const api = {
     request<void>(`/review-styles/${encodeURIComponent(full_name)}`, {
       method: "DELETE",
     }),
+  getReviewApprovalPolicy: (repository: string | null = null) =>
+    request<PolicySettingsView>(
+      `/review-approval-policy${repository ? `?repository=${encodeURIComponent(repository)}` : ""}`
+    ),
+  saveReviewApprovalPolicy: (
+    repository: string | null,
+    policy: PolicyDefinition | null,
+    expected_version: string
+  ) =>
+    request<PolicySettingsView>(
+      `/review-approval-policy${repository ? `?repository=${encodeURIComponent(repository)}` : ""}`,
+      {
+        method: "PUT",
+        body: JSON.stringify({ policy, expected_version }),
+      }
+    ),
   getMyInstructions: () => request<UserInstructions>("/me/instructions"),
   saveMyInstructions: (instructions: string) =>
     request<UserInstructions>("/me/instructions", {

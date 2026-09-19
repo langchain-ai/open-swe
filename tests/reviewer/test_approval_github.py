@@ -1,28 +1,36 @@
-import base64
-from collections.abc import Iterator
-from unittest.mock import patch
+from collections.abc import AsyncIterator
+from unittest.mock import AsyncMock, patch
 
 import httpx2
 import pytest
 
+from agent.review import approval_settings as settings
 from agent.review.approval import (
     ApprovalDecision,
     ApprovalEvaluation,
     ApprovalEvidence,
     CriterionEvidence,
+    PolicyRules,
 )
 from agent.review.approval_github import evaluate_pr_approval, fetch_approval_policy
+from tests.conftest import FakeStore
 
 HEAD = "a" * 40
 BASE = "b" * 40
-POLICY = '+++\nmax_risk_score = 2\nrequired_checks = ["tests"]\n+++\n## Scope\nOnly documentation changes.'
+POLICY = settings.PolicyDefinition(
+    rules=PolicyRules(required_checks=["tests"], human_review_paths=["auth/*"]),
+    criteria_markdown="## Scope\nOnly documentation changes.",
+)
 
 
 GithubFixture = tuple[dict[str, object], list[httpx2.Request]]
 
 
 @pytest.fixture
-def github() -> Iterator[GithubFixture]:
+async def github(fake_store: FakeStore) -> AsyncIterator[GithubFixture]:
+    await settings.CURRENT.put(
+        "default", settings.PolicyRevision(repository=None, policy=POLICY, updated_by="admin")
+    )
     payloads: dict[str, object] = {
         "/repos/org/repo/pulls/7": {
             "head": {"sha": HEAD},
@@ -30,12 +38,6 @@ def github() -> Iterator[GithubFixture]:
             "state": "open",
             "draft": False,
             "changed_files": 1,
-        },
-        "/repos/org/repo/contents": [{"path": "APPROVAL_POLICY.md", "type": "file"}],
-        "/repos/org/repo/contents/APPROVAL_POLICY.md": {
-            "type": "file",
-            "encoding": "base64",
-            "content": base64.b64encode(POLICY.encode()).decode(),
         },
         f"/repos/org/repo/commits/{HEAD}/check-runs": {
             "check_runs": [
@@ -88,7 +90,9 @@ async def evidence() -> ApprovalEvidence:
         base_sha=BASE,
         head_sha=HEAD,
         review_complete=True,
-        criteria=[CriterionEvidence(id="scope", status="pass", evidence="README prose only.")],
+        criteria=[
+            CriterionEvidence(id="shared:scope", status="pass", evidence="README prose only.")
+        ],
     )
 
 
@@ -108,15 +112,16 @@ async def evaluate(evidence: ApprovalEvidence | None) -> ApprovalEvaluation:
     )
 
 
-async def test_policy_and_gates_use_base_commit_and_exact_reviewed_head(
+async def test_policy_comes_from_settings_and_gates_use_exact_reviewed_head(
     github: GithubFixture,
 ) -> None:
     _, requests = github
     result = await evaluate(await evidence())
     assert result.decision == "would_approve"
-    assert result.policy is not None and result.policy.source == "repository"
+    assert result.policy is not None and result.policy.source == "settings"
     content_requests = [r for r in requests if "/contents" in r.url.path]
-    assert all(r.url.params["ref"] == BASE for r in content_requests)
+    assert not content_requests
+    assert result.policy.base_sha == BASE
     assert all(r.method == "GET" for r in requests)
 
 
@@ -152,20 +157,54 @@ async def test_missing_required_check_is_not_a_pass(github: GithubFixture) -> No
     assert (await evaluate(await evidence())).decision == "insufficient_evidence"
 
 
-async def test_unreadable_policy_does_not_fall_back_to_default(github: GithubFixture) -> None:
-    payloads, _ = github
-    payloads["/repos/org/repo/contents"] = 403
+async def test_unreadable_policy_does_not_fall_back_to_default(
+    github: GithubFixture, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(
+        settings.CURRENT, "get", AsyncMock(side_effect=RuntimeError("settings unavailable"))
+    )
     result = await evaluate(None)
     assert result.decision == "insufficient_evidence"
     assert result.policy is None
 
 
 async def test_absent_policy_uses_versioned_default(github: GithubFixture) -> None:
-    payloads, _ = github
-    payloads["/repos/org/repo/contents"] = []
+    await settings.CURRENT.delete("default")
     policy = await fetch_approval_policy("org", "repo", 7, "test")
     assert policy.source == "default" and policy.criteria
     assert policy.base_sha == BASE
+
+
+async def test_settings_changed_since_review_invalidate_evidence(github: GithubFixture) -> None:
+    old_evidence = await evidence()
+    await settings.CURRENT.put(
+        "default", settings.PolicyRevision(repository=None, policy=POLICY, updated_by="other-admin")
+    )
+    result = await evaluate(old_evidence)
+    assert result.decision == "insufficient_evidence"
+    assert next(g for g in result.criteria if g.id == "policy_binding").status == "unknown"
+
+
+async def test_settings_changed_during_github_collection_cannot_approve(
+    github: GithubFixture,
+) -> None:
+    old_evidence = await evidence()
+    original = settings.load_policy_snapshot
+    calls = 0
+
+    async def changing_policy(repository: str, *, base_sha: str, head_sha: str):
+        nonlocal calls
+        calls += 1
+        if calls == 2:
+            await settings.CURRENT.put(
+                "default",
+                settings.PolicyRevision(repository=None, policy=POLICY, updated_by="other-admin"),
+            )
+        return await original(repository, base_sha=base_sha, head_sha=head_sha)
+
+    with patch("agent.review.approval_github.load_policy_snapshot", side_effect=changing_policy):
+        result = await evaluate(old_evidence)
+    assert result.decision == "insufficient_evidence"
 
 
 async def test_later_comment_does_not_clear_outstanding_change_request(
@@ -223,7 +262,7 @@ async def test_earlier_created_review_submitted_later_can_request_changes(
 async def test_rename_out_of_protected_path_still_requires_human(github: GithubFixture) -> None:
     payloads, _ = github
     payloads["/repos/org/repo/pulls/7/files"] = [
-        {"filename": "docs/policy.txt", "previous_filename": "APPROVAL_POLICY.md"}
+        {"filename": "docs/policy.txt", "previous_filename": "auth/session.py"}
     ]
     assert (await evaluate(await evidence())).decision == "needs_human_review"
 

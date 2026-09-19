@@ -15,6 +15,7 @@ from agent.github.pull_request_status import pull_request_identity
 from agent.github.repos import accessible_repo_full_names
 from agent.review import risk
 from agent.review.analyzer_cron import remove_continual_cron
+from agent.review.approval_routes import router as approval_router
 from agent.review.chat import (
     get_review_chat,
     proxy_review_chat_commands,
@@ -53,6 +54,7 @@ from agent.review.styles import (
 from agent.thread_ids import reviewer_thread_id
 
 router = APIRouter(tags=["review"])
+router.include_router(approval_router)
 
 REVIEWS_PAGE_SIZE = 20
 

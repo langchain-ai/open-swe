@@ -10,51 +10,55 @@ bounded change, relevant verification, and no outstanding need for human
 judgment. Every required criterion must pass. A known failure routes to human
 review; otherwise, missing evidence produces an insufficient-evidence result.
 
-## Repository policy
+## Configure policy in Open SWE
 
-Place `APPROVAL_POLICY.md` at the repository root to replace the default policy.
-Open SWE reads it from the PR's **base commit**, never from the proposed head.
-This first version supports one root policy, not directory inheritance.
+Open **Open SWE Review → Approval policy** (`/review/approval`). Approval
+requirements are separate from learned review style prompts and feedback.
+Open SWE admins can edit the shared policy or add requirements for an accessible
+repository. Other users can read policies for repositories they can access.
+The shared default applies across this Open SWE instance.
 
-Optional TOML frontmatter sets machine rules; Markdown level-two headings define
-the criteria the reviewer must assess:
+Use the structured fields for maximum risk (1–5), minimum confidence, required
+check names, and paths requiring human review. Write natural-language criteria
+in Markdown, with a unique `##` heading for each requirement:
 
 ```markdown
-+++
-max_risk_score = 2
-minimum_confidence = "high"
-required_checks = ["tests", "typecheck"]
-human_review_paths = ["auth/*", "migrations/*", ".github/*"]
-+++
-# Approval policy
-
 ## Limited impact
 The change has a narrow, well-understood effect. Explain affected behavior and callers.
 
 ## Verification
 Cite inspected verification of the changed behavior. Missing context means unknown.
-
-## Owner judgment
-Changes to public contracts or security boundaries need a human owner.
 ```
 
-Omitted rules use the default maximum risk of 2 and minimum confidence of high;
-check-name and path lists default to empty. Requirements before the first
-level-two heading are also evaluated. Policies must have 1–20 uniquely named
-criteria and fit within 24 KB. Invalid or unreadable policies produce unknown
-eligibility rather than falling back to a default. A missing policy uses the
-built-in default only after Open SWE successfully reads the base directory.
+Repository requirements **add to** the shared policy: the lower risk ceiling and
+higher confidence threshold win; required checks and human-review paths accumulate;
+all shared and repository criteria must pass. Repository criteria may be empty when
+only adding machine rules. The editor shows the effective limits and inherited
+requirements. Each scope supports up to 100 check names and 100 path patterns,
+and 1–20 criteria within 24 KB (repository criteria can be empty).
+
+**Save policy** creates a revision recording the author and timestamp. **Reset**
+returns a repository to the shared policy, or returns shared settings to the
+built-in default. Concurrent edits are rejected; reload before reconciling them.
+The private-admin `manage_review_approval_policy` tool exposes the same read,
+save, and reset operations, with repository access and version checks.
+
+`APPROVAL_POLICY.md` files are not loaded. A PR cannot change its approval
+requirements by editing repository files. Existing assessments made with older
+repository-file policies retain their original policy snapshot.
 
 Path patterns use case-sensitive shell wildcard matching over the full
 repository-relative path; `*` matches slashes. Renames inspect both old and new
-paths. Changing any `APPROVAL_POLICY.md` always requires human review, regardless
-of the path rules.
+paths. Missing customization uses the built-in policy. Unreadable or invalid
+settings produce unknown eligibility; they never silently fall back to defaults.
 
 ## Evidence and decisions
 
 The reviewer calls `get_review_approval_policy`, inspects the entire PR, and
 reports pass/fail/unknown with evidence for every criterion. Publication checks
-that evidence refers to the same policy content, base, and reviewed head.
+that evidence refers to the same effective settings version, base, and reviewed head.
+Settings are rechecked after collecting GitHub evidence; changes during a review
+require the reviewer to read and assess the current policy again.
 Missing, extra, or stale criterion evidence cannot yield a would-approve result.
 
 Code also requires an open, non-draft PR; a complete review without limitations;
@@ -68,7 +72,7 @@ succeed, including any explicitly named `required_checks`. The current Open SWE
 review check is excluded by its recorded ID because publication completes that
 check. Missing checks, no external check results, pending runs, neutral/skipped
 conclusions, and unreadable or incomplete GitHub responses are unknown. Failed
-checks are a policy failure. Repository prose cannot override these checks.
+checks are a policy failure. Natural-language criteria cannot override these checks.
 
 The result is a snapshot at publication time. Later CI completion or human
 review changes require another review to produce a new evaluation; the old
@@ -80,6 +84,7 @@ APPROVE operation.
 The GitHub comment shows a compact decision and risk score, with the explanation
 collapsed under **Why this decision?** It links to the exact assessment in the dashboard, which displays
 the policy source/version, base and head commits, and each criterion's evidence.
+Policy edits never rewrite a published assessment.
 
 React to the GitHub review comment with **👍 useful** or **👎 unhelpful**.
 The app collects these reactions through GitHub GraphQL; GitHub does not send

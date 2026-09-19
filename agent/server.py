@@ -166,6 +166,7 @@ from agent.tools import (
     manage_baby_sit,
     manage_code_channel,
     manage_incident,
+    manage_review_approval_policy,
     manage_thread,
     notify_automation_channel,
     open_pull_request,
@@ -1258,7 +1259,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         submit_thread_feedback,
         submit_review_risk_feedback,
         *(ADMIN_TOOLS if admin_thread else ()),
-        *((read_only_sql,) if private_admin_surface else ()),
+        *((read_only_sql, manage_review_approval_policy) if private_admin_surface else ()),
     ]
     if credential_login is None:
         personal_tools = (
@@ -1373,6 +1374,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         and tool is not background_task
         and tool is not submit_thread_feedback
         and tool is not submit_review_risk_feedback
+        and tool is not manage_review_approval_policy
     ]
     title_model = _make_model_or_defer(
         title_model_id,
