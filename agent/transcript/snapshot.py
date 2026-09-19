@@ -8,7 +8,8 @@ is never consulted: ``thread.metadata`` mirrors its thread metadata precisely so
 the read path can authorize a caller on its own.
 """
 
-from collections.abc import Mapping
+from collections.abc import AsyncIterator, Mapping
+from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import datetime
 from uuid import UUID
@@ -178,6 +179,21 @@ class ReplayGap:
         return self.events > MAX_REPLAY_EVENTS or self.payload_bytes > MAX_REPLAY_BYTES
 
 
+@asynccontextmanager
+async def reading(conn: AsyncConnection | None) -> AsyncIterator[AsyncConnection]:
+    """``conn`` when a caller already holds a snapshot, else a fresh one.
+
+    Every loader takes an optional connection so a route can authorize the
+    caller and read the data it guards in the same database snapshot; on its
+    own, a loader still gets the consistent read it always had.
+    """
+    if conn is not None:
+        yield conn
+        return
+    async with postgres.snapshot_transaction() as fresh:
+        yield fresh
+
+
 async def _rows(
     conn: AsyncConnection, statement: str | TextClause, parameters: Mapping[str, object]
 ) -> list[RowMapping]:
@@ -195,13 +211,13 @@ async def _row(
     return rows[0] if rows else None
 
 
-async def load_access(thread_id: str) -> JsonObject | None:
+async def load_access(thread_id: str, *, conn: AsyncConnection | None = None) -> JsonObject | None:
     """The thread's mirrored LangGraph metadata, or ``None`` when untranscribed.
 
     This is what the read path authorizes a caller against, and its absence is
     what says the thread is not served by the transcript API at all.
     """
-    async with postgres.snapshot_transaction() as conn:
+    async with reading(conn) as conn:
         row = await _row(
             conn,
             "SELECT metadata FROM thread WHERE thread_id = :thread_id",
@@ -350,7 +366,9 @@ async def _load_turn_contents(
     )
 
 
-async def load_snapshot(thread_id: str, *, limit: int | None = None) -> TranscriptSnapshot | None:
+async def load_snapshot(
+    thread_id: str, *, limit: int | None = None, conn: AsyncConnection | None = None
+) -> TranscriptSnapshot | None:
     """The newest window of the thread, as of one consistent read.
 
     Older turns are reached through ``older_cursor`` and
@@ -358,7 +376,7 @@ async def load_snapshot(thread_id: str, *, limit: int | None = None) -> Transcri
     already holds them keeps them rather than refetching.
     """
     page_size = _page_size(limit)
-    async with postgres.snapshot_transaction() as conn:
+    async with reading(conn) as conn:
         thread = await _row(
             conn,
             """
@@ -419,7 +437,11 @@ async def load_snapshot(thread_id: str, *, limit: int | None = None) -> Transcri
 
 
 async def load_turn_page(
-    thread_id: str, *, before: TurnPageCursor, limit: int | None = None
+    thread_id: str,
+    *,
+    before: TurnPageCursor,
+    limit: int | None = None,
+    conn: AsyncConnection | None = None,
 ) -> TranscriptTurnPage:
     """The page of turns immediately older than ``before``.
 
@@ -428,7 +450,7 @@ async def load_turn_page(
     visits every turn exactly once.
     """
     page_size = _page_size(limit)
-    async with postgres.snapshot_transaction() as conn:
+    async with reading(conn) as conn:
         turns, older_cursor = await _load_turns(conn, thread_id, before=before, limit=page_size)
         messages, tool_calls = await _load_turn_contents(
             conn, thread_id, [turn.turn_id for turn in turns]
@@ -442,9 +464,11 @@ async def load_turn_page(
     )
 
 
-async def measure_gap(thread_id: str, after: int) -> ReplayGap:
+async def measure_gap(
+    thread_id: str, after: int, *, conn: AsyncConnection | None = None
+) -> ReplayGap:
     """How much log stands between ``after`` and the head, in events and in bytes."""
-    async with postgres.snapshot_transaction() as conn:
+    async with reading(conn) as conn:
         (row,) = await _rows(
             conn,
             """
@@ -464,9 +488,11 @@ async def measure_gap(thread_id: str, after: int) -> ReplayGap:
     )
 
 
-async def load_events(thread_id: str, *, after: int, limit: int) -> list[StoredEvent]:
+async def load_events(
+    thread_id: str, *, after: int, limit: int, conn: AsyncConnection | None = None
+) -> list[StoredEvent]:
     """Stored events with ``version > after``, oldest first."""
-    async with postgres.snapshot_transaction() as conn:
+    async with reading(conn) as conn:
         rows = await _rows(
             conn,
             """

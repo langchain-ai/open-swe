@@ -13,7 +13,7 @@ from uuid import UUID
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
-from agent.database import postgres
+from agent.transcript.snapshot import reading
 
 MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024
 """Matches the per-attachment cap the dashboard command path already enforces."""
@@ -81,9 +81,11 @@ async def write(
         )
 
 
-async def load(thread_id: str, attachment_id: UUID) -> StoredAttachment | None:
+async def load(
+    thread_id: str, attachment_id: UUID, *, conn: AsyncConnection | None = None
+) -> StoredAttachment | None:
     """One attachment, addressed by the thread that owns it as well as its id."""
-    async with postgres.snapshot_transaction() as conn:
+    async with reading(conn) as conn:
         row = (
             (
                 await conn.execute(

@@ -15,6 +15,7 @@ from agent.transcript.events import (
     TurnCompleted,
     TurnInterrupted,
     TurnRequested,
+    TurnStarted,
 )
 from agent.transcript.snapshot import load_events, load_snapshot
 
@@ -175,3 +176,30 @@ async def test_a_late_completion_of_an_interrupted_turn_leaves_the_thread_alone(
     assert snapshot.thread.status == "running"
     states = {turn.turn_id: turn.state for turn in snapshot.turns}
     assert states[interrupted_turn] == "interrupted"
+
+
+async def test_a_late_start_does_not_reopen_an_interrupted_turn(registry_db: None) -> None:
+    """The run's ``turn.started`` lands after the cancel that settled its turn."""
+    thread_id = str(uuid7())
+    turn = uuid7()
+    await _create(thread_id)
+    await _request_turn(thread_id, turn)
+    await _end_turn(thread_id, turn, interrupted=True, tag="interrupted")
+
+    await append(
+        thread_id,
+        [
+            Command(
+                command_id=f"turn:{turn}:started",
+                event=TurnStarted(turn_id=turn, run_id="run-1"),
+                actor_kind="agent",
+                run_id="run-1",
+                turn_id=turn,
+            )
+        ],
+    )
+
+    snapshot = await load_snapshot(thread_id)
+    assert snapshot is not None
+    assert snapshot.thread.status == "idle"
+    assert [turn_view.state for turn_view in snapshot.turns] == ["interrupted"]

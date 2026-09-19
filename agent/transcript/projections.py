@@ -241,8 +241,10 @@ async def _turn_started(
     conn: AsyncConnection, thread_id: str, event: TurnStarted, occurred_at: datetime
 ) -> None:
     # Upserted rather than updated: a run triggered outside the dashboard has no
-    # ``turn.requested`` ahead of it, and its turn still has to exist.
-    await conn.execute(
+    # ``turn.requested`` ahead of it, and its turn still has to exist. Only an
+    # open turn is started, though: a ``turn.started`` that lands after the turn
+    # was cancelled must not reopen it, nor mark the thread busy again.
+    result = await conn.execute(
         text(
             """
             INSERT INTO thread_turn (turn_id, thread_id, run_id, state, requested_at, started_at)
@@ -252,6 +254,8 @@ async def _turn_started(
                 run_id = EXCLUDED.run_id,
                 started_at = COALESCE(thread_turn.started_at, EXCLUDED.started_at)
             WHERE thread_turn.thread_id = EXCLUDED.thread_id
+              AND thread_turn.state IN ('requested', 'running')
+            RETURNING turn_id
             """
         ),
         {
@@ -261,7 +265,8 @@ async def _turn_started(
             "started_at": occurred_at,
         },
     )
-    await _set_thread_status(conn, thread_id, status="running")
+    if result.scalar_one_or_none() is not None:
+        await _set_thread_status(conn, thread_id, status="running")
 
 
 async def _turn_checkpoint(

@@ -9,8 +9,8 @@ rather than a projection of it — rebuilding the projections never touches it.
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
-from agent.database import postgres
 from agent.transcript.events import TOOL_OUTPUT_PREVIEW_CHARS, ToolCompleted
+from agent.transcript.snapshot import reading
 
 MAX_TOOL_OUTPUT_CHARS = 256 * 1024
 """The cap on what is stored; the endpoint has no more than this either."""
@@ -60,9 +60,11 @@ async def write(
     )
 
 
-async def load(thread_id: str, tool_call_id: str) -> str | None:
+async def load(
+    thread_id: str, tool_call_id: str, *, conn: AsyncConnection | None = None
+) -> str | None:
     """The stored output of one tool call, or ``None`` when none was stored."""
-    async with postgres.snapshot_transaction() as conn:
+    async with reading(conn) as conn:
         row = (
             await conn.execute(
                 text(

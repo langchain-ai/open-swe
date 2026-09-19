@@ -27,7 +27,12 @@ from agent.transcript.events import (
     TurnRequested,
     TurnStarted,
 )
-from agent.transcript.listener import DELETED_VERSION, _resync_subscribers, subscribe
+from agent.transcript.listener import (
+    _SUBSCRIBERS,
+    DELETED_VERSION,
+    _resync_subscribers,
+    subscribe,
+)
 from agent.transcript.mirror import mirror_thread_metadata
 from agent.transcript.routes import (
     _readable_transcript,
@@ -240,6 +245,40 @@ async def test_a_live_stream_ends_when_its_reader_loses_access(registry_db: None
             await frame()
 
 
+async def test_a_stream_that_ends_during_its_replay_unsubscribes(registry_db: None) -> None:
+    """A cursor past the head ends the stream before it ever awaits a notification."""
+    thread_id = str(uuid7())
+    await _create(thread_id)
+    owner = {"sub": OWNER, "email": None}
+
+    async with aclosing(_stream(thread_id, 10_000, owner)) as stream:
+        assert await anext(stream) == "event: deleted\ndata: {}\n\n"
+        with pytest.raises(StopAsyncIteration):
+            await anext(stream)
+    assert thread_id not in _SUBSCRIBERS
+
+    # Abandoned mid-replay, before the live loop, the same holds.
+    stream = _stream(thread_id, 0, owner)
+    assert "event: transcript" in await anext(stream)
+    await stream.aclose()
+    assert thread_id not in _SUBSCRIBERS
+
+
+async def test_a_replay_is_refused_to_a_reader_who_lost_access(registry_db: None) -> None:
+    """The request was authorized while public; the replay itself sees the flip."""
+    thread_id = str(uuid7())
+    await _create(thread_id, visibility="public")
+    stranger = {"sub": "someone-else", "email": "someone-else@example.com"}
+    await _readable_transcript(thread_id, stranger)
+
+    await mirror_thread_metadata(thread_id, {"visibility": "private"})
+
+    async with aclosing(_stream(thread_id, 0, stranger)) as stream:
+        assert await anext(stream) == "event: revoked\ndata: {}\n\n"
+        with pytest.raises(StopAsyncIteration):
+            await anext(stream)
+
+
 async def test_a_resync_reports_a_thread_deleted_while_the_listener_was_down(
     registry_db: None,
 ) -> None:
@@ -249,10 +288,7 @@ async def test_a_resync_reports_a_thread_deleted_while_the_listener_was_down(
     await _create(gone)
     assert await delete_transcript(gone)
 
-    async with (
-        aclosing(subscribe(alive)) as alive_versions,
-        aclosing(subscribe(gone)) as gone_versions,
-    ):
+    async with subscribe(alive) as alive_versions, subscribe(gone) as gone_versions:
         await _resync_subscribers()
 
         snapshot = await load_snapshot(alive)

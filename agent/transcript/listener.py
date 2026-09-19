@@ -14,7 +14,7 @@ missing in-process publish only ever costs latency.
 import asyncio
 import contextlib
 import logging
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncIterator
 
 import asyncpg
 from sqlalchemy import ARRAY, Text, bindparam, make_url, text
@@ -42,28 +42,40 @@ _TASK: asyncio.Task[None] | None = None
 _STOP = asyncio.Event()
 
 
-def subscribe(thread_id: str) -> AsyncGenerator[int]:
-    """Versions notified for ``thread_id``, newest first as they arrive.
+class _Versions:
+    """The versions handed to one subscriber, in the order they arrived."""
 
-    Registration happens before this returns, so a caller can subscribe and
-    then read its replay range without a window in which events are lost. The
-    iterator must be closed (``aclosing``) to unregister.
+    __slots__ = ("_queue",)
+
+    def __init__(self, queue: asyncio.Queue[int]) -> None:
+        self._queue = queue
+
+    def __aiter__(self) -> _Versions:
+        return self
+
+    async def __anext__(self) -> int:
+        return await self._queue.get()
+
+
+@contextlib.asynccontextmanager
+async def subscribe(thread_id: str) -> AsyncIterator[AsyncIterator[int]]:
+    """Versions notified for ``thread_id``, as they arrive, for the body of the ``with``.
+
+    Registration happens on entry, so a caller can subscribe and then read its
+    replay range without a window in which events are lost. Leaving the block
+    unregisters, whether or not the versions were ever awaited: a subscriber
+    that gives up during its replay must not leave its queue behind.
     """
     queue: asyncio.Queue[int] = asyncio.Queue(maxsize=_QUEUE_LIMIT)
     _SUBSCRIBERS.setdefault(thread_id, set()).add(queue)
-
-    async def _versions() -> AsyncGenerator[int]:
-        try:
-            while True:
-                yield await queue.get()
-        finally:
-            queues = _SUBSCRIBERS.get(thread_id)
-            if queues is not None:
-                queues.discard(queue)
-                if not queues:
-                    _SUBSCRIBERS.pop(thread_id, None)
-
-    return _versions()
+    try:
+        yield _Versions(queue)
+    finally:
+        queues = _SUBSCRIBERS.get(thread_id)
+        if queues is not None:
+            queues.discard(queue)
+            if not queues:
+                _SUBSCRIBERS.pop(thread_id, None)
 
 
 def publish(thread_id: str, version: int) -> None:
