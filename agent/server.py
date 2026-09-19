@@ -151,13 +151,13 @@ from agent.tools import (
     background_task,
     create_automation,
     create_sandbox_file_download_url,
-    create_sandbox_service_url,
     delete_automation,
     delete_organization_skill,
     delete_user_skill,
     delete_workspace,
     enter_plan_mode,
     expedite_pr_approval,
+    expose_port,
     fetch_url,
     get_thread,
     http_request,
@@ -356,7 +356,7 @@ PLAN_MODE_EXCLUDED_TOOLS: frozenset[str] = frozenset(
         "task",
         "background_execute",
         "background_task",
-        "create_sandbox_service_url",
+        "expose_port",
         "http_request",
         "expedite_pr_approval",
         "manage_baby_sit",
@@ -1237,7 +1237,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         notify_automation_channel,
         open_pull_request,
         *(
-            (output_iframe, create_sandbox_file_download_url, create_sandbox_service_url)
+            (output_iframe, create_sandbox_file_download_url, expose_port)
             if sandbox_file_downloads
             else ()
         ),
@@ -1292,7 +1292,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         ]
     static_tools = apply_tool_descriptions(
         static_tools,
-        {"create_sandbox_service_url": {"jwks_url": service_identity_jwks_url()}},
+        {"expose_port": {"jwks_url": service_identity_jwks_url()}},
     )
     if local_run:
         static_tools = apply_tool_descriptions([http_request, fetch_url, web_search])

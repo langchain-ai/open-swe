@@ -3,7 +3,7 @@ from typing import Any
 
 import pytest
 
-service_tool = importlib.import_module("agent.tools.create_sandbox_service_url")
+service_tool = importlib.import_module("agent.tools.expose_port")
 
 
 class _Backend:
@@ -30,31 +30,31 @@ def _configure(monkeypatch: pytest.MonkeyPatch) -> tuple[_Backend, list[tuple[st
     return backend, calls
 
 
-async def test_create_sandbox_service_url_shares_the_port_with_the_workspace(
+async def test_expose_port_shares_the_port_with_the_workspace(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _, calls = _configure(monkeypatch)
 
-    result = await service_tool.create_sandbox_service_url(3000)
+    result = await service_tool.expose_port(3000)
 
     assert result == {"url": "https://l-abc123.sandbox.example/", "port": 3000}
     assert calls == [("sandbox-1", 3000)]
 
 
 @pytest.mark.parametrize("port", [True, 0, 65536, 3.5, "3000"])
-async def test_create_sandbox_service_url_rejects_invalid_port(
+async def test_expose_port_rejects_invalid_port(
     monkeypatch: pytest.MonkeyPatch,
     port: Any,
 ) -> None:
     _, calls = _configure(monkeypatch)
 
     with pytest.raises(ValueError, match="port must be an integer between 1 and 65535"):
-        await service_tool.create_sandbox_service_url(port)
+        await service_tool.expose_port(port)
 
     assert calls == []
 
 
-async def test_create_sandbox_service_url_detects_sandbox_change(
+async def test_expose_port_detects_sandbox_change(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     backend, _ = _configure(monkeypatch)
@@ -62,4 +62,4 @@ async def test_create_sandbox_service_url_detects_sandbox_change(
     monkeypatch.setattr(service_tool, "unwrap_sandbox_backend", lambda _value: current.pop(0))
 
     with pytest.raises(RuntimeError, match="sandbox changed while creating the service URL"):
-        await service_tool.create_sandbox_service_url(3000)
+        await service_tool.expose_port(3000)

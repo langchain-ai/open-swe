@@ -1,4 +1,4 @@
-Create a browser URL for a service listening in the active LangSmith sandbox.
+Expose a port of the active LangSmith sandbox on the web and return the URL that reaches it.
 
 The service must listen on `0.0.0.0` at the specified port. It is served at the root of its own
 LangSmith domain, so root-absolute URLs (`/assets/app.js`, `/@vite/client`), WebSockets, and hot

@@ -5,8 +5,8 @@ from agent.sandboxes.providers.langsmith import create_workspace_service_url
 from agent.sandboxes.state import get_sandbox_backend, unwrap_sandbox_backend
 
 
-async def create_sandbox_service_url(port: int) -> dict[str, Any]:
-    """Implement the `create_sandbox_service_url` tool."""
+async def expose_port(port: int) -> dict[str, Any]:
+    """Implement the `expose_port` tool."""
     if isinstance(port, bool) or not isinstance(port, int) or not 1 <= port <= 65535:
         raise ValueError("port must be an integer between 1 and 65535")
 
