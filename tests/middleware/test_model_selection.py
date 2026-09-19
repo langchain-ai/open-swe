@@ -5,7 +5,11 @@ import pytest
 from langchain.agents.middleware.types import ModelRequest, ModelResponse
 from langchain_core.messages import HumanMessage, ToolMessage
 
-from agent.middleware.model_selection import ModelSelectionMiddleware, RouteDecision
+from agent.middleware.model_selection import (
+    ModelSelectionMiddleware,
+    RouteDecision,
+    _latest_human_task,
+)
 
 
 def _middleware(
@@ -291,6 +295,16 @@ _SENDER_CONTEXT_ENVELOPE = (
     "message. Workspace admin: yes.</content>\n"
     "</input-message>"
 )
+_SCHEDULE_ENVELOPE = (
+    '<input-message sender="system:schedule:nightly" surface="automation" kind="system">\n'
+    "<content>Run the nightly maintenance job</content>\n"
+    "</input-message>"
+)
+_SLACK_BOT_ENVELOPE = (
+    '<input-message sender="system:slack-bot-123" surface="slack" kind="system">\n'
+    "<content>Investigate the failing CI checks</content>\n"
+    "</input-message>"
+)
 
 
 @pytest.mark.asyncio
@@ -318,3 +332,33 @@ async def test_plain_human_message_without_an_envelope_is_still_classified() -> 
     await middleware.abefore_model(cast(Any, state), MagicMock())
 
     assert "Update the README" in classifier.await_args.args[0]
+
+
+def test_system_schedule_envelope_is_used_as_the_task() -> None:
+    assert _latest_human_task([HumanMessage(content=_SCHEDULE_ENVELOPE)]) == (
+        "Run the nightly maintenance job"
+    )
+
+
+def test_system_slack_bot_envelope_is_used_as_the_task() -> None:
+    assert _latest_human_task([HumanMessage(content=_SLACK_BOT_ENVELOPE)]) == (
+        "Investigate the failing CI checks"
+    )
+
+
+def test_human_envelope_takes_precedence_over_an_older_system_envelope() -> None:
+    assert (
+        _latest_human_task(
+            [HumanMessage(content=_SCHEDULE_ENVELOPE), HumanMessage(content=_HUMAN_ENVELOPE)]
+        )
+        == "how's the weather in sf today"
+    )
+
+
+@pytest.mark.asyncio
+async def test_empty_task_uses_balanced_route_without_calling_classifier() -> None:
+    middleware, _, classifier = _middleware(route="performance")
+    state = {"messages": [HumanMessage(content="<dynamic-context />")]}
+
+    assert await middleware.select_route(cast(Any, state)) == "balanced"
+    classifier.assert_not_awaited()
