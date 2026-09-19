@@ -8,6 +8,7 @@ import textwrap
 import uuid
 from typing import Any
 
+from agent.credential_redaction import resolve_credentials
 from agent.run_config import RunConfig
 from agent.sandboxes.state import SANDBOX_BACKENDS
 
@@ -294,6 +295,7 @@ async def background_execute(
         return {"success": False, "error": f"timeout must be between 1 and {MAX_TIMEOUT_SECONDS}s"}
     try:
         thread_id, backend = _current_backend()
+        command = resolve_credentials(command, thread_id)
         script = control_script("list", None)
         current = await execute(
             backend, f"printf %s {shlex.quote(encoded(script))} | base64 -d | python3"
