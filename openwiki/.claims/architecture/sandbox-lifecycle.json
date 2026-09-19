@@ -1,66 +1,78 @@
 {
   "schemaVersion": 1,
-  "pageVersion": "sha256:9a2f68a604c41df7f34926178eb68d0f796098563f93fbb6bf97ab441e987d34",
+  "pageVersion": "sha256:4bf22563886d85973f8a216a85de57834634e65e4fdc926941ba3b5976b75bee",
   "claims": [
     {
       "id": "claim_b84ca73fa9ca440eaddd035980a5842f",
-      "statement": "A thread’s durable sandbox binding is `sandbox_id` in thread metadata, while `SANDBOX_BACKENDS` is a worker-local map of stable per-thread proxies; metadata lookup prefers inline run metadata, falls back to the live thread, and returns no metadata on lookup failure.",
+      "statement": "A thread’s durable sandbox binding is `sandbox_id` in thread metadata, while `SANDBOX_BACKENDS` is a worker-local map of stable per-thread proxies and `SANDBOX_CONNECTIONS` caches live connections by sandbox ID; metadata prefers qualifying inline run metadata then reads the live thread, and live lookup failures propagate rather than reading as unbound.",
       "evidence": [
         {
-          "resource": "repo://agent/sandboxes/state.py#L319-L393",
-          "version": "repo-lines-v1:sha256:6a50d2b42cd264e4d6a356eb286fddfe0fa94697c27e5fef99d7f659ac992923:eyJzZWxlY3RlZExpbmVDb3VudCI6NzUsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImYxZDMyOWI1ZjEyZTA0ZmRjMTcyZjZiOGFkOTE4YmYxZWEzOTVlZWFlOGQzZDA5ZDhiODkyYmY4OWEyOTMxM2IiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjdkZWVlMjNhMTQwOTEwYjFiODBjNDc3ZDA1MjRlZjIzYWZhYjE3NjhmNzVmZjBiNmZlNjNmMmEzYjBkNjczZDciLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImUwMDA2MGJmNTNhNDMxZGI2NWMwMzg1ODBmYjlkZjlmNjY3OWM0YjRmMmJlOTcyNmIxZGE4YzUyNjBlM2ZlYTUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImFlNzlkYWRhZmQ1OTA4NTQyYzI2OTExZTA3YjU3NzRmNjVmMWVjN2NlYTkyNWU4MDcyODcxYTMwMjQwMGEyN2MifQ"
+          "resource": "repo://agent/sandboxes/state.py#L324-L406",
+          "version": "repo-lines-v1:sha256:168060b601e0f8409490261ea4841a37ce251f2956a86e190fd69ef37626d8dd:eyJzZWxlY3RlZExpbmVDb3VudCI6ODMsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImYxZDMyOWI1ZjEyZTA0ZmRjMTcyZjZiOGFkOTE4YmYxZWEzOTVlZWFlOGQzZDA5ZDhiODkyYmY4OWEyOTMxM2IiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjdkZWVlMjNhMTQwOTEwYjFiODBjNDc3ZDA1MjRlZjIzYWZhYjE3NjhmNzVmZjBiNmZlNjNmMmEzYjBkNjczZDciLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImUwMDA2MGJmNTNhNDMxZGI2NWMwMzg1ODBmYjlkZjlmNjY3OWM0YjRmMmJlOTcyNmIxZGE4YzUyNjBlM2ZlYTUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImFlNzlkYWRhZmQ1OTA4NTQyYzI2OTExZTA3YjU3NzRmNjVmMWVjN2NlYTkyNWU4MDcyODcxYTMwMjQwMGEyN2MifQ"
         }
       ]
     },
     {
       "id": "claim_cf16dbcef63c407689e631eb4ca92734",
-      "statement": "`SandboxBackendProxy` is an async-only stable handle whose target can be replaced; missing targets reconnect through a registered callback or metadata ID, and a lock plus shared startup task ensures concurrent callers use one reconnect.",
+      "statement": "`SandboxBackendProxy` is an async-only stable handle whose target can be replaced; missing targets reconnect through a registered callback or metadata ID, and a lock plus shared startup task ensures concurrent callers use one reconnect while shielding it from waiter cancellation.",
       "evidence": [
         {
-          "resource": "repo://agent/sandboxes/state.py#L329-L362",
-          "version": "repo-lines-v1:sha256:a78cb9496575bcfc9a4e4b77aa256bb54c740129c6a4702e09410dd89220bdec:eyJzZWxlY3RlZExpbmVDb3VudCI6MzQsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQ1OWRmODkzNWRlMjJhZmM1YTMyZWVhOGVmNzdiYmRlZmQ0MTk3MGIxMDg4MzQyMWM5Njc5ZTk1YzMzZjA2YjIiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjhiYmU3MjhkZDEzM2M5MDdiMDk0YjMxMjJmYTRhNDllZjc1NjUzOTFiMTE1YTE3YzRjNzM3MjNmNmFhMmFlMjAiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImMxNDA2MDNjNmE1OWRkZmFjMTQ4ZmI3Y2M2YzlkMGZiYzZjOTI4MDAxNGUyNDdmYjk5NDgyODAxNzkzZTc5NDciLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjIxMTk2YzUxODMyYWU1YTJkZGI2ZDNiYTJhMmE4ZjdkMjQ2YmIwY2IxNzE3OWViODEyODA4NDQ4YzVhZGUzZDQifQ"
+          "resource": "repo://agent/sandboxes/state.py#L50-L188",
+          "version": "repo-lines-v1:sha256:0df63303f1589f1c30cad0b074c28efc25119b7ef821de594037b392be532dda:eyJzZWxlY3RlZExpbmVDb3VudCI6MTM5LCJmaXJzdFNlbGVjdGVkTGluZUhhc2giOiJiYTM2MGIzYjU2MDYxMTBiM2MwZTIyNjVlOTU4YWI0ZDA0ZjhjYmVhMTA0YzVmMmEyMmFjNTczOTE5MWE1MWQ3IiwibGFzdFNlbGVjdGVkTGluZUhhc2giOiIyZjgzMGUzOTUwMTAwODQzOTQ5MWE5MjBhNzNiNmFiMjI5MGY3NjdjNjQ0MmNjOTVjMmNjN2IyOTc0MzQ3NjU0IiwicHJlY2VkaW5nQ29udGV4dExpbmVDb3VudCI6MywicHJlY2VkaW5nQ29udGV4dEhhc2giOiJiM2RmMmFjZjA2ZThjM2YwM2M3MTM1YzZlOGFjNWE5Y2E1NDMyYWJlMDZhNzRhY2EwZmRkOWE1M2EwMDhmOTg3IiwiZm9sbG93aW5nQ29udGV4dExpbmVDb3VudCI6MywiZm9sbG93aW5nQ29udGV4dEhhc2giOiIyZTMyNDdiMzg0OTNkMWYyYWRlYjIyOWZhMDg1ODcyNDE5YzU2OTgyNGU0N2Q1OTgwNjNlNTUwZjBlOGM5YjlmIn0"
         },
         {
-          "resource": "repo://agent/sandboxes/state.py#L50-L186",
-          "version": "repo-lines-v1:sha256:73ed13e978e2b687de7a773ad88436c119bfaf7d8f8a01fe23171e9dd0c31fd8:eyJzZWxlY3RlZExpbmVDb3VudCI6MTM3LCJmaXJzdFNlbGVjdGVkTGluZUhhc2giOiJiYTM2MGIzYjU2MDYxMTBiM2MwZTIyNjVlOTU4YWI0ZDA0ZjhjYmVhMTA0YzVmMmEyMmFjNTczOTE5MWE1MWQ3IiwibGFzdFNlbGVjdGVkTGluZUhhc2giOiIyZjgzMGUzOTUwMTAwODQzOTQ5MWE5MjBhNzNiNmFiMjI5MGY3NjdjNjQ0MmNjOTVjMmNjN2IyOTc0MzQ3NjU0IiwicHJlY2VkaW5nQ29udGV4dExpbmVDb3VudCI6MywicHJlY2VkaW5nQ29udGV4dEhhc2giOiJiM2RmMmFjZjA2ZThjM2YwM2M3MTM1YzZlOGFjNWE5Y2E1NDMyYWJlMDZhNzRhY2EwZmRkOWE1M2EwMDhmOTg3IiwiZm9sbG93aW5nQ29udGV4dExpbmVDb3VudCI6MywiZm9sbG93aW5nQ29udGV4dEhhc2giOiIyZTMyNDdiMzg0OTNkMWYyYWRlYjIyOWZhMDg1ODcyNDE5YzU2OTgyNGU0N2Q1OTgwNjNlNTUwZjBlOGM5YjlmIn0"
+          "resource": "repo://tests/sandbox/test_sandbox_state.py#L134-L204",
+          "version": "repo-lines-v1:sha256:b6b1d1ee647a987901e7f2df460298dafdacec20ea8eafb40188df962185d834:eyJzZWxlY3RlZExpbmVDb3VudCI6NzEsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImJkOTk0MmRlYjdkYmFiYzExNGIxYzQ4ZDAyZGE0NjM4NmU5YWNhNTE1YTUyZmI3YjNjNDEyZGM2Mjc5MjFiMDgiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQ2NjA4ZDE1ZDk5NzU2NzNjNmVlZjk5ZWViODU4NWY2ZmJjMzFhMjNkNDFjOGIwMmEyN2Y1ZWRiNjNkYjdmMWQiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjA0ZDExMGQzMmExY2FjZWY2ZWZiZGM4MTQ0NGUzNTU1NGI3OWNlNzlhZWZlMmVjZTY4ZGYyMzJmZDJhODBkNTkiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjVhYjdiMjcyYWI0ZTI1MTc1YjVmZDI0YzEzY2ZlNTYzNDI1MTRjMDI3OTQ2ZjAzYjUzMDVkZjIwMzM3ODc5ZjkifQ"
+        },
+        {
+          "resource": "repo://tests/sandbox/test_sandbox_state.py#L253-L306",
+          "version": "repo-lines-v1:sha256:eccf16c9fd04503e7c33a408c58f45223d436f057e6b1826e873af250683e5c3:eyJzZWxlY3RlZExpbmVDb3VudCI6NTQsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImJkOTk0MmRlYjdkYmFiYzExNGIxYzQ4ZDAyZGE0NjM4NmU5YWNhNTE1YTUyZmI3YjNjNDEyZGM2Mjc5MjFiMDgiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjIyODRkNDU2NjExYmE2OTgwZDdiNGZiM2UyOTk5MWQ2MDBmYTRhZTg3ODVlZmYxODExZTgyMDE1ZmMyMjViNmEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjYwNTNmMjhlM2NiZGIzODgyY2ViOWUzMmZmMDJjZDYyMTIwMzNmZDkxOTU1MTY4MTA1YmMxMzQ2M2IxNzAyMjciLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjVhYjdiMjcyYWI0ZTI1MTc1YjVmZDI0YzEzY2ZlNTYzNDI1MTRjMDI3OTQ2ZjAzYjUzMDVkZjIwMzM3ODc5ZjkifQ"
         }
       ]
     },
     {
       "id": "claim_cbeeb50addd14f5e8510198dcf97ffed",
-      "statement": "The proxy subclasses `BaseSandbox` so filesystem tooling retains capture-at-source behavior, and its offload method delegates when supported or reports an ordinary-execution fallback.",
+      "statement": "The proxy subclasses `BaseSandbox` so filesystem tooling retains capture-at-source behavior, delegates offload execution when supported, and reports an ordinary-execution fallback when it is not.",
       "evidence": [
         {
-          "resource": "repo://agent/sandboxes/state.py#L287-L316",
-          "version": "repo-lines-v1:sha256:7ab3b6f157a62afb425e852b198784d1bc701931479814687dfbbc14e818e933:eyJzZWxlY3RlZExpbmVDb3VudCI6MzAsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6Ijk3YmIxOTBkZGZmNWFiMTYxY2E3MjAyYjhhMzUxZGQ1YTEwNmRhMGUyNTc1ZmY5NzdhMTY5NGRiNDcxMzY3OTQiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjU5ZjA2ZWQ5NTJmYjhiMTViMjI5NGQ5NTIxMjVkMTI2ZmRkYWIwYjE0NWUzYjIwNmRhMjRmNjc2MTI3Y2Q1OWIiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjY2NmQ5NzQ4ODMyZTAwZjkxYzhjMzkzMjUwZmRlOGNmZWJkYTc2YjlhMGRmODhhZmEyM2QzN2YxM2Q1ZDljZmYiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImQwMjE3NjhjNTk3MTU2OGZkYWVlZTdiYzZkODU5ZTM2YjY3ZGY3NjI0YmM2MGFlMTQyMjE4MzIyOTExZDRhYWQifQ"
+          "resource": "repo://agent/sandboxes/state.py#L279-L321",
+          "version": "repo-lines-v1:sha256:012b72d8f7e3fae69208b62d831263bb3199e8f470880109ebd011b3c6ede603:eyJzZWxlY3RlZExpbmVDb3VudCI6NDMsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjAyYmMyNTM3Mzg5ODdiYjY0YjE5MWFlYmI1OTNmODc3NWYxMDZkMDg2NGE5Nzg5YTFhZDIxMDY5NTMxZGEzZjYiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjU5ZjA2ZWQ5NTJmYjhiMTViMjI5NGQ5NTIxMjVkMTI2ZmRkYWIwYjE0NWUzYjIwNmRhMjRmNjc2MTI3Y2Q1OWIiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImQ5NTYwOTg5NDJlY2ZjOTUyMTk1YzRlNzA3OTc5OTk2OGIzYzBjODE4NzBkOWE2MzhmZDQxZWYzYTE1NmQxYTAiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImQwMjE3NjhjNTk3MTU2OGZkYWVlZTdiYzZkODU5ZTM2YjY3ZGY3NjI0YmM2MGFlMTQyMjE4MzIyOTExZDRhYWQifQ"
         },
         {
-          "resource": "repo://agent/sandboxes/state.py#L53-L61",
-          "version": "repo-lines-v1:sha256:26466a8c75330899dbb9ca6605cdb7d1e06cf7bdac2c139996a9023e5732deb0:eyJzZWxlY3RlZExpbmVDb3VudCI6OSwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiNDQyM2NlZWQ3NTE5NDU0NjI3YWI5MmM2ODY5MTRjYjBmNDA5YTg1MGFjNDdiYzRhN2Q2ZTExNDE2MDRmZTlkYSIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiYTZhNzE1MjU3MmVlODRmMTA5MDZjNzRiOWYyYTkyNDM0ZGRhYjBlM2M0MjgxM2IwNGU1OTdlZmNlYzk1MWIyNiIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiOTc4MmUxZmU0MTU3YThmNWM5MTU2NTM0YjExN2E0OGNlZGNhMmNkMmI1NDc2MDQzZjBjOTlmN2UyODM1ZWZhNyIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiZDMzMTA5NWQ1ZmQ5NDk3ZjQzZGQ2OTAxYTkzZjc0M2JiNjU1NTA2YTA1MGUxNWMyODE1YmYxYzlkNGYxMzI5OCJ9"
+          "resource": "repo://agent/sandboxes/state.py#L54-L62",
+          "version": "repo-lines-v1:sha256:26466a8c75330899dbb9ca6605cdb7d1e06cf7bdac2c139996a9023e5732deb0:eyJzZWxlY3RlZExpbmVDb3VudCI6OSwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiNDQyM2NlZWQ3NTE5NDU0NjI3YWI5MmM2ODY5MTRjYjBmNDA5YTg1MGFjNDdiYzRhN2Q2ZTExNDE2MDRmZTlkYSIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiYTZhNzE1MjU3MmVlODRmMTA5MDZjNzRiOWYyYTkyNDM0ZGRhYjBlM2M0MjgxM2IwNGU1OTdlZmNlYzk1MWIyNiIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiNTZjMWZjN2FkMTFlYjc3M2MyOGVkNTFkMmQzMDU2OWZmZDhkZDk2NDk1MDliNGE0MDNhNzcwM2I4NGVmOTNjNyIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiZDMzMTA5NWQ1ZmQ5NDk3ZjQzZGQ2OTAxYTkzZjc0M2JiNjU1NTA2YTA1MGUxNWMyODE1YmYxYzlkNGYxMzI5OCJ9"
         },
         {
-          "resource": "repo://tests/sandbox/test_sandbox_state.py#L79-L117",
-          "version": "repo-lines-v1:sha256:be2d92f781f350924c734fa9e8113a6632d6347467df434a0b1706110c1855ea:eyJzZWxlY3RlZExpbmVDb3VudCI6MzksImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjJjNTBhYWM1N2U5OTYwNDNiYzI4MzY1YjI2M2UyZjU3MWZkZDA4MDc0YTZmZTA0YTcyMjNkMTE5YWVmMzQ5ZTYiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjZhNTJiNzIzZjRkMTgwN2E5M2E2NDJmNjg4MzVhOTNjYjgyNTc0ZmZiYTUwYTk3YWQ4MDdhMzZmNmM3NzQwYTgiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImIzZGYyYWNmMDZlOGMzZjAzYzcxMzVjNmU4YWM1YTljYTU0MzJhYmUwNmE3NGFjYTBmZGQ5YTUzYTAwOGY5ODciLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjVhYjdiMjcyYWI0ZTI1MTc1YjVmZDI0YzEzY2ZlNTYzNDI1MTRjMDI3OTQ2ZjAzYjUzMDVkZjIwMzM3ODc5ZjkifQ"
+          "resource": "repo://tests/sandbox/test_sandbox_state.py#L82-L120",
+          "version": "repo-lines-v1:sha256:99e0e548d383e4f47d6b1a513461d9bf8bb3e5dd0756ae9231de9b96b557545b:eyJzZWxlY3RlZExpbmVDb3VudCI6MzksImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjJjNTBhYWM1N2U5OTYwNDNiYzI4MzY1YjI2M2UyZjU3MWZkZDA4MDc0YTZmZTA0YTcyMjNkMTE5YWVmMzQ5ZTYiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjY4NWQzNTM1ODNlYjdmNjc4NTQyM2ZkOGFmNDJjZDA0MWIyODg3Zjc0MDBlYWZlOTdhZGYyMmVkYzM2NWExYjciLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImIzZGYyYWNmMDZlOGMzZjAzYzcxMzVjNmU4YWM1YTljYTU0MzJhYmUwNmE3NGFjYTBmZGQ5YTUzYTAwOGY5ODciLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjVhYjdiMjcyYWI0ZTI1MTc1YjVmZDI0YzEzY2ZlNTYzNDI1MTRjMDI3OTQ2ZjAzYjUzMDVkZjIwMzM3ODc5ZjkifQ"
         }
       ]
     },
     {
       "id": "claim_8512c79985af41acbf674c992c457641",
-      "statement": "`create_sandbox` selects a lazily imported provider factory from `SANDBOX_TYPE`; supported values are langsmith, daytona, modal, runloop, e2b, and local, with langsmith receiving creation overrides and synchronous factories offloaded to threads.",
+      "statement": "`create_sandbox` selects a lazily imported provider factory from `SANDBOX_TYPE`; supported values are langsmith, daytona, modal, runloop, e2b, and local, with LangSmith receiving creation overrides and synchronous factories offloaded to threads.",
       "evidence": [
         {
           "resource": "repo://agent/sandboxes/providers/registry.py#L23-L94",
-          "version": "repo-lines-v1:sha256:081bfbeee617f0462bc187d8cea890480e19a391ebf4ee6ae222517c5781117d:eyJzZWxlY3RlZExpbmVDb3VudCI6NzIsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6Ijg3N2UzNzE5ODFmZDljNTYwMDU0ZTFhMWZmY2FlODkyMmEzODY0OGJiNjQxMjdkYjU3YWM4NDE5OTUzZjIwZTAiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImU2MTcwODc1ZThjYTQxYmJhMzVmMGNmNmQyOGViMjk2N2YwMDE0N2M1ZWIxNzVmNmM4ZDcyOWVkZWQ3NjdjNjQiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjAyYjI1NzhkODVmMDU0N2ZhOTE3ZGE3YjE4ZDIwNzg5OTE4MjlhNTM4MmM3OTEyOGJlMTZmNmYxMDg4ZjdhYjUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImY1ODljNzUzOGZiMDliOWFjNjE0ZjNkYTY4ZWUwNGY2MjFkZjJkZjRjZGRmZjAzNzY0OGNlMzQyMjAyNGI0MmIifQ"
+          "version": "repo-lines-v1:sha256:93d965aed6a5b3aeb15e094f13eb49d6c226ffb3f400a20fcf21d7687d76ac12:eyJzZWxlY3RlZExpbmVDb3VudCI6NzIsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6Ijg3N2UzNzE5ODFmZDljNTYwMDU0ZTFhMWZmY2FlODkyMmEzODY0OGJiNjQxMjdkYjU3YWM4NDE5OTUzZjIwZTAiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImU2MTcwODc1ZThjYTQxYmJhMzVmMGNmNmQyOGViMjk2N2YwMDE0N2M1ZWIxNzVmNmM4ZDcyOWVkZWQ3NjdjNjQiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjAyYjI1NzhkODVmMDU0N2ZhOTE3ZGE3YjE4ZDIwNzg5OTE4MjlhNTM4MmM3OTEyOGJlMTZmNmYxMDg4ZjdhYjUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImY1ODljNzUzOGZiMDliOWFjNjE0ZjNkYTY4ZWUwNGY2MjFkZjJkZjRjZGRmZjAzNzY0OGNlMzQyMjAyNGI0MmIifQ"
         }
       ]
     },
     {
       "id": "claim_f2bc0072b66348c0b36c6bd7e580f8af",
-      "statement": "New thread sandboxes use an environment’s ready snapshot when available or the admin base snapshot otherwise, and carry environment resource settings and create parameters into provisioning.",
+      "statement": "New thread sandboxes use the selected environment’s ready snapshot, resource settings, and create parameters when a workspace is loaded; an explicitly base-sourced or absent workspace configuration passes no snapshot so LangSmith uses its root snapshot.",
       "evidence": [
         {
-          "resource": "repo://agent/sandboxes/lifecycle.py#L59-L89",
-          "version": "repo-lines-v1:sha256:09e2f17c55cf781ad3a9d2ed1993d6f51fe89c9557239cd91f6d9259713f0133:eyJzZWxlY3RlZExpbmVDb3VudCI6MzEsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjBlM2ZiMWU1OGZiYzkwNDc5NGQ1MDczMTRmYTkxYzlmMmYxOThjODhkM2ZmMzk1ZTAwODI4OTAxYzM3ZGM5MWIiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjEzY2VmYWU5MTkzMzZlMzgzZmZhNGU2YTVmMjM5YjQyYmE1ZDZjNjNhYjdlYTJkOTgxYWQ3NWU5Nzc4N2JhZTkiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjE2NDcwMDQyZDgwYTJiODQ0ZDhmODc1ZGVjYmEzNzJlYWMwNzEyMmQxOTYzNWE2MDViMWQ5NDRiYzg3NWVmMDQiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6Ijg4YzEyMzhjMDU5MTk1OTNmZDQ3NGFlNWExZmVkZjk3MmY5ZjczYTIwNzBhMmE5MmJlMGVmZDZjMzg5MjcxN2IifQ"
+          "resource": "repo://agent/sandboxes/lifecycle.py#L64-L149",
+          "version": "repo-lines-v1:sha256:fc9f42dc3d126dcf9bf6665a9bbadf3462ad276dbafd7a6673bdd427733f2f55:eyJzZWxlY3RlZExpbmVDb3VudCI6ODYsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjBlM2ZiMWU1OGZiYzkwNDc5NGQ1MDczMTRmYTkxYzlmMmYxOThjODhkM2ZmMzk1ZTAwODI4OTAxYzM3ZGM5MWIiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjEzY2VmYWU5MTkzMzZlMzgzZmZhNGU2YTVmMjM5YjQyYmE1ZDZjNjNhYjdlYTJkOTgxYWQ3NWU5Nzc4N2JhZTkiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImJmN2JiMjQ3M2E1MWJiNTIwMmZmYWFkNjE4MjkyOTM4YWVlMmMxMzg5N2JkMDE5ZjA1MWY5M2JiYTA5YzNjZTgiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6Ijg4YzEyMzhjMDU5MTk1OTNmZDQ3NGFlNWExZmVkZjk3MmY5ZjczYTIwNzBhMmE5MmJlMGVmZDZjMzg5MjcxN2IifQ"
+        },
+        {
+          "resource": "repo://agent/sandboxes/providers/langsmith.py#L737-L755",
+          "version": "repo-lines-v1:sha256:4d65d5fb5720360cca2d749122b581dbb6ad6774216d49944cbcbc314766b9ba:eyJzZWxlY3RlZExpbmVDb3VudCI6MTksImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImM3NmJhMDk0NGJmZmU5YjExYjEyNTVlZTYyZTE4NzFjZmUxMDhlZDdhYWJmNGNmYzNjMTAwZjY3MDkyOTA2MzYiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjUxMDM0ODFjNTdkMGYwZGMwZjc2Y2QyY2M4YjM2MDRjNGU4Mjk2ZGE0MTIyYWRkMTllODE3NDVkYzdlMzMxYTYiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjNlYjBkNTU1NjU1MzJjZDYzNWJkNmI5YzUxYTRkYmQ1NDkxYzc1YzZlMjVhZTM0MjA0Zjk3Yjk4ZmU3NWYwYjYiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjJkNDExNjliYTI5MTFhZTZkNDhlYmExMWRjNmIyNmEzMmYyNGE5OWUzZjEzY2M1NzIzOGJkODJhMzQxNjZiNmMifQ"
+        },
+        {
+          "resource": "repo://tests/sandbox/test_sandbox_recreation.py#L91-L105",
+          "version": "repo-lines-v1:sha256:4ce0a22cffb7428885c13ce0ca1312a15cd97d3b2ace97be0da18df5fb906f96:eyJzZWxlY3RlZExpbmVDb3VudCI6MTUsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImJkOTk0MmRlYjdkYmFiYzExNGIxYzQ4ZDAyZGE0NjM4NmU5YWNhNTE1YTUyZmI3YjNjNDEyZGM2Mjc5MjFiMDgiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjAxYmE0NzE5YzgwYjZmZTkxMWIwOTFhN2MwNTEyNGI2NGVlZWNlOTY0ZTA5YzA1OGVmOGY5ODA1ZGFjYTU0NmIiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjIzNWZkOTUzYzNjMzQ3M2FhMjkwYTZkYWEyYmU3ODk1ZGY1Mjg4NjgyYjE2NDhmOGUxZDU2NmFhZjQ2MmMzMGYiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6Ijk2Njg0Mjc0ZmRkN2JiNWVhNjdlZDg3NGVlNzAyNzg4Njk0Mjc1MzY4OTZjYzA4Y2VmM2JhNGE2NTk2MDI5ZTYifQ"
         }
       ]
     },
@@ -69,7 +81,7 @@
       "statement": "LangSmith startup validation checks configured numeric sizing and retention values, rejects negative retention TTLs, and validates extra create JSON before the first sandbox creation.",
       "evidence": [
         {
-          "resource": "repo://agent/sandboxes/providers/langsmith.py#L752-L780",
+          "resource": "repo://agent/sandboxes/providers/langsmith.py#L676-L704",
           "version": "repo-lines-v1:sha256:1f52a87b62a01263ac80752a9e5e874885df595479b78021b6bf15dcaa46c7ef:eyJzZWxlY3RlZExpbmVDb3VudCI6MjksImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjgyMGI0NTNmNWUwYzkyZDVmNmMyNTFhNWVhMTk2MGQ3MmYzYmQwNzk1NmFlODU3ZGEyMGUzMWE4OGM1NTk2OWYiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjZlZDhhZGJmMGNhMjVhNmFlYWI4MDU5ZmQ5MzAyNDcxZTE1ZDI4OGUwNDBjYzAyMTQ1YWViNTJhMDQ0MzZhYWIiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6Ijk0YWY3YTJmMDQ1ZWVlZjJlY2M0ZDQyNjU0MDQ5MjhmZDIyMTUyMmVlNjBhMzg0YTU0OTY3MDc3NzZjNmRmYjkiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjA5YmI0NzMyNTg0ZmM2NjJmMTc0YTkwMDRlNWZhYTMyODhiYTRjZmY5ZGY3OGE0OTAzZWRjYTE1NDhlZDY0ODMifQ"
         },
         {
@@ -83,8 +95,8 @@
       "statement": "LangSmith command retries are limited to `SandboxRetryableConnectionError`, which represents a rejected WebSocket upgrade before the command frame was sent; retries are bounded and use exponential jittered backoff.",
       "evidence": [
         {
-          "resource": "repo://agent/sandboxes/providers/langsmith.py#L683-L692",
-          "version": "repo-lines-v1:sha256:9ed1d32f678b42fecee7f8c9476098d5a72d792d06dbc9fc2c23992231af8d93:eyJzZWxlY3RlZExpbmVDb3VudCI6MTAsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImQ4ZWQyOTAyMWJmMTExOGE4MzdhY2RjZGNkYzk0MGI1YTczOTVmZDdlNzExNmMwMmRjMGUzNzg3ZjRmMWQ4NjgiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjU5MDlhNTNhNjE4ZDAyOGUxZDMwMDBjMGE3YWJjZWVjYmU1ZmIzN2Y0ZTUxMWVmZTQ2NjQzZmFkNmU2Njg3MmYiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImZjZWJmZjk2MDdjZDM2MmRjMjAwZTEyOTVkYmMzOTAwNjNkZTgxZTcwNTJkZWJmZDE4OWVmOWI4OTQ2YTQzNzgiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImQwM2Y1MWQwMTRmYTlmODNkZDliYmRhYmNiNTY5YjAzYWNmNWY0ZDY1M2JmNTljZDQwZjI2MDA0Y2U3Nzc5NGMifQ"
+          "resource": "repo://agent/sandboxes/providers/langsmith.py#L607-L616",
+          "version": "repo-lines-v1:sha256:9ed1d32f678b42fecee7f8c9476098d5a72d792d06dbc9fc2c23992231af8d93:eyJzZWxlY3RlZExpbmVDb3VudCI6MTAsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImQ4ZWQyOTAyMWJmMTExOGE4MzdhY2RjZGNkYzk0MGI1YTczOTVmZDdlNzExNmMwMmRjMGUzNzg3ZjRmMWQ4NjgiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjU5MDlhNTNhNjE4ZDAyOGUxZDMwMDBjMGE3YWJjZWVjYmU1ZmIzN2Y0ZTUxMWVmZTQ2NjQzZmFkNmU2Njg3MmYiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjgwZTJiNzE2YjQxNGU2MTc0MzcxM2NjMjVjMTEzMWRiYzRmNjY0YTliYzFlMzg4YjAyNzllOTcwZjg4NDNiMzYiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImQwM2Y1MWQwMTRmYTlmODNkZDliYmRhYmNiNTY5YjAzYWNmNWY0ZDY1M2JmNTljZDQwZjI2MDA0Y2U3Nzc5NGMifQ"
         },
         {
           "resource": "repo://agent/sandboxes/retry.py#L13-L61",
@@ -94,15 +106,15 @@
     },
     {
       "id": "claim_fdc7171f0e3e4eb7951f6640f0327d40",
-      "statement": "`ensure_sandbox_for_thread` reuses a cached backend, reconnects through a metadata ID, or creates a new box; thread dispatch interruption is relied upon to avoid concurrent provisioning without a cross-process sentinel.",
+      "statement": "`ensure_sandbox_for_thread` reuses a cached connection keyed by the durable metadata ID, reconnects through the provider when needed, or creates a new box; thread dispatch interruption is relied upon to avoid concurrent provisioning without a cross-process sentinel.",
       "evidence": [
         {
-          "resource": "repo://agent/sandboxes/lifecycle.py#L290-L358",
-          "version": "repo-lines-v1:sha256:66f228a344eb1050f5e3ee8eeeba47e7cb2600c0cafe852aced7251be2d8ecfc:eyJzZWxlY3RlZExpbmVDb3VudCI6NjksImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjRmODdhYzZjOWY4NmZlNGE1ZDExOGQ3YjQ5NzNkZjU5NjVhN2ZkNzMzZTI3MmY5ZGVhYTkyYTdmMmM0YmUzY2IiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjU5MDlhNTNhNjE4ZDAyOGUxZDMwMDBjMGE3YWJjZWVjYmU1ZmIzN2Y0ZTUxMWVmZTQ2NjQzZmFkNmU2Njg3MmYiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjY3ODY2NWE0YmU4NTg4NWI3YmNlNmUzY2RhNmNiZGQ3OWJlY2ZjN2Q4ZjdjOTcwYWQ5NTdjMDk4ZWFkNDdiZjQiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjMyOTMxZTVmZGQ5YzM0ZTNhZTZmOGFmZWNlOWZhOTM0ZjliMDEzZDQxMGU0ZWQ3NjdjNDhlYzg3ZDFiZjZmY2EifQ"
+          "resource": "repo://agent/sandboxes/lifecycle.py#L355-L472",
+          "version": "repo-lines-v1:sha256:09d22bb6e333a4e85490675b425716fa94971e17cdf14b0b20820ce56f562188:eyJzZWxlY3RlZExpbmVDb3VudCI6MTE4LCJmaXJzdFNlbGVjdGVkTGluZUhhc2giOiI0Zjg3YWM2YzlmODZmZTRhNWQxMThkN2I0OTczZGY1OTY1YTdmZDczM2UyNzJmOWRlYWE5MmE3ZjJjNGJlM2NiIiwibGFzdFNlbGVjdGVkTGluZUhhc2giOiJhZWVjNGM1NmEzMGU1NDI3ODZlNGY0ZTQyZDlhMmUxOWFhOTUzNmJmMTI5ZmFiZTcxOTdhYWVhNTQ0YWEzMmZkIiwicHJlY2VkaW5nQ29udGV4dExpbmVDb3VudCI6MywicHJlY2VkaW5nQ29udGV4dEhhc2giOiI2Nzg2NjVhNGJlODU4ODViN2JjZTZlM2NkYTZjYmRkNzliZWNmYzdkOGY3Yzk3MGFkOTU3YzA5OGVhZDQ3YmY0IiwiZm9sbG93aW5nQ29udGV4dExpbmVDb3VudCI6MywiZm9sbG93aW5nQ29udGV4dEhhc2giOiJhMzNlY2ZiY2E2NGEzZDMzOGU1NDVlNDlkMzU2MDRhYzc4NWIxNTBmNGIzODM4Yzg4ZDc2MTU2YTRmYjdhZjdmIn0"
         },
         {
-          "resource": "repo://tests/sandbox/test_stale_sandbox_creating.py#L1-L46",
-          "version": "repo-lines-v1:sha256:1ab9dad5cd65e5515de587cf5e0b46e4bcba3ccaef29aac2ef3584889b9479f1:eyJzZWxlY3RlZExpbmVDb3VudCI6NDYsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjZmMzQ2MTliZmFhM2UyNGU2M2ZjOTBjNGYwYTY3NDIxZDNhYWQ3MGQ3YTlkOGU1OTdhMTRlOTRjNzcyOGJiZDQiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQ4OTNmNDBlMzc4MWViODk2YzgyZDA0NmEwODA2N2ExMWUzNWNkZjJmMWRmYWYyNmZlYTkwYjhkYjY2NzY0MTMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjowLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjIzNWZkOTUzYzNjMzQ3M2FhMjkwYTZkYWEyYmU3ODk1ZGY1Mjg4NjgyYjE2NDhmOGUxZDU2NmFhZjQ2MmMzMGYifQ"
+          "resource": "repo://agent/server.py#L954-L966",
+          "version": "repo-lines-v1:sha256:13773417101d3ddb58f9e375f472af495ccf9a2e30c0fa2201555dec4e984dc8:eyJzZWxlY3RlZExpbmVDb3VudCI6MTMsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6Ijg1YzU4YjYyMGRlYjFiNmNiMGQxMTUyNGI2NjU4NjFjMjcyYTc5MjRiNGY1NzhjNjJmMjgxNzFhMjE2ODNlZTciLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImFlMzM2NmQyNDQ3N2RhMjc2Y2YxZTU1NjRhNTFjMjkwMDE4YjFiMTBlNTgyMjNmYjIyYTQ0ZjllMGY3ZDYyZTAiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImUyODdlNTZhN2Q1MDRiYmJiMDA4YjRkMjBmZjQyOTEwMDYxNjc0OTU3MTJjMjQyM2ZhNGRkNzJiMDZiYWM3YWUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImQ2YTdjNDJjMDNkYmFiMzFhMzMyNmIxNzEyYTI4MjIxMWM1YWM3YTVhODZlMWM1Yjc0NjAyNmQ4ZDgyNGYwOWYifQ"
         }
       ]
     },
@@ -111,12 +123,12 @@
       "statement": "Sandbox initialization writes metadata only after creation and initialization, then publishes the backend last; failures before those steps do not expose a new backend through the thread proxy.",
       "evidence": [
         {
-          "resource": "repo://agent/sandboxes/lifecycle.py#L405-L419",
-          "version": "repo-lines-v1:sha256:d2a6e2174762fd5259cd565c53763874427a9facd395c28695e6ba340366b3d8:eyJzZWxlY3RlZExpbmVDb3VudCI6MTUsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjYzOTBjM2M3ODRkMDYzZTQ3Yzk4MDBlNDAzZmYwNjIzYjFlNGI3NzVmNDM2YjJhNzQzMTUwZWI5OTYyOGM0NDMiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImFlZWM0YzU2YTMwZTU0Mjc4NmU0ZjRlNDJkOWEyZTE5YWE5NTM2YmYxMjlmYWJlNzE5N2FhZWE1NDRhYTMyZmQiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjlkZDg2MTJiOTNiODBiMDI3NjAxNDgxYzdlZWFlNDhjMWI5ZDdmMWQwYjBkOTYxMDZhY2ExMjQ5MDkxNTk2NmMiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjM0NzY0MTU2NjA2OWI4MGQ1OGZmOTE1MTJkZTg4NmE0N2UzNjM3YTgzZWQxZjA3YzM4MWFlNGQ3ZTUzNmI1ZjAifQ"
+          "resource": "repo://agent/sandboxes/lifecycle.py#L458-L472",
+          "version": "repo-lines-v1:sha256:12ce40d7e7994c8ec5012208de926153b6366f50d5cc52ca006e8c5455d8d064:eyJzZWxlY3RlZExpbmVDb3VudCI6MTUsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjYzOTBjM2M3ODRkMDYzZTQ3Yzk4MDBlNDAzZmYwNjIzYjFlNGI3NzVmNDM2YjJhNzQzMTUwZWI5OTYyOGM0NDMiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImFlZWM0YzU2YTMwZTU0Mjc4NmU0ZjRlNDJkOWEyZTE5YWE5NTM2YmYxMjlmYWJlNzE5N2FhZWE1NDRhYTMyZmQiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjlkZDg2MTJiOTNiODBiMDI3NjAxNDgxYzdlZWFlNDhjMWI5ZDdmMWQwYjBkOTYxMDZhY2ExMjQ5MDkxNTk2NmMiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImEzM2VjZmJjYTY0YTNkMzM4ZTU0NWU0OWQzNTYwNGFjNzg1YjE1MGY0YjM4MzhjODhkNzYxNTZhNGZiN2FmN2YifQ"
         },
         {
           "resource": "repo://tests/sandbox/test_sandbox_publish_ordering.py#L17-L51",
-          "version": "repo-lines-v1:sha256:9fbdabc1d4b648e22647d574fa6ea5b8150416b87a0748f268bb443307323b38:eyJzZWxlY3RlZExpbmVDb3VudCI6MzUsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImJkOTk0MmRlYjdkYmFiYzExNGIxYzQ4ZDAyZGE0NjM4NmU5YWNhNTE1YTUyZmI3YjNjNDEyZGM2Mjc5MjFiMDgiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjNjMTJkNmVjNzkzNjZjNmQ2MWJiNDMwNDEwNWMyMGNjOWRhZjcxMmFjNzYwZWNjM2FmNDk0OTU5YmI2NGIyNjAiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6Ijc4MzczNjZmYTE4ODg3OWU5YTE0OTc2MzYzMGFjNTZhMjk0OTMzNDQ5M2M2ZDc3YWFlZTRkOWY4ODQ1NmJjOTciLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjVhYjdiMjcyYWI0ZTI1MTc1YjVmZDI0YzEzY2ZlNTYzNDI1MTRjMDI3OTQ2ZjAzYjUzMDVkZjIwMzM3ODc5ZjkifQ"
+          "version": "repo-lines-v1:sha256:d5ed498eeb9c8d310934d918ed59bbe1d541babe536acd2c7d90edadab724a7b:eyJzZWxlY3RlZExpbmVDb3VudCI6MzUsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImJkOTk0MmRlYjdkYmFiYzExNGIxYzQ4ZDAyZGE0NjM4NmU5YWNhNTE1YTUyZmI3YjNjNDEyZGM2Mjc5MjFiMDgiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjNjMTJkNmVjNzkzNjZjNmQ2MWJiNDMwNDEwNWMyMGNjOWRhZjcxMmFjNzYwZWNjM2FmNDk0OTU5YmI2NGIyNjAiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6Ijc4MzczNjZmYTE4ODg3OWU5YTE0OTc2MzYzMGFjNTZhMjk0OTMzNDQ5M2M2ZDc3YWFlZTRkOWY4ODQ1NmJjOTciLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjVhYjdiMjcyYWI0ZTI1MTc1YjVmZDI0YzEzY2ZlNTYzNDI1MTRjMDI3OTQ2ZjAzYjUzMDVkZjIwMzM3ODc5ZjkifQ"
         }
       ]
     },
@@ -125,8 +137,12 @@
       "statement": "A deleted sandbox (`SandboxGoneError`) is always replaced, whereas an unreachable sandbox is not replaced by default because it may recover and may contain the only uncommitted working tree; a chosen replacement failure is surfaced as `SandboxUnreachableError`.",
       "evidence": [
         {
-          "resource": "repo://agent/sandboxes/lifecycle.py#L362-L402",
-          "version": "repo-lines-v1:sha256:f3ad25a4fbb22a1d5fbd9efc8dae0e79da5dac9c1ac3c0958ab83f16da66bb46:eyJzZWxlY3RlZExpbmVDb3VudCI6NDEsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImI1NjljYjA5MjgwZWUwNzgxOTQ1ZTQ4ZDQwNDFiZDJkZmFhZTY5MWFkMmVhYmY1ZDNjYmEwODQ2YzcyMTZjYWEiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjA1ZjcxMmRhOTQxMDFiMTNhNWQ4OTExZDZhMWVlYTU2ZTgzMGEzNjNjMGE0NThjYmU2MGZhNDhjZWUwNWFiZDIiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjMyOTMxZTVmZGQ5YzM0ZTNhZTZmOGFmZWNlOWZhOTM0ZjliMDEzZDQxMGU0ZWQ3NjdjNDhlYzg3ZDFiZjZmY2EiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImU4ZDM3OTJjNzc5OWI5NWI4NTNiY2JmNzE2NzdmMGEwYjc5NzdjY2VkOTdlMTBkNDI0YTM5NjRmYmZmMzQ0NGEifQ"
+          "resource": "repo://agent/sandboxes/lifecycle.py#L316-L352",
+          "version": "repo-lines-v1:sha256:11a46a21756d9d498b2cf400ed43104da37febd43259a5c1f74a9e969e9fcd9e:eyJzZWxlY3RlZExpbmVDb3VudCI6MzcsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQzYmIyYzZhNzY2ZDBkNjZiYTlmYjBiZDRiMDlkY2QzMTNlZTc4YTI2Yjk1YWEyMDU4NTU0MDViNTFhNWI3MmYiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjY2MWM2ZmRkZjZjYmQ0NjRjNzM2YjhkNTBjZGQwNWM4ZTAxZGYyYjkyZmI5NTFlMzgxNzA1ZmFiZWYwNzI4ZjMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImY4MDM4MDNiMjUzYjAwZGI3YzVmMTQ5YjA3NTA5ZmU5YjUyOTNiODY2MTNlNTdkYThkYmQzZjY1NWM3MmFjODUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImI4MmNlNDQxOWE2NTllY2UwNDZmZTU3MzVhZDBjMzlmYmNmYmZjZjE3N2IxOWJjZjlkOTExZWQ5NGY3YWU3MzkifQ"
+        },
+        {
+          "resource": "repo://agent/sandboxes/lifecycle.py#L415-L455",
+          "version": "repo-lines-v1:sha256:e227c8ab189b31fb093aa832f94890498aea6433b07357f2071c5a90acc72c0f:eyJzZWxlY3RlZExpbmVDb3VudCI6NDEsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjU5YzcxNDk3Y2ZjODJlNmZlMGZmZmYwYjA2MjM2NWVmNDk3MTUzODhhNjU0N2I5N2ExMzAwZjdlZWEyOGYwMmQiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjA1ZjcxMmRhOTQxMDFiMTNhNWQ4OTExZDZhMWVlYTU2ZTgzMGEzNjNjMGE0NThjYmU2MGZhNDhjZWUwNWFiZDIiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjI3NTZiYzMyZWUwNmJkZGQ3YzU2MWQ5OTUzZjUzMjM3MmU3ZDNiZGNlMmE4YjViYjNiMmU2MjgxZGVlYzEwZTgiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImU4ZDM3OTJjNzc5OWI5NWI4NTNiY2JmNzE2NzdmMGEwYjc5NzdjY2VkOTdlMTBkNDI0YTM5NjRmYmZmMzQ0NGEifQ"
         },
         {
           "resource": "repo://agent/sandboxes/providers/registry.py#L15-L20",
@@ -140,11 +156,11 @@
     },
     {
       "id": "claim_28493a2098884df3923e58235a642cd0",
-      "statement": "Only reviewer calls allow replacement of an unreachable sandbox because review repository preparation re-derives the checkout each run and reviewer threads persist per PR across pushes.",
+      "statement": "Only reviewer calls opt into replacement of an unreachable sandbox because review repository preparation re-derives the checkout each run and reviewer threads persist per PR across pushes.",
       "evidence": [
         {
-          "resource": "repo://agent/reviewer.py#L953-L964",
-          "version": "repo-lines-v1:sha256:7e03fd4925dbbc9e04e8229da1e26cbcdc601a01d6356f209f5fc73323192756:eyJzZWxlY3RlZExpbmVDb3VudCI6MTIsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjczNzZiY2ZlN2M4ZDdlZWM4NTVlMDE5NzJjOTUwYzIyZWJmMDg4Yjc0MzE4ZDQ1MTQwYzEwZWRjOGY0MzBjZjciLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImFmZjA5MjBmYTdlMzQxMjI3ZjA0MDQxZjc0Yjc5YzgxYjRjYmM2ZjQ5NDYzZmVmY2M3NWQ0MzUyNTI0YTQ4MjEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjdmMWI1NmRmMjI3ODA4MDBiMjBmODExZWJiYTVkYTNkNjlmMzNlZjQwMDU2ZTNmNmM4YTJiY2FmYmYxOTJkMWIiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjhjYzRhN2QxY2M3OTZhYmEzZTQ2NzIzMzI3ZjUxN2U5ZjgxMTk4MmQyNTBmMDcwMjk4NmU0YjU3NjRhZDk1ODkifQ"
+          "resource": "repo://agent/reviewer.py#L614-L645",
+          "version": "repo-lines-v1:sha256:ebbc01a96ec60e496d810a4824874f0a5083a2b7a2d20967f607d2863f143dac:eyJzZWxlY3RlZExpbmVDb3VudCI6MzIsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjU2MzY0MmU3MjczZGQzMjIxNmVjNjU3NjUxZjk4ZDQwNDYwZjc1YjA3ZDYxZTUzNzM5OGQ4Mzg0ZDQ5Zjk3ZWYiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjMwYzFmMTg4ZjE0MmVkN2E4MjQ2ODBiMjA3MTcyYzU1MTliYzYxNGE0OGZkYTdjZjE2N2VkYjhkZGY3OTk1NmMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImFkYTBlNjdlNDFiNGUzYTA5NjY2YjQ3ZDkxY2Q2OTE3ZmZjNmExNjY5YjU1Mzk3Nzk4ZmRhNWZmYTllZmZlYzMiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjM2OTI2YWMyYmJjYzE5NjUwZDg2NmUxODVhODA1YzllNTFhMTgyMzhkYmM0NWRhZTc5YWU2NGFiY2YyM2NhNzIifQ"
         },
         {
           "resource": "repo://agent/sandboxes/repo_prep.py#L73-L116",
@@ -157,84 +173,66 @@
       "statement": "For LangSmith sandboxes, GitHub authentication is injected by proxy rules as a Bearer header for `api.github.com` and Basic authentication for GitHub web hosts, while the sandbox receives only a placeholder `GH_TOKEN`.",
       "evidence": [
         {
-          "resource": "repo://agent/sandboxes/lifecycle.py#L148-L180",
-          "version": "repo-lines-v1:sha256:37ee6d7d7f4e4e5e3286fc741081293b5181d654153056abde2f84d38b0f500b:eyJzZWxlY3RlZExpbmVDb3VudCI6MzMsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImY3NmRjYmI1ZTYwM2I3NzlmMmU3NjUzNThlN2I2NTJiMzQ0NjJjYTEyY2U2MzZlYzdjOWRmMzRjNzIxMTk2NWYiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjMwYzFmMTg4ZjE0MmVkN2E4MjQ2ODBiMjA3MTcyYzU1MTliYzYxNGE0OGZkYTdjZjE2N2VkYjhkZGY3OTk1NmMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjZmMzVhMGE1NjljYWI5YWZjYjdhMGQ1ODE2ZjkxZTVhYzQ0MzNjNDNmYmM5MWQzMTRlODY3MjEzODZmZjdjNTkiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImY3NzAwYzllZTIxZjA1YzAzMmM2OGI2Yzc1MGU3Y2E3MzgzYThmN2E0MzI3ZDczNmQ5M2VjOTNjYjE1MjJhNTcifQ"
+          "resource": "repo://agent/sandboxes/providers/langsmith.py#L150-L192",
+          "version": "repo-lines-v1:sha256:195f145eae73a05878098783f44fd7370f9a5b523f71508c7f5b20e1f8576252:eyJzZWxlY3RlZExpbmVDb3VudCI6NDMsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjUwOTBhNGZmZmY3N2Q5YzA2ZjFjMzRkNDAwZWMwYTc4M2VlMTFhNjFmZWQyNTU2NzM1OTcyNmFmMGE4MDA0ZWIiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImFkZDI0NDU4MmI2ZmIwM2QyM2I4NDE1YWJlY2QzNDZiMGM5ZjQ2NmI2Zjc1MmIwNjgxODljZTdlOWEyZGMzNTAiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjBhOTA4NGUzZTQ0MjYzMmM3ZjMwNjA5OTAyYzg3NjA0MTY1ZmNiNDgyZmQxZDIyYjZhYmI4MzZhYWE0Y2Y1NDUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjBiM2UxM2M0MDE0YjhlZmI2NjBlMGRmNDVhNDZmMGUxNmJmMDlkZWI0ZmRjNzhiZWI1NDliOTA5M2FiZjY2OWYifQ"
         },
         {
-          "resource": "repo://agent/sandboxes/providers/langsmith.py#L221-L249",
-          "version": "repo-lines-v1:sha256:37449046e486bcd1a3644d657a4d5a057cb0a7fbd8d1b11e70feae5371f2643e:eyJzZWxlY3RlZExpbmVDb3VudCI6MjksImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImQzNzZiYmNjMzRiMGI2MjkxM2NlNmZjYzcwYmI5ZDIxNGVlNTU0YzliY2M0NDlhMzIxYWRjODNjMjExY2NjZGIiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImFkZDI0NDU4MmI2ZmIwM2QyM2I4NDE1YWJlY2QzNDZiMGM5ZjQ2NmI2Zjc1MmIwNjgxODljZTdlOWEyZGMzNTAiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjRmYmQwMDkzMTRiYzI3MDg0MTY3MzRhMDJhZTVmZjM5YTFlNDhhMDUwYmU5MWY0M2IyZmFhOTIwMDJjNjJiZmMiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjI0ZDhmNzlkZjY3OGU2ZTcwMjEzOWQxOGYyMTYxYTY5NTk1YWQ5NTJmNDNjMjExMWI1MTFkZDMxZmEyNTc2MjkifQ"
+          "resource": "repo://agent/sandboxes/providers/langsmith.py#L357-L407",
+          "version": "repo-lines-v1:sha256:f6f5292e96c023e5fd94d610a6f88d0091d42a5e52ed5ca7fdc7a5580005ef3e:eyJzZWxlY3RlZExpbmVDb3VudCI6NTEsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImI4MTY0YWViMjZkOTExYTIzMWE3ZDAyNTNjZjQyZDE5MmFjZDUxMTI4ZDU0Y2VmYjY4NDFlNTliMzI2Mzk1YTIiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjcyNDFjZDMzYTQ0YzUzNzNhY2ZmMjgwNzZlNTM0N2RhMDY2YmMxZTFiYTU1ZTRmMTUxMjQzNjdiN2E0MjE4NDAiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjVlYjI1NGQ2YWIwMWY0MTI1MGJkYjZhZTBhNGZhMGY3NWVkYTk5ZjlmODFmYmY1MGMyODA0MzUzY2RkOWRlMWEiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjhjYzQ3MGRhNjk2ZmMyNjhlYjYyYWJmNTNlZjhhY2U2NjdiZTkzMmU4ZjcxOTBiNmVkODNhYmZhOWEzMTNlNDIifQ"
         }
       ]
     },
     {
       "id": "claim_0dd2825bf17542078e1295bb88a0e291",
-      "statement": "LangSmith proxy configuration preserves custom base rules, retries transient PATCH errors, and when a configuration PATCH reports the sandbox is not ready, best-effort starts it before retrying.",
+      "statement": "LangSmith proxy configuration preserves unrelated custom base rules, retries transient PATCH errors, and when a configuration PATCH reports the sandbox is not ready, best-effort starts it before retrying.",
       "evidence": [
         {
-          "resource": "repo://agent/sandboxes/providers/langsmith.py#L378-L419",
-          "version": "repo-lines-v1:sha256:a416631cc341de32e72856e55de8f2aa68e02f719a6461f90c1da0263e3620a5:eyJzZWxlY3RlZExpbmVDb3VudCI6NDIsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjdjMTIzNGM1ZTc5NDMwYzI0MzQ1N2UzNjYzZTlkMzYwMTVlODY2NjYwMjcyM2U3NjAyYTdhYzQxYzZjNDJiZjEiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImE0NjBhYjY1MzNjMDU4N2ZjOTNmOTBlMzIyYTA4M2U2MzI5ZDZiYTUyYTVmNzYwZTczNDhkMmQzZDQ0MTk5NmQiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjhjYzRhN2QxY2M3OTZhYmEzZTQ2NzIzMzI3ZjUxN2U5ZjgxMTk4MmQyNTBmMDcwMjk4NmU0YjU3NjRhZDk1ODkiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImU1ZGEzMTM0ZDNkYWM0OWUwYWE5MDQ1Zjc5OTFlYTRlODQzMDJmODg2OTk1ZTZhZDM1OTQxMjQ5YjBlZGI0YjMifQ"
+          "resource": "repo://agent/sandboxes/providers/langsmith.py#L295-L336",
+          "version": "repo-lines-v1:sha256:9987067251b84477b611a617a91cb67e04b9cb2d03c1b69fdf120d37a4b7f563:eyJzZWxlY3RlZExpbmVDb3VudCI6NDIsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjdjMTIzNGM1ZTc5NDMwYzI0MzQ1N2UzNjYzZTlkMzYwMTVlODY2NjYwMjcyM2U3NjAyYTdhYzQxYzZjNDJiZjEiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImE0NjBhYjY1MzNjMDU4N2ZjOTNmOTBlMzIyYTA4M2U2MzI5ZDZiYTUyYTVmNzYwZTczNDhkMmQzZDQ0MTk5NmQiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjhjYzRhN2QxY2M3OTZhYmEzZTQ2NzIzMzI3ZjUxN2U5ZjgxMTk4MmQyNTBmMDcwMjk4NmU0YjU3NjRhZDk1ODkiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImU1ZGEzMTM0ZDNkYWM0OWUwYWE5MDQ1Zjc5OTFlYTRlODQzMDJmODg2OTk1ZTZhZDM1OTQxMjQ5YjBlZGI0YjMifQ"
         },
         {
-          "resource": "repo://agent/sandboxes/providers/langsmith.py#L422-L492",
-          "version": "repo-lines-v1:sha256:2b2a5a9cc253023481fc552e3aab722707dff778ba4b85c7f603131fc9304ed5:eyJzZWxlY3RlZExpbmVDb3VudCI6NzEsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjM5ZjJmMWE5M2RjMzY5ZTllNTcxNWZkY2E5ZWEzN2IyNzk2NGQ2ZDQ0NDk4MTJjMDg2OGJjY2ViNTM1YWQ1ZDciLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjcyNDFjZDMzYTQ0YzUzNzNhY2ZmMjgwNzZlNTM0N2RhMDY2YmMxZTFiYTU1ZTRmMTUxMjQzNjdiN2E0MjE4NDAiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImQ3N2JmMjA4NDRhZmFlZjIxMmExZGU1Y2RmNmQ4MGI2MDQ1NjYzODhkOWZhZjBkYTlmYzVlZWNhNmY1NjI1MDEiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjhjYzQ3MGRhNjk2ZmMyNjhlYjYyYWJmNTNlZjhhY2U2NjdiZTkzMmU4ZjcxOTBiNmVkODNhYmZhOWEzMTNlNDIifQ"
+          "resource": "repo://agent/sandboxes/providers/langsmith.py#L339-L407",
+          "version": "repo-lines-v1:sha256:90c53e41e1895ae8d7547269b91109e0e5ebc51e3aa9edfe7e4a78e3a89b65f5:eyJzZWxlY3RlZExpbmVDb3VudCI6NjksImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjM5ZjJmMWE5M2RjMzY5ZTllNTcxNWZkY2E5ZWEzN2IyNzk2NGQ2ZDQ0NDk4MTJjMDg2OGJjY2ViNTM1YWQ1ZDciLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjcyNDFjZDMzYTQ0YzUzNzNhY2ZmMjgwNzZlNTM0N2RhMDY2YmMxZTFiYTU1ZTRmMTUxMjQzNjdiN2E0MjE4NDAiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImQ3N2JmMjA4NDRhZmFlZjIxMmExZGU1Y2RmNmQ4MGI2MDQ1NjYzODhkOWZhZjBkYTlmYzVlZWNhNmY1NjI1MDEiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjhjYzQ3MGRhNjk2ZmMyNjhlYjYyYWJmNTNlZjhhY2U2NjdiZTkzMmU4ZjcxOTBiNmVkODNhYmZhOWEzMTNlNDIifQ"
         }
       ]
     },
     {
       "id": "claim_6b47db05b8ad4c08bc6264c68d193fd4",
-      "statement": "Proxy token records keep expiry, repository scope, permission scope, and base configuration per thread; before-model middleware refreshes LangSmith tokens within five minutes of known expiry or after 50 minutes when expiry is unknown.",
+      "statement": "Proxy token records keep expiry, repository scope, permission scope, and base configuration per thread; before-model middleware refreshes LangSmith tokens within five minutes of known expiry or after 50 minutes when expiry is unknown, preserving recorded scope by default.",
       "evidence": [
         {
-          "resource": "repo://agent/github/proxy.py#L112-L188",
-          "version": "repo-lines-v1:sha256:61a57f46431b79fa69f66bfdd5edff43818081c20335172f730eab2c2f355abd:eyJzZWxlY3RlZExpbmVDb3VudCI6NzcsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQ2ODZjOTVjODJkZTU3ODdhNTg5NTgyMDM1N2JhOTc3ZGU2NmJmMGYwZjk4YThiM2YwYTVmYjZjYmExZGM2MjgiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjdlNDBmZjQ1MTMxMDMwY2Q0ODA4OGZlMTcxMWZjNjk1NGI3Y2VjNDgwMmI0OWFjYjAzYTFhNGRiNDFiNWRjNDAiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjhhNWE4MGJmM2RlYmUwYzgwN2UzMDJmNjY0YWM2MGU4MjdkMjE4NTdhNzM2MzM5MTc2YTdjZGE4ZjhmNzM4NTYiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjoxLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjY2MWM2ZmRkZjZjYmQ0NjRjNzM2YjhkNTBjZGQwNWM4ZTAxZGYyYjkyZmI5NTFlMzgxNzA1ZmFiZWYwNzI4ZjMifQ"
+          "resource": "repo://agent/github/proxy.py#L112-L175",
+          "version": "repo-lines-v1:sha256:cd4372eebef9d28e71f74a71bf67a2843dad9ffb63b5892d4b059664de2663fd:eyJzZWxlY3RlZExpbmVDb3VudCI6NjQsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQ2ODZjOTVjODJkZTU3ODdhNTg5NTgyMDM1N2JhOTc3ZGU2NmJmMGYwZjk4YThiM2YwYTVmYjZjYmExZGM2MjgiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjMwZTJhNDY1MDA5NWZhOTVkMGUyYmI0MWIyZGIyOTA5NGQzNDA0ZDI4Y2UxMjMzOWVjODhiYjRiNWM1YmU4ZjYiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjhhNWE4MGJmM2RlYmUwYzgwN2UzMDJmNjY0YWM2MGU4MjdkMjE4NTdhNzM2MzM5MTc2YTdjZGE4ZjhmNzM4NTYiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImNiOTQ5ZWZmN2Y1NjE4NmQ5Yjg1MzA1ZjRlNTA2NzVlNjAxMWI3MTYwNzFiMzRlYzkxOGFiOWYwZDUzZmEzNzcifQ"
         },
         {
           "resource": "repo://agent/github/proxy.py#L26-L35",
           "version": "repo-lines-v1:sha256:d1a2f94d35fdab24b26b2487960ed787a3d235b4949eb5d6813a62d9a5278f66:eyJzZWxlY3RlZExpbmVDb3VudCI6MTAsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImY4NTQ4ZmE0MGYzY2NkNTdiOWFlN2IxOWRiZWI0YzExMzBlZGJiOWJlNzgyYzNlZDFlMzIwMjhlMDQ3ZmExZTgiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImRhNjFlMzRhZWI4NDQ2M2U1NWJlMWE3NDljODI3NGQ5YzdiOTYzZWUyNzA5NDFkNTQ2MTEwMjY3MTJiZjRiNjkiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImU1YzFjNDYyZTJhMzlkNzQ3NTlmNWUxYjEyNmY3NjgzYTJiNzMwMTE4ZTE4ZjUxMjJiMDhjZWRlZWI2NTBlMjMiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImYxMGJmOTBmMTQ3YWY1ZTE2YTJkYjM0YTFjMTU1ZWNhMTgyNDE0MTFmMzBmMzY1OTEzODM5MjE1OTllNjBmMTYifQ"
         },
         {
-          "resource": "repo://agent/github/proxy.py#L64-L89",
-          "version": "repo-lines-v1:sha256:da93e46385ca4cc5723bc26ded1db9fd870e2dbf5e17ae0a3824a42af4cc4cfc:eyJzZWxlY3RlZExpbmVDb3VudCI6MjYsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjZmMjNkNzhjYjViOGIyMTY2ZjlhMTBmMjEwMmI0N2JlNjFlMTIzYjI4NDI1MTE0YWE2MGQ2ZjAwNzI0YzQxNzMiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImRjYjhkZjgxMmJmMWJiZDI0MDFiOTM5NjEyZmM5YzcyMTAwNDAxNWE2ZThiOWFiM2FmOTdhZDlhZDJlMTFmY2EiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImQ3MDE0OWUwNjlhZDY3ZWNjZjQ3MzY0NmZmMWM3NTAwNTBkMzI5ZDExMDAxOGRjNTc2Njg3OGVhZmExZDYwN2QiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImUwNzBjYWJmZWYxMGU0MWJjNzBjMzUyNDUzMDczY2QxZjYyZDQ1NDdmOGM3NmI4Mjc4OWZjMmJjOWIyMzY5Y2UifQ"
+          "resource": "repo://agent/github/proxy.py#L64-L96",
+          "version": "repo-lines-v1:sha256:82357a99c3b1a73fcf9fd6eeace2cdeeb50ba55bf636657d1a77f288a51e7a22:eyJzZWxlY3RlZExpbmVDb3VudCI6MzMsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjZmMjNkNzhjYjViOGIyMTY2ZjlhMTBmMjEwMmI0N2JlNjFlMTIzYjI4NDI1MTE0YWE2MGQ2ZjAwNzI0YzQxNzMiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImQ1NmJmNTZkZjA4NTEzMDlmYzVhOTY0N2E1NzRiYTMzZTUxMWY2OTk1M2FkODE3NTJiZTQ2MTcxMDBhMWVlMWUiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImQ3MDE0OWUwNjlhZDY3ZWNjZjQ3MzY0NmZmMWM3NTAwNTBkMzI5ZDExMDAxOGRjNTc2Njg3OGVhZmExZDYwN2QiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjVlNDAzM2U0M2E5MjQzZTZmN2JhYjRiNDMzNmNkMWRmOGEwYWY4NzE0NGQ5OGY4NTBkNmNhMDFhNDIwMWYyMzgifQ"
         },
         {
-          "resource": "repo://agent/middleware/refresh_github_proxy.py#L22-L45",
-          "version": "repo-lines-v1:sha256:3fba9d0a0dcdc8d52185245eccb77d6c7cc0abedac8c172e5ffaf99574efff57:eyJzZWxlY3RlZExpbmVDb3VudCI6MjQsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjIzODY4YjFjYmRiNTdmZjM3M2VmMThlZWJjNzVlZDc0NzdlZDUxYWY4NjI0ODk4NzUxYmMwNDQzZDdjZTk2OGQiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQ4OTYwMGE3M2QyZTAyZjM1MmI5MGZlZjFkOGQ2MzgxMWJhNGE4ZWUwYzFiZWFhN2FlNDY1OGYzNmFhMmUxOTgiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjYyMDA5N2U0YWE1MDA2OGJhMTU3ZjlhMjczOWZhZDg2OTk1ZTFlMGNkY2NkYWRjNTg5N2MyMDM0Yzc0ZDNlZmEiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjowLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUifQ"
+          "resource": "repo://agent/middleware/refresh_github_proxy.py#L23-L47",
+          "version": "repo-lines-v1:sha256:fbaa4cbe86e2499c4a0b3e81afe134b878652ba2a3b5632191da831297689940:eyJzZWxlY3RlZExpbmVDb3VudCI6MjUsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImJiNzIwYWExNDNhYmYwMmQwNjMwOTJlZWE2YzU0NTQ2ZGM5ZjBlYjEyMjRhZGRkNjY4ZDMzZmRiNGYxNTliMmQiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQ4OTYwMGE3M2QyZTAyZjM1MmI5MGZlZjFkOGQ2MzgxMWJhNGE4ZWUwYzFiZWFhN2FlNDY1OGYzNmFhMmUxOTgiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjYyMDA5N2U0YWE1MDA2OGJhMTU3ZjlhMjczOWZhZDg2OTk1ZTFlMGNkY2NkYWRjNTg5N2MyMDM0Yzc0ZDNlZmEiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjowLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUifQ"
         }
       ]
     },
     {
       "id": "claim_4444e2534bc04099b399153cc5fe2c62",
-      "statement": "`recreate_sandbox_for_thread` and LangSmith-only `reset_sandbox_for_thread` preserve the old sandbox, persist a distinct new ID before replacing the cached proxy target, and leave the old target in place when metadata persistence fails.",
+      "statement": "`recreate_sandbox_for_thread` preserves the old sandbox, requires a distinct new ID, persists the new binding before replacing the cached proxy target, and leaves the old target in place when metadata persistence fails.",
       "evidence": [
         {
-          "resource": "repo://agent/sandboxes/lifecycle.py#L422-L514",
-          "version": "repo-lines-v1:sha256:fef1d9e7f946b336097ef482fa4638f08634d6334324dcf65084e4a7d61a137c:eyJzZWxlY3RlZExpbmVDb3VudCI6OTMsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjY0YTNhZjc5MmMyYjhiMmE3ODY0YmQ4YjJjMzE5NzI5NzU4Y2Y5Mjk5YjU3OWU1OGNhZTQ4ZGZkMDJhYTk1YmQiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImNkYmVkODMwZTc4MzUwMmIxZjMxZDgxNTIxY2M5YzI0ZGNhMzIzNGQ4NWQ0ODhmMWVlMjBmODJmYTY1NmEwOTQiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjIyODNkMDA5ODBhMmE4ZDBjYzVmZTI0ZTE4NDA2MGNkM2M1NzM4YThiNjc3ZTIxZTFlYzkyNWViYmRhMGVlODYiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjIyMDRkZTdkYzhmMTY3MDg3M2YyOGJlNWIzMzYyYjQxMTMyYmQyMDgyMmUyMmI5OGFjZWVkYzU2MDBiMTUzNzcifQ"
+          "resource": "repo://agent/sandboxes/lifecycle.py#L475-L516",
+          "version": "repo-lines-v1:sha256:d0b479c36785adcce7cbd2d54893558e4f14248e713afb3f4059d58c9b06b070:eyJzZWxlY3RlZExpbmVDb3VudCI6NDIsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6Ijc5YTNkNjkwYTU5MzYxNDhlYzNiZWFjMjNlNDA3YmM2MWI3NzA1OTQ1YTkxM2FlNzQ5MzE3YmQ0M2UxNmRlN2QiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImNkYmVkODMwZTc4MzUwMmIxZjMxZDgxNTIxY2M5YzI0ZGNhMzIzNGQ4NWQ0ODhmMWVlMjBmODJmYTY1NmEwOTQiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjIyODNkMDA5ODBhMmE4ZDBjYzVmZTI0ZTE4NDA2MGNkM2M1NzM4YThiNjc3ZTIxZTFlYzkyNWViYmRhMGVlODYiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjIyMDRkZTdkYzhmMTY3MDg3M2YyOGJlNWIzMzYyYjQxMTMyYmQyMDgyMmUyMmI5OGFjZWVkYzU2MDBiMTUzNzcifQ"
         },
         {
-          "resource": "repo://tests/sandbox/test_sandbox_recreation.py#L10-L90",
-          "version": "repo-lines-v1:sha256:9f15400e2c27e6d5093a312397d9d8164b6e0873085695da718c5fa45fcdcbf8:eyJzZWxlY3RlZExpbmVDb3VudCI6ODEsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjYyODNmMDhkMmVhZTU1NzQ3ZTBlYWIxZmNkZTU3ZTg5YWYxZDQ3YTNlYTM5Y2RlZDQ1ZjJiNDlkZDg3NTkxMWUiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjNjMTJkNmVjNzkzNjZjNmQ2MWJiNDMwNDEwNWMyMGNjOWRhZjcxMmFjNzYwZWNjM2FmNDk0OTU5YmI2NGIyNjAiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjVhYjdiMjcyYWI0ZTI1MTc1YjVmZDI0YzEzY2ZlNTYzNDI1MTRjMDI3OTQ2ZjAzYjUzMDVkZjIwMzM3ODc5ZjkiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjVhYjdiMjcyYWI0ZTI1MTc1YjVmZDI0YzEzY2ZlNTYzNDI1MTRjMDI3OTQ2ZjAzYjUzMDVkZjIwMzM3ODc5ZjkifQ"
+          "resource": "repo://tests/sandbox/test_sandbox_recreation.py#L10-L57",
+          "version": "repo-lines-v1:sha256:7e79b61243fe25a9d924882fa71619a0d452f9bd1e13564a117e74f83f57849b:eyJzZWxlY3RlZExpbmVDb3VudCI6NDgsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjYyODNmMDhkMmVhZTU1NzQ3ZTBlYWIxZmNkZTU3ZTg5YWYxZDQ3YTNlYTM5Y2RlZDQ1ZjJiNDlkZDg3NTkxMWUiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjNjMTJkNmVjNzkzNjZjNmQ2MWJiNDMwNDEwNWMyMGNjOWRhZjcxMmFjNzYwZWNjM2FmNDk0OTU5YmI2NGIyNjAiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjVhYjdiMjcyYWI0ZTI1MTc1YjVmZDI0YzEzY2ZlNTYzNDI1MTRjMDI3OTQ2ZjAzYjUzMDVkZjIwMzM3ODc5ZjkiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjVhYjdiMjcyYWI0ZTI1MTc1YjVmZDI0YzEzY2ZlNTYzNDI1MTRjMDI3OTQ2ZjAzYjUzMDVkZjIwMzM3ODc5ZjkifQ"
         },
         {
-          "resource": "repo://tests/sandbox/test_sandbox_reset.py#L11-L78",
-          "version": "repo-lines-v1:sha256:cc1f70c3afc9e260cd7648d5f16f0075085f7098e1a1eb283f0714f9c54b93c4:eyJzZWxlY3RlZExpbmVDb3VudCI6NjgsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjkyMGFlMTZkNGRlNjE1MjE4N2E4NWFkYjVmYjZkNmRhZGE2N2FkNmUyNjk1NjFmYTkzNGVlZjI5MjM5ZWRlOWMiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjNjMTJkNmVjNzkzNjZjNmQ2MWJiNDMwNDEwNWMyMGNjOWRhZjcxMmFjNzYwZWNjM2FmNDk0OTU5YmI2NGIyNjAiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjVhYjdiMjcyYWI0ZTI1MTc1YjVmZDI0YzEzY2ZlNTYzNDI1MTRjMDI3OTQ2ZjAzYjUzMDVkZjIwMzM3ODc5ZjkiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjVhYjdiMjcyYWI0ZTI1MTc1YjVmZDI0YzEzY2ZlNTYzNDI1MTRjMDI3OTQ2ZjAzYjUzMDVkZjIwMzM3ODc5ZjkifQ"
-        }
-      ]
-    },
-    {
-      "id": "claim_423c3250245044ac9b6efbf9fbdcc516",
-      "statement": "Desktop runs bypass the remote thread-sandbox lifecycle and use a local backend only for an allowlisted project or desktop-created worktree; desktop artifact routes keep internal files outside the project.",
-      "evidence": [
-        {
-          "resource": "repo://agent/desktop.py#L36-L68",
-          "version": "repo-lines-v1:sha256:f1530d1e291776ea654952887b6749fc8e7259a8ba0683800df825981a619a2d:eyJzZWxlY3RlZExpbmVDb3VudCI6MzMsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImEyMTFlZDdhZWFhMWNlOWI3OGUyYzhmN2IwZWU0MDc3ZmUxNGFjNmU1ZDUwMDBjNDJlMmE5ZjdmNTkzZjFiYmIiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjMwYzFmMTg4ZjE0MmVkN2E4MjQ2ODBiMjA3MTcyYzU1MTliYzYxNGE0OGZkYTdjZjE2N2VkYjhkZGY3OTk1NmMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjRmYmQwMDkzMTRiYzI3MDg0MTY3MzRhMDJhZTVmZjM5YTFlNDhhMDUwYmU5MWY0M2IyZmFhOTIwMDJjNjJiZmMiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjU5MWMxOTk4NmE4ZDBlMjE5ODA4YzJlNjgwOGY1NTUyMmQ0MGUxZWFhN2Y0ZGVjOGJhNzMwZjQ2YTQ1ZjZiYjEifQ"
-        },
-        {
-          "resource": "repo://agent/desktop.py#L78-L96",
-          "version": "repo-lines-v1:sha256:e246a1827bd7daa14da8c719287f82150e65e3072ce317476d538846f2ecbd74:eyJzZWxlY3RlZExpbmVDb3VudCI6MTksImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImVkNzUyYjM2NWM1OWNlMzdjOTI1OTE3ZGNhYmY2N2NmNjFkOTA4YjBkYjNmNTYxMjkwMGU4YjdlY2JmZjg5NzMiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjA5NDAxM2VmZGU4YTQ4MDFiYmRiM2RlNTViMDE0M2EzNzgzYTBhYzU4MjcxZmNhMWM2MDA0NjQ0ODEzMWI2MWEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImI3NjYyZGUxMWY3NzQ1ZWZiOTc4MTA4NzMzYzVmZjkwZTQxMzM2OThhZWJlNDllZGY2YTM2NmE3MzZhMjFkNWEiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjowLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUifQ"
-        },
-        {
-          "resource": "repo://agent/server.py#L906-L942",
-          "version": "repo-lines-v1:sha256:377a8c3dd6699ec28bf88f08113c71f9a8b3f997522ecd7d706df27acdf4d408:eyJzZWxlY3RlZExpbmVDb3VudCI6MzcsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjU4NTlkMDZjZjNjZmI0Y2I1YjNmMzUzMTI5NDU0ZTk3NzAyZmViNGJhNjViM2MxMGVlOTM2NWUzMjA0MjMzYTEiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImFlMzM2NmQyNDQ3N2RhMjc2Y2YxZTU1NjRhNTFjMjkwMDE4YjFiMTBlNTgyMjNmYjIyYTQ0ZjllMGY3ZDYyZTAiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjlhYWEzZTcwMThkOWJkODNiZmQ4ZDE5OWM1YzU1ZjA0ZThmNzg3YzRhM2ViYzNmNDlhZWJhMjMxNTRkYmE3ZTIiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjZkOWVhOWRjOGEyZjkwYjI4MjBmMWNlMmNiY2EyM2QwMjRjZWUwN2U0NzBhOTQ5NTY5ZDI5NGY0ZWY1MGY0ZjEifQ"
+          "resource": "repo://tests/sandbox/test_sandbox_recreation.py#L107-L169",
+          "version": "repo-lines-v1:sha256:47b666236a49af69ebf07cf7692a979bb82e1ccb772bb4e37fb76dc2b14fc357:eyJzZWxlY3RlZExpbmVDb3VudCI6NjMsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImJkOTk0MmRlYjdkYmFiYzExNGIxYzQ4ZDAyZGE0NjM4NmU5YWNhNTE1YTUyZmI3YjNjNDEyZGM2Mjc5MjFiMDgiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjAxMGNkZTQwYThhZDk2Y2EzZGI2MmVmNWEwMWQwZmEzZDkxN2YzNDBkYWMyNDQxY2FlNTFhZjJlMWViNmQxMDUiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjIxYTZmYzE1YjYxMjA4YzRiODgzNjhlYTE3OGU3ODkyZDFiMDM3ZDQyMzYxMzAxZTRjMWYxMmNjNDZlZTllN2IiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjoxLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjNjMTJkNmVjNzkzNjZjNmQ2MWJiNDMwNDEwNWMyMGNjOWRhZjcxMmFjNzYwZWNjM2FmNDk0OTU5YmI2NGIyNjAifQ"
         }
       ]
     },
@@ -243,12 +241,8 @@
       "statement": "The local provider runs without isolation, scopes global Git configuration to `.gitconfig-sandbox`, and omits model and provider API keys from the child environment.",
       "evidence": [
         {
-          "resource": "repo://agent/sandboxes/providers/local.py#L24-L66",
-          "version": "repo-lines-v1:sha256:362d100da883e87f01498559ab80349e8ccd6ceaef01666650f0b5ab4b35f8f6:eyJzZWxlY3RlZExpbmVDb3VudCI6NDMsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6Ijc3OWRkY2MwZDFlYzY0MjA5N2M5MGVkNGU1ZWQxOTIzMThlNmYzMzk0OWE4Njg3NjI0ZTI5ZDkyMWFlOTdmNzciLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjMwYzFmMTg4ZjE0MmVkN2E4MjQ2ODBiMjA3MTcyYzU1MTliYzYxNGE0OGZkYTdjZjE2N2VkYjhkZGY3OTk1NmMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjA5ZjkzMDgzYzE5NzEyMWI5ODI3MDBiYThhZmFiZDE3MjJjZjFkM2U3NDA0NTA5ZTgwZWZhMjcyNDdmNjJmMDciLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjowLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUifQ"
-        },
-        {
-          "resource": "repo://agent/sandboxes/providers/local.py#L8-L21",
-          "version": "repo-lines-v1:sha256:8c17062bcab56844e6f17662e98851d9f9878bc817d72f9a2f77fc15378bd0c2:eyJzZWxlY3RlZExpbmVDb3VudCI6MTQsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjcxY2U0ZjIwNjVhNWZiZGI3NjdjOGUyMDA5ZGVkODU2MTk4MzlmNGYyZDM4ODI2NGI0YjU5NDliM2I0MzU2NTgiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQxMmNhMzQ1Y2NmNzViZjljMDgwNmJjZTY5NWJlOGRlODA4Yjc5OTg0MjUxYTdhNTRkMjAyY2Y2MTAxZGQ0NTEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6Ijc1N2I0OWY3YWYzMmQ0ZWYxYmU3NTg4OTcwOWM5MjMxNGQ0NGM1MjQyNzA5NzBiNTQ3ZDA1MDEwNzdmY2ExNjAiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjUyNTg4YzdhMjgzZGRkYTdlOWIyNTY2NDQzZDEwOTcwMmM3NzM1ZjZjNDBjYjNmZWJjM2ZiM2IyMzZlZTQ3NWIifQ"
+          "resource": "repo://agent/sandboxes/providers/local.py#L8-L66",
+          "version": "repo-lines-v1:sha256:d082643c52302e6ca0d783c3f33b4f91bb2234121dc1b32d39bf7c2256475b86:eyJzZWxlY3RlZExpbmVDb3VudCI6NTksImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjcxY2U0ZjIwNjVhNWZiZGI3NjdjOGUyMDA5ZGVkODU2MTk4MzlmNGYyZDM4ODI2NGI0YjU5NDliM2I0MzU2NTgiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjMwYzFmMTg4ZjE0MmVkN2E4MjQ2ODBiMjA3MTcyYzU1MTliYzYxNGE0OGZkYTdjZjE2N2VkYjhkZGY3OTk1NmMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6Ijc1N2I0OWY3YWYzMmQ0ZWYxYmU3NTg4OTcwOWM5MjMxNGQ0NGM1MjQyNzA5NzBiNTQ3ZDA1MDEwNzdmY2ExNjAiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjowLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUifQ"
         }
       ]
     },
@@ -279,10 +273,46 @@
           "version": "repo-lines-v1:sha256:79a7f31bd2e98a4b0efb77aec1fd6315d3a9aa2d3ac9abe73fb155bc2621f4a9:eyJzZWxlY3RlZExpbmVDb3VudCI6NDIsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImFmNzRlOGViZjhjNTQ4MTkzMTI4NTRkY2IzNDQ3OTI3ZDI3ODVlMjk4NGZlZDA4NzEwZGZlZDFjNDM3MTBmODUiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjEzZTdiYjMxNTZkZjFmNzcyOGY0NTMxOTM0NDlhYTc0NmQ3MWE1NDEzYTQ0M2FjZGVkMTZkYzcwNTI2Nzg0ODEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjBjNzYzMjk1NDRmMWM1MDM5MzdlZTZhZTNhMzFmY2NlNDQwNDIxMjM1YzhmMTE4NmEzNWE3Y2Q4NGYyODAwOWMiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6Ijg2NjljMGQ5ZWRlODNhYzEzMzM0ODJjZWNlMmM1ZWU5ZTZkMjQyMGY1N2JlNzZkMDY3OGJiNjMzMTU0ZDliNWMifQ"
         }
       ]
+    },
+    {
+      "id": "claim_ac4d430b7cbf4d4ea35371a1f158de83",
+      "statement": "After a stale workspace-backed sandbox boots, its update script runs before the first model call with a bounded timeout; failures are logged and non-fatal, while snapshot update triggering continues in the background for later creations.",
+      "evidence": [
+        {
+          "resource": "repo://agent/sandboxes/lifecycle.py#L189-L205",
+          "version": "repo-lines-v1:sha256:df7c7a844fba8ece5de9e819e6a7edb314d70b50eeab22e59dce3cba70edec7e:eyJzZWxlY3RlZExpbmVDb3VudCI6MTcsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjRlOTJiNWZjMTE3ZDAwMWRiODhiNWE1NDI4OTcwZGE4MjQ3ZjM0MzZiODBkNjIwYTA4ZWQ4ZmNmNDNkNTJhMzYiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjdkMGRhMTIzZjE1ZDgzOGM1NjQxNTk0NGIxNTJjYjAxNTQ0YmVjN2I2MzZlOTYzMjM3ODgwZTgxN2RmODdiYTYiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjlhZjI4MjFkZDQ3YTYyMzZhMTUxNGYwM2UwOWZjYzU4YzU1ZWY1ZThiOTVkZWVkMzdlOGIzMTY1ODM4YmJhZDEiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImVlZGJlMTNiM2U3ODVjODc3ZWNjNDNjYjQ5MjE3NTNiNjk0ZjUyYjYwMjlmYWQ0ZmZiNDI3ZWZhNDczOTI4ODcifQ"
+        },
+        {
+          "resource": "repo://agent/sandboxes/lifecycle.py#L96-L140",
+          "version": "repo-lines-v1:sha256:f83124babb3899ae006ae76bda650308976be8785d0f94b8d9ede3947921540c:eyJzZWxlY3RlZExpbmVDb3VudCI6NDUsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImQ2YjUwMzhjMzRhOTdhMGUwNWE5MzEwNzUwZjMxYzU1YzhkYTQ5OWQ4MDNkMDNlOTY2ZjU4MmYwYTMxZDE0MzYiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjU1MDMyZTk2NGQwOTMyMzUxZTVkMTg1MjY5MjgxYjE3MWEzYTA5YjA4YjI4NmU2NjFlYTQ3MDMyM2M4MmViNGQiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImRlMTcwMjA3NjcxMWI1MTIzY2YxNGQzYjU4NTQ1YzFhYmY5MDEzZmJlYTI2NTNlNDU3ZWU0OGIwZTk3ZjhjYmIiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImVmZmEyNDllMGRiZjExOWZhNjhiMjAzZjUwZDE3YzIxYjUwMGYyNWE5ODBkZTAzZGUwOWY3YmMxNjdkODIyOTcifQ"
+        },
+        {
+          "resource": "repo://tests/sandbox/test_workspace_update_script.py#L45-L105",
+          "version": "repo-lines-v1:sha256:8889bd796374355c299d1df529267fb6c3838d0b235efe3521da84373767b38a:eyJzZWxlY3RlZExpbmVDb3VudCI6NjEsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImJkOTk0MmRlYjdkYmFiYzExNGIxYzQ4ZDAyZGE0NjM4NmU5YWNhNTE1YTUyZmI3YjNjNDEyZGM2Mjc5MjFiMDgiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjAxYmE0NzE5YzgwYjZmZTkxMWIwOTFhN2MwNTEyNGI2NGVlZWNlOTY0ZTA5YzA1OGVmOGY5ODA1ZGFjYTU0NmIiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjU0ODVkNTg0NTllYjcwY2I2NzYzMzNjOTgxYjQxYzdkODEyZGFlM2UxNDZkZjFkMDQ5NDIxMmMzNWNiZDlmMjMiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjoxLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjI4MjIyMTFjODIzZjc3MTdmNjk2NWNmNjI3ZjA1ZDE5MDk4OTAwNmNiZTU2OWY1Y2I3MzUzMWQ5NGQwZGQyNDgifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_134eebd1463849ef98e762fb3df6a653",
+      "statement": "The provider interface intentionally has no delete operation because sandboxes can hold the only uncommitted working tree; LangSmith resource reclamation is configured through idle and delete-after-stop retention at creation time.",
+      "evidence": [
+        {
+          "resource": "repo://agent/sandboxes/providers/langsmith.py#L646-L662",
+          "version": "repo-lines-v1:sha256:c68c8e5fc091dd7eeb922b21f766669e8f1620454b5c889e823004af5da3016d:eyJzZWxlY3RlZExpbmVDb3VudCI6MTcsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImE1NjlmNmRlZDFkZDdlY2I3ZTA1ZGU2ODJkMzQ0OTAzZTUwZTViZjcwMGE4NmNjNjVlODE5NmVlMDhmZjRmNmUiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjBlNTBiNmRlMGQ2NGE0MTUzMGEwMTUwMzg2Yjg3MmFiMTA0N2ZjYTRhMzA5MzFlZDMxMTJhZDNkM2UwNDMzOTQiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjZlOGM3ZWRjM2I1ZDhiN2MwNDIzMWY4NWJmMjc5N2RmM2VkOTc4ODU0ZGE5MGEzODY4MDU5ODVjOWIwNjBiNDQiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjIxZTZjNmE2MTMwMDQzMzZiYmQ4MWNkYmJmZjZkZmNkMzE4Zjg2YzY1YTU4ODRlMzQ5ZWFjMmZmZjdhM2U1YzgifQ"
+        },
+        {
+          "resource": "repo://agent/sandboxes/providers/langsmith.py#L706-L755",
+          "version": "repo-lines-v1:sha256:2e027c669f30d629edc060bfaca89de3040204b4bbcce2917cd5436cae29686e:eyJzZWxlY3RlZExpbmVDb3VudCI6NTAsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImNjZWRkYWQ4Y2VjMTllNzk4ODIxNWNmMzlhMGE0NTM2NTIxMTlhZmNmMzk1YzQxODE0MjEzM2FmZjNiMGM2ZmEiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjUxMDM0ODFjNTdkMGYwZGMwZjc2Y2QyY2M4YjM2MDRjNGU4Mjk2ZGE0MTIyYWRkMTllODE3NDVkYzdlMzMxYTYiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjUzMzg0YTk1MTc4MTI4YzBiZWE0ODQ0NmNiMDk4YzgxMjNlZjBiZjA2M2M1ZTY0Njc3ZjYxMDU1MWYyNzZiZWEiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjJkNDExNjliYTI5MTFhZTZkNDhlYmExMWRjNmIyNmEzMmYyNGE5OWUzZjEzY2M1NzIzOGJkODJhMzQxNjZiNmMifQ"
+        },
+        {
+          "resource": "repo://tests/sandbox/test_langsmith_sandbox_config.py#L43-L58",
+          "version": "repo-lines-v1:sha256:04d9c0624c175a86079bb36ced7fd1d10a75461c4d845091f95c50e9416c9fb4:eyJzZWxlY3RlZExpbmVDb3VudCI6MTYsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImMxN2Y5ZjVhNGRkZmE4ZGQyYTg5MTI3NjlhYWViNmZjMmFlODdjMjg3NzExZGI3OGQyMjVlOTU5NzJjMDZmYjEiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImU1YjRlNjVjYmVmNWIzMWU0MzZmYjc4MDEzNzI3MWQxZDA5ODQ2MjBhM2MyNjU5ZDFiYjFlODliNjA4NzU1MTUiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjcxN2MxYTVkMThkNGZjOTc4NDk3MTNlNmI3NjVkNmU0MDc2YjIxNTJiZmQ1ZDkzNzBjNTI4MTExOGVlNzk3OGIiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjQzZjgwNjAyNTllZTJlYjYwMGI5OTQ3NmZmMTNlYjQ2ZjUyZGJkYmY3ZTMxZTRiYWUzNWNkNGIyZWMwYzUyOTcifQ"
+        }
+      ]
     }
   ],
   "verification": {
     "by": "openwiki/0.4.2",
-    "at": "2026-09-08T08:15:30.533Z"
+    "at": "2026-09-19T08:13:05.087Z"
   }
 }

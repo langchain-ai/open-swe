@@ -1,7 +1,7 @@
 # Files
 
-- [Coding Agent Assembly](agent-graph.md) - How the primary Deep Agents coding graph is assembled for an executable thread run, including configuration, model policy, sandbox and skills backends, tool surfaces, subagents, and run preparation.
-- [Middleware and Failure Boundaries](middleware-stack.md) - Ordering-sensitive middleware around the coding agent and reviewer model and tool loops. Explains preparation, policy, retries, deadlines, completion hooks, and how failures become safe user-visible outcomes.
-- [Runtime and Product Architecture](overview.md) - LangGraph deployment, graph entrypoints, FastAPI ingress, durable dispatch, sandbox ownership, and the dashboard and desktop product surfaces.
-- [Review and Style Analysis Graphs](reviewer-and-analyzer.md) - Architecture of the isolated reviewer and review-style analyzer graphs, including repository preparation, durable finding reconciliation and publication, per-repository style persistence, and continual analysis scheduling.
-- [Thread Sandbox Lifecycle](sandbox-lifecycle.md) - How a thread acquires, persists, reconnects to, and deliberately replaces its sandbox. Covers provider selection, proxy-backed credentials, recovery safety, and operational lifecycle controls.
+- [Coding Agent Assembly](agent-graph.md) - How an executable coding-thread run resolves durable configuration, backend, models, prompts, skills, tools, subagents, and middleware into a Deep Agents graph.
+- [Agent Middleware, Limits, and Failure Semantics](middleware-stack.md) - Ordering-sensitive middleware surrounding the coding-agent and reviewer tool and model loops. Covers per-run preparation, routing, queues, safety policy, retries, timeouts, completion, and observability.
+- [Runtime Architecture and Service Composition](overview.md) - How Open SWE composes LangGraph graph entrypoints, FastAPI ingress, durable run dispatch, PostgreSQL-backed services, and cloud and desktop user interfaces.
+- [Pull Request Reviewer and Style Analyzer](reviewer-and-analyzer.md) - Architecture of the read-only pull-request reviewer and the repository-specific style analyzer. Covers durable findings, re-review and publication behavior, and bootstrap and continual style-learning operations.
+- [Thread Sandbox Lifecycle](sandbox-lifecycle.md) - How a normal agent thread acquires, persists, reconnects to, and deliberately replaces its sandbox. Covers workspace-backed provisioning, stable proxy handles, credential injection, recovery safety, and reviewer checkout preparation.
