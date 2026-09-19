@@ -1,6 +1,7 @@
 """Tests for LangSmith sandbox env-var configuration parsing."""
 
 import json
+from collections.abc import Callable
 from pathlib import Path
 from typing import cast
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -446,6 +447,19 @@ async def test_reuse_keeps_other_failures_untyped() -> None:
     assert not isinstance(excinfo.value, SandboxGoneError)
 
 
+def _serve(
+    monkeypatch: pytest.MonkeyPatch,
+    handler: Callable[[httpx2.Request], httpx2.Response],
+) -> None:
+    """Answer the provider's own client from `handler` instead of the network."""
+    client = httpx2.AsyncClient
+    monkeypatch.setattr(
+        langsmith_provider.httpx2,
+        "AsyncClient",
+        lambda **_kwargs: client(transport=httpx2.MockTransport(handler)),
+    )
+
+
 @pytest.mark.asyncio
 async def test_service_url_asks_for_a_workspace_grant(
     monkeypatch: pytest.MonkeyPatch,
@@ -466,11 +480,7 @@ async def test_service_url_asks_for_a_workspace_grant(
 
     monkeypatch.setenv("LANGSMITH_ENDPOINT", "https://api.smith.langchain.com")
     monkeypatch.setenv("LANGSMITH_API_KEY", "lsv2-key")
-    monkeypatch.setattr(
-        langsmith_provider.httpx2,
-        "AsyncClient",
-        lambda **_kwargs: httpx2.AsyncClient(transport=httpx2.MockTransport(handler)),
-    )
+    _serve(monkeypatch, handler)
 
     service_url = await create_workspace_service_url("sandbox-1", 3000)
 
@@ -496,11 +506,7 @@ async def test_service_url_surfaces_the_api_refusal(
 
     monkeypatch.setenv("LANGSMITH_ENDPOINT", "https://api.smith.langchain.com")
     monkeypatch.setenv("LANGSMITH_API_KEY", "lsv2-key")
-    monkeypatch.setattr(
-        langsmith_provider.httpx2,
-        "AsyncClient",
-        lambda **_kwargs: httpx2.AsyncClient(transport=httpx2.MockTransport(handler)),
-    )
+    _serve(monkeypatch, handler)
 
     with pytest.raises(httpx2.HTTPStatusError, match="active token"):
         await create_workspace_service_url("sandbox-1", 3000)
