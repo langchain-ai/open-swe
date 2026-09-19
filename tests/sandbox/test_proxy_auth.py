@@ -437,7 +437,7 @@ class TestCreateSandboxWithProxy:
             patch(
                 "agent.sandboxes.lifecycle.workspace_token",
                 new_callable=AsyncMock,
-                return_value=SandboxGitHubAccess("ghs_install", repositories=("acme/api",)),
+                return_value=SandboxGitHubAccess("ghs_install"),
             ),
             patch(
                 "agent.sandboxes.lifecycle.configure_github_proxy", new_callable=AsyncMock
@@ -461,7 +461,6 @@ class TestCreateSandboxWithProxy:
             "sandbox-123",
             "ghs_install",
             base_proxy_config=workspace.create_params["proxy_config"],
-            repositories=("acme/api",),
         )
 
     @pytest.mark.asyncio
@@ -504,7 +503,7 @@ class TestRefreshProxyOnSandboxReuse:
             patch(
                 "agent.sandboxes.lifecycle.workspace_token",
                 new_callable=AsyncMock,
-                return_value=SandboxGitHubAccess("ghs_fresh", repositories=("acme/api",)),
+                return_value=SandboxGitHubAccess("ghs_fresh"),
             ),
             patch(
                 "agent.sandboxes.lifecycle.configure_github_proxy",
@@ -514,7 +513,7 @@ class TestRefreshProxyOnSandboxReuse:
                     request=request,
                     response=response,
                 ),
-            ) as mock_proxy,
+            ),
             patch(
                 "agent.sandboxes.lifecycle._create_sandbox_with_proxy", new_callable=AsyncMock
             ) as mock_create,
@@ -529,7 +528,4 @@ class TestRefreshProxyOnSandboxReuse:
                 await _refresh_github_proxy_or_fail(mock_sandbox, "thread-123")
 
             assert excinfo.value.sandbox_id == "sandbox-stale"
-            mock_proxy.assert_called_once_with(
-                "sandbox-stale", "ghs_fresh", repositories=("acme/api",)
-            )
             mock_create.assert_not_awaited()

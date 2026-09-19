@@ -174,13 +174,10 @@ async def refresh_proxy_token(
         await configure_github_proxy(
             current_backend.id,
             access.token,
-            repositories=access.repositories,
             base_proxy_config=base_proxy_config,
         )
     else:
-        await configure_github_proxy(
-            current_backend.id, access.token, repositories=access.repositories
-        )
+        await configure_github_proxy(current_backend.id, access.token)
     record_proxy_token_expiry(
         thread_id,
         access.expires_at,

@@ -203,9 +203,7 @@ async def _configure_proxy(
     kwargs: dict[str, Any] = {}
     if base_proxy_config is not None:
         kwargs["base_proxy_config"] = base_proxy_config
-    await configure_github_proxy(
-        sandbox_id, access.token, repositories=access.repositories, **kwargs
-    )
+    await configure_github_proxy(sandbox_id, access.token, **kwargs)
 
 
 async def _refresh_github_proxy(

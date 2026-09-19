@@ -27,7 +27,6 @@ class _InstallationRepositories(BaseModel):
 class SandboxGitHubAccess:
     token: str | None = None
     expires_at: str | None = None
-    repositories: tuple[str, ...] = ()
 
 
 async def repository_token(
@@ -46,7 +45,6 @@ async def repository_token(
     if not discovery_token:
         raise RuntimeError("GitHub App installation token is unavailable")
     repository_ids: list[int] = []
-    full_names: list[str] = []
     async with httpx2.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as client:
         page = 1
         while True:
@@ -63,7 +61,6 @@ async def repository_token(
             for repo in batch:
                 if repo.full_name.lower() in allowed:
                     repository_ids.append(repo.id)
-                    full_names.append(repo.full_name)
             if len(batch) < 100:
                 break
             page += 1
@@ -74,7 +71,7 @@ async def repository_token(
     )
     if not token:
         raise RuntimeError("Workspace GitHub repository token is unavailable")
-    return SandboxGitHubAccess(token, expires_at, tuple(full_names))
+    return SandboxGitHubAccess(token, expires_at)
 
 
 async def workspace_token(

@@ -215,12 +215,25 @@ async def test_workspace_builder_uses_same_access_boundary(
     assert injected_auth(github) == (["x-access-token:repos:11"] if repos else [""])
 
 
-async def test_public_git_reads_have_no_credentials_outside_workspace(
+@pytest.mark.parametrize("repos", [["acme/api"], []])
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/acme/api.git/info/refs",
+        "/acme/API/git-upload-pack",
+        "/ACME/api.git/git-receive-pack",
+        "/aCmE/aPi.git/info/lfs/objects/batch",
+        "/aCmE/aPi/archive/refs/heads/main.zip",
+    ],
+)
+async def test_git_auth_preserves_repository_scope_for_mixed_case_remotes(
     monkeypatch: pytest.MonkeyPatch,
     github: list[dict[str, object]],
+    repos: list[str],
+    path: str,
 ) -> None:
     monkeypatch.setattr(
-        WORKSPACES, "get", AsyncMock(return_value=Workspace(slug="workspace", repos=["acme/api"]))
+        WORKSPACES, "get", AsyncMock(return_value=Workspace(slug="workspace", repos=repos))
     )
     await lifecycle._create_sandbox_with_proxy(workspace_slug="workspace")
     config = github[-1]["proxy_config"]
@@ -231,27 +244,27 @@ async def test_public_git_reads_have_no_credentials_outside_workspace(
     def matches(path: str, pattern: str) -> bool:
         return path.startswith(pattern[:-2]) if pattern.endswith("/*") else path == pattern
 
-    for path, want_auth in [
-        ("/acme/api.git/info/refs", True),
-        ("/acme/api/git-upload-pack", True),
-        ("/acme/api.git/info/lfs/objects/batch", True),
-        ("/other/api.git/info/refs", False),
-        ("/acme/api-other.git/info/refs", False),
-        ("/acme/internal.git/info/refs", False),
-    ]:
-        rule = next(
-            rule
-            for rule in rules
-            if any(fnmatchcase("github.com", host) for host in rule["match_hosts"])
-            and (
-                not rule.get("match_paths")
-                or any(matches(path, match) for match in rule["match_paths"])
-            )
+    rule = next(
+        rule
+        for rule in rules
+        if any(fnmatchcase("github.com", host) for host in rule["match_hosts"])
+        and (
+            not rule.get("match_paths")
+            or any(matches(path, match) for match in rule["match_paths"])
         )
-        if want_auth:
-            assert rule["headers"][0]["value"]
-        else:
-            assert not any(header["name"].lower() == "authorization" for header in rule["headers"])
+    )
+    auth = next(
+        (
+            header["value"]
+            for header in rule["headers"]
+            if header["name"].lower() == "authorization"
+        ),
+        "",
+    )
+    if repos:
+        assert base64.b64decode(auth.removeprefix("Basic ")).decode() == "x-access-token:repos:11"
+    else:
+        assert not auth
 
 
 async def test_expiry_refresh_keeps_workspace_and_custom_proxy_rules(
