@@ -113,6 +113,7 @@ from agent.middleware.conversation_offloading import ConversationOffloadingMiddl
 from agent.middleware.model_selection import ModelSelectionState, RoutingMode
 from agent.middleware.prepare_run import PrepareRunState
 from agent.middleware.sandbox_circuit_breaker import post_sandbox_unreachable_notification
+from agent.middleware.transcript import TranscriptMiddleware
 from agent.prompt import (
     construct_sender_context,
     construct_system_prompt,
@@ -485,6 +486,7 @@ def _general_purpose_subagent(
         "middleware": cast(
             list[AgentMiddleware[Any, Any, Any]],
             [
+                TranscriptMiddleware(),
                 *([incident_middleware] if incident_middleware else []),
                 *([workspace_skills] if workspace_skills else []),
                 *_subagent_middleware(dynamic_tools),
@@ -1431,6 +1433,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
                     model_selection=model_selection,
                     routing_defaults=routing_defaults,
                 ),
+                TranscriptMiddleware(),
                 *([IncidentMiddleware(incident_session)] if incident_session is not None else []),
                 *([workspace_skills] if workspace_skills else []),
                 *([dynamic_tool_middleware] if dynamic_tool_middleware else []),
