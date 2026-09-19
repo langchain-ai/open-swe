@@ -3,6 +3,7 @@
 import asyncio
 import json
 import logging
+import time
 from collections.abc import Awaitable, Callable, Collection, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Annotated, Any, NotRequired
@@ -23,6 +24,9 @@ from agent.middleware.trace import OpenSWEMiddleware
 from agent.prompts import load_prompt
 
 logger = logging.getLogger(__name__)
+
+RETRY_BASE_SECONDS = 5.0
+RETRY_MAX_SECONDS = 60.0
 
 
 def _merge_tool_names(current: list[str], update: list[str]) -> list[str]:
@@ -48,8 +52,18 @@ class DynamicToolState(AgentState):
 
 @dataclass
 class _Resolved:
+    """One group's load outcome.
+
+    ``done`` is set only by a successful load. A failure leaves the group
+    unresolved and parks it behind ``retry_at`` so a transient MCP, credential,
+    or network outage is retried on a later request instead of disabling the
+    group for the life of the process.
+    """
+
     tools: dict[str, BaseTool] = field(default_factory=dict)
     done: bool = False
+    failures: int = 0
+    retry_at: float = 0.0
 
 
 class DynamicToolMiddleware(OpenSWEMiddleware[DynamicToolState]):
@@ -61,12 +75,15 @@ class DynamicToolMiddleware(OpenSWEMiddleware[DynamicToolState]):
         self,
         groups: Mapping[str, IntegrationGroup | Sequence[BaseTool]],
         reserved_names: Collection[str] = (),
+        *,
+        clock: Callable[[], float] = time.monotonic,
     ) -> None:
         reserved = {"load_integration_tools", *reserved_names}
         self._groups: dict[str, IntegrationGroup] = {}
         self._group_of: dict[str, str] = {}
         self._resolved: dict[str, _Resolved] = {}
         self._locks: dict[str, asyncio.Lock] = {}
+        self._clock = clock
         catalog: list[str] = []
 
         for group, spec in groups.items():
@@ -163,20 +180,38 @@ class DynamicToolMiddleware(OpenSWEMiddleware[DynamicToolState]):
 
     async def _resolve(self, group: str) -> dict[str, BaseTool]:
         resolved = self._resolved.setdefault(group, _Resolved())
-        if resolved.done:
+        if resolved.done or self._cooling_down(resolved):
             return resolved.tools
         lock = self._locks.setdefault(group, asyncio.Lock())
         async with lock:
-            if resolved.done:
+            if resolved.done or self._cooling_down(resolved):
                 return resolved.tools
             try:
                 tools = await self._groups[group].load()
             except Exception:
-                logger.warning("Failed to load %s integration tools", group, exc_info=True)
-                tools = []
+                resolved.failures += 1
+                backoff = min(
+                    RETRY_BASE_SECONDS * 2 ** min(resolved.failures - 1, 32), RETRY_MAX_SECONDS
+                )
+                resolved.retry_at = self._clock() + backoff
+                logger.warning(
+                    "Failed to load integration tools",
+                    exc_info=True,
+                    extra={
+                        "integration_group": group,
+                        "failure_count": resolved.failures,
+                        "retry_in_seconds": backoff,
+                    },
+                )
+                return resolved.tools
             resolved.tools = {tool.name: tool for tool in tools}
             resolved.done = True
+            resolved.failures = 0
+            resolved.retry_at = 0.0
         return resolved.tools
+
+    def _cooling_down(self, resolved: _Resolved) -> bool:
+        return resolved.failures > 0 and self._clock() < resolved.retry_at
 
     async def _build(self, names: Sequence[str]) -> list[str]:
         """Build the groups behind ``names``; return the names that did not appear."""

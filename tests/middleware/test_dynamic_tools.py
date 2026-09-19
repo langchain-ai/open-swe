@@ -8,7 +8,12 @@ from langchain_core.messages import ToolMessage
 from langchain_core.tools import BaseTool, StructuredTool
 from langgraph.types import Command
 
-from agent.middleware.dynamic_tools import DynamicToolMiddleware, IntegrationGroup
+from agent.middleware.dynamic_tools import (
+    RETRY_BASE_SECONDS,
+    RETRY_MAX_SECONDS,
+    DynamicToolMiddleware,
+    IntegrationGroup,
+)
 
 
 def _tool(name: str, description: str = "schema details that must stay hidden") -> BaseTool:
@@ -225,3 +230,74 @@ async def test_a_group_whose_catalog_is_empty_is_not_offered() -> None:
 
     assert not middleware.has_groups
     assert "- Corridor" not in cast(StructuredTool, middleware.tools[0]).description
+
+
+async def test_a_transient_load_failure_is_retried_after_a_backoff() -> None:
+    attempts = 0
+
+    async def load() -> list[BaseTool]:
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            raise RuntimeError("mcp unreachable")
+        return [_tool("analyzePlan")]
+
+    now = 0.0
+    middleware = DynamicToolMiddleware(
+        {"Corridor": IntegrationGroup(tool_names=("analyzePlan",), load=load)},
+        clock=lambda: now,
+    )
+    coroutine = cast(Any, cast(StructuredTool, middleware.tools[0]).coroutine)
+
+    command = await coroutine(tool_names=["analyzePlan"], state={}, tool_call_id="load-1")
+    message = cast(dict[str, Any], cast(Command, command).update)["messages"][0]
+    assert message.status == "error"
+    assert attempts == 1
+
+    # Still inside the cooldown: the loader is not hammered.
+    now = RETRY_BASE_SECONDS / 2
+    command = await coroutine(tool_names=["analyzePlan"], state={}, tool_call_id="load-2")
+    message = cast(dict[str, Any], cast(Command, command).update)["messages"][0]
+    assert message.status == "error"
+    assert attempts == 1
+
+    now = RETRY_BASE_SECONDS + 1
+    command = await coroutine(tool_names=["analyzePlan"], state={}, tool_call_id="load-3")
+    update = cast(dict[str, Any], cast(Command, command).update)
+    assert attempts == 2
+    assert update["loaded_integration_tools"] == ["analyzePlan"]
+    assert update["messages"][0].status != "error"
+
+
+async def test_repeated_load_failures_back_off_up_to_a_ceiling() -> None:
+    attempts = 0
+
+    async def load() -> list[BaseTool]:
+        nonlocal attempts
+        attempts += 1
+        raise RuntimeError("mcp unreachable")
+
+    now = 0.0
+    middleware = DynamicToolMiddleware(
+        {"Corridor": IntegrationGroup(tool_names=("analyzePlan",), load=load)},
+        clock=lambda: now,
+    )
+    coroutine = cast(Any, cast(StructuredTool, middleware.tools[0]).coroutine)
+
+    # The cooldown grows: after a second failure, a base-length wait that used to
+    # be enough no longer is.
+    await coroutine(tool_names=["analyzePlan"], state={}, tool_call_id="load")
+    assert attempts == 1
+    now += RETRY_BASE_SECONDS + 1
+    await coroutine(tool_names=["analyzePlan"], state={}, tool_call_id="load")
+    assert attempts == 2
+    now += RETRY_BASE_SECONDS + 1
+    await coroutine(tool_names=["analyzePlan"], state={}, tool_call_id="load")
+    assert attempts == 2
+
+    # However many times it has failed, one ceiling-length wait always earns a
+    # fresh attempt, so the backoff never grows past RETRY_MAX_SECONDS.
+    for expected_attempts in range(3, 10):
+        now += RETRY_MAX_SECONDS + 1
+        await coroutine(tool_names=["analyzePlan"], state={}, tool_call_id="load")
+        assert attempts == expected_attempts
