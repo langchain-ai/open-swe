@@ -18,6 +18,7 @@ from langsmith.sandbox import (
     SandboxConnectionError,
     SandboxServerReloadError,
 )
+from pydantic import BaseModel
 
 from agent.config import ENV
 from agent.sandboxes.providers.registry import SandboxGoneError
@@ -48,6 +49,7 @@ PROXY_CONFIG_NOT_READY_STATUS = 400
 PROXY_CONFIG_ERROR_BODY_CHARS = 500
 SANDBOX_START_TIMEOUT_SECONDS = 120
 PROXY_GH_TOKEN_PLACEHOLDER = "proxy-injected"
+SERVICE_URL_TIMEOUT_SECONDS = 15.0
 
 
 def _get_langsmith_api_key() -> str | None:
@@ -72,6 +74,18 @@ def _get_sandbox_api_endpoint() -> str:
     root = _get_sandbox_endpoint().rstrip("/")
     suffix = "/v2/sandboxes"
     return root if root.endswith(suffix) else f"{root}{suffix}"
+
+
+def service_identity_jwks_url() -> str:
+    """Where an app in a sandbox verifies the identity token LangSmith forwards to it.
+
+    The keys are served by the API host, not by the app origin the token names as
+    its issuer.
+    """
+    root = _get_sandbox_endpoint().rstrip("/")
+    suffix = "/v2/sandboxes"
+    api_root = root[: -len(suffix)] if root.endswith(suffix) else root
+    return f"{api_root}/.well-known/jwks.json"
 
 
 def _parse_optional_int(name: str, default: int) -> int:
@@ -422,6 +436,43 @@ async def configure_github_proxy(
             await _start_sandbox_best_effort(sandbox_name)
             await _patch_proxy_config(client, url, payload, api_key, sandbox_name)
     logger.info("Configured GitHub proxy for sandbox %s", sandbox_name)
+
+
+class WorkspaceServiceURL(BaseModel):
+    """LangSmith's reply to sharing a sandbox port with the workspace."""
+
+    service_url: str
+    access: Literal["workspace"]
+
+
+async def create_workspace_service_url(sandbox_id: str, port: int) -> str:
+    """Share ``port`` of a sandbox with the workspace and return its URL.
+
+    The URL carries no token and never expires, so the same link keeps working
+    for as long as the sandbox does; its viewers authenticate with their own
+    LangSmith session. LangSmith refuses it while an unexpired service token
+    exists for the same port, and while the tenant's
+    ``sandbox_service_url_langsmith_login`` flag is off.
+    """
+    api_key = _get_langsmith_api_key()
+    if not api_key:
+        msg = "LANGSMITH_API_KEY not set"
+        raise ValueError(msg)
+    url = f"{_get_sandbox_api_endpoint()}/boxes/{sandbox_id}/service-url"
+    async with httpx2.AsyncClient(timeout=SERVICE_URL_TIMEOUT_SECONDS) as client:
+        response = await client.post(
+            url,
+            json={"port": port, "access": "workspace"},
+            headers={"X-API-Key": api_key},
+        )
+        try:
+            response.raise_for_status()
+        except httpx2.HTTPStatusError as exc:
+            enriched = _with_response_body(exc)
+            if enriched is not None:
+                raise enriched from exc
+            raise
+    return WorkspaceServiceURL.model_validate(response.json()).service_url
 
 
 def get_async_sandbox_client() -> AsyncSandboxClient:

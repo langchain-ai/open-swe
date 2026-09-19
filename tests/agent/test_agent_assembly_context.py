@@ -581,7 +581,7 @@ async def test_agent_includes_sql_only_on_private_admin_surfaces(
 async def test_agent_includes_sandbox_file_download_url_tools() -> None:
     from agent.tools import (
         create_sandbox_file_download_url,
-        create_sandbox_service_url,
+        expose_port,
         output_iframe,
     )
 
@@ -589,7 +589,7 @@ async def test_agent_includes_sandbox_file_download_url_tools() -> None:
     tools = captured["tools"]
     assert isinstance(tools, list)
     assert create_sandbox_file_download_url in tools
-    assert create_sandbox_service_url in tools
+    assert expose_port in tools
     assert output_iframe in tools
 
 
@@ -602,7 +602,7 @@ async def test_agent_excludes_sandbox_file_downloads_for_other_providers(
     from agent.prompt import OPEN_SWE_SHARED_BASE
     from agent.tools import (
         create_sandbox_file_download_url,
-        create_sandbox_service_url,
+        expose_port,
         output_iframe,
     )
 
@@ -613,11 +613,11 @@ async def test_agent_excludes_sandbox_file_downloads_for_other_providers(
     assert isinstance(tools, list)
     assert isinstance(subagents, list)
     assert create_sandbox_file_download_url not in tools
-    assert create_sandbox_service_url not in tools
+    assert expose_port not in tools
     assert output_iframe not in tools
     general_purpose = next(item for item in subagents if item["name"] == "general-purpose")
     assert create_sandbox_file_download_url not in general_purpose["tools"]
-    assert create_sandbox_service_url not in general_purpose["tools"]
+    assert expose_port not in general_purpose["tools"]
     assert output_iframe not in general_purpose["tools"]
     assert general_purpose["system_prompt"] == (
         f"{OPEN_SWE_SHARED_BASE}\n\n{GENERAL_PURPOSE_SUBAGENT['system_prompt']}"

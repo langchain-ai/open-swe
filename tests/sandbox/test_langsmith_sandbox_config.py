@@ -1,12 +1,16 @@
 """Tests for LangSmith sandbox env-var configuration parsing."""
 
+import json
+from collections.abc import Callable
 from pathlib import Path
 from typing import cast
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import httpx2
 import pytest
 from langsmith.sandbox import AsyncSandboxClient, ResourceNotFoundError
 
+from agent.sandboxes.providers import langsmith as langsmith_provider
 from agent.sandboxes.providers.langsmith import (
     DEFAULT_SANDBOX_DELETE_AFTER_STOP_SECONDS,
     DEFAULT_SANDBOX_IDLE_TTL_SECONDS,
@@ -23,6 +27,8 @@ from agent.sandboxes.providers.langsmith import (
     _reuse_existing_sandbox,
     capture_snapshot_with_tag,
     create_langsmith_sandbox,
+    create_workspace_service_url,
+    service_identity_jwks_url,
 )
 from agent.sandboxes.providers.registry import SandboxGoneError
 
@@ -439,3 +445,78 @@ async def test_reuse_keeps_other_failures_untyped() -> None:
     with pytest.raises(RuntimeError) as excinfo:
         await _reuse_existing_sandbox(cast(AsyncSandboxClient, client), "openswe-abc")
     assert not isinstance(excinfo.value, SandboxGoneError)
+
+
+def _serve(
+    monkeypatch: pytest.MonkeyPatch,
+    handler: Callable[[httpx2.Request], httpx2.Response],
+) -> None:
+    """Answer the provider's own client from `handler` instead of the network."""
+    client = httpx2.AsyncClient
+    monkeypatch.setattr(
+        langsmith_provider.httpx2,
+        "AsyncClient",
+        lambda **_kwargs: client(transport=httpx2.MockTransport(handler)),
+    )
+
+
+@pytest.mark.asyncio
+async def test_service_url_asks_for_a_workspace_grant(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    requests: list[httpx2.Request] = []
+
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        requests.append(request)
+        return httpx2.Response(
+            200,
+            json={
+                # LangSmith answers with browser_url too; in workspace mode it is the same URL.
+                "browser_url": "https://l-abc.sandbox.example/",
+                "service_url": "https://l-abc.sandbox.example/",
+                "access": "workspace",
+            },
+        )
+
+    monkeypatch.setenv("LANGSMITH_ENDPOINT", "https://api.smith.langchain.com")
+    monkeypatch.setenv("LANGSMITH_API_KEY", "lsv2-key")
+    _serve(monkeypatch, handler)
+
+    service_url = await create_workspace_service_url("sandbox-1", 3000)
+
+    assert service_url == "https://l-abc.sandbox.example/"
+    request = requests[0]
+    assert str(request.url) == (
+        "https://api.smith.langchain.com/v2/sandboxes/boxes/sandbox-1/service-url"
+    )
+    assert request.headers["X-API-Key"] == "lsv2-key"
+    assert json.loads(request.content) == {"port": 3000, "access": "workspace"}
+
+
+@pytest.mark.asyncio
+async def test_service_url_surfaces_the_api_refusal(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A port holding an unexpired service token is refused; the agent needs to read why."""
+
+    def handler(_request: httpx2.Request) -> httpx2.Response:
+        return httpx2.Response(
+            409, json={"detail": "This service URL has an active token. Retry after it expires."}
+        )
+
+    monkeypatch.setenv("LANGSMITH_ENDPOINT", "https://api.smith.langchain.com")
+    monkeypatch.setenv("LANGSMITH_API_KEY", "lsv2-key")
+    _serve(monkeypatch, handler)
+
+    with pytest.raises(httpx2.HTTPStatusError, match="active token"):
+        await create_workspace_service_url("sandbox-1", 3000)
+
+
+def test_identity_jwks_url_sits_on_the_api_host() -> None:
+    with patch.dict(
+        "os.environ",
+        {"LANGSMITH_ENDPOINT": "https://api.smith.langchain.com/v2/sandboxes"},
+    ):
+        assert (
+            service_identity_jwks_url() == "https://api.smith.langchain.com/.well-known/jwks.json"
+        )

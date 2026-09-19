@@ -9,11 +9,11 @@ _TOOL_MODULES = {
     "background_task": ".background_task",
     "create_automation": ".automations",
     "create_sandbox_file_download_url": ".create_sandbox_file_download_url",
-    "create_sandbox_service_url": ".create_sandbox_service_url",
     "delete_automation": ".automations",
     "delete_workspace": ".workspaces",
     "enter_plan_mode": ".enter_plan_mode",
     "expedite_pr_approval": ".expedite_pr_approval",
+    "expose_port": ".expose_port",
     "fetch_review_diff": ".fetch_review_diff",
     "fetch_url": ".fetch_url",
     "get_thread": ".threads",
@@ -70,11 +70,11 @@ __all__ = [
     "background_task",
     "create_automation",
     "create_sandbox_file_download_url",
-    "create_sandbox_service_url",
     "delete_automation",
     "delete_workspace",
     "enter_plan_mode",
     "expedite_pr_approval",
+    "expose_port",
     "fetch_review_diff",
     "fetch_url",
     "get_thread",
@@ -149,9 +149,9 @@ if TYPE_CHECKING:
     from agent.tools.background_execute import background_execute
     from agent.tools.background_task import background_task
     from agent.tools.create_sandbox_file_download_url import create_sandbox_file_download_url
-    from agent.tools.create_sandbox_service_url import create_sandbox_service_url
     from agent.tools.enter_plan_mode import enter_plan_mode
     from agent.tools.expedite_pr_approval import expedite_pr_approval
+    from agent.tools.expose_port import expose_port
     from agent.tools.fetch_review_diff import fetch_review_diff
     from agent.tools.fetch_url import fetch_url
     from agent.tools.http_request import http_request
