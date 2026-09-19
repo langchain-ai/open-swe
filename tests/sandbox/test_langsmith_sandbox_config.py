@@ -446,7 +446,7 @@ async def test_reuse_keeps_other_failures_untyped() -> None:
 
 
 @pytest.mark.asyncio
-async def test_login_service_url_asks_for_a_restricted_grant(
+async def test_login_service_url_asks_for_a_workspace_grant(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     requests: list[httpx2.Request] = []
@@ -458,7 +458,7 @@ async def test_login_service_url_asks_for_a_restricted_grant(
             json={
                 "browser_url": "https://l-abc.sandbox.example/",
                 "service_url": "https://l-abc.sandbox.example/",
-                "access": "restricted",
+                "access": "workspace",
             },
         )
 
@@ -473,13 +473,13 @@ async def test_login_service_url_asks_for_a_restricted_grant(
     service = await create_login_service_url("sandbox-1", 3000)
 
     assert service.browser_url == "https://l-abc.sandbox.example/"
-    assert service.access == "restricted"
+    assert service.access == "workspace"
     request = requests[0]
     assert str(request.url) == (
         "https://api.smith.langchain.com/v2/sandboxes/boxes/sandbox-1/service-url"
     )
     assert request.headers["X-API-Key"] == "lsv2-key"
-    assert json.loads(request.content) == {"port": 3000, "access": "restricted"}
+    assert json.loads(request.content) == {"port": 3000, "access": "workspace"}
 
 
 @pytest.mark.asyncio

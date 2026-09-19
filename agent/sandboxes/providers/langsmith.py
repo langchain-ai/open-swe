@@ -50,9 +50,8 @@ PROXY_CONFIG_ERROR_BODY_CHARS = 500
 SANDBOX_START_TIMEOUT_SECONDS = 120
 PROXY_GH_TOKEN_PLACEHOLDER = "proxy-injected"
 SERVICE_URL_TIMEOUT_SECONDS = 15.0
-# The narrower of LangSmith's two durable grants: workspace members who can read
-# the sandbox, rather than every member of the workspace.
-SERVICE_URL_ACCESS = "restricted"
+# Any member of the workspace the sandbox belongs to.
+SERVICE_URL_ACCESS = "workspace"
 
 
 def _get_langsmith_api_key() -> str | None:

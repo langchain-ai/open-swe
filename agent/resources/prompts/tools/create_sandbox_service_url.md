@@ -5,7 +5,7 @@ LangSmith domain, so root-absolute URLs (`/assets/app.js`, `/@vite/client`), Web
 reload work with no base-path configuration.
 
 The link carries no credential and never expires: whoever opens it signs in with their own
-LangSmith session, and only workspace members who can read this sandbox get through. The app
+LangSmith session, and any member of this sandbox's LangSmith workspace gets through. The app
 behind it receives their signed identity in the `X-Langsmith-User-Token` header, verifiable
 against `<langsmith-url>/.well-known/jwks.json`.
 

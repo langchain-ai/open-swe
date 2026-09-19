@@ -24,7 +24,7 @@ def _configure(monkeypatch: pytest.MonkeyPatch) -> tuple[_Backend, list[tuple[st
 
     async def create_url(sandbox_id: str, port: int) -> LoginServiceURL:
         calls.append((sandbox_id, port))
-        return LoginServiceURL(browser_url="https://l-abc123.sandbox.example/", access="restricted")
+        return LoginServiceURL(browser_url="https://l-abc123.sandbox.example/", access="workspace")
 
     monkeypatch.setattr(service_tool, "get_sandbox_backend", get_backend)
     monkeypatch.setattr(service_tool, "unwrap_sandbox_backend", lambda value: value)
@@ -42,7 +42,7 @@ async def test_create_sandbox_service_url_shares_a_langsmith_login_url(
     assert result == {
         "url": "https://l-abc123.sandbox.example/",
         "port": 3000,
-        "access": "restricted",
+        "access": "workspace",
     }
     assert calls == [("sandbox-1", 3000)]
 
