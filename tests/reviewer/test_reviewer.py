@@ -110,7 +110,7 @@ async def test_reviewer_resolves_app_installation_token_at_run_start() -> None:
 
 
 @pytest.mark.asyncio
-async def test_reviewer_reuses_app_token_for_sandbox_proxy() -> None:
+async def test_reviewer_limits_sandbox_to_reviewed_repository_in_workspace() -> None:
     config: RunnableConfig = {
         "configurable": {
             "__is_for_execution__": True,
@@ -158,8 +158,7 @@ async def test_reviewer_reuses_app_token_for_sandbox_proxy() -> None:
     mock_sandbox.assert_awaited_once_with(
         "reviewer-thread-id",
         workspace_slug="oss",
-        github_proxy_token="app-token",
-        github_proxy_repositories=["repo"],
+        github_proxy_repositories=["acme/repo"],
         allow_replacement=True,
     )
 

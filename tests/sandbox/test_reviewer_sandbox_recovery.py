@@ -54,7 +54,6 @@ async def test_replaces_unreachable_sandbox_when_replacement_allowed() -> None:
 
     assert result.id == "sandbox-replacement"
     create_replacement.assert_awaited_once_with(
-        None,
         thread_id=thread_id,
         github_proxy_repositories=None,
         workspace_slug="large",

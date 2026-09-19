@@ -4,9 +4,8 @@ Learns a per-repo review-style prompt for the reviewer agent. It mines
 historical human PR review feedback and this reviewer's own past finding
 outcomes (resolved / dismissed / 👍👎) to teach what this team flags and skips.
 
-Uses the same sandbox + ``gh`` pattern as the reviewer agent. The dashboard
-user's OAuth token is injected into the LangSmith GitHub proxy so ``gh`` works
-on public repos even when the GitHub App is not installed on them.
+Uses workspace-scoped sandbox credentials, like the coding agent. Public
+repositories outside the workspace remain readable anonymously.
 """
 
 # ruff: noqa: E402
@@ -18,21 +17,17 @@ from langgraph.graph.state import RunnableConfig
 from langgraph.pregel import Pregel
 from langgraph.runtime import Runtime
 
-from agent.config import ENV
-
 warnings.filterwarnings("ignore", module="langchain_core._api.deprecation")
 warnings.filterwarnings("ignore", message=".*Pydantic V1.*", category=UserWarning)
 
 from deepagents import create_deep_agent
 from deepagents.backends.composite import CompositeBackend
-from deepagents.backends.protocol import SandboxBackendProtocol
 from deepagents.backends.state import StateBackend
 from langchain.agents.middleware import ModelCallLimitMiddleware
 from langchain.agents.middleware.types import AgentMiddleware
 from langchain_core.language_models import BaseChatModel
 
 from agent.dashboard.workspace_settings_cache import cached_workspace_settings
-from agent.github.app import get_github_app_installation_token
 from agent.middleware import (
     BasePrepareRunMiddleware,
     PrepareRunState,
@@ -54,8 +49,6 @@ from agent.runtime import (
     graph_loaded_for_execution,
 )
 from agent.sandboxes.paths import resolve_sandbox_work_dir
-from agent.sandboxes.providers.langsmith import configure_github_proxy
-from agent.sandboxes.state import unwrap_sandbox_backend
 from agent.tools.read_finding_outcomes import read_finding_outcomes
 from agent.tools.save_review_style import save_review_style_prompt
 from agent.utils.analyzer_skills import SKILLS_ROUTE, skill_path_for_mode
@@ -71,14 +64,14 @@ STYLE_ANALYZER_MODEL_CALL_LIMIT = 80
 STYLE_ANALYZER_PROMPT = load_prompt("analyzer/main.md")
 
 
-async def _configure_sandbox_github_proxy(
-    sandbox_backend: SandboxBackendProtocol,
-    github_token: str,
-) -> None:
-    if ENV.SANDBOX_TYPE.get() != "langsmith":
-        return
-    backend = unwrap_sandbox_backend(sandbox_backend)
-    await configure_github_proxy(backend.id, github_token)
+async def _analyzer_workspace(cfg: RunConfig) -> str | None:
+    if cfg.workspace_slug or not cfg.review_style_full_name:
+        return cfg.workspace_slug
+    from agent.workspaces.store import WORKSPACES
+
+    if WORKSPACES.repo_import_is_pending(cfg.review_style_full_name):
+        raise RuntimeError("Analyzer repository workspace has not been imported")
+    return await WORKSPACES.owner_of_repo(cfg.review_style_full_name)
 
 
 def _make_model_or_defer(model_id: str, *, use_gateway: bool, **kwargs: Any) -> BaseChatModel:
@@ -104,18 +97,19 @@ class PrepareAnalyzerRunMiddleware(BasePrepareRunMiddleware):
         }
 
     async def _prepare(self, state: PrepareRunState, runtime: Runtime) -> dict[str, Any]:  # noqa: ARG002
-        sandbox_backend = await ensure_sandbox_for_thread(self._thread_id)
-        work_dir = await resolve_sandbox_work_dir(sandbox_backend)
         cfg = RunConfig.from_config(self._config)
+        sandbox_backend = await ensure_sandbox_for_thread(
+            self._thread_id,
+            workspace_slug=await _analyzer_workspace(cfg),
+            github_proxy_repositories=[cfg.review_style_full_name]
+            if cfg.review_style_full_name
+            else [],
+        )
+        work_dir = await resolve_sandbox_work_dir(sandbox_backend)
         full_name = cfg.review_style_full_name or "owner/repo"
         owner, _, name = full_name.partition("/")
         samples_text = cfg.review_style_samples_text or ""
         mode = cfg.analyzer_mode or "bootstrap"
-        github_token = cfg.review_style_github_token
-        if not github_token:
-            github_token = await get_github_app_installation_token()
-        if isinstance(github_token, str) and github_token:
-            await _configure_sandbox_github_proxy(sandbox_backend, github_token)
         system_prompt = render_prompt(
             "analyzer/main.md",
             repo_owner=owner or "<owner>",
@@ -140,14 +134,22 @@ async def get_analyzer(config: RunnableConfig) -> Pregel:
     if thread_id is None or not graph_loaded_for_execution(config):
         return create_deep_agent(system_prompt="", tools=[]).with_config(bindable_config(config))
 
+    workspace = await _analyzer_workspace(cfg)
+
     async def reconnect_backend(_thread_id: str = thread_id):
-        return await ensure_sandbox_for_thread(_thread_id)
+        return await ensure_sandbox_for_thread(
+            _thread_id,
+            workspace_slug=workspace,
+            github_proxy_repositories=[cfg.review_style_full_name]
+            if cfg.review_style_full_name
+            else [],
+        )
 
     default_backend = get_cached_sandbox_backend(thread_id, reconnect=reconnect_backend)
     backend = CompositeBackend(default=default_backend, routes={SKILLS_ROUTE: StateBackend()})
 
     model_id = DEFAULT_LLM_MODEL_ID
-    use_gateway = (await cached_workspace_settings(cfg.workspace_slug)).effective_gateway_enabled
+    use_gateway = (await cached_workspace_settings(workspace)).effective_gateway_enabled
     model_kwargs = provider_model_kwargs(
         model_id,
         None,

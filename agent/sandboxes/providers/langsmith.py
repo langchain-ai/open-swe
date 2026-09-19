@@ -6,7 +6,7 @@ import json
 import logging
 import shlex
 from abc import ABC, abstractmethod
-from typing import Any, Literal
+from typing import Any, Literal, NotRequired, TypedDict
 
 import httpx2
 from deepagents.backends import LangSmithSandbox
@@ -175,8 +175,22 @@ def _install_create_extra_fields(client: AsyncSandboxClient, extra: dict[str, An
     client._http.post = post_with_extra  # noqa: SLF001 # ty: ignore[invalid-assignment]
 
 
-def _github_proxy_rules(github_token: str) -> list[dict[str, Any]]:
+class GitHubProxyHeader(TypedDict):
+    name: str
+    type: Literal["opaque", "plaintext"]
+    value: str
+
+
+class GitHubProxyRule(TypedDict):
+    name: str
+    match_hosts: list[str]
+    headers: list[GitHubProxyHeader]
+    env_vars: NotRequired[dict[str, str]]
+
+
+def _github_proxy_rules(github_token: str | None) -> list[GitHubProxyRule]:
     basic_auth = base64.b64encode(f"x-access-token:{github_token}".encode()).decode()
+    # GitHub enforces repository IDs on the token, including for mixed-case URLs.
     return [
         {
             "name": "github-api",
@@ -184,8 +198,8 @@ def _github_proxy_rules(github_token: str) -> list[dict[str, Any]]:
             "headers": [
                 {
                     "name": "Authorization",
-                    "type": "opaque",
-                    "value": f"Bearer {github_token}",
+                    "type": "opaque" if github_token else "plaintext",
+                    "value": f"Bearer {github_token}" if github_token else "",
                 }
             ],
             # `gh` refuses to run without a token in its environment even though the
@@ -201,7 +215,9 @@ def _github_proxy_rules(github_token: str) -> list[dict[str, Any]]:
                     "type": "opaque",
                     "value": f"Basic {basic_auth}",
                 }
-            ],
+            ]
+            if github_token
+            else [],
         },
     ]
 
@@ -370,7 +386,7 @@ async def _start_sandbox_best_effort(sandbox_name: str) -> None:
 
 async def configure_github_proxy(
     sandbox_name: str,
-    github_token: str,
+    github_token: str | None,
     *,
     base_proxy_config: dict[str, Any] | None = None,
 ) -> None:
@@ -398,11 +414,12 @@ async def configure_github_proxy(
         rule
         for rule in (custom_rules if isinstance(custom_rules, list) else [])
         if not isinstance(rule, dict)
-        or rule.get("name") not in {"open-swe-langsmith", "stagehand-model"}
+        or rule.get("name")
+        not in {"github", "github-api", "github-public", "open-swe-langsmith", "stagehand-model"}
     ]
     proxy_config["rules"] = [
-        *preserved_rules,
         *_github_proxy_rules(github_token),
+        *preserved_rules,
     ]
     payload = {"proxy_config": proxy_config}
     async with httpx2.AsyncClient(timeout=PROXY_CONFIG_TIMEOUT_SECONDS) as client:

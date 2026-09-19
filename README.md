@@ -104,6 +104,8 @@ This composition keeps the system extensible while allowing it to inherit improv
 
 Cloud work runs in isolated Linux sandboxes with the development tooling supplied by the workspace's setup scripts or snapshot. A sandbox persists with its thread, but an unreachable coding sandbox is not silently replaced—Open SWE fails safely rather than risk discarding uncommitted work.
 
+LangSmith sandbox GitHub credentials are restricted to repositories assigned to the selected workspace and accessible to the GitHub App installation. This applies to coding, review, analysis, and workspace image builds. Public repositories can still be cloned over HTTPS in any workspace. An empty or unconfigured default workspace receives no GitHub credentials; an unavailable workspace or failed credential lookup never falls back to installation-wide access. Repository changes take effect when the sandbox reconnects or refreshes its credentials. This controls managed GitHub access, not files already present in a sandbox or snapshot, or credentials supplied separately by an administrator.
+
 [LangSmith](https://smith.langchain.com/) is the default sandbox and tracing provider. Open SWE also supports [Modal](https://modal.com/), [Daytona](https://www.daytona.io/), [Runloop](https://www.runloop.ai/), [E2B](https://e2b.dev/), and local execution, with a pluggable interface for additional providers.
 
 ### Tools stay curated

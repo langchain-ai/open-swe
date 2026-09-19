@@ -633,8 +633,7 @@ async def _ensure_reviewer_sandbox_for_thread(
         await ensure_sandbox_for_thread(
             thread_id,
             workspace_slug=cfg.workspace_slug,
-            github_proxy_token=github_token,
-            github_proxy_repositories=[repo_name] if repo_name else None,
+            github_proxy_repositories=[cfg.repo.full_name] if cfg.repo else [],
             # A reviewer sandbox holds nothing but a checkout `prepare_review_repo`
             # re-derives every run, and reviewer threads outlive their sandbox: one
             # thread per PR, re-triggered on every push. Refusing to replace an
