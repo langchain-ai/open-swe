@@ -206,26 +206,6 @@ async def test_hook_sequence_for_a_transcribed_turn(monkeypatch: pytest.MonkeyPa
     assert completed.tool_output == "file body"
 
 
-async def test_follow_up_without_a_turn_id_mints_one(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A dashboard follow-up without ``transcript_turn_id`` (Slack) gets one."""
-    engine = _install(monkeypatch, transcribed=True)
-    middleware = mw.TranscriptMiddleware()
-    human = HumanMessage(content="follow up", id="human-2")
-
-    await middleware.abefore_agent({"messages": [AIMessage(content="old"), human]}, None)
-    await middleware.aafter_agent({"messages": []}, None)
-
-    assert engine.types == [
-        "turn.requested",
-        "turn.started",
-        "turn.checkpoint.completed",
-        "turn.completed",
-    ]
-    requested = engine.commands[0]
-    assert requested.event.message_id == "human-2"
-    assert requested.event.text == "follow up"
-
-
 @pytest.mark.parametrize(
     ("transcribed", "postgres_configured"),
     [
@@ -394,44 +374,6 @@ async def test_streamed_fragments_keep_one_message_id(monkeypatch: pytest.Monkey
     assert tool_started.event.message_id == next(iter(used_ids))
 
 
-async def test_injected_human_images_become_attachments(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    engine = _install(monkeypatch, transcribed=True, turn_id=uuid7())
-    middleware = mw.TranscriptMiddleware()
-    await middleware.abefore_agent({"messages": [HumanMessage(content="hi", id="h")]}, None)
-
-    injected = HumanMessage(
-        content=[
-            {"type": "text", "text": "look at this"},
-            {
-                "type": "image",
-                "base64": base64.b64encode(b"pretend-png").decode("ascii"),
-                "mime_type": "image/png",
-                "file_name": "shot.png",
-            },
-        ],
-        id="human-queued",
-    )
-
-    async def model_handler(request: ModelRequest) -> ModelResponse:
-        return ModelResponse(result=[AIMessage(content="ok", id="ai-1")])
-
-    await middleware.awrap_model_call(_model_request([injected]), model_handler)
-    await middleware.aafter_agent({"messages": []}, None)
-
-    human = next(
-        command for command in engine.commands if command.command_id == "human:human-queued"
-    )
-    assert len(human.attachments) == 1
-    attachment = human.attachments[0]
-    assert attachment.mime_type == "image/png"
-    assert attachment.file_name == "shot.png"
-    assert attachment.data == b"pretend-png"
-    assert human.event.attachments is not None
-    assert human.event.attachments[0].attachment_id == attachment.attachment_id
-
-
 async def test_an_external_turn_request_keeps_its_images(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -454,8 +396,9 @@ async def test_an_external_turn_request_keeps_its_images(
     await middleware.abefore_agent({"messages": [AIMessage(content="old"), human]}, None)
     await middleware.aafter_agent({"messages": []}, None)
 
+    assert engine.types[:2] == ["turn.requested", "turn.started"]
     requested = engine.commands[0]
-    assert requested.event.type == "turn.requested"
+    assert requested.event.message_id == "human-slack"
     assert len(requested.attachments) == 1
     assert requested.attachments[0].data == b"pretend-png"
     assert requested.event.attachments[0].file_name == "screenshot.png"

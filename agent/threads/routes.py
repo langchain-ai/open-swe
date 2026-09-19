@@ -30,6 +30,7 @@ from agent.threads.handlers import (
     get_dashboard_thread_pull_request_context,
     get_dashboard_thread_pull_request_status,
     get_dashboard_thread_state,
+    interrupt_transcript_turns,
     rename_dashboard_thread,
     resolve_all_dashboard_threads,
     resolve_dashboard_thread,
@@ -54,7 +55,6 @@ from agent.threads.runs import (
     ThreadRenameBody,
     ThreadResolveBody,
 )
-from agent.transcript.turns import settle_run_turn
 from agent.utils.langsmith import get_langsmith_trace_url
 from agent.utils.timing import server_timing_header
 
@@ -62,19 +62,6 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["threads"])
 router.include_router(feedback_router)
-
-
-async def _interrupt_transcript_turn(thread_id: str, run_id: str) -> None:
-    """Record a cancel of one run on the thread's transcript, when it has one."""
-    try:
-        await settle_run_turn(thread_id, run_id, outcome="interrupted")
-    except Exception:  # noqa: BLE001
-        # The runs are already cancelled; the completion webhook closes the turn.
-        logger.warning(
-            "Could not record a cancel on the transcript",
-            exc_info=True,
-            extra={"transcript": {"thread_id": thread_id, "run_id": run_id}},
-        )
 
 
 @router.get("/me/local-trace-url/{thread_id}")
@@ -377,7 +364,7 @@ async def api_cancel_thread_run(
         email=session.get("email"),
     )
     if status_code < 400:
-        await _interrupt_transcript_turn(thread_id, run_id)
+        await interrupt_transcript_turns(thread_id, [run_id])
     return Response(content=content, status_code=status_code, media_type=media_type)
 
 

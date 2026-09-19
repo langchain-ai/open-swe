@@ -344,7 +344,7 @@ async def _cancel_active_thread_runs(client: Any, thread_id: str) -> list[str]:
     return cancelled
 
 
-async def _interrupt_transcript_turns(thread_id: str, run_ids: Sequence[str]) -> None:
+async def interrupt_transcript_turns(thread_id: str, run_ids: Sequence[str]) -> None:
     """Close the transcript turn of each cancelled run.
 
     Scoped to the runs that were actually cancelled: a queued follow-up
@@ -388,7 +388,7 @@ async def cancel_dashboard_thread(
     except Exception as exc:  # noqa: BLE001
         logger.exception("Failed to cancel active runs for thread %s", thread_id)
         raise HTTPException(502, "failed to request thread cancellation") from exc
-    await _interrupt_transcript_turns(thread_id, cancelled_run_ids)
+    await interrupt_transcript_turns(thread_id, cancelled_run_ids)
 
     metadata_update: dict[str, Any] = {
         "latest_run_status": "interrupted",
@@ -440,7 +440,7 @@ async def admin_cancel_dashboard_thread(
     except Exception as exc:  # noqa: BLE001
         logger.exception("Failed to cancel active runs for thread %s", thread_id)
         raise HTTPException(502, "failed to request thread cancellation") from exc
-    await _interrupt_transcript_turns(thread_id, cancelled_run_ids)
+    await interrupt_transcript_turns(thread_id, cancelled_run_ids)
 
     await client.threads.update(
         thread_id=thread_id,

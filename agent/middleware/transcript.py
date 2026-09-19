@@ -1,12 +1,11 @@
 """Write agent activity into the append-only transcript event log.
 
-One middleware instance serves every run of a graph, so all per-run state lives
-in a module-level registry keyed by ``thread_id:run_id`` rather than on ``self``.
-A ``ContextVar`` cannot hold it: LangGraph runs each node in its own copied
-context (``langgraph._internal._runnable``), so a value set in ``abefore_agent``
-is invisible to the model node. The subagent *namespace* is the exception — it
-only ever has to travel downward into a nested graph invoked from inside the
-tool coroutine, which a ``ContextVar`` does correctly.
+One middleware instance serves every run of a graph, so per-run state lives in a
+module-level registry keyed by ``thread_id:run_id``. A ``ContextVar`` cannot
+hold it: LangGraph runs each node in its own copied context, so a value set in
+``abefore_agent`` is invisible to the model node. The subagent *namespace* is
+the exception — it only travels downward into a nested graph invoked from
+inside the tool coroutine, which a ``ContextVar`` does correctly.
 
 Transcript writes are observability: every failure is logged and swallowed so a
 transcript problem can never fail a run. Events are queued and written by one
@@ -94,10 +93,9 @@ def paragraph_boundary(text: str) -> int:
     """The largest safe markdown flush offset in ``text`` (0 when there is none).
 
     Safe boundaries are the end of a blank line, the end of a closing code
-    fence, and the start of a list item. Offsets inside an open fence never
-    qualify, and the trailing partial line is never itself flushed — though a
-    partial line that has already declared itself a list item is a boundary in
-    front of it.
+    fence, and the start of a list item; offsets inside an open fence never
+    qualify. The trailing partial line is never flushed, but a boundary in
+    front of it is one once it has declared itself a list item.
     """
     best = 0
     offset = 0
@@ -174,14 +172,13 @@ class RunState:
     seen_human_ids: set[str] = field(default_factory=set)
     buffers: dict[str, MessageBuffers] = field(default_factory=dict)
     message_alias: dict[str, str] = field(default_factory=dict)
-    notices: dict[str, object] = field(default_factory=dict)
+    offloading_notice: JsonObject | None = None
     queue: asyncio.Queue[Command] | None = None
     writer: asyncio.Task[None] | None = None
     terminal: bool = False
 
     def enqueue(self, *commands: Command) -> None:
-        """Queue commands for the writer. Nothing is ever shed: the queue is
-        bounded by the run's own output, and the turn end waits for the drain."""
+        """Queue commands for the writer. Nothing is shed: the turn end drains."""
         if not self.enabled or self.queue is None:
             return
         for command in commands:
@@ -210,9 +207,8 @@ class RunIds:
 def _run_ids() -> RunIds | None:
     """Correlation ids from the running graph's config, or ``None`` off-graph.
 
-    The LangGraph server puts ``run_id`` at the top level of the run config;
-    a direct ``graph.ainvoke`` (evals, the desktop app) has none, so one is
-    minted to keep the turn's events correlated with each other.
+    A direct ``graph.ainvoke`` (evals, the desktop app) has no ``run_id``; a
+    minted one would differ per lookup, so such a run is not recorded at all.
     """
     try:
         config = get_config()
@@ -224,10 +220,12 @@ def _run_ids() -> RunIds | None:
     if not isinstance(thread_id, str) or not thread_id:
         return None
     run_id = config.get("run_id") or configurable.get("run_id")
+    if not isinstance(run_id, (str, UUID)) or not run_id:
+        return None
     turn_id = configurable.get("transcript_turn_id")
     return RunIds(
         thread_id=thread_id,
-        run_id=str(run_id) if isinstance(run_id, (str, UUID)) and run_id else str(uuid.uuid7()),
+        run_id=str(run_id),
         turn_id=_parse_turn_id(turn_id if isinstance(turn_id, str) else None),
         configurable=configurable,
     )
@@ -242,11 +240,8 @@ def _lookup_state() -> RunState:
 
 
 def _reasoning_text(message: BaseMessage) -> str:
-    """Concatenated reasoning, normalised exactly like the UI's ``reasoningText``.
-
-    Never stripped: the same function reads a streaming chunk, where the leading
-    space is part of the delta.
-    """
+    """Concatenated reasoning. Never stripped: a streaming chunk's leading space
+    is part of the delta."""
     try:
         blocks = message.content_blocks
     except Exception:
@@ -314,9 +309,8 @@ def _human_attachments(
 ) -> tuple[list[MessageAttachment], tuple[PendingAttachment, ...]]:
     """Files on a human message, as event metadata plus the bytes to store.
 
-    Only standard base64 image blocks are captured. A remote-URL image is
-    referenced rather than copied, and anything else is skipped with a log so a
-    missing attachment is never silent.
+    Only standard base64 image blocks are captured; a remote-URL image is
+    referenced rather than copied, and anything else is skipped with a log.
     """
     try:
         blocks = message.content_blocks
@@ -392,12 +386,12 @@ def _tool_output(content: object) -> tuple[str, bool]:
 class _DeltaHandler(AsyncCallbackHandler):
     """Feeds the streaming deltas of one model call into one message's buffers.
 
-    Chunk ids are deliberately ignored. A provider does not have to name its
-    message the same way in every chunk — the OpenAI Responses stream carries
-    the real ``resp_...`` id on some chunks and LangChain's ``lc_run--<run_id>``
-    placeholder on the rest — so keying the buffers on the chunk would split one
-    reply across several transcript messages. The middleware mints one id per
-    model call instead and ``message.completed`` reuses it.
+    Chunk ids are deliberately ignored: a provider need not name its message
+    the same way in every chunk (the OpenAI Responses stream alternates between
+    the real ``resp_...`` id and LangChain's ``lc_run--<run_id>`` placeholder),
+    so keying the buffers on the chunk would split one reply across several
+    transcript messages. One id is minted per model call instead, and
+    ``message.completed`` reuses it.
     """
 
     run_inline = True
@@ -547,11 +541,8 @@ async def _writer_loop(state: RunState) -> None:
 
 
 async def _finish(state: RunState) -> None:
-    """Flush the queue, then stop the writer — even if the drain is cancelled.
-
-    A cancellation during the drain is the process shutting down; it has to
-    propagate, but the writer task must not be left running behind it.
-    """
+    """Flush the queue, then stop the writer — even if the drain is cancelled,
+    which is the process shutting down and must not leave the writer behind."""
     try:
         if state.queue is not None:
             await asyncio.wait_for(state.queue.join(), timeout=30)
@@ -790,9 +781,9 @@ class TranscriptMiddleware(OpenSWEMiddleware):
         if not isinstance(status, Mapping):
             return
         payload = _json_object(status)
-        if state.notices.get("conversation_offloading") == payload:
+        if state.offloading_notice == payload:
             return
-        state.notices["conversation_offloading"] = payload
+        state.offloading_notice = payload
         state.enqueue(
             Command(
                 command_id=str(uuid.uuid7()),
@@ -817,8 +808,8 @@ class TranscriptMiddleware(OpenSWEMiddleware):
     ) -> None:
         """Replace the streamed accumulation with the model's canonical output.
 
-        The reply keeps the id its fragments used, and the graph's own id for
-        that message is remembered so a tool call it issued still points at it.
+        The reply keeps the id its fragments used, and the graph's own id is
+        aliased to it so a tool call it issued still points at the same row.
         """
         ai_messages = [message for message in response.result if isinstance(message, AIMessage)]
         streamed_id = sniffer.message_id if sniffer.streamed else None
@@ -951,12 +942,8 @@ class TranscriptMiddleware(OpenSWEMiddleware):
             )
 
     async def _capture_checkpoint(self, state: RunState) -> None:
-        """Record what the turn left in the sandbox, ahead of the event that ends it.
-
-        Enqueued before ``turn.completed`` (or ``turn.failed``) so a reader
-        that sees a turn settle already holds its checkpoint, rather than
-        briefly seeing a finished turn with nothing to diff.
-        """
+        """Record what the turn left in the sandbox, enqueued before the event
+        that ends it so a reader never sees a settled turn with nothing to diff."""
         try:
             state.enqueue(
                 await checkpoints.checkpoint_command(
@@ -1158,10 +1145,9 @@ def _result_output(
 def _attach(handler: AsyncCallbackHandler) -> CallbackManager | AsyncCallbackManager | None:
     """Add ``handler`` to the node's callback manager so it sees model deltas.
 
-    The agent's model node calls ``model.ainvoke(messages)`` with no explicit
-    config, so the model inherits the contextvar ``RunnableConfig``; its
-    ``callbacks`` manager is where a handler has to live to receive the child
-    LLM run's token callbacks.
+    The model node invokes with no explicit config, so the model inherits the
+    contextvar ``RunnableConfig``; its ``callbacks`` manager is where a handler
+    has to live to receive the child LLM run's token callbacks.
     """
     try:
         callbacks = get_config().get("callbacks")

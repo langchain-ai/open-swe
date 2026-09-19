@@ -160,7 +160,7 @@ def _with_vision_fallback(model_id: str, effort: str, *, has_images: bool) -> tu
 
 def _decode_dashboard_image(image: DashboardImageBody) -> bytes:
     if image.mime_type not in _SUPPORTED_IMAGE_MIME_TYPES:
-        raise HTTPException(422, f"unsupported attachment type: {image.mime_type}")
+        raise HTTPException(422, f"unsupported image type: {image.mime_type}")
     try:
         data = base64.b64decode(image.base64, validate=True)
     except binascii.Error as exc:
@@ -741,8 +741,8 @@ async def _enrich_run_start_command(
 
     # Offloading starts a run with no human message, so it has no turn to
     # request; the middleware's ``turn.started`` opens that turn instead.
-    turn_id = uuid.uuid7() if transcribed else None
-    if turn_id is not None:
+    if transcribed:
+        turn_id = uuid.uuid7()
         if message_id is not None and not offload_requested:
             # Keyed by the message, not the turn: a retried ``run.start`` mints
             # a new turn id but asks for the same message, so its receipt
