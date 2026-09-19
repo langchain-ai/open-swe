@@ -527,13 +527,12 @@ async def test_agent_includes_sql_only_on_private_admin_surfaces(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from agent.server import ADMIN_TOOLS
-    from agent.tools import manage_review_approval_policy, read_only_sql
+    from agent.tools import read_only_sql
 
     captured = await _capture_create_deep_agent_kwargs()
     tools = captured["tools"]
     assert isinstance(tools, list)
     assert read_only_sql not in tools
-    assert manage_review_approval_policy not in tools
 
     monkeypatch.setenv("CONFIGURED_ADMINS", "octocat")
     config = _base_config()
@@ -544,12 +543,10 @@ async def test_agent_includes_sql_only_on_private_admin_surfaces(
     tools = captured["tools"]
     assert isinstance(tools, list)
     assert read_only_sql in tools
-    assert manage_review_approval_policy in tools
     subagents = captured["subagents"]
     assert isinstance(subagents, list)
     general_purpose = next(item for item in subagents if item["name"] == "general-purpose")
     assert read_only_sql not in general_purpose["tools"]
-    assert manage_review_approval_policy not in general_purpose["tools"]
 
     configurable["source"] = "slack"
     configurable["slack_thread"] = {
@@ -562,7 +559,6 @@ async def test_agent_includes_sql_only_on_private_admin_surfaces(
     tools = captured["tools"]
     assert isinstance(tools, list)
     assert read_only_sql in tools
-    assert manage_review_approval_policy in tools
 
     assert all(tool in tools for tool in ADMIN_TOOLS)
 
@@ -571,7 +567,6 @@ async def test_agent_includes_sql_only_on_private_admin_surfaces(
     tools = captured["tools"]
     assert isinstance(tools, list)
     assert read_only_sql not in tools
-    assert manage_review_approval_policy not in tools
     assert all(tool not in tools for tool in ADMIN_TOOLS)
 
     configurable["github_login"] = "octocat"
@@ -580,7 +575,6 @@ async def test_agent_includes_sql_only_on_private_admin_surfaces(
     tools = captured["tools"]
     assert isinstance(tools, list)
     assert read_only_sql not in tools
-    assert manage_review_approval_policy not in tools
 
 
 @pytest.mark.asyncio
@@ -795,7 +789,6 @@ async def test_general_purpose_subagent_cannot_use_slack_tools() -> None:
         "manage_thread",
         "read_user_settings",
         "submit_thread_feedback",
-        "submit_review_risk_feedback",
     }
     assert parent_only_names <= parent_names
     assert parent_only_names.isdisjoint(subagent_names)

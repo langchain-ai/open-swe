@@ -95,7 +95,6 @@ from agent.tools import (
     add_finding,
     fetch_review_diff,
     fetch_url,
-    get_review_approval_policy,
     http_request,
     list_findings,
     publish_review,
@@ -171,6 +170,7 @@ def _reviewer_system_prompt(
     head_sha: str = "",
     reviewer_eval: bool = False,
     org_guidelines: str | None = None,
+    approval_policy: str | None = None,
     repo_style_prompt: str | None = None,
     agents_md_content: str | None = None,
     scoped_agents_md: dict[str, str] | None = None,
@@ -183,6 +183,7 @@ def _reviewer_system_prompt(
         repo_name=repo_name or "<repo>",
         pr_number=pr_number if pr_number != "" else "<pr_number>",
         historical_review_guidance="" if reviewer_eval else HISTORICAL_REVIEW_GUIDANCE,
+        approval_policy=approval_policy or load_prompt("reviewer/approval-policy.md"),
         repo_checkout_note=_repo_checkout_note(
             repo_ready=repo_ready,
             working_dir=working_dir,
@@ -612,6 +613,18 @@ async def _cached_org_guidelines(workspace: str | None) -> str | None:
     return (await cached_workspace_settings(workspace)).org_review_guidelines
 
 
+async def _review_approval_policy(owner: str, repo: str, workspace: str | None) -> str:
+    from agent.review.styles import REVIEW_STYLES
+
+    record = await REVIEW_STYLES.get(f"{owner}/{repo}") if owner and repo else None
+    if record and record.approval_policy:
+        return record.approval_policy
+    policy = (await cached_workspace_settings(workspace)).get("approval_policy")
+    return (
+        policy if isinstance(policy, str) and policy else load_prompt("reviewer/approval-policy.md")
+    )
+
+
 async def _ensure_reviewer_sandbox_for_thread(
     thread_id: str,
     cfg: RunConfig,
@@ -830,6 +843,11 @@ class PrepareReviewerRunMiddleware(BasePrepareRunMiddleware):
         repo_style_task = asyncio.create_task(_fetch_repo_style_prompt())
         agents_md_task = asyncio.create_task(_fetch_agents_md_context())
         org_guidelines_task = asyncio.create_task(_cached_org_guidelines(cfg.workspace_slug))
+        approval_policy = (
+            None
+            if reviewer_eval
+            else await _review_approval_policy(repo_owner, repo_name, cfg.workspace_slug)
+        )
         api_standards_task = asyncio.create_task(_cached_api_standards_skill())
         diff_context = await diff_context_task
         pr_diff_text, pr_diff_line_set = diff_context
@@ -905,6 +923,7 @@ class PrepareReviewerRunMiddleware(BasePrepareRunMiddleware):
             head_sha=head_sha,
             reviewer_eval=reviewer_eval,
             org_guidelines=org_guidelines,
+            approval_policy=approval_policy,
             repo_style_prompt=repo_style_prompt,
             agents_md_content=agents_md_content,
             scoped_agents_md=scoped_agents_md,
@@ -1043,7 +1062,6 @@ async def get_reviewer_agent(config: RunnableConfig) -> Pregel:
         tools=apply_tool_descriptions(
             [
                 fetch_review_diff,
-                get_review_approval_policy,
                 add_finding,
                 update_finding,
                 list_findings,

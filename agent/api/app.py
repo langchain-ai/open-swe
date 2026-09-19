@@ -33,7 +33,6 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     from agent.dashboard.admin import configured_admins
     from agent.dashboard.oauth import validate_github_login_allowlist
     from agent.database.analytics import activate_reporting, load_workspace
-    from agent.review.reactions import reaction_sync_lifecycle
     from agent.sandboxes.providers.registry import validate_sandbox_startup_config
     from agent.users import User
     from agent.users.import_store import import_user_mappings
@@ -82,8 +81,7 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     except Exception:  # noqa: BLE001
         logger.warning("Analytics startup failed", exc_info=True)
     try:
-        async with reaction_sync_lifecycle():
-            yield
+        yield
     finally:
         await stop_worker()
         await database.close()

@@ -1,7 +1,11 @@
-Read, save, or reset Open SWE's shared or repository approval policy. Available only to an authenticated admin in their private admin thread.
+Read, save, or reset the advisory approval policy independently of review guidelines.
+Only use this from a private admin task when the user requests a settings change.
 
-Omit `repository` for shared defaults, or pass `owner/repo` for a repository override. Always read first and pass the returned `effective_version` as `expected_version` on a save or reset. If the version changed, read again and reconcile the user's intended changes; do not overwrite a concurrent edit blindly.
+- `action`: `read`, `save`, or `reset`. Read before editing to preserve intended requirements.
+- `policy`: full replacement instructions for `save`, at most 10,000 characters.
+- `repository`: optional `owner/repo`; replaces the inherited approval policy for that repo.
+- `workspace`: optional workspace slug; overrides the instance policy using existing settings inheritance.
+  Omit both repository and workspace to manage the instance policy; do not provide both.
 
-`policy` contains structured `rules` (maximum risk score 1–5, minimum confidence, required check names, human-review path globs) and `criteria_markdown` with named `##` sections. A repository policy replaces the shared policy in full and may be more or less restrictive. Empty repository check/path lists or criteria remain empty; they do not inherit shared values. When creating an override, start from the shared policy and apply the user's requested changes so other values are preserved unless the user asks to replace them.
-
-Reset removes customization: a repository inherits shared policy; shared defaults return to the built-in policy. Policy changes affect future evaluations, preserve past assessments, and do not enable actual GitHub approvals. Learned review style and usefulness feedback are separate from approval policy.
+Reset removes that override. These settings only affect future advisory assessments,
+never GitHub approvals or merges. Repository access is required for repository settings.

@@ -19,13 +19,20 @@ export function ReviewSettings({
 }) {
   const settings = useScopedSettings(scope)
   const [guidelinesDraft, setGuidelinesDraft] = useState("")
+  const [policyDraft, setPolicyDraft] = useState("")
+
+  const guidelinesValue = settings.data?.org_guidelines ?? ""
+  const policyValue = settings.data?.approval_policy ?? ""
 
   useEffect(() => {
-    if (settings.data) {
-      // oxlint-disable-next-line react/set-state-in-effect
-      setGuidelinesDraft(settings.data.org_guidelines ?? "")
-    }
-  }, [settings.data])
+    // oxlint-disable-next-line react/set-state-in-effect
+    setGuidelinesDraft(guidelinesValue)
+  }, [guidelinesValue])
+
+  useEffect(() => {
+    // oxlint-disable-next-line react/set-state-in-effect
+    setPolicyDraft(policyValue)
+  }, [policyValue])
 
   // Until the settings arrive a toggle would write a value nobody chose.
   const editable = canEdit && settings.data !== undefined
@@ -65,6 +72,7 @@ export function ReviewSettings({
             </p>
           )}
           <Textarea
+            aria-label="Review guidelines"
             className="min-h-[200px] w-full font-mono text-xs"
             value={guidelinesDraft}
             onChange={(e) => setGuidelinesDraft(e.target.value)}
@@ -97,6 +105,58 @@ export function ReviewSettings({
                   Unsaved changes
                 </span>
               )}
+            </div>
+          )}
+        </div>
+      </SettingsSection>
+
+      <SettingsSection
+        title="Approval policy"
+        description="Criteria for the advisory approval assessment, separate from review guidelines. Repository policies override these criteria. No automatic approval or merge."
+      >
+        <div className="flex flex-col gap-2 p-4">
+          <Textarea
+            aria-label="Approval policy"
+            className="min-h-[160px] w-full font-mono text-xs"
+            value={policyDraft}
+            onChange={(e) => setPolicyDraft(e.target.value)}
+            maxLength={10000}
+            disabled={!editable}
+          />
+          {canEdit && (
+            <div className="flex items-center gap-2">
+              <Button
+                size="sm"
+                disabled={
+                  !editable ||
+                  settings.saving ||
+                  policyDraft.trim() ===
+                    (settings.data?.approval_policy ?? "").trim()
+                }
+                onClick={() =>
+                  settings.save({ approval_policy: policyDraft.trim() || null })
+                }
+              >
+                Save approval policy
+              </Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                disabled={
+                  !editable ||
+                  settings.saving ||
+                  (scoped && settings.inherits("approval_policy"))
+                }
+                onClick={() =>
+                  scoped
+                    ? settings.reset("approval_policy")
+                    : settings.save({ approval_policy: null })
+                }
+              >
+                {scoped
+                  ? "Reset approval policy to instance"
+                  : "Reset approval policy to default"}
+              </Button>
             </div>
           )}
         </div>

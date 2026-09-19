@@ -4,8 +4,7 @@ The reviewer agent calls ``publish_review`` at the end of a run. That tool
 batches eligible findings (severity ≥ threshold, status=open) into a
 single GitHub PR Review:
 
-- Review body: a fixed, host-formatted summary line. The agent never writes
-  prose here — it's either "no issues found" or "found N potential issue(s)".
+- Review body: a host-formatted findings summary and optional advisory assessment.
 - Inline comments: one per surfaced finding, anchored to ``path`` + ``line``
   (+ ``start_line`` for ranges) + ``side``.
 - Suggestion: when ``finding.suggestion`` is set, appended to the comment body
@@ -21,9 +20,11 @@ the GraphQL ``resolveReviewThread`` mutation (REST doesn't expose this).
 import json
 import logging
 import re
-from typing import Any, TypedDict
+from html import escape
+from typing import Any, Literal, TypedDict
 
 import httpx2
+from pydantic import BaseModel, Field
 
 from agent.github.checks import CheckConclusion, complete_review_check_run
 from agent.github.http import (
@@ -272,6 +273,15 @@ def render_out_of_diff_section(findings: list[Finding]) -> str:
     )
 
 
+class ReviewAssessment(BaseModel):
+    """Advisory judgment for the exact commit the reviewer inspected."""
+
+    head_sha: str = Field(pattern=r"^[0-9a-f]{40}$")
+    risk_score: int = Field(ge=1, le=5, strict=True)
+    decision: Literal["would_approve", "needs_human_review"]
+    explanation: str = Field(min_length=1, max_length=1500)
+
+
 def render_review_body(
     *,
     pr_number: int,
@@ -280,6 +290,7 @@ def render_review_body(
     ui_url: str | None = None,
     out_of_diff_findings: list[Finding] | None = None,
     additional_findings_count: int = 0,
+    assessment: ReviewAssessment | None = None,
 ) -> str:
     """Compose the top-level review body.
 
@@ -306,6 +317,20 @@ def render_review_body(
         parts.append(f"{additional_findings_count} additional {noun} can be viewed in the web app.")
     if out_of_diff_findings:
         parts.append(render_out_of_diff_section(out_of_diff_findings))
+    if assessment is not None:
+        decision = (
+            "Would approve" if assessment.decision == "would_approve" else "Needs human review"
+        )
+        parts.append(f"**Risk: {assessment.risk_score}/5 · {decision}** (advisory)")
+        parts.append(
+            "<details>\n<summary>Why?</summary>\n\n"
+            f"{escape(assessment.explanation)}\n\n"
+            f"Reviewed commit: `{assessment.head_sha}`. Risk ranges from 1 (low) to 5 (high). "
+            "This assessment does not approve or merge the PR.\n\n</details>"
+        )
+        parts.append(
+            "React 👍 if this assessment is right, 👎 if it is wrong. Comment with context."
+        )
     links = []
     if ui_url:
         links.append(f"[Open in Web]({ui_url})")

@@ -166,7 +166,6 @@ from agent.tools import (
     manage_baby_sit,
     manage_code_channel,
     manage_incident,
-    manage_review_approval_policy,
     manage_thread,
     notify_automation_channel,
     open_pull_request,
@@ -190,13 +189,13 @@ from agent.tools import (
     slack_read_thread_messages,
     slack_start_new_thread,
     slack_thread_reply,
-    submit_review_risk_feedback,
     submit_thread_feedback,
     trigger_automation,
     update_automation,
     web_search,
 )
 from agent.tools.admin_gate import actor_has_admin_context, actor_is_admin, is_private_admin_surface
+from agent.tools.manage_review_approval_policy import manage_review_approval_policy
 from agent.utils import ttl_cache
 from agent.utils.authorship import (
     CollaboratorIdentity,
@@ -1257,13 +1256,11 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         slack_start_new_thread,
         slack_thread_reply,
         submit_thread_feedback,
-        submit_review_risk_feedback,
         *(ADMIN_TOOLS if admin_thread else ()),
         *((read_only_sql, manage_review_approval_policy) if private_admin_surface else ()),
     ]
     if credential_login is None:
         personal_tools = (
-            submit_review_risk_feedback,
             save_user_instructions,
             save_user_skill,
             delete_user_skill,
@@ -1373,8 +1370,6 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         if tool is not background_execute
         and tool is not background_task
         and tool is not submit_thread_feedback
-        and tool is not submit_review_risk_feedback
-        and tool is not manage_review_approval_policy
     ]
     title_model = _make_model_or_defer(
         title_model_id,

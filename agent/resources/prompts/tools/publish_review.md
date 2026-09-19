@@ -7,20 +7,21 @@ inline findings, records the GitHub comment/thread IDs for future
 re-reviews, resolves GitHub threads for findings now marked resolved, and
 advances the reviewer thread's ``last_reviewed_sha``.
 
-On a re-review with no new findings or unpublished risk assessment, it skips
-posting a new GitHub Review but still resolves fixed threads and updates state.
+On a re-review with no new findings or assessment, it skips posting a new
+GitHub Review but still resolves fixed threads and updates reviewer state.
 
 Args:
-    risk_assessment: Overall PR risk at the exact reviewed head: full head_sha,
-        score (1–5, or null when assessment is incomplete), confidence,
-        rationale, and limitations. Include this after every completed review.
-        Uses the reviewer risk rubric. It publishes an advisory score and a
-        feedback link; it never approves or merges the PR. Unresolved findings
-        from all reviews can raise the score. A stale head is rejected.
-        Include approval evidence from get_review_approval_policy: policy_version,
-        base_sha, head_sha, review_complete, and criteria (id, pass/fail/unknown status,
-        evidence). Code publishes a shadow policy decision alongside the score.
-        Missing or stale evidence cannot produce a would-approve decision.
+    assessment: Optional structured advisory approval assessment with the full
+        ``head_sha`` inspected, integer ``risk_score`` (1 = low, 5 = high),
+        ``decision`` (``would_approve`` or ``needs_human_review``), and a short
+        ``explanation`` (up to 1500 characters). Include it after completing a
+        review. Use the approval policy in the reviewer instructions, including
+        organization and repository overrides. The commit must match the live
+        reviewed head. Unresolved findings force ``needs_human_review``. A new
+        assessment is published even when a re-review has no new findings.
+        GitHub keeps native thumbs-up/down feedback on the review. No approval
+        or merge is performed. Assessments are omitted in eval mode and when
+        publication retries with only a subset of findings.
     severity_threshold: Lowest severity to surface as inline GitHub comments
         (default ``medium``). Lower-severity findings stay in state and are
         mentioned in the review summary with a link to the web app, but are
@@ -40,11 +41,6 @@ Returns:
     - ``dry_run: true`` (with ``review_id: null``): eval/benchmark mode —
       the publish was simulated and nothing was posted to GitHub. Do not
       claim publication.
-    - ``reused_existing_review: true``: a previously posted review was recovered;
-      no new GitHub review was created by this call.
-    - ``risk_assessment_deferred: true``: some inline findings were posted, but
-      the review is incomplete. Reconcile ``unresolvable_findings`` and call
-      again with an updated assessment before reporting completion.
 
-    Only a numeric ``review_id`` without a skipped, dry-run, or reused flag
-    confirms a new GitHub Review was created.
+    Only a numeric ``review_id`` (with neither flag set) confirms a real
+    GitHub Review was created.

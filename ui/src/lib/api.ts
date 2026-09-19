@@ -211,6 +211,7 @@ export interface WorkspaceSettings {
   /** Experimental: approve and merge tiny PRs from their Slack thread. Off by default. */
   expedited_review_enabled?: boolean
   org_guidelines?: string | null
+  approval_policy?: string | null
   default_agent_model?: string | null
   default_agent_reasoning_effort?: string | null
   default_agent_subagent_model?: string | null
@@ -458,6 +459,7 @@ export interface ReviewStyle {
   name?: string
   status: ReviewStyleStatus
   custom_prompt: string | null
+  approval_policy?: string | null
   analysis_summary: string | null
   top_reviewers: Array<string>
   prs_sampled: number
@@ -833,81 +835,6 @@ export interface ReviewDetail extends ReviewSummary {
   diff_groups_stale: boolean
 }
 
-export type ReviewApprovalFeedback = "safe" | "needs_review" | "unsure"
-
-export interface PolicyRules {
-  max_risk_score: number
-  minimum_confidence: "low" | "medium" | "high"
-  required_checks: string[]
-  human_review_paths: string[]
-}
-
-export interface PolicyDefinition {
-  rules: PolicyRules
-  criteria_markdown: string
-}
-
-export interface PolicySettingsView {
-  repository: string | null
-  policy: PolicyDefinition | null
-  shared_policy: PolicyDefinition
-  effective_rules: PolicyRules
-  effective_version: string
-  revision: string | null
-  updated_by: string | null
-  updated_at: string | null
-  can_edit: boolean
-}
-
-export interface ReviewApprovalEvaluation {
-  mode: "shadow"
-  decision: "would_approve" | "needs_human_review" | "insufficient_evidence"
-  evaluated_at: string
-  policy: {
-    source: "default" | "repository" | "settings" | "repository_settings"
-    version: string
-    base_sha: string
-  } | null
-  criteria: {
-    id: string
-    title: string
-    status: "pass" | "fail" | "unknown"
-    evidence: string
-    requirement?: string | null
-    source: "code" | "reviewer"
-  }[]
-}
-
-export interface ReviewRiskAssessment {
-  id: string
-  github_review_id?: number | null
-  head_sha: string
-  score: 1 | 2 | 3 | 4 | 5 | null
-  proposed_score: 1 | 2 | 3 | 4 | 5 | null
-  confidence: "low" | "medium" | "high"
-  rationale: string
-  limitations: string[]
-  open_findings: number
-  approval_evaluation?: ReviewApprovalEvaluation | null
-}
-
-export interface ReviewRiskFeedback {
-  assessment_id: string
-  decision: ReviewApprovalFeedback | null
-  comment: string
-}
-
-export interface ReviewRiskResponse {
-  assessment: ReviewRiskAssessment | null
-  feedback: ReviewRiskFeedback | null
-  reactions?: {
-    helpful: number
-    unhelpful: number
-    viewer_rating: "helpful" | "unhelpful" | "conflicting" | null
-    synced_at: string | null
-  }
-}
-
 export interface ReviewDiffFile {
   path: string
   previousPath: string | null
@@ -1044,6 +971,14 @@ export const api = {
       method: "PUT",
       body: JSON.stringify({ custom_prompt }),
     }),
+  saveReviewApprovalPolicy: (
+    full_name: string,
+    approval_policy: string | null
+  ) =>
+    request<ReviewStyle>(`/review-styles/${encodeURIComponent(full_name)}`, {
+      method: "PUT",
+      body: JSON.stringify({ approval_policy }),
+    }),
   analyzeReviewStyle: (full_name: string) =>
     request<ReviewStyle>(
       `/review-styles/${encodeURIComponent(full_name)}/analyze`,
@@ -1062,22 +997,6 @@ export const api = {
     request<void>(`/review-styles/${encodeURIComponent(full_name)}`, {
       method: "DELETE",
     }),
-  getReviewApprovalPolicy: (repository: string | null = null) =>
-    request<PolicySettingsView>(
-      `/review-approval-policy${repository ? `?repository=${encodeURIComponent(repository)}` : ""}`
-    ),
-  saveReviewApprovalPolicy: (
-    repository: string | null,
-    policy: PolicyDefinition | null,
-    expected_version: string
-  ) =>
-    request<PolicySettingsView>(
-      `/review-approval-policy${repository ? `?repository=${encodeURIComponent(repository)}` : ""}`,
-      {
-        method: "PUT",
-        body: JSON.stringify({ policy, expected_version }),
-      }
-    ),
   getMyInstructions: () => request<UserInstructions>("/me/instructions"),
   saveMyInstructions: (instructions: string) =>
     request<UserInstructions>("/me/instructions", {
@@ -1364,26 +1283,6 @@ export const api = {
   getReviewDiff: (owner: string, repo: string, number: number) =>
     request<ReviewDiffPayload>(
       `/reviews/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}/diff`
-    ),
-  getReviewRisk: (
-    owner: string,
-    repo: string,
-    number: number,
-    assessmentId?: string
-  ) =>
-    request<ReviewRiskResponse>(
-      `/reviews/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}/risk${assessmentId ? `?assessment_id=${encodeURIComponent(assessmentId)}` : ""}`
-    ),
-  submitReviewRiskFeedback: (
-    owner: string,
-    repo: string,
-    number: number,
-    assessmentId: string,
-    feedback: { decision: ReviewApprovalFeedback | null; comment: string }
-  ) =>
-    request<ReviewRiskFeedback>(
-      `/reviews/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}/risk/${encodeURIComponent(assessmentId)}/feedback`,
-      { method: "POST", body: JSON.stringify(feedback) }
     ),
   getReviewChat: (owner: string, repo: string, number: number) =>
     request<ReviewChatMeta>(

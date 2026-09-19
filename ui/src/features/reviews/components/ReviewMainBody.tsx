@@ -71,7 +71,6 @@ import type { DiffStyle } from "@/features/agents/utils/diffUtils"
 import { Markdown } from "@/features/agents/components/chat/Markdown"
 import { DiffWrapToggle } from "@/features/agents/components/DiffWrapToggle"
 import { PrHeader } from "@/features/reviews/components/PrHeader"
-import { ReviewRiskCard } from "@/features/reviews/components/ReviewRiskCard"
 import {
   ReviewChat,
   ReviewChatComposerProvider,
@@ -1242,14 +1241,6 @@ function ReviewBodyInner({
             </div>
           )}
           <div className="relative flex min-h-0 min-w-0 flex-1 flex-col">
-            {!embedded && (
-              <ReviewRiskCard
-                owner={detail.owner}
-                repo={detail.repo}
-                number={detail.number}
-                headSha={detail.pr.head_sha}
-              />
-            )}
             {embedded && (
               <div className="flex h-9 shrink-0 items-center justify-end border-b border-border px-3">
                 <button
