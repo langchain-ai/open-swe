@@ -3,24 +3,20 @@
 from collections.abc import Sequence
 from dataclasses import dataclass
 
-import httpx2
+from githubkit.auth import TokenAuthStrategy
 from pydantic import BaseModel, PositiveInt
 
 from agent.github.app import (
     PermissionMap,
     get_github_app_installation_token_with_expiry,
 )
-from agent.utils.http import DEFAULT_HTTP_TIMEOUT
+from agent.github.sdk import GITHUB_API_VERSION, github_sdk
 from agent.workspaces.store import DEFAULT_WORKSPACE_SLUG, WORKSPACES
 
 
 class _InstallationRepository(BaseModel):
     id: PositiveInt
     full_name: str
-
-
-class _InstallationRepositories(BaseModel):
-    repositories: list[_InstallationRepository]
 
 
 @dataclass(frozen=True)
@@ -45,25 +41,16 @@ async def repository_token(
     if not discovery_token:
         raise RuntimeError("GitHub App installation token is unavailable")
     repository_ids: list[int] = []
-    async with httpx2.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as client:
-        page = 1
-        while True:
-            response = await client.get(
-                "https://api.github.com/installation/repositories",
-                headers={
-                    "Authorization": f"Bearer {discovery_token}",
-                    "Accept": "application/vnd.github+json",
-                },
-                params={"per_page": 100, "page": page},
-            )
-            response.raise_for_status()
-            batch = _InstallationRepositories.model_validate(response.json()).repositories
-            for repo in batch:
-                if repo.full_name.lower() in allowed:
-                    repository_ids.append(repo.id)
-            if len(batch) < 100:
-                break
-            page += 1
+    async with github_sdk(TokenAuthStrategy(discovery_token)) as client:
+        async for item in client.rest.paginate(
+            client.rest(GITHUB_API_VERSION).apps.async_list_repos_accessible_to_installation,
+            map_func=lambda response: response.json()["repositories"],
+            per_page=100,
+            headers={"X-GitHub-Api-Version": GITHUB_API_VERSION},
+        ):
+            repo = _InstallationRepository.model_validate(item)
+            if repo.full_name.lower() in allowed:
+                repository_ids.append(repo.id)
     if not repository_ids:
         return SandboxGitHubAccess()
     token, expires_at = await get_github_app_installation_token_with_expiry(
