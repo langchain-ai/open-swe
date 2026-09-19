@@ -1,12 +1,14 @@
 """Bearer-token authentication for the MCP endpoint.
 
-Tokens are HMAC-signed, expiring, and bound to a user's work email. An operator
-mints one per user (``python -m agent.mcp_server.auth mint alice@corp.com``),
-and the user pastes it into their MCP client's ``Authorization`` header.
+Tokens are HMAC-signed, expiring, and bound to a GitHub login, which is the
+identity the dashboard passes to ``trigger_pr_review_from_ref`` as
+``github_login``. An operator mints one per user
+(``python -m agent.mcp_server.auth mint octocat``) and the user pastes it into
+their MCP client's ``Authorization`` header.
 
-``resolve_caller`` is the single seam where a token's email becomes the identity
-a run is attributed to. Point it at the same resolver the Slack integration uses
-(``agent/users/resolve.py``) so both surfaces share one user mapping.
+``resolve_caller`` is the seam where a token's login becomes the identity a
+run is attributed to. Point it at the user mapping (Admin -> User mappings /
+``agent/users/resolve.py``) so unknown logins are rejected as they are elsewhere.
 """
 
 from __future__ import annotations
@@ -17,11 +19,13 @@ import hashlib
 import hmac
 import json
 import os
+import re
 import time
 from dataclasses import dataclass
 
 TOKEN_PREFIX = "oswe_mcp_"
 DEFAULT_TTL_SECONDS = 30 * 24 * 3600
+_LOGIN = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$")
 
 
 class AuthError(Exception):
@@ -32,8 +36,8 @@ class AuthError(Exception):
 class Caller:
     """The authenticated identity a review run is attributed to."""
 
-    user_id: str
-    email: str
+    github_login: str
+    github_user_id: int | None = None
 
 
 def _secret() -> bytes:
@@ -55,20 +59,24 @@ def _sign(body: str) -> str:
     return _b64(hmac.new(_secret(), body.encode(), hashlib.sha256).digest())
 
 
-def mint_token(email: str, ttl_seconds: int = DEFAULT_TTL_SECONDS) -> str:
-    payload = {"v": 1, "sub": email.strip().lower(), "exp": int(time.time()) + ttl_seconds}
+def mint_token(github_login: str, ttl_seconds: int = DEFAULT_TTL_SECONDS) -> str:
+    login = github_login.strip()
+    if not _LOGIN.match(login):
+        raise ValueError(f"not a valid GitHub login: {github_login!r}")
+    payload = {"v": 2, "sub": login, "exp": int(time.time()) + ttl_seconds}
     body = _b64(json.dumps(payload, separators=(",", ":")).encode())
     return f"{TOKEN_PREFIX}{body}.{_sign(body)}"
 
 
-def resolve_caller(email: str) -> Caller:
-    """Map a token's email to a Caller.
+def resolve_caller(github_login: str) -> Caller:
+    """Map a token's GitHub login to a Caller.
 
-    TODO: replace with the shared resolver (agent/users/resolve.py) so that
-    unknown or unmapped users are rejected exactly as they are for Slack.
-    Raise ``AuthError`` for anyone who should not be allowed to dispatch runs.
+    TODO: look the login up in the user mapping (agent/users/resolve.py) and
+    raise ``AuthError`` if it is unknown, exactly as Slack and the dashboard do.
+    Also fill ``github_user_id`` from the mapping. Until then, any login an
+    operator mints a token for is trusted.
     """
-    return Caller(user_id=email, email=email)
+    return Caller(github_login=github_login)
 
 
 def verify_token(token: str) -> Caller:
@@ -81,23 +89,23 @@ def verify_token(token: str) -> Caller:
         raise AuthError("bad signature")
     try:
         payload = json.loads(_unb64(body))
-        email = str(payload["sub"])
+        login = str(payload["sub"])
         expires_at = int(payload["exp"])
     except (ValueError, KeyError, TypeError) as exc:
         raise AuthError("malformed token") from exc
-    if expires_at < time.time():
-        raise AuthError("token expired")
-    return resolve_caller(email)
+    if expires_at < time.time() or not _LOGIN.match(login):
+        raise AuthError("token expired or invalid")
+    return resolve_caller(login)
 
 
 def _main() -> None:
     parser = argparse.ArgumentParser(prog="python -m agent.mcp_server.auth")
     sub = parser.add_subparsers(dest="command", required=True)
-    mint = sub.add_parser("mint", help="mint a bearer token for a user")
-    mint.add_argument("email")
+    mint = sub.add_parser("mint", help="mint a bearer token for a GitHub login")
+    mint.add_argument("github_login")
     mint.add_argument("--days", type=int, default=DEFAULT_TTL_SECONDS // 86400)
     args = parser.parse_args()
-    print(mint_token(args.email, ttl_seconds=args.days * 86400))
+    print(mint_token(args.github_login, ttl_seconds=args.days * 86400))
 
 
 if __name__ == "__main__":

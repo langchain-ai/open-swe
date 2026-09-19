@@ -1,10 +1,13 @@
 """PR review dispatch for the MCP server.
 
-Everything that touches the reviewer graph lives here so the MCP layer stays
-protocol-only. Two functions carry assumptions about the rest of the codebase
-and are marked ``INTEGRATION``: ``start_review`` (should mirror what the Slack
-``review`` trigger sends) and ``extract_findings`` (should read wherever the
-reviewer graph records its structured findings).
+Reviews are started through ``trigger_pr_review_from_ref``, the same function
+the dashboard and Slack use, so an MCP-requested review behaves identically:
+canonical per-PR reviewer thread, "review started" comment, review published
+to GitHub, visible in the dashboard. This module only adds the parts an MCP
+caller needs: URL parsing, allowlists, waiting for the run, and reading the
+findings back.
+
+Two things are worth verifying and are marked ``VERIFY``.
 """
 
 from __future__ import annotations
@@ -12,23 +15,41 @@ from __future__ import annotations
 import asyncio
 import os
 import re
-import uuid
 from dataclasses import dataclass
 from typing import Any
 from urllib.parse import urlparse
 
-from langgraph_sdk import get_client
-
 from agent.mcp_server.auth import Caller
+from agent.review.findings import REVIEWER_THREAD_KIND, list_findings
+from agent.thread_ids import reviewer_thread_id
 
-REVIEWER_GRAPH = "reviewer"
+# VERIFY: ``source`` lands in the run's configurable, and some code may branch
+# on it. "dashboard" is known to work with a github_login (the dashboard's own
+# review button does exactly this). Once you've confirmed nothing breaks, set
+# MCP_RUN_SOURCE=mcp so runs are attributable to this surface.
+RUN_SOURCE = os.environ.get("MCP_RUN_SOURCE", "dashboard")
+
 POLL_SECONDS = 3.0
+ACTIVE_STATUSES = frozenset({"pending", "running"})
 TERMINAL_STATUSES = frozenset({"success", "error", "timeout", "interrupted"})
 
-_THREAD_NAMESPACE = uuid.UUID("6f0f3c1e-5a0b-4a52-9d0e-2b8a5e1c7c11")
 _PR_PATH = re.compile(
     r"^/(?P<owner>[A-Za-z0-9_.-]+)/(?P<repo>[A-Za-z0-9_.-]+)/pull/(?P<number>[0-9]{1,9})"
     r"(?:/(?:files|commits|checks))?/?$"
+)
+_FINDING_FIELDS = (
+    "id",
+    "severity",
+    "confidence",
+    "category",
+    "title",
+    "file",
+    "start_line",
+    "end_line",
+    "description",
+    "suggestion",
+    "status",
+    "in_diff",
 )
 
 
@@ -79,7 +100,7 @@ def parse_pr_url(raw: str) -> PullRequestRef:
 
 
 def assert_repo_allowed(ref: PullRequestRef) -> None:
-    """Apply the same allowlists the GitHub and Slack triggers use."""
+    """Apply the same org/repo allowlists the GitHub and Slack triggers use."""
     orgs, repos = _csv_env("ALLOWED_GITHUB_ORGS"), _csv_env("ALLOWED_GITHUB_REPOS")
     if not orgs and not repos:
         return
@@ -88,76 +109,90 @@ def assert_repo_allowed(ref: PullRequestRef) -> None:
     raise ReviewError("repo_not_allowed", f"{ref.full_name} is not enabled for Open SWE")
 
 
+async def assert_user_access(caller: Caller, ref: PullRequestRef) -> None:
+    """VERIFY / TODO before any shared deployment: per-user repo access.
+
+    trigger_pr_review_from_ref runs with the GitHub App token and does not
+    check the requesting user, so callers must. Mirror what the dashboard's
+    review endpoint (agent/dashboard/review_api.py, near its call to
+    trigger_pr_review_from_ref) does to confirm this user can see the repo,
+    and raise ``ReviewError("forbidden", ...)`` otherwise.
+    """
+
+
 def get_langgraph_client() -> Any:
-    # url=None talks to the in-process server when running inside the deployment.
-    return get_client(url=os.environ.get("LANGGRAPH_URL") or None)
+    from agent.webhooks import common
+
+    return common.get_client(url=common.LANGGRAPH_URL)
 
 
-def review_thread_id(ref: PullRequestRef, caller: Caller) -> str:
-    """Deterministic per (PR, user), so repeat requests reuse one thread."""
-    key = f"mcp-review:{ref.full_name.lower()}#{ref.number}:{caller.user_id}"
-    return str(uuid.uuid5(_THREAD_NAMESPACE, key))
-
-
-def web_url_for(thread_id: str) -> str | None:
+def web_url_for(ref: PullRequestRef) -> str | None:
+    """VERIFY: the dashboard route for a PR review (ui/src/routes/agents/reviews/)."""
     base = os.environ.get("DASHBOARD_BASE_URL", "").rstrip("/")
-    return f"{base}/agents/{thread_id}" if base else None
+    return f"{base}/agents/reviews/{ref.owner}/{ref.repo}/{ref.number}" if base else None
 
 
 def _status_code(exc: Exception) -> int | None:
     return getattr(getattr(exc, "response", None), "status_code", None)
 
 
-async def start_review(client: Any, caller: Caller, ref: PullRequestRef) -> ReviewHandle:
-    """INTEGRATION: keep in step with the Slack ``review`` trigger.
+async def _trigger(ref: PullRequestRef, caller: Caller) -> dict[str, Any]:
+    from agent.github.webhook import trigger_pr_review_from_ref
+    from agent.slack.client import GitHubPrRef
 
-    Prefer calling the shared helper in agent/dispatch.py if it exposes one;
-    the inline version below shows the shape of the run it needs to create.
-    """
-    thread_id = review_thread_id(ref, caller)
-    await client.threads.create(
-        thread_id=thread_id,
-        if_exists="do_nothing",
-        metadata={
-            "source": "mcp",
-            "graph_id": REVIEWER_GRAPH,
-            "mcp_user_id": caller.user_id,
-            "repo": ref.full_name,
-            "pr_number": ref.number,
-        },
+    return await trigger_pr_review_from_ref(
+        GitHubPrRef(owner=ref.owner, repo=ref.repo, number=ref.number, url=ref.url),
+        source=RUN_SOURCE,
+        github_login=caller.github_login,
+        github_user_id=caller.github_user_id,
     )
+
+
+async def latest_run(client: Any, thread_id: str) -> dict[str, Any] | None:
     try:
-        run = await client.runs.create(
-            thread_id,
-            REVIEWER_GRAPH,
-            input={"messages": [{"role": "user", "content": f"Review {ref.url}"}]},
-            config={
-                "configurable": {
-                    "repo": {"owner": ref.owner, "name": ref.repo},
-                    "pr_number": ref.number,
-                    "pr_url": ref.url,
-                    "source": "mcp",
-                    "user_email": caller.email,
-                }
-            },
-            metadata={"source": "mcp", "mcp_user_id": caller.user_id},
-            multitask_strategy="reject",
-        )
-        joined = False
+        runs = await client.runs.list(thread_id, limit=1)
     except Exception as exc:
-        if _status_code(exc) != 409:
-            raise
-        # A review of this PR is already running for this user: attach to it.
-        run = await latest_run(client, thread_id)
-        joined = True
-    return ReviewHandle(thread_id, run["run_id"], web_url_for(thread_id), joined)
+        if _status_code(exc) == 404:
+            return None
+        raise
+    return runs[0] if runs else None
 
 
-async def latest_run(client: Any, thread_id: str) -> dict[str, Any]:
-    runs = await client.runs.list(thread_id, limit=1)
-    if not runs:
-        raise ReviewError("not_found", "No review run exists for this thread")
-    return runs[0]
+async def start_review(client: Any, caller: Caller, ref: PullRequestRef) -> ReviewHandle:
+    thread_id = reviewer_thread_id(ref.owner, ref.repo, ref.number)
+
+    # dispatch_agent_run defaults to multitask_strategy="interrupt", so triggering
+    # while a review is running would kill it. Attach to the running one instead.
+    active = await latest_run(client, thread_id)
+    if active and active["status"] in ACTIVE_STATUSES:
+        return ReviewHandle(thread_id, active["run_id"], web_url_for(ref), True)
+
+    result = await _trigger(ref, caller)
+    if not result.get("success"):
+        raise ReviewError("dispatch_failed", str(result.get("error") or "Could not start the review"))
+    thread_id = result.get("thread_id") or thread_id
+    run = await latest_run(client, thread_id)
+    if run is None:
+        raise ReviewError("dispatch_failed", "Review was dispatched but no run was found")
+    return ReviewHandle(thread_id, run["run_id"], web_url_for(ref), False)
+
+
+async def load_review(client: Any, ref: PullRequestRef) -> tuple[str, dict[str, Any]]:
+    """Find the reviewer thread and its latest run for a PR."""
+    thread_id = reviewer_thread_id(ref.owner, ref.repo, ref.number)
+    missing = ReviewError("not_found", "No Open SWE review exists for this PR")
+    try:
+        thread = await client.threads.get(thread_id)
+    except Exception as exc:
+        if _status_code(exc) == 404:
+            raise missing from exc
+        raise
+    if (thread.get("metadata") or {}).get("kind") != REVIEWER_THREAD_KIND:
+        raise missing
+    run = await latest_run(client, thread_id)
+    if run is None:
+        raise missing
+    return thread_id, run
 
 
 async def wait_for_run(client: Any, thread_id: str, run_id: str, *, timeout: float) -> str:
@@ -179,44 +214,13 @@ def public_status(run_status: str) -> str:
     return "running"
 
 
-def normalize_finding(raw: dict[str, Any], index: int) -> dict[str, Any]:
-    return {
-        "id": str(raw.get("id") or index),
-        "path": raw.get("path") or raw.get("file"),
-        "line": raw.get("line") or raw.get("start_line"),
-        "severity": raw.get("severity") or raw.get("priority"),
-        "title": raw.get("title") or raw.get("summary"),
-        "body": raw.get("body") or raw.get("description") or raw.get("comment"),
-    }
-
-
-async def extract_findings(client: Any, thread_id: str) -> list[dict[str, Any]]:
-    """INTEGRATION: read the reviewer's structured findings.
-
-    This assumes the reviewer leaves them in thread state under ``findings``.
-    If they are only persisted through ``publish_review`` / the
-    ``pull_request_review`` rows, read them from that store here instead.
-    """
-    state = await client.threads.get_state(thread_id)
-    values = state.get("values") or {}
-    raw = values.get("findings") or (values.get("review") or {}).get("findings") or []
-    return [normalize_finding(f, i) for i, f in enumerate(raw, start=1) if isinstance(f, dict)]
-
-
-async def assert_owns_thread(client: Any, caller: Caller, thread_id: str) -> None:
-    try:
-        thread = await client.threads.get(thread_id)
-    except Exception as exc:
-        if _status_code(exc) == 404:
-            raise ReviewError("not_found", "Unknown thread") from exc
-        raise
-    if (thread.get("metadata") or {}).get("mcp_user_id") != caller.user_id:
-        # Same message as unknown, so thread ids can't be probed.
-        raise ReviewError("not_found", "Unknown thread")
+def normalize_finding(finding: dict[str, Any]) -> dict[str, Any]:
+    """Expose only the fields an external agent needs, not GitHub bookkeeping."""
+    return {key: finding.get(key) for key in _FINDING_FIELDS}
 
 
 async def build_result(
-    client: Any, thread_id: str, run_id: str, web_url: str | None, run_status: str
+    thread_id: str, run_id: str, web_url: str | None, run_status: str
 ) -> dict[str, Any]:
     status = public_status(run_status)
     result: dict[str, Any] = {
@@ -226,7 +230,7 @@ async def build_result(
         "status": status,
     }
     if status == "completed":
-        result["findings"] = await extract_findings(client, thread_id)
+        result["findings"] = [normalize_finding(f) for f in await list_findings(thread_id)]
     elif status == "failed":
         result["error"] = f"Review run ended with status '{run_status}'. See web_url for details."
     return result

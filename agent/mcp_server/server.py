@@ -17,7 +17,6 @@ import asyncio
 import json
 import logging
 import os
-import uuid
 from collections.abc import AsyncIterator
 from typing import Any
 
@@ -46,7 +45,7 @@ TOOLS: list[dict[str, Any]] = [
             "Ask Open SWE to review a GitHub pull request and return structured findings. "
             "With wait=true (default) this blocks until the review finishes or the timeout "
             "elapses. With wait=false it returns immediately with a thread_id; call "
-            "get_review to collect the result."
+            "get_review with the same pr_url to collect the result."
         ),
         "inputSchema": {
             "type": "object",
@@ -72,11 +71,20 @@ TOOLS: list[dict[str, Any]] = [
     },
     {
         "name": "get_review",
-        "description": "Get the status and findings of a review started with request_review.",
+        "description": (
+            "Get the current status and findings of Open SWE's review of a PR, e.g. after "
+            "request_review returned status 'running'. Findings include their status "
+            "(open, resolved, ...) so earlier rounds can be filtered out."
+        ),
         "inputSchema": {
             "type": "object",
-            "properties": {"thread_id": {"type": "string", "format": "uuid"}},
-            "required": ["thread_id"],
+            "properties": {
+                "pr_url": {
+                    "type": "string",
+                    "description": "https://github.com/<owner>/<repo>/pull/<number>",
+                }
+            },
+            "required": ["pr_url"],
             "additionalProperties": False,
         },
         "annotations": {"title": "Get PR review", "readOnlyHint": True},
@@ -131,6 +139,7 @@ async def _request_review(args: dict[str, Any], caller: Caller) -> dict[str, Any
 
     ref = reviews.parse_pr_url(pr_url)
     reviews.assert_repo_allowed(ref)
+    await reviews.assert_user_access(caller, ref)
 
     client = reviews.get_langgraph_client()
     handle = await reviews.start_review(client, caller, ref)
@@ -140,7 +149,7 @@ async def _request_review(args: dict[str, Any], caller: Caller) -> dict[str, Any
             client, handle.thread_id, handle.run_id, timeout=timeout
         )
     result = await reviews.build_result(
-        client, handle.thread_id, handle.run_id, handle.web_url, run_status
+        handle.thread_id, handle.run_id, handle.web_url, run_status
     )
     if handle.joined_existing_run:
         result["note"] = "A review of this PR was already in progress; attached to it."
@@ -148,17 +157,16 @@ async def _request_review(args: dict[str, Any], caller: Caller) -> dict[str, Any
 
 
 async def _get_review(args: dict[str, Any], caller: Caller) -> dict[str, Any]:
-    raw_id = args.get("thread_id")
-    try:
-        thread_id = str(uuid.UUID(str(raw_id)))
-    except ValueError as exc:
-        raise reviews.ReviewError("invalid_arguments", "thread_id must be a UUID") from exc
+    pr_url = args.get("pr_url")
+    if not isinstance(pr_url, str):
+        raise reviews.ReviewError("invalid_arguments", "pr_url is required")
+    ref = reviews.parse_pr_url(pr_url)
+    reviews.assert_repo_allowed(ref)
+    await reviews.assert_user_access(caller, ref)
+
     client = reviews.get_langgraph_client()
-    await reviews.assert_owns_thread(client, caller, thread_id)
-    run = await reviews.latest_run(client, thread_id)
-    return await reviews.build_result(
-        client, thread_id, run["run_id"], reviews.web_url_for(thread_id), run["status"]
-    )
+    thread_id, run = await reviews.load_review(client, ref)
+    return await reviews.build_result(thread_id, run["run_id"], reviews.web_url_for(ref), run["status"])
 
 
 async def _call_tool(name: str, args: dict[str, Any], caller: Caller) -> dict[str, Any]:
