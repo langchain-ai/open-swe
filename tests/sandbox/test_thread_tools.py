@@ -210,27 +210,44 @@ async def test_http_list_search_invoke_and_reject_context_overrides(
         listed = await http.get("/sandbox-tools/list", headers=headers)
         assert listed.json()["total"] == 1
         invoked = await http.post(
-            "/sandbox-tools/invoke",
+            "/sandbox-tools/invoke/integration_echo",
             headers=headers,
-            json={"name": "integration_echo", "arguments": {"value": "hello"}},
+            json={"value": "hello"},
         )
         assert invoked.json() == {"status": "success", "content": "hello"}
         forged = await http.post(
-            "/sandbox-tools/invoke",
+            "/sandbox-tools/invoke/integration_echo",
             headers=headers,
             json={
-                "name": "integration_echo",
-                "arguments": {"value": "hello"},
+                "value": "hello",
                 "thread_id": "other",
             },
         )
         assert forged.status_code == 422
         large = await http.post(
-            "/sandbox-tools/invoke",
+            "/sandbox-tools/invoke/integration_echo",
             headers=headers,
             content=b" " * (tool_routes.MAX_REQUEST_BYTES + 1),
         )
         assert large.status_code == 413
+        for content in (
+            "[]",
+            "null",
+            "{invalid",
+            '{"name":"integration_echo","arguments":{"value":"hello"}}',
+        ):
+            invalid = await http.post(
+                "/sandbox-tools/invoke/integration_echo",
+                headers=headers,
+                content=content,
+            )
+            assert invalid.status_code == 422
+        unknown = await http.post("/sandbox-tools/invoke/unknown", headers=headers, json={})
+        assert unknown.status_code == 404
+        unauthorized = await http.post(
+            "/sandbox-tools/invoke/integration_echo", json={"value": "hello"}
+        )
+        assert unauthorized.status_code == 401
 
 
 async def test_postgres_records_round_trip_and_isolate_threads(registry_db: None) -> None:
