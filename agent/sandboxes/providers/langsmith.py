@@ -389,6 +389,7 @@ async def configure_github_proxy(
     github_token: str | None,
     *,
     base_proxy_config: dict[str, Any] | None = None,
+    thread_id: str | None = None,
 ) -> None:
     """Configure sandbox proxy to inject managed credentials for outbound traffic.
 
@@ -417,8 +418,17 @@ async def configure_github_proxy(
         or rule.get("name")
         not in {"github", "github-api", "github-public", "open-swe-langsmith", "stagehand-model"}
     ]
+    from agent.sandboxes.tool_access import TOOLS_RULE, tool_proxy_rule
+
+    preserved_rules = [
+        rule
+        for rule in preserved_rules
+        if not isinstance(rule, dict) or rule.get("name") != TOOLS_RULE
+    ]
+    tools_rule = await tool_proxy_rule(thread_id, sandbox_name) if thread_id else None
     proxy_config["rules"] = [
         *_github_proxy_rules(github_token),
+        *([tools_rule] if tools_rule else []),
         *preserved_rules,
     ]
     payload = {"proxy_config": proxy_config}

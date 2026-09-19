@@ -13,6 +13,7 @@ from agent.config import ENV
 from agent.dashboard import router as dashboard_router
 from agent.github.routes import router as github_webhook_router
 from agent.linear.routes import router as linear_webhook_router
+from agent.sandboxes.tool_routes import router as sandbox_tool_router
 from agent.slack.routes import router as slack_webhook_router
 from agent.threads.plan_api import plan_router
 from agent.threads.workflow_approval_api import workflow_approval_router
@@ -115,6 +116,7 @@ def create_app() -> FastAPI:
     app.include_router(slack_webhook_router)
     app.include_router(health_router)
     app.include_router(github_webhook_router)
+    app.include_router(sandbox_tool_router)
     mount_dashboard_ui(app)
     return app
 
