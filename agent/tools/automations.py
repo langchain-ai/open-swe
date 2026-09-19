@@ -48,6 +48,7 @@ async def create_automation(
     effort: str | None = None,
     slack_channel_id: str | None = None,
     slack_notification_mode: schedules.SlackNotificationMode = "always",
+    sandbox_mode: schedules.SandboxMode = "reuse",
     admin_thread: bool = False,
 ) -> dict[str, Any]:
     """Implement the `create_automation` tool."""
@@ -70,6 +71,7 @@ async def create_automation(
                 effort=effort,
                 slack_channel_id=slack_channel_id,
                 slack_notification_mode=slack_notification_mode,
+                sandbox_mode=sandbox_mode,
                 admin_thread=admin_thread,
             ),
             email=email,
@@ -95,6 +97,7 @@ async def update_automation(
     slack_channel_id: str | None = None,
     clear_slack_channel: bool = False,
     slack_notification_mode: schedules.SlackNotificationMode | None = None,
+    sandbox_mode: schedules.SandboxMode | None = None,
     admin_thread: bool | None = None,
 ) -> dict[str, Any]:
     """Implement the `update_automation` tool."""
@@ -119,6 +122,7 @@ async def update_automation(
         "effort": effort,
         "enabled": enabled,
         "slack_notification_mode": slack_notification_mode,
+        "sandbox_mode": sandbox_mode,
         "admin_thread": admin_thread,
     }
     values = {key: value for key, value in values.items() if value is not None}

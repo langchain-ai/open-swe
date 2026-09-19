@@ -47,10 +47,17 @@ _SCHEDULER_ASSISTANT_ID = "scheduler"
 _CRON_FIELD_RANGES = ((0, 59), (0, 23), (1, 31), (1, 12), (0, 7))
 _SLACK_CHANNEL_ID_RE = re.compile(r"^[CG][A-Z0-9]{8,}$")
 SlackNotificationMode = Literal["always", "on_action"]
+SandboxMode = Literal["new", "reuse"]
 AutomationTrigger = Literal["schedule", "github_issue_opened"]
 _DEFAULT_SLACK_NOTIFICATION_MODE: SlackNotificationMode = "always"
+_DEFAULT_SANDBOX_MODE: SandboxMode = "reuse"
 _DEFAULT_AUTOMATION_TRIGGER: AutomationTrigger = "schedule"
+_AUTOMATION_LAUNCH_LOCK_TTL_MINUTES = 5
 _ISSUE_DELIVERY_CLAIM_TTL_MINUTES = 24 * 60
+
+
+def _sandbox_mode(record: dict[str, Any]) -> SandboxMode:
+    return "new" if record.get("sandbox_mode") == "new" else "reuse"
 
 
 def _normalize_slack_channel_id(value: str | None) -> str | None:
@@ -76,6 +83,7 @@ class ScheduleCreateBody(BaseModel):
     effort: str | None = None
     slack_channel_id: str | None = None
     slack_notification_mode: SlackNotificationMode = _DEFAULT_SLACK_NOTIFICATION_MODE
+    sandbox_mode: SandboxMode = _DEFAULT_SANDBOX_MODE
     admin_thread: bool = False
 
     @field_validator("schedule")
@@ -110,6 +118,7 @@ class ScheduleUpdateBody(BaseModel):
     enabled: bool | None = None
     slack_channel_id: str | None = None
     slack_notification_mode: SlackNotificationMode | None = None
+    sandbox_mode: SandboxMode | None = None
     admin_thread: bool | None = None
 
     @field_validator("schedule")
@@ -188,6 +197,7 @@ def _schedule_summary(
         "repo": _repo_full_name(repo),
         "slackChannelId": record.get("slack_channel_id"),
         "slackNotificationMode": _slack_notification_mode(record),
+        "sandboxMode": _sandbox_mode(record),
         "adminThread": record.get("admin_thread") is True,
         "model": record.get("model"),
         "effort": record.get("effort"),
@@ -223,6 +233,31 @@ async def _put_schedule(record: dict[str, Any]) -> dict[str, Any]:
 
 async def _get_run_state(schedule_id: str) -> dict[str, Any] | None:
     return await get_value(SCHEDULE_RUN_STATE_NAMESPACE, schedule_id)
+
+
+async def _acquire_automation_launch_lock(schedule_id: str) -> str | None:
+    """Lock id for the launch, or ``None`` when another launch already holds it."""
+    lock_id = str(uuid.uuid5(uuid.NAMESPACE_URL, f"open-swe:automation-launch:{schedule_id}"))
+    try:
+        await langgraph_client().threads.create(
+            thread_id=lock_id,
+            if_exists="raise",
+            ttl=_AUTOMATION_LAUNCH_LOCK_TTL_MINUTES,
+        )
+    except ConflictError:
+        return None
+    return lock_id
+
+
+async def _release_automation_launch_lock(lock_id: str) -> None:
+    try:
+        await langgraph_client().threads.delete(lock_id)
+    except Exception:
+        logger.warning(
+            "Failed to release automation launch lock",
+            extra={"lock_id": lock_id},
+            exc_info=True,
+        )
 
 
 async def _put_run_state(record: dict[str, Any], patch: dict[str, Any]) -> None:
@@ -358,6 +393,7 @@ async def create_agent_schedule(
         "repo": repo,
         "slack_channel_id": body.slack_channel_id,
         "slack_notification_mode": body.slack_notification_mode,
+        "sandbox_mode": body.sandbox_mode,
         "admin_thread": body.admin_thread,
         "model": chosen_model or profile.get("default_model") or "Default",
         "effort": chosen_effort or profile.get("reasoning_effort"),
@@ -436,6 +472,9 @@ async def update_agent_schedule(
         patch["slack_notification_mode"] = (
             body.slack_notification_mode or _DEFAULT_SLACK_NOTIFICATION_MODE
         )
+    if "sandbox_mode" in body.model_fields_set:
+        patch["sandbox_mode"] = body.sandbox_mode or _DEFAULT_SANDBOX_MODE
+
     if body.admin_thread is not None:
         patch["admin_thread"] = body.admin_thread
 
@@ -639,6 +678,39 @@ async def _agent_run_config(
 async def _launch_agent_schedule_record(
     record: dict[str, Any], *, test_run: bool = False, prompt: str | None = None
 ) -> dict[str, Any]:
+    if _sandbox_mode(record) != "reuse":
+        return await _launch_agent_schedule_record_unlocked(
+            record, test_run=test_run, prompt=prompt
+        )
+
+    schedule_id = record["id"]
+    try:
+        lock_id = await _acquire_automation_launch_lock(schedule_id)
+    except Exception:
+        error = "failed to acquire automation launch lock"
+        logger.exception(
+            "Failed to acquire automation launch lock",
+            extra={"schedule_id": schedule_id},
+        )
+        await _put_run_state(record, {"last_error": error, "last_error_at": now_iso()})
+        return {"status": "error", "schedule_id": schedule_id, "error": error}
+    if lock_id is None:
+        return {
+            "status": "busy",
+            "schedule_id": schedule_id,
+            "error": "automation launch already in progress",
+        }
+    try:
+        return await _launch_agent_schedule_record_unlocked(
+            record, test_run=test_run, prompt=prompt
+        )
+    finally:
+        await _release_automation_launch_lock(lock_id)
+
+
+async def _launch_agent_schedule_record_unlocked(
+    record: dict[str, Any], *, test_run: bool = False, prompt: str | None = None
+) -> dict[str, Any]:
     schedule_id = record["id"]
     if not test_run and not record.get("enabled"):
         return {"status": "disabled", "schedule_id": schedule_id}
@@ -664,7 +736,45 @@ async def _launch_agent_schedule_record(
             }
 
     client = langgraph_client()
+    reuse_sandbox = _sandbox_mode(record) == "reuse"
     thread_id = str(uuid.uuid4())
+    shared_sandbox_metadata: dict[str, Any] = {}
+    if reuse_sandbox:
+        run_state = await _get_run_state(schedule_id)
+        prior_thread_id = run_state.get("last_thread_id") if run_state else None
+        if not isinstance(prior_thread_id, str):
+            prior_thread_id = record.get("last_thread_id")
+        if isinstance(prior_thread_id, str):
+            try:
+                prior_thread = await client.threads.get(prior_thread_id)
+            except Exception as exc:  # noqa: BLE001
+                if getattr(exc, "status_code", None) != 404:
+                    error = "failed to load shared automation sandbox"
+                    logger.exception(
+                        "Failed to load shared automation sandbox",
+                        extra={"schedule_id": schedule_id, "thread_id": prior_thread_id},
+                    )
+                    await _put_run_state(
+                        record,
+                        {"last_error": error, "last_error_at": now_iso()},
+                    )
+                    return {"status": "error", "schedule_id": schedule_id, "error": error}
+            else:
+                prior_metadata = prior_thread.get("metadata")
+                if isinstance(prior_metadata, dict):
+                    if prior_metadata.get("latest_run_status") in {"pending", "running"}:
+                        return {
+                            "status": "busy",
+                            "schedule_id": schedule_id,
+                            "error": "previous automation run is still active",
+                        }
+                    sandbox_id = prior_metadata.get("sandbox_id")
+                    if isinstance(sandbox_id, str) and sandbox_id and sandbox_id != "__creating__":
+                        shared_sandbox_metadata["sandbox_id"] = sandbox_id
+                        proxy_config = prior_metadata.get("sandbox_base_proxy_config")
+                        if isinstance(proxy_config, dict):
+                            shared_sandbox_metadata["sandbox_base_proxy_config"] = proxy_config
+
     slack_thread: dict[str, Any] | None = None
     slack_channel_id = record.get("slack_channel_id")
     if (
@@ -703,6 +813,7 @@ async def _launch_agent_schedule_record(
         test_run=test_run,
         admin_thread=admin_thread,
     )
+    metadata.update(shared_sandbox_metadata)
     if admin_thread:
         metadata["system_authorization"] = {
             "schedule_id": schedule_id,

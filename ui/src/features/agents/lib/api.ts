@@ -3,6 +3,7 @@ import type {
   AgentPullRequestStatusResponse,
   AgentSchedule,
   AgentThread,
+  AutomationSandboxMode,
   ImageChunk,
   Message,
   SlackNotificationMode,
@@ -16,7 +17,13 @@ import {
 } from "@/lib/dashboard-fetch"
 import { withRequestTiming } from "@/lib/perf/fetchTiming"
 
-export type { AgentSchedule, AgentThread, Message, SlackNotificationMode }
+export type {
+  AgentSchedule,
+  AgentThread,
+  AutomationSandboxMode,
+  Message,
+  SlackNotificationMode,
+}
 
 export class AgentsApiError extends Error {
   constructor(
@@ -45,6 +52,7 @@ export interface ScheduleCreateRequest {
   repo?: string | null
   slack_channel_id?: string | null
   slack_notification_mode?: SlackNotificationMode
+  sandbox_mode?: AutomationSandboxMode
   admin_thread?: boolean
   model_id?: string | null
   effort?: string | null
@@ -58,6 +66,7 @@ export interface ScheduleUpdateRequest {
   repo?: string | null
   slack_channel_id?: string | null
   slack_notification_mode?: SlackNotificationMode
+  sandbox_mode?: AutomationSandboxMode
   admin_thread?: boolean
   model_id?: string | null
   effort?: string | null

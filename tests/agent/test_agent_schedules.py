@@ -69,31 +69,39 @@ class _FakeCrons:
         self.deleted.append(cron_id)
 
 
+class _NotFoundError(Exception):
+    status_code = 404
+
+
 class _FakeThreads:
     def __init__(self) -> None:
         self.created: list[dict[str, Any]] = []
         self.updated: list[dict[str, Any]] = []
-        self.ids: set[str] = set()
+        self.items: dict[str, dict[str, Any]] = {}
 
     async def create(self, **kwargs: Any) -> None:
         thread_id = kwargs.get("thread_id")
-        if kwargs.get("if_exists") == "raise" and thread_id in self.ids:
+        if kwargs.get("if_exists") == "raise" and thread_id in self.items:
             request = httpx2.Request("POST", "http://test/threads")
             response = httpx2.Response(409, request=request)
             raise ConflictError("Thread already exists", response=response, body=None)
         if isinstance(thread_id, str):
-            self.ids.add(thread_id)
-        self.created.append(kwargs)
+            self.items.setdefault(thread_id, {"metadata": kwargs.get("metadata", {})})
+        if "metadata" in kwargs:
+            self.created.append(kwargs)
 
     async def update(self, **kwargs: Any) -> None:
         self.updated.append(kwargs)
+        thread = self.items.setdefault(kwargs["thread_id"], {"metadata": {}})
+        thread["metadata"].update(kwargs["metadata"])
 
     async def delete(self, thread_id: str) -> None:
-        self.ids.discard(thread_id)
+        self.items.pop(thread_id, None)
 
     async def get(self, thread_id: str) -> dict[str, Any]:
-        thread = next(item for item in self.created if item["thread_id"] == thread_id)
-        return {"metadata": thread["metadata"]}
+        if thread_id not in self.items:
+            raise _NotFoundError
+        return self.items[thread_id]
 
 
 class _FakeRuns:
@@ -174,13 +182,14 @@ def test_slack_channel_validation_normalizes_ids() -> None:
         ScheduleCreateBody(prompt="hello", schedule="0 9 * * *", slack_channel_id="#general")
 
 
-def test_slack_notification_mode_defaults_and_validates() -> None:
+def test_schedule_modes_default_and_validate() -> None:
     default_body = ScheduleCreateBody(prompt="hello", schedule="0 9 * * *")
     conditional_body = ScheduleCreateBody(
         prompt="hello", schedule="0 9 * * *", slack_notification_mode="on_action"
     )
 
     assert default_body.slack_notification_mode == "always"
+    assert default_body.sandbox_mode == "reuse"
     assert conditional_body.slack_notification_mode == "on_action"
     with pytest.raises(ValidationError):
         ScheduleCreateBody.model_validate(
@@ -188,6 +197,14 @@ def test_slack_notification_mode_defaults_and_validates() -> None:
                 "prompt": "hello",
                 "schedule": "0 9 * * *",
                 "slack_notification_mode": "sometimes",
+            }
+        )
+    with pytest.raises(ValidationError):
+        ScheduleCreateBody.model_validate(
+            {
+                "prompt": "hello",
+                "schedule": "0 9 * * *",
+                "sandbox_mode": "sometimes",
             }
         )
 
@@ -207,6 +224,7 @@ async def test_create_agent_schedule_registers_scheduler_cron(fake_client, auth)
     assert result["enabled"] is True
     assert result["slackChannelId"] == "C0123456789"
     assert result["slackNotificationMode"] == "always"
+    assert result["sandboxMode"] == "reuse"
     assert result["cronId"] == "cron_1"
     created = fake_client.crons.created[0]
     assert created["assistant_id"] == "scheduler"
@@ -1136,6 +1154,133 @@ async def test_launch_scheduled_agent_run_starts_fresh_agent_thread(
     assert stored["last_thread_id"] == thread_id
     assert stored["last_run_id"] == "run_123"
     assert stored["scope"] == "workspace"
+
+
+async def test_launch_scheduled_agent_runs_use_distinct_threads_with_one_sandbox(
+    fake_client, auth
+) -> None:  # noqa: ANN001, ARG001
+    record = {
+        "id": "sched_1",
+        "name": "Daily report",
+        "prompt": "Summarize updates",
+        "schedule": "0 9 * * *",
+        "repo": None,
+        "sandbox_mode": "reuse",
+        "model": "Default",
+        "enabled": True,
+        "created_by": "alice",
+    }
+    await fake_client.store.put_item(schedules.SCHEDULES_NAMESPACE, "sched_1", record)
+
+    first = await schedules.launch_scheduled_agent_run("sched_1")
+    fake_client.threads.items[first["thread_id"]]["metadata"].update(
+        {
+            "latest_run_status": "success",
+            "sandbox_id": "sandbox-shared",
+            "sandbox_base_proxy_config": {"allowed_repositories": ["langchain-ai/open-swe"]},
+        }
+    )
+    second = await schedules.launch_scheduled_agent_run("sched_1")
+
+    assert first["thread_id"] != second["thread_id"]
+    second_metadata = fake_client.threads.items[second["thread_id"]]["metadata"]
+    assert second_metadata["sandbox_id"] == "sandbox-shared"
+    assert second_metadata["sandbox_base_proxy_config"] == {
+        "allowed_repositories": ["langchain-ai/open-swe"]
+    }
+    assert all(run["multitask_strategy"] == "interrupt" for run in fake_client.runs.created)
+
+
+async def test_launch_scheduled_agent_run_waits_for_shared_sandbox_user(fake_client, auth) -> None:  # noqa: ANN001, ARG001
+    record = {
+        "id": "sched_1",
+        "prompt": "Summarize updates",
+        "schedule": "0 9 * * *",
+        "repo": None,
+        "sandbox_mode": "reuse",
+        "model": "Default",
+        "enabled": True,
+        "created_by": "alice",
+    }
+    await fake_client.store.put_item(schedules.SCHEDULES_NAMESPACE, "sched_1", record)
+
+    first = await schedules.launch_scheduled_agent_run("sched_1")
+    result = await schedules.launch_scheduled_agent_run("sched_1")
+
+    assert result == {
+        "status": "busy",
+        "schedule_id": "sched_1",
+        "error": "previous automation run is still active",
+    }
+    assert len(fake_client.runs.created) == 1
+    assert first["thread_id"] in fake_client.threads.items
+
+
+async def test_launch_scheduled_agent_run_skips_concurrent_shared_sandbox_launch(
+    fake_client, auth
+) -> None:  # noqa: ANN001, ARG001
+    record = {
+        "id": "sched_1",
+        "prompt": "Summarize updates",
+        "schedule": "0 9 * * *",
+        "sandbox_mode": "reuse",
+        "model": "Default",
+        "enabled": True,
+        "created_by": "alice",
+    }
+    await fake_client.store.put_item(schedules.SCHEDULES_NAMESPACE, "sched_1", record)
+    lock_id = str(uuid.uuid5(uuid.NAMESPACE_URL, "open-swe:automation-launch:sched_1"))
+    fake_client.threads.items[lock_id] = {"metadata": {}}
+
+    result = await schedules.launch_scheduled_agent_run("sched_1")
+
+    assert result["status"] == "busy"
+    assert fake_client.runs.created == []
+
+
+async def test_launch_scheduled_agent_run_with_fresh_sandbox_does_not_copy_binding(
+    fake_client, auth
+) -> None:  # noqa: ANN001, ARG001
+    record = {
+        "id": "sched_1",
+        "prompt": "Summarize updates",
+        "schedule": "0 9 * * *",
+        "repo": None,
+        "sandbox_mode": "new",
+        "model": "Default",
+        "enabled": True,
+        "created_by": "alice",
+    }
+    await fake_client.store.put_item(schedules.SCHEDULES_NAMESPACE, "sched_1", record)
+
+    first = await schedules.launch_scheduled_agent_run("sched_1")
+    fake_client.threads.items[first["thread_id"]]["metadata"]["sandbox_id"] = "sandbox-first"
+    second = await schedules.launch_scheduled_agent_run("sched_1")
+
+    assert first["thread_id"] != second["thread_id"]
+    assert "sandbox_id" not in fake_client.threads.items[second["thread_id"]]["metadata"]
+
+
+async def test_launch_scheduled_agent_run_does_not_copy_creating_sandbox(fake_client, auth) -> None:  # noqa: ANN001, ARG001
+    record = {
+        "id": "sched_1",
+        "prompt": "Summarize updates",
+        "schedule": "0 9 * * *",
+        "repo": None,
+        "sandbox_mode": "reuse",
+        "model": "Default",
+        "enabled": True,
+        "created_by": "alice",
+    }
+    await fake_client.store.put_item(schedules.SCHEDULES_NAMESPACE, "sched_1", record)
+
+    first = await schedules.launch_scheduled_agent_run("sched_1")
+    fake_client.threads.items[first["thread_id"]]["metadata"].update(
+        {"latest_run_status": "success", "sandbox_id": "__creating__"}
+    )
+    second = await schedules.launch_scheduled_agent_run("sched_1")
+
+    assert "sandbox_id" not in fake_client.threads.items[second["thread_id"]]["metadata"]
 
 
 async def test_launch_scheduled_agent_run_stamps_workspace_owning_repo(

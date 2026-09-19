@@ -1,5 +1,7 @@
 Create a workspace automation.
 
+Every run gets a new thread. By default, those threads share one sandbox, so files written in the sandbox persist between runs. Set ``sandbox_mode`` to ``new`` only when every run should start with a fresh sandbox.
+
 Args:
     prompt: Complete instructions for every run.
     trigger: How the automation fires. "schedule" (the default) runs on a
@@ -15,4 +17,5 @@ Args:
     effort: Optional reasoning effort for the model.
     slack_channel_id: Optional Slack channel ID starting with C or G.
     slack_notification_mode: Post every run or only when the run takes action.
+    sandbox_mode: Share one sandbox across run threads by default, or use ``new`` for fresh sandboxes.
     admin_thread: Give runs workspace-admin capabilities while the creator remains an admin.

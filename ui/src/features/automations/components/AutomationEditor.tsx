@@ -5,6 +5,7 @@ import { ClockIcon, TrashIcon } from "@phosphor-icons/react"
 import type { ModelOption } from "@/lib/api"
 import type {
   AgentSchedule,
+  AutomationSandboxMode,
   AutomationTrigger,
   SlackNotificationMode,
 } from "@/features/agents/lib/types"
@@ -88,6 +89,9 @@ export function AutomationEditor({
   )
   const [slackNotificationMode, setSlackNotificationMode] =
     useState<SlackNotificationMode>(schedule?.slackNotificationMode ?? "always")
+  const [sandboxMode, setSandboxMode] = useState<AutomationSandboxMode>(
+    schedule?.sandboxMode ?? "reuse"
+  )
   const [enabled, setEnabled] = useState(schedule?.enabled ?? true)
   const [adminThread, setAdminThread] = useState(schedule?.adminThread ?? false)
   // undefined = untouched (derive from the schedule / default as models load).
@@ -108,6 +112,7 @@ export function AutomationEditor({
       repo !== (schedule?.repo ?? null) ||
       slackChannelId !== (schedule?.slackChannelId ?? "") ||
       slackNotificationMode !== (schedule?.slackNotificationMode ?? "always") ||
+      sandboxMode !== (schedule?.sandboxMode ?? "reuse") ||
       enabled !== (schedule?.enabled ?? true) ||
       adminThread !== (schedule?.adminThread ?? false) ||
       activeSelection?.modelId !== initialSelection?.modelId ||
@@ -150,6 +155,7 @@ export function AutomationEditor({
           repo,
           slack_channel_id: slackChannelId.trim() || null,
           slack_notification_mode: slackNotificationMode,
+          sandbox_mode: sandboxMode,
           admin_thread: adminThread,
           model_id: modelId,
           effort,
@@ -175,6 +181,7 @@ export function AutomationEditor({
           repo: repo ?? "",
           slack_channel_id: slackChannelId.trim() || null,
           slack_notification_mode: slackNotificationMode,
+          sandbox_mode: sandboxMode,
           admin_thread: adminThread,
           model_id: modelId,
           effort,
@@ -336,6 +343,31 @@ export function AutomationEditor({
               triggerLabel={cron ? "Change trigger" : "Add Trigger"}
             />
           )}
+        </div>
+
+        <SectionLabel>Sandbox persistence</SectionLabel>
+        <div className="rounded-xl border border-border bg-card p-3">
+          <div className="flex items-center justify-between gap-3">
+            <span className="text-xs text-muted-foreground">Run threads</span>
+            <Select
+              value={sandboxMode}
+              onValueChange={(value) => value && setSandboxMode(value)}
+              disabled={!canManage}
+            >
+              <SelectTrigger className="w-52">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="reuse">Share one sandbox</SelectItem>
+                <SelectItem value="new">Use fresh sandboxes</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <p className="mt-2 text-xs text-muted-foreground/70">
+            {sandboxMode === "reuse"
+              ? "Each trigger starts a new thread that shares files with earlier runs."
+              : "Each trigger starts a new thread with a fresh sandbox."}
+          </p>
         </div>
 
         <SectionLabel>Slack destination</SectionLabel>

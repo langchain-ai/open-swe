@@ -200,6 +200,7 @@ export interface LocalRepo {
 }
 
 export type SlackNotificationMode = "always" | "on_action"
+export type AutomationSandboxMode = "new" | "reuse"
 export type AutomationTrigger = "schedule" | "github_issue_opened"
 
 export interface AgentSchedule {
@@ -212,6 +213,7 @@ export interface AgentSchedule {
   repo: string | null
   slackChannelId?: string | null
   slackNotificationMode: SlackNotificationMode
+  sandboxMode: AutomationSandboxMode
   adminThread: boolean
   model: string
   effort?: string | null

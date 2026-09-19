@@ -1,1 +1,1 @@
-Start a test run for a workspace automation, including a paused one.
+Start a test run for a workspace automation, including a paused one. The run always gets a new thread; by default that thread shares the automation's persistent sandbox and can read files written by earlier runs.
