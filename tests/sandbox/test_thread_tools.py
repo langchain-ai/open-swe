@@ -99,7 +99,7 @@ async def test_proxy_refresh_preserves_tools_and_custom_rules(
     patch_proxy = AsyncMock()
     monkeypatch.setattr(langsmith, "_patch_proxy_config", patch_proxy)
     custom = {"name": "custom", "match_hosts": ["custom.example.test"]}
-    await langsmith.configure_github_proxy(
+    await langsmith.configure_sandbox_proxy(
         "sandbox-a",
         "test-github-token",
         thread_id="thread-a",
@@ -113,7 +113,7 @@ async def test_proxy_refresh_preserves_tools_and_custom_rules(
     assert rule["env_vars"] == {"OPEN_SWE_TOOLS_URL": "https://agent.example.test/sandbox-tools"}
     assert "thread-a" not in str(rule) and "sandbox-a" not in str(rule)
     first_token = rule["headers"][0]["value"]
-    await langsmith.configure_github_proxy(
+    await langsmith.configure_sandbox_proxy(
         "sandbox-a",
         "new-test-github-token",
         thread_id="thread-a",

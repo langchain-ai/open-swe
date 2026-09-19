@@ -166,19 +166,19 @@ async def refresh_proxy_token(
         permissions=dict(permission_key) if permission_key else None,
     )
 
-    from agent.sandboxes.providers.langsmith import configure_github_proxy
+    from agent.sandboxes.providers.langsmith import configure_sandbox_proxy
 
     current_backend = unwrap_sandbox_backend(sandbox_backend)
     base_proxy_config = _PROXY_BASE_CONFIGS.get(thread_id)
     if base_proxy_config is not None:
-        await configure_github_proxy(
+        await configure_sandbox_proxy(
             current_backend.id,
             access.token,
             base_proxy_config=base_proxy_config,
             thread_id=thread_id,
         )
     else:
-        await configure_github_proxy(current_backend.id, access.token, thread_id=thread_id)
+        await configure_sandbox_proxy(current_backend.id, access.token, thread_id=thread_id)
     record_proxy_token_expiry(
         thread_id,
         access.expires_at,

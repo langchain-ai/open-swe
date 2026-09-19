@@ -17,7 +17,7 @@ from langgraph_sdk import get_client
 from agent.config import ENV
 from agent.github.proxy import get_recorded_proxy_base_config, record_proxy_token_expiry
 from agent.github.sandbox_access import SandboxGitHubAccess, workspace_token
-from agent.sandboxes.providers.langsmith import configure_github_proxy, get_sandbox_proxy_config
+from agent.sandboxes.providers.langsmith import configure_sandbox_proxy, get_sandbox_proxy_config
 from agent.sandboxes.providers.registry import SandboxGoneError, create_sandbox
 from agent.sandboxes.state import (
     SANDBOX_BACKENDS,
@@ -208,7 +208,7 @@ async def _configure_proxy(
         kwargs["base_proxy_config"] = base_proxy_config
     if thread_id is not None:
         kwargs["thread_id"] = thread_id
-    await configure_github_proxy(sandbox_id, access.token, **kwargs)
+    await configure_sandbox_proxy(sandbox_id, access.token, **kwargs)
 
 
 async def _refresh_github_proxy(
