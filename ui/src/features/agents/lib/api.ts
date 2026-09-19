@@ -157,7 +157,7 @@ export const agentsLangGraphApiUrl = `${API_BASE}/dashboard/api`
 
 const timedFetch = withRequestTiming((input, init) => fetch(input, init))
 
-async function agentsRequest<T>(
+export async function agentsRequest<T>(
   path: string,
   init: RequestInit = {}
 ): Promise<T> {
