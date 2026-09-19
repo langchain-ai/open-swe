@@ -37,21 +37,11 @@ function ReviewPage() {
     >
       <RepositoriesSection canEdit={canEdit} />
 
-      <SettingsSection title="Rules">
+      <SettingsSection title="Configuration">
         <SettingsNavRow
-          to="/review/approval"
-          label="Approval Policy"
-          description="Configure shared and repository-specific rules for shadow approval evaluation."
-        />
-        <SettingsNavRow
-          to="/review/styles"
-          label="Review Style Prompts"
-          description="Per-repo style guides learned from past PR review feedback."
-        />
-        <SettingsNavRow
-          to="/workspaces"
-          label="Workspace review settings"
-          description="Guidelines and review toggles are configured on each workspace."
+          to="/review/settings"
+          label="Review settings"
+          description="Configure instructions, approval policy, and automatic review behavior."
         />
       </SettingsSection>
     </AppShell>

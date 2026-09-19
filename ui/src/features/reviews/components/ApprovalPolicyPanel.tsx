@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { useRef, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -12,7 +12,6 @@ import {
   type PolicyDefinition,
   type PolicySettingsView,
 } from "@/lib/api"
-import { useRepos } from "@/lib/profile"
 
 const policyQueryKey = (repository: string | null) =>
   ["review-approval-policy", repository] as const
@@ -60,10 +59,14 @@ function mutationError(error: Error): string {
   return error.message || "Could not save the policy."
 }
 
-export function ApprovalPolicyPanel() {
-  const [repository, setRepository] = useState<string | null>(null)
+export function ApprovalPolicyPanel({
+  repository,
+  onDirtyChange,
+}: {
+  repository: string | null
+  onDirtyChange?: (dirty: boolean) => void
+}) {
   const [notice, setNotice] = useState<string | null>(null)
-  const repos = useRepos()
   const query = useQuery({
     queryKey: policyQueryKey(repository),
     queryFn: () => api.getReviewApprovalPolicy(repository),
@@ -71,30 +74,6 @@ export function ApprovalPolicyPanel() {
 
   return (
     <div className="space-y-6 p-4">
-      <div className="space-y-2">
-        <Label htmlFor="policy-scope">Policy scope</Label>
-        <select
-          id="policy-scope"
-          className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm sm:max-w-md"
-          value={repository ?? ""}
-          onChange={(event) => {
-            setRepository(event.target.value || null)
-            setNotice(null)
-          }}
-        >
-          <option value="">Shared default</option>
-          {(repos.data?.repositories ?? []).map((repo) => (
-            <option key={repo.full_name} value={repo.full_name}>
-              {repo.full_name}
-            </option>
-          ))}
-        </select>
-        <p className="text-xs text-muted-foreground">
-          The shared policy applies to every repository. Repository policies add
-          stricter requirements.
-        </p>
-      </div>
-
       {query.isLoading && <Skeleton className="h-96 w-full" />}
       {query.isError && (
         <p role="alert" className="text-sm text-destructive">
@@ -107,6 +86,7 @@ export function ApprovalPolicyPanel() {
           repository={repository}
           view={query.data}
           onNotice={setNotice}
+          onDirtyChange={onDirtyChange}
         />
       )}
       {notice && (
@@ -122,10 +102,12 @@ function PolicyEditor({
   repository,
   view,
   onNotice,
+  onDirtyChange,
 }: {
   repository: string | null
   view: PolicySettingsView
   onNotice: (notice: string | null) => void
+  onDirtyChange?: (dirty: boolean) => void
 }) {
   const queryClient = useQueryClient()
   const [draft, setDraft] = useState(() => initialDraft(view))
@@ -139,6 +121,8 @@ function PolicyEditor({
   const baselineVersionRef = useRef(view.effective_version)
   const [error, setError] = useState<string | null>(null)
   const [reloading, setReloading] = useState(false)
+  const [dirty, setDirty] = useState(false)
+  useEffect(() => onDirtyChange?.(dirty), [dirty, onDirtyChange])
 
   const adoptView = (nextView: PolicySettingsView) => {
     const nextDraft = initialDraft(nextView)
@@ -148,6 +132,7 @@ function PolicyEditor({
     setBaselineVersion(nextView.effective_version)
     baselineVersionRef.current = nextView.effective_version
     setError(null)
+    setDirty(false)
   }
 
   const save = useMutation({
@@ -202,6 +187,7 @@ function PolicyEditor({
       return next
     })
     setError(null)
+    setDirty(true)
     onNotice(null)
   }
 
@@ -288,6 +274,7 @@ function PolicyEditor({
               placeholder="One check name per line"
               onChange={(event) => {
                 setRequiredChecks(event.target.value)
+                setDirty(true)
                 setError(null)
                 onNotice(null)
               }}
@@ -302,6 +289,7 @@ function PolicyEditor({
               placeholder="One path pattern per line"
               onChange={(event) => {
                 setProtectedPaths(event.target.value)
+                setDirty(true)
                 setError(null)
                 onNotice(null)
               }}
@@ -323,6 +311,7 @@ function PolicyEditor({
                 const next = { ...current, criteria_markdown }
                 return next
               })
+              setDirty(true)
               setError(null)
               onNotice(null)
             }}

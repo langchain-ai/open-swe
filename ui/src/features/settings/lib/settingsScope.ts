@@ -1,4 +1,9 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import {
+  useIsMutating,
+  useMutation,
+  useQuery,
+  useQueryClient,
+} from "@tanstack/react-query"
 import { useState } from "react"
 import {
   api,
@@ -18,6 +23,10 @@ export function settingsQueryKey(scope: SettingsScope): Array<string> {
   return scope.kind === "instance"
     ? ["instanceSettings"]
     : ["workspaceSettings", scope.slug]
+}
+
+function settingsMutationKey(scope: SettingsScope): Array<string> {
+  return [...settingsQueryKey(scope), "mutation"]
 }
 
 /** The settings fields whose values are strings, for rows that pick one. */
@@ -41,6 +50,9 @@ export interface ScopedSettings {
   save: (patch: WorkspaceSettingsOverrides) => void
   /** Drops `fields` from a workspace's record so they inherit again; no-op on the instance. */
   reset: (...fields: Array<keyof WorkspaceSettings>) => void
+  resetAndWait: (
+    ...fields: Array<keyof WorkspaceSettings>
+  ) => Promise<WorkspaceSettings | undefined>
   saving: boolean
   error: string | null
 }
@@ -96,6 +108,7 @@ export function useScopedSettings(
     queryFn: () => load(scope),
   })
   const mutation = useMutation({
+    mutationKey: settingsMutationKey(scope),
     mutationFn: persist,
     onSuccess: (saved, variables) => {
       qc.setQueryData(settingsQueryKey(variables.scope), saved)
@@ -103,6 +116,9 @@ export function useScopedSettings(
       onSaved?.()
     },
     onError: (e: Error) => setError(e.message),
+  })
+  const scopeMutations = useIsMutating({
+    mutationKey: settingsMutationKey(scope),
   })
 
   const current = snapshot.data
@@ -132,7 +148,18 @@ export function useScopedSettings(
       for (const field of fields) delete overrides[field]
       write(overrides, current.effective)
     },
-    saving: mutation.isPending,
+    resetAndWait: async (...fields) => {
+      if (!current || scope.kind !== "workspace") return undefined
+      const overrides = { ...current.overrides }
+      for (const field of fields) delete overrides[field]
+      const saved = await mutation.mutateAsync({
+        scope,
+        effective: current.effective,
+        overrides,
+      })
+      return saved.effective
+    },
+    saving: mutation.isPending || scopeMutations > 0,
     error,
   }
 }

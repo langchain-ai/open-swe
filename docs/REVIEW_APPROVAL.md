@@ -12,11 +12,19 @@ review; otherwise, missing evidence produces an insufficient-evidence result.
 
 ## Configure policy in Open SWE
 
-Open **Open SWE Review → Approval policy** (`/review/approval`). Approval
-requirements are separate from learned review style prompts and feedback.
+Open **Open SWE Review → Review settings → Approval policy**
+(`/review/settings?tab=approval`). Use the scope selector to edit instance defaults
+or customize a repository. The same page holds **Instructions** and **Automation**;
+approval requirements remain separate from review instructions and feedback.
 Open SWE admins can edit the shared policy or add requirements for an accessible
 repository. Other users can read policies for repositories they can access.
 The shared default applies across this Open SWE instance.
+
+Under **Instructions**, admins can edit shared reviewer guidelines or the selected
+repository's review prompt. Repository prompts supplement the shared guidance and take precedence
+when they conflict. **Run analysis** is an optional way to generate and
+update the repository prompt. Existing workspace guideline overrides continue to
+apply to their workspaces; this page does not add another workspace policy layer.
 
 Use the structured fields for maximum risk (1–5), minimum confidence, required
 check names, and paths requiring human review. Write natural-language criteria

@@ -30,7 +30,6 @@ import { dashboardApiBase } from "@/lib/api-base"
 import { AllowedSlackBotsSection } from "@/features/settings/components/AllowedSlackBotsSection"
 import { ExpeditedReviewSection } from "@/features/settings/components/ExpeditedReviewSection"
 import { MCPConnectionsSection } from "@/features/settings/components/MCPConnectionsSection"
-import { ReviewSettings } from "@/features/settings/components/ReviewSettings"
 import {
   DefaultRepoSection,
   FableSection,
@@ -86,7 +85,13 @@ function AdminPage() {
       />
       <LLMGatewaySection scope={INSTANCE_SCOPE} />
       <FableSection scope={INSTANCE_SCOPE} />
-      <ReviewSettings scope={INSTANCE_SCOPE} canEdit />
+      <SettingsSection title="Review settings">
+        <SettingsNavRow
+          to="/review/settings"
+          label="Review settings"
+          description="Configure instance review defaults and repository-specific guidance."
+        />
+      </SettingsSection>
       <ExpeditedReviewSection scope={INSTANCE_SCOPE} />
       <MCPConnectionsSection scope="instance" />
 
