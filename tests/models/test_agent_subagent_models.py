@@ -5,6 +5,7 @@ import langgraph_sdk
 import pytest
 from langgraph.graph.state import RunnableConfig
 
+from agent.dashboard.profiles import Profile
 from agent.dashboard.workspace_settings import WorkspaceSettings
 from agent.server import get_agent
 
@@ -77,12 +78,15 @@ async def test_agent_uses_profile_subagent_model_override() -> None:
         patch(
             "agent.server.load_profile",
             new_callable=AsyncMock,
-            return_value={
-                "default_model": "anthropic:claude-opus-5",
-                "reasoning_effort": "high",
-                "default_subagent_model": "openai:gpt-5.6-sol",
-                "subagent_reasoning_effort": "xhigh",
-            },
+            return_value=Profile.model_validate(
+                {
+                    "default_model": "anthropic:claude-opus-5",
+                    "reasoning_effort": "high",
+                    "default_subagent_model": "openai:gpt-5.6-sol",
+                    "subagent_reasoning_effort": "xhigh",
+                }
+                or {}
+            ),
         ),
         patch("agent.server.fallback_model_id_for", return_value=None),
         patch("agent.server.make_model", side_effect=[main_model, subagent_model]) as make_model,
@@ -150,10 +154,13 @@ async def test_agent_subagent_inherits_profile_model_override_without_explicit_p
         patch(
             "agent.server.load_profile",
             new_callable=AsyncMock,
-            return_value={
-                "default_model": "anthropic:claude-opus-5",
-                "reasoning_effort": "high",
-            },
+            return_value=Profile.model_validate(
+                {
+                    "default_model": "anthropic:claude-opus-5",
+                    "reasoning_effort": "high",
+                }
+                or {}
+            ),
         ),
         patch("agent.server.fallback_model_id_for", return_value=None),
         patch("agent.server.make_model", side_effect=[main_model, subagent_model]) as make_model,
@@ -216,10 +223,13 @@ async def test_agent_gate_swaps_disabled_fable_profile_to_opus() -> None:
         patch(
             "agent.server.load_profile",
             new_callable=AsyncMock,
-            return_value={
-                "default_model": "anthropic:claude-fable-5-1",
-                "reasoning_effort": "high",
-            },
+            return_value=Profile.model_validate(
+                {
+                    "default_model": "anthropic:claude-fable-5-1",
+                    "reasoning_effort": "high",
+                }
+                or {}
+            ),
         ),
         patch("agent.server.fallback_model_id_for", return_value=None),
         patch("agent.server.make_model", side_effect=[main_model, subagent_model]) as make_model,

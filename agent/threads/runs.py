@@ -231,7 +231,7 @@ async def _create_dashboard_thread_record(
     workspace: str | None = None,
 ) -> dict[str, Any]:
     """Create a dashboard thread with immutable ownership and visibility."""
-    profile = await get_profile(login) or {}
+    profile = (await get_profile(login)).model_dump(exclude_unset=True)
     now_ms = _now_ms()
     prompt = prompt.strip()
     resolved_model, resolved_effort = await _resolve_agent_model_choice(
@@ -303,7 +303,11 @@ async def _build_dashboard_configurable(
     profile: dict[str, Any] | None = None,
     overrides: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    profile = profile if profile is not None else await get_profile(login) or {}
+    profile = (
+        profile
+        if profile is not None
+        else (await get_profile(login)).model_dump(exclude_unset=True)
+    )
     source = thread_source(metadata)
     configurable: dict[str, Any] = {
         "thread_id": thread_id,

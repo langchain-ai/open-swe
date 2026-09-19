@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from agent.dashboard.profiles import Profile
 from agent.dashboard.workspace_settings import WorkspaceSettingsUpdate, upsert_workspace_overrides
 from agent.github import webhook as github_webhooks
 from agent.webhooks import common as webhook_common
@@ -59,7 +60,9 @@ async def test_pr_ready_non_draft_triggers_run(monkeypatch: pytest.MonkeyPatch) 
     fake_client = MagicMock()
     fake_client.runs.create = AsyncMock()
     _patch_dispatch_deps(monkeypatch, fake_client)
-    monkeypatch.setattr(webhook_common, "get_profile", AsyncMock(return_value=None))
+    monkeypatch.setattr(
+        webhook_common, "get_profile", AsyncMock(return_value=Profile.model_validate(None or {}))
+    )
     monkeypatch.setattr(webhook_common, "get_workspace_settings", AsyncMock(return_value={}))
 
     await github_webhooks.process_github_pr_ready(_pr_payload(action="opened", draft=False))
@@ -86,7 +89,9 @@ async def test_pr_ready_public_repo_uses_scoped_reviewer_token(
     monkeypatch.setattr(webhook_common, "cache_github_token_for_thread", cache_token)
     monkeypatch.setattr(webhook_common, "set_reviewer_thread_metadata", AsyncMock())
     monkeypatch.setattr(webhook_common, "get_client", lambda url: fake_client)
-    monkeypatch.setattr(webhook_common, "get_profile", AsyncMock(return_value=None))
+    monkeypatch.setattr(
+        webhook_common, "get_profile", AsyncMock(return_value=Profile.model_validate(None or {}))
+    )
     monkeypatch.setattr(webhook_common, "get_workspace_settings", AsyncMock(return_value={}))
 
     await github_webhooks.process_github_pr_ready(
@@ -113,7 +118,9 @@ async def test_pr_ready_private_repo_uses_full_reviewer_token(
     monkeypatch.setattr(webhook_common, "cache_github_token_for_thread", MagicMock())
     monkeypatch.setattr(webhook_common, "set_reviewer_thread_metadata", AsyncMock())
     monkeypatch.setattr(webhook_common, "get_client", lambda url: fake_client)
-    monkeypatch.setattr(webhook_common, "get_profile", AsyncMock(return_value=None))
+    monkeypatch.setattr(
+        webhook_common, "get_profile", AsyncMock(return_value=Profile.model_validate(None or {}))
+    )
     monkeypatch.setattr(webhook_common, "get_workspace_settings", AsyncMock(return_value={}))
 
     await github_webhooks.process_github_pr_ready(
@@ -132,7 +139,9 @@ async def test_pr_ready_for_review_triggers_run(monkeypatch: pytest.MonkeyPatch)
     fake_client.runs.create = AsyncMock()
     _patch_dispatch_deps(monkeypatch, fake_client)
     monkeypatch.setattr(webhook_common, "get_thread_metadata_safe", AsyncMock(return_value=None))
-    monkeypatch.setattr(webhook_common, "get_profile", AsyncMock(return_value=None))
+    monkeypatch.setattr(
+        webhook_common, "get_profile", AsyncMock(return_value=Profile.model_validate(None or {}))
+    )
     monkeypatch.setattr(webhook_common, "get_workspace_settings", AsyncMock(return_value={}))
 
     await github_webhooks.process_github_pr_ready(
@@ -164,7 +173,9 @@ async def test_pr_ready_for_review_skips_when_head_already_reviewed(
         ),
     )
     monkeypatch.setattr(webhook_common, "get_client", lambda url: fake_client)
-    monkeypatch.setattr(webhook_common, "get_profile", AsyncMock(return_value=None))
+    monkeypatch.setattr(
+        webhook_common, "get_profile", AsyncMock(return_value=Profile.model_validate(None or {}))
+    )
     monkeypatch.setattr(webhook_common, "get_workspace_settings", AsyncMock(return_value={}))
 
     await github_webhooks.process_github_pr_ready(
@@ -196,7 +207,9 @@ async def test_pr_ready_for_review_uses_re_review_after_previous_review(
             }
         ),
     )
-    monkeypatch.setattr(webhook_common, "get_profile", AsyncMock(return_value=None))
+    monkeypatch.setattr(
+        webhook_common, "get_profile", AsyncMock(return_value=Profile.model_validate(None or {}))
+    )
     monkeypatch.setattr(webhook_common, "get_workspace_settings", AsyncMock(return_value={}))
 
     await github_webhooks.process_github_pr_ready(
@@ -231,7 +244,9 @@ async def test_pr_ready_draft_user_override_off_wins_over_team_on(
     monkeypatch.setattr(
         webhook_common,
         "get_profile",
-        AsyncMock(return_value={"login": "alice", "review_draft_prs": False}),
+        AsyncMock(
+            return_value=Profile.model_validate({"login": "alice", "review_draft_prs": False} or {})
+        ),
     )
     monkeypatch.setattr(
         webhook_common, "get_workspace_settings", AsyncMock(return_value={"review_draft_prs": True})
@@ -252,7 +267,9 @@ async def test_pr_ready_draft_user_override_on_wins_over_team_off(
     monkeypatch.setattr(
         webhook_common,
         "get_profile",
-        AsyncMock(return_value={"login": "alice", "review_draft_prs": True}),
+        AsyncMock(
+            return_value=Profile.model_validate({"login": "alice", "review_draft_prs": True} or {})
+        ),
     )
     monkeypatch.setattr(
         webhook_common,
@@ -276,7 +293,9 @@ async def test_pr_ready_draft_user_default_falls_back_to_team_on(
     monkeypatch.setattr(
         webhook_common,
         "get_profile",
-        AsyncMock(return_value={"login": "alice", "review_draft_prs": None}),
+        AsyncMock(
+            return_value=Profile.model_validate({"login": "alice", "review_draft_prs": None} or {})
+        ),
     )
     monkeypatch.setattr(
         webhook_common, "get_workspace_settings", AsyncMock(return_value={"review_draft_prs": True})
@@ -295,7 +314,9 @@ async def test_pr_ready_draft_no_profile_falls_back_to_team_off(
     fake_client.runs.create = AsyncMock()
     _patch_dispatch_deps(monkeypatch, fake_client)
     # External contributor — inherit the workspace default (off).
-    monkeypatch.setattr(webhook_common, "get_profile", AsyncMock(return_value=None))
+    monkeypatch.setattr(
+        webhook_common, "get_profile", AsyncMock(return_value=Profile.model_validate(None or {}))
+    )
     monkeypatch.setattr(
         webhook_common,
         "get_workspace_settings",
@@ -314,7 +335,9 @@ async def test_pr_ready_draft_no_profile_falls_back_to_team_on(
     fake_client = MagicMock()
     fake_client.runs.create = AsyncMock()
     _patch_dispatch_deps(monkeypatch, fake_client)
-    monkeypatch.setattr(webhook_common, "get_profile", AsyncMock(return_value=None))
+    monkeypatch.setattr(
+        webhook_common, "get_profile", AsyncMock(return_value=Profile.model_validate(None or {}))
+    )
     monkeypatch.setattr(
         webhook_common, "get_workspace_settings", AsyncMock(return_value={"review_draft_prs": True})
     )
@@ -354,7 +377,9 @@ async def test_converted_to_draft_disables_watch_when_drafts_off(
         patch(
             "agent.webhooks.common.get_profile",
             new_callable=AsyncMock,
-            return_value={"login": "alice", "review_draft_prs": False},
+            return_value=Profile.model_validate(
+                {"login": "alice", "review_draft_prs": False} or {}
+            ),
         ),
         patch(
             "agent.webhooks.common.get_workspace_settings",
@@ -381,7 +406,7 @@ async def test_converted_to_draft_keeps_watch_when_author_drafts_on(
         patch(
             "agent.webhooks.common.get_profile",
             new_callable=AsyncMock,
-            return_value={"login": "alice", "review_draft_prs": True},
+            return_value=Profile.model_validate({"login": "alice", "review_draft_prs": True} or {}),
         ),
         patch(
             "agent.webhooks.common.get_workspace_settings",
@@ -409,7 +434,7 @@ async def test_converted_to_draft_keeps_watch_when_team_default_drafts_on(
         patch(
             "agent.webhooks.common.get_profile",
             new_callable=AsyncMock,
-            return_value={"login": "alice", "review_draft_prs": None},
+            return_value=Profile.model_validate({"login": "alice", "review_draft_prs": None} or {}),
         ),
         patch(
             "agent.webhooks.common.get_workspace_settings",
@@ -430,7 +455,9 @@ async def test_pr_ready_draft_reads_the_owning_workspaces_team_default(
     fake_client = MagicMock()
     fake_client.runs.create = AsyncMock()
     _patch_dispatch_deps(monkeypatch, fake_client)
-    monkeypatch.setattr(webhook_common, "get_profile", AsyncMock(return_value=None))
+    monkeypatch.setattr(
+        webhook_common, "get_profile", AsyncMock(return_value=Profile.model_validate(None or {}))
+    )
     await WORKSPACES.create(WorkspaceCreate(name="OSS", repos=["lc/repo"]), "alice")
     await upsert_workspace_overrides("oss", WorkspaceSettingsUpdate(review_draft_prs=True))
     await upsert_workspace_overrides("default", WorkspaceSettingsUpdate(review_draft_prs=False))

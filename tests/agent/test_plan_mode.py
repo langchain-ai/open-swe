@@ -4,6 +4,7 @@ from typing import Any
 import pytest
 
 from agent import server
+from agent.dashboard.profiles import Profile
 from agent.prompt import construct_system_prompt
 from agent.threads import runs as thread_runs
 from agent.threads import summary as thread_summary
@@ -93,7 +94,7 @@ def dashboard_run_client(monkeypatch: pytest.MonkeyPatch) -> _FakeLangGraphClien
     client = _FakeLangGraphClient()
 
     async def fake_get_profile(login: str) -> dict[str, Any]:
-        return {}
+        return Profile.model_validate({} or {})
 
     async def fake_ensure_token(login: str) -> None:
         return None

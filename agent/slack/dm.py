@@ -8,7 +8,6 @@ timestamp is also how the rest of the code recognizes the mode: only a DM the
 owner enabled ever reaches a run with it.
 """
 
-from agent.dashboard.agent_overrides import profile_dm_session_enabled
 from agent.dashboard.profiles import get_profile
 from agent.slack.payloads import SlackChannelContext
 from agent.users import User
@@ -33,7 +32,7 @@ async def dm_session_enabled(slack_user_id: str) -> bool:
     login = await User.login_for_slack(slack_user_id)
     if not login:
         return False
-    return profile_dm_session_enabled(await get_profile(login))
+    return (await get_profile(login)).dm_session_enabled
 
 
 def dm_thread_title(name: str) -> str:
