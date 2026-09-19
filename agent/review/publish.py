@@ -643,6 +643,7 @@ async def post_pull_request_review(
             # once, instead of the agent retrying with byte-identical args.
             error_kind: str | None = None
             raw_errors: list[Any] = []
+            error_messages: list[object] = []
             if e.response.status_code == 422:
                 try:
                     parsed = e.response.json()
@@ -650,6 +651,7 @@ async def post_pull_request_review(
                         candidate = parsed.get("errors", [])
                         if isinstance(candidate, list):
                             raw_errors = candidate
+                        error_messages = [parsed.get("message"), *raw_errors]
                 except Exception:  # noqa: BLE001 — body may not be JSON
                     raw_errors = []
                 if any(
@@ -658,6 +660,14 @@ async def post_pull_request_review(
                     for err in raw_errors
                 ):
                     error_kind = "unresolved_anchor"
+                for error in error_messages:
+                    message = error.get("message") if isinstance(error, dict) else error
+                    if (
+                        isinstance(message, str)
+                        and "Can not approve your own pull request" in message
+                    ):
+                        error_kind = "self_approval"
+                        break
             return {
                 "_error": f"HTTP {e.response.status_code}: {body}",
                 "_error_kind": error_kind,

@@ -376,26 +376,36 @@ async def _publish_review_async(
             owner=owner, repo=repo, pr_number=pr_number, head_sha=head_sha, token=token
         )
     )
-    review_body = render_review_body(
-        pr_number=pr_number,
-        surfaced_count=len(inline_comments),
-        trace_url=review_trace_url,
-        ui_url=review_ui_url,
-        additional_findings_count=additional_findings_count,
-        assessment=assessment,
-        approved=approved,
-    )
+    # GitHub forbids self-approval; publish the assessment as an advisory comment instead.
+    for _ in range(2):
+        review_body = render_review_body(
+            pr_number=pr_number,
+            surfaced_count=len(inline_comments),
+            trace_url=review_trace_url,
+            ui_url=review_ui_url,
+            additional_findings_count=additional_findings_count,
+            assessment=assessment,
+            approved=approved,
+        )
 
-    review_response = await post_pull_request_review(
-        owner=owner,
-        repo=repo,
-        pr_number=pr_number,
-        head_sha=head_sha,
-        body=review_body,
-        inline_comments=inline_comments,
-        token=token,
-        event="APPROVE" if approved else "COMMENT",
-    )
+        review_response = await post_pull_request_review(
+            owner=owner,
+            repo=repo,
+            pr_number=pr_number,
+            head_sha=head_sha,
+            body=review_body,
+            inline_comments=inline_comments,
+            token=token,
+            event="APPROVE" if approved else "COMMENT",
+        )
+        if (
+            approved
+            and isinstance(review_response, dict)
+            and review_response.get("_error_kind") == "self_approval"
+        ):
+            approved = False
+        else:
+            break
     # If GitHub rejected the batch because one or more inline comments anchor
     # to a file/line that's not in the PR diff, drop just those findings and
     # retry once. Returning the bare 422 to the agent only invites it to

@@ -2572,3 +2572,89 @@ async def test_approved_review_posts_approve_event_for_reviewed_commit() -> None
     payload = request.await_args.kwargs["json"]
     assert payload["event"] == "APPROVE"
     assert payload["commit_id"] == "a" * 40
+
+
+@pytest.mark.parametrize(
+    "status,error_body,retry,succeeds",
+    [
+        (422, {"errors": ["Can not approve your own pull request"]}, True, True),
+        (422, {"message": "Can not approve your own pull request"}, True, True),
+        (422, {"errors": [{"message": "Can not approve your own pull request"}]}, True, True),
+        (422, {"errors": ["Review body is too long"]}, False, False),
+        (500, {"message": "Can not approve your own pull request"}, False, False),
+        (422, {"errors": ["Can not approve your own pull request"]}, True, False),
+    ],
+)
+async def test_approval_publication_handles_github_rejections(
+    status: int, error_body: dict[str, object], retry: bool, succeeds: bool
+) -> None:
+    import httpx2
+
+    from agent.tools.publish_review import _publish_review_async
+
+    request = httpx2.Request("POST", "https://api.github.com/repos/o/r/pulls/7/reviews")
+    responses = [httpx2.Response(status, json=error_body, request=request)]
+    if retry:
+        responses.append(
+            httpx2.Response(
+                200 if succeeds else 422,
+                json={"id": 77} if succeeds else error_body,
+                request=request,
+            )
+        )
+    with (
+        patch("agent.tools.publish_review.get_thread_id_from_runtime", return_value="tid"),
+        patch(
+            "agent.tools.publish_review.get_workspace_settings",
+            AsyncMock(
+                return_value=WorkspaceSettings(
+                    {"approval_policy": "Docs only", "review_auto_approve": True}
+                )
+            ),
+        ),
+        patch("agent.tools.publish_review.approval_allowed_for_head", AsyncMock(return_value=True)),
+        patch("agent.tools.publish_review.list_findings_async", AsyncMock(return_value=[])),
+        patch("agent.review.publish.github_request", AsyncMock(side_effect=responses)) as post,
+        patch("agent.tools.publish_review._resolve_review_trace_url", AsyncMock(return_value=None)),
+        patch(
+            "agent.tools.publish_review._resolve_threads_for_resolved_findings",
+            AsyncMock(return_value=0),
+        ),
+        patch("agent.tools.publish_review.set_reviewer_thread_metadata", AsyncMock()) as metadata,
+        patch("agent.tools.publish_review._record_reviewer_usage", AsyncMock()),
+        patch("agent.tools.publish_review.settle_review_check_run", AsyncMock()) as settle_check,
+    ):
+        result = await _publish_review_async(
+            owner="o",
+            repo="r",
+            pr_number=7,
+            head_sha="a" * 40,
+            token="t",
+            severity_threshold="medium",
+            cap=None,
+            is_re_review=False,
+            assessment=_assessment(),
+            state={"review_approval_policy": "Docs only"},
+        )
+    assert result["success"] is succeeds
+    payloads = [call.kwargs["json"] for call in post.await_args_list]
+    assert [payload["event"] for payload in payloads] == (
+        ["APPROVE", "COMMENT"] if retry else ["APPROVE"]
+    )
+    if retry:
+        assert payloads[1]["commit_id"] == "a" * 40
+        assert "Would approve" in payloads[1]["body"]
+        assert "Approved" not in payloads[1]["body"]
+    saved = await ASSESSMENTS.get("77")
+    if succeeds:
+        assert saved is not None
+        assert saved.approved is False
+        assert saved.decision == "would_approve"
+        assert saved.head_sha == "a" * 40
+        metadata.assert_any_await("tid", last_reviewed_sha="a" * 40)
+        settle_check.assert_awaited_once()
+    else:
+        assert saved is None
+        assert "Failed to POST PR review" in result["error"]
+        metadata.assert_not_awaited()
+        settle_check.assert_not_awaited()
