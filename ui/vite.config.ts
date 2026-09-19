@@ -309,19 +309,13 @@ const config = defineConfig({
     devtools(),
     nitro({
       routeRules: devRouteRules,
-      // A sandbox service is reached through this server so its LangSmith token
-      // rides as a header on our own request, and hot reload through that proxy
-      // needs the WebSocket upgrade.
-      features: { websocket: true },
       // Registered explicitly: nitro's convention scan does not reach this
-      // directory under the vite plugin. `/sandbox` is this server's own route
-      // in both dev and production; the backend prefixes below are proxied by a
+      // directory under the vite plugin. The backend prefixes are proxied by a
       // deployed build only — dev proxies them through devRouteRules, which has
       // a localhost default the handler deliberately refuses to have. Only the
       // two prefixes a deployed dashboard fronts, since proxying `/static`
       // would shadow nitro's assets.
       handlers: [
-        { route: "/sandbox/**", handler: "./server/sandbox-proxy.ts" },
         ...(IS_PRODUCTION
           ? [
               "/dashboard/api",

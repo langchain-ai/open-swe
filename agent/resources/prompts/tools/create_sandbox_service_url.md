@@ -1,15 +1,13 @@
 Create a browser URL for a service listening in the active LangSmith sandbox.
 
-The service must listen on `0.0.0.0` at the specified port. The dashboard proxies the URL and
-attaches the sandbox credential itself, so the link is short, never expires, and only signed-in
-users who can read this thread can reach the service.
+The service must listen on `0.0.0.0` at the specified port. It is served at the root of its own
+LangSmith domain, so root-absolute URLs (`/assets/app.js`, `/@vite/client`), WebSockets, and hot
+reload work with no base-path configuration.
 
-The service is served under `base_path`, so anything it serves from a root-absolute URL
-(`/assets/app.js`, `/@vite/client`) is requested from the dashboard root and never reaches it.
-Start dev servers with that base path — `vite --base=<base_path>`, Next.js `basePath`,
-`ng build --base-href` — and their WebSockets and hot reload work through the proxy too. Static
-files and JSON APIs need no configuration.
+The link carries no credential and never expires: whoever opens it signs in with their own
+LangSmith session, and only workspace members who can read this sandbox get through. The app
+behind it receives their signed identity in the `X-Langsmith-User-Token` header, verifiable
+against `<langsmith-url>/.well-known/jwks.json`.
 
-The page runs with `Content-Security-Policy: sandbox`, so it holds no dashboard privileges: it
-cannot read the dashboard's API, and browser storage is unavailable to it. Scripts, forms, and
-WebSockets still run.
+Sharing one port twice returns the same link. A port that already handed out a short-lived
+service token is refused until that token expires.

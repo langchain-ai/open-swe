@@ -6,7 +6,7 @@ import json
 import logging
 import shlex
 from abc import ABC, abstractmethod
-from typing import Any
+from typing import Any, Literal
 
 import httpx2
 from deepagents.backends import LangSmithSandbox
@@ -18,6 +18,7 @@ from langsmith.sandbox import (
     SandboxConnectionError,
     SandboxServerReloadError,
 )
+from pydantic import BaseModel
 
 from agent.config import ENV
 from agent.sandboxes.providers.registry import SandboxGoneError
@@ -48,6 +49,10 @@ PROXY_CONFIG_NOT_READY_STATUS = 400
 PROXY_CONFIG_ERROR_BODY_CHARS = 500
 SANDBOX_START_TIMEOUT_SECONDS = 120
 PROXY_GH_TOKEN_PLACEHOLDER = "proxy-injected"
+SERVICE_URL_TIMEOUT_SECONDS = 15.0
+# The narrower of LangSmith's two durable grants: workspace members who can read
+# the sandbox, rather than every member of the workspace.
+SERVICE_URL_ACCESS = "restricted"
 
 
 def _get_langsmith_api_key() -> str | None:
@@ -405,6 +410,42 @@ async def configure_github_proxy(
             await _start_sandbox_best_effort(sandbox_name)
             await _patch_proxy_config(client, url, payload, api_key, sandbox_name)
     logger.info("Configured GitHub proxy for sandbox %s", sandbox_name)
+
+
+class LoginServiceURL(BaseModel):
+    """A sandbox service URL its viewers open with their own LangSmith session."""
+
+    browser_url: str
+    access: Literal["restricted", "workspace"]
+
+
+async def create_login_service_url(sandbox_id: str, port: int) -> LoginServiceURL:
+    """Share ``port`` of a sandbox as a durable LangSmith-authenticated URL.
+
+    The grant carries no token and never expires, so the same link keeps working
+    for as long as the sandbox does. LangSmith refuses it while an unexpired
+    service token exists for the same port, and while the tenant's
+    ``sandbox_service_url_langsmith_login`` flag is off.
+    """
+    api_key = _get_langsmith_api_key()
+    if not api_key:
+        msg = "LANGSMITH_API_KEY not set"
+        raise ValueError(msg)
+    url = f"{_get_sandbox_endpoint().rstrip('/')}/v2/sandboxes/boxes/{sandbox_id}/service-url"
+    async with httpx2.AsyncClient(timeout=SERVICE_URL_TIMEOUT_SECONDS) as client:
+        response = await client.post(
+            url,
+            json={"port": port, "access": SERVICE_URL_ACCESS},
+            headers={"X-API-Key": api_key},
+        )
+        try:
+            response.raise_for_status()
+        except httpx2.HTTPStatusError as exc:
+            enriched = _with_response_body(exc)
+            if enriched is not None:
+                raise enriched from exc
+            raise
+    return LoginServiceURL.model_validate(response.json())
 
 
 def get_async_sandbox_client() -> AsyncSandboxClient:

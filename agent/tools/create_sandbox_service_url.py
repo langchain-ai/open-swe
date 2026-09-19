@@ -1,12 +1,8 @@
 from typing import Any
-from urllib.parse import quote
 
 from agent.run_config import RunConfig
-from agent.sandboxes.providers.langsmith import get_async_sandbox_client
+from agent.sandboxes.providers.langsmith import create_login_service_url
 from agent.sandboxes.state import get_sandbox_backend, unwrap_sandbox_backend
-from agent.utils.dashboard_links import dashboard_base_url, dashboard_proxies_requests
-
-_DIRECT_EXPIRES_IN_SECONDS = 86400
 
 
 async def create_sandbox_service_url(port: int) -> dict[str, Any]:
@@ -18,28 +14,10 @@ async def create_sandbox_service_url(port: int) -> dict[str, Any]:
     if not isinstance(thread_id, str) or not thread_id:
         raise ValueError("no thread_id in run config")
 
-    base_url = dashboard_base_url() if dashboard_proxies_requests() else ""
-    if base_url:
-        base_path = f"/sandbox/{quote(thread_id, safe='')}/{port}/"
-        return {"url": f"{base_url}{base_path}", "port": port, "base_path": base_path}
-
-    # No dashboard app in front of this backend to attach the token, so hand out
-    # LangSmith's own token-bearing URL instead.
     backend_proxy = await get_sandbox_backend(thread_id)
     backend = unwrap_sandbox_backend(backend_proxy)
-    async with get_async_sandbox_client() as client:
-        service = await client.service(
-            backend.id,
-            port,
-            expires_in_seconds=_DIRECT_EXPIRES_IN_SECONDS,
-        )
+    service = await create_login_service_url(backend.id, port)
     if unwrap_sandbox_backend(backend_proxy) is not backend:
         raise RuntimeError("sandbox changed while creating the service URL; retry")
-    if not service.browser_url:
-        raise RuntimeError("LangSmith did not return a service URL")
 
-    return {
-        "url": service.browser_url,
-        "port": port,
-        "expires_at": service.expires_at,
-    }
+    return {"url": service.browser_url, "port": port, "access": service.access}
