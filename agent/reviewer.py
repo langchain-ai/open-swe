@@ -88,7 +88,7 @@ from agent.runtime import (
     get_cached_sandbox_backend,
     graph_loaded_for_execution,
 )
-from agent.sandboxes.paths import resolve_sandbox_work_dir
+from agent.sandboxes.paths import resolve_repo_dir, resolve_sandbox_work_dir
 from agent.sandboxes.repo_prep import materialize_trusted_skills, prepare_review_repo
 from agent.sandboxes.state import SandboxUnreachableError
 from agent.tools import (
@@ -691,6 +691,7 @@ class PrepareReviewerRunMiddleware(BasePrepareRunMiddleware):
 
         repo_owner = cfg.repo.owner if cfg.repo else ""
         repo_name = cfg.repo.name if cfg.repo else ""
+        repo_dir = await resolve_repo_dir(sandbox_backend, repo_name) if repo_name else ""
         base_sha = cfg.base_sha or ""
         head_sha = cfg.head_sha or ""
         pr_number = cfg.pr_number
@@ -707,7 +708,7 @@ class PrepareReviewerRunMiddleware(BasePrepareRunMiddleware):
         skill_sources: list[str] = []
         if repo_ready and repo_name:
             skill_sources = await materialize_trusted_skills(
-                sandbox_backend, repo_dir=f"{work_dir}/{repo_name}", trusted_ref=base_sha
+                sandbox_backend, repo_dir=repo_dir, trusted_ref=base_sha
             )
 
         pr_url = cfg.pr_url or ""
@@ -741,7 +742,7 @@ class PrepareReviewerRunMiddleware(BasePrepareRunMiddleware):
                 )
                 materialized = await materialize_review_diff(
                     sandbox_backend,
-                    work_dir=f"{work_dir}/{repo_name}",
+                    work_dir=repo_dir,
                     base_ref=diff_base,
                     head_ref=diff_head,
                     merge_base=merge_base,
