@@ -828,11 +828,30 @@ export interface ReviewDiffGroup {
 }
 
 export interface ReviewDetail extends ReviewSummary {
+  assessment?: PublishedReviewAssessment | null
   pr: ReviewPrDetails
   checks: Array<ReviewCheckRun>
   findings: Array<ReviewFinding>
   diff_groups: Array<ReviewDiffGroup>
   diff_groups_stale: boolean
+}
+
+export interface PublishedReviewAssessment {
+  review_id: number
+  head_sha: string
+  risk_score: number
+  decision: "would_approve" | "needs_human_review"
+  explanation: string
+}
+
+export interface ReviewAssessmentFeedbackInput {
+  rating: "helpful" | "unhelpful"
+  comment: string
+}
+
+export interface ReviewAssessmentFeedback extends ReviewAssessmentFeedbackInput {
+  login: string
+  updated_at: string
 }
 
 export interface ReviewDiffFile {
@@ -1279,6 +1298,26 @@ export const api = {
   getReview: (owner: string, repo: string, number: number) =>
     request<ReviewDetail>(
       `/reviews/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}`
+    ),
+  getAssessmentFeedback: (
+    owner: string,
+    repo: string,
+    number: number,
+    reviewId: number
+  ) =>
+    request<ReviewAssessmentFeedback | null>(
+      `/reviews/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}/feedback/${reviewId}`
+    ),
+  saveAssessmentFeedback: (
+    owner: string,
+    repo: string,
+    number: number,
+    reviewId: number,
+    feedback: ReviewAssessmentFeedbackInput
+  ) =>
+    request<ReviewAssessmentFeedback>(
+      `/reviews/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}/feedback/${reviewId}`,
+      { method: "PUT", body: JSON.stringify(feedback) }
     ),
   getReviewDiff: (owner: string, repo: string, number: number) =>
     request<ReviewDiffPayload>(

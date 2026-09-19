@@ -196,6 +196,7 @@ from agent.tools import (
 )
 from agent.tools.admin_gate import actor_has_admin_context, actor_is_admin, is_private_admin_surface
 from agent.tools.manage_review_approval_policy import manage_review_approval_policy
+from agent.tools.submit_review_assessment_feedback import submit_review_assessment_feedback
 from agent.utils import ttl_cache
 from agent.utils.authorship import (
     CollaboratorIdentity,
@@ -1256,6 +1257,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         slack_start_new_thread,
         slack_thread_reply,
         submit_thread_feedback,
+        submit_review_assessment_feedback,
         *(ADMIN_TOOLS if admin_thread else ()),
         *((read_only_sql, manage_review_approval_policy) if private_admin_surface else ()),
     ]
@@ -1370,6 +1372,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         if tool is not background_execute
         and tool is not background_task
         and tool is not submit_thread_feedback
+        and tool is not submit_review_assessment_feedback
     ]
     title_model = _make_model_or_defer(
         title_model_id,

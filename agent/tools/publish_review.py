@@ -16,6 +16,7 @@ from agent.github.thread_token import (
     get_github_token,
     invalidate_cached_github_token,
 )
+from agent.review.assessment_feedback import ASSESSMENTS, PublishedAssessment
 from agent.review.diff import compute_diff_line_set, fetch_pr_diff, is_range_in_diff
 from agent.review.findings import (
     REVIEW_FINDING_CAP,
@@ -450,6 +451,23 @@ async def _publish_review_async(
             "error": "Failed to POST PR review: no response from GitHub",
         }
     review_id = review_response.get("id") if isinstance(review_response, dict) else None
+
+    if assessment is not None and isinstance(review_id, int) and not unresolvable_findings:
+        # GitHub already accepted the review; a storage failure must not prompt a duplicate post.
+        try:
+            await ASSESSMENTS.put(
+                str(review_id),
+                PublishedAssessment(
+                    **assessment.model_dump(),
+                    review_id=review_id,
+                    owner=owner,
+                    repo=repo,
+                    pr_number=pr_number,
+                ),
+            )
+            await set_reviewer_thread_metadata(thread_id, extra={"review_assessment_id": review_id})
+        except Exception:
+            logger.exception("Failed to save published assessment", extra={"review_id": review_id})
 
     if review_id is not None and inline_comments:
         # Record the GitHub review id AND inline comment ids in a single

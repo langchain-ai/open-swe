@@ -328,9 +328,12 @@ def render_review_body(
             f"Reviewed commit: `{assessment.head_sha}`. Risk ranges from 1 (low) to 5 (high). "
             "This assessment does not approve or merge the PR.\n\n</details>"
         )
-        parts.append(
-            "React 👍 if this assessment is right, 👎 if it is wrong. Comment with context."
+        feedback_link = (
+            f", or [rate the latest assessment in Open SWE]({ui_url}#assessment-feedback)"
+            if ui_url
+            else ""
         )
+        parts.append(f"React 👍 or 👎{feedback_link}.")
     links = []
     if ui_url:
         links.append(f"[Open in Web]({ui_url})")
