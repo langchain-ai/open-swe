@@ -36,6 +36,7 @@ async def test_create_sandbox_service_url_shares_a_langsmith_login_url(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _, calls = _configure(monkeypatch)
+    monkeypatch.setenv("LANGSMITH_ENDPOINT", "https://api.smith.langchain.com")
 
     result = await service_tool.create_sandbox_service_url(3000)
 
@@ -43,6 +44,7 @@ async def test_create_sandbox_service_url_shares_a_langsmith_login_url(
         "url": "https://l-abc123.sandbox.example/",
         "port": 3000,
         "access": "workspace",
+        "jwks_url": "https://api.smith.langchain.com/.well-known/jwks.json",
     }
     assert calls == [("sandbox-1", 3000)]
 

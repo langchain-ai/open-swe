@@ -78,6 +78,18 @@ def _get_sandbox_api_endpoint() -> str:
     return root if root.endswith(suffix) else f"{root}{suffix}"
 
 
+def service_identity_jwks_url() -> str:
+    """Where an app in a sandbox verifies the identity token LangSmith forwards to it.
+
+    The keys are served by the API host, not by the app origin the token names as
+    its issuer.
+    """
+    root = _get_sandbox_endpoint().rstrip("/")
+    suffix = "/v2/sandboxes"
+    api_root = root[: -len(suffix)] if root.endswith(suffix) else root
+    return f"{api_root}/.well-known/jwks.json"
+
+
 def _parse_optional_int(name: str, default: int) -> int:
     raw = ENV[name].optional()
     if not raw:
@@ -430,7 +442,7 @@ async def create_login_service_url(sandbox_id: str, port: int) -> LoginServiceUR
     if not api_key:
         msg = "LANGSMITH_API_KEY not set"
         raise ValueError(msg)
-    url = f"{_get_sandbox_endpoint().rstrip('/')}/v2/sandboxes/boxes/{sandbox_id}/service-url"
+    url = f"{_get_sandbox_api_endpoint()}/boxes/{sandbox_id}/service-url"
     async with httpx2.AsyncClient(timeout=SERVICE_URL_TIMEOUT_SECONDS) as client:
         response = await client.post(
             url,

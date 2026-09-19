@@ -27,6 +27,7 @@ from agent.sandboxes.providers.langsmith import (
     capture_snapshot_with_tag,
     create_langsmith_sandbox,
     create_login_service_url,
+    service_identity_jwks_url,
 )
 from agent.sandboxes.providers.registry import SandboxGoneError
 
@@ -503,3 +504,13 @@ async def test_login_service_url_surfaces_the_api_refusal(
 
     with pytest.raises(httpx2.HTTPStatusError, match="active token"):
         await create_login_service_url("sandbox-1", 3000)
+
+
+def test_identity_jwks_url_sits_on_the_api_host() -> None:
+    with patch.dict(
+        "os.environ",
+        {"LANGSMITH_ENDPOINT": "https://api.smith.langchain.com/v2/sandboxes"},
+    ):
+        assert (
+            service_identity_jwks_url() == "https://api.smith.langchain.com/.well-known/jwks.json"
+        )
