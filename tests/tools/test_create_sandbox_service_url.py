@@ -3,8 +3,6 @@ from typing import Any
 
 import pytest
 
-from agent.sandboxes.providers.langsmith import LoginServiceURL
-
 service_tool = importlib.import_module("agent.tools.create_sandbox_service_url")
 
 
@@ -22,28 +20,24 @@ def _configure(monkeypatch: pytest.MonkeyPatch) -> tuple[_Backend, list[tuple[st
     async def get_backend(_thread_id: str) -> _Backend:
         return backend
 
-    async def create_url(sandbox_id: str, port: int) -> LoginServiceURL:
+    async def create_url(sandbox_id: str, port: int) -> str:
         calls.append((sandbox_id, port))
-        return LoginServiceURL(browser_url="https://l-abc123.sandbox.example/", access="workspace")
+        return "https://l-abc123.sandbox.example/"
 
     monkeypatch.setattr(service_tool, "get_sandbox_backend", get_backend)
     monkeypatch.setattr(service_tool, "unwrap_sandbox_backend", lambda value: value)
-    monkeypatch.setattr(service_tool, "create_login_service_url", create_url)
+    monkeypatch.setattr(service_tool, "create_workspace_service_url", create_url)
     return backend, calls
 
 
-async def test_create_sandbox_service_url_shares_a_langsmith_login_url(
+async def test_create_sandbox_service_url_shares_the_port_with_the_workspace(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _, calls = _configure(monkeypatch)
 
     result = await service_tool.create_sandbox_service_url(3000)
 
-    assert result == {
-        "url": "https://l-abc123.sandbox.example/",
-        "port": 3000,
-        "access": "workspace",
-    }
+    assert result == {"url": "https://l-abc123.sandbox.example/", "port": 3000}
     assert calls == [("sandbox-1", 3000)]
 
 

@@ -26,7 +26,7 @@ from agent.sandboxes.providers.langsmith import (
     _reuse_existing_sandbox,
     capture_snapshot_with_tag,
     create_langsmith_sandbox,
-    create_login_service_url,
+    create_workspace_service_url,
     service_identity_jwks_url,
 )
 from agent.sandboxes.providers.registry import SandboxGoneError
@@ -447,7 +447,7 @@ async def test_reuse_keeps_other_failures_untyped() -> None:
 
 
 @pytest.mark.asyncio
-async def test_login_service_url_asks_for_a_workspace_grant(
+async def test_service_url_asks_for_a_workspace_grant(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     requests: list[httpx2.Request] = []
@@ -457,6 +457,7 @@ async def test_login_service_url_asks_for_a_workspace_grant(
         return httpx2.Response(
             200,
             json={
+                # LangSmith answers with browser_url too; in workspace mode it is the same URL.
                 "browser_url": "https://l-abc.sandbox.example/",
                 "service_url": "https://l-abc.sandbox.example/",
                 "access": "workspace",
@@ -471,10 +472,9 @@ async def test_login_service_url_asks_for_a_workspace_grant(
         lambda **_kwargs: httpx2.AsyncClient(transport=httpx2.MockTransport(handler)),
     )
 
-    service = await create_login_service_url("sandbox-1", 3000)
+    service_url = await create_workspace_service_url("sandbox-1", 3000)
 
-    assert service.browser_url == "https://l-abc.sandbox.example/"
-    assert service.access == "workspace"
+    assert service_url == "https://l-abc.sandbox.example/"
     request = requests[0]
     assert str(request.url) == (
         "https://api.smith.langchain.com/v2/sandboxes/boxes/sandbox-1/service-url"
@@ -484,7 +484,7 @@ async def test_login_service_url_asks_for_a_workspace_grant(
 
 
 @pytest.mark.asyncio
-async def test_login_service_url_surfaces_the_api_refusal(
+async def test_service_url_surfaces_the_api_refusal(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A port holding an unexpired service token is refused; the agent needs to read why."""
@@ -503,7 +503,7 @@ async def test_login_service_url_surfaces_the_api_refusal(
     )
 
     with pytest.raises(httpx2.HTTPStatusError, match="active token"):
-        await create_login_service_url("sandbox-1", 3000)
+        await create_workspace_service_url("sandbox-1", 3000)
 
 
 def test_identity_jwks_url_sits_on_the_api_host() -> None:
