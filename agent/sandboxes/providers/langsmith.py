@@ -204,7 +204,11 @@ def _github_proxy_rules(github_token: str | None) -> list[GitHubProxyRule]:
             ],
             # `gh` refuses to run without a token in its environment even though the
             # proxy injects the real one on the wire.
-            "env_vars": {"GH_TOKEN": PROXY_GH_TOKEN_PLACEHOLDER},
+            "env_vars": {
+                "GH_TOKEN": PROXY_GH_TOKEN_PLACEHOLDER,
+                "COREPACK_ENABLE_STRICT": "0",
+                "COREPACK_ENABLE_DOWNLOAD_PROMPT": "0",
+            },
         },
         {
             "name": "github",
