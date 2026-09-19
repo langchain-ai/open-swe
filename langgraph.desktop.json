@@ -16,6 +16,7 @@
     "path": "agent.local_checkpointer.create_checkpointer"
   },
   "http": {
+    "app": "agent.local_webapp:app",
     "disable_ui": true
   }
 }

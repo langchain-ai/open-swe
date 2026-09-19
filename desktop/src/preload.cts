@@ -56,6 +56,8 @@ contextBridge.exposeInMainWorld("openSweDesktop", {
     ipcRenderer.invoke("desktop:local-model-credential-status", modelId),
   openLocalTrace: (threadId) =>
     ipcRenderer.invoke("desktop:open-local-trace", threadId),
+  submitThreadFeedback: (input) =>
+    ipcRenderer.invoke("desktop:submit-thread-feedback", { ...input }),
   signInLocalOpenAI: () => ipcRenderer.invoke("desktop:local-openai-sign-in"),
   startLocalThread: (input) =>
     ipcRenderer.invoke("desktop:start-local-thread", input),

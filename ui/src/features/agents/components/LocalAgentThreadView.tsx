@@ -21,6 +21,7 @@ import { AgentPromptBar } from "@/features/agents/components/AgentPromptBar"
 import { AgentComposerDock } from "@/features/agents/components/composer/AgentComposerDock"
 import { AgentThreadHeader } from "@/features/agents/components/AgentThreadHeader"
 import { ChangesPanel } from "@/features/agents/components/ChangesPanel"
+import { DesktopThreadFeedbackCard } from "@/features/agents/components/DesktopThreadFeedbackCard"
 import { toPanelFiles } from "@/features/agents/components/DiffFilesView"
 import { Messages } from "@/features/agents/components/messages"
 import type { MessagesScrollControl } from "@/features/agents/components/messages"
@@ -472,6 +473,14 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
             }
             streamIsLoading={stream.isLoading}
             scrollControlRef={scrollControlRef}
+            footer={
+              !isRunning && (
+                <DesktopThreadFeedbackCard
+                  key={sessionId}
+                  threadId={sessionId}
+                />
+              )
+            }
           />
           <AgentComposerDock>
             {terminalContexts.length > 0 && (
