@@ -38,6 +38,47 @@ describe("buildRenderItems", () => {
     ])
   })
 
+  it("keeps SQL results as a dedicated inline reply item", () => {
+    const chunk: ToolExecutionChunk = {
+      kind: "tool-execution",
+      toolCallId: "call-sql",
+      title: "Read only sql",
+      toolKind: "sql",
+      status: "completed",
+      output:
+        '{"ok":true,"columns":["id"],"rows":[[1]],"row_count":1,"truncated":false}',
+    }
+
+    expect(buildRenderItems([chunk])).toEqual([
+      { type: "sql-item", key: "tool-call-sql", chunk },
+    ])
+    expect(
+      splitWorkAndReply(buildRenderItems([chunk])).replyItems
+    ).toHaveLength(1)
+  })
+
+  it.each([
+    ["in-progress", "in_progress", undefined],
+    ["failed", "error", '{"ok":false,"error":"Query failed"}'],
+    ["malformed", "completed", '{"ok":false,"error":"Query rejected"}'],
+  ] as const)(
+    "keeps %s SQL calls as ordinary tool entries",
+    (_label, status, output) => {
+      const chunk: ToolExecutionChunk = {
+        kind: "tool-execution",
+        toolCallId: "call-sql",
+        title: "Read only sql",
+        toolKind: "sql",
+        status,
+        output,
+      }
+
+      expect(buildRenderItems([chunk])).toEqual([
+        { type: "tool-item", key: "tool-call-sql", chunk },
+      ])
+    }
+  )
+
   it("keeps sent replies visible when later work runs", () => {
     const sentReply: ToolExecutionChunk = {
       kind: "tool-execution",

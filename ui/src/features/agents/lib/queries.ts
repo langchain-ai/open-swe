@@ -29,10 +29,8 @@ import { api } from "@/lib/api"
 export const agentThreadKeys = {
   lists: ["agent-threads", "lists"] as const,
   pinned: ["agent-threads", "lists", "pinned"] as const,
-  projects: (params: {
-    includeResolved: boolean
-    includeAutomations: boolean
-  }) => ["agent-threads", "lists", "projects", params] as const,
+  repos: (params: { includeResolved: boolean; includeAutomations: boolean }) =>
+    ["agent-threads", "lists", "repos", params] as const,
   sidebarActive: (threadId: string) =>
     ["agent-threads", "lists", "sidebar-active", threadId] as const,
   detail: (threadId: string) => ["agent-threads", threadId] as const,
@@ -285,15 +283,15 @@ const BUNDLED_SKILLS: Array<Skill> = [
   },
 ]
 
-export const environmentOptionKeys = {
-  all: ["environment-options"] as const,
+export const workspaceOptionKeys = {
+  all: ["workspace-options"] as const,
 }
 
-/** Environments a new thread can boot from. Empty when none are configured. */
-export function useEnvironmentOptions(enabled = true) {
+/** Workspaces a new thread can boot from. Empty when none are configured. */
+export function useWorkspaceOptions(enabled = true) {
   return useQuery({
-    queryKey: environmentOptionKeys.all,
-    queryFn: api.listEnvironmentOptions,
+    queryKey: workspaceOptionKeys.all,
+    queryFn: api.listWorkspaceOptions,
     staleTime: 60_000,
     enabled,
   })
@@ -467,7 +465,7 @@ export function useSidebarPinnedThreads({ enabled = true } = {}) {
   })
 }
 
-export function useSidebarProjects({
+export function useSidebarRepos({
   includeAutomations = false,
   includeResolved = false,
   enabled = true,
@@ -479,8 +477,8 @@ export function useSidebarProjects({
   const params = { includeAutomations, includeResolved }
   const hydrated = useSidebarPrefsHydrated()
   return useQuery({
-    queryKey: agentThreadKeys.projects(params),
-    queryFn: () => agentsApi.listThreadProjects(params),
+    queryKey: agentThreadKeys.repos(params),
+    queryFn: () => agentsApi.listThreadRepos(params),
     enabled: enabled && hydrated,
     placeholderData: (previous) => previous,
     refetchOnMount: "always",
@@ -538,31 +536,31 @@ function useSidebarThreadPages(
 
 /** Exported so the head-script warmup can be tested against the real request. */
 export function sidebarRecentsParams({
-  projectMode,
+  repoMode,
   includeAutomations = false,
   includeResolved = false,
   sort = "created",
 }: {
-  projectMode: boolean
+  repoMode: boolean
   includeAutomations?: boolean
   includeResolved?: boolean
   sort?: ChatSort
 }): Omit<ThreadsPageParams, "offset"> {
   return {
     ...sidebarPageParams({ includeAutomations, includeResolved }),
-    ...(projectMode ? { ownerless: true } : {}),
+    ...(repoMode ? { ownerless: true } : {}),
     sortBy: sort === "created" ? "created_at" : "updated_at",
   }
 }
 
 export function useSidebarRecents({
-  projectMode,
+  repoMode,
   includeAutomations = false,
   includeResolved = false,
   sort = "created",
   enabled = true,
 }: {
-  projectMode: boolean
+  repoMode: boolean
   includeAutomations?: boolean
   includeResolved?: boolean
   sort?: ChatSort
@@ -570,7 +568,7 @@ export function useSidebarRecents({
 }) {
   return useSidebarThreadPages(
     sidebarRecentsParams({
-      projectMode,
+      repoMode,
       includeAutomations,
       includeResolved,
       sort,
@@ -579,7 +577,7 @@ export function useSidebarRecents({
   )
 }
 
-export function useSidebarProjectThreads({
+export function useSidebarRepoThreads({
   repoFullName,
   includeAutomations = false,
   includeResolved = false,
@@ -630,7 +628,7 @@ export function useAgentThread(threadId: string) {
       query.state.data?.status === "running" ? 3000 : false,
     // Lets the optimistic detail seeded by `AgentsHome` survive until the
     // proxied run.start stamps the server-side thread; an immediate refetch
-    // would 404 and bounce the route back to /agents.
+    // would 404 and replace the seeded view with a load error.
     staleTime: 30_000,
   })
 }

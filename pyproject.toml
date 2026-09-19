@@ -16,6 +16,7 @@ dependencies = [
     "langchain>=1.3.16",
     "langgraph>=1.2.11",
     "markdownify>=1.2.3",
+    "markdown-it-py==4.2.0",
     "langchain-anthropic>=1.6.1",
     "langgraph-cli[inmem]>=0.4.31",
     "langsmith>=0.12.0",
@@ -37,6 +38,9 @@ dependencies = [
     "alembic==1.20.0",
     "sqlalchemy[asyncio]==2.0.52",
     "asyncpg==0.31.0",
+    "langgraph-checkpoint-sqlite>=3.1.1",
+    "pillow>=12.1.0",
+    "Pygments>=2.21.0",
 ]
 
 [project.optional-dependencies]
@@ -45,7 +49,6 @@ dev = [
     "pytest>=9.1.1",
     "pytest-asyncio>=1.4.0",
     "ruff>=0.16.4",
-    "Pygments>=2.21.0",
 ]
 
 [tool.uv]
@@ -100,7 +103,7 @@ ignore = [
 # Siblings of one package sharing package-internal helpers. PLC2701 cannot tell
 # an intra-package import from a cross-package one; names these modules expose
 # to the rest of the codebase are public.
-"agent/dashboard/threads/*" = ["PLC2701"]
+"agent/threads/*" = ["PLC2701"]
 
 [tool.ruff.lint.flake8-tidy-imports.banned-api]
 "__future__.annotations".msg = "Do not use postponed annotation evaluation."
@@ -113,7 +116,7 @@ testpaths = ["tests"]
 include = ["agent", "tests"]
 
 [tool.ty.analysis]
-allowed-unresolved-imports = ["langgraph_api.metrics_datadog", "ddtrace", "ddtrace.trace"]
+allowed-unresolved-imports = ["ddtrace", "ddtrace.trace"]
 
 [tool.ty.terminal]
 error-on-warning = false

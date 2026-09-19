@@ -1,4 +1,6 @@
 import http from "node:http"
+import { execSync } from "node:child_process"
+import { mkdirSync, writeFileSync } from "node:fs"
 import { defineConfig } from "vite"
 import { devtools } from "@tanstack/devtools-vite"
 import { tanstackStart } from "@tanstack/react-start/plugin/vite"
@@ -240,8 +242,51 @@ const BASE_PATH = process.env.DASHBOARD_BASE_PATH || "/"
 // client is told to open it against this port whatever page origin it loaded from.
 const DEV_PORT = Number(process.env.PORT) || 3000
 
+// The bundle's own identity, discovered by the build that emits it: CI or a
+// platform can pass SOURCE_COMMIT explicitly, a local build can prove the
+// checkout's HEAD, and otherwise the value stays null (rendered Unavailable)
+// rather than guessed.
+const BUNDLE_BUILD_AT = new Date().toISOString()
+
+function sourceCommit(): string | null {
+  const fromEnv = process.env.SOURCE_COMMIT?.trim()
+  if (fromEnv) return fromEnv
+  try {
+    return execSync("git rev-parse HEAD", {
+      stdio: ["ignore", "pipe", "ignore"],
+    })
+      .toString()
+      .trim()
+  } catch {
+    return null // Not a git checkout (source archive); no trustworthy commit.
+  }
+}
+
+// Writes the sidecar the backend reads when it serves this bundle.
+function buildInfoStamp(): Plugin {
+  return {
+    name: "build-info-stamp",
+    apply: "build",
+    closeBundle() {
+      const info: Record<string, string> = { built_at: BUNDLE_BUILD_AT }
+      const commit = sourceCommit()
+      if (commit) info.commit = commit
+      mkdirSync(".output/public", { recursive: true })
+      writeFileSync(
+        ".output/public/open-swe-build-info.json",
+        JSON.stringify(info)
+      )
+    },
+  }
+}
+
 const config = defineConfig({
   base: BASE_PATH,
+  define: {
+    // Read by window.__OPEN_SWE_BUNDLE__ in the emitted bundle.
+    __OPEN_SWE_BUNDLE_COMMIT__: JSON.stringify(sourceCommit()),
+    __OPEN_SWE_BUNDLE_BUILT_AT__: JSON.stringify(BUNDLE_BUILD_AT),
+  },
   server: { port: DEV_PORT, strictPort: true, hmr: { clientPort: DEV_PORT } },
   resolve: { tsconfigPaths: true },
   optimizeDeps: {
@@ -313,6 +358,7 @@ const config = defineConfig({
     }),
     tailwindcss(),
     tanstackStart({ pages: [SHELL_PAGE] }),
+    buildInfoStamp(),
     // React Compiler via oxc-transform-react, the Rust port. Upstream still
     // marks it experimental; the fallback is `@rolldown/plugin-babel` with
     // plugin-react's `reactCompilerPreset()`, which runs the Babel compiler.

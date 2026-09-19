@@ -69,7 +69,8 @@ export const Messages = memo(function MessagesComponent({
   isThinking,
   settingUpSandbox,
   isOffloading = false,
-  project,
+  reconnectLabel = null,
+  localRepo,
   contentWidthClass = "max-w-[42rem]",
   contentPaddingClass = "px-6",
   bottomInset = 0,
@@ -106,7 +107,7 @@ export const Messages = memo(function MessagesComponent({
     onShowScrollToBottomChange?.(showScrollToBottom)
   }, [onShowScrollToBottomChange, showScrollToBottom])
 
-  const projectPath = project?.path
+  const repoPath = localRepo?.path
   const lastAgentIndex = visibleMessages.findLastIndex(
     (message) => message.author === "agent"
   )
@@ -114,8 +115,8 @@ export const Messages = memo(function MessagesComponent({
     if (!isStreaming) return undefined
     const lastMessage = visibleMessages.at(-1)
     if (!lastMessage || lastMessage.author !== "agent") return undefined
-    return liveActivityLabel(lastMessage.chunks, projectPath)
-  }, [isStreaming, projectPath, visibleMessages])
+    return liveActivityLabel(lastMessage.chunks, repoPath)
+  }, [isStreaming, repoPath, visibleMessages])
 
   return (
     <TooltipProvider delay={250} closeDelay={0}>
@@ -150,7 +151,7 @@ export const Messages = memo(function MessagesComponent({
                   message={message}
                   isStreaming={messageIsStreaming && !isOffloading}
                   isMarkdownLive={messageIsMarkdownLive}
-                  projectPath={projectPath}
+                  repoPath={repoPath}
                   activityLabel={messageIsStreaming ? activityLabel : undefined}
                   onApprove={onApprove}
                   onReject={onReject}
@@ -172,6 +173,7 @@ export const Messages = memo(function MessagesComponent({
             {footer}
             <ThinkingSpinner
               isActive={
+                !!reconnectLabel ||
                 isOffloading ||
                 (!!(isThinking || streamIsLoading || isStreaming) &&
                   !(
@@ -180,9 +182,12 @@ export const Messages = memo(function MessagesComponent({
                     lastAgentIndex === visibleMessages.length - 1
                   ))
               }
-              settingUpSandbox={settingUpSandbox && !isOffloading}
+              settingUpSandbox={
+                settingUpSandbox && !isOffloading && !reconnectLabel
+              }
               label={
-                isOffloading ? "Offloading conversation..." : activityLabel
+                reconnectLabel ??
+                (isOffloading ? "Offloading conversation..." : activityLabel)
               }
             />
           </div>

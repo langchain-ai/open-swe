@@ -2,10 +2,11 @@
 
 from contextlib import asynccontextmanager
 from typing import Any
-from unittest.mock import ANY, AsyncMock, MagicMock, patch
+from unittest.mock import ANY, AsyncMock, MagicMock, call, patch
 
 import pytest
 
+from agent.github import pull_requests
 from agent.webhooks import common as webhook_common
 
 
@@ -14,14 +15,31 @@ async def _unlocked(*args, **kwargs):
     yield
 
 
+@pytest.fixture(autouse=True)
+async def _pr_registry(registry_db_if_available: bool, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Run against PostgreSQL when configured, else the registry-unavailable fallback.
+
+    The registry reads threads through its own client binding, so point it at
+    whichever fake the test installed on the webhook module.
+    """
+    monkeypatch.setattr(pull_requests, "langgraph_client", lambda: webhook_common.get_client())
+
+
+@pytest.fixture(autouse=True)
+def _no_feedback_side_effects(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("agent.thread_feedback.schedule_pr_feedback", AsyncMock())
+
+
 def _pr_payload(*, state: str, merged: bool = False, draft: bool = False) -> dict[str, Any]:
     return {
+        "repository": {"full_name": "lc/repo"},
         "pull_request": {
+            "number": 7,
             "html_url": "https://github.com/lc/repo/pull/7",
             "state": state,
             "merged": merged,
             "draft": draft,
-        }
+        },
     }
 
 
@@ -531,17 +549,27 @@ async def test_merged_pr_records_thread_feedback() -> None:
     ):
         await webhook_common.update_agent_thread_pr_state(_pr_payload(state="closed", merged=True))
 
-    create_feedback.assert_awaited_once_with(
-        "t1",
-        "github_pr_merged:https://github.com/lc/repo/pull/7",
-        score=1.0,
-        comment="Agent-authored pull request merged: https://github.com/lc/repo/pull/7",
-        source_info={
-            "source": "github_pr_merged",
-            "thread_id": "t1",
-            "pr_url": "https://github.com/lc/repo/pull/7",
-        },
-    )
+    source_info = {
+        "source": "github_pr_merged",
+        "thread_id": "t1",
+        "pr_url": "https://github.com/lc/repo/pull/7",
+    }
+    assert create_feedback.await_args_list == [
+        call(
+            "t1",
+            "github_pr_merged:https://github.com/lc/repo/pull/7",
+            score=1.0,
+            comment="Agent-authored pull request merged: https://github.com/lc/repo/pull/7",
+            source_info=source_info,
+        ),
+        call(
+            "t1",
+            "pr_merged",
+            score=1.0,
+            comment="https://github.com/lc/repo/pull/7",
+            source_info=source_info,
+        ),
+    ]
 
 
 @pytest.mark.asyncio

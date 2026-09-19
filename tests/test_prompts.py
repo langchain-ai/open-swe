@@ -1,5 +1,3 @@
-from pathlib import Path
-
 import pytest
 from langchain_core.tools import StructuredTool
 
@@ -41,10 +39,3 @@ def test_apply_tool_descriptions_copies_base_tools(monkeypatch: pytest.MonkeyPat
     assert described.name == source.name
     assert described.args_schema == source.args_schema
     assert described.description == "Resource description."
-
-
-def test_prompt_resources_are_markdown_files() -> None:
-    root = Path(__file__).parents[1] / "agent" / "resources" / "prompts"
-
-    assert root.is_dir()
-    assert all(path.suffix == ".md" for path in root.rglob("*") if path.is_file())

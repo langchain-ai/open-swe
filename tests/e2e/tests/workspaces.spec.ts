@@ -1,0 +1,418 @@
+import { test, expect, type Page } from "@playwright/test";
+
+// Workspaces end-to-end: dashboard management, the admin gate, and an admin
+// thread that creates, provisions, and captures its own sandbox. The agent, the
+// tools, store writes, and prompt injection are real; only the LLM and snapshot
+// service are faked (see patches.py).
+const ADMIN = { login: "alice", email: "alice@example.com" };
+const MEMBER = { login: "bob", email: "bob@example.com" };
+
+const DEFAULT_SLUG = "default";
+const DRAFT_NAME = "Staging Box";
+const DRAFT_SLUG = "staging-box";
+const EXPECTED_SNAPSHOT_NAME = "openswe-environment-default";
+const ALT_NAME = "Alt Box";
+const ALT_SLUG = "alt-box";
+const DEFAULT_WORKSPACE_PROMPT = "Default workspace: run make test.";
+const ALT_WORKSPACE_PROMPT = "Alt workspace: run pytest -q.";
+// Mirrors fake_llm.py's workspace script.
+const WORKSPACE_PROMPT =
+  "Checkouts live in /workspace/repos. Build with `make build`, test with `make test`.";
+
+interface Workspace {
+  slug: string;
+  name: string;
+  prompt: string;
+  repos: Array<string>;
+  snapshot_id: string | null;
+  snapshot_name: string | null;
+  update_script?: string;
+  snapshot_status: string;
+  snapshot_tag?: string | null;
+  refresh_kind?: string | null;
+  refresh_status?: string;
+  refresh_error?: string | null;
+  refresh_log?: string | null;
+  refresh_sandbox_id?: string | null;
+  refresh_steps?: Array<{
+    label: string;
+    status: string;
+    exit_code?: number | null;
+    log_path?: string | null;
+  }>;
+}
+
+async function loginAs(page: Page, user: { login: string; email: string }) {
+  const res = await page.request.post("/control/login", { data: user });
+  expect(res.ok()).toBeTruthy();
+}
+
+async function listWorkspaces(page: Page): Promise<Array<Workspace>> {
+  const res = await page.request.get("/dashboard/api/workspaces");
+  expect(res.ok()).toBeTruthy();
+  return ((await res.json()) as { workspaces: Array<Workspace> }).workspaces;
+}
+
+async function findWorkspace(
+  page: Page,
+  slug: string,
+): Promise<Workspace | undefined> {
+  return (await listWorkspaces(page)).find((env) => env.slug === slug);
+}
+
+const BASE_URL = `http://127.0.0.1:${process.env.E2E_PORT ?? 2024}`;
+
+// The dashboard's mutating routes enforce same-origin, which a browser sets for
+// itself but APIRequestContext does not.
+const SAME_ORIGIN_HEADERS = { origin: BASE_URL, referer: `${BASE_URL}/` };
+
+async function deleteWorkspace(page: Page, slug: string) {
+  await page.request.delete(`/dashboard/api/workspaces/${slug}`, {
+    headers: SAME_ORIGIN_HEADERS,
+  });
+}
+
+// Saving a default model retires the first-run onboarding modal, which otherwise
+// covers the composer on the new-agent page.
+async function saveDefaultModel(page: Page) {
+  const options = (await (
+    await page.request.get("/dashboard/api/options")
+  ).json()) as {
+    default_agent_model: string;
+    default_agent_reasoning_effort: string;
+  };
+  const res = await page.request.put("/dashboard/api/profile", {
+    headers: SAME_ORIGIN_HEADERS,
+    data: {
+      default_model: options.default_agent_model,
+      reasoning_effort: options.default_agent_reasoning_effort,
+    },
+  });
+  expect(res.ok()).toBeTruthy();
+}
+
+async function capturedSnapshots(page: Page): Promise<
+  Array<{
+    snapshot_id: string;
+    name: string;
+    tag: string | null;
+    sandbox_id: string;
+  }>
+> {
+  const res = await page.request.get("/control/snapshots");
+  expect(res.ok()).toBeTruthy();
+  return (
+    (await res.json()) as {
+      captured: Array<{
+        snapshot_id: string;
+        name: string;
+        tag: string | null;
+        sandbox_id: string;
+      }>;
+    }
+  ).captured;
+}
+
+async function lastSystemPrompt(page: Page): Promise<string> {
+  const res = await page.request.get("/control/last-system-prompt");
+  expect(res.ok()).toBeTruthy();
+  return ((await res.json()) as { text: string }).text;
+}
+
+async function openNewAgentHome(page: Page) {
+  await saveDefaultModel(page);
+  await page.goto("/agents");
+  await expect(page.getByTestId("composer-editor")).toBeVisible();
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+}
+
+async function createWorkspace(
+  page: Page,
+  name: string,
+  prompt: string,
+): Promise<string> {
+  // A workspace owns at least one repository and a repository has exactly one
+  // owner, so every test workspace claims one named after itself.
+  const repo = `e2e/${name.toLowerCase().replace(/\s+/g, "-")}`;
+  const created = await page.request.post("/dashboard/api/workspaces", {
+    headers: SAME_ORIGIN_HEADERS,
+    data: { name, prompt, repos: [repo] },
+  });
+  expect(created.ok()).toBeTruthy();
+  // No snapshot: the prompt applies on its own, and the sandbox falls back to
+  // the base image — which is what these selection specs assert on.
+  return ((await created.json()) as { slug: string }).slug;
+}
+
+async function typeIntoComposer(page: Page, text: string) {
+  const editor = page.getByTestId("composer-editor");
+  await editor.click();
+  await editor.pressSequentially(text);
+  await editor.press("Enter");
+}
+
+test.describe("Workspaces", () => {
+  test("an admin views workspaces and editing instructions in Settings", async ({
+    page,
+  }) => {
+    await loginAs(page, ADMIN);
+    await deleteWorkspace(page, DRAFT_SLUG);
+    await createWorkspace(page, DRAFT_NAME, "");
+
+    await page.goto("/workspaces");
+    const section = page
+      .getByRole("heading", { name: "Workspaces", level: 2 })
+      .locator("xpath=ancestor::section");
+    await expect(section).toBeVisible();
+    await expect(section.getByText(DRAFT_NAME)).toBeVisible();
+    await expect(section.getByText("No snapshot").first()).toBeVisible();
+    await expect(section.getByText(/enable admin mode/)).toBeVisible();
+    await expect(section.getByRole("button", { name: "Save" })).toHaveCount(0);
+    await expect(section.getByRole("button", { name: "Delete" })).toHaveCount(
+      0,
+    );
+
+    await deleteWorkspace(page, DRAFT_SLUG);
+  });
+
+  test("a non-admin cannot reach the workspaces page or API", async ({
+    page,
+  }) => {
+    await loginAs(page, MEMBER);
+
+    const res = await page.request.get("/dashboard/api/workspaces");
+    expect(res.status()).toBe(403);
+
+    await page.goto("/agents/workspaces");
+    await expect(page).toHaveURL(/\/workspaces$/);
+    await expect(
+      page.getByRole("heading", { name: "Workspaces", level: 2 }),
+    ).toBeVisible();
+    await expect(page.getByText(/ask a workspace admin/)).toBeVisible();
+
+    // No Admin toggle in the composer, so they cannot start an admin thread.
+    await openNewAgentHome(page);
+    await expect(page.getByTestId("composer-editor")).toBeVisible();
+    await expect(
+      page.getByRole("button", { name: "Admin mode", exact: true }),
+    ).toHaveCount(0);
+  });
+
+  test("the composer picker appears only with several workspaces, and the pick reaches the run", async ({
+    page,
+  }) => {
+    await loginAs(page, ADMIN);
+    await deleteWorkspace(page, DEFAULT_SLUG);
+    await deleteWorkspace(page, ALT_SLUG);
+    await createWorkspace(page, "default", DEFAULT_WORKSPACE_PROMPT);
+
+    // One workspace: the choice is already made, so no control is rendered.
+    // Exact: the sidebar's "Workspaces" group header is a button too.
+    await openNewAgentHome(page);
+    await expect(
+      page.getByRole("button", { name: "Workspace", exact: true }),
+    ).toHaveCount(0);
+
+    await createWorkspace(page, ALT_NAME, ALT_WORKSPACE_PROMPT);
+    await page.reload();
+    const picker = page.getByRole("button", { name: "Workspace", exact: true });
+    await expect(picker).toBeVisible();
+    // Defaults to the workspace named `default`.
+    await expect(picker).toContainText("default");
+
+    await picker.click();
+    await page.getByRole("button", { name: new RegExp(ALT_NAME) }).click();
+    await expect(picker).toContainText(ALT_NAME);
+
+    await typeIntoComposer(page, "Which workspace am I in?");
+    await expect(page).toHaveURL(/\/agents\/[^/]+$/);
+    const threadId = new URL(page.url()).pathname.split("/").pop() ?? "";
+
+    // The thread records the pick, and the run's prompt carries that
+    // workspace's instructions — not the default's.
+    await expect
+      .poll(async () => {
+        const res = await page.request.get(
+          `/dashboard/api/threads/${threadId}?mark_viewed=false`,
+        );
+        return res.ok()
+          ? ((await res.json()) as { workspace?: string | null }).workspace
+          : undefined;
+      })
+      .toBe(ALT_SLUG);
+    await expect
+      .poll(() => lastSystemPrompt(page), { timeout: 30_000 })
+      .toContain(ALT_WORKSPACE_PROMPT);
+    expect(await lastSystemPrompt(page)).not.toContain(
+      DEFAULT_WORKSPACE_PROMPT,
+    );
+
+    await deleteWorkspace(page, ALT_SLUG);
+    await deleteWorkspace(page, DEFAULT_SLUG);
+  });
+
+  test("an env: tag on the opening Slack message selects the workspace", async ({
+    page,
+  }) => {
+    await loginAs(page, ADMIN);
+    await deleteWorkspace(page, ALT_SLUG);
+    await createWorkspace(page, ALT_NAME, ALT_WORKSPACE_PROMPT);
+
+    await page.goto("/mock/slack");
+    await page.locator("#reset").click();
+    await expect(page.locator("#thread")).toContainText("No messages yet");
+    await page
+      .locator("#text")
+      .fill(
+        `<@U0BOT> env:${ALT_SLUG} please add a greet() helper and open a PR`,
+      );
+    await page.locator("#send").click();
+
+    await expect(
+      page.locator(".msg.bot").filter({ hasText: "Add greet() helper" }),
+    ).toBeVisible();
+
+    const systemPrompt = await lastSystemPrompt(page);
+    expect(systemPrompt).toContain(ALT_WORKSPACE_PROMPT);
+    // The tag itself is consumed, so the agent never sees it in the request.
+    expect(systemPrompt).not.toContain(`env:${ALT_SLUG}`);
+
+    await deleteWorkspace(page, ALT_SLUG);
+  });
+
+  test("an admin thread provisions its sandbox, captures it, and later runs boot with the workspace prompt", async ({
+    page,
+  }) => {
+    await loginAs(page, ADMIN);
+    await deleteWorkspace(page, DEFAULT_SLUG);
+    await page.request.post("/control/reset");
+
+    await openNewAgentHome(page);
+    await expect(
+      page.getByRole("button", { name: "Thread visibility" }),
+    ).toContainText("Private");
+
+    await typeIntoComposer(
+      page,
+      "Please set up the default workspace for this repo and capture it.",
+    );
+    await expect(page).toHaveURL(/\/agents\/[^/]+$/);
+    const threadId = new URL(page.url()).pathname.split("/").pop() ?? "";
+    expect(threadId).not.toBe("");
+    await expect
+      .poll(async () => {
+        const response = await page.request.get(
+          `/dashboard/api/threads/${threadId}?mark_viewed=false`,
+        );
+        if (!response.ok()) return undefined;
+        const thread = (await response.json()) as {
+          adminThread: boolean;
+          visibility: string;
+        };
+        return {
+          adminThread: thread.adminThread,
+          visibility: thread.visibility,
+        };
+      })
+      .toEqual({ adminThread: true, visibility: "private" });
+
+    // The agent's own summary, after the real save + capture tools ran.
+    await expect(
+      page.getByText(/workspace is captured and live/),
+    ).toBeVisible();
+
+    // Publishing captured this thread's sandbox synchronously, so the image is
+    // ready as soon as the tool returned. The reproducibility rebuild it then
+    // kicked off is a background job; wait for that on the record.
+    expect((await findWorkspace(page, DEFAULT_SLUG))?.snapshot_status).toBe(
+      "ready",
+    );
+    await expect
+      .poll(
+        async () => (await findWorkspace(page, DEFAULT_SLUG))?.refresh_status,
+        { timeout: 60_000 },
+      )
+      .toBe("success");
+
+    // The record the real tools wrote: prompt, repos, and a ready snapshot.
+    const record = await findWorkspace(page, DEFAULT_SLUG);
+    expect(record).toBeDefined();
+    expect(record?.prompt).toBe(WORKSPACE_PROMPT);
+    expect(record?.repos).toEqual(["fakeorg/demo"]);
+    expect(record?.snapshot_status).toBe("ready");
+    expect(record?.snapshot_name).toBe(EXPECTED_SNAPSHOT_NAME);
+
+    // The scripts ran and the whole refresh is recorded, log and all.
+    expect(record?.refresh_status).toBe("success");
+    expect(record?.refresh_error).toBeNull();
+    expect(record?.refresh_log).toContain("--- setup script ---");
+    expect(record?.refresh_log).toContain(".provisioned");
+    expect(record?.refresh_log).toContain("--- update script ---");
+    // `bash -x` traces each command, which is what makes the log worth keeping.
+    expect(record?.refresh_log).toContain("+ ");
+    // The save ran a full rebuild; hourly updates are a separate kind.
+    expect(record?.refresh_kind).toBe("full");
+
+    // Every stage is recorded as it happens, which is what the one poll tool
+    // reports while a rebuild is still running.
+    expect(
+      record?.refresh_steps?.map((step) => [step.label, step.status]),
+    ).toEqual([
+      ["boot", "success"],
+      ["setup", "success"],
+      ["update", "success"],
+      ["capture", "success"],
+    ]);
+    // Script steps carry where their live trace was written; the builder does not.
+    const setupStep = record?.refresh_steps?.find((s) => s.label === "setup");
+    expect(setupStep?.log_path).toContain("/logs/setup.log");
+    // The builder is released with the refresh, so it is no longer offered.
+    expect(record?.refresh_sandbox_id).toBeNull();
+
+    // Two captures under the same name:latest — the tag moved. The first came
+    // from this thread's own sandbox (the publish); the second from the
+    // reproducibility rebuild's throwaway builder, and it is what the record
+    // points at now.
+    const captures = await capturedSnapshots(page);
+    expect(captures.map((c) => c.name)).toEqual([
+      EXPECTED_SNAPSHOT_NAME,
+      EXPECTED_SNAPSHOT_NAME,
+    ]);
+    expect(captures.map((c) => c.tag)).toEqual(["latest", "latest"]);
+    const threadRes = await page.request.get(
+      `/dashboard/api/threads/${threadId}?mark_viewed=false`,
+    );
+    expect(threadRes.ok()).toBeTruthy();
+    const thread = (await threadRes.json()) as { sandboxId?: string | null };
+    expect(captures[0]?.sandbox_id).toBe(thread.sandboxId);
+    expect(captures[1]?.sandbox_id).not.toBe(thread.sandboxId);
+    expect(record?.snapshot_id).toBe(captures[1]?.snapshot_id);
+
+    // A later run is told about the workspace: the prompt is appended verbatim.
+    await typeIntoComposer(page, "Thanks — anything else needed?");
+    await expect(
+      page.getByText(/anything else you'd like changed/),
+    ).toBeVisible();
+    const systemPrompt = await lastSystemPrompt(page);
+    expect(systemPrompt).toContain("### Workspace Instructions (default)");
+    expect(systemPrompt).toContain(WORKSPACE_PROMPT);
+    // Admin threads also carry the workspace-management instructions.
+    expect(systemPrompt).toContain("### Admin Thread: Workspace Setup");
+
+    await page.goto("/workspaces");
+    await expect(page.getByText("Default")).toBeVisible();
+    await expect(page.getByText("Snapshot ready")).toBeVisible();
+    // The save ran a full rebuild, so the row reads "Rebuilt …", not "Updated …".
+    await expect(page.getByText(/^Rebuilt /)).toBeVisible();
+    await expect(page.getByText("Refresh log")).toBeVisible();
+    // Each stage is visible to everyone, not only through the agent's tools.
+    for (const label of ["boot", "setup", "update", "capture"]) {
+      await expect(page.getByText(`✓ ${label}`)).toBeVisible();
+    }
+    await expect(page.getByRole("button", { name: "Delete" })).toHaveCount(0);
+
+    // Leave no default behind: later specs' runs would boot from it.
+    await deleteWorkspace(page, DEFAULT_SLUG);
+    await expect.poll(() => findWorkspace(page, DEFAULT_SLUG)).toBeUndefined();
+  });
+});

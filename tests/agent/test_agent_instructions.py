@@ -5,7 +5,8 @@ import pytest
 from fastapi import HTTPException
 
 from agent import server
-from agent.dashboard import routes
+from agent.dashboard import agent_instructions as instructions_api
+from agent.dashboard import deps
 from agent.dashboard.agent_instructions import (
     AGENT_INSTRUCTIONS,
     AGENT_INSTRUCTIONS_NAMESPACE,
@@ -102,7 +103,7 @@ def test_resolve_repo_custom_instructions_returns_none_without_repo() -> None:
 @pytest.mark.asyncio
 async def test_list_agent_instructions_filters_inaccessible_repos(monkeypatch) -> None:
     monkeypatch.setattr(
-        routes.AGENT_INSTRUCTIONS,
+        AGENT_INSTRUCTIONS,
         "list_all",
         AsyncMock(
             return_value=[
@@ -117,9 +118,9 @@ async def test_list_agent_instructions_filters_inaccessible_repos(monkeypatch) -
             raise HTTPException(403, "no access")
         return "token"
 
-    monkeypatch.setattr(routes, "require_repo_access_for_user", fake_require_repo_access_for_user)
+    monkeypatch.setattr(deps, "require_repo_access_for_user", fake_require_repo_access_for_user)
 
-    result = await routes.api_list_agent_instructions(session={"sub": "octocat"})
+    result = await instructions_api.api_list_agent_instructions(session={"sub": "octocat"})
 
     assert result == [AgentInstructions(full_name="acme/visible", instructions="visible")]
 
@@ -128,13 +129,13 @@ async def test_list_agent_instructions_filters_inaccessible_repos(monkeypatch) -
 async def test_get_agent_instructions_requires_repo_access(monkeypatch) -> None:
     require_access = AsyncMock(return_value="token")
     monkeypatch.setattr(
-        routes.AGENT_INSTRUCTIONS,
+        AGENT_INSTRUCTIONS,
         "get",
         AsyncMock(return_value=AgentInstructions(full_name="acme/repo", instructions="rules")),
     )
-    monkeypatch.setattr(routes, "require_repo_access_for_user", require_access)
+    monkeypatch.setattr(instructions_api, "require_repo_access_for_user", require_access)
 
-    result = await routes.api_get_agent_instructions(
+    result = await instructions_api.api_get_agent_instructions(
         "https://github.com/acme/repo", session={"sub": "octocat"}
     )
 
@@ -148,16 +149,18 @@ async def test_delete_agent_instructions_requires_repo_access_before_delete(monk
     get_instructions = AsyncMock(
         return_value=AgentInstructions(full_name="acme/repo", instructions="rules")
     )
-    monkeypatch.setattr(routes.AGENT_INSTRUCTIONS, "get", get_instructions)
+    monkeypatch.setattr(AGENT_INSTRUCTIONS, "get", get_instructions)
     monkeypatch.setattr(
-        routes,
+        instructions_api,
         "require_repo_access_for_user",
         AsyncMock(side_effect=HTTPException(403, "no access")),
     )
-    monkeypatch.setattr(routes.AGENT_INSTRUCTIONS, "delete", delete_instructions)
+    monkeypatch.setattr(AGENT_INSTRUCTIONS, "delete", delete_instructions)
 
     with pytest.raises(HTTPException) as exc:
-        await routes.api_delete_agent_instructions("acme/repo", session={"sub": "octocat"})
+        await instructions_api.api_delete_agent_instructions(
+            "acme/repo", session={"sub": "octocat"}
+        )
 
     assert exc.value.status_code == 403
     get_instructions.assert_not_awaited()

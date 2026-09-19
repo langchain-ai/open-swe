@@ -23,7 +23,6 @@ from agent.sandboxes.providers.langsmith import (
     _reuse_existing_sandbox,
     capture_snapshot_with_tag,
     create_langsmith_sandbox,
-    create_langsmith_sandbox_from_params,
 )
 from agent.sandboxes.providers.registry import SandboxGoneError
 
@@ -60,13 +59,8 @@ def test_nothing_deletes_sandboxes() -> None:
 
 
 def test_defaults_when_env_unset() -> None:
-    with patch.dict(
-        "os.environ",
-        {"DEFAULT_SANDBOX_SNAPSHOT_ID": "snap-1"},
-        clear=True,
-    ):
-        snapshot_id, fs, vcpus, mem, idle, delete_after = _get_sandbox_snapshot_config()
-    assert snapshot_id == "snap-1"
+    with patch.dict("os.environ", {}, clear=True):
+        fs, vcpus, mem, idle, delete_after = _get_sandbox_snapshot_config()
     assert fs == DEFAULT_SNAPSHOT_FS_CAPACITY_BYTES
     assert vcpus == DEFAULT_SANDBOX_VCPUS
     assert mem == DEFAULT_SANDBOX_MEM_BYTES
@@ -79,13 +73,12 @@ def test_overrides_from_env() -> None:
     with patch.dict(
         "os.environ",
         {
-            "DEFAULT_SANDBOX_SNAPSHOT_ID": "snap-2",
             "DEFAULT_SANDBOX_IDLE_TTL_SECONDS": "120",
             "DEFAULT_SANDBOX_DELETE_AFTER_STOP_SECONDS": "3600",
         },
         clear=True,
     ):
-        _, _, _, _, idle, delete_after = _get_sandbox_snapshot_config()
+        _, _, _, idle, delete_after = _get_sandbox_snapshot_config()
     assert idle == 120
     assert delete_after == 3600
 
@@ -97,7 +90,7 @@ async def test_create_langsmith_sandbox_prefers_resource_overrides() -> None:
     with (
         patch(
             "agent.sandboxes.providers.langsmith._get_sandbox_snapshot_config",
-            return_value=("default-snap", 100, 2, 200, 300, 400),
+            return_value=(100, 2, 200, 300, 400),
         ),
         patch("agent.sandboxes.providers.langsmith.LangSmithProvider", return_value=provider),
     ):
@@ -128,7 +121,7 @@ async def test_create_langsmith_sandbox_uses_root_snapshot_when_unset() -> None:
     with (
         patch(
             "agent.sandboxes.providers.langsmith._get_sandbox_snapshot_config",
-            return_value=(None, 100, 2, 200, 300, 400),
+            return_value=(100, 2, 200, 300, 400),
         ),
         patch("agent.sandboxes.providers.langsmith.LangSmithProvider", return_value=provider),
     ):
@@ -156,7 +149,7 @@ async def test_create_langsmith_sandbox_derives_partial_cpu_memory_overrides(
     with (
         patch(
             "agent.sandboxes.providers.langsmith._get_sandbox_snapshot_config",
-            return_value=("default-snap", 100, 2, 200, 300, 400),
+            return_value=(100, 2, 200, 300, 400),
         ),
         patch("agent.sandboxes.providers.langsmith.LangSmithProvider", return_value=provider),
     ):
@@ -174,13 +167,12 @@ def test_zero_disables_ttls() -> None:
     with patch.dict(
         "os.environ",
         {
-            "DEFAULT_SANDBOX_SNAPSHOT_ID": "snap-3",
             "DEFAULT_SANDBOX_IDLE_TTL_SECONDS": "0",
             "DEFAULT_SANDBOX_DELETE_AFTER_STOP_SECONDS": "0",
         },
         clear=True,
     ):
-        _, _, _, _, idle, delete_after = _get_sandbox_snapshot_config()
+        _, _, _, idle, delete_after = _get_sandbox_snapshot_config()
     assert idle == 0
     assert delete_after == 0
 
@@ -188,10 +180,7 @@ def test_zero_disables_ttls() -> None:
 def test_validate_startup_rejects_non_integer_ttl() -> None:
     with patch.dict(
         "os.environ",
-        {
-            "DEFAULT_SANDBOX_SNAPSHOT_ID": "snap-4",
-            "DEFAULT_SANDBOX_IDLE_TTL_SECONDS": "not-a-number",
-        },
+        {"DEFAULT_SANDBOX_IDLE_TTL_SECONDS": "not-a-number"},
         clear=True,
     ):
         with pytest.raises(ValueError, match="DEFAULT_SANDBOX_IDLE_TTL_SECONDS"):
@@ -201,10 +190,7 @@ def test_validate_startup_rejects_non_integer_ttl() -> None:
 def test_validate_startup_rejects_negative_ttl() -> None:
     with patch.dict(
         "os.environ",
-        {
-            "DEFAULT_SANDBOX_SNAPSHOT_ID": "snap-5",
-            "DEFAULT_SANDBOX_DELETE_AFTER_STOP_SECONDS": "-1",
-        },
+        {"DEFAULT_SANDBOX_DELETE_AFTER_STOP_SECONDS": "-1"},
         clear=True,
     ):
         with pytest.raises(ValueError, match=">= 0"):
@@ -215,7 +201,6 @@ def test_validate_startup_accepts_valid_config() -> None:
     with patch.dict(
         "os.environ",
         {
-            "DEFAULT_SANDBOX_SNAPSHOT_ID": "snap-6",
             "DEFAULT_SANDBOX_IDLE_TTL_SECONDS": "1800",
             "DEFAULT_SANDBOX_DELETE_AFTER_STOP_SECONDS": "86400",
         },
@@ -290,62 +275,6 @@ async def test_create_sandbox_with_retry_retries_transient_errors(monkeypatch) -
     assert result == {"sandbox": "snap-1"}
     assert client.calls == 3
     assert "name" not in client.last_kwargs
-
-
-@pytest.mark.asyncio
-async def test_create_from_params_forwards_public_and_hidden_options() -> None:
-    sandbox = MagicMock(name="sandbox-new")
-    sandbox.name = "sandbox-new"
-    sandbox.to_sync.return_value = MagicMock(id="sandbox-new")
-    client = MagicMock()
-    client.__aenter__ = AsyncMock(return_value=client)
-    client.__aexit__ = AsyncMock(return_value=None)
-    client.create_sandbox = AsyncMock(return_value=sandbox)
-    client.wait_for_sandbox = AsyncMock(return_value=sandbox)
-
-    with (
-        patch.dict(
-            "os.environ",
-            {
-                "LANGSMITH_API_KEY": "shared-key",
-                "LANGSMITH_ENDPOINT": "https://shared.smith.langchain.com",
-                "SANDBOX_LANGSMITH_API_KEY": "retired-key",
-                "SANDBOX_LANGSMITH_ENDPOINT": "https://retired.smith.langchain.com",
-            },
-            clear=True,
-        ),
-        patch(
-            "agent.sandboxes.providers.langsmith.AsyncSandboxClient", return_value=client
-        ) as client_factory,
-        patch("agent.sandboxes.providers.langsmith._install_create_extra_fields") as install,
-        patch(
-            "agent.sandboxes.providers.langsmith._get_sandbox_create_extra_fields",
-            return_value={},
-        ),
-    ):
-        await create_langsmith_sandbox_from_params(
-            {
-                "snapshot_name": "python:latest",
-                "wait_for_ready": False,
-                "timeout": 240,
-                "cpu_millicores": 500,
-                "_internal_runtime": "v2",
-            }
-        )
-
-    client_factory.assert_called_once_with(
-        api_key="shared-key", api_endpoint="https://shared.smith.langchain.com/v2/sandboxes"
-    )
-    client.create_sandbox.assert_awaited_once_with(
-        snapshot_name="python:latest",
-        wait_for_ready=False,
-        timeout=240,
-    )
-    client.wait_for_sandbox.assert_awaited_once_with("sandbox-new", timeout=240)
-    install.assert_called_once_with(
-        client,
-        {"cpu_millicores": 500, "_internal_runtime": "v2"},
-    )
 
 
 def test_extra_fields_unset_is_empty() -> None:

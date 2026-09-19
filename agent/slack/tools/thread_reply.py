@@ -1,20 +1,34 @@
 import json
+import logging
 from collections.abc import Mapping
 from typing import Annotated, Any
 
 from langgraph.config import get_config
 from langgraph.prebuilt import InjectedState
+from langgraph_sdk.client import LangGraphClient
 
 from agent.run_config import RunConfig
 from agent.slack.client import (
-    convert_mentions_to_slack_format,
     get_active_slack_thread,
+    post_slack_ephemeral_reply,
     post_slack_thread_reply_with_ts,
     slack_thread_mutation_lock,
     store_slack_message_run_mapping,
 )
+from agent.slack.markdown import markdown_to_mrkdwn
+from agent.slack.orphan import (
+    dashboard_handoff_message,
+    move_thread_to_dashboard,
+    slack_thread_detached,
+)
+from agent.slack.thinking import restore_slack_session_status, restore_slack_thinking_status
+from agent.utils.json_types import thread_metadata
 from agent.utils.run_usage import RunUsageSummary, summarize_run_usage
 from agent.utils.thread_ops import langgraph_client as get_langgraph_client
+
+logger = logging.getLogger(__name__)
+
+_NATIVE_MARKDOWN_MAX_CHARS = 12000
 
 
 async def slack_thread_reply(
@@ -22,7 +36,6 @@ async def slack_thread_reply(
     options: list[str] | None = None,
     blocks: list[dict[str, Any]] | None = None,
     state: Annotated[dict[str, Any] | None, InjectedState] = None,
-    should_ask_for_feedback: bool = False,
 ) -> dict[str, Any]:
     """Implement the `slack_thread_reply` tool."""
     config = get_config()
@@ -30,6 +43,8 @@ async def slack_thread_reply(
     run_id = _current_run_id(config)
     slack_thread = cfg.slack_thread.dump() if cfg.slack_thread else {}
     thread_id = cfg.thread_id
+    if cfg.slack_ask is True:
+        return await _ephemeral_reply(cfg, message, blocks, options, state)
     client = get_langgraph_client()
     active = await get_active_slack_thread(
         client,
@@ -48,6 +63,8 @@ async def slack_thread_reply(
     channel_id = active.get("channel_id")
     thread_ts = active.get("thread_ts")
     if not channel_id or not thread_ts:
+        if await _already_moved_to_dashboard(client, thread_id):
+            return _dashboard_handoff(thread_id)
         return {
             "success": False,
             "error": "Missing slack_thread.channel_id or slack_thread.thread_ts in config",
@@ -66,8 +83,12 @@ async def slack_thread_reply(
     )
 
     async with slack_thread_mutation_lock(client, channel_id, thread_ts):
-        message = convert_mentions_to_slack_format(message)
-        slack_blocks = blocks or _build_option_blocks(message, options)
+        slack_blocks = blocks if blocks is not None else _build_option_blocks(message, options)
+        if blocks is None and len(message) > _NATIVE_MARKDOWN_MAX_CHARS:
+            if options:
+                return _oversized_options_error(message)
+            message = markdown_to_mrkdwn(message)
+            slack_blocks = None
         usage = summarize_run_usage(state)
         message_ts, slack_error = await _post_and_store_mapping(
             channel_id,
@@ -82,9 +103,13 @@ async def slack_thread_reply(
             langgraph_client=client,
             run_id=run_id,
             triggering_user_id=_triggering_user_id(cfg),
-            should_ask_for_feedback=should_ask_for_feedback and not options,
         )
     if message_ts is None:
+        if slack_error == "thread_not_found":
+            moved = bool(thread_id) and await move_thread_to_dashboard(
+                client, str(thread_id), str(channel_id), str(thread_ts)
+            )
+            return _dashboard_handoff(thread_id) if moved else _dashboard_handoff_failed()
         return {
             "success": False,
             "error": slack_error or "post failed",
@@ -92,7 +117,98 @@ async def slack_thread_reply(
             "message_chars": len(message),
             "hint": _slack_reply_failure_hint(slack_error),
         }
+    if run_id:
+        # Slack drops the status when the app posts; a session keeps its on
+        # whichever message currently holds it rather than on the session itself.
+        if is_code_channel_session(str(thread_ts)):
+            await restore_slack_session_status(client, str(channel_id), str(thread_ts))
+        else:
+            await restore_slack_thinking_status(str(channel_id), str(thread_ts))
     return {"success": True}
+
+
+async def _ephemeral_reply(
+    cfg: RunConfig,
+    message: str,
+    blocks: list[dict[str, Any]] | None,
+    options: list[str] | None,
+    state: dict[str, Any] | None,
+) -> dict[str, Any]:
+    if options:
+        return {
+            "success": False,
+            "error": "options cannot be answered on an ephemeral reply",
+            "retry": True,
+            "hint": (
+                "Slack cannot route a choice button on an ephemeral message back to this run, "
+                "so nothing was posted. Call this tool again without `options`, putting the "
+                "choice in `message` as a question."
+            ),
+        }
+    slack_thread = cfg.slack_thread
+    channel_id = slack_thread.channel_id if slack_thread else ""
+    user_id = slack_thread.triggering_user_id if slack_thread else ""
+    if not channel_id or not user_id:
+        return {"success": False, "error": "Missing the Slack channel or user to answer"}
+    if not message.strip():
+        return {"success": False, "error": "Message cannot be empty"}
+    native_markdown = blocks is None and len(message) <= _NATIVE_MARKDOWN_MAX_CHARS
+    if blocks is None and not native_markdown:
+        message = markdown_to_mrkdwn(message)
+    posted = await post_slack_ephemeral_reply(
+        channel_id,
+        user_id,
+        message,
+        blocks=blocks
+        if blocks is not None
+        else (_build_option_blocks(message, None) if native_markdown else None),
+        usage=summarize_run_usage(state),
+        agent_thread_id=cfg.thread_id,
+    )
+    if not posted:
+        return {
+            "success": False,
+            "error": "post failed",
+            "hint": "The ephemeral answer could not be delivered. Retry once, then stop.",
+        }
+    return {"success": True}
+
+
+async def _already_moved_to_dashboard(client: LangGraphClient, thread_id: str | None) -> bool:
+    if not thread_id:
+        return False
+    try:
+        thread = await client.threads.get(thread_id)
+    except Exception:
+        logger.exception(
+            "Could not check whether the thread left Slack", extra={"agent_thread_id": thread_id}
+        )
+        return False
+    return slack_thread_detached(thread_metadata(thread))
+
+
+def _dashboard_handoff_failed() -> dict[str, Any]:
+    return {
+        "success": False,
+        "error": "Slack thread no longer exists and it could not be moved to the dashboard",
+        "moved_to_dashboard": False,
+        "retry": True,
+        "hint": (
+            "The Slack thread you were replying in is gone, so posting there cannot work, and "
+            "moving this thread to the dashboard failed. Retry once; if it fails again, give "
+            "your answer as your final response."
+        ),
+    }
+
+
+def _dashboard_handoff(thread_id: str | None) -> dict[str, Any]:
+    return {
+        "success": False,
+        "error": "Slack thread no longer exists",
+        "moved_to_dashboard": True,
+        "retry": False,
+        "hint": dashboard_handoff_message(str(thread_id or "")),
+    }
 
 
 def _current_run_id(config: Mapping[str, Any]) -> str | None:
@@ -104,14 +220,22 @@ def _triggering_user_id(cfg: RunConfig) -> str | None:
     return (cfg.slack_thread.triggering_user_id or None) if cfg.slack_thread else None
 
 
-def _build_option_blocks(message: str, options: list[str] | None) -> list[dict[str, Any]] | None:
-    if not options:
-        return None
-    clean_options = [option.strip() for option in options if option.strip()]
+def _oversized_options_error(message: str) -> dict[str, str | int | bool]:
+    return {
+        "success": False,
+        "error": "Message with options exceeds Slack's 12000-character native Markdown limit",
+        "message_chars": len(message),
+        "retry": True,
+        "hint": "Retry with the options and a message of at most 12000 characters.",
+    }
+
+
+def _build_option_blocks(message: str, options: list[str] | None) -> list[dict[str, Any]]:
+    clean_options = [option.strip() for option in options or [] if option.strip()]
+    blocks: list[dict[str, Any]] = [{"type": "markdown", "text": message}]
     if not clean_options:
-        return None
-    return [
-        {"type": "section", "text": {"type": "mrkdwn", "text": message}},
+        return blocks
+    blocks.append(
         {
             "type": "actions",
             "elements": [
@@ -130,8 +254,9 @@ def _build_option_blocks(message: str, options: list[str] | None) -> list[dict[s
                 }
                 for index, option in enumerate(clean_options[:5])
             ],
-        },
-    ]
+        }
+    )
+    return blocks
 
 
 def build_workflow_approval_blocks(message: str, fingerprint: str) -> list[dict[str, Any]]:
@@ -204,7 +329,6 @@ async def _post_and_store_mapping(
     run_id: str | None = None,
     triggering_user_id: str | None = None,
     post_thread_ts: str | None = None,
-    should_ask_for_feedback: bool = False,
 ) -> tuple[str | None, str | None]:
     message_ts, slack_error = await post_slack_thread_reply_with_ts(
         channel_id,
@@ -223,6 +347,5 @@ async def _post_and_store_mapping(
             message_ts,
             run_id=run_id,
             triggering_user_id=triggering_user_id,
-            should_ask_for_feedback=should_ask_for_feedback,
         )
     return message_ts, slack_error

@@ -67,15 +67,18 @@ function CloudAgentsPage() {
     options.data?.default_agent_subagent_reasoning_effort ?? defaultAgentEffort
   const currentModel: ModelOption | undefined =
     defaultModels?.find((m) => m.id === modelId) ?? firstModel
-  const currentSubagentModel: ModelOption | undefined =
-    defaultModels?.find((m) => m.id === subagentModelId) ?? firstModel
+  const subagentInheritsMain = subagentModelId === "inherit"
+  const currentSubagentModel: ModelOption | undefined = subagentInheritsMain
+    ? currentModel
+    : (defaultModels?.find((m) => m.id === subagentModelId) ?? firstModel)
   const effort =
     currentModel && !currentModel.efforts.includes(effortChoice)
       ? currentModel.default_effort
       : effortChoice
-  const subagentEffort =
-    currentSubagentModel &&
-    !currentSubagentModel.efforts.includes(subagentEffortChoice)
+  const subagentEffort = subagentInheritsMain
+    ? effort
+    : currentSubagentModel &&
+        !currentSubagentModel.efforts.includes(subagentEffortChoice)
       ? currentSubagentModel.default_effort
       : subagentEffortChoice
 
@@ -87,15 +90,11 @@ function CloudAgentsPage() {
     // oxlint-disable-next-line react/set-state-in-effect
     setModelId(profile.data.default_model ?? defaultAgentModel)
     setEffort(profile.data.reasoning_effort ?? defaultAgentEffort)
-    setSubagentModelId(
-      profile.data.default_subagent_model ??
-        profile.data.default_model ??
-        defaultSubagentModel
-    )
+    setSubagentModelId(profile.data.default_subagent_model ?? "inherit")
     setSubagentEffort(
-      profile.data.subagent_reasoning_effort ??
-        profile.data.reasoning_effort ??
-        defaultSubagentEffort
+      profile.data.default_subagent_model == null
+        ? (profile.data.reasoning_effort ?? defaultAgentEffort)
+        : (profile.data.subagent_reasoning_effort ?? defaultSubagentEffort)
     )
     setDefaultRepo(profile.data.default_repo ?? "")
     setBaseBranch(profile.data.base_branch ?? "")
@@ -133,8 +132,8 @@ function CloudAgentsPage() {
     persist({
       default_model: modelId,
       reasoning_effort: effort,
-      default_subagent_model: subagentModelId,
-      subagent_reasoning_effort: subagentEffort,
+      default_subagent_model: subagentInheritsMain ? null : subagentModelId,
+      subagent_reasoning_effort: subagentInheritsMain ? null : subagentEffort,
       default_repo: defaultRepo || null,
       base_branch: baseBranch || null,
       branch_prefix: branchPrefix || null,
@@ -218,7 +217,7 @@ function CloudAgentsPage() {
           />
           <SettingsRow
             label="Default Subagent Model"
-            description="Used for delegated tasks launched by your agent"
+            description="Used for delegated tasks; inherit follows your default model and effort"
             control={
               <Select
                 value={subagentModelId}
@@ -228,6 +227,7 @@ function CloudAgentsPage() {
                   <SelectValue placeholder="Pick a model" />
                 </SelectTrigger>
                 <SelectContent>
+                  <SelectItem value="inherit">Inherit from main</SelectItem>
                   {defaultModels?.map((m) => (
                     <SelectItem key={m.id} value={m.id}>
                       {m.label}
@@ -244,6 +244,7 @@ function CloudAgentsPage() {
               <Select
                 value={subagentEffort}
                 onValueChange={(v) => v && setSubagentEffort(v)}
+                disabled={subagentInheritsMain}
               >
                 <SelectTrigger className="w-32">
                   <SelectValue />
@@ -339,19 +340,27 @@ function CloudAgentsPage() {
         </div>
       </SettingsSection>
 
+      <SettingsSection title="Slack">
+        <div className="divide-y divide-border">
+          <SettingsRow
+            label="Keep my DM as one conversation"
+            description="Your whole DM with Open SWE becomes one private thread it always answers in, instead of a new thread for every message."
+            control={
+              <Switch
+                checked={profile.data?.dm_session_enabled ?? false}
+                onCheckedChange={(v) => persist({ dm_session_enabled: v })}
+              />
+            }
+          />
+        </div>
+      </SettingsSection>
+
       <SettingsSection title="Rules">
         <SettingsNavRow
           to="/agents/instructions"
           label="Repository Instructions"
           description="Per-repo custom instructions injected into the agent's system prompt."
         />
-        {session.data.is_admin && (
-          <SettingsNavRow
-            to="/agents/sandbox"
-            label="Sandbox"
-            description="The snapshot new sandboxes boot from when their environment has none."
-          />
-        )}
       </SettingsSection>
 
       {error && <p className="text-xs text-destructive">{error}</p>}

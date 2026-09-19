@@ -6,6 +6,7 @@ import type {
   ImageChunk,
   Message,
   SlackNotificationMode,
+  AutomationTrigger,
   WorkflowPushApprovalsResponse,
 } from "./types"
 import { dashboardApiBase } from "@/lib/api-base"
@@ -13,6 +14,7 @@ import {
   dashboardApiUrl,
   dashboardForwardedHeaders,
 } from "@/lib/dashboard-fetch"
+import { withRequestTiming } from "@/lib/perf/fetchTiming"
 
 export type { AgentSchedule, AgentThread, Message, SlackNotificationMode }
 
@@ -37,7 +39,8 @@ export interface ThreadMessageRequest {
 
 export interface ScheduleCreateRequest {
   prompt: string
-  schedule: string
+  schedule?: string | null
+  trigger?: AutomationTrigger
   name?: string | null
   repo?: string | null
   slack_channel_id?: string | null
@@ -50,6 +53,7 @@ export interface ScheduleCreateRequest {
 export interface ScheduleUpdateRequest {
   prompt?: string | null
   schedule?: string | null
+  trigger?: AutomationTrigger
   name?: string | null
   repo?: string | null
   slack_channel_id?: string | null
@@ -139,21 +143,25 @@ export interface ThreadsPage {
   hasMore?: boolean
 }
 
-export interface SidebarProject {
+export interface SidebarRepo {
   repoFullName: string
   name: string
   updatedAt: number
+  /** Slug of the workspace that owns this repository; `"default"` when unassigned. */
+  workspace: string
 }
 
 const API_BASE = dashboardApiBase()
 
 export const agentsLangGraphApiUrl = `${API_BASE}/dashboard/api`
 
+const timedFetch = withRequestTiming((input, init) => fetch(input, init))
+
 async function agentsRequest<T>(
   path: string,
   init: RequestInit = {}
 ): Promise<T> {
-  const res = await fetch(dashboardApiUrl(path), {
+  const res = await timedFetch(dashboardApiUrl(path), {
     ...init,
     credentials: "include",
     headers: {
@@ -234,7 +242,7 @@ function buildThreadsPageQuery(params: ThreadsPageParams): string {
   return query ? `?${query}` : ""
 }
 
-function buildProjectsQuery(params: {
+function buildReposQuery(params: {
   includeResolved?: boolean
   includeAutomations?: boolean
 }): string {
@@ -289,14 +297,14 @@ export const agentsApi = {
         body: JSON.stringify(body),
       }
     ),
-  listThreadProjects: (
+  listThreadRepos: (
     params: {
       includeResolved?: boolean
       includeAutomations?: boolean
     } = {}
   ) =>
-    agentsRequest<Array<SidebarProject>>(
-      `/threads/projects${buildProjectsQuery(params)}`
+    agentsRequest<Array<SidebarRepo>>(
+      `/threads/repos${buildReposQuery(params)}`
     ),
   listPinnedThreads: () => agentsRequest<Array<AgentThread>>("/threads/pinned"),
   listThreadsPage: (params: ThreadsPageParams = {}) =>

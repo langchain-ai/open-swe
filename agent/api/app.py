@@ -11,12 +11,12 @@ from agent.api.health import router as health_router
 from agent.api.tracing import add_trace_resource_names
 from agent.config import ENV
 from agent.dashboard import router as dashboard_router
-from agent.dashboard.plan_api import plan_router
-from agent.dashboard.workflow_approval_api import workflow_approval_router
 from agent.github.routes import router as github_webhook_router
 from agent.linear.routes import router as linear_webhook_router
 from agent.mcp_server import router as mcp_router
 from agent.slack.routes import router as slack_webhook_router
+from agent.threads.plan_api import plan_router
+from agent.threads.workflow_approval_api import workflow_approval_router
 from agent.utils.dashboard_ui import mount_dashboard_ui
 from agent.utils.event_loop import pin_single_event_loop
 
@@ -29,19 +29,55 @@ pin_single_event_loop()
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
+    from agent import database
     from agent.analytics.worker import start_worker, stop_worker
+    from agent.dashboard.admin import configured_admins
     from agent.dashboard.oauth import validate_github_login_allowlist
-    from agent.database.analytics import close as close_analytics
-    from agent.database.analytics import migrate as migrate_analytics
+    from agent.database.analytics import activate_reporting, load_workspace
     from agent.sandboxes.providers.registry import validate_sandbox_startup_config
+    from agent.users import User
+    from agent.users.import_store import import_user_mappings
     from agent.utils.model import close_cached_models, validate_local_dev_llm_config
+    from agent.workspaces.store import import_store_records
 
     pin_single_event_loop()
     validate_github_login_allowlist()
     validate_sandbox_startup_config()
     validate_local_dev_llm_config()
+    database.require_configured()
+    await database.migrate()
     try:
-        await migrate_analytics()
+        # Workspaces used to live in the LangGraph Store; this empties it into
+        # the tables and is a no-op once it has.
+        imported = await import_store_records()
+    except Exception:  # noqa: BLE001
+        # Startup continues, but repository routing fails closed until an import
+        # succeeds: the tables this failed to fill make every repository read as
+        # unowned, and GitHub retries a 503 while it drops a 200.
+        logger.exception("Importing workspaces from the LangGraph Store failed")
+    else:
+        logger.info(
+            "Imported workspaces from the LangGraph Store",
+            extra={"imported_workspaces": imported},
+        )
+    try:
+        # People used to be Store records keyed by GitHub login; this moves them
+        # into the users table and is a no-op once it has.
+        imported_users = await import_user_mappings()
+    except Exception:  # noqa: BLE001
+        # Startup continues: anyone still in the Store cannot vote or be
+        # resolved from Slack until an import succeeds, and nothing else breaks.
+        logger.exception("Importing user mappings from the LangGraph Store failed")
+    else:
+        logger.info(
+            "Imported user mappings from the LangGraph Store",
+            extra={"imported_users": imported_users},
+        )
+    if admins := configured_admins():
+        await User.sync_admins(admins)
+    try:
+        await load_workspace()
+        await activate_reporting()
         await start_worker()
     except Exception:  # noqa: BLE001
         logger.warning("Analytics startup failed", exc_info=True)
@@ -49,7 +85,7 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         yield
     finally:
         await stop_worker()
-        await close_analytics()
+        await database.close()
         await close_cached_models()
 
 
