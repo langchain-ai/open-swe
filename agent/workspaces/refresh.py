@@ -164,7 +164,7 @@ async def _release_builder_sandbox(sandbox_id: str) -> None:
 async def _create_builder_sandbox(record: Workspace, snapshot_id: str | None) -> Any:
     from agent.github.sandbox_access import repository_token
     from agent.sandboxes.providers.langsmith import (
-        configure_github_proxy,
+        configure_sandbox_proxy,
         create_langsmith_sandbox,
         get_sandbox_proxy_config,
     )
@@ -179,7 +179,7 @@ async def _create_builder_sandbox(record: Workspace, snapshot_id: str | None) ->
         create_params=create_params,
         **record.sandbox_resources(),
     )
-    await configure_github_proxy(
+    await configure_sandbox_proxy(
         backend.id, access.token, base_proxy_config=get_sandbox_proxy_config(create_params)
     )
     return backend

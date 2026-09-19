@@ -140,6 +140,8 @@ from agent.sandboxes.state import (
     SandboxUnreachableError,
     get_or_create_sandbox_backend_proxy,
 )
+from agent.sandboxes.tool_access import tools_base_url
+from agent.sandboxes.tool_runtime import ToolSurface, save_tool_context
 from agent.skill_store.store import ORGANIZATION_SKILLS_NAMESPACE, SKILLS_NAMESPACE
 from agent.slack.dm import is_dm_session
 from agent.thread_title import TITLE_GENERATION_MAX_TOKENS, schedule_thread_title_generation
@@ -920,7 +922,7 @@ class DesktopAgentState(FilesystemState, DeepAgentState):
     """Desktop agent state including snapshotted skill files."""
 
 
-async def get_agent(config: RunnableConfig) -> Pregel:
+async def get_agent(config: RunnableConfig, *, tool_surface: ToolSurface | None = None) -> Pregel:
     """Get or create an agent with a sandbox for the given thread."""
     configurable = config.get("configurable") or {}
     cfg = RunConfig.parse(configurable)
@@ -964,7 +966,8 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         )
 
     backend = get_cached_sandbox_backend(thread_id, reconnect=reconnect_backend)
-    backend.start()
+    if tool_surface is None:
+        backend.start()
 
     # `profile_login` is whoever sent the message that started this run; it drives
     # authorization. Personal integrations require verified private ownership.
@@ -1384,7 +1387,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         if credential_login is None and not local_run
         else None
     )
-    return create_deep_agent(
+    graph = create_deep_agent(
         model=main_model,
         system_prompt="",
         tools=static_tools,
@@ -1487,6 +1490,24 @@ async def get_agent(config: RunnableConfig) -> Pregel:
             ],
         ),
     ).with_config(bindable_config(config))
+    if tool_surface is not None:
+        tool_surface.graph = graph
+        tool_surface.dynamic = dynamic_tool_middleware
+        tool_surface.excluded = (
+            STOP_SUMMARY_EXCLUDED_TOOLS
+            if stop_summary_mode
+            else SLACK_ASK_EXCLUDED_TOOLS
+            if slack_ask_mode
+            else DEEP_AGENT_EXCLUDED_TOOLS | INCIDENT_AUTOMATIC_EXCLUDED_TOOLS
+            if incident_automatic
+            else DEEP_AGENT_EXCLUDED_TOOLS
+        )
+        tool_surface.plan_excluded = PLAN_MODE_EXCLUDED_TOOLS | frozenset(
+            tool.name for tool in mcp_tools
+        )
+    elif tools_base_url() and ENV.DASHBOARD_JWT_SECRET.optional() and not local_run:
+        await save_tool_context(thread_id, config)
+    return graph
 
 
 # langgraph.json entrypoint. Runs trace into LANGSMITH_PROJECT like everything else.
