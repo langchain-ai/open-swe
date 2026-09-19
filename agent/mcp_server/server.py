@@ -11,8 +11,6 @@ notifications (or comment keepalives) so proxies don't drop the connection.
 Disconnecting never cancels the review itself; poll ``get_review`` instead.
 """
 
-from __future__ import annotations
-
 import asyncio
 import json
 import logging
@@ -134,7 +132,9 @@ async def _request_review(args: dict[str, Any], caller: Caller) -> dict[str, Any
     wait = args.get("wait", True)
     timeout = args.get("timeout_seconds", DEFAULT_TIMEOUT_SECONDS)
     if not isinstance(wait, bool) or not isinstance(timeout, int) or isinstance(timeout, bool):
-        raise reviews.ReviewError("invalid_arguments", "wait must be boolean, timeout_seconds integer")
+        raise reviews.ReviewError(
+            "invalid_arguments", "wait must be boolean, timeout_seconds integer"
+        )
     timeout = max(10, min(timeout, MAX_TIMEOUT_SECONDS))
 
     ref = reviews.parse_pr_url(pr_url)
@@ -148,9 +148,7 @@ async def _request_review(args: dict[str, Any], caller: Caller) -> dict[str, Any
         run_status = await reviews.wait_for_run(
             client, handle.thread_id, handle.run_id, timeout=timeout
         )
-    result = await reviews.build_result(
-        handle.thread_id, handle.run_id, handle.web_url, run_status
-    )
+    result = await reviews.build_result(handle.thread_id, handle.run_id, handle.web_url, run_status)
     if handle.joined_existing_run:
         result["note"] = "A review of this PR was already in progress; attached to it."
     return result
@@ -166,7 +164,9 @@ async def _get_review(args: dict[str, Any], caller: Caller) -> dict[str, Any]:
 
     client = reviews.get_langgraph_client()
     thread_id, run = await reviews.load_review(client, ref)
-    return await reviews.build_result(thread_id, run["run_id"], reviews.web_url_for(ref), run["status"])
+    return await reviews.build_result(
+        thread_id, run["run_id"], reviews.web_url_for(ref), run["status"]
+    )
 
 
 async def _call_tool(name: str, args: dict[str, Any], caller: Caller) -> dict[str, Any]:
@@ -279,7 +279,11 @@ async def mcp_endpoint(request: Request) -> Response:
 
     if method == "initialize":
         requested = params.get("protocolVersion")
-        version = requested if requested in SUPPORTED_PROTOCOL_VERSIONS else SUPPORTED_PROTOCOL_VERSIONS[0]
+        version = (
+            requested
+            if requested in SUPPORTED_PROTOCOL_VERSIONS
+            else SUPPORTED_PROTOCOL_VERSIONS[0]
+        )
         return JSONResponse(
             _result(
                 request_id,
@@ -298,7 +302,9 @@ async def mcp_endpoint(request: Request) -> Response:
     if method == "tools/call":
         name, args = params.get("name"), params.get("arguments") or {}
         if name not in _TOOL_NAMES or not isinstance(args, dict):
-            return JSONResponse(_error(request_id, -32602, f"Unknown tool or bad arguments: {name}"))
+            return JSONResponse(
+                _error(request_id, -32602, f"Unknown tool or bad arguments: {name}")
+            )
         wants_sse = "text/event-stream" in request.headers.get("accept", "")
         if name == "request_review" and args.get("wait", True) is True and wants_sse:
             token = (params.get("_meta") or {}).get("progressToken")

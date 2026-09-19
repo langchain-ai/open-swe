@@ -10,8 +10,6 @@ findings back.
 Two things are worth verifying and are marked ``VERIFY``.
 """
 
-from __future__ import annotations
-
 import asyncio
 import os
 import re
@@ -95,7 +93,9 @@ def parse_pr_url(raw: str) -> PullRequestRef:
     hosts = {"github.com"} | _csv_env("MCP_GITHUB_HOSTS")
     match = _PR_PATH.match(parsed.path)
     if parsed.scheme != "https" or (parsed.hostname or "").lower() not in hosts or not match:
-        raise ReviewError("invalid_pr_url", "Expected https://github.com/<owner>/<repo>/pull/<number>")
+        raise ReviewError(
+            "invalid_pr_url", "Expected https://github.com/<owner>/<repo>/pull/<number>"
+        )
     return PullRequestRef(match["owner"], match["repo"], int(match["number"]))
 
 
@@ -169,7 +169,9 @@ async def start_review(client: Any, caller: Caller, ref: PullRequestRef) -> Revi
 
     result = await _trigger(ref, caller)
     if not result.get("success"):
-        raise ReviewError("dispatch_failed", str(result.get("error") or "Could not start the review"))
+        raise ReviewError(
+            "dispatch_failed", str(result.get("error") or "Could not start the review")
+        )
     thread_id = result.get("thread_id") or thread_id
     run = await latest_run(client, thread_id)
     if run is None:

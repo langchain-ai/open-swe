@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import json
 from types import SimpleNamespace
 
@@ -113,7 +111,9 @@ def headers(login="dev-user"):
 
 def rpc(client, method, params=None, id_=1, hdrs=None):
     body = {"jsonrpc": "2.0", "id": id_, "method": method, "params": params or {}}
-    return client.post("/integrations/mcp", json=body, headers=hdrs if hdrs is not None else headers())
+    return client.post(
+        "/integrations/mcp", json=body, headers=hdrs if hdrs is not None else headers()
+    )
 
 
 def call(client, name, arguments):
@@ -149,7 +149,9 @@ def test_mint_rejects_invalid_logins(env):
 
 
 def test_rejects_foreign_origin(client):
-    assert rpc(client, "ping", hdrs={**headers(), "Origin": "https://evil.example"}).status_code == 403
+    assert (
+        rpc(client, "ping", hdrs={**headers(), "Origin": "https://evil.example"}).status_code == 403
+    )
 
 
 def test_initialize_negotiates_version(client):
@@ -221,7 +223,9 @@ def test_timeout_reports_running(client, fake, monkeypatch):
         return "running"
 
     monkeypatch.setattr(reviews, "wait_for_run", instant_timeout)
-    assert call(client, "request_review", {"pr_url": PR})["structuredContent"]["status"] == "running"
+    assert (
+        call(client, "request_review", {"pr_url": PR})["structuredContent"]["status"] == "running"
+    )
 
 
 def test_failed_run(client, fake):
@@ -260,13 +264,19 @@ def test_invalid_pr_urls(client, fake, url):
 
 
 def test_pr_url_variants_parse():
-    assert reviews.parse_pr_url("https://github.com/acme/widgets/pull/42/files?diff=split").number == 42
+    assert (
+        reviews.parse_pr_url("https://github.com/acme/widgets/pull/42/files?diff=split").number
+        == 42
+    )
 
 
 def test_repo_allowlist_blocks_before_dispatch(client, fake, monkeypatch):
     monkeypatch.setenv("ALLOWED_GITHUB_ORGS", "other-org")
     lg = fake()
-    assert call(client, "request_review", {"pr_url": PR})["structuredContent"]["error"] == "repo_not_allowed"
+    assert (
+        call(client, "request_review", {"pr_url": PR})["structuredContent"]["error"]
+        == "repo_not_allowed"
+    )
     assert lg.trigger_calls == []
 
 
@@ -277,7 +287,9 @@ def test_user_access_check_is_enforced(client, fake, monkeypatch):
         raise reviews.ReviewError("forbidden", "no access")
 
     monkeypatch.setattr(reviews, "assert_user_access", deny)
-    assert call(client, "request_review", {"pr_url": PR})["structuredContent"]["error"] == "forbidden"
+    assert (
+        call(client, "request_review", {"pr_url": PR})["structuredContent"]["error"] == "forbidden"
+    )
     assert lg.trigger_calls == []
 
 

@@ -11,8 +11,6 @@ run is attributed to. Point it at the user mapping (Admin -> User mappings /
 ``agent/users/resolve.py``) so unknown logins are rejected as they are elsewhere.
 """
 
-from __future__ import annotations
-
 import argparse
 import base64
 import hashlib
