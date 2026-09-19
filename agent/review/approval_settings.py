@@ -103,22 +103,6 @@ def _builtin_policy() -> PolicyDefinition:
     )
 
 
-def _combined_rules(shared: PolicyRules, local: PolicyRules | None) -> PolicyRules:
-    if local is None:
-        return shared.model_copy(deep=True)
-    confidence_rank = {"low": 0, "medium": 1, "high": 2}
-    return PolicyRules(
-        max_risk_score=min(shared.max_risk_score, local.max_risk_score),
-        minimum_confidence=max(
-            [shared.minimum_confidence, local.minimum_confidence], key=confidence_rank.__getitem__
-        ),
-        required_checks=list(dict.fromkeys([*shared.required_checks, *local.required_checks])),
-        human_review_paths=list(
-            dict.fromkeys([*shared.human_review_paths, *local.human_review_paths])
-        ),
-    )
-
-
 def _criteria(definition: PolicyDefinition, scope: str) -> list[PolicyCriterion]:
     if not definition.criteria_markdown:
         return []
@@ -135,16 +119,16 @@ async def _resolved_policy(repository: str | None) -> tuple[PolicySettingsView, 
     repo_record = await CURRENT.get(repository) if repository else None
     shared = shared_record.policy if shared_record and shared_record.policy else _builtin_policy()
     local = repo_record.policy if repo_record else None
-    rules = _combined_rules(shared.rules, local.rules if local else None)
-    criteria = _criteria(shared, "shared") + (_criteria(local, "repository") if local else [])
-    if not criteria:
+    effective = local if local is not None else shared
+    rules = effective.rules.model_copy(deep=True)
+    criteria = _criteria(effective, "repository" if local is not None else "shared")
+    if not criteria and local is None:
         raise ValueError("Shared approval policy must contain criteria")
-    revisions = {"shared": shared_record.id if shared_record else "builtin"}
+    revisions: dict[str, str] = (
+        {} if local is not None else {"shared": shared_record.id if shared_record else "builtin"}
+    )
     if repository:
         revisions[repository] = repo_record.id if repo_record else "inherited"
-    content = "# Shared approval policy\n\n" + shared.criteria_markdown
-    if local and local.criteria_markdown:
-        content += "\n\n# Repository requirements\n\n" + local.criteria_markdown
     version = hashlib.sha256(
         json.dumps(
             {
@@ -164,7 +148,7 @@ async def _resolved_policy(repository: str | None) -> tuple[PolicySettingsView, 
         version=version,
         base_sha="",
         head_sha="",
-        content=content,
+        content=effective.criteria_markdown,
         rules=rules,
         criteria=criteria,
         settings_revisions=revisions,
@@ -194,7 +178,7 @@ async def load_policy_snapshot(repository: str, *, base_sha: str, head_sha: str)
 
 @asynccontextmanager
 async def _policy_lock() -> AsyncIterator[None]:
-    # Shared defaults affect every repository, so all policy writes use the same lock.
+    # Serialize shared edits with repositories entering or leaving inheritance.
     async with database.transaction() as conn:
         await conn.execute(text("SET LOCAL lock_timeout = '5s'"))
         await conn.execute(
@@ -214,9 +198,6 @@ async def save_policy_settings(
         current = await get_policy_settings(repository)
         if current.effective_version != expected_version:
             raise PolicyConflict("Approval policy changed. Reload the policy before saving.")
-        # Validate merged list limits before writing either record.
-        if repository and policy:
-            _combined_rules(current.shared_policy.rules, policy.rules)
         revision = PolicyRevision(repository=repository, policy=policy, updated_by=login)
         await REVISIONS.put(revision.id, revision)
         await CURRENT.put(repository or "default", revision)

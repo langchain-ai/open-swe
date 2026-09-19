@@ -26,7 +26,7 @@ function ReviewApprovalPage() {
     <AppShell
       user={session.data}
       title="Approval Policy"
-      description="Set the shared policy and stricter repository requirements used for shadow approval evaluation."
+      description="Set the shared policy and repository overrides used for shadow approval evaluation."
       backTo={{ to: "/review", label: "Back to Open SWE Review" }}
     >
       <div className="rounded-lg border border-border bg-card">

@@ -292,55 +292,75 @@ it("shortens long versions and disables reset when the scope has no saved policy
   ).toBe(true)
 })
 
-it("explains inherited shared requirements and the repository's stricter effective policy", async () => {
-  const repositoryPolicy: PolicyDefinition = {
-    rules: {
-      max_risk_score: 1,
-      minimum_confidence: "high",
-      required_checks: ["security-scan"],
-      human_review_paths: ["payments/**"],
-    },
-    criteria_markdown: "",
-  }
+it("starts a repository override from the shared policy and restores inheritance on reset", async () => {
+  const inherited = view({
+    repository: "acme/widgets",
+    policy: null,
+    revision: null,
+    effective_version: "inherited-v1",
+  })
   vi.spyOn(api, "getReviewApprovalPolicy").mockImplementation(
-    async (repository) =>
-      repository
-        ? view({
-            repository,
-            policy: repositoryPolicy,
-            effective_rules: {
-              max_risk_score: 1,
-              minimum_confidence: "high",
-              required_checks: ["build", "security-scan"],
-              human_review_paths: ["security/**", "payments/**"],
-            },
-            effective_version: "repo-effective-v3",
-            revision: "repo-r2",
-          })
-        : view()
+    async (repository) => (repository ? inherited : view())
   )
+  const save = vi
+    .spyOn(api, "saveReviewApprovalPolicy")
+    .mockImplementation(async (_repository, policy) =>
+      view({
+        ...inherited,
+        policy,
+        effective_rules: policy?.rules ?? SHARED_POLICY.rules,
+        effective_version: policy ? "override-v2" : "inherited-v3",
+        revision: policy ? "repo-r2" : "repo-r3",
+      })
+    )
   renderPanel()
 
   fireEvent.change(await screen.findByLabelText("Policy scope"), {
     target: { value: "acme/widgets" },
   })
-
-  expect(
-    await screen.findByText(
-      "Repository requirements can only make the shared policy stricter."
-    )
-  ).toBeTruthy()
-  const inherited = screen
-    .getByText("Inherited shared policy (read-only)")
-    .closest("details")
-  expect(inherited?.open).toBe(false)
-  expect(inherited?.textContent).toContain("Required checks: build")
-  expect(inherited?.textContent).toContain("Protected paths: security/**")
-  expect(inherited?.textContent).toContain("## Tests")
-  expect(inherited?.textContent).toContain("All tests must pass.")
-  expect(screen.getByText(/Effective: maximum risk 1/).textContent).toContain(
-    "high confidence"
+  await waitFor(() =>
+    expect(
+      screen.getByLabelText("Additional criteria (Markdown)")
+    ).toHaveProperty("value", "## Tests\nAll tests must pass.")
   )
-  expect(screen.getByText(/build, security-scan/)).toBeTruthy()
-  expect(screen.getByText(/Shadow mode/)).toBeTruthy()
+  fireEvent.change(screen.getByLabelText("Maximum risk score"), {
+    target: { value: "5" },
+  })
+  fireEvent.change(screen.getByLabelText("Required checks"), {
+    target: { value: "" },
+  })
+  fireEvent.change(screen.getByLabelText("Protected paths"), {
+    target: { value: "" },
+  })
+  fireEvent.click(screen.getByRole("button", { name: "Save policy" }))
+
+  await screen.findByText("Policy saved.")
+  expect(save).toHaveBeenCalledWith(
+    "acme/widgets",
+    {
+      rules: {
+        max_risk_score: 5,
+        minimum_confidence: "medium",
+        required_checks: [],
+        human_review_paths: [],
+      },
+      criteria_markdown: "## Tests\nAll tests must pass.",
+    },
+    "inherited-v1"
+  )
+  expect(screen.getByText(/Effective: maximum risk 5/)).toBeTruthy()
+
+  fireEvent.click(screen.getByRole("button", { name: "Reset policy" }))
+  await screen.findByText("Repository policy reset to the shared default.")
+  expect(screen.getByLabelText("Maximum risk score")).toHaveProperty(
+    "value",
+    "2"
+  )
+  expect(screen.getByLabelText("Required checks")).toHaveProperty(
+    "value",
+    "build"
+  )
+  expect(
+    screen.getByLabelText("Additional criteria (Markdown)")
+  ).toHaveProperty("value", "## Tests\nAll tests must pass.")
 })

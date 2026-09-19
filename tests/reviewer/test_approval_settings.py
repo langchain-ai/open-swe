@@ -7,7 +7,14 @@ import pytest
 from fastapi import HTTPException
 
 from agent.review import approval_settings as settings
-from agent.review.approval import PolicyRules
+from agent.review.approval import (
+    ApprovalEvidence,
+    ApprovalFacts,
+    CriterionEvidence,
+    Gate,
+    PolicyRules,
+    evaluate_policy,
+)
 from tests.conftest import FakeStore
 
 
@@ -41,7 +48,7 @@ async def save(
     )
 
 
-async def test_repository_cannot_weaken_shared_requirements() -> None:
+async def test_repository_policy_replaces_shared_rules_and_criteria() -> None:
     shared = definition()
     shared.rules.human_review_paths = ["auth/*"]
     await save(None, shared)
@@ -51,14 +58,58 @@ async def test_repository_cannot_weaken_shared_requirements() -> None:
     local.rules.human_review_paths = ["billing/*"]
     view = await save("Org/Repo", local)
     assert view.repository == "org/repo"
-    assert view.effective_rules.max_risk_score == 2
-    assert view.effective_rules.minimum_confidence == "high"
-    assert view.effective_rules.required_checks == ["tests", "docs"]
-    assert view.effective_rules.human_review_paths == ["auth/*", "billing/*"]
+    assert view.effective_rules.max_risk_score == 5
+    assert view.effective_rules.minimum_confidence == "low"
+    assert view.effective_rules.required_checks == ["docs"]
+    assert view.effective_rules.human_review_paths == ["billing/*"]
     snapshot = await settings.load_policy_snapshot("org/repo", base_sha="b" * 40, head_sha="a" * 40)
-    assert [c.id for c in snapshot.criteria] == ["shared:scope", "repository:scope"]
-    assert "Only documentation changes." in snapshot.content
+    assert [c.id for c in snapshot.criteria] == ["repository:scope"]
+    assert "Only documentation changes." not in snapshot.content
     assert "An owner has checked" in snapshot.content
+    evaluation = evaluate_policy(
+        policy=snapshot,
+        evidence=ApprovalEvidence(
+            policy_version=snapshot.version,
+            base_sha="b" * 40,
+            head_sha="a" * 40,
+            review_complete=True,
+            criteria=[
+                CriterionEvidence(
+                    id="repository:scope", status="pass", evidence="Owner reviewed the change."
+                )
+            ],
+        ),
+        facts=ApprovalFacts(
+            current_head_sha="a" * 40,
+            current_base_sha="b" * 40,
+            ready=True,
+            changed_paths=["auth/docs.md"],
+            ci=Gate(id="ci", title="Checks", status="pass", evidence="Checks passed."),
+            change_requests=Gate(
+                id="change_requests", title="Reviews", status="pass", evidence="None outstanding."
+            ),
+        ),
+        head_sha="a" * 40,
+        risk_score=4,
+        confidence="low",
+        limitations=[],
+        open_findings=0,
+    )
+    assert evaluation.decision == "would_approve"
+
+
+async def test_shared_edits_do_not_change_an_overridden_repository_policy() -> None:
+    await save(None, definition(2))
+    before = await save("org/repo", definition(4))
+    await save(None, definition(1, "## New shared criterion\nRequires human review."))
+    after = await settings.get_policy_settings("org/repo")
+    assert after.shared_policy.rules.max_risk_score == 1
+    assert after.effective_rules.max_risk_score == 4
+    assert after.effective_version == before.effective_version
+    updated = await settings.save_policy_settings(
+        "org/repo", policy=definition(5), expected_version=before.effective_version, login="admin"
+    )
+    assert updated.effective_rules.max_risk_score == 5
 
 
 async def test_reset_inherits_latest_shared_policy_without_mutating_old_snapshot() -> None:
@@ -112,7 +163,17 @@ async def test_reverting_content_still_invalidates_old_evidence() -> None:
 
 
 async def test_rules_only_repository_policy_is_valid_but_empty_shared_policy_is_not() -> None:
-    await save("org/repo", definition(1, ""))
+    shared = definition()
+    shared.rules.human_review_paths = ["auth/*"]
+    await save(None, shared)
+    local = definition(4, "")
+    local.rules.required_checks = []
+    local.rules.human_review_paths = []
+    await save("org/repo", local)
+    snapshot = await settings.load_policy_snapshot("org/repo", base_sha="b" * 40, head_sha="a" * 40)
+    assert snapshot.criteria == []
+    assert snapshot.rules.required_checks == []
+    assert snapshot.rules.human_review_paths == []
     with pytest.raises(ValueError, match="criteria"):
         await save(None, definition(1, ""))
 

@@ -1,7 +1,8 @@
 Read the approval policy managed in Open SWE for the current PR. Returns the
 policy's source, effective version, settings revisions, base/head SHAs, machine
-rules, and named criteria. Shared requirements and repository additions are
-combined, with stricter thresholds taking precedence. Repository files and
+rules, and named criteria. A repository policy replaces the shared policy in
+full, including thresholds, check/path lists, and criteria. Without a repository
+override, the shared policy applies. Repository files and
 learned review style cannot override approval requirements. Missing customization
 uses the built-in shared policy; unreadable settings produce an error, never a
 permissive fallback.

@@ -14,7 +14,7 @@ review; otherwise, missing evidence produces an insufficient-evidence result.
 
 Open **Open SWE Review → Approval policy** (`/review/approval`). Approval
 requirements are separate from learned review style prompts and feedback.
-Open SWE admins can edit the shared policy or add requirements for an accessible
+Open SWE admins can edit the shared policy or override it for an accessible
 repository. Other users can read policies for repositories they can access.
 The shared default applies across this Open SWE instance.
 
@@ -30,16 +30,21 @@ The change has a narrow, well-understood effect. Explain affected behavior and c
 Cite inspected verification of the changed behavior. Missing context means unknown.
 ```
 
-Repository requirements **add to** the shared policy: the lower risk ceiling and
-higher confidence threshold win; required checks and human-review paths accumulate;
-all shared and repository criteria must pass. Repository criteria may be empty when
-only adding machine rules. The editor shows the effective limits and inherited
-requirements. Each scope supports up to 100 check names and 100 path patterns,
-and 1–20 criteria within 24 KB (repository criteria can be empty).
+Repository policies **replace** the shared policy in full: thresholds, required
+checks, human-review paths, and natural-language criteria all come from the
+repository override. An override may be more or less restrictive. Empty lists
+and empty repository criteria stay empty. Without an override, the repository
+inherits the shared policy, including future shared edits. New overrides start
+with a copy of the shared values in the editor. The editor shows the effective
+limits and the shared default for reference. Each scope supports up to 100 check
+names and 100 path patterns, and 1–20 criteria within 24 KB (repository criteria
+can be empty).
 
 **Save policy** creates a revision recording the author and timestamp. **Reset**
-returns a repository to the shared policy, or returns shared settings to the
-built-in default. Concurrent edits are rejected; reload before reconciling them.
+returns a repository to the latest shared policy, or returns shared settings to
+the built-in default. Shared edits do not change an existing repository override.
+Concurrent edits to the effective policy are rejected; reload before reconciling
+them.
 The private-admin `manage_review_approval_policy` tool exposes the same read,
 save, and reset operations, with repository access and version checks.
 

@@ -27,9 +27,7 @@ function initialDraft(view: PolicySettingsView): PolicyDefinition {
   if (view.policy) return view.policy
   return {
     rules: { ...view.shared_policy.rules },
-    criteria_markdown: view.repository
-      ? ""
-      : view.shared_policy.criteria_markdown,
+    criteria_markdown: view.shared_policy.criteria_markdown,
   }
 }
 
@@ -90,8 +88,8 @@ export function ApprovalPolicyPanel() {
           ))}
         </select>
         <p className="text-xs text-muted-foreground">
-          The shared policy applies to every repository. Repository policies add
-          stricter requirements.
+          Repositories inherit the shared policy unless they have an override. A
+          repository policy replaces the shared policy in full.
         </p>
       </div>
 
@@ -329,7 +327,7 @@ function PolicyEditor({
           />
           <p className="text-xs text-muted-foreground">
             Shared criteria require 1–20 named ## sections. Repository criteria
-            may be empty.
+            may be empty; shared criteria do not apply to an override.
           </p>
         </div>
       </fieldset>
@@ -380,11 +378,13 @@ function RepositoryPolicyContext({ view }: { view: PolicySettingsView }) {
   return (
     <section className="space-y-3 rounded-md border border-border p-4 text-xs">
       <p className="font-medium">
-        Repository requirements can only make the shared policy stricter.
+        {view.policy
+          ? "This repository policy replaces the shared policy. Reset to inherit the shared default."
+          : "This repository inherits the shared policy. Saving creates a complete repository override."}
       </p>
       <details className="rounded-md border border-border p-3">
         <summary className="cursor-pointer font-medium">
-          Inherited shared policy (read-only)
+          Shared default (read-only)
         </summary>
         <div className="mt-3 space-y-2 text-muted-foreground">
           <p>
