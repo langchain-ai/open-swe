@@ -44,6 +44,7 @@ _TOOL_MODULES = {
     "publish_workspace": ".workspaces",
     "save_organization_skill": ".organization_skills",
     "save_plan": ".save_plan",
+    "set_model_routing_provider": ".workspaces",
     "save_user_instructions": ".save_user_instructions",
     "save_user_skill": ".user_skills",
     "delete_user_skill": ".user_skills",
@@ -105,6 +106,7 @@ __all__ = [
     "save_organization_skill",
     "delete_organization_skill",
     "save_plan",
+    "set_model_routing_provider",
     "save_user_instructions",
     "save_user_skill",
     "delete_user_skill",
@@ -182,6 +184,7 @@ if TYPE_CHECKING:
         list_workspaces,
         publish_workspace,
         refresh_workspace_start,
+        set_model_routing_provider,
     )
 
 

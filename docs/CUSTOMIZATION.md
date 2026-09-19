@@ -196,6 +196,12 @@ async def get_agent(config: RunnableConfig) -> Pregel:
     return create_deep_agent(model=model, ...)
 ```
 
+### Auto model routing with Jev
+
+Auto mode uses the existing LangChain classifier by default. Set the `model_routing_provider` field to `"langchain"` or `"jev"` through the instance/workspace settings APIs, or use the authorized `set_model_routing_provider` admin-thread tool for an organization-wide selection or workspace override. `MODEL_ROUTING_PROVIDER` remains the deployment fallback when no stored setting overrides it. Keep `TYPESAFE_API_KEY` in the deployment environment; selecting Jev changes the classifier for eligible Auto turns but does not enable Auto or change the existing rollout split.
+
+Jev receives the same bounded task text (up to 8,000 characters) as the existing classifier, sent directly to TypeSafe rather than through the LangSmith Gateway. Review data-handling requirements before enabling it. Responses below an initial `0.6` confidence threshold, timeouts, API errors, malformed responses, and a missing key fall back to the existing classifier. This threshold is experimental, not a calibrated correctness probability. Plan-mode routing, explicit performance routing, and persisted routes bypass classification as before.
+
 ### Routing through the LangSmith LLM Gateway
 
 Model calls can be proxied through the [LangSmith LLM Gateway](https://docs.langchain.com/langsmith/llm-gateway) (private beta) instead of hitting providers directly. The gateway authenticates with a **LangSmith API key** that has the `gateway:invoke` permission and resolves the real provider key from workspace Provider Secrets, so no provider API keys are needed at runtime — and it adds central spend limits, PII/secrets redaction, and tracing. Your org must have the gateway enabled with Provider Secrets configured.

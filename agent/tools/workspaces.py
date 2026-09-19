@@ -6,6 +6,14 @@ Wired into admin threads; each tool rechecks user or system authorization.
 import logging
 from typing import Any
 
+from agent.dashboard.workspace_settings import (
+    ModelRoutingProvider,
+    WorkspaceSettingsUpdate,
+    get_instance_settings,
+    upsert_instance_settings,
+    upsert_workspace_overrides,
+    workspace_settings_view,
+)
 from agent.tools.admin_gate import configurable as _configurable
 from agent.tools.admin_gate import require_admin
 from agent.workspaces import refresh, store
@@ -91,6 +99,43 @@ async def list_workspaces() -> dict[str, Any]:
             {**_summary(record), "is_default": record.slug == store.DEFAULT_WORKSPACE_SLUG}
             for record in records
         ],
+    }
+
+
+async def set_model_routing_provider(
+    provider: ModelRoutingProvider | None,
+    workspace: str | None = None,
+) -> dict[str, str | bool]:
+    """Set or clear the classifier selection for an organization or workspace."""
+    if error := await _require_admin():
+        return {"ok": False, "error": error}
+    if workspace is None:
+        current = await get_instance_settings()
+        values = {key: current.get(key) for key in WorkspaceSettingsUpdate.model_fields}
+        values["model_routing_provider"] = provider
+        await upsert_instance_settings(WorkspaceSettingsUpdate.model_validate(values))
+        effective = await get_instance_settings()
+        return {
+            "ok": True,
+            "scope": "organization",
+            "model_routing_provider": effective.model_routing_provider,
+        }
+    try:
+        slug = store.slugify(workspace)
+    except ValueError as exc:
+        return {"ok": False, "error": str(exc)}
+    if await store.WORKSPACES.get(slug) is None:
+        return {"ok": False, "error": f"no workspace named {workspace!r}"}
+    current = await workspace_settings_view(slug)
+    overrides = WorkspaceSettingsUpdate.model_validate(
+        {**current["overrides"], "model_routing_provider": provider}
+    )
+    saved = await upsert_workspace_overrides(slug, overrides)
+    return {
+        "ok": True,
+        "scope": "workspace",
+        "workspace": slug,
+        "model_routing_provider": saved["effective"]["model_routing_provider"],
     }
 
 

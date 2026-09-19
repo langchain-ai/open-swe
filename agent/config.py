@@ -193,6 +193,16 @@ ENV.var(
     default="true",
 )
 ENV.var(
+    "MODEL_ROUTING_PROVIDER",
+    "Adaptive model routing classifier: langchain or jev.",
+    default="langchain",
+)
+ENV.var(
+    "TYPESAFE_API_KEY",
+    "TypeSafe API key used when MODEL_ROUTING_PROVIDER is jev.",
+    secret=True,
+)
+ENV.var(
     "REVIEWER_OUTCOMES_DATASET",
     "LangSmith dataset for reviewer finding outcomes.",
     default="openswe-reviewer-outcomes",
