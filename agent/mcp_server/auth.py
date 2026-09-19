@@ -69,10 +69,11 @@ def mint_token(github_login: str, ttl_seconds: int = DEFAULT_TTL_SECONDS) -> str
 def resolve_caller(github_login: str) -> Caller:
     """Map a token's GitHub login to a Caller.
 
-    TODO: look the login up in the user mapping (agent/users/resolve.py) and
-    raise ``AuthError`` if it is unknown, exactly as Slack and the dashboard do.
-    Also fill ``github_user_id`` from the mapping. Until then, any login an
-    operator mints a token for is trusted.
+    Repo access is verified per request against GitHub with the user's own
+    dashboard token (see reviews.assert_user_access), so a token alone does not
+    grant access to anything the login cannot see. Optionally also look the
+    login up in the user mapping (agent/users/resolve.py), raise ``AuthError``
+    for unknown logins, and fill ``github_user_id``.
     """
     return Caller(github_login=github_login)
 

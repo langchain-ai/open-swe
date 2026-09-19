@@ -4,6 +4,7 @@ from types import SimpleNamespace
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from starlette.exceptions import HTTPException
 
 from agent.mcp_server import auth, reviews, server
 from agent.mcp_server.server import router
@@ -66,11 +67,22 @@ class FakeLangGraph:
 def env(monkeypatch):
     monkeypatch.setenv("MCP_SERVER_ENABLED", "1")
     monkeypatch.setenv("MCP_TOKEN_SECRET", "s" * 40)
-    monkeypatch.setenv("MCP_SKIP_USER_ACCESS_CHECK", "1")
     monkeypatch.setenv("DASHBOARD_BASE_URL", "https://swe.example.com")
     monkeypatch.delenv("ALLOWED_GITHUB_ORGS", raising=False)
     monkeypatch.delenv("ALLOWED_GITHUB_REPOS", raising=False)
     monkeypatch.setattr(reviews, "POLL_SECONDS", 0)
+
+
+@pytest.fixture(autouse=True)
+def access(monkeypatch):
+    """Default: the dashboard access check allows. Records (login, full_name)."""
+    calls: list[tuple[str, str]] = []
+
+    async def allow(login, full_name):
+        calls.append((login, full_name))
+
+    monkeypatch.setattr(reviews, "_check_dashboard_access", allow)
+    return calls
 
 
 @pytest.fixture
@@ -281,26 +293,45 @@ def test_repo_allowlist_blocks_before_dispatch(client, fake, monkeypatch):
     assert lg.trigger_calls == []
 
 
-def test_user_access_check_is_enforced(client, fake, monkeypatch):
-    lg = fake()
-
-    async def deny(caller, ref):
-        raise reviews.ReviewError("forbidden", "no access")
-
-    monkeypatch.setattr(reviews, "assert_user_access", deny)
-    assert (
-        call(client, "request_review", {"pr_url": PR})["structuredContent"]["error"] == "forbidden"
-    )
-    assert lg.trigger_calls == []
+def test_access_is_checked_for_the_token_user_and_repo(client, fake, access):
+    fake()
+    call(client, "request_review", {"pr_url": PR})
+    assert access == [("dev-user", "acme/widgets")]
 
 
-def test_fails_closed_without_user_access_check(client, fake, monkeypatch):
-    monkeypatch.delenv("MCP_SKIP_USER_ACCESS_CHECK")
-    lg = fake()
-    for tool in ("request_review", "get_review"):
-        result = call(client, tool, {"pr_url": PR})
-        assert result["structuredContent"]["error"] == "forbidden"
-    assert lg.trigger_calls == []
+@pytest.mark.parametrize(
+    ("raised", "expected"),
+    [
+        (HTTPException(401, "github token unavailable, re-login required"), "login_required"),
+        (HTTPException(403, "no"), "forbidden"),
+        (HTTPException(404, "not found"), "forbidden"),
+        (HTTPException(502, "bad gateway"), "access_check_failed"),
+        (RuntimeError("boom"), "access_check_failed"),  # unknown failure fails closed
+    ],
+)
+@pytest.mark.parametrize("tool", ["request_review", "get_review"])
+def test_access_denials_block_everything(client, fake, monkeypatch, raised, expected, tool):
+    lg = fake(statuses=["success"], thread_kind="reviewer", has_run=True)
+
+    async def deny(login, full_name):
+        raise raised
+
+    monkeypatch.setattr(reviews, "_check_dashboard_access", deny)
+    result = call(client, tool, {"pr_url": PR})
+    assert result["isError"] and result["structuredContent"]["error"] == expected
+    assert lg.trigger_calls == []  # never dispatched
+    assert "findings" not in result["structuredContent"]  # never read
+
+
+def test_login_required_message_is_actionable(client, fake, monkeypatch):
+    fake()
+
+    async def deny(login, full_name):
+        raise HTTPException(401, "re-login required")
+
+    monkeypatch.setattr(reviews, "_check_dashboard_access", deny)
+    message = call(client, "request_review", {"pr_url": PR})["structuredContent"]["message"]
+    assert "dashboard" in message
 
 
 def test_bad_arguments(client, fake):

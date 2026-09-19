@@ -11,7 +11,6 @@ Set on the deployment:
 | `MCP_SERVER_ENABLED=true` | Turns the endpoint on. Off by default (404). |
 | `MCP_TOKEN_SECRET` | ≥32 random characters. Signs bearer tokens. Rotating it revokes all tokens. |
 | `MCP_ROUTE_PATH` | Optional. Defaults to `/integrations/mcp` so it doesn't collide with LangGraph Platform's own `/mcp`. |
-| `MCP_SKIP_USER_ACCESS_CHECK` | **Local testing only.** Per-user repo access checks are not implemented yet, so without this the tools refuse every request (fail closed). Remove once `assert_user_access` is implemented. |
 | `MCP_ALLOWED_ORIGINS` | Optional. Comma-separated browser origins allowed to call the endpoint. Normally empty. |
 | `MCP_GITHUB_HOSTS` | Optional. Extra PR hosts (GitHub Enterprise Server). |
 
@@ -24,6 +23,14 @@ from agent.mcp_server import router as mcp_router
 
 app.include_router(mcp_router)
 ```
+
+## Who can use it
+
+Every call verifies that the token's GitHub login can access the PR's repository, using the same check as the dashboard's review routes (`require_repo_access_for_user`, which uses that user's own stored GitHub token). Consequences:
+
+- A user must have **signed in to the dashboard with GitHub at least once**. Otherwise calls return `login_required`.
+- No access returns `forbidden`. If access can't be verified (GitHub error, etc.) the call is refused with `access_check_failed`.
+- Treat bearer tokens as secrets: whoever holds one can request reviews with that user's repo access.
 
 ## Mint a token
 
@@ -60,9 +67,9 @@ curl -s https://<deployment>/integrations/mcp \
   -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'
 ```
 
-## Before enabling on a shared deployment
+## Known limitations
 
-1. **Per-user repo access.** `trigger_pr_review_from_ref` runs with the GitHub App token and does not check the requesting user; the dashboard enforces access in the route that calls it. `assert_user_access` in `agent/mcp_server/reviews.py` must do the same. It currently fails closed, and `MCP_SKIP_USER_ACCESS_CHECK` bypasses it for local testing only.
-2. **User mapping.** `resolve_caller` in `auth.py` should look the login up in the user mapping and reject unknown logins.
-3. **Run source.** Runs are dispatched with `source="dashboard"`, the proven path for a user-triggered review. A dedicated `mcp` source would need handling in `agent/github/token.py`, `agent/utils/thread_participants.py` and `agent/completion.py`.
-4. **Dashboard link.** `web_url_for` assumes `/agents/reviews/<owner>/<repo>/<number>`; check it against `ui/src/routes/agents/reviews/`.
+1. **Run source.** Runs are dispatched with `source="dashboard"`, the proven path for a user-triggered review. A dedicated `mcp` source would need handling in `agent/github/token.py`, `agent/utils/thread_participants.py` and `agent/completion.py`.
+2. **Tokens.** HMAC-signed, expiring, no per-token revocation (rotate `MCP_TOKEN_SECRET` to revoke all). A dashboard "create token" action and a revocation list are follow-ups.
+3. **User mapping.** `resolve_caller` in `auth.py` does not consult the user mapping; repo access is enforced per request instead.
+4. **No rate limiting** yet.

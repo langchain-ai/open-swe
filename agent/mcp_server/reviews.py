@@ -7,19 +7,23 @@ to GitHub, visible in the dashboard. This module only adds the parts an MCP
 caller needs: URL parsing, allowlists, waiting for the run, and reading the
 findings back.
 
-Two things are worth verifying and are marked ``VERIFY``.
 """
 
 import asyncio
+import logging
 import os
 import re
 from dataclasses import dataclass
 from typing import Any
 from urllib.parse import urlparse
 
+from starlette.exceptions import HTTPException
+
 from agent.mcp_server.auth import Caller
 from agent.review.findings import REVIEWER_THREAD_KIND, list_findings
 from agent.thread_ids import reviewer_thread_id
+
+logger = logging.getLogger(__name__)
 
 # The dashboard's own re-review button dispatches with source="dashboard" and a
 # github_login, which is a proven path. Other values are not interchangeable:
@@ -110,20 +114,41 @@ def assert_repo_allowed(ref: PullRequestRef) -> None:
     raise ReviewError("repo_not_allowed", f"{ref.full_name} is not enabled for Open SWE")
 
 
+async def _check_dashboard_access(login: str, full_name: str) -> None:
+    from agent.dashboard.repo_access import require_repo_access_for_user
+
+    await require_repo_access_for_user(login, full_name)
+
+
 async def assert_user_access(caller: Caller, ref: PullRequestRef) -> None:
-    """Per-user repo access. NOT IMPLEMENTED: fails closed.
+    """Enforce the same per-user repo access the dashboard's review routes do.
 
     trigger_pr_review_from_ref runs with the GitHub App token and never checks
-    who is asking; the dashboard enforces access in the route that calls it.
-    Until the same check is implemented here (and this stub removed), requests
-    are refused unless MCP_SKIP_USER_ACCESS_CHECK is set. Only set it for local
-    testing, never on a shared deployment.
+    who is asking, so this must run before any dispatch or read. It reuses the
+    dashboard's ``require_repo_access_for_user``, which verifies the login's
+    repo access with that user's own stored GitHub token. Any failure to
+    verify is treated as denial.
     """
-    if os.environ.get("MCP_SKIP_USER_ACCESS_CHECK", "").lower() in {"1", "true", "yes"}:
-        return
-    raise ReviewError(
-        "forbidden", "Per-user access checks for MCP reviews are not enabled on this deployment"
-    )
+    try:
+        await _check_dashboard_access(caller.github_login, ref.full_name)
+    except HTTPException as exc:
+        if exc.status_code == 401:
+            raise ReviewError(
+                "login_required",
+                "Sign in to the Open SWE dashboard with GitHub once so your repository "
+                "access can be verified, then retry.",
+            ) from exc
+        if exc.status_code in (403, 404):
+            raise ReviewError("forbidden", f"You don't have access to {ref.full_name}") from exc
+        logger.warning("repo access check returned HTTP %s for %s", exc.status_code, ref.full_name)
+        raise ReviewError(
+            "access_check_failed", "Could not verify repository access. Try again shortly."
+        ) from exc
+    except Exception as exc:
+        logger.warning("repo access check errored for %s", ref.full_name, exc_info=True)
+        raise ReviewError(
+            "access_check_failed", "Could not verify repository access. Try again shortly."
+        ) from exc
 
 
 def get_langgraph_client() -> Any:
@@ -133,7 +158,7 @@ def get_langgraph_client() -> Any:
 
 
 def web_url_for(ref: PullRequestRef) -> str | None:
-    """VERIFY: the dashboard route for a PR review (ui/src/routes/agents/reviews/)."""
+    """Dashboard page for a PR review (ui/src/routes/agents/reviews/$owner.$repo.$number)."""
     base = os.environ.get("DASHBOARD_BASE_URL", "").rstrip("/")
     return f"{base}/agents/reviews/{ref.owner}/{ref.repo}/{ref.number}" if base else None
 
