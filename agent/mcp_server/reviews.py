@@ -21,11 +21,12 @@ from agent.mcp_server.auth import Caller
 from agent.review.findings import REVIEWER_THREAD_KIND, list_findings
 from agent.thread_ids import reviewer_thread_id
 
-# VERIFY: ``source`` lands in the run's configurable, and some code may branch
-# on it. "dashboard" is known to work with a github_login (the dashboard's own
-# review button does exactly this). Once you've confirmed nothing breaks, set
-# MCP_RUN_SOURCE=mcp so runs are attributable to this surface.
-RUN_SOURCE = os.environ.get("MCP_RUN_SOURCE", "dashboard")
+# The dashboard's own re-review button dispatches with source="dashboard" and a
+# github_login, which is a proven path. Other values are not interchangeable:
+# agent/github/token.py, agent/utils/thread_participants.py and
+# agent/completion.py all branch on the source. A dedicated "mcp" source needs
+# handling added in those places, so it is a follow-up rather than a setting.
+RUN_SOURCE = "dashboard"
 
 POLL_SECONDS = 3.0
 ACTIVE_STATUSES = frozenset({"pending", "running"})
@@ -110,14 +111,19 @@ def assert_repo_allowed(ref: PullRequestRef) -> None:
 
 
 async def assert_user_access(caller: Caller, ref: PullRequestRef) -> None:
-    """VERIFY / TODO before any shared deployment: per-user repo access.
+    """Per-user repo access. NOT IMPLEMENTED: fails closed.
 
-    trigger_pr_review_from_ref runs with the GitHub App token and does not
-    check the requesting user, so callers must. Mirror what the dashboard's
-    review endpoint (agent/dashboard/review_api.py, near its call to
-    trigger_pr_review_from_ref) does to confirm this user can see the repo,
-    and raise ``ReviewError("forbidden", ...)`` otherwise.
+    trigger_pr_review_from_ref runs with the GitHub App token and never checks
+    who is asking; the dashboard enforces access in the route that calls it.
+    Until the same check is implemented here (and this stub removed), requests
+    are refused unless MCP_SKIP_USER_ACCESS_CHECK is set. Only set it for local
+    testing, never on a shared deployment.
     """
+    if os.environ.get("MCP_SKIP_USER_ACCESS_CHECK", "").lower() in {"1", "true", "yes"}:
+        return
+    raise ReviewError(
+        "forbidden", "Per-user access checks for MCP reviews are not enabled on this deployment"
+    )
 
 
 def get_langgraph_client() -> Any:

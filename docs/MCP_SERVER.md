@@ -11,7 +11,7 @@ Set on the deployment:
 | `MCP_SERVER_ENABLED=true` | Turns the endpoint on. Off by default (404). |
 | `MCP_TOKEN_SECRET` | ≥32 random characters. Signs bearer tokens. Rotating it revokes all tokens. |
 | `MCP_ROUTE_PATH` | Optional. Defaults to `/integrations/mcp` so it doesn't collide with LangGraph Platform's own `/mcp`. |
-| `MCP_RUN_SOURCE` | Optional. `source` recorded on the run. Defaults to `dashboard` (known to work); switch to `mcp` once verified. |
+| `MCP_SKIP_USER_ACCESS_CHECK` | **Local testing only.** Per-user repo access checks are not implemented yet, so without this the tools refuse every request (fail closed). Remove once `assert_user_access` is implemented. |
 | `MCP_ALLOWED_ORIGINS` | Optional. Comma-separated browser origins allowed to call the endpoint. Normally empty. |
 | `MCP_GITHUB_HOSTS` | Optional. Extra PR hosts (GitHub Enterprise Server). |
 
@@ -62,7 +62,7 @@ curl -s https://<deployment>/integrations/mcp \
 
 ## Before enabling on a shared deployment
 
-1. **Per-user repo access.** `trigger_pr_review_from_ref` runs with the GitHub App token and does not check the requesting user. Implement `assert_user_access` in `agent/mcp_server/reviews.py` the way the dashboard's review endpoint does. Until then, anyone with a token can request a review of any repo the App and allowlists permit.
+1. **Per-user repo access.** `trigger_pr_review_from_ref` runs with the GitHub App token and does not check the requesting user; the dashboard enforces access in the route that calls it. `assert_user_access` in `agent/mcp_server/reviews.py` must do the same. It currently fails closed, and `MCP_SKIP_USER_ACCESS_CHECK` bypasses it for local testing only.
 2. **User mapping.** `resolve_caller` in `auth.py` should look the login up in the user mapping and reject unknown logins.
-3. **Run source.** Confirm nothing branches on `source` in a way that breaks `mcp`, then set `MCP_RUN_SOURCE=mcp`.
+3. **Run source.** Runs are dispatched with `source="dashboard"`, the proven path for a user-triggered review. A dedicated `mcp` source would need handling in `agent/github/token.py`, `agent/utils/thread_participants.py` and `agent/completion.py`.
 4. **Dashboard link.** `web_url_for` assumes `/agents/reviews/<owner>/<repo>/<number>`; check it against `ui/src/routes/agents/reviews/`.

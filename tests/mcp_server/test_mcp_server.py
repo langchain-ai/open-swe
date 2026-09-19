@@ -66,6 +66,7 @@ class FakeLangGraph:
 def env(monkeypatch):
     monkeypatch.setenv("MCP_SERVER_ENABLED", "1")
     monkeypatch.setenv("MCP_TOKEN_SECRET", "s" * 40)
+    monkeypatch.setenv("MCP_SKIP_USER_ACCESS_CHECK", "1")
     monkeypatch.setenv("DASHBOARD_BASE_URL", "https://swe.example.com")
     monkeypatch.delenv("ALLOWED_GITHUB_ORGS", raising=False)
     monkeypatch.delenv("ALLOWED_GITHUB_REPOS", raising=False)
@@ -290,6 +291,15 @@ def test_user_access_check_is_enforced(client, fake, monkeypatch):
     assert (
         call(client, "request_review", {"pr_url": PR})["structuredContent"]["error"] == "forbidden"
     )
+    assert lg.trigger_calls == []
+
+
+def test_fails_closed_without_user_access_check(client, fake, monkeypatch):
+    monkeypatch.delenv("MCP_SKIP_USER_ACCESS_CHECK")
+    lg = fake()
+    for tool in ("request_review", "get_review"):
+        result = call(client, tool, {"pr_url": PR})
+        assert result["structuredContent"]["error"] == "forbidden"
     assert lg.trigger_calls == []
 
 
