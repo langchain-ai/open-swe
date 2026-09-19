@@ -17,7 +17,12 @@ def _config() -> dict:
     }
 
 
-def _backend(content: bytes = b"test", *, prepare_output: str | None = None) -> MagicMock:
+def _backend(
+    content: bytes = b"test",
+    *,
+    prepare_output: str | None = None,
+    filename: str = "test.html",
+) -> MagicMock:
     backend = MagicMock()
     backend.aexecute = AsyncMock(
         side_effect=[
@@ -29,7 +34,7 @@ def _backend(content: bytes = b"test", *, prepare_output: str | None = None) -> 
         ]
     )
     backend.adownload_files = AsyncMock(
-        return_value=[FileDownloadResponse(path="/workspace/test.html", content=content)]
+        return_value=[FileDownloadResponse(path=f"/workspace/{filename}", content=content)]
     )
     return backend
 
@@ -39,11 +44,12 @@ def _setup(
     backend: MagicMock,
     *,
     active: list[dict | None] | None = None,
+    filename: str = "test.html",
 ) -> AsyncMock:
     monkeypatch.setattr(
         attach_tool,
         "resolve_sandbox_file",
-        AsyncMock(return_value=(backend, "/workspace/test.html", "/workspace")),
+        AsyncMock(return_value=(backend, f"/workspace/{filename}", "/workspace")),
     )
     monkeypatch.setattr(attach_tool, "get_config", _config)
     current = active or [
@@ -96,8 +102,67 @@ async def test_slack_attach_html_rejects_non_html_file(monkeypatch: pytest.Monke
 
     result = await attach_tool.slack_attach_html("test.txt")
 
-    assert result == {"success": False, "error": "file_path must identify an HTML file"}
+    assert result == {
+        "success": False,
+        "error": "file_path must identify a supported Slack attachment",
+    }
     backend.aexecute.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_slack_attach_file_uploads_png_to_active_thread(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    content = b"png"
+    backend = _backend(content, filename="test.png")
+    upload = _setup(monkeypatch, backend, filename="test.png")
+
+    result = await attach_tool.slack_attach_file("test.png")
+
+    assert result == {"success": True, "file_id": "F1", "filename": "test.png"}
+    upload.assert_awaited_once_with(
+        "C1", "1.0", "test.png", content, title=None, initial_comment=None
+    )
+
+
+@pytest.mark.asyncio
+async def test_slack_attach_file_rejects_unsupported_extension(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    backend = _backend(filename="test.txt")
+    monkeypatch.setattr(
+        attach_tool,
+        "resolve_sandbox_file",
+        AsyncMock(return_value=(backend, "/workspace/test.txt", "/workspace")),
+    )
+
+    result = await attach_tool.slack_attach_file("test.txt")
+
+    assert result == {
+        "success": False,
+        "error": "file_path must identify a supported Slack attachment",
+    }
+    backend.aexecute.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_slack_attach_file_rejects_oversized_image(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    backend = _backend(
+        prepare_output=str(attach_tool._MAX_SLACK_ATTACHMENT_BYTES + 1),
+        filename="big.png",
+    )
+    monkeypatch.setattr(
+        attach_tool,
+        "resolve_sandbox_file",
+        AsyncMock(return_value=(backend, "/workspace/big.png", "/workspace")),
+    )
+
+    result = await attach_tool.slack_attach_file("big.png")
+
+    assert result == {"success": False, "error": "file exceeds the 10 MB attachment limit"}
+    backend.adownload_files.assert_not_awaited()
 
 
 @pytest.mark.asyncio
