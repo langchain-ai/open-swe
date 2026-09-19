@@ -23,6 +23,7 @@ async def deployment_db(monkeypatch):
     uri = os.environ.get("TEST_ANALYTICS_POSTGRES_URI")
     if not uri:
         pytest.skip("TEST_ANALYTICS_POSTGRES_URI is required for PostgreSQL regressions")
+    uri = postgres.normalize_uri(uri)
     admin = create_async_engine(uri, isolation_level="AUTOCOMMIT")
     db_name = f"analytics_deployment_test_{uuid4().hex}"
     async with admin.connect() as conn:
