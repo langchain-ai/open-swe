@@ -32,6 +32,16 @@ async def _noop_handler(_req: ModelRequest[None]) -> ModelResponse[Any]:
 
 class TestRepairOrphanedToolCallsMiddleware:
     @pytest.mark.asyncio
+    async def test_drops_orphaned_tool_result(self) -> None:
+        orphan = ToolMessage(content="unexpected", tool_call_id="missing_call")
+        human = HumanMessage(content="hi")
+        request = _make_request([human, orphan])
+
+        await RepairOrphanedToolCallsMiddleware().awrap_model_call(request, _noop_handler)
+
+        assert request.messages == [human]
+
+    @pytest.mark.asyncio
     async def test_inserts_synthetic_result_for_orphaned_tool_call(self) -> None:
         ai = _ai_with_tool_call("call_1")
         follow_up = HumanMessage(content="continue")
@@ -62,10 +72,27 @@ class TestRepairOrphanedToolCallsMiddleware:
         tool = ToolMessage(content="done", tool_call_id="call_1")
         original = [HumanMessage(content="hi"), ai, tool]
         request = _make_request(list(original))
+        original_messages = request.messages
 
         await RepairOrphanedToolCallsMiddleware().awrap_model_call(request, _noop_handler)
 
         assert request.messages == original
+        assert request.messages is original_messages
+
+    @pytest.mark.asyncio
+    async def test_repairs_both_orphan_directions_in_one_pass(self) -> None:
+        orphan_result = ToolMessage(content="unexpected", tool_call_id="missing_call")
+        ai = _ai_with_tool_call("interrupted_call")
+        request = _make_request([orphan_result, ai])
+
+        await RepairOrphanedToolCallsMiddleware().awrap_model_call(request, _noop_handler)
+
+        assert len(request.messages) == 2
+        assert request.messages[0] is ai
+        synthetic = request.messages[1]
+        assert isinstance(synthetic, ToolMessage)
+        assert synthetic.tool_call_id == "interrupted_call"
+        assert synthetic.status == "error"
 
     @pytest.mark.asyncio
     async def test_repairs_multiple_orphans_on_one_message(self) -> None:
