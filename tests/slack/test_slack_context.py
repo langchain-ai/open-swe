@@ -1148,7 +1148,7 @@ async def slack_file_mention(monkeypatch, fake_store, registry_db):
 
     provisioned: list[Sandbox] = []
 
-    async def provision(_token, *, workspace_slug=None, **kwargs):
+    async def provision(*, workspace_slug: str | None = None, **kwargs: object) -> Sandbox:
         sandbox = Sandbox(workspace_slug)
         provisioned.append(sandbox)
         return sandbox

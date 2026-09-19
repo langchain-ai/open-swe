@@ -162,21 +162,27 @@ async def _release_builder_sandbox(sandbox_id: str) -> None:
 
 
 async def _create_builder_sandbox(record: Workspace, snapshot_id: str | None) -> Any:
-    from agent.github.app import get_github_app_installation_token
-    from agent.sandboxes.providers.langsmith import create_langsmith_sandbox
+    from agent.github.sandbox_access import repository_token
+    from agent.sandboxes.providers.langsmith import (
+        configure_github_proxy,
+        create_langsmith_sandbox,
+        get_sandbox_proxy_config,
+    )
 
-    token = await get_github_app_installation_token()
-    if not token:
-        raise RuntimeError("GitHub App installation token is unavailable")
-    return await create_langsmith_sandbox(
-        github_token=token,
+    access = await repository_token(record.repos)
+    create_params = {
+        **record.sandbox_create_params(),
+        "delete_after_stop_seconds": BUILDER_DELETE_AFTER_STOP_SECONDS,
+    }
+    backend = await create_langsmith_sandbox(
         snapshot_id=snapshot_id,
-        create_params={
-            **record.sandbox_create_params(),
-            "delete_after_stop_seconds": BUILDER_DELETE_AFTER_STOP_SECONDS,
-        },
+        create_params=create_params,
         **record.sandbox_resources(),
     )
+    await configure_github_proxy(
+        backend.id, access.token, base_proxy_config=get_sandbox_proxy_config(create_params)
+    )
+    return backend
 
 
 def _scripts_to_run(record: Workspace, kind: RefreshKind) -> list[tuple[str, str, int]]:
