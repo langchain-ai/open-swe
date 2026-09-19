@@ -2,16 +2,18 @@
 
 from typing import Any, Literal
 
-from fastapi import APIRouter, HTTPException, Request, Response
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from fastapi.responses import StreamingResponse
 from pydantic import AliasGenerator, BaseModel, ConfigDict, Field
 from pydantic.alias_generators import to_camel
 
 from agent.dashboard.deps import ADMIN_DEP, SESSION_DEP, filter_repo_models_for_user
+from agent.dashboard.oauth import require_same_origin_for_mutations
 from agent.dashboard.profiles import get_valid_access_token
 from agent.dashboard.repo_access import require_repo_access_for_user
 from agent.github.pull_request_status import pull_request_identity
 from agent.github.repos import accessible_repo_full_names
+from agent.review import risk
 from agent.review.analyzer_cron import remove_continual_cron
 from agent.review.chat import (
     get_review_chat,
@@ -22,6 +24,8 @@ from agent.review.chat import (
 )
 from agent.review.enabled_repos import list_enabled_review_repos, set_review_repo_enabled
 from agent.review.eval_jobs import get_reviewer_eval_status
+from agent.review.findings import get_thread_metadata
+from agent.review.reactions import get_reaction_summary
 from agent.review.reviews import (
     ReviewSummary,
     create_review_comment,
@@ -46,6 +50,7 @@ from agent.review.styles import (
     ReviewStylePromptUpdate,
     normalize_repo_full_name,
 )
+from agent.thread_ids import reviewer_thread_id
 
 router = APIRouter(tags=["review"])
 
@@ -169,6 +174,52 @@ async def api_get_review_diff(
 ) -> dict[str, Any]:
     await require_repo_access_for_user(session["sub"], f"{owner}/{repo}")
     return await get_review_diff(owner, repo, pr_number)
+
+
+@router.get("/reviews/{owner}/{repo}/{pr_number}/risk")
+async def api_get_review_risk(
+    owner: str,
+    repo: str,
+    pr_number: int,
+    assessment_id: str | None = None,
+    session: dict[str, object] = SESSION_DEP,
+) -> risk.RiskResponse:
+    login = str(session["sub"])
+    await require_repo_access_for_user(login, f"{owner}/{repo}")
+    if assessment_id is None:
+        metadata = await get_thread_metadata(reviewer_thread_id(owner, repo, pr_number))
+        latest = metadata.get("review_risk_assessment_id")
+        assessment_id = latest if isinstance(latest, str) else None
+    if assessment_id is None:
+        return risk.RiskResponse(assessment=None)
+    record = await risk.get_assessment(owner, repo, pr_number, assessment_id)
+    if record is None or record.github_review_id is None:
+        raise HTTPException(404, "Risk assessment not found")
+    return risk.RiskResponse(
+        assessment=record,
+        feedback=await risk.get_feedback(record.id, login),
+        reactions=await get_reaction_summary(record.id, login),
+    )
+
+
+@router.post(
+    "/reviews/{owner}/{repo}/{pr_number}/risk/{assessment_id}/feedback",
+    dependencies=[Depends(require_same_origin_for_mutations)],
+)
+async def api_submit_risk_feedback(
+    owner: str,
+    repo: str,
+    pr_number: int,
+    assessment_id: str,
+    submission: risk.RiskFeedbackSubmission,
+    session: dict[str, object] = SESSION_DEP,
+) -> risk.RiskFeedback:
+    login = str(session["sub"])
+    await require_repo_access_for_user(login, f"{owner}/{repo}")
+    record = await risk.get_assessment(owner, repo, pr_number, assessment_id)
+    if record is None or record.github_review_id is None:
+        raise HTTPException(404, "Risk assessment not found")
+    return await risk.save_feedback(record, login=login, submission=submission)
 
 
 @router.get("/reviews/{owner}/{repo}/{pr_number}/image")

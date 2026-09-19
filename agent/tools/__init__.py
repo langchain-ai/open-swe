@@ -15,6 +15,7 @@ _TOOL_MODULES = {
     "enter_plan_mode": ".enter_plan_mode",
     "expedite_pr_approval": ".expedite_pr_approval",
     "fetch_review_diff": ".fetch_review_diff",
+    "get_review_approval_policy": ".get_review_approval_policy",
     "fetch_url": ".fetch_url",
     "get_thread": ".threads",
     "http_request": ".http_request",
@@ -57,6 +58,7 @@ _TOOL_MODULES = {
     "slack_start_new_thread": "agent.slack.tools.start_new_thread",
     "slack_thread_reply": "agent.slack.tools.thread_reply",
     "submit_thread_feedback": ".submit_thread_feedback",
+    "submit_review_risk_feedback": ".submit_review_risk_feedback",
     "trigger_automation": ".automations",
     "update_automation": ".automations",
     "update_finding": ".update_finding",
@@ -76,6 +78,7 @@ __all__ = [
     "enter_plan_mode",
     "expedite_pr_approval",
     "fetch_review_diff",
+    "get_review_approval_policy",
     "fetch_url",
     "get_thread",
     "http_request",
@@ -118,6 +121,7 @@ __all__ = [
     "slack_start_new_thread",
     "slack_thread_reply",
     "submit_thread_feedback",
+    "submit_review_risk_feedback",
     "trigger_automation",
     "update_automation",
     "update_finding",
@@ -154,6 +158,7 @@ if TYPE_CHECKING:
     from agent.tools.expedite_pr_approval import expedite_pr_approval
     from agent.tools.fetch_review_diff import fetch_review_diff
     from agent.tools.fetch_url import fetch_url
+    from agent.tools.get_review_approval_policy import get_review_approval_policy
     from agent.tools.http_request import http_request
     from agent.tools.list_findings import list_findings
     from agent.tools.list_review_findings import list_review_findings
@@ -172,6 +177,7 @@ if TYPE_CHECKING:
     from agent.tools.save_plan import save_plan
     from agent.tools.save_user_instructions import save_user_instructions
     from agent.tools.schedule_thread_wakeup import schedule_thread_wakeup
+    from agent.tools.submit_review_risk_feedback import submit_review_risk_feedback
     from agent.tools.submit_thread_feedback import submit_thread_feedback
     from agent.tools.threads import get_thread, list_threads, manage_thread
     from agent.tools.update_finding import update_finding

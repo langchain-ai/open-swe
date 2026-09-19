@@ -95,6 +95,7 @@ from agent.tools import (
     add_finding,
     fetch_review_diff,
     fetch_url,
+    get_review_approval_policy,
     http_request,
     list_findings,
     publish_review,
@@ -1042,6 +1043,7 @@ async def get_reviewer_agent(config: RunnableConfig) -> Pregel:
         tools=apply_tool_descriptions(
             [
                 fetch_review_diff,
+                get_review_approval_policy,
                 add_finding,
                 update_finding,
                 list_findings,

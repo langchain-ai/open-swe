@@ -16,6 +16,7 @@ from agent.github.thread_token import (
     get_github_token,
     invalidate_cached_github_token,
 )
+from agent.review.approval_github import evaluate_pr_approval
 from agent.review.diff import compute_diff_line_set, fetch_pr_diff, is_range_in_diff
 from agent.review.findings import (
     REVIEW_FINDING_CAP,
@@ -60,6 +61,14 @@ from agent.review.publish import (
     settle_review_check_run,
 )
 from agent.review.reconcile import reconcile_findings_with_review_threads
+from agent.review.risk import (
+    ASSESSMENTS,
+    RiskInput,
+    assessment_key,
+    find_published_assessment,
+    prepare_assessment,
+    render_risk_assessment,
+)
 from agent.run_config import RunConfig
 from agent.slack.client import post_slack_thread_reply
 from agent.utils.dashboard_links import dashboard_review_url
@@ -78,6 +87,7 @@ async def _record_reviewer_usage(**kwargs: Any) -> None:
 async def publish_review(
     severity_threshold: Severity = "medium",
     state: Annotated[dict[str, Any] | None, InjectedState] = None,
+    risk_assessment: RiskInput | None = None,
 ) -> dict[str, Any]:
     """Implement the `publish_review` tool."""
     if severity_threshold not in {"low", "medium", "high", "critical"}:
@@ -128,6 +138,7 @@ async def publish_review(
             langgraph_run_id=_current_run_id(config),
             trace_link_config_override=cfg.review_trace_link_enabled,
             state=state,
+            risk_assessment=risk_assessment,
         )
     except ReviewerThreadMissingError as exc:
         return thread_missing_tool_result(exc)
@@ -218,6 +229,7 @@ async def _publish_review_async(
     langgraph_run_id: str | None = None,
     trace_link_config_override: bool | None = None,
     state: dict[str, Any] | None = None,
+    risk_assessment: RiskInput | None = None,
 ) -> dict[str, Any]:
     thread_id = get_thread_id_from_runtime()
     # The run config's head_sha is frozen at run creation; a push that arrived
@@ -234,6 +246,58 @@ async def _publish_review_async(
         pr_number=pr_number,
         token=token,
     )
+    assessment = None
+    recovered_review_id: int | None = None
+    if risk_assessment is not None:
+        if risk_assessment.head_sha != head_sha:
+            return {
+                "success": False,
+                "error": "Risk assessment commit differs from the current review commit.",
+            }
+        metadata = await get_thread_metadata(thread_id)
+        if langgraph_run_id is None:
+            current_run_id = metadata.get("current_reviewer_run_id")
+            if isinstance(current_run_id, str) and current_run_id:
+                langgraph_run_id = current_run_id
+        risk_run_id = langgraph_run_id or thread_id
+        existing = await ASSESSMENTS.get(
+            assessment_key(owner, repo, pr_number, head_sha, risk_run_id)
+        )
+        if existing is not None:
+            recovered_review_id = existing.github_review_id
+            if recovered_review_id is None:
+                recovered_review_id = await find_published_assessment(existing, token)
+            if recovered_review_id is not None:
+                existing.github_review_id = recovered_review_id
+                await ASSESSMENTS.put(existing.id, existing)
+                await set_reviewer_thread_metadata(
+                    thread_id, extra={"review_risk_assessment_id": existing.id}
+                )
+        assessment = await prepare_assessment(
+            owner=owner,
+            repo=repo,
+            pr_number=pr_number,
+            head_sha=head_sha,
+            run_id=risk_run_id,
+            assessment=risk_assessment,
+            findings=findings,
+        )
+        if assessment.github_review_id is None:
+            check_run_id = metadata.get("review_check_run_id")
+            assessment.approval_evaluation = await evaluate_pr_approval(
+                owner=owner,
+                repo=repo,
+                pr_number=pr_number,
+                token=token,
+                head_sha=head_sha,
+                risk_score=assessment.score,
+                confidence=assessment.confidence,
+                limitations=assessment.limitations,
+                open_findings=assessment.open_findings,
+                evidence=risk_assessment.approval,
+                review_check_run_id=check_run_id if isinstance(check_run_id, int) else None,
+            )
+            await ASSESSMENTS.put(assessment.id, assessment)
 
     # Re-reviews only post NEW findings. Anything with a recorded review comment
     # id already lives on GitHub from a prior publish — reposting would create
@@ -282,13 +346,17 @@ async def _publish_review_async(
     # SWE review summary) instead. Still resolve threads for findings that just
     # moved to resolved, and advance last_reviewed_sha so subsequent pushes
     # don't redo the same diff.
-    if not inline_comments and await _open_swe_already_reviewed(
-        thread_id=thread_id,
-        owner=owner,
-        repo=repo,
-        pr_number=pr_number,
-        token=token,
-        is_re_review=is_re_review,
+    if (
+        not inline_comments
+        and (assessment is None or assessment.publication_complete)
+        and await _open_swe_already_reviewed(
+            thread_id=thread_id,
+            owner=owner,
+            repo=repo,
+            pr_number=pr_number,
+            token=token,
+            is_re_review=is_re_review,
+        )
     ):
         resolved_thread_count = await _resolve_threads_for_resolved_findings(
             owner=owner,
@@ -333,15 +401,21 @@ async def _publish_review_async(
         ui_url=review_ui_url,
         additional_findings_count=additional_findings_count,
     )
+    if assessment is not None:
+        review_body += "\n\n" + render_risk_assessment(assessment, review_ui_url)
 
-    review_response = await post_pull_request_review(
-        owner=owner,
-        repo=repo,
-        pr_number=pr_number,
-        head_sha=head_sha,
-        body=review_body,
-        inline_comments=inline_comments,
-        token=token,
+    review_response = (
+        {"id": recovered_review_id}
+        if recovered_review_id is not None
+        else await post_pull_request_review(
+            owner=owner,
+            repo=repo,
+            pr_number=pr_number,
+            head_sha=head_sha,
+            body=review_body,
+            inline_comments=inline_comments,
+            token=token,
+        )
     )
     # If GitHub rejected the batch because one or more inline comments anchor
     # to a file/line that's not in the PR diff, drop just those findings and
@@ -383,6 +457,8 @@ async def _publish_review_async(
                 inline_comments = retry_inline
                 eligible_with_payload = valid_with_payload
                 unresolvable_findings = dropped_ids
+                # The agent still has anchors to reconcile before assessing the whole PR.
+                assessment = None
             else:
                 retry_error = (
                     retry_response.get("_error", "unknown error")
@@ -425,6 +501,13 @@ async def _publish_review_async(
             "error": "Failed to POST PR review: no response from GitHub",
         }
     review_id = review_response.get("id") if isinstance(review_response, dict) else None
+    if assessment is not None and isinstance(review_id, int):
+        assessment.github_review_id = review_id
+        await ASSESSMENTS.put(assessment.id, assessment)
+        await set_reviewer_thread_metadata(
+            thread_id,
+            extra={"review_risk_assessment_id": assessment.id},
+        )
 
     if review_id is not None and inline_comments:
         # Record the GitHub review id AND inline comment ids in a single
@@ -472,6 +555,17 @@ async def _publish_review_async(
             pr_number=pr_number,
             token=token,
         )
+
+    if unresolvable_findings and risk_assessment is not None:
+        return {
+            "success": False,
+            "review_id": review_id,
+            "surfaced_count": len(inline_comments),
+            "unresolvable_findings": unresolvable_findings,
+            "risk_assessment_deferred": True,
+            "error": "Partial review published; reconcile the remaining findings before completing the review.",
+            "hint": "Correct or resolve the unresolvable findings, then call publish_review again with an updated assessment.",
+        }
 
     resolved_thread_count = await _resolve_threads_for_resolved_findings(
         owner=owner,
@@ -528,12 +622,17 @@ async def _publish_review_async(
             exc_info=True,
         )
 
+    if assessment is not None and isinstance(review_id, int):
+        assessment.publication_complete = True
+        await ASSESSMENTS.put(assessment.id, assessment)
+
     result: dict[str, Any] = {
         "success": True,
         "review_id": review_id,
         "surfaced_count": len(inline_comments),
         "hidden_count": max(len(open_unpublished) - len(inline_comments), 0),
         "resolved_thread_count": resolved_thread_count,
+        "reused_existing_review": recovered_review_id is not None,
     }
     if unresolvable_findings:
         result["unresolvable_findings"] = unresolvable_findings

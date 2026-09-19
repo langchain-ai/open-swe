@@ -833,6 +833,57 @@ export interface ReviewDetail extends ReviewSummary {
   diff_groups_stale: boolean
 }
 
+export type ReviewApprovalFeedback = "safe" | "needs_review" | "unsure"
+
+export interface ReviewApprovalEvaluation {
+  mode: "shadow"
+  decision: "would_approve" | "needs_human_review" | "insufficient_evidence"
+  evaluated_at: string
+  policy: {
+    source: "default" | "repository"
+    version: string
+    base_sha: string
+  } | null
+  criteria: {
+    id: string
+    title: string
+    status: "pass" | "fail" | "unknown"
+    evidence: string
+    requirement?: string | null
+    source: "code" | "reviewer"
+  }[]
+}
+
+export interface ReviewRiskAssessment {
+  id: string
+  github_review_id?: number | null
+  head_sha: string
+  score: 1 | 2 | 3 | 4 | 5 | null
+  proposed_score: 1 | 2 | 3 | 4 | 5 | null
+  confidence: "low" | "medium" | "high"
+  rationale: string
+  limitations: string[]
+  open_findings: number
+  approval_evaluation?: ReviewApprovalEvaluation | null
+}
+
+export interface ReviewRiskFeedback {
+  assessment_id: string
+  decision: ReviewApprovalFeedback | null
+  comment: string
+}
+
+export interface ReviewRiskResponse {
+  assessment: ReviewRiskAssessment | null
+  feedback: ReviewRiskFeedback | null
+  reactions?: {
+    helpful: number
+    unhelpful: number
+    viewer_rating: "helpful" | "unhelpful" | "conflicting" | null
+    synced_at: string | null
+  }
+}
+
 export interface ReviewDiffFile {
   path: string
   previousPath: string | null
@@ -1273,6 +1324,26 @@ export const api = {
   getReviewDiff: (owner: string, repo: string, number: number) =>
     request<ReviewDiffPayload>(
       `/reviews/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}/diff`
+    ),
+  getReviewRisk: (
+    owner: string,
+    repo: string,
+    number: number,
+    assessmentId?: string
+  ) =>
+    request<ReviewRiskResponse>(
+      `/reviews/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}/risk${assessmentId ? `?assessment_id=${encodeURIComponent(assessmentId)}` : ""}`
+    ),
+  submitReviewRiskFeedback: (
+    owner: string,
+    repo: string,
+    number: number,
+    assessmentId: string,
+    feedback: { decision: ReviewApprovalFeedback | null; comment: string }
+  ) =>
+    request<ReviewRiskFeedback>(
+      `/reviews/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}/risk/${encodeURIComponent(assessmentId)}/feedback`,
+      { method: "POST", body: JSON.stringify(feedback) }
     ),
   getReviewChat: (owner: string, repo: string, number: number) =>
     request<ReviewChatMeta>(

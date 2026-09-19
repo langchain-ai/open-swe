@@ -14,6 +14,8 @@ from agent.background_tasks import monitor_background_tasks
 from agent.expedited_review.watch import CRON_TASK as EXPEDITED_REVIEW_TASK
 from agent.expedited_review.watch import evaluate_approval
 from agent.reconcile import reconcile_stale_runs
+from agent.review.reactions import CRON_TASK as REVIEW_REACTIONS_TASK
+from agent.review.reactions import sync_review_reactions
 from agent.run_config import RunConfig
 from agent.schedules.store import launch_scheduled_agent_run
 from agent.session_cost import run_session_cost_refresh
@@ -52,6 +54,8 @@ async def _launch(state: SchedulerState, config: RunnableConfig) -> dict[str, An
     task = state.task or cfg.task
     if task == "reconcile":
         return {"result": await reconcile_stale_runs()}
+    if task == REVIEW_REACTIONS_TASK:
+        return {"result": await sync_review_reactions()}
     if task == "baby_sit":
         key = state.watch_key or cfg.watch_key
         if not key:

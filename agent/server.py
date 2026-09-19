@@ -189,6 +189,7 @@ from agent.tools import (
     slack_read_thread_messages,
     slack_start_new_thread,
     slack_thread_reply,
+    submit_review_risk_feedback,
     submit_thread_feedback,
     trigger_automation,
     update_automation,
@@ -1255,11 +1256,13 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         slack_start_new_thread,
         slack_thread_reply,
         submit_thread_feedback,
+        submit_review_risk_feedback,
         *(ADMIN_TOOLS if admin_thread else ()),
         *((read_only_sql,) if private_admin_surface else ()),
     ]
     if credential_login is None:
         personal_tools = (
+            submit_review_risk_feedback,
             save_user_instructions,
             save_user_skill,
             delete_user_skill,
@@ -1369,6 +1372,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         if tool is not background_execute
         and tool is not background_task
         and tool is not submit_thread_feedback
+        and tool is not submit_review_risk_feedback
     ]
     title_model = _make_model_or_defer(
         title_model_id,
