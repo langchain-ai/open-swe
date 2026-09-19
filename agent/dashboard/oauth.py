@@ -8,8 +8,9 @@ import re
 import secrets
 import time
 from datetime import UTC, datetime, timedelta
+import posixpath
+from urllib.parse import quote, unquote, urlparse
 from typing import Any, Literal
-from urllib.parse import quote, urlparse
 from uuid import UUID
 
 import httpx2
@@ -134,8 +135,15 @@ def _origin_of(url: str) -> str:
 
 
 def _is_blocked_redirect_path(path: str) -> bool:
-    return path in {"/login", "/dashboard/api", "/_serverFn"} or path.startswith(
-        ("/login/", "/login?", "/login#", "/dashboard/api/", "/_serverFn/")
+    # Decode percent-encoding and collapse dot segments before matching. A raw
+    # string check alone can be bypassed by an encoded or dotted variant (e.g.
+    # "/%2e%2e/login", "/foo/../dashboard/api/x") that still resolves to a
+    # blocked path once a browser normalizes and decodes it client-side.
+    normalized = posixpath.normpath(unquote(path))
+    if not normalized.startswith("/"):
+        normalized = f"/{normalized}"
+    return normalized in {"/login", "/dashboard/api", "/_serverFn"} or normalized.startswith(
+        ("/login/", "/dashboard/api/", "/_serverFn/")
     )
 
 
