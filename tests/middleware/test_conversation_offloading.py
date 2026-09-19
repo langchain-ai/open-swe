@@ -129,6 +129,37 @@ async def test_automatic_completion_precedes_handler_and_suppresses_tokens(
     ] == "completed"
 
 
+async def test_offload_summarizes_untrimmed_messages_when_trimming_discards_everything(
+    tmp_path,
+):
+    model = FakeListChatModel(responses=["A usable summary."])
+    middleware = ConversationOffloadingMiddleware(
+        model, FilesystemBackend(root_dir=str(tmp_path), virtual_mode=True)
+    )
+    middleware._lc_helper.keep = ("messages", 2)
+    middleware._lc_helper._trigger_clauses = [{"messages": 4}]
+    middleware._lc_helper.trim_tokens_to_summarize = 1
+    graph = create_agent(model=model, middleware=[middleware], checkpointer=InMemorySaver())
+    config = {"configurable": {"thread_id": "fallback"}}
+
+    await graph.ainvoke(
+        {
+            "messages": [
+                HumanMessage(content="old"),
+                AIMessage(content="old reply"),
+                HumanMessage(content="recent"),
+                AIMessage(content="recent reply"),
+            ]
+        },
+        config,
+    )
+
+    state = await graph.aget_state(config)
+    event = state.values["_summarization_event"]
+    assert "A usable summary." in event["summary_message"].content
+    assert state.values["conversation_offloading"]["status"] == "completed"
+
+
 async def test_manual_before_model_runs_after_prepare(tmp_path, monkeypatch):
     prepared = []
 
