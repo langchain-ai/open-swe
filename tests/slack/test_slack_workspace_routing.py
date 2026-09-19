@@ -7,7 +7,9 @@ channel routing; ``tests/workspaces/test_routing.py`` covers the resolver
 itself.
 """
 
+from types import SimpleNamespace
 from typing import Any
+from xml.etree import ElementTree
 
 import pytest
 
@@ -267,3 +269,135 @@ async def test_a_named_repository_still_outranks_a_bound_channel(
     configurable = captured["run_create"]["kwargs"]["config"]["configurable"]
     assert configurable["workspace"] == "internal"
     assert configurable["repo"] == {"owner": "acme", "name": "internal"}
+
+
+@pytest.mark.parametrize(
+    "model_switch",
+    ["/model:", "/model:Fast", "/model:performance", "/model:fastest", "/model:fast /model:nope"],
+)
+async def test_invalid_slack_model_switch_posts_error_without_dispatch_or_persistence(
+    monkeypatch: pytest.MonkeyPatch,
+    model_switch: str,
+) -> None:
+    captured: dict[str, object] = {}
+    _setup_slack_mention_fakes(monkeypatch, captured)
+
+    async def post_thread_reply(
+        channel_id: str,
+        thread_ts: str,
+        text: str,
+        **kwargs: object,
+    ) -> bool:
+        captured["error_reply"] = (channel_id, thread_ts, text, kwargs)
+        return True
+
+    async def upsert_metadata(*args: object, **kwargs: object) -> bool:
+        captured["metadata_persisted"] = (args, kwargs)
+        return True
+
+    monkeypatch.setattr(webhook_common, "post_slack_thread_reply", post_thread_reply)
+    monkeypatch.setattr(webhook_common, "upsert_agent_thread_metadata", upsert_metadata)
+
+    request = SlackRequest.model_validate(
+        {
+            "channel_id": "C0SS",
+            "thread_ts": "1700000000.000100",
+            "event_ts": "1700000000.000200",
+            "user_id": "U123",
+            "text": f"<@UBOT> fix this {model_switch}",
+            "bot_user_id": "UBOT",
+        }
+    )
+
+    await slack_webhooks._process_slack_mention_impl(request, None)
+
+    assert captured["error_reply"] == (
+        "C0SS",
+        "1700000000.000100",
+        "Invalid model switch. Use `/model:fast` or `/model:perf`.",
+        {"agent_thread_id": "mapped-thread"},
+    )
+    assert "run_create" not in captured
+    assert "metadata_persisted" not in captured
+
+
+async def test_slack_model_switch_uses_workspace_route_and_overrides_stored_choice(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, object] = {}
+    _setup_slack_mention_fakes(monkeypatch, captured)
+
+    async def fake_thread_exists(thread_id: str) -> bool:
+        return True
+
+    async def stored_thread_choice(thread_id: str) -> tuple[str, str]:
+        return "openai:gpt-6-astra", "high"
+
+    async def thread_workspace(thread_id: str) -> str:
+        return "oss"
+
+    async def workspace_settings(workspace: str | None) -> SimpleNamespace:
+        assert workspace == "oss"
+        return SimpleNamespace(
+            agent_routing_models={
+                "fast": ("anthropic:claude-haiku-4-5", "low"),
+                "performance": ("anthropic:claude-opus-5", "high"),
+            }
+        )
+
+    async def upsert_metadata(thread_id: str, **kwargs: object) -> bool:
+        captured["explicit_model_choice"] = kwargs.get("explicit_model_choice")
+        return True
+
+    monkeypatch.setattr(webhook_common, "thread_exists", fake_thread_exists)
+    monkeypatch.setattr(webhook_common, "get_thread_model_choice", stored_thread_choice)
+    monkeypatch.setattr(webhook_common, "get_thread_workspace", thread_workspace)
+    monkeypatch.setattr(webhook_common, "get_workspace_settings", workspace_settings)
+    monkeypatch.setattr(webhook_common, "upsert_agent_thread_metadata", upsert_metadata)
+
+    request = SlackRequest.model_validate(
+        {
+            "channel_id": "C0SS",
+            "thread_ts": "1700000000.000100",
+            "event_ts": "1700000000.000200",
+            "user_id": "U123",
+            "text": "<@UBOT> fix this /model:perf then /model:fast",
+            "bot_user_id": "UBOT",
+        }
+    )
+
+    await slack_webhooks._process_slack_mention_impl(request, None)
+
+    run_create = captured["run_create"]
+    assert isinstance(run_create, dict)
+    kwargs = run_create["kwargs"]
+    assert isinstance(kwargs, dict)
+    config = kwargs["config"]
+    assert isinstance(config, dict)
+    configurable = config["configurable"]
+    assert isinstance(configurable, dict)
+    assert configurable["workspace"] == "oss"
+    assert configurable["agent_model_id"] == "anthropic:claude-haiku-4-5"
+    assert configurable["agent_effort"] == "low"
+    assert configurable["model_selection"] == "explicit"
+    metadata = kwargs["metadata"]
+    assert isinstance(metadata, dict)
+    assert metadata["slack_model_switch"] == "fast"
+    assert metadata["slack_requested_model"] == "anthropic:claude-haiku-4-5"
+    assert metadata["slack_requested_effort"] == "low"
+    assert "open_swe_model_route" not in metadata
+    run_input = kwargs["input"]
+    assert isinstance(run_input, dict)
+    messages = run_input["messages"]
+    assert isinstance(messages, list)
+    last_message = messages[-1]
+    assert isinstance(last_message, dict)
+    content = last_message["content"]
+    assert isinstance(content, list)
+    content_block = content[0]
+    assert isinstance(content_block, dict)
+    text = content_block["text"]
+    assert isinstance(text, str)
+    request_text = ElementTree.fromstring(text)
+    assert request_text.findtext("content") == "fix this  then "
+    assert captured["explicit_model_choice"] == ("anthropic:claude-haiku-4-5", "low")

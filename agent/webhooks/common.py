@@ -522,6 +522,7 @@ async def upsert_agent_thread_metadata(
     owner_login: str = "",
     owner_type: str = "user",
     unlisted: bool = False,
+    explicit_model_choice: tuple[str, str] | None = None,
 ) -> bool:
     """Persist source/participant metadata so the dashboard can surface non-dashboard threads.
 
@@ -557,6 +558,14 @@ async def upsert_agent_thread_metadata(
         metadata["title"] = title[:80]
     if workspace:
         metadata["workspace"] = workspace
+    if explicit_model_choice:
+        metadata.update(
+            {
+                "model_selection": "explicit",
+                "model": explicit_model_choice[0],
+                "effort": explicit_model_choice[1],
+            }
+        )
     # Only ever set here: the dashboard clears it when someone continues the
     # thread on the web, and that promotion must survive later Slack events.
     if unlisted:
