@@ -118,7 +118,7 @@ def thread_is_promptable(metadata: Mapping[str, Any], login: str | None) -> bool
     )
 
 
-def _assert_thread_readable(
+def assert_thread_readable(
     metadata: Mapping[str, Any], login: str | None = None, email: str | None = None
 ) -> None:
     if not thread_is_readable(metadata, login, email):

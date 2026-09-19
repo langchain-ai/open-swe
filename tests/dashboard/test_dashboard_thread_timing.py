@@ -16,7 +16,7 @@ async def test_get_thread_reports_server_timing_phases(monkeypatch) -> None:
     }
     client = SimpleNamespace(threads=SimpleNamespace(get=AsyncMock(return_value=thread)))
     monkeypatch.setattr(thread_api, "langgraph_client", lambda: client)
-    monkeypatch.setattr(thread_api, "_assert_thread_readable", lambda *args: None)
+    monkeypatch.setattr(thread_api, "assert_thread_readable", lambda *args: None)
 
     async def refresh(_client, current, *, timings=None):
         if timings is not None:

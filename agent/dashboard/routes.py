@@ -22,6 +22,7 @@ from agent.schedules.routes import router as schedules_router
 from agent.skill_store.routes import router as skills_router
 from agent.slack.dashboard_routes import router as slack_router
 from agent.threads.routes import router as threads_router
+from agent.transcript.routes import router as transcript_router
 from agent.users.routes import router as users_router
 from agent.workspaces.routes import router as workspaces_router
 
@@ -51,3 +52,4 @@ router.include_router(skills_router)
 router.include_router(analytics_router)
 router.include_router(schedules_router)
 router.include_router(threads_router)
+router.include_router(transcript_router)
