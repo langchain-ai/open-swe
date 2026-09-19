@@ -1,7 +1,7 @@
 import { useEffect } from "react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 
-import { ApiError, api } from "./api"
+import { ApiError, api, DEFAULT_WORKSPACE_SLUG } from "./api"
 import {
   REPOS_CACHE_MAX_AGE_MS,
   readCachedRepos,
@@ -19,10 +19,15 @@ export function useProfile() {
   })
 }
 
-export function useOptions() {
+/**
+ * Selectable models and defaults for the workspace a run will land in; model
+ * defaults and the Fable flag are per workspace, so the key carries the slug.
+ */
+export function useOptions(workspace?: string | null) {
+  const slug = workspace ?? DEFAULT_WORKSPACE_SLUG
   return useQuery({
-    queryKey: ["options"],
-    queryFn: api.options,
+    queryKey: ["options", slug],
+    queryFn: () => api.options(slug),
   })
 }
 
@@ -109,19 +114,17 @@ export function buildProfileUpdate(
   return {
     default_model: current?.default_model ?? fallbackModel,
     reasoning_effort: current?.reasoning_effort ?? fallbackEffort,
-    default_subagent_model:
-      current?.default_subagent_model ??
-      current?.default_model ??
-      fallbackModel,
+    default_subagent_model: current?.default_subagent_model ?? null,
     subagent_reasoning_effort:
-      current?.subagent_reasoning_effort ??
-      current?.reasoning_effort ??
-      fallbackEffort,
+      current?.default_subagent_model == null
+        ? null
+        : (current.subagent_reasoning_effort ?? fallbackEffort),
     default_repo: current?.default_repo ?? null,
     base_branch: current?.base_branch ?? null,
     branch_prefix: current?.branch_prefix ?? null,
     auto_fix_ci: current?.auto_fix_ci ?? true,
     model_routing_enabled: current?.model_routing_enabled ?? null,
+    dm_session_enabled: current?.dm_session_enabled ?? false,
     draft_prs: current?.draft_prs ?? true,
     review_draft_prs: current?.review_draft_prs ?? null,
     ...patch,

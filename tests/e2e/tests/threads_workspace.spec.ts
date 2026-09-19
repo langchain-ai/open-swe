@@ -6,6 +6,8 @@ import {
   type Page,
 } from "@playwright/test";
 
+import { dismissOnboardingIfShown } from "./helpers/dashboard";
+
 const USER = {
   login: "threads-workspace-e2e",
   email: "threads-workspace-e2e@example.com",
@@ -26,8 +28,8 @@ const THREAD_IDS = {
   dailyScheduled: "73000000-0000-4000-8000-000000000001",
   dailyTest: "73000000-0000-4000-8000-000000000002",
   weeklyRunning: "73000000-0000-4000-8000-000000000003",
-  noProject: "74000000-0000-4000-8000-000000000001",
-  pinnedProject: "74000000-0000-4000-8000-000000000002",
+  noRepo: "74000000-0000-4000-8000-000000000001",
+  pinnedRepo: "74000000-0000-4000-8000-000000000002",
 } as const;
 
 const TITLES = {
@@ -41,8 +43,8 @@ const TITLES = {
   dailyScheduled: "E2E Workspace Daily health scheduled run",
   dailyTest: "E2E Workspace Daily health test run",
   weeklyRunning: "E2E Workspace Weekly cleanup running",
-  noProject: "E2E Workspace No project chat",
-  pinnedProject: "E2E Workspace Pinned project chat",
+  noRepo: "E2E Workspace No repository chat",
+  pinnedRepo: "E2E Workspace Pinned repository chat",
 } as const;
 
 const SCHEDULE_IDS = {
@@ -247,27 +249,6 @@ function automationThreads(): Array<ThreadSeed> {
   ];
 }
 
-function paginationThreads(): Array<ThreadSeed> {
-  const now = Date.now();
-  return Array.from({ length: 26 }, (_, index) => {
-    const number = index + 1;
-    return {
-      id: `72000000-0000-4000-8000-${String(number).padStart(12, "0")}`,
-      metadata: baseMetadata(
-        now,
-        `E2E Pagination thread ${String(number).padStart(2, "0")}`,
-        number * 1_000,
-        {
-          latest_run_id: `e2e-pagination-run-${number}`,
-          latest_run_status: "success",
-          last_viewed_run_id: `e2e-pagination-run-${number}`,
-          last_viewed_at_ms: now - number * 1_000,
-        },
-      ),
-    };
-  });
-}
-
 // Earlier specs leave their own threads behind for this user, and the sidebar
 // counts every one of them — so start from an empty workspace.
 async function purgeParticipantThreads(request: APIRequestContext) {
@@ -413,33 +394,11 @@ function waitForThreadsPage(page: Page, expected: Record<string, string>) {
   });
 }
 
-function boardColumn(main: Locator, name: string): Locator {
-  return main.locator(`section:has(h2:text-is("${name}"))`);
-}
-
 function sidebarSection(sidebar: Locator, name: string): Locator {
   return sidebar
     .getByRole("button", { name, exact: true })
     .locator("..")
     .locator("..");
-}
-
-function sourceFilter(main: Locator): Locator {
-  return main.locator('select:has(option[value="github"])');
-}
-
-function statusFilter(main: Locator): Locator {
-  return main.locator('select:has(option[value="finished"])');
-}
-
-function triFilter(main: Locator, label: string): Locator {
-  return main.getByText(label, { exact: true }).locator("..");
-}
-
-async function expectBoardOrder(main: Locator, expected: Array<string>) {
-  await expect
-    .poll(() => main.getByRole("heading", { level: 2 }).allTextContents())
-    .toEqual(expected);
 }
 
 test.afterEach(async ({ request }) => {
@@ -476,7 +435,6 @@ test.describe("threads workspace", () => {
     const pinned = sidebarSection(page.locator("aside"), "Pinned");
     const pinnedRow = pinned.getByRole("link", { name: TITLES.shared });
     await expect(pinnedRow).toBeVisible();
-    await page.getByRole("link", { name: "Kanban" }).click();
     await expect(pinnedRow).toBeVisible();
 
     await pinnedRow.press("Shift+F10");
@@ -569,159 +527,7 @@ test.describe("threads workspace", () => {
     expect(flashed).toBe(false);
   });
 
-  test("uses real thread metadata for focus and alternate groupings", async ({
-    page,
-    request,
-  }) => {
-    await seedThreads(request, [...workspaceThreads(), ...automationThreads()]);
-    await loginAs(page);
-
-    const initialResponse = waitForThreadsPage(page, { scope: "interactive" });
-    await page.goto("/agents/threads");
-    expect((await initialResponse).ok()).toBeTruthy();
-
-    const main = page.getByRole("main").last();
-    await expect(
-      main.getByRole("heading", { name: "Threads", level: 1 }),
-    ).toBeVisible();
-
-    const searchResponse = waitForThreadsPage(page, {
-      scope: "interactive",
-      q: WORKSPACE_QUERY,
-      limit: "100",
-      offset: "0",
-    });
-    await main.getByPlaceholder("Search by title...").fill(WORKSPACE_QUERY);
-    await main.getByRole("button", { name: "Search" }).click();
-    expect((await searchResponse).ok()).toBeTruthy();
-
-    const attention = boardColumn(main, "Needs attention");
-    const progress = boardColumn(main, "In progress");
-    const ready = boardColumn(main, "Ready");
-    const done = boardColumn(main, "Done");
-
-    await expect(attention).toContainText(TITLES.attention);
-    await expect(attention).toContainText(TITLES.error);
-    await expect(attention).toContainText(TITLES.interrupted);
-    await expect(attention).toContainText("PR #82 · draft");
-    await expect(attention).toContainText("+18 −4");
-    await expect(progress).toContainText(TITLES.running);
-    await expect(ready).toContainText(TITLES.ready);
-    await expect(done).toContainText(TITLES.done);
-    await expect(main).not.toContainText(TITLES.dailyScheduled);
-
-    const grouping = main.getByLabel("Group by");
-    await grouping.selectOption("status");
-    await expect(page).toHaveURL(/group=status/);
-    await expect(boardColumn(main, "Finished")).toContainText(TITLES.ready);
-    await expect(boardColumn(main, "Running")).toContainText(TITLES.running);
-    await expect(boardColumn(main, "Interrupted")).toContainText(
-      TITLES.interrupted,
-    );
-    await expect(boardColumn(main, "Error")).toContainText(TITLES.error);
-
-    await grouping.selectOption("source");
-    await expect(boardColumn(main, "GitHub")).toContainText(TITLES.attention);
-    await expect(boardColumn(main, "GitHub")).toContainText(TITLES.interrupted);
-    await expect(boardColumn(main, "Slack")).toContainText(TITLES.running);
-    await expect(boardColumn(main, "Linear")).toContainText(TITLES.error);
-    await expect(boardColumn(main, "Dashboard")).toContainText(TITLES.ready);
-
-    await grouping.selectOption("repo");
-    await expect(boardColumn(main, "acme/alpha")).toContainText(
-      TITLES.attention,
-    );
-    await expect(boardColumn(main, "acme/beta")).toContainText(TITLES.running);
-    await expect(boardColumn(main, "acme/delta")).toContainText(TITLES.error);
-    await expect(boardColumn(main, "acme/epsilon")).toContainText(
-      TITLES.interrupted,
-    );
-    await expect(boardColumn(main, "acme/gamma")).toContainText(TITLES.ready);
-
-    await grouping.selectOption("pr");
-    await expect(boardColumn(main, "Draft")).toContainText(TITLES.attention);
-    await expect(boardColumn(main, "Open")).toContainText(TITLES.ready);
-    await expect(boardColumn(main, "Merged")).toContainText(TITLES.done);
-    await expect(boardColumn(main, "No pull request")).toContainText(
-      TITLES.running,
-    );
-
-    const sourceResponse = waitForThreadsPage(page, {
-      scope: "interactive",
-      q: WORKSPACE_QUERY,
-      source: "github",
-    });
-    await sourceFilter(main).selectOption("github");
-    expect((await sourceResponse).ok()).toBeTruthy();
-    await expect(main).toContainText(TITLES.attention);
-    await expect(main).toContainText(TITLES.interrupted);
-    await expect(main).not.toContainText(TITLES.running);
-
-    const resolvedResponse = waitForThreadsPage(page, {
-      scope: "interactive",
-      q: WORKSPACE_QUERY,
-      source: "github",
-      resolved: "false",
-    });
-    await triFilter(main, "Resolved")
-      .getByRole("button", { name: "No", exact: true })
-      .click();
-    expect((await resolvedResponse).ok()).toBeTruthy();
-    await expect(main).not.toContainText(TITLES.done);
-
-    const statusResponse = waitForThreadsPage(page, {
-      scope: "interactive",
-      q: WORKSPACE_QUERY,
-      source: "github",
-      resolved: "false",
-      status: "finished",
-    });
-    await statusFilter(main).selectOption("finished");
-    expect((await statusResponse).ok()).toBeTruthy();
-    await expect(main).toContainText(TITLES.attention);
-    await expect(main).not.toContainText(TITLES.interrupted);
-    await expect(main).not.toContainText(TITLES.error);
-
-    const resetSourceResponse = waitForThreadsPage(page, {
-      scope: "interactive",
-      q: WORKSPACE_QUERY,
-      resolved: "false",
-      status: "finished",
-    });
-    await sourceFilter(main).selectOption("any");
-    expect((await resetSourceResponse).ok()).toBeTruthy();
-
-    const resetStatusResponse = waitForThreadsPage(page, {
-      scope: "interactive",
-      q: WORKSPACE_QUERY,
-      resolved: "false",
-    });
-    await statusFilter(main).selectOption("any");
-    expect((await resetStatusResponse).ok()).toBeTruthy();
-
-    await triFilter(main, "Resolved")
-      .getByRole("button", { name: "Any", exact: true })
-      .click();
-    await expect
-      .poll(() => new URL(page.url()).searchParams.has("resolved"))
-      .toBe(false);
-
-    const viewedResponse = waitForThreadsPage(page, {
-      scope: "interactive",
-      q: WORKSPACE_QUERY,
-      viewed: "true",
-    });
-    await triFilter(main, "Viewed")
-      .getByRole("button", { name: "Yes", exact: true })
-      .click();
-    expect((await viewedResponse).ok()).toBeTruthy();
-    await expect(main).toContainText(TITLES.ready);
-    await expect(main).toContainText(TITLES.done);
-    await expect(main).not.toContainText(TITLES.attention);
-    await expect(main).not.toContainText(TITLES.running);
-  });
-
-  test("shows a recency-sorted project list in the sidebar", async ({
+  test("shows a recency-sorted repository list in the sidebar", async ({
     page,
     request,
   }, testInfo) => {
@@ -731,10 +537,11 @@ test.describe("threads workspace", () => {
     ]);
     await loginAs(page);
     await page.setViewportSize({ width: 1280, height: 900 });
-    await page.goto("/agents/threads");
+    await page.goto("/agents");
+    await dismissOnboardingIfShown(page);
 
     const sidebar = page.locator("[data-sidebar-frame]");
-    await sidebar.getByRole("button", { name: "Projects options" }).click();
+    await sidebar.getByRole("button", { name: "Repositories options" }).click();
     await page
       .getByRole("menuitemradio", { name: "Last updated", exact: true })
       .click();
@@ -773,7 +580,7 @@ test.describe("threads workspace", () => {
       0,
     );
 
-    // Collapsing a project hides only that project's threads.
+    // Collapsing a repository hides only that repository's threads.
     await betaGroup.click();
     await expect(betaGroup).toHaveAttribute("aria-expanded", "false");
     await expect(workspaceLinks).toHaveCount(4);
@@ -783,7 +590,7 @@ test.describe("threads workspace", () => {
     await betaGroup.click();
     await expect(workspaceLinks).toHaveCount(5);
 
-    await sidebar.getByRole("button", { name: "Projects options" }).click();
+    await sidebar.getByRole("button", { name: "Repositories options" }).click();
     await page
       .getByRole("menuitemcheckbox", { name: "Show archived", exact: true })
       .click();
@@ -815,23 +622,23 @@ test.describe("threads workspace", () => {
     });
   });
 
-  test("groups unprojected chats in a pinnable No project folder", async ({
+  test("groups repository-less chats in a pinnable No repository folder", async ({
     page,
     request,
   }, testInfo) => {
     const now = Date.now();
     await seedThreads(request, [
       {
-        id: THREAD_IDS.noProject,
-        metadata: baseMetadata(now, TITLES.noProject, 1_000, {
+        id: THREAD_IDS.noRepo,
+        metadata: baseMetadata(now, TITLES.noRepo, 1_000, {
           participant_logins: { [ADMIN_USER.login]: true },
           repo_owner: "",
           repo_name: "",
         }),
       },
       {
-        id: THREAD_IDS.pinnedProject,
-        metadata: baseMetadata(now, TITLES.pinnedProject, 2_000, {
+        id: THREAD_IDS.pinnedRepo,
+        metadata: baseMetadata(now, TITLES.pinnedRepo, 2_000, {
           participant_logins: { [ADMIN_USER.login]: true },
         }),
       },
@@ -841,17 +648,18 @@ test.describe("threads workspace", () => {
     });
     expect(loginResponse.ok()).toBeTruthy();
     await page.setViewportSize({ width: 1280, height: 900 });
-    await page.goto("/agents/threads");
+    await page.goto("/agents");
+    await dismissOnboardingIfShown(page);
 
     const sidebar = page.locator("[data-sidebar-frame]");
-    const noProject = sidebar.getByRole("button", {
-      name: "No project",
+    const noRepo = sidebar.getByRole("button", {
+      name: "No repository",
       exact: true,
     });
-    await expect(noProject).toBeVisible();
-    await expect(sidebar).toContainText(TITLES.noProject);
+    await expect(noRepo).toBeVisible();
+    await expect(sidebar).toContainText(TITLES.noRepo);
 
-    await sidebar.getByRole("button", { name: "Projects options" }).click();
+    await sidebar.getByRole("button", { name: "Repositories options" }).click();
     await expect(
       page.getByRole("menuitemradio", { name: "Created", exact: true }),
     ).toBeChecked();
@@ -863,207 +671,33 @@ test.describe("threads workspace", () => {
     });
     await page.keyboard.press("Escape");
 
-    await noProject.hover();
-    await sidebar.getByRole("button", { name: "Pin No project" }).click();
+    const pinNoRepo = sidebar.getByRole("button", {
+      name: "Pin No repository",
+      includeHidden: true,
+    });
+    await pinNoRepo.locator("..").hover();
+    await pinNoRepo.click();
     await expect(sidebar.getByText("Pinned", { exact: true })).toBeVisible();
     await expect(
-      sidebar.getByRole("button", { name: "No project", exact: true }),
+      sidebar.getByRole("button", { name: "No repository", exact: true }),
     ).toBeVisible();
 
     await page.reload();
-    const pinnedNoProject = sidebar.getByRole("button", {
-      name: "No project",
-      exact: true,
+    await dismissOnboardingIfShown(page);
+    await expect(sidebar).toContainText(TITLES.noRepo);
+    const unpinNoRepo = sidebar.getByRole("button", {
+      name: "Unpin No repository",
+      includeHidden: true,
     });
-    await expect(pinnedNoProject).toBeVisible();
-    await pinnedNoProject.hover();
-    await expect(
-      sidebar.getByRole("button", { name: "Unpin No project" }),
-    ).toBeVisible();
-    await expect(sidebar).toContainText(TITLES.noProject);
+    await unpinNoRepo.locator("..").hover();
+    await expect(unpinNoRepo).toBeVisible();
 
-    const screenshotPath = testInfo.outputPath("pinned-no-project.png");
+    const screenshotPath = testInfo.outputPath("pinned-no-repository.png");
     await sidebar.screenshot({ path: screenshotPath });
-    await testInfo.attach("pinned-no-project", {
+    await testInfo.attach("pinned-no-repository", {
       path: screenshotPath,
       contentType: "image/png",
     });
-  });
-
-  test("persists layout and column order and resolves threads", async ({
-    page,
-    request,
-  }) => {
-    await seedThreads(request, workspaceThreads());
-    await loginAs(page);
-
-    const pageResponse = waitForThreadsPage(page, {
-      scope: "interactive",
-      q: WORKSPACE_QUERY,
-    });
-    await page.goto(
-      `/agents/threads?q=${encodeURIComponent(WORKSPACE_QUERY)}&group=focus`,
-    );
-    expect((await pageResponse).ok()).toBeTruthy();
-
-    const main = page.getByRole("main").last();
-    await main.getByRole("button", { name: "List" }).click();
-    await expect
-      .poll(() => new URL(page.url()).searchParams.get("layout"))
-      .toBe("list");
-    await main.getByLabel("Group by").selectOption("source");
-    await expect
-      .poll(() => {
-        const url = new URL(page.url());
-        return {
-          layout: url.searchParams.get("layout"),
-          group: url.searchParams.get("group"),
-        };
-      })
-      .toEqual({ layout: "list", group: "source" });
-    await expect(main.locator("article")).toHaveCount(0);
-
-    await page.reload();
-    await expect(main.locator("article")).toHaveCount(0);
-    const slackGroup = main.locator(
-      'section:has(> div > span:text-is("Slack"))',
-    );
-    const githubGroup = main.locator(
-      'section:has(> div > span:text-is("GitHub"))',
-    );
-    await expect(slackGroup).toContainText(TITLES.running);
-    await expect(githubGroup).toContainText(TITLES.attention);
-    await expect(githubGroup).toContainText(TITLES.interrupted);
-    await expect(slackGroup).not.toContainText(TITLES.attention);
-
-    await main.getByRole("button", { name: "Board" }).click();
-    await expect
-      .poll(() => new URL(page.url()).searchParams.get("layout"))
-      .toBe("board");
-    await expect(main.locator("article").first()).toBeVisible();
-    await main.getByLabel("Group by").selectOption("focus");
-    await expect
-      .poll(() => new URL(page.url()).searchParams.get("group"))
-      .toBe("focus");
-    await expectBoardOrder(main, [
-      "Needs attention",
-      "In progress",
-      "Ready",
-      "Done",
-    ]);
-    await main
-      .getByRole("button", { name: "Move Needs attention right" })
-      .click();
-
-    await expect
-      .poll(() => new URL(page.url()).searchParams.get("order"))
-      .toBe("progress|attention|ready|done");
-    await expectBoardOrder(main, [
-      "In progress",
-      "Needs attention",
-      "Ready",
-      "Done",
-    ]);
-
-    const doneHeader = boardColumn(main, "Done").locator('[draggable="true"]');
-    await doneHeader.dragTo(boardColumn(main, "Needs attention"));
-    await expectBoardOrder(main, [
-      "In progress",
-      "Done",
-      "Needs attention",
-      "Ready",
-    ]);
-    await expect
-      .poll(() => new URL(page.url()).searchParams.get("order"))
-      .toBe("progress|done|attention|ready");
-
-    await page.reload();
-    await expectBoardOrder(main, [
-      "In progress",
-      "Done",
-      "Needs attention",
-      "Ready",
-    ]);
-    expect(
-      await page.evaluate(() =>
-        window.localStorage.getItem("open-swe:thread-board-order:focus"),
-      ),
-    ).toBe("progress|done|attention|ready");
-
-    await page.goto(
-      `/agents/threads?q=${encodeURIComponent(WORKSPACE_QUERY)}&layout=board&group=focus`,
-    );
-    await expectBoardOrder(main, [
-      "In progress",
-      "Done",
-      "Needs attention",
-      "Ready",
-    ]);
-
-    const readyCard = boardColumn(main, "Ready")
-      .locator("article")
-      .filter({ hasText: TITLES.ready });
-    const resolveResponse = page.waitForResponse(
-      (response) =>
-        response.request().method() === "POST" &&
-        new URL(response.url()).pathname ===
-          `/dashboard/api/threads/${THREAD_IDS.ready}/resolve`,
-    );
-    await readyCard.getByRole("button", { name: "Resolve thread" }).click();
-    expect((await resolveResponse).ok()).toBeTruthy();
-    await expect(boardColumn(main, "Done")).toContainText(TITLES.ready);
-    await expect(boardColumn(main, "Ready")).toHaveCount(0);
-
-    const resolvedCard = boardColumn(main, "Done")
-      .locator("article")
-      .filter({ hasText: TITLES.ready });
-    const reopenResponse = page.waitForResponse(
-      (response) =>
-        response.request().method() === "POST" &&
-        new URL(response.url()).pathname ===
-          `/dashboard/api/threads/${THREAD_IDS.ready}/resolve`,
-    );
-    await resolvedCard.getByRole("button", { name: "Reopen thread" }).click();
-    expect((await reopenResponse).ok()).toBeTruthy();
-    await expect(boardColumn(main, "Ready")).toContainText(TITLES.ready);
-  });
-
-  test("paginates the real list endpoint", async ({ page, request }) => {
-    await seedThreads(request, paginationThreads());
-    await loginAs(page);
-
-    const firstPageResponse = waitForThreadsPage(page, {
-      scope: "interactive",
-      q: "E2E Pagination",
-      limit: "25",
-      offset: "0",
-    });
-    await page.goto(
-      "/agents/threads?layout=list&group=none&q=E2E%20Pagination",
-    );
-    expect((await firstPageResponse).ok()).toBeTruthy();
-
-    const main = page.getByRole("main").last();
-    await expect(main.getByText("1–25+", { exact: true })).toBeVisible();
-    await expect(main).toContainText("E2E Pagination thread 01");
-    await expect(main).not.toContainText("E2E Pagination thread 26");
-
-    const secondPageResponse = waitForThreadsPage(page, {
-      scope: "interactive",
-      q: "E2E Pagination",
-      limit: "25",
-      offset: "25",
-    });
-    await main.getByRole("button", { name: "Next" }).click();
-    expect((await secondPageResponse).ok()).toBeTruthy();
-    await expect(main.getByText("Page 2", { exact: true })).toBeVisible();
-    await expect(main.getByText("26–26", { exact: true })).toBeVisible();
-    await expect(main).toContainText("E2E Pagination thread 26");
-    await expect(main.getByRole("button", { name: "Next" })).toBeDisabled();
-
-    await main.getByRole("button", { name: "Prev" }).click();
-    await expect(main.getByText("Page 1", { exact: true })).toBeVisible();
-    await expect(main).toContainText("E2E Pagination thread 01");
   });
 });
 

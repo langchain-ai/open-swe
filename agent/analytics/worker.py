@@ -6,7 +6,7 @@ import logging
 from agent.analytics.outbox import deliver_batch
 from agent.analytics.retention import enforce_retention
 from agent.analytics.summaries import recompute_dirty_partitions
-from agent.database.analytics import configured
+from agent.database import configured
 
 logger = logging.getLogger(__name__)
 

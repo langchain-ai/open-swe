@@ -4,7 +4,7 @@ import logging
 from collections.abc import Awaitable, Callable
 from functools import wraps
 
-from agent.database.analytics import configured
+from agent.database import configured
 
 logger = logging.getLogger(__name__)
 

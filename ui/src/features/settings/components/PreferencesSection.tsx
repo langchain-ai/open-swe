@@ -35,6 +35,10 @@ const VISIBILITIES: Array<{ value: ThreadVisibility; label: string }> = [
   { value: "public", label: "Workspace" },
 ]
 
+// Radix's Select rejects an empty-string item value, so "no default" needs a
+// sentinel that is translated back to null on save.
+const NO_DEFAULT_WORKSPACE = "__no_default_workspace__"
+
 export function PreferencesSection() {
   const { theme, setTheme } = useTheme()
   const qc = useQueryClient()
@@ -45,6 +49,11 @@ export function PreferencesSection() {
   const savePreferences = useMutation({
     mutationFn: api.saveMyPreferences,
     onSuccess: (data) => qc.setQueryData(["myPreferences"], data),
+  })
+  const workspaceOptions = useQuery({
+    queryKey: ["workspace-options"],
+    queryFn: api.listWorkspaceOptions,
+    staleTime: 60_000,
   })
   const archiveThreads = useMutation({
     mutationFn: agentsApi.resolveAllThreads,
@@ -117,6 +126,45 @@ export function PreferencesSection() {
               {VISIBILITIES.map((v) => (
                 <SelectItem key={v.value} value={v.value}>
                   {v.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        }
+      />
+      <SettingsRow
+        label="Default workspace"
+        description={
+          savePreferences.error
+            ? `Could not save: ${savePreferences.error.message}`
+            : "Preselected in the composer's workspace picker when the chosen repository does not belong to another workspace."
+        }
+        control={
+          <Select
+            value={preferences.data?.default_workspace ?? NO_DEFAULT_WORKSPACE}
+            onValueChange={(v) =>
+              v &&
+              savePreferences.mutate({
+                ...preferences.data!,
+                default_workspace: v === NO_DEFAULT_WORKSPACE ? null : v,
+              })
+            }
+            disabled={
+              preferences.isLoading ||
+              savePreferences.isPending ||
+              workspaceOptions.isLoading
+            }
+          >
+            <SelectTrigger className="w-48">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value={NO_DEFAULT_WORKSPACE}>
+                Workspace default
+              </SelectItem>
+              {(workspaceOptions.data?.workspaces ?? []).map((workspace) => (
+                <SelectItem key={workspace.slug} value={workspace.slug}>
+                  {workspace.name}
                 </SelectItem>
               ))}
             </SelectContent>

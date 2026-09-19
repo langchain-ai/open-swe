@@ -9,10 +9,10 @@ import {
   mentionReplacementText,
 } from "./ComposerPromptEditor"
 import { ContextWindowMeter } from "./ContextWindowMeter"
-import { EnvironmentSelector } from "./EnvironmentSelector"
+import { WorkspaceSelector } from "./WorkspaceSelector"
 import {
   LocalBranchSelector,
-  LocalProjectSelector,
+  LocalRepoSelector,
   LocalWorkspaceSelector,
   RunTargetSelector,
 } from "./RunTargetSelector"
@@ -34,7 +34,7 @@ import type {
   DesktopProjectRef,
   DesktopWorkspaceMode,
 } from "@/desktop"
-import type { EnvironmentOption, ModelOption, Skill } from "@/lib/api"
+import type { ModelOption, Skill, WorkspaceOption } from "@/lib/api"
 import type { ImageChunk } from "@/features/agents/lib/types"
 import type { ModelSelection } from "@/features/agents/lib/provider/useModelOptions"
 import { ModelPicker } from "@/features/agents/components/ModelPicker"
@@ -106,25 +106,25 @@ export interface ChatComposerProps {
   /** Desktop-only execution target. Omit this prop to keep the control out of the web UI. */
   runTarget?: RunTarget
   onRunTargetChange?: (next: RunTarget) => void
-  localProjects?: Array<DesktopProject>
-  selectedLocalProjectPath?: string | null
-  selectedLocalProjectBranch?: string | null
-  localProjectBranches?: Array<DesktopProjectRef>
+  localRepos?: Array<DesktopProject>
+  selectedLocalRepoPath?: string | null
+  selectedLocalRepoBranch?: string | null
+  localRepoBranches?: Array<DesktopProjectRef>
   localWorkspaceMode?: DesktopWorkspaceMode
   localWorktreeLabel?: string
   onLocalWorkspaceModeChange?: (next: DesktopWorkspaceMode) => void
-  onSelectLocalProject?: (cwd: string) => void
-  onAddLocalProject?: () => void
-  onRemoveLocalProject?: (cwd: string) => void
-  onRefreshLocalProjectBranch?: () => void
-  onSelectLocalProjectBranch?: (branch: string) => void
+  onSelectLocalRepo?: (cwd: string) => void
+  onAddLocalRepo?: () => void
+  onRemoveLocalRepo?: (cwd: string) => void
+  onRefreshLocalRepoBranch?: () => void
+  onSelectLocalRepoBranch?: (branch: string) => void
   /** When provided, a Plan mode toggle is shown. Plan mode researches read-only and proposes a plan before editing. */
   planMode?: boolean
   onPlanModeChange?: (next: boolean) => void
-  /** Environments a new thread can boot from. The picker appears only when there are several. */
-  environments?: Array<EnvironmentOption>
-  selectedEnvironment?: string | null
-  onEnvironmentChange?: (slug: string | null) => void
+  /** Workspaces a new thread can boot from. The picker appears only when there are several. */
+  workspaceOptions?: Array<WorkspaceOption>
+  selectedWorkspace?: string | null
+  onWorkspaceChange?: (slug: string | null) => void
   /** Paths offered by `@` autocomplete — in a thread, the files the agent has touched. */
   mentionPaths?: Array<string>
   skills?: Array<Skill>
@@ -233,23 +233,23 @@ export const ChatComposer = memo(function ChatComposer({
   onRepoChange,
   runTarget,
   onRunTargetChange,
-  localProjects = [],
-  selectedLocalProjectPath = null,
-  selectedLocalProjectBranch = null,
-  localProjectBranches = [],
+  localRepos = [],
+  selectedLocalRepoPath = null,
+  selectedLocalRepoBranch = null,
+  localRepoBranches = [],
   localWorkspaceMode = "local",
   localWorktreeLabel,
   onLocalWorkspaceModeChange,
-  onSelectLocalProject,
-  onAddLocalProject,
-  onRemoveLocalProject,
-  onRefreshLocalProjectBranch,
-  onSelectLocalProjectBranch,
+  onSelectLocalRepo,
+  onAddLocalRepo,
+  onRemoveLocalRepo,
+  onRefreshLocalRepoBranch,
+  onSelectLocalRepoBranch,
   planMode = false,
   onPlanModeChange,
-  environments = [],
-  selectedEnvironment = null,
-  onEnvironmentChange,
+  workspaceOptions = [],
+  selectedWorkspace = null,
+  onWorkspaceChange,
   mentionPaths = [],
   skills = [],
   contextUsage,
@@ -629,56 +629,56 @@ export const ChatComposer = memo(function ChatComposer({
 
       {(onRepoChange ||
         onRunTargetChange ||
-        onEnvironmentChange ||
-        onSelectLocalProjectBranch) && (
+        onWorkspaceChange ||
+        onSelectLocalRepoBranch) && (
         <div className="relative mx-5 -mb-3 flex min-w-0 flex-wrap items-center gap-x-5 gap-y-2 rounded-t-2xl bg-accent px-4 pt-3 pb-5 text-xs dark:bg-muted">
+          {runTarget && onRunTargetChange && (
+            <RunTargetSelector onChange={onRunTargetChange} value={runTarget} />
+          )}
+          {runTarget !== "local" && onWorkspaceChange && (
+            <WorkspaceSelector
+              workspaces={workspaceOptions}
+              selectedSlug={selectedWorkspace}
+              onChange={onWorkspaceChange}
+            />
+          )}
           {runTarget !== "local" && onRepoChange && (
             <RepoSelector
-              emptySelectionLabel="Don't work in a project"
-              noMatchesLabel="No matching projects"
+              emptySelectionLabel="Don't work in a repository"
+              noMatchesLabel="No matching repositories"
               onRepoChange={onRepoChange}
-              placeholder="Select project"
+              placeholder="Select repository"
               repos={repos}
-              searchPlaceholder="Search projects…"
+              searchPlaceholder="Search repositories…"
               selectedRepo={selectedRepo}
               side="top"
             />
           )}
           {runTarget === "local" &&
-            onSelectLocalProject &&
-            onAddLocalProject &&
-            onRemoveLocalProject && (
-              <LocalProjectSelector
-                onAddProject={onAddLocalProject}
-                onRemoveProject={onRemoveLocalProject}
-                onSelectProject={onSelectLocalProject}
-                projects={localProjects}
-                selectedProjectPath={selectedLocalProjectPath}
+            onSelectLocalRepo &&
+            onAddLocalRepo &&
+            onRemoveLocalRepo && (
+              <LocalRepoSelector
+                onAddRepo={onAddLocalRepo}
+                onRemoveRepo={onRemoveLocalRepo}
+                onSelectRepo={onSelectLocalRepo}
+                repos={localRepos}
+                selectedRepoPath={selectedLocalRepoPath}
                 side="top"
               />
             )}
-          {runTarget && onRunTargetChange && (
-            <RunTargetSelector onChange={onRunTargetChange} value={runTarget} />
-          )}
-          {runTarget !== "local" && onEnvironmentChange && (
-            <EnvironmentSelector
-              environments={environments}
-              selectedSlug={selectedEnvironment}
-              onChange={onEnvironmentChange}
-            />
-          )}
           {runTarget === "local" &&
-            onRefreshLocalProjectBranch &&
-            onSelectLocalProjectBranch && (
+            onRefreshLocalRepoBranch &&
+            onSelectLocalRepoBranch && (
               <LocalBranchSelector
-                refs={localProjectBranches}
-                disabled={!selectedLocalProjectPath}
-                onRefresh={onRefreshLocalProjectBranch}
-                onSelectBranch={onSelectLocalProjectBranch}
-                selectedBranch={selectedLocalProjectBranch}
+                refs={localRepoBranches}
+                disabled={!selectedLocalRepoPath}
+                onRefresh={onRefreshLocalRepoBranch}
+                onSelectBranch={onSelectLocalRepoBranch}
+                selectedBranch={selectedLocalRepoBranch}
               />
             )}
-          {runTarget === "local" && onSelectLocalProjectBranch && (
+          {runTarget === "local" && onSelectLocalRepoBranch && (
             <LocalWorkspaceSelector
               onChange={onLocalWorkspaceModeChange}
               value={localWorkspaceMode}

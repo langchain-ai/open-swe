@@ -92,9 +92,8 @@ def _execute_client_grace_seconds() -> int:
     return _parse_optional_int("SANDBOX_EXECUTE_CLIENT_GRACE_SECONDS", 30)
 
 
-def _get_sandbox_snapshot_config() -> tuple[str | None, int, int, int, int, int]:
+def _get_sandbox_snapshot_config() -> tuple[int, int, int, int, int]:
     """Get sandbox snapshot configuration from environment."""
-    snapshot_id = ENV.DEFAULT_SANDBOX_SNAPSHOT_ID.optional()
     fs_capacity_bytes = _parse_optional_int(
         "DEFAULT_SANDBOX_SNAPSHOT_FS_CAPACITY_BYTES", DEFAULT_SNAPSHOT_FS_CAPACITY_BYTES
     )
@@ -108,7 +107,6 @@ def _get_sandbox_snapshot_config() -> tuple[str | None, int, int, int, int, int]
         DEFAULT_SANDBOX_DELETE_AFTER_STOP_SECONDS,
     )
     return (
-        snapshot_id,
         fs_capacity_bytes,
         vcpus,
         mem_bytes,
@@ -459,42 +457,6 @@ async def connect_async_langsmith_sandbox(sandbox_id: str) -> tuple[AsyncSandbox
         raise
 
 
-async def create_langsmith_sandbox_from_params(
-    create_params: dict[str, Any],
-) -> SandboxBackendProtocol:
-    """Create a ready LangSmith sandbox from an unfiltered create-body object."""
-    params = _merge_sandbox_create_extra_fields(create_params)
-    sdk_keys = {
-        "snapshot_id",
-        "snapshot_name",
-        "name",
-        "timeout",
-        "wait_for_ready",
-        "idle_ttl_seconds",
-        "delete_after_stop_seconds",
-        "vcpus",
-        "mem_bytes",
-        "fs_capacity_bytes",
-        "mount_config",
-        "proxy_config",
-    }
-    sdk_params = {key: value for key, value in params.items() if key in sdk_keys}
-    extra_params = {key: value for key, value in params.items() if key not in sdk_keys}
-    wait_for_ready = sdk_params.get("wait_for_ready", True)
-    timeout = sdk_params.get("timeout", 180)
-    if not isinstance(timeout, int):
-        raise ValueError("timeout must be an integer")
-
-    async with AsyncSandboxClient(
-        api_key=_get_langsmith_api_key(), api_endpoint=_get_sandbox_api_endpoint()
-    ) as client:
-        _install_create_extra_fields(client, extra_params)
-        sandbox = await client.create_sandbox(**sdk_params)
-        if wait_for_ready is False:
-            sandbox = await client.wait_for_sandbox(sandbox.name, timeout=timeout)
-        return TimeoutLangSmithSandbox(sandbox.to_sync())
-
-
 async def create_langsmith_sandbox(
     sandbox_id: str | None = None,
     github_token: str | None = None,
@@ -517,7 +479,7 @@ async def create_langsmith_sandbox(
         github_token: Optional GitHub token. Used to configure proxy auth on
                       new sandboxes. Ignored when connecting to an existing sandbox.
         snapshot_id: Optional repo-scoped snapshot to boot from. When omitted,
-            uses DEFAULT_SANDBOX_SNAPSHOT_ID or the API's root snapshot.
+            uses the API's root snapshot.
         mem_bytes: Optional memory capacity override for a newly-created sandbox.
         vcpus: Optional virtual CPU count override for a newly-created sandbox.
         fs_capacity_bytes: Optional filesystem capacity override for a newly-created sandbox.
@@ -528,7 +490,6 @@ async def create_langsmith_sandbox(
     """
     api_key = _get_langsmith_api_key()
     (
-        default_snapshot_id,
         default_fs_capacity_bytes,
         default_vcpus,
         default_mem_bytes,
@@ -536,7 +497,7 @@ async def create_langsmith_sandbox(
         delete_after_stop_seconds,
     ) = _get_sandbox_snapshot_config()
 
-    effective_snapshot_id = snapshot_id or default_snapshot_id or ""
+    effective_snapshot_id = snapshot_id or ""
     if mem_bytes is None and vcpus is None:
         effective_mem_bytes = default_mem_bytes
         effective_vcpus = default_vcpus

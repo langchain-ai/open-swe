@@ -170,7 +170,7 @@ async def test_workflow_change_does_not_misattribute_preexisting_workflows() -> 
 
 
 def test_workflow_approval_response_serializes_review_fields() -> None:
-    from agent.dashboard.workflow_approval import workflow_push_approval_response
+    from agent.threads.workflow_approval import workflow_push_approval_response
 
     response = workflow_push_approval_response(
         {
@@ -261,6 +261,15 @@ async def test_unapproved_workflow_push_blocks_and_posts_slack(
     monkeypatch.setattr(guard, "ensure_workflow_push_pending", fake_pending)
     monkeypatch.setattr(guard, "post_slack_thread_reply_with_ts", fake_post)
     monkeypatch.setattr(guard, "mark_workflow_push_notified", fake_notified)
+
+    class _NoThreadsClient:
+        async def get(self, thread_id: str) -> dict[str, str]:
+            raise KeyError(thread_id)
+
+    class _NoClient:
+        threads = _NoThreadsClient()
+
+    monkeypatch.setattr(guard, "get_client", lambda url: _NoClient())
 
     called = False
 

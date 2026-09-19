@@ -51,7 +51,7 @@ Each cloud coding thread is bound to its own persistent sandbox, so the agent ca
 - Investigates repositories, plans work, edits code, and runs focused validation
 - Commits and pushes changes, then opens or updates pull requests
 - Uses subagents to parallelize research and independent work
-- Supports reusable skills, repository instructions, and custom environments
+- Supports reusable skills, repository instructions, and custom workspaces
 
 ### Review
 
@@ -102,7 +102,7 @@ This composition keeps the system extensible while allowing it to inherit improv
 
 ### Sandboxes contain the work
 
-Cloud work runs in isolated Linux sandboxes with the development tooling supplied by the configured environment or snapshot. A sandbox persists with its thread, but an unreachable coding sandbox is not silently replaced—Open SWE fails safely rather than risk discarding uncommitted work.
+Cloud work runs in isolated Linux sandboxes with the development tooling supplied by the workspace's setup scripts or snapshot. A sandbox persists with its thread, but an unreachable coding sandbox is not silently replaced—Open SWE fails safely rather than risk discarding uncommitted work.
 
 [LangSmith](https://smith.langchain.com/) is the default sandbox and tracing provider. Open SWE also supports [Modal](https://modal.com/), [Daytona](https://www.daytona.io/), [Runloop](https://www.runloop.ai/), [E2B](https://e2b.dev/), and local execution, with a pluggable interface for additional providers.
 
@@ -114,9 +114,9 @@ Deep Agents supplies the core filesystem, shell, and subagent tools. Open SWE ad
 
 - **Dashboard** — Start and continue tasks, inspect work, manage pull requests, and configure user or team settings.
 - **GitHub** — Start tasks from issues, request changes from pull request conversations, run reviews, and continue work on the same branch.
-- **Slack** — Start from a channel, thread, or code channel and receive progress and delivery updates in context.
+- **Slack** — Start from a channel, thread, or code channel, and receive progress and delivery updates in context.
 - **Linear** — Invoke Open SWE from an issue and post results back to the issue.
-- **Desktop (experimental)** — Run the same agent against local projects. Packaged releases currently target macOS; source builds also support Windows and Linux.
+- **Desktop (experimental)** — Run the same agent against local repositories. Packaged releases currently target macOS; source builds also support Windows and Linux.
 
 ## Control and safety
 

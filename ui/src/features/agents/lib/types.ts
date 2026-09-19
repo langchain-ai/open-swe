@@ -59,6 +59,7 @@ export type AcpToolKind =
   | "fetch"
   | "slack"
   | "linear"
+  | "sql"
   /** deepagents `task` tool — spawns a subagent; rendered as a subagent card. */
   | "task"
   | "other"
@@ -189,7 +190,7 @@ export interface Message {
   hidden?: boolean
 }
 
-export interface Project {
+export interface LocalRepo {
   id: string
   path: string
   name: string
@@ -199,12 +200,14 @@ export interface Project {
 }
 
 export type SlackNotificationMode = "always" | "on_action"
+export type AutomationTrigger = "schedule" | "github_issue_opened"
 
 export interface AgentSchedule {
   id: string
   name: string
   prompt: string
-  schedule: string
+  schedule: string | null
+  trigger: AutomationTrigger
   scope: "workspace"
   repo: string | null
   slackChannelId?: string | null

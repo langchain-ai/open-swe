@@ -6,7 +6,7 @@ from agent.incidents import channels, service
 from agent.incidents.models import Incident, IncidentPolicy
 from agent.incidents.runtime import current_run_id
 from agent.run_config import RunConfig
-from agent.slack.client import get_slack_channel_info
+from agent.slack.channels import SlackChannel
 from agent.utils.dashboard_links import dashboard_incident_url
 
 IncidentAction = Literal["start", "pause", "resume", "complete"]
@@ -51,6 +51,21 @@ async def manage_incident(action: IncidentAction) -> dict[str, Any]:
     control = _CONTROLS[action].get(record.status)
     if control is None:
         return _result(record, action, changed=False)
+    # Both sides must name a real run: a dashboard completion records no run id and
+    # current_run_id() is empty outside a run, which must not read as a match.
+    closed_by_this_run = (
+        bool(record.completed_run_id) and record.completed_run_id == current_run_id()
+    )
+    if control == "reopen" and closed_by_this_run:
+        return {
+            "success": False,
+            "error": (
+                "This run just completed the incident; it cannot reopen it. A responder can "
+                "mention me with reopen if it should keep going."
+            ),
+            "status": record.status,
+            "incident_id": record.id,
+        }
     # The current run is the one carrying out the request, so it must keep running.
     record = await channels.apply_control(
         record, control, _actor(cfg), keep_run_id=current_run_id()
@@ -67,7 +82,7 @@ async def _start(cfg: RunConfig, policy: IncidentPolicy, channel_id: str) -> dic
                 "(Sign in with Slack in the dashboard)"
             ),
         }
-    info = await get_slack_channel_info(channel_id, use_cache=False)
+    info = await SlackChannel.fetch(channel_id, use_cache=False)
     if info is None or not service.channel_allowed(info, policy, require_prefix=False):
         return {
             "success": False,

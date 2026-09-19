@@ -93,7 +93,9 @@ async def test_schedule_creates_one_debounced_system_turn(record, policy, platfo
     assert configurable["source"] == "incidents_agent"
     assert configurable["incident_id"] == "i1"
     assert configurable["slack_thread"] == {"channel_id": "C1", "thread_ts": "0"}
-    assert not {"github_login", "user_email", "incident_request"} & configurable.keys()
+    assert not {"github_login", "user_email"} & configurable.keys()
+    # Present and null, so a stale question on the thread cannot survive into this turn.
+    assert configurable["incident_request"] is None
     assert kwargs["metadata"]["incident_turn"] == "automatic"
     assert "New activity" in json.dumps(kwargs["input"])
 

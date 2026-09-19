@@ -8,8 +8,9 @@ from langgraph.config import get_config
 from langgraph.prebuilt import InjectedState
 
 from agent.analytics.usage import record_reviewer_publication
-from agent.dashboard.team_settings import get_team_review_trace_links_enabled
+from agent.dashboard.workspace_settings import get_workspace_settings
 from agent.github.checks import review_check_conclusion
+from agent.github.pull_requests import PullRequest
 from agent.github.thread_token import (
     GitHubAuthError,
     get_github_token,
@@ -147,7 +148,7 @@ async def publish_review(
 async def _resolve_review_trace_url(thread_id: str, config_override: bool | None) -> str | None:
     if config_override is False:
         return None
-    if not await get_team_review_trace_links_enabled():
+    if not (await get_workspace_settings()).review_trace_links_enabled:
         return None
     if not thread_id:
         return None
@@ -510,6 +511,22 @@ async def _publish_review_async(
         title=check_title,
         summary=check_summary,
     )
+
+    try:
+        await PullRequest(owner=owner, repo=repo, number=pr_number).link_review(
+            reviewer_thread_id=thread_id,
+            github_review_id=review_id if isinstance(review_id, int) else None,
+            head_sha=head_sha,
+            finding_count=len(inline_comments),
+        )
+    except Exception:  # noqa: BLE001
+        # The review is already published on GitHub; a registry write must not
+        # turn that into a tool failure the agent retries.
+        logger.warning(
+            "Failed to link published review to its pull request",
+            extra={"pr_repo_full_name": f"{owner}/{repo}", "pr_number": pr_number},
+            exc_info=True,
+        )
 
     result: dict[str, Any] = {
         "success": True,

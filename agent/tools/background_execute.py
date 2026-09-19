@@ -338,7 +338,7 @@ def owns_task(task_id: str) -> bool:
     before task kinds existed, and such a task can still be running in a
     sandbox that predates this code.
     """
-    from agent.dashboard.environment_refresh import owns_task as refresh_owns_task
+    from agent.workspaces.refresh import owns_task as refresh_owns_task
 
     return not refresh_owns_task(task_id)
 

@@ -1,3 +1,5 @@
+"""Analytics-only database state: the workspace identity and reporting cutover."""
+
 import asyncio
 import logging
 from datetime import datetime
@@ -13,16 +15,11 @@ from agent.database import postgres
 logger = logging.getLogger(__name__)
 
 _WORKSPACE_ID: UUID | None = None
-analytics_uri = postgres.uri
-configured = postgres.configured
-engine = postgres.engine
-connection = postgres.connection
-transaction = postgres.transaction
 
 
 def workspace_id() -> UUID:
     if _WORKSPACE_ID is None:
-        raise RuntimeError("analytics migrations have not completed")
+        raise RuntimeError("analytics workspace has not been loaded")
     return _WORKSPACE_ID
 
 
@@ -41,9 +38,7 @@ async def record_capture(conn: AsyncConnection) -> None:
 
 async def activate_reporting() -> None:
     """Start a fresh reporting period once, when the SQL reporting path is enabled."""
-    if not configured():
-        return
-    async with transaction() as conn:
+    async with postgres.transaction() as conn:
         await conn.execute(
             text(
                 "UPDATE deployment_metadata SET reporting_cutover_at = clock_timestamp() "
@@ -81,42 +76,23 @@ async def reporting_metadata(conn: AsyncConnection) -> dict[str, Any]:
     }
 
 
-async def migrate() -> None:
+async def load_workspace() -> None:
+    """Load the analytics workspace identity; run after ``database.migrate``."""
     global _WORKSPACE_ID
-    if not configured():
-        logger.info(
-            "Analytics disabled",
-            extra={"analytics_database_setting": "POSTGRES_URI", "analytics_reason": "unset"},
-        )
-        return
-    logger.info(
-        "Initializing database",
-        extra={"database_setting": "POSTGRES_URI", "database_schema": postgres.SCHEMA},
-    )
-    await postgres.migrate()
-    async with connection() as conn:
-        persisted_workspace = await conn.scalar(
-            text("SELECT workspace_id FROM deployment_metadata")
-        )
-    if persisted_workspace is None:
+    async with postgres.connection() as conn:
+        persisted = await conn.scalar(text("SELECT workspace_id FROM deployment_metadata"))
+    if persisted is None:
         raise RuntimeError("analytics deployment metadata is missing")
-    _WORKSPACE_ID = persisted_workspace
-    logger.info(
-        "Database initialized",
-        extra={
-            "database_setting": "POSTGRES_URI",
-            "database_schema": postgres.SCHEMA,
-            "analytics_workspace_id": str(persisted_workspace),
-        },
-    )
+    _WORKSPACE_ID = persisted
+    logger.info("Analytics workspace loaded", extra={"analytics_workspace_id": str(persisted)})
 
 
 async def readiness() -> dict[str, Any]:
     try:
-        if not configured():
+        if not postgres.configured():
             return {"configured": False, "ready": False, "reason": "not configured"}
         async with asyncio.timeout(ENV.ANALYTICS_HEALTH_TIMEOUT_SECONDS.get_int(3)):
-            async with connection() as conn:
+            async with postgres.connection() as conn:
                 event_count = await conn.scalar(text("SELECT count(*) FROM events WHERE false"))
                 pending = await conn.scalar(
                     text("SELECT count(*) FROM outbox WHERE state = 'pending'")
@@ -136,9 +112,3 @@ async def readiness() -> dict[str, Any]:
     except Exception as exc:  # noqa: BLE001
         logger.warning("Analytics readiness check failed", exc_info=True)
         return {"configured": True, "ready": False, "reason": type(exc).__name__}
-
-
-async def close() -> None:
-    global _WORKSPACE_ID
-    await postgres.close()
-    _WORKSPACE_ID = None

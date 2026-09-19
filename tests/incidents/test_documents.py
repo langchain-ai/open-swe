@@ -6,6 +6,7 @@ from fastapi import FastAPI, HTTPException
 
 from agent.incidents import documents, service
 from agent.incidents.models import Evidence, Hypothesis, Incident, IncidentPolicy, IncidentReport
+from agent.slack.channels import SlackChannel
 
 CHANNEL = {
     "id": "C1",
@@ -23,7 +24,7 @@ async def record(fake_store, monkeypatch):
     await service.POLICIES.put(
         "default", IncidentPolicy(enabled=True, workspace_id="T1", slack_app_id="A1")
     )
-    monkeypatch.setattr(service, "get_slack_channel_info", AsyncMock(return_value=dict(CHANNEL)))
+    monkeypatch.setattr(SlackChannel, "fetch", AsyncMock(return_value=dict(CHANNEL)))
     incident = Incident(
         id="incident-1",
         workspace_id="T1",
@@ -85,7 +86,7 @@ async def test_curated_history_keeps_titles_but_follows_channel_access(record):
     assert (await documents.search_history(q="availability"))["items"][0]["title"] == (
         "API availability"
     )
-    service.get_slack_channel_info.return_value = {**CHANNEL, "is_member": False}
+    SlackChannel.fetch.return_value = {**CHANNEL, "is_member": False}
     assert (await documents.search_history())["items"] == []
     with pytest.raises(HTTPException) as error:
         await current(record)
@@ -94,7 +95,7 @@ async def test_curated_history_keeps_titles_but_follows_channel_access(record):
 
 @pytest.mark.parametrize(("info", "status"), [(None, 503), ({"is_member": False}, 404)])
 async def test_document_reads_distinguish_outages_from_revocation(record, info, status):
-    service.get_slack_channel_info.return_value = info
+    SlackChannel.fetch.return_value = info
     with pytest.raises(HTTPException) as error:
         await current(record)
     assert error.value.status_code == status
@@ -107,19 +108,19 @@ async def test_store_outage_is_not_an_empty_summary(record, monkeypatch):
 
 
 async def test_documents_api_is_read_only_and_checks_channel_access(record):
-    from agent.dashboard import incidents_api
-    from agent.incidents.document_api import router
+    from agent.incidents import routes as incidents_routes
+    from agent.incidents.document_routes import router
 
     await documents.update_from_report(record, report())
     app = FastAPI()
     app.include_router(router, prefix="/documents")
-    app.dependency_overrides[incidents_api.require_session] = lambda: {"sub": "test-user"}
+    app.dependency_overrides[incidents_routes.require_session] = lambda: {"sub": "test-user"}
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=app), base_url="http://test"
     ) as client:
         assert (await client.get(f"/documents/{record.id}")).json()["postmortem"]["markdown"]
         assert (await client.put(f"/documents/{record.id}/postmortem", json={})).status_code == 404
-        service.get_slack_channel_info.return_value = {**CHANNEL, "is_member": False}
+        SlackChannel.fetch.return_value = {**CHANNEL, "is_member": False}
         assert (await client.get(f"/documents/{record.id}")).status_code == 404
 
 

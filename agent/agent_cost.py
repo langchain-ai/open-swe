@@ -2,7 +2,7 @@
 
 import logging
 from collections.abc import Mapping
-from typing import Any, Literal, TypedDict
+from typing import Any, Literal, NotRequired, TypedDict
 
 from langgraph_sdk.client import LangGraphClient
 
@@ -27,6 +27,7 @@ class AgentCostRefresh(TypedDict):
     thread_id: str
     invocation_id: str
     prepare_run_id: str
+    invocation_started_at: NotRequired[str]
     run_id: str
     attempt: int
 
@@ -48,7 +49,7 @@ def _payload(state: Mapping[str, Any], attempt: int) -> AgentCostRefresh | None:
     invocation_id = invocation_id or legacy_run_id
     if thread_id is None or invocation_id is None:
         return None
-    return {
+    payload: AgentCostRefresh = {
         "task": "agent_cost",
         "thread_id": thread_id,
         "invocation_id": invocation_id,
@@ -56,6 +57,9 @@ def _payload(state: Mapping[str, Any], attempt: int) -> AgentCostRefresh | None:
         "run_id": invocation_id,
         "attempt": attempt,
     }
+    if started_at := _value(state, "invocation_started_at"):
+        payload["invocation_started_at"] = started_at
+    return payload
 
 
 async def schedule_agent_cost_refresh(
@@ -105,8 +109,11 @@ async def run_agent_cost_refresh(
         return {"status": "unavailable", "reason": "invalid payload"}
 
     try:
+        cost_kwargs: dict[str, Any] = {"run_only": True}
+        if started_at := payload.get("invocation_started_at"):
+            cost_kwargs["lookup_start"] = started_at
         snapshot = await get_langsmith_thread_cost(
-            payload["thread_id"], payload["invocation_id"], run_only=True
+            payload["thread_id"], payload["invocation_id"], **cost_kwargs
         )
     except LangSmithCostUnavailable as exc:
         logger.info(
@@ -159,6 +166,7 @@ async def finalize_agent_invocation_usage(
     *,
     invocation_id: str,
     thread_id: str,
+    invocation_started_at: str | None = None,
     state: dict[str, Any] | None,
     status: str = "success",
     failure_code: str | None = None,
@@ -177,7 +185,15 @@ async def finalize_agent_invocation_usage(
         ):
             return
         scheduled = await schedule_agent_cost_refresh(
-            {"thread_id": thread_id, "invocation_id": invocation_id}
+            {
+                "thread_id": thread_id,
+                "invocation_id": invocation_id,
+                **(
+                    {"invocation_started_at": invocation_started_at}
+                    if invocation_started_at
+                    else {}
+                ),
+            }
         )
         if scheduled:
             await mark_agent_invocation_cost_refresh_scheduled(invocation_id=invocation_id)

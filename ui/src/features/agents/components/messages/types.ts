@@ -1,6 +1,6 @@
 import type {
   Message,
-  Project,
+  LocalRepo,
   QueuedThreadMessage,
 } from "@/features/agents/lib/types"
 
@@ -34,7 +34,9 @@ export interface MessagesProps extends ApprovalCallbacks {
   isThinking?: boolean
   settingUpSandbox?: boolean
   isOffloading?: boolean
-  project?: Project | null
+  /** Takes over the activity line while the event stream is reconnecting. */
+  reconnectLabel?: string | null
+  localRepo?: LocalRepo | null
   contentWidthClass?: string
   /** Horizontal padding on centered content (scroll track stays edge-to-edge). */
   contentPaddingClass?: string

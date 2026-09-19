@@ -21,20 +21,27 @@ class _LangSmithThreads:
         return self._stats
 
 
-class _LangSmithClient:
-    def __init__(self, roots: list[Any] | dict[str, list[Any]], stats: Any) -> None:
+class _LangSmithRuns:
+    def __init__(self, roots: list[Any] | dict[str, list[Any]]) -> None:
         self._roots = roots
-        self.threads = _LangSmithThreads(stats)
-        self.list_kwargs: dict[str, Any] = {}
+        self.calls: list[dict[str, Any]] = []
 
-    async def list_runs(self, **kwargs: Any):
-        self.list_kwargs = kwargs
-        if kwargs["filter"].startswith("or("):
-            raise ValueError("OR across metadata fields is not supported by LangSmith")
+    async def query(self, **kwargs: Any):
+        self.calls.append(kwargs)
         field = "invocation_id" if '"invocation_id"' in kwargs["filter"] else "prepare_run_id"
         roots = self._roots.get(field, []) if isinstance(self._roots, dict) else self._roots
         for root in roots:
             yield root
+
+
+class _LangSmithClient:
+    def __init__(self, roots: list[Any] | dict[str, list[Any]], stats: Any) -> None:
+        self.runs = _LangSmithRuns(roots)
+        self.threads = _LangSmithThreads(stats)
+        self.project = SimpleNamespace(start_time=datetime(2025, 1, 1, tzinfo=UTC))
+
+    async def read_project(self, **kwargs: Any) -> Any:
+        return self.project
 
 
 async def test_langsmith_cost_requires_correlated_fresh_aggregate(
@@ -54,6 +61,11 @@ async def test_langsmith_cost_requires_correlated_fresh_aggregate(
 
     assert result is not None
     assert result.total_cost == 1.234
+    assert len(client.runs.calls) == 1
+    assert '"invocation_id"' in client.runs.calls[0]["filter"]
+    assert client.runs.calls[0]["project_ids"] == ["project-id"]
+    assert client.runs.calls[0]["selects"] == ["ID", "END_TIME"]
+    assert client.runs.calls[0]["min_start_time"] == client.project.start_time
     assert client.threads.calls == [
         {
             "thread_id": "thread-1",
@@ -121,14 +133,35 @@ async def test_cost_lookup_accepts_either_invocation_metadata_field(monkeypatch,
     result = await ls_utils.get_langsmith_thread_cost("thread-1", "prepare-1", run_only=True)
     assert result is not None
     assert result.total_cost == 0.0
+    assert len(client.runs.calls) == (1 if field == "invocation_id" else 2)
 
 
-async def test_cost_lookup_combines_metadata_matches_without_duplicate_traces(monkeypatch):
+async def test_cost_lookup_uses_explicit_invocation_start(monkeypatch):
     root_end = datetime(2026, 8, 18, 22, 0, tzinfo=UTC)
-    shared = SimpleNamespace(id="trace-1", end_time=root_end)
+    invocation_start = root_end - timedelta(days=3)
+    client = _LangSmithClient(
+        [SimpleNamespace(id="trace-1", end_time=root_end)],
+        SimpleNamespace(total_cost=0.5, last_end_time=root_end),
+    )
+    monkeypatch.setattr(ls_utils, "_build_langsmith_client", lambda: client)
+    monkeypatch.setattr(
+        ls_utils, "_resolve_project_id_by_name", AsyncMock(return_value="project-id")
+    )
+
+    result = await ls_utils.get_langsmith_thread_cost(
+        "thread-1", "prepare-1", lookup_start=invocation_start
+    )
+
+    assert result is not None
+    assert client.runs.calls[0]["min_start_time"] == invocation_start
+
+
+async def test_cost_lookup_combines_legacy_metadata_matches(monkeypatch):
+    root_end = datetime(2026, 8, 18, 22, 0, tzinfo=UTC)
+    earlier = SimpleNamespace(id="trace-1", end_time=root_end)
     later = SimpleNamespace(id="trace-2", end_time=root_end + timedelta(seconds=1))
     client = _LangSmithClient(
-        {"invocation_id": [shared], "prepare_run_id": [shared, later]},
+        {"prepare_run_id": [earlier, later]},
         SimpleNamespace(total_cost=0.5, last_end_time=later.end_time),
     )
     monkeypatch.setattr(ls_utils, "_build_langsmith_client", lambda: client)
@@ -139,6 +172,7 @@ async def test_cost_lookup_combines_metadata_matches_without_duplicate_traces(mo
     assert result is not None
     assert result.total_cost == 0.5
     assert result.target_end_time == later.end_time
+    assert len(client.runs.calls) == 2
     assert client.threads.calls[0]["filter"] == (
         'or(eq(trace_id, "trace-1"), eq(trace_id, "trace-2"))'
     )
@@ -210,7 +244,7 @@ async def test_refresh_updates_exact_mapped_slack_message_in_place(
             "elements": [
                 {
                     "type": "mrkdwn",
-                    "text": "<https://app/agents/t1|Open in Web> • model-a • 10 main-agent tokens",
+                    "text": "<https://app/agents/t1|Open in Web> • model-a • calculating cost...",
                 }
             ],
         },
@@ -225,7 +259,7 @@ async def test_refresh_updates_exact_mapped_slack_message_in_place(
         "fetch_slack_thread_message_by_ts",
         AsyncMock(
             return_value={
-                "text": "Done <https://app/agents/t1|Open in Web> • model-a • 10 main-agent tokens",
+                "text": "Done <https://app/agents/t1|Open in Web> • model-a • calculating cost...",
                 "blocks": blocks,
             }
         ),
@@ -270,6 +304,94 @@ def _state(attempt: int) -> dict[str, Any]:
     }
 
 
+async def test_schedule_marks_mapped_reply_cost_pending(monkeypatch: pytest.MonkeyPatch) -> None:
+    class _Store:
+        async def get_item(self, namespace: Any, key: str) -> dict[str, Any] | None:
+            if key == "run:run-1":
+                return {"value": {"run_id": "run-1", "thread_ts": "1.0", "message_ts": "1.1"}}
+            return None
+
+    client: Any = SimpleNamespace(store=_Store(), runs=_Runs())
+    original = {
+        "text": "Done <https://app/agents/t1|Open in Web> • model-a",
+        "blocks": [
+            {"type": "section", "text": {"type": "mrkdwn", "text": "Done"}},
+            {
+                "type": "context",
+                "elements": [
+                    {
+                        "type": "mrkdwn",
+                        "text": "<https://app/agents/t1|Open in Web> • model-a",
+                    }
+                ],
+            },
+        ],
+    }
+    pending = {
+        "text": f"{original['text']} • calculating cost...",
+        "blocks": [
+            original["blocks"][0],
+            {
+                "type": "context",
+                "elements": [
+                    {
+                        "type": "mrkdwn",
+                        "text": "<https://app/agents/t1|Open in Web> • model-a • calculating cost...",
+                    }
+                ],
+            },
+        ],
+    }
+    monkeypatch.setattr(
+        session_cost,
+        "fetch_slack_thread_message_by_ts",
+        AsyncMock(side_effect=[original, pending]),
+    )
+    update = AsyncMock(return_value=(True, None))
+    monkeypatch.setattr(session_cost, "update_slack_message", update)
+
+    assert await session_cost.schedule_session_cost_refresh(_state(0), client=client)
+
+    assert client.runs.created[0]["after_seconds"] == 15
+    update.assert_awaited_once()
+    args = update.await_args
+    assert args is not None
+    assert args.args[:2] == ("C1", "1.1")
+    assert (
+        args.args[2] == "Done <https://app/agents/t1|Open in Web> • model-a • calculating cost..."
+    )
+    footer = args.kwargs["blocks"][-1]["elements"][0]["text"]
+    assert footer == "<https://app/agents/t1|Open in Web> • model-a • calculating cost..."
+
+    # Re-marking the already-pending message is a no-op.
+    update.reset_mock()
+    assert await session_cost.schedule_session_cost_refresh(_state(0), client=client)
+    update.assert_not_awaited()
+
+
+async def test_schedule_skips_pending_mark_without_footer(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class _Store:
+        async def get_item(self, namespace: Any, key: str) -> dict[str, Any] | None:
+            if key == "run:run-1":
+                return {"value": {"run_id": "run-1", "thread_ts": "1.0", "message_ts": "1.1"}}
+            return None
+
+    client: Any = SimpleNamespace(store=_Store(), runs=_Runs())
+    monkeypatch.setattr(
+        session_cost,
+        "fetch_slack_thread_message_by_ts",
+        AsyncMock(return_value={"text": "Acknowledged", "blocks": None}),
+    )
+    update = AsyncMock(return_value=(True, None))
+    monkeypatch.setattr(session_cost, "update_slack_message", update)
+
+    assert await session_cost.schedule_session_cost_refresh(_state(0), client=client)
+
+    update.assert_not_awaited()
+
+
 async def test_refresh_schedules_bounded_stateless_retry(monkeypatch: pytest.MonkeyPatch) -> None:
     client: Any = _Client()
     monkeypatch.setattr(
@@ -305,3 +427,45 @@ async def test_refresh_stops_after_final_attempt(monkeypatch: pytest.MonkeyPatch
 
     assert result == {"status": "exhausted", "reason": "LangSmith not ready"}
     assert client.runs.created == []
+
+
+@pytest.mark.parametrize("status,attempt", [("unavailable", 0), ("pending", 4), ("pending", 0)])
+async def test_terminal_refresh_clears_pending_footer(
+    monkeypatch: pytest.MonkeyPatch, status: str, attempt: int
+) -> None:
+    monkeypatch.setattr(
+        session_cost, "_refresh_once", AsyncMock(return_value=(status, "unavailable"))
+    )
+    monkeypatch.setattr(
+        session_cost, "schedule_session_cost_refresh", AsyncMock(return_value=False)
+    )
+    monkeypatch.setattr(
+        session_cost,
+        "lookup_slack_run_message_mapping",
+        AsyncMock(return_value={"thread_ts": "1.0", "message_ts": "1.1"}),
+    )
+    monkeypatch.setattr(
+        session_cost,
+        "fetch_slack_thread_message_by_ts",
+        AsyncMock(
+            return_value={
+                "text": "Done <https://app/agents/t1|Open in Web> • model-a • calculating cost...",
+                "blocks": None,
+            }
+        ),
+    )
+    update = AsyncMock(return_value=(True, None))
+    monkeypatch.setattr(session_cost, "update_slack_message", update)
+    await session_cost.run_session_cost_refresh(
+        {
+            "agent_thread_id": "t1",
+            "run_id": "r1",
+            "invocation_id": "i1",
+            "channel_id": "C1",
+            "thread_ts": "1.0",
+            "attempt": attempt,
+        },
+        client=SimpleNamespace(),
+    )
+    update.assert_awaited_once()
+    assert update.call_args.args[2].endswith("model-a")

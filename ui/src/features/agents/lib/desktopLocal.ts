@@ -23,14 +23,14 @@ export const localThreadKeys = {
   ready: (threadId: string) => ["local-thread-ready", threadId] as const,
   diff: (threadId: string) => ["local-thread-diff", threadId] as const,
   prDiff: (threadId: string) => ["local-thread-pr-diff", threadId] as const,
-  projectDiff: (cwd: string) => ["local-project-diff", cwd] as const,
-  refs: (cwd: string | undefined) => ["local-project-refs", cwd ?? ""] as const,
+  repoDiff: (cwd: string) => ["local-repo-diff", cwd] as const,
+  refs: (cwd: string | undefined) => ["local-repo-refs", cwd ?? ""] as const,
 }
 
-/** Worktree changes for a project, for screens without a thread yet. */
-export function useProjectDiff(cwd: string, enabled: boolean) {
+/** Worktree changes for a repository, for screens without a thread yet. */
+export function useRepoDiff(cwd: string, enabled: boolean) {
   return useQuery({
-    queryKey: localThreadKeys.projectDiff(cwd),
+    queryKey: localThreadKeys.repoDiff(cwd),
     queryFn: () => window.openSweDesktop?.getProjectDiff(cwd) ?? NO_DIFF,
     enabled: enabled && Boolean(cwd),
   })
@@ -38,7 +38,7 @@ export function useProjectDiff(cwd: string, enabled: boolean) {
 
 const NO_REFS: Array<DesktopProjectRef> = []
 
-export function useLocalProjectRefs(cwd: string | undefined) {
+export function useLocalRepoRefs(cwd: string | undefined) {
   return useQuery({
     queryKey: localThreadKeys.refs(cwd),
     enabled: Boolean(cwd),
@@ -142,7 +142,7 @@ export function useLocalThreadDiff(
 /**
  * What the thread's branch has committed on top of its pull request's base.
  * Unlike the checkpoint diff this ignores the worktree, which every session in
- * the project shares.
+ * the repository shares.
  */
 export function useLocalThreadPrDiff(
   threadId: string,

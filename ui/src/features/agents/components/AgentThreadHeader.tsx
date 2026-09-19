@@ -22,13 +22,13 @@ import {
   usePinAgentThread,
   useResolveAgentThread,
   useSidebarPinnedThreads,
-  useSidebarProjects,
+  useSidebarRepos,
 } from "@/features/agents/lib/queries"
 import type { ThreadVisibility } from "@/lib/api"
 import { useSession } from "@/lib/session"
 import { cn } from "@/lib/utils"
 
-function ThreadProjectIndicator({
+function ThreadRepoIndicator({
   thread,
   localThread,
 }: {
@@ -36,20 +36,21 @@ function ThreadProjectIndicator({
   localThread?: DesktopLocalThreadSummary
 }) {
   const [open, setOpen] = useState(false)
-  const { projects } = useDesktopProjects()
+  const { projects: localRepos } = useDesktopProjects()
   const { prefs } = useSidebarPrefs()
   const session = useSession()
-  const cloudProjects = useSidebarProjects({
+  const cloudRepos = useSidebarRepos({
     ...prefs.filters,
     enabled: !localThread && Boolean(session.data),
   })
   const repo = !localThread ? thread?.repoFullName.trim() : undefined
-  const projectName = localThread
-    ? projects.find((project) => project.cwd === localThread.cwd)?.name
-    : (cloudProjects.data?.find(
-        (project) => project.repoFullName.toLowerCase() === repo?.toLowerCase()
+  const repoName = localThread
+    ? localRepos.find((candidate) => candidate.cwd === localThread.cwd)?.name
+    : (cloudRepos.data?.find(
+        (candidate) =>
+          candidate.repoFullName.toLowerCase() === repo?.toLowerCase()
       )?.name ?? (repo ? thread?.repo || repo : undefined))
-  if (!projectName) return null
+  if (!repoName) return null
 
   return (
     <Tooltip open={open} onOpenChange={setOpen}>
@@ -59,13 +60,13 @@ function ThreadProjectIndicator({
         onClick={() => setOpen(true)}
         onPointerLeave={() => setOpen(false)}
         onBlur={() => setOpen(false)}
-        aria-label={`Project: ${projectName}`}
+        aria-label={`Repository: ${repoName}`}
         data-no-drag=""
         className="flex size-7 shrink-0 items-center justify-center text-muted-foreground"
       >
         <Folder className="size-4" />
       </TooltipTrigger>
-      <TooltipPopup>{projectName}</TooltipPopup>
+      <TooltipPopup>{repoName}</TooltipPopup>
     </Tooltip>
   )
 }
@@ -208,6 +209,7 @@ export function AgentThreadHeader({
   const menuItems = (
     <ThreadMenuItems
       thread={thread ?? null}
+      localThread={localThread}
       pinned={pinned}
       archived={archived}
       isDeleting={isDeleting}
@@ -248,10 +250,7 @@ export function AgentThreadHeader({
         {title && (
           <div className="flex min-w-0 items-center gap-1 text-sm font-medium">
             {(thread || localThread) && (
-              <ThreadProjectIndicator
-                thread={thread}
-                localThread={localThread}
-              />
+              <ThreadRepoIndicator thread={thread} localThread={localThread} />
             )}
             {draft !== null ? (
               <input
@@ -370,7 +369,7 @@ export function AgentThreadHeader({
           localThread
             ? localThread.ownedWorktrees?.length
               ? "This deletes the worktree Open SWE created for it, including any uncommitted changes in it. Its branch and commits are kept."
-              : "This removes its history but does not revert changes made to your project."
+              : "This removes its history but does not revert changes made to your repository."
             : undefined
         }
         error={deleteError}

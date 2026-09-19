@@ -1,5 +1,7 @@
 import { Link, useNavigate } from "@tanstack/react-router"
 import {
+  CaretDownIcon,
+  CaretRightIcon,
   CircleNotchIcon,
   DownloadSimpleIcon,
   FolderIcon,
@@ -13,20 +15,22 @@ import {
   PushPinIcon,
   PushPinSlashIcon,
   SparkleIcon,
+  StackIcon,
 } from "@phosphor-icons/react"
-import { Kanban, Radar } from "lucide-react"
+import { Radar } from "lucide-react"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 
 import type { DesktopUpdateState } from "@/desktop"
 import type { SessionUser } from "@/lib/api"
 import type {
   PullRequestSnapshot,
-  SidebarProject,
+  SidebarRepo,
 } from "@/features/agents/lib/api"
 import type { AgentThread } from "@/features/agents/lib/types"
 import type {
-  SidebarProjectGroup,
+  SidebarRepoGroup,
   SidebarThreadItem,
+  SidebarWorkspaceGroup,
 } from "@/features/agents/lib/sidebarThreads"
 import type { SidebarLayout } from "@/components/sidebar-layout"
 import { SidebarUserMenu } from "@/components/SidebarUserMenu"
@@ -70,9 +74,10 @@ import {
   useSeedAgentThreadDetails,
   useSidebarActiveThread,
   useSidebarPinnedThreads,
-  useSidebarProjects,
-  useSidebarProjectThreads,
+  useSidebarRepos,
+  useSidebarRepoThreads,
   useSidebarRecents,
+  useWorkspaceOptions,
 } from "@/features/agents/lib/queries"
 import { useSidebarPullRequests } from "@/features/agents/lib/prChecks"
 import { useRunCompletionNotifier } from "@/features/agents/lib/useRunCompletionNotifier"
@@ -83,12 +88,14 @@ import {
 } from "@/features/agents/lib/desktopLocal"
 import { useDesktopProjects } from "@/features/agents/lib/desktopProjects"
 import {
-  applyProjectKeyAliases,
+  applyRepoKeyAliases,
   cloudSidebarThread,
-  groupSidebarThreadsByProject,
+  DEFAULT_SIDEBAR_WORKSPACE_SLUG,
+  groupRepoGroupsByWorkspace,
+  groupSidebarThreadsByRepo,
   localSidebarThread,
-  sidebarProjectKey,
-  sidebarProjectOptions,
+  sidebarRepoKey,
+  sidebarRepoOptions,
   sortSidebarThreads,
 } from "@/features/agents/lib/sidebarThreads"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -107,37 +114,31 @@ interface AgentsSidebarProps {
   layout: SidebarLayout
 }
 
-interface HydratedProjectGroup extends SidebarProjectGroup {
+interface HydratedRepoGroup extends SidebarRepoGroup {
   repoFullName: string | null
-  localProjectPath?: string
+  localRepoPath?: string
   updatedAt: number
   activeThread?: AgentThread
 }
 
 const NAV = [
-  {
-    to: "/agents/threads",
-    label: "Kanban",
-    icon: Kanban,
-    badge: "Experimental",
-  },
   { to: "/agents/skills", label: "Skills", icon: SparkleIcon },
   { to: "/agents/automations", label: "Automations", icon: LightningIcon },
-  { to: "/agents/reviews", label: "Reviews", icon: GitPullRequestIcon },
+  { to: "/agents/reviews", label: "Pull Requests", icon: GitPullRequestIcon },
   { to: "/incidents", label: "Incidents", icon: Radar },
 ] as const
 
-/** Threads shown per project before the group needs a "Show more". */
-const PROJECT_PREVIEW_COUNT = 5
-const NO_PROJECT_GROUP_KEY = "project:no-project"
+/** Threads shown per repo before the group needs a "Show more". */
+const REPO_PREVIEW_COUNT = 5
+const NO_REPO_GROUP_KEY = "repo:no-repo"
 
-function cloudProjectAliases(
-  projects: ReadonlyArray<SidebarProject>
+function cloudRepoAliases(
+  repos: ReadonlyArray<SidebarRepo>
 ): Map<string, string> {
   const keys = new Map<string, Array<string>>()
-  for (const project of projects) {
-    const label = project.name.trim().toLowerCase()
-    const key = sidebarProjectKey(project.repoFullName)
+  for (const repo of repos) {
+    const label = repo.name.trim().toLowerCase()
+    const key = sidebarRepoKey(repo.repoFullName)
     if (label && key) keys.set(label, [...(keys.get(label) ?? []), key])
   }
   return new Map(
@@ -206,10 +207,10 @@ export function AgentsSidebar({
     setCompact,
     setFilters,
     toggleLocalPin,
-    toggleProjectPin,
-    toggleProjectCollapsed,
+    toggleRepoPin,
+    toggleRepoCollapsed,
     toggleSectionCollapsed,
-    expandProject,
+    expandRepo,
     setView,
   } = useSidebarPrefs()
   const isDesktop =
@@ -234,23 +235,37 @@ export function AgentsSidebar({
     )
   }, [updateState])
   const updateInstalling = updateState.status === "installing"
-  const projectMode = prefs.organize === "project"
+  const workspaceOrganize = prefs.organize === "workspace"
+  // "workspace" mode groups the same repo folders as "repo" mode; it
+  // only changes how the unpinned ones are laid out (nested under a workspace
+  // header instead of a flat list), so every other repo-mode query and
+  // computation below applies to both.
+  const repoMode = prefs.organize === "repo" || workspaceOrganize
   const includeAutomations =
     prefs.filters.includeAutomations ||
     prefs.filters.sources.includes("schedule")
   const pinnedQuery = useSidebarPinnedThreads({ enabled: !localOnly })
   const recentsQuery = useSidebarRecents({
-    projectMode,
+    repoMode,
     includeAutomations,
     includeResolved: prefs.filters.includeResolved,
     sort: prefs.sortChats,
     enabled: !localOnly,
   })
-  const projectsQuery = useSidebarProjects({
+  const sidebarReposQuery = useSidebarRepos({
     includeAutomations,
     includeResolved: prefs.filters.includeResolved,
-    enabled: !localOnly && projectMode,
+    enabled: !localOnly && repoMode,
   })
+  const workspaceOptionsQuery = useWorkspaceOptions(
+    !localOnly && workspaceOrganize
+  )
+  // One workspace — or none yet, while the list loads — has nothing to group
+  // by, so the header would add a level of nesting that says nothing. The
+  // composer's workspace picker and the admin page hide themselves the same way.
+  const workspaceMode =
+    workspaceOrganize &&
+    (workspaceOptionsQuery.data?.workspaces.length ?? 0) > 1
   const localThreads = useDesktopLocalThreads({ enabled: isDesktop })
   const localSessions = localThreads.data ?? []
   const activity = useLocalThreadActivity()
@@ -258,28 +273,28 @@ export function AgentsSidebar({
   const pinThread = usePinAgentThread()
   const resolveThread = useResolveAgentThread()
   const {
-    projects: localProjects,
-    addProject: addLocalProject,
-    removeProject: removeLocalProject,
+    projects: localRepos,
+    addProject: addLocalRepo,
+    removeProject: removeLocalRepo,
   } = useDesktopProjects()
-  const projectCommands = useMemo(
+  const repoCommands = useMemo(
     () =>
       isDesktop
         ? [
             {
-              id: "add-project",
-              label: "Add project",
+              id: "add-repository",
+              label: "Add repository",
               aliases: ["open folder", "add folder", "repository", "repo"],
               group: "Workspace",
               run: async () => {
-                await addLocalProject()
+                await addLocalRepo()
               },
             },
           ]
         : [],
-    [addLocalProject, isDesktop]
+    [addLocalRepo, isDesktop]
   )
-  useRegisterAppCommands(projectCommands)
+  useRegisterAppCommands(repoCommands)
 
   const pinnedThreads = pinnedQuery.data ?? []
   const cloudPinnedIds = new Set(pinnedThreads.map((thread) => thread.id))
@@ -292,63 +307,68 @@ export function AgentsSidebar({
     includeResolved: prefs.filters.includeResolved,
     enabled: !localOnly,
   })
-  const activeInProject = Boolean(
-    projectMode && activeThread?.repoFullName.trim()
-  )
+  const activeInRepo = Boolean(repoMode && activeThread?.repoFullName.trim())
   const recentThreads = [
-    ...(activeThread && !activeInProject ? [activeThread] : []),
+    ...(activeThread && !activeInRepo ? [activeThread] : []),
     ...pageThreads.filter((thread) => thread.id !== activeThread?.id),
   ]
   const visibleThreads = [...pinnedThreads, ...recentThreads]
   useSeedAgentThreadDetails(visibleThreads, activeThreadId)
   useRunCompletionNotifier(visibleThreads, activeThreadId, openThread)
 
-  const projectByPath = new Map(
-    localProjects.map((project) => [project.cwd, project])
-  )
+  const repoByPath = new Map(localRepos.map((repo) => [repo.cwd, repo]))
   const localPinnedIds = new Set(prefs.pinnedLocalIds)
   const localItems = localSessions
-    // Removing a project has to remove its threads too, otherwise they linger
-    // and re-derive the project from the cwd basename.
-    .filter((thread) => projectByPath.has(thread.cwd))
+    // Removing a repo has to remove its threads too, otherwise they linger
+    // and re-derive the repo from the cwd basename.
+    .filter((thread) => repoByPath.has(thread.cwd))
     .map((thread) =>
       localSidebarThread(
         thread,
-        projectByPath.get(thread.cwd),
+        repoByPath.get(thread.cwd),
         activity[thread.id]
       )
     )
     // Cloud threads are omitted server-side unless includeResolved; local
     // archiving is client-side, so it has to honour the same switch here.
     .filter((item) => prefs.filters.includeResolved || !item.resolved)
-  // Fold a local checkout into the cloud project of the same name so the repo
-  // renders as one folder; project keys are otherwise full identities.
-  const serverProjects = projectsQuery.data ?? []
-  const activeProject = activeThread?.repoFullName.trim()
+  // Fold a local checkout into the cloud repo of the same name so the repo
+  // renders as one folder; repo keys are otherwise full identities.
+  const serverRepos = sidebarReposQuery.data ?? []
+  const activeRepo: SidebarRepo | undefined = activeThread?.repoFullName.trim()
     ? {
         repoFullName: activeThread.repoFullName,
         name: activeThread.repo,
         updatedAt: activeThread.updatedAt,
+        // The server repo list hasn't caught up with this thread yet;
+        // it is re-grouped correctly as soon as `sidebarReposQuery` refetches.
+        workspace: DEFAULT_SIDEBAR_WORKSPACE_SLUG,
       }
     : undefined
-  const cloudProjects =
-    activeProject &&
-    !serverProjects.some(
-      (project) =>
-        project.repoFullName.toLowerCase() ===
-        activeProject.repoFullName.toLowerCase()
+  const cloudRepos =
+    activeRepo &&
+    !serverRepos.some(
+      (repo) =>
+        repo.repoFullName.toLowerCase() ===
+        activeRepo.repoFullName.toLowerCase()
     )
-      ? [activeProject, ...serverProjects]
-      : serverProjects
-  const aliases = cloudProjectAliases(cloudProjects)
-  const alignedLocalItems = applyProjectKeyAliases(localItems, aliases)
+      ? [activeRepo, ...serverRepos]
+      : serverRepos
+  // A repo whose repository name is blank has no stable key, which is what
+  // `sidebarRepoKey` reports with a null; it cannot be grouped or pinned.
+  const keyedCloudRepos = cloudRepos.flatMap((repo) => {
+    const key = sidebarRepoKey(repo.repoFullName)
+    return key ? [{ repo, key }] : []
+  })
+  const aliases = cloudRepoAliases(cloudRepos)
+  const alignedLocalItems = applyRepoKeyAliases(localItems, aliases)
   const pinnedItems = [
     ...pinnedThreads.map(cloudSidebarThread),
     ...alignedLocalItems.filter((item) => localPinnedIds.has(item.id)),
   ]
   const threadItems: Array<SidebarThreadItem> = [
     ...recentThreads.map(cloudSidebarThread),
-    ...(projectMode
+    ...(repoMode
       ? []
       : alignedLocalItems.filter((item) => !localPinnedIds.has(item.id))),
   ]
@@ -364,26 +384,25 @@ export function AgentsSidebar({
   const unpinnedLocalItems = alignedLocalItems.filter(
     (item) => !localPinnedIds.has(item.id)
   )
-  const localGroups = projectMode
-    ? groupSidebarThreadsByProject(
+  const localGroups = repoMode
+    ? groupSidebarThreadsByRepo(
         filterThreads(unpinnedLocalItems, prefs.filters),
-        sidebarProjectOptions(unpinnedLocalItems, localProjects),
+        sidebarRepoOptions(unpinnedLocalItems, localRepos),
         prefs.sortChats
-      ).projects
+      ).repos
     : []
-  const projectGroups: Array<HydratedProjectGroup> = projectMode
+  const repoGroups: Array<HydratedRepoGroup> = repoMode
     ? [
-        ...cloudProjects.map((project) => {
-          const key = sidebarProjectKey(project.repoFullName)!
+        ...keyedCloudRepos.map(({ repo, key }) => {
           return {
             key,
-            label: project.name,
-            repoFullName: project.repoFullName,
-            updatedAt: project.updatedAt,
+            label: repo.name,
+            repoFullName: repo.repoFullName,
+            updatedAt: repo.updatedAt,
             activeThread:
-              activeInProject &&
+              activeInRepo &&
               activeThread?.repoFullName.toLowerCase() ===
-                project.repoFullName.toLowerCase()
+                repo.repoFullName.toLowerCase()
                 ? activeThread
                 : undefined,
             threads:
@@ -392,29 +411,41 @@ export function AgentsSidebar({
         }),
         ...localGroups
           .filter(
-            (group) =>
-              !cloudProjects.some(
-                (project) =>
-                  sidebarProjectKey(project.repoFullName) === group.key
-              )
+            (group) => !keyedCloudRepos.some(({ key }) => key === group.key)
           )
           .map((group) => ({
             ...group,
             repoFullName: null,
-            localProjectPath: group.threads.find(
+            localRepoPath: group.threads.find(
               (thread) => thread.location === "local"
             )?.thread.cwd,
             updatedAt: group.threads[0]?.updatedAt ?? 0,
           })),
       ].sort((left, right) => right.updatedAt - left.updatedAt)
     : []
-  const pinnedProjectKeys = new Set(prefs.pinnedProjectKeys)
-  const pinnedGroups = projectGroups.filter((group) =>
-    pinnedProjectKeys.has(group.key)
+  const pinnedRepoKeys = new Set(prefs.pinnedRepoKeys)
+  const pinnedGroups = repoGroups.filter((group) =>
+    pinnedRepoKeys.has(group.key)
   )
-  const unpinnedGroups = projectGroups.filter(
-    (group) => !pinnedProjectKeys.has(group.key)
+  const unpinnedGroups = repoGroups.filter(
+    (group) => !pinnedRepoKeys.has(group.key)
   )
+  // Every repository sits in exactly one workspace, so the unpinned repo
+  // folders nest cleanly under workspace headers; local-only folders (no
+  // server-side repo) fall under the default workspace.
+  const repoWorkspaceOptions = keyedCloudRepos.map(({ repo, key }) => ({
+    key,
+    label: repo.name,
+    workspace: repo.workspace,
+  }))
+  const workspaceGroups: Array<SidebarWorkspaceGroup<HydratedRepoGroup>> =
+    workspaceMode
+      ? groupRepoGroupsByWorkspace(
+          unpinnedGroups,
+          repoWorkspaceOptions,
+          workspaceOptionsQuery.data?.workspaces ?? []
+        )
+      : []
 
   const pullRequestFor = useSidebarPullRequests(allItems, !localOnly)
   const isPinned = (item: SidebarThreadItem) =>
@@ -476,7 +507,7 @@ export function AgentsSidebar({
 
   const sectionCollapsed = (key: string) =>
     prefs.collapsedSectionKeys.includes(key)
-  const hydrateProjectThreads = (threads: Array<AgentThread>) =>
+  const hydrateRepoThreads = (threads: Array<AgentThread>) =>
     filterThreads(
       threads
         .filter((thread) => !cloudPinnedIds.has(thread.id))
@@ -484,25 +515,25 @@ export function AgentsSidebar({
       prefs.filters
     )
 
-  // Projects and Recents share one menu: both control the same list.
-  const removeProjectItems = isDesktop && localProjects.length > 0 && (
+  // Repositories and Recents share one menu: both control the same list.
+  const removeProjectItems = isDesktop && localRepos.length > 0 && (
     <>
       <MenuSeparator />
       <MenuSub>
         <MenuSubTrigger>
           <TrashIcon />
-          Remove project…
+          Remove repository…
         </MenuSubTrigger>
         <MenuSubPopup className="w-56">
           <MenuGroup>
-            {localProjects.map((project) => (
+            {localRepos.map((repo) => (
               <MenuItem
-                key={project.cwd}
-                onClick={() => void removeLocalProject(project.cwd)}
+                key={repo.cwd}
+                onClick={() => void removeLocalRepo(repo.cwd)}
                 variant="destructive"
               >
                 <TrashIcon />
-                <span className="min-w-0 truncate">{project.name}</span>
+                <span className="min-w-0 truncate">{repo.name}</span>
               </MenuItem>
             ))}
           </MenuGroup>
@@ -521,7 +552,8 @@ export function AgentsSidebar({
             setView({ organize: value as OrganizeMode })
           }
         >
-          <MenuRadioItem value="project">By project</MenuRadioItem>
+          <MenuRadioItem value="workspace">Workspaces</MenuRadioItem>
+          <MenuRadioItem value="repo">By repository</MenuRadioItem>
           <MenuRadioItem value="list">In one list</MenuRadioItem>
         </MenuRadioGroup>
       </MenuGroup>
@@ -560,54 +592,52 @@ export function AgentsSidebar({
     </>
   )
 
-  const noProjectGroup: HydratedProjectGroup = {
-    key: NO_PROJECT_GROUP_KEY,
-    label: "No project",
+  const noRepoGroup: HydratedRepoGroup = {
+    key: NO_REPO_GROUP_KEY,
+    label: "No repository",
     repoFullName: null,
     updatedAt: recents[0]?.updatedAt ?? 0,
     threads: recents,
   }
-  const noProjectAvailable = recents.length > 0 || recentsQuery.hasMore
-  const noProjectPinned = pinnedProjectKeys.has(NO_PROJECT_GROUP_KEY)
+  const noRepoAvailable = recents.length > 0 || recentsQuery.hasMore
+  const noRepoPinned = pinnedRepoKeys.has(NO_REPO_GROUP_KEY)
 
-  const renderProjectGroup = (group: HydratedProjectGroup) => (
-    <ProjectGroup
+  const renderRepoGroup = (group: HydratedRepoGroup) => (
+    <RepoGroup
       key={group.key}
       group={group}
       activeKey={activeKey}
-      collapsed={prefs.collapsedProjectKeys.includes(group.key)}
-      expanded={prefs.expandedProjectKeys.includes(group.key)}
-      pinned={pinnedProjectKeys.has(group.key)}
+      collapsed={prefs.collapsedRepoKeys.includes(group.key)}
+      expanded={prefs.expandedRepoKeys.includes(group.key)}
+      pinned={pinnedRepoKeys.has(group.key)}
       includeResolved={prefs.filters.includeResolved}
       includeAutomations={includeAutomations}
       sort={prefs.sortChats}
       activeThreadId={activeThreadId}
       openThread={openThread}
-      hydrate={hydrateProjectThreads}
-      onToggleCollapsed={() => toggleProjectCollapsed(group.key)}
-      onExpand={() => expandProject(group.key)}
+      hydrate={hydrateRepoThreads}
+      onToggleCollapsed={() => toggleRepoCollapsed(group.key)}
+      onExpand={() => expandRepo(group.key)}
       onCompose={() => {
         layout.closeOnMobile()
         void navigate({
           to: "/agents",
           search: group.repoFullName
             ? { repo: group.repoFullName }
-            : group.localProjectPath
-              ? { localProject: group.localProjectPath }
-              : { noProject: true },
+            : group.localRepoPath
+              ? { localRepo: group.localRepoPath }
+              : { noRepo: true },
         })
       }}
-      onTogglePin={() => toggleProjectPin(group.key)}
+      onTogglePin={() => toggleRepoPin(group.key)}
       onLoadMore={
-        group.key === NO_PROJECT_GROUP_KEY
-          ? recentsQuery.fetchNextPage
-          : undefined
+        group.key === NO_REPO_GROUP_KEY ? recentsQuery.fetchNextPage : undefined
       }
       hasMore={
-        group.key === NO_PROJECT_GROUP_KEY ? recentsQuery.hasMore : undefined
+        group.key === NO_REPO_GROUP_KEY ? recentsQuery.hasMore : undefined
       }
       loadingMore={
-        group.key === NO_PROJECT_GROUP_KEY
+        group.key === NO_REPO_GROUP_KEY
           ? recentsQuery.isFetchingNextPage
           : undefined
       }
@@ -621,17 +651,17 @@ export function AgentsSidebar({
     !localOnly &&
     (pinnedQuery.isPending ||
       recentsQuery.isPending ||
-      (projectMode && projectsQuery.isPending))
+      (repoMode && sidebarReposQuery.isPending))
   const cloudError =
     pinnedQuery.isError ||
     recentsQuery.isError ||
-    (projectMode && projectsQuery.isError)
+    (repoMode && sidebarReposQuery.isError)
   const sourcesLoading = cloudPending || (isDesktop && localThreads.isPending)
   const isEmpty =
     !cloudPending &&
     (!isDesktop || !localThreads.isPending) &&
     filteredPinnedItems.length === 0 &&
-    projectGroups.length === 0 &&
+    repoGroups.length === 0 &&
     recents.length === 0
 
   return (
@@ -721,11 +751,6 @@ export function AgentsSidebar({
                     >
                       <Icon className="size-4" />
                       {item.label}
-                      {"badge" in item && (
-                        <span className="rounded-full border border-border px-1.5 py-0.5 text-[9px] leading-none font-medium text-muted-foreground">
-                          {item.badge}
-                        </span>
-                      )}
                     </Link>
                   )
                 })}
@@ -740,7 +765,7 @@ export function AgentsSidebar({
                 onRetry={() => {
                   void pinnedQuery.refetch()
                   void recentsQuery.refetch()
-                  if (projectMode) void projectsQuery.refetch()
+                  if (repoMode) void sidebarReposQuery.refetch()
                 }}
               />
             )}
@@ -759,7 +784,7 @@ export function AgentsSidebar({
 
             {(filteredPinnedItems.length > 0 ||
               pinnedGroups.length > 0 ||
-              (projectMode && noProjectPinned && noProjectAvailable)) && (
+              (repoMode && noRepoPinned && noRepoAvailable)) && (
               <section className="mb-3">
                 <SidebarSectionHeader
                   label="Pinned"
@@ -791,27 +816,25 @@ export function AgentsSidebar({
                     {filteredPinnedItems.map((item) => (
                       <SidebarThreadRow key={item.key} {...rowProps(item)} />
                     ))}
-                    {pinnedGroups.map(renderProjectGroup)}
-                    {projectMode &&
-                      noProjectPinned &&
-                      noProjectAvailable &&
-                      renderProjectGroup(noProjectGroup)}
+                    {pinnedGroups.map(renderRepoGroup)}
+                    {repoMode &&
+                      noRepoPinned &&
+                      noRepoAvailable &&
+                      renderRepoGroup(noRepoGroup)}
                   </>
                 )}
               </section>
             )}
 
-            {projectMode &&
-              (unpinnedGroups.length > 0 ||
-                noProjectAvailable ||
-                isDesktop) && (
+            {repoMode &&
+              (unpinnedGroups.length > 0 || noRepoAvailable || isDesktop) && (
                 <section className="mb-3">
                   <SidebarSectionHeader
-                    label="Projects"
-                    collapsed={sectionCollapsed("projects")}
-                    onToggleCollapsed={() => toggleSectionCollapsed("projects")}
+                    label={workspaceMode ? "Workspaces" : "Repositories"}
+                    collapsed={sectionCollapsed("repos")}
+                    onToggleCollapsed={() => toggleSectionCollapsed("repos")}
                     menu={
-                      <SidebarSectionMenu label="Projects options">
+                      <SidebarSectionMenu label="Repositories options">
                         {viewMenuItems}
                         {removeProjectItems}
                       </SidebarSectionMenu>
@@ -819,25 +842,41 @@ export function AgentsSidebar({
                     action={
                       isDesktop ? (
                         <SidebarSectionAction
-                          label="Add project"
+                          label="Add repository"
                           icon={<PlusIcon className="size-4" />}
-                          onClick={() => void addLocalProject()}
+                          onClick={() => void addLocalRepo()}
                         />
                       ) : undefined
                     }
                   />
-                  {!sectionCollapsed("projects") && (
+                  {!sectionCollapsed("repos") && (
                     <>
-                      {unpinnedGroups.map(renderProjectGroup)}
-                      {!noProjectPinned &&
-                        noProjectAvailable &&
-                        renderProjectGroup(noProjectGroup)}
+                      {workspaceMode
+                        ? workspaceGroups.map((workspace) => (
+                            <WorkspaceGroupSection
+                              key={workspace.slug}
+                              workspace={workspace}
+                              collapsed={sectionCollapsed(
+                                `workspace:${workspace.slug}`
+                              )}
+                              onToggleCollapsed={() =>
+                                toggleSectionCollapsed(
+                                  `workspace:${workspace.slug}`
+                                )
+                              }
+                              renderRepoGroup={renderRepoGroup}
+                            />
+                          ))
+                        : unpinnedGroups.map(renderRepoGroup)}
+                      {!noRepoPinned &&
+                        noRepoAvailable &&
+                        renderRepoGroup(noRepoGroup)}
                     </>
                   )}
                 </section>
               )}
 
-            {!projectMode && (
+            {!repoMode && (
               <section className="mb-3">
                 <SidebarSectionHeader
                   label="Recents"
@@ -931,7 +970,49 @@ export function AgentsSidebar({
   )
 }
 
-function ProjectGroup({
+/**
+ * A workspace header inside the "Workspaces" section, nesting the repo
+ * folders that belong to it. Collapse state reuses the sidebar's generic
+ * collapsed-section keys (`workspace:<slug>`), the same mechanism the
+ * Pinned/Repositories/Recents headers use.
+ */
+function WorkspaceGroupSection({
+  workspace,
+  collapsed,
+  onToggleCollapsed,
+  renderRepoGroup,
+}: {
+  workspace: SidebarWorkspaceGroup<HydratedRepoGroup>
+  collapsed: boolean
+  onToggleCollapsed: () => void
+  renderRepoGroup: (group: HydratedRepoGroup) => React.ReactNode
+}) {
+  const Caret = collapsed ? CaretRightIcon : CaretDownIcon
+  return (
+    <div className="mb-1">
+      <button
+        type="button"
+        onClick={onToggleCollapsed}
+        aria-expanded={!collapsed}
+        className="group/workspace flex w-full items-center gap-1.5 rounded-md px-2 py-1 text-left text-[13px] font-medium text-muted-foreground/70 transition-colors hover:text-foreground"
+      >
+        <StackIcon className="size-3.5 shrink-0" />
+        <span className="min-w-0 flex-1 truncate">{workspace.name}</span>
+        <Caret
+          className={cn(
+            "size-3.5 shrink-0",
+            collapsed ? "block" : "hidden group-hover/workspace:block"
+          )}
+        />
+      </button>
+      {!collapsed && (
+        <div className="pl-2">{workspace.repos.map(renderRepoGroup)}</div>
+      )}
+    </div>
+  )
+}
+
+function RepoGroup({
   group,
   activeKey,
   collapsed,
@@ -952,7 +1033,7 @@ function ProjectGroup({
   loadingMore = false,
   renderRow,
 }: {
-  group: HydratedProjectGroup
+  group: HydratedRepoGroup
   activeKey?: string
   collapsed: boolean
   expanded: boolean
@@ -976,7 +1057,7 @@ function ProjectGroup({
   ) => React.ReactNode
 }) {
   const Folder = collapsed ? FolderIcon : FolderOpenIcon
-  const project = useSidebarProjectThreads({
+  const repo = useSidebarRepoThreads({
     repoFullName: group.repoFullName,
     includeResolved,
     includeAutomations,
@@ -985,7 +1066,7 @@ function ProjectGroup({
   })
   const cloudThreads = [
     ...(group.activeThread ? [group.activeThread] : []),
-    ...project.items.filter((thread) => thread.id !== group.activeThread?.id),
+    ...repo.items.filter((thread) => thread.id !== group.activeThread?.id),
   ]
   useSeedAgentThreadDetails(cloudThreads, activeThreadId)
   useRunCompletionNotifier(cloudThreads, activeThreadId, openThread)
@@ -997,7 +1078,7 @@ function ProjectGroup({
     threads,
     Boolean(group.repoFullName)
   )
-  const preview = threads.slice(0, PROJECT_PREVIEW_COUNT)
+  const preview = threads.slice(0, REPO_PREVIEW_COUNT)
   const active = threads.find((thread) => thread.key === activeKey)
   const shown = expanded
     ? threads
@@ -1005,13 +1086,12 @@ function ProjectGroup({
       ? [...preview.slice(0, -1), active]
       : preview
   const loading =
-    project.isFetchingNextPage ||
+    repo.isFetchingNextPage ||
     loadingMore ||
-    (Boolean(group.repoFullName) && !collapsed && project.isPending)
+    (Boolean(group.repoFullName) && !collapsed && repo.isPending)
   const hasMore = expanded
-    ? (externalHasMore ?? project.hasMore)
-    : threads.length > PROJECT_PREVIEW_COUNT ||
-      (externalHasMore ?? project.hasMore)
+    ? (externalHasMore ?? repo.hasMore)
+    : threads.length > REPO_PREVIEW_COUNT || (externalHasMore ?? repo.hasMore)
 
   return (
     <div className="mb-1">
@@ -1028,7 +1108,7 @@ function ProjectGroup({
         <button
           type="button"
           aria-label={pinned ? `Unpin ${group.label}` : `Pin ${group.label}`}
-          title={pinned ? "Unpin project" : "Pin project"}
+          title={pinned ? "Unpin repository" : "Pin repository"}
           onClick={onTogglePin}
           className="hidden size-5 shrink-0 items-center justify-center rounded text-muted-foreground/80 group-hover/folder:flex hover:bg-accent hover:text-foreground"
         >
@@ -1057,15 +1137,15 @@ function ProjectGroup({
               Loading chats…
             </div>
           )}
-          {shown.length === 0 && !loading && !project.isError && (
+          {shown.length === 0 && !loading && !repo.isError && (
             <p className="py-1 pr-2.5 pl-6 text-[13px] text-muted-foreground/60">
               No chats
             </p>
           )}
-          {project.isError && (
+          {repo.isError && (
             <button
               type="button"
-              onClick={() => void project.refetch()}
+              onClick={() => void repo.refetch()}
               className="w-full py-1 pr-2.5 pl-6 text-left text-[13px] text-destructive"
             >
               Retry loading chats
@@ -1077,7 +1157,7 @@ function ProjectGroup({
               onClick={() => {
                 if (!expanded) onExpand()
                 else if (onLoadMore) onLoadMore()
-                else project.fetchNextPage()
+                else repo.fetchNextPage()
               }}
               disabled={loading}
               className="flex w-full items-center gap-1.5 rounded-lg py-1 pr-2.5 pl-6 text-left text-[13px] text-muted-foreground/70 transition-colors hover:text-foreground disabled:cursor-wait disabled:opacity-60"
