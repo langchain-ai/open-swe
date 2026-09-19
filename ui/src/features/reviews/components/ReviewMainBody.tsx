@@ -72,6 +72,7 @@ import type { DiffStyle } from "@/features/agents/utils/diffUtils"
 import { Markdown } from "@/features/agents/components/chat/Markdown"
 import { DiffWrapToggle } from "@/features/agents/components/DiffWrapToggle"
 import { PrHeader } from "@/features/reviews/components/PrHeader"
+import { ReviewAssessmentCard } from "@/features/reviews/components/ReviewAssessmentCard"
 import {
   ReviewChat,
   ReviewChatComposerProvider,
@@ -1300,6 +1301,15 @@ function ReviewBodyInner({
                     deletions: detail.pr.deletions,
                   }}
                 />
+                {detail.assessment && (
+                  <ReviewAssessmentCard
+                    assessment={detail.assessment}
+                    owner={detail.owner}
+                    repo={detail.repo}
+                    number={detail.number}
+                    headSha={detail.pr.head_sha}
+                  />
+                )}
                 <div
                   className={cn(
                     "mt-4 rounded-lg border border-border p-4",

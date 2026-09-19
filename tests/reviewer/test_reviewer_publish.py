@@ -7,8 +7,10 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from agent.dashboard.workspace_settings import WorkspaceSettings
+from agent.review.assessment_feedback import ASSESSMENTS
 from agent.review.findings import Finding, new_finding
 from agent.review.publish import (
+    ReviewAssessment,
     clear_review_started_comment,
     fetch_pr_review_threads,
     open_swe_review_exists,
@@ -25,6 +27,123 @@ from agent.review.publish import (
     review_summary_marker,
     status_comment_marker,
 )
+from tests.conftest import FakeStore
+
+
+def _assessment(head_sha: str = "a" * 40) -> ReviewAssessment:
+    return ReviewAssessment(
+        head_sha=head_sha,
+        risk_score=1,
+        decision="would_approve",
+        explanation="Documentation only; satisfies the repository approval instructions.",
+    )
+
+
+def test_assessment_is_compact_with_native_feedback() -> None:
+    assessment = _assessment().model_copy(update={"explanation": "Check </details> text."})
+    body = render_review_body(pr_number=7, surfaced_count=0, assessment=assessment)
+    assert "Risk: 1/5" in body
+    assert "Would approve" in body
+    assert "advisory" in body
+    assert body.count("</details>") == 1
+    assert "Check &lt;/details&gt; text." in body
+    assert "👍" in body and "👎" in body
+    assert assessment.head_sha in body
+
+
+@pytest.mark.parametrize("open_finding", [False, True])
+@pytest.mark.parametrize("storage_fails", [False, True])
+async def test_assessment_on_empty_re_review_respects_existing_findings(
+    open_finding: bool, storage_fails: bool, fake_store: FakeStore, caplog: pytest.LogCaptureFixture
+) -> None:
+    from langchain_core.tools import StructuredTool
+
+    from agent.prompts import apply_tool_descriptions
+    from agent.tools.publish_review import publish_review
+
+    findings = [_f(severity="low", github_review_comment_id=123)] if open_finding else []
+    tool = StructuredTool.from_function(coroutine=apply_tool_descriptions([publish_review])[0])
+    with (
+        patch(
+            "agent.tools.publish_review.get_config",
+            return_value={
+                "configurable": {
+                    "repo": {"owner": "o", "name": "r"},
+                    "pr_number": 7,
+                    "head_sha": "a" * 40,
+                    "re_review": True,
+                }
+            },
+        ),
+        patch("agent.tools.publish_review.get_github_token", return_value="t"),
+        patch("agent.tools.publish_review.get_thread_id_from_runtime", return_value="tid"),
+        patch("agent.tools.publish_review.list_findings_async", AsyncMock(return_value=findings)),
+        patch(
+            "agent.tools.publish_review.post_pull_request_review",
+            AsyncMock(return_value={"id": 555}),
+        ) as post,
+        patch("agent.tools.publish_review._resolve_review_trace_url", AsyncMock(return_value=None)),
+        patch(
+            "agent.tools.publish_review._resolve_threads_for_resolved_findings",
+            AsyncMock(return_value=0),
+        ),
+        patch("agent.tools.publish_review.set_reviewer_thread_metadata", AsyncMock()),
+        patch("agent.tools.publish_review._record_reviewer_usage", AsyncMock()),
+        patch("agent.tools.publish_review.settle_review_check_run", AsyncMock()),
+    ):
+        if storage_fails:
+            with patch.object(
+                ASSESSMENTS, "put", AsyncMock(side_effect=RuntimeError("Storage unavailable"))
+            ):
+                result = await tool.ainvoke({"assessment": _assessment().model_dump()})
+        else:
+            result = await tool.ainvoke({"assessment": _assessment().model_dump()})
+    saved = await ASSESSMENTS.get("555")
+    if storage_fails:
+        assert saved is None
+        assert "Failed to save published assessment" in caplog.text
+    else:
+        assert saved is not None
+        assert saved.decision == ("needs_human_review" if open_finding else "would_approve")
+    assert result["review_id"] == 555
+    assert post.await_args is not None
+    assert post.await_args.kwargs["head_sha"] == "a" * 40
+    body = post.await_args.kwargs["body"]
+    assert "Risk: 1/5" in body
+    if open_finding:
+        assert "Would approve" not in body
+        assert "Needs human review" in body
+        assert "Unresolved findings remain" in body
+    else:
+        assert "Would approve" in body
+
+
+async def test_stale_assessment_does_not_publish_or_advance_reviewed_commit() -> None:
+    from agent.tools.publish_review import _publish_review_async
+
+    with (
+        patch("agent.tools.publish_review.get_thread_id_from_runtime", return_value="tid"),
+        patch(
+            "agent.tools.publish_review.resolve_review_head_sha", AsyncMock(return_value="b" * 40)
+        ),
+        patch("agent.tools.publish_review.post_pull_request_review", AsyncMock()) as post,
+        patch("agent.tools.publish_review.set_reviewer_thread_metadata", AsyncMock()) as metadata,
+    ):
+        result = await _publish_review_async(
+            owner="o",
+            repo="r",
+            pr_number=7,
+            head_sha="a" * 40,
+            token="t",
+            severity_threshold="medium",
+            cap=None,
+            is_re_review=False,
+            assessment=_assessment(),
+        )
+    assert result["success"] is False
+    assert "commit" in result["error"]
+    post.assert_not_awaited()
+    metadata.assert_not_awaited()
 
 
 def _f(**overrides: Any) -> Finding:
@@ -437,7 +556,7 @@ async def test_publish_review_eval_mode_does_not_call_github() -> None:
         patch("agent.tools.publish_review.get_github_token") as get_token,
         patch("agent.tools.publish_review.post_pull_request_review", AsyncMock()) as post_review,
     ):
-        result = await publish_review()
+        result = await publish_review(assessment=_assessment())
 
     assert result["success"] is True
     assert result["dry_run"] is True
@@ -1990,7 +2109,9 @@ async def test_post_pull_request_review_does_not_tag_unrelated_422() -> None:
 
 
 @pytest.mark.asyncio
-async def test_publish_review_drops_unresolvable_findings_and_retries_once() -> None:
+async def test_publish_review_drops_unresolvable_findings_and_retries_once(
+    fake_store: FakeStore,
+) -> None:
     """When GitHub rejects the batch with an ``unresolved_anchor`` 422, the
     tool must filter the bad findings against the PR diff_line_set, re-POST
     with only the valid ones, return ``success=True``, and report the dropped
@@ -2052,19 +2173,23 @@ async def test_publish_review_drops_unresolvable_findings_and_retries_once() -> 
             owner="o",
             repo="r",
             pr_number=7,
-            head_sha="sha",
+            head_sha="a" * 40,
             token="t",
             severity_threshold="medium",
             cap=15,
             is_re_review=False,
+            assessment=_assessment(),
         )
 
     assert post_review.await_count == 2
+    assert "Risk: 1/5" in post_review.await_args_list[0].kwargs["body"]
+    assert "Risk:" not in post_review.await_args_list[1].kwargs["body"]
     # Retry must contain only the in-diff finding.
     retry_inline = post_review.await_args_list[1].kwargs["inline_comments"]
     assert {c["path"] for c in retry_inline} == {"in_diff.py"}
     assert result["success"] is True
     assert result["review_id"] == 7777
+    assert await ASSESSMENTS.get("7777") is None
     assert result["surfaced_count"] == 1
     assert result["unresolvable_findings"] == ["f_bad"]
     assert "update_finding" in result["hint"]

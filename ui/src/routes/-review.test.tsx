@@ -79,10 +79,9 @@ it("reads the workspace's settings and writes only its own override", async () =
     true
   )
   await waitFor(() =>
-    expect(screen.getByRole("textbox")).toHaveProperty(
-      "value",
-      "oss guidelines"
-    )
+    expect(
+      screen.getByRole("textbox", { name: "Review guidelines" })
+    ).toHaveProperty("value", "oss guidelines")
   )
   expect(screen.getByText("Inherited from the instance.")).toBeTruthy()
 
@@ -97,6 +96,58 @@ it("reads the workspace's settings and writes only its own override", async () =
       name: "Reset PR Summaries to the instance value",
     })
   ).toBeTruthy()
+  client.clear()
+})
+
+it("saves and resets approval criteria without changing the review guidelines", async () => {
+  const writes: WorkspaceSettingsOverrides[] = []
+  const base = { ...SETTINGS, approval_policy: "Documentation only" }
+  vi.spyOn(globalThis, "fetch").mockImplementation(async (_input, init) => {
+    if (init?.method === "PUT") {
+      const body = JSON.parse(String(init.body)) as WorkspaceSettingsOverrides
+      writes.push(body)
+      return new Response(
+        JSON.stringify({ effective: { ...base, ...body }, overrides: body })
+      )
+    }
+    return new Response(JSON.stringify({ effective: base, overrides: {} }))
+  })
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  })
+  render(
+    <QueryClientProvider client={client}>
+      <ReviewSettings scope={{ kind: "workspace", slug: "oss" }} canEdit />
+    </QueryClientProvider>
+  )
+  const policy = screen.getByRole("textbox", { name: "Approval policy" })
+  await waitFor(() =>
+    expect(policy).toHaveProperty("value", "Documentation only")
+  )
+  fireEvent.change(policy, {
+    target: { value: "Allow small tested refactors" },
+  })
+  fireEvent.change(screen.getByRole("textbox", { name: "Review guidelines" }), {
+    target: { value: "Unsaved review guidance" },
+  })
+  fireEvent.click(screen.getByRole("button", { name: "Save approval policy" }))
+  await waitFor(() =>
+    expect(writes).toEqual([
+      { approval_policy: "Allow small tested refactors" },
+    ])
+  )
+  const reset = screen.getByRole("button", {
+    name: "Reset approval policy to instance",
+  })
+  await waitFor(() => expect(reset).toHaveProperty("disabled", false))
+  fireEvent.click(reset)
+  await waitFor(() => expect(writes[1]).toEqual({}))
+  await waitFor(() =>
+    expect(policy).toHaveProperty("value", "Documentation only")
+  )
+  expect(
+    screen.getByRole("textbox", { name: "Review guidelines" })
+  ).toHaveProperty("value", "Unsaved review guidance")
   client.clear()
 })
 
