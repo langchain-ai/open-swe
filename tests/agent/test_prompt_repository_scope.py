@@ -19,8 +19,9 @@ def test_prompt_composes_artifact_delivery_guidance_with_available_tools() -> No
     assert "`.open-swe/artifacts/`" in download_prompt
     assert "`.git/info/exclude`" in download_prompt
     assert "Prefer `output_iframe` for HTML previews" in download_prompt
-    assert "`create_sandbox_file_download_url` for images, videos" in download_prompt
-    assert "use `slack_attach_html`" in download_prompt
+    assert "`create_sandbox_file_download_url` only for files over" in download_prompt
+    assert "use `slack_attach_file`" in download_prompt
+    assert "`slack_attach_html` for compatibility" in download_prompt
 
 
 def test_prompt_restricts_edits_to_allowed_github_orgs(monkeypatch: pytest.MonkeyPatch) -> None:
