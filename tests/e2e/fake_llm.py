@@ -942,6 +942,12 @@ SCRIPT_LIBRARY: dict[str, tuple[StepSpec, ...]] = {
             "call-setup",
         ),
         _tool_step(
+            "Reading the greeting implementation.",
+            "read_file",
+            {"file_path": f"/repo/{FEATURE_FILE}"},
+            "call-read",
+        ),
+        _tool_step(
             "Implementing the greeting.",
             "edit_file",
             {

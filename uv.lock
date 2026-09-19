@@ -5,7 +5,7 @@ requires-python = ">=3.14"
 [manifest]
 constraints = [{ name = "langgraph-api", specifier = ">=0.13.3,<0.14" }]
 overrides = [
-    { name = "deepagents", specifier = "==0.7.13" },
+    { name = "deepagents", specifier = "==0.7.14" },
     { name = "wcmatch", specifier = ">=11.0" },
 ]
 
@@ -674,7 +674,7 @@ wheels = [
 
 [[package]]
 name = "deepagents"
-version = "0.7.13"
+version = "0.7.14"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "langchain" },
@@ -685,9 +685,9 @@ dependencies = [
     { name = "packaging" },
     { name = "wcmatch" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/d2/a7/18d5479456c5c4d47d6074a8af615f8b844d91ec4e7bd548f2b047953903/deepagents-0.7.13.tar.gz", hash = "sha256:99fc1855b1387c1c6e6035ba3600edbd933f59c39a4863ef3a7d5a0272ea67ab", size = 297293, upload-time = "2026-09-02T17:36:38.484Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/1f/6c/411f50acbef27e529822f35577d3207a45e4b8cf7cd4f962642694c62f75/deepagents-0.7.14.tar.gz", hash = "sha256:69b3050e3e0a1998d07d62cf70cc7c675e7674f7671a5b869fd113b9988493a9", size = 299904, upload-time = "2026-09-14T14:45:10.975Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/9d/64/6881d1c040433a3c48a1556afa5e70bcd5a761b0f67f9162a311ca8ed91c/deepagents-0.7.13-py3-none-any.whl", hash = "sha256:d717ee8ee092a91c475a6124ed578d5e4154d54120769a1081bfe1aece87c248", size = 324274, upload-time = "2026-09-02T17:36:37.165Z" },
+    { url = "https://files.pythonhosted.org/packages/48/04/7c1573dbe3f5b48e0d39c023f79cfbd4fa65e3cb8783c9bffe7b38d08918/deepagents-0.7.14-py3-none-any.whl", hash = "sha256:65b6cf304d7cad0c5af968c53d9e69f2809ecf4b95a1aec632bfea134a735d08", size = 326918, upload-time = "2026-09-14T14:45:09.282Z" },
 ]
 
 [[package]]
@@ -2008,7 +2008,7 @@ requires-dist = [
     { name = "alembic", specifier = "==1.20.0" },
     { name = "asyncpg", specifier = "==0.31.0" },
     { name = "cryptography", specifier = ">=50.0.0" },
-    { name = "deepagents", specifier = "==0.7.13" },
+    { name = "deepagents", specifier = "==0.7.14" },
     { name = "exa-py", specifier = ">=2.18.1" },
     { name = "fastapi", specifier = ">=0.141.1" },
     { name = "fireworks-ai", specifier = ">=1.2.9" },

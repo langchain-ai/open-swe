@@ -58,15 +58,22 @@ test.describe("finished transcript (shared fixture thread)", () => {
       name: /^Worked(?: for .+)? · \d+ actions?$/,
     });
     const acknowledgement = page.getByText("On it!", { exact: true });
+    const read = page.getByRole("button", { name: "Read greet.py" });
     const edit = page.getByRole("button", { name: "Edited greet.py" });
 
     // Folded: the acknowledgement shows, the individual tool calls do not.
     await expect(worked).toBeVisible();
     await expect(acknowledgement).toBeVisible();
+    await expect(read).toHaveCount(0);
     await expect(edit).toHaveCount(0);
 
     await worked.click();
+    await expect(read).toBeVisible();
     await expect(edit).toBeVisible();
+    await read.click();
+    await expect(read).toContainText("1  def normalize(name):");
+    await expect(read).toContainText("4  def greet(name):");
+    await expect(read).not.toContainText("@@ lines");
     await expect(acknowledgement).toBeVisible();
     expect(
       await acknowledgement.evaluate(
