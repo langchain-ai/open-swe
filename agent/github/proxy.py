@@ -16,10 +16,11 @@ from agent.config import ENV
 from agent.github.app import (
     PermissionKey,
     PermissionMap,
-    get_github_app_installation_token_with_expiry,
     normalize_permissions,
 )
+from agent.github.sandbox_access import workspace_token
 from agent.sandboxes.state import SANDBOX_BACKENDS, unwrap_sandbox_backend
+from agent.workspaces.store import DEFAULT_WORKSPACE_SLUG
 
 logger = logging.getLogger(__name__)
 
@@ -32,6 +33,7 @@ PROXY_TOKEN_FALLBACK_TTL = timedelta(minutes=50)
 _PROXY_TOKEN_EXPIRY: dict[
     str, tuple[datetime | None, datetime, tuple[str, ...] | None, PermissionKey]
 ] = {}
+_PROXY_WORKSPACES: dict[str, str] = {}
 _PROXY_BASE_CONFIGS: dict[str, dict[str, Any]] = {}
 ProxyTokenRecord = tuple[datetime | None, datetime, tuple[str, ...] | None, PermissionKey]
 
@@ -68,6 +70,7 @@ def record_proxy_token_expiry(
     repositories: Sequence[str] | None = None,
     permissions: PermissionMap | None = None,
     base_proxy_config: dict[str, Any] | None = None,
+    workspace_slug: str | None = None,
 ) -> None:
     """Record when ``thread_id``'s proxy token expires and the repo scope it was minted with.
 
@@ -76,7 +79,8 @@ def record_proxy_token_expiry(
     """
     if not thread_id:
         return
-    scope = tuple(repositories) if repositories else None
+    scope = tuple(repositories) if repositories is not None else None
+    _PROXY_WORKSPACES[thread_id] = workspace_slug or DEFAULT_WORKSPACE_SLUG
     _PROXY_TOKEN_EXPIRY[thread_id] = (
         _parse_expiry(expires_at),
         datetime.now(UTC),
@@ -99,6 +103,7 @@ def get_recorded_proxy_base_config(thread_id: str | None) -> dict[str, Any] | No
 def clear_proxy_token_expiry(thread_id: str | None) -> None:
     if thread_id:
         _PROXY_TOKEN_EXPIRY.pop(thread_id, None)
+        _PROXY_WORKSPACES.pop(thread_id, None)
         _PROXY_BASE_CONFIGS.pop(thread_id, None)
 
 
@@ -137,20 +142,29 @@ async def refresh_proxy_token(
     if sandbox_backend is None:
         return False
 
-    _expires, _recorded, recorded_repositories, recorded_permissions = _unpack_proxy_token_record(
-        _PROXY_TOKEN_EXPIRY.get(thread_id, (None, None, None, ()))
-    )
-    effective_repositories = tuple(repositories) if repositories else recorded_repositories
-    permission_key = normalize_permissions(permissions) or recorded_permissions
-    token_kwargs: dict[str, Any] = {}
-    if effective_repositories:
-        token_kwargs["repositories"] = list(effective_repositories)
-    if permission_key:
-        token_kwargs["permissions"] = dict(permission_key)
-    token, expires_at = await get_github_app_installation_token_with_expiry(**token_kwargs)
-    if not token:
-        logger.warning("Proxy token refresh for thread %s failed: no installation token", thread_id)
+    record = _PROXY_TOKEN_EXPIRY.get(thread_id)
+    if record is None:
         return False
+    _expires, _recorded, recorded_repositories, recorded_permissions = _unpack_proxy_token_record(
+        record
+    )
+    effective_repositories = recorded_repositories
+    if repositories is not None:
+        requested = {repo.lower() for repo in repositories}
+        effective_repositories = tuple(
+            sorted(
+                requested
+                if recorded_repositories is None
+                else requested.intersection(repo.lower() for repo in recorded_repositories)
+            )
+        )
+    permission_key = normalize_permissions(permissions) or recorded_permissions
+    workspace_slug = _PROXY_WORKSPACES.get(thread_id, DEFAULT_WORKSPACE_SLUG)
+    access = await workspace_token(
+        workspace_slug,
+        repositories=effective_repositories,
+        permissions=dict(permission_key) if permission_key else None,
+    )
 
     from agent.sandboxes.providers.langsmith import configure_github_proxy
 
@@ -159,17 +173,21 @@ async def refresh_proxy_token(
     if base_proxy_config is not None:
         await configure_github_proxy(
             current_backend.id,
-            token,
+            access.token,
+            repositories=access.repositories,
             base_proxy_config=base_proxy_config,
         )
     else:
-        await configure_github_proxy(current_backend.id, token)
+        await configure_github_proxy(
+            current_backend.id, access.token, repositories=access.repositories
+        )
     record_proxy_token_expiry(
         thread_id,
-        expires_at,
+        access.expires_at,
         repositories=effective_repositories,
         permissions=dict(permission_key) if permission_key else None,
         base_proxy_config=base_proxy_config,
+        workspace_slug=workspace_slug,
     )
     logger.info("Refreshed GitHub proxy token for thread %s", thread_id)
     return True

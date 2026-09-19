@@ -162,14 +162,13 @@ async def _release_builder_sandbox(sandbox_id: str) -> None:
 
 
 async def _create_builder_sandbox(record: Workspace, snapshot_id: str | None) -> Any:
-    from agent.github.app import get_github_app_installation_token
+    from agent.github.sandbox_access import repository_token
     from agent.sandboxes.providers.langsmith import create_langsmith_sandbox
 
-    token = await get_github_app_installation_token()
-    if not token:
-        raise RuntimeError("GitHub App installation token is unavailable")
+    access = await repository_token(record.repos)
     return await create_langsmith_sandbox(
-        github_token=token,
+        github_token=access.token,
+        github_repositories=access.repositories,
         snapshot_id=snapshot_id,
         create_params={
             **record.sandbox_create_params(),
