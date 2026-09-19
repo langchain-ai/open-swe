@@ -16,7 +16,6 @@ def _capture() -> tuple[dict[str, Any], Any]:
 
 
 def _make_model(model_id: str, **kwargs: Any) -> dict[str, Any]:
-    model._MODEL_CACHE.clear()
     captured, fake = _capture()
     with patch.object(model, "init_chat_model", fake):
         model.make_model(model_id, use_gateway=False, **kwargs)

@@ -37,7 +37,7 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     from agent.transcript import listener as transcript_listener
     from agent.users import User
     from agent.users.import_store import import_user_mappings
-    from agent.utils.model import close_cached_models, validate_local_dev_llm_config
+    from agent.utils.model import validate_local_dev_llm_config
     from agent.workspaces.store import import_store_records
 
     pin_single_event_loop()
@@ -93,7 +93,6 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         await transcript_listener.stop()
         await stop_worker()
         await database.close()
-        await close_cached_models()
 
 
 def create_app() -> FastAPI:
