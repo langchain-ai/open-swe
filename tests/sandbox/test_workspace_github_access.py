@@ -7,6 +7,7 @@ from datetime import UTC, datetime, timedelta
 from fnmatch import fnmatchcase
 from unittest.mock import AsyncMock, MagicMock
 
+import httpx
 import httpx2
 import pytest
 
@@ -15,6 +16,7 @@ from agent.sandboxes import lifecycle
 from agent.sandboxes.providers.langsmith import LangSmithProvider
 from agent.workspaces.refresh import _create_builder_sandbox
 from agent.workspaces.store import WORKSPACES, Workspace
+from tests.support.github_sdk import mock_github_sdk
 
 
 @pytest.fixture
@@ -23,11 +25,11 @@ def github(monkeypatch: pytest.MonkeyPatch) -> Iterator[list[dict[str, object]]]
     payloads: list[dict[str, object]] = []
     client = httpx2.AsyncClient
 
-    def handle(request: httpx2.Request) -> httpx2.Response:
+    def handle(request: httpx.Request) -> httpx.Response:
         if request.url.path.endswith("/access_tokens"):
             body = json.loads(request.content or b"{}")
             ids = body.get("repository_ids", [11, 22])
-            return httpx2.Response(
+            return httpx.Response(
                 201,
                 json={
                     "token": "repos:" + ",".join(str(repo_id) for repo_id in ids),
@@ -35,7 +37,7 @@ def github(monkeypatch: pytest.MonkeyPatch) -> Iterator[list[dict[str, object]]]
                 },
             )
         if request.url.path == "/installation/repositories":
-            return httpx2.Response(
+            return httpx.Response(
                 200,
                 json={
                     "repositories": [
@@ -44,19 +46,22 @@ def github(monkeypatch: pytest.MonkeyPatch) -> Iterator[list[dict[str, object]]]
                     ]
                 },
             )
+        raise AssertionError(f"Unexpected request: {request.method} {request.url}")
+
+    def handle_proxy(request: httpx2.Request) -> httpx2.Response:
         if request.method == "PATCH":
             payloads.append(json.loads(request.content))
             return httpx2.Response(200, json={})
         raise AssertionError(f"Unexpected request: {request.method} {request.url}")
 
     def make_client(**kwargs: object) -> httpx2.AsyncClient:
-        return client(transport=httpx2.MockTransport(handle))
+        return client(transport=httpx2.MockTransport(handle_proxy))
 
-    monkeypatch.setattr(app.httpx2, "AsyncClient", make_client)
+    monkeypatch.setattr(httpx2, "AsyncClient", make_client)
+    mock_github_sdk(monkeypatch, handle)
     monkeypatch.setattr(app, "GITHUB_APP_ID", "1")
     monkeypatch.setattr(app, "GITHUB_APP_INSTALLATION_ID", "2")
     monkeypatch.setattr(app, "GITHUB_APP_PRIVATE_KEY", "test-key")
-    monkeypatch.setattr(app, "_generate_app_jwt", lambda: "test-jwt")
     monkeypatch.setenv("SANDBOX_TYPE", "langsmith")
     monkeypatch.setenv("LANGSMITH_API_KEY", "test-key")
     monkeypatch.setattr(
@@ -362,32 +367,34 @@ async def test_scoped_token_failure_does_not_inject_discovery_token(
 async def test_repository_access_uses_later_installation_pages(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    original_client = httpx2.AsyncClient
     requests: list[dict[str, object]] = []
 
-    def handle(request: httpx2.Request) -> httpx2.Response:
+    def handle(request: httpx.Request) -> httpx.Response:
         if request.method == "POST":
             body = json.loads(request.content or b"{}")
             requests.append(body)
-            return httpx2.Response(
+            return httpx.Response(
                 201, json={"token": "test-token", "expires_at": "2099-01-01T00:00:00Z"}
             )
-        page = int(request.url.params["page"])
+        page = int(request.url.params.get("page", "1"))
         repos = (
             [{"id": repo_id, "full_name": f"acme/other-{repo_id}"} for repo_id in range(1, 101)]
             if page == 1
             else [{"id": 101, "full_name": "Acme/API"}]
         )
-        return httpx2.Response(200, json={"repositories": repos})
+        headers = (
+            {
+                "Link": '<https://api.github.com/installation/repositories?per_page=100&page=2>; rel="next"'
+            }
+            if page == 1
+            else {}
+        )
+        return httpx.Response(200, json={"repositories": repos}, headers=headers)
 
-    def make_client(**kwargs: object) -> httpx2.AsyncClient:
-        return original_client(transport=httpx2.MockTransport(handle))
-
-    monkeypatch.setattr(app.httpx2, "AsyncClient", make_client)
+    mock_github_sdk(monkeypatch, handle)
     monkeypatch.setattr(app, "GITHUB_APP_ID", "1")
     monkeypatch.setattr(app, "GITHUB_APP_INSTALLATION_ID", "2")
     monkeypatch.setattr(app, "GITHUB_APP_PRIVATE_KEY", "test-key")
-    monkeypatch.setattr(app, "_generate_app_jwt", lambda: "test-jwt")
     app.clear_app_token_cache()
     try:
         access = await sandbox_access.repository_token(["acme/api"])

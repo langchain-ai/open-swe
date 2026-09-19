@@ -1,17 +1,19 @@
 """GitHub App installation token generation."""
 
 import logging
-import time
 from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime, timedelta
-from typing import Any
 from urllib.parse import quote
 
-import httpx2
-import jwt
+from githubkit.auth import AppAuthStrategy
+from githubkit_schemas.v2022_11_28.types import (
+    AppInstallationsInstallationIdAccessTokensPostBodyType,
+    AppPermissionsType,
+)
+from pydantic import TypeAdapter
 
 from agent.config import ENV
-from agent.utils.http import DEFAULT_HTTP_TIMEOUT
+from agent.github.sdk import GITHUB_API_VERSION, github_sdk
 
 logger = logging.getLogger(__name__)
 
@@ -52,7 +54,7 @@ def _scope_key(
     return installation_id, ids, names, normalize_permissions(permissions)
 
 
-def _parse_expiry(expires_at: Any) -> datetime | None:
+def _parse_expiry(expires_at: object) -> datetime | None:
     """Best-effort parse of a GitHub ``expires_at`` ISO timestamp to a UTC datetime."""
     if not isinstance(expires_at, str):
         return None
@@ -84,16 +86,8 @@ def clear_app_token_cache() -> None:
     _TOKEN_CACHE.clear()
 
 
-def _generate_app_jwt() -> str:
-    """Generate a short-lived JWT signed with the GitHub App private key."""
-    now = int(time.time())
-    payload = {
-        "iat": now - 60,  # issued 60s ago to account for clock skew
-        "exp": now + 540,  # expires in 9 minutes (max is 10)
-        "iss": GITHUB_APP_ID,
-    }
-    private_key = GITHUB_APP_PRIVATE_KEY.replace("\\n", "\n")
-    return jwt.encode(payload, private_key, algorithm="RS256")
+def _app_auth() -> AppAuthStrategy:
+    return AppAuthStrategy(GITHUB_APP_ID, GITHUB_APP_PRIVATE_KEY.replace("\\n", "\n"))
 
 
 async def get_github_app_installation_id_for_org(org: str) -> int | None:
@@ -101,20 +95,16 @@ async def get_github_app_installation_id_for_org(org: str) -> int | None:
     if not GITHUB_APP_ID or not GITHUB_APP_PRIVATE_KEY or not org.strip():
         return None
     try:
-        async with httpx2.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as client:
-            response = await client.get(
-                f"https://api.github.com/orgs/{quote(org.strip(), safe='')}/installation",
-                headers={
-                    "Authorization": f"Bearer {_generate_app_jwt()}",
-                    "Accept": "application/vnd.github+json",
-                    "X-GitHub-Api-Version": "2022-11-28",
-                },
+        async with github_sdk(_app_auth()) as client:
+            response = await client.rest(GITHUB_API_VERSION).apps.async_get_org_installation(
+                quote(org.strip(), safe="")
             )
-        response.raise_for_status()
         installation_id = response.json().get("id")
         return installation_id if isinstance(installation_id, int) and installation_id > 0 else None
     except Exception:
-        logger.warning("Failed to resolve GitHub App installation for %s", org, exc_info=True)
+        logger.warning(
+            "Failed to resolve GitHub App installation", extra={"org": org}, exc_info=True
+        )
         return None
 
 
@@ -122,26 +112,18 @@ async def get_github_app_installation_id_for_repo(owner: str, repo: str) -> int 
     """Resolve the GitHub App installation that can access a repository."""
     if not GITHUB_APP_ID or not GITHUB_APP_PRIVATE_KEY or not owner.strip() or not repo.strip():
         return None
-    url = (
-        "https://api.github.com/repos/"
-        f"{quote(owner.strip(), safe='')}/{quote(repo.strip(), safe='')}/installation"
-    )
     try:
-        async with httpx2.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as client:
-            response = await client.get(
-                url,
-                headers={
-                    "Authorization": f"Bearer {_generate_app_jwt()}",
-                    "Accept": "application/vnd.github+json",
-                    "X-GitHub-Api-Version": "2022-11-28",
-                },
+        async with github_sdk(_app_auth()) as client:
+            response = await client.rest(GITHUB_API_VERSION).apps.async_get_repo_installation(
+                quote(owner.strip(), safe=""), quote(repo.strip(), safe="")
             )
-        response.raise_for_status()
         installation_id = response.json().get("id")
         return installation_id if isinstance(installation_id, int) and installation_id > 0 else None
     except Exception:
         logger.warning(
-            "Failed to resolve GitHub App installation for %s/%s", owner, repo, exc_info=True
+            "Failed to resolve GitHub App installation",
+            extra={"owner": owner, "repo": repo},
+            exc_info=True,
         )
         return None
 
@@ -192,28 +174,21 @@ async def get_github_app_installation_token_with_expiry(
     if cached is not None:
         return cached
 
-    body: dict[str, Any] = {}
+    body: AppInstallationsInstallationIdAccessTokensPostBodyType = {}
     if repository_ids:
         body["repository_ids"] = list(repository_ids)
     elif repositories:
         body["repositories"] = list(repositories)
     permission_key = normalize_permissions(permissions)
-    if permission_key:
-        body["permissions"] = dict(permission_key)
-
     try:
-        app_jwt = _generate_app_jwt()
-        async with httpx2.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as client:
-            response = await client.post(
-                f"https://api.github.com/app/installations/{resolved_installation_id}/access_tokens",
-                headers={
-                    "Authorization": f"Bearer {app_jwt}",
-                    "Accept": "application/vnd.github+json",
-                    "X-GitHub-Api-Version": "2022-11-28",
-                },
-                json=body or None,
+        if permission_key:
+            body["permissions"] = TypeAdapter(AppPermissionsType).validate_python(
+                dict(permission_key), extra="forbid"
             )
-            response.raise_for_status()
+        async with github_sdk(_app_auth()) as client:
+            response = await client.rest(
+                GITHUB_API_VERSION
+            ).apps.async_create_installation_access_token(int(resolved_installation_id), data=body)
             data = response.json()
             token, expires_at = data.get("token"), data.get("expires_at")
             parsed = _parse_expiry(expires_at)
