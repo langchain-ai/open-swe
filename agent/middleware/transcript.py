@@ -278,6 +278,23 @@ def _human_text(message: HumanMessage) -> str:
     return (authored or _message_text(message)).strip()
 
 
+def _transcribed_human_text(message: HumanMessage) -> str:
+    """A human message as the reader has to receive it: envelope and all.
+
+    Who sent it, on which surface, and whether it is a platform-generated
+    context message the UI hides are all carried by the ``<input-message>``
+    wrapper and by nothing else on the wire. Unwrapping here would strip a
+    message of its attribution and turn ``system:sender-context`` into a
+    message apparently typed by the user.
+    """
+    return _message_text(message).strip()
+
+
+def _is_dynamic_context(message: HumanMessage) -> bool:
+    """A ``<dynamic-context>`` introduction: who a sender is, not what they said."""
+    return "<dynamic-context" in _message_text(message)
+
+
 def _usage(message: AIMessage) -> MessageUsage | None:
     """Token accounting for one AI message, when the provider reported any."""
     usage = message.usage_metadata
@@ -682,11 +699,18 @@ class TranscriptMiddleware(OpenSWEMiddleware):
         )
         # Every human message already in state belongs to a turn that is over.
         # Only a message injected after the run started is new, and recording
-        # an older one again would move it into this turn.
+        # an older one again would move it into this turn. The exception is a
+        # ``<dynamic-context>`` introduction: it names a sender the reader has
+        # to resolve, it is injected once per thread rather than per turn, and
+        # it renders as nothing, so recording it is what makes attribution work
+        # and moving it costs nothing.
         run_state.seen_human_ids.update(
             message.id
             for message in messages
-            if isinstance(message, HumanMessage) and isinstance(message.id, str) and message.id
+            if isinstance(message, HumanMessage)
+            and isinstance(message.id, str)
+            and message.id
+            and not _is_dynamic_context(message)
         )
         run_state.enqueue(*commands)
         # The baseline the turn's checkpoint is diffed against when the thread
@@ -745,7 +769,7 @@ class TranscriptMiddleware(OpenSWEMiddleware):
             if not isinstance(message_id, str) or message_id in state.seen_human_ids:
                 continue
             state.seen_human_ids.add(message_id)
-            text = _human_text(message)
+            text = _transcribed_human_text(message)
             attachments, pending = _human_attachments(message, message_id)
             if not text and not attachments:
                 continue
@@ -1073,7 +1097,7 @@ def _turn_requested(
             type="turn.requested",
             turn_id=state.turn_id,
             message_id=message_id,
-            text=_human_text(human),
+            text=_transcribed_human_text(human),
             sender=_sender(human, ids, metadata),
             attachments=attachments,
             model_id=_string(ids.configurable.get("resolved_agent_model_id"))

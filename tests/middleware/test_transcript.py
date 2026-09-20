@@ -271,6 +271,42 @@ async def test_only_mid_run_human_messages_are_recorded_once(
     assert human_events[0].event.role == "human"
 
 
+async def test_a_human_message_keeps_the_envelope_it_is_attributed_by(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Who sent a message, on which surface, is carried by the envelope alone."""
+    engine = _install(monkeypatch, transcribed=True, turn_id=None)
+    middleware = mw.TranscriptMiddleware()
+    entity = HumanMessage(
+        content=(
+            '<dynamic-context kind="person" id="slack:U1"><handle>bob</handle></dynamic-context>'
+        ),
+        id="entity-bob",
+    )
+    envelope = (
+        '<input-message sender="slack:U1" surface="slack" kind="human">'
+        "<content>add a greet() helper</content></input-message>"
+    )
+    human = HumanMessage(content=envelope, id="human-1")
+    await middleware.abefore_agent({"messages": [entity, human]}, None)
+
+    async def model_handler(request: ModelRequest) -> ModelResponse:
+        return ModelResponse(result=[AIMessage(content="ok", id="ai-1")])
+
+    await middleware.awrap_model_call(_model_request([entity, human]), model_handler)
+    await middleware.aafter_agent({"messages": []}, None)
+
+    requested = next(
+        command.event for command in engine.commands if command.command_id.endswith(":requested")
+    )
+    assert requested.text == envelope
+    # The introduction that names the sender is recorded too, though it renders
+    # as nothing: without it the reader has no display name to attribute by.
+    recorded = [command for command in engine.commands if command.command_id.startswith("human:")]
+    assert [command.command_id for command in recorded] == ["human:entity-bob"]
+    assert "slack:U1" in recorded[0].event.text
+
+
 async def test_model_failure_records_turn_failed(monkeypatch: pytest.MonkeyPatch) -> None:
     engine = _install(monkeypatch, transcribed=True, turn_id=uuid7())
     middleware = mw.TranscriptMiddleware()

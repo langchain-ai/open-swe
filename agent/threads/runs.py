@@ -758,7 +758,10 @@ async def _enrich_run_start_command(
                         event=TurnRequested(
                             turn_id=turn_id,
                             message_id=message_id,
-                            text=_command_prompt_text(content),
+                            # The envelope, not the bare prompt: it is what
+                            # carries the sender and surface a reader attributes
+                            # the message by.
+                            text=_command_prompt_text(structured[-1].get("content")),
                             sender=MessageSender(login=login, kind=DASHBOARD_SOURCE),
                             attachments=attachments,
                             model_id=run_model,
