@@ -41,7 +41,11 @@ from pydantic_core import PydanticSerializationError, to_jsonable_python
 from sqlalchemy import text as sql
 
 from agent.database import postgres
-from agent.input_messages import input_message_text, message_sender_id
+from agent.input_messages import (
+    SENDER_CONTEXT_SENDER_ID,
+    input_message_text,
+    message_sender_id,
+)
 from agent.middleware.trace import OpenSWEMiddleware
 from agent.transcript import checkpoints
 from agent.transcript.attachments import PendingAttachment, UnsupportedAttachment
@@ -293,6 +297,19 @@ def _transcribed_human_text(message: HumanMessage) -> str:
 def _is_dynamic_context(message: HumanMessage) -> bool:
     """A ``<dynamic-context>`` introduction: who a sender is, not what they said."""
     return "<dynamic-context" in _message_text(message)
+
+
+def _is_turn_annotation(message: HumanMessage) -> bool:
+    """A platform block that annotates the turn instead of being it.
+
+    The run appends the sender-context metadata *after* the message it
+    describes, and a ``<dynamic-context>`` introduction can trail it too, so the
+    last human message in state is routinely neither the request nor anything a
+    reader should see attributed to the user.
+    """
+    return _is_dynamic_context(message) or (
+        message_sender_id(message.content) == SENDER_CONTEXT_SENDER_ID
+    )
 
 
 def _usage(message: AIMessage) -> MessageUsage | None:
@@ -656,7 +673,14 @@ class TranscriptMiddleware(OpenSWEMiddleware):
             )
             return
 
-        human = next((m for m in reversed(messages) if isinstance(m, HumanMessage)), None)
+        human = next(
+            (
+                m
+                for m in reversed(messages)
+                if isinstance(m, HumanMessage) and not _is_turn_annotation(m)
+            ),
+            None,
+        )
         metadata: Mapping[str, object] = {}
         if not transcribed:
             metadata = await _thread_metadata(ids.thread_id)
@@ -907,11 +931,13 @@ class TranscriptMiddleware(OpenSWEMiddleware):
         try:
             result = await handler(request)
         except asyncio.CancelledError:
+            # A stopped tool never finished, and it did not fail either: leaving
+            # it open is what keeps the reader showing the work the run was in
+            # the middle of, the way the turn's own interruption describes it.
             # Cancelling a run that is awaiting a tool never reaches
             # ``aafter_agent``, so the root run settles its turn and releases
             # its writer here. A nested cancellation belongs to the ``task``
             # tool call above it, whose parent run keeps going.
-            self._complete_tool(state, tool_call_id, namespace, "error", *_tool_output("cancelled"))
             if not namespace:
                 await self._interrupt_turn(state)
             raise

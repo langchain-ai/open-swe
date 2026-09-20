@@ -17,6 +17,10 @@ Surface = Literal["slack", "linear", "github", "web", "desktop", "automation", "
 EntityKind = Literal["person", "channel", "system"]
 MessageKind = Literal["human", "system"]
 
+# The run's own annotation of whoever sent the turn, appended after the turn's
+# message rather than being one; readers have to look past it to find the turn.
+SENDER_CONTEXT_SENDER_ID = "system:sender-context"
+
 
 class PersonIdentity(TypedDict):
     id: str

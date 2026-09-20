@@ -288,12 +288,22 @@ async def test_a_human_message_keeps_the_envelope_it_is_attributed_by(
         "<content>add a greet() helper</content></input-message>"
     )
     human = HumanMessage(content=envelope, id="human-1")
-    await middleware.abefore_agent({"messages": [entity, human]}, None)
+    # The run appends its own annotation of the sender *after* the turn's
+    # message, so the last human message in state is not the request.
+    sender_context = HumanMessage(
+        content=(
+            '<input-message sender="system:sender-context" surface="automation" kind="system">'
+            "<content>Workspace admin: yes.</content></input-message>"
+        ),
+        id="sender-context-1",
+    )
+    messages = [entity, human, sender_context]
+    await middleware.abefore_agent({"messages": messages}, None)
 
     async def model_handler(request: ModelRequest) -> ModelResponse:
         return ModelResponse(result=[AIMessage(content="ok", id="ai-1")])
 
-    await middleware.awrap_model_call(_model_request([entity, human]), model_handler)
+    await middleware.awrap_model_call(_model_request(messages), model_handler)
     await middleware.aafter_agent({"messages": []}, None)
 
     requested = next(
@@ -454,8 +464,9 @@ async def test_tool_cancellation_settles_the_turn(monkeypatch: pytest.MonkeyPatc
     with pytest.raises(asyncio.CancelledError):
         await middleware.awrap_tool_call(_tool_request("call-1", {"messages": []}), cancelled_tool)
 
-    assert engine.types == ["turn.started", "tool.started", "tool.completed", "turn.interrupted"]
-    assert engine.commands[2].event.status == "error"
+    # The stopped tool call is left open: it neither finished nor failed, and a
+    # reader shows it as the work the interrupted turn was in the middle of.
+    assert engine.types == ["turn.started", "tool.started", "turn.interrupted"]
     # The run's writer and registry entry are released, not left blocked.
     assert mw._runs == {}
 

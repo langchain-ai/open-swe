@@ -69,6 +69,7 @@ from agent.desktop import create_desktop_backend, desktop_artifact_routes, is_de
 from agent.desktop_branch import schedule_worktree_branch_rename
 from agent.github.token import resolve_github_token
 from agent.input_messages import (
+    SENDER_CONTEXT_SENDER_ID,
     SystemIdentity,
     build_input_messages,
     dynamic_context_hash,
@@ -501,7 +502,7 @@ def _general_purpose_subagent(
 
 
 _SENDER_CONTEXT_SYSTEM: SystemIdentity = {
-    "id": "system:sender-context",
+    "id": SENDER_CONTEXT_SENDER_ID,
     "display_name": "Sender context",
     "platform": "open-swe",
 }
