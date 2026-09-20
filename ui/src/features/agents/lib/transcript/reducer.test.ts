@@ -9,12 +9,14 @@ import {
   routedNotice,
   toMessages,
 } from "./reducer"
+import type { TranscriptState } from "./reducer"
 import type { Message, ToolExecutionChunk } from "@/features/agents/lib/types"
 import type { AnyImageChunk } from "@/features/agents/lib/types"
 import type {
   MessageCompletedPayload,
   RunNoticePayload,
   StoredEvent,
+  ToolCompletedPayload,
   TranscriptAttachment,
   TranscriptMessageRow,
   TranscriptSnapshot,
@@ -480,5 +482,144 @@ describe("windowed reads", () => {
     expect(refreshed.messages["ai-2"]?.text).toBe("the newest answer")
     // The window's own cursor points at history this client already holds.
     expect(refreshed.olderCursor).toBe("page-3")
+  })
+
+  it("starts over from a snapshot whose window no longer reaches the history held", () => {
+    const loaded = prependTurns(
+      fromSnapshot(twoTurnSnapshot({ older_cursor: "page-2" })),
+      olderPage({ older_cursor: null })
+    )
+
+    expect(loaded.olderCursor).toBeNull()
+
+    const refreshed = applySnapshot(
+      loaded,
+      snapshot({
+        version: 99,
+        turns: [turn("turn-9", "2026-01-01T09:00:00Z")],
+        messages: [
+          messageRow({
+            message_id: "human-9",
+            turn_id: "turn-9",
+            role: "human",
+            text: "much later",
+            created_at: "2026-01-01T09:00:00Z",
+          }),
+        ],
+        older_cursor: "page-fresh",
+      })
+    )
+
+    // Turns between the held history and the fresh window are missing, so the
+    // fresh paging path has to survive for them to ever be reachable.
+    expect(refreshed.turnOrder).toEqual(["turn-9"])
+    expect(refreshed.olderCursor).toBe("page-fresh")
+    expect(refreshed.messages["human-0"]).toBeUndefined()
+  })
+})
+
+function toolCompleted(
+  version: number,
+  payload: Partial<ToolCompletedPayload> = {}
+): StoredEvent {
+  return {
+    ...appended(version, {}),
+    event_type: "tool.completed",
+    payload: {
+      turn_id: "turn-1",
+      tool_call_id: "read-1",
+      status: "completed",
+      output_preview: null,
+      output_truncated: false,
+      has_output: true,
+      ...payload,
+    },
+  }
+}
+
+function readChunk(state: TranscriptState): ToolExecutionChunk | undefined {
+  return toMessages(state)
+    .flatMap((entry) => entry.chunks)
+    .find(
+      (chunk): chunk is ToolExecutionChunk =>
+        chunk.kind === "tool-execution" && chunk.toolCallId === "read-1"
+    )
+}
+
+describe("tool output", () => {
+  it("keeps the full output loadable when the preview stopped at the cap", () => {
+    // A long result is not `output_truncated`: that flag is about the stored
+    // output hitting its own cap, not about the preview being cut.
+    const settled = applyEvent(
+      fromSnapshot(twoTurnSnapshot()),
+      toolCompleted(11, { output_preview: "x".repeat(2000) })
+    )
+
+    expect(readChunk(settled)?.loadOutput).toBeTypeOf("function")
+  })
+
+  it("offers no fetch once the preview is known to be the whole output", () => {
+    const settled = applyEvent(
+      fromSnapshot(twoTurnSnapshot()),
+      toolCompleted(11, { output_preview: "short" })
+    )
+
+    expect(readChunk(settled)?.output).toBe("short")
+    expect(readChunk(settled)?.loadOutput).toBeUndefined()
+  })
+
+  it("keeps the full output loadable when the stored output was capped", () => {
+    const settled = applyEvent(
+      fromSnapshot(twoTurnSnapshot()),
+      toolCompleted(11, { output_preview: "short", output_truncated: true })
+    )
+
+    expect(readChunk(settled)?.loadOutput).toBeTypeOf("function")
+  })
+})
+
+describe("context meter", () => {
+  const usage = { input_tokens: 90, output_tokens: 10 }
+
+  it("reads the newest root usage from a snapshot, not a subagent's", () => {
+    const state = fromSnapshot(
+      twoTurnSnapshot({
+        messages: [
+          messageRow({
+            message_id: "ai-root",
+            turn_id: "turn-1",
+            usage,
+            created_at: "2026-01-01T00:00:01Z",
+          }),
+          messageRow({
+            message_id: "ai-nested",
+            turn_id: "turn-1",
+            namespace: ["task-1"],
+            usage: { input_tokens: 5, output_tokens: 1 },
+            created_at: "2026-01-01T00:00:02Z",
+          }),
+        ],
+      })
+    )
+
+    expect(state.contextTokens).toBe(100)
+  })
+
+  it("leaves the meter alone when a subagent's message completes", () => {
+    const base = applyEvent(
+      fromSnapshot(twoTurnSnapshot()),
+      completed(11, { usage })
+    )
+    const nested = applyEvent(
+      base,
+      completed(12, {
+        message_id: "ai-sub",
+        namespace: ["task-1"],
+        usage: { input_tokens: 40_000 },
+      })
+    )
+
+    expect(base.contextTokens).toBe(100)
+    expect(nested.contextTokens).toBe(100)
   })
 })

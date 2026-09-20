@@ -178,6 +178,28 @@ function indexMessages(
   return messages
 }
 
+/**
+ * `TOOL_OUTPUT_PREVIEW_CHARS` on the server: the cap on the preview the
+ * `tool.completed` payload carries, not on the output stored behind it.
+ */
+const OUTPUT_PREVIEW_CHARS = 2000
+
+/**
+ * Whether a preview is already the whole output.
+ *
+ * `output_truncated` says the *stored* output hit its own size cap, so it
+ * answers a different question: a normal result longer than the preview cap is
+ * not truncated, yet its preview is still short of the full text. Only a
+ * preview that stopped before the cap, with nothing lost in storage either, is
+ * everything the server has.
+ */
+function previewIsComplete(
+  preview: string | null,
+  storedTruncated: boolean
+): boolean {
+  return !storedTruncated && (preview?.length ?? 0) < OUTPUT_PREVIEW_CHARS
+}
+
 function indexToolCalls(
   rows: ReadonlyArray<TranscriptToolCallRow>
 ): Record<string, TranscriptToolCallState> {
@@ -190,6 +212,8 @@ function indexToolCalls(
       input: row.input,
       status: row.status,
       output: row.output_preview,
+      // The snapshot row carries the preview only and says nothing about
+      // whether it is the whole output, so the endpoint stays available.
       outputComplete: false,
       hasOutput: row.has_output,
       namespace: row.namespace,
@@ -262,10 +286,13 @@ export function fromSnapshot(snapshot: TranscriptSnapshot): TranscriptState {
     toolCalls,
     notices,
     olderCursor: snapshot.older_cursor,
-    // `snapshot.messages` is ordered by `created_at`, so the last AI row is the
-    // newest one, and its usage is what the composer's meter reads.
+    // `snapshot.messages` is ordered by `created_at`, so the last root AI row
+    // is the newest one, and its usage is what the composer's meter reads.
+    // Subagents report their own context, which is not this conversation's.
     contextTokens: contextTokensFromUsageMetadata(
-      snapshot.messages.findLast((message) => message.role === "ai")?.usage
+      snapshot.messages.findLast(
+        (message) => message.role === "ai" && message.namespace.length === 0
+      )?.usage
     ),
     entities: collectStructuredEntities(humanTexts(messages)),
   }
@@ -276,8 +303,9 @@ export function fromSnapshot(snapshot: TranscriptSnapshot): TranscriptState {
  *
  * The server sends one when a subscriber's replay gap is too large, and it
  * carries the newest window only. Turns older than that window have settled
- * and are immutable, so whatever the client already loaded stays loaded and
- * the cursor that reaches furthest back is the one that survives.
+ * and are immutable, so whatever the client already loaded stays loaded --
+ * but only while it still reaches the window, so that no unreachable gap
+ * opens between the two.
  */
 export function applySnapshot(
   state: TranscriptState | null,
@@ -285,20 +313,33 @@ export function applySnapshot(
 ): TranscriptState {
   const fresh = fromSnapshot(snapshot)
   if (!state) return fresh
+  // Preserved turns are only safe to keep when they reach the snapshot's
+  // window. Enough activity during the gap pushes the window past everything
+  // the client holds, and merging then renders two stretches of history with
+  // an invisible hole between them that no cursor reaches, because the
+  // preserved `olderCursor` pages off the older stretch. Starting over from
+  // the snapshot costs the reader their loaded history but keeps the thread
+  // contiguous and every older turn still reachable.
+  const freshOldest = fresh.turnOrder[0]
+  const continuous =
+    freshOldest === undefined || state.turns[freshOldest] !== undefined
+  if (!continuous) {
+    return {
+      ...fresh,
+      contextTokens: fresh.contextTokens ?? state.contextTokens,
+    }
+  }
   const messages = { ...state.messages, ...fresh.messages }
   const toolCalls = { ...state.toolCalls, ...fresh.toolCalls }
   const turns = { ...state.turns, ...fresh.turns }
   const turnOrder = sortedTurnOrder(turns)
-  const freshOldest = fresh.turnOrder[0]
-  const keptOlderHistory =
-    freshOldest === undefined || turnOrder[0] !== freshOldest
   return {
     ...fresh,
     turnOrder,
     turns,
     messages,
     toolCalls,
-    olderCursor: keptOlderHistory ? state.olderCursor : fresh.olderCursor,
+    olderCursor: state.olderCursor,
     // A window whose AI messages reported no usage leaves the last known
     // context size in place rather than blanking the composer's meter.
     contextTokens: fresh.contextTokens ?? state.contextTokens,
@@ -550,10 +591,12 @@ export function applyEvent(
         attachments: payload.attachments ?? existing?.attachments ?? [],
         createdAt: payload.created_at || existing?.createdAt || at,
       })
-      if (payload.role === "ai") {
-        // Events arrive in order, so the message that just completed is the
-        // newest one. A message the provider reported no usage for leaves the
-        // last known size in place rather than blanking the meter.
+      if (payload.role === "ai" && payload.namespace.length === 0) {
+        // Events arrive in order, so the root message that just completed is
+        // the newest one. A subagent's usage describes its own context, not
+        // this conversation's, so it never moves the meter. A message the
+        // provider reported no usage for leaves the last known size in place
+        // rather than blanking the meter.
         const tokens = contextTokensFromUsageMetadata(payload.usage)
         if (tokens !== null)
           draft.state = { ...draft.state, contextTokens: tokens }
@@ -588,7 +631,10 @@ export function applyEvent(
         status: payload.status,
         output: payload.output_preview,
         // Anything the preview cut off is fetched from the endpoint on expand.
-        outputComplete: !payload.output_truncated,
+        outputComplete: previewIsComplete(
+          payload.output_preview,
+          payload.output_truncated
+        ),
         hasOutput: payload.has_output,
       })
       break
