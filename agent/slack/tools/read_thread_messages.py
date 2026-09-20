@@ -1,7 +1,10 @@
+import re
 from typing import Any
 
+from agent.slack.channels import SlackChannel
 from agent.slack.client import (
     SLACK_THREAD_MAX_MESSAGES,
+    SlackThreadFetchError,
     fetch_slack_thread_messages,
     format_slack_messages_for_prompt,
     get_slack_user_names,
@@ -10,9 +13,20 @@ from agent.slack.client import (
 
 async def _fetch_and_format(channel_id: str, message_ts: str) -> dict[str, Any]:
     """Fetch thread messages and resolve author names."""
-    messages = await fetch_slack_thread_messages(channel_id, message_ts)
-    if not messages:
-        return {"success": False, "messages": []}
+    try:
+        messages = await fetch_slack_thread_messages(channel_id, message_ts)
+    except SlackThreadFetchError as exc:
+        if exc.error_code in {"thread_not_found", "message_not_found"}:
+            return {
+                "success": False,
+                "error": "Slack could not resolve that thread timestamp. Convert a Slack "
+                "permalink timestamp to seconds plus a dot and six digits from the end "
+                "(for example, 1789750092.207789), not 1789750092207789.",
+            }
+        return {
+            "success": False,
+            "error": f"Could not fetch the Slack thread ({exc.error_code}).",
+        }
 
     user_ids = [
         user_id for msg in messages if isinstance(user_id := msg.get("user"), str) and user_id
@@ -35,17 +49,28 @@ async def _fetch_and_format(channel_id: str, message_ts: str) -> dict[str, Any]:
 
 async def slack_read_thread_messages(channel_id: str, message_ts: str) -> dict[str, Any]:
     """Implement the `slack_read_thread_messages` tool."""
-    if not channel_id or not channel_id.strip():
+    channel_id = channel_id.strip() if isinstance(channel_id, str) else ""
+    message_ts = message_ts.strip() if isinstance(message_ts, str) else ""
+    if not channel_id:
         return {"success": False, "error": "channel_id is required"}
-    if not message_ts or not message_ts.strip():
+    if not message_ts:
         return {"success": False, "error": "message_ts is required"}
-
-    result = await _fetch_and_format(channel_id.strip(), message_ts.strip())
-    if not result.get("success"):
+    if not re.fullmatch(r"\d{10}\.\d{6}", message_ts):
         return {
             "success": False,
-            "error": "Could not fetch thread messages. The bot may not have access to "
-            "that channel, or the message may have been deleted.",
+            "error": "message_ts must be Slack seconds plus a dot and six digits from the "
+            "end of the permalink timestamp (for example, 1789750092.207789), not the "
+            "16-digit permalink value.",
         }
+    if await SlackChannel.load(channel_id) is None:
+        return {
+            "success": False,
+            "error": "The bot cannot read that Slack channel. Retrying will not help; ask "
+            "the sender to paste the thread or invite the bot to the channel.",
+        }
+
+    result = await _fetch_and_format(channel_id, message_ts)
+    if not result.get("success"):
+        return result
 
     return result
