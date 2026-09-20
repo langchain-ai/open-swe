@@ -163,11 +163,7 @@ function PooledStream({ entry }: { entry: StreamPoolEntry }) {
   return null
 }
 
-/**
- * Owns every live `useStream` under `/agents`. The bound thread is the one the
- * route asks for; threads left within the last minute (and any still running)
- * stay mounted so returning to them is instant and never orphans a run.
- */
+/** Keeps visited cloud runtimes alive until the provider unmounts. */
 export function AgentStreamProvider({
   threadId,
   transport = "cloud",
@@ -190,6 +186,8 @@ export function AgentStreamProvider({
   const stream = useStreamPool((state) =>
     selectStreamFor(state, transport, threadId)
   )
+
+  useLayoutEffect(() => () => useStreamPool.getState().clear(), [])
 
   useLayoutEffect(
     () => activate(transport, threadId),

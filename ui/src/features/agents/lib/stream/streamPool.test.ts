@@ -74,12 +74,12 @@ describe("streamPool", () => {
   })
 
   it("drops idle instances after the TTL but never a running one", () => {
-    pool().activate("cloud", "running")
+    pool().activate("local", "running")
     const running = activeEntry()
     if (!running) throw new Error("no active entry")
     pool().publish(running.id, handle(true))
-    pool().activate("cloud", "idle")
-    pool().activate("cloud", "current")
+    pool().activate("local", "idle")
+    pool().activate("local", "current")
     useStreamPool.setState((state) => ({
       entries: state.entries.map((entry) =>
         entry.threadId === "current"
@@ -98,7 +98,7 @@ describe("streamPool", () => {
   })
 
   it("restarts the retention window when a thread is left", () => {
-    pool().activate("cloud", "stale")
+    pool().activate("local", "stale")
     useStreamPool.setState((state) => ({
       entries: state.entries.map((entry) => ({
         ...entry,
@@ -106,7 +106,7 @@ describe("streamPool", () => {
       })),
     }))
 
-    pool().activate("cloud", "next")
+    pool().activate("local", "next")
 
     expect(pool().entries.map((entry) => entry.threadId)).toEqual([
       "stale",
@@ -116,9 +116,9 @@ describe("streamPool", () => {
 
   it("caps retained idle instances, evicting the least recently active", () => {
     for (let index = 0; index <= MAX_IDLE_STREAMS; index += 1) {
-      pool().activate("cloud", `thread-${index}`)
+      pool().activate("local", `thread-${index}`)
     }
-    pool().activate("cloud", "current")
+    pool().activate("local", "current")
     useStreamPool.setState((state) => ({
       entries: state.entries.map((entry, index) =>
         entry.threadId === "current"
@@ -134,6 +134,37 @@ describe("streamPool", () => {
     expect(retained).toContain(`thread-${MAX_IDLE_STREAMS}`)
     expect(retained).toContain("current")
     expect(retained).toHaveLength(MAX_IDLE_STREAMS + 1)
+  })
+
+  it("retains visited cloud streams beyond the idle cap and TTL", () => {
+    pool().activate("cloud", "first")
+    const first = activeEntry()!
+    const stream = handle(false)
+    pool().publish(first.id, stream)
+    for (let index = 0; index < MAX_IDLE_STREAMS + 2; index += 1) {
+      pool().activate("cloud", `visited-${index}`)
+    }
+    pool().sweep(Date.now() + IDLE_STREAM_TTL_MS * 2)
+    pool().activate("cloud", "first")
+    expect(activeEntry()?.id).toBe(first.id)
+    expect(pool().handles[first.id]).toBe(stream)
+  })
+
+  it("releases deleted cloud streams without removing the local namesake", () => {
+    pool().activate("cloud", "same")
+    const cloud = activeEntry()!
+    pool().publish(cloud.id, handle(false))
+    pool().activate("local", "same")
+    pool().remove("cloud", "same")
+    expect(pool().handles[cloud.id]).toBeUndefined()
+    expect(pool().entries.map((entry) => entry.transport)).toEqual(["local"])
+  })
+
+  it("still evicts abandoned unsent cloud drafts", () => {
+    pool().activate("cloud", null)
+    pool().activate("cloud", "current")
+    pool().sweep(Date.now() + IDLE_STREAM_TTL_MS * 2)
+    expect(pool().entries.map((entry) => entry.threadId)).toEqual(["current"])
   })
 
   describe("connection", () => {
