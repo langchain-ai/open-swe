@@ -16,6 +16,7 @@ from agent.github.thread_token import (
     get_github_token,
     invalidate_cached_github_token,
 )
+from agent.review.assessment_feedback import ASSESSMENTS, PublishedAssessment
 from agent.review.diff import compute_diff_line_set, fetch_pr_diff, is_range_in_diff
 from agent.review.findings import (
     REVIEW_FINDING_CAP,
@@ -45,6 +46,8 @@ from agent.review.findings import (
     list_findings as list_findings_async,
 )
 from agent.review.publish import (
+    ReviewAssessment,
+    approval_allowed_for_head,
     clear_review_started_comment,
     fetch_pr_review_threads,
     fetch_review_comments,
@@ -60,6 +63,7 @@ from agent.review.publish import (
     settle_review_check_run,
 )
 from agent.review.reconcile import reconcile_findings_with_review_threads
+from agent.review.styles import get_approval_policy
 from agent.run_config import RunConfig
 from agent.slack.client import post_slack_thread_reply
 from agent.utils.dashboard_links import dashboard_review_url
@@ -78,6 +82,7 @@ async def _record_reviewer_usage(**kwargs: Any) -> None:
 async def publish_review(
     severity_threshold: Severity = "medium",
     state: Annotated[dict[str, Any] | None, InjectedState] = None,
+    assessment: ReviewAssessment | None = None,
 ) -> dict[str, Any]:
     """Implement the `publish_review` tool."""
     if severity_threshold not in {"low", "medium", "high", "critical"}:
@@ -128,6 +133,7 @@ async def publish_review(
             langgraph_run_id=_current_run_id(config),
             trace_link_config_override=cfg.review_trace_link_enabled,
             state=state,
+            assessment=assessment,
         )
     except ReviewerThreadMissingError as exc:
         return thread_missing_tool_result(exc)
@@ -218,13 +224,34 @@ async def _publish_review_async(
     langgraph_run_id: str | None = None,
     trace_link_config_override: bool | None = None,
     state: dict[str, Any] | None = None,
+    assessment: ReviewAssessment | None = None,
 ) -> dict[str, Any]:
     thread_id = get_thread_id_from_runtime()
+    auto_approve = False
+    if assessment is not None:
+        settings = await get_workspace_settings()
+        policy = await get_approval_policy(owner, repo, settings)
+        if not policy:
+            assessment = None
+        elif state and state.get("review_approval_policy") != policy:
+            return {
+                "success": False,
+                "error": "Approval policy changed. Start a new review before publishing an assessment.",
+            }
+        else:
+            auto_approve = settings.get("review_auto_approve") is True and bool(
+                state and state.get("review_approval_policy") == policy
+            )
     # The run config's head_sha is frozen at run creation; a push that arrived
     # mid-run updated the live head in thread metadata. Prefer that so the
     # review anchors to (and last_reviewed_sha advances to) the commit actually
     # reviewed, not the stale one this run was created for.
     head_sha = await resolve_review_head_sha(thread_id, RunConfig(head_sha=head_sha))
+    if assessment is not None and assessment.head_sha != head_sha:
+        return {
+            "success": False,
+            "error": "Assessment commit differs from the current review head. Review it again.",
+        }
     review_trace_url = await _resolve_review_trace_url(thread_id, trace_link_config_override)
     review_ui_url = dashboard_review_url(owner, repo, pr_number)
     findings = await _backfill_findings_from_pr_threads(
@@ -234,6 +261,17 @@ async def _publish_review_async(
         pr_number=pr_number,
         token=token,
     )
+    if (
+        assessment is not None
+        and assessment.decision == "would_approve"
+        and any(f.get("status", "open") == "open" for f in findings)
+    ):
+        assessment = assessment.model_copy(
+            update={
+                "decision": "needs_human_review",
+                "explanation": f"Unresolved findings remain. {assessment.explanation}",
+            }
+        )
 
     # Re-reviews only post NEW findings. Anything with a recorded review comment
     # id already lives on GitHub from a prior publish — reposting would create
@@ -282,13 +320,17 @@ async def _publish_review_async(
     # SWE review summary) instead. Still resolve threads for findings that just
     # moved to resolved, and advance last_reviewed_sha so subsequent pushes
     # don't redo the same diff.
-    if not inline_comments and await _open_swe_already_reviewed(
-        thread_id=thread_id,
-        owner=owner,
-        repo=repo,
-        pr_number=pr_number,
-        token=token,
-        is_re_review=is_re_review,
+    if (
+        assessment is None
+        and not inline_comments
+        and await _open_swe_already_reviewed(
+            thread_id=thread_id,
+            owner=owner,
+            repo=repo,
+            pr_number=pr_number,
+            token=token,
+            is_re_review=is_re_review,
+        )
     ):
         resolved_thread_count = await _resolve_threads_for_resolved_findings(
             owner=owner,
@@ -326,23 +368,44 @@ async def _publish_review_async(
             "skipped_empty_re_review": True,
         }
 
-    review_body = render_review_body(
-        pr_number=pr_number,
-        surfaced_count=len(inline_comments),
-        trace_url=review_trace_url,
-        ui_url=review_ui_url,
-        additional_findings_count=additional_findings_count,
+    approved = (
+        auto_approve
+        and assessment is not None
+        and assessment.decision == "would_approve"
+        and await approval_allowed_for_head(
+            owner=owner, repo=repo, pr_number=pr_number, head_sha=head_sha, token=token
+        )
     )
+    # GitHub forbids self-approval; publish the assessment as an advisory comment instead.
+    for _ in range(2):
+        review_body = render_review_body(
+            pr_number=pr_number,
+            surfaced_count=len(inline_comments),
+            trace_url=review_trace_url,
+            ui_url=review_ui_url,
+            additional_findings_count=additional_findings_count,
+            assessment=assessment,
+            approved=approved,
+        )
 
-    review_response = await post_pull_request_review(
-        owner=owner,
-        repo=repo,
-        pr_number=pr_number,
-        head_sha=head_sha,
-        body=review_body,
-        inline_comments=inline_comments,
-        token=token,
-    )
+        review_response = await post_pull_request_review(
+            owner=owner,
+            repo=repo,
+            pr_number=pr_number,
+            head_sha=head_sha,
+            body=review_body,
+            inline_comments=inline_comments,
+            token=token,
+            event="APPROVE" if approved else "COMMENT",
+        )
+        if (
+            approved
+            and isinstance(review_response, dict)
+            and review_response.get("_error_kind") == "self_approval"
+        ):
+            approved = False
+        else:
+            break
     # If GitHub rejected the batch because one or more inline comments anchor
     # to a file/line that's not in the PR diff, drop just those findings and
     # retry once. Returning the bare 422 to the agent only invites it to
@@ -425,6 +488,24 @@ async def _publish_review_async(
             "error": "Failed to POST PR review: no response from GitHub",
         }
     review_id = review_response.get("id") if isinstance(review_response, dict) else None
+
+    if assessment is not None and isinstance(review_id, int) and not unresolvable_findings:
+        # GitHub already accepted the review; a storage failure must not prompt a duplicate post.
+        try:
+            await ASSESSMENTS.put(
+                str(review_id),
+                PublishedAssessment(
+                    **assessment.model_dump(),
+                    review_id=review_id,
+                    owner=owner,
+                    repo=repo,
+                    pr_number=pr_number,
+                    approved=approved,
+                ),
+            )
+            await set_reviewer_thread_metadata(thread_id, extra={"review_assessment_id": review_id})
+        except Exception:
+            logger.exception("Failed to save published assessment", extra={"review_id": review_id})
 
     if review_id is not None and inline_comments:
         # Record the GitHub review id AND inline comment ids in a single

@@ -5,6 +5,7 @@ analysis metadata, and the status of the background style-analysis run.
 """
 
 import logging
+from collections.abc import Mapping
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -16,6 +17,13 @@ logger = logging.getLogger(__name__)
 REVIEW_STYLES_NAMESPACE: list[str] = ["review_styles"]
 
 AnalysisStatus = Literal["idle", "running", "completed", "failed"]
+
+
+async def get_approval_policy(owner: str, repo: str, settings: Mapping[str, object]) -> str | None:
+    record = await REVIEW_STYLES.get(f"{owner}/{repo}") if owner and repo else None
+    policy = (record.approval_policy if record else None) or settings.get("approval_policy")
+    return policy.strip() or None if isinstance(policy, str) else None
+
 
 _TERMINAL_SUCCESS = frozenset({"success", "completed"})
 _TERMINAL_FAILURE = frozenset({"error", "failed", "timeout", "interrupted", "cancelled"})
@@ -46,12 +54,13 @@ class ReviewStyleCreate(BaseModel):
 
 
 class ReviewStylePromptUpdate(BaseModel):
-    custom_prompt: str
+    custom_prompt: str | None = None
+    approval_policy: str | None = Field(default=None, max_length=10_000)
 
     @field_validator("custom_prompt")
     @classmethod
-    def _non_empty(cls, v: str) -> str:
-        if not v.strip():
+    def _non_empty(cls, v: str | None) -> str | None:
+        if v is not None and not v.strip():
             raise ValueError("custom_prompt cannot be empty")
         return v
 
@@ -64,6 +73,7 @@ class ReviewStyle(BaseModel):
     name: str = ""
     status: AnalysisStatus = "idle"
     custom_prompt: str | None = None
+    approval_policy: str | None = None
     analysis_summary: str | None = None
     top_reviewers: list[str] = Field(default_factory=list)
     prs_sampled: int = 0
@@ -117,11 +127,19 @@ class ReviewStyleStore(TypedStore[ReviewStyle]):
         return await self.put(full_name, ReviewStyle.seed(full_name, created_by))
 
     async def set_custom_prompt(self, full_name: str, custom_prompt: str) -> ReviewStyle:
+        return await self.update_prompts(
+            full_name, ReviewStylePromptUpdate(custom_prompt=custom_prompt)
+        )
+
+    async def update_prompts(self, full_name: str, update: ReviewStylePromptUpdate) -> ReviewStyle:
         record = await self.get_or_seed(full_name)
-        record.custom_prompt = custom_prompt
-        if record.status == "running":
-            record.status = "completed"
-            record.error = None
+        if update.custom_prompt is not None:
+            record.custom_prompt = update.custom_prompt
+            if record.status == "running":
+                record.status = "completed"
+                record.error = None
+        if "approval_policy" in update.model_fields_set:
+            record.approval_policy = (update.approval_policy or "").strip() or None
         return await self.save(record)
 
     async def set_continual_cron(self, full_name: str, cron_id: str | None) -> ReviewStyle:

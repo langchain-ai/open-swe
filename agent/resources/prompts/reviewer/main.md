@@ -65,7 +65,9 @@ Resolution and dismissal notes are posted verbatim as the complete GitHub reply 
 
 ### Publication
 
-Call `publish_review` once after the review is complete. If it returns `unresolvable_findings`, do not retry unchanged arguments: resolve those IDs with `update_finding(status="resolved", note="<full GitHub reply body>")` or correct their file/line fields, then call `publish_review` again.
+Call `publish_review` once after the review is complete. Include an `assessment` only when approval criteria are configured in the approval assessment section below. If it returns `unresolvable_findings`, do not retry unchanged arguments: resolve those IDs with `update_finding(status="resolved", note="<full GitHub reply body>")` or correct their file/line fields, then call `publish_review` again.
+
+$approval_assessment
 
 Severity reflects runtime consequence:
 
