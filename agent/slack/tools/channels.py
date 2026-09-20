@@ -1,7 +1,12 @@
 import re
 from typing import Literal, TypedDict
 
-from agent.slack import client as slack_messages
+from fastapi import HTTPException
+
+from agent.slack.client import (
+    convert_mentions_to_slack_format,
+    post_slack_top_level_message_with_ts,
+)
 from agent.slack.http import SLACK_REQUEST_ERRORS, slack_client, slack_error
 
 _CHANNEL_ID_RE = re.compile(r"^[CG][A-Z0-9]{1,99}$")
@@ -32,16 +37,16 @@ class SlackMessageReceipt(TypedDict):
 
 async def slack_list_channels(cursor: str | None = None) -> SlackChannelList | SlackChannelError:
     """List a page of public and private channels the Open SWE bot belongs to."""
-    if not slack_messages.SLACK_BOT_TOKEN:
-        return {"success": False, "error": "missing_slack_bot_token"}
     try:
-        async with slack_client(token=slack_messages.SLACK_BOT_TOKEN) as client:
+        async with slack_client() as client:
             response = await client.users_conversations(
                 types="public_channel,private_channel",
                 exclude_archived=True,
                 limit=200,
                 cursor=cursor,
             )
+    except HTTPException:
+        return {"success": False, "error": "missing_slack_bot_token"}
     except SLACK_REQUEST_ERRORS as exc:
         return {"success": False, "error": slack_error(exc)}
 
@@ -80,7 +85,7 @@ async def slack_post_message(
         return {"success": False, "error": "channel_id must be a Slack channel ID"}
     if not message.strip():
         return {"success": False, "error": "message is required"}
-    message = slack_messages.convert_mentions_to_slack_format(message)
+    message = convert_mentions_to_slack_format(message)
     if len(message) > 40_000:
         return {"success": False, "error": "msg_too_long"}
     # conversations.info does not guarantee an is_member field.
@@ -99,7 +104,7 @@ async def slack_post_message(
             return {"success": False, "error": "invalid_slack_response"}
         seen_cursors.add(cursor)
 
-    message_ts, error = await slack_messages.post_slack_top_level_message_with_ts(
+    message_ts, error = await post_slack_top_level_message_with_ts(
         channel_id, message, unfurl_links=False, unfurl_media=False
     )
     if not message_ts:

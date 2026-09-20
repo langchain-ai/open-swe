@@ -1,7 +1,6 @@
 import pytest
 
 from agent import tools
-from agent.slack import client as slack_client
 from tests.support.slack_api import SlackAPI
 
 
@@ -176,7 +175,7 @@ async def test_list_channels_rejects_invalid_response(
 async def test_channel_tools_report_missing_configuration(
     slack_api: SlackAPI, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr(slack_client, "SLACK_BOT_TOKEN", "")
+    monkeypatch.delenv("SLACK_BOT_TOKEN", raising=False)
     for result in (
         await tools.slack_list_channels(),
         await tools.slack_post_message("C123", "hello"),
