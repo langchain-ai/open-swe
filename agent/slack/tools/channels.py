@@ -1,3 +1,4 @@
+import logging
 import re
 from typing import Literal, TypedDict
 
@@ -8,6 +9,8 @@ from agent.slack.client import (
     post_slack_top_level_message_with_ts,
 )
 from agent.slack.http import SLACK_REQUEST_ERRORS, slack_client, slack_error
+
+logger = logging.getLogger(__name__)
 
 _CHANNEL_ID_RE = re.compile(r"^[CG][A-Z0-9]{1,99}$")
 
@@ -46,9 +49,14 @@ async def slack_list_channels(cursor: str | None = None) -> SlackChannelList | S
                 cursor=cursor,
             )
     except HTTPException:
+        logger.warning(
+            "Slack channel lookup failed", extra={"slack_error": "missing_slack_bot_token"}
+        )
         return {"success": False, "error": "missing_slack_bot_token"}
     except SLACK_REQUEST_ERRORS as exc:
-        return {"success": False, "error": slack_error(exc)}
+        error = slack_error(exc)
+        logger.warning("Slack channel lookup failed", extra={"slack_error": error})
+        return {"success": False, "error": error}
 
     raw_channels: object = response.get("channels")
     if not isinstance(raw_channels, list):

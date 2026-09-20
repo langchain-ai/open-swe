@@ -155,11 +155,17 @@ async def test_post_channel_message_reports_slack_failure_without_retry(
     assert len(slack_api.calls) == 2
 
 
-async def test_list_channels_reports_api_failure(slack_api: SlackAPI) -> None:
-    slack_api.respond({"ok": False, "error": "missing_scope"})
+async def test_list_channels_reports_api_failure(
+    slack_api: SlackAPI, caplog: pytest.LogCaptureFixture
+) -> None:
+    slack_api.respond({"ok": False, "error": "missing_scope", "detail": "private-response-details"})
     result = await tools.slack_list_channels()
     assert result["success"] is False
     assert result["error"] == "missing_scope"
+    records = [record for record in caplog.records if record.name == "agent.slack.tools.channels"]
+    assert any(getattr(record, "slack_error", None) == "missing_scope" for record in records)
+    assert all(record.exc_info is None for record in records)
+    assert "private-response-details" not in caplog.text
 
 
 @pytest.mark.parametrize("channels", [None, {}, ["not-a-channel"]])
