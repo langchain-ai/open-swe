@@ -781,16 +781,24 @@ class WorkspaceStore:
                 )
         return records
 
-    async def put(self, slug: str, record: Workspace) -> Workspace:
+    async def put(self, slug: str, record: Workspace, *, insert: bool = False) -> Workspace:
         """Write the row and replace its bindings, in one transaction.
 
         Returns the stored view rather than the record it was handed: a
         repository already known under another capitalization keeps the casing
         its ``repository`` row carries, which is what :meth:`get` reads back.
+
+        ``insert`` writes a new row without looking for one first, so a slug
+        another request committed a moment ago lands on ``workspace_slug_key``
+        instead of quietly overwriting the workspace that won the race.
         """
         try:
             async with postgres.session() as session:
-                row = await session.scalar(select(WorkspaceRow).where(WorkspaceRow.slug == slug))
+                row = (
+                    None
+                    if insert
+                    else await session.scalar(select(WorkspaceRow).where(WorkspaceRow.slug == slug))
+                )
                 if row is None:
                     row = WorkspaceRow(slug=slug, name=record.name)
                     session.add(row)
@@ -896,9 +904,7 @@ class WorkspaceStore:
     async def create(self, create: WorkspaceCreate, created_by: str) -> Workspace:
         record = Workspace.seed(create, created_by)
         await self._assert_unique(record)
-        if await self.slug_exists(record.slug):
-            raise WorkspaceConflictError(f"workspace {create.name!r} already exists")
-        return await self.put(record.slug, record)
+        return await self.put(record.slug, record, insert=True)
 
     async def apply_update(self, slug: str, update: WorkspaceUpdate) -> Workspace:
         record = await self.get(slug)
