@@ -25,6 +25,21 @@ class FakeExa:
         return self.result
 
 
+class FakeSearchResult:
+    def __init__(self, content: str, results: list[object] | None = None) -> None:
+        self.content = content
+        self.results = results or []
+
+    def __str__(self) -> str:
+        return self.content
+
+
+class FakeResultItem:
+    def __init__(self, title: str | None, url: str | None) -> None:
+        self.title = title
+        self.url = url
+
+
 def test_chunk_output_as_jsonl_is_lossless_and_bounds_source_lines() -> None:
     content = "prefix\n" + "x" * 10_000 + "\nsuffix"
 
@@ -65,9 +80,40 @@ async def test_write_sandbox_output_uses_current_thread_backend(monkeypatch) -> 
     assert writes == [(path, "full results")]
 
 
-async def test_web_search_saves_results_and_returns_only_path(monkeypatch) -> None:
+async def test_web_search_returns_small_results_inline(monkeypatch) -> None:
+    raw_results = "small result"
+    FakeExa.result = FakeSearchResult(raw_results)
+    monkeypatch.setitem(sys.modules, "exa_py", types.SimpleNamespace(Exa=FakeExa))
+    monkeypatch.setenv("EXA_API_KEY", "test-key")
+    writes: list[tuple[str, str, str]] = []
+
+    async def fake_write(tool_name: str, content: str, extension: str) -> str:
+        writes.append((tool_name, content, extension))
+        return "/workspace/web-search-result.jsonl"
+
+    monkeypatch.setattr(web_search_tool, "write_sandbox_output", fake_write)
+
+    result = await web_search_tool.web_search("python docs")
+
+    assert result == {
+        "success": True,
+        "results_path": None,
+        "results": raw_results,
+        "result_chars": len(raw_results),
+        "error": None,
+    }
+    assert writes == []
+
+
+async def test_web_search_offloads_large_results_with_preview(monkeypatch) -> None:
     raw_results = "untrusted result\n" + "x" * 200_000
-    FakeExa.result = raw_results
+    FakeExa.result = FakeSearchResult(
+        raw_results,
+        [
+            FakeResultItem("First result", "https://example.com/first"),
+            FakeResultItem(None, None),
+        ],
+    )
     monkeypatch.setitem(sys.modules, "exa_py", types.SimpleNamespace(Exa=FakeExa))
     monkeypatch.setenv("EXA_API_KEY", "test-key")
     writes: list[tuple[str, str, str]] = []
@@ -84,6 +130,9 @@ async def test_web_search_saves_results_and_returns_only_path(monkeypatch) -> No
         "success": True,
         "results_path": "/workspace/web-search-result.jsonl",
         "results": None,
+        "results_preview": (
+            "2 results\n- First result — https://example.com/first\n- (untitled) — (no URL)"
+        ),
         "result_chars": len(raw_results),
         "error": None,
     }
