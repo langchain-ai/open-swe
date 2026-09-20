@@ -66,6 +66,13 @@ const NEW_AGENT_PANEL_REF = {
   threadId: NEW_AGENT_PANEL_ID,
 }
 
+/** A cloud submission whose `run.start` has not come back yet. */
+interface PendingCloudSubmit {
+  threadId: string
+  /** Stop was pressed before the run was accepted; cancel it once it is. */
+  stopRequested: boolean
+}
+
 export function AgentsHome({
   initialRepo,
   initialLocalRepo,
@@ -219,7 +226,15 @@ export function AgentsHome({
   // The thread id is minted here: the first `run.start` posted against it is
   // what creates the thread server-side.
   const [pendingThreadId, setPendingThreadId] = useState<string | null>(null)
-  const pendingRun = useRef<AbortController | null>(null)
+  // Identity of the submission in flight, so its continuation can tell whether
+  // it is still the one this page is waiting for.
+  const pendingRun = useRef<PendingCloudSubmit | null>(null)
+  useEffect(
+    () => () => {
+      pendingRun.current = null
+    },
+    []
+  )
 
   useEffect(() => {
     if (pendingThreadId)
@@ -389,17 +404,26 @@ export function AgentsHome({
     setSubmittedDraft(null)
   }
 
-  const abortPendingSubmit = () => {
-    pendingRun.current?.abort()
-    const threadId = pendingThreadId
-    // The command may already have been dispatched before the fetch was
-    // aborted, so the run is cancelled server-side too. A thread the server
-    // never created has nothing to cancel, which is the only expected failure.
-    if (threadId) {
-      void agentsApi.cancelThread(threadId).catch((error: unknown) => {
-        console.warn("Could not cancel the thread being created", error)
-      })
+  const cancelPendingThread = async (threadId: string) => {
+    try {
+      const cancelled = await agentsApi.cancelThread(threadId)
+      queryClient.setQueryData(agentThreadKeys.detail(threadId), cancelled)
+      invalidateAgentThreadLists(queryClient)
+    } catch (error) {
+      console.warn("Could not cancel the thread being created", error)
     }
+  }
+
+  /**
+   * Stop while the thread is still being created. The start request is left to
+   * finish: aborting it would not stop the server from creating the thread and
+   * dispatching the run, and cancelling before the run exists either 404s or
+   * finds nothing to cancel. So the run is only marked for cancellation here,
+   * and the request's own continuation cancels it once it was accepted.
+   */
+  const stopPendingSubmit = () => {
+    const pending = pendingRun.current
+    if (pending) pending.stopRequested = true
     resetPendingSubmit()
   }
 
@@ -484,9 +508,13 @@ export function AgentsHome({
       })()
       return
     }
+    // Minted here so the seeded thread, the graph's HumanMessage and the
+    // transcript row all carry the same message id.
+    const messageId = crypto.randomUUID()
     const draft = {
       prompt,
       images,
+      client_message_id: messageId,
       repo,
       visibility,
       repo_explicitly_none: repoOverride === null,
@@ -505,7 +533,6 @@ export function AgentsHome({
     if (selectedWorkspace) configurable.workspace = selectedWorkspace
 
     const handleCloudSubmitError = (error: unknown) => {
-      if (error instanceof DOMException && error.name === "AbortError") return
       resetPendingSubmit()
       setLocalError(
         error instanceof Error
@@ -515,8 +542,8 @@ export function AgentsHome({
     }
 
     const threadId = crypto.randomUUID()
-    const abort = new AbortController()
-    pendingRun.current = abort
+    const pending: PendingCloudSubmit = { threadId, stopRequested: false }
+    pendingRun.current = pending
     setPendingThreadId(threadId)
     void (async () => {
       try {
@@ -524,22 +551,31 @@ export function AgentsHome({
           threadId,
           runStartCommand({
             threadId,
-            message: { id: crypto.randomUUID(), text: prompt, images },
+            message: { id: messageId, text: prompt, images },
             configurable,
-          }),
-          { signal: abort.signal }
+          })
         )
-        if (abort.signal.aborted) return
-        // Seeded so the thread route renders the prompt immediately; the real
-        // record lands with the next detail fetch.
-        const thread: AgentThread = optimisticThread(threadId, draft)
-        queryClient.setQueryData(agentThreadKeys.detail(threadId), thread)
-        seedAgentThreadLists(queryClient, thread)
-        invalidateAgentThreadLists(queryClient)
-        await navigate({ to: "/agents/$threadId", params: { threadId } })
       } catch (error) {
-        handleCloudSubmitError(error)
+        // A run that never started has nothing left to cancel, and the page
+        // already went back to the empty composer when Stop was pressed.
+        if (!pending.stopRequested) handleCloudSubmitError(error)
+        return
       }
+      // Seeded so the thread route renders the prompt immediately; the real
+      // record lands with the next detail fetch.
+      const thread: AgentThread = optimisticThread(threadId, draft)
+      queryClient.setQueryData(agentThreadKeys.detail(threadId), thread)
+      seedAgentThreadLists(queryClient, thread)
+      invalidateAgentThreadLists(queryClient)
+      if (pending.stopRequested) {
+        await cancelPendingThread(threadId)
+        return
+      }
+      // The user moved on (another submission, or another thread opened) while
+      // this was in flight: the thread is seeded either way, but only the
+      // submission this page is still waiting for may navigate.
+      if (pendingRun.current !== pending) return
+      await navigate({ to: "/agents/$threadId", params: { threadId } })
     })()
   }
 
@@ -607,7 +643,7 @@ export function AgentsHome({
             onSubmit={handleSubmit}
             onStop={
               optimisticDraftThread && runTarget === "cloud"
-                ? abortPendingSubmit
+                ? stopPendingSubmit
                 : undefined
             }
             disabled={Boolean(submittedDraft)}

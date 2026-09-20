@@ -110,12 +110,14 @@ function isProtocolFailure(value: unknown): value is ProtocolFailure {
 
 /**
  * Post a thread command. The first `run.start` on a client-minted thread id is
- * what creates the thread, so this doubles as the creation call.
+ * what creates the thread, so this doubles as the creation call. It takes no
+ * abort signal on purpose: aborting the request would not stop the handler
+ * from creating the thread and dispatching the run, so a caller that wants to
+ * stop has to wait for this and then cancel the run.
  */
 export async function startRun(
   threadId: string,
-  command: RunStartCommand,
-  options: { signal?: AbortSignal } = {}
+  command: RunStartCommand
 ): Promise<void> {
   const response = await timedFetch(
     dashboardApiUrl(`/threads/${encodeURIComponent(threadId)}/commands`),
@@ -124,7 +126,6 @@ export async function startRun(
       credentials: "include",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(command),
-      ...(options.signal ? { signal: options.signal } : {}),
     }
   )
   if (!response.ok) throw await apiError(response)
