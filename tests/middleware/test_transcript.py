@@ -304,7 +304,7 @@ async def test_a_human_message_keeps_the_envelope_it_is_attributed_by(
     # as nothing: without it the reader has no display name to attribute by.
     recorded = [command for command in engine.commands if command.command_id.startswith("human:")]
     assert [command.command_id for command in recorded] == ["human:entity-bob"]
-    assert "slack:U1" in recorded[0].event.text
+    assert "slack:U1" in (recorded[0].event.text or "")
 
 
 async def test_model_failure_records_turn_failed(monkeypatch: pytest.MonkeyPatch) -> None:
