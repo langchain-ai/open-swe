@@ -196,7 +196,7 @@ def _scripts_to_run(record: Workspace, kind: RefreshKind) -> list[tuple[str, str
         steps.append(
             (
                 "setup",
-                script_command(record.setup_script, "setup"),
+                script_command(record.setup_script, "setup", record.repos),
                 _seconds(ENV.WORKSPACE_REFRESH_TIMEOUT_SECONDS, DEFAULT_SCRIPT_TIMEOUT_SECONDS),
             )
         )
@@ -204,7 +204,7 @@ def _scripts_to_run(record: Workspace, kind: RefreshKind) -> list[tuple[str, str
         steps.append(
             (
                 "update",
-                script_command(record.update_script, "update"),
+                script_command(record.update_script, "update", record.repos),
                 _seconds(ENV.WORKSPACE_UPDATE_TIMEOUT_SECONDS, DEFAULT_UPDATE_TIMEOUT_SECONDS),
             )
         )
