@@ -102,7 +102,7 @@ class SandboxCreateConfig:
         try:
             async with aphase(thread_id, "sandbox.update_script"):
                 result = await sandbox_backend.aexecute(
-                    script_command(workspace.update_script, "update"),
+                    script_command(workspace.update_script, "update", workspace.repos),
                     timeout=sandbox_update_timeout(),
                 )
         except Exception:
