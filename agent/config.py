@@ -457,5 +457,10 @@ ENV.var(
     secret=True,
 )
 ENV.var("BG_JOB_ISOLATED_LOOPS", "LangGraph background-job event-loop isolation flag.")
+ENV.var(
+    "TRANSCRIPT_EVENT_LOG",
+    "Record threads into the append-only transcript event log and serve them from it "
+    "instead of LangGraph state; off unless set, and ignored without PostgreSQL.",
+)
 ENV.var("DEBUG_TRACEMALLOC", "Start tracemalloc to attribute unclosed-session warnings.")
 ENV.var("DEBUG_TRACEMALLOC_FRAMES", "Frames tracemalloc records per allocation.", default="25")

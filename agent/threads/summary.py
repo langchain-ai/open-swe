@@ -14,6 +14,7 @@ from agent.slack.client import parse_github_pr_url
 from agent.slack.code_channels import CODE_CHANNEL_SESSION_TS
 from agent.slack.oauth import SLACK_TEAM_ID
 from agent.source_context import SourceContext
+from agent.transcript.flag import transcript_enabled
 from agent.utils.json_types import (
     JsonObject,
     ThreadLike,
@@ -389,8 +390,12 @@ async def _thread_summary(
         ),
         "adminThread": metadata.get("admin_thread") is True,
         "visibility": metadata.get("visibility", "public"),
+        # A stamped thread is served from the event log only while the flag is
+        # on; switching it off sends every thread back to LangGraph state.
         "transcript": (
-            TRANSCRIPT_VERSION if metadata.get("transcript") == TRANSCRIPT_VERSION else None
+            TRANSCRIPT_VERSION
+            if metadata.get("transcript") == TRANSCRIPT_VERSION and transcript_enabled()
+            else None
         ),
         "ownerLogin": metadata.get("owner_login"),
         "continuedFromThreadId": metadata.get("continued_from_thread_id"),
