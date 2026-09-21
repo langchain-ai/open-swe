@@ -972,6 +972,14 @@ async def manage_thread(
     thread_id = thread_id.strip()
     if not thread_id:
         return _failure("thread_id is required")
+    executing_thread_id = RunConfig.from_config(_config()).thread_id
+    if executing_thread_id and thread_id == executing_thread_id:
+        return _failure(
+            f"thread_id {thread_id} is the thread this tool call is executing inside; "
+            "manage_thread cannot operate on its own session. Reply to the user through "
+            "your normal response path (slack_thread_reply on Slack, or your response text) "
+            "instead of managing this thread."
+        )
     unexpected = _unexpected_action_arguments(
         action,
         message=message,
@@ -987,25 +995,6 @@ async def manage_thread(
     )
     if unexpected:
         return _failure(f"Unexpected arguments for {action}: {', '.join(unexpected)}")
-    executing_thread_id = RunConfig.from_config(_config()).thread_id
-    if (
-        executing_thread_id
-        and thread_id == executing_thread_id
-        and action
-        in {
-            "cancel",
-            "admin_cancel",
-            "delete",
-            "resolve",
-            "unresolve",
-            "send_message",
-        }
-    ):
-        return _failure(
-            f"thread_id {thread_id} is the thread this tool call is executing inside; "
-            f"manage_thread cannot {action} its own session. Answer the user directly in "
-            "your response instead of mutating this thread."
-        )
     if action == "admin_cancel" and not actor.admin:
         return _failure("Only workspace admins can cancel another user's thread")
     if action == "delete" and not confirm:

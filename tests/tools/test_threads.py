@@ -871,9 +871,8 @@ async def test_manage_thread_uses_followup_sender_for_owner_checks(
     cancel.assert_awaited_once_with("thread-1", "reviewer", email=None)
 
 
-@pytest.mark.parametrize("action", ["cancel", "resolve", "unresolve", "send_message"])
-async def test_manage_thread_rejects_mutating_current_thread(
-    monkeypatch: pytest.MonkeyPatch, action: str
+async def test_manage_thread_rejects_any_action_on_current_thread(
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     current_thread_id = "thread-current"
     monkeypatch.setattr(threads_tool, "_actor", AsyncMock(return_value=_actor()))
@@ -885,24 +884,34 @@ async def test_manage_thread_rejects_mutating_current_thread(
     cancel = AsyncMock()
     resolve = AsyncMock()
     send = AsyncMock()
+    plan_api = AsyncMock()
     monkeypatch.setattr(threads_tool, "cancel_dashboard_thread", cancel)
     monkeypatch.setattr(threads_tool, "resolve_dashboard_thread", resolve)
     monkeypatch.setattr(threads_tool, "_send_message", send)
+    monkeypatch.setattr(threads_tool, "plan_api", plan_api)
 
-    result = await threads_tool.manage_thread(
-        current_thread_id,
-        action,
-        message="Continue" if action == "send_message" else None,
-    )
+    for action in (
+        "cancel",
+        "resolve",
+        "unresolve",
+        "delete",
+        "update_plan",
+        "add_plan_comment",
+    ):
+        result = await threads_tool.manage_thread(current_thread_id, action)
 
-    assert result == {
-        "success": False,
-        "error": (
-            "thread_id thread-current is the thread this tool call is executing inside; "
-            f"manage_thread cannot {action} its own session. Answer the user directly in "
-            "your response instead of mutating this thread."
-        ),
-    }
+        assert result == {
+            "success": False,
+            "error": (
+                "thread_id thread-current is the thread this tool call is executing inside; "
+                "manage_thread cannot operate on its own session. Reply to the user through "
+                "your normal response path (slack_thread_reply on Slack, or your response text) "
+                "instead of managing this thread."
+            ),
+        }, action
+    plan_api.post_plan_comment.assert_not_awaited()
+    plan_api.update_plan.assert_not_awaited()
+    plan_api.approve_plan.assert_not_awaited()
     cancel.assert_not_awaited()
     resolve.assert_not_awaited()
     send.assert_not_awaited()
