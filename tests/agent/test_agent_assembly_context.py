@@ -531,10 +531,24 @@ async def test_personal_settings_tool_is_private_and_parent_only(source: str) ->
     assert isinstance(tools, list)
     assert isinstance(subagents, list)
     assert "save_user_settings" in {_registered_tool_name(tool) for tool in tools}
+
+    from langchain.agents.middleware.types import ToolCallRequest
+    from langchain_core.messages import ToolMessage
+
+    handler = AsyncMock(return_value=ToolMessage(content="executed", tool_call_id="settings"))
+    request = MagicMock(spec=ToolCallRequest)
+    request.tool_call = {
+        "name": "save_user_settings",
+        "args": {},
+        "id": "settings",
+        "type": "tool_call",
+    }
     for subagent in subagents:
-        assert "save_user_settings" not in {
-            _registered_tool_name(tool) for tool in subagent.get("tools", [])
-        }
+        guard = next(item for item in subagent["middleware"] if item.name == "_SubagentToolGuard")
+        result = await guard.awrap_tool_call(request, handler)
+        assert isinstance(result, ToolMessage)
+        assert "inside a subagent" in result.content
+    handler.assert_not_awaited()
 
 
 @pytest.mark.parametrize(

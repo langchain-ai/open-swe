@@ -28,6 +28,7 @@ export function visiblePendingMessages(
       timestamp: new Date(message.createdAt).toISOString(),
       timestampIsFallback: true,
       deliveryStatus: message.status,
+      deliveryError: message.error,
       optimistic: true,
       chunks: [
         ...(message.images ?? []),
