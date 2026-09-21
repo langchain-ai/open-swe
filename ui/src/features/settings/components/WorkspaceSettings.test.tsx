@@ -177,6 +177,8 @@ describe("WorkspaceSettingsPanel", () => {
 
     const setup = await screen.findByLabelText("Setup script")
     expect((setup as HTMLTextAreaElement).value).toBe("make setup")
+    expect(screen.getAllByText("OPENSWE_WORKSPACE_REPOS")).toHaveLength(2)
+    expect(screen.getAllByText("acme/oss")).toHaveLength(2)
     fireEvent.change(setup, { target: { value: "make setup && make build" } })
     fireEvent.click(screen.getByRole("button", { name: "Save scripts" }))
     await waitFor(() =>

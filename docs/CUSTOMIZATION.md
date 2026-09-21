@@ -30,7 +30,7 @@ By default, Open SWE runs each task in a [LangSmith cloud sandbox](https://docs.
 
 ### Using a custom sandbox snapshot
 
-New sandboxes boot from LangSmith's root snapshot unless the workspace they run in has its own snapshot. Build a snapshot in LangSmith (UI or `SandboxClient.create_snapshot`) from your Docker image and set it as a workspace's base snapshot from the **Workspaces** page.
+New sandboxes boot from LangSmith's root snapshot unless the workspace they run in has its own snapshot. Build a snapshot in LangSmith (UI or `SandboxClient.create_snapshot`) from your Docker image and set it as a workspace's base snapshot from the **Workspaces** page. Workspace setup and update scripts receive the selected repository names in the space-delimited `OPENSWE_WORKSPACE_REPOS` environment variable.
 
 Per-sandbox resources are configured on the deployment:
 
