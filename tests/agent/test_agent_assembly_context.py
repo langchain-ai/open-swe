@@ -644,6 +644,7 @@ async def test_dashboard_agent_excludes_slack_tools() -> None:
     assert tool_names.isdisjoint(
         {
             "slack_add_reaction",
+            "slack_attach_file",
             "slack_attach_html",
             "slack_move_thread",
             "slack_read_thread_messages",
@@ -773,6 +774,7 @@ async def test_general_purpose_subagent_cannot_use_slack_tools() -> None:
         "manage_incident",
         "notify_automation_channel",
         "slack_add_reaction",
+        "slack_attach_file",
         "slack_attach_html",
         "slack_move_thread",
         "slack_read_thread_messages",

@@ -50,6 +50,7 @@ _TOOL_MODULES = {
     "schedule_thread_wakeup": ".schedule_thread_wakeup",
     "search_repo_code": "agent.github.tools.search_repo_code",
     "slack_add_reaction": "agent.slack.tools.add_reaction",
+    "slack_attach_file": "agent.slack.tools.attach_html",
     "slack_attach_html": "agent.slack.tools.attach_html",
     "slack_move_thread": "agent.slack.tools.move_thread",
     "slack_read_channel_messages": "agent.slack.tools.read_channel_messages",
@@ -111,6 +112,7 @@ __all__ = [
     "schedule_thread_wakeup",
     "search_repo_code",
     "slack_add_reaction",
+    "slack_attach_file",
     "slack_attach_html",
     "slack_move_thread",
     "slack_read_channel_messages",
@@ -129,7 +131,7 @@ if TYPE_CHECKING:
     from agent.github.tools.search_repo_code import search_repo_code
     from agent.incidents.tools import manage_incident
     from agent.slack.tools.add_reaction import slack_add_reaction
-    from agent.slack.tools.attach_html import slack_attach_html
+    from agent.slack.tools.attach_html import slack_attach_file, slack_attach_html
     from agent.slack.tools.manage_code_channel import manage_code_channel
     from agent.slack.tools.move_thread import slack_move_thread
     from agent.slack.tools.read_channel_messages import slack_read_channel_messages

@@ -16,17 +16,30 @@ from agent.utils.thread_ops import langgraph_client
 
 _MAX_SLACK_ATTACHMENT_BYTES = 10 * 1024 * 1024
 _MAX_COMMENT_CHARS = 3000
+_SUPPORTED_ATTACHMENT_MIME_TYPES = {
+    ".html": "text/html",
+    ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".gif": "image/gif",
+    ".webp": "image/webp",
+    ".pdf": "application/pdf",
+}
 
 
-async def slack_attach_html(
+async def slack_attach_file(
     file_path: str,
     title: str | None = None,
     initial_comment: str | None = None,
 ) -> dict[str, Any]:
-    """Implement the `slack_attach_html` tool."""
+    """Implement the `slack_attach_file` tool."""
     backend, path, work_dir = await resolve_sandbox_file(file_path)
-    if not path.lower().endswith(".html"):
-        return {"success": False, "error": "file_path must identify an HTML file"}
+    suffix = posixpath.splitext(path)[1].lower()
+    if suffix not in _SUPPORTED_ATTACHMENT_MIME_TYPES:
+        return {
+            "success": False,
+            "error": "file_path must identify a supported Slack attachment",
+        }
     staged_path = posixpath.join(work_dir, f".open-swe-slack-upload-{uuid.uuid4().hex}")
     prepare = await backend.aexecute(_prepare_file_command(path, staged_path))
     if prepare.exit_code != 0:
@@ -110,6 +123,15 @@ async def slack_attach_html(
         return {"success": True, "file_id": file_id, "filename": filename}
     finally:
         await _remove_staged_file(backend, staged_path)
+
+
+async def slack_attach_html(
+    file_path: str,
+    title: str | None = None,
+    initial_comment: str | None = None,
+) -> dict[str, Any]:
+    """Implement the `slack_attach_html` compatibility tool."""
+    return await slack_attach_file(file_path, title=title, initial_comment=initial_comment)
 
 
 def _prepare_file_command(path: str, staged_path: str) -> str:
