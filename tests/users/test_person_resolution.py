@@ -72,3 +72,18 @@ async def test_canonical_person_leaves_unknown_people_on_their_surface_id() -> N
     person = await User.canonical_person({"id": "slack:U404", "platform": "slack"})
 
     assert person["id"] == "slack:U404"
+
+
+async def test_canonical_person_survives_a_database_that_cannot_answer(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Dispatch runs on this path; a nicer key is never worth refusing a run."""
+
+    async def unavailable(*_args: object, **_kwargs: object) -> None:
+        raise RuntimeError("PostgreSQL is not configured")
+
+    monkeypatch.setattr(User, "for_person", classmethod(unavailable))
+
+    person = await User.canonical_person({"id": "github:octocat", "platform": "github"})
+
+    assert person["id"] == "github:octocat"

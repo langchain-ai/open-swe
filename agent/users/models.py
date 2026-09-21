@@ -151,8 +151,20 @@ class User(Base):
         One person reaching Open SWE from Slack and from the dashboard is one
         entity the model can match across surfaces, instead of two whose
         relationship it has to infer. Provider handles stay on the record.
+
+        Best effort by design: this sits on the path that starts every run, and
+        a nicer identity key is never worth refusing to start one, so a database
+        that cannot answer leaves the surface's own key in place.
         """
-        user = await cls.for_person(person)
+        try:
+            user = await cls.for_person(person)
+        except Exception:
+            logger.warning(
+                "Could not resolve a person; keeping their surface identity",
+                extra={"person_key": person["id"]},
+                exc_info=True,
+            )
+            return person
         return person if user is None else user.as_person(person)
 
     def as_person(self, person: PersonIdentity) -> PersonIdentity:
