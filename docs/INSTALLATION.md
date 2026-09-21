@@ -298,6 +298,39 @@ Public status-page publishing is not implemented. Authorized responders can ask 
 
 </details>
 
+<details id="api-keys">
+<summary><strong>API keys</strong></summary>
+
+An API key lets an external system — CI, a cron box, another service — start Open SWE threads over HTTP without a browser session.
+
+**Minting.** Only `CONFIGURED_ADMINS` can mint, list, or revoke keys, from `POST /dashboard/api/admin/api-keys` with a dashboard session. A key is scoped to exactly one workspace and expires at a date you choose, at most 365 days out:
+
+```bash
+curl -X POST "<URL>/dashboard/api/admin/api-keys" \
+  -H 'Content-Type: application/json' -b osw_session=<your session cookie> \
+  -d '{"workspace": "core", "name": "release CI", "expires_at": "2027-01-01T00:00:00Z"}'
+```
+
+The response is the only place the secret appears: `{"id": …, "workspace": "core", "name": "release CI", "key_suffix": "a1b2c3", "created_by": "octocat", "created_at": …, "expires_at": …, "secret": "osk_…"}`. Store it in your secret manager immediately. The server keeps only the SHA-256 digest of the secret and its last six characters, so a lost key cannot be recovered — mint a new one and revoke the old. `GET /dashboard/api/admin/api-keys?workspace=core` lists keys with `last_used_at`, `revoked_at`, and a `status` of `active`, `expired`, or `revoked`; `DELETE /dashboard/api/admin/api-keys/<id>` revokes one.
+
+**Using a key.** Present it as a bearer token. Threads started this way are system-owned and public, run in the key's workspace, and carry no GitHub user, so the agent works with the GitHub App's installation permissions rather than anyone's personal token. A repository named in the request must belong to the key's workspace.
+
+```bash
+# Start a thread
+curl -X POST "<URL>/api/v1/threads" \
+  -H 'Authorization: Bearer osk_…' -H 'Content-Type: application/json' \
+  -d '{"prompt": "Upgrade the linter and open a PR", "repo": "acme/api", "title": "Linter upgrade"}'
+# → 201 {"thread_id": "…", "run_id": "…", "url": "https://…/agents/…"}
+
+# Check on it
+curl "<URL>/api/v1/threads/<thread_id>" -H 'Authorization: Bearer osk_…'
+# → 200 {"thread_id": "…", "status": "running", "title": "Linter upgrade", "url": "https://…"}
+```
+
+`repo` and `title` are optional. A key can only read the threads it started. Unknown, revoked, and expired keys all answer `401 invalid API key`.
+
+</details>
+
 <details id="linear">
 <summary><strong>Linear</strong></summary>
 

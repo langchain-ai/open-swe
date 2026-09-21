@@ -37,11 +37,11 @@ from agent.threads.summary import (
     _metadata_model_id,
     _now_ms,
     _refresh_latest_run_metadata,
-    _run_status_to_agent_status,
     _thread_is_busy,
     _thread_run_id,
     _thread_summary,
     assert_thread_readable,
+    run_status_to_agent_status,
     thread_source,
 )
 from agent.transcript.engine import delete_transcript
@@ -198,7 +198,7 @@ async def get_dashboard_thread(
         client, thread, timings=record
     )
     metadata = thread_metadata(thread)
-    status = _run_status_to_agent_status(
+    status = run_status_to_agent_status(
         thread.get("status") if isinstance(thread.get("status"), str) else "idle",
         latest_run_status
         or (

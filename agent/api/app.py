@@ -9,6 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from agent.api.health import router as health_router
 from agent.api.tracing import add_trace_resource_names
+from agent.api_keys.public_routes import router as api_key_public_router
 from agent.config import ENV
 from agent.dashboard import router as dashboard_router
 from agent.github.routes import router as github_webhook_router
@@ -125,6 +126,7 @@ def create_app() -> FastAPI:
     app.include_router(health_router)
     app.include_router(github_webhook_router)
     app.include_router(sandbox_tool_router)
+    app.include_router(api_key_public_router)
     mount_dashboard_ui(app)
     return app
 
