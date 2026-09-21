@@ -56,6 +56,7 @@ export function WorkspaceSandboxSection({
 
   const status = record.snapshot_status ?? "none"
   const refreshing = record.refresh_status === "refreshing"
+  const workspaceRepos = record.repos.join(" ")
   const sizing = [
     record.vcpus === null || record.vcpus === undefined
       ? null
@@ -100,20 +101,35 @@ export function WorkspaceSandboxSection({
       <div className="space-y-3 px-4 py-3.5">
         <label className="block text-sm">
           Setup script
+          <span className="mt-0.5 block text-xs text-muted-foreground">
+            Runs on the base snapshot to build the image. Selected repositories
+            are available in <code>OPENSWE_WORKSPACE_REPOS</code>
+            {workspaceRepos && (
+              <>
+                {": "}
+                <code>{workspaceRepos}</code>
+              </>
+            )}
+            .
+          </span>
           <Textarea
             aria-label="Setup script"
             className="mt-1 font-mono text-xs"
-            placeholder="Runs on the base snapshot to build the image, e.g. install dependencies."
+            placeholder="Install dependencies and build the image."
             value={setupScript}
             onChange={(e) => setSetupScript(e.target.value)}
           />
         </label>
         <label className="block text-sm">
           Update script
+          <span className="mt-0.5 block text-xs text-muted-foreground">
+            Runs on the current image to bring it up to date, with the same
+            <code className="ml-1">OPENSWE_WORKSPACE_REPOS</code> value.
+          </span>
           <Textarea
             aria-label="Update script"
             className="mt-1 font-mono text-xs"
-            placeholder="Runs on the current image to bring it up to date, e.g. pull and reinstall."
+            placeholder="Pull repositories and reinstall dependencies."
             value={updateScript}
             onChange={(e) => setUpdateScript(e.target.value)}
           />
