@@ -1,10 +1,11 @@
-import { useEffect, useMemo, useRef, useState } from "react"
+import { useMemo, useState } from "react"
 import {
   ArrowsClockwiseIcon,
   CaretDownIcon,
   FolderIcon,
 } from "@phosphor-icons/react"
 
+import { Popover, PopoverPopup, PopoverTrigger } from "@/components/ui/popover"
 import { useRefreshRepos } from "@/lib/profile"
 import { cn } from "@/lib/utils"
 
@@ -43,7 +44,6 @@ export function RepoSelector({
 }: RepoSelectorProps) {
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState("")
-  const dropdownRef = useRef<HTMLDivElement>(null)
   const refresh = useRefreshRepos()
 
   const filteredRepos = useMemo(() => {
@@ -53,39 +53,38 @@ export function RepoSelector({
     return all.filter((repo) => repo.full_name.toLowerCase().includes(q))
   }, [repos, query])
 
-  useEffect(() => {
-    function handleClickOutside(e: MouseEvent) {
-      const target = e.target as Node
-      if (dropdownRef.current && !dropdownRef.current.contains(target)) {
-        setOpen(false)
-      }
-    }
-    document.addEventListener("mousedown", handleClickOutside)
-    return () => document.removeEventListener("mousedown", handleClickOutside)
-  }, [])
-
   return (
-    <div ref={dropdownRef} className={cn("relative min-w-0 shrink", className)}>
-      <button
-        type="button"
-        disabled={disabled}
-        onClick={() => setOpen((value) => !value)}
-        className={cn(
-          "flex max-w-[260px] cursor-pointer items-center gap-1 text-muted-foreground transition-opacity hover:opacity-80 disabled:cursor-default disabled:opacity-60",
-          triggerClassName
-        )}
-      >
-        <FolderIcon className="size-3.5 shrink-0" />
-        <span className="flex-1 truncate text-left">
-          {selectedRepo ? (selectedLabel ?? selectedRepo) : placeholder}
-        </span>
-        <CaretDownIcon className="size-3 shrink-0 opacity-70" />
-      </button>
-      {open && (
-        <div
+    <Popover
+      open={open}
+      onOpenChange={(value) => {
+        setOpen(value)
+        if (!value) setQuery("")
+      }}
+    >
+      <div className={cn("min-w-0 shrink", className)}>
+        <PopoverTrigger
+          render={
+            <button
+              type="button"
+              disabled={disabled}
+              className={cn(
+                "flex max-w-[260px] cursor-pointer items-center gap-1 text-muted-foreground transition-opacity hover:opacity-80 disabled:cursor-default disabled:opacity-60",
+                triggerClassName
+              )}
+            />
+          }
+        >
+          <FolderIcon className="size-3.5 shrink-0" />
+          <span className="flex-1 truncate text-left">
+            {selectedRepo ? (selectedLabel ?? selectedRepo) : placeholder}
+          </span>
+          <CaretDownIcon className="size-3 shrink-0 opacity-70" />
+        </PopoverTrigger>
+        <PopoverPopup
+          align="start"
+          side={side}
           className={cn(
-            "absolute left-0 z-50 flex max-h-72 w-72 flex-col overflow-hidden rounded border border-border bg-popover text-xs text-popover-foreground shadow-lg",
-            side === "top" ? "bottom-full mb-1" : "top-full mt-1",
+            "flex max-h-72 w-72 flex-col overflow-hidden rounded border border-border bg-popover p-0 text-xs text-popover-foreground shadow-lg",
             dropdownClassName
           )}
         >
@@ -160,8 +159,8 @@ export function RepoSelector({
               })
             )}
           </div>
-        </div>
-      )}
-    </div>
+        </PopoverPopup>
+      </div>
+    </Popover>
   )
 }

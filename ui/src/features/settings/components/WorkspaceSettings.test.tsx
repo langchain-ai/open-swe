@@ -217,8 +217,10 @@ describe("WorkspaceSettingsPanel", () => {
     await waitFor(() => expect(trigger.hasAttribute("disabled")).toBe(false))
     fireEvent.click(trigger)
 
-    // The chip in General plus the option in the dropdown; Core's repo nowhere.
+    // The chip in General plus the option in the portalled dropdown; Core's repo nowhere.
     expect(screen.getAllByText("acme/oss").length).toBeGreaterThan(1)
+    const option = screen.getByRole("button", { name: "acme/oss" })
+    expect(option.closest("section")).toBeNull()
     expect(screen.queryByText("acme/api")).toBeNull()
   })
 
