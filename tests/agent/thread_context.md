@@ -1,11 +1,12 @@
 # How a thread looks to the model
 
-Generated from the real renderers (`agent.input_messages`, `agent.prompt`,
-`agent.server.PrepareAgentRunMiddleware`). Every block below is the
-exact text the model receives; only the Collaborative Attribution boilerplate is
-elided after its first appearance.
+Rendered by `tests/agent/test_thread_context.py` through the real renderers
+(`agent.input_messages`, `agent.prompt`, `agent.server.PrepareAgentRunMiddleware`);
+the test fails if this file and the code disagree. Every block is the exact text
+the model receives; only the Collaborative Attribution boilerplate is elided
+after its first appearance.
 
-Two layers append to the thread. **Dispatch** (Slack webhook / dashboard) adds the
+Two layers append to the thread. **Dispatch** (Slack webhook / dashboard) adds a
 person's `<dynamic-context>` introduction the first time they appear, then their
 message as an `<input-message>` envelope whose `sender=` is their canonical
 `user:<uuid>`. **The run** then adds the thread-level `system:collaboration`
@@ -44,7 +45,7 @@ pointer every turn.
 </dynamic-context>
 ```
 
-<sub>the message, sender is the pointer's key · ~55 tokens</sub>
+<sub>the message; `sender` is the key the pointer uses · ~55 tokens</sub>
 
 ```xml
 <input-message sender="user:0199e0ae-1111-7000-8000-00000000a11c" channel="slack:C0BQUH14FK3" surface="slack" kind="human">
@@ -104,7 +105,7 @@ If you forget the trailer on an unpushed commit, fix it with `git commit --amend
 
 **Dispatch appends:**
 
-<sub>the message, sender is the pointer's key · ~55 tokens</sub>
+<sub>the message; `sender` is the key the pointer uses · ~55 tokens</sub>
 
 ```xml
 <input-message sender="user:0199e0ae-1111-7000-8000-00000000a11c" channel="slack:C0BQUH14FK3" surface="slack" kind="human">
@@ -145,7 +146,7 @@ If you forget the trailer on an unpushed commit, fix it with `git commit --amend
 </dynamic-context>
 ```
 
-<sub>the message, sender is the pointer's key · ~55 tokens</sub>
+<sub>the message; `sender` is the key the pointer uses · ~55 tokens</sub>
 
 ```xml
 <input-message sender="user:0199e0ae-2222-7000-8000-000000000b0b" channel="slack:C0BQUH14FK3" surface="slack" kind="human">
@@ -193,7 +194,7 @@ Everyone who has posted in this thread. Each incoming message is followed by a `
 
 **Given** the thread now has Alice and Bob  
 **When** Alice opens the thread in the dashboard and types *ship it*  
-**Then** her envelope carries the same `user:` id as her Slack messages — one person, two surfaces — so the pointer resolves to the same roster entry and the roster is not repeated; her introduction reappears once because the dashboard knows different attributes about her (platform, no timezone)
+**Then** her envelope carries the same `user:` id as her Slack messages — one person, two surfaces — so the pointer resolves to the same roster entry and the roster is not repeated; her introduction reappears once because the dashboard knows different attributes about her
 
 **Dispatch appends:**
 
@@ -207,7 +208,7 @@ Everyone who has posted in this thread. Each incoming message is followed by a `
 </dynamic-context>
 ```
 
-<sub>the message, sender is the pointer's key · ~34 tokens</sub>
+<sub>the message; `sender` is the key the pointer uses · ~34 tokens</sub>
 
 ```xml
 <input-message sender="user:0199e0ae-1111-7000-8000-00000000a11c" surface="web" kind="human">
@@ -236,7 +237,7 @@ Everyone who has posted in this thread. Each incoming message is followed by a `
 
 **Dispatch appends:**
 
-<sub>the message, sender is the pointer's key · ~53 tokens</sub>
+<sub>the message; `sender` is the key the pointer uses · ~53 tokens</sub>
 
 ```xml
 <input-message sender="user:0199e0ae-2222-7000-8000-000000000b0b" channel="slack:C0BQUH14FK3" surface="slack" kind="human">
@@ -286,7 +287,7 @@ Everyone who has posted in this thread. Each incoming message is followed by a `
 
 **Given** Carol is in the Slack channel but never signed in to Open SWE  
 **When** she replies: *can it handle unicode?*  
-**Then** she is keyed by her Slack id, marked `unlinked`, and gets a roster entry with only what Slack knows about her — no GitHub identity to commit as, no admin, defaults
+**Then** she is keyed by her Slack id, marked `unlinked`, and gets a roster entry with only what Slack knows about her
 
 **Dispatch appends:**
 
@@ -300,7 +301,7 @@ Everyone who has posted in this thread. Each incoming message is followed by a `
 </dynamic-context>
 ```
 
-<sub>the message, sender is the pointer's key · ~48 tokens</sub>
+<sub>the message; `sender` is the key the pointer uses · ~48 tokens</sub>
 
 ```xml
 <input-message sender="slack:U0CAR0L" channel="slack:C0BQUH14FK3" surface="slack" kind="human">
