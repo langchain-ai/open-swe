@@ -39,6 +39,7 @@ dependencies = [
     "Pygments>=2.21.0",
     "githubkit[auth-app]==0.16.1",
     "githubkit-schemas[2022-11-28]==26.9.13",
+    "langchain-typesafe==0.0.1a3",
 ]
 
 [project.optional-dependencies]

@@ -1,14 +1,16 @@
 import logging
+import math
 from collections.abc import Awaitable, Callable, Mapping, Sequence
-from typing import Annotated, Any, Literal, NotRequired
+from typing import Any, Literal, NotRequired
 
 import httpx2
 from langchain.agents.middleware.types import AgentState, ModelRequest, ModelResponse
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import HumanMessage, ToolMessage
+from langchain_typesafe import Choice, TypeSafeClassifier
 from langgraph.config import get_stream_writer
 from langgraph.runtime import Runtime
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
 from agent.config import ENV
 from agent.input_messages import input_message_text, message_sender_id
@@ -54,21 +56,6 @@ class RouteDecision(BaseModel):
     model_route: Route
 
 
-class SemifChoice(BaseModel):
-    type: Literal["choice"]
-    choice: Route
-    confidence: Annotated[float, Field(ge=0, le=1, allow_inf_nan=False)]
-    probabilities: dict[Route, Annotated[float, Field(ge=0, le=1, allow_inf_nan=False)]]
-
-
-class SemifAnswers(BaseModel):
-    route: SemifChoice
-
-
-class SemifResponse(BaseModel):
-    answers: SemifAnswers
-
-
 async def _select_semif_route(task: str) -> Route | None:
     api_key = ENV.LANGSMITH_GATEWAY_API_KEY.optional() or ENV.LANGSMITH_API_KEY.optional()
     if not api_key:
@@ -76,26 +63,29 @@ async def _select_semif_route(task: str) -> Route | None:
         return None
     try:
         async with httpx2.AsyncClient(timeout=3.0) as client:
-            response = await client.post(
-                f"{gateway_base_url()}/v1/systemone",
-                headers={"Authorization": f"Bearer {api_key}"},
-                json={
-                    "model": "semif-qwen3.5-4b",
+            classifier = TypeSafeClassifier(
+                model="semif-qwen3.5-4b",
+                api_key=api_key,
+                base_url=gateway_base_url(),
+                async_client=client,
+            )
+            response = await classifier.ainvoke(
+                {
                     "state": task,
                     "questions": {
-                        "route": {
-                            "type": "choice",
-                            "instructions": render_prompt("model-selection.md", task=""),
-                            "criteria": dict.fromkeys(("fast", "balanced", "performance")),
-                        }
+                        "route": Choice(
+                            instructions=render_prompt("model-selection.md", task=""),
+                            criteria=dict.fromkeys(("fast", "balanced", "performance")),
+                        )
                     },
                 },
+                config={"tags": ["nostream"]},
             )
-            response.raise_for_status()
-            answer = SemifResponse.model_validate(response.json()).answers.route
+            answer = response.choices["route"]
         probabilities = answer.probabilities
         if (
             set(probabilities) != {"fast", "balanced", "performance"}
+            or any(not math.isfinite(p) or not 0 <= p <= 1 for p in probabilities.values())
             or abs(sum(probabilities.values()) - 1) > 0.01
             or probabilities[answer.choice] != max(probabilities.values())
         ):
@@ -106,7 +96,7 @@ async def _select_semif_route(task: str) -> Route | None:
                 extra={"confidence": answer.confidence},
             )
             return None
-        return answer.choice
+        return RouteDecision.model_validate({"model_route": answer.choice}).model_route
     except Exception:
         logger.exception("SemIf routing failed; using fallback classifier")
         return None

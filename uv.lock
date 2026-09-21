@@ -1624,6 +1624,19 @@ wheels = [
 ]
 
 [[package]]
+name = "langchain-typesafe"
+version = "0.0.1a3"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "httpx2" },
+    { name = "langchain-core" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/c9/54/460d126cb5db7b031e5b3b94c63fe36d58bce020f2692fd7661f8f84c7d3/langchain_typesafe-0.0.1a3.tar.gz", hash = "sha256:d77647a7a5bafaa82db8212a682b223a9bbcd52fb015e49464f211552f1f3272", size = 200970, upload-time = "2026-09-20T18:54:40.777Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/ca/5b/a14f30242eb36363ee757024a01727fef5efffbb542d2382468f457a7e2b/langchain_typesafe-0.0.1a3-py3-none-any.whl", hash = "sha256:f06f74ebdcb10cbc836dd89a275bbf4e2e13646cb919dcc02d4219e602cfe36e", size = 24962, upload-time = "2026-09-20T18:54:39.797Z" },
+]
+
+[[package]]
 name = "langgraph"
 version = "1.2.11"
 source = { registry = "https://pypi.org/simple" }
@@ -2127,6 +2140,7 @@ dependencies = [
     { name = "langchain-google-genai" },
     { name = "langchain-mcp-adapters" },
     { name = "langchain-openai" },
+    { name = "langchain-typesafe" },
     { name = "langgraph" },
     { name = "langgraph-checkpoint-sqlite" },
     { name = "langgraph-cli", extra = ["inmem"] },
@@ -2197,6 +2211,7 @@ requires-dist = [
     { name = "langchain-openai", specifier = ">=1.6.1,<2.0.0" },
     { name = "langchain-runloop", marker = "extra == 'sandbox-providers'", specifier = ">=0.0.7" },
     { name = "langchain-runloop", marker = "extra == 'sandbox-runloop'", specifier = ">=0.0.7" },
+    { name = "langchain-typesafe", specifier = "==0.0.1a3" },
     { name = "langgraph", specifier = ">=1.2.11" },
     { name = "langgraph-checkpoint-sqlite", specifier = ">=3.1.1" },
     { name = "langgraph-cli", extras = ["inmem"], specifier = ">=0.4.31" },

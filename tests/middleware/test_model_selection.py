@@ -355,6 +355,7 @@ async def test_semif_routes_or_falls_back(
         return httpx2.Response(
             200,
             json={
+                "model": "semif-qwen3.5-4b",
                 "answers": {
                     "route": {
                         "type": "choice",
@@ -370,7 +371,7 @@ async def test_semif_routes_or_falls_back(
                             "performance": 0.05,
                         },
                     }
-                }
+                },
             },
         )
 
