@@ -289,6 +289,11 @@ export const agentsApi = {
     agentsRequest<ThreadFeedback>(
       `/threads/${encodeURIComponent(threadId)}/feedback`
     ),
+  openThreadFeedback: (threadId: string) =>
+    agentsRequest<ThreadFeedback>(
+      `/threads/${encodeURIComponent(threadId)}/feedback/open`,
+      { method: "POST" }
+    ),
   submitThreadFeedback: (threadId: string, body: ThreadFeedbackSubmission) =>
     agentsRequest<ThreadFeedback>(
       `/threads/${encodeURIComponent(threadId)}/feedback`,
