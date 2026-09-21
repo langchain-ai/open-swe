@@ -10,27 +10,48 @@ claim on their account and is never overwritten.
 
 import logging
 
-from agent.users.models import User
+from sqlalchemy import select, update
+
+from agent.database import postgres
+from agent.users.models import User, UserIdentity
 
 logger = logging.getLogger(__name__)
 
 
-async def persist_display_name(slack_user_id: str, name: str, *, team_id: str = "") -> None:
+async def persist_display_name(slack_user_id: str, name: str) -> None:
     """Give the person behind ``slack_user_id`` their Slack name, if they are nameless.
 
-    Known values win and empty ones leave what is stored alone (see
-    ``User._known``): a missing Slack profile or an empty ``name`` writes
-    nothing, and a stored display name is kept.
+    The rename is conditional on the stored name still being empty inside the
+    same UPDATE, so a dashboard sign in that lands between the Slack lookup and
+    this write can never lose the GitHub name it claimed — and the first
+    backfill wins for each person. An empty or ``unknown`` Slack name writes
+    nothing.
     """
     name = name.strip()
     if not name or name == "unknown" or not slack_user_id:
         return
-    user = await User.for_identity("slack", slack_user_id)
-    if user is None or user.display_name:
+    if postgres.uri() is None:
+        # The Store carries no users in this deployment, so there is nothing to
+        # backfill; the Slack request continues without it.
         return
-    await user.link("slack", slack_user_id, team_id=team_id)
-    await user.rename(name)
-    logger.info(
-        "Backfilled a display name from Slack",
-        extra={"slack_user_id": slack_user_id, "user_id": str(user.id)},
-    )
+    async with postgres.session() as session:
+        changed = await session.scalars(
+            update(User)
+            .where(
+                User.display_name == "",
+                User.id.in_(
+                    select(UserIdentity.user_id).where(
+                        UserIdentity.provider == "slack",
+                        UserIdentity.external_id == slack_user_id,
+                    )
+                ),
+            )
+            .values(display_name=name)
+            .returning(User.id)
+        )
+        await session.flush()
+    if changed.first():
+        logger.info(
+            "Backfilled a display name from Slack",
+            extra={"slack_user_id": slack_user_id},
+        )
