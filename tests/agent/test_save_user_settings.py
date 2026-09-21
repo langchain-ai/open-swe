@@ -8,6 +8,7 @@ import pytest
 from langchain_core.tools import StructuredTool
 
 from agent.dashboard.personal_settings import SettingValue, patch_personal_settings
+from agent.dashboard.profiles import ProfileUpdate, upsert_profile
 from agent.tools.read_user_settings import read_user_settings
 from agent.tools.save_user_settings import save_user_settings
 from tests.conftest import FakeStore
@@ -187,6 +188,42 @@ async def test_invalid_patch_rejects_all_changes(
     assert fake_store.items == before
 
 
+@pytest.mark.parametrize("value", [True, False, None])
+@pytest.mark.parametrize("mixed", [False, True])
+async def test_agent_cannot_change_dm_session_even_in_mixed_patch(
+    fake_store: FakeStore,
+    requester: dict[str, object],
+    saved_scope: dict[str, object],
+    value: bool | None,
+    mixed: bool,
+) -> None:
+    fake_store.seed(["profiles"], "Alice", {"dm_session_enabled": value is not True})
+    fake_store.seed(["user_preferences"], "Alice", {"default_workspace": "keep"})
+    settings: dict[str, SettingValue] = {"dm_session_enabled": value}
+    if mixed:
+        settings = {"auto_fix_ci": False, "default_workspace": "new", **settings}
+    before = deepcopy(fake_store.items)
+    result = await save_user_settings(settings)
+    assert result["ok"] is False
+    assert "dashboard" in str(result["error"])
+    assert fake_store.items == before
+
+
+@pytest.mark.parametrize("enabled", [True, False])
+async def test_dashboard_can_still_toggle_dm_session(fake_store: FakeStore, enabled: bool) -> None:
+    fake_store.seed(["profiles"], "Alice", {"dm_session_enabled": not enabled})
+    await upsert_profile(
+        "Alice",
+        "alice@example.com",
+        ProfileUpdate(
+            default_model="openai:gpt-5.6-sol",
+            reasoning_effort="high",
+            dm_session_enabled=enabled,
+        ),
+    )
+    assert fake_store.values(["profiles"])["Alice"]["dm_session_enabled"] is enabled
+
+
 async def test_nullable_fields_clear_and_false_values_survive(fake_store: FakeStore) -> None:
     fake_store.seed(
         ["profiles"],
@@ -291,6 +328,7 @@ async def test_private_read_exposes_all_ordinary_settings_only_for_requester(
         "base_branch": "develop",
         "branch_prefix": "alice/",
         "model_routing_enabled": False,
+        "dm_session_enabled": True,
     }
     fake_store.seed(
         ["profiles"],
