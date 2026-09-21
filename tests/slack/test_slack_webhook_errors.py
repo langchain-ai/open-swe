@@ -8,7 +8,6 @@ from agent.slack import failures as slack_failures
 from agent.slack import webhook as slack_webhook
 from agent.slack.payloads import SlackChannelContext
 from agent.slack.request import SlackRequest
-from agent.threads import plan_api
 from agent.webhooks import common as webhook_common
 
 
@@ -128,41 +127,6 @@ async def test_slack_processing_error_replies_even_without_an_agent_thread(
     assert await_args.kwargs["agent_thread_id"] is None
 
 
-async def test_slack_plan_button_uses_verified_actor(monkeypatch: pytest.MonkeyPatch) -> None:
-    approve = AsyncMock(return_value={"status": "approved", "run_id": "run-1"})
-    monkeypatch.setattr(plan_api, "approve_plan_for_thread", approve)
-    monkeypatch.setattr(slack_webhook, "_slack_login", AsyncMock(return_value="alice"))
-    event_data = SlackRequest(
-        channel_id="C1", thread_ts="123.45", thread_id="t1", user_id="U1", user_name="Alice"
-    )
-
-    await slack_webhook.process_slack_plan_approval(event_data, None)
-
-    approve.assert_awaited_once_with(
-        "t1",
-        approver={"id": "U1", "name": "Alice", "source": "slack"},
-        github_login="alice",
-    )
-
-
-async def test_slack_plan_button_failure_notifies_user(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    approve = AsyncMock(side_effect=RuntimeError("store down"))
-    notify = AsyncMock()
-    monkeypatch.setattr(plan_api, "approve_plan_for_thread", approve)
-    monkeypatch.setattr(slack_webhook, "_slack_login", AsyncMock(return_value="alice"))
-    monkeypatch.setattr(slack_webhook, "_notify_slack_processing_error", notify)
-    event_data = SlackRequest(
-        thread_id="t1", channel_id="C1", thread_ts="123.45", user_id="U1", user_name="Alice"
-    )
-    repo_config = Repo(owner="langchain-ai", name="open-swe")
-
-    await slack_webhook.process_slack_plan_approval(event_data, repo_config)
-
-    notify.assert_awaited_once_with(event_data, repo_config, approve.side_effect)
-
-
 @pytest.mark.asyncio
 async def test_dispatch_or_queue_enqueues_untagged_follow_up(
     monkeypatch: pytest.MonkeyPatch,
@@ -214,7 +178,6 @@ async def test_message_update_dispatches_a_new_message_without_old_context(
     )
     monkeypatch.setattr(slack_webhook.common, "thread_exists", AsyncMock(return_value=True))
     monkeypatch.setattr(slack_webhook.common, "get_thread_workspace", AsyncMock(return_value=None))
-    monkeypatch.setattr(slack_webhook.common, "get_thread_plan_mode", AsyncMock(return_value=None))
     monkeypatch.setattr(
         slack_webhook.common, "get_thread_model_choice", AsyncMock(return_value=None)
     )
@@ -286,7 +249,6 @@ async def test_private_dm_does_not_dispatch_when_privacy_metadata_fails(
     )
     monkeypatch.setattr(slack_webhook.common, "thread_exists", AsyncMock(return_value=False))
     monkeypatch.setattr(slack_webhook.common, "get_thread_workspace", AsyncMock(return_value=None))
-    monkeypatch.setattr(slack_webhook.common, "get_thread_plan_mode", AsyncMock(return_value=None))
     monkeypatch.setattr(
         slack_webhook.common, "get_thread_model_choice", AsyncMock(return_value=None)
     )

@@ -700,17 +700,6 @@
         "title": "MCPToolDescription",
         "type": "object"
       },
-      "PlanRejection": {
-        "properties": {
-          "dispatch": {
-            "default": true,
-            "title": "Dispatch",
-            "type": "boolean"
-          }
-        },
-        "title": "PlanRejection",
-        "type": "object"
-      },
       "PlanUpdate": {
         "properties": {
           "html": {
@@ -1793,11 +1782,6 @@
               }
             ],
             "title": "Model Id"
-          },
-          "plan_mode": {
-            "default": false,
-            "title": "Plan Mode",
-            "type": "boolean"
           }
         },
         "title": "ThreadMessageBody",
@@ -5638,55 +5622,6 @@
         ]
       }
     },
-    "/dashboard/api/plan/{thread_id}/approve": {
-      "post": {
-        "operationId": "approve_plan_dashboard_api_plan__thread_id__approve_post",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "thread_id",
-            "required": true,
-            "schema": {
-              "title": "Thread Id",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Approve Plan Dashboard Api Plan  Thread Id  Approve Post",
-                  "type": "object"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "DashboardSession": []
-          }
-        ],
-        "summary": "Approve Plan",
-        "tags": [
-          "plan"
-        ]
-      }
-    },
     "/dashboard/api/plan/{thread_id}/comments": {
       "get": {
         "operationId": "get_plan_comments_dashboard_api_plan__thread_id__comments_get",
@@ -5846,72 +5781,6 @@
           }
         ],
         "summary": "Remove Plan Comment",
-        "tags": [
-          "plan"
-        ]
-      }
-    },
-    "/dashboard/api/plan/{thread_id}/reject": {
-      "post": {
-        "operationId": "reject_plan_dashboard_api_plan__thread_id__reject_post",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "thread_id",
-            "required": true,
-            "schema": {
-              "title": "Thread Id",
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "anyOf": [
-                  {
-                    "$ref": "#/components/schemas/PlanRejection"
-                  },
-                  {
-                    "type": "null"
-                  }
-                ],
-                "title": "Rejection"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Reject Plan Dashboard Api Plan  Thread Id  Reject Post",
-                  "type": "object"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "DashboardSession": []
-          }
-        ],
-        "summary": "Reject Plan",
         "tags": [
           "plan"
         ]

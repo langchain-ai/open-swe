@@ -3,10 +3,18 @@
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
+from langgraph_sdk.schema import Run
 
 from agent.dashboard.oauth import require_same_origin_for_mutations, require_session
-from agent.threads.plan_api import dispatch_followup, fetch_thread_metadata
-from agent.threads.summary import thread_is_promptable, thread_is_readable
+from agent.dispatch import dispatch_agent_run
+from agent.source_context import SourceContext
+from agent.threads.plan_api import fetch_thread_metadata
+from agent.threads.summary import (
+    repo_config_from_metadata,
+    thread_is_promptable,
+    thread_is_readable,
+    thread_source,
+)
 from agent.threads.workflow_approval import (
     decide_workflow_push_approval,
     get_workflow_push_approvals,
@@ -51,7 +59,6 @@ async def approve_workflow_push(
         thread_id,
         metadata,
         "The workflow-file push approval was approved. Retry the blocked git push now; do not alter workflow files before pushing.",
-        plan_mode=False,
         github_login=session["sub"],
         user_email=session.get("email"),
     )
@@ -71,3 +78,33 @@ async def reject_workflow_push(
     if record is None:
         raise HTTPException(404, "workflow push approval not found")
     return {"status": "rejected", "fingerprint": fingerprint}
+
+
+async def dispatch_followup(
+    thread_id: str,
+    metadata: dict[str, Any],
+    text: str,
+    *,
+    github_login: str | None,
+    user_email: str | None = None,
+) -> Run:
+    """Continue the existing thread with the decision as a new instruction run."""
+    configurable: dict[str, Any] = {
+        "thread_id": thread_id,
+        "source": thread_source(metadata) or "slack",
+        "github_login": github_login,
+        "user_email": user_email,
+    }
+    repo = repo_config_from_metadata(metadata)
+    if repo:
+        configurable["repo"] = repo
+    context = SourceContext.from_metadata(metadata)
+    if context.slack_thread is not None:
+        configurable["slack_thread"] = context.dump()["slack_thread"]
+
+    return await dispatch_agent_run(
+        thread_id,
+        text,
+        configurable,
+        source=configurable["source"],
+    )

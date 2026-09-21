@@ -203,7 +203,6 @@ async def _process_slack_ask(request: SlackAskRequest) -> None:
         "slack_thread": slack_thread.dump(),
         "source": "slack",
         "slack_ask": True,
-        "plan_mode": False,
         "github_login": login,
         "user_email": user_email,
         "workspace": workspace,

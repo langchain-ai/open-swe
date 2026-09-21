@@ -130,7 +130,6 @@ A useful software factory needs both autonomy and boundaries. Open SWE includes:
 - Credentials kept in the server process or injected through a sandbox proxy
 - Human approval before pushing workflow-file changes
 - Read-only reviewer and PR chat agents
-- Plan mode for reviewing an implementation approach before code changes
 - Opt-in automatic review and CI monitoring
 
 Sandboxes can have network access and powerful tools. Deployments should use least-privilege credentials, restrict enabled repositories and integrations, and tailor approval rules to their environment.

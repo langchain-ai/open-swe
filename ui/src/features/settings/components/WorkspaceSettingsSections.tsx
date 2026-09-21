@@ -345,7 +345,7 @@ export function ModelDefaultsSection({
           settings={settings}
           models={models}
           label="Agent routing: performance"
-          description="Model used for complex reasoning and plan-mode turns."
+          description="Model used for complex reasoning."
           modelField="default_agent_routing_performance_model"
           effortField="default_agent_routing_performance_reasoning_effort"
         />

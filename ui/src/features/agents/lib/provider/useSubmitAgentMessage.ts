@@ -103,7 +103,6 @@ export function useSubmitAgentMessage(threadId: string) {
           images: vars.images,
           model_id: vars.model_id,
           effort: vars.effort,
-          plan_mode: vars.plan_mode,
           client_message_id: id,
         })
         updateThread((thread) => setQueuedMessage(thread, queuedMessage))
@@ -142,7 +141,6 @@ export function useSubmitAgentMessage(threadId: string) {
         modelId: vars.model_id,
         effort: vars.effort,
       })
-      if (vars.plan_mode) configurable.plan_mode = true
 
       void source
         .startRun({

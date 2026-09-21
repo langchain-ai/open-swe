@@ -12,7 +12,6 @@ _MIDDLEWARE_MODULES = {
     "ModelFallbackMiddleware": ".model_fallback",
     "ModelSelectionMiddleware": ".model_selection",
     "notify_step_limit_reached": ".notify_step_limit",
-    "PlanModeMiddleware": ".plan_mode",
     "PrepareRunState": ".prepare_run",
     "BasePrepareRunMiddleware": ".prepare_run",
     "PullRequestCreationGuardMiddleware": ".pr_creation_guard",
@@ -44,7 +43,6 @@ __all__ = [
     "ModelFallbackMiddleware",
     "ModelSelectionMiddleware",
     "BasePrepareRunMiddleware",
-    "PlanModeMiddleware",
     "PrepareRunState",
     "PullRequestCreationGuardMiddleware",
     "RepairOrphanedToolCallsMiddleware",
@@ -77,7 +75,6 @@ if TYPE_CHECKING:
     from agent.middleware.model_fallback import ModelFallbackMiddleware
     from agent.middleware.model_selection import ModelSelectionMiddleware
     from agent.middleware.notify_step_limit import notify_step_limit_reached
-    from agent.middleware.plan_mode import PlanModeMiddleware
     from agent.middleware.pr_creation_guard import PullRequestCreationGuardMiddleware
     from agent.middleware.prepare_run import BasePrepareRunMiddleware, PrepareRunState
     from agent.middleware.record_run_usage import record_run_usage

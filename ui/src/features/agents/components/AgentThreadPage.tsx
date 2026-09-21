@@ -14,11 +14,7 @@ import {
   threadDetailResolved,
 } from "@/lib/perf/threadLoad"
 
-export function AgentThreadPage(props: {
-  threadId: string
-  active?: boolean
-  autoFocusComposer?: boolean
-}) {
+export function AgentThreadPage(props: { threadId: string; active?: boolean }) {
   return (
     <CatchBoundary
       getResetKey={() => props.threadId}
@@ -39,11 +35,9 @@ export function AgentThreadPage(props: {
 function AgentThreadContent({
   threadId,
   active = true,
-  autoFocusComposer = false,
 }: {
   threadId: string
   active?: boolean
-  autoFocusComposer?: boolean
 }) {
   const threadQuery = useAgentThread(threadId)
   const session = useSession()
@@ -104,10 +98,7 @@ function AgentThreadContent({
   return (
     <AgentThreadStreamBoundary active={active}>
       <ThreadSourceProvider threadId={threadId} transcript={transcript}>
-        <AgentThreadView
-          thread={threadQuery.data}
-          autoFocusComposer={autoFocusComposer}
-        />
+        <AgentThreadView thread={threadQuery.data} />
       </ThreadSourceProvider>
     </AgentThreadStreamBoundary>
   )

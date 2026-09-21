@@ -381,7 +381,6 @@ async def _thread_summary(
         "branch": metadata.get("branch_name") or metadata.get("base_branch") or "main",
         "model": model,
         "effort": effort,
-        "planMode": metadata.get("plan_mode") is True,
         "modelSelection": (
             metadata.get("model_selection")
             if metadata.get("model_selection") in {"auto", "explicit"}

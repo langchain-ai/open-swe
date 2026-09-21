@@ -4,14 +4,12 @@ from typing import TYPE_CHECKING, Any
 
 _TOOL_MODULES = {
     "add_finding": ".add_finding",
-    "approve_plan": ".approve_plan",
     "background_execute": ".background_execute",
     "background_task": ".background_task",
     "create_automation": ".automations",
     "create_sandbox_file_download_url": ".create_sandbox_file_download_url",
     "delete_automation": ".automations",
     "delete_workspace": ".workspaces",
-    "enter_plan_mode": ".enter_plan_mode",
     "expedite_pr_approval": ".expedite_pr_approval",
     "expose_port": ".expose_port",
     "fetch_review_diff": ".fetch_review_diff",
@@ -65,14 +63,12 @@ _TOOL_MODULES = {
 
 __all__ = [
     "add_finding",
-    "approve_plan",
     "background_execute",
     "background_task",
     "create_automation",
     "create_sandbox_file_download_url",
     "delete_automation",
     "delete_workspace",
-    "enter_plan_mode",
     "expedite_pr_approval",
     "expose_port",
     "fetch_review_diff",
@@ -138,7 +134,6 @@ if TYPE_CHECKING:
     from agent.slack.tools.start_new_thread import slack_start_new_thread
     from agent.slack.tools.thread_reply import slack_thread_reply
     from agent.tools.add_finding import add_finding
-    from agent.tools.approve_plan import approve_plan
     from agent.tools.automations import (
         create_automation,
         delete_automation,
@@ -149,7 +144,6 @@ if TYPE_CHECKING:
     from agent.tools.background_execute import background_execute
     from agent.tools.background_task import background_task
     from agent.tools.create_sandbox_file_download_url import create_sandbox_file_download_url
-    from agent.tools.enter_plan_mode import enter_plan_mode
     from agent.tools.expedite_pr_approval import expedite_pr_approval
     from agent.tools.expose_port import expose_port
     from agent.tools.fetch_review_diff import fetch_review_diff
