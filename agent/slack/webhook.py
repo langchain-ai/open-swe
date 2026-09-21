@@ -8,7 +8,7 @@ import posixpath
 import re
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Any, cast
+from typing import Any, Literal, cast
 from urllib.parse import urlparse
 
 import httpx2
@@ -56,6 +56,31 @@ _MENTION_PREAMBLE = f"{load_prompt('runs/slack-mentioned.md')}\n\n"
 _CODE_CHANNEL_CONTEXT = load_prompt("runs/slack-code-channel.md")
 _DM_CONTEXT = load_prompt("runs/slack-dm.md")
 _MESSAGE_UPDATE_PREAMBLE = f"{load_prompt('runs/slack-message-update.md')}\n\n"
+_MODEL_SWITCH_RE = re.compile(r"(?<!\S)/model:(\S*)")
+SlackModelSwitch = Literal["fast", "perf"]
+RoutingTier = Literal["fast", "performance"]
+_MODEL_ROUTING_TIERS: dict[SlackModelSwitch, RoutingTier] = {
+    "fast": "fast",
+    "perf": "performance",
+}
+
+
+@dataclass(frozen=True)
+class SlackModelSwitchParse:
+    model_switch: SlackModelSwitch | None
+    cleaned_text: str
+    invalid: bool = False
+
+
+def parse_slack_model_switch(text: str) -> SlackModelSwitchParse:
+    matches = list(_MODEL_SWITCH_RE.finditer(text))
+    if not matches:
+        return SlackModelSwitchParse(None, text)
+    values = [match.group(1) for match in matches]
+    if any(value not in _MODEL_ROUTING_TIERS for value in values):
+        return SlackModelSwitchParse(None, text, invalid=True)
+    cleaned = _MODEL_SWITCH_RE.sub("", text)
+    return SlackModelSwitchParse(cast(SlackModelSwitch, values[-1]), cleaned)
 
 
 def _slack_prompt_preamble(message_update: bool = False) -> str:
@@ -100,6 +125,7 @@ async def _dispatch_or_queue_slack_run(
     configurable: dict[str, Any],
     *,
     explicitly_tagged: bool,
+    metadata: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     """Dispatch explicit requests immediately and enqueue other Slack follow-ups."""
     if isinstance(run_input, list):
@@ -111,7 +137,7 @@ async def _dispatch_or_queue_slack_run(
             configurable,
             source="slack",
             input=run_input,
-            metadata=common.AGENT_VERSION_METADATA,
+            metadata={**common.AGENT_VERSION_METADATA, **(metadata or {})},
             client=client,
             multitask_strategy="interrupt" if explicitly_tagged else "enqueue",
         )
@@ -798,10 +824,18 @@ async def _process_slack_mention_impl(
             if treat_all_messages_as_mentions
             else "the previous message where I was tagged"
         )
-    clean_text = (
-        common.strip_bot_mention(text, bot_user_id, bot_username=common.SLACK_BOT_USERNAME)
-        or "(no text in mention)"
-    )
+    clean_text = common.strip_bot_mention(text, bot_user_id, bot_username=common.SLACK_BOT_USERNAME)
+    model_switch_parse = parse_slack_model_switch(clean_text)
+    if model_switch_parse.invalid:
+        await common.post_slack_thread_reply(
+            channel_id,
+            reply_thread_ts or thread_ts,
+            "Invalid model switch. Use `/model:fast` or `/model:perf`.",
+            agent_thread_id=thread_id,
+        )
+        return
+    model_switch = model_switch_parse.model_switch
+    clean_text = model_switch_parse.cleaned_text or "(no text in mention)"
     is_first_mention = not await common.thread_exists(thread_id)
     # A `workspace:<name>` (or legacy `env:<name>`) tag on the message that opens
     # a thread is one input to which workspace its sandbox boots from — resolved
@@ -850,8 +884,8 @@ async def _process_slack_mention_impl(
     )
 
     mapped_login = await _slack_login(user_id, user_email) if allowed_bot is None else None
-    # A DM always answers on the person's own default model: a per-thread model
-    # choice is never routed into it.
+    # A DM normally answers on the person's own default model: a per-thread model
+    # choice is not routed into it, but a switch in the current message still wins.
     thread_model_choice = None if dm_session else await common.get_thread_model_choice(thread_id)
 
     # Routing comes before the run's repository: a repository nobody named
@@ -880,6 +914,14 @@ async def _process_slack_mention_impl(
         )
     else:
         thread_workspace = await common.get_thread_workspace(thread_id)
+
+    model_switch_choice: tuple[str, str] | None = None
+    if model_switch:
+        routing_tier = _MODEL_ROUTING_TIERS[model_switch]
+        model_switch_choice = (
+            await common.get_workspace_settings(thread_workspace)
+        ).agent_routing_models[routing_tier]
+        thread_model_choice = model_switch_choice
 
     image_model_override: tuple[str, str] | None = None
     if image_urls:
@@ -1052,6 +1094,7 @@ async def _process_slack_mention_impl(
         visibility=visibility,
         owner_login=mapped_login or "",
         owner_type="system" if allowed_bot else "user",
+        explicit_model_choice=model_switch_choice,
     )
     if (visibility == "private" or allowed_bot is not None) and not persisted:
         # Dispatch would create the thread itself, with no metadata and so public.
@@ -1110,6 +1153,13 @@ async def _process_slack_mention_impl(
                 ),
             )
             await common.set_commands(channel_id, common.DEFAULT_CODE_CHANNEL_COMMANDS)
+    run_metadata: dict[str, str] = {}
+    if model_switch and model_switch_choice:
+        run_metadata = {
+            "slack_model_switch": model_switch,
+            "slack_requested_model": model_switch_choice[0],
+            "slack_requested_effort": model_switch_choice[1],
+        }
     try:
         run = await _dispatch_or_queue_slack_run(
             langgraph_client,
@@ -1117,6 +1167,7 @@ async def _process_slack_mention_impl(
             run_input,
             configurable,
             explicitly_tagged=explicitly_tagged,
+            metadata=run_metadata,
         )
     except Exception:
         # No run means no completion webhook, so nothing else would ever clear

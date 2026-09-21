@@ -59,6 +59,46 @@ class _FakeClient:
         self.threads = threads_client
 
 
+@pytest.mark.parametrize(
+    ("text", "expected_switch", "expected_text", "invalid"),
+    [
+        ("please /model:fast fix this", "fast", "please  fix this", False),
+        ("/model:perf\ncheck this", "perf", "\ncheck this", False),
+        ("/model:fast first /model:perf", "perf", " first ", False),
+        ("/model:perf /model:fast last", "fast", "  last", False),
+        ("keep x/model:fast and https://example.com/model:perf", None, None, False),
+        ("reject /model:", None, None, True),
+        ("reject /model:Fast", None, None, True),
+        ("reject /model:PERF", None, None, True),
+        ("reject /model:performance", None, None, True),
+        ("reject /model:fastest", None, None, True),
+        ("reject /model:fast /model:invalid", None, None, True),
+    ],
+)
+def test_parse_slack_model_switch(
+    text: str,
+    expected_switch: str | None,
+    expected_text: str | None,
+    invalid: bool,
+) -> None:
+    parsed = slack_webhooks.parse_slack_model_switch(text)
+
+    assert parsed.model_switch == expected_switch
+    assert parsed.cleaned_text == (text if expected_text is None else expected_text)
+    assert parsed.invalid is invalid
+
+
+@pytest.mark.parametrize("switch", ["/model:fast", "/model:perf"])
+def test_model_switch_preserves_code_whitespace(switch: str) -> None:
+    snippet = '    if ready:\n        value = "two  spaces"\n\t\tprocess(value)  \n'
+    text = f"{snippet}{switch}\n"
+
+    parsed = slack_webhooks.parse_slack_model_switch(text)
+
+    assert parsed.cleaned_text == f"{snippet}\n"
+    assert not parsed.invalid
+
+
 def test_channel_context_preserves_external_sharing_status() -> None:
     context = SlackChannelPayload.of({"name": "shared", "is_ext_shared": True}).to_context("C123")
 
@@ -2095,16 +2135,16 @@ def test_thread_workspace_round_trips_through_metadata(
 def test_thread_model_choice_round_trips_explicit_metadata(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    threads = _FakeThreadsClient(
-        {
-            "metadata": {
-                "model_selection": "explicit",
-                "model": "anthropic:claude-opus-5",
-                "effort": "high",
-            }
-        }
-    )
+    threads = _FakeThreadsClient({"metadata": {}})
     monkeypatch.setattr(webhook_common, "get_client", lambda url: _FakeClient(threads))
+
+    asyncio.run(
+        webhook_common.upsert_agent_thread_metadata(
+            "thread-id",
+            source="slack",
+            explicit_model_choice=("anthropic:claude-opus-5", "high"),
+        )
+    )
 
     assert asyncio.run(webhook_common.get_thread_model_choice("thread-id")) == (
         "anthropic:claude-opus-5",
