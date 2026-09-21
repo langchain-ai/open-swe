@@ -62,7 +62,9 @@ function removeQueuedMessage(thread: AgentThread, id: string): AgentThread {
 /** Human-readable reason a send failed, shown under the failed bubble. */
 export function describeSendError(error: unknown): string {
   if (error instanceof AgentsApiError) {
-    return error.message ? `${error.status} ${error.message}` : `${error.status}`
+    return error.message
+      ? `${error.status} ${error.message}`
+      : `${error.status}`
   }
   if (error instanceof Error) return error.message || error.name
   return String(error)
