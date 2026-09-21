@@ -134,6 +134,10 @@ describe("WorkspacesSection", () => {
       .closest("[data-workspace-row]") as HTMLElement
     expect(defaultRow).toBeTruthy()
     expect(within(defaultRow).getByText("acme/oss")).toBeTruthy()
+    const chip = within(defaultRow).getByRole("link", { name: "acme/oss" })
+    expect(chip.getAttribute("href")).toBe("https://github.com/acme/oss")
+    expect(chip.getAttribute("target")).toBe("_blank")
+    expect(chip.getAttribute("rel")).toBe("noopener noreferrer")
     expect(within(defaultRow).getByText("Default")).toBeTruthy()
     expect(within(previewRow).queryByText("Default")).toBeNull()
   })
