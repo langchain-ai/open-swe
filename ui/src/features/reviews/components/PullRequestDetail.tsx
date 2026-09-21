@@ -1,12 +1,13 @@
 import { useQuery } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
 import { XIcon } from "@phosphor-icons/react"
-import type { ReactNode } from "react"
+import { useCallback, useState, type ReactNode } from "react"
 
 import type {
   OpenPullRequest,
   PreviewCheck,
   PreviewFile,
+  PreviewThread,
   PullRequestPreview,
 } from "@/lib/api"
 import { Markdown } from "@/features/agents/components/chat/Markdown"
@@ -194,6 +195,60 @@ function Checks({ checks }: { checks: Array<PreviewCheck> | null }) {
   )
 }
 
+function Conversation({ thread }: { thread: PreviewThread }) {
+  const [open, setOpen] = useState(false)
+  const [clamped, setClamped] = useState(false)
+  // Only offer the toggle when there is something hidden to show.
+  const measure = useCallback((node: HTMLParagraphElement | null) => {
+    if (node) setClamped(node.scrollHeight > node.clientHeight + 1)
+  }, [])
+
+  return (
+    <li className="border-l-2 border-amber-600/40 pl-3">
+      <div className="flex items-baseline gap-2 text-xs text-muted-foreground">
+        <span className="font-medium text-foreground">
+          {thread.author ?? "Someone"}
+        </span>
+        <span className="min-w-0 truncate font-mono">
+          {thread.path}
+          {thread.line !== null && `:${thread.line}`}
+        </span>
+        {thread.url && (
+          <a
+            className="ml-auto shrink-0 hover:text-foreground hover:underline"
+            href={thread.url}
+            target="_blank"
+            rel="noreferrer"
+          >
+            Reply
+          </a>
+        )}
+      </div>
+      {open ? (
+        <div className="mt-1 max-w-[72ch]">
+          <Markdown content={thread.body} />
+        </div>
+      ) : (
+        <p
+          ref={measure}
+          className="mt-1 line-clamp-3 text-xs whitespace-pre-wrap text-foreground"
+        >
+          {thread.body}
+        </p>
+      )}
+      {(clamped || open) && (
+        <button
+          type="button"
+          onClick={() => setOpen(!open)}
+          className="mt-1 text-xs text-muted-foreground hover:text-foreground hover:underline"
+        >
+          {open ? "Show less" : "Show more"}
+        </button>
+      )}
+    </li>
+  )
+}
+
 function Conversations({ preview }: { preview: PullRequestPreview }) {
   if (preview.unresolved === null) {
     return (
@@ -213,33 +268,10 @@ function Conversations({ preview }: { preview: PullRequestPreview }) {
   return (
     <ul className="space-y-2.5">
       {preview.unresolved.map((thread, index) => (
-        <li
+        <Conversation
           key={thread.url ?? `${thread.path}:${thread.line}:${index}`}
-          className="border-l-2 border-amber-600/40 pl-3"
-        >
-          <div className="flex items-baseline gap-2 text-xs text-muted-foreground">
-            <span className="font-medium text-foreground">
-              {thread.author ?? "Someone"}
-            </span>
-            <span className="min-w-0 truncate font-mono">
-              {thread.path}
-              {thread.line !== null && `:${thread.line}`}
-            </span>
-            {thread.url && (
-              <a
-                className="ml-auto shrink-0 hover:text-foreground hover:underline"
-                href={thread.url}
-                target="_blank"
-                rel="noreferrer"
-              >
-                Reply
-              </a>
-            )}
-          </div>
-          <p className="mt-1 line-clamp-3 text-xs whitespace-pre-wrap text-foreground">
-            {thread.body}
-          </p>
-        </li>
+          thread={thread}
+        />
       ))}
     </ul>
   )
