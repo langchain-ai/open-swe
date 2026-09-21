@@ -6,6 +6,11 @@ import { expect, type Page } from "@playwright/test";
 export const SAME_USER = { login: "alice", email: "alice@example.com" };
 export const OTHER_USER = { login: "bob", email: "bob@example.com" };
 
+// The dashboard's mutating routes enforce same-origin, which a browser sets for
+// itself but APIRequestContext does not.
+const BASE_URL = `http://127.0.0.1:${process.env.E2E_PORT ?? 2024}`;
+export const SAME_ORIGIN_HEADERS = { origin: BASE_URL, referer: `${BASE_URL}/` };
+
 export async function loginAs(
   page: Page,
   user: { login: string; email: string },
@@ -20,12 +25,13 @@ export async function loginAs(
 // `false` to cover a user who has not opted in and reads LangGraph state.
 export async function setTranscriptStreaming(page: Page, enabled: boolean) {
   const current = await page.request.get("/dashboard/api/me/preferences");
-  expect(current.ok()).toBeTruthy();
+  expect(current.ok(), await current.text()).toBeTruthy();
   const preferences = (await current.json()) as Record<string, unknown>;
   const saved = await page.request.put("/dashboard/api/me/preferences", {
+    headers: SAME_ORIGIN_HEADERS,
     data: { ...preferences, transcript_streaming: enabled },
   });
-  expect(saved.ok()).toBeTruthy();
+  expect(saved.ok(), await saved.text()).toBeTruthy();
 }
 
 // The composer is a rich-text editor, not a <textarea>: it carries the prompt
