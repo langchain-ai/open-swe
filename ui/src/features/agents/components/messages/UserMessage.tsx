@@ -1,7 +1,7 @@
 import { ChevronDown, ChevronRight } from "lucide-react"
 import { IoLogoSlack } from "react-icons/io5"
 import { useEffect, useRef, useState } from "react"
-import { useMessageMetadata } from "@langchain/react"
+import { type MessageMetadata, useMessageMetadata } from "@langchain/react"
 
 import { SkillPromptText } from "../SkillBadge"
 import { MessageTimestamp } from "./MessageTimestamp"
@@ -10,6 +10,20 @@ import { useAgentStream } from "@/features/agents/lib/stream/AgentStreamProvider
 import type { Message } from "@/features/agents/lib/types"
 
 const COLLAPSED_MAX_HEIGHT_PX = 250
+
+function deliveryStatusFromOptimisticStatus(
+  optimisticStatus: MessageMetadata["optimisticStatus"],
+): Message["deliveryStatus"] {
+  switch (optimisticStatus) {
+    case "pending":
+      return "sending"
+    case "failed":
+      return "failed"
+    case "sent":
+    case undefined:
+      return undefined
+  }
+}
 
 export function UserMessage({ message }: { message: Message }) {
   const stream = useAgentStream()
@@ -23,11 +37,7 @@ export function UserMessage({ message }: { message: Message }) {
     ?.optimisticStatus
   const deliveryStatus =
     message.deliveryStatus ??
-    (optimisticStatus === "pending"
-      ? "sending"
-      : optimisticStatus === "failed"
-        ? "failed"
-        : undefined)
+    deliveryStatusFromOptimisticStatus(optimisticStatus)
   const isSystem = message.structuredSenderKind === "system"
   const isSlack = message.structuredSurface === "slack"
   const text = message.chunks

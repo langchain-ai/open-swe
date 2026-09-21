@@ -84,7 +84,7 @@ function PooledStream({ entry }: { entry: StreamPoolEntry }) {
     assistantId: AGENT_ASSISTANT_ID,
     threadId: entry.threadId,
     fetch: dashboardFetch,
-    serverQueue: true,
+    queue: "server",
     maxReconnectAttempts: MAX_RECONNECT_ATTEMPTS,
     reconnectDelayMs,
     onReconnect: scheduleReconnectNotice,
