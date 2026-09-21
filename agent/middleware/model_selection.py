@@ -1,17 +1,20 @@
 import logging
 from collections.abc import Awaitable, Callable, Mapping, Sequence
-from typing import Any, Literal, NotRequired
+from typing import Annotated, Any, Literal, NotRequired
 
+import httpx2
 from langchain.agents.middleware.types import AgentState, ModelRequest, ModelResponse
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import HumanMessage, ToolMessage
 from langgraph.config import get_stream_writer
 from langgraph.runtime import Runtime
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
+from agent.config import ENV
 from agent.input_messages import input_message_text, message_sender_id
 from agent.middleware.trace import OpenSWEMiddleware
 from agent.prompts import load_prompt, render_prompt
+from agent.utils.gateway import gateway_base_url
 
 logger = logging.getLogger(__name__)
 
@@ -49,6 +52,64 @@ def _latest_human_task(messages: Sequence[Any]) -> str:
 
 class RouteDecision(BaseModel):
     model_route: Route
+
+
+class SemifChoice(BaseModel):
+    type: Literal["choice"]
+    choice: Route
+    confidence: Annotated[float, Field(ge=0, le=1, allow_inf_nan=False)]
+    probabilities: dict[Route, Annotated[float, Field(ge=0, le=1, allow_inf_nan=False)]]
+
+
+class SemifAnswers(BaseModel):
+    route: SemifChoice
+
+
+class SemifResponse(BaseModel):
+    answers: SemifAnswers
+
+
+async def _select_semif_route(task: str) -> Route | None:
+    api_key = ENV.LANGSMITH_GATEWAY_API_KEY.optional() or ENV.LANGSMITH_API_KEY.optional()
+    if not api_key:
+        logger.info("SemIf routing has no gateway key; using fallback classifier")
+        return None
+    try:
+        async with httpx2.AsyncClient(timeout=3.0) as client:
+            response = await client.post(
+                f"{gateway_base_url()}/v1/systemone",
+                headers={"Authorization": f"Bearer {api_key}"},
+                json={
+                    "model": "semif-qwen3.5-4b",
+                    "state": task,
+                    "questions": {
+                        "route": {
+                            "type": "choice",
+                            "instructions": render_prompt("model-selection.md", task=""),
+                            "criteria": dict.fromkeys(("fast", "balanced", "performance")),
+                        }
+                    },
+                },
+            )
+            response.raise_for_status()
+            answer = SemifResponse.model_validate(response.json()).answers.route
+        probabilities = answer.probabilities
+        if (
+            set(probabilities) != {"fast", "balanced", "performance"}
+            or abs(sum(probabilities.values()) - 1) > 0.01
+            or probabilities[answer.choice] != max(probabilities.values())
+        ):
+            raise ValueError("Invalid SemIf routing probabilities")
+        if answer.confidence < 0.6:
+            logger.info(
+                "SemIf routing confidence below threshold; using fallback classifier",
+                extra={"confidence": answer.confidence},
+            )
+            return None
+        return answer.choice
+    except Exception:
+        logger.exception("SemIf routing failed; using fallback classifier")
+        return None
 
 
 class ModelSelectionState(AgentState):
@@ -125,7 +186,9 @@ class ModelSelectionMiddleware(OpenSWEMiddleware[ModelSelectionState]):
             ),
             "",
         )
-        task = approved_plan or _latest_human_task(messages)
+        task = (approved_plan or _latest_human_task(messages))[-8_000:]
+        if semif_route := await _select_semif_route(task):
+            return semif_route
         route: Route = "balanced"
         try:
             decision = await self._classifier.ainvoke(

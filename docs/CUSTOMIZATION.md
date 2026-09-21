@@ -198,6 +198,12 @@ async def get_agent(config: RunnableConfig) -> Pregel:
     return create_deep_agent(model=model, ...)
 ```
 
+### Auto model routing with SemIf
+
+Eligible Auto turns use the open-source `semif-qwen3.5-4b` decision model through the [LangSmith Gateway System One API](https://docs.langchain.com/langsmith/llm-gateway-decision-models). This classifier call is independent of the provider-proxy gateway toggle below; it uses `LANGSMITH_GATEWAY_API_KEY` (falling back to `LANGSMITH_API_KEY`) and respects `LANGSMITH_GATEWAY_BASE_URL`. The key needs gateway access; no TypeSafe key or SDK is required.
+
+SemIf receives the same bounded task or approved-plan text (up to 8,000 characters) as the existing classifier. Missing credentials, API errors, a three-second HTTP timeout, malformed responses, or confidence below `0.6` fall back to the existing chat classifier, then to the balanced route if that also fails. The confidence cutoff is an initial heuristic, not a calibrated correctness probability. Existing Auto eligibility, plan-mode overrides, explicit performance routing, and persisted routes are unchanged.
+
 ### Routing through the LangSmith LLM Gateway
 
 Model calls can be proxied through the [LangSmith LLM Gateway](https://docs.langchain.com/langsmith/llm-gateway) (private beta) instead of hitting providers directly. The gateway authenticates with a **LangSmith API key** that has the `gateway:invoke` permission and resolves the real provider key from workspace Provider Secrets, so no provider API keys are needed at runtime — and it adds central spend limits, PII/secrets redaction, and tracing. Your org must have the gateway enabled with Provider Secrets configured.
