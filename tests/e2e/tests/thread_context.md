@@ -12,8 +12,8 @@ Then: dispatch introduces the channel, carrying everything that stays true of th
 platform: slack
 name: #demo
 thread_id: <slack-ts-1>
-topic (untrusted): Demo channel topic
-purpose (untrusted): Demo channel purpose
+topic: Demo channel topic
+purpose: Demo channel purpose
 default_repo: fakeorg/demo
 web_url: http://127.0.0.1:3100/agents/<thread-id>
 </dynamic-context>

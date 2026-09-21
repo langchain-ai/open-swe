@@ -33,8 +33,7 @@ const MESSAGE_PATTERN =
   /^\s*<input-message\b([^>]*)>([\s\S]*?)<\/input-message>\s*$/
 const OPEN_TAG_PATTERN = /^\s*<([A-Za-z_][\w:.-]*)>/
 const ATTRIBUTE_PATTERN = /([A-Za-z_][\w:.-]*)\s*=\s*("[^"]*"|'[^']*')/g
-const ENTITY_FIELD_PATTERN =
-  /^([A-Za-z_][\w.-]*)(?: \(untrusted\))?:(?: (.*))?$/
+const ENTITY_FIELD_PATTERN = /^([A-Za-z_][\w.-]*):(?: (.*))?$/
 const ELEMENT_ENTITY_FIELD_PATTERN =
   /<([A-Za-z_][\w.-]*)(?:\s[^>]*)?>([\s\S]*?)<\/\1>/g
 

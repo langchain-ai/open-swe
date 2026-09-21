@@ -258,7 +258,7 @@ test("records every message the model is handed as people come and go", async ({
   // turn has to restate it.
   expect(first.dispatch[0]).toContain('kind="channel"');
   expect(first.dispatch[0]).toContain("name: #demo");
-  expect(first.dispatch[0]).toContain("topic (untrusted): Demo channel topic");
+  expect(first.dispatch[0]).toContain("topic: Demo channel topic");
   expect(first.dispatch[0]).toContain("default_repo: fakeorg/demo");
   expect(first.dispatch[0]).toContain("web_url: ");
   expect(first.run).toHaveLength(1);

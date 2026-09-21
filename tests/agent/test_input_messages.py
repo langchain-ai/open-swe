@@ -87,7 +87,7 @@ def test_first_seen_introductions_are_practical_and_mutate_registry() -> None:
     channel = _parse(channel_content)
     assert (channel.text or "").strip().splitlines() == [
         "platform: slack",
-        "topic (untrusted): a < b",
+        "topic: a < b",
     ]
 
 

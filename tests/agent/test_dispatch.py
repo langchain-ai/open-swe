@@ -264,8 +264,8 @@ async def test_dispatch_describes_the_channel_and_leaves_the_sender_to_the_run()
     assert channel.attrib["kind"] == "channel"
     body = (channel.text or "").strip().splitlines()
     assert "name: eng" in body
-    assert "topic (untrusted): Ship <safely>" in body
-    assert "purpose (untrusted): Engineering work" in body
+    assert "topic: Ship <safely>" in body
+    assert "purpose: Engineering work" in body
 
 
 @pytest.mark.usefixtures("registry_db")

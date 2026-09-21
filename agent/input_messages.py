@@ -115,7 +115,6 @@ _ENTITY_FIELDS: dict[EntityKind, tuple[str, ...]] = {
     ),
     "system": ("display_name", "platform", "sender_type", "content"),
 }
-_UNTRUSTED_ENTITY_FIELDS = frozenset({"topic", "purpose", "description"})
 
 
 def _xml_text(value: object) -> str:
@@ -259,12 +258,11 @@ def visible_dynamic_context_hashes(state: Mapping[str, Any]) -> set[str]:
 
 
 def _entity_field_line(field: str, value: object) -> str:
-    label = f"{field} (untrusted)" if field in _UNTRUSTED_ENTITY_FIELDS else field
     text = _xml_text(value)
     if "\n" not in text:
-        return f"{label}: {text}"
+        return f"{field}: {text}"
     indented = "\n".join(f"  {line}" for line in text.split("\n"))
-    return f"{label}:\n{indented}"
+    return f"{field}:\n{indented}"
 
 
 def _entity_message(identity: Identity, kind: EntityKind) -> RunMessage:
