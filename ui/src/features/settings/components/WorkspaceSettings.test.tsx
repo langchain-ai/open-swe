@@ -112,7 +112,7 @@ function renderPage() {
   clients.push(client)
   return render(
     <QueryClientProvider client={client}>
-      <WorkspaceSettingsPanel slug="oss" canEdit />
+      <WorkspaceSettingsPanel slug="oss" canEdit onCloned={() => undefined} />
     </QueryClientProvider>
   )
 }
@@ -134,6 +134,8 @@ describe("WorkspaceSettingsPanel", () => {
     // Bound channels read by name once the directory is in.
     expect((await screen.findAllByText("#oss-help")).length).toBeGreaterThan(0)
 
+    expect(screen.getByRole("button", { name: "Clone workspace" })).toBeTruthy()
+
     fireEvent.change(name, { target: { value: " OSS support " } })
     fireEvent.click(screen.getByRole("button", { name: "Save" }))
 
@@ -143,6 +145,50 @@ describe("WorkspaceSettingsPanel", () => {
         repos: ["acme/oss"],
         slack_channel_ids: ["C1"],
         prompt: "Run make test.",
+      })
+    )
+  })
+
+  it("clones the workspace configuration without its owned resources", async () => {
+    mockApis()
+    const create = vi.spyOn(api, "createWorkspace").mockResolvedValue({
+      ...RECORD,
+      slug: "oss-copy",
+      name: "OSS copy",
+      repos: [],
+      slack_channel_ids: [],
+    })
+    renderPage()
+
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Clone workspace" })
+    )
+    fireEvent.change(screen.getAllByLabelText("Workspace name").at(0)!, {
+      target: { value: "OSS fork" },
+    })
+    fireEvent.click(
+      screen.getAllByRole("button", { name: "Choose repositories" }).at(0)!
+    )
+    fireEvent.change(await screen.findByLabelText("Add a repository by name"), {
+      target: { value: "acme/fork" },
+    })
+    fireEvent.click(screen.getByRole("button", { name: "Add" }))
+    fireEvent.click(screen.getByRole("button", { name: "Save 1 repository" }))
+    fireEvent.click(screen.getByRole("button", { name: "Clone workspace" }))
+
+    await waitFor(() =>
+      expect(create).toHaveBeenCalledWith({
+        name: "OSS fork",
+        prompt: "Run make test.",
+        repos: ["acme/fork"],
+        slack_channel_ids: [],
+        setup_script: "make setup",
+        update_script: "",
+        base_snapshot_id: null,
+        mem_bytes: 8 * 1024 ** 3,
+        vcpus: 4,
+        fs_capacity_bytes: null,
+        create_params: undefined,
       })
     )
   })

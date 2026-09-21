@@ -585,8 +585,15 @@ export interface WorkspaceOptionList {
 export interface WorkspaceCreate {
   name: string
   prompt?: string
+  setup_script?: string
+  update_script?: string
+  base_snapshot_id?: string | null
   repos?: Array<string>
   slack_channel_ids?: Array<string>
+  mem_bytes?: number | null
+  vcpus?: number | null
+  fs_capacity_bytes?: number | null
+  create_params?: Record<string, unknown>
 }
 
 /** Body for `PUT /workspaces/{slug}`. Only the fields present are changed. */
@@ -622,6 +629,7 @@ export interface WorkspaceRecord {
   mem_bytes?: number | null
   vcpus?: number | null
   fs_capacity_bytes?: number | null
+  create_params?: Record<string, unknown>
   refresh_status?: WorkspaceRefreshStatus
   refresh_kind?: "full" | "update" | null
   refresh_finished_at?: string | null

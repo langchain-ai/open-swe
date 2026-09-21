@@ -9,6 +9,7 @@ import {
   workspaceOptionKeys,
 } from "@/features/agents/lib/queries"
 import { api, type WorkspaceOption, type WorkspaceRecord } from "@/lib/api"
+import { CloneWorkspaceButton } from "./CloneWorkspaceButton"
 import { MCPConnectionsSection } from "./MCPConnectionsSection"
 import { ExpeditedReviewSection } from "./ExpeditedReviewSection"
 import { ReviewSettings } from "./ReviewSettings"
@@ -116,9 +117,11 @@ function GeneralSection({
 export function WorkspaceSettingsPanel({
   slug,
   canEdit,
+  onCloned,
 }: {
   slug: string
   canEdit: boolean
+  onCloned?: (slug: string) => void
 }) {
   const qc = useQueryClient()
   const record = useQuery({
@@ -167,6 +170,14 @@ export function WorkspaceSettingsPanel({
 
   return (
     <>
+      {onCloned && (
+        <CloneWorkspaceButton
+          workspace={record.data}
+          workspaces={options.data?.workspaces ?? []}
+          channelLabel={channelLabel}
+          onCloned={onCloned}
+        />
+      )}
       <GeneralSection
         // Remount when the record changes underneath so the draft follows it.
         key={JSON.stringify(draftFromWorkspace(record.data))}
