@@ -12,6 +12,7 @@ from fastapi import HTTPException
 from agent.dashboard import deps, options_routes, profiles
 from agent.dashboard.agent_overrides import resolve_agent_model_id
 from agent.dashboard.options import model_supports_images
+from agent.dashboard.profiles import Profile
 from agent.dashboard.ttft import AssistantTextObservation
 from agent.dashboard.workspace_settings import (
     WorkspaceSettings,
@@ -189,7 +190,9 @@ async def test_resolve_agent_model_id_applies_profile_override(monkeypatch) -> N
     monkeypatch.setattr("agent.dashboard.agent_overrides.get_workspace_settings", fake_team_default)
 
     async def fake_load_profile(login: str) -> dict:
-        return {"default_model": _VISION_MODEL, "reasoning_effort": "medium"}
+        return Profile.model_validate(
+            {"default_model": _VISION_MODEL, "reasoning_effort": "medium"} or {}
+        )
 
     monkeypatch.setattr("agent.dashboard.agent_overrides.load_profile", fake_load_profile)
 
@@ -249,7 +252,7 @@ def _new_thread_client(created: dict[str, object]) -> object:
 
 def _patch_new_thread_deps(monkeypatch, *, profile: dict[str, object]) -> None:
     async def fake_profile(login: str) -> dict[str, object]:
-        return dict(profile)
+        return Profile.model_validate(profile)
 
     async def fake_team_default(workspace: str | None = None) -> WorkspaceSettings:
         return WorkspaceSettings(
@@ -361,7 +364,7 @@ async def test_enrich_run_start_command_resolves_model_from_repos_workspace(
     created: dict[str, object] = {}
 
     async def fake_profile(login: str) -> dict[str, object]:
-        return {}
+        return Profile.model_validate({} or {})
 
     async def fake_ensure_token(login: str) -> None:
         return None
@@ -934,7 +937,7 @@ async def test_enrich_run_start_command_attributes_non_owner_message(monkeypatch
         threads = FakeThreads()
 
     async def fake_get_profile(login: str) -> dict[str, object]:
-        return {}
+        return Profile.model_validate({} or {})
 
     async def fake_ensure_token(login: str) -> None:
         pass
@@ -981,7 +984,7 @@ async def test_enrich_run_start_command_adds_web_handoff_for_slack_thread(monkey
         threads = FakeThreads()
 
     async def fake_get_profile(login: str) -> dict[str, object]:
-        return {}
+        return Profile.model_validate({} or {})
 
     async def fake_ensure_token(login: str) -> None:
         pass
@@ -1035,7 +1038,7 @@ async def test_enrich_run_start_command_adds_web_handoff_before_image_blocks(mon
         threads = FakeThreads()
 
     async def fake_get_profile(login: str) -> dict[str, object]:
-        return {}
+        return Profile.model_validate({} or {})
 
     async def fake_ensure_token(login: str) -> None:
         pass
@@ -1088,7 +1091,7 @@ async def test_enrich_run_start_command_does_not_attribute_owner_message(monkeyp
         threads = FakeThreads()
 
     async def fake_get_profile(login: str) -> dict[str, object]:
-        return {}
+        return Profile.model_validate({} or {})
 
     async def fake_ensure_token(login: str) -> None:
         pass
@@ -1132,7 +1135,7 @@ async def test_enrich_run_start_command_allowlists_client_configurable(monkeypat
 
     async def fake_get_profile(login: str) -> dict[str, object]:
         assert login == "octocat"
-        return {}
+        return Profile.model_validate({} or {})
 
     async def fake_ensure_token(login: str) -> None:
         assert login == "octocat"
@@ -1262,7 +1265,7 @@ async def test_proxy_run_start_from_slack_thread_updates_trace_reply(monkeypatch
             return FakeResponse()
 
     async def fake_get_profile(login: str) -> dict[str, object]:
-        return {}
+        return Profile.model_validate({} or {})
 
     async def fake_ensure_token(login: str) -> None:
         pass
@@ -2743,10 +2746,13 @@ async def test_get_my_profile_drops_deprecated_models() -> None:
     with patch(
         "agent.dashboard.profiles.get_profile",
         new_callable=AsyncMock,
-        return_value={
-            "default_model": "fireworks:accounts/fireworks/models/glm-5p2",
-            "reasoning_effort": "high",
-        },
+        return_value=Profile.model_validate(
+            {
+                "default_model": "fireworks:accounts/fireworks/models/glm-5p2",
+                "reasoning_effort": "high",
+            }
+            or {}
+        ),
     ):
         payload = await profiles.get_my_profile({"sub": "octocat"})
 

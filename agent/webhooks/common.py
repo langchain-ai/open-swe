@@ -1244,10 +1244,8 @@ async def draft_review_enabled_for_author(
     """
     if author_login:
         profile = await get_profile(author_login)
-        if isinstance(profile, dict):
-            override = profile.get("review_draft_prs")
-            if isinstance(override, bool):
-                return override
+        if profile.review_draft_prs is not None:
+            return profile.review_draft_prs
     settings = await get_workspace_settings(await workspace_for_repo_config(repo_config))
     return bool(settings.get("review_draft_prs"))
 

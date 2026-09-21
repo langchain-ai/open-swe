@@ -53,8 +53,6 @@ from agent.dashboard.agent_overrides import (
     load_profile,
     normalize_profile_overrides,
     normalize_profile_subagent_overrides,
-    profile_draft_prs,
-    profile_model_routing_enabled,
     resolve_github_login,
 )
 from agent.dashboard.options import (
@@ -63,6 +61,7 @@ from agent.dashboard.options import (
     gate_fable_model,
     model_supports_effort,
 )
+from agent.dashboard.profiles import Profile
 from agent.dashboard.workspace_settings import WorkspaceSettings, get_workspace_settings
 from agent.dashboard.workspace_settings_cache import cached_workspace_settings
 from agent.desktop import create_desktop_backend, desktop_artifact_routes, is_desktop_run
@@ -173,6 +172,7 @@ from agent.tools import (
     output_iframe,
     publish_workspace,
     read_only_sql,
+    read_user_preferences,
     read_user_settings,
     recreate_sandbox,
     refresh_workspace_start,
@@ -193,6 +193,7 @@ from agent.tools import (
     submit_thread_feedback,
     trigger_automation,
     update_automation,
+    update_user_preferences,
     web_search,
 )
 from agent.tools.admin_gate import actor_has_admin_context, actor_is_admin, is_private_admin_surface
@@ -356,6 +357,7 @@ async def _resolve_user_custom_instructions(login: str | None) -> str | None:
 PLAN_MODE_EXCLUDED_TOOLS: frozenset[str] = frozenset(
     {
         "task",
+        "update_user_preferences",
         "background_execute",
         "background_task",
         "expose_port",
@@ -452,7 +454,9 @@ def _is_subagent_excluded_tool(tool: Any) -> bool:
         "notify_automation_channel",
         "read_incident",
         "read_only_sql",
+        "read_user_preferences",
         "read_user_settings",
+        "update_user_preferences",
         "record_incident_report",
         "search_incidents",
     }
@@ -589,9 +593,9 @@ async def _phase_result(thread_id: str | None, name: str, loader: Any) -> Any:
         return await loader()
 
 
-async def _cached_profile(profile_login: str | None):
+async def _cached_profile(profile_login: str | None) -> Profile:
     if not profile_login:
-        return None
+        return Profile()
     return await ttl_cache.cached(
         f"profile:{profile_login}", 30, lambda: load_profile(profile_login)
     )
@@ -994,7 +998,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         }
         title_defaults = model_defaults[0]
         use_gateway = gateway_env_default()
-        profile = None
+        profile = Profile()
         fable_enabled = False
     else:
         async with aphase(thread_id, "factory.settings_defaults"):
@@ -1018,7 +1022,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
     logger.info("Using workspace default agent model: model=%s effort=%s", model_id, profile_effort)
 
     if profile_login and profile:
-        overridden_model, overridden_effort = normalize_profile_overrides(profile)
+        overridden_model, overridden_effort = normalize_profile_overrides(profile.model_dump())
         if overridden_model:
             logger.info(
                 "Applying dashboard profile override for %s: model=%s effort=%s",
@@ -1031,7 +1035,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
             subagent_model_id = overridden_model
             subagent_effort = overridden_effort
         overridden_subagent_model, overridden_subagent_effort = (
-            normalize_profile_subagent_overrides(profile)
+            normalize_profile_subagent_overrides(profile.model_dump())
         )
         if overridden_subagent_model:
             logger.info(
@@ -1044,7 +1048,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
             subagent_effort = overridden_subagent_effort
 
     # User preference overrides the workspace's toggle; None inherits it.
-    adaptive_model_routing = profile_model_routing_enabled(profile)
+    adaptive_model_routing = profile.model_routing_enabled
     if adaptive_model_routing is None:
         adaptive_model_routing = settings.model_routing_enabled if settings else False
     stored_model = thread_settings.get("model_id")
@@ -1083,8 +1087,8 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         subagent_effort = per_thread_effort
 
     async with aphase(thread_id, "factory.sender_profile"):
-        sender_profile = profile if profile is not None else await _cached_profile(profile_login)
-    sender_draft_prs = profile_draft_prs(sender_profile)
+        sender_profile = await _cached_profile(profile_login)
+    sender_draft_prs = sender_profile.draft_prs
     configurable["draft_prs"] = sender_draft_prs
     cfg.draft_prs = sender_draft_prs
     if isinstance(thread_settings.get("model_id"), str):
@@ -1243,7 +1247,9 @@ async def get_agent(config: RunnableConfig) -> Pregel:
             if sandbox_file_downloads
             else ()
         ),
+        read_user_preferences,
         read_user_settings,
+        update_user_preferences,
         request_pr_review,
         recreate_sandbox,
         report_platform_issue,
@@ -1267,7 +1273,9 @@ async def get_agent(config: RunnableConfig) -> Pregel:
             save_user_instructions,
             save_user_skill,
             delete_user_skill,
+            read_user_preferences,
             read_user_settings,
+            update_user_preferences,
         )
         static_tools = [tool for tool in static_tools if tool not in personal_tools]
     if not private_thread:
@@ -1456,7 +1464,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
                         else DEEP_AGENT_EXCLUDED_TOOLS | INCIDENT_AUTOMATIC_EXCLUDED_TOOLS
                         if incident_automatic
                         else DEEP_AGENT_EXCLUDED_TOOLS
-                    )
+                    ),
                 ),
                 SubdirAgentsReadMiddleware(),
                 ToolRetryMiddleware(

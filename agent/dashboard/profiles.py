@@ -12,6 +12,7 @@ each other's fields even when they interleave.
 
 import asyncio
 import logging
+from collections.abc import Mapping
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -45,6 +46,24 @@ logger = logging.getLogger(__name__)
 
 PROFILES_NAMESPACE: list[str] = ["profiles"]
 OAUTH_TOKENS_NAMESPACE: list[str] = ["oauth_tokens"]
+
+
+class Profile(BaseModel):
+    login: str = ""
+    email: str = ""
+    default_model: str | None = None
+    reasoning_effort: str | None = None
+    default_subagent_model: str | None = None
+    subagent_reasoning_effort: str | None = None
+    default_repo: str | None = None
+    base_branch: str | None = None
+    branch_prefix: str | None = None
+    auto_fix_ci: bool = True
+    model_routing_enabled: bool | None = None
+    dm_session_enabled: bool = False
+    draft_prs: bool = True
+    review_draft_prs: bool | None = None
+    updated_at: str = ""
 
 
 class ProfileUpdate(BaseModel):
@@ -113,7 +132,7 @@ def _normalize_stale_model_pair(model: str, effort: str | None) -> tuple[str, st
     return fallback
 
 
-def normalize_profile_for_response(profile: dict[str, Any]) -> dict[str, Any]:
+def normalize_profile_for_response(profile: Mapping[str, object]) -> dict[str, Any]:
     value = dict(profile)
     value.pop("create_prs", None)
     for model_field, effort_field in (
@@ -132,8 +151,9 @@ def normalize_profile_for_response(profile: dict[str, Any]) -> dict[str, Any]:
     return value
 
 
-async def get_profile(login: str) -> dict[str, Any] | None:
-    return await get_value(PROFILES_NAMESPACE, login)
+async def get_profile(login: str) -> Profile:
+    value = await get_value(PROFILES_NAMESPACE, login)
+    return Profile.model_validate(value or {}, strict=True)
 
 
 async def get_oauth_token_record(login: str) -> dict[str, Any] | None:
@@ -160,7 +180,7 @@ async def upsert_profile(login: str, email: str, update: ProfileUpdate) -> dict[
     is untouched, so a concurrent re-login can't be clobbered by this write
     and vice versa.
     """
-    existing = await get_profile(login) or {}
+    existing = (await get_profile(login)).model_dump(exclude_unset=True)
     value: dict[str, Any] = {
         **existing,
         "login": login,
@@ -398,9 +418,7 @@ async def get_my_profile(
     session: dict[str, Any] = _SESSION_DEP,
 ) -> dict[str, Any]:
     profile = await get_profile(session["sub"])
-    if not profile:
-        return {}
-    return normalize_profile_for_response(profile)
+    return normalize_profile_for_response(profile.model_dump(exclude_unset=True))
 
 
 @router.put("/profile")

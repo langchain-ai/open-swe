@@ -343,7 +343,7 @@ async def create_agent_schedule(
         run_email = email
     else:
         await _ensure_dashboard_github_token(login)
-        profile = await get_profile(login) or {}
+        profile = (await get_profile(login)).model_dump(exclude_unset=True)
         repo = await repo_config_for_user(login, body.repo)
         run_email = await resolve_run_email(login, profile) or email
     chosen_model, chosen_effort = normalize_model_choice(body.model_id, body.effort)

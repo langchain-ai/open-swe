@@ -18,6 +18,7 @@ from deepagents.backends.composite import CompositeBackend
 from deepagents.backends.state import StateBackend
 from langgraph.graph.state import RunnableConfig
 
+from agent.dashboard.profiles import Profile
 from agent.dashboard.workspace_settings import WorkspaceSettings
 from agent.run_config import RunConfig
 from agent.sandboxes.read_only_backend import ReadOnlyBackend
@@ -56,7 +57,14 @@ async def test_public_agent_excludes_personal_skills_and_tools(saved_thread_scop
     assert isinstance(tools, list)
     tool_names = {_registered_tool_name(tool) for tool in tools}
     assert not tool_names.intersection(
-        {"save_user_instructions", "save_user_skill", "delete_user_skill", "read_user_settings"}
+        {
+            "save_user_instructions",
+            "save_user_skill",
+            "delete_user_skill",
+            "read_user_settings",
+            "read_user_preferences",
+            "update_user_preferences",
+        }
     )
     notion.assert_awaited_once_with(None)
     from agent.middleware import WorkspaceSkillsMiddleware
@@ -154,7 +162,11 @@ async def _capture_create_deep_agent_kwargs(
             new_callable=AsyncMock,
             return_value=private_thread,
         ),
-        patch("agent.server.load_profile", new_callable=AsyncMock, return_value=profile),
+        patch(
+            "agent.server.load_profile",
+            new_callable=AsyncMock,
+            return_value=Profile.model_validate(profile or {}),
+        ),
         patch(
             "agent.server.load_thread_settings",
             new_callable=AsyncMock,
@@ -226,7 +238,11 @@ async def test_agent_starts_sandbox_while_loading_settings() -> None:
     with (
         patch("agent.server.ensure_sandbox_for_thread", side_effect=ensure_sandbox),
         patch("agent.server.cached_workspace_settings", side_effect=load_defaults),
-        patch("agent.server._cached_profile", new_callable=AsyncMock, return_value=None),
+        patch(
+            "agent.server._cached_profile",
+            new_callable=AsyncMock,
+            return_value=Profile.model_validate(None or {}),
+        ),
         patch("agent.server._mcp_tools_for", new_callable=AsyncMock, return_value=[]),
         patch("agent.server._notion_tools_for", new_callable=AsyncMock, return_value=[]),
         patch("agent.server.make_model", return_value=MagicMock()),
@@ -787,7 +803,9 @@ async def test_general_purpose_subagent_cannot_use_slack_tools() -> None:
         "get_thread",
         "list_threads",
         "manage_thread",
+        "read_user_preferences",
         "read_user_settings",
+        "update_user_preferences",
         "submit_thread_feedback",
         "submit_review_assessment_feedback",
     }
