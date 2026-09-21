@@ -1,36 +1,32 @@
-# OEP-0003: Workspaces
+# Workspaces architecture
 
-- **Authors:** Mukil Loganathan (`@langchain-infra`)
-- **Status:** Draft
-- **Created:** 2026-09-13
-- **Discussion:** https://github.com/langchain-ai/open-swe/pulls?q=is%3Apr+OEP-0003
-- **Supersedes:** None
+This document records the architecture, routing, settings hierarchy, migration behavior, and known gaps of Open SWE workspaces.
 
 ## Summary
 
-Add a **workspace** to Open SWE. A workspace owns one or more repositories, and a repository
-belongs to exactly one workspace. The workspace absorbs today's environment (prompt, snapshot,
+A **workspace** in Open SWE owns one or more repositories, and a repository
+belongs to exactly one workspace. The workspace absorbs the former environment (prompt, snapshot,
 setup and update scripts, sandbox sizing, nightly refresh) and additionally owns the Slack
-channels that route to it, its MCP connections, and the settings that are instance-wide today.
+channels that route to it, its MCP connections, and workspace-scoped settings.
 Inbound work is routed to a workspace by its thread, then its repository, then its Slack channel,
-then the user's default, and otherwise to the `default` workspace, which is what the current
-single-scope install becomes. In this version every signed-in user sees every workspace and every
-admin administers every workspace; roles come later.
+then the user's default, and otherwise to the `default` workspace, preserving the original
+single-scope behavior. Every signed-in user sees every workspace, and every admin administers
+every workspace; workspace roles remain future work.
 
 ## Motivation
 
-The OSS team wants Open SWE to handle issues on public repositories. Today one deployment is one
-scope: the same settings, MCP connections such as Datadog, and installation-wide GitHub access
-serve every run. Trigger gates keep outsiders from starting runs, but extending the same scope to
+The OSS team wants Open SWE to handle issues on public repositories. Before workspaces, one
+deployment was one scope: the same settings, MCP connections such as Datadog, and
+installation-wide GitHub access served every run. Trigger gates keep outsiders from starting runs, but extending the same scope to
 public repositories means public content meets internal access. Deploying a second instance
 avoids that but is heavyweight for what will be a common split.
 
 Two concepts already point at the answer. Environments carry a prompt, a snapshot, and a list of
 repositories, and are selected per thread. MCP connections and thread visibility are already
-called "workspace" scoped. This proposal makes the workspace a real object and folds the
+called "workspace" scoped. The workspace is a first-class object and folds the
 environment into it, since the two would otherwise map one to one.
 
-## Proposal
+## Design
 
 ### The workspace record
 
@@ -89,7 +85,7 @@ not the LangGraph Store: a `workspace` table (one row per workspace, slug unique
 `workspace_repository` primary key is `repository_id`, referencing the `repository` table the
 pull-request work added — rather than on the workspace, so the database itself enforces that a
 repository or a Slack channel belongs to at most one workspace, instead of the application
-re-checking it on every save. Settings and MCP connections stay exactly where this proposal put
+re-checking it on every save. Settings and MCP connections stay exactly where this design places
 them: in the LangGraph Store, keyed by workspace slug. `Workspace`, `WorkspaceCreate`, and
 `WorkspaceUpdate` remain the domain and API shape that the dashboard, the agent tools, and routing
 read and write; the tables are an implementation detail behind `WorkspaceStore`, swappable again
@@ -152,7 +148,7 @@ are answered 503 so GitHub retries them rather than routing them to `default` or
 - Per-workspace GitHub or Slack apps. One App and one Slack team per instance.
 - Routing individual Slack messages within a channel to different workspaces.
 - Per-workspace memory. The existing per-user memory stores are unchanged for now.
-- The controls a public workspace needs beyond partitioning: repository-scoped tokens, a per-workspace MCP allowlist for externally triggered runs, and public-safe prompts and outputs. Those are the next proposal and depend on this one.
+- The controls a public workspace needs beyond partitioning: repository-scoped tokens, a per-workspace MCP allowlist for externally triggered runs, and public-safe prompts and outputs. Those are follow-up work that depends on this design.
 
 ## Security and privacy
 
@@ -178,7 +174,7 @@ workspace they belong to.
 - **Keep environments separate from workspaces.** Two objects with a one-to-one mapping would only
   add a join. Folding the environment in keeps a single admin surface.
 
-## Unresolved questions
+## Open questions
 
 - Should memory become per workspace, per user and workspace, or stay per user?
 - Confirm the follow-up scope for public workspaces listed under non-goals.
@@ -188,7 +184,7 @@ workspace owns a specific repository row rather than a name.
 
 ## Follow-ups
 
-Known gaps this proposal leaves open, so they survive outside the pull requests that built it.
+Known gaps this design leaves open, so they survive outside the pull requests that built it.
 
 - **A renamed or transferred repository keeps its old binding.** An inbound webhook is matched to a
   `repository` row by `repository.key` (lowercased `owner/name`), and nothing updates an existing
@@ -214,7 +210,3 @@ Known gaps this proposal leaves open, so they survive outside the pull requests 
   flat until per-workspace grouping is designed. The review page's guidelines and toggles are
   per workspace, but the repository list above them is still every installed repository grouped by
   GitHub owner, which does not say which workspace each one belongs to.
-
-## Resolution
-
-Pending.
