@@ -69,6 +69,7 @@ from agent.desktop import create_desktop_backend, desktop_artifact_routes, is_de
 from agent.desktop_branch import schedule_worktree_branch_rename
 from agent.github.token import resolve_github_token
 from agent.input_messages import (
+    SENDER_CONTEXT_SENDER_ID,
     SystemIdentity,
     build_input_messages,
     dynamic_context_hash,
@@ -113,6 +114,7 @@ from agent.middleware.conversation_offloading import ConversationOffloadingMiddl
 from agent.middleware.model_selection import ModelSelectionState, RoutingMode
 from agent.middleware.prepare_run import PrepareRunState
 from agent.middleware.sandbox_circuit_breaker import post_sandbox_unreachable_notification
+from agent.middleware.transcript import TranscriptMiddleware
 from agent.prompt import (
     construct_sender_context,
     construct_system_prompt,
@@ -487,6 +489,7 @@ def _general_purpose_subagent(
         "middleware": cast(
             list[AgentMiddleware[Any, Any, Any]],
             [
+                TranscriptMiddleware(),
                 *([incident_middleware] if incident_middleware else []),
                 *([workspace_skills] if workspace_skills else []),
                 *_subagent_middleware(dynamic_tools),
@@ -501,7 +504,7 @@ def _general_purpose_subagent(
 
 
 _SENDER_CONTEXT_SYSTEM: SystemIdentity = {
-    "id": "system:sender-context",
+    "id": SENDER_CONTEXT_SENDER_ID,
     "display_name": "Sender context",
     "platform": "open-swe",
 }
@@ -1435,6 +1438,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
                     model_selection=model_selection,
                     routing_defaults=routing_defaults,
                 ),
+                TranscriptMiddleware(),
                 *([IncidentMiddleware(incident_session)] if incident_session is not None else []),
                 *([workspace_skills] if workspace_skills else []),
                 *([dynamic_tool_middleware] if dynamic_tool_middleware else []),
