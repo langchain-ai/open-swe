@@ -272,6 +272,15 @@ class User(Base):
             raise RuntimeError(f"user {self.id} vanished during link")
         return stored
 
+    async def rename(self, display_name: str) -> None:
+        """Replace a person's display name, for the one backfill that knows better."""
+        cls = type(self)
+        async with postgres.session() as session:
+            await session.execute(
+                update(cls).where(cls.id == self.id).values(display_name=display_name.strip())
+            )
+            await session.flush()
+
     @classmethod
     async def sync_admins(cls, admins: Collection[str]) -> int:
         """Make ``is_admin`` match ``admins``: GitHub logins or identity emails.

@@ -8,6 +8,7 @@ import { useSubmitAgentMessage } from "./useSubmitAgentMessage"
 import type { InfiniteData } from "@tanstack/react-query"
 import type { AgentThread } from "@/features/agents/lib/types"
 import type { ThreadsPage } from "@/features/agents/lib/api"
+import { AgentsApiError } from "@/features/agents/lib/api"
 import {
   SIDEBAR_PAGE_SIZE,
   agentThreadKeys,
@@ -140,15 +141,21 @@ describe("useSubmitAgentMessage", () => {
     )
   })
 
-  it("marks the optimistic message failed when the start rejects", async () => {
-    source.startRun.mockRejectedValueOnce(new Error("run start failed"))
+  it("marks the optimistic message failed with the reason when the start rejects", async () => {
+    source.startRun.mockRejectedValueOnce(
+      new AgentsApiError(503, "Service Unavailable")
+    )
     const { client, result } = setup()
 
     await result.current.mutateAsync({ content: "try me", images: [] })
 
     await waitFor(() =>
       expect(pendingMessages(client)).toEqual([
-        expect.objectContaining({ content: "try me", status: "failed" }),
+        expect.objectContaining({
+          content: "try me",
+          status: "failed",
+          error: "503 Service Unavailable",
+        }),
       ])
     )
     expect(sidebarStatus(client)).toBe("error")

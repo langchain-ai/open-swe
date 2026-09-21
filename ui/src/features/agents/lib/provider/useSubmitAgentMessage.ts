@@ -5,6 +5,7 @@ import type {
   AgentThread,
   PendingThreadMessage,
 } from "@/features/agents/lib/types"
+import { AgentsApiError } from "@/features/agents/lib/api"
 import {
   agentThreadKeys,
   setAgentThreadStatus,
@@ -34,6 +35,17 @@ function removePendingMessage(thread: AgentThread, id: string): AgentThread {
       (message) => message.id !== id
     ),
   }
+}
+
+/** Human-readable reason a send failed, shown under the failed bubble. */
+export function describeSendError(error: unknown): string {
+  if (error instanceof AgentsApiError) {
+    return error.message
+      ? `${error.status} ${error.message}`
+      : `${error.status}`
+  }
+  if (error instanceof Error) return error.message || error.name
+  return String(error)
 }
 
 /**
@@ -97,14 +109,18 @@ export function useSubmitAgentMessage(threadId: string) {
           message: { id, text: vars.content, images: vars.images },
           configurable,
         })
-        .catch(() => {
+        .catch((error: unknown) => {
           if (onFailure) {
             updateThread((thread) => removePendingMessage(thread, id))
             onFailure()
             return
           }
           updateThread((thread) =>
-            setPendingMessage(thread, { ...pendingMessage, status: "failed" })
+            setPendingMessage(thread, {
+              ...pendingMessage,
+              status: "failed",
+              error: describeSendError(error),
+            })
           )
           setAgentThreadStatus(queryClient, threadId, "error")
         })
