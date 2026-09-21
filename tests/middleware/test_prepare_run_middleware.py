@@ -263,3 +263,20 @@ async def test_ttl_cache_exception_without_stale_is_not_cached():
     with pytest.raises(RuntimeError):
         await ttl_cache.cached("k", 60, failing_loader)
     assert calls == 2
+
+
+@pytest.mark.asyncio
+async def test_fork_preserves_prepared_context() -> None:
+    middleware = DummyPrepareMiddleware()
+    state = cast(
+        AgentState,
+        {
+            "messages": [HumanMessage("new delegated task")],
+            "_deepagents_forked_context": True,
+            "run_prepared": True,
+            "run_prepared_for": "parent fingerprint",
+            "rendered_system_prompt": "parent prompt",
+        },
+    )
+    assert await middleware.abefore_agent(state, cast(Runtime[None], MagicMock())) is None
+    assert middleware.calls == 0

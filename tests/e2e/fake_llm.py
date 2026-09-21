@@ -1216,10 +1216,7 @@ def _is_revision(text: str) -> bool:
 
 
 SCRIPT_RULES: tuple[ScriptRule, ...] = (
-    ScriptRule(
-        "subagent_task",
-        lambda ctx: ctx.human_count <= 1 and SUBAGENT_TASK_MARKER in ctx.first_text,
-    ),
+    ScriptRule("subagent_task", lambda ctx: SUBAGENT_TASK_MARKER in ctx.last_text),
     ScriptRule("delegate", lambda ctx: ctx.human_count <= 1 and DELEGATE_MARKER in ctx.first_text),
     ScriptRule(
         "slack_reply_grouped_order",

@@ -56,6 +56,8 @@ class BasePrepareRunMiddleware(OpenSWEMiddleware):
         state: AgentState,
         runtime: Runtime,
     ) -> dict[str, Any] | None:
+        if state.get("_deepagents_forked_context"):
+            return None
         try:
             prepared_state = cast(PrepareRunState, state)
             fingerprint = self._prepare_fingerprint(prepared_state, runtime)

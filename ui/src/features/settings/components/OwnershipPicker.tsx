@@ -127,7 +127,6 @@ export function OwnershipPicker({
   const inThis = draft
     .map((id) => rows.get(id))
     .filter((item): item is PickerItem => !!item)
-    .filter((item) => matchesSearch(item, search))
   const rest = [...rows.values()].filter(
     (item) => !draftSet.has(item.id) && matchesSearch(item, search)
   )
