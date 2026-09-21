@@ -85,10 +85,32 @@ def test_first_seen_introductions_are_practical_and_mutate_registry() -> None:
     channel_content = first[0]["content"]
     assert isinstance(channel_content, str)
     channel = _parse(channel_content)
-    topic = channel.find("topic")
-    assert topic is not None
-    assert topic.attrib["trust"] == "untrusted"
-    assert channel.findtext("topic") == "a < b"
+    assert (channel.text or "").strip().splitlines() == [
+        "platform: slack",
+        "topic (untrusted): a < b",
+    ]
+
+
+def test_a_multi_line_field_indents_its_continuation_lines() -> None:
+    content = person_introduction(
+        {
+            "id": "user:1",
+            "display_name": "Ramon",
+            "standing_instructions": "Never use ripgrep.\n\nPrefer grep: it is fine.",
+        }
+    )["content"]
+    assert isinstance(content, str)
+
+    assert content == (
+        '<dynamic-context kind="person" id="user:1">\n'
+        "display_name: Ramon\n"
+        "standing_instructions:\n"
+        "  Never use ripgrep.\n"
+        "  \n"
+        "  Prefer grep: it is fine.\n"
+        "</dynamic-context>"
+    )
+    assert _parse(content).attrib["id"] == "user:1"
 
 
 def test_run_input_preserves_files() -> None:

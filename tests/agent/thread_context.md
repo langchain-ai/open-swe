@@ -9,8 +9,8 @@ Then: the channel is introduced, then her envelope, then the one block that desc
 ### dispatch appends
 ```xml
 <dynamic-context kind="channel" id="slack:C0BQUH14FK3">
-<platform>slack</platform>
-<name>open-swe-dev</name>
+platform: slack
+name: open-swe-dev
 </dynamic-context>
 ```
 
@@ -23,14 +23,14 @@ Then: the channel is introduced, then her envelope, then the one block that desc
 ### run appends
 ```xml
 <dynamic-context kind="person" id="user:0199e0ae-1111-7000-8000-00000000a11c">
-<display_name>Alice</display_name>
-<github_login>alice</github_login>
-<commit_name>Alice</commit_name>
-<commit_email>alice@users.noreply.github.com</commit_email>
-<email>alice@example.com</email>
-<open_swe_account>linked</open_swe_account>
-<workspace_admin>yes</workspace_admin>
-<new_prs>as drafts</new_prs>
+display_name: Alice
+github_login: alice
+commit_name: Alice
+commit_email: alice@users.noreply.github.com
+email: alice@example.com
+open_swe_account: linked
+workspace_admin: yes
+new_prs: as drafts
 </dynamic-context>
 ```
 
@@ -64,13 +64,13 @@ Then: his envelope and his block; Alice's is not repeated
 ### run appends
 ```xml
 <dynamic-context kind="person" id="user:0199e0ae-2222-7000-8000-000000000b0b">
-<display_name>Bob</display_name>
-<github_login>bob</github_login>
-<commit_name>Bob</commit_name>
-<commit_email>bob@users.noreply.github.com</commit_email>
-<open_swe_account>linked</open_swe_account>
-<workspace_admin>no</workspace_admin>
-<new_prs>ready for review</new_prs>
+display_name: Bob
+github_login: bob
+commit_name: Bob
+commit_email: bob@users.noreply.github.com
+open_swe_account: linked
+workspace_admin: no
+new_prs: ready for review
 </dynamic-context>
 ```
 
@@ -104,15 +104,16 @@ Then: only Bob's block is re-sent, now with his instructions
 ### run appends
 ```xml
 <dynamic-context kind="person" id="user:0199e0ae-2222-7000-8000-000000000b0b">
-<display_name>Bob</display_name>
-<github_login>bob</github_login>
-<commit_name>Bob</commit_name>
-<commit_email>bob@users.noreply.github.com</commit_email>
-<open_swe_account>linked</open_swe_account>
-<workspace_admin>no</workspace_admin>
-<new_prs>ready for review</new_prs>
-<standing_instructions>Never use ripgrep.
-Run `make lint` before every push.</standing_instructions>
+display_name: Bob
+github_login: bob
+commit_name: Bob
+commit_email: bob@users.noreply.github.com
+open_swe_account: linked
+workspace_admin: no
+new_prs: ready for review
+standing_instructions:
+  Never use ripgrep.
+  Run `make lint` before every push.
 </dynamic-context>
 ```
 
@@ -131,9 +132,9 @@ Then: keyed by her Slack id and marked unlinked; with no GitHub login she has no
 ### run appends
 ```xml
 <dynamic-context kind="person" id="slack:U0CAR0L">
-<display_name>Carol</display_name>
-<open_swe_account>unlinked</open_swe_account>
-<workspace_admin>no</workspace_admin>
-<new_prs>as drafts</new_prs>
+display_name: Carol
+open_swe_account: unlinked
+workspace_admin: no
+new_prs: as drafts
 </dynamic-context>
 ```

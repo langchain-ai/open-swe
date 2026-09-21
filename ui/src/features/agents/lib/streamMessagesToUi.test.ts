@@ -9,7 +9,7 @@ describe("streamMessagesToUi", () => {
       new HumanMessage({
         id: "person-block",
         content:
-          '<dynamic-context kind="person" id="github:alice"><display_name>Alice</display_name><commit_name>Alice</commit_name><commit_email>alice@users.noreply.github.com</commit_email></dynamic-context>',
+          '<dynamic-context kind="person" id="github:alice">\ndisplay_name: Alice\ncommit_name: Alice\ncommit_email: alice@users.noreply.github.com\n</dynamic-context>',
       }),
       new HumanMessage({
         id: "person-message",
@@ -30,12 +30,12 @@ describe("streamMessagesToUi", () => {
       new HumanMessage({
         id: "person-entity",
         content:
-          '<dynamic-context kind="person" id="github:alice"><display_name>Alice</display_name></dynamic-context>',
+          '<dynamic-context kind="person" id="github:alice">\ndisplay_name: Alice\n</dynamic-context>',
       }),
       new HumanMessage({
         id: "system-entity",
         content:
-          '<dynamic-context kind="system" id="system:scheduler"><display_name>Scheduler</display_name></dynamic-context>',
+          '<dynamic-context kind="system" id="system:scheduler">\ndisplay_name: Scheduler\n</dynamic-context>',
       }),
       new HumanMessage({
         id: "person-message",
@@ -77,7 +77,7 @@ describe("streamMessagesToUi", () => {
       new HumanMessage({
         id: "self-entity",
         content:
-          '<dynamic-context kind="system" id="system:open-swe"><display_name>Open SWE</display_name><sender_type>self</sender_type></dynamic-context>',
+          '<dynamic-context kind="system" id="system:open-swe">\ndisplay_name: Open SWE\nsender_type: self\n</dynamic-context>',
       }),
       new HumanMessage({
         id: "self-message",

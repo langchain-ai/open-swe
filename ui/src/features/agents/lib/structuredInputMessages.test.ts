@@ -8,10 +8,10 @@ import {
 
 describe("structured input messages", () => {
   const person = `<dynamic-context kind="person" id="github:alice">
-  <display_name>Alice &amp; Bob</display_name>
+display_name: Alice &amp; Bob
 </dynamic-context>`
   const system = `<dynamic-context kind="system" id="system:scheduler">
-  <display_name>Scheduler</display_name>
+display_name: Scheduler
 </dynamic-context>`
 
   it("recognizes entity introductions so transcripts can hide them", () => {
@@ -25,8 +25,7 @@ describe("structured input messages", () => {
 
   it("falls back to a handle when a sender has no display name", () => {
     const introduction = `<dynamic-context kind="person" id="github:bob">
-  <platform>github</platform>
-  <github_login>bob</github_login>
+github_login: bob
 </dynamic-context>`
     expect(parseStructuredInput(introduction)).toEqual({
       type: "entity",
@@ -42,6 +41,35 @@ describe("structured input messages", () => {
         handle: "bob",
       }
     )
+  })
+
+  it("reads fields that follow an indented multi-line value", () => {
+    const introduction = `<dynamic-context kind="person" id="user:1">
+standing_instructions:
+  Never use ripgrep.
+  Prefer grep: display_name: not a field
+github_login: carol
+</dynamic-context>`
+    expect(parseStructuredInput(introduction)).toEqual({
+      type: "entity",
+      id: "user:1",
+      kind: "person",
+      handle: "carol",
+    })
+  })
+
+  it("still reads blocks stored with one element per field", () => {
+    const introduction = `<dynamic-context kind="person" id="github:dave">
+<display_name>Dave &amp; co</display_name>
+<github_login>dave</github_login>
+</dynamic-context>`
+    expect(parseStructuredInput(introduction)).toEqual({
+      type: "entity",
+      id: "github:dave",
+      kind: "person",
+      displayName: "Dave & co",
+      handle: "dave",
+    })
   })
 
   it("ignores the data fields a real envelope carries beside its content", () => {
@@ -123,12 +151,12 @@ describe("structured input messages", () => {
 
   it("carries the bot marker and account link status of an entity", () => {
     const bot = `<dynamic-context kind="system" id="system:slack-bot-B9">
-  <display_name>CI Bot</display_name>
-  <sender_type>bot</sender_type>
+display_name: CI Bot
+sender_type: bot
 </dynamic-context>`
     const guest = `<dynamic-context kind="person" id="slack:U456">
-  <display_name>Guest</display_name>
-  <open_swe_account>unlinked</open_swe_account>
+display_name: Guest
+open_swe_account: unlinked
 </dynamic-context>`
     const entities = collectStructuredEntities([bot, guest])
 

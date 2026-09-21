@@ -155,8 +155,9 @@ def test_each_participant_is_introduced_by_their_own_context_block():
     blocks = [ElementTree.fromstring(cast(str, m["content"])) for m in messages]
     assert [b.attrib["kind"] for b in blocks] == ["person", "person"]
     assert [b.attrib["id"] for b in blocks] == ["user:alice", "user:bob"]
-    assert blocks[0].findtext("commit_name") == "alice"
-    assert blocks[0].findtext("commit_email") == "alice@users.noreply.github.com"
+    body = (blocks[0].text or "").strip().splitlines()
+    assert "commit_name: alice" in body
+    assert "commit_email: alice@users.noreply.github.com" in body
 
 
 def test_a_visible_participant_is_not_repeated_when_someone_joins():
@@ -181,7 +182,7 @@ def test_only_the_changed_participant_is_resent():
     assert len(messages) == 1
     block = ElementTree.fromstring(cast(str, messages[0]["content"]))
     assert block.attrib["id"] == "user:bob"
-    assert block.findtext("standing_instructions") == "Never use ripgrep."
+    assert "standing_instructions: Never use ripgrep." in (block.text or "")
 
 
 def test_participant_blocks_are_restored_after_compaction():

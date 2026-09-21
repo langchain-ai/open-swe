@@ -273,8 +273,7 @@ async def test_a_human_message_keeps_the_envelope_it_is_attributed_by(
     middleware = mw.TranscriptMiddleware()
     entity = HumanMessage(
         content=(
-            '<dynamic-context kind="channel" id="slack:C1">'
-            "<platform>slack</platform></dynamic-context>"
+            '<dynamic-context kind="channel" id="slack:C1">\nplatform: slack\n</dynamic-context>'
         ),
         id="entity-channel",
     )
@@ -287,8 +286,7 @@ async def test_a_human_message_keeps_the_envelope_it_is_attributed_by(
     # the last human message in state is not the request.
     person = HumanMessage(
         content=(
-            '<dynamic-context kind="person" id="slack:U1">'
-            "<display_name>bob</display_name></dynamic-context>"
+            '<dynamic-context kind="person" id="slack:U1">\ndisplay_name: bob\n</dynamic-context>'
         ),
         id="person-bob",
     )

@@ -2175,7 +2175,7 @@ def test_slack_context_attributes_own_replies_to_open_swe(
     assert 'sender="system:open-swe"' in own_reply
     assert 'kind="system"' in own_reply
     assert any(
-        '<dynamic-context kind="system"' in text and "<sender_type>self</sender_type>" in text
+        '<dynamic-context kind="system"' in text and "sender_type: self" in text
         for text in contents
     )
     assert not any('sender="slack:UBOT"' in text for text in contents)
@@ -2199,8 +2199,8 @@ def test_slack_context_marks_other_bots_as_bots() -> None:
     assert 'sender="system:slack-bot-B9"' in bot_message
     assert 'kind="system"' in bot_message
     intro = next(text for text in contents if 'id="system:slack-bot-B9"' in text)
-    assert "<display_name>CI Bot</display_name>" in intro
-    assert "<sender_type>bot</sender_type>" in intro
+    assert "display_name: CI Bot" in intro
+    assert "sender_type: bot" in intro
 
 
 def test_slack_context_marks_replayed_people_without_an_open_swe_account() -> None:
@@ -2216,10 +2216,10 @@ def test_slack_context_marks_replayed_people_without_an_open_swe_account() -> No
     )
 
     linked = next(text for text in contents if 'id="slack:U456"' in text)
-    assert "<github_login>mona-gh</github_login>" in linked
-    assert "<open_swe_account>linked</open_swe_account>" in linked
+    assert "github_login: mona-gh" in linked
+    assert "open_swe_account: linked" in linked
     unlinked = next(text for text in contents if 'id="slack:U789"' in text)
-    assert "<open_swe_account>unlinked</open_swe_account>" in unlinked
+    assert "open_swe_account: unlinked" in unlinked
     assert "github_login" not in unlinked
     assert not any('<dynamic-context kind="person" id="slack:U123"' in t for t in contents)
 
@@ -2269,7 +2269,7 @@ def test_slack_context_does_not_treat_a_lookalike_bot_as_open_swe(
     assert 'sender="system:slack-bot-B9"' in lookalike
     assert 'sender="system:open-swe"' not in lookalike
     intro = next(text for text in contents if 'id="system:slack-bot-B9"' in text)
-    assert "<sender_type>bot</sender_type>" in intro
+    assert "sender_type: bot" in intro
 
 
 def test_format_slack_messages_for_prompt_does_not_label_a_lookalike_as_self() -> None:

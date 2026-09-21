@@ -132,8 +132,8 @@ def walkthrough() -> tuple[str, list[dict[str, Any]]]:
         participants=[P_ALICE],
     )
     assert len(t1["people"]) == 1 and f'id="{ALICE}"' in t1["people"][0]
-    assert "<commit_email>alice@users.noreply.github.com</commit_email>" in t1["people"][0]
-    assert "<open_swe_account>linked</open_swe_account>" in t1["people"][0]
+    assert "commit_email: alice@users.noreply.github.com" in t1["people"][0]
+    assert "open_swe_account: linked" in t1["people"][0]
     assert 'timestamp="1789991539.477079"' in t1["envelope"]
     assert f'sender="{ALICE}"' in t1["envelope"]
     turns.append(t1)
@@ -165,7 +165,7 @@ def walkthrough() -> tuple[str, list[dict[str, Any]]]:
         participants=[P_ALICE, P_BOB],
     )
     assert len(t3["people"]) == 1 and f'id="{BOB}"' in t3["people"][0]
-    assert "<new_prs>ready for review</new_prs>" in t3["people"][0]
+    assert "new_prs: ready for review" in t3["people"][0]
     turns.append(t3)
 
     t4 = thread.turn(
@@ -212,7 +212,7 @@ def walkthrough() -> tuple[str, list[dict[str, Any]]]:
         participants=[P_ALICE, P_BOB_INSTRUCTED, P_CAROL],
     )
     assert len(t6["people"]) == 1 and f'id="{CAROL}"' in t6["people"][0]
-    assert "<open_swe_account>unlinked</open_swe_account>" in t6["people"][0]
+    assert "open_swe_account: unlinked" in t6["people"][0]
     assert "commit_" not in t6["people"][0] and "github_login" not in t6["people"][0]
     turns.append(t6)
 

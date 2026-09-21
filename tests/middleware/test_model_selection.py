@@ -287,8 +287,8 @@ _HUMAN_ENVELOPE = (
 )
 _PERSON_BLOCK = (
     '<dynamic-context kind="person" id="github:alice">\n'
-    "<display_name>Alice</display_name>\n"
-    "<workspace_admin>yes</workspace_admin>\n"
+    "display_name: Alice\n"
+    "workspace_admin: yes\n"
     "</dynamic-context>"
 )
 

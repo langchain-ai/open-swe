@@ -262,12 +262,10 @@ async def test_dispatch_describes_the_channel_and_leaves_the_sender_to_the_run()
     channel = ElementTree.fromstring(run_input["messages"][0]["content"])
     assert len(run_input["messages"]) == 2
     assert channel.attrib["kind"] == "channel"
-    assert channel.findtext("name") == "eng"
-    assert channel.findtext("topic") == "Ship <safely>"
-    topic = channel.find("topic")
-    assert topic is not None
-    assert topic.attrib["trust"] == "untrusted"
-    assert channel.findtext("purpose") == "Engineering work"
+    body = (channel.text or "").strip().splitlines()
+    assert "name: eng" in body
+    assert "topic (untrusted): Ship <safely>" in body
+    assert "purpose (untrusted): Engineering work" in body
 
 
 @pytest.mark.usefixtures("registry_db")

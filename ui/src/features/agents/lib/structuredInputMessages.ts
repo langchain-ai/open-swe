@@ -33,6 +33,10 @@ const MESSAGE_PATTERN =
   /^\s*<input-message\b([^>]*)>([\s\S]*?)<\/input-message>\s*$/
 const OPEN_TAG_PATTERN = /^\s*<([A-Za-z_][\w:.-]*)>/
 const ATTRIBUTE_PATTERN = /([A-Za-z_][\w:.-]*)\s*=\s*("[^"]*"|'[^']*')/g
+const ENTITY_FIELD_PATTERN =
+  /^([A-Za-z_][\w.-]*)(?: \(untrusted\))?:(?: (.*))?$/
+const ELEMENT_ENTITY_FIELD_PATTERN =
+  /<([A-Za-z_][\w.-]*)(?:\s[^>]*)?>([\s\S]*?)<\/\1>/g
 
 export function decodeXmlText(value: string): string {
   return value.replace(
@@ -132,9 +136,36 @@ function splitContent(
   }
 }
 
-function childText(body: string, tag: string): string | undefined {
-  const match = new RegExp(`<${tag}>([\\s\\S]*?)<\\/${tag}>`).exec(body)
-  return match ? decodeXmlText(match[1] ?? "") : undefined
+// An entity body is `field: value` lines; a value spanning lines puts nothing
+// after the colon and indents each of its lines by two spaces.
+function entityFields(body: string): Map<string, string> {
+  if (OPEN_TAG_PATTERN.test(body)) {
+    return new Map(
+      [...body.matchAll(ELEMENT_ENTITY_FIELD_PATTERN)].map(
+        ([, name, value]) => [name ?? "", decodeXmlText(value ?? "")]
+      )
+    )
+  }
+  const fields = new Map<string, string[]>()
+  let current: string[] | null = null
+  for (const line of body.split("\n")) {
+    if (current && line.startsWith("  ")) {
+      current.push(line.slice(2))
+      continue
+    }
+    const match = ENTITY_FIELD_PATTERN.exec(line)
+    const name = match?.[1]
+    if (!name) {
+      current = null
+      continue
+    }
+    const inline = match[2]
+    current = inline ? [inline] : []
+    fields.set(name, current)
+  }
+  return new Map(
+    [...fields].map(([name, lines]) => [name, decodeXmlText(lines.join("\n"))])
+  )
 }
 
 function senderKind(
@@ -159,15 +190,15 @@ export function parseStructuredInput(
     const id = attributes?.id
     const kind = attributes?.kind
     if (id && kind) {
-      const body = entityMatch[2] ?? ""
+      const fields = entityFields(entityMatch[2] ?? "")
       return {
         type: "entity",
         id,
         kind: kind.toLowerCase(),
-        displayName: childText(body, "display_name"),
-        handle: childText(body, "handle") ?? childText(body, "github_login"),
-        senderType: childText(body, "sender_type"),
-        openSweAccount: childText(body, "open_swe_account"),
+        displayName: fields.get("display_name"),
+        handle: fields.get("handle") ?? fields.get("github_login"),
+        senderType: fields.get("sender_type"),
+        openSweAccount: fields.get("open_swe_account"),
       }
     }
   }

@@ -231,16 +231,24 @@ def visible_dynamic_context_hashes(state: Mapping[str, Any]) -> set[str]:
     return dynamic_context_hashes_from_messages(messages)
 
 
+def _entity_field_line(field: str, value: object) -> str:
+    label = f"{field} (untrusted)" if field in _UNTRUSTED_ENTITY_FIELDS else field
+    text = _xml_text(value)
+    if "\n" not in text:
+        return f"{label}: {text}"
+    indented = "\n".join(f"  {line}" for line in text.split("\n"))
+    return f"{label}:\n{indented}"
+
+
 def _entity_message(identity: Identity, kind: EntityKind) -> RunMessage:
     entity_id = _validate_entity_id(identity["id"])
-    children: list[str] = []
+    lines: list[str] = []
     for field in _ENTITY_FIELDS[kind]:
         value = identity.get(field)  # type: ignore[union-attr]
         if value is None or value == "":
             continue
-        trust = ' trust="untrusted"' if field in _UNTRUSTED_ENTITY_FIELDS else ""
-        children.append(f"<{field}{trust}>{_xml_text(value)}</{field}>")
-    body = "\n".join(children)
+        lines.append(_entity_field_line(field, value))
+    body = "\n".join(lines)
     canonical = f'<dynamic-context kind="{kind}" id="{_xml_attr(entity_id)}">'
     if body:
         canonical += f"\n{body}\n"

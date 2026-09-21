@@ -327,11 +327,11 @@ test.describe("transcript rendering", () => {
         const injected = [
           [
             "entity-person",
-            '<dynamic-context kind="person" id="github:alice"><display_name>Alice</display_name></dynamic-context>',
+            '<dynamic-context kind="person" id="github:alice">\ndisplay_name: Alice\n</dynamic-context>',
           ],
           [
             "entity-system",
-            '<dynamic-context kind="system" id="system:scheduler"><display_name>Scheduler</display_name></dynamic-context>',
+            '<dynamic-context kind="system" id="system:scheduler">\ndisplay_name: Scheduler\n</dynamic-context>',
           ],
           [
             "structured-person",

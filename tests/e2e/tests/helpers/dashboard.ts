@@ -3,8 +3,16 @@ import { expect, type Page } from "@playwright/test";
 // Shared fixtures for the specs that drive the REAL built ui/ app (served
 // same-origin from the harness). Only the LLM/GitHub/Slack/token boundaries
 // are faked.
-export const SAME_USER = { login: "alice", email: "alice@example.com" };
-export const OTHER_USER = { login: "bob", email: "bob@example.com" };
+export const SAME_USER = {
+  login: "alice",
+  email: "alice@example.com",
+  name: "Alice",
+};
+export const OTHER_USER = {
+  login: "bob",
+  email: "bob@example.com",
+  name: "Bob",
+};
 
 // The dashboard's mutating routes enforce same-origin, which a browser sets for
 // itself but APIRequestContext does not.

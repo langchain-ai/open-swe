@@ -669,13 +669,21 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
     await typeIntoComposer(page, followUp);
     await waitForStateToContain(page, threadId, followUp);
 
-    // The non-owner's message is tagged server-side with their GitHub login, so
-    // the owner can tell who sent it. Read it from the transcript the server
-    // stored: in the sender's own session the bubble is still the SDK's
-    // optimistic echo of what they typed, which carries no envelope.
+    // The non-owner's message is attributed server-side to the person the run
+    // describes, so the owner can tell who sent it. Read it from the transcript
+    // the server stored: in the sender's own session the bubble is still the
+    // SDK's optimistic echo of what they typed, which carries no envelope.
+    await waitForStateToContain(
+      page,
+      threadId,
+      `display_name: ${OTHER_USER.name}`,
+    );
     await page.reload();
     await expect(
-      page.getByText(new RegExp(`@${OTHER_USER.login}`)).first(),
+      page
+        .getByTestId("user-message")
+        .filter({ hasText: followUp })
+        .getByText(OTHER_USER.name, { exact: true }),
     ).toBeVisible();
   });
 
