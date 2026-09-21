@@ -1,32 +1,27 @@
-import type { ReactNode } from "react"
+import type { MouseEvent as ReactMouseEvent, ReactNode } from "react"
 
 import type { OpenPullRequest } from "@/lib/api"
 import { cn } from "@/lib/utils"
 import { dateLabel } from "../lib/dateLabel"
-import {
-  blockerLabel,
-  blockerTone,
-  canAttemptMerge,
-  hasUnresolvedConversations,
-  isFixable,
-  statusLabels,
-} from "../lib/status"
-import { PullRequestLinks } from "../PullRequestLinks"
-import { ClosePullRequest } from "./ClosePullRequest"
+import { blockerLabel, blockerTone, statusLabels } from "../lib/status"
 import { Diffstat } from "./Diffstat"
-import { MarkPullRequestReady } from "./MarkPullRequestReady"
-import { MergePullRequest } from "./MergePullRequest"
+import {
+  PullRequestActions,
+  type PullRequestOutcome,
+} from "./PullRequestActions"
 import { PullRequestChecks } from "./PullRequestChecks"
-import { PullRequestThreadAction } from "./PullRequestThreadAction"
 import { StatusPill } from "./StatusPill"
 import { UnresolvedConversations } from "./UnresolvedConversations"
 
-export type PullRequestOutcome = "merged" | "closed"
+export type { PullRequestOutcome }
 
 const outcomeLabels: Record<PullRequestOutcome, string> = {
   merged: "Merged",
   closed: "Closed",
 }
+
+const interactive =
+  'a,button,input,select,textarea,[role="button"],[role="menu"]'
 
 export function PullRequestCard({
   pr,
@@ -90,11 +85,24 @@ export function PullRequestCard({
     )
   }
 
+  // Anywhere on the card opens the preview, but the card is full of its own
+  // controls, and a click that lands on one of those means that control. The
+  // title stays a real button so the card is reachable without a pointer.
+  const openFromCard = (event: ReactMouseEvent<HTMLDivElement>) => {
+    if (event.target instanceof Element && event.target.closest(interactive))
+      return
+    if (window.getSelection()?.toString()) return
+    onSelect()
+  }
+
   return (
     <div
+      onClick={openFromCard}
       className={cn(
-        "rounded-lg border bg-card p-4 transition-colors",
-        selected ? "border-foreground/30" : "border-border",
+        "cursor-pointer rounded-lg border bg-card p-4 transition-colors",
+        selected
+          ? "border-foreground/30"
+          : "border-border hover:border-foreground/20",
         outcome && "opacity-60"
       )}
     >
@@ -148,46 +156,13 @@ export function PullRequestCard({
           )}
         </div>
         <PullRequestChecks pr={pr} />
-        <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-          <div className="flex flex-wrap items-center gap-x-2 gap-y-2">
-            {outcome ? (
-              <span className="text-xs text-muted-foreground">
-                {outcomeLabels[outcome]} · leaves the list on the next refresh
-              </span>
-            ) : (
-              <>
-                {isFixable(pr) && (
-                  <PullRequestThreadAction pr={pr} login={login} action="fix" />
-                )}
-                {hasUnresolvedConversations(pr) && (
-                  <PullRequestThreadAction
-                    pr={pr}
-                    login={login}
-                    action="address-comments"
-                  />
-                )}
-                {pr.draft === true && (
-                  <MarkPullRequestReady pr={pr} onReady={onReady} />
-                )}
-                {canAttemptMerge(pr) && (
-                  <MergePullRequest
-                    pr={pr}
-                    onMerged={() => onSettled("merged")}
-                  />
-                )}
-                <ClosePullRequest
-                  pr={pr}
-                  onClosed={() => onSettled("closed")}
-                />
-              </>
-            )}
-          </div>
-          <PullRequestLinks
-            repo={pr.repo}
-            number={pr.number}
-            title={pr.title}
-          />
-        </div>
+        <PullRequestActions
+          pr={pr}
+          login={login}
+          outcome={outcome}
+          onSettled={onSettled}
+          onReady={onReady}
+        />
       </div>
     </div>
   )

@@ -21,6 +21,7 @@ from pydantic import BaseModel, ValidationError
 
 from agent.github.app import get_github_app_installation_token
 from agent.github.checks import github_headers
+from agent.github.ci import list_check_runs
 from agent.github.http import github_client
 from agent.github.pull_request_diff import build_pr_diff_files
 from agent.github.pull_request_status import fetch_unresolved_review_threads
@@ -681,16 +682,31 @@ class PreviewThread(BaseModel):
     url: str | None = None
 
 
+class PreviewCheck(BaseModel):
+    name: str
+    status: str
+    conclusion: str | None = None
+    url: str | None = None
+
+
 class PullRequestPreview(BaseModel):
     title: str
     body: str
     author: str | None
+    author_avatar_url: str | None
+    state: str
+    draft: bool
+    head_ref: str
+    base_ref: str
+    commits: int
     additions: int
     deletions: int
     changed_files: int
     files: list[PreviewFile]
-    # None when GitHub could not answer, which is not the same as none unresolved.
+    # None when GitHub could not answer, which is not the same as none unresolved
+    # or no checks configured.
     unresolved: list[PreviewThread] | None
+    checks: list[PreviewCheck] | None
 
 
 class _GithubPreviewFile(BaseModel):
@@ -700,17 +716,36 @@ class _GithubPreviewFile(BaseModel):
     deletions: int = 0
 
 
+class _GithubCheckRun(BaseModel):
+    name: str = ""
+    status: str = "completed"
+    conclusion: str | None = None
+    html_url: str | None = None
+
+
 class _GithubUser(BaseModel):
     login: str
+    avatar_url: str | None = None
+
+
+class _GithubRef(BaseModel):
+    ref: str = ""
+    sha: str = ""
 
 
 class _GithubPreviewPull(BaseModel):
     title: str = ""
     body: str | None = None
+    state: str = "open"
+    draft: bool = False
+    merged: bool = False
+    commits: int = 0
     additions: int = 0
     deletions: int = 0
     changed_files: int = 0
     user: _GithubUser | None = None
+    head: _GithubRef | None = None
+    base: _GithubRef | None = None
 
 
 def _preview_thread(thread: dict[str, Any]) -> PreviewThread:
@@ -757,10 +792,37 @@ async def get_pull_request_preview(
         )
     ]
     files.sort(key=lambda entry: entry.additions + entry.deletions, reverse=True)
+    head_sha = pull.head.sha if pull.head else ""
+    raw_checks = (
+        await list_check_runs(owner=owner, repo=repo, ref=head_sha, token=token)
+        if head_sha
+        else None
+    )
+    checks = (
+        None
+        if raw_checks is None
+        else [
+            PreviewCheck(
+                name=run.name, status=run.status, conclusion=run.conclusion, url=run.html_url
+            )
+            for run in (
+                _GithubCheckRun.model_validate(item)
+                for item in raw_checks
+                if isinstance(item, dict)
+            )
+        ]
+    )
     return PullRequestPreview(
         title=pull.title,
         body=pull.body or "",
         author=pull.user.login if pull.user else None,
+        author_avatar_url=pull.user.avatar_url if pull.user else None,
+        state="merged" if pull.merged else pull.state,
+        draft=pull.draft,
+        head_ref=pull.head.ref if pull.head else "",
+        base_ref=pull.base.ref if pull.base else "",
+        commits=pull.commits,
+        checks=checks,
         additions=pull.additions,
         deletions=pull.deletions,
         changed_files=pull.changed_files or len(files),

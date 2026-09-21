@@ -11,6 +11,7 @@ import {
   PullRequestCard,
   type PullRequestOutcome,
 } from "./components/PullRequestCard"
+import { PullRequestDetail } from "./components/PullRequestDetail"
 import { PullRequestList } from "./components/PullRequestList"
 import { PullRequestReview } from "./components/PullRequestReview"
 import { refreshPullRequest } from "./lib/cache"
@@ -177,170 +178,211 @@ export function MyPullRequests({
     )
   }
 
+  const selectedRow = selected
+    ? all.find((row) => pullRequestKey(row) === selected)
+    : undefined
+
   return (
-    <section
-      className="mt-4 flex min-h-0 flex-1 flex-col gap-3"
-      aria-label="My open pull requests"
-    >
-      <div className="flex flex-wrap items-center gap-2">
-        <MultiSelect
-          label="Filter by repository"
-          placeholder="All repositories"
-          searchPlaceholder="Search repositories…"
-          emptyMessage={
-            knownRepos.isPending
-              ? "Loading repositories…"
-              : knownRepos.isError
-                ? "Could not load repositories"
-                : "No matches"
-          }
-          options={repoNames}
-          value={repo}
-          onValueChange={(chosen) =>
-            onFiltersChange({ repo: chosen.length ? chosen : undefined })
-          }
-        />
-        <input
-          className={cn(control, "min-w-40 flex-1")}
-          aria-label="Search pull requests"
-          placeholder="Search title or PR number…"
-          value={search}
-          onChange={(event) =>
-            onFiltersChange({ q: event.target.value || undefined }, true)
-          }
-        />
-        <MultiSelect
-          label="Filter by status"
-          placeholder="All statuses"
-          options={reviewStatuses}
-          value={filter ?? []}
-          onValueChange={(status) =>
-            onFiltersChange({ status: status.length ? status : undefined })
-          }
-        />
-        {!selected && (
-          <span className="flex items-center gap-1 text-xs text-muted-foreground">
-            Sort
-            {sortOptions.map(([label, key]) => (
-              <button
-                key={key}
-                type="button"
-                aria-pressed={sort === key}
-                onClick={() => toggleSort(key)}
-                className={cn(
-                  "inline-flex items-center gap-1 rounded-md border px-2 py-1",
-                  sort === key
-                    ? "border-border bg-muted text-foreground"
-                    : "border-transparent hover:text-foreground"
-                )}
-              >
-                {label}
-                <span aria-hidden="true">
-                  {sort === key ? (direction === "asc" ? "↑" : "↓") : "↕"}
-                </span>
-              </button>
-            ))}
-          </span>
-        )}
-        {!selected && (
-          <span
-            aria-live="polite"
-            className="text-xs whitespace-nowrap text-muted-foreground"
-          >
-            {refreshing
-              ? "Refreshing from GitHub…"
-              : latest
-                ? `Refreshed ${dateLabel(latest.updatedAt)}`
-                : "Live open pull requests from GitHub"}
-          </span>
-        )}
-        <Button
-          size="sm"
-          variant="outline"
-          disabled={query.isFetching}
-          onClick={() => {
-            setSettled({})
-            queryClient.removeQueries({
-              queryKey: ["my-pr-details", login],
-              predicate: (cached) => cached.state.data === null,
-            })
-            void query.refetch()
-            void queryClient.invalidateQueries({
-              queryKey: ["my-pr-details", login],
-            })
-            void queryClient.invalidateQueries({
-              queryKey: ["pr-thread-status", login],
-            })
-            void queryClient.invalidateQueries({
-              queryKey: ["my-pr-review-summaries", login],
-            })
-          }}
+    <div className="flex min-h-0 flex-1">
+      {/* Both columns grow from a zero basis, so opening a preview animates the
+          list across rather than resizing it in place. */}
+      <div
+        className="flex min-h-0 min-w-0 flex-col transition-[flex-grow] duration-300 ease-out"
+        style={{ flexGrow: 1, flexBasis: 0 }}
+      >
+        <section
+          className="mt-4 flex min-h-0 flex-1 flex-col gap-3"
+          aria-label="My open pull requests"
         >
-          Refresh
-        </Button>
-      </div>
-      {query.error && (
-        <p role="alert" className="text-sm text-destructive">
-          {latest &&
-            (query.isFetchNextPageError
-              ? "Could not load more PRs; showing the pages loaded so far. "
-              : "Refresh failed; showing the previous snapshot. ")}
-          {query.error.message}
-        </p>
-      )}
-      {query.isLoading ? (
-        <Skeleton className="h-56 w-full" />
-      ) : incomplete ? (
-        <p
-          role="status"
-          className="rounded-lg border border-border bg-card px-4 py-12 text-center text-xs text-amber-700 dark:text-amber-400"
-        >
-          GitHub&rsquo;s pull request search timed out, and the partial answer
-          it returned would have hidden most of your PRs. Filter by repository
-          to narrow the search, or refresh to try again.
-        </p>
-      ) : (
-        latest && (
-          <>
-            {visible.length === 0 ? (
-              <p className="rounded-lg border border-border bg-card px-4 py-12 text-center text-xs text-muted-foreground">
-                {detailsLoading || query.isFetchingNextPage
-                  ? "Loading matching PRs…"
-                  : all.length
-                    ? "No PRs match these filters."
-                    : "No open PRs found."}
-              </p>
-            ) : (
-              <PullRequestList
-                rows={visible}
-                available={matchingRows.length}
-                compact={Boolean(selected)}
-                // Unclamped: asking for more rows than are loaded is what
-                // makes the next GitHub page arrive, and reaching the end
-                // again is the only other thing that would grow it.
-                onEndReached={() =>
-                  setGrowth({ key: listKey, rows: requested + chunkSize })
-                }
-              >
-                {card}
-              </PullRequestList>
-            )}
-            <div className="flex items-center gap-3 text-xs text-muted-foreground">
-              <span>
-                {visible.length} of {filtered.length}
-                {query.hasNextPage ? "+" : ""} PRs
-                {!selected &&
-                  " · Added/deleted lines include tests and docs. PRs with checks still running are Pending."}
+          <div className="flex flex-wrap items-center gap-2">
+            <MultiSelect
+              label="Filter by repository"
+              placeholder="All repositories"
+              searchPlaceholder="Search repositories…"
+              emptyMessage={
+                knownRepos.isPending
+                  ? "Loading repositories…"
+                  : knownRepos.isError
+                    ? "Could not load repositories"
+                    : "No matches"
+              }
+              options={repoNames}
+              value={repo}
+              onValueChange={(chosen) =>
+                onFiltersChange({ repo: chosen.length ? chosen : undefined })
+              }
+            />
+            <input
+              className={cn(control, "min-w-40 flex-1")}
+              aria-label="Search pull requests"
+              placeholder="Search title or PR number…"
+              value={search}
+              onChange={(event) =>
+                onFiltersChange({ q: event.target.value || undefined }, true)
+              }
+            />
+            <MultiSelect
+              label="Filter by status"
+              placeholder="All statuses"
+              options={reviewStatuses}
+              value={filter ?? []}
+              onValueChange={(status) =>
+                onFiltersChange({ status: status.length ? status : undefined })
+              }
+            />
+            {!selected && (
+              <span className="flex items-center gap-1 text-xs text-muted-foreground">
+                Sort
+                {sortOptions.map(([label, key]) => (
+                  <button
+                    key={key}
+                    type="button"
+                    aria-pressed={sort === key}
+                    onClick={() => toggleSort(key)}
+                    className={cn(
+                      "inline-flex items-center gap-1 rounded-md border px-2 py-1",
+                      sort === key
+                        ? "border-border bg-muted text-foreground"
+                        : "border-transparent hover:text-foreground"
+                    )}
+                  >
+                    {label}
+                    <span aria-hidden="true">
+                      {sort === key ? (direction === "asc" ? "↑" : "↓") : "↕"}
+                    </span>
+                  </button>
+                ))}
               </span>
-              {query.isFetchingNextPage ? (
-                <span role="status">Loading more PRs from GitHub…</span>
-              ) : (
-                detailsLoading && <span role="status">Loading PR details…</span>
-              )}
-            </div>
-          </>
-        )
-      )}
-    </section>
+            )}
+            {!selected && (
+              <span
+                aria-live="polite"
+                className="text-xs whitespace-nowrap text-muted-foreground"
+              >
+                {refreshing
+                  ? "Refreshing from GitHub…"
+                  : latest
+                    ? `Refreshed ${dateLabel(latest.updatedAt)}`
+                    : "Live open pull requests from GitHub"}
+              </span>
+            )}
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={query.isFetching}
+              onClick={() => {
+                setSettled({})
+                queryClient.removeQueries({
+                  queryKey: ["my-pr-details", login],
+                  predicate: (cached) => cached.state.data === null,
+                })
+                void query.refetch()
+                void queryClient.invalidateQueries({
+                  queryKey: ["my-pr-details", login],
+                })
+                void queryClient.invalidateQueries({
+                  queryKey: ["pr-thread-status", login],
+                })
+                void queryClient.invalidateQueries({
+                  queryKey: ["my-pr-review-summaries", login],
+                })
+              }}
+            >
+              Refresh
+            </Button>
+          </div>
+          {query.error && (
+            <p role="alert" className="text-sm text-destructive">
+              {latest &&
+                (query.isFetchNextPageError
+                  ? "Could not load more PRs; showing the pages loaded so far. "
+                  : "Refresh failed; showing the previous snapshot. ")}
+              {query.error.message}
+            </p>
+          )}
+          {query.isLoading ? (
+            <Skeleton className="h-56 w-full" />
+          ) : incomplete ? (
+            <p
+              role="status"
+              className="rounded-lg border border-border bg-card px-4 py-12 text-center text-xs text-amber-700 dark:text-amber-400"
+            >
+              GitHub&rsquo;s pull request search timed out, and the partial
+              answer it returned would have hidden most of your PRs. Filter by
+              repository to narrow the search, or refresh to try again.
+            </p>
+          ) : (
+            latest && (
+              <>
+                {visible.length === 0 ? (
+                  <p className="rounded-lg border border-border bg-card px-4 py-12 text-center text-xs text-muted-foreground">
+                    {detailsLoading || query.isFetchingNextPage
+                      ? "Loading matching PRs…"
+                      : all.length
+                        ? "No PRs match these filters."
+                        : "No open PRs found."}
+                  </p>
+                ) : (
+                  <PullRequestList
+                    rows={visible}
+                    available={matchingRows.length}
+                    compact={Boolean(selected)}
+                    // Unclamped: asking for more rows than are loaded is what
+                    // makes the next GitHub page arrive, and reaching the end
+                    // again is the only other thing that would grow it.
+                    onEndReached={() =>
+                      setGrowth({ key: listKey, rows: requested + chunkSize })
+                    }
+                  >
+                    {card}
+                  </PullRequestList>
+                )}
+                <div className="flex items-center gap-3 text-xs text-muted-foreground">
+                  <span>
+                    {visible.length} of {filtered.length}
+                    {query.hasNextPage ? "+" : ""} PRs
+                    {!selected &&
+                      " · Added/deleted lines include tests and docs. PRs with checks still running are Pending."}
+                  </span>
+                  {query.isFetchingNextPage ? (
+                    <span role="status">Loading more PRs from GitHub…</span>
+                  ) : (
+                    detailsLoading && (
+                      <span role="status">Loading PR details…</span>
+                    )
+                  )}
+                </div>
+              </>
+            )
+          )}
+        </section>
+      </div>
+
+      <div
+        className="flex min-h-0 min-w-0 overflow-hidden transition-[flex-grow] duration-300 ease-out"
+        style={{ flexGrow: selectedRow ? 2.2 : 0, flexBasis: 0 }}
+      >
+        {selectedRow && (
+          <div className="flex min-h-0 w-full min-w-[420px] pt-4 pl-5">
+            <PullRequestDetail
+              key={selected}
+              pr={selectedRow}
+              login={login}
+              outcome={settled[pullRequestKey(selectedRow)]}
+              onClose={() => onFiltersChange({ pr: undefined })}
+              onSettled={(outcome) =>
+                setSettled((previous) => ({
+                  ...previous,
+                  [pullRequestKey(selectedRow)]: outcome,
+                }))
+              }
+              onReady={() =>
+                refreshPullRequest(queryClient, login, selectedRow)
+              }
+            />
+          </div>
+        )}
+      </div>
+    </div>
   )
 }

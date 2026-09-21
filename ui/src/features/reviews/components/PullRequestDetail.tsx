@@ -1,14 +1,24 @@
 import { useQuery } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
 import { XIcon } from "@phosphor-icons/react"
+import type { ReactNode } from "react"
 
-import type { PreviewFile, PullRequestPreview } from "@/lib/api"
+import type {
+  OpenPullRequest,
+  PreviewCheck,
+  PreviewFile,
+  PullRequestPreview,
+} from "@/lib/api"
 import { Markdown } from "@/features/agents/components/chat/Markdown"
 import { Skeleton } from "@/components/ui/skeleton"
 import { api } from "@/lib/api"
 import { cn } from "@/lib/utils"
+import {
+  PullRequestActions,
+  type PullRequestOutcome,
+} from "./PullRequestActions"
 
-const statusMarks: Record<PreviewFile["status"], string> = {
+const fileMarks: Record<string, string> = {
   added: "A",
   removed: "D",
   modified: "M",
@@ -18,14 +28,26 @@ const statusMarks: Record<PreviewFile["status"], string> = {
   unchanged: "·",
 }
 
-const statusTones: Record<PreviewFile["status"], string> = {
+const fileTones: Record<string, string> = {
   added: "text-emerald-700 dark:text-emerald-400",
   removed: "text-destructive",
-  modified: "text-muted-foreground",
   renamed: "text-sky-700 dark:text-sky-400",
   copied: "text-sky-700 dark:text-sky-400",
-  changed: "text-muted-foreground",
-  unchanged: "text-muted-foreground",
+}
+
+const passedConclusions = new Set(["success", "neutral", "skipped"])
+
+function checkTone(check: PreviewCheck): string {
+  if (check.status !== "completed") return "text-amber-700 dark:text-amber-400"
+  if (check.conclusion && passedConclusions.has(check.conclusion))
+    return "text-emerald-700 dark:text-emerald-400"
+  return "text-destructive"
+}
+
+function checkRank(check: PreviewCheck): number {
+  if (check.status !== "completed") return 1
+  if (check.conclusion && passedConclusions.has(check.conclusion)) return 2
+  return 0
 }
 
 function Section({
@@ -35,7 +57,7 @@ function Section({
 }: {
   heading: string
   count?: string
-  children: React.ReactNode
+  children: ReactNode
 }) {
   return (
     <section className="border-t border-border px-5 py-4 first:border-t-0">
@@ -58,18 +80,16 @@ function FileRow({ file }: { file: PreviewFile }) {
     <li className="flex items-baseline gap-2.5 py-1 font-mono text-xs">
       <span
         aria-hidden="true"
-        className={cn("w-3 shrink-0", statusTones[file.status])}
+        className={cn("w-3 shrink-0", fileTones[file.status])}
         title={file.status}
       >
-        {statusMarks[file.status]}
+        {fileMarks[file.status] ?? "M"}
       </span>
-      <span className="min-w-0 flex-1 truncate" title={file.path} dir="rtl">
-        <span dir="ltr">
-          <span className="text-muted-foreground">
-            {cut < 0 ? "" : file.path.slice(0, cut + 1)}
-          </span>
-          <span className="text-foreground">{file.path.slice(cut + 1)}</span>
+      <span className="min-w-0 flex-1 truncate" title={file.path}>
+        <span className="text-muted-foreground">
+          {cut < 0 ? "" : file.path.slice(0, cut + 1)}
         </span>
+        <span className="text-foreground">{file.path.slice(cut + 1)}</span>
       </span>
       <span className="shrink-0 text-emerald-700 tabular-nums dark:text-emerald-400">
         +{file.additions}
@@ -81,7 +101,100 @@ function FileRow({ file }: { file: PreviewFile }) {
   )
 }
 
-function Blockers({ preview }: { preview: PullRequestPreview }) {
+function CheckRow({ check }: { check: PreviewCheck }) {
+  return (
+    <li className="flex items-baseline gap-2.5 py-0.5 text-xs">
+      <span className={cn("shrink-0 tabular-nums", checkTone(check))}>
+        {check.status !== "completed"
+          ? "•"
+          : check.conclusion === "success"
+            ? "✓"
+            : "✕"}
+      </span>
+      <span className="min-w-0 flex-1 truncate text-foreground">
+        {check.url ? (
+          <a
+            className="hover:underline"
+            href={check.url}
+            target="_blank"
+            rel="noreferrer"
+          >
+            {check.name}
+          </a>
+        ) : (
+          check.name
+        )}
+      </span>
+      <span className={cn("shrink-0", checkTone(check))}>
+        {check.status !== "completed"
+          ? check.status
+          : (check.conclusion ?? "done")}
+      </span>
+    </li>
+  )
+}
+
+// A repo with hundreds of checks turns the preview into a wall of green, so
+// past this many they collapse and only what needs attention stays open.
+const groupChecksAbove = 20
+
+const checkGroups = [
+  ["Failing", 0],
+  ["Running", 1],
+  ["Passed", 2],
+] as const
+
+function Checks({ checks }: { checks: Array<PreviewCheck> | null }) {
+  if (checks === null) {
+    return (
+      <p className="text-xs text-amber-700 dark:text-amber-400">
+        GitHub did not return the checks for this commit.
+      </p>
+    )
+  }
+  if (checks.length === 0) {
+    return <p className="text-xs text-muted-foreground">No checks ran.</p>
+  }
+  const sorted = [...checks].sort((a, b) => checkRank(a) - checkRank(b))
+  if (sorted.length <= groupChecksAbove) {
+    return (
+      <ul className="space-y-0.5">
+        {sorted.map((check) => (
+          <CheckRow key={`${check.name}:${check.url ?? ""}`} check={check} />
+        ))}
+      </ul>
+    )
+  }
+  return (
+    <div className="space-y-1.5">
+      {checkGroups.map(([label, rank]) => {
+        const group = sorted.filter((check) => checkRank(check) === rank)
+        if (!group.length) return null
+        return (
+          <details key={label} open={rank === 0} className="group">
+            <summary className="cursor-pointer list-none text-xs text-muted-foreground hover:text-foreground">
+              <span aria-hidden="true" className="inline-block w-3">
+                {"›"}
+              </span>
+              {label}
+              <span className="ml-1.5 tabular-nums">{group.length}</span>
+            </summary>
+            <ul className="mt-1 space-y-0.5 pl-3">
+              {group.map((check) => (
+                <CheckRow
+                  key={`${check.name}:${check.url ?? ""}`}
+                  check={check}
+                />
+              ))}
+            </ul>
+          </details>
+        )
+      })}
+    </div>
+  )
+}
+
+function Conversations({ preview }: { preview: PullRequestPreview }) {
   if (preview.unresolved === null) {
     return (
       <p className="text-xs text-amber-700 dark:text-amber-400">
@@ -132,41 +245,44 @@ function Blockers({ preview }: { preview: PullRequestPreview }) {
   )
 }
 
-/**
- * Preview of one pull request beside the list: what blocks it, what it
- * touches, and why. Ordered for triage rather than for reading — the threads
- * that hold up a merge come before the description that explains it.
- */
+/** One pull request beside the list, in the shape of GitHub's own summary. */
 export function PullRequestDetail({
-  owner,
-  repo,
-  number,
+  pr,
+  login,
+  outcome,
   onClose,
+  onSettled,
+  onReady,
 }: {
-  owner: string
-  repo: string
-  number: number
+  pr: OpenPullRequest
+  login: string
+  outcome?: PullRequestOutcome
   onClose: () => void
+  onSettled: (outcome: PullRequestOutcome) => void
+  onReady: () => void
 }) {
+  const [owner, name] = pr.repo.split("/")
   const preview = useQuery({
-    queryKey: ["pr-preview", owner, repo, number],
-    queryFn: () => api.getPullRequestPreview(owner, repo, number),
+    queryKey: ["pr-preview", owner, name, pr.number],
+    queryFn: () => api.getPullRequestPreview(owner!, name!, pr.number),
     staleTime: 60_000,
   })
   const data = preview.data
+  const failing =
+    data?.checks?.filter((check) => checkRank(check) === 0).length ?? 0
+  const running =
+    data?.checks?.filter((check) => checkRank(check) === 1).length ?? 0
 
   return (
     <aside
-      aria-label={`Pull request ${owner}/${repo} #${number}`}
+      aria-label={`Pull request ${pr.repo} #${pr.number}`}
       className="flex min-h-0 w-full flex-col overflow-hidden rounded-lg border border-border bg-card"
     >
       <header className="flex items-start gap-3 border-b border-border px-5 py-4">
         <div className="min-w-0 flex-1">
           <div className="flex items-baseline gap-2 text-xs text-muted-foreground">
-            <span className="truncate">
-              {owner}/{repo}
-            </span>
-            <span className="font-mono tabular-nums">#{number}</span>
+            <span className="truncate">{pr.repo}</span>
+            <span className="font-mono tabular-nums">#{pr.number}</span>
             {data && (
               <span className="tabular-nums">
                 <span className="text-emerald-700 dark:text-emerald-400">
@@ -177,24 +293,28 @@ export function PullRequestDetail({
             )}
           </div>
           <h2 className="mt-1 text-sm font-medium break-words text-foreground">
-            {data?.title ?? `Pull request #${number}`}
+            {data?.title ?? pr.title}
           </h2>
+          {data && (
+            <p className="mt-1 text-xs text-muted-foreground">
+              {data.author ?? "Someone"} wants to merge {data.commits}{" "}
+              {data.commits === 1 ? "commit" : "commits"} into{" "}
+              <span className="font-mono">{data.base_ref}</span> from{" "}
+              <span className="font-mono">{data.head_ref}</span>
+            </p>
+          )}
           <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
             <Link
               className="text-muted-foreground hover:text-foreground hover:underline"
               to="/agents/reviews/$owner/$repo/$number"
-              params={{ owner, repo, number: String(number) }}
+              params={{
+                owner: owner!,
+                repo: name!,
+                number: String(pr.number),
+              }}
             >
               Open full review
             </Link>
-            <a
-              className="text-muted-foreground hover:text-foreground hover:underline"
-              href={`https://github.com/${owner}/${repo}/pull/${number}`}
-              target="_blank"
-              rel="noreferrer"
-            >
-              View on GitHub
-            </a>
           </div>
         </div>
         <button
@@ -206,6 +326,16 @@ export function PullRequestDetail({
           <XIcon className="size-4" />
         </button>
       </header>
+
+      <div className="border-b border-border px-5 py-3">
+        <PullRequestActions
+          pr={pr}
+          login={login}
+          outcome={outcome}
+          onSettled={onSettled}
+          onReady={onReady}
+        />
+      </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto">
         {preview.isPending && (
@@ -222,6 +352,18 @@ export function PullRequestDetail({
         )}
         {data && (
           <>
+            <Section heading="Description">
+              {data.body ? (
+                <div className="max-w-[72ch]">
+                  <Markdown content={data.body} />
+                </div>
+              ) : (
+                <p className="text-xs text-muted-foreground">
+                  This PR has no description.
+                </p>
+              )}
+            </Section>
+
             <Section
               heading="Unresolved comments"
               count={
@@ -230,7 +372,7 @@ export function PullRequestDetail({
                   : String(data.unresolved.length)
               }
             >
-              <Blockers preview={data} />
+              <Conversations preview={data} />
             </Section>
 
             <Section
@@ -254,16 +396,17 @@ export function PullRequestDetail({
               )}
             </Section>
 
-            <Section heading="Description">
-              {data.body ? (
-                <div className="max-w-[72ch]">
-                  <Markdown content={data.body} />
-                </div>
-              ) : (
-                <p className="text-xs text-muted-foreground">
-                  This PR has no description.
-                </p>
-              )}
+            <Section
+              heading="Checks"
+              count={
+                data.checks === null
+                  ? undefined
+                  : failing || running
+                    ? `${failing} failing, ${running} running, ${data.checks.length} total`
+                    : String(data.checks.length)
+              }
+            >
+              <Checks checks={data.checks} />
             </Section>
           </>
         )}
