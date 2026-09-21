@@ -131,7 +131,18 @@ testpaths = ["tests"]
 include = ["agent", "tests"]
 
 [tool.ty.analysis]
-allowed-unresolved-imports = ["ddtrace", "ddtrace.trace"]
+allowed-unresolved-imports = [
+    "daytona",
+    "ddtrace",
+    "ddtrace.trace",
+    "e2b",
+    "langchain_daytona",
+    "langchain_e2b",
+    "langchain_modal",
+    "langchain_runloop",
+    "modal",
+    "runloop_api_client",
+]
 
 [tool.ty.terminal]
 error-on-warning = false
