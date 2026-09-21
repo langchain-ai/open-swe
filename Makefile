@@ -1,4 +1,4 @@
-.PHONY: all format format-check lint typecheck test tests integration_tests help run dev dev-ui postgres tunnel web build-dashboard desktop install-desktop install-checkout swagger
+.PHONY: all format format-check lint typecheck test tests integration_tests help run dev dev-ui postgres tunnel web build-dashboard desktop install-desktop install-checkout swagger cli
 
 # Default target executed when no arguments are given to make.
 all: help
@@ -69,6 +69,13 @@ install-checkout:
 install:
 	uv sync --extra dev
 
+# Single-file `open-swe` binary. Bun compiles its own runtime into the output,
+# so the result runs on a laptop without Node or Bun installed.
+cli:
+	@command -v bun >/dev/null 2>&1 || { echo 'bun is required: https://bun.com/docs/installation' >&2; exit 1; }
+	cd cli && bun install && bun run build
+	@echo "Built $(CURDIR)/cli/dist/open-swe"
+
 ######################
 # TESTING
 ######################
@@ -126,6 +133,7 @@ help:
 	@echo 'install-desktop              - install or update Open SWE Desktop on macOS'
 	@echo 'install-checkout             - install the current checkout of Open SWE Desktop on macOS'
 	@echo 'install                      - install dependencies (incl. dev extras)'
+	@echo 'cli                          - build the open-swe CLI binary into cli/dist/open-swe'
 	@echo 'format                       - run code formatters'
 	@echo 'lint                         - run linters'
 	@echo 'typecheck                    - run ty on agent/ and tests/'

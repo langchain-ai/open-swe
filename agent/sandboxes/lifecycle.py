@@ -14,6 +14,8 @@ from typing import Any, Literal
 from deepagents.backends.protocol import SandboxBackendProtocol
 from langgraph_sdk import get_client
 
+from agent.bridge.backend import BridgeSandboxBackend
+from agent.bridge.store import Bridge
 from agent.config import ENV
 from agent.github.proxy import get_recorded_proxy_base_config, record_proxy_token_expiry
 from agent.github.sandbox_access import SandboxGitHubAccess, workspace_token
@@ -376,6 +378,15 @@ async def ensure_sandbox_for_thread(
         sandbox_metadata = await get_sandbox_metadata(thread_id)
     raw_sandbox_id = sandbox_metadata.get("sandbox_id")
     sandbox_id = raw_sandbox_id if isinstance(raw_sandbox_id, str) else None
+    bridge_id = Bridge.bridge_id_of(sandbox_id)
+    if bridge_id is not None:
+        # The sandbox is the user's own machine: there is nothing to boot, no
+        # managed proxy to reconfigure, and no global git config of theirs to
+        # rewrite. An unreachable bridge fails the run, as any bound sandbox does.
+        async with aphase(thread_id, "sandbox.bridge_connect", sandbox_id=sandbox_id):
+            return set_sandbox_backend(
+                thread_id, await BridgeSandboxBackend.connect(thread_id, bridge_id)
+            )
     metadata_proxy_config = sandbox_metadata.get(_SANDBOX_PROXY_CONFIG_METADATA_KEY)
     base_proxy_config = (
         metadata_proxy_config
@@ -470,6 +481,8 @@ async def recreate_sandbox_for_thread(
     old_sandbox_id = cached.id if cached is not None and cached.has_backend else metadata_sandbox_id
     if not old_sandbox_id:
         raise ValueError(f"Thread {thread_id} has no sandbox to recreate")
+    if Bridge.bridge_id_of(old_sandbox_id) is not None:
+        raise ValueError("A thread bridged to a local machine cannot be given a cloud sandbox")
 
     new_sandbox = await _create_sandbox_with_proxy(
         thread_id=thread_id,

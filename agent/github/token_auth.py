@@ -5,10 +5,10 @@ A request that carries a bearer token instead is not a browser form post, so it
 is exempt from the CSRF origin check.
 """
 
-from fastapi import Request
+from starlette.requests import HTTPConnection
 
 
-def bearer_github_token(request: Request) -> str | None:
+def bearer_token(request: HTTPConnection) -> str | None:
     """Return the ``Authorization: Bearer`` token, if the request carries one."""
     header = request.headers.get("authorization", "")
     scheme, _, value = header.partition(" ")
