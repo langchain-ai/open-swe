@@ -68,7 +68,6 @@ from agent.transcript.events import (
     TurnRequested,
     TurnStarted,
 )
-from agent.transcript.flag import transcript_enabled
 
 logger = logging.getLogger(__name__)
 
@@ -616,8 +615,8 @@ def _thread_created(metadata: Mapping[str, object], title: str) -> ThreadCreated
 
 
 async def _has_transcript(thread_id: str) -> bool:
-    """Whether the thread is served by the event log rather than by LangGraph state."""
-    if not transcript_enabled():
+    """Whether the thread is recorded in the event log."""
+    if not postgres.configured():
         return False
     async with postgres.read_only_transaction() as conn:
         result = await conn.execute(
@@ -660,9 +659,10 @@ class TranscriptMiddleware(OpenSWEMiddleware):
 
         messages = cast(Sequence[BaseMessage], state.get("messages") or [])
         transcribed = await _has_transcript(ids.thread_id)
-        # With the event log switched off for this deployment the run records
-        # nothing at all, so no thread is ever stamped as transcribed.
-        untranscribable = not transcript_enabled() or (
+        # Without PostgreSQL there is nowhere to keep a transcript, so the run
+        # must not be stamped as one: whoever serves the thread would be pointed
+        # at a read path with no rows behind it.
+        untranscribable = not postgres.configured() or (
             not transcribed and any(isinstance(message, AIMessage) for message in messages)
         )
         if untranscribable:
