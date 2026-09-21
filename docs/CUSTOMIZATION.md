@@ -66,6 +66,8 @@ Set the `SANDBOX_TYPE` environment variable to switch providers. Each provider h
 
 > **Warning**: `local` runs commands directly on your host with no sandboxing. Only use for local development with human-in-the-loop enabled.
 
+The third-party provider SDKs (`daytona`, `modal`, `runloop`, `e2b`) are optional dependency groups, so a base install only carries the default langsmith and local providers. Selecting one of these providers requires installing its extra — e.g. `uv sync --extra sandbox-e2b` — or all of them with `--extra sandbox-providers`; startup validation fails fast with the install command if it's missing.
+
 For `langsmith`, sandbox provisioning, connection, proxy configuration, and workspace snapshot captures use the deployment’s `LANGSMITH_API_KEY` and `LANGSMITH_ENDPOINT`. A workspace's base snapshot must exist in that LangSmith workspace. The former `SANDBOX_LANGSMITH_API_KEY` and `SANDBOX_LANGSMITH_ENDPOINT` overrides are no longer used.
 
 ### Adding a new sandbox provider

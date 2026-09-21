@@ -40,6 +40,8 @@ from langchain_core.messages import (
 )
 from langchain_core.outputs import ChatGeneration, ChatResult
 
+from agent.input_messages import TURN_ANNOTATION_SENDER_IDS
+
 
 def _slack_thread_ts(messages: list[BaseMessage]) -> str:
     matches = re.findall(r"Thread TS: ([0-9.]+)", "\n".join(_text(m.content) for m in messages))
@@ -295,7 +297,7 @@ def _text(content: Any) -> str:
 
 
 _FRAMING_SENDER_IDS = ("system:slack-context", "system:dashboard-handoff")
-_METADATA_SENDER_IDS = ("system:sender-context", "system:collaboration")
+_METADATA_SENDER_IDS = tuple(sorted(TURN_ANNOTATION_SENDER_IDS))
 
 
 def _is_framing_block(header: str) -> bool:

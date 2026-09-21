@@ -5,6 +5,7 @@ import { LoadError, useLoadTimedOut } from "@/components/LoadError"
 import { AgentThreadView } from "@/features/agents/components/AgentThreadView"
 import { Skeleton } from "@/components/ui/skeleton"
 import { AgentThreadStreamBoundary } from "@/features/agents/lib/provider/useIsInAgentThreadStream"
+import { ThreadSourceProvider } from "@/features/agents/lib/threadSource/ThreadSourceProvider"
 import { useAgentThread } from "@/features/agents/lib/queries"
 import {
   ensureThreadLoad,
@@ -93,10 +94,12 @@ function AgentThreadContent({
 
   return (
     <AgentThreadStreamBoundary active={active}>
-      <AgentThreadView
-        thread={threadQuery.data}
-        autoFocusComposer={autoFocusComposer}
-      />
+      <ThreadSourceProvider threadId={threadId}>
+        <AgentThreadView
+          thread={threadQuery.data}
+          autoFocusComposer={autoFocusComposer}
+        />
+      </ThreadSourceProvider>
     </AgentThreadStreamBoundary>
   )
 }

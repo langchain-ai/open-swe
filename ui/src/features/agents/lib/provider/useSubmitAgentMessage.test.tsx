@@ -14,13 +14,13 @@ import {
   agentThreadKeys,
 } from "@/features/agents/lib/queries"
 
-const stream = {
-  isLoading: false,
-  submit: vi.fn(() => Promise.resolve(undefined)),
+const source = {
+  isRunning: false,
+  startRun: vi.fn(() => Promise.resolve(undefined)),
 }
 
-vi.mock("@/features/agents/lib/stream/AgentStreamProvider", () => ({
-  useAgentStream: () => stream,
+vi.mock("@/features/agents/lib/threadSource/ThreadSourceProvider", () => ({
+  useThreadSource: () => source,
 }))
 
 const queueMessage = vi.fn()
@@ -103,8 +103,8 @@ function sidebarStatus(client: QueryClient) {
 }
 
 beforeEach(() => {
-  stream.isLoading = false
-  stream.submit.mockClear()
+  source.isRunning = false
+  source.startRun.mockClear()
   queueMessage.mockReset()
   queueMessage.mockResolvedValue(undefined)
 })
@@ -113,24 +113,21 @@ describe("useSubmitAgentMessage", () => {
   it("offloads without adding a user message or queuing a prompt", async () => {
     const { client, result } = setup()
     await result.current.mutateAsync({ content: "/offload", images: [] })
-    expect(stream.submit).toHaveBeenCalledWith(
-      {},
-      {
-        config: { configurable: { offload_conversation: true } },
-      }
-    )
+    expect(source.startRun).toHaveBeenCalledWith({
+      configurable: { offload_conversation: true },
+    })
     expect(queueMessage).not.toHaveBeenCalled()
     expect(pendingMessages(client)).toBeUndefined()
     expect(queuedMessages(client)).toBeUndefined()
   })
 
   it("rejects offloading during a live run instead of queuing it", async () => {
-    stream.isLoading = true
+    source.isRunning = true
     const { result } = setup()
     await expect(
       result.current.mutateAsync({ content: "/offload" })
     ).rejects.toThrow("Wait for the current run")
-    expect(stream.submit).not.toHaveBeenCalled()
+    expect(source.startRun).not.toHaveBeenCalled()
     expect(queueMessage).not.toHaveBeenCalled()
   })
 
@@ -151,18 +148,15 @@ describe("useSubmitAgentMessage", () => {
       content: "hi",
       status: "sending",
     })
-    expect(stream.submit).not.toHaveBeenCalled()
+    expect(source.startRun).not.toHaveBeenCalled()
 
     rejectProbe(new AgentsApiError(409, "no active run"))
     await pending
 
-    expect(stream.submit).toHaveBeenCalledWith(
-      {
-        messages: [
-          expect.objectContaining({ id: optimisticId, type: "human" }),
-        ],
-      },
-      expect.any(Object)
+    expect(source.startRun).toHaveBeenCalledWith(
+      expect.objectContaining({
+        message: expect.objectContaining({ id: optimisticId, text: "hi" }),
+      })
     )
     expect(pendingMessages(client)).toEqual([
       expect.objectContaining({ id: optimisticId, status: "sending" }),
@@ -174,7 +168,7 @@ describe("useSubmitAgentMessage", () => {
   it("marks the optimistic message failed when run start rejects", async () => {
     queueMessage.mockRejectedValueOnce(new AgentsApiError(409, "no active run"))
     let rejectSubmission: (error: Error) => void = () => {}
-    stream.submit.mockImplementationOnce(
+    source.startRun.mockImplementationOnce(
       () =>
         new Promise((_, reject) => {
           rejectSubmission = reject
@@ -205,11 +199,11 @@ describe("useSubmitAgentMessage", () => {
         client_message_id: queuedMessages(client)?.[0]?.id,
       })
     )
-    expect(stream.submit).not.toHaveBeenCalled()
+    expect(source.startRun).not.toHaveBeenCalled()
   })
 
   it("shows the queued bubble immediately while this client streams", async () => {
-    stream.isLoading = true
+    source.isRunning = true
     let acceptQueue: () => void = () => {}
     queueMessage.mockImplementationOnce(
       () =>

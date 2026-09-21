@@ -17,6 +17,15 @@ Surface = Literal["slack", "linear", "github", "web", "desktop", "automation", "
 EntityKind = Literal["person", "channel", "system"]
 MessageKind = Literal["human", "system"]
 
+# The run's own annotation of whoever sent the turn, appended after the turn's
+# message rather than being one; readers have to look past it to find the turn.
+SENDER_CONTEXT_SENDER_ID = "system:sender-context"
+# Attribution rules that hold for the whole thread, appended the same way.
+COLLABORATION_SENDER_ID = "system:collaboration"
+# Every block a reader must look past: the transcript, the dashboard and the
+# scripted test model each have to agree on which messages nobody typed.
+TURN_ANNOTATION_SENDER_IDS = frozenset({SENDER_CONTEXT_SENDER_ID, COLLABORATION_SENDER_ID})
+
 
 class PersonIdentity(TypedDict):
     id: str
