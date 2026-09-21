@@ -781,7 +781,7 @@ class WorkspaceStore:
                 )
         return records
 
-    async def put(self, slug: str, record: Workspace) -> Workspace:
+    async def put(self, slug: str, record: Workspace, *, create_only: bool = False) -> Workspace:
         """Write the row and replace its bindings, in one transaction.
 
         Returns the stored view rather than the record it was handed: a
@@ -790,7 +790,11 @@ class WorkspaceStore:
         """
         try:
             async with postgres.session() as session:
-                row = await session.scalar(select(WorkspaceRow).where(WorkspaceRow.slug == slug))
+                row = (
+                    None
+                    if create_only
+                    else await session.scalar(select(WorkspaceRow).where(WorkspaceRow.slug == slug))
+                )
                 if row is None:
                     row = WorkspaceRow(slug=slug, name=record.name)
                     session.add(row)
@@ -898,7 +902,7 @@ class WorkspaceStore:
         await self._assert_unique(record)
         if await self.slug_exists(record.slug):
             raise WorkspaceConflictError(f"workspace {create.name!r} already exists")
-        return await self.put(record.slug, record)
+        return await self.put(record.slug, record, create_only=True)
 
     async def apply_update(self, slug: str, update: WorkspaceUpdate) -> Workspace:
         record = await self.get(slug)
