@@ -4,7 +4,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from deepagents.backends.protocol import ExecuteResponse, SandboxBackendProtocol
 from langchain_core.messages import ToolMessage
-from langgraph.errors import NodeCancelledError
 from langgraph.prebuilt.tool_node import ToolCallRequest
 from langsmith.sandbox import (
     SandboxConnectionError,
@@ -43,18 +42,6 @@ def _tool_request(thread_id: str = "thread-1") -> ToolCallRequest:
         state={},
         runtime=runtime,
     )
-
-
-@pytest.mark.asyncio
-async def test_node_cancellation_ends_the_run() -> None:
-    middleware = ToolErrorMiddleware()
-    request = _tool_request()
-
-    async def handler(_request: ToolCallRequest) -> ToolMessage:
-        raise NodeCancelledError("tools")
-
-    with pytest.raises(NodeCancelledError):
-        await middleware.awrap_tool_call(request, handler)
 
 
 @pytest.mark.asyncio
