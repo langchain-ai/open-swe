@@ -297,8 +297,7 @@ async def _create_dashboard_thread_record(
         metadata["repo_explicitly_none"] = True
 
     # A deployment without PostgreSQL has nowhere to keep a transcript, so the
-    # thread is not stamped as one. The stamp says the thread is recorded, not
-    # that the event log serves it — `TRANSCRIPT_EVENT_LOG` decides that.
+    # thread is not stamped as one and keeps reading LangGraph state.
     transcribed = postgres.configured()
     if transcribed:
         metadata["transcript"] = TRANSCRIPT_VERSION

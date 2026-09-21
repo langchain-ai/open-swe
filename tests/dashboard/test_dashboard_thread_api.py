@@ -529,17 +529,6 @@ async def test_thread_summary_exposes_attention_reason() -> None:
     assert quiet["attentionReason"] is None
 
 
-async def test_thread_summary_reports_the_transcript_only_while_serving(monkeypatch) -> None:
-    """A thread keeps being recorded while the flag decides who serves it."""
-    recorded = _thread_with_metadata({"title": "Ship it", "transcript": "v2"})
-
-    monkeypatch.setattr(thread_summary, "transcript_serving_enabled", lambda: True)
-    assert (await thread_summary._thread_summary(recorded))["transcript"] == "v2"
-
-    monkeypatch.setattr(thread_summary, "transcript_serving_enabled", lambda: False)
-    assert (await thread_summary._thread_summary(recorded))["transcript"] is None
-
-
 async def test_thread_summary_includes_pr_and_diff_stats() -> None:
     summary = await thread_summary._thread_summary(
         _thread_with_metadata(
