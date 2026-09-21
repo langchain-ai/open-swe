@@ -1,12 +1,6 @@
-# OEP-0002: Expedited Slack review for small pull requests
+# Expedited Slack review for small pull requests
 
-- **Authors:** Ramon Nogueira (`@ramon-langchain`)
-- **Status:** Draft
-- **Created:** 2026-09-09
-- **Updated:** 2026-09-15
-- **Discussion:** https://github.com/langchain-ai/open-swe/issues/2569
-- **Implementation:** https://github.com/langchain-ai/open-swe/pull/2779 (experimental, off by default)
-- **Supersedes:** None
+This document records the design and operating constraints of expedited Slack review. The feature is experimental and off by default.
 
 ## Summary
 
@@ -20,7 +14,7 @@ SWE merges. Any rejection, new commit, or regressed check kills the vote.
 For a 5-line change, opening GitHub takes longer than reviewing it. The reviewers
 are already in the Slack thread.
 
-## Proposal
+## Design
 
 ### Enablement
 
@@ -138,7 +132,7 @@ looked up for display only.
 - **Eligibility policy:** the fixed rules above; no preview size cap beyond Slack's.
 - **Vote expiry:** none.
 
-## Unresolved questions
+## Open questions
 
 - Which third-party review agents expose a trustworthy completion signal, and
   whether to require a configured list of reviewer check names.
