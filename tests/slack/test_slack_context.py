@@ -2508,3 +2508,54 @@ def test_cost_enrichment_without_model_metadata(usage: RunUsageSummary | None) -
     )
     assert "calculating cost" not in cleared_text
     assert "calculating cost" not in str(cleared_blocks)
+
+
+@pytest.mark.parametrize("linked_in_body", [False, True])
+def test_workspace_footer_survives_cost_updates(linked_in_body: bool) -> None:
+    url = "https://app.example/agents/t1"
+    body = f"Done <{url}|Open in Web>" if linked_in_body else "Done"
+    usage = RunUsageSummary(models=("model-a",), total_tokens=123)
+    blocks = slack_utils._with_slack_web_link_context_block(
+        body,
+        [{"type": "section", "text": {"type": "mrkdwn", "text": body}}],
+        url,
+        usage,
+        "internal",
+    )
+    text = slack_utils.append_slack_web_link_footer(body, url, usage, "internal")
+    updated_text, updated_blocks = slack_utils.with_slack_session_cost(text, blocks, 0.42)
+    assert "Workspace: internal" in updated_text
+    assert "Workspace: internal" in updated_blocks[-1]["elements"][0]["text"]
+    assert updated_text.endswith("model-a • $0.42")
+
+
+def test_workspace_footer_escapes_slack_markup() -> None:
+    footer = slack_utils.format_slack_web_link_footer(
+        "https://app.example/agents/t1", workspace="<workspace>&"
+    )
+    assert "Workspace: &lt;workspace&gt;&amp;" in footer
+
+
+def test_reply_footer_uses_persisted_thread_workspace(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: dict[str, object] = {}
+
+    async def workspace(thread_id: str) -> str:
+        assert thread_id == "agent-thread"
+        return "routed-workspace"
+
+    async def post(channel_id: str, text: str, **kwargs: object) -> tuple[str, None]:
+        captured.update(text=text, **kwargs)
+        return "123.456", None
+
+    monkeypatch.setattr(webhook_common, "get_thread_workspace", workspace)
+    monkeypatch.setattr(slack_utils, "_post_slack_message_with_ts", post)
+    monkeypatch.setattr(
+        slack_utils, "dashboard_thread_url", lambda _: "https://app.example/agents/t1"
+    )
+    asyncio.run(
+        slack_utils.post_slack_thread_reply_with_ts(
+            "C123", "123.000", "Done", agent_thread_id="agent-thread"
+        )
+    )
+    assert "Workspace: routed-workspace" in str(captured["text"])
+    assert "Workspace: routed-workspace" in str(captured["blocks"])

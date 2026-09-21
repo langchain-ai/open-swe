@@ -4,6 +4,7 @@ import asyncio
 import copy
 import hashlib
 import hmac
+import html
 import logging
 import re
 import time
@@ -642,11 +643,14 @@ def with_slack_pending_session_cost(
 def format_slack_web_link_footer(
     dashboard_url: str | None,
     usage: RunUsageSummary | None = None,
+    workspace: str | None = None,
 ) -> str:
     """Format the compact Slack footer links."""
     if not dashboard_url:
         return ""
     links = [f"<{dashboard_url}|{SLACK_WEB_LINK_FOOTER_LABEL}>"]
+    if workspace:
+        links.append(f"Workspace: {html.escape(workspace)}")
     usage_text = format_slack_run_usage(usage)
     if usage_text:
         links.append(usage_text)
@@ -657,9 +661,10 @@ def append_slack_web_link_footer(
     text: str,
     dashboard_url: str | None,
     usage: RunUsageSummary | None = None,
+    workspace: str | None = None,
 ) -> str:
     """Append the compact Slack footer links to fallback text."""
-    footer = format_slack_web_link_footer(dashboard_url, usage)
+    footer = format_slack_web_link_footer(dashboard_url, usage, workspace)
     if not footer or footer in text:
         return text
     stripped = text.rstrip()
@@ -671,8 +676,9 @@ def append_slack_web_link_footer(
 def _slack_web_link_context_block(
     dashboard_url: str | None,
     usage: RunUsageSummary | None = None,
+    workspace: str | None = None,
 ) -> dict[str, Any] | None:
-    footer = format_slack_web_link_footer(dashboard_url, usage)
+    footer = format_slack_web_link_footer(dashboard_url, usage, workspace)
     if not footer:
         return None
     return {"type": "context", "elements": [{"type": "mrkdwn", "text": footer}]}
@@ -695,8 +701,9 @@ def _with_slack_web_link_context_block(
     blocks: list[dict[str, Any]] | None,
     dashboard_url: str | None,
     usage: RunUsageSummary | None = None,
+    workspace: str | None = None,
 ) -> list[dict[str, Any]] | None:
-    context_block = _slack_web_link_context_block(dashboard_url, usage)
+    context_block = _slack_web_link_context_block(dashboard_url, usage, workspace)
     if context_block is None:
         return blocks
     if not blocks:
@@ -710,13 +717,19 @@ def _with_slack_web_link_context_block(
     if dashboard_url and any(
         _block_contains_text(block, dashboard_url) for block in updated_blocks
     ):
-        usage_text = format_slack_run_usage(usage)
-        if not usage_text or any(
-            _block_contains_text(block, usage_text) for block in updated_blocks
-        ):
+        labels = [
+            f"Workspace: {html.escape(workspace)}" if workspace else "",
+            format_slack_run_usage(usage),
+        ]
+        missing = [
+            label
+            for label in labels
+            if label and not any(_block_contains_text(block, label) for block in updated_blocks)
+        ]
+        if not missing:
             return updated_blocks
         context_block["block_id"] = "open_swe_usage_footer"
-        context_block["elements"][0]["text"] = usage_text
+        context_block["elements"][0]["text"] = " • ".join(missing)
     updated_blocks.append(context_block)
     return updated_blocks
 
@@ -735,12 +748,14 @@ async def post_slack_thread_reply_with_ts(
 ) -> tuple[str | None, str | None]:
     """Post a reply in a Slack thread and return its Slack timestamp and error."""
     from agent.slack.code_channels import is_code_channel_session
+    from agent.webhooks.common import get_thread_workspace
 
     if is_code_channel_session(thread_ts):
         agent_thread_id = None
     dashboard_url = _slack_thread_dashboard_url(channel_id, thread_ts, agent_thread_id)
-    blocks = _with_slack_web_link_context_block(text, blocks, dashboard_url, usage)
-    text = append_slack_web_link_footer(text, dashboard_url, usage)
+    workspace = await get_thread_workspace(agent_thread_id) if agent_thread_id else None
+    blocks = _with_slack_web_link_context_block(text, blocks, dashboard_url, usage, workspace)
+    text = append_slack_web_link_footer(text, dashboard_url, usage, workspace)
     return await _post_slack_message_with_ts(
         channel_id,
         text,
@@ -762,12 +777,15 @@ async def post_slack_ephemeral_reply(
     agent_thread_id: str | None = None,
 ) -> bool:
     """Answer one person in a channel, carrying the same web link a thread reply would."""
+    from agent.webhooks.common import get_thread_workspace
+
     dashboard_url = dashboard_thread_url(agent_thread_id) if agent_thread_id else None
-    blocks = _with_slack_web_link_context_block(text, blocks, dashboard_url, usage)
+    workspace = await get_thread_workspace(agent_thread_id) if agent_thread_id else None
+    blocks = _with_slack_web_link_context_block(text, blocks, dashboard_url, usage, workspace)
     return await post_slack_ephemeral_message(
         channel_id,
         user_id,
-        append_slack_web_link_footer(text, dashboard_url, usage),
+        append_slack_web_link_footer(text, dashboard_url, usage, workspace),
         blocks=blocks,
     )
 
