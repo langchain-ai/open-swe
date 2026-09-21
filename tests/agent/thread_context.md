@@ -4,7 +4,7 @@ Every message appended per turn, rendered by test_thread_context.py through the 
 ## Turn 1: Alice starts the thread from Slack
 Given: an empty thread; Alice has a linked GitHub account and is a workspace admin
 When: she mentions the bot: add a greet() helper
-Then: channel and Alice introduced; participants block emitted for the first time; pointer names Alice
+Then: channel and Alice introduced; Alice's participant block sent; pointer names Alice
 
 ### dispatch appends
 ```xml
@@ -33,13 +33,11 @@ Then: channel and Alice introduced; participants block emitted for the first tim
 
 ### run appends
 ```xml
-<dynamic-context kind="system" id="system:participants">
-<display_name>Thread participants</display_name>
-<content>- **Alice** — `user:0199e0ae-1111-7000-8000-00000000a11c`
-  - Commit as: `git config user.name Alice &amp;&amp; git config user.email alice@users.noreply.github.com`
-  - Workspace admin: yes
-  - New PRs: as drafts
-  - Standing instructions: none</content>
+<dynamic-context kind="participant" id="user:0199e0ae-1111-7000-8000-00000000a11c">
+<display_name>Alice</display_name>
+<git_identity>git config user.name Alice &amp;&amp; git config user.email alice@users.noreply.github.com</git_identity>
+<workspace_admin>yes</workspace_admin>
+<new_prs>as drafts</new_prs>
 </dynamic-context>
 ```
 
@@ -52,7 +50,7 @@ Then: channel and Alice introduced; participants block emitted for the first tim
 ## Turn 2: Alice follows up
 Given: turn 1 has run to completion
 When: Alice replies in the same Slack thread: also add a docstring
-Then: only her envelope and the pointer; participants block not repeated
+Then: only her envelope and the pointer; nothing about her has changed
 
 ### dispatch appends
 ```xml
@@ -62,7 +60,7 @@ Then: only her envelope and the pointer; participants block not repeated
 ```
 
 ### run appends
-(system:participants: unchanged, not repeated)
+(participants: all already visible, none re-sent)
 
 ```xml
 <input-message sender="system:sender-context" surface="automation" kind="system">
@@ -73,7 +71,7 @@ Then: only her envelope and the pointer; participants block not repeated
 ## Turn 3: Bob joins
 Given: Bob has a linked account and prefers PRs opened ready for review
 When: Bob replies: make it return bytes
-Then: Bob introduced; participants block re-emitted with two people; pointer names Bob
+Then: Bob introduced; only Bob's participant block sent, Alice's is not repeated; pointer names Bob
 
 ### dispatch appends
 ```xml
@@ -93,18 +91,11 @@ Then: Bob introduced; participants block re-emitted with two people; pointer nam
 
 ### run appends
 ```xml
-<dynamic-context kind="system" id="system:participants">
-<display_name>Thread participants</display_name>
-<content>- **Alice** — `user:0199e0ae-1111-7000-8000-00000000a11c`
-  - Commit as: `git config user.name Alice &amp;&amp; git config user.email alice@users.noreply.github.com`
-  - Workspace admin: yes
-  - New PRs: as drafts
-  - Standing instructions: none
-- **Bob** — `user:0199e0ae-2222-7000-8000-000000000b0b`
-  - Commit as: `git config user.name Bob &amp;&amp; git config user.email bob@users.noreply.github.com`
-  - Workspace admin: no
-  - New PRs: ready for review
-  - Standing instructions: none</content>
+<dynamic-context kind="participant" id="user:0199e0ae-2222-7000-8000-000000000b0b">
+<display_name>Bob</display_name>
+<git_identity>git config user.name Bob &amp;&amp; git config user.email bob@users.noreply.github.com</git_identity>
+<workspace_admin>no</workspace_admin>
+<new_prs>ready for review</new_prs>
 </dynamic-context>
 ```
 
@@ -117,7 +108,7 @@ Then: Bob introduced; participants block re-emitted with two people; pointer nam
 ## Turn 4: Alice switches to the web dashboard
 Given: the thread has Alice and Bob
 When: Alice types in the dashboard: ship it
-Then: same user: id as her Slack turns; participants block not repeated; her person block reappears once with the dashboard's attributes
+Then: same user: id as her Slack turns; no participant block re-sent; her person block reappears once with the dashboard's attributes
 
 ### dispatch appends
 ```xml
@@ -135,7 +126,7 @@ Then: same user: id as her Slack turns; participants block not repeated; her per
 ```
 
 ### run appends
-(system:participants: unchanged, not repeated)
+(participants: all already visible, none re-sent)
 
 ```xml
 <input-message sender="system:sender-context" surface="automation" kind="system">
@@ -146,7 +137,7 @@ Then: same user: id as her Slack turns; participants block not repeated; her per
 ## Turn 5: Bob sets standing instructions, then asks for the PR
 Given: Bob saved personal instructions between turns
 When: Bob replies: open the PR
-Then: participants block re-emitted because Bob's entry changed; pointer names Bob
+Then: only Bob's participant block is re-sent, now with his instructions; pointer names Bob
 
 ### dispatch appends
 ```xml
@@ -157,20 +148,13 @@ Then: participants block re-emitted because Bob's entry changed; pointer names B
 
 ### run appends
 ```xml
-<dynamic-context kind="system" id="system:participants">
-<display_name>Thread participants</display_name>
-<content>- **Alice** — `user:0199e0ae-1111-7000-8000-00000000a11c`
-  - Commit as: `git config user.name Alice &amp;&amp; git config user.email alice@users.noreply.github.com`
-  - Workspace admin: yes
-  - New PRs: as drafts
-  - Standing instructions: none
-- **Bob** — `user:0199e0ae-2222-7000-8000-000000000b0b`
-  - Commit as: `git config user.name Bob &amp;&amp; git config user.email bob@users.noreply.github.com`
-  - Workspace admin: no
-  - New PRs: ready for review
-  - Standing instructions: 
-    Never use ripgrep.
-    Run `make lint` before every push.</content>
+<dynamic-context kind="participant" id="user:0199e0ae-2222-7000-8000-000000000b0b">
+<display_name>Bob</display_name>
+<git_identity>git config user.name Bob &amp;&amp; git config user.email bob@users.noreply.github.com</git_identity>
+<workspace_admin>no</workspace_admin>
+<new_prs>ready for review</new_prs>
+<standing_instructions>Never use ripgrep.
+Run `make lint` before every push.</standing_instructions>
 </dynamic-context>
 ```
 
@@ -183,7 +167,7 @@ Then: participants block re-emitted because Bob's entry changed; pointer names B
 ## Turn 6: Carol, with no Open SWE account, chimes in
 Given: Carol never signed in to Open SWE
 When: she replies: can it handle unicode?
-Then: keyed by her Slack id, marked unlinked; her entry carries only what Slack knows
+Then: keyed by her Slack id, marked unlinked; only her participant block sent, with only what Slack knows
 
 ### dispatch appends
 ```xml
@@ -202,25 +186,11 @@ Then: keyed by her Slack id, marked unlinked; her entry carries only what Slack 
 
 ### run appends
 ```xml
-<dynamic-context kind="system" id="system:participants">
-<display_name>Thread participants</display_name>
-<content>- **Alice** — `user:0199e0ae-1111-7000-8000-00000000a11c`
-  - Commit as: `git config user.name Alice &amp;&amp; git config user.email alice@users.noreply.github.com`
-  - Workspace admin: yes
-  - New PRs: as drafts
-  - Standing instructions: none
-- **Bob** — `user:0199e0ae-2222-7000-8000-000000000b0b`
-  - Commit as: `git config user.name Bob &amp;&amp; git config user.email bob@users.noreply.github.com`
-  - Workspace admin: no
-  - New PRs: ready for review
-  - Standing instructions: 
-    Never use ripgrep.
-    Run `make lint` before every push.
-- **Carol** — `slack:U0CAR0L`
-  - Commit as: `git config user.name Carol &amp;&amp; git config user.email carol@example.com`
-  - Workspace admin: no
-  - New PRs: as drafts
-  - Standing instructions: none</content>
+<dynamic-context kind="participant" id="slack:U0CAR0L">
+<display_name>Carol</display_name>
+<git_identity>git config user.name Carol &amp;&amp; git config user.email carol@example.com</git_identity>
+<workspace_admin>no</workspace_admin>
+<new_prs>as drafts</new_prs>
 </dynamic-context>
 ```
 

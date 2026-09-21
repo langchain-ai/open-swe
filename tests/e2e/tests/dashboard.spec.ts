@@ -49,10 +49,15 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
     await expect(
       page.getByRole("link", { name: /Open fakeorg\/demo pull request #1/ }),
     ).toBeVisible();
-    await pullRequestLink.hover();
-    await expect(
-      page.getByTestId("pr-hover-card-fakeorg/demo-1"),
-    ).toBeVisible();
+    // The transcript is a stick-to-bottom scroller that can still shift after
+    // the reply streams in; a shift under the pointer closes the tooltip, so
+    // hover again until the card stays.
+    await expect(async () => {
+      await pullRequestLink.hover();
+      await expect(
+        page.getByTestId("pr-hover-card-fakeorg/demo-1"),
+      ).toBeVisible({ timeout: 2_000 });
+    }).toPass({ timeout: 20_000 });
   });
 
   test("shows an optimistic message before the idle-thread probe completes", async ({
@@ -284,7 +289,7 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
     const senderMarker = /Sent by \*\*/g;
     const countIn = (state: string, marker: RegExp) =>
       state.match(marker)?.length ?? 0;
-    // Every roster block the thread holds, so a repeat fails with the diff, not a count.
+    // Every participant block the thread holds, so a repeat fails with the diff, not a count.
     const rosterBlocks = (state: string): string[] => {
       const parsed = JSON.parse(state) as {
         values?: { messages?: Array<{ content?: unknown }> };
@@ -293,7 +298,9 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
         .map((message) =>
           typeof message.content === "string" ? message.content : "",
         )
-        .filter((content) => content.includes('id="system:participants"'));
+        .filter((content) =>
+          content.includes('<dynamic-context kind="participant"'),
+        );
     };
     const expectOneRoster = (state: string) => {
       const blocks = rosterBlocks(state);
@@ -365,8 +372,8 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
       .toBe(3);
     await waitForThreadIdle(page, threadId);
 
-    // Bob's standing instructions changed, so the roster — where they live — is
-    // re-emitted once; the pointer stays a pointer.
+    // The sender's standing instructions changed, so their participant block —
+    // where they live — is re-sent once; the pointer stays a pointer.
     const state = await threadState(page, threadId);
     expect(countIn(state, senderMarker)).toBe(3);
     const rosters = rosterBlocks(state);
@@ -374,8 +381,10 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
       rosters,
       rosters.join("\n\n=== next roster block ===\n\n"),
     ).toHaveLength(2);
-    expect(rosters[0]).toContain("Standing instructions: none");
-    expect(rosters[1]).toContain(instructions);
+    expect(rosters[0]).not.toContain("<standing_instructions>");
+    expect(rosters[1]).toContain(
+      `<standing_instructions>${instructions}</standing_instructions>`,
+    );
   });
 
   test("keeps the submitted message and thread view visible while a new chat starts", async ({

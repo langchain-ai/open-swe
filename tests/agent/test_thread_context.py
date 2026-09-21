@@ -12,13 +12,12 @@ from typing import Any, cast
 from langchain_core.messages import HumanMessage
 
 from agent.input_messages import (
-    PARTICIPANTS_CONTEXT_ID,
     PersonIdentity,
     channel_introduction,
     human_input,
     person_introduction,
 )
-from agent.prompt import construct_participants_context, construct_sender_context
+from agent.prompt import construct_sender_context
 from agent.server import PrepareAgentRunMiddleware
 from agent.utils.authorship import CollaboratorIdentity, ThreadParticipant
 
@@ -105,20 +104,20 @@ class Thread:
         self._append(envelope)
 
         self.dump.append("### run appends")
-        roster_msgs = PrepareAgentRunMiddleware._participants_messages(
-            cast(Any, self.state), construct_participants_context(participants)
+        participant_msgs = PrepareAgentRunMiddleware._participants_messages(
+            cast(Any, self.state), participants
         )
         pointer_msgs = PrepareAgentRunMiddleware._sender_context_messages(
             construct_sender_context(display_name, person_id)
         )
-        if not roster_msgs:
-            self.dump.append(f"({PARTICIPANTS_CONTEXT_ID}: unchanged, not repeated)\n")
-        for message in [*roster_msgs, *pointer_msgs]:
+        if not participant_msgs:
+            self.dump.append("(participants: all already visible, none re-sent)\n")
+        for message in [*participant_msgs, *pointer_msgs]:
             self._append(cast(str, message["content"]))
         return {
             "introduced": introduced,
             "envelope": envelope,
-            "roster": cast(str, roster_msgs[-1]["content"]) if roster_msgs else None,
+            "participants": [cast(str, m["content"]) for m in participant_msgs],
             "pointer": cast(str, pointer_msgs[-1]["content"]),
         }
 
@@ -136,7 +135,7 @@ def walkthrough() -> tuple[str, list[dict[str, Any]]]:
         title="Turn 1: Alice starts the thread from Slack",
         given="an empty thread; Alice has a linked GitHub account and is a workspace admin",
         when="she mentions the bot: add a greet() helper",
-        then="channel and Alice introduced; participants block emitted for the first time; pointer names Alice",
+        then="channel and Alice introduced; Alice's participant block sent; pointer names Alice",
         person_id=ALICE,
         person={
             "id": ALICE,
@@ -153,7 +152,7 @@ def walkthrough() -> tuple[str, list[dict[str, Any]]]:
         display_name="Alice",
         participants=[P_ALICE],
     )
-    assert t1["roster"] is not None and "**Alice**" in t1["roster"]
+    assert len(t1["participants"]) == 1 and f'id="{ALICE}"' in t1["participants"][0]
     assert 'timestamp="1789991539.477079"' in t1["envelope"]
     assert "Sent by **Alice**" in t1["pointer"]
     turns.append(t1)
@@ -162,7 +161,7 @@ def walkthrough() -> tuple[str, list[dict[str, Any]]]:
         title="Turn 2: Alice follows up",
         given="turn 1 has run to completion",
         when="Alice replies in the same Slack thread: also add a docstring",
-        then="only her envelope and the pointer; participants block not repeated",
+        then="only her envelope and the pointer; nothing about her has changed",
         person_id=ALICE,
         person=None,
         text="also add a docstring",
@@ -171,7 +170,7 @@ def walkthrough() -> tuple[str, list[dict[str, Any]]]:
         display_name="Alice",
         participants=[P_ALICE],
     )
-    assert t2["roster"] is None
+    assert t2["participants"] == []
     assert "Sent by **Alice**" in t2["pointer"]
     turns.append(t2)
 
@@ -179,7 +178,7 @@ def walkthrough() -> tuple[str, list[dict[str, Any]]]:
         title="Turn 3: Bob joins",
         given="Bob has a linked account and prefers PRs opened ready for review",
         when="Bob replies: make it return bytes",
-        then="Bob introduced; participants block re-emitted with two people; pointer names Bob",
+        then="Bob introduced; only Bob's participant block sent, Alice's is not repeated; pointer names Bob",
         person_id=BOB,
         person={
             "id": BOB,
@@ -194,15 +193,15 @@ def walkthrough() -> tuple[str, list[dict[str, Any]]]:
         display_name="Bob",
         participants=[P_ALICE, P_BOB],
     )
-    assert t3["roster"] is not None
-    assert "**Bob**" in t3["roster"] and "ready for review" in t3["roster"]
+    assert len(t3["participants"]) == 1 and f'id="{BOB}"' in t3["participants"][0]
+    assert "<new_prs>ready for review</new_prs>" in t3["participants"][0]
     turns.append(t3)
 
     t4 = thread.turn(
         title="Turn 4: Alice switches to the web dashboard",
         given="the thread has Alice and Bob",
         when="Alice types in the dashboard: ship it",
-        then="same user: id as her Slack turns; participants block not repeated; her person block reappears once with the dashboard's attributes",
+        then="same user: id as her Slack turns; no participant block re-sent; her person block reappears once with the dashboard's attributes",
         person_id=ALICE,
         person={
             "id": ALICE,
@@ -216,7 +215,7 @@ def walkthrough() -> tuple[str, list[dict[str, Any]]]:
         display_name="Alice",
         participants=[P_ALICE, P_BOB],
     )
-    assert t4["roster"] is None
+    assert t4["participants"] == []
     assert f'sender="{ALICE}"' in t4["envelope"] and 'surface="web"' in t4["envelope"]
     turns.append(t4)
 
@@ -224,7 +223,7 @@ def walkthrough() -> tuple[str, list[dict[str, Any]]]:
         title="Turn 5: Bob sets standing instructions, then asks for the PR",
         given="Bob saved personal instructions between turns",
         when="Bob replies: open the PR",
-        then="participants block re-emitted because Bob's entry changed; pointer names Bob",
+        then="only Bob's participant block is re-sent, now with his instructions; pointer names Bob",
         person_id=BOB,
         person=None,
         text="open the PR",
@@ -233,14 +232,15 @@ def walkthrough() -> tuple[str, list[dict[str, Any]]]:
         display_name="Bob",
         participants=[P_ALICE, P_BOB_INSTRUCTED],
     )
-    assert t5["roster"] is not None and "Never use ripgrep." in t5["roster"]
+    assert len(t5["participants"]) == 1 and f'id="{BOB}"' in t5["participants"][0]
+    assert "Never use ripgrep." in t5["participants"][0]
     turns.append(t5)
 
     t6 = thread.turn(
         title="Turn 6: Carol, with no Open SWE account, chimes in",
         given="Carol never signed in to Open SWE",
         when="she replies: can it handle unicode?",
-        then="keyed by her Slack id, marked unlinked; her entry carries only what Slack knows",
+        then="keyed by her Slack id, marked unlinked; only her participant block sent, with only what Slack knows",
         person_id=CAROL,
         person={
             "id": CAROL,
@@ -254,7 +254,7 @@ def walkthrough() -> tuple[str, list[dict[str, Any]]]:
         display_name="Carol",
         participants=[P_ALICE, P_BOB_INSTRUCTED, P_CAROL],
     )
-    assert t6["roster"] is not None and f"`{CAROL}`" in t6["roster"]
+    assert len(t6["participants"]) == 1 and f'id="{CAROL}"' in t6["participants"][0]
     assert any("<open_swe_account>unlinked</open_swe_account>" in c for c in t6["introduced"])
     turns.append(t6)
 

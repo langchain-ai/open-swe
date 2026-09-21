@@ -9,7 +9,7 @@ from langchain_core.outputs import ChatGeneration, ChatResult
 from agent.dashboard.agent_overrides import profile_draft_prs
 from agent.github import comments as github_comments
 from agent.github import webhook as github_webhooks
-from agent.prompt import construct_participants_context, construct_system_prompt
+from agent.prompt import construct_system_prompt, participant_context
 from agent.utils.authorship import (
     OPEN_SWE_BOT_EMAIL,
     OPEN_SWE_BOT_NAME,
@@ -162,17 +162,15 @@ def test_construct_system_prompt_shell_escapes_user_name() -> None:
     )
 
     system_prompt = construct_system_prompt(working_dir="/workspace")
-    collaboration_context = construct_participants_context(
-        [
-            ThreadParticipant(
-                identity=identity, person_id="user:0199e0ae-0000-7000-8000-000000000000"
-            )
-        ]
+    context = participant_context(
+        ThreadParticipant(identity=identity, person_id="user:0199e0ae-0000-7000-8000-000000000000")
     )
 
     assert hostile not in system_prompt
-    assert f"git config user.name {shlex.quote(hostile)}" in collaboration_context
-    assert f"git config user.name {hostile}" not in collaboration_context
+    assert context["git_identity"] == (
+        f"git config user.name {shlex.quote(hostile)} && git config user.email "
+        "1234+oconnor@users.noreply.github.com"
+    )
 
 
 def test_add_pr_collaboration_note_replaces_legacy_footer() -> None:

@@ -14,7 +14,7 @@ describe("streamMessagesToUi", () => {
       new HumanMessage({
         id: "participants",
         content:
-          '<dynamic-context kind="system" id="system:participants"><display_name>Thread participants</display_name><content>- **Alice**</content></dynamic-context>',
+          '<dynamic-context kind="participant" id="github:alice"><display_name>Alice</display_name><git_identity>git config user.name Alice</git_identity></dynamic-context>',
       }),
       new HumanMessage({
         id: "person-message",

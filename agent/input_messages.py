@@ -14,14 +14,12 @@ INJECTED_DYNAMIC_CONTEXT_HASHES_KEY = "injected_dynamic_context_hashes"
 SUMMARIZATION_EVENT_KEY = "_summarization_event"
 
 Surface = Literal["slack", "linear", "github", "web", "desktop", "automation", "eval"]
-EntityKind = Literal["person", "channel", "system"]
+EntityKind = Literal["person", "channel", "system", "participant"]
 MessageKind = Literal["human", "system"]
 
 # The run's own annotation of whoever sent the turn, appended after the turn's
 # message rather than being one; readers have to look past it to find the turn.
 SENDER_CONTEXT_SENDER_ID = "system:sender-context"
-# The thread's participants, a context block that re-emits only when it changes.
-PARTICIPANTS_CONTEXT_ID = "system:participants"
 # Every envelope a reader must look past: the transcript, the dashboard and the
 # scripted test model each have to agree on which messages nobody typed.
 TURN_ANNOTATION_SENDER_IDS = frozenset({SENDER_CONTEXT_SENDER_ID})
@@ -47,6 +45,17 @@ class ChannelIdentity(TypedDict):
     purpose: NotRequired[str]
 
 
+class ParticipantIdentity(TypedDict):
+    """How the agent acts for one person in the thread; one block per person."""
+
+    id: str
+    display_name: str
+    git_identity: str
+    workspace_admin: Literal["yes", "no"]
+    new_prs: Literal["as drafts", "ready for review"]
+    standing_instructions: NotRequired[str]
+
+
 class SystemIdentity(TypedDict):
     id: str
     display_name: str
@@ -55,7 +64,7 @@ class SystemIdentity(TypedDict):
     content: NotRequired[str]
 
 
-Identity = PersonIdentity | ChannelIdentity | SystemIdentity
+Identity = PersonIdentity | ChannelIdentity | SystemIdentity | ParticipantIdentity
 
 
 class InputMessageContext(TypedDict):
@@ -89,6 +98,13 @@ _ENTITY_FIELDS: dict[EntityKind, tuple[str, ...]] = {
     ),
     "channel": ("platform", "name", "thread_id", "topic", "purpose"),
     "system": ("display_name", "platform", "sender_type", "content"),
+    "participant": (
+        "display_name",
+        "git_identity",
+        "workspace_admin",
+        "new_prs",
+        "standing_instructions",
+    ),
 }
 _UNTRUSTED_ENTITY_FIELDS = frozenset({"topic", "purpose"})
 
@@ -254,6 +270,10 @@ def channel_introduction(channel: ChannelIdentity) -> RunMessage:
 
 def system_introduction(system: SystemIdentity) -> RunMessage:
     return _entity_message(system, "system")
+
+
+def participant_introduction(participant: ParticipantIdentity) -> RunMessage:
+    return _entity_message(participant, "participant")
 
 
 def _data_element(name: str, value: object) -> str:

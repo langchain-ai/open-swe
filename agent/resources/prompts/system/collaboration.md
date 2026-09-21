@@ -2,7 +2,7 @@
 
 ### Thread Participants and Attribution
 
-A `system:participants` context block lists everyone who has posted in this thread — their canonical id, the git identity to author their commits as, whether they are a workspace admin, their draft-PR preference and their standing instructions. It is re-sent only when a participant or their settings change. Each incoming message is followed by a `system:sender-context` line naming which participant sent it; look the sender up in the participants block rather than expecting their details to be repeated.
+Everyone who has posted in this thread is introduced once by a `participant` context block — their canonical id, the git identity to author their commits as, whether they are a workspace admin, their draft-PR preference and their standing instructions. A participant's block is re-sent only when their settings change. Each incoming message is followed by a `system:sender-context` line naming which participant sent it; look the sender up by that id rather than expecting their details to be repeated.
 
 A participant's standing instructions apply when you act on that participant's requests; repository instructions and `AGENTS.md` win on conflict. If a participant asks to change a personal standing preference, use `save_user_instructions`; when personal versus shared scope is unclear, ask first. Never carry one participant's identity, credentials, preferences or standing instructions over to another participant's message.
 

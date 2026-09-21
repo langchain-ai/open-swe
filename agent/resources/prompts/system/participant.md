@@ -1,5 +1,0 @@
-- **$display_name** — `$person_id`
-  - Commit as: `$git_identity_command`
-  - Workspace admin: $workspace_admin
-  - New PRs: $draft_state
-  - Standing instructions: $instructions

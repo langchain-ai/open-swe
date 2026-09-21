@@ -7,7 +7,7 @@ import pytest
 from langgraph.graph.state import RunnableConfig
 
 from agent import server
-from agent.prompt import construct_participants_context, construct_system_prompt
+from agent.prompt import construct_system_prompt, participant_context
 from agent.run_config import RunConfig
 from agent.sandboxes import lifecycle
 from agent.tools import workspaces as env_tools
@@ -484,8 +484,8 @@ def test_sender_context_includes_workspace_admin_status() -> None:
     admin = ThreadParticipant(identity=identity, person_id="user:1", workspace_admin=True)
     member = ThreadParticipant(identity=identity, person_id="user:1")
 
-    assert "Workspace admin: yes" in construct_participants_context([admin])
-    assert "Workspace admin: no" in construct_participants_context([member])
+    assert participant_context(admin)["workspace_admin"] == "yes"
+    assert participant_context(member)["workspace_admin"] == "no"
 
 
 def test_workspace_instructions_render_in_system_prompt() -> None:

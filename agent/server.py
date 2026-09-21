@@ -69,13 +69,11 @@ from agent.desktop import create_desktop_backend, desktop_artifact_routes, is_de
 from agent.desktop_branch import schedule_worktree_branch_rename
 from agent.github.token import resolve_github_token
 from agent.input_messages import (
-    PARTICIPANTS_CONTEXT_ID,
     SENDER_CONTEXT_SENDER_ID,
-    SystemIdentity,
     dynamic_context_hash,
     message_sender_id,
+    participant_introduction,
     system_input,
-    system_introduction,
     visible_dynamic_context_hashes,
 )
 from agent.mcp import load_mcp_tools
@@ -117,9 +115,9 @@ from agent.middleware.prepare_run import PrepareRunState
 from agent.middleware.sandbox_circuit_breaker import post_sandbox_unreachable_notification
 from agent.middleware.transcript import TranscriptMiddleware
 from agent.prompt import (
-    construct_participants_context,
     construct_sender_context,
     construct_system_prompt,
+    participant_context,
     render_open_swe_shared_base,
 )
 from agent.prompts import apply_tool_descriptions, load_prompt
@@ -578,12 +576,6 @@ def _general_purpose_subagent(
     return subagent
 
 
-_PARTICIPANTS_CONTEXT: SystemIdentity = {
-    "id": PARTICIPANTS_CONTEXT_ID,
-    "display_name": "Thread participants",
-}
-
-
 # Added to an admin thread's tools; see the admin-thread section of the prompt.
 ADMIN_TOOLS = (
     list_automations,
@@ -813,12 +805,17 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
         ]
 
     @staticmethod
-    def _participants_messages(state: PrepareRunState, participants_context: str) -> list[Any]:
-        """The roster as a context block, re-sent only when its content changed."""
-        block = system_introduction({**_PARTICIPANTS_CONTEXT, "content": participants_context})
-        if dynamic_context_hash(block["content"]) in visible_dynamic_context_hashes(state):
-            return []
-        return [block]
+    def _participants_messages(
+        state: PrepareRunState, participants: Sequence[ThreadParticipant]
+    ) -> list[Any]:
+        """One context block per participant, sent when theirs is not already visible."""
+        visible = visible_dynamic_context_hashes(state)
+        ordered = sorted(
+            participants,
+            key=lambda candidate: (candidate.identity.display_name.lower(), candidate.person_id),
+        )
+        blocks = [participant_introduction(participant_context(p)) for p in ordered]
+        return [block for block in blocks if dynamic_context_hash(block["content"]) not in visible]
 
     async def _prepare(self, state: PrepareRunState, runtime: Runtime) -> dict[str, Any]:  # noqa: ARG002
         schedule_thread_title_generation(
@@ -902,9 +899,7 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
                     sender_person_id=subject_id,
                 )
                 sender_messages = [
-                    *self._participants_messages(
-                        state, construct_participants_context(participants)
-                    ),
+                    *self._participants_messages(state, participants),
                     *self._sender_context_messages(
                         construct_sender_context(participants[0].identity.display_name, subject_id)
                     ),

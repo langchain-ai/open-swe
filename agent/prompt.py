@@ -1,12 +1,11 @@
 import logging
 import shlex
-import textwrap
-from collections.abc import Sequence
 from importlib import resources
 from pathlib import Path
 
 from agent.config import ENV
 from agent.github.comments import UNTRUSTED_GITHUB_COMMENT_OPEN_TAG
+from agent.input_messages import ParticipantIdentity
 from agent.prompts import load_prompt, render_prompt
 from agent.utils.authorship import (
     OPEN_SWE_BOT_EMAIL,
@@ -111,31 +110,23 @@ def _git_identity_command(identity: CollaboratorIdentity) -> str:
     )
 
 
-def _render_participant(participant: ThreadParticipant) -> str:
-    instructions = participant.instructions.strip()
-    return render_prompt(
-        "system/participant.md",
-        display_name=participant.identity.display_name,
-        person_id=participant.person_id,
-        git_identity_command=_git_identity_command(participant.identity),
-        workspace_admin="yes" if participant.workspace_admin else "no",
-        draft_state="as drafts" if participant.draft_prs else "ready for review",
-        instructions=textwrap.indent(f"\n{instructions}", "    ") if instructions else "none",
-    )
+def participant_context(participant: ThreadParticipant) -> ParticipantIdentity:
+    """One person's entry: introduced once, re-sent only when their settings change."""
+    context: ParticipantIdentity = {
+        "id": participant.person_id,
+        "display_name": participant.identity.display_name,
+        "git_identity": _git_identity_command(participant.identity),
+        "workspace_admin": "yes" if participant.workspace_admin else "no",
+        "new_prs": "as drafts" if participant.draft_prs else "ready for review",
+    }
+    if participant.instructions.strip():
+        context["standing_instructions"] = participant.instructions.strip()
+    return context
 
 
 def construct_sender_context(display_name: str, person_id: str) -> str:
-    """The turn's pointer at its sender; everything about them is in the roster."""
+    """The turn's pointer at its sender; everything about them is in their participant block."""
     return render_prompt("system/sender-context.md", display_name=display_name, person_id=person_id)
-
-
-def construct_participants_context(participants: Sequence[ThreadParticipant]) -> str:
-    """The roster, in a stable order so alternating senders leave it unchanged."""
-    ordered = sorted(
-        participants,
-        key=lambda candidate: (candidate.identity.display_name.lower(), candidate.person_id),
-    )
-    return "\n".join(_render_participant(candidate) for candidate in ordered)
 
 
 def _render_collaboration_section() -> str:
