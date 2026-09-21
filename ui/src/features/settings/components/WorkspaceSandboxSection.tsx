@@ -1,8 +1,14 @@
-import { useState } from "react"
+import { useId, useState } from "react"
 import { useMutation } from "@tanstack/react-query"
 
 import { SettingsRow, SettingsSection } from "@/components/AppShell"
 import { Button } from "@/components/ui/button"
+import {
+  Popover,
+  PopoverPopup,
+  PopoverTitle,
+  PopoverTrigger,
+} from "@/components/ui/popover"
 import { Textarea } from "@/components/ui/textarea"
 import { api, type WorkspaceRecord } from "@/lib/api"
 
@@ -14,6 +20,22 @@ const SNAPSHOT_LABEL: Record<
   capturing: "Capturing…",
   ready: "Image ready",
   failed: "Capture failed",
+}
+
+function WorkspaceReposPopover({ repos }: { repos: string[] }) {
+  return (
+    <Popover>
+      <PopoverTrigger className="cursor-pointer rounded-sm font-mono underline decoration-dotted underline-offset-4 hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring">
+        OPENSWE_WORKSPACE_REPOS
+      </PopoverTrigger>
+      <PopoverPopup align="start" className="w-96 max-w-[calc(100vw-2rem)]">
+        <PopoverTitle>Expanded value</PopoverTitle>
+        <pre className="mt-2 max-h-60 overflow-auto rounded-md bg-muted p-3 font-mono text-xs break-all whitespace-pre-wrap">
+          <code>{`OPENSWE_WORKSPACE_REPOS="${repos.join(" ")}"`}</code>
+        </pre>
+      </PopoverPopup>
+    </Popover>
+  )
 }
 
 function gib(bytes: number | null | undefined): string | null {
@@ -35,6 +57,8 @@ export function WorkspaceSandboxSection({
   onSaved: (saved: WorkspaceRecord) => void
   onRebuildStarted: () => void
 }) {
+  const setupId = useId()
+  const updateId = useId()
   const [setupScript, setSetupScript] = useState(record.setup_script ?? "")
   const [updateScript, setUpdateScript] = useState(record.update_script ?? "")
   const dirty =
@@ -56,7 +80,6 @@ export function WorkspaceSandboxSection({
 
   const status = record.snapshot_status ?? "none"
   const refreshing = record.refresh_status === "refreshing"
-  const workspaceRepos = record.repos.join(" ")
   const sizing = [
     record.vcpus === null || record.vcpus === undefined
       ? null
@@ -99,41 +122,34 @@ export function WorkspaceSandboxSection({
         />
       )}
       <div className="space-y-3 px-4 py-3.5">
-        <label className="block text-sm">
-          Setup script
+        <div className="text-sm">
+          <label htmlFor={setupId}>Setup script</label>
           <span className="mt-0.5 block text-xs text-muted-foreground">
             Runs on the base snapshot to build the image. Selected repositories
-            are available in <code>OPENSWE_WORKSPACE_REPOS</code>
-            {workspaceRepos && (
-              <>
-                {": "}
-                <code>{workspaceRepos}</code>
-              </>
-            )}
-            .
+            are available in <WorkspaceReposPopover repos={record.repos} />.
           </span>
           <Textarea
-            aria-label="Setup script"
+            id={setupId}
             className="mt-1 font-mono text-xs"
             placeholder="Install dependencies and build the image."
             value={setupScript}
             onChange={(e) => setSetupScript(e.target.value)}
           />
-        </label>
-        <label className="block text-sm">
-          Update script
+        </div>
+        <div className="text-sm">
+          <label htmlFor={updateId}>Update script</label>
           <span className="mt-0.5 block text-xs text-muted-foreground">
-            Runs on the current image to bring it up to date, with the same
-            <code className="ml-1">OPENSWE_WORKSPACE_REPOS</code> value.
+            Runs on the current image to bring it up to date, with the same{" "}
+            <WorkspaceReposPopover repos={record.repos} /> value.
           </span>
           <Textarea
-            aria-label="Update script"
+            id={updateId}
             className="mt-1 font-mono text-xs"
             placeholder="Pull repositories and reinstall dependencies."
             value={updateScript}
             onChange={(e) => setUpdateScript(e.target.value)}
           />
-        </label>
+        </div>
         {(save.error || rebuild.error) && (
           <p role="alert" className="text-xs text-destructive">
             {(save.error ?? rebuild.error)?.message}
