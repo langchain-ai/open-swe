@@ -72,7 +72,8 @@ async def auth_login(
         # the only credential the per-user reads need.
         if dev_login_enabled() and not desktop:
             return RedirectResponse(
-                f"/dashboard/api/auth/dev-login?{urlencode({'redirect_to': redirect_to or ''})}",
+                "/dashboard/api/auth/dev-login?"
+                + urlencode({"redirect_to": sanitize_redirect_to(redirect_to)}),
                 status_code=302,
             )
         raise HTTPException(500, "GITHUB_APP_CLIENT_ID not configured")
