@@ -1,5 +1,8 @@
+import { QuestionIcon } from "@phosphor-icons/react"
+
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
+import { Tooltip, TooltipPopup, TooltipTrigger } from "@/components/ui/tooltip"
 import { RepositoryPicker, SlackChannelPicker } from "./WorkspaceBindingPickers"
 import { type WorkspaceOption, type WorkspaceRecord } from "@/lib/api"
 
@@ -92,7 +95,25 @@ export function WorkspaceEditor({
         />
       </label>
       <div className="text-sm">
-        Repositories
+        <span className="inline-flex items-center gap-1.5">
+          Repositories
+          <Tooltip>
+            <TooltipTrigger
+              aria-label="About workspace repositories"
+              className="rounded-full text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+              type="button"
+            >
+              <QuestionIcon size={15} weight="fill" />
+            </TooltipTrigger>
+            <TooltipPopup className="max-w-72">
+              Assigning a repository makes this the workspace for requests
+              targeting that repository, whether submitted from the dashboard,
+              Slack, GitHub issues, or pull requests. Runs use this
+              workspace&apos;s sandbox, instructions, settings, and connections.
+              Each repository can belong to only one workspace.
+            </TooltipPopup>
+          </Tooltip>
+        </span>
         <div
           role="group"
           aria-label="Repositories"
