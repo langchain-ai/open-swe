@@ -1264,45 +1264,6 @@ async def slack_users_info(user: str = "") -> JSONResponse:
     )
 
 
-@app.get("/fake-slack/users.conversations")
-async def slack_users_conversations() -> JSONResponse:
-    return _ok(
-        {
-            "channels": [
-                {"id": "C01ENGINEERING", "name": "engineering", "num_members": 42},
-                {"id": "C01PRODUCT", "name": "product", "num_members": 18},
-                {"id": "C01SUPPORT", "name": "customer-support", "num_members": 24},
-            ],
-            "response_metadata": {"next_cursor": ""},
-        }
-    )
-
-
-@app.get("/fake-slack/conversations.list")
-async def slack_conversations_list() -> JSONResponse:
-    return _ok(
-        {
-            "channels": [
-                {
-                    "id": "C01ENGINEERING",
-                    "name": "engineering",
-                    "is_member": True,
-                    "num_members": 42,
-                },
-                {"id": "C01PRODUCT", "name": "product", "is_member": True, "num_members": 18},
-                {
-                    "id": "C01SUPPORT",
-                    "name": "customer-support",
-                    "is_member": True,
-                    "num_members": 24,
-                },
-                {"id": "C01DESIGN", "name": "design", "is_member": False, "num_members": 12},
-            ],
-            "response_metadata": {"next_cursor": ""},
-        }
-    )
-
-
 @app.get("/fake-slack/conversations.info")
 async def slack_conversations_info(channel: str = "") -> JSONResponse:
     code_channel = fakes.CODE_CHANNELS.get(channel)
