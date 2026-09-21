@@ -41,7 +41,7 @@ from agent.slack.thinking import (
     stream_slack_thinking_steps,
 )
 from agent.source_context import SlackThreadRef, SourceContext
-from agent.users import User
+from agent.users import User, persist_display_name
 from agent.utils.json_types import as_json_object
 from agent.utils.langsmith import get_langsmith_trace_url
 from agent.utils.thread_ops import (
@@ -715,7 +715,9 @@ async def _process_slack_mention_impl(
     user_timezone = ""
     if user_id and allowed_bot is None:
         slack_user = await common.get_slack_user_info(user_id)
+        team_id = ""
         if slack_user:
+            team_id = str(slack_user.get("team_id") or "")
             profile = slack_user.get("profile", {})
             if isinstance(profile, dict):
                 user_email = profile.get("email")
@@ -729,6 +731,7 @@ async def _process_slack_mention_impl(
             timezone_value = slack_user.get("tz")
             if isinstance(timezone_value, str):
                 user_timezone = timezone_value.strip()
+        await persist_display_name(user_id, user_name, team_id=team_id)
 
     thread_metadata = await common.authorize_github_thread(
         thread_id, (await _slack_login(user_id, user_email) or "") if allowed_bot is None else ""
