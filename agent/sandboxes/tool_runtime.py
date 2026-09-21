@@ -141,7 +141,7 @@ class ToolSurface:
 async def load_tool_surface(
     thread_id: str,
 ) -> tuple[ToolSurface, RunnableConfig, dict[str, object]]:
-    from agent.server import get_agent
+    from agent.server import build_agent
 
     context = await load_context(thread_id)
     if context is None:
@@ -158,6 +158,6 @@ async def load_tool_surface(
         },
     }
     surface = ToolSurface()
-    await get_agent(config, tool_surface=surface)
+    await build_agent(config, tool_surface=surface)
     await surface.prepare(state)
     return surface, config, state

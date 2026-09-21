@@ -141,7 +141,7 @@ async def test_restores_idle_context_and_initial_plan_restrictions(
     monkeypatch.setattr(tool_runtime, "get_client", lambda: client)
     source = surface()
 
-    async def get_agent(config: RunnableConfig, *, tool_surface: ToolSurface) -> object:
+    async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface) -> object:
         assert config["configurable"]["github_login"] == "owner"
         assert config["configurable"]["thread_id"] == "thread-a"
         tool_surface.graph = source.graph
@@ -149,7 +149,7 @@ async def test_restores_idle_context_and_initial_plan_restrictions(
         tool_surface.plan_excluded = source.plan_excluded
         return source.graph
 
-    monkeypatch.setattr(server, "get_agent", get_agent)
+    monkeypatch.setattr(server, "build_agent", build_agent)
     restored, _, _ = await tool_runtime.load_tool_surface("thread-a")
     assert "integration_echo" not in restored.tools
 
@@ -326,3 +326,15 @@ async def test_chunked_request_limit_precedes_json_parsing(monkeypatch: pytest.M
             headers={"Content-Type": "application/json"},
         )
     assert response.status_code == 413
+
+
+def test_agent_factory_is_accepted_by_langgraph() -> None:
+    from langgraph_api._factory_utils import FACTORY_KWARGS, classify_factory
+
+    from agent.server import traced_agent
+
+    graph_id = "sandbox-tools-factory-test"
+    try:
+        classify_factory(traced_agent, graph_id)
+    finally:
+        FACTORY_KWARGS.pop(graph_id, None)

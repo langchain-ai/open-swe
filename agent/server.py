@@ -924,7 +924,11 @@ class DesktopAgentState(FilesystemState, DeepAgentState):
     """Desktop agent state including snapshotted skill files."""
 
 
-async def get_agent(config: RunnableConfig, *, tool_surface: ToolSurface | None = None) -> Pregel:
+async def get_agent(config: RunnableConfig) -> Pregel:
+    return await build_agent(config)
+
+
+async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | None = None) -> Pregel:
     """Get or create an agent with a sandbox for the given thread."""
     configurable = config.get("configurable") or {}
     cfg = RunConfig.parse(configurable)
