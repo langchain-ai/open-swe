@@ -4,6 +4,7 @@ from contextlib import asynccontextmanager
 from types import SimpleNamespace
 from typing import cast
 from unittest.mock import AsyncMock, patch
+from uuid import UUID, uuid7
 from xml.etree import ElementTree
 
 import pytest
@@ -26,6 +27,7 @@ from agent.threads import proxy as thread_proxy
 from agent.threads import routes as thread_routes
 from agent.threads import runs as thread_runs
 from agent.threads import summary as thread_summary
+from agent.transcript.engine import AppendResult
 from agent.workspaces.store import WORKSPACES, WorkspaceCreate
 from tests.conftest import FakeStore, patch_thread_module
 
@@ -1210,6 +1212,63 @@ async def test_enrich_run_start_command_allowlists_client_configurable(monkeypat
     )
     assert offloaded["params"]["config"]["configurable"]["model_selection"] == "explicit"
     assert updates[-1]["model_selection"] == "explicit"
+
+
+async def test_enrich_run_start_command_reuses_a_deduplicated_turn(monkeypatch) -> None:
+    """A retried dispatch must join the turn its first request recorded."""
+
+    class FakeThreads:
+        async def update(self, *, thread_id: str, metadata: dict[str, object]) -> None:
+            return None
+
+    class FakeClient:
+        threads = FakeThreads()
+
+    async def fake_get_profile(login: str) -> dict[str, object]:
+        return {}
+
+    async def fake_ensure_token(login: str) -> None:
+        return None
+
+    async def fake_resolve_email(login: str, profile: dict[str, object]) -> str:
+        return "octocat@example.com"
+
+    patch_thread_module(monkeypatch, "langgraph_client", lambda: FakeClient())
+    patch_thread_module(monkeypatch, "get_profile", fake_get_profile)
+    patch_thread_module(monkeypatch, "_ensure_dashboard_github_token", fake_ensure_token)
+    patch_thread_module(monkeypatch, "resolve_run_email", fake_resolve_email)
+    monkeypatch.setattr(thread_runs.postgres, "configured", lambda: True)
+
+    recorded = uuid7()
+    appended: list[str] = []
+
+    async def fake_append(thread_id: str, commands) -> AppendResult:
+        appended.extend(command.command_id for command in commands)
+        # The receipt already covers this message: nothing is appended.
+        return AppendResult(versions=[1], events=[])
+
+    async def fake_recorded_turn_id(thread_id: str, command_id: str) -> UUID:
+        assert command_id == appended[-1]
+        return recorded
+
+    patch_thread_module(monkeypatch, "append", fake_append)
+    patch_thread_module(monkeypatch, "recorded_turn_id", fake_recorded_turn_id)
+
+    command = {
+        "method": "run.start",
+        "params": {
+            "input": {"messages": [{"type": "human", "content": "retry me"}]},
+            "config": {"configurable": {"agent_model_id": _VISION_MODEL}},
+        },
+    }
+    enriched = await thread_runs._enrich_run_start_command(
+        "tid",
+        "octocat",
+        command,
+        metadata={"source": "dashboard", "github_login": "octocat", "transcript": "v2"},
+    )
+
+    assert enriched["params"]["config"]["configurable"]["transcript_turn_id"] == str(recorded)
 
 
 async def test_proxy_run_start_from_slack_thread_updates_trace_reply(monkeypatch) -> None:
@@ -2988,6 +3047,63 @@ async def test_cancel_dashboard_thread_interrupts_runs_it_did_not_start(monkeypa
     )
     # Reported as interrupted even though the platform still says busy.
     assert result["status"] == "interrupted"
+
+
+async def test_cancel_settles_its_runs_before_the_queued_follow_up(monkeypatch) -> None:
+    """The replacement run's own turn must not be settled as interrupted."""
+    order: list[str] = []
+    thread = {
+        "thread_id": "thread-1",
+        "status": "busy",
+        "metadata": {"github_login": "owner", "latest_run_status": "running"},
+    }
+
+    class FakeThreads:
+        async def get(self, thread_id: str) -> dict[str, object]:
+            return thread
+
+        async def update(self, **kwargs: object) -> None:
+            return None
+
+    class FakeRuns:
+        async def list(self, thread_id: str, **kwargs: object) -> list[dict[str, str]]:
+            return [{"run_id": "running-run"}] if kwargs["status"] == "running" else []
+
+        async def cancel_many(self, **kwargs: object) -> None:
+            order.append("cancel")
+
+    class FakeStore:
+        async def get_item(self, namespace: tuple[str, str], key: str) -> dict[str, object]:
+            return {"value": {"messages": [{"text": "and also this"}]}}
+
+    class FakeClient:
+        threads = FakeThreads()
+        runs = FakeRuns()
+        store = FakeStore()
+
+    async def fake_settle(thread_id: str, run_id: str | None, **kwargs: object) -> None:
+        order.append(f"settle:{run_id}")
+        return None
+
+    async def fake_configurable(*args: object, **kwargs: object) -> dict[str, object]:
+        return {}
+
+    async def fake_dispatch(*args: object, **kwargs: object) -> dict[str, str]:
+        order.append("dispatch")
+        return {"run_id": "replacement-run"}
+
+    async def fake_summary(thread: dict[str, object]) -> dict[str, object]:
+        return {"thread_id": "thread-1"}
+
+    patch_thread_module(monkeypatch, "langgraph_client", lambda: FakeClient())
+    patch_thread_module(monkeypatch, "settle_run_turn", fake_settle)
+    patch_thread_module(monkeypatch, "_build_dashboard_configurable", fake_configurable)
+    patch_thread_module(monkeypatch, "dispatch_agent_run", fake_dispatch)
+    patch_thread_module(monkeypatch, "_thread_summary", fake_summary)
+
+    await handlers.cancel_dashboard_thread("thread-1", "owner")
+
+    assert order == ["cancel", "settle:running-run", "dispatch"]
 
 
 async def test_cancel_dashboard_thread_rejects_non_owner(monkeypatch) -> None:

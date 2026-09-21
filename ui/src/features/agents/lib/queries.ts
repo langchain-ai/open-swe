@@ -789,6 +789,8 @@ export interface CreateAgentThreadVariables {
   visibility?: "public" | "private"
   prompt: string
   images?: Array<ImageChunk>
+  /** Id the run was started with, shared with the graph's HumanMessage. */
+  client_message_id?: string
   repo?: string | null
   repo_explicitly_none?: boolean
   model_id?: string | null
@@ -805,7 +807,15 @@ export interface CreateAgentThreadVariables {
  */
 export function optimisticThread(
   threadId: string,
-  vars: CreateAgentThreadVariables
+  vars: CreateAgentThreadVariables,
+  options: {
+    /**
+     * Whether the server records new threads into the transcript log. The seed
+     * has to carry the same `transcript` stamp the server writes, or the thread
+     * page picks the SDK stream first and swaps sources on the next refetch.
+     */
+    recorded?: boolean
+  } = {}
 ): AgentThread {
   const now = Date.now()
   const text = vars.prompt.trim()
@@ -815,7 +825,7 @@ export function optimisticThread(
     ...(text ? [{ kind: "text", text } satisfies Chunk] : []),
   ]
   const message: Message = {
-    id: `optimistic-user-${threadId}`,
+    id: vars.client_message_id ?? `optimistic-user-${threadId}`,
     author: "user",
     timestamp: new Date(now).toISOString(),
     chunks,
@@ -823,6 +833,7 @@ export function optimisticThread(
   return {
     id: threadId,
     visibility: vars.visibility ?? "public",
+    ...(options.recorded ? { transcript: "v2" as const } : {}),
     title: text.slice(0, 80) || "New agent",
     repo: repoFullName.split("/")[1] ?? "",
     repoFullName,
@@ -837,7 +848,23 @@ export function optimisticThread(
     updatedAt: now,
     traceUrl: null,
     sandboxId: null,
-    messages: message.chunks.length > 0 ? [message] : [],
+    messages: chunks.length > 0 ? [message] : [],
+    // The thread page reads the transcript from its own source, which starts
+    // empty while it hydrates. Carrying the prompt as a pending message keeps
+    // it on screen across the handoff; the source drops it again as soon as it
+    // has the message under the same id.
+    pendingMessages:
+      chunks.length > 0
+        ? [
+            {
+              id: message.id,
+              content: text,
+              images: vars.images,
+              createdAt: now,
+              status: "sending",
+            },
+          ]
+        : [],
   }
 }
 

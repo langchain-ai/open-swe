@@ -119,12 +119,23 @@ async def api_update_workspace(
     body: WorkspaceUpdate,
     _admin: dict[str, Any] = ADMIN_DEP,
 ) -> Workspace:
+    normalized = _normalized_slug(slug)
+    previous = await WORKSPACES.get(normalized)
+    repos_changed = (
+        previous is not None
+        and body.repos is not None
+        and {repo.lower() for repo in body.repos} != {repo.lower() for repo in previous.repos}
+    )
+    if repos_changed and is_refresh_in_flight(previous):
+        raise HTTPException(409, "a refresh of this workspace is already running")
     try:
-        record = await WORKSPACES.apply_update(_normalized_slug(slug), body)
+        record = await WORKSPACES.apply_update(normalized, body)
     except ValueError as e:
         raise _save_conflict(e) from e
     if record.setup_script:
         await ensure_refresh_cron(record.slug)
+        if repos_changed and await start_refresh_run(record.slug) is None:
+            raise HTTPException(502, "workspace was saved but its snapshot rebuild could not start")
     return record
 
 

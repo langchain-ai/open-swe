@@ -240,10 +240,31 @@ async def test_update_writes_only_provided_fields() -> None:
 
 @pytest.mark.asyncio
 @pytest.mark.usefixtures("registry_db")
-async def test_update_rejects_a_rename_across_slugs() -> None:
-    await WORKSPACES.create(WorkspaceCreate(name="draft", repos=["acme/draft"]), "ramon")
-    with pytest.raises(ValueError, match="renaming a workspace"):
-        await WORKSPACES.apply_update("draft", WorkspaceUpdate(name="default"))
+async def test_rename_preserves_workspace_identity_and_snapshot() -> None:
+    await WORKSPACES.create(
+        WorkspaceCreate(name="draft", repos=["acme/draft"], slack_channel_ids=["C123"]),
+        "ramon",
+    )
+    await WORKSPACES.mark_captured(
+        "draft",
+        snapshot_id="snap-1",
+        snapshot_name="draft-image",
+        source_sandbox_id="sb-1",
+    )
+
+    updated = await WORKSPACES.apply_update("draft", WorkspaceUpdate(name="New name"))
+    persisted = await WORKSPACES.get("draft")
+
+    assert persisted == updated
+    assert updated.name == "New name"
+    assert updated.slug == "draft"
+    assert updated.repos == ["acme/draft"]
+    assert updated.slack_channel_ids == ["C123"]
+    assert updated.ready_snapshot_id == "snap-1"
+    assert updated.snapshot_name == "draft-image"
+    assert await WORKSPACES.get("new-name") is None
+    edited = await WORKSPACES.apply_update("draft", WorkspaceUpdate(name="New name", prompt="new"))
+    assert edited.prompt == "new"
 
 
 @pytest.mark.asyncio

@@ -43,6 +43,19 @@ def test_script_command_carries_the_script_verbatim() -> None:
     assert base64.b64decode(encoded).decode() == script
 
 
+def test_script_command_exposes_workspace_repositories() -> None:
+    command = env_store.script_command(
+        "printf '%s' \"$OPENSWE_WORKSPACE_REPOS\"",
+        "setup",
+        [
+            "acme/api",
+            "acme/web",
+        ],
+    )
+
+    assert "OPENSWE_WORKSPACE_REPOS='acme/api acme/web' bash -x" in command
+
+
 def test_script_command_traces_into_a_canonical_log_and_keeps_the_exit_code(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
