@@ -14,7 +14,7 @@ from langsmith.sandbox import SandboxClientError
 from agent.reviewer import PrepareReviewerRunMiddleware, _ensure_reviewer_sandbox_for_thread
 from agent.run_config import RunConfig
 from agent.sandboxes.lifecycle import SANDBOX_BACKENDS, ensure_sandbox_for_thread
-from agent.sandboxes.providers.registry import SandboxGoneError
+from agent.sandboxes.providers.registry import SandboxGoneError, SandboxProxyConfigError
 from agent.sandboxes.state import SandboxUnreachableError, set_sandbox_backend
 
 
@@ -139,6 +139,80 @@ async def test_failed_replacement_still_raises_sandbox_unreachable() -> None:
 
 
 @pytest.mark.asyncio
+async def test_rejected_proxy_config_is_not_treated_as_unreachable() -> None:
+    """A 4xx on the proxy PATCH is our request, not the sandbox; replacing it
+    would resend the same request, so the run must fail with the real reason."""
+    thread_id = "thread-reviewer-bad-proxy-config"
+    SANDBOX_BACKENDS.clear()
+    existing = MagicMock()
+    existing.id = "sandbox-live"
+    rejected = SandboxProxyConfigError(
+        "sandbox-live", 422, "value is required for plaintext headers"
+    )
+
+    with (
+        patch(
+            "agent.sandboxes.lifecycle.get_sandbox_metadata",
+            new_callable=AsyncMock,
+            return_value={"sandbox_id": "sandbox-live"},
+        ),
+        patch(
+            "agent.sandboxes.lifecycle.create_sandbox",
+            new_callable=AsyncMock,
+            return_value=existing,
+        ),
+        patch(
+            "agent.sandboxes.lifecycle._refresh_github_proxy",
+            new_callable=AsyncMock,
+            side_effect=rejected,
+        ),
+        patch(
+            "agent.sandboxes.lifecycle._create_sandbox_with_proxy",
+            new_callable=AsyncMock,
+        ) as create_replacement,
+        patch("agent.sandboxes.lifecycle.configure_git_identity", new_callable=AsyncMock),
+        patch("agent.sandboxes.lifecycle.client.threads.update", new_callable=AsyncMock),
+        pytest.raises(SandboxProxyConfigError) as excinfo,
+    ):
+        await ensure_sandbox_for_thread(thread_id, allow_replacement=True)
+
+    assert excinfo.value is rejected
+    create_replacement.assert_not_awaited()
+    SANDBOX_BACKENDS.clear()
+
+
+@pytest.mark.asyncio
+async def test_rejected_proxy_config_on_replacement_is_not_wrapped() -> None:
+    thread_id = "thread-reviewer-bad-proxy-config-on-create"
+    SANDBOX_BACKENDS.clear()
+    rejected = SandboxProxyConfigError("sandbox-new", 422, "bad header")
+
+    with (
+        patch(
+            "agent.sandboxes.lifecycle.get_sandbox_metadata",
+            new_callable=AsyncMock,
+            return_value={"sandbox_id": "sandbox-deleted"},
+        ),
+        patch(
+            "agent.sandboxes.lifecycle.create_sandbox",
+            new_callable=AsyncMock,
+            side_effect=SandboxGoneError("Sandbox 'sandbox-deleted' not found"),
+        ),
+        patch(
+            "agent.sandboxes.lifecycle._create_sandbox_with_proxy",
+            new_callable=AsyncMock,
+            side_effect=rejected,
+        ),
+        patch("agent.sandboxes.lifecycle.client.threads.update", new_callable=AsyncMock),
+        pytest.raises(SandboxProxyConfigError) as excinfo,
+    ):
+        await ensure_sandbox_for_thread(thread_id, allow_replacement=True)
+
+    assert excinfo.value is rejected
+    SANDBOX_BACKENDS.clear()
+
+
+@pytest.mark.asyncio
 async def test_unreachable_sandbox_still_fails_by_default() -> None:
     thread_id = "thread-agent-dead-sandbox"
     SANDBOX_BACKENDS.clear()
@@ -217,6 +291,40 @@ async def test_reviewer_notifies_when_replacement_also_fails() -> None:
         "sandbox_id": "sandbox-deleted",
         "replacement_attempted": True,
     }
+
+
+@pytest.mark.asyncio
+async def test_reviewer_posts_the_rejection_reason_when_proxy_config_is_refused() -> None:
+    config: RunnableConfig = {
+        "configurable": {"repo": {"owner": "langchain-ai", "name": "open-swe"}}
+    }
+    middleware = PrepareReviewerRunMiddleware(
+        thread_id="thread-reviewer", config=config, use_gateway=False
+    )
+    rejected = SandboxProxyConfigError(
+        "sandbox-live", 422, "value is required for plaintext headers"
+    )
+
+    with (
+        patch(
+            "agent.reviewer._ensure_reviewer_sandbox_for_thread",
+            new_callable=AsyncMock,
+            side_effect=rejected,
+        ),
+        patch("agent.reviewer.post_sandbox_notification", new_callable=AsyncMock) as notify,
+        patch(
+            "agent.reviewer.post_sandbox_unreachable_notification", new_callable=AsyncMock
+        ) as notify_unreachable,
+        pytest.raises(SandboxProxyConfigError),
+    ):
+        await middleware._prepare({"messages": []}, MagicMock())
+
+    notify_unreachable.assert_not_awaited()
+    notify.assert_awaited_once()
+    assert notify.await_args is not None
+    message = notify.await_args.args[1]
+    assert "plaintext headers" in message
+    assert "stopped responding" not in message
 
 
 @pytest.mark.asyncio

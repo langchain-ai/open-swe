@@ -112,7 +112,11 @@ from agent.middleware import (
 from agent.middleware.conversation_offloading import ConversationOffloadingMiddleware
 from agent.middleware.model_selection import ModelSelectionState, RoutingMode
 from agent.middleware.prepare_run import PrepareRunState
-from agent.middleware.sandbox_circuit_breaker import post_sandbox_unreachable_notification
+from agent.middleware.sandbox_circuit_breaker import (
+    post_sandbox_notification,
+    post_sandbox_unreachable_notification,
+    sandbox_config_rejected_message,
+)
 from agent.prompt import (
     construct_sender_context,
     construct_system_prompt,
@@ -135,6 +139,7 @@ from agent.sandboxes.lifecycle import (
 )
 from agent.sandboxes.paths import resolve_sandbox_work_dir
 from agent.sandboxes.providers.langsmith import service_identity_jwks_url
+from agent.sandboxes.providers.registry import SandboxProxyConfigError
 from agent.sandboxes.read_only_backend import ReadOnlyBackend
 from agent.sandboxes.state import (
     SandboxUnreachableError,
@@ -805,6 +810,11 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
             # why rather than getting silence.
             await post_sandbox_unreachable_notification(
                 self._config or {}, sandbox_id=exc.sandbox_id
+            )
+            raise
+        except SandboxProxyConfigError as exc:
+            await post_sandbox_notification(
+                self._config or {}, sandbox_config_rejected_message(str(exc))
             )
             raise
         del github_token

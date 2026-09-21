@@ -18,7 +18,11 @@ from agent.config import ENV
 from agent.github.proxy import get_recorded_proxy_base_config, record_proxy_token_expiry
 from agent.github.sandbox_access import SandboxGitHubAccess, workspace_token
 from agent.sandboxes.providers.langsmith import configure_github_proxy, get_sandbox_proxy_config
-from agent.sandboxes.providers.registry import SandboxGoneError, create_sandbox
+from agent.sandboxes.providers.registry import (
+    SandboxGoneError,
+    SandboxProxyConfigError,
+    create_sandbox,
+)
 from agent.sandboxes.state import (
     SANDBOX_BACKENDS,
     SANDBOX_CONNECTIONS,
@@ -253,6 +257,8 @@ async def _refresh_github_proxy_or_fail(
             base_proxy_config=base_proxy_config,
             workspace_slug=workspace_slug,
         )
+    except SandboxProxyConfigError:
+        raise
     except Exception as exc:
         logger.warning(
             "Failed to refresh GitHub proxy for sandbox %s on thread %s",
@@ -423,6 +429,8 @@ async def ensure_sandbox_for_thread(
                 )
                 created = True
                 created_proxy_config = get_recorded_proxy_base_config(thread_id)
+            except SandboxProxyConfigError:
+                raise
             except Exception as create_exc:
                 # Keep the failure typed so callers still recognize "this run has no
                 # sandbox" and can notify the user.
