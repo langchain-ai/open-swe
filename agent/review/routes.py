@@ -30,8 +30,10 @@ from agent.review.chat import (
 from agent.review.enabled_repos import list_enabled_review_repos, set_review_repo_enabled
 from agent.review.eval_jobs import get_reviewer_eval_status
 from agent.review.reviews import (
+    PullRequestPreview,
     ReviewSummary,
     create_review_comment,
+    get_pull_request_preview,
     get_review,
     get_review_diff,
     get_review_summaries,
@@ -190,6 +192,20 @@ async def submit_assessment_feedback(
     session: dict[str, object] = SESSION_DEP,
 ) -> AssessmentFeedback:
     return await save_feedback(owner, repo, pr_number, review_id, str(session["sub"]), submission)
+
+
+@router.get("/reviews/{owner}/{repo}/{pr_number}/preview")
+async def api_get_pull_request_preview(
+    owner: str,
+    repo: str,
+    pr_number: int,
+    session: dict[str, Any] = SESSION_DEP,
+) -> PullRequestPreview:
+    await require_repo_access_for_user(session["sub"], f"{owner}/{repo}")
+    token = await get_valid_access_token(session["sub"])
+    if not token:
+        raise HTTPException(401, "GitHub token unavailable, re-login required")
+    return await get_pull_request_preview(owner, repo, pr_number, token)
 
 
 @router.get("/reviews/{owner}/{repo}/{pr_number}/diff")

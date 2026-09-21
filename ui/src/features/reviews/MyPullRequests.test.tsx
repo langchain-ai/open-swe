@@ -315,13 +315,13 @@ describe("My PRs", () => {
     ).toBe(false)
   })
 
-  it("links the title to GitHub, keeps the number plain, and provides explicit destination links", async () => {
+  it("opens the preview from the title, keeps the number plain, and provides explicit destination links", async () => {
     mount()
     const title = await screen.findByText("Change 1")
     const card = title.closest("li")!
-    expect(title.closest("a")?.getAttribute("href")).toBe(
-      "https://github.com/acme/app/pull/1"
-    )
+    // The title opens the preview beside the list; GitHub stays an explicit link.
+    expect(title.closest("a")).toBeNull()
+    expect(title.closest("button")).toBeTruthy()
     expect(title.closest("h3")).toBeTruthy()
     expect(within(card).getByText("acme/app")).toBeTruthy()
     expect(screen.queryByText("feature/example")).toBeNull()
