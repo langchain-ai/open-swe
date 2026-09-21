@@ -18,6 +18,7 @@ from agent.dashboard.oauth import enforce_github_login_gate
 from agent.dashboard.options import SUPPORTED_MODEL_IDS, canonical_model_pair, model_supports_effort
 from agent.input_messages import input_message_text, message_sender_id
 from agent.invocation import resolve_invocation_id
+from agent.run_config import RunConfig
 from agent.slack.client import lookup_slack_thread_id, parse_github_pr_url, parse_slack_thread_url
 from agent.slack.code_channels import CODE_CHANNEL_SESSION_TS
 from agent.threads import plan_api, workflow_approval_api
@@ -986,6 +987,25 @@ async def manage_thread(
     )
     if unexpected:
         return _failure(f"Unexpected arguments for {action}: {', '.join(unexpected)}")
+    executing_thread_id = RunConfig.from_config(_config()).thread_id
+    if (
+        executing_thread_id
+        and thread_id == executing_thread_id
+        and action
+        in {
+            "cancel",
+            "admin_cancel",
+            "delete",
+            "resolve",
+            "unresolve",
+            "send_message",
+        }
+    ):
+        return _failure(
+            f"thread_id {thread_id} is the thread this tool call is executing inside; "
+            f"manage_thread cannot {action} its own session. Answer the user directly in "
+            "your response instead of mutating this thread."
+        )
     if action == "admin_cancel" and not actor.admin:
         return _failure("Only workspace admins can cancel another user's thread")
     if action == "delete" and not confirm:

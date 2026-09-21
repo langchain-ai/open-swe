@@ -8,6 +8,20 @@ from agent.baby_sit import BabySitWatch
 manage_tool = importlib.import_module("agent.tools.manage_baby_sit")
 
 
+async def test_manage_baby_sit_start_rejects_empty_payload() -> None:
+    result = await manage_tool.manage_baby_sit(
+        "   ", head_sha=" ", check_name="", details_url="\t", evidence=""
+    )
+
+    assert result == {
+        "success": False,
+        "error": (
+            "manage_baby_sit start requires non-empty pr_url, head_sha, check_name, "
+            "details_url, and evidence; received an empty payload."
+        ),
+    }
+
+
 async def test_manage_baby_sit_starts_cross_repo_watch_from_github_issue(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

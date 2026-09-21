@@ -68,6 +68,16 @@ async def manage_baby_sit(
     details_url: str = "",
 ) -> dict[str, Any]:
     """Implement the `manage_baby_sit` tool."""
+    if action == "start" and not any(
+        value.strip() for value in (pr_url, head_sha, check_name, details_url, evidence)
+    ):
+        return {
+            "success": False,
+            "error": (
+                "manage_baby_sit start requires non-empty pr_url, head_sha, check_name, "
+                "details_url, and evidence; received an empty payload."
+            ),
+        }
     pr_ref = parse_github_pr_url(pr_url)
     if pr_ref is None:
         return {"success": False, "error": "pr_url must be a canonical GitHub pull request URL"}
