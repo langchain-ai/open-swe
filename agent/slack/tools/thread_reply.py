@@ -130,7 +130,7 @@ async def slack_thread_reply(
             "message_chars": len(message),
             "hint": _slack_reply_failure_hint(slack_error),
         }
-    if run_id:
+    if run_id and not cfg.background_task_completion:
         # Slack drops the status when the app posts; a session keeps its on
         # whichever message currently holds it rather than on the session itself.
         if is_code_channel_session(str(thread_ts)):

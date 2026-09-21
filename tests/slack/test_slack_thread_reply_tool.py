@@ -68,6 +68,39 @@ async def test_reply_records_mapping_with_or_without_pending_choices(
     assert mapping.await_count == int(stores_mapping)
 
 
+@pytest.mark.parametrize("background_task_completion", [False, True])
+@pytest.mark.parametrize("thread_ts", ["1.0", "0"])
+async def test_reply_restores_status_only_for_foreground_runs(
+    monkeypatch: pytest.MonkeyPatch,
+    background_task_completion: bool,
+    thread_ts: str,
+) -> None:
+    monkeypatch.setattr(
+        slack_reply_tool,
+        "get_config",
+        lambda: {
+            "run_id": "run-1",
+            "configurable": {"background_task_completion": background_task_completion},
+        },
+    )
+    monkeypatch.setattr(
+        slack_reply_tool,
+        "get_active_slack_thread",
+        AsyncMock(return_value={"channel_id": "C1", "thread_ts": thread_ts}),
+    )
+    post = AsyncMock(return_value=("2.0", None))
+    monkeypatch.setattr(slack_reply_tool, "_post_and_store_mapping", post)
+    thinking_status = AsyncMock()
+    session_status = AsyncMock()
+    monkeypatch.setattr(slack_reply_tool, "restore_slack_thinking_status", thinking_status)
+    monkeypatch.setattr(slack_reply_tool, "restore_slack_session_status", session_status)
+
+    assert await slack_reply_tool.slack_thread_reply("The answer") == {"success": True}
+    post.assert_awaited_once()
+    assert thinking_status.await_count == int(not background_task_completion and thread_ts != "0")
+    assert session_status.await_count == int(not background_task_completion and thread_ts == "0")
+
+
 async def test_slack_thread_reply_holds_mutation_lock_while_posting(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
