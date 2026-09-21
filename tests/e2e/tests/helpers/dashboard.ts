@@ -9,7 +9,10 @@ export const OTHER_USER = { login: "bob", email: "bob@example.com" };
 // The dashboard's mutating routes enforce same-origin, which a browser sets for
 // itself but APIRequestContext does not.
 const BASE_URL = `http://127.0.0.1:${process.env.E2E_PORT ?? 2024}`;
-export const SAME_ORIGIN_HEADERS = { origin: BASE_URL, referer: `${BASE_URL}/` };
+export const SAME_ORIGIN_HEADERS = {
+  origin: BASE_URL,
+  referer: `${BASE_URL}/`,
+};
 
 export async function loginAs(
   page: Page,
