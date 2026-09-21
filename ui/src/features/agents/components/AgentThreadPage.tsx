@@ -7,6 +7,7 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { AgentThreadStreamBoundary } from "@/features/agents/lib/provider/useIsInAgentThreadStream"
 import { ThreadSourceProvider } from "@/features/agents/lib/threadSource/ThreadSourceProvider"
 import { useAgentThread } from "@/features/agents/lib/queries"
+import { useSession } from "@/lib/session"
 import {
   ensureThreadLoad,
   threadDetailFailed,
@@ -45,6 +46,14 @@ function AgentThreadContent({
   autoFocusComposer?: boolean
 }) {
   const threadQuery = useAgentThread(threadId)
+  const session = useSession()
+  // Both halves have to hold: the thread has to be recorded in the event log,
+  // and its reader has to have opted into being served from it. The session is
+  // resolved before any thread page renders, so this costs no request and the
+  // source is picked once rather than swapped under a mounted stream.
+  const transcript =
+    threadQuery.data?.transcript === "v2" &&
+    session.data?.transcript_streaming === true
   const timedOut = useLoadTimedOut(threadQuery.isPending)
   const title = threadQuery.data?.title
   const hasDetail = threadQuery.data !== undefined
@@ -94,7 +103,7 @@ function AgentThreadContent({
 
   return (
     <AgentThreadStreamBoundary active={active}>
-      <ThreadSourceProvider threadId={threadId}>
+      <ThreadSourceProvider threadId={threadId} transcript={transcript}>
         <AgentThreadView
           thread={threadQuery.data}
           autoFocusComposer={autoFocusComposer}
