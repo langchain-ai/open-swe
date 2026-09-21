@@ -45,10 +45,6 @@ def next_slack_ts() -> str:
     return f"{_slack_epoch}.{_slack_seq[0]:06d}"
 
 
-def new_thread_ts() -> str:
-    return next_slack_ts()
-
-
 def add_slack_message(
     channel: str, thread_ts: str, *, user: str, text: str, blocks: Any = None, is_bot: bool = False
 ) -> str:

@@ -42,7 +42,7 @@ from langchain_core.outputs import ChatGeneration, ChatResult
 
 
 def _slack_thread_ts(messages: list[BaseMessage]) -> str:
-    matches = re.findall(r"Thread TS: ([0-9.]+)", "\n".join(_text(m.content) for m in messages))
+    matches = re.findall(r"thread_id: ([0-9.]+)", "\n".join(_text(m.content) for m in messages))
     return matches[-1] if matches else ""
 
 
@@ -304,18 +304,29 @@ def _is_framing_block(header: str) -> bool:
     )
 
 
+def _envelope_follows(messages: list[BaseMessage], index: int) -> bool:
+    """Whether another input envelope arrives in the same dispatch as ``index``."""
+    for later in messages[index + 1 :]:
+        if not isinstance(later, HumanMessage):
+            return False
+        text = _text(later.content).lstrip()
+        if text.startswith("<dynamic-context "):
+            continue
+        return text.startswith("<input-message ")
+    return False
+
+
 def _script_humans(messages: list[BaseMessage]) -> list[HumanMessage]:
     """The user turns a script routes on, recovered from the structured stream.
 
-    A Slack dispatch replays the thread's earlier messages as context before the
-    system block that frames the mention, so only the message after that block is
-    the turn. An instruction Open SWE dispatches to itself — a plan decision, a
-    scheduled wake-up — carries no Slack timestamp and is always a turn, even
-    though it too arrives as a system envelope.
+    A Slack dispatch replays whatever the thread has not been handed yet ahead of
+    the message it was triggered by, and that message is always last, so a Slack
+    envelope is a turn only when nothing else follows it in the same dispatch. An
+    instruction Open SWE dispatches to itself — a plan decision, a scheduled
+    wake-up — carries no Slack timestamp and is always a turn.
     """
     selected: list[HumanMessage] = []
-    slack_request_pending = False
-    for message in messages:
+    for index, message in enumerate(messages):
         if not isinstance(message, HumanMessage):
             continue
         text = _text(message.content).lstrip()
@@ -324,12 +335,12 @@ def _script_humans(messages: list[BaseMessage]) -> list[HumanMessage]:
         if text.startswith("<input-message "):
             header = text.split(">", 1)[0]
             if _is_framing_block(header):
-                slack_request_pending = 'surface="slack"' in header
                 continue
-            if 'surface="slack"' in header and 'timestamp="' in header:
-                if slack_request_pending:
-                    selected.append(message)
-                    slack_request_pending = False
+            if (
+                'surface="slack"' in header
+                and 'timestamp="' in header
+                and _envelope_follows(messages, index)
+            ):
                 continue
         selected.append(message)
     return selected

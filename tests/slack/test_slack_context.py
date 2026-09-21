@@ -1063,6 +1063,9 @@ def _setup_slack_mention_fakes(
         async def get(self, thread_id: str) -> dict:
             return {"metadata": {"visibility": "public"}}
 
+        async def get_state(self, thread_id: str) -> dict:
+            return {"values": captured.get("thread_state_values", {"messages": []})}
+
         async def update(self, *, thread_id: str, metadata: dict) -> None:
             captured["metadata_update"] = {"thread_id": thread_id, "metadata": metadata}
 
@@ -1325,13 +1328,13 @@ def test_process_slack_mention_runs_without_a_repository(
     assert kwargs["config"]["configurable"]["repo"] is None
     if private:
         assert "Teammate instruction" not in str(kwargs["input"]["messages"])
-    prompt_message = next(
+    channel_block = next(
         message
         for message in kwargs["input"]["messages"]
         if isinstance(message["content"], str)
-        and 'sender="system:slack-context"' in message["content"]
+        and '<dynamic-context kind="channel"' in message["content"]
     )
-    assert "Default Repository Hint" not in prompt_message["content"]
+    assert "default_repo" not in channel_block["content"]
     metadata_update = captured.get("metadata_update", {})
     assert isinstance(metadata_update, dict)
     assert "repo" not in metadata_update.get("metadata", {})
@@ -1460,26 +1463,16 @@ def test_process_slack_mention_creates_thread_first_run_without_trace_reply(
     channel = next(entity for entity in entities if entity.attrib["id"] == "slack:C123")
     request_block = messages[-1]["content"][0]
     request = ElementTree.fromstring(request_block["text"]).findtext("content") or ""
-    prompt_message = next(
-        message
-        for message in messages
-        if isinstance(message["content"], str)
-        and 'sender="system:slack-context"' in message["content"]
-    )
-    prompt = ElementTree.fromstring(prompt_message["content"]).findtext("content") or ""
     # The run describes the trigger sender, so dispatch names them only in the envelope.
     assert not any(entity.attrib["id"] == "slack:U123" for entity in entities)
-    assert channel.attrib["id"] == "slack:C123"
-    assert "## Default Repository Hint\nlangchain-ai/open-swe" in prompt
-    assert "## Triggering User Time Zone\nAmerica/New_York" in prompt
-    assert prompt.count("## Slack Thread") == 1
-    assert f"Thread TS: {thread_ts}" in prompt
-    assert "## Open SWE Links" in prompt
-    assert f"- Web: https://app.example.com/agents/{expected_thread_id}" in prompt
-    assert "- Trace: https://smith/x" in prompt
-    assert "slack_thread_reply" not in prompt
-    assert "slack_add_reaction" not in prompt
-    assert "slack_read_thread_messages" not in prompt
+    # Everything that stays true of the thread rides the channel block, which is
+    # deduped by content, so nothing frames the mention turn by turn.
+    channel_text = channel.text or ""
+    assert f"thread_id: {thread_ts}" in channel_text
+    assert "default_repo: langchain-ai/open-swe" in channel_text
+    assert f"web_url: https://app.example.com/agents/{expected_thread_id}" in channel_text
+    assert "trace_url: https://smith/x" in channel_text
+    assert not any("system:slack-context" in str(message["content"]) for message in messages)
     assert request == "continue on the branch"
 
 
@@ -1543,16 +1536,17 @@ def test_process_slack_mention_treats_direct_message_as_implicit_mention(
     assert configurable["admin_thread"] is True
     assert configurable["slack_thread"]["channel_context"]["is_im"] is True
     messages = run_create["kwargs"]["input"]["messages"]
-    prompt_message = next(
-        message
-        for message in messages
-        if isinstance(message["content"], str)
-        and 'sender="system:slack-context"' in message["content"]
-    )
-    prompt = ElementTree.fromstring(prompt_message["content"]).findtext("content") or ""
+    serialized = [message["content"] for message in messages if isinstance(message["content"], str)]
     request_block = messages[-1]["content"][0]
     request = ElementTree.fromstring(request_block["text"]).findtext("content") or ""
-    assert "Context starts at: the previous direct message" in prompt
+    # Guidance that holds for the whole DM rides a context block, deduped by
+    # content, instead of framing every turn.
+    assert not any('sender="system:slack-context"' in text for text in serialized)
+    assert dm_session == any(
+        '<dynamic-context kind="system" id="system:slack-context"' in text for text in serialized
+    )
+    # The model wrote its own reply; replaying it would show it twice.
+    assert not any("agent response" in text for text in serialized)
     assert request == "continue on the branch"
     context_messages = captured["context_messages"]
     assert isinstance(context_messages, list)
@@ -2148,20 +2142,26 @@ def _context_input(messages: list[dict], **kwargs: object) -> list[str]:
         messages,
         cast(dict, kwargs.get("user_names_by_id", {"U123": "Alice", "UBOT": "Open SWE"})),
         cast(dict, kwargs.get("logins_by_user_id", {})),
-        channel_id="C123",
+        person_ids_by_user_id=cast(dict, kwargs.get("person_ids_by_user_id", {})),
+        channel={"id": "slack:C123", "platform": "slack"},
         bot_user_id="UBOT",
         event_ts="9.0",
         request_text="do the thing",
         request_blocks=[{"type": "text", "text": "do the thing"}],
-        operational_context="## Open SWE Links",
+        dispatched_timestamps=cast(set, kwargs.get("dispatched_timestamps", set())),
+        run_described_person_ids=cast(set, kwargs.get("run_described_person_ids", set())),
     )
     return [cast(str, message["content"]) for message in run_input["messages"]]
 
 
-def test_slack_context_attributes_own_replies_to_open_swe(
+def test_slack_context_never_replays_open_swes_own_replies(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Open SWE posts with a bot token, so its replies carry `user` *and* `bot_id`."""
+    """The model wrote them and already holds them; replaying shows it its own words twice.
+
+    Open SWE posts with a bot token, so its replies carry `user` *and* `bot_id`;
+    keying off `user` alone attributes them to a person instead.
+    """
     monkeypatch.setattr(webhook_common, "SLACK_BOT_USERNAME", "Open SWE")
     contents = _context_input(
         [
@@ -2171,14 +2171,41 @@ def test_slack_context_attributes_own_replies_to_open_swe(
         ]
     )
 
-    own_reply = next(text for text in contents if "on it" in text)
-    assert 'sender="system:open-swe"' in own_reply
-    assert 'kind="system"' in own_reply
-    assert any(
-        '<dynamic-context kind="system"' in text and "sender_type: self" in text
-        for text in contents
-    )
+    assert not any("on it" in text for text in contents)
+    assert not any("system:open-swe" in text for text in contents)
     assert not any('sender="slack:UBOT"' in text for text in contents)
+    assert any("please fix it" in text for text in contents)
+
+
+def test_slack_context_skips_messages_the_thread_already_holds() -> None:
+    """A follow-up replays the window since the last mention, most of it already sent."""
+    contents = _context_input(
+        [
+            {"ts": "1.0", "text": "<@UBOT> please fix it", "user": "U123"},
+            {"ts": "1.5", "text": "and mind the tests", "user": "U456"},
+            {"ts": "9.0", "text": "<@UBOT> do the thing", "user": "U123"},
+        ],
+        dispatched_timestamps={"1.0"},
+    )
+
+    assert not any("please fix it" in text for text in contents)
+    assert any("and mind the tests" in text for text in contents)
+
+
+def test_slack_context_leaves_a_replayed_author_to_the_run_when_it_describes_them() -> None:
+    contents = _context_input(
+        [
+            {"ts": "1.5", "text": "and mind the tests", "user": "U456"},
+            {"ts": "9.0", "text": "<@UBOT> do the thing", "user": "U123"},
+        ],
+        user_names_by_id={"U123": "Alice", "U456": "Mona"},
+        logins_by_user_id={"U456": "mona-gh"},
+        person_ids_by_user_id={"U456": "user:mona"},
+        run_described_person_ids={"user:mona"},
+    )
+
+    assert any('sender="user:mona"' in text for text in contents)
+    assert not any('<dynamic-context kind="person"' in text for text in contents)
 
 
 def test_slack_context_marks_other_bots_as_bots() -> None:
@@ -2295,13 +2322,12 @@ def _trigger_identities(
         messages,
         user_names_by_id if user_names_by_id is not None else {"U123": "Alice", "UBOT": "Open SWE"},
         logins_by_user_id if logins_by_user_id is not None else {},
-        channel_id="C123",
+        channel={"id": "slack:C123", "platform": "slack"},
         bot_user_id="UBOT",
         event_ts=event_ts,
         trigger_user_id=trigger_user_id,
         request_text="do the thing",
         request_blocks=[{"type": "text", "text": "do the thing"}],
-        operational_context="## Open SWE Links",
     )
     return [cast(str, message["content"]) for message in run_input["messages"]]
 

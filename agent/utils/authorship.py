@@ -93,6 +93,7 @@ class ThreadParticipant:
     draft_prs: bool = True
     instructions: str = ""
     email: str = ""
+    timezone: str = ""
     linked: bool = False
 
     def as_person(self) -> PersonIdentity:
@@ -106,6 +107,8 @@ class ThreadParticipant:
             person["commit_email"] = self.identity.commit_email
         if self.email:
             person["email"] = self.email
+        if self.timezone:
+            person["timezone"] = self.timezone
         person["open_swe_account"] = "linked" if self.linked else "unlinked"
         person["workspace_admin"] = "yes" if self.workspace_admin else "no"
         person["new_prs"] = "as drafts" if self.draft_prs else "ready for review"

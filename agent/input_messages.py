@@ -3,10 +3,10 @@
 import hashlib
 from collections.abc import Mapping
 from html import escape
-from typing import Any, Literal, NotRequired, TypedDict, cast
+from typing import Any, Literal, NotRequired, TypedDict
 from xml.etree import ElementTree
 
-from langchain_core.messages import AnyMessage, BaseMessage
+from langchain_core.messages import BaseMessage
 
 INJECTED_DYNAMIC_CONTEXT_HASHES_KEY = "injected_dynamic_context_hashes"
 # Written by the deepagents summarization middleware; the prompt it builds is the
@@ -40,12 +40,23 @@ class PersonIdentity(TypedDict):
 
 
 class ChannelIdentity(TypedDict):
+    """The conversation a message arrived in, with whatever stays true of it.
+
+    Thread-constant data belongs here rather than in a per-turn message: the
+    block is deduped by content, so the model is told once and told again only
+    when something about the conversation actually changes.
+    """
+
     id: str
     platform: str
     name: NotRequired[str]
     thread_id: NotRequired[str]
     topic: NotRequired[str]
     purpose: NotRequired[str]
+    description: NotRequired[str]
+    default_repo: NotRequired[str]
+    web_url: NotRequired[str]
+    trace_url: NotRequired[str]
 
 
 class SystemIdentity(TypedDict):
@@ -91,10 +102,20 @@ _ENTITY_FIELDS: dict[EntityKind, tuple[str, ...]] = {
         "new_prs",
         "standing_instructions",
     ),
-    "channel": ("platform", "name", "thread_id", "topic", "purpose"),
+    "channel": (
+        "platform",
+        "name",
+        "thread_id",
+        "topic",
+        "purpose",
+        "description",
+        "default_repo",
+        "web_url",
+        "trace_url",
+    ),
     "system": ("display_name", "platform", "sender_type", "content"),
 }
-_UNTRUSTED_ENTITY_FIELDS = frozenset({"topic", "purpose"})
+_UNTRUSTED_ENTITY_FIELDS = frozenset({"topic", "purpose", "description"})
 
 
 def _xml_text(value: object) -> str:
@@ -130,42 +151,53 @@ def injected_dynamic_context_hashes_from_metadata(metadata: object) -> set[str]:
     return {value for value in values if isinstance(value, str) and value}
 
 
-def message_sender_id(content: object, *, kind: MessageKind | None = None) -> str | None:
+def _content_texts(content: object) -> list[str]:
     values = content if isinstance(content, list) else [content]
-    for value in values:
-        text = value.get("text") if isinstance(value, dict) else value
-        if not isinstance(text, str) or "<input-message" not in text:
+    return [
+        text
+        for value in values
+        if isinstance(text := (value.get("text") if isinstance(value, dict) else value), str)
+    ]
+
+
+def _input_message_elements(content: object) -> list[ElementTree.Element]:
+    elements: list[ElementTree.Element] = []
+    for text in _content_texts(content):
+        if "<input-message" not in text:
             continue
         try:
             root = ElementTree.fromstring(text)
         except ElementTree.ParseError:
             continue
-        messages = [root] if root.tag == "input-message" else root.findall(".//input-message")
-        for message in messages:
-            sender = message.get("sender")
-            if sender and (kind is None or message.get("kind") == kind):
-                return sender
+        elements.extend([root] if root.tag == "input-message" else root.findall(".//input-message"))
+    return elements
+
+
+def message_sender_id(content: object, *, kind: MessageKind | None = None) -> str | None:
+    for message in _input_message_elements(content):
+        sender = message.get("sender")
+        if sender and (kind is None or message.get("kind") == kind):
+            return sender
     return None
 
 
 def input_message_text(content: object) -> str | None:
     """The authored text carried by a serialized input message, when present."""
-    texts: list[str] = []
-    values = content if isinstance(content, list) else [content]
-    for value in values:
-        text = value.get("text") if isinstance(value, dict) else value
-        if not isinstance(text, str) or "<input-message" not in text:
-            continue
-        try:
-            root = ElementTree.fromstring(text)
-        except ElementTree.ParseError:
-            continue
-        messages = [root] if root.tag == "input-message" else root.findall(".//input-message")
-        for message in messages:
-            body = message.findtext("content")
-            if body and body.strip():
-                texts.append(body.strip())
+    texts = [
+        body.strip()
+        for message in _input_message_elements(content)
+        if (body := message.findtext("content")) and body.strip()
+    ]
     return "\n\n".join(texts) or None
+
+
+def input_message_timestamps(content: object) -> set[str]:
+    """Source-message timestamps the serialized envelopes in ``content`` carry."""
+    return {
+        timestamp
+        for message in _input_message_elements(content)
+        if (timestamp := message.get("timestamp"))
+    }
 
 
 def dynamic_context_hash(content: object) -> str | None:
@@ -188,26 +220,21 @@ def dynamic_context_hash(content: object) -> str | None:
     return None
 
 
-def dynamic_context_messages(messages: object) -> list[AnyMessage]:
-    if not isinstance(messages, (list, tuple)):
-        return []
-    found: list[AnyMessage] = []
-    hashes: set[str] = set()
-    for message in messages:
-        if not isinstance(message, BaseMessage):
-            continue
-        message = cast(AnyMessage, message)
-        context_hash = dynamic_context_hash(message.content)
-        if context_hash is not None and context_hash not in hashes:
-            hashes.add(context_hash)
-            found.append(message)
-    return found
+def _message_content(message: object) -> object:
+    """The content of a message, whether it is a model object or its JSON form."""
+    if isinstance(message, BaseMessage):
+        return message.content
+    if isinstance(message, Mapping):
+        return message.get("content")
+    return None
 
 
 def dynamic_context_hashes_from_messages(messages: object) -> set[str]:
+    if not isinstance(messages, (list, tuple)):
+        return set()
     hashes: set[str] = set()
-    for message in dynamic_context_messages(messages):
-        context_hash = dynamic_context_hash(message.content)
+    for message in messages:
+        context_hash = dynamic_context_hash(_message_content(message))
         if context_hash is not None:
             hashes.add(context_hash)
     return hashes

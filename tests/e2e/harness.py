@@ -522,9 +522,10 @@ async def slack_send(request: Request) -> JSONResponse:
             channel, thread_ts, user=user_id, text=text, is_bot=False
         )
     else:
-        thread_ts = fakes.new_thread_ts()
-        fakes.add_slack_message(channel, thread_ts, user=user_id, text=text, is_bot=False)
-        event_ts = thread_ts
+        # A thread's opening message is its parent: Slack gives it one ts, which
+        # is both its own and the thread's.
+        event_ts = fakes.add_slack_message(channel, "", user=user_id, text=text, is_bot=False)
+        thread_ts = event_ts
     CURRENT_THREAD["channel"] = channel
     CURRENT_THREAD["thread_ts"] = thread_ts
 

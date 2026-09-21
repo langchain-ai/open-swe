@@ -205,9 +205,6 @@ async def test_message_update_dispatches_a_new_message_without_old_context(
         "resolve_slack_links_in_context",
         AsyncMock(return_value=("", [])),
     )
-    monkeypatch.setattr(
-        slack_webhook, "_format_slack_run_links_section", AsyncMock(return_value="")
-    )
     monkeypatch.setattr(slack_webhook.User, "login_for_slack", AsyncMock(return_value="alice"))
     monkeypatch.setattr(
         slack_webhook.common, "get_valid_access_token", AsyncMock(return_value="tok")
@@ -257,12 +254,6 @@ async def test_message_update_dispatches_a_new_message_without_old_context(
     assert store_args is not None
     assert store_args.kwargs["message_ts"] == "1.0"
     assert store_args.kwargs["agent_thread_id"] == "t1"
-
-
-def test_tagged_prompt_omits_untagged_wording() -> None:
-    preamble = slack_webhook._slack_prompt_preamble()
-
-    assert "NOT tagged" not in preamble
 
 
 @pytest.mark.asyncio

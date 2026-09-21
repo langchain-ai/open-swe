@@ -362,11 +362,15 @@ async def _user_for_login(login: str) -> User | None:
 
 
 async def _thread_participant(
-    identity: CollaboratorIdentity, config: RunnableConfig, *, person_id: str | None = None
+    identity: CollaboratorIdentity,
+    config: RunnableConfig,
+    *,
+    person_id: str | None = None,
+    timezone: str = "",
 ) -> ThreadParticipant:
     login = identity.github_login or None
     if login is None:
-        return ThreadParticipant(identity=identity, person_id=person_id or "")
+        return ThreadParticipant(identity=identity, person_id=person_id or "", timezone=timezone)
     user, profile, workspace_admin, instructions = await asyncio.gather(
         _user_for_login(login),
         load_profile(login),
@@ -386,6 +390,7 @@ async def _thread_participant(
         draft_prs=profile_draft_prs(profile),
         instructions=instructions or "",
         email=(user.email if user else "") or "",
+        timezone=timezone,
         linked=user is not None,
     )
 
@@ -397,6 +402,7 @@ async def _thread_participants(
     *,
     sender_person_id: str,
     sender_display_name: str = "",
+    sender_timezone: str = "",
 ) -> list[ThreadParticipant]:
     """Everyone in the thread, each with the settings the agent acts under for them.
 
@@ -420,7 +426,9 @@ async def _thread_participants(
     ]
     return list(
         await asyncio.gather(
-            _thread_participant(resolved_sender, config, person_id=sender_person_id),
+            _thread_participant(
+                resolved_sender, config, person_id=sender_person_id, timezone=sender_timezone
+            ),
             *(_thread_participant(identity, config) for identity in others),
         )
     )
@@ -917,6 +925,9 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
                     sender_person_id=subject_id,
                     sender_display_name=(
                         cfg.slack_thread.triggering_user_name if cfg.slack_thread else ""
+                    ),
+                    sender_timezone=(
+                        cfg.slack_thread.triggering_user_timezone if cfg.slack_thread else ""
                     ),
                 )
                 sender_messages = self._participants_messages(state, participants)

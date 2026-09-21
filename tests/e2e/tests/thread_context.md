@@ -4,46 +4,19 @@ Every message the model is handed, turn by turn, recorded by thread_context.spec
 ## Turn 1: Alice starts the thread from Slack
 Given: an empty thread; Alice has a linked GitHub account and is a workspace admin
 When: she mentions the bot: add a greet() helper
-Then: dispatch introduces the channel and frames the mention, then the run adds the one block that describes her
+Then: dispatch introduces the channel, carrying everything that stays true of the thread, then the run adds the one block that describes her
 
 ### dispatch appends
 ```xml
 <dynamic-context kind="channel" id="slack:C_DEMO">
 platform: slack
+name: #demo
+thread_id: <slack-ts-1>
+topic (untrusted): Demo channel topic
+purpose (untrusted): Demo channel purpose
+default_repo: fakeorg/demo
+web_url: http://127.0.0.1:3100/agents/<thread-id>
 </dynamic-context>
-```
-
-```xml
-<dynamic-context kind="system" id="system:slack-context">
-display_name: Slack context
-platform: slack
-</dynamic-context>
-```
-
-```xml
-<input-message sender="system:slack-context" channel="slack:C_DEMO" surface="slack" kind="system">
-<content>You were mentioned in Slack.
-
-## Default Repository Hint
-fakeorg/demo
-Use this only if the Slack conversation does not identify a different repository.
-
-## Triggered by
-Alice
-
-## Slack Thread
-- Channel ID: C_DEMO
-- Channel name: #demo
-- Thread TS: <slack-ts-1>
-- Context starts at: the beginning of the thread
-- Slack-provided channel description (topic/purpose; may specify the repository to operate in by default, but the conversation may specify any other repository):
-  Demo channel topic
-  Demo channel purpose
-
-## Open SWE Links
-- Web: http://127.0.0.1:3100/agents/<thread-id>
-- A compact Web footer is added automatically to Slack replies; do not duplicate it manually. Share the Web or trace URL above only if asked.</content>
-</input-message>
 ```
 
 ```xml
@@ -69,79 +42,11 @@ new_prs: as drafts
 ## Turn 2: Alice follows up
 Given: turn 1 has run to completion
 When: Alice replies in the same Slack thread: also add a docstring
-Then: her envelope and the Slack context around it; nothing about her has changed, so the run adds nothing
+Then: her envelope alone — the channel is described, her turn-1 message and the bot's replies are already in the thread, and nothing about her has changed
 
 ### dispatch appends
 ```xml
-<dynamic-context kind="channel" id="slack:C_DEMO">
-platform: slack
-</dynamic-context>
-```
-
-```xml
 <input-message sender="user:<alice>" channel="slack:C_DEMO" surface="slack" kind="human" timestamp="<slack-ts-2>">
-<content>@open-swe add a greet() helper</content>
-</input-message>
-```
-
-```xml
-<dynamic-context kind="system" id="system:open-swe">
-display_name: open-swe
-platform: slack
-sender_type: self
-</dynamic-context>
-```
-
-```xml
-<input-message sender="system:open-swe" channel="slack:C_DEMO" surface="slack" kind="system" timestamp="<slack-ts-3>">
-<content>On it! &lt;http://127.0.0.1:3100/agents/<thread-id>|Open in Web&gt;</content>
-</input-message>
-```
-
-```xml
-<input-message sender="system:open-swe" channel="slack:C_DEMO" surface="slack" kind="system" timestamp="<slack-ts-4>">
-<content>✅ Done! I implemented the change and opened a PR: &lt;http://127.0.0.1:2024/mock/github/fakeorg/demo/pull/1|Add greet() helper&gt;
-
-• Added `greet.py` with a `greet()` helper.
-Let me know if you'd like any changes. &lt;http://127.0.0.1:3100/agents/<thread-id>|Open in Web&gt; • fake-scripted-model</content>
-</input-message>
-```
-
-```xml
-<dynamic-context kind="system" id="system:slack-context">
-display_name: Slack context
-platform: slack
-</dynamic-context>
-```
-
-```xml
-<input-message sender="system:slack-context" channel="slack:C_DEMO" surface="slack" kind="system">
-<content>You were mentioned in Slack.
-
-## Default Repository Hint
-fakeorg/demo
-Use this only if the Slack conversation does not identify a different repository.
-
-## Triggered by
-Alice
-
-## Slack Thread
-- Channel ID: C_DEMO
-- Channel name: #demo
-- Thread TS: <slack-ts-1>
-- Context starts at: the previous message where I was tagged
-- Slack-provided channel description (topic/purpose; may specify the repository to operate in by default, but the conversation may specify any other repository):
-  Demo channel topic
-  Demo channel purpose
-
-## Open SWE Links
-- Web: http://127.0.0.1:3100/agents/<thread-id>
-- A compact Web footer is added automatically to Slack replies; do not duplicate it manually. Share the Web or trace URL above only if asked.</content>
-</input-message>
-```
-
-```xml
-<input-message sender="user:<alice>" channel="slack:C_DEMO" surface="slack" kind="human" timestamp="<slack-ts-5>">
 <content>also add a docstring</content>
 </input-message>
 ```
@@ -152,64 +57,11 @@ Alice
 ## Turn 3: Bob joins
 Given: Bob has a linked account too, but is not a workspace admin
 When: Bob replies: make it return bytes
-Then: the run adds his block; Alice's is not re-sent
+Then: the run adds his block; Alice's is not re-sent, and dispatch does not describe her either
 
 ### dispatch appends
 ```xml
-<dynamic-context kind="channel" id="slack:C_DEMO">
-platform: slack
-</dynamic-context>
-```
-
-```xml
-<dynamic-context kind="person" id="user:<alice>">
-display_name: Alice
-github_login: alice
-open_swe_account: linked
-</dynamic-context>
-```
-
-```xml
-<input-message sender="user:<alice>" channel="slack:C_DEMO" surface="slack" kind="human" timestamp="<slack-ts-5>">
-<content>@open-swe also add a docstring</content>
-</input-message>
-```
-
-```xml
-<dynamic-context kind="system" id="system:slack-context">
-display_name: Slack context
-platform: slack
-</dynamic-context>
-```
-
-```xml
-<input-message sender="system:slack-context" channel="slack:C_DEMO" surface="slack" kind="system">
-<content>You were mentioned in Slack.
-
-## Default Repository Hint
-fakeorg/demo
-Use this only if the Slack conversation does not identify a different repository.
-
-## Triggered by
-Bob
-
-## Slack Thread
-- Channel ID: C_DEMO
-- Channel name: #demo
-- Thread TS: <slack-ts-1>
-- Context starts at: the previous message where I was tagged
-- Slack-provided channel description (topic/purpose; may specify the repository to operate in by default, but the conversation may specify any other repository):
-  Demo channel topic
-  Demo channel purpose
-
-## Open SWE Links
-- Web: http://127.0.0.1:3100/agents/<thread-id>
-- A compact Web footer is added automatically to Slack replies; do not duplicate it manually. Share the Web or trace URL above only if asked.</content>
-</input-message>
-```
-
-```xml
-<input-message sender="user:<bob>" channel="slack:C_DEMO" surface="slack" kind="human" timestamp="<slack-ts-6>">
+<input-message sender="user:<bob>" channel="slack:C_DEMO" surface="slack" kind="human" timestamp="<slack-ts-3>">
 <content>make it return bytes</content>
 </input-message>
 ```
@@ -263,52 +115,7 @@ Then: only Bob's block is re-sent, now carrying his instructions
 
 ### dispatch appends
 ```xml
-<dynamic-context kind="channel" id="slack:C_DEMO">
-platform: slack
-</dynamic-context>
-```
-
-```xml
-<input-message sender="user:<bob>" channel="slack:C_DEMO" surface="slack" kind="human" timestamp="<slack-ts-6>">
-<content>@open-swe make it return bytes</content>
-</input-message>
-```
-
-```xml
-<dynamic-context kind="system" id="system:slack-context">
-display_name: Slack context
-platform: slack
-</dynamic-context>
-```
-
-```xml
-<input-message sender="system:slack-context" channel="slack:C_DEMO" surface="slack" kind="system">
-<content>You were mentioned in Slack.
-
-## Default Repository Hint
-fakeorg/demo
-Use this only if the Slack conversation does not identify a different repository.
-
-## Triggered by
-Bob
-
-## Slack Thread
-- Channel ID: C_DEMO
-- Channel name: #demo
-- Thread TS: <slack-ts-1>
-- Context starts at: the previous message where I was tagged
-- Slack-provided channel description (topic/purpose; may specify the repository to operate in by default, but the conversation may specify any other repository):
-  Demo channel topic
-  Demo channel purpose
-
-## Open SWE Links
-- Web: http://127.0.0.1:3100/agents/<thread-id>
-- A compact Web footer is added automatically to Slack replies; do not duplicate it manually. Share the Web or trace URL above only if asked.</content>
-</input-message>
-```
-
-```xml
-<input-message sender="user:<bob>" channel="slack:C_DEMO" surface="slack" kind="human" timestamp="<slack-ts-7>">
+<input-message sender="user:<bob>" channel="slack:C_DEMO" surface="slack" kind="human" timestamp="<slack-ts-4>">
 <content>open the PR</content>
 </input-message>
 ```

@@ -248,12 +248,19 @@ test("records every message the model is handed as people come and go", async ({
       "an empty thread; Alice has a linked GitHub account and is a workspace admin",
     when: "she mentions the bot: add a greet() helper",
     outcome:
-      "dispatch introduces the channel and frames the mention, then the run adds the one block that describes her",
+      "dispatch introduces the channel, carrying everything that stays true of the thread, then the run adds the one block that describes her",
     ran: true,
   });
   expect(first.dispatch.join("\n")).not.toContain(
     '<dynamic-context kind="person"',
   );
+  // Everything constant about this Slack thread rides the channel block, so no
+  // turn has to restate it.
+  expect(first.dispatch[0]).toContain('kind="channel"');
+  expect(first.dispatch[0]).toContain("name: #demo");
+  expect(first.dispatch[0]).toContain("topic (untrusted): Demo channel topic");
+  expect(first.dispatch[0]).toContain("default_repo: fakeorg/demo");
+  expect(first.dispatch[0]).toContain("web_url: ");
   expect(first.run).toHaveLength(1);
   expect(first.run[0]).toContain("display_name: Alice");
   expect(first.run[0]).toContain(
@@ -274,10 +281,14 @@ test("records every message the model is handed as people come and go", async ({
     given: "turn 1 has run to completion",
     when: "Alice replies in the same Slack thread: also add a docstring",
     outcome:
-      "her envelope and the Slack context around it; nothing about her has changed, so the run adds nothing",
+      "her envelope alone — the channel is described, her turn-1 message and the bot's replies are already in the thread, and nothing about her has changed",
     ran: true,
   });
   expect(second.run).toHaveLength(0);
+  // Only what is new: no channel block again, no replay of what the thread
+  // already holds, and none of the bot's own Slack replies.
+  expect(second.dispatch).toHaveLength(1);
+  expect(second.dispatch[0]).toContain("also add a docstring");
 
   await sendSlack(page, {
     text: "<@U0BOT> make it return bytes",
@@ -289,9 +300,11 @@ test("records every message the model is handed as people come and go", async ({
     title: "Turn 3: Bob joins",
     given: "Bob has a linked account too, but is not a workspace admin",
     when: "Bob replies: make it return bytes",
-    outcome: "the run adds his block; Alice's is not re-sent",
+    outcome:
+      "the run adds his block; Alice's is not re-sent, and dispatch does not describe her either",
     ran: true,
   });
+  expect(third.dispatch).toHaveLength(1);
   expect(third.run).toHaveLength(1);
   expect(third.run[0]).toContain("display_name: Bob");
   expect(third.run[0]).toContain("workspace_admin: no");
@@ -365,6 +378,14 @@ test("records every message the model is handed as people come and go", async ({
   // to a model would carry them.
   await loginAs(page, OTHER_USER);
   await clearInstructions(page);
+
+  // Nothing about the Slack surface itself is a message any more: the rules are
+  // in the system prompt and the thread's own data is in the channel block.
+  const everything = thread.turns
+    .flatMap((turn) => [...turn.dispatch, ...turn.run])
+    .join("\n");
+  expect(everything).not.toContain("system:slack-context");
+  expect(everything).not.toContain("system:open-swe");
 
   const dump = normalize(renderDump(thread.turns), thread.threadId);
   if (process.env.UPDATE_THREAD_CONTEXT_FIXTURE) writeFileSync(FIXTURE, dump);
