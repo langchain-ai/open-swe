@@ -125,6 +125,8 @@ export interface SessionUser {
   is_admin: boolean
   /** Mirrors the user's preference, so the thread page has it on first render. */
   transcript_streaming?: boolean
+  /** Mirrors the user's preference: what Enter does while a run is live. */
+  follow_up_behavior?: FollowUpBehavior
   /** Whether the server records new threads into the transcript log. */
   transcript_recording?: boolean
   slack_oauth_enabled?: boolean
@@ -496,6 +498,8 @@ export interface UserInstructions {
 }
 
 export type ThreadVisibility = "public" | "private"
+/** Queue holds a follow-up until the run ends; steer delivers it into the live run. */
+export type FollowUpBehavior = "queue" | "steer"
 
 export interface UserPreferences {
   default_visibility: ThreadVisibility
@@ -503,6 +507,7 @@ export interface UserPreferences {
   default_local_tracing_project: string
   default_workspace: string | null
   transcript_streaming: boolean
+  follow_up_behavior: FollowUpBehavior
 }
 
 export interface Skill {

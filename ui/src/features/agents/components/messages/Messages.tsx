@@ -15,7 +15,8 @@ import { useLiveMarkdownMessageId } from "@/features/agents/lib/provider/useLive
 
 function queuedStatusLabel(isNext: boolean, held: boolean): string {
   if (held) return "Waiting for you: send it now, or cancel to edit it."
-  if (isNext) return "Sends when the run ends. Send now steers the run instead."
+  if (isNext)
+    return "Sends when the run ends. Send now, or Enter on an empty composer, steers the run with it instead."
   return "Waits for the message ahead of it."
 }
 

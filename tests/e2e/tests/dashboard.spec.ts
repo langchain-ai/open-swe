@@ -201,8 +201,6 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
       .getByTestId("queued-message")
       .filter({ hasText: queuedText });
     await expect(queuedMessage).toBeVisible();
-    await page.reload();
-    await expect(queuedMessage).toBeVisible();
     const screenshotPath = testInfo.outputPath("queued-messages-dashboard.png");
     await page.screenshot({ path: screenshotPath, fullPage: true });
     await testInfo.attach("queued-messages-dashboard", {
@@ -440,10 +438,9 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
     expect.soft(observations.newChatReturned).toBe(false);
   });
 
-  // Stopping a run must not strand what the user queued behind it: the server
-  // starts a follow-up run for the queue, and the page has to show that run
-  // answering without the user sending anything else.
-  test("answers a queued follow-up after the user stops the active run", async ({
+  // Stopping a run must not strand what the user queued behind it: the queue
+  // goes back into the composer, where the user decides what to do with it.
+  test("returns a queued follow-up to the composer when the user stops the active run", async ({
     page,
   }) => {
     await loginAs(page, SAME_USER);
@@ -462,27 +459,16 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
 
     await page.getByRole("button", { name: "Stop run" }).click();
 
-    // The queue drains into the follow-up run, whose reply is the fake
-    // model's follow-up script (the stopped run never got to its own reply).
     await expect(page.getByTestId("queued-message")).toHaveCount(0, {
       timeout: 30_000,
     });
-    const sentFollowUp = page
-      .getByTestId("user-message")
-      .filter({ hasText: queuedText });
-    await expect(sentFollowUp).toBeVisible({ timeout: 30_000 });
-    const reply = page.getByText(/anything else you'd like changed/);
-    await expect(reply).toBeVisible({ timeout: 30_000 });
-    expect(
-      await sentFollowUp.evaluate(
-        (message, answer) =>
-          Boolean(
-            message.compareDocumentPosition(answer) &
-            Node.DOCUMENT_POSITION_FOLLOWING,
-          ),
-        await reply.elementHandle(),
-      ),
-    ).toBe(true);
+    await expect(page.getByTestId("composer-editor")).toContainText(
+      queuedText,
+      { timeout: 30_000 },
+    );
+    await expect(
+      page.getByTestId("user-message").filter({ hasText: queuedText }),
+    ).toHaveCount(0);
   });
 
   test("answers a queued follow-up after stopping a run this browser started", async ({

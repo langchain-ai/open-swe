@@ -198,6 +198,7 @@ async def me(session: dict[str, Any] = SESSION_DEP) -> dict[str, Any]:
             extra={"github_login": session["sub"]},
             exc_info=True,
         )
+    preferences = await get_user_preferences(session["sub"])
     return {
         "login": session["sub"],
         "email": session.get("email") or (user.email or None if user else None),
@@ -208,9 +209,7 @@ async def me(session: dict[str, Any] = SESSION_DEP) -> dict[str, Any]:
         # Read at render time by the thread page, which picks the transcript
         # event log over LangGraph state on it, so it rides the payload the
         # dashboard already boots on rather than a request of its own.
-        "transcript_streaming": (await get_user_preferences(session["sub"]))[
-            "transcript_streaming"
-        ],
+        **{key: preferences[key] for key in ("transcript_streaming", "follow_up_behavior")},
         # Whether new threads are stamped `transcript: v2` (`agent/threads/runs.py`),
         # so the thread the UI seeds after `run.start` can carry the same stamp.
         "transcript_recording": postgres.configured(),

@@ -15,6 +15,7 @@ logger = logging.getLogger(__name__)
 USER_PREFERENCES_NAMESPACE: list[str] = ["user_preferences"]
 
 ThreadVisibility = Literal["public", "private"]
+FollowUpBehavior = Literal["queue", "steer"]
 
 
 class UserPreferencesUpdate(BaseModel):
@@ -25,6 +26,9 @@ class UserPreferencesUpdate(BaseModel):
     # optional, reading from it is. Omitted (a client built before the field
     # existed) keeps the stored value rather than switching the reader back.
     transcript_streaming: bool | None = None
+    # What Enter does while a run is live: hold the message until the run ends,
+    # or steer the live run. Omitted keeps the stored value.
+    follow_up_behavior: FollowUpBehavior | None = None
 
 
 def _normalize(record: dict[str, Any] | None) -> dict[str, Any]:
@@ -39,6 +43,9 @@ def _normalize(record: dict[str, Any] | None) -> dict[str, Any]:
         "local_tracing_project": project if isinstance(project, str) and project.strip() else None,
         "default_workspace": normalized_workspace,
         "transcript_streaming": (record or {}).get("transcript_streaming") is True,
+        "follow_up_behavior": (
+            "steer" if (record or {}).get("follow_up_behavior") == "steer" else "queue"
+        ),
     }
 
 
@@ -68,6 +75,11 @@ async def set_user_preferences(login: str, update: UserPreferencesUpdate) -> dic
             update.transcript_streaming
             if update.transcript_streaming is not None
             else existing.get("transcript_streaming") is True
+        ),
+        "follow_up_behavior": (
+            update.follow_up_behavior
+            if update.follow_up_behavior is not None
+            else existing.get("follow_up_behavior")
         ),
         "created_at": existing.get("created_at") or now_iso(),
         "updated_at": now_iso(),

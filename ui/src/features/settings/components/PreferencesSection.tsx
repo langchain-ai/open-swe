@@ -21,7 +21,7 @@ import {
 } from "@/lib/notifications"
 import { agentsApi } from "@/features/agents/lib/api"
 import { api } from "@/lib/api"
-import type { ThreadVisibility } from "@/lib/api"
+import type { FollowUpBehavior, ThreadVisibility } from "@/lib/api"
 import { useTheme } from "@/lib/theme"
 
 const THEMES: Array<{ value: Theme; label: string }> = [
@@ -33,6 +33,11 @@ const THEMES: Array<{ value: Theme; label: string }> = [
 const VISIBILITIES: Array<{ value: ThreadVisibility; label: string }> = [
   { value: "private", label: "Private · only me" },
   { value: "public", label: "Workspace" },
+]
+
+const FOLLOW_UP_BEHAVIORS: Array<{ value: FollowUpBehavior; label: string }> = [
+  { value: "queue", label: "Queue" },
+  { value: "steer", label: "Steer" },
 ]
 
 // Radix's Select rejects an empty-string item value, so "no default" needs a
@@ -170,6 +175,38 @@ export function PreferencesSection() {
               {(workspaceOptions.data?.workspaces ?? []).map((workspace) => (
                 <SelectItem key={workspace.slug} value={workspace.slug}>
                   {workspace.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        }
+      />
+      <SettingsRow
+        label="Follow-up behavior"
+        description={
+          savePreferences.error
+            ? `Could not save: ${savePreferences.error.message}`
+            : "Queue follow-ups until the run ends, or steer the current run with them. ⌘↵ does the opposite for one message; Enter on an empty composer sends the next queued message now."
+        }
+        control={
+          <Select
+            value={preferences.data?.follow_up_behavior ?? "queue"}
+            onValueChange={(v) =>
+              v &&
+              savePreferences.mutate({
+                ...preferences.data!,
+                follow_up_behavior: v,
+              })
+            }
+            disabled={preferences.isLoading || savePreferences.isPending}
+          >
+            <SelectTrigger className="w-40">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {FOLLOW_UP_BEHAVIORS.map((behavior) => (
+                <SelectItem key={behavior.value} value={behavior.value}>
+                  {behavior.label}
                 </SelectItem>
               ))}
             </SelectContent>

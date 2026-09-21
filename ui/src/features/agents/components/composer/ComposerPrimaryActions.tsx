@@ -24,6 +24,8 @@ export interface ComposerPrimaryActionsProps {
   onStop?: () => void | Promise<void>
   /** Set false while the composer owns Escape (an open command menu or model picker). */
   stopOnEscape?: boolean
+  /** Label of the send button while a run is live. */
+  runningLabel?: string
 }
 
 function useEscapeToStop(enabled: boolean, onStop: () => void) {
@@ -172,7 +174,11 @@ function ThreadPrimaryActions(props: ComposerPrimaryActionsProps) {
   if (!running) return <SendButton {...props} />
 
   return props.canSubmit ? (
-    <SendButton {...props} canSubmit={!stopping} label="Queue message" />
+    <SendButton
+      {...props}
+      canSubmit={!stopping}
+      label={props.runningLabel ?? "Queue message"}
+    />
   ) : (
     <StopButton
       disabled={stopping}
@@ -202,7 +208,11 @@ function DirectPrimaryActions(props: ComposerPrimaryActionsProps) {
   )
   if (!running) return <SendButton {...props} />
   return props.canSubmit ? (
-    <SendButton {...props} canSubmit={!stopping} label="Queue message" />
+    <SendButton
+      {...props}
+      canSubmit={!stopping}
+      label={props.runningLabel ?? "Queue message"}
+    />
   ) : (
     <StopButton
       disabled={stopping}

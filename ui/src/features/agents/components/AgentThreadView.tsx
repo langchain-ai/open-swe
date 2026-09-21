@@ -57,7 +57,10 @@ import type {
   QueuePhase,
   QueuedComposerMessage,
 } from "@/features/agents/lib/queuedMessageStore"
-import type { RestoredDraft } from "@/features/agents/components/composer/ChatComposer"
+import type {
+  RestoredDraft,
+  SubmitOptions,
+} from "@/features/agents/components/composer/ChatComposer"
 import { agentsApi } from "@/features/agents/lib/api"
 import { rejectPlan } from "@/lib/plan"
 import { useSession } from "@/lib/session"
@@ -161,12 +164,21 @@ export function AgentThreadView({
   const queuedMessages = useQueuedMessages(thread.id)
   const sendInFlightRef = useRef(false)
 
+  const followUpBehavior = session.data?.follow_up_behavior ?? "queue"
   const submitMessage = useCallback(
-    async (content: string, images: Array<ImageChunk>) => {
+    async (
+      content: string,
+      images: Array<ImageChunk>,
+      options?: SubmitOptions
+    ) => {
       scrollControlRef.current?.scrollToBottom()
-      // While a run is live the draft waits for it to end; the release effect
-      // below then sends it through the same path as a direct send.
-      if (isStreaming && content.trim() !== "/offload") {
+      // While a run is live the draft either waits for it to end (the release
+      // effect below then sends it through the same path as a direct send) or
+      // goes straight through, which the server delivers into the live run.
+      // The preference sets the default; ⌘↵ flips it for one message.
+      const queue =
+        (followUpBehavior === "queue") !== (options?.alternate === true)
+      if (isStreaming && queue && content.trim() !== "/offload") {
         useQueuedMessageStore.getState().enqueue(thread.id, {
           text: content,
           images,
@@ -191,6 +203,7 @@ export function AgentThreadView({
       activePlanMode,
       activeSelection?.effort,
       activeSelection?.modelId,
+      followUpBehavior,
       isStreaming,
       planFeedbackPending,
       sendMessage,
@@ -259,6 +272,11 @@ export function AgentThreadView({
     },
     [queuedMessages, sendQueuedMessage]
   )
+  // Enter on an empty composer sends the head of the queue now.
+  const steerNextQueuedMessage = useCallback(() => {
+    const message = queuedMessages[0]
+    if (message) void sendQueuedMessage(message)
+  }, [queuedMessages, sendQueuedMessage])
   const removeQueuedMessage = useCallback(
     (id: string) => {
       const message = useQueuedMessageStore.getState().remove(thread.id, id)
@@ -577,6 +595,8 @@ export function AgentThreadView({
                 activeRun={activeRun}
                 onStop={stopRun}
                 onSubmit={submitMessage}
+                onEmptySubmit={steerNextQueuedMessage}
+                followUpBehavior={followUpBehavior}
                 restoreDraft={restoreDraft}
                 models={models}
                 routed={routed}

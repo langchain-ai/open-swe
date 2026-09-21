@@ -356,6 +356,7 @@ async def test_private_read_exposes_all_ordinary_settings_only_for_requester(
                 "default_visibility": "private",
                 "local_tracing_project": "tracing",
                 "transcript_streaming": True,
+                "follow_up_behavior": "queue",
             },
             "instructions": "",
             "connections": {"notion": {"connected": False}},
