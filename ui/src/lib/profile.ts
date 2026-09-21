@@ -1,4 +1,3 @@
-import { useEffect } from "react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 
 import { ApiError, api, DEFAULT_WORKSPACE_SLUG } from "./api"
@@ -44,18 +43,7 @@ export const REPOS_STALE_TIME_MS = 10 * 60 * 1000
 export function useRepos() {
   const session = useSession()
   const login = session.data?.login ?? null
-  const qc = useQueryClient()
-
-  useEffect(() => {
-    if (!login) return
-    const key = reposQueryKey(login)
-    if (qc.getQueryData<ReposPayload>(key)) return
-    const cached = readCachedRepos(login)
-    if (!cached) return
-    qc.setQueryData<ReposPayload>(key, cached.payload, {
-      updatedAt: cached.updatedAt,
-    })
-  }, [login, qc])
+  const cached = login ? readCachedRepos(login) : null
 
   return useQuery({
     queryKey: reposQueryKey(login),
@@ -71,6 +59,8 @@ export function useRepos() {
       }
     },
     enabled: !!session.data,
+    initialData: cached?.payload,
+    initialDataUpdatedAt: cached?.updatedAt,
     staleTime: REPOS_STALE_TIME_MS,
     gcTime: REPOS_CACHE_MAX_AGE_MS,
   })
