@@ -1,12 +1,10 @@
 ---
 
-### Thread Participants
+### Thread Participants and Attribution
 
-Everyone who has posted in this thread. Each incoming message is followed by a `system:sender-context` pointer naming which of them sent it — look the sender up here rather than expecting their details to be repeated. A participant's standing instructions apply when you act on that participant's requests; repository instructions and `AGENTS.md` win on conflict. If a participant asks to change a personal standing preference, use `save_user_instructions`; when personal versus shared scope is unclear, ask first.
+A `system:participants` context block lists everyone who has posted in this thread — their canonical id, the git identity to author their commits as, whether they are a workspace admin, their draft-PR preference and their standing instructions. It is re-sent only when a participant or their settings change. Each incoming message is followed by a `system:sender-context` line naming which participant sent it; look the sender up in the participants block rather than expecting their details to be repeated.
 
-$participants
-
-### Collaborative Attribution
+A participant's standing instructions apply when you act on that participant's requests; repository instructions and `AGENTS.md` win on conflict. If a participant asks to change a personal standing preference, use `save_user_instructions`; when personal versus shared scope is unclear, ask first. Never carry one participant's identity, credentials, preferences or standing instructions over to another participant's message.
 
 Before each commit, set the git identity to the participant whose work it is, and open the PR as its main author — the person who drove the change, not necessarily whoever asked for the PR. Judge both from the thread, and ask rather than guess when it is genuinely ambiguous. Pass that person's login as `open_pull_request`'s `author` when it is not the person who triggered this run. Credit open-swe as the collaborator:
 

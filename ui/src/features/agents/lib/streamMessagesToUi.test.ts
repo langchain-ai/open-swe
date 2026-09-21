@@ -9,12 +9,12 @@ describe("streamMessagesToUi", () => {
       new HumanMessage({
         id: "sender-context",
         content:
-          '<input-message sender="system:sender-context" surface="automation" kind="system"><content>Metadata for Alice</content></input-message>',
+          '<input-message sender="system:sender-context" surface="automation" kind="system"><content>Sent by **Alice** (`user:1`).</content></input-message>',
       }),
       new HumanMessage({
-        id: "collaboration",
+        id: "participants",
         content:
-          '<input-message sender="system:collaboration" surface="automation" kind="system"><content>Git identities you may author commits as</content></input-message>',
+          '<dynamic-context kind="system" id="system:participants"><display_name>Thread participants</display_name><content>- **Alice**</content></dynamic-context>',
       }),
       new HumanMessage({
         id: "person-message",

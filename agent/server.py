@@ -69,12 +69,12 @@ from agent.desktop import create_desktop_backend, desktop_artifact_routes, is_de
 from agent.desktop_branch import schedule_worktree_branch_rename
 from agent.github.token import resolve_github_token
 from agent.input_messages import (
-    COLLABORATION_SENDER_ID,
+    PARTICIPANTS_CONTEXT_ID,
     SENDER_CONTEXT_SENDER_ID,
     SystemIdentity,
-    build_input_messages,
     dynamic_context_hash,
     message_sender_id,
+    system_input,
     system_introduction,
     visible_dynamic_context_hashes,
 )
@@ -117,7 +117,7 @@ from agent.middleware.prepare_run import PrepareRunState
 from agent.middleware.sandbox_circuit_breaker import post_sandbox_unreachable_notification
 from agent.middleware.transcript import TranscriptMiddleware
 from agent.prompt import (
-    construct_collaboration_context,
+    construct_participants_context,
     construct_sender_context,
     construct_system_prompt,
     render_open_swe_shared_base,
@@ -578,16 +578,9 @@ def _general_purpose_subagent(
     return subagent
 
 
-_SENDER_CONTEXT_SYSTEM: SystemIdentity = {
-    "id": SENDER_CONTEXT_SENDER_ID,
-    "display_name": "Sender context",
-    "platform": "open-swe",
-}
-
-_COLLABORATION_SYSTEM: SystemIdentity = {
-    "id": COLLABORATION_SENDER_ID,
-    "display_name": "Collaboration",
-    "platform": "open-swe",
+_PARTICIPANTS_CONTEXT: SystemIdentity = {
+    "id": PARTICIPANTS_CONTEXT_ID,
+    "display_name": "Thread participants",
 }
 
 
@@ -806,58 +799,26 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
         )
 
     @staticmethod
-    def _sender_context_messages(
-        state: PrepareRunState, sender_context: str, *, sender_id: str
-    ) -> list[Any]:
-        """Sender context as its own message, appended after the run's input.
+    def _sender_context_messages(sender_context: str) -> list[Any]:
+        """The turn's pointer at its sender, appended after the run's input every turn.
 
-        Emitted every turn: the block is scoped to the message it follows, so
-        suppressing it as a duplicate left later turns describing a sender the
-        model was told not to carry forward.
-
-        Splicing it into the triggering message rewrote history: that message is
-        already cached from the run that received it, so every later run sent a
-        different byte sequence for it. The transcript renders one envelope per
-        message, so this arrives as a collapsed context pill rather than markup
-        inside the user's own text.
+        A separate message rather than a splice into the triggering message: that
+        message is already cached from the run that received it.
         """
-        identity: SystemIdentity = {**_SENDER_CONTEXT_SYSTEM, "subject_id": sender_id}
-        return cast(
-            list[Any],
-            build_input_messages(
+        return [
+            system_input(
                 sender_context,
-                {
-                    "sender_id": _SENDER_CONTEXT_SYSTEM["id"],
-                    "surface": "automation",
-                    "kind": "system",
-                },
-                systems=[identity],
-                injected_dynamic_context_hashes=visible_dynamic_context_hashes(state),
-            ),
-        )
+                {"sender_id": SENDER_CONTEXT_SENDER_ID, "surface": "automation", "kind": "system"},
+            )
+        ]
 
     @staticmethod
-    def _collaboration_messages(state: PrepareRunState, collaboration_context: str) -> list[Any]:
-        """Standing attribution rules and roster, reintroduced only when they change."""
-        identity: SystemIdentity = {
-            **_COLLABORATION_SYSTEM,
-            "context_hash": hashlib.sha256(collaboration_context.encode()).hexdigest(),
-        }
-        introduction_hash = dynamic_context_hash(system_introduction(identity)["content"])
-        if introduction_hash in visible_dynamic_context_hashes(state):
+    def _participants_messages(state: PrepareRunState, participants_context: str) -> list[Any]:
+        """The roster as a context block, re-sent only when its content changed."""
+        block = system_introduction({**_PARTICIPANTS_CONTEXT, "content": participants_context})
+        if dynamic_context_hash(block["content"]) in visible_dynamic_context_hashes(state):
             return []
-        return cast(
-            list[Any],
-            build_input_messages(
-                collaboration_context,
-                {
-                    "sender_id": _COLLABORATION_SYSTEM["id"],
-                    "surface": "automation",
-                    "kind": "system",
-                },
-                systems=[identity],
-            ),
-        )
+        return [block]
 
     async def _prepare(self, state: PrepareRunState, runtime: Runtime) -> dict[str, Any]:  # noqa: ARG002
         schedule_thread_title_generation(
@@ -941,14 +902,11 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
                     sender_person_id=subject_id,
                 )
                 sender_messages = [
-                    *self._collaboration_messages(
-                        state,
-                        construct_collaboration_context(participants),
+                    *self._participants_messages(
+                        state, construct_participants_context(participants)
                     ),
                     *self._sender_context_messages(
-                        state,
-                        construct_sender_context(participants[0].identity.display_name, subject_id),
-                        sender_id=subject_id,
+                        construct_sender_context(participants[0].identity.display_name, subject_id)
                     ),
                 ]
         try:

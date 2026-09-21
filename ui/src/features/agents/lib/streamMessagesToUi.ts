@@ -38,10 +38,7 @@ const FETCH_TOOLS = new Set(["fetch", "fetch_url", "http_request"])
 /** Bookkeeping calls the transcript never shows. */
 export const INTERNAL_TOOLS = new Set(["confirming_completion", "no_op"])
 // Platform metadata about a turn, not a turn anyone typed.
-const HIDDEN_SYSTEM_SENDERS = new Set([
-  "system:sender-context",
-  "system:collaboration",
-])
+const HIDDEN_SYSTEM_SENDERS = new Set(["system:sender-context"])
 
 type ToolKind = ToolExecutionChunk["toolKind"]
 

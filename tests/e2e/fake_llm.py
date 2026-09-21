@@ -338,7 +338,7 @@ def _script_humans(messages: list[BaseMessage]) -> list[HumanMessage]:
             if _is_framing_block(header):
                 slack_request_pending = 'surface="slack"' in header
                 continue
-            if 'surface="slack"' in header and "<timestamp>" in text:
+            if 'surface="slack"' in header and 'timestamp="' in header:
                 if slack_request_pending:
                     selected.append(message)
                     slack_request_pending = False

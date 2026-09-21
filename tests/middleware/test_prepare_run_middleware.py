@@ -1,5 +1,4 @@
 import asyncio
-import hashlib
 from typing import Any, cast
 from unittest.mock import MagicMock
 from xml.etree import ElementTree
@@ -10,7 +9,7 @@ from langchain.agents.middleware.types import ModelRequest, ModelResponse
 from langchain_core.messages import HumanMessage
 from langgraph.runtime import Runtime
 
-from agent.input_messages import human_input, system_input, system_introduction
+from agent.input_messages import human_input, system_introduction
 from agent.middleware.prepare_run import BasePrepareRunMiddleware, PrepareRunState
 from agent.server import PrepareAgentRunMiddleware
 from agent.utils import ttl_cache
@@ -104,120 +103,28 @@ def _sender_message(sender_id: str, text: str = "ship it") -> HumanMessage:
     return HumanMessage(content=cast(str, content))
 
 
-def _sender_context_introduction(sender_id: str) -> HumanMessage:
+def _participants_block(roster: str = "- **alice**") -> HumanMessage:
     content = system_introduction(
-        {
-            "id": "system:sender-context",
-            "display_name": "Sender context",
-            "platform": "open-swe",
-            "subject_id": sender_id,
-        }
+        {"id": "system:participants", "display_name": "Thread participants", "content": roster}
     )["content"]
     return HumanMessage(content=cast(str, content))
 
 
-def _collaboration_introduction(collaboration_context: str = "roster") -> HumanMessage:
-    content = system_introduction(
-        {
-            "id": "system:collaboration",
-            "display_name": "Collaboration",
-            "platform": "open-swe",
-            "context_hash": hashlib.sha256(collaboration_context.encode()).hexdigest(),
-        }
-    )["content"]
-    return HumanMessage(content=cast(str, content))
-
-
-def test_sender_context_arrives_as_its_own_message():
-    latest = _sender_message("user:0199e0ae-1111-7000-8000-000000000000")
-
-    messages = PrepareAgentRunMiddleware._sender_context_messages(
-        cast(PrepareRunState, {"messages": [latest]}),
-        "sender",
-        sender_id="user:0199e0ae-1111-7000-8000-000000000000",
-    )
-
-    assert len(messages) == 2
-    introduction = ElementTree.fromstring(cast(str, messages[0]["content"]))
-    assert introduction.findtext("subject_id") == "user:0199e0ae-1111-7000-8000-000000000000"
-    envelope = ElementTree.fromstring(cast(str, messages[-1]["content"]))
-    assert envelope.attrib["sender"] == "system:sender-context"
-    assert envelope.attrib["kind"] == "system"
-    assert envelope.findtext("content") == "sender"
-
-
-def test_sender_context_repeats_for_every_turn_from_the_same_sender():
-    """A later turn still gets the block that names who it is acting for."""
-    state = cast(
-        PrepareRunState,
-        {
-            "messages": [
-                _sender_context_introduction("github:ramon"),
-                _sender_message("github:ramon", "again"),
-            ]
-        },
-    )
-
-    messages = PrepareAgentRunMiddleware._sender_context_messages(
-        state, "sender", sender_id="github:ramon"
-    )
+def test_sender_pointer_is_one_system_message_every_turn():
+    messages = PrepareAgentRunMiddleware._sender_context_messages("Sent by **Ramon** (`user:1`).")
 
     assert len(messages) == 1
-    envelope = ElementTree.fromstring(cast(str, messages[-1]["content"]))
+    envelope = ElementTree.fromstring(cast(str, messages[0]["content"]))
     assert envelope.attrib["sender"] == "system:sender-context"
-    assert envelope.findtext("content") == "sender"
+    assert envelope.attrib["kind"] == "system"
+    assert envelope.findtext("content") == "Sent by **Ramon** (`user:1`)."
 
 
-def test_sender_context_introduces_a_new_sender():
-    state = cast(
-        PrepareRunState,
-        {
-            "messages": [
-                _sender_context_introduction("github:ramon"),
-                _sender_message("github:alice"),
-            ]
-        },
-    )
+def test_sender_pointer_escapes_untrusted_text():
+    messages = PrepareAgentRunMiddleware._sender_context_messages("Sent by **O'Connor <x>** & co.")
 
-    messages = PrepareAgentRunMiddleware._sender_context_messages(
-        state, "alice", sender_id="github:alice"
-    )
-    assert len(messages) == 2
-    introduction = ElementTree.fromstring(cast(str, messages[0]["content"]))
-    assert introduction.findtext("subject_id") == "github:alice"
-
-
-def test_sender_context_introduction_is_restored_after_compaction():
-    state = cast(
-        PrepareRunState,
-        {
-            "messages": [
-                _sender_context_introduction("github:ramon"),
-                _sender_message("github:ramon", "again"),
-            ],
-            "_summarization_event": {"cutoff_index": 1},
-        },
-    )
-
-    messages = PrepareAgentRunMiddleware._sender_context_messages(
-        state, "sender", sender_id="github:ramon"
-    )
-    assert len(messages) == 2
-
-
-def test_sender_context_escapes_untrusted_identity_text():
-    message = _sender_message("slack:U1", "ship it <now> & fast")
-    original = message.content
-
-    messages = PrepareAgentRunMiddleware._sender_context_messages(
-        cast(PrepareRunState, {"messages": [message]}),
-        "identity: 'ramon' & <team>",
-        sender_id="slack:U1",
-    )
-
-    assert message.content == original
-    envelope = ElementTree.fromstring(cast(str, messages[-1]["content"]))
-    assert envelope.findtext("content") == "identity: 'ramon' & <team>"
+    envelope = ElementTree.fromstring(cast(str, messages[0]["content"]))
+    assert envelope.findtext("content") == "Sent by **O'Connor <x>** & co."
 
 
 def test_sender_subject_id_is_none_without_a_human_message():
@@ -236,47 +143,51 @@ def test_sender_subject_id_prefers_the_latest_human_sender():
     assert PrepareAgentRunMiddleware._sender_subject_id(state, None) == "github:alice"
 
 
-def test_collaboration_context_is_skipped_while_visible():
-    state = cast(PrepareRunState, {"messages": [_collaboration_introduction()]})
-
-    assert PrepareAgentRunMiddleware._collaboration_messages(state, "roster") == []
-
-
-def test_collaboration_context_returns_when_the_roster_changes():
-    state = cast(PrepareRunState, {"messages": [_collaboration_introduction("roster")]})
-
-    messages = PrepareAgentRunMiddleware._collaboration_messages(state, "roster with alice")
-
-    assert len(messages) == 2
-    envelope = ElementTree.fromstring(cast(str, messages[-1]["content"]))
-    assert envelope.attrib["sender"] == "system:collaboration"
-    assert envelope.findtext("content") == "roster with alice"
-
-
-@pytest.mark.parametrize("has_human_history", [False, True])
-def test_bot_sender_context_uses_bot_identity(has_human_history: bool):
+def test_sender_subject_id_honors_an_explicit_bot_sender():
     bot_id = "system:slack-bot-B123"
-    bot_request = HumanMessage(
-        content=cast(
-            str,
-            system_input(
-                "Open a PR",
-                {"sender_id": bot_id, "surface": "slack", "kind": "system"},
-            )["content"],
-        )
-    )
-    history = [_sender_message("github:someone-else")] if has_human_history else []
-    state = cast(PrepareRunState, {"messages": [*history, bot_request]})
+    state = cast(PrepareRunState, {"messages": [_sender_message("github:someone-else")]})
 
-    messages = PrepareAgentRunMiddleware._sender_context_messages(
-        state, "bot owner's context", sender_id=bot_id
+    assert PrepareAgentRunMiddleware._sender_subject_id(state, bot_id) == bot_id
+
+
+def test_participants_block_is_a_context_block_with_the_roster():
+    messages = PrepareAgentRunMiddleware._participants_messages(
+        cast(PrepareRunState, {"messages": [_sender_message("github:ramon")]}), "- **ramon**"
     )
 
-    assert len(messages) == 2
-    introduction = ElementTree.fromstring(cast(str, messages[0]["content"]))
-    assert introduction.findtext("subject_id") == bot_id
-    envelope = ElementTree.fromstring(cast(str, messages[-1]["content"]))
-    assert envelope.findtext("content") == "bot owner's context"
+    assert len(messages) == 1
+    block = ElementTree.fromstring(cast(str, messages[0]["content"]))
+    assert block.tag == "dynamic-context"
+    assert block.attrib["id"] == "system:participants"
+    assert block.findtext("content") == "- **ramon**"
+
+
+def test_participants_block_is_skipped_while_visible():
+    state = cast(PrepareRunState, {"messages": [_participants_block("- **alice**")]})
+
+    assert PrepareAgentRunMiddleware._participants_messages(state, "- **alice**") == []
+
+
+def test_participants_block_returns_when_the_roster_changes():
+    state = cast(PrepareRunState, {"messages": [_participants_block("- **alice**")]})
+
+    messages = PrepareAgentRunMiddleware._participants_messages(state, "- **alice**\n- **bob**")
+
+    assert len(messages) == 1
+    block = ElementTree.fromstring(cast(str, messages[0]["content"]))
+    assert block.findtext("content") == "- **alice**\n- **bob**"
+
+
+def test_participants_block_is_restored_after_compaction():
+    state = cast(
+        PrepareRunState,
+        {
+            "messages": [_participants_block("- **alice**"), _sender_message("github:alice")],
+            "_summarization_event": {"cutoff_index": 1},
+        },
+    )
+
+    assert len(PrepareAgentRunMiddleware._participants_messages(state, "- **alice**")) == 1
 
 
 @pytest.mark.asyncio

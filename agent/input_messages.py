@@ -20,11 +20,11 @@ MessageKind = Literal["human", "system"]
 # The run's own annotation of whoever sent the turn, appended after the turn's
 # message rather than being one; readers have to look past it to find the turn.
 SENDER_CONTEXT_SENDER_ID = "system:sender-context"
-# Attribution rules that hold for the whole thread, appended the same way.
-COLLABORATION_SENDER_ID = "system:collaboration"
-# Every block a reader must look past: the transcript, the dashboard and the
+# The thread's participants, a context block that re-emits only when it changes.
+PARTICIPANTS_CONTEXT_ID = "system:participants"
+# Every envelope a reader must look past: the transcript, the dashboard and the
 # scripted test model each have to agree on which messages nobody typed.
-TURN_ANNOTATION_SENDER_IDS = frozenset({SENDER_CONTEXT_SENDER_ID, COLLABORATION_SENDER_ID})
+TURN_ANNOTATION_SENDER_IDS = frozenset({SENDER_CONTEXT_SENDER_ID})
 
 
 class PersonIdentity(TypedDict):
@@ -52,8 +52,7 @@ class SystemIdentity(TypedDict):
     display_name: str
     platform: NotRequired[str]
     sender_type: NotRequired[str]
-    subject_id: NotRequired[str]
-    context_hash: NotRequired[str]
+    content: NotRequired[str]
 
 
 Identity = PersonIdentity | ChannelIdentity | SystemIdentity
@@ -89,7 +88,7 @@ _ENTITY_FIELDS: dict[EntityKind, tuple[str, ...]] = {
         "open_swe_account",
     ),
     "channel": ("platform", "name", "thread_id", "topic", "purpose"),
-    "system": ("display_name", "platform", "sender_type", "subject_id", "context_hash"),
+    "system": ("display_name", "platform", "sender_type", "content"),
 }
 _UNTRUSTED_ENTITY_FIELDS = frozenset({"topic", "purpose"})
 
@@ -242,9 +241,7 @@ def _entity_message(identity: Identity, kind: EntityKind) -> RunMessage:
     if body:
         canonical += f"\n{body}\n"
     canonical += "</dynamic-context>"
-    context_hash = hashlib.sha256(canonical.encode()).hexdigest()
-    serialized = canonical.replace(">", f' hash="{context_hash}">', 1)
-    return {"role": "user", "content": serialized}
+    return {"role": "user", "content": canonical}
 
 
 def person_introduction(person: PersonIdentity) -> RunMessage:
@@ -281,7 +278,14 @@ def _serialize_message(text: str, context: InputMessageContext) -> str:
     channel_id = context.get("channel_id")
     if channel_id:
         attributes.insert(1, f'channel="{_xml_attr(_validate_entity_id(channel_id))}"')
-    children = [_data_element(name, value) for name, value in context.get("data", {}).items()]
+    children: list[str] = []
+    for name, value in context.get("data", {}).items():
+        if isinstance(value, (dict, list, tuple)):
+            children.append(_data_element(name, value))
+        elif not name.replace("_", "").replace("-", "").isalnum():
+            raise ValueError(f"invalid structured data field: {name}")
+        else:
+            attributes.append(f'{name}="{_xml_attr(value)}"')
     children.append(f"<content>{_xml_text(text)}</content>")
     body = "\n".join(children)
     return f"<input-message {' '.join(attributes)}>\n{body}\n</input-message>"

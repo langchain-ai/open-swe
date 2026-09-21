@@ -43,6 +43,12 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
       .getByRole("link", { name: "Add greet() helper" })
       .first();
     await expect(pullRequestLink).toBeVisible();
+    // The hover card exists only once the thread's PR list has loaded; the PR
+    // pill renders from that same list, so its arrival means the link is a
+    // hover trigger and not a plain anchor.
+    await expect(
+      page.getByRole("link", { name: /Open fakeorg\/demo pull request #1/ }),
+    ).toBeVisible();
     await pullRequestLink.hover();
     await expect(
       page.getByTestId("pr-hover-card-fakeorg/demo-1"),
@@ -287,7 +293,7 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
         .map((message) =>
           typeof message.content === "string" ? message.content : "",
         )
-        .filter((content) => content.includes('sender="system:collaboration"'));
+        .filter((content) => content.includes('id="system:participants"'));
     };
     const expectOneRoster = (state: string) => {
       const blocks = rosterBlocks(state);

@@ -12,13 +12,13 @@ from typing import Any, cast
 from langchain_core.messages import HumanMessage
 
 from agent.input_messages import (
-    COLLABORATION_SENDER_ID,
+    PARTICIPANTS_CONTEXT_ID,
     PersonIdentity,
     channel_introduction,
     human_input,
     person_introduction,
 )
-from agent.prompt import construct_collaboration_context, construct_sender_context
+from agent.prompt import construct_participants_context, construct_sender_context
 from agent.server import PrepareAgentRunMiddleware
 from agent.utils.authorship import CollaboratorIdentity, ThreadParticipant
 
@@ -105,16 +105,14 @@ class Thread:
         self._append(envelope)
 
         self.dump.append("### run appends")
-        roster_msgs = PrepareAgentRunMiddleware._collaboration_messages(
-            cast(Any, self.state), construct_collaboration_context(participants)
+        roster_msgs = PrepareAgentRunMiddleware._participants_messages(
+            cast(Any, self.state), construct_participants_context(participants)
         )
         pointer_msgs = PrepareAgentRunMiddleware._sender_context_messages(
-            cast(Any, self.state),
-            construct_sender_context(display_name, person_id),
-            sender_id=person_id,
+            construct_sender_context(display_name, person_id)
         )
         if not roster_msgs:
-            self.dump.append(f"({COLLABORATION_SENDER_ID}: unchanged, not repeated)\n")
+            self.dump.append(f"({PARTICIPANTS_CONTEXT_ID}: unchanged, not repeated)\n")
         for message in [*roster_msgs, *pointer_msgs]:
             self._append(cast(str, message["content"]))
         return {
@@ -138,7 +136,7 @@ def walkthrough() -> tuple[str, list[dict[str, Any]]]:
         title="Turn 1: Alice starts the thread from Slack",
         given="an empty thread; Alice has a linked GitHub account and is a workspace admin",
         when="she mentions the bot: add a greet() helper",
-        then="channel and Alice introduced; roster emitted for the first time; pointer names Alice",
+        then="channel and Alice introduced; participants block emitted for the first time; pointer names Alice",
         person_id=ALICE,
         person={
             "id": ALICE,
@@ -156,6 +154,7 @@ def walkthrough() -> tuple[str, list[dict[str, Any]]]:
         participants=[P_ALICE],
     )
     assert t1["roster"] is not None and "**Alice**" in t1["roster"]
+    assert 'timestamp="1789991539.477079"' in t1["envelope"]
     assert "Sent by **Alice**" in t1["pointer"]
     turns.append(t1)
 
@@ -163,7 +162,7 @@ def walkthrough() -> tuple[str, list[dict[str, Any]]]:
         title="Turn 2: Alice follows up",
         given="turn 1 has run to completion",
         when="Alice replies in the same Slack thread: also add a docstring",
-        then="only her envelope and the pointer; roster not repeated",
+        then="only her envelope and the pointer; participants block not repeated",
         person_id=ALICE,
         person=None,
         text="also add a docstring",
@@ -180,7 +179,7 @@ def walkthrough() -> tuple[str, list[dict[str, Any]]]:
         title="Turn 3: Bob joins",
         given="Bob has a linked account and prefers PRs opened ready for review",
         when="Bob replies: make it return bytes",
-        then="Bob introduced; roster re-emitted with two participants; pointer names Bob",
+        then="Bob introduced; participants block re-emitted with two people; pointer names Bob",
         person_id=BOB,
         person={
             "id": BOB,
@@ -203,7 +202,7 @@ def walkthrough() -> tuple[str, list[dict[str, Any]]]:
         title="Turn 4: Alice switches to the web dashboard",
         given="the thread has Alice and Bob",
         when="Alice types in the dashboard: ship it",
-        then="same user: id as her Slack turns; roster not repeated; her person block reappears once with the dashboard's attributes",
+        then="same user: id as her Slack turns; participants block not repeated; her person block reappears once with the dashboard's attributes",
         person_id=ALICE,
         person={
             "id": ALICE,
@@ -225,7 +224,7 @@ def walkthrough() -> tuple[str, list[dict[str, Any]]]:
         title="Turn 5: Bob sets standing instructions, then asks for the PR",
         given="Bob saved personal instructions between turns",
         when="Bob replies: open the PR",
-        then="roster re-emitted because Bob's entry changed; pointer names Bob",
+        then="participants block re-emitted because Bob's entry changed; pointer names Bob",
         person_id=BOB,
         person=None,
         text="open the PR",
@@ -241,7 +240,7 @@ def walkthrough() -> tuple[str, list[dict[str, Any]]]:
         title="Turn 6: Carol, with no Open SWE account, chimes in",
         given="Carol never signed in to Open SWE",
         when="she replies: can it handle unicode?",
-        then="keyed by her Slack id, marked unlinked; roster entry carries only what Slack knows",
+        then="keyed by her Slack id, marked unlinked; her entry carries only what Slack knows",
         person_id=CAROL,
         person={
             "id": CAROL,

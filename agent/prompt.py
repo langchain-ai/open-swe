@@ -129,18 +129,18 @@ def construct_sender_context(display_name: str, person_id: str) -> str:
     return render_prompt("system/sender-context.md", display_name=display_name, person_id=person_id)
 
 
-def construct_collaboration_context(participants: Sequence[ThreadParticipant]) -> str:
-    """The roster and attribution rules, stable across turns.
-
-    Ordered by person so alternating senders produce the same text and the
-    block is reintroduced only when a participant or their settings change.
-    """
+def construct_participants_context(participants: Sequence[ThreadParticipant]) -> str:
+    """The roster, in a stable order so alternating senders leave it unchanged."""
     ordered = sorted(
-        participants, key=lambda candidate: (candidate.person_id, candidate.identity.commit_email)
+        participants,
+        key=lambda candidate: (candidate.identity.display_name.lower(), candidate.person_id),
     )
+    return "\n".join(_render_participant(candidate) for candidate in ordered)
+
+
+def _render_collaboration_section() -> str:
     return render_prompt(
         "system/collaboration.md",
-        participants="\n".join(_render_participant(candidate) for candidate in ordered),
         bot_coauthor_trailer=f"Co-authored-by: {OPEN_SWE_BOT_NAME} <{OPEN_SWE_BOT_EMAIL}>",
         pr_attribution_text=PR_ATTRIBUTION_TEXT,
     )
@@ -215,6 +215,7 @@ def construct_system_prompt(
         repository_setup_section=render_prompt(
             "system/repository-setup.md", working_dir=working_dir
         ),
+        collaboration_section=_render_collaboration_section(),
         task_execution_section=load_prompt("system/task-execution.md"),
         dependency_section=load_prompt("system/dependencies.md"),
         external_untrusted_comments_section=untrusted_section,
