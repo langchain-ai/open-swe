@@ -161,6 +161,8 @@ async def test_unavailable_thread_scope_fails_closed(
         {"default_visibility": "everyone"},
         {"dm_session_enabled": None},
         {"default_model": "unknown-model"},
+        {"default_model": "openai:gpt-5.5"},
+        {"default_subagent_model": "openai:gpt-5.5", "subagent_reasoning_effort": "high"},
         {"default_model": "anthropic:claude-fable-5-1"},
         {"default_model": "anthropic:claude-haiku-4-5", "reasoning_effort": "high"},
         {"default_subagent_model": None, "subagent_reasoning_effort": "high"},
@@ -235,6 +237,29 @@ async def test_first_setting_does_not_pin_inherited_model_defaults(fake_store: F
     prefs = fake_store.values(["user_preferences"])["alice"]
     assert prefs["default_visibility"] == "private"
     assert prefs["local_tracing_project"] == "project"
+
+
+@pytest.mark.parametrize("model", ["openai:gpt-5.5", "anthropic:claude-fable-5-1"])
+async def test_unrelated_patch_preserves_retired_model_pairs(
+    fake_store: FakeStore, model: str
+) -> None:
+    profile = {
+        "default_model": model,
+        "reasoning_effort": "high",
+        "default_subagent_model": model,
+        "subagent_reasoning_effort": "high",
+        "default_repo": "org/repo",
+    }
+    fake_store.seed(["profiles"], "alice", profile)
+    settings: dict[str, SettingValue] = {
+        "draft_prs": False,
+        "branch_prefix": "new/",
+        "auto_fix_ci": False,
+    }
+    assert await patch_personal_settings("alice", settings) == settings
+    saved = fake_store.values(["profiles"])["alice"]
+    assert {key: saved[key] for key in profile} == profile
+    assert {key: saved[key] for key in settings} == settings
 
 
 async def test_model_effort_patch_uses_dashboard_normalization(fake_store: FakeStore) -> None:

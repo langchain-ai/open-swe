@@ -3,7 +3,12 @@
 from collections.abc import Mapping
 
 from agent.dashboard.options import default_model_pair
-from agent.dashboard.profiles import PROFILES_NAMESPACE, ProfileUpdate, get_profile
+from agent.dashboard.profiles import (
+    PROFILES_NAMESPACE,
+    ProfileUpdate,
+    get_profile,
+    normalize_profile_for_response,
+)
 from agent.dashboard.user_preferences import (
     USER_PREFERENCES_NAMESPACE,
     UserPreferencesUpdate,
@@ -54,7 +59,11 @@ async def patch_personal_settings(
         merged = {
             "default_model": model,
             "reasoning_effort": effort,
-            **{key: value for key, value in profile.items() if key in PROFILE_SETTING_KEYS},
+            **{
+                key: value
+                for key, value in normalize_profile_for_response(profile).items()
+                if key in PROFILE_SETTING_KEYS
+            },
             **profile_patch,
         }
         update = ProfileUpdate.model_validate(merged)
