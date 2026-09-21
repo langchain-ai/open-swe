@@ -141,7 +141,18 @@ export function UserMessage({ message }: { message: Message }) {
                 : "text-muted-foreground"
             }`}
           >
-            {message.deliveryStatus === "failed" ? "Failed to send" : "Sending"}
+            {message.deliveryStatus !== "failed" ? (
+              "Sending"
+            ) : (
+              <span
+                title={message.deliveryError}
+                data-testid="user-message-delivery-error"
+              >
+                {message.deliveryError
+                  ? `Failed to send · ${message.deliveryError}`
+                  : "Failed to send"}
+              </span>
+            )}
           </div>
         )}
         {!message.timestampIsFallback && (!isSystem || expanded) && (
