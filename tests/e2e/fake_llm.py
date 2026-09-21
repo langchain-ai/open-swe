@@ -253,6 +253,10 @@ class ScriptRule:
 
 
 def _tool_call(name: str, args: ToolArgs, call_id: str) -> ToolCallSpec:
+    # `response_type` is required on the real tool, and a script that leaves it
+    # out means "this reply ends the turn" — the common case here.
+    if name == "slack_reply" and "response_type" not in args:
+        args = {**args, "response_type": "final"}
     return ToolCallSpec(name=name, args=args, call_id=call_id)
 
 
@@ -602,7 +606,7 @@ def _plan_link_step(messages: list[BaseMessage]) -> AIMessage:
             {
                 "name": "slack_reply",
                 "args": {
-                    "response_type": "progress",
+                    "response_type": "final",
                     "message": f"I'm putting together a plan. Follow along and review it here: <{url}|plan review>",
                 },
                 "id": "call-plan-link",
