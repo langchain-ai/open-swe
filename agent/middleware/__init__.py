@@ -18,6 +18,7 @@ _MIDDLEWARE_MODULES = {
     "PullRequestCreationGuardMiddleware": ".pr_creation_guard",
     "record_run_usage": ".record_run_usage",
     "refresh_github_proxy_before_model": ".refresh_github_proxy",
+    "RepairMalformedToolCallsMiddleware": ".repair_malformed_tool_calls",
     "RepairOrphanedToolCallsMiddleware": ".repair_orphaned_tool_calls",
     "SanitizeFireworksMessagesMiddleware": ".sanitize_fireworks_messages",
     "SanitizeOpenAIResponsesMiddleware": ".sanitize_openai_responses",
@@ -47,6 +48,7 @@ __all__ = [
     "PlanModeMiddleware",
     "PrepareRunState",
     "PullRequestCreationGuardMiddleware",
+    "RepairMalformedToolCallsMiddleware",
     "RepairOrphanedToolCallsMiddleware",
     "SanitizeFireworksMessagesMiddleware",
     "SanitizeOpenAIResponsesMiddleware",
@@ -82,6 +84,7 @@ if TYPE_CHECKING:
     from agent.middleware.prepare_run import BasePrepareRunMiddleware, PrepareRunState
     from agent.middleware.record_run_usage import record_run_usage
     from agent.middleware.refresh_github_proxy import refresh_github_proxy_before_model
+    from agent.middleware.repair_malformed_tool_calls import RepairMalformedToolCallsMiddleware
     from agent.middleware.repair_orphaned_tool_calls import RepairOrphanedToolCallsMiddleware
     from agent.middleware.sanitize_fireworks_messages import SanitizeFireworksMessagesMiddleware
     from agent.middleware.sanitize_openai_responses import SanitizeOpenAIResponsesMiddleware
