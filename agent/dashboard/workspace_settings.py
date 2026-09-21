@@ -73,6 +73,8 @@ class WorkspaceSettingsUpdate(BaseModel):
     fable_enabled: bool | None = None
     expedited_review_enabled: bool | None = None
     org_guidelines: str | None = None
+    approval_policy: str | None = None
+    review_auto_approve: bool | None = None
     default_agent_model: str | None = None
     default_agent_reasoning_effort: str | None = None
     default_agent_subagent_model: str | None = None
@@ -95,19 +97,19 @@ class WorkspaceSettingsUpdate(BaseModel):
     default_thread_title_model: str | None = None
     default_thread_title_reasoning_effort: str | None = None
 
-    @field_validator("org_guidelines", mode="before")
+    @field_validator("org_guidelines", "approval_policy", mode="before")
     @classmethod
-    def _normalize_org_guidelines(cls, v: object) -> str | None:
+    def _normalize_review_instructions(cls, v: object) -> str | None:
         if v is None:
             return None
         if not isinstance(v, str):
-            raise ValueError("org_guidelines must be a string")
+            raise ValueError("review instructions must be a string")
         text = v.strip()
         if not text:
             return None
         if len(text) > ORG_GUIDELINES_MAX_CHARS:
             raise ValueError(
-                f"org_guidelines must be at most {ORG_GUIDELINES_MAX_CHARS} characters"
+                f"review instructions must be at most {ORG_GUIDELINES_MAX_CHARS} characters"
             )
         return text
 
@@ -327,6 +329,8 @@ def _default_settings() -> dict[str, Any]:
         "fable_enabled": False,
         "expedited_review_enabled": False,
         "org_guidelines": None,
+        "approval_policy": None,
+        "review_auto_approve": False,
         "default_agent_model": fallback_model,
         "default_agent_reasoning_effort": fallback_effort,
         "default_agent_subagent_model": fallback_model,
@@ -741,7 +745,8 @@ async def api_put_instance_settings(
     body: WorkspaceSettingsUpdate, _admin: dict[str, Any] = ADMIN_DEP
 ) -> dict[str, Any]:
     try:
-        return await upsert_instance_settings(body)
+        await upsert_instance_settings(body)
+        return dict(await get_instance_settings())
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
 

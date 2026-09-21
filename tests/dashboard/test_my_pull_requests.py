@@ -69,6 +69,7 @@ async def test_payload_json_keys_stay_camel_case_for_the_dashboard_client():
         "headSha",
         "headRef",
         "reviewDecision",
+        "reviewRequired",
         "unresolvedThreads",
         "statusAvailable",
         "createdAt",
@@ -243,7 +244,9 @@ async def test_pending_mergeability_is_awaited_rather_than_reported_unknown(monk
     monkeypatch.setattr(prs, "_fetch_check_runs", AsyncMock(return_value=[]))
     monkeypatch.setattr(prs, "_fetch_commit_statuses", AsyncMock(return_value=[]))
     monkeypatch.setattr(prs, "_fetch_review_decision", AsyncMock(return_value="approved"))
-    monkeypatch.setattr(prs, "_fetch_unresolved_thread_count", AsyncMock(return_value=0))
+    monkeypatch.setattr(
+        prs, "_fetch_review_state", AsyncMock(return_value=prs.ReviewState(0, False))
+    )
     result = await prs.load_open_pull_request(object(), {"repo_full_name": "acme/app", "number": 1})
     assert fetches.await_count == 3
     assert result is not None

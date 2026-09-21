@@ -33,7 +33,6 @@ from agent.threads.summary import (
     DASHBOARD_SOURCE,
     _assert_thread_postable,
     _assert_thread_promptable,
-    _assert_thread_readable,
     _is_thread_resolved,
     _metadata_model_id,
     _now_ms,
@@ -42,8 +41,12 @@ from agent.threads.summary import (
     _thread_is_busy,
     _thread_run_id,
     _thread_summary,
+    assert_thread_readable,
     thread_source,
 )
+from agent.transcript.engine import delete_transcript
+from agent.transcript.mirror import mirror_thread_metadata
+from agent.transcript.turns import settle_run_turn
 from agent.utils.json_types import as_json_object, as_thread_dict, thread_metadata
 from agent.utils.thread_ops import (
     get_thread_active_status,
@@ -186,7 +189,7 @@ async def get_dashboard_thread(
             raise HTTPException(404, "thread not found") from exc
 
     metadata = thread_metadata(thread)
-    _assert_thread_readable(metadata, login, email)
+    assert_thread_readable(metadata, login, email)
 
     # The transcript is hydrated client-side by the SDK (`StreamProvider` reads
     # `GET …/state` → `stream.messages`), so the detail endpoint returns
@@ -287,6 +290,7 @@ async def send_dashboard_message(
         if metadata.get("attention_reason"):
             metadata_update["attention_reason"] = None
         await client.threads.update(thread_id=thread_id, metadata=metadata_update)
+    await mirror_thread_metadata(thread_id, metadata_update)
     queue_payload: dict[str, Any] = {
         "text": prompt,
         "source": DASHBOARD_SOURCE,
@@ -317,7 +321,8 @@ async def send_dashboard_message(
     return await _thread_summary(thread)
 
 
-async def _cancel_active_thread_runs(client: Any, thread_id: str) -> None:
+async def _cancel_active_thread_runs(client: Any, thread_id: str) -> list[str]:
+    """Interrupt every live run on the thread, and report which ones those were."""
     run_ids: set[str] = set()
     for status in ("pending", "running"):
         offset = 0
@@ -329,12 +334,33 @@ async def _cancel_active_thread_runs(client: Any, thread_id: str) -> None:
             if len(runs) < 100:
                 break
             offset += len(runs)
-    if run_ids:
+    cancelled = sorted(run_ids)
+    if cancelled:
         await client.runs.cancel_many(
             thread_id=thread_id,
-            run_ids=sorted(run_ids),
+            run_ids=cancelled,
             action="interrupt",
         )
+    return cancelled
+
+
+async def interrupt_transcript_turns(thread_id: str, run_ids: Sequence[str]) -> None:
+    """Close the transcript turn of each cancelled run.
+
+    Scoped to the runs that were actually cancelled: a queued follow-up
+    dispatched right after this must not have its own freshly opened turn
+    settled as interrupted.
+    """
+    for run_id in run_ids:
+        try:
+            await settle_run_turn(thread_id, run_id, outcome="interrupted")
+        except Exception:  # noqa: BLE001
+            # The run is already cancelled; the completion webhook closes the turn.
+            logger.warning(
+                "Could not record a cancel on the transcript",
+                exc_info=True,
+                extra={"transcript": {"thread_id": thread_id, "run_id": run_id}},
+            )
 
 
 async def cancel_dashboard_thread(
@@ -358,10 +384,11 @@ async def cancel_dashboard_thread(
     _assert_thread_postable(metadata, login, email)
 
     try:
-        await _cancel_active_thread_runs(client, thread_id)
+        cancelled_run_ids = await _cancel_active_thread_runs(client, thread_id)
     except Exception as exc:  # noqa: BLE001
         logger.exception("Failed to cancel active runs for thread %s", thread_id)
         raise HTTPException(502, "failed to request thread cancellation") from exc
+    await interrupt_transcript_turns(thread_id, cancelled_run_ids)
 
     metadata_update: dict[str, Any] = {
         "latest_run_status": "interrupted",
@@ -406,13 +433,14 @@ async def admin_cancel_dashboard_thread(
         raise HTTPException(404, "thread not found")
 
     if thread_metadata(thread).get("visibility", "public") != "public":
-        _assert_thread_readable(thread_metadata(thread), login, email)
+        assert_thread_readable(thread_metadata(thread), login, email)
 
     try:
-        await _cancel_active_thread_runs(client, thread_id)
+        cancelled_run_ids = await _cancel_active_thread_runs(client, thread_id)
     except Exception as exc:  # noqa: BLE001
         logger.exception("Failed to cancel active runs for thread %s", thread_id)
         raise HTTPException(502, "failed to request thread cancellation") from exc
+    await interrupt_transcript_turns(thread_id, cancelled_run_ids)
 
     await client.threads.update(
         thread_id=thread_id,
@@ -440,6 +468,16 @@ async def delete_dashboard_thread(thread_id: str, login: str, *, email: str | No
             logger.debug("Could not cancel run %s for thread %s", run_id, thread_id, exc_info=True)
 
     await client.threads.delete(thread_id)
+    # The mirrored transcript outlives the LangGraph thread otherwise, and the
+    # read path authorizes against the mirror rather than against LangGraph.
+    try:
+        await delete_transcript(thread_id)
+    except Exception:  # noqa: BLE001
+        logger.warning(
+            "Could not delete the thread transcript",
+            exc_info=True,
+            extra={"transcript": {"thread_id": thread_id}},
+        )
 
 
 async def rename_dashboard_thread(
@@ -453,6 +491,7 @@ async def rename_dashboard_thread(
     except Exception as exc:  # noqa: BLE001
         logger.debug("Could not rename thread", extra={"thread_id": thread_id}, exc_info=True)
         raise HTTPException(502, "failed to update thread") from exc
+    await mirror_thread_metadata(thread_id, metadata_update)
     thread = {
         **as_thread_dict(thread),
         "metadata": {**thread_metadata(thread), **metadata_update},
@@ -694,7 +733,7 @@ async def get_dashboard_thread_state(
         except Exception as exc:  # noqa: BLE001
             raise HTTPException(404, "thread not found") from exc
     metadata = thread_metadata(thread)
-    _assert_thread_readable(metadata, login, email)
+    assert_thread_readable(metadata, login, email)
     thread, latest_run_status, _ = await _refresh_latest_run_metadata(
         client, thread, timings=record
     )

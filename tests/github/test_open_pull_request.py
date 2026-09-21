@@ -2,7 +2,7 @@ import asyncio
 import sys
 from types import SimpleNamespace
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, call, patch
 
 import httpx2
 import langgraph_sdk
@@ -1029,14 +1029,10 @@ def test_resolves_thread_flag_defaults_to_false(monkeypatch: pytest.MonkeyPatch)
     assert record_telemetry.await_args.kwargs["resolves_thread"] is False
 
 
-@pytest.mark.parametrize(
-    ("record_opening", "expected_keys"),
-    [(True, ["pr_opened"]), (False, [])],
-)
+@pytest.mark.parametrize("record_opening", [True, False])
 async def test_record_pr_telemetry_records_pr_opened_feedback(
     monkeypatch: pytest.MonkeyPatch,
     record_opening: bool,
-    expected_keys: list[str],
 ) -> None:
     """``pr_opened`` is the averageable denominator, so it fires once per new PR."""
     _set_config(monkeypatch, {"source": "slack", "thread_id": "t1", "github_login": "octo"})
@@ -1070,10 +1066,32 @@ async def test_record_pr_telemetry_records_pr_opened_feedback(
         record_opening=record_opening,
     )
 
-    assert [call.args[1] for call in create_feedback.await_args_list] == expected_keys
-    if expected_keys:
-        assert create_feedback.await_args.kwargs["score"] == 1.0
-        assert create_feedback.await_args.kwargs["comment"] == details["html_url"]
+    expected_source_info = {
+        "source": "open_pull_request",
+        "thread_id": "t1",
+        "pr_url": details["html_url"],
+    }
+    expected_calls = (
+        [
+            call(
+                "t1",
+                f"github_pr_opened:{details['html_url']}",
+                score=1.0,
+                comment=f"Agent-authored pull request opened: {details['html_url']}",
+                source_info=expected_source_info,
+            ),
+            call(
+                "t1",
+                "pr_opened",
+                score=1.0,
+                comment=details["html_url"],
+                source_info=expected_source_info,
+            ),
+        ]
+        if record_opening
+        else []
+    )
+    assert create_feedback.await_args_list == expected_calls
 
 
 @pytest.mark.parametrize("top_level_run_id", [False, True])

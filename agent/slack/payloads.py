@@ -242,6 +242,8 @@ class SlackButtonValue(SlackPayload):
     type: str = ""
     action: str = ""
     fingerprint: str = ""
+    thread_id: str = ""
+    thread_ts: str = ""
     response: str = ""
 
 
@@ -269,6 +271,7 @@ class SlackViewSubmission(SlackPayload):
     trigger_id: str = ""
     view: SlackView = Field(default_factory=SlackView)
     user: SlackInteractionUser = Field(default_factory=SlackInteractionUser)
+    team: SlackRef = Field(default_factory=SlackRef)
 
     @property
     def callback_id(self) -> str:

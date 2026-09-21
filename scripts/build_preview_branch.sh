@@ -34,7 +34,7 @@ open_preview_pulls() {
     --jq ".[]
       | select(any(.labels[]; .name == \"${PREVIEW_LABEL}\"))
       | select(.number != (${excluded} | tonumber))
-      | [.number, .head.sha, .author_association, .user.login, .html_url, .title]
+      | [.number, .head.sha, (.head.repo.full_name // \"\"), .user.login, .html_url, .title]
       | @tsv" |
     sort -n |
     awk -v max="$PREVIEW_MAX_PRS" 'NR<=max'
@@ -132,7 +132,7 @@ merge_ref() {
 build() {
   local force="${FORCE:-false}" base_sha published_tree assembled_tree
   local included=() skipped=() conflicted=false
-  local number head_sha association login url title ref fetched reason unlabelled path output status pulls
+  local number head_sha head_repo login url title ref fetched reason unlabelled path output status pulls
 
   git config user.name github-actions[bot]
   git config user.email 41898282+github-actions[bot]@users.noreply.github.com
@@ -176,12 +176,16 @@ build() {
     printf 'could not list open pull requests\n' >&2
     return 1
   fi
-  while IFS=$'\t' read -r number head_sha association login url title; do
+  while IFS=$'\t' read -r number head_sha head_repo login url title; do
     [[ -z "$number" ]] && continue
-    case "$association" in
-      OWNER | MEMBER) ;;
-      *) skipped+=("[#${number} ${title}](${url}) — @${login} — author is \`${association}\`, not an org member"); continue ;;
-    esac
+    # Only someone with write access can push a branch into this repository, so
+    # an in-repo head is the trust boundary; a fork's code stays out however the
+    # PR is labelled. author_association would exclude members whose org
+    # membership is private, since the workflow token cannot see it.
+    if [[ "$head_repo" != "$GH_REPO" ]]; then
+      skipped+=("[#${number} ${title}](${url}) — @${login} — head branch is in \`${head_repo:-a deleted fork}\`, not this repository")
+      continue
+    fi
     ref="refs/preview-prs/${number}"
     if ! git fetch --no-tags origin "pull/${number}/head:${ref}" >/dev/null 2>&1; then
       skipped+=("[#${number} ${title}](${url}) — @${login} — could not fetch the PR head")

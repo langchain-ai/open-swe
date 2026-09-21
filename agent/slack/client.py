@@ -426,6 +426,7 @@ async def _post_slack_message_with_ts(
     unfurl_links: bool = True,
     unfurl_media: bool = True,
     blocks: list[dict[str, Any]] | None = None,
+    reply_broadcast: bool = False,
 ) -> tuple[str | None, str | None]:
     if not SLACK_BOT_TOKEN:
         return None, "missing_slack_bot_token"
@@ -434,6 +435,7 @@ async def _post_slack_message_with_ts(
 
     # A code channel is one flowing session: replies belong in the channel.
     reply_ts = None if is_code_channel_session(thread_ts) else thread_ts
+    broadcast = {"reply_broadcast": True} if reply_broadcast and reply_ts else {}
 
     try:
         async with SlackClient.bot() as client:
@@ -444,6 +446,7 @@ async def _post_slack_message_with_ts(
                 unfurl_links=unfurl_links,
                 unfurl_media=unfurl_media,
                 blocks=blocks or None,
+                **broadcast,
             )
         message_ts = data.get("ts")
         if isinstance(message_ts, str) and message_ts:
@@ -481,7 +484,8 @@ def _safe_model_label(model: str) -> str:
     return sanitized.rsplit("/", 1)[-1][:48].strip("-")
 
 
-SLACK_COST_PENDING_LABEL = "calculating cost"
+SLACK_COST_PENDING_LABEL = "calculating cost..."
+_PENDING_COST_LABEL_RE = re.compile(r"(?: • )?calculating cost(?:\.\.\.)?$")
 
 
 def format_slack_run_usage(usage: RunUsageSummary | None) -> str:
@@ -498,7 +502,7 @@ def format_slack_run_usage(usage: RunUsageSummary | None) -> str:
 
 
 _SESSION_COST_LABEL_RE = re.compile(
-    rf"(?: • )?(?:<\$0\.01|\$[0-9]+(?:\.[0-9]+)?|{re.escape(SLACK_COST_PENDING_LABEL)})(?: session cost)?$"
+    r"(?: • )?(?:<\$0\.01|\$[0-9]+(?:\.[0-9]+)?|calculating cost(?:\.\.\.)?)(?: session cost)?$"
 )
 _MAIN_AGENT_TOKEN_LABEL_RE = re.compile(r"(?: • )?[0-9]+(?:\.[0-9]+)?[KM]? main-agent tokens$")
 
@@ -551,7 +555,7 @@ def with_slack_session_cost(
             if (
                 block.get("block_id") == "open_swe_usage_footer"
                 or "main-agent tokens" in value_text
-                or SLACK_COST_PENDING_LABEL in value_text
+                or _PENDING_COST_LABEL_RE.search(value_text)
             ):
                 candidates.append(value)
             elif SLACK_WEB_LINK_FOOTER_LABEL in value_text:
@@ -587,8 +591,7 @@ def with_slack_pending_session_cost(
 ) -> tuple[str, list[dict[str, Any]] | None]:
     """Append the pending cost label to a live Slack footer awaiting its cost."""
     if clear:
-        suffix = f" • {SLACK_COST_PENDING_LABEL}"
-        updated_text = text.removesuffix(suffix)
+        updated_text = _PENDING_COST_LABEL_RE.sub("", text)
         updated_blocks = copy.deepcopy(blocks)
         for block in updated_blocks or []:
             if block.get("type") != "context":
@@ -596,11 +599,12 @@ def with_slack_pending_session_cost(
             values = [block.get("text"), *(block.get("elements") or [])]
             for value in values:
                 if isinstance(value, dict) and isinstance(value.get("text"), str):
-                    value["text"] = value["text"].removesuffix(suffix)
-                    if value["text"] == SLACK_COST_PENDING_LABEL:
+                    if _PENDING_COST_LABEL_RE.fullmatch(value["text"]):
                         value["text"] = "Cost unavailable"
+                    else:
+                        value["text"] = _PENDING_COST_LABEL_RE.sub("", value["text"])
         return updated_text, updated_blocks
-    if SLACK_COST_PENDING_LABEL in text or SLACK_WEB_LINK_FOOTER_LABEL not in text:
+    if _PENDING_COST_LABEL_RE.search(text) or SLACK_WEB_LINK_FOOTER_LABEL not in text:
         return text, blocks
     updated_text = f"{text} • {SLACK_COST_PENDING_LABEL}"
     if blocks is None:
@@ -622,7 +626,7 @@ def with_slack_pending_session_cost(
             values.extend(item for item in elements if isinstance(item, dict))
         for value in values:
             value_text = value.get("text")
-            if isinstance(value_text, str) and SLACK_COST_PENDING_LABEL not in value_text:
+            if isinstance(value_text, str) and not _PENDING_COST_LABEL_RE.search(value_text):
                 value["text"] = f"{value_text} • {SLACK_COST_PENDING_LABEL}"
                 return updated_text, updated_blocks
     updated_blocks.append(
@@ -727,6 +731,7 @@ async def post_slack_thread_reply_with_ts(
     blocks: list[dict[str, Any]] | None = None,
     usage: RunUsageSummary | None = None,
     agent_thread_id: str | None = None,
+    reply_broadcast: bool = False,
 ) -> tuple[str | None, str | None]:
     """Post a reply in a Slack thread and return its Slack timestamp and error."""
     from agent.slack.code_channels import is_code_channel_session
@@ -743,6 +748,7 @@ async def post_slack_thread_reply_with_ts(
         unfurl_links=unfurl_links,
         unfurl_media=unfurl_media,
         blocks=blocks,
+        reply_broadcast=reply_broadcast,
     )
 
 
@@ -915,15 +921,19 @@ async def update_slack_message(
 
 
 async def upload_slack_thread_file(
-    channel_id: str,
-    thread_ts: str,
+    channel_id: str | None,
+    thread_ts: str | None,
     filename: str,
     content: bytes,
     *,
     title: str | None = None,
     initial_comment: str | None = None,
 ) -> tuple[str | None, str | None]:
-    """Upload one file to a Slack thread and return its file ID and any error."""
+    """Upload one file and return its file ID and any error.
+
+    Without a channel the file is hosted but never posted, which is what a block
+    that renders the file itself needs.
+    """
     if not SLACK_BOT_TOKEN:
         return None, "missing_slack_bot_token"
     if not content:

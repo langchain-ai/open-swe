@@ -1,4 +1,6 @@
 import http from "node:http"
+import { execSync } from "node:child_process"
+import { mkdirSync, writeFileSync } from "node:fs"
 import { defineConfig } from "vite"
 import { devtools } from "@tanstack/devtools-vite"
 import { tanstackStart } from "@tanstack/react-start/plugin/vite"
@@ -240,8 +242,51 @@ const BASE_PATH = process.env.DASHBOARD_BASE_PATH || "/"
 // client is told to open it against this port whatever page origin it loaded from.
 const DEV_PORT = Number(process.env.PORT) || 3000
 
+// The bundle's own identity, discovered by the build that emits it: CI or a
+// platform can pass SOURCE_COMMIT explicitly, a local build can prove the
+// checkout's HEAD, and otherwise the value stays null (rendered Unavailable)
+// rather than guessed.
+const BUNDLE_BUILD_AT = new Date().toISOString()
+
+function sourceCommit(): string | null {
+  const fromEnv = process.env.SOURCE_COMMIT?.trim()
+  if (fromEnv) return fromEnv
+  try {
+    return execSync("git rev-parse HEAD", {
+      stdio: ["ignore", "pipe", "ignore"],
+    })
+      .toString()
+      .trim()
+  } catch {
+    return null // Not a git checkout (source archive); no trustworthy commit.
+  }
+}
+
+// Writes the sidecar the backend reads when it serves this bundle.
+function buildInfoStamp(): Plugin {
+  return {
+    name: "build-info-stamp",
+    apply: "build",
+    closeBundle() {
+      const info: Record<string, string> = { built_at: BUNDLE_BUILD_AT }
+      const commit = sourceCommit()
+      if (commit) info.commit = commit
+      mkdirSync(".output/public", { recursive: true })
+      writeFileSync(
+        ".output/public/open-swe-build-info.json",
+        JSON.stringify(info)
+      )
+    },
+  }
+}
+
 const config = defineConfig({
   base: BASE_PATH,
+  define: {
+    // Read by window.__OPEN_SWE_BUNDLE__ in the emitted bundle.
+    __OPEN_SWE_BUNDLE_COMMIT__: JSON.stringify(sourceCommit()),
+    __OPEN_SWE_BUNDLE_BUILT_AT__: JSON.stringify(BUNDLE_BUILD_AT),
+  },
   server: { port: DEV_PORT, strictPort: true, hmr: { clientPort: DEV_PORT } },
   resolve: { tsconfigPaths: true },
   optimizeDeps: {
@@ -264,35 +309,27 @@ const config = defineConfig({
     devtools(),
     nitro({
       routeRules: devRouteRules,
-      // A sandbox service is reached through this server so its LangSmith token
-      // rides as a header on our own request, and hot reload through that proxy
-      // needs the WebSocket upgrade.
-      features: { websocket: true },
       // Registered explicitly: nitro's convention scan does not reach this
-      // directory under the vite plugin. `/sandbox` is this server's own route
-      // in both dev and production; the backend prefixes below are proxied by a
+      // directory under the vite plugin. The backend prefixes are proxied by a
       // deployed build only — dev proxies them through devRouteRules, which has
       // a localhost default the handler deliberately refuses to have. Only the
       // two prefixes a deployed dashboard fronts, since proxying `/static`
       // would shadow nitro's assets.
-      handlers: [
-        { route: "/sandbox/**", handler: "./server/sandbox-proxy.ts" },
-        ...(IS_PRODUCTION
-          ? [
-              "/dashboard/api",
-              "/webhooks",
-              // A built server fronting the mock harness fronts its fake-SaaS and
-              // control routes too, so the E2E browser has the one origin a
-              // deployment gives it and reaches the backend the way it really
-              // does — through the handler below. Serving the app from the
-              // harness instead let the suite pass while this proxy was broken.
-              ...(process.env.E2E_HARNESS ? E2E_HARNESS_PREFIXES : []),
-            ].map((prefix) => ({
-              route: `${prefix}/**`,
-              handler: "./server/backend-proxy.ts",
-            }))
-          : []),
-      ],
+      handlers: IS_PRODUCTION
+        ? [
+            "/dashboard/api",
+            "/webhooks",
+            // A built server fronting the mock harness fronts its fake-SaaS and
+            // control routes too, so the E2E browser has the one origin a
+            // deployment gives it and reaches the backend the way it really
+            // does — through the handler below. Serving the app from the
+            // harness instead let the suite pass while this proxy was broken.
+            ...(process.env.E2E_HARNESS ? E2E_HARNESS_PREFIXES : []),
+          ].map((prefix) => ({
+            route: `${prefix}/**`,
+            handler: "./server/backend-proxy.ts",
+          }))
+        : [],
       // Nitro gives every node_modules package its own server chunk. The
       // LangGraph SDK reaches CJS-only `eventemitter3` through `p-queue`, and
       // splitting that cycle puts the CommonJS interop helper in the SDK's chunk
@@ -313,6 +350,7 @@ const config = defineConfig({
     }),
     tailwindcss(),
     tanstackStart({ pages: [SHELL_PAGE] }),
+    buildInfoStamp(),
     // React Compiler via oxc-transform-react, the Rust port. Upstream still
     // marks it experimental; the fallback is `@rolldown/plugin-babel` with
     // plugin-react's `reactCompilerPreset()`, which runs the Babel compiler.

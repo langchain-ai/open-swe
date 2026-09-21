@@ -78,6 +78,7 @@ from agent.review.findings import (
 from agent.review.groups import maybe_generate_and_store_diff_groups
 from agent.review.publish import fetch_pr_review_threads
 from agent.review.reconcile import reconcile_findings_with_review_threads
+from agent.review.styles import get_approval_policy
 from agent.run_config import RunConfig
 from agent.runtime import (
     DEFAULT_LLM_MAX_TOKENS,
@@ -170,6 +171,7 @@ def _reviewer_system_prompt(
     head_sha: str = "",
     reviewer_eval: bool = False,
     org_guidelines: str | None = None,
+    approval_policy: str | None = None,
     repo_style_prompt: str | None = None,
     agents_md_content: str | None = None,
     scoped_agents_md: dict[str, str] | None = None,
@@ -182,6 +184,11 @@ def _reviewer_system_prompt(
         repo_name=repo_name or "<repo>",
         pr_number=pr_number if pr_number != "" else "<pr_number>",
         historical_review_guidance="" if reviewer_eval else HISTORICAL_REVIEW_GUIDANCE,
+        approval_assessment=(
+            render_prompt("reviewer/approval-assessment.md", approval_policy=approval_policy)
+            if approval_policy and not reviewer_eval
+            else ""
+        ),
         repo_checkout_note=_repo_checkout_note(
             repo_ready=repo_ready,
             working_dir=working_dir,
@@ -605,10 +612,15 @@ async def _cached_api_standards_skill() -> str | None:
 class PrepareReviewerRunState(PrepareRunState):
     diff_text: NotRequired[str]
     diff_line_set: NotRequired[dict[str, dict[str, set[int]]] | None]
+    review_approval_policy: NotRequired[str | None]
 
 
 async def _cached_org_guidelines(workspace: str | None) -> str | None:
     return (await cached_workspace_settings(workspace)).org_review_guidelines
+
+
+async def _review_approval_policy(owner: str, repo: str, workspace: str | None) -> str | None:
+    return await get_approval_policy(owner, repo, await cached_workspace_settings(workspace))
 
 
 async def _ensure_reviewer_sandbox_for_thread(
@@ -633,8 +645,7 @@ async def _ensure_reviewer_sandbox_for_thread(
         await ensure_sandbox_for_thread(
             thread_id,
             workspace_slug=cfg.workspace_slug,
-            github_proxy_token=github_token,
-            github_proxy_repositories=[repo_name] if repo_name else None,
+            github_proxy_repositories=[cfg.repo.full_name] if cfg.repo else [],
             # A reviewer sandbox holds nothing but a checkout `prepare_review_repo`
             # re-derives every run, and reviewer threads outlive their sandbox: one
             # thread per PR, re-triggered on every push. Refusing to replace an
@@ -829,6 +840,11 @@ class PrepareReviewerRunMiddleware(BasePrepareRunMiddleware):
         repo_style_task = asyncio.create_task(_fetch_repo_style_prompt())
         agents_md_task = asyncio.create_task(_fetch_agents_md_context())
         org_guidelines_task = asyncio.create_task(_cached_org_guidelines(cfg.workspace_slug))
+        approval_policy = (
+            None
+            if reviewer_eval
+            else await _review_approval_policy(repo_owner, repo_name, cfg.workspace_slug)
+        )
         api_standards_task = asyncio.create_task(_cached_api_standards_skill())
         diff_context = await diff_context_task
         pr_diff_text, pr_diff_line_set = diff_context
@@ -904,6 +920,7 @@ class PrepareReviewerRunMiddleware(BasePrepareRunMiddleware):
             head_sha=head_sha,
             reviewer_eval=reviewer_eval,
             org_guidelines=org_guidelines,
+            approval_policy=approval_policy,
             repo_style_prompt=repo_style_prompt,
             agents_md_content=agents_md_content,
             scoped_agents_md=scoped_agents_md,
@@ -959,6 +976,7 @@ class PrepareReviewerRunMiddleware(BasePrepareRunMiddleware):
         return {
             "work_dir": work_dir,
             "rendered_system_prompt": system_prompt,
+            "review_approval_policy": approval_policy,
             "diff_text": pr_diff_text,
             "diff_line_set": pr_diff_line_set,
         }

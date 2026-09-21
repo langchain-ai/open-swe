@@ -38,8 +38,11 @@ from agent.dashboard.oauth import (
     valid_handoff_challenge,
 )
 from agent.dashboard.profiles import upsert_access_token_from_github_response
+from agent.dashboard.user_preferences import get_user_preferences
+from agent.database import postgres
 from agent.slack.oauth import slack_base_url, slack_oauth_configured
 from agent.users import User
+from agent.utils.build_info import build_info
 from agent.utils.dashboard_links import dashboard_api_base_url
 
 router = APIRouter(tags=["auth"])
@@ -202,7 +205,17 @@ async def me(session: dict[str, Any] = SESSION_DEP) -> dict[str, Any]:
         "user_id": session.get("user_id") or (str(user.id) if user else None),
         "slack_user_id": (user.slack_user_id or None) if user else None,
         "is_admin": session_is_admin(session),
+        # Read at render time by the thread page, which picks the transcript
+        # event log over LangGraph state on it, so it rides the payload the
+        # dashboard already boots on rather than a request of its own.
+        "transcript_streaming": (await get_user_preferences(session["sub"]))[
+            "transcript_streaming"
+        ],
+        # Whether new threads are stamped `transcript: v2` (`agent/threads/runs.py`),
+        # so the thread the UI seeds after `run.start` can carry the same stamp.
+        "transcript_recording": postgres.configured(),
         "slack_oauth_enabled": slack_oauth_configured(),
         "api_base_url": dashboard_api_base_url(),
         "slack_base_url": slack_base_url(),
+        "build_info": build_info(),
     }

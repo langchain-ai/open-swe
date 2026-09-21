@@ -41,7 +41,7 @@ import {
   ensureDesktopModelCredential,
   localThreadKeys,
   useDesktopLocalThread,
-  useLocalProjectRefs,
+  useLocalRepoRefs,
   useLocalThreadActivity,
   useLocalThreadDiff,
   useLocalThreadPrDiff,
@@ -60,7 +60,7 @@ import { visibleQueuedMessages } from "@/features/agents/lib/queuedMessages"
 import { messageArrivalTimestamp } from "@/features/agents/lib/messageTimestamps"
 import { useIsMobile } from "@/lib/useIsMobile"
 import { useSession } from "@/lib/session"
-import { useAgentStream } from "@/features/agents/lib/stream/AgentStreamProvider"
+import { useAgentThreadStream } from "@/features/agents/lib/stream/useAgentThreadStream"
 import {
   threadHydrated,
   threadHydrationFailed,
@@ -86,7 +86,10 @@ function errorMessage(error: unknown): string {
 export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
   const session = useSession()
   const login = session.data?.login
-  const stream = useAgentStream()
+  const { stream } = useAgentThreadStream({
+    transport: "local",
+    threadId: sessionId,
+  })
   const threadQuery = useDesktopLocalThread(sessionId)
   const thread = threadQuery.data
   const queryClient = useQueryClient()
@@ -163,13 +166,13 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
   )
 
   const worktreePath = thread?.worktreePath ?? null
-  const refsQuery = useLocalProjectRefs(thread?.cwd)
-  const projectRefs = refsQuery.data
-  const refetchProjectRefs = refsQuery.refetch
+  const refsQuery = useLocalRepoRefs(thread?.cwd)
+  const repoRefs = refsQuery.data
+  const refetchRepoRefs = refsQuery.refetch
   // The thread's branch is wherever its working tree is: the ref checked out in
-  // its worktree, or the project's own checkout when it has none.
+  // its worktree, or the repository's own checkout when it has none.
   const threadBranch =
-    projectRefs.find((candidate) =>
+    repoRefs.find((candidate) =>
       worktreePath ? candidate.worktreePath === worktreePath : candidate.current
     )?.name ?? null
 
@@ -183,12 +186,12 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
         })
         if (updated)
           queryClient.setQueryData(localThreadKeys.detail(sessionId), updated)
-        await refetchProjectRefs()
+        await refetchRepoRefs()
       } catch (cause) {
         setError(errorMessage(cause))
       }
     },
-    [queryClient, refetchProjectRefs, sessionId]
+    [queryClient, refetchRepoRefs, sessionId]
   )
 
   const activity = useLocalThreadActivity()[sessionId]
@@ -534,11 +537,11 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
               placeholder="Add a follow up"
               skills={skills.data}
               runTarget="local"
-              selectedLocalProjectPath={thread.cwd}
-              localProjectBranches={projectRefs}
-              selectedLocalProjectBranch={threadBranch}
-              onRefreshLocalProjectBranch={() => void refetchProjectRefs()}
-              onSelectLocalProjectBranch={(branch) => void selectBranch(branch)}
+              selectedLocalRepoPath={thread.cwd}
+              localRepoBranches={repoRefs}
+              selectedLocalRepoBranch={threadBranch}
+              onRefreshLocalRepoBranch={() => void refetchRepoRefs()}
+              onSelectLocalRepoBranch={(branch) => void selectBranch(branch)}
               localWorkspaceMode={thread.worktreePath ? "worktree" : "local"}
               localWorktreeLabel="Worktree"
             />

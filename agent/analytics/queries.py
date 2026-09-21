@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncConnection
 from agent.config import ENV
 from agent.database import connection
 from agent.database.analytics import reporting_metadata, workspace_id
+from agent.utils.build_info import backend_build_info
 
 UsageSort = Literal[
     "rank",
@@ -21,6 +22,7 @@ UsageSort = Literal[
     "favorite_model",
     "invocations",
     "threads",
+    "avg_invocations_per_thread",
     "total_tokens",
     "total_cost_usd",
     "avg_invocation_seconds",
@@ -38,7 +40,7 @@ class InvalidUsageCursor(ValueError):
 
 
 def period_start(period: str | None) -> datetime:
-    days = 7 if period == "7d" else 30
+    days = 1 if period == "24h" else 7 if period == "7d" else 30
     if period == "all":
         return datetime.min.replace(tzinfo=UTC)
     return datetime.now(UTC) - timedelta(days=days)
@@ -281,12 +283,13 @@ async def pr_merge_rate_by_model(
             "this metric does not allocate independent model credit."
         ),
         "maturity_days": days,
-        "period": period if period in {"7d", "30d", "all"} else "30d",
+        "period": period if period in {"24h", "7d", "30d", "all"} else "30d",
         "suppression_threshold": minimum,
         "cohorts": cohorts,
         "unavailable_thread_ids": unavailable_threads,
         **metadata,
         "as_of": as_of.isoformat(),
+        "build_info": backend_build_info(),
     }
 
 
@@ -432,6 +435,9 @@ WITH runs AS (
           OR (:current_email <> '' AND lower(d.email) = :current_email)) IS TRUE AS is_current,
         COALESCE(r.invocations, 0) AS invocations,
         COALESCE(r.threads, 0) AS threads,
+        CASE WHEN COALESCE(r.threads, 0) > 0
+            THEN r.invocations::numeric / r.threads ELSE 0 END
+            AS avg_invocations_per_thread,
         COALESCE(r.total_tokens, 0) AS total_tokens,
         COALESCE(r.total_cost_usd, 0) AS total_cost_usd,
         COALESCE(r.invocations_without_cost, 0) AS invocations_without_cost,
@@ -488,6 +494,7 @@ WITH runs AS (
             WHEN 'rank' THEN rank::numeric
             WHEN 'invocations' THEN invocations::numeric
             WHEN 'threads' THEN threads::numeric
+            WHEN 'avg_invocations_per_thread' THEN avg_invocations_per_thread
             WHEN 'total_tokens' THEN total_tokens::numeric
             WHEN 'total_cost_usd' THEN total_cost_usd::numeric
             WHEN 'avg_invocation_seconds' THEN avg_invocation_seconds::numeric
@@ -522,6 +529,7 @@ WITH runs AS (
             'avg_thread_seconds', avg_thread_seconds,
             'avg_run_seconds', avg_invocation_seconds,
             'agent_runs', invocations, 'invocations', invocations, 'threads', threads,
+            'avg_invocations_per_thread', avg_invocations_per_thread,
             'prs_opened', prs_opened, 'merged_prs', merged_prs,
             'merged_prs_per_thread', merged_prs_per_thread,
             'agent_loc', agent_loc, 'additions', additions, 'deletions', deletions,
@@ -589,7 +597,7 @@ async def usage_leaderboard(
     admin: bool = False,
 ) -> dict[str, Any]:
     """Read usage and review cohorts from one bounded PostgreSQL snapshot."""
-    normalized = period if period in {"7d", "30d", "all"} else "30d"
+    normalized = period if period in {"24h", "7d", "30d", "all"} else "30d"
     workspace = workspace_id()
     if cursor:
         as_of, offset = _decode_usage_cursor(cursor, workspace, normalized, sort, direction)
@@ -644,4 +652,5 @@ async def usage_leaderboard(
         "reviewer_stats": reviewer,
         **metadata,
         "as_of": as_of.isoformat(),
+        "build_info": backend_build_info(),
     }

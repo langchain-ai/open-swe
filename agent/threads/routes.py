@@ -30,6 +30,7 @@ from agent.threads.handlers import (
     get_dashboard_thread_pull_request_context,
     get_dashboard_thread_pull_request_status,
     get_dashboard_thread_state,
+    interrupt_transcript_turns,
     rename_dashboard_thread,
     resolve_all_dashboard_threads,
     resolve_dashboard_thread,
@@ -37,7 +38,7 @@ from agent.threads.handlers import (
 )
 from agent.threads.listing import (
     list_dashboard_pinned_threads,
-    list_dashboard_thread_projects,
+    list_dashboard_thread_repos,
     list_dashboard_threads,
     list_dashboard_threads_page,
     pin_dashboard_thread,
@@ -92,8 +93,8 @@ async def api_resolve_all_threads(
     }
 
 
-@router.get("/threads/projects")
-async def api_list_thread_projects(
+@router.get("/threads/repos")
+async def api_list_thread_repos(
     include_resolved: bool = False,
     include_automations: bool = False,
     all: bool = False,
@@ -101,7 +102,7 @@ async def api_list_thread_projects(
 ) -> list[dict[str, Any]]:
     if all and not session_is_admin(session):
         raise HTTPException(403, "admin only")
-    return await list_dashboard_thread_projects(
+    return await list_dashboard_thread_repos(
         session["sub"],
         email=session.get("email"),
         include_resolved=include_resolved,
@@ -362,6 +363,8 @@ async def api_cancel_thread_run(
         action=action,
         email=session.get("email"),
     )
+    if status_code < 400:
+        await interrupt_transcript_turns(thread_id, [run_id])
     return Response(content=content, status_code=status_code, media_type=media_type)
 
 

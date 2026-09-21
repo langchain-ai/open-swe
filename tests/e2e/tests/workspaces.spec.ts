@@ -168,11 +168,31 @@ test.describe("Workspaces", () => {
     await expect(section.getByText("No snapshot").first()).toBeVisible();
     await expect(section.getByText(/enable admin mode/)).toBeVisible();
     await expect(section.getByRole("button", { name: "Save" })).toHaveCount(0);
-    await expect(section.getByRole("button", { name: "Delete" })).toHaveCount(
+    await expect(section.getByRole("button", { name: /^Delete/ })).toHaveCount(
       0,
     );
+    await section
+      .getByRole("link", { name: `Configure ${DRAFT_NAME}` })
+      .click();
+    await expect(page).toHaveURL(new RegExp(`/workspaces/${DRAFT_SLUG}$`));
+    await page
+      .getByRole("button", { name: `Delete ${DRAFT_NAME}`, exact: true })
+      .click();
+    const confirmation = page.getByRole("alertdialog");
+    await expect(confirmation).toContainText(`Delete ${DRAFT_NAME}?`);
+    await confirmation.getByRole("button", { name: "Cancel" }).click();
+    expect(await findWorkspace(page, DRAFT_SLUG)).toBeDefined();
 
-    await deleteWorkspace(page, DRAFT_SLUG);
+    await page
+      .getByRole("button", { name: `Delete ${DRAFT_NAME}`, exact: true })
+      .click();
+    await confirmation
+      .getByRole("button", { name: "Delete workspace" })
+      .click();
+    await expect(page).toHaveURL(/\/workspaces$/);
+    await expect(confirmation).toHaveCount(0);
+    await expect(section.getByText(DRAFT_NAME, { exact: true })).toHaveCount(0);
+    expect(await findWorkspace(page, DRAFT_SLUG)).toBeUndefined();
   });
 
   test("a non-admin cannot reach the workspaces page or API", async ({
@@ -189,6 +209,17 @@ test.describe("Workspaces", () => {
       page.getByRole("heading", { name: "Workspaces", level: 2 }),
     ).toBeVisible();
     await expect(page.getByText(/ask a workspace admin/)).toBeVisible();
+    await expect(page.getByRole("button", { name: /^Delete / })).toHaveCount(0);
+    await page.goto(`/workspaces/${DRAFT_SLUG}`);
+    await expect(page).toHaveURL(/\/workspaces$/);
+    await expect(page.getByRole("button", { name: /^Delete / })).toHaveCount(0);
+    const deletion = await page.request.delete(
+      `/dashboard/api/workspaces/${DRAFT_SLUG}`,
+      {
+        headers: SAME_ORIGIN_HEADERS,
+      },
+    );
+    expect(deletion.status()).toBe(403);
 
     // No Admin toggle in the composer, so they cannot start an admin thread.
     await openNewAgentHome(page);
@@ -207,14 +238,15 @@ test.describe("Workspaces", () => {
     await createWorkspace(page, "default", DEFAULT_WORKSPACE_PROMPT);
 
     // One workspace: the choice is already made, so no control is rendered.
+    // Exact: the sidebar's "Workspaces" group header is a button too.
     await openNewAgentHome(page);
-    await expect(page.getByRole("button", { name: "Workspace" })).toHaveCount(
-      0,
-    );
+    await expect(
+      page.getByRole("button", { name: "Workspace", exact: true }),
+    ).toHaveCount(0);
 
     await createWorkspace(page, ALT_NAME, ALT_WORKSPACE_PROMPT);
     await page.reload();
-    const picker = page.getByRole("button", { name: "Workspace" });
+    const picker = page.getByRole("button", { name: "Workspace", exact: true });
     await expect(picker).toBeVisible();
     // Defaults to the workspace named `default`.
     await expect(picker).toContainText("default");
@@ -399,10 +431,8 @@ test.describe("Workspaces", () => {
     expect(systemPrompt).toContain("### Admin Thread: Workspace Setup");
 
     await page.goto("/workspaces");
-    await expect(page.getByText("Default workspace")).toBeVisible();
-    await expect(
-      page.getByText("Default workspace · Snapshot ready"),
-    ).toBeVisible();
+    await expect(page.getByText("Default")).toBeVisible();
+    await expect(page.getByText("Snapshot ready")).toBeVisible();
     // The save ran a full rebuild, so the row reads "Rebuilt …", not "Updated …".
     await expect(page.getByText(/^Rebuilt /)).toBeVisible();
     await expect(page.getByText("Refresh log")).toBeVisible();
@@ -410,7 +440,9 @@ test.describe("Workspaces", () => {
     for (const label of ["boot", "setup", "update", "capture"]) {
       await expect(page.getByText(`✓ ${label}`)).toBeVisible();
     }
-    await expect(page.getByRole("button", { name: "Delete" })).toHaveCount(0);
+    await expect(
+      page.getByRole("link", { name: "Configure default", exact: true }),
+    ).toBeVisible();
 
     // Leave no default behind: later specs' runs would boot from it.
     await deleteWorkspace(page, DEFAULT_SLUG);

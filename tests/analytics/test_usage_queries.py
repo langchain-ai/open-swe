@@ -117,6 +117,18 @@ async def test_empty_report_exposes_collection_progress(usage_db):
     assert result["reviewer_stats"]["top_categories"] == []
 
 
+async def test_usage_supports_last_24_hours(usage_db):
+    recent = await person("recent")
+    stale = await person("stale")
+    await run(recent, age=0)
+    await run(stale, age=2)
+
+    result = await report(period="24h")
+
+    assert result["period"] == "24h"
+    assert [row["user"]["name"] for row in result["rows"]] == ["recent"]
+
+
 async def test_usage_ranks_run_and_pr_cohorts_with_cost_coverage(usage_db):
     alice = await person("alice", "alice@example.com", display_name="Alice Example")
     bob = await person("bob", "bob@example.com")
@@ -226,6 +238,29 @@ async def test_usage_sorting_happens_before_pagination(usage_db):
             sort="user",
             direction="asc",
         )
+
+
+@pytest.mark.parametrize("direction", ["asc", "desc"])
+async def test_avg_invocations_per_thread_sort_handles_members_without_threads(
+    usage_db: UUID, direction: queries.SortDirection
+) -> None:
+    dense = await person("dense", display_name="Dense")
+    sparse = await person("sparse", display_name="Sparse")
+    threadless = await person("threadless", display_name="Threadless")
+    shared_thread = uuid4()
+    await run(dense, thread_id=shared_thread)
+    await run(dense, thread_id=shared_thread)
+    await run(sparse, thread_id=uuid4())
+    await run(threadless)
+    await pr(threadless, state="merged")
+
+    result = await report(sort="avg_invocations_per_thread", direction=direction)
+    averages = {row["user"]["name"]: row["avg_invocations_per_thread"] for row in result["rows"]}
+    assert averages == {"Dense": 2, "Sparse": 1, "Threadless": 0}
+    expected = ["Threadless", "Sparse", "Dense"]
+    if direction == "desc":
+        expected.reverse()
+    assert [row["user"]["name"] for row in result["rows"]] == expected
 
 
 async def test_usage_sorts_by_merged_prs_per_thread(usage_db):

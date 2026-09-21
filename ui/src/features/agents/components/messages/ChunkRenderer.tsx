@@ -3,15 +3,16 @@ import type { ApprovalCallbacks } from "./types"
 import { CodeBlock } from "@/features/agents/components/chat/CodeBlock"
 import { Markdown } from "@/features/agents/components/chat/Markdown"
 import { ToolExecution } from "@/features/agents/components/chat/ToolExecution"
+import { MessageImage } from "./MessageImage"
 
 export function ChunkRenderer({
   chunk,
-  projectPath,
+  repoPath,
   isMarkdownLive,
   ...callbacks
 }: {
   chunk: Chunk
-  projectPath?: string
+  repoPath?: string
   isMarkdownLive?: boolean
 } & ApprovalCallbacks) {
   switch (chunk.kind) {
@@ -37,7 +38,7 @@ export function ChunkRenderer({
       return (
         <ToolExecution
           chunk={chunk}
-          projectPath={projectPath}
+          repoPath={repoPath}
           onApprove={callbacks.onApprove}
           onReject={callbacks.onReject}
           onAutoApprove={callbacks.onAutoApprove}
@@ -45,9 +46,8 @@ export function ChunkRenderer({
       )
     case "image":
       return (
-        <img
-          src={`data:${chunk.mimeType};base64,${chunk.base64}`}
-          alt={chunk.fileName || "image"}
+        <MessageImage
+          chunk={chunk}
           className="max-h-48 max-w-48 rounded border border-border"
         />
       )

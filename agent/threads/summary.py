@@ -27,6 +27,8 @@ from agent.utils.timing import phase
 logger = logging.getLogger(__name__)
 
 DASHBOARD_SOURCE = "dashboard"
+# Threads whose transcript is served from the append-only event log.
+TRANSCRIPT_VERSION = "v2"
 # Sources whose threads should surface in the Agents UI (besides "dashboard").
 _SURFACED_SOURCES: tuple[str, ...] = ("dashboard", "github", "slack", "linear", "schedule")
 # PR lifecycle states surfaced to the UI for a thread's associated pull request.
@@ -118,7 +120,7 @@ def thread_is_promptable(metadata: Mapping[str, Any], login: str | None) -> bool
     )
 
 
-def _assert_thread_readable(
+def assert_thread_readable(
     metadata: Mapping[str, Any], login: str | None = None, email: str | None = None
 ) -> None:
     if not thread_is_readable(metadata, login, email):
@@ -387,6 +389,9 @@ async def _thread_summary(
         ),
         "adminThread": metadata.get("admin_thread") is True,
         "visibility": metadata.get("visibility", "public"),
+        "transcript": (
+            TRANSCRIPT_VERSION if metadata.get("transcript") == TRANSCRIPT_VERSION else None
+        ),
         "ownerLogin": metadata.get("owner_login"),
         "continuedFromThreadId": metadata.get("continued_from_thread_id"),
         "environment": metadata.get("environment"),

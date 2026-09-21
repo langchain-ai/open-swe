@@ -123,10 +123,13 @@ export interface SessionUser {
   user_id?: string | null
   slack_user_id?: string | null
   is_admin: boolean
+  /** Mirrors the user's preference, so the thread page has it on first render. */
+  transcript_streaming?: boolean
+  /** Whether the server records new threads into the transcript log. */
+  transcript_recording?: boolean
   slack_oauth_enabled?: boolean
   api_base_url?: string
   slack_base_url?: string
-  default_workspace: string | null
 }
 
 export interface ModelOption {
@@ -199,7 +202,8 @@ export interface AllowedSlackBot {
   image_url: string
 }
 
-export interface TeamSettings {
+/** The settings record at either tier: the instance, or what a workspace's runs see. */
+export interface WorkspaceSettings {
   review_draft_prs: boolean
   pr_summaries: boolean
   review_trace_links: boolean
@@ -211,6 +215,8 @@ export interface TeamSettings {
   /** Experimental: approve and merge tiny PRs from their Slack thread. Off by default. */
   expedited_review_enabled?: boolean
   org_guidelines?: string | null
+  review_auto_approve?: boolean
+  approval_policy?: string | null
   default_agent_model?: string | null
   default_agent_reasoning_effort?: string | null
   default_agent_subagent_model?: string | null
@@ -233,6 +239,15 @@ export interface TeamSettings {
   default_thread_title_model?: string | null
   default_thread_title_reasoning_effort?: string | null
   updated_at?: string | null
+}
+
+/** The fields of a workspace's own settings record; anything absent inherits the instance value. */
+export type WorkspaceSettingsOverrides = Partial<WorkspaceSettings>
+
+/** One workspace's settings: what its runs see, and which of those values it set itself. */
+export interface WorkspaceSettingsView {
+  effective: WorkspaceSettings
+  overrides: WorkspaceSettingsOverrides
 }
 
 export interface MCPOAuth {
@@ -291,13 +306,14 @@ export interface AdminUsersPage {
   page_size: number
 }
 
-export type UsageLeaderboardPeriod = "7d" | "30d" | "all"
+export type UsageLeaderboardPeriod = "24h" | "7d" | "30d" | "all"
 export type UsageLeaderboardSort =
   | "rank"
   | "user"
   | "favorite_model"
   | "invocations"
   | "threads"
+  | "avg_invocations_per_thread"
   | "total_tokens"
   | "total_cost_usd"
   | "avg_invocation_seconds"
@@ -448,6 +464,7 @@ export interface ReviewStyle {
   name?: string
   status: ReviewStyleStatus
   custom_prompt: string | null
+  approval_policy?: string | null
   analysis_summary: string | null
   top_reviewers: Array<string>
   prs_sampled: number
@@ -484,6 +501,8 @@ export interface UserPreferences {
   default_visibility: ThreadVisibility
   local_tracing_project: string | null
   default_local_tracing_project: string
+  default_workspace: string | null
+  transcript_streaming: boolean
 }
 
 export interface Skill {
@@ -509,15 +528,6 @@ export interface OrganizationSkillsPage {
   next_cursor: string | null
 }
 
-export interface SandboxSettings {
-  base_snapshot_id: string | null
-  env_base_snapshot_id: string | null
-  effective_base_snapshot_id: string | null
-  base_snapshot_source: "admin" | "env" | "unset"
-  updated_at: string | null
-  updated_by: string | null
-}
-
 /** What a non-admin needs to pick a workspace for a new thread. */
 export type WorkspaceRefreshStatus =
   | "never"
@@ -535,10 +545,15 @@ export interface WorkspaceRefreshStep {
   log_path?: string | null
 }
 
+/** Slug of the workspace every deployment ships with; matches the backend's `DEFAULT_WORKSPACE_SLUG`. */
+export const DEFAULT_WORKSPACE_SLUG = "default"
+
 export interface WorkspaceOption {
   slug: string
   name: string
   repos: Array<string>
+  /** Effective default repository, withheld when another workspace owns it. */
+  default_repo: string | null
   slack_channel_ids: Array<string>
   is_default: boolean
   has_snapshot: boolean
@@ -550,9 +565,78 @@ export interface WorkspaceOption {
   refresh_steps?: Array<WorkspaceRefreshStep>
 }
 
+/** A channel the Slack bot can see, offered when binding channels to a workspace. */
+export interface SlackChannelOption {
+  id: string
+  name: string
+  is_private: boolean
+  is_member: boolean
+  is_ext_shared: boolean
+  num_members: number | null
+}
+
+/** The channel directory; partial when Slack rate limited the walk over public channels. */
+export interface SlackChannelDirectory {
+  channels: Array<SlackChannelOption>
+  partial: boolean
+}
+
 export interface WorkspaceOptionList {
   workspaces: Array<WorkspaceOption>
   default_slug: string
+}
+
+/** Body for `POST /workspaces`; `name` is the only required field. */
+export interface WorkspaceCreate {
+  name: string
+  prompt?: string
+  repos?: Array<string>
+  slack_channel_ids?: Array<string>
+}
+
+/** Body for `PUT /workspaces/{slug}`. Only the fields present are changed. */
+export interface WorkspaceUpdate {
+  name?: string
+  prompt?: string
+  repos?: Array<string>
+  slack_channel_ids?: Array<string>
+  setup_script?: string
+  update_script?: string
+}
+
+export type WorkspaceSnapshotStatus = "none" | "capturing" | "ready" | "failed"
+
+/**
+ * A workspace as `GET /workspaces/{slug}` returns it. The first five fields
+ * are what `createWorkspace`/`updateWorkspace` guarantee; the rest describe
+ * the sandbox image and its last rebuild.
+ */
+export interface WorkspaceRecord {
+  slug: string
+  name: string
+  prompt: string
+  repos: Array<string>
+  slack_channel_ids: Array<string>
+  setup_script?: string
+  update_script?: string
+  base_snapshot_id?: string | null
+  snapshot_id?: string | null
+  snapshot_name?: string | null
+  snapshot_status?: WorkspaceSnapshotStatus
+  status_message?: string | null
+  mem_bytes?: number | null
+  vcpus?: number | null
+  fs_capacity_bytes?: number | null
+  refresh_status?: WorkspaceRefreshStatus
+  refresh_kind?: "full" | "update" | null
+  refresh_finished_at?: string | null
+  refresh_error?: string | null
+}
+
+/** What `POST /workspaces/{slug}/refresh` answers. */
+export interface WorkspaceRefreshStart {
+  started: boolean
+  run_id: string
 }
 
 export type FindingSeverity = "low" | "medium" | "high" | "critical"
@@ -669,6 +753,8 @@ export interface OpenPullRequest {
   headSha: string | null
   headRef: string | null
   reviewDecision: "approved" | "changes_requested" | "none" | null
+  // Branch protection still wants an approval this PR does not have.
+  reviewRequired: boolean
   statusAvailable: boolean
   createdAt: string | null
   updatedAt: string | null
@@ -748,11 +834,31 @@ export interface ReviewDiffGroup {
 }
 
 export interface ReviewDetail extends ReviewSummary {
+  assessment?: PublishedReviewAssessment | null
   pr: ReviewPrDetails
   checks: Array<ReviewCheckRun>
   findings: Array<ReviewFinding>
   diff_groups: Array<ReviewDiffGroup>
   diff_groups_stale: boolean
+}
+
+export interface PublishedReviewAssessment {
+  approved?: boolean
+  review_id: number
+  head_sha: string
+  risk_score: number
+  decision: "would_approve" | "needs_human_review"
+  explanation: string
+}
+
+export interface ReviewAssessmentFeedbackInput {
+  rating: "helpful" | "unhelpful"
+  comment: string
+}
+
+export interface ReviewAssessmentFeedback extends ReviewAssessmentFeedbackInput {
+  login: string
+  updated_at: string
 }
 
 export interface ReviewDiffFile {
@@ -776,12 +882,7 @@ export interface ReviewDiffPayload {
 export interface ReviewChatMeta {
   available: boolean
   assistant_id: string
-}
-
-export interface ReviewChatThread {
   thread_id: string
-  title: string
-  updated_at?: string | null
 }
 
 /**
@@ -873,7 +974,11 @@ function pullRequestThread(
 
 export const api = {
   me: () => request<SessionUser>("/me"),
-  options: () => request<OptionsPayload>("/options"),
+  /** Model list and defaults for one workspace; model defaults are per workspace. */
+  options: (workspace: string = DEFAULT_WORKSPACE_SLUG) =>
+    request<OptionsPayload>(
+      `/options?workspace=${encodeURIComponent(workspace)}`
+    ),
   profile: () => request<Profile>("/profile"),
   saveProfile: (body: ProfileUpdate) =>
     request<Profile>("/profile", { method: "PUT", body: JSON.stringify(body) }),
@@ -891,6 +996,14 @@ export const api = {
     request<ReviewStyle>(`/review-styles/${encodeURIComponent(full_name)}`, {
       method: "PUT",
       body: JSON.stringify({ custom_prompt }),
+    }),
+  saveReviewApprovalPolicy: (
+    full_name: string,
+    approval_policy: string | null
+  ) =>
+    request<ReviewStyle>(`/review-styles/${encodeURIComponent(full_name)}`, {
+      method: "PUT",
+      body: JSON.stringify({ approval_policy }),
     }),
   analyzeReviewStyle: (full_name: string) =>
     request<ReviewStyle>(
@@ -981,16 +1094,46 @@ export const api = {
     request<void>(`/agent-instructions/${encodeURIComponent(full_name)}`, {
       method: "DELETE",
     }),
-  getSandboxSettings: () => request<SandboxSettings>("/sandbox-settings"),
-  saveSandboxSettings: (base_snapshot_id: string | null) =>
-    request<SandboxSettings>("/sandbox-settings", {
-      method: "PUT",
-      body: JSON.stringify({ base_snapshot_id }),
-    }),
   listWorkspaceOptions: () =>
     request<WorkspaceOptionList>("/workspaces/options"),
-  getTeamSettings: () => request<TeamSettings>("/team-settings"),
+  getWorkspace: (slug: string) =>
+    request<WorkspaceRecord>(`/workspaces/${encodeURIComponent(slug)}`),
+  createWorkspace: (body: WorkspaceCreate) =>
+    request<WorkspaceRecord>("/workspaces", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  refreshWorkspace: (slug: string) =>
+    request<WorkspaceRefreshStart>(
+      `/workspaces/${encodeURIComponent(slug)}/refresh`,
+      { method: "POST" }
+    ),
+  updateWorkspace: (slug: string, body: WorkspaceUpdate) =>
+    request<WorkspaceRecord>(`/workspaces/${encodeURIComponent(slug)}`, {
+      method: "PUT",
+      body: JSON.stringify(body),
+    }),
+  deleteWorkspace: (slug: string) =>
+    request<void>(`/workspaces/${encodeURIComponent(slug)}`, {
+      method: "DELETE",
+    }),
+  /** The instance record every workspace inherits. */
+  getInstanceSettings: () => request<WorkspaceSettings>("/settings"),
+  getWorkspaceSettings: (slug: string) =>
+    request<WorkspaceSettingsView>(
+      `/workspaces/${encodeURIComponent(slug)}/settings`
+    ),
+  /** Replaces the workspace's overrides; a field left out inherits the instance value. */
+  saveWorkspaceSettings: (
+    slug: string,
+    overrides: WorkspaceSettingsOverrides
+  ) =>
+    request<WorkspaceSettingsView>(
+      `/workspaces/${encodeURIComponent(slug)}/settings`,
+      { method: "PUT", body: JSON.stringify(overrides) }
+    ),
   listSlackBots: () => request<SlackBotOption[]>("/slack/bots"),
+  listSlackChannels: () => request<SlackChannelDirectory>("/slack/channels"),
   listAllowedSlackBots: () => request<AllowedSlackBot[]>("/slack/allowed-bots"),
   allowSlackBot: (body: { bot_id: string }) =>
     request<AllowedSlackBot>("/slack/allowed-bots", {
@@ -1002,11 +1145,29 @@ export const api = {
       `/slack/allowed-bots/${encodeURIComponent(teamId)}/${encodeURIComponent(botId)}`,
       { method: "DELETE" }
     ),
-  saveTeamSettings: (body: TeamSettings) =>
-    request<TeamSettings>("/team-settings", {
+  saveInstanceSettings: (body: WorkspaceSettings) =>
+    request<WorkspaceSettings>("/settings", {
       method: "PUT",
       body: JSON.stringify(body),
     }),
+  getInstanceMCPs: () => request<MCPConnection[]>("/mcps"),
+  revealInstanceMCPHeaders: (name: string) =>
+    request<Record<string, string>>(
+      `/mcps/${encodeURIComponent(name)}/headers/reveal`,
+      { method: "POST", cache: "no-store" }
+    ),
+  saveInstanceMCP: (body: MCPConnectionUpdate) =>
+    request<MCPConnection>(`/mcps/${encodeURIComponent(body.name)}`, {
+      method: "PUT",
+      body: JSON.stringify(body),
+    }),
+  deleteInstanceMCP: (name: string) =>
+    request<void>(`/mcps/${encodeURIComponent(name)}`, { method: "DELETE" }),
+  discoverInstanceMCP: (body: MCPConnectionUpdate) =>
+    request<{ name: string; description: string }[]>(
+      `/mcps/${encodeURIComponent(body.name)}/discover`,
+      { method: "POST", body: JSON.stringify(body) }
+    ),
   getWorkspaceMCPs: (workspace: string) =>
     request<MCPConnection[]>(
       `/workspaces/${encodeURIComponent(workspace)}/mcps`
@@ -1145,6 +1306,26 @@ export const api = {
     request<ReviewDetail>(
       `/reviews/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}`
     ),
+  getAssessmentFeedback: (
+    owner: string,
+    repo: string,
+    number: number,
+    reviewId: number
+  ) =>
+    request<ReviewAssessmentFeedback | null>(
+      `/reviews/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}/feedback/${reviewId}`
+    ),
+  saveAssessmentFeedback: (
+    owner: string,
+    repo: string,
+    number: number,
+    reviewId: number,
+    feedback: ReviewAssessmentFeedbackInput
+  ) =>
+    request<ReviewAssessmentFeedback>(
+      `/reviews/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}/feedback/${reviewId}`,
+      { method: "PUT", body: JSON.stringify(feedback) }
+    ),
   getReviewDiff: (owner: string, repo: string, number: number) =>
     request<ReviewDiffPayload>(
       `/reviews/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}/diff`
@@ -1152,20 +1333,6 @@ export const api = {
   getReviewChat: (owner: string, repo: string, number: number) =>
     request<ReviewChatMeta>(
       `/reviews/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}/chat`
-    ),
-  listReviewChatThreads: (owner: string, repo: string, number: number) =>
-    request<{ threads: Array<ReviewChatThread> }>(
-      `/reviews/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}/chat/threads`
-    ),
-  deleteReviewChatThread: (
-    owner: string,
-    repo: string,
-    number: number,
-    threadId: string
-  ) =>
-    request<void>(
-      `/reviews/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}/chat/threads/${encodeURIComponent(threadId)}`,
-      { method: "DELETE" }
     ),
   reReview: (owner: string, repo: string, number: number) =>
     request<{
