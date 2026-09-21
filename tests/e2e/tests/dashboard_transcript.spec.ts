@@ -5,6 +5,7 @@ import {
   loginAs,
   openRunningThreadViaSlackLink,
   openThreadViaSlackLink,
+  setTranscriptStreaming,
   threadIdFromUrl,
   typeIntoComposer,
   waitForStateToContain,
@@ -177,13 +178,15 @@ test.describe("transcript rendering", () => {
       page.getByRole("link", { name: "Add greet() helper" }).first(),
     ).toBeVisible();
 
+    // The transcript source hydrates from its snapshot once; coming back to
+    // the foreground must not fetch it again.
     const foregroundHydration = page
       .waitForRequest(
         (request) => {
           const path = new URL(request.url()).pathname;
           return (
             request.method() === "GET" &&
-            path === `/dashboard/api/threads/${threadId}/state`
+            path === `/dashboard/api/threads/${threadId}/transcript`
           );
         },
         { timeout: 1_000 },
@@ -207,6 +210,33 @@ test.describe("transcript rendering", () => {
     await expect(
       page.getByRole("link", { name: "Add greet() helper" }).first(),
     ).toBeVisible();
+  });
+
+  // Reading from the transcript is opt-in, so this is the path every user is on
+  // until they flip the switch. Its own user, because the preference is stored
+  // server-side and other workers sign in as `SAME_USER` with it turned on.
+  test("a user who has not opted in hydrates from LangGraph state", async ({
+    page,
+  }) => {
+    await loginAs(page, { login: "carol", email: "carol@example.com" });
+    await setTranscriptStreaming(page, false);
+    const hydrations: Array<string> = [];
+    page.on("request", (request) => {
+      if (request.method() !== "GET") return;
+      const path = new URL(request.url()).pathname;
+      if (/^\/dashboard\/api\/threads\/[^/]+\/(state|transcript)$/.test(path))
+        hydrations.push(path);
+    });
+
+    await openThreadViaSlackLink(page);
+    const threadId = threadIdFromUrl(page);
+    await waitForThreadIdle(page, threadId);
+    await expectTranscriptVisible(page);
+
+    expect(hydrations).toContain(`/dashboard/api/threads/${threadId}/state`);
+    expect(hydrations).not.toContain(
+      `/dashboard/api/threads/${threadId}/transcript`,
+    );
   });
 
   test("renders a web follow-up exactly once", async ({ page }) => {
