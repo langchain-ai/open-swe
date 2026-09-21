@@ -1,10 +1,15 @@
+import json
 from typing import Any
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock
+from urllib.parse import urlencode
 
 import pytest
+from fastapi import BackgroundTasks, Request
+from starlette.types import Message
 
 from agent.run_config import Repo
 from agent.slack import failures as slack_failures
+from agent.slack import routes as slack_routes
 from agent.slack import webhook as slack_webhook
 from agent.slack.payloads import SlackChannelContext
 from agent.slack.request import SlackRequest
@@ -125,6 +130,55 @@ async def test_slack_processing_error_replies_even_without_an_agent_thread(
     assert await_args is not None
     assert await_args.args[:2] == ("C1", "123.45")
     assert await_args.kwargs["agent_thread_id"] is None
+
+
+@pytest.mark.parametrize("action", ["approve", "revise", "cancel"])
+@pytest.mark.parametrize("thread_ts", ["123.45", None])
+async def test_legacy_plan_buttons_only_notify_the_clicking_user(
+    monkeypatch: pytest.MonkeyPatch, action: str, thread_ts: str | None
+) -> None:
+    payload = {
+        "type": "block_actions",
+        "channel": {"id": "C1" if thread_ts else "D1"},
+        "user": {"id": "U1"},
+        "message": {"ts": "234.56", **({"thread_ts": thread_ts} if thread_ts else {})},
+        "actions": [
+            {
+                "action_id": "open_swe_option_select_0" if thread_ts else "open_swe_option_select",
+                "value": json.dumps({"type": "plan_approval", "action": action}),
+            }
+        ],
+    }
+    body = urlencode({"payload": json.dumps(payload)}).encode()
+
+    async def receive() -> Message:
+        return {"type": "http.request", "body": body, "more_body": False}
+
+    request = Request({"type": "http", "headers": []}, receive)
+    notify = AsyncMock(return_value=True)
+    client = Mock(side_effect=AssertionError("Retired buttons must not access thread state"))
+    dispatch = AsyncMock()
+    monkeypatch.setattr(slack_routes.common, "verify_slack_signature", lambda **_kwargs: True)
+    monkeypatch.setattr(slack_routes.common, "post_slack_ephemeral_message", notify)
+    monkeypatch.setattr(slack_routes, "get_langgraph_client", client)
+    monkeypatch.setattr(slack_routes.service, "process_slack_mention", dispatch)
+    tasks = BackgroundTasks()
+
+    result = await slack_routes.slack_interactivity(request, tasks)
+    await tasks()
+
+    assert result["status"] == "accepted"
+    notify.assert_awaited_once()
+    args = notify.await_args
+    assert args is not None
+    assert args.args[:2] == ("C1" if thread_ts else "D1", "U1")
+    assert args.kwargs == {"thread_ts": thread_ts}
+    assert "no longer active" in args.args[2]
+    assert "artifact" in args.args[2]
+    assert "reply in this thread" in args.args[2]
+    assert "No action was taken" in args.args[2]
+    client.assert_not_called()
+    dispatch.assert_not_awaited()
 
 
 @pytest.mark.asyncio

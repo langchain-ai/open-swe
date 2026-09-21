@@ -82,7 +82,7 @@ async def save_plan_content(
                 extra={"agent_thread_id": thread_id},
                 exc_info=True,
             )
-    metadata: dict[str, Any] = {"plan_status": status}
+    metadata = {"plan_status": status, "plan_approved_by": None, "plan_approved_at": None}
     await _merge_thread_metadata(thread_id, metadata)
 
 

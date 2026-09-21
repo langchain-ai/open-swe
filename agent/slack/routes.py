@@ -688,6 +688,20 @@ async def slack_interactivity(
     button = SlackButtonValue.parse(parse_json_object((action.value or "{}").encode("utf-8")))
     if button is None:
         return ignored("Invalid action value")
+    if button.type == "plan_approval":
+        if not interaction.channel_id or not interaction.user.id:
+            return ignored("Missing Slack action context")
+        background_tasks.add_task(
+            common.post_slack_ephemeral_message,
+            interaction.channel_id,
+            interaction.user.id,
+            "This plan approval button is no longer active. Plan mode and approval gates "
+            "have been removed. Open the artifact linked in the original message to review it, "
+            "or reply in this thread and mention Open SWE with what you'd like to do next. "
+            "No action was taken.",
+            thread_ts=interaction.message.thread_ts or interaction.container.thread_ts or None,
+        )
+        return accepted("Legacy plan button retired")
 
     channel_id = interaction.channel_id
     if not channel_id:

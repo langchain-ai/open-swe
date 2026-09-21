@@ -353,7 +353,37 @@ async def test_save_plan_content_publishes_shared_artifact(
 
     await plan_store.save_plan_content("t", html="x")
 
-    assert merged == {"plan_status": "shared"}
+    assert merged == {
+        "plan_status": "shared",
+        "plan_approved_by": None,
+        "plan_approved_at": None,
+    }
+
+
+async def test_republished_artifact_drops_legacy_approval(
+    monkeypatch: pytest.MonkeyPatch, fake_store: FakeStore
+) -> None:
+    from agent.threads import plan_api, plan_store
+
+    metadata: dict[str, object] = {
+        "source": "slack",
+        "plan_status": "approved",
+        "plan_approved_by": "reviewer",
+        "plan_approved_at": "2026-08-16T12:00:00+00:00",
+    }
+
+    async def merge_metadata(thread_id: str, changes: dict[str, object]) -> None:
+        metadata.update(changes)
+
+    monkeypatch.setattr(plan_store, "_merge_thread_metadata", merge_metadata)
+    monkeypatch.setattr(plan_api, "fetch_thread_metadata", AsyncMock(return_value=metadata))
+    await plan_store.save_plan_content("t1", html="<p>Updated artifact</p>")
+    result = await plan_api.get_plan(
+        "t1", session={"sub": "reviewer", "email": None, "name": "Reviewer"}
+    )
+    assert result["status"] == "shared"
+    assert result["approvedBy"] is None
+    assert result["approvedAt"] is None
 
 
 async def test_get_plan_returns_approval_attribution(monkeypatch: pytest.MonkeyPatch) -> None:
