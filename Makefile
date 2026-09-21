@@ -73,7 +73,8 @@ install:
 # so the result runs on a laptop without Node or Bun installed.
 cli:
 	@command -v bun >/dev/null 2>&1 || { echo 'bun is required: https://bun.com/docs/installation' >&2; exit 1; }
-	cd cli && bun install && bun run build
+	pnpm install --frozen-lockfile --filter open-swe-cli --filter open-swe
+	pnpm --filter open-swe-cli run build
 	@echo "Built $(CURDIR)/cli/dist/open-swe"
 
 ######################

@@ -80,7 +80,7 @@ output is capped at 1 MiB, keeping the first and last 512 KiB.
 ## Development
 
 ```sh
-bun install
-bun run check     # tsc --noEmit + bun test
-bun run build
+pnpm install --filter open-swe-cli   # from the repository root
+pnpm --filter open-swe-cli run check # tsc --noEmit + bun test
+pnpm --filter open-swe-cli run build
 ```
