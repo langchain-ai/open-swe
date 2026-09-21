@@ -44,6 +44,7 @@ class IntegrationGroup:
 
 class DynamicToolState(AgentState):
     loaded_integration_tools: NotRequired[Annotated[list[str], _merge_tool_names]]
+    integration_load_attempts: NotRequired[dict[str, int]]
 
 
 @dataclass
@@ -108,15 +109,17 @@ class DynamicToolMiddleware(OpenSWEMiddleware[DynamicToolState]):
                         ]
                     }
                 )
-            missing = await self._build(normalized_names)
-            if missing:
+            loaded = set(state.get("loaded_integration_tools", [])) if state else set()
+            requested = set(normalized_names)
+            if requested and requested <= loaded:
                 return Command(
                     update={
                         "messages": [
                             ToolMessage(
                                 content=(
-                                    "These integration tools are unavailable right now: "
-                                    f"{', '.join(missing)}. Continue without them."
+                                    "These integration tools are already loaded: "
+                                    f"{', '.join(sorted(requested))}. Call them directly, or "
+                                    "treat them as unavailable if their schemas are not visible."
                                 ),
                                 tool_call_id=tool_call_id,
                                 status="error",
@@ -124,7 +127,34 @@ class DynamicToolMiddleware(OpenSWEMiddleware[DynamicToolState]):
                         ]
                     }
                 )
-            loaded = set(state.get("loaded_integration_tools", [])) if state else set()
+            signature = json.dumps(sorted(requested), separators=(",", ":"))
+            attempts = dict(state.get("integration_load_attempts", {})) if state else {}
+            attempt = attempts.get(signature, 0) + 1
+            missing = await self._build(normalized_names)
+            if missing:
+                attempts[signature] = attempt
+                if attempt >= 3:
+                    content = (
+                        "These integration tools are unavailable: "
+                        f"{', '.join(missing)}. Proceed without them and do not retry."
+                    )
+                else:
+                    content = (
+                        "These integration tools are unavailable right now: "
+                        f"{', '.join(missing)}. Continue without them."
+                    )
+                return Command(
+                    update={
+                        "integration_load_attempts": attempts,
+                        "messages": [
+                            ToolMessage(
+                                content=content,
+                                tool_call_id=tool_call_id,
+                                status="error",
+                            )
+                        ],
+                    }
+                )
             loaded.update(normalized_names)
             return Command(
                 update={
@@ -173,7 +203,7 @@ class DynamicToolMiddleware(OpenSWEMiddleware[DynamicToolState]):
                 tools = await self._groups[group].load()
             except Exception:
                 logger.warning("Failed to load %s integration tools", group, exc_info=True)
-                tools = []
+                return {}
             resolved.tools = {tool.name: tool for tool in tools}
             resolved.done = True
         return resolved.tools
@@ -191,7 +221,10 @@ class DynamicToolMiddleware(OpenSWEMiddleware[DynamicToolState]):
         return self._resolved.get(group, _Resolved()).tools.get(name)
 
     async def abefore_agent(self, state: DynamicToolState, runtime: Runtime) -> dict[str, Any]:  # noqa: ARG002
-        return {"loaded_integration_tools": Overwrite([])}
+        return {
+            "loaded_integration_tools": Overwrite([]),
+            "integration_load_attempts": Overwrite({}),
+        }
 
     async def awrap_model_call(
         self,
@@ -201,6 +234,11 @@ class DynamicToolMiddleware(OpenSWEMiddleware[DynamicToolState]):
         loaded = self._loaded_names(request.state)
         if loaded:
             await self._build(loaded)
+        for name in loaded:
+            if self._tool(name) is None:
+                logger.warning(
+                    "Loaded integration tool is not available", extra={"tool_name": name}
+                )
         tools = [tool for name in loaded if (tool := self._tool(name)) is not None]
         return await handler(request.override(tools=[*request.tools, *tools]))
 

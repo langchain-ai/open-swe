@@ -88,6 +88,74 @@ async def test_dynamic_tools_load_only_selected_schemas_and_route_calls() -> Non
         DynamicToolMiddleware({"Notion": [_tool("static")]}, reserved_names={"static"})
 
 
+async def test_loading_an_already_loaded_tool_returns_an_error_without_state_write() -> None:
+    middleware = DynamicToolMiddleware({"Notion": [_tool("notion-search")]})
+    coroutine = cast(Any, cast(StructuredTool, middleware.tools[0]).coroutine)
+
+    command = await coroutine(
+        tool_names=["Notion: notion-search"],
+        state={"loaded_integration_tools": ["notion-search"]},
+        tool_call_id="load-1",
+    )
+
+    assert isinstance(command, Command)
+    update = cast(dict[str, Any], command.update)
+    message = update["messages"][0]
+    assert message.status == "error"
+    assert "already loaded" in message.content
+    assert "loaded_integration_tools" not in update
+
+
+async def test_unresolved_tool_load_becomes_terminal_on_third_attempt() -> None:
+    async def load() -> list[BaseTool]:
+        return []
+
+    middleware = DynamicToolMiddleware(
+        {"Notion": IntegrationGroup(tool_names=("notion-search",), load=load)}
+    )
+    coroutine = cast(Any, cast(StructuredTool, middleware.tools[0]).coroutine)
+    state: dict[str, Any] = {}
+
+    for attempt in range(1, 4):
+        command = await coroutine(
+            tool_names=["notion-search"], state=state, tool_call_id=f"load-{attempt}"
+        )
+        assert isinstance(command, Command)
+        update = cast(dict[str, Any], command.update)
+        state.update(update)
+
+    message = state["messages"][0]
+    assert message.status == "error"
+    assert "do not retry" in message.content
+
+
+async def test_integration_load_attempts_reset_at_agent_start() -> None:
+    async def load() -> list[BaseTool]:
+        return []
+
+    middleware = DynamicToolMiddleware(
+        {"Notion": IntegrationGroup(tool_names=("notion-search",), load=load)}
+    )
+    coroutine = cast(Any, cast(StructuredTool, middleware.tools[0]).coroutine)
+    state: dict[str, Any] = {}
+
+    for attempt in range(1, 3):
+        command = await coroutine(
+            tool_names=["notion-search"], state=state, tool_call_id=f"load-{attempt}"
+        )
+        assert isinstance(command, Command)
+        state.update(cast(dict[str, Any], command.update))
+
+    reset = await middleware.abefore_agent(state, MagicMock())
+    state.update({key: value.value for key, value in reset.items()})
+    command = await coroutine(tool_names=["notion-search"], state=state, tool_call_id="load-3")
+
+    assert isinstance(command, Command)
+    update = cast(dict[str, Any], command.update)
+    assert "do not retry" not in update["messages"][0].content
+    assert list(update["integration_load_attempts"].values()) == [1]
+
+
 def test_general_purpose_subagent_includes_dynamic_tools() -> None:
     from agent.server import _general_purpose_subagent
 
@@ -202,8 +270,14 @@ async def test_unknown_qualified_name_is_rejected() -> None:
 
 
 async def test_a_group_that_fails_to_build_is_reported_not_raised() -> None:
+    attempts = 0
+
     async def load() -> list[BaseTool]:
-        raise RuntimeError("mcp unreachable")
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            raise RuntimeError("mcp unreachable")
+        return [_tool("analyzePlan")]
 
     middleware = DynamicToolMiddleware(
         {"Corridor": IntegrationGroup(tool_names=("analyzePlan",), load=load)}
@@ -215,6 +289,10 @@ async def test_a_group_that_fails_to_build_is_reported_not_raised() -> None:
     message = cast(dict[str, Any], command.update)["messages"][0]
     assert message.status == "error"
     assert "unavailable right now" in message.content
+
+    command = await coroutine(tool_names=["analyzePlan"], state={}, tool_call_id="load-2")
+    assert isinstance(command, Command)
+    assert cast(dict[str, Any], command.update)["loaded_integration_tools"] == ["analyzePlan"]
 
 
 async def test_a_group_whose_catalog_is_empty_is_not_offered() -> None:
