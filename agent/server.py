@@ -1412,7 +1412,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         subagents=[
             _general_purpose_subagent(
                 subagent_model,
-                tools=static_tools,
+                tools=[tool for tool in static_tools if tool is not save_user_settings],
                 workspace_skills=workspace_skills,
                 dynamic_tools=dynamic_tool_middleware,
                 offloading=ConversationOffloadingMiddleware(subagent_model, agent_backend),

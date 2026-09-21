@@ -841,8 +841,7 @@ async def test_general_purpose_subagent_cannot_use_slack_tools() -> None:
         "submit_review_assessment_feedback",
     }
     assert parent_only_names <= parent_names
-    assert gp["tools"] == parent_tools
-    assert subagent_names == parent_names
+    assert subagent_names == parent_names - {"save_user_settings"}
 
     from unittest.mock import AsyncMock, MagicMock
 
