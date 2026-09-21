@@ -255,6 +255,14 @@ describe("WorkspacesSection", () => {
     fireEvent.change(screen.getByLabelText("Workspace name"), {
       target: { value: "Preview" },
     })
+    const repositoryHelp = screen.getByRole("button", {
+      name: "About workspace repositories",
+    })
+    fireEvent.mouseEnter(repositoryHelp)
+    fireEvent.mouseMove(repositoryHelp)
+    expect(
+      await screen.findByText(/routes new work for it to this workspace/)
+    ).toBeTruthy()
     fireEvent.click(screen.getByRole("button", { name: "Choose repositories" }))
     fireEvent.change(await screen.findByLabelText("Add a repository by name"), {
       target: { value: "acme/web" },
