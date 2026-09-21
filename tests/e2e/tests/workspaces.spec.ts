@@ -429,7 +429,9 @@ test.describe("Workspaces", () => {
     for (const label of ["boot", "setup", "update", "capture"]) {
       await expect(page.getByText(`✓ ${label}`)).toBeVisible();
     }
-    await expect(page.getByRole("button", { name: "Delete" })).toHaveCount(0);
+    await expect(
+      page.getByRole("button", { name: "Delete default", exact: true }),
+    ).toBeVisible();
 
     // Leave no default behind: later specs' runs would boot from it.
     await deleteWorkspace(page, DEFAULT_SLUG);
