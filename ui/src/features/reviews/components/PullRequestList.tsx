@@ -5,6 +5,7 @@ import type { OpenPullRequest } from "@/lib/api"
 import { pullRequestKey } from "../lib/status"
 
 const estimatedCardHeight = 208
+const estimatedRowHeight = 68
 const rowGap = 12
 
 /**
@@ -15,6 +16,7 @@ const rowGap = 12
 export function PullRequestList({
   rows,
   available,
+  compact,
   children,
   onEndReached,
 }: {
@@ -23,6 +25,7 @@ export function PullRequestList({
   // already in view have to resume growth on their own: nothing moves on
   // screen, so no further scrolling would ask for them.
   available: number
+  compact?: boolean
   children: (pr: OpenPullRequest) => ReactNode
   onEndReached: () => void
 }) {
@@ -42,7 +45,7 @@ export function PullRequestList({
   const virtualizer = useVirtualizer({
     count: rows.length,
     getScrollElement: () => scroller,
-    estimateSize: () => estimatedCardHeight,
+    estimateSize: () => (compact ? estimatedRowHeight : estimatedCardHeight),
     overscan: 4,
     getItemKey: (index) => pullRequestKey(rows[index]!),
   })
@@ -69,7 +72,7 @@ export function PullRequestList({
               className="absolute top-0 left-0 w-full"
               style={{
                 transform: `translateY(${row.start}px)`,
-                paddingBottom: rowGap,
+                paddingBottom: compact ? 0 : rowGap,
               }}
             >
               {children(rows[row.index]!)}
@@ -77,7 +80,7 @@ export function PullRequestList({
           ))}
         </ul>
       ) : (
-        <ul className="space-y-3">
+        <ul className={compact ? undefined : "space-y-3"}>
           {rows.map((pr) => (
             <li key={pullRequestKey(pr)}>{children(pr)}</li>
           ))}

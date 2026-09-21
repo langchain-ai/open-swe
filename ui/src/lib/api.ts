@@ -872,6 +872,57 @@ export interface ReviewDiffFile {
   unrenderable?: boolean
 }
 
+export type PreviewFileStatus =
+  | "added"
+  | "removed"
+  | "modified"
+  | "renamed"
+  | "copied"
+  | "changed"
+  | "unchanged"
+
+export interface PreviewFile {
+  path: string
+  status: PreviewFileStatus
+  additions: number
+  deletions: number
+}
+
+export interface PreviewThread {
+  author: string | null
+  body: string
+  path: string
+  line: number | null
+  url: string | null
+}
+
+export interface PreviewCheck {
+  name: string
+  status: string
+  conclusion: string | null
+  url: string | null
+}
+
+export interface PullRequestPreview {
+  title: string
+  body: string
+  author: string | null
+  author_avatar_url: string | null
+  state: string
+  draft: boolean
+  head_ref: string
+  base_ref: string
+  commits: number
+  additions: number
+  deletions: number
+  changed_files: number
+  files: Array<PreviewFile>
+  // null when GitHub could not answer, which is not the same as none unresolved
+  // or no checks configured.
+  unresolved: Array<PreviewThread> | null
+  checks: Array<PreviewCheck> | null
+}
+
 export interface ReviewDiffPayload {
   files: Array<ReviewDiffFile>
   total_additions: number
@@ -1325,6 +1376,10 @@ export const api = {
     request<ReviewAssessmentFeedback>(
       `/reviews/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}/feedback/${reviewId}`,
       { method: "PUT", body: JSON.stringify(feedback) }
+    ),
+  getPullRequestPreview: (owner: string, repo: string, number: number) =>
+    request<PullRequestPreview>(
+      `/reviews/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}/preview`
     ),
   getReviewDiff: (owner: string, repo: string, number: number) =>
     request<ReviewDiffPayload>(
