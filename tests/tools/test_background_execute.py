@@ -229,3 +229,28 @@ async def test_monitor_enqueues_one_claimed_completion() -> None:
     ]
     assert dispatch.await_args.kwargs["multitask_strategy"] == "enqueue"
     delete_crons.assert_awaited_once_with("thread-1")
+
+
+async def test_monitor_skips_delivered_stopped_task() -> None:
+    task = {
+        "task_id": "task-1",
+        "status": "stopped",
+        "notification": "done",
+    }
+    backend = AsyncMock()
+    backend.aexecute.return_value = SimpleNamespace(exit_code=0)
+    client = AsyncMock()
+    client.threads.get.return_value = {"metadata": {"sandbox_id": "sandbox-1"}}
+
+    with (
+        patch("agent.background_tasks._client", return_value=client),
+        patch("agent.background_tasks.create_sandbox", AsyncMock(return_value=backend)),
+        patch("agent.background_tasks._list_tasks", AsyncMock(side_effect=[[task], [task]])),
+        patch("agent.background_tasks.dispatch_agent_run", AsyncMock()) as dispatch,
+        patch("agent.background_tasks._delete_crons", AsyncMock()) as delete_crons,
+    ):
+        result = await monitor_background_tasks("thread-1")
+
+    assert result == {"status": "idle", "delivered": 0}
+    dispatch.assert_not_awaited()
+    delete_crons.assert_awaited_once_with("thread-1")
