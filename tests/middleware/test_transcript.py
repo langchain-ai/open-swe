@@ -64,11 +64,6 @@ def _install(
         return transcribed
 
     monkeypatch.setattr(mw, "_has_transcript", _has_transcript)
-
-    async def _turn_context(thread_id: str, turn_id: UUID) -> tuple[str | None, str | None]:
-        return None, None
-
-    monkeypatch.setattr(mw.checkpoints, "_turn_context", _turn_context)
     configurable: dict[str, Any] = {"thread_id": THREAD_ID, "run_id": RUN_ID}
     if turn_id is not None:
         configurable["transcript_turn_id"] = str(turn_id)
@@ -186,7 +181,6 @@ async def test_hook_sequence_for_a_transcribed_turn(monkeypatch: pytest.MonkeyPa
         "message.completed",
         "tool.started",
         "tool.completed",
-        "turn.checkpoint.completed",
         "turn.completed",
     ]
     assert engine.command_ids[0] == f"turn:{turn_id}:started:{RUN_ID}"
@@ -328,7 +322,7 @@ async def test_model_failure_records_turn_failed(monkeypatch: pytest.MonkeyPatch
     with pytest.raises(RuntimeError):
         await middleware.awrap_model_call(_model_request([]), model_handler)
 
-    assert engine.types == ["turn.started", "turn.checkpoint.completed", "turn.failed"]
+    assert engine.types == ["turn.started", "turn.failed"]
     failed = engine.commands[-1].event
     assert isinstance(failed, TurnFailed)
     assert "provider exploded" in failed.error
