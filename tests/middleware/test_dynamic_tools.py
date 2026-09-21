@@ -1,227 +1,256 @@
-from dataclasses import dataclass, replace
-from typing import Any, cast
-from unittest.mock import MagicMock
+from collections.abc import Awaitable, Callable, Sequence
+from typing import Self, cast
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from langchain.agents import create_agent
+from langchain.agents.middleware import LLMToolSelectorMiddleware
 from langchain.agents.middleware.types import ModelRequest, ModelResponse, ToolCallRequest
-from langchain_core.messages import ToolMessage
+from langchain_anthropic import ChatAnthropic
+from langchain_core.language_models import BaseChatModel
+from langchain_core.language_models.fake_chat_models import (
+    FakeListChatModel,
+    FakeMessagesListChatModel,
+)
+from langchain_core.messages import AIMessage, HumanMessage, ToolCall, ToolMessage
 from langchain_core.tools import BaseTool, StructuredTool
-from langgraph.types import Command
+from langchain_openai import ChatOpenAI
+from langgraph.prebuilt.tool_node import ToolRuntime
 
 from agent.middleware.dynamic_tools import DynamicToolMiddleware, IntegrationGroup
 
 
-def _tool(name: str, description: str = "schema details that must stay hidden") -> BaseTool:
-    async def run(value: str) -> str:
+def _tool(name: str) -> BaseTool:
+    async def run(value: str = "") -> str:
         return value
 
-    return StructuredTool.from_function(coroutine=run, name=name, description=description)
+    return StructuredTool.from_function(coroutine=run, name=name, description=f"Use {name}.")
 
 
-@dataclass
-class _Request:
-    state: dict[str, Any]
-    tools: list[BaseTool]
-    tool_call: dict[str, Any] | None = None
-    tool: BaseTool | None = None
-
-    def override(self, **kwargs: Any) -> _Request:
-        return replace(self, **kwargs)
-
-
-async def test_dynamic_tools_load_only_selected_schemas_and_route_calls() -> None:
-    notion_search = _tool("notion-search")
-    notion_update = _tool("notion-update-page")
-    middleware = DynamicToolMiddleware({"Notion": [notion_search, notion_update]})
-    loader = cast(StructuredTool, middleware.tools[0])
-
-    assert "- notion-search (integration: Notion)" in loader.description
-    assert "- notion-update-page (integration: Notion)" in loader.description
-    assert 'Example: {"tool_names":["notion-search"]}' in loader.description
-    assert "schema details that must stay hidden" not in loader.description
-    schema = cast(Any, loader.tool_call_schema).model_json_schema()
-    assert set(schema["properties"]) == {"tool_names"}
-
-    coroutine = cast(Any, loader.coroutine)
-    command = await coroutine(tool_names=["notion-search"], state={}, tool_call_id="load-1")
-    assert isinstance(command, Command)
-    loaded_state = cast(dict[str, Any], command.update)
-    assert loaded_state["loaded_integration_tools"] == ["notion-search"]
-    assert "next turn" in loaded_state["messages"][0].content
-
-    visible: list[str] = []
-
-    async def model_handler(request: ModelRequest) -> ModelResponse:
-        visible.extend(tool.name for tool in request.tools if isinstance(tool, BaseTool))
-        return cast(ModelResponse, object())
-
-    model_request = _Request(state=loaded_state, tools=[_tool("static")])
-    await middleware.awrap_model_call(cast(ModelRequest, model_request), model_handler)
-    assert visible == ["static", "notion-search"]
-
-    routed: list[str] = []
-
-    async def tool_handler(request: ToolCallRequest) -> ToolMessage:
-        assert request.tool is not None
-        routed.append(request.tool.name)
-        return ToolMessage(content="ok", tool_call_id=request.tool_call["id"])
-
-    loaded_call = _Request(
-        state=loaded_state,
-        tools=[],
-        tool_call={"name": "notion-search", "args": {"value": "x"}, "id": "call-1"},
+def _request(
+    model: BaseChatModel,
+    tools: list[BaseTool | dict[str, object]] | None = None,
+) -> ModelRequest:
+    return ModelRequest(
+        model=model,
+        messages=[HumanMessage("help")],
+        tools=tools or [],
+        state={"messages": []},
     )
-    result = await middleware.awrap_tool_call(cast(ToolCallRequest, loaded_call), tool_handler)
-    assert isinstance(result, ToolMessage)
-    assert routed == ["notion-search"]
 
-    unloaded_call = replace(
-        loaded_call,
-        tool_call={"name": "notion-update-page", "args": {}, "id": "call-2"},
+
+def _tool_request(name: str, tool: BaseTool | None = None) -> ToolCallRequest:
+    call = ToolCall(name=name, args={"value": "result"}, id="call-1")
+    return ToolCallRequest(call, tool, {}, cast(ToolRuntime, None))
+
+
+async def _visible_tools(
+    middleware: DynamicToolMiddleware, request: ModelRequest
+) -> list[BaseTool | dict[str, object]]:
+    visible: list[BaseTool | dict[str, object]] = []
+
+    async def handler(model_request: ModelRequest) -> ModelResponse:
+        visible.extend(model_request.tools)
+        return ModelResponse(result=[])
+
+    await middleware.awrap_model_call(request, handler)
+    return visible
+
+
+@pytest.mark.parametrize(
+    "model,search_type",
+    [
+        (
+            ChatAnthropic(model="claude-sonnet-4-6", api_key="test"),
+            "tool_search_tool_bm25_20251119",
+        ),
+        (ChatAnthropic(model="claude-opus-5", api_key="test"), "tool_search_tool_bm25_20251119"),
+        (ChatAnthropic(model="claude-haiku-4-5", api_key="test"), "tool_search_tool_bm25_20251119"),
+        (ChatOpenAI(model="gpt-5.5", api_key="test"), "tool_search"),
+        (ChatOpenAI(model="gpt-5.6-sol", api_key="test"), "tool_search"),
+    ],
+)
+async def test_supported_direct_models_use_native_deferral(
+    model: BaseChatModel, search_type: str
+) -> None:
+    static = _tool("static")
+    middleware = DynamicToolMiddleware({"MCP": [_tool("integration")]})
+
+    visible = await _visible_tools(middleware, _request(model, [static]))
+
+    assert visible[0] is static
+    deferred = cast(BaseTool, visible[1])
+    assert deferred.name == "integration"
+    assert deferred.extras == {"defer_loading": True}
+    provider_search = cast(dict[str, object], visible[2])
+    assert provider_search["type"] == search_type
+
+
+@pytest.mark.parametrize(
+    "model",
+    [
+        ChatAnthropic(model="claude-3-7-sonnet-latest", api_key="test"),
+        ChatAnthropic(model="claude-haiku-4-4", api_key="test"),
+        ChatOpenAI(model="gpt-5.4", api_key="test"),
+        ChatOpenAI(
+            model="gpt-5.6-sol",
+            api_key="test",
+            base_url="https://gateway.smith.langchain.com/openai/v1",
+        ),
+        FakeListChatModel(responses=["unused"]),
+    ],
+)
+async def test_fallback_selects_only_integrations_and_preserves_request_tools(
+    model: BaseChatModel, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    static = _tool("static")
+    provider_tool: dict[str, object] = {"type": "web_search"}
+    first = _tool("first-integration")
+    second = _tool("second-integration")
+    seen: list[str] = []
+
+    async def select(
+        _self: LLMToolSelectorMiddleware,
+        request: ModelRequest,
+        handler: Callable[[ModelRequest], Awaitable[ModelResponse]],
+    ) -> ModelResponse:
+        seen.extend(tool.name for tool in request.tools if isinstance(tool, BaseTool))
+        return await handler(request.override(tools=[second]))
+
+    monkeypatch.setattr(LLMToolSelectorMiddleware, "awrap_model_call", select)
+    middleware = DynamicToolMiddleware({"MCP": [first, second]})
+
+    visible = await _visible_tools(middleware, _request(model, [static, provider_tool]))
+
+    assert seen == ["first-integration", "second-integration"]
+    assert visible == [static, provider_tool, second]
+
+
+async def test_tools_resolve_once_route_execution_and_report_unavailable() -> None:
+    builds = 0
+    available = _tool("available")
+
+    async def load() -> list[BaseTool]:
+        nonlocal builds
+        builds += 1
+        return [available]
+
+    middleware = DynamicToolMiddleware(
+        {"MCP": IntegrationGroup(tool_names=("available", "unavailable"), load=load)}
     )
-    result = await middleware.awrap_tool_call(cast(ToolCallRequest, unloaded_call), tool_handler)
+    request = _request(ChatOpenAI(model="gpt-5.5", api_key="test"))
+    await _visible_tools(middleware, request)
+    await _visible_tools(middleware, request)
+    assert builds == 1
+
+    handler = AsyncMock(return_value=ToolMessage(content="ok", tool_call_id="call-1"))
+    await middleware.awrap_tool_call(_tool_request("available"), handler)
+    assert handler.await_args.args[0].tool is available
+
+    result = await middleware.awrap_tool_call(_tool_request("unavailable"), handler)
     assert isinstance(result, ToolMessage)
     assert result.status == "error"
-    assert routed == ["notion-search"]
+    assert "unavailable right now" in result.content
+    assert handler.await_count == 1
 
-    with pytest.raises(ValueError, match="Duplicate integration tool name"):
-        DynamicToolMiddleware({"Notion": [_tool("static")]}, reserved_names={"static"})
+
+async def test_group_load_failure_is_graceful() -> None:
+    async def load() -> list[BaseTool]:
+        raise RuntimeError("MCP unavailable")
+
+    middleware = DynamicToolMiddleware(
+        {"MCP": IntegrationGroup(tool_names=("integration",), load=load)}
+    )
+    request = _request(ChatOpenAI(model="gpt-5.5", api_key="test"))
+
+    assert await _visible_tools(middleware, request) == []
+    result = await middleware.awrap_tool_call(_tool_request("integration"), AsyncMock())
+    assert isinstance(result, ToolMessage)
+    assert result.status == "error"
+
+
+def test_catalog_and_resolved_collisions_are_rejected() -> None:
+    with pytest.raises(ValueError, match="Duplicate integration tool name: static"):
+        DynamicToolMiddleware({"MCP": [_tool("static")]}, reserved_names={"static"})
+    with pytest.raises(ValueError, match="Duplicate integration tool name: same"):
+        DynamicToolMiddleware({"A": [_tool("same")], "B": [_tool("same")]})
+
+
+async def test_unexpected_resolved_tool_collision_is_rejected() -> None:
+    async def load_first() -> list[BaseTool]:
+        return [_tool("first"), _tool("second")]
+
+    async def load_second() -> list[BaseTool]:
+        return [_tool("second")]
+
+    middleware = DynamicToolMiddleware(
+        {
+            "First": IntegrationGroup(tool_names=("first",), load=load_first),
+            "Second": IntegrationGroup(tool_names=("second",), load=load_second),
+        }
+    )
+
+    with pytest.raises(ValueError, match="Duplicate integration tool name: second"):
+        await _visible_tools(middleware, _request(ChatOpenAI(model="gpt-5.5", api_key="test")))
+
+
+class _ToolCallingFakeModel(FakeMessagesListChatModel):
+    def bind_tools(
+        self,
+        tools: Sequence[object],
+        *,
+        tool_choice: str | None = None,
+        **kwargs: object,
+    ) -> Self:
+        return self
+
+
+async def test_create_agent_fallback_search_executes_integration(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[str] = []
+
+    async def integration(value: str = "") -> str:
+        calls.append(value)
+        return f"integration:{value}"
+
+    tool = StructuredTool.from_function(
+        coroutine=integration,
+        name="integration",
+        description="Use integration.",
+    )
+    model = _ToolCallingFakeModel(
+        responses=[
+            AIMessage(
+                content="",
+                tool_calls=[{"name": "integration", "args": {"value": "result"}, "id": "call-1"}],
+            ),
+            AIMessage(content="done"),
+        ]
+    )
+
+    async def select(
+        _self: LLMToolSelectorMiddleware,
+        request: ModelRequest,
+        handler: Callable[[ModelRequest], Awaitable[ModelResponse]],
+    ) -> ModelResponse:
+        return await handler(request.override(tools=[tool]))
+
+    monkeypatch.setattr(LLMToolSelectorMiddleware, "awrap_model_call", select)
+    graph = create_agent(model=model, middleware=[DynamicToolMiddleware({"MCP": [tool]})])
+
+    result = await graph.ainvoke({"messages": [HumanMessage("use the integration")]})
+
+    assert calls == ["result"]
+    assert result["messages"][-1].content == "done"
+    tool_messages = [message for message in result["messages"] if isinstance(message, ToolMessage)]
+    assert tool_messages[-1].content == "integration:result"
 
 
 def test_general_purpose_subagent_includes_dynamic_tools() -> None:
     from agent.server import _general_purpose_subagent
 
-    middleware = DynamicToolMiddleware({"Notion": [_tool("notion-search")]})
+    middleware = DynamicToolMiddleware({"MCP": [_tool("integration")]})
     subagent = _general_purpose_subagent(MagicMock(), tools=[], dynamic_tools=middleware)
 
     assert middleware in subagent.get("middleware", [])
-
-
-async def test_a_lazy_group_is_not_built_until_it_is_loaded() -> None:
-    builds = 0
-
-    async def load() -> list[BaseTool]:
-        nonlocal builds
-        builds += 1
-        return [_tool("analyzePlan")]
-
-    middleware = DynamicToolMiddleware(
-        {"Corridor": IntegrationGroup(tool_names=("analyzePlan",), load=load)}
-    )
-    loader = cast(StructuredTool, middleware.tools[0])
-
-    # The catalog reaches the model without the group ever being built.
-    assert "- analyzePlan (integration: Corridor)" in loader.description
-    assert 'Example: {"tool_names":["analyzePlan"]}' in loader.description
-    assert builds == 0
-
-    coroutine = cast(Any, loader.coroutine)
-    command = await coroutine(tool_names=["analyzePlan"], state={}, tool_call_id="load-1")
-    assert isinstance(command, Command)
-    assert builds == 1
-
-    loaded_state = cast(dict[str, Any], command.update)
-    routed: list[str] = []
-
-    async def tool_handler(request: ToolCallRequest) -> ToolMessage:
-        assert request.tool is not None
-        routed.append(request.tool.name)
-        return ToolMessage(content="ok", tool_call_id=request.tool_call["id"])
-
-    call = _Request(
-        state=loaded_state,
-        tools=[],
-        tool_call={"name": "analyzePlan", "args": {"value": "x"}, "id": "call-1"},
-    )
-    await middleware.awrap_tool_call(cast(ToolCallRequest, call), tool_handler)
-    assert routed == ["analyzePlan"]
-    # Built once and reused, not re-fetched per call.
-    assert builds == 1
-
-
-@pytest.mark.parametrize("qualified_name", ["Corridor:analyzePlan", "Corridor: analyzePlan"])
-async def test_catalog_qualified_names_are_normalized(qualified_name: str) -> None:
-    builds = 0
-    calls = 0
-
-    async def analyze_plan(value: str) -> str:
-        nonlocal calls
-        calls += 1
-        return value
-
-    async def load() -> list[BaseTool]:
-        nonlocal builds
-        builds += 1
-        return [
-            StructuredTool.from_function(
-                coroutine=analyze_plan,
-                name="analyzePlan",
-                description="Analyze an implementation plan.",
-            )
-        ]
-
-    middleware = DynamicToolMiddleware(
-        {"Corridor": IntegrationGroup(tool_names=("analyzePlan",), load=load)}
-    )
-    coroutine = cast(Any, cast(StructuredTool, middleware.tools[0]).coroutine)
-
-    command = await coroutine(tool_names=[qualified_name], state={}, tool_call_id="load-1")
-    assert isinstance(command, Command)
-    assert builds == 1
-    loaded_state = cast(dict[str, Any], command.update)
-    assert loaded_state["loaded_integration_tools"] == ["analyzePlan"]
-
-    async def tool_handler(request: ToolCallRequest) -> ToolMessage:
-        assert request.tool is not None
-        result = await request.tool.ainvoke(request.tool_call["args"])
-        return ToolMessage(content=result, tool_call_id=request.tool_call["id"])
-
-    call = _Request(
-        state=loaded_state,
-        tools=[],
-        tool_call={"name": "analyzePlan", "args": {"value": "plan"}, "id": "call-1"},
-    )
-    result = await middleware.awrap_tool_call(cast(ToolCallRequest, call), tool_handler)
-
-    assert isinstance(result, ToolMessage)
-    assert result.content == "plan"
-    assert builds == 1
-    assert calls == 1
-
-
-async def test_unknown_qualified_name_is_rejected() -> None:
-    middleware = DynamicToolMiddleware({"Corridor": [_tool("analyzePlan")]})
-    coroutine = cast(Any, cast(StructuredTool, middleware.tools[0]).coroutine)
-
-    command = await coroutine(tool_names=["Other:analyzePlan"], state={}, tool_call_id="load-1")
-
-    assert isinstance(command, Command)
-    message = cast(dict[str, Any], command.update)["messages"][0]
-    assert message.status == "error"
-    assert message.content == "Unknown integration tools: Other:analyzePlan"
-
-
-async def test_a_group_that_fails_to_build_is_reported_not_raised() -> None:
-    async def load() -> list[BaseTool]:
-        raise RuntimeError("mcp unreachable")
-
-    middleware = DynamicToolMiddleware(
-        {"Corridor": IntegrationGroup(tool_names=("analyzePlan",), load=load)}
-    )
-    coroutine = cast(Any, cast(StructuredTool, middleware.tools[0]).coroutine)
-
-    command = await coroutine(tool_names=["analyzePlan"], state={}, tool_call_id="load-1")
-    assert isinstance(command, Command)
-    message = cast(dict[str, Any], command.update)["messages"][0]
-    assert message.status == "error"
-    assert "unavailable right now" in message.content
-
-
-async def test_a_group_whose_catalog_is_empty_is_not_offered() -> None:
-    async def load() -> list[BaseTool]:
-        return []
-
-    middleware = DynamicToolMiddleware({"Corridor": IntegrationGroup(tool_names=(), load=load)})
-
-    assert not middleware.has_groups
-    assert "- Corridor" not in cast(StructuredTool, middleware.tools[0]).description

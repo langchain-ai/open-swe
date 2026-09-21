@@ -1,225 +1,134 @@
-"""Load optional integration tool schemas only when requested."""
+"""Defer integration tools with LangChain's supported middleware."""
 
 import asyncio
-import json
 import logging
+import re
 from collections.abc import Awaitable, Callable, Collection, Mapping, Sequence
-from dataclasses import dataclass, field
-from typing import Annotated, Any, NotRequired
+from dataclasses import dataclass
 
-from langchain.agents.middleware.types import (
-    AgentState,
-    ModelRequest,
-    ModelResponse,
-    ToolCallRequest,
-)
-from langchain_core.messages import ToolMessage
-from langchain_core.tools import BaseTool, InjectedToolCallId, StructuredTool
-from langgraph.prebuilt import InjectedState
-from langgraph.runtime import Runtime
-from langgraph.types import Command, Overwrite
+from langchain.agents.middleware import LLMToolSelectorMiddleware, ProviderToolSearchMiddleware
+from langchain.agents.middleware.types import ModelRequest, ModelResponse, ToolCallRequest
+from langchain_anthropic import ChatAnthropic
+from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
+from langchain_core.tools import BaseTool
+from langchain_openai import ChatOpenAI
+from langgraph.types import Command
 
 from agent.middleware.trace import OpenSWEMiddleware
-from agent.prompts import load_prompt
 
 logger = logging.getLogger(__name__)
 
-
-def _merge_tool_names(current: list[str], update: list[str]) -> list[str]:
-    return sorted(set(current) | set(update))
+_OPENAI_TOOL_SEARCH_VERSION = re.compile(r"^gpt-(?P<major>\d+)(?:\.(?P<minor>\d+))?")
+_ANTHROPIC_TOOL_SEARCH_MODEL = re.compile(
+    r"^claude-(?:sonnet-(?:[4-9](?:-|$))|opus-(?:[4-9](?:-|$))|haiku-(?:4-5(?:-|$)|[5-9](?:-|$)))"
+)
+_OPENAI_DIRECT_BASES = {"https://api.openai.com/v1", "wss://api.openai.com/v1"}
+_ANTHROPIC_DIRECT_BASE = "https://api.anthropic.com"
 
 
 @dataclass(frozen=True)
 class IntegrationGroup:
-    """A connected integration, described by name and built on request.
-
-    Only the names reach the model up front. Building the tools is what costs —
-    an MCP handshake, a credential round trip — so it waits until the agent asks
-    for the group rather than running before the run's first model call.
-    """
+    """A connected integration with its catalog and per-run tool resolver."""
 
     tool_names: Sequence[str]
     load: Callable[[], Awaitable[Sequence[BaseTool]]]
 
 
-class DynamicToolState(AgentState):
-    loaded_integration_tools: NotRequired[Annotated[list[str], _merge_tool_names]]
-
-
-@dataclass
-class _Resolved:
-    tools: dict[str, BaseTool] = field(default_factory=dict)
-    done: bool = False
-
-
-class DynamicToolMiddleware(OpenSWEMiddleware[DynamicToolState]):
-    """Expose connected integration schemas only after explicit loading."""
-
-    state_schema = DynamicToolState
+class DynamicToolMiddleware(OpenSWEMiddleware):
+    """Resolve integration tools once, then defer or select their schemas."""
 
     def __init__(
         self,
         groups: Mapping[str, IntegrationGroup | Sequence[BaseTool]],
         reserved_names: Collection[str] = (),
     ) -> None:
-        reserved = {"load_integration_tools", *reserved_names}
         self._groups: dict[str, IntegrationGroup] = {}
         self._group_of: dict[str, str] = {}
-        self._resolved: dict[str, _Resolved] = {}
-        self._locks: dict[str, asyncio.Lock] = {}
-        catalog: list[str] = []
+        self._tools: dict[str, BaseTool] | None = None
+        self._resolve_lock = asyncio.Lock()
+        self._selector = LLMToolSelectorMiddleware(on_parsing_failure="all")
 
         for group, spec in groups.items():
             entry = spec if isinstance(spec, IntegrationGroup) else _eager_group(spec)
-            names: list[str] = []
-            for name in entry.tool_names:
-                if name in reserved or name in self._group_of:
+            names = list(entry.tool_names)
+            for name in names:
+                if name in reserved_names or name in self._group_of:
                     raise ValueError(f"Duplicate integration tool name: {name}")
                 self._group_of[name] = group
-                names.append(name)
-            if not names:
-                continue
-            self._groups[group] = entry
-            catalog.extend(f"- {name} (integration: {group})" for name in sorted(names))
-
-        aliases = {
-            alias: name
-            for name, group in self._group_of.items()
-            for alias in (f"{group}:{name}", f"{group}: {name}")
-            if alias not in self._group_of
-        }
-
-        async def load_integration_tools(
-            tool_names: list[str],
-            state: Annotated[DynamicToolState | None, InjectedState] = None,
-            tool_call_id: Annotated[str, InjectedToolCallId] = "",
-        ) -> Command:
-            normalized_names = [aliases.get(name, name) for name in tool_names]
-            unknown = sorted(set(normalized_names) - self._group_of.keys())
-            if unknown:
-                return Command(
-                    update={
-                        "messages": [
-                            ToolMessage(
-                                content=f"Unknown integration tools: {', '.join(unknown)}",
-                                tool_call_id=tool_call_id,
-                                status="error",
-                            )
-                        ]
-                    }
-                )
-            missing = await self._build(normalized_names)
-            if missing:
-                return Command(
-                    update={
-                        "messages": [
-                            ToolMessage(
-                                content=(
-                                    "These integration tools are unavailable right now: "
-                                    f"{', '.join(missing)}. Continue without them."
-                                ),
-                                tool_call_id=tool_call_id,
-                                status="error",
-                            )
-                        ]
-                    }
-                )
-            loaded = set(state.get("loaded_integration_tools", [])) if state else set()
-            loaded.update(normalized_names)
-            return Command(
-                update={
-                    "loaded_integration_tools": sorted(loaded),
-                    "messages": [
-                        ToolMessage(
-                            content=(
-                                "Loaded integration tool schemas: "
-                                f"{', '.join(sorted(normalized_names))}. "
-                                "Call these tools normally on your next turn."
-                            ),
-                            tool_call_id=tool_call_id,
-                        )
-                    ],
-                }
-            )
-
-        description = load_prompt("tools/load_integration_tools.md")
-        if self._group_of:
-            example_name = (
-                "analyzePlan" if "analyzePlan" in self._group_of else next(iter(self._group_of))
-            )
-            example = json.dumps({"tool_names": [example_name]}, separators=(",", ":"))
-            description += f"\nExample: {example}\nAvailable tools:\n" + "\n".join(catalog)
-        self.tools = [
-            StructuredTool.from_function(
-                coroutine=load_integration_tools,
-                name="load_integration_tools",
-                description=description,
-            )
-        ]
+            if names:
+                self._groups[group] = entry
 
     @property
     def has_groups(self) -> bool:
         return bool(self._groups)
 
-    async def _resolve(self, group: str) -> dict[str, BaseTool]:
-        resolved = self._resolved.setdefault(group, _Resolved())
-        if resolved.done:
-            return resolved.tools
-        lock = self._locks.setdefault(group, asyncio.Lock())
-        async with lock:
-            if resolved.done:
-                return resolved.tools
-            try:
-                tools = await self._groups[group].load()
-            except Exception:
-                logger.warning("Failed to load %s integration tools", group, exc_info=True)
-                tools = []
-            resolved.tools = {tool.name: tool for tool in tools}
-            resolved.done = True
-        return resolved.tools
+    async def _resolve_tools(self) -> dict[str, BaseTool]:
+        if self._tools is not None:
+            return self._tools
+        async with self._resolve_lock:
+            if self._tools is not None:
+                return self._tools
+            groups = sorted(self._groups)
+            loaded = await asyncio.gather(*(self._load_group(group) for group in groups))
+            tools: dict[str, BaseTool] = {}
+            for group, group_tools in zip(groups, loaded, strict=True):
+                for tool in group_tools:
+                    if self._group_of.get(tool.name) != group or tool.name in tools:
+                        raise ValueError(f"Duplicate integration tool name: {tool.name}")
+                    tools[tool.name] = tool
+            self._tools = tools
+        return self._tools
 
-    async def _build(self, names: Sequence[str]) -> list[str]:
-        """Build the groups behind ``names``; return the names that did not appear."""
-        wanted = {self._group_of[name] for name in names if name in self._group_of}
-        await asyncio.gather(*(self._resolve(group) for group in sorted(wanted)))
-        return sorted(name for name in names if self._tool(name) is None)
-
-    def _tool(self, name: str) -> BaseTool | None:
-        group = self._group_of.get(name)
-        if group is None:
-            return None
-        return self._resolved.get(group, _Resolved()).tools.get(name)
-
-    async def abefore_agent(self, state: DynamicToolState, runtime: Runtime) -> dict[str, Any]:  # noqa: ARG002
-        return {"loaded_integration_tools": Overwrite([])}
+    async def _load_group(self, group: str) -> Sequence[BaseTool]:
+        try:
+            return await self._groups[group].load()
+        except Exception:
+            logger.warning(
+                "Failed to load integration tools",
+                extra={"integration_group": group},
+                exc_info=True,
+            )
+            return []
 
     async def awrap_model_call(
         self,
         request: ModelRequest,
         handler: Callable[[ModelRequest], Awaitable[ModelResponse]],
-    ) -> ModelResponse:
-        loaded = self._loaded_names(request.state)
-        if loaded:
-            await self._build(loaded)
-        tools = [tool for name in loaded if (tool := self._tool(name)) is not None]
-        return await handler(request.override(tools=[*request.tools, *tools]))
+    ) -> ModelResponse | AIMessage:
+        integration_tools = list((await self._resolve_tools()).values())
+        if not integration_tools:
+            return await handler(request)
+
+        integration_request = request.override(tools=[*integration_tools])
+        if _supports_provider_tool_search(request.model):
+            middleware = ProviderToolSearchMiddleware(
+                searchable_tools=[tool.name for tool in integration_tools]
+            )
+            return await middleware.awrap_model_call(
+                request.override(tools=[*request.tools, *integration_tools]), handler
+            )
+
+        async def recombine(selected_request: ModelRequest) -> ModelResponse:
+            return await handler(
+                selected_request.override(
+                    tools=[*request.tools, *selected_request.tools],
+                    messages=request.messages,
+                )
+            )
+
+        if not any(isinstance(message, HumanMessage) for message in request.messages):
+            return await recombine(integration_request)
+        return await self._selector.awrap_model_call(integration_request, recombine)
 
     async def awrap_tool_call(
         self,
         request: ToolCallRequest,
-        handler: Callable[[ToolCallRequest], Awaitable[ToolMessage | Command[Any]]],
-    ) -> ToolMessage | Command[Any]:
+        handler: Callable[[ToolCallRequest], Awaitable[ToolMessage | Command]],
+    ) -> ToolMessage | Command:
         name = request.tool_call["name"]
         if name not in self._group_of:
             return await handler(request)
-        if name not in self._loaded_names(request.state):
-            return ToolMessage(
-                content=f"Load {name} with load_integration_tools before calling it.",
-                tool_call_id=request.tool_call["id"],
-                status="error",
-            )
-        await self._build([name])
-        tool = self._tool(name)
+        tool = (await self._resolve_tools()).get(name)
         if tool is None:
             return ToolMessage(
                 content=f"{name} is unavailable right now. Continue without it.",
@@ -228,14 +137,26 @@ class DynamicToolMiddleware(OpenSWEMiddleware[DynamicToolState]):
             )
         return await handler(request.override(tool=tool))
 
-    @staticmethod
-    def _loaded_names(state: Mapping[str, Any]) -> list[str]:
-        loaded = state.get("loaded_integration_tools", [])
-        return loaded if isinstance(loaded, list) else []
+
+def _supports_provider_tool_search(model: object) -> bool:
+    """Return whether a model is a supported direct-provider model."""
+    if isinstance(model, ChatAnthropic):
+        return (
+            str(model.anthropic_api_url).rstrip("/") == _ANTHROPIC_DIRECT_BASE
+            and _ANTHROPIC_TOOL_SEARCH_MODEL.match(model.model) is not None
+        )
+    if not isinstance(model, ChatOpenAI):
+        return False
+    base_url = str(model.openai_api_base or "https://api.openai.com/v1").rstrip("/")
+    match = _OPENAI_TOOL_SEARCH_VERSION.match(model.model_name)
+    if match is None or base_url not in _OPENAI_DIRECT_BASES:
+        return False
+    version = (int(match.group("major")), int(match.group("minor") or 0))
+    return version >= (5, 5)
 
 
 def _eager_group(tools: Sequence[BaseTool]) -> IntegrationGroup:
-    """Wrap tools that are already built, so both forms share one code path."""
+    """Wrap tools that are already resolved."""
 
     async def load() -> Sequence[BaseTool]:
         return tools
