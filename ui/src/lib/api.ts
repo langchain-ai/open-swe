@@ -123,6 +123,8 @@ export interface SessionUser {
   user_id?: string | null
   slack_user_id?: string | null
   is_admin: boolean
+  /** Mirrors the user's preference, so the thread page has it on first render. */
+  transcript_streaming?: boolean
   slack_oauth_enabled?: boolean
   api_base_url?: string
   slack_base_url?: string
@@ -498,6 +500,7 @@ export interface UserPreferences {
   local_tracing_project: string | null
   default_local_tracing_project: string
   default_workspace: string | null
+  transcript_streaming: boolean
 }
 
 export interface Skill {

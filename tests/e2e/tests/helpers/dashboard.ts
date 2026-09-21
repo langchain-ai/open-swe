@@ -12,6 +12,20 @@ export async function loginAs(
 ) {
   const res = await page.request.post("/control/login", { data: user });
   expect(res.ok()).toBeTruthy();
+  await setTranscriptStreaming(page, true);
+}
+
+// Reading a thread from the transcript event log is opt-in per user while it
+// rolls out, and the suite asserts that path, so signing in turns it on. Pass
+// `false` to cover a user who has not opted in and reads LangGraph state.
+export async function setTranscriptStreaming(page: Page, enabled: boolean) {
+  const current = await page.request.get("/dashboard/api/me/preferences");
+  expect(current.ok()).toBeTruthy();
+  const preferences = (await current.json()) as Record<string, unknown>;
+  const saved = await page.request.put("/dashboard/api/me/preferences", {
+    data: { ...preferences, transcript_streaming: enabled },
+  });
+  expect(saved.ok()).toBeTruthy();
 }
 
 // The composer is a rich-text editor, not a <textarea>: it carries the prompt

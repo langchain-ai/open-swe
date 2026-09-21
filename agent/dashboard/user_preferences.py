@@ -21,6 +21,9 @@ class UserPreferencesUpdate(BaseModel):
     default_visibility: ThreadVisibility
     local_tracing_project: str | None = None
     default_workspace: str | None = None
+    # Opt-in while the transcript event log is rolling out: recording is not
+    # optional, reading from it is.
+    transcript_streaming: bool = False
 
 
 def _normalize(record: dict[str, Any] | None) -> dict[str, Any]:
@@ -34,6 +37,7 @@ def _normalize(record: dict[str, Any] | None) -> dict[str, Any]:
         "default_visibility": visibility if visibility in ("public", "private") else "private",
         "local_tracing_project": project if isinstance(project, str) and project.strip() else None,
         "default_workspace": normalized_workspace,
+        "transcript_streaming": (record or {}).get("transcript_streaming") is True,
     }
 
 
@@ -59,6 +63,7 @@ async def set_user_preferences(login: str, update: UserPreferencesUpdate) -> dic
         "default_workspace": update.default_workspace.strip().lower()
         if update.default_workspace and update.default_workspace.strip()
         else None,
+        "transcript_streaming": update.transcript_streaming,
         "created_at": existing.get("created_at") or now_iso(),
         "updated_at": now_iso(),
     }
