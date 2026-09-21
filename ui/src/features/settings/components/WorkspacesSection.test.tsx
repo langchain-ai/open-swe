@@ -165,6 +165,7 @@ describe("WorkspacesSection", () => {
     expect(await screen.findByText(/Rebuilt 1 hour ago/)).toBeTruthy()
     expect(screen.queryByText("Refresh log")).toBeNull()
     expect(screen.queryByText(/hunter2/)).toBeNull()
+    expect(screen.queryByRole("button", { name: /^Delete/ })).toBeNull()
   })
 
   it("says so when a workspace has never been refreshed", async () => {
@@ -187,6 +188,69 @@ describe("WorkspacesSection", () => {
 
     expect(await screen.findByText("Never refreshed")).toBeTruthy()
     expect(screen.getByText("No snapshot")).toBeTruthy()
+  })
+
+  it("confirms deletion, keeps failures retryable, and removes the deleted workspace", async () => {
+    const options = {
+      default_slug: "default",
+      workspaces: [
+        {
+          slug: "preview",
+          name: "Preview",
+          repos: [],
+          slack_channel_ids: [],
+          is_default: false,
+          default_repo: null,
+          has_snapshot: false,
+        },
+      ],
+    }
+    const list = vi
+      .spyOn(api, "listWorkspaceOptions")
+      .mockResolvedValue(options)
+    const remove = vi
+      .spyOn(api, "deleteWorkspace")
+      .mockRejectedValueOnce(new Error("Could not delete the workspace"))
+
+    renderSection(true)
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Delete Preview" })
+    )
+    expect(screen.getByRole("alertdialog").textContent).toContain(
+      "cannot be undone"
+    )
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }))
+    expect(remove).not.toHaveBeenCalled()
+
+    fireEvent.click(screen.getByRole("button", { name: "Delete Preview" }))
+    fireEvent.click(screen.getByRole("button", { name: "Delete workspace" }))
+    expect((await screen.findByRole("alert")).textContent).toBe(
+      "Could not delete the workspace"
+    )
+    expect(remove).toHaveBeenCalledWith("preview", expect.anything())
+
+    let finish!: () => void
+    remove.mockImplementation(
+      () =>
+        new Promise<void>((resolve) => {
+          finish = resolve
+        })
+    )
+    list.mockResolvedValue({ default_slug: "default", workspaces: [] })
+    fireEvent.click(screen.getByRole("button", { name: "Delete workspace" }))
+    expect(
+      (await screen.findByRole("button", { name: "Deleting…" })).hasAttribute(
+        "disabled"
+      )
+    ).toBe(true)
+    expect(
+      screen.getByRole("button", { name: "Cancel" }).hasAttribute("disabled")
+    ).toBe(true)
+    finish()
+    expect(
+      await screen.findByText("No workspaces are configured.")
+    ).toBeTruthy()
+    expect(screen.queryByRole("alertdialog")).toBeNull()
   })
 
   it("directs non-admins to a workspace admin", async () => {
