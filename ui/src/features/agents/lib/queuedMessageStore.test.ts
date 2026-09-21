@@ -1,12 +1,7 @@
 import { beforeEach, describe, expect, it } from "vitest"
 
-import {
-  isQueuedMessageDue,
-  latestCompletedToolCallId,
-  useQueuedMessageStore,
-} from "./queuedMessageStore"
+import { isQueuedMessageDue, useQueuedMessageStore } from "./queuedMessageStore"
 import type { QueuedComposerMessage } from "./queuedMessageStore"
-import type { Message } from "@/features/agents/lib/types"
 
 function makeMessage(text: string): Omit<QueuedComposerMessage, "id"> {
   return {
@@ -15,7 +10,6 @@ function makeMessage(text: string): Omit<QueuedComposerMessage, "id"> {
     modelId: null,
     effort: null,
     planMode: false,
-    queuedAfterToolCallId: null,
     createdAt: 1,
   }
 }
@@ -45,36 +39,14 @@ describe("queuedMessageStore", () => {
     const { enqueue, take } = useQueuedMessageStore.getState()
     const entry = enqueue("thread-a", makeMessage("first"))
 
-    expect(take("thread-a", entry.id, null)?.text).toBe("first")
-    expect(take("thread-a", entry.id, null)).toBeNull()
+    expect(take("thread-a", entry.id)?.text).toBe("first")
+    expect(take("thread-a", entry.id)).toBeNull()
     expect(texts("thread-a")).toBeUndefined()
   })
 
-  it("take re-anchors the remaining messages to the current tool boundary", () => {
-    const { enqueue, take } = useQueuedMessageStore.getState()
-    const first = enqueue("thread-a", makeMessage("first"))
-    enqueue("thread-a", makeMessage("second"))
-
-    take("thread-a", first.id, "tool-2")
-
-    const [second] =
-      useQueuedMessageStore.getState().queuesByThreadId["thread-a"] ?? []
-    expect(second?.queuedAfterToolCallId).toBe("tool-2")
-    expect(
-      isQueuedMessageDue({
-        message: second!,
-        phase: "running",
-        latestToolCallId: "tool-2",
-      })
-    ).toBe(false)
-  })
-
-  it("remove keeps the other messages' anchors", () => {
+  it("remove leaves the other messages in place", () => {
     const { enqueue, remove } = useQueuedMessageStore.getState()
-    const first = enqueue("thread-a", {
-      ...makeMessage("first"),
-      queuedAfterToolCallId: "t1",
-    })
+    const first = enqueue("thread-a", makeMessage("first"))
     const second = enqueue("thread-a", makeMessage("second"))
 
     expect(remove("thread-a", second.id)?.text).toBe("second")
@@ -88,7 +60,7 @@ describe("queuedMessageStore", () => {
     const { enqueue, take, holdAtFront } = useQueuedMessageStore.getState()
     const first = enqueue("thread-a", makeMessage("first"))
     enqueue("thread-a", makeMessage("second"))
-    const taken = take("thread-a", first.id, "t1")!
+    const taken = take("thread-a", first.id)!
 
     holdAtFront("thread-a", taken)
 
@@ -96,13 +68,9 @@ describe("queuedMessageStore", () => {
       useQueuedMessageStore.getState().queuesByThreadId["thread-a"] ?? []
     expect(queue.map((message) => message.text)).toEqual(["first", "second"])
     expect(queue[0]?.holdUntilUserAction).toBe(true)
-    expect(
-      isQueuedMessageDue({
-        message: queue[0]!,
-        phase: "ready",
-        latestToolCallId: null,
-      })
-    ).toBe(false)
+    expect(isQueuedMessageDue({ message: queue[0]!, phase: "ready" })).toBe(
+      false
+    )
   })
 
   it("drain empties one thread's queue in order", () => {
@@ -123,63 +91,15 @@ describe("queuedMessageStore", () => {
 })
 
 describe("queued message dispatch timing", () => {
-  const messages = [
-    {
-      id: "m1",
-      author: "agent",
-      timestamp: "2026-01-01T00:00:00Z",
-      chunks: [
-        {
-          kind: "tool-execution",
-          toolCallId: "t1",
-          title: "Read",
-          toolKind: "read",
-          status: "completed",
-        },
-        {
-          kind: "tool-execution",
-          toolCallId: "t2",
-          title: "Edit",
-          toolKind: "edit",
-          status: "in_progress",
-        },
-      ],
-    },
-  ] as unknown as Array<Message>
-
-  it("finds the newest settled tool call and ignores the ones still running", () => {
-    expect(latestCompletedToolCallId(messages)).toBe("t1")
-    expect(latestCompletedToolCallId([])).toBeNull()
-  })
-
-  it("waits mid-run until a tool call finishes after the message was queued", () => {
-    const message = { queuedAfterToolCallId: "t1" }
-    expect(
-      isQueuedMessageDue({ message, phase: "running", latestToolCallId: "t1" })
-    ).toBe(false)
-    expect(
-      isQueuedMessageDue({ message, phase: "running", latestToolCallId: "t2" })
-    ).toBe(true)
+  it("waits for the run to end, and for a send in flight to land", () => {
+    const message = {}
+    expect(isQueuedMessageDue({ message, phase: "running" })).toBe(false)
+    expect(isQueuedMessageDue({ message, phase: "connecting" })).toBe(false)
+    expect(isQueuedMessageDue({ message, phase: "ready" })).toBe(true)
   })
 
   it("never auto-sends a message held for user action", () => {
-    const message = { queuedAfterToolCallId: null, holdUntilUserAction: true }
-    expect(
-      isQueuedMessageDue({ message, phase: "ready", latestToolCallId: "t2" })
-    ).toBe(false)
-  })
-
-  it("is due as soon as the run is over, but not while a send is connecting", () => {
-    const message = { queuedAfterToolCallId: "t1" }
-    expect(
-      isQueuedMessageDue({ message, phase: "ready", latestToolCallId: "t1" })
-    ).toBe(true)
-    expect(
-      isQueuedMessageDue({
-        message,
-        phase: "connecting",
-        latestToolCallId: "t2",
-      })
-    ).toBe(false)
+    const message = { holdUntilUserAction: true }
+    expect(isQueuedMessageDue({ message, phase: "ready" })).toBe(false)
   })
 })

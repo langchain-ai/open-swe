@@ -1,6 +1,6 @@
 import { create } from "zustand"
 
-import type { ImageChunk, Message } from "@/features/agents/lib/types"
+import type { ImageChunk } from "@/features/agents/lib/types"
 
 /**
  * A composer submission held back while the thread's run is live. It carries
@@ -14,12 +14,6 @@ export interface QueuedComposerMessage {
   modelId: string | null
   effort: string | null
   planMode: boolean
-  /**
-   * The newest completed tool call at queue time. A different id later means
-   * a tool call finished after the user queued, which is the boundary the
-   * message goes out on.
-   */
-  queuedAfterToolCallId: string | null
   /**
    * Set when the message was created by Stop or a failed send, not by the user
    * pressing send. It waits for Send now instead of leaving on its own.
@@ -40,17 +34,9 @@ interface QueuedMessageStoreState {
     threadId: string,
     message: Omit<QueuedComposerMessage, "id">
   ) => QueuedComposerMessage
-  /**
-   * Removes one message and returns it, or null when another caller already
-   * took it. The remaining messages are re-anchored to `toolCallId` so only
-   * one queued message leaves per tool boundary.
-   */
-  take: (
-    threadId: string,
-    id: string,
-    toolCallId: string | null
-  ) => QueuedComposerMessage | null
-  /** Removes one message without touching the others' anchors. Null when already gone. */
+  /** Removes one message and returns it, or null when another caller already took it. */
+  take: (threadId: string, id: string) => QueuedComposerMessage | null
+  /** Removes one message and returns it, or null when already gone. */
   remove: (threadId: string, id: string) => QueuedComposerMessage | null
   /**
    * Puts a message back at the head, held for user action. Used when its send
@@ -95,25 +81,7 @@ export const useQueuedMessageStore = create<QueuedMessageStoreState>()(
       }))
       return entry
     },
-    take: (threadId, id, toolCallId) => {
-      const queue = get().queuesByThreadId[threadId]
-      const entry = queue?.find((message) => message.id === id)
-      if (!queue || !entry) return null
-      set((state) => ({
-        queuesByThreadId: withoutThread(
-          state.queuesByThreadId,
-          threadId,
-          (state.queuesByThreadId[threadId] ?? EMPTY_QUEUE)
-            .filter((message) => message.id !== id)
-            .map((message) =>
-              message.queuedAfterToolCallId === toolCallId
-                ? message
-                : { ...message, queuedAfterToolCallId: toolCallId }
-            )
-        ),
-      }))
-      return entry
-    },
+    take: (threadId, id) => get().remove(threadId, id),
     remove: (threadId, id) => {
       const queue = get().queuesByThreadId[threadId]
       const entry = queue?.find((message) => message.id === id)
@@ -154,44 +122,19 @@ export const useQueuedMessageStore = create<QueuedMessageStoreState>()(
   })
 )
 
-/**
- * The newest finished tool call, the id whose change is the boundary a queued
- * message goes out on. Messages and their chunks arrive in order, so the last
- * settled call wins.
- */
-export function latestCompletedToolCallId(
-  messages: ReadonlyArray<Message>
-): string | null {
-  let latest: string | null = null
-  for (const message of messages) {
-    for (const chunk of message.chunks) {
-      if (chunk.kind !== "tool-execution") continue
-      if (chunk.status !== "completed" && chunk.status !== "error") continue
-      latest = chunk.toolCallId
-    }
-  }
-  return latest
-}
-
 export type QueuePhase = "connecting" | "running" | "ready"
 
 /**
- * A queued message is due mid-run once a tool call finished after it was
- * queued, and as soon as the run is over otherwise. "connecting" is the gap
- * between a send and the server picking it up, so nothing is due there.
+ * A queued message is due once the run is over. "connecting" is the gap
+ * between a send and the message reaching the transcript, so nothing is due
+ * there either; Send now is the only way out mid-run.
  */
 export function isQueuedMessageDue(input: {
-  message: Pick<
-    QueuedComposerMessage,
-    "queuedAfterToolCallId" | "holdUntilUserAction"
-  >
+  message: Pick<QueuedComposerMessage, "holdUntilUserAction">
   phase: QueuePhase
-  latestToolCallId: string | null
 }): boolean {
   if (input.message.holdUntilUserAction) return false
-  if (input.phase === "connecting") return false
-  if (input.phase !== "running") return true
-  return input.latestToolCallId !== input.message.queuedAfterToolCallId
+  return input.phase === "ready"
 }
 
 export function useQueuedMessages(

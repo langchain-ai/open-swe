@@ -50,7 +50,6 @@ import {
 import { visiblePendingMessages } from "@/features/agents/lib/queuedMessages"
 import {
   isQueuedMessageDue,
-  latestCompletedToolCallId,
   useQueuedMessageStore,
   useQueuedMessages,
 } from "@/features/agents/lib/queuedMessageStore"
@@ -165,8 +164,8 @@ export function AgentThreadView({
   const submitMessage = useCallback(
     async (content: string, images: Array<ImageChunk>) => {
       scrollControlRef.current?.scrollToBottom()
-      // While a run is live the draft waits for the next tool boundary; the
-      // release effect below sends it through the same path as a direct send.
+      // While a run is live the draft waits for it to end; the release effect
+      // below then sends it through the same path as a direct send.
       if (isStreaming && content.trim() !== "/offload") {
         useQueuedMessageStore.getState().enqueue(thread.id, {
           text: content,
@@ -174,7 +173,6 @@ export function AgentThreadView({
           modelId: activeSelection?.modelId ?? null,
           effort: activeSelection?.effort ?? null,
           planMode: activePlanMode,
-          queuedAfterToolCallId: latestCompletedToolCallId(baseMessages),
           createdAt: Date.now(),
         })
         return
@@ -193,7 +191,6 @@ export function AgentThreadView({
       activePlanMode,
       activeSelection?.effort,
       activeSelection?.modelId,
-      baseMessages,
       isStreaming,
       planFeedbackPending,
       sendMessage,
@@ -209,11 +206,7 @@ export function AgentThreadView({
     async (message: QueuedComposerMessage) => {
       if (sendInFlightRef.current) return
       const store = useQueuedMessageStore.getState()
-      const taken = store.take(
-        thread.id,
-        message.id,
-        latestCompletedToolCallId(baseMessages)
-      )
+      const taken = store.take(thread.id, message.id)
       if (!taken) return
       const drainGenerationAtTake = store.drainGeneration
       const holdAgain = () => {
@@ -241,7 +234,7 @@ export function AgentThreadView({
         sendInFlightRef.current = false
       }
     },
-    [baseMessages, sendMessage, thread.id]
+    [sendMessage, thread.id]
   )
 
   const [restoreDraft, setRestoreDraft] = useState<RestoredDraft | null>(null)
@@ -340,15 +333,11 @@ export function AgentThreadView({
     [queuedMessages]
   )
 
-  // Sends the oldest queued message once it is due: a tool call finished
-  // after it was queued, or the run ended. Only one leaves per boundary; the
-  // take inside the send re-anchors the rest. "connecting" is the gap between
-  // a send and the message showing up in the transcript, when nothing is due.
+  // Sends the oldest queued message once the run is over. One leaves at a
+  // time; the next waits for the run it starts. "connecting" is the gap
+  // between a send and the message reaching the transcript, when nothing is
+  // due. Send now is the only way out mid-run.
   const nextQueuedMessage = queuedMessages[0] ?? null
-  const latestToolCallId = useMemo(
-    () => (nextQueuedMessage ? latestCompletedToolCallId(baseMessages) : null),
-    [baseMessages, nextQueuedMessage]
-  )
   const queuePhase: QueuePhase =
     pendingMessages.length > 0
       ? "connecting"
@@ -357,16 +346,10 @@ export function AgentThreadView({
         : "ready"
   useEffect(() => {
     if (!nextQueuedMessage || sendInFlightRef.current) return
-    if (
-      !isQueuedMessageDue({
-        message: nextQueuedMessage,
-        phase: queuePhase,
-        latestToolCallId,
-      })
-    )
+    if (!isQueuedMessageDue({ message: nextQueuedMessage, phase: queuePhase }))
       return
     void sendQueuedMessage(nextQueuedMessage)
-  }, [latestToolCallId, nextQueuedMessage, queuePhase, sendQueuedMessage])
+  }, [nextQueuedMessage, queuePhase, sendQueuedMessage])
 
   const hasMessages = visibleMessages.length > 0
   const hasConversation = hasMessages || queuedMessages.length > 0
