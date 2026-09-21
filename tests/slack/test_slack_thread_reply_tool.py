@@ -70,7 +70,7 @@ async def test_reply_records_mapping_with_or_without_pending_choices(
 
 @pytest.mark.parametrize("background_task_completion", [False, True])
 @pytest.mark.parametrize("thread_ts", ["1.0", "0"])
-async def test_reply_restores_status_only_for_foreground_runs(
+async def test_reply_restores_status_including_completion_runs(
     monkeypatch: pytest.MonkeyPatch,
     background_task_completion: bool,
     thread_ts: str,
@@ -97,8 +97,8 @@ async def test_reply_restores_status_only_for_foreground_runs(
 
     assert await slack_reply_tool.slack_thread_reply("The answer") == {"success": True}
     post.assert_awaited_once()
-    assert thinking_status.await_count == int(not background_task_completion and thread_ts != "0")
-    assert session_status.await_count == int(not background_task_completion and thread_ts == "0")
+    assert thinking_status.await_count == int(thread_ts != "0")
+    assert session_status.await_count == int(thread_ts == "0")
 
 
 async def test_slack_thread_reply_holds_mutation_lock_while_posting(
