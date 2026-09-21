@@ -13,6 +13,8 @@ laptop that was closed.
 """
 
 import asyncio
+import base64
+import binascii
 import logging
 from collections.abc import AsyncIterator
 from typing import Self
@@ -23,6 +25,7 @@ from deepagents.backends.protocol import (
     FileUploadResponse,
 )
 from deepagents.backends.sandbox import BaseSandbox
+from pydantic import BaseModel
 
 from agent.bridge import listener
 from agent.bridge.constants import (
@@ -34,12 +37,9 @@ from agent.bridge.protocol import (
     BridgeMethod,
     BridgeParams,
     DownloadFilesParams,
-    DownloadFilesResult,
     ExecuteParams,
-    ExecuteResult,
     JsonObject,
     UploadFilesParams,
-    UploadFilesResult,
 )
 from agent.bridge.store import Bridge, BridgeStore, BridgeUnavailableError
 from agent.sandboxes.state import SandboxUnreachableError
@@ -49,6 +49,53 @@ logger = logging.getLogger(__name__)
 _SYNC_UNSUPPORTED = "BridgeSandboxBackend is async-only; use the a-prefixed method instead."
 _LIVENESS_TICK_SECONDS = 15.0
 _FILE_TRANSFER_TIMEOUT_SECONDS = 120
+
+
+class ExecuteResult(BaseModel):
+    output: str
+    exit_code: int | None = None
+    truncated: bool = False
+
+    def response(self) -> ExecuteResponse:
+        return ExecuteResponse(
+            output=self.output, exit_code=self.exit_code, truncated=self.truncated
+        )
+
+
+class UploadFileResult(BaseModel):
+    path: str
+    error: str | None = None
+
+
+class UploadFilesResult(BaseModel):
+    responses: list[UploadFileResult]
+
+    def response(self) -> list[FileUploadResponse]:
+        return [FileUploadResponse(path=entry.path, error=entry.error) for entry in self.responses]
+
+
+class DownloadFileResult(BaseModel):
+    path: str
+    content_base64: str | None = None
+    error: str | None = None
+
+    def response(self) -> FileDownloadResponse:
+        if self.content_base64 is None:
+            return FileDownloadResponse(path=self.path, content=None, error=self.error)
+        try:
+            content = base64.b64decode(self.content_base64, validate=True)
+        except (binascii.Error, ValueError) as exc:
+            return FileDownloadResponse(
+                path=self.path, content=None, error=f"undecodable content: {exc}"
+            )
+        return FileDownloadResponse(path=self.path, content=content, error=self.error)
+
+
+class DownloadFilesResult(BaseModel):
+    responses: list[DownloadFileResult]
+
+    def response(self) -> list[FileDownloadResponse]:
+        return [entry.response() for entry in self.responses]
 
 
 class BridgeSandboxBackend(BaseSandbox):
@@ -136,15 +183,9 @@ class BridgeSandboxBackend(BaseSandbox):
     ) -> JsonObject:
         deadline = asyncio.get_running_loop().time() + wait
         while True:
-            outcome = await BridgeStore.outcome(self._bridge_id, request_id)
-            if outcome is None:
-                raise self._unreachable("request disappeared before it was answered")
-            if outcome.finished:
-                if outcome.error is not None:
-                    raise RuntimeError(outcome.error)
-                if outcome.result is None:
-                    raise RuntimeError("bridge answered without a result")
-                return outcome.result
+            outcome = await self._finished_outcome(request_id)
+            if outcome is not None:
+                return outcome
             remaining = deadline - asyncio.get_running_loop().time()
             if remaining <= 0:
                 await BridgeStore.complete(
@@ -154,6 +195,11 @@ class BridgeSandboxBackend(BaseSandbox):
                     f"Sandbox bridge {self._bridge_id} did not answer within {wait:.0f}s"
                 )
             if not await self._is_alive():
+                # Closing fails the request in the same transaction that marks the
+                # bridge closed, so a re-read carries the real reason.
+                outcome = await self._finished_outcome(request_id)
+                if outcome is not None:
+                    return outcome
                 raise self._unreachable("bridge disconnected")
             try:
                 async with asyncio.timeout(min(_LIVENESS_TICK_SECONDS, remaining)):
@@ -162,3 +208,15 @@ class BridgeSandboxBackend(BaseSandbox):
                             break
             except TimeoutError:
                 continue
+
+    async def _finished_outcome(self, request_id: str) -> JsonObject | None:
+        outcome = await BridgeStore.outcome(self._bridge_id, request_id)
+        if outcome is None:
+            raise self._unreachable("request disappeared before it was answered")
+        if not outcome.finished:
+            return None
+        if outcome.error is not None:
+            raise RuntimeError(outcome.error)
+        if outcome.result is None:
+            raise RuntimeError("bridge answered without a result")
+        return outcome.result
