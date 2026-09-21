@@ -170,7 +170,7 @@ export function PlanReview({ plan }: { plan: PlanData }) {
         >
           {content.trim() ? (
             format === "html" ? (
-              <div className="flex min-h-0 min-w-0 flex-1">
+              <div className="flex min-h-0 min-w-0 flex-1 flex-col @3xl:flex-row">
                 <PlanArtifactFrame
                   html={content}
                   comments={comments}
@@ -182,7 +182,7 @@ export function PlanReview({ plan }: { plan: PlanData }) {
                 />
                 <aside
                   data-testid="plan-comments"
-                  className="flex w-80 shrink-0 flex-col border-l border-border bg-background/95"
+                  className="flex max-h-1/2 shrink-0 flex-col overflow-y-auto border-t border-border bg-background/95 @3xl:max-h-none @3xl:w-80 @3xl:border-t-0 @3xl:border-l"
                 >
                   <div className="border-b border-border p-3">
                     <h2 className="text-sm font-semibold">Comments</h2>
