@@ -3,6 +3,7 @@ import { IoLogoSlack } from "react-icons/io5"
 import { useEffect, useRef, useState } from "react"
 
 import { SkillPromptText } from "../SkillBadge"
+import { MessageImage } from "./MessageImage"
 import { MessageTimestamp } from "./MessageTimestamp"
 import { SlackMrkdwn } from "./SlackMrkdwn"
 import type { Message } from "@/features/agents/lib/types"
@@ -94,9 +95,8 @@ export function UserMessage({ message }: { message: Message }) {
                     key={i}
                     className="overflow-hidden rounded-lg border border-border/80 bg-background/70"
                   >
-                    <img
-                      src={`data:${img.mimeType};base64,${img.base64}`}
-                      alt={img.fileName || "image"}
+                    <MessageImage
+                      chunk={img}
                       className="block h-auto max-h-[220px] w-full object-cover"
                     />
                   </div>

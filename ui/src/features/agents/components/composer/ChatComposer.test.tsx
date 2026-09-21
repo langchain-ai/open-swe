@@ -15,16 +15,30 @@ import { ComposerPrimaryActions } from "./ComposerPrimaryActions"
 import { replaceTextRange } from "./composerTrigger"
 import type { ChatComposerProps } from "./ChatComposer"
 import { AgentThreadStreamBoundary } from "@/features/agents/lib/provider/useIsInAgentThreadStream"
+import { ThreadSourceProvider } from "@/features/agents/lib/threadSource/ThreadSourceProvider"
 
 const stream = {
   isLoading: false,
   threadId: "thread-1",
-  stop: vi.fn(),
+  messages: [],
+  toolCalls: [],
+  isThreadLoading: false,
+  hydrationPromise: Promise.resolve(),
+  error: null,
+  submit: vi.fn(),
   disconnect: vi.fn(),
+  getThread: () => null,
 }
 
-vi.mock("@/features/agents/lib/stream/AgentStreamProvider", () => ({
-  useAgentStream: () => stream,
+vi.mock("@langchain/react", () => ({
+  useStream: () => stream,
+  useChannelEffect: () => {},
+}))
+
+vi.mock("@/lib/langgraph-client", () => ({
+  createDashboardClient: () => ({}),
+  createLocalGraphClient: () => ({}),
+  dashboardFetch: fetch,
 }))
 
 const cancelThread = vi.fn((threadId: string) =>
@@ -44,7 +58,6 @@ afterEach(() => cleanup())
 
 beforeEach(() => {
   stream.isLoading = false
-  stream.stop.mockClear()
   stream.disconnect.mockClear()
   cancelThread.mockClear()
 })
@@ -59,10 +72,12 @@ function renderComposer(
   render(
     <QueryClientProvider client={client}>
       <AgentThreadStreamBoundary>
-        <ChatComposer
-          activeRun={{ threadId: "thread-1", running }}
-          {...props}
-        />
+        <ThreadSourceProvider threadId="thread-1">
+          <ChatComposer
+            activeRun={{ threadId: "thread-1", running }}
+            {...props}
+          />
+        </ThreadSourceProvider>
       </AgentThreadStreamBoundary>
     </QueryClientProvider>
   )

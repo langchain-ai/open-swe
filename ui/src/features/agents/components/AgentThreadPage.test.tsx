@@ -16,6 +16,10 @@ vi.mock("@/features/agents/lib/provider/useIsInAgentThreadStream", () => ({
 vi.mock("@/features/agents/lib/queries", () => ({
   useAgentThread: vi.fn(),
 }))
+vi.mock("@/features/agents/lib/threadSource/ThreadSourceProvider", () => ({
+  ThreadSourceProvider: ({ children }: { children: React.ReactNode }) =>
+    children,
+}))
 
 const threadQuery = {
   data: { id: "thread-1", title: "Fix web title" },

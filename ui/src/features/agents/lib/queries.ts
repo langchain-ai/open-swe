@@ -789,6 +789,8 @@ export interface CreateAgentThreadVariables {
   visibility?: "public" | "private"
   prompt: string
   images?: Array<ImageChunk>
+  /** Id the run was started with, shared with the graph's HumanMessage. */
+  client_message_id?: string
   repo?: string | null
   repo_explicitly_none?: boolean
   model_id?: string | null
@@ -815,7 +817,7 @@ export function optimisticThread(
     ...(text ? [{ kind: "text", text } satisfies Chunk] : []),
   ]
   const message: Message = {
-    id: `optimistic-user-${threadId}`,
+    id: vars.client_message_id ?? `optimistic-user-${threadId}`,
     author: "user",
     timestamp: new Date(now).toISOString(),
     chunks,
@@ -837,7 +839,23 @@ export function optimisticThread(
     updatedAt: now,
     traceUrl: null,
     sandboxId: null,
-    messages: message.chunks.length > 0 ? [message] : [],
+    messages: chunks.length > 0 ? [message] : [],
+    // The thread page reads the transcript from its own source, which starts
+    // empty while it hydrates. Carrying the prompt as a pending message keeps
+    // it on screen across the handoff; the source drops it again as soon as it
+    // has the message under the same id.
+    pendingMessages:
+      chunks.length > 0
+        ? [
+            {
+              id: message.id,
+              content: text,
+              images: vars.images,
+              createdAt: now,
+              status: "sending",
+            },
+          ]
+        : [],
   }
 }
 
