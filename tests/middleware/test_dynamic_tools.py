@@ -225,3 +225,20 @@ async def test_a_group_whose_catalog_is_empty_is_not_offered() -> None:
 
     assert not middleware.has_groups
     assert "- Corridor" not in cast(StructuredTool, middleware.tools[0]).description
+
+
+async def test_fork_preserves_loaded_integration_schemas() -> None:
+    from langgraph.runtime import Runtime
+
+    from agent.middleware.dynamic_tools import DynamicToolState
+
+    middleware = DynamicToolMiddleware({"Notion": [_tool("notion-search")]})
+    state = cast(
+        DynamicToolState,
+        {
+            "messages": [],
+            "_deepagents_forked_context": True,
+            "loaded_integration_tools": ["notion-search"],
+        },
+    )
+    assert await middleware.abefore_agent(state, cast(Runtime, MagicMock())) == {}

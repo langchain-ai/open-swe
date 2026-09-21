@@ -293,6 +293,11 @@ async def test_model_routing_is_applied_when_enabled() -> None:
         type(middleware).__name__ for middleware in cast(list[object], agent["middleware"])
     ]
     assert "ModelSelectionMiddleware" in middleware_names
+    subagents = agent["subagents"]
+    assert isinstance(subagents, list)
+    general_purpose = next(item for item in subagents if item["name"] == "general-purpose")
+    subagent_middleware = {item.name for item in general_purpose["middleware"]}
+    assert "ModelSelectionMiddleware" in subagent_middleware
     assert "model_routing_mode" not in config["configurable"]
     assert config["metadata"]["model_routing_mode"] == "auto"
     assert config["metadata"]["model_routing_applied"] is True
@@ -313,6 +318,11 @@ async def test_model_routing_control_uses_performance_model() -> None:
         type(middleware).__name__ for middleware in cast(list[object], agent["middleware"])
     ]
     assert "ModelSelectionMiddleware" in middleware_names
+    subagents = agent["subagents"]
+    assert isinstance(subagents, list)
+    general_purpose = next(item for item in subagents if item["name"] == "general-purpose")
+    subagent_middleware = {item.name for item in general_purpose["middleware"]}
+    assert "ModelSelectionMiddleware" in subagent_middleware
     assert "model_routing_mode" not in config["configurable"]
     assert config["metadata"]["model_routing_mode"] == "performance"
     assert config["metadata"]["model_routing_applied"] is True
@@ -400,7 +410,8 @@ async def test_agent_wires_user_organization_and_bundled_skills_into_agents() ->
     subagents = captured["subagents"]
     assert isinstance(subagents, list)
     gp = next(s for s in subagents if s["name"] == "general-purpose")
-    assert gp["skills"] == sources
+    assert gp["mode"] == "fork"
+    assert "skills" not in gp
 
 
 @pytest.mark.asyncio
@@ -471,6 +482,11 @@ async def test_agent_keeps_message_queue_and_step_limit_middleware() -> None:
     present = {type(m).__name__ for m in middleware}
     assert "check_message_queue_before_model" in present
     assert "notify_step_limit_reached" in present
+    subagents = captured["subagents"]
+    assert isinstance(subagents, list)
+    general_purpose = next(item for item in subagents if item["name"] == "general-purpose")
+    subagent_middleware = {item.name for item in general_purpose["middleware"]}
+    assert "check_message_queue_before_model" in subagent_middleware
 
 
 @pytest.mark.asyncio
@@ -484,7 +500,7 @@ async def test_agent_includes_report_platform_issue_tool() -> None:
 
 
 @pytest.mark.asyncio
-async def test_agent_includes_read_user_settings_only_on_parent() -> None:
+async def test_agent_includes_read_user_settings_schema() -> None:
     from agent.tools import read_user_settings
 
     captured = await _capture_create_deep_agent_kwargs()
@@ -494,11 +510,11 @@ async def test_agent_includes_read_user_settings_only_on_parent() -> None:
     assert isinstance(subagents, list)
     assert read_user_settings in tools
     general_purpose = next(item for item in subagents if item["name"] == "general-purpose")
-    assert read_user_settings not in general_purpose["tools"]
+    assert read_user_settings in general_purpose["tools"]
 
 
 @pytest.mark.asyncio
-async def test_agent_includes_thread_tools_only_on_parent() -> None:
+async def test_agent_includes_thread_tool_schemas() -> None:
     from agent.tools import get_thread, list_threads, manage_thread
 
     captured = await _capture_create_deep_agent_kwargs()
@@ -509,7 +525,7 @@ async def test_agent_includes_thread_tools_only_on_parent() -> None:
     thread_tools = (get_thread, list_threads, manage_thread)
     assert all(tool in tools for tool in thread_tools)
     general_purpose = next(item for item in subagents if item["name"] == "general-purpose")
-    assert all(tool not in general_purpose["tools"] for tool in thread_tools)
+    assert all(tool in general_purpose["tools"] for tool in thread_tools)
 
 
 @pytest.mark.asyncio
@@ -546,7 +562,7 @@ async def test_agent_includes_sql_only_on_private_admin_surfaces(
     subagents = captured["subagents"]
     assert isinstance(subagents, list)
     general_purpose = next(item for item in subagents if item["name"] == "general-purpose")
-    assert read_only_sql not in general_purpose["tools"]
+    assert read_only_sql in general_purpose["tools"]
 
     configurable["source"] = "slack"
     configurable["slack_thread"] = {
@@ -597,9 +613,6 @@ async def test_agent_includes_sandbox_file_download_url_tools() -> None:
 async def test_agent_excludes_sandbox_file_downloads_for_other_providers(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from deepagents.middleware.subagents import GENERAL_PURPOSE_SUBAGENT
-
-    from agent.prompt import OPEN_SWE_SHARED_BASE
     from agent.tools import (
         create_sandbox_file_download_url,
         expose_port,
@@ -619,9 +632,7 @@ async def test_agent_excludes_sandbox_file_downloads_for_other_providers(
     assert create_sandbox_file_download_url not in general_purpose["tools"]
     assert expose_port not in general_purpose["tools"]
     assert output_iframe not in general_purpose["tools"]
-    assert general_purpose["system_prompt"] == (
-        f"{OPEN_SWE_SHARED_BASE}\n\n{GENERAL_PURPOSE_SUBAGENT['system_prompt']}"
-    )
+    assert not general_purpose.get("system_prompt")
 
 
 @pytest.mark.asyncio
@@ -691,13 +702,6 @@ async def test_agent_excludes_deepagents_grep_tool() -> None:
 
     exclusion = next(item for item in middleware if type(item).__name__ == "ExcludeToolsMiddleware")
     assert exclusion._excluded == frozenset({"grep"})
-    general_purpose = next(item for item in subagents if item["name"] == "general-purpose")
-    subagent_exclusion = next(
-        item
-        for item in general_purpose["middleware"]
-        if type(item).__name__ == "ExcludeToolsMiddleware"
-    )
-    assert subagent_exclusion._excluded == frozenset({"grep"})
 
 
 @pytest.mark.asyncio
@@ -792,8 +796,32 @@ async def test_general_purpose_subagent_cannot_use_slack_tools() -> None:
         "submit_review_assessment_feedback",
     }
     assert parent_only_names <= parent_names
-    assert parent_only_names.isdisjoint(subagent_names)
-    assert subagent_names == parent_names - parent_only_names
+    assert gp["tools"] == parent_tools
+    assert subagent_names == parent_names
+
+    from unittest.mock import AsyncMock, MagicMock
+
+    from langchain.agents.middleware.types import ToolCallRequest
+    from langchain_core.messages import ToolMessage
+
+    guard = next(item for item in gp["middleware"] if item.name == "_SubagentToolGuard")
+    handler = AsyncMock(return_value=ToolMessage(content="executed", tool_call_id="allowed"))
+    for name in parent_only_names | {
+        "read_only_sql",
+        "read_incident",
+        "search_incidents",
+        "record_incident_report",
+    }:
+        request = MagicMock(spec=ToolCallRequest)
+        request.tool_call = {"name": name, "args": {}, "id": name, "type": "tool_call"}
+        result = await guard.awrap_tool_call(request, handler)
+        assert isinstance(result, ToolMessage)
+        assert result.tool_call_id == name
+        assert "inside a subagent" in result.content
+    handler.assert_not_awaited()
+    request.tool_call = {"name": "execute", "args": {}, "id": "allowed", "type": "tool_call"}
+    assert (await guard.awrap_tool_call(request, handler)).content == "executed"
+    handler.assert_awaited_once_with(request)
 
 
 @pytest.mark.asyncio

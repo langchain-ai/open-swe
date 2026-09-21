@@ -11,7 +11,7 @@ the agent itself is stateless.
 import hashlib
 import logging
 import warnings
-from collections.abc import Mapping, Sequence
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from pathlib import Path
 from typing import Any, cast
 
@@ -43,9 +43,20 @@ from deepagents.graph import DeepAgentState
 from deepagents.middleware.filesystem import FilesystemState
 from deepagents.middleware.subagents import GENERAL_PURPOSE_SUBAGENT, SubAgent
 from langchain.agents.middleware import ModelCallLimitMiddleware, ToolRetryMiddleware
-from langchain.agents.middleware.types import AgentMiddleware
+from langchain.agents.middleware.types import AgentMiddleware, ToolCallRequest
 from langchain_core.language_models import BaseChatModel
-from langchain_core.messages import HumanMessage
+from langchain_core.messages import HumanMessage, ToolMessage
+from langgraph.types import Command
+
+
+class _DisableInheritedMiddleware(AgentMiddleware):
+    def __init__(self, name: str) -> None:
+        self._name = name
+
+    @property
+    def name(self) -> str:
+        return self._name
+
 
 from agent.analytics.usage import record_agent_invocation_usage
 from agent.credential_scope import private_credential_login
@@ -115,11 +126,7 @@ from agent.middleware.model_selection import ModelSelectionState, RoutingMode
 from agent.middleware.prepare_run import PrepareRunState
 from agent.middleware.sandbox_circuit_breaker import post_sandbox_unreachable_notification
 from agent.middleware.transcript import TranscriptMiddleware
-from agent.prompt import (
-    construct_sender_context,
-    construct_system_prompt,
-    render_open_swe_shared_base,
-)
+from agent.prompt import construct_sender_context, construct_system_prompt
 from agent.prompts import apply_tool_descriptions, load_prompt
 from agent.run_config import RunConfig
 from agent.runtime.constants import (
@@ -424,7 +431,6 @@ def _subagent_middleware(
     middleware: list[AgentMiddleware[Any, Any, Any]] = []
     if dynamic_tools is not None:
         middleware.append(dynamic_tools)
-    middleware.append(ExcludeToolsMiddleware(excluded=DEEP_AGENT_EXCLUDED_TOOLS))
     middleware.append(WorkflowPushGuardMiddleware())
     middleware.extend(_subagent_model_middleware())
     return middleware
@@ -440,12 +446,15 @@ def _subagent_guard_middleware(local_run: bool) -> list[AgentMiddleware[Any, Any
     return [PullRequestCreationGuardMiddleware()]
 
 
-def _is_subagent_excluded_tool(tool: Any) -> bool:
-    """Return whether a tool depends on parent-only source context."""
-    name = getattr(tool, "name", None) or getattr(tool, "__name__", "")
+def _is_subagent_excluded_tool(name: str) -> bool:
+    """Return whether a tool requires the parent agent."""
     if name in SOURCE_FREE_SLACK_TOOLS:
         return False
     return name.startswith("slack_") or name in {
+        "background_execute",
+        "background_task",
+        "submit_thread_feedback",
+        "submit_review_assessment_feedback",
         "get_thread",
         "manage_code_channel",
         "manage_incident",
@@ -460,17 +469,30 @@ def _is_subagent_excluded_tool(tool: Any) -> bool:
     }
 
 
+class _SubagentToolGuard(AgentMiddleware):
+    async def awrap_tool_call(
+        self,
+        request: ToolCallRequest,
+        handler: Callable[[ToolCallRequest], Awaitable[ToolMessage | Command]],
+    ) -> ToolMessage | Command:
+        if _is_subagent_excluded_tool(request.tool_call["name"]):
+            return ToolMessage(
+                content=load_prompt("tools/subagent-unavailable.md"),
+                tool_call_id=request.tool_call["id"],
+            )
+        return await handler(request)
+
+
 def _general_purpose_subagent(
     model: BaseChatModel,
     tools: Sequence[Any],
-    skills: list[str] | None = None,
     dynamic_tools: DynamicToolMiddleware | None = None,
     *,
-    sandbox_file_downloads: bool = False,
     offloading: ConversationOffloadingMiddleware | None = None,
     workspace_skills: WorkspaceSkillsMiddleware | None = None,
     incident_middleware: AgentMiddleware | None = None,
     guard_middleware: Sequence[AgentMiddleware[Any, Any, Any]] = (),
+    inherited_middleware_exclusions: Sequence[str] = (),
 ) -> SubAgent:
     subagent: SubAgent = {
         "name": GENERAL_PURPOSE_SUBAGENT["name"],
@@ -478,17 +500,14 @@ def _general_purpose_subagent(
             f"{GENERAL_PURPOSE_SUBAGENT['description']} "
             f"{load_prompt('system/general-purpose-subagent-suffix.md')}"
         ),
-        # Deep Agents' default GP prompt covers only task mechanics; the shared
-        # base carries the Open SWE identity and conventions (gh proxy usage,
-        # tool-call cadence) that delegated work also needs.
-        "system_prompt": render_open_swe_shared_base(sandbox_file_downloads=sandbox_file_downloads)
-        + "\n\n"
-        + GENERAL_PURPOSE_SUBAGENT["system_prompt"],
+        "mode": "fork",
         "model": model,
-        "tools": [tool for tool in tools if not _is_subagent_excluded_tool(tool)],
+        "tools": list(tools),
         "middleware": cast(
             list[AgentMiddleware[Any, Any, Any]],
             [
+                *(_DisableInheritedMiddleware(name) for name in inherited_middleware_exclusions),
+                _SubagentToolGuard(),
                 TranscriptMiddleware(),
                 *([incident_middleware] if incident_middleware else []),
                 *([workspace_skills] if workspace_skills else []),
@@ -498,8 +517,6 @@ def _general_purpose_subagent(
             ],
         ),
     }
-    if skills:
-        subagent["skills"] = skills
     return subagent
 
 
@@ -1373,14 +1390,6 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         use_gateway=use_gateway,
         **subagent_model_kwargs,
     )
-    subagent_tools = [
-        tool
-        for tool in static_tools
-        if tool is not background_execute
-        and tool is not background_task
-        and tool is not submit_thread_feedback
-        and tool is not submit_review_assessment_feedback
-    ]
     title_model = _make_model_or_defer(
         title_model_id,
         use_gateway=use_gateway,
@@ -1398,16 +1407,18 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         subagents=[
             _general_purpose_subagent(
                 subagent_model,
-                tools=subagent_tools,
-                skills=skill_sources,
+                tools=static_tools,
                 workspace_skills=workspace_skills,
                 dynamic_tools=dynamic_tool_middleware,
-                sandbox_file_downloads=sandbox_file_downloads,
                 offloading=ConversationOffloadingMiddleware(subagent_model, agent_backend),
                 incident_middleware=IncidentMiddleware(incident_session)
                 if incident_session is not None
                 else None,
                 guard_middleware=_subagent_guard_middleware(local_run),
+                inherited_middleware_exclusions=(
+                    check_message_queue_before_model.name,
+                    *((model_selection.name,) if model_selection else ()),
+                ),
             ),
         ],
         skills=skill_sources,
