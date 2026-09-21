@@ -54,11 +54,11 @@ def _install(
     *,
     transcribed: bool,
     turn_id: UUID | None = None,
-    postgres_configured: bool = True,
+    enabled: bool = True,
 ) -> FakeEngine:
     engine = FakeEngine()
     monkeypatch.setattr(mw, "append", engine.append)
-    monkeypatch.setattr(mw.postgres, "configured", lambda: postgres_configured)
+    monkeypatch.setattr(mw, "transcript_enabled", lambda: enabled)
 
     async def _has_transcript(thread_id: str) -> bool:
         return transcribed
@@ -207,18 +207,20 @@ async def test_hook_sequence_for_a_transcribed_turn(monkeypatch: pytest.MonkeyPa
 
 
 @pytest.mark.parametrize(
-    ("transcribed", "postgres_configured"),
+    ("transcribed", "enabled"),
     [
-        # An older thread with agent turns but no transcript row, and a
-        # deployment with nowhere to keep a transcript at all.
+        # An older thread with agent turns but no transcript row, a deployment
+        # with the event log switched off, and one switched off after the
+        # thread was already recorded.
         (False, True),
         (False, False),
+        (True, False),
     ],
 )
 async def test_an_untranscribable_run_writes_nothing(
-    monkeypatch: pytest.MonkeyPatch, transcribed: bool, postgres_configured: bool
+    monkeypatch: pytest.MonkeyPatch, transcribed: bool, enabled: bool
 ) -> None:
-    engine = _install(monkeypatch, transcribed=transcribed, postgres_configured=postgres_configured)
+    engine = _install(monkeypatch, transcribed=transcribed, enabled=enabled)
     stamped: list[str] = []
 
     async def _stamp(thread_id: str) -> None:

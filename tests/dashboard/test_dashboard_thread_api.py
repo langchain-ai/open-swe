@@ -529,6 +529,17 @@ async def test_thread_summary_exposes_attention_reason() -> None:
     assert quiet["attentionReason"] is None
 
 
+async def test_thread_summary_reports_the_transcript_only_while_enabled(monkeypatch) -> None:
+    """The flag is the rollback: a stamped thread reads LangGraph state again."""
+    stamped = _thread_with_metadata({"title": "Ship it", "transcript": "v2"})
+
+    monkeypatch.setattr(thread_summary, "transcript_enabled", lambda: True)
+    assert (await thread_summary._thread_summary(stamped))["transcript"] == "v2"
+
+    monkeypatch.setattr(thread_summary, "transcript_enabled", lambda: False)
+    assert (await thread_summary._thread_summary(stamped))["transcript"] is None
+
+
 async def test_thread_summary_includes_pr_and_diff_stats() -> None:
     summary = await thread_summary._thread_summary(
         _thread_with_metadata(
@@ -1237,7 +1248,7 @@ async def test_enrich_run_start_command_reuses_a_deduplicated_turn(monkeypatch) 
     patch_thread_module(monkeypatch, "get_profile", fake_get_profile)
     patch_thread_module(monkeypatch, "_ensure_dashboard_github_token", fake_ensure_token)
     patch_thread_module(monkeypatch, "resolve_run_email", fake_resolve_email)
-    monkeypatch.setattr(thread_runs.postgres, "configured", lambda: True)
+    monkeypatch.setattr(thread_runs, "transcript_enabled", lambda: True)
 
     recorded = uuid7()
     appended: list[str] = []

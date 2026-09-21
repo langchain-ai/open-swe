@@ -26,7 +26,6 @@ from agent.dashboard.user_preferences import get_user_preferences
 from agent.dashboard.workspace_settings import (
     get_workspace_settings,
 )
-from agent.database import postgres
 from agent.input_messages import (
     PersonIdentity,
     build_input_messages,
@@ -62,6 +61,7 @@ from agent.transcript.events import (
     ThreadCreated,
     TurnRequested,
 )
+from agent.transcript.flag import transcript_enabled
 from agent.transcript.turns import recorded_turn_id
 from agent.utils.dashboard_handoff import DASHBOARD_HANDOFF_BODY
 from agent.utils.json_types import JsonObject, as_thread_dict, thread_metadata
@@ -296,9 +296,9 @@ async def _create_dashboard_thread_record(
     elif repo_explicitly_none:
         metadata["repo_explicitly_none"] = True
 
-    # A deployment without PostgreSQL has nowhere to keep a transcript, so the
-    # thread is not stamped as one and keeps reading LangGraph state.
-    transcribed = postgres.configured()
+    # With the event log switched off the thread is not stamped as transcribed
+    # and keeps reading LangGraph state.
+    transcribed = transcript_enabled()
     if transcribed:
         metadata["transcript"] = TRANSCRIPT_VERSION
 
@@ -678,9 +678,9 @@ async def _enrich_run_start_command(
         )
     # The transcript keys a human message by the id the graph will carry, so the
     # id is minted here when the client did not send a usable one.
-    transcribed = (creating and postgres.configured()) or metadata.get(
-        "transcript"
-    ) == TRANSCRIPT_VERSION
+    transcribed = transcript_enabled() and (
+        creating or metadata.get("transcript") == TRANSCRIPT_VERSION
+    )
     client_message_id = _command_message_id(params)
     message_id: str | None = None
     if client_message_id and client_message_id not in persisted_message_ids:
