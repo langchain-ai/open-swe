@@ -125,6 +125,8 @@ export interface SessionUser {
   is_admin: boolean
   /** Mirrors the user's preference, so the thread page has it on first render. */
   transcript_streaming?: boolean
+  /** Whether the server records new threads into the transcript log. */
+  transcript_recording?: boolean
   slack_oauth_enabled?: boolean
   api_base_url?: string
   slack_base_url?: string
