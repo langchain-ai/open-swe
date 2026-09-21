@@ -510,3 +510,25 @@ def test_blank_workspace_prompt_renders_nothing() -> None:
         working_dir="/workspace", workspace_name="Base", workspace_instructions="   "
     )
     assert "Workspace Instructions" not in prompt
+
+
+async def test_roster_admin_flag_is_the_participants_own(monkeypatch: pytest.MonkeyPatch) -> None:
+    """An admin requester must not make everyone else in the roster look like one."""
+    from agent import server
+    from agent.users import User
+
+    monkeypatch.setenv("CONFIGURED_ADMINS", "admin@example.com")
+    monkeypatch.setattr(server, "_person_id_for_login", AsyncMock(return_value="user:bob"))
+    monkeypatch.setattr(server, "load_profile", AsyncMock(return_value=None))
+    monkeypatch.setattr(server, "_resolve_user_custom_instructions", AsyncMock(return_value=None))
+    monkeypatch.setattr(User, "email_for_login", AsyncMock(return_value="bob@example.com"))
+    bob = CollaboratorIdentity(
+        display_name="bob", commit_name="bob", commit_email="bob@example.com", github_login="bob"
+    )
+    admin_requester_config = {"configurable": {"user_email": "admin@example.com"}}
+
+    as_seen_by_admin = await server._thread_participant(bob, admin_requester_config)
+    assert as_seen_by_admin.workspace_admin is False
+
+    monkeypatch.setenv("CONFIGURED_ADMINS", "admin@example.com,bob")
+    assert (await server._thread_participant(bob, admin_requester_config)).workspace_admin is True

@@ -199,7 +199,12 @@ from agent.tools import (
     update_automation,
     web_search,
 )
-from agent.tools.admin_gate import actor_has_admin_context, actor_is_admin, is_private_admin_surface
+from agent.tools.admin_gate import (
+    actor_has_admin_context,
+    actor_is_admin,
+    is_private_admin_surface,
+    participant_is_admin,
+)
 from agent.tools.manage_review_approval_policy import manage_review_approval_policy
 from agent.tools.submit_review_assessment_feedback import submit_review_assessment_feedback
 from agent.users import User
@@ -361,7 +366,7 @@ async def _thread_participant(
     resolved_id, profile, workspace_admin, instructions = await asyncio.gather(
         _person_id_for_login(login),
         load_profile(login),
-        _workspace_admin(config, login),
+        participant_is_admin(login),
         _resolve_user_custom_instructions(login),
     )
     return ThreadParticipant(
