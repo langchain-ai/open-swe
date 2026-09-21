@@ -50,6 +50,7 @@ export function MyPullRequests({
     status: filter,
     sort = "updatedAt",
     direction = "desc",
+    pr: selected,
   } = filters
   const toggleSort = (next: ReviewSort) =>
     onFiltersChange({
@@ -156,6 +157,9 @@ export function MyPullRequests({
         pr={pr}
         login={login}
         outcome={settled[key]}
+        compact={Boolean(selected)}
+        selected={selected === key}
+        onSelect={() => onFiltersChange({ pr: key })}
         review={
           summariesUnavailable ? null : (
             <PullRequestReview
@@ -175,43 +179,10 @@ export function MyPullRequests({
 
   return (
     <section
-      className="mt-5 flex min-h-0 flex-1 flex-col gap-4"
+      className="mt-4 flex min-h-0 flex-1 flex-col gap-3"
       aria-label="My open pull requests"
     >
-      <div className="flex flex-wrap items-center justify-between gap-3 text-xs text-muted-foreground">
-        <span aria-live="polite">
-          {refreshing
-            ? "Refreshing from GitHub…"
-            : latest
-              ? `Refreshed ${dateLabel(latest.updatedAt)}`
-              : "Live open pull requests from GitHub"}
-        </span>
-        <Button
-          size="sm"
-          variant="outline"
-          disabled={query.isFetching}
-          onClick={() => {
-            setSettled({})
-            queryClient.removeQueries({
-              queryKey: ["my-pr-details", login],
-              predicate: (cached) => cached.state.data === null,
-            })
-            void query.refetch()
-            void queryClient.invalidateQueries({
-              queryKey: ["my-pr-details", login],
-            })
-            void queryClient.invalidateQueries({
-              queryKey: ["pr-thread-status", login],
-            })
-            void queryClient.invalidateQueries({
-              queryKey: ["my-pr-review-summaries", login],
-            })
-          }}
-        >
-          Refresh
-        </Button>
-      </div>
-      <div className="flex flex-wrap gap-2">
+      <div className="flex flex-wrap items-center gap-2">
         <MultiSelect
           label="Filter by repository"
           placeholder="All repositories"
@@ -247,6 +218,66 @@ export function MyPullRequests({
             onFiltersChange({ status: status.length ? status : undefined })
           }
         />
+        {!selected && (
+          <span className="flex items-center gap-1 text-xs text-muted-foreground">
+            Sort
+            {sortOptions.map(([label, key]) => (
+              <button
+                key={key}
+                type="button"
+                aria-pressed={sort === key}
+                onClick={() => toggleSort(key)}
+                className={cn(
+                  "inline-flex items-center gap-1 rounded-md border px-2 py-1",
+                  sort === key
+                    ? "border-border bg-muted text-foreground"
+                    : "border-transparent hover:text-foreground"
+                )}
+              >
+                {label}
+                <span aria-hidden="true">
+                  {sort === key ? (direction === "asc" ? "↑" : "↓") : "↕"}
+                </span>
+              </button>
+            ))}
+          </span>
+        )}
+        {!selected && (
+          <span
+            aria-live="polite"
+            className="text-xs whitespace-nowrap text-muted-foreground"
+          >
+            {refreshing
+              ? "Refreshing from GitHub…"
+              : latest
+                ? `Refreshed ${dateLabel(latest.updatedAt)}`
+                : "Live open pull requests from GitHub"}
+          </span>
+        )}
+        <Button
+          size="sm"
+          variant="outline"
+          disabled={query.isFetching}
+          onClick={() => {
+            setSettled({})
+            queryClient.removeQueries({
+              queryKey: ["my-pr-details", login],
+              predicate: (cached) => cached.state.data === null,
+            })
+            void query.refetch()
+            void queryClient.invalidateQueries({
+              queryKey: ["my-pr-details", login],
+            })
+            void queryClient.invalidateQueries({
+              queryKey: ["pr-thread-status", login],
+            })
+            void queryClient.invalidateQueries({
+              queryKey: ["my-pr-review-summaries", login],
+            })
+          }}
+        >
+          Refresh
+        </Button>
       </div>
       {query.error && (
         <p role="alert" className="text-sm text-destructive">
@@ -271,30 +302,6 @@ export function MyPullRequests({
       ) : (
         latest && (
           <>
-            <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-xs text-muted-foreground">
-              <span className="ml-auto flex items-center gap-1">
-                Sort
-                {sortOptions.map(([label, key]) => (
-                  <button
-                    key={key}
-                    type="button"
-                    aria-pressed={sort === key}
-                    onClick={() => toggleSort(key)}
-                    className={cn(
-                      "inline-flex items-center gap-1 rounded-md border px-2 py-1",
-                      sort === key
-                        ? "border-border bg-muted text-foreground"
-                        : "border-transparent hover:text-foreground"
-                    )}
-                  >
-                    {label}
-                    <span aria-hidden="true">
-                      {sort === key ? (direction === "asc" ? "↑" : "↓") : "↕"}
-                    </span>
-                  </button>
-                ))}
-              </span>
-            </div>
             {visible.length === 0 ? (
               <p className="rounded-lg border border-border bg-card px-4 py-12 text-center text-xs text-muted-foreground">
                 {detailsLoading || query.isFetchingNextPage
@@ -307,6 +314,7 @@ export function MyPullRequests({
               <PullRequestList
                 rows={visible}
                 available={matchingRows.length}
+                compact={Boolean(selected)}
                 // Unclamped: asking for more rows than are loaded is what
                 // makes the next GitHub page arrive, and reaching the end
                 // again is the only other thing that would grow it.
@@ -320,8 +328,9 @@ export function MyPullRequests({
             <div className="flex items-center gap-3 text-xs text-muted-foreground">
               <span>
                 {visible.length} of {filtered.length}
-                {query.hasNextPage ? "+" : ""} PRs · Added/deleted lines include
-                tests and docs. PRs with checks still running are Pending.
+                {query.hasNextPage ? "+" : ""} PRs
+                {!selected &&
+                  " · Added/deleted lines include tests and docs. PRs with checks still running are Pending."}
               </span>
               {query.isFetchingNextPage ? (
                 <span role="status">Loading more PRs from GitHub…</span>

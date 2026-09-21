@@ -4,6 +4,8 @@ import type { OpenPullRequest } from "@/lib/api"
 import { cn } from "@/lib/utils"
 import { dateLabel } from "../lib/dateLabel"
 import {
+  blockerLabel,
+  blockerTone,
   canAttemptMerge,
   hasUnresolvedConversations,
   isFixable,
@@ -31,6 +33,9 @@ export function PullRequestCard({
   login,
   review,
   outcome,
+  compact,
+  selected,
+  onSelect,
   onSettled,
   onReady,
 }: {
@@ -40,13 +45,56 @@ export function PullRequestCard({
   // Set once the PR has left GitHub's open list. The card keeps its place
   // until the next refresh so the rows below it never jump.
   outcome?: PullRequestOutcome
+  // Rail form: title plus the one thing blocking the merge, and no controls —
+  // those live in the preview the row opens.
+  compact?: boolean
+  selected?: boolean
+  onSelect: () => void
   onSettled: (outcome: PullRequestOutcome) => void
   onReady: () => void
 }) {
+  if (compact) {
+    return (
+      <button
+        type="button"
+        aria-current={selected ? "true" : undefined}
+        onClick={onSelect}
+        className={cn(
+          "flex w-full gap-2.5 rounded-md py-2 pr-2.5 pl-2 text-left transition-colors",
+          selected ? "bg-sidebar-row-hover" : "hover:bg-sidebar-row-hover",
+          outcome && "opacity-60"
+        )}
+      >
+        <span
+          aria-hidden="true"
+          className={cn(
+            "mt-0.5 w-0.5 shrink-0 self-stretch rounded-full",
+            selected ? "bg-foreground/60" : "bg-transparent"
+          )}
+        />
+        <span className="min-w-0 flex-1">
+          <span className="flex items-baseline gap-1.5 text-xs text-muted-foreground">
+            <span className="min-w-0 truncate">{pr.repo}</span>
+            <span className="font-mono tabular-nums">#{pr.number}</span>
+          </span>
+          <span className="mt-0.5 block truncate text-xs font-medium text-foreground">
+            {pr.title}
+          </span>
+          <span
+            className={cn("mt-0.5 block truncate text-xs", blockerTone(pr))}
+          >
+            {outcome ? outcomeLabels[outcome] : blockerLabel(pr)}
+          </span>
+        </span>
+      </button>
+    )
+  }
+
   return (
     <div
       className={cn(
-        "rounded-lg border border-border bg-card p-4",
+        "rounded-lg border bg-card p-4 transition-colors",
+        selected ? "border-foreground/30" : "border-border",
         outcome && "opacity-60"
       )}
     >
@@ -62,14 +110,13 @@ export function PullRequestCard({
             ))}
           </div>
           <h3 className="mt-1 text-sm font-medium break-words">
-            <a
-              className="hover:underline"
-              href={`https://github.com/${pr.repo}/pull/${pr.number}`}
-              target="_blank"
-              rel="noreferrer"
+            <button
+              type="button"
+              className="text-left hover:underline"
+              onClick={onSelect}
             >
               {pr.title}
-            </a>
+            </button>
           </h3>
         </div>
         <div className="flex flex-wrap items-center gap-x-5 gap-y-2 text-xs text-muted-foreground">

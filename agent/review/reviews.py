@@ -21,7 +21,9 @@ from pydantic import BaseModel, ValidationError
 
 from agent.github.app import get_github_app_installation_token
 from agent.github.checks import github_headers
+from agent.github.http import github_client
 from agent.github.pull_request_diff import build_pr_diff_files
+from agent.github.pull_request_status import fetch_unresolved_review_threads
 from agent.github.webhook import trigger_pr_review_from_ref
 from agent.review.assessment_feedback import ASSESSMENTS
 from agent.review.findings import (
@@ -658,6 +660,105 @@ async def get_review(owner: str, repo: str, pr_number: int) -> dict[str, Any]:
         "diff_groups_stale": diff_groups_stale,
         "assessment": assessment.model_dump() if assessment else None,
     }
+
+
+_PREVIEW_FILE_LIMIT = 10
+_PREVIEW_FILES_PER_PAGE = 100
+
+
+class PreviewFile(BaseModel):
+    path: str
+    status: str
+    additions: int
+    deletions: int
+
+
+class PreviewThread(BaseModel):
+    author: str | None = None
+    body: str
+    path: str
+    line: int | None = None
+    url: str | None = None
+
+
+class PullRequestPreview(BaseModel):
+    title: str
+    body: str
+    author: str | None
+    additions: int
+    deletions: int
+    changed_files: int
+    files: list[PreviewFile]
+    # None when GitHub could not answer, which is not the same as none unresolved.
+    unresolved: list[PreviewThread] | None
+
+
+class _GithubPreviewFile(BaseModel):
+    filename: str
+    status: str = "modified"
+    additions: int = 0
+    deletions: int = 0
+
+
+class _GithubUser(BaseModel):
+    login: str
+
+
+class _GithubPreviewPull(BaseModel):
+    title: str = ""
+    body: str | None = None
+    additions: int = 0
+    deletions: int = 0
+    changed_files: int = 0
+    user: _GithubUser | None = None
+
+
+async def get_pull_request_preview(owner: str, repo: str, pr_number: int) -> PullRequestPreview:
+    """Description, the largest changed files, and unresolved threads for any PR.
+
+    Unlike ``get_review`` this does not need a reviewer thread, so it answers for
+    every PR the viewer can reach. Only file metadata is read — the contents live
+    behind ``get_review_diff``, which is far too heavy to open a preview with.
+    """
+    token = await _require_app_token()
+    async with github_client(token=token, timeout=_GITHUB_TIMEOUT) as client:
+        pull_payload, file_payload, threads = await asyncio.gather(
+            _github_get(f"/repos/{owner}/{repo}/pulls/{pr_number}", token),
+            _github_get(
+                f"/repos/{owner}/{repo}/pulls/{pr_number}/files",
+                token,
+                params={"per_page": _PREVIEW_FILES_PER_PAGE},
+            ),
+            fetch_unresolved_review_threads(client, owner, repo, pr_number),
+        )
+    pull = _GithubPreviewPull.model_validate(pull_payload if isinstance(pull_payload, dict) else {})
+    raw_files = file_payload if isinstance(file_payload, list) else []
+    files = [
+        PreviewFile(
+            path=entry.filename,
+            status=entry.status,
+            additions=entry.additions,
+            deletions=entry.deletions,
+        )
+        for entry in (
+            _GithubPreviewFile.model_validate(item) for item in raw_files if isinstance(item, dict)
+        )
+    ]
+    files.sort(key=lambda entry: entry.additions + entry.deletions, reverse=True)
+    return PullRequestPreview(
+        title=pull.title,
+        body=pull.body or "",
+        author=pull.user.login if pull.user else None,
+        additions=pull.additions,
+        deletions=pull.deletions,
+        changed_files=pull.changed_files or len(files),
+        files=files[:_PREVIEW_FILE_LIMIT],
+        unresolved=(
+            None
+            if threads is None
+            else [PreviewThread.model_validate(thread) for thread in threads]
+        ),
+    )
 
 
 async def get_review_diff(owner: str, repo: str, pr_number: int) -> dict[str, Any]:
