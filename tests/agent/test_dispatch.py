@@ -235,7 +235,7 @@ async def test_dashboard_followup_records_activity_even_if_dispatch_fails(
     assert client.threads.metadata[thread_feedback.ACTIVITY_KEY] == 123000
 
 
-async def test_dispatch_slack_identity_includes_verified_context() -> None:
+async def test_dispatch_describes_the_channel_and_leaves_the_sender_to_the_run() -> None:
     run_input = await dispatch._dispatch_input(
         "hello",
         "slack",
@@ -257,10 +257,9 @@ async def test_dispatch_slack_identity_includes_verified_context() -> None:
         },
     )
 
-    person = ElementTree.fromstring(run_input["messages"][0]["content"])
-    channel = ElementTree.fromstring(run_input["messages"][1]["content"])
-    assert person.findtext("display_name") == "Mason"
-    assert person.findtext("timezone") == "America/New_York"
+    channel = ElementTree.fromstring(run_input["messages"][0]["content"])
+    assert len(run_input["messages"]) == 2
+    assert channel.attrib["kind"] == "channel"
     assert channel.findtext("name") == "eng"
     assert channel.findtext("topic") == "Ship <safely>"
     topic = channel.find("topic")
@@ -283,7 +282,5 @@ async def test_dispatch_keys_a_linked_slack_sender_on_their_person(
         {"slack_thread": {"triggering_user_id": "U123", "channel_id": "C123"}},
     )
 
-    person = ElementTree.fromstring(run_input["messages"][0]["content"])
     envelope = ElementTree.fromstring(run_input["messages"][-1]["content"])
-    assert person.attrib["id"] == f"user:{user.id}"
     assert envelope.attrib["sender"] == f"user:{user.id}"

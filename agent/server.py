@@ -29,6 +29,7 @@ from langgraph_sdk import get_client
 warnings.filterwarnings("ignore", module="langchain_core._api.deprecation")
 
 import asyncio
+from dataclasses import replace
 
 # Suppress Pydantic v1 compatibility warnings from langchain on Python 3.14+
 warnings.filterwarnings("ignore", message=".*Pydantic V1.*", category=UserWarning)
@@ -69,11 +70,9 @@ from agent.desktop import create_desktop_backend, desktop_artifact_routes, is_de
 from agent.desktop_branch import schedule_worktree_branch_rename
 from agent.github.token import resolve_github_token
 from agent.input_messages import (
-    SENDER_CONTEXT_SENDER_ID,
     dynamic_context_hash,
     message_sender_id,
-    participant_introduction,
-    system_input,
+    person_introduction,
     visible_dynamic_context_hashes,
 )
 from agent.mcp import load_mcp_tools
@@ -115,9 +114,7 @@ from agent.middleware.prepare_run import PrepareRunState
 from agent.middleware.sandbox_circuit_breaker import post_sandbox_unreachable_notification
 from agent.middleware.transcript import TranscriptMiddleware
 from agent.prompt import (
-    construct_sender_context,
     construct_system_prompt,
-    participant_context,
     render_open_swe_shared_base,
 )
 from agent.prompts import apply_tool_descriptions, load_prompt
@@ -341,18 +338,17 @@ async def _thread_participant_identities(thread_id: str) -> list[CollaboratorIde
         return []
 
 
-async def _person_id_for_login(login: str) -> str:
-    """The roster key for a GitHub login; the login itself when no person row answers."""
+async def _user_for_login(login: str) -> User | None:
+    """The ``users`` row behind a GitHub login, or ``None`` when nothing answers."""
     try:
-        user = await User.for_login("github", login)
+        return await User.for_login("github", login)
     except Exception:
         logger.warning(
-            "Could not resolve a participant; keying them by login",
+            "Could not resolve a participant; describing them from surface data",
             extra={"participant_login": login},
             exc_info=True,
         )
-        return f"github:{login}"
-    return f"user:{user.id}" if user is not None else f"github:{login}"
+        return None
 
 
 async def _thread_participant(
@@ -361,18 +357,26 @@ async def _thread_participant(
     login = identity.github_login or None
     if login is None:
         return ThreadParticipant(identity=identity, person_id=person_id or "")
-    resolved_id, profile, workspace_admin, instructions = await asyncio.gather(
-        _person_id_for_login(login),
+    user, profile, workspace_admin, instructions = await asyncio.gather(
+        _user_for_login(login),
         load_profile(login),
         participant_is_admin(login),
         _resolve_user_custom_instructions(login),
     )
+    display_name = (user.display_name if user else "") or identity.display_name or login
     return ThreadParticipant(
-        identity=identity,
-        person_id=person_id or resolved_id,
+        identity=replace(
+            identity,
+            display_name=display_name,
+            commit_name=display_name,
+            commit_email=identity.login_noreply_email,
+        ),
+        person_id=person_id or (f"user:{user.id}" if user else f"github:{login}"),
         workspace_admin=workspace_admin,
         draft_prs=profile_draft_prs(profile),
         instructions=instructions or "",
+        email=(user.email if user else "") or "",
+        linked=user is not None,
     )
 
 
@@ -382,17 +386,24 @@ async def _thread_participants(
     sender: CollaboratorIdentity | None,
     *,
     sender_person_id: str,
+    sender_display_name: str = "",
 ) -> list[ThreadParticipant]:
     """Everyone in the thread, each with the settings the agent acts under for them.
 
     The sender is keyed by the id their message envelope carries, so the turn's
-    pointer resolves to their roster entry even when no person row exists.
+    envelope resolves to their block even when no person row exists. Without a
+    GitHub account they have no commit identity, and the surface's name for them
+    is all anyone knows.
     """
     identities = await _thread_participant_identities(thread_id)
-    resolved_sender = sender or CollaboratorIdentity(
-        display_name=OPEN_SWE_BOT_NAME,
-        commit_name=OPEN_SWE_BOT_NAME,
-        commit_email=OPEN_SWE_BOT_EMAIL,
+    resolved_sender = sender or (
+        CollaboratorIdentity(display_name=sender_display_name, commit_name="", commit_email="")
+        if sender_display_name
+        else CollaboratorIdentity(
+            display_name=OPEN_SWE_BOT_NAME,
+            commit_name=OPEN_SWE_BOT_NAME,
+            commit_email=OPEN_SWE_BOT_EMAIL,
+        )
     )
     others = [
         identity for identity in identities if identity.commit_email != resolved_sender.commit_email
@@ -791,30 +802,16 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
         )
 
     @staticmethod
-    def _sender_context_messages(sender_context: str) -> list[Any]:
-        """The turn's pointer at its sender, appended after the run's input every turn.
-
-        A separate message rather than a splice into the triggering message: that
-        message is already cached from the run that received it.
-        """
-        return [
-            system_input(
-                sender_context,
-                {"sender_id": SENDER_CONTEXT_SENDER_ID, "surface": "automation", "kind": "system"},
-            )
-        ]
-
-    @staticmethod
     def _participants_messages(
         state: PrepareRunState, participants: Sequence[ThreadParticipant]
     ) -> list[Any]:
-        """One context block per participant, sent when theirs is not already visible."""
+        """One person block per participant, sent when theirs is not already visible."""
         visible = visible_dynamic_context_hashes(state)
         ordered = sorted(
             participants,
             key=lambda candidate: (candidate.identity.display_name.lower(), candidate.person_id),
         )
-        blocks = [participant_introduction(participant_context(p)) for p in ordered]
+        blocks = [person_introduction(p.as_person()) for p in ordered]
         return [block for block in blocks if dynamic_context_hash(block["content"]) not in visible]
 
     async def _prepare(self, state: PrepareRunState, runtime: Runtime) -> dict[str, Any]:  # noqa: ARG002
@@ -873,7 +870,7 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
             work_dir = await resolve_sandbox_work_dir(sandbox_backend)
         async with aphase(self._thread_id, "prepare.workspace"):
             workspace = await load_workspace(workspace_slug(cfg))
-        async with aphase(self._thread_id, "prepare.sender_context"):
+        async with aphase(self._thread_id, "prepare.participants"):
             attribution_model_id = self._model_id
             attribution_effort = self._effort
             attribution_route = None
@@ -897,13 +894,11 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
                     self._config or {},
                     triggering_user_identity,
                     sender_person_id=subject_id,
-                )
-                sender_messages = [
-                    *self._participants_messages(state, participants),
-                    *self._sender_context_messages(
-                        construct_sender_context(participants[0].identity.display_name, subject_id)
+                    sender_display_name=(
+                        cfg.slack_thread.triggering_user_name if cfg.slack_thread else ""
                     ),
-                ]
+                )
+                sender_messages = self._participants_messages(state, participants)
         try:
             async with aphase(self._thread_id, "prepare.record_run"):
                 await client.threads.update(

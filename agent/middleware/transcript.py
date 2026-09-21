@@ -42,7 +42,6 @@ from sqlalchemy import text as sql
 
 from agent.database import postgres
 from agent.input_messages import (
-    TURN_ANNOTATION_SENDER_IDS,
     input_message_text,
     message_sender_id,
 )
@@ -288,8 +287,7 @@ def _transcribed_human_text(message: HumanMessage) -> str:
     Who sent it, on which surface, and whether it is a platform-generated
     context message the UI hides are all carried by the ``<input-message>``
     wrapper and by nothing else on the wire. Unwrapping here would strip a
-    message of its attribution and turn ``system:sender-context`` into a
-    message apparently typed by the user.
+    message of its attribution.
     """
     return _message_text(message).strip()
 
@@ -302,14 +300,10 @@ def _is_dynamic_context(message: HumanMessage) -> bool:
 def _is_turn_annotation(message: HumanMessage) -> bool:
     """A platform block that annotates the turn instead of being it.
 
-    The run appends the sender-context metadata *after* the message it
-    describes, and a ``<dynamic-context>`` introduction can trail it too, so the
-    last human message in state is routinely neither the request nor anything a
-    reader should see attributed to the user.
+    A ``<dynamic-context>`` introduction can trail the message it describes, so
+    the last human message in state is not reliably the request itself.
     """
-    return _is_dynamic_context(message) or (
-        message_sender_id(message.content) in TURN_ANNOTATION_SENDER_IDS
-    )
+    return _is_dynamic_context(message)
 
 
 def _usage(message: AIMessage) -> MessageUsage | None:

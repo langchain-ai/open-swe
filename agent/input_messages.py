@@ -14,26 +14,29 @@ INJECTED_DYNAMIC_CONTEXT_HASHES_KEY = "injected_dynamic_context_hashes"
 SUMMARIZATION_EVENT_KEY = "_summarization_event"
 
 Surface = Literal["slack", "linear", "github", "web", "desktop", "automation", "eval"]
-EntityKind = Literal["person", "channel", "system", "participant"]
+EntityKind = Literal["person", "channel", "system"]
 MessageKind = Literal["human", "system"]
-
-# The run's own annotation of whoever sent the turn, appended after the turn's
-# message rather than being one; readers have to look past it to find the turn.
-SENDER_CONTEXT_SENDER_ID = "system:sender-context"
-# Every envelope a reader must look past: the transcript, the dashboard and the
-# scripted test model each have to agree on which messages nobody typed.
-TURN_ANNOTATION_SENDER_IDS = frozenset({SENDER_CONTEXT_SENDER_ID})
 
 
 class PersonIdentity(TypedDict):
+    """Everything the agent knows about one person, independent of any surface.
+
+    The surface a message arrived on belongs to its envelope, so this block is
+    identical whichever way the person reached the thread and is re-sent only
+    when their own data changes.
+    """
+
     id: str
     display_name: NotRequired[str]
-    handle: NotRequired[str]
-    platform: NotRequired[str]
     github_login: NotRequired[str]
+    commit_name: NotRequired[str]
+    commit_email: NotRequired[str]
     email: NotRequired[str]
     timezone: NotRequired[str]
-    open_swe_account: NotRequired[str]
+    open_swe_account: NotRequired[Literal["linked", "unlinked"]]
+    workspace_admin: NotRequired[Literal["yes", "no"]]
+    new_prs: NotRequired[Literal["as drafts", "ready for review"]]
+    standing_instructions: NotRequired[str]
 
 
 class ChannelIdentity(TypedDict):
@@ -45,17 +48,6 @@ class ChannelIdentity(TypedDict):
     purpose: NotRequired[str]
 
 
-class ParticipantIdentity(TypedDict):
-    """How the agent acts for one person in the thread; one block per person."""
-
-    id: str
-    display_name: str
-    git_identity: str
-    workspace_admin: Literal["yes", "no"]
-    new_prs: Literal["as drafts", "ready for review"]
-    standing_instructions: NotRequired[str]
-
-
 class SystemIdentity(TypedDict):
     id: str
     display_name: str
@@ -64,7 +56,7 @@ class SystemIdentity(TypedDict):
     content: NotRequired[str]
 
 
-Identity = PersonIdentity | ChannelIdentity | SystemIdentity | ParticipantIdentity
+Identity = PersonIdentity | ChannelIdentity | SystemIdentity
 
 
 class InputMessageContext(TypedDict):
@@ -89,22 +81,18 @@ class RunInput(TypedDict):
 _ENTITY_FIELDS: dict[EntityKind, tuple[str, ...]] = {
     "person": (
         "display_name",
-        "handle",
-        "platform",
         "github_login",
+        "commit_name",
+        "commit_email",
         "email",
         "timezone",
         "open_swe_account",
-    ),
-    "channel": ("platform", "name", "thread_id", "topic", "purpose"),
-    "system": ("display_name", "platform", "sender_type", "content"),
-    "participant": (
-        "display_name",
-        "git_identity",
         "workspace_admin",
         "new_prs",
         "standing_instructions",
     ),
+    "channel": ("platform", "name", "thread_id", "topic", "purpose"),
+    "system": ("display_name", "platform", "sender_type", "content"),
 }
 _UNTRUSTED_ENTITY_FIELDS = frozenset({"topic", "purpose"})
 
@@ -121,7 +109,7 @@ def split_person_id(person: PersonIdentity) -> tuple[str, str]:
     """``(platform, external id)`` from ``person["id"]``; platform may be empty."""
     platform, separator, external_id = person["id"].partition(":")
     if not separator:
-        return person.get("platform", ""), platform
+        return "", person["id"]
     return platform, external_id
 
 
@@ -272,10 +260,6 @@ def system_introduction(system: SystemIdentity) -> RunMessage:
     return _entity_message(system, "system")
 
 
-def participant_introduction(participant: ParticipantIdentity) -> RunMessage:
-    return _entity_message(participant, "participant")
-
-
 def _data_element(name: str, value: object) -> str:
     if not name.replace("_", "").replace("-", "").isalnum():
         raise ValueError(f"invalid structured data field: {name}")
@@ -393,7 +377,6 @@ def build_input_messages(
     content: str | list[dict[str, Any]],
     context: InputMessageContext,
     *,
-    people: list[PersonIdentity] | None = None,
     channels: list[ChannelIdentity] | None = None,
     systems: list[SystemIdentity] | None = None,
     injected_dynamic_context_hashes: set[str] | None = None,
@@ -403,7 +386,6 @@ def build_input_messages(
     )
     messages: list[RunMessage] = []
     introductions = [
-        *(person_introduction(person) for person in people or []),
         *(channel_introduction(channel) for channel in channels or []),
         *(system_introduction(system) for system in systems or []),
     ]
@@ -424,7 +406,6 @@ def build_run_input(
     content: str | list[dict[str, Any]],
     context: InputMessageContext,
     *,
-    people: list[PersonIdentity] | None = None,
     channels: list[ChannelIdentity] | None = None,
     systems: list[SystemIdentity] | None = None,
     injected_dynamic_context_hashes: set[str] | None = None,
@@ -434,7 +415,6 @@ def build_run_input(
         "messages": build_input_messages(
             content,
             context,
-            people=people,
             channels=channels,
             systems=systems,
             injected_dynamic_context_hashes=injected_dynamic_context_hashes,

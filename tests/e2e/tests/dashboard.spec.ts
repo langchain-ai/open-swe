@@ -258,18 +258,21 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
       .filter({ hasText: prompt });
     await expect(userMessage).toContainText(prompt);
     await expect(userMessage).not.toContainText("sender_context");
-    await waitForStateToContain(page, threadId, "system:sender-context");
+    // The state comes back JSON-encoded, so the attribute quotes are escaped.
+    await waitForStateToContain(
+      page,
+      threadId,
+      '<dynamic-context kind=\\"person\\"',
+    );
 
     await page.reload();
     await expect(userMessage).toContainText(prompt);
     await expect(userMessage).not.toContainText("sender_context");
   });
 
-  // A turn without sender context is a turn the agent cannot attribute: it read
-  // the block as scoped to an earlier message and refused to set a commit
-  // identity at all. The roster is the opposite — everything about the people,
-  // stated once, repeated only when one of them changes.
-  test("points at the sender every turn and re-emits the roster only when a participant changes", async ({
+  // The roster states everything about the people once, and repeats a person's
+  // block only when something about them changes.
+  test("re-emits a person block only when that person changes", async ({
     page,
   }) => {
     await loginAs(page, SAME_USER);
@@ -286,10 +289,7 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
     );
     expect(clearInstructions.ok()).toBeTruthy();
 
-    const senderMarker = /Sent by \*\*/g;
-    const countIn = (state: string, marker: RegExp) =>
-      state.match(marker)?.length ?? 0;
-    // Every participant block the thread holds, so a repeat fails with the diff, not a count.
+    // Every person block the thread holds, so a repeat fails with the diff, not a count.
     const rosterBlocks = (state: string): string[] => {
       const parsed = JSON.parse(state) as {
         values?: { messages?: Array<{ content?: unknown }> };
@@ -299,7 +299,7 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
           typeof message.content === "string" ? message.content : "",
         )
         .filter((content) =>
-          content.includes('<dynamic-context kind="participant"'),
+          content.includes('<dynamic-context kind="person"'),
         );
     };
     const expectOneRoster = (state: string) => {
@@ -316,7 +316,12 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
     await editor.press("Enter");
     await expect(page).toHaveURL(/\/agents\/[^/]+$/);
     const threadId = threadIdFromUrl(page);
-    await waitForStateToContain(page, threadId, "Sent by **");
+    // The state comes back JSON-encoded, so the attribute quotes are escaped.
+    await waitForStateToContain(
+      page,
+      threadId,
+      '<dynamic-context kind=\\"person\\"',
+    );
     await waitForThreadIdle(page, threadId);
     await expect(page.getByTestId("composer-editor")).toHaveAttribute(
       "contenteditable",
@@ -333,12 +338,6 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
     );
     await waitForThreadIdle(page, threadId);
 
-    await expect
-      .poll(
-        async () => countIn(await threadState(page, threadId), senderMarker),
-        { timeout: 60_000, intervals: [500] },
-      )
-      .toBe(2);
     expectOneRoster(await threadState(page, threadId));
 
     const instructions = "Always use the sender preference update marker.";
@@ -364,18 +363,11 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
       "sender preference changed message",
     );
     await waitForStateToContain(page, threadId, instructions);
-    await expect
-      .poll(
-        async () => countIn(await threadState(page, threadId), senderMarker),
-        { timeout: 60_000, intervals: [500] },
-      )
-      .toBe(3);
     await waitForThreadIdle(page, threadId);
 
-    // The sender's standing instructions changed, so their participant block —
-    // where they live — is re-sent once; the pointer stays a pointer.
+    // The sender's standing instructions changed, so their person block —
+    // where they live — is re-sent once.
     const state = await threadState(page, threadId);
-    expect(countIn(state, senderMarker)).toBe(3);
     const rosters = rosterBlocks(state);
     expect(
       rosters,

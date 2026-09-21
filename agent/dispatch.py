@@ -74,7 +74,6 @@ async def _dispatch_input(
         if source in {"slack", "linear", "github", "web", "desktop", "eval"}
         else "automation"
     )  # type: ignore[assignment]
-    people: list[PersonIdentity] = []
     channels: list[ChannelIdentity] = []
     systems: list[SystemIdentity] = []
     cfg = RunConfig.parse(configurable)
@@ -82,20 +81,17 @@ async def _dispatch_input(
     email = cfg.user_email
     slack_thread = cfg.slack_thread
     sender_id = ""
+    # Only for resolving the canonical id: the run describes the sender itself.
+    sender: PersonIdentity | None = None
     channel_id: str | None = None
     if surface == "slack" and slack_thread is not None:
         if slack_thread.triggering_user_id:
             sender_id = f"slack:{slack_thread.triggering_user_id}"
-            person: PersonIdentity = {"id": sender_id, "platform": "slack"}
-            if slack_thread.triggering_user_name:
-                person["display_name"] = slack_thread.triggering_user_name
-            if slack_thread.triggering_user_timezone:
-                person["timezone"] = slack_thread.triggering_user_timezone
+            sender = {"id": sender_id}
             if login:
-                person["github_login"] = login
+                sender["github_login"] = login
             if email:
-                person["email"] = email
-            people.append(person)
+                sender["email"] = email
         if slack_thread.channel_id:
             channel_id = f"slack:{slack_thread.channel_id}"
             channel: ChannelIdentity = {"id": channel_id, "platform": "slack"}
@@ -115,16 +111,14 @@ async def _dispatch_input(
             channels.append(channel)
     if not sender_id and login:
         sender_id = f"github:{login}"
-        person = {"id": sender_id, "platform": "github", "github_login": login}
+        sender = {"id": sender_id, "github_login": login}
         if email:
-            person["email"] = email
-        people.append(person)
+            sender["email"] = email
     if not sender_id and surface == "linear" and email:
         sender_id = f"linear:{email.lower()}"
-        people.append({"id": sender_id, "platform": "linear", "email": email})
-    if sender_id and people:
-        people[-1] = await User.canonical_person(people[-1])
-        sender_id = people[-1]["id"]
+        sender = {"id": sender_id, "email": email}
+    if sender is not None:
+        sender_id = (await User.canonical_person(sender))["id"]
     kind = "human" if sender_id else "system"
     if not sender_id:
         sender_id = f"system:{source.replace('_', '-')}"
@@ -145,7 +139,6 @@ async def _dispatch_input(
     return build_run_input(
         content,
         context,
-        people=people,
         channels=channels,
         systems=systems,
     )
@@ -304,7 +297,6 @@ async def dispatch_agent_run(
     source: str,
     input: RunInput | None = None,
     context: InputMessageContext | None = None,
-    people: list[PersonIdentity] | None = None,
     channels: list[ChannelIdentity] | None = None,
     systems: list[SystemIdentity] | None = None,
     assistant_id: str = "agent",
@@ -319,7 +311,7 @@ async def dispatch_agent_run(
     the graph (``"agent"`` or ``"reviewer"``).
     """
     if input is not None and any(
-        value is not None for value in (content, context, people, channels, systems)
+        value is not None for value in (content, context, channels, systems)
     ):
         raise ValueError("prebuilt input cannot be combined with content or source identities")
     if input is None:
@@ -329,7 +321,6 @@ async def dispatch_agent_run(
             build_run_input(
                 content,
                 context,
-                people=people,
                 channels=channels,
                 systems=systems,
             )

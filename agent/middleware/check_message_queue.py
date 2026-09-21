@@ -280,14 +280,7 @@ async def check_message_queue_before_model(  # noqa: PLR0911
                 sender = content.get("sender")
                 if isinstance(sender, dict) and isinstance(sender.get("id"), str):
                     person: PersonIdentity = {"id": sender["id"]}
-                    for key in (
-                        "display_name",
-                        "handle",
-                        "platform",
-                        "github_login",
-                        "email",
-                        "timezone",
-                    ):
+                    for key in ("github_login", "email"):
                         value = sender.get(key)
                         if isinstance(value, str):
                             cast(dict[str, str], person)[key] = value
@@ -295,7 +288,6 @@ async def check_message_queue_before_model(  # noqa: PLR0911
                     structured = build_input_messages(
                         blocks,
                         {"sender_id": person["id"], "surface": "web", "kind": "human"},
-                        people=[person],
                         injected_dynamic_context_hashes=injected,
                     )
                     _flush_blocks(queued_updates, content_blocks, injected)

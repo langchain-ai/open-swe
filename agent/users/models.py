@@ -168,19 +168,12 @@ class User(Base):
         return person if user is None else user.as_person(person)
 
     def as_person(self, person: PersonIdentity) -> PersonIdentity:
-        """``person`` keyed on this row, keeping what the surface named them.
+        """``person`` keyed on this row; only the identity key changes.
 
-        Only the identity key changes. The display fields are what the surface
-        observed and what a transcript renders, so filling them from this row
-        would rewrite how existing messages read.
+        What the agent is told about a person is built from this row by the run,
+        so an ingress only needs the key that ties its surface to it.
         """
-        canonical: PersonIdentity = {**person, "id": f"user:{self.id}"}
-        platform, _external_id = split_person_id(person)
-        if platform:
-            canonical["platform"] = platform
-        if not canonical.get("github_login") and self.github_login:
-            canonical["github_login"] = self.github_login
-        return canonical
+        return {**person, "id": f"user:{self.id}"}
 
     @classmethod
     async def login_for_slack(cls, slack_user_id: str | None) -> str | None:

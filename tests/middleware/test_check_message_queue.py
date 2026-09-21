@@ -76,17 +76,16 @@ async def test_check_message_queue_injects_dashboard_handoff_instruction() -> No
     messages = result["messages"]
     # One envelope per message: the transcript parses them individually, so a
     # concatenation would render as raw XML.
-    assert [message["role"] for message in messages] == ["user"] * 4
+    assert [message["role"] for message in messages] == ["user"] * 3
     handoff_entity = ElementTree.fromstring(_envelope(messages[0]))
     handoff_message = ElementTree.fromstring(_envelope(messages[1]))
-    user_entity = ElementTree.fromstring(_envelope(messages[2]))
-    user_message = ElementTree.fromstring(_envelope(messages[3]))
+    user_message = ElementTree.fromstring(_envelope(messages[2]))
     assert handoff_entity.attrib["id"] == "system:dashboard-handoff"
     assert handoff_message.attrib["kind"] == "system"
     assert "conversation has moved to Web" in (handoff_message.findtext("content") or "")
-    assert user_entity.attrib["id"] == "github:octocat"
+    assert user_message.attrib["sender"] == "github:octocat"
     assert user_message.findtext("content") == "continue in web"
-    assert messages[3]["id"] == "8a60896d-65ca-4e40-8a2d-1fbe81777001"
+    assert messages[2]["id"] == "8a60896d-65ca-4e40-8a2d-1fbe81777001"
     # The handoff is carried by the injected message alone. Rewriting the system
     # prompt would say the same thing while invalidating the whole cached prefix.
     assert "rendered_system_prompt" not in result

@@ -40,8 +40,6 @@ from langchain_core.messages import (
 )
 from langchain_core.outputs import ChatGeneration, ChatResult
 
-from agent.input_messages import TURN_ANNOTATION_SENDER_IDS
-
 
 def _slack_thread_ts(messages: list[BaseMessage]) -> str:
     matches = re.findall(r"Thread TS: ([0-9.]+)", "\n".join(_text(m.content) for m in messages))
@@ -297,20 +295,12 @@ def _text(content: Any) -> str:
 
 
 _FRAMING_SENDER_IDS = ("system:slack-context", "system:dashboard-handoff")
-_METADATA_SENDER_IDS = tuple(sorted(TURN_ANNOTATION_SENDER_IDS))
 
 
 def _is_framing_block(header: str) -> bool:
     """A system envelope that describes where the next turn came from."""
     return 'kind="system"' in header and any(
         f'sender="{sender}"' in header for sender in _FRAMING_SENDER_IDS
-    )
-
-
-def _is_metadata_block(header: str) -> bool:
-    """A system envelope that annotates the turn instead of being one."""
-    return 'kind="system"' in header and any(
-        f'sender="{sender}"' in header for sender in _METADATA_SENDER_IDS
     )
 
 
@@ -333,8 +323,6 @@ def _script_humans(messages: list[BaseMessage]) -> list[HumanMessage]:
             continue
         if text.startswith("<input-message "):
             header = text.split(">", 1)[0]
-            if _is_metadata_block(header):
-                continue
             if _is_framing_block(header):
                 slack_request_pending = 'surface="slack"' in header
                 continue

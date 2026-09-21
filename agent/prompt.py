@@ -1,18 +1,14 @@
 import logging
-import shlex
 from importlib import resources
 from pathlib import Path
 
 from agent.config import ENV
 from agent.github.comments import UNTRUSTED_GITHUB_COMMENT_OPEN_TAG
-from agent.input_messages import ParticipantIdentity
 from agent.prompts import load_prompt, render_prompt
 from agent.utils.authorship import (
     OPEN_SWE_BOT_EMAIL,
     OPEN_SWE_BOT_NAME,
     PR_ATTRIBUTION_TEXT,
-    CollaboratorIdentity,
-    ThreadParticipant,
 )
 
 logger = logging.getLogger(__name__)
@@ -101,32 +97,6 @@ def _render_workspace_section(name: str | None, instructions: str | None) -> str
         label=label,
         instructions=instructions.strip(),
     )
-
-
-def _git_identity_command(identity: CollaboratorIdentity) -> str:
-    return (
-        f"git config user.name {shlex.quote(identity.commit_name)} "
-        f"&& git config user.email {shlex.quote(identity.commit_email)}"
-    )
-
-
-def participant_context(participant: ThreadParticipant) -> ParticipantIdentity:
-    """One person's entry: introduced once, re-sent only when their settings change."""
-    context: ParticipantIdentity = {
-        "id": participant.person_id,
-        "display_name": participant.identity.display_name,
-        "git_identity": _git_identity_command(participant.identity),
-        "workspace_admin": "yes" if participant.workspace_admin else "no",
-        "new_prs": "as drafts" if participant.draft_prs else "ready for review",
-    }
-    if participant.instructions.strip():
-        context["standing_instructions"] = participant.instructions.strip()
-    return context
-
-
-def construct_sender_context(display_name: str, person_id: str) -> str:
-    """The turn's pointer at its sender; everything about them is in their participant block."""
-    return render_prompt("system/sender-context.md", display_name=display_name, person_id=person_id)
 
 
 def _render_collaboration_section() -> str:

@@ -310,7 +310,6 @@ def _slack_person(
 ) -> PersonIdentity:
     person: PersonIdentity = {
         "id": person_id or f"slack:{user_id}",
-        "platform": "slack",
         "open_swe_account": "linked" if github_login else "unlinked",
     }
     if name:
@@ -384,7 +383,29 @@ def _slack_context_input(
 ) -> RunInput:
     channel_entity_id = f"slack:{channel_id}"
     run_messages = [channel_introduction({"id": channel_entity_id, "platform": "slack"})]
-    introduced: set[str] = {channel_entity_id}
+    # An edit's `event_ts` matches no message, and the approve-button path passes
+    # the ts of Open SWE's own button message, so matching history attributes the
+    # run to nobody or to the bot. The caller already knows who triggered it.
+    trigger_id = trigger_user_id or next(
+        (
+            str(message.get("user"))
+            for message in messages
+            if str(message.get("ts", "")) == str(event_ts)
+            and message.get("user")
+            and not slack_utils.is_own_slack_message(message, bot_user_id)
+            and not slack_utils.slack_message_bot_id(message)
+        ),
+        "unknown",
+    )
+    trigger_person = _slack_person(
+        trigger_id,
+        user_names_by_id.get(trigger_id, ""),
+        logins_by_user_id.get(trigger_id, ""),
+        (person_ids_by_user_id or {}).get(trigger_id, ""),
+    )
+    # The run this dispatch starts describes the trigger sender itself; replayed
+    # history is the only place an author nobody resolves needs introducing.
+    introduced: set[str] = {channel_entity_id, trigger_person["id"]}
     for message in messages:
         if str(message.get("ts", "")) == str(event_ts):
             continue
@@ -427,26 +448,6 @@ def _slack_context_input(
             },
         )
     )
-    # An edit's `event_ts` matches no message, and the approve-button path passes
-    # the ts of Open SWE's own button message, so matching history attributes the
-    # run to nobody or to the bot. The caller already knows who triggered it.
-    trigger_id = trigger_user_id or next(
-        (
-            str(message.get("user"))
-            for message in messages
-            if str(message.get("ts", "")) == str(event_ts)
-            and message.get("user")
-            and not slack_utils.is_own_slack_message(message, bot_user_id)
-            and not slack_utils.slack_message_bot_id(message)
-        ),
-        "unknown",
-    )
-    trigger_person = _slack_person(
-        trigger_id,
-        user_names_by_id.get(trigger_id, ""),
-        logins_by_user_id.get(trigger_id, ""),
-        (person_ids_by_user_id or {}).get(trigger_id, ""),
-    )
     trigger_sender_id = trigger_person["id"]
     trigger_kind: MessageKind = "human"
     if trigger_bot is not None:
@@ -458,8 +459,6 @@ def _slack_context_input(
         )
         if trigger_sender_id not in introduced:
             run_messages.append(system_introduction(cast(SystemIdentity, bot_identity)))
-    elif trigger_person["id"] not in introduced:
-        run_messages.append(person_introduction(trigger_person))
     current_message = next(
         (message for message in messages if str(message.get("ts", "")) == str(event_ts)), {}
     )

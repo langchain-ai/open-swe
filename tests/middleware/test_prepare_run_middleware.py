@@ -9,9 +9,8 @@ from langchain.agents.middleware.types import ModelRequest, ModelResponse
 from langchain_core.messages import HumanMessage
 from langgraph.runtime import Runtime
 
-from agent.input_messages import human_input, participant_introduction
+from agent.input_messages import human_input, person_introduction
 from agent.middleware.prepare_run import BasePrepareRunMiddleware, PrepareRunState
-from agent.prompt import participant_context
 from agent.server import PrepareAgentRunMiddleware
 from agent.utils import ttl_cache
 from agent.utils.authorship import CollaboratorIdentity, ThreadParticipant
@@ -118,25 +117,8 @@ def _participant(login: str, *, instructions: str = "") -> ThreadParticipant:
 
 
 def _participant_block(participant: ThreadParticipant) -> HumanMessage:
-    content = participant_introduction(participant_context(participant))["content"]
+    content = person_introduction(participant.as_person())["content"]
     return HumanMessage(content=cast(str, content))
-
-
-def test_sender_pointer_is_one_system_message_every_turn():
-    messages = PrepareAgentRunMiddleware._sender_context_messages("Sent by **Ramon** (`user:1`).")
-
-    assert len(messages) == 1
-    envelope = ElementTree.fromstring(cast(str, messages[0]["content"]))
-    assert envelope.attrib["sender"] == "system:sender-context"
-    assert envelope.attrib["kind"] == "system"
-    assert envelope.findtext("content") == "Sent by **Ramon** (`user:1`)."
-
-
-def test_sender_pointer_escapes_untrusted_text():
-    messages = PrepareAgentRunMiddleware._sender_context_messages("Sent by **O'Connor <x>** & co.")
-
-    envelope = ElementTree.fromstring(cast(str, messages[0]["content"]))
-    assert envelope.findtext("content") == "Sent by **O'Connor <x>** & co."
 
 
 def test_sender_subject_id_is_none_without_a_human_message():
@@ -171,11 +153,10 @@ def test_each_participant_is_introduced_by_their_own_context_block():
 
     assert len(messages) == 2
     blocks = [ElementTree.fromstring(cast(str, m["content"])) for m in messages]
-    assert [b.attrib["kind"] for b in blocks] == ["participant", "participant"]
+    assert [b.attrib["kind"] for b in blocks] == ["person", "person"]
     assert [b.attrib["id"] for b in blocks] == ["user:alice", "user:bob"]
-    assert blocks[0].findtext("git_identity") == (
-        "git config user.name alice && git config user.email alice@users.noreply.github.com"
-    )
+    assert blocks[0].findtext("commit_name") == "alice"
+    assert blocks[0].findtext("commit_email") == "alice@users.noreply.github.com"
 
 
 def test_a_visible_participant_is_not_repeated_when_someone_joins():

@@ -53,8 +53,8 @@ def test_multimodal_input_preserves_non_text_blocks_and_order() -> None:
 def test_first_seen_introductions_are_practical_and_mutate_registry() -> None:
     injected = set()
     kwargs = {
-        "people": [{"id": "github:octocat", "platform": "github", "github_login": "octocat"}],
         "channels": [{"id": "slack:C123", "platform": "slack", "topic": "a < b"}],
+        "systems": [{"id": "system:dashboard-handoff", "display_name": "Dashboard handoff"}],
         "injected_dynamic_context_hashes": injected,
     }
     first = build_input_messages(
@@ -82,7 +82,7 @@ def test_first_seen_introductions_are_practical_and_mutate_registry() -> None:
     assert len(second) == 1
     assert len(injected) == 2
     assert all(len(value) == 64 for value in injected)
-    channel_content = first[1]["content"]
+    channel_content = first[0]["content"]
     assert isinstance(channel_content, str)
     channel = _parse(channel_content)
     topic = channel.find("topic")

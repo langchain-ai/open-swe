@@ -1,6 +1,5 @@
 """Helpers for collaborative commit and PR attribution."""
 
-import asyncio
 import logging
 from collections.abc import Iterable
 from dataclasses import dataclass
@@ -9,7 +8,7 @@ from typing import Any
 import httpx2
 
 from agent.analytics.identity import DisplayNameSource
-from agent.users import User
+from agent.input_messages import PersonIdentity
 from agent.utils import ttl_cache
 from agent.utils.http import DEFAULT_HTTP_TIMEOUT
 
@@ -68,6 +67,11 @@ class CollaboratorIdentity:
     analytics_display_name: str = ""
 
     @property
+    def login_noreply_email(self) -> str:
+        """The login-only GitHub noreply address, the same from every surface."""
+        return _github_noreply_email(self.github_login)
+
+    @property
     def pr_attribution_name(self) -> str:
         """Display name with GitHub login when available."""
         if self.github_login and self.github_login != self.display_name:
@@ -79,8 +83,8 @@ class CollaboratorIdentity:
 class ThreadParticipant:
     """A person in the thread, with everything the agent needs to act for them.
 
-    Described once in the thread-level roster so a turn only has to point at
-    its sender; ``person_id`` is the key that pointer uses.
+    Described once per thread; ``person_id`` is the id a message envelope's
+    ``sender`` attribute points at.
     """
 
     identity: CollaboratorIdentity
@@ -88,6 +92,26 @@ class ThreadParticipant:
     workspace_admin: bool = False
     draft_prs: bool = True
     instructions: str = ""
+    email: str = ""
+    linked: bool = False
+
+    def as_person(self) -> PersonIdentity:
+        """This person as the single context block the model is given for them."""
+        person: PersonIdentity = {"id": self.person_id}
+        if self.identity.display_name:
+            person["display_name"] = self.identity.display_name
+        if self.identity.github_login:
+            person["github_login"] = self.identity.github_login
+            person["commit_name"] = self.identity.commit_name
+            person["commit_email"] = self.identity.commit_email
+        if self.email:
+            person["email"] = self.email
+        person["open_swe_account"] = "linked" if self.linked else "unlinked"
+        person["workspace_admin"] = "yes" if self.workspace_admin else "no"
+        person["new_prs"] = "as drafts" if self.draft_prs else "ready for review"
+        if self.instructions.strip():
+            person["standing_instructions"] = self.instructions.strip()
+        return person
 
 
 def _normalize_text(value: Any) -> str:
@@ -234,66 +258,51 @@ async def _identity_from_config(config: dict[str, Any]) -> CollaboratorIdentity 
     slack_thread = configurable.get("slack_thread", {})
     linear_issue = configurable.get("linear_issue", {})
 
+    github_login = _normalize_text(configurable.get("github_login"))
+    if not github_login:
+        return None
+
     display_name = (
         _normalize_text(slack_thread.get("triggering_user_name"))
         or _normalize_text(linear_issue.get("triggering_user_name"))
         or _normalize_text(configurable.get("user_email")).split("@", 1)[0]
     )
-
-    github_login = _normalize_text(configurable.get("github_login"))
-    if github_login:
-        github_user_id = configurable.get("github_user_id")
-        commit_email = _github_noreply_email(github_login, github_user_id) or _normalize_text(
-            await User.email_for_login(github_login)
-        )
-        if commit_email:
-            commit_name = display_name or github_login
-            github_profile = await resolve_public_github_profile(github_login)
-            if github_profile is not None and github_profile.name:
-                analytics_display_name = github_profile.name
-                display_name_source: DisplayNameSource | None = "github"
-            elif slack_thread.get("triggering_user_name"):
-                # Slack names are only trusted server-side; the webhook fetches
-                # them via users.info, never from the event payload.
-                analytics_display_name = display_name
-                display_name_source = "slack" if display_name else None
-            else:
-                analytics_display_name = ""
-                display_name_source = None
-            return CollaboratorIdentity(
-                display_name=commit_name,
-                commit_name=commit_name,
-                commit_email=commit_email,
-                github_login=github_login,
-                github_user_id=(
-                    github_profile.user_id
-                    if github_profile is not None
-                    else _positive_int(github_user_id)
-                ),
-                display_name_source=display_name_source,
-                analytics_display_name=analytics_display_name,
-            )
-    commit_email = _normalize_text(configurable.get("user_email")) or _normalize_text(
-        slack_thread.get("triggering_user_email")
+    github_user_id = configurable.get("github_user_id")
+    commit_name = display_name or github_login
+    github_profile = await resolve_public_github_profile(github_login)
+    if github_profile is not None and github_profile.name:
+        analytics_display_name = github_profile.name
+        display_name_source: DisplayNameSource | None = "github"
+    elif slack_thread.get("triggering_user_name"):
+        # Slack names are only trusted server-side; the webhook fetches
+        # them via users.info, never from the event payload.
+        analytics_display_name = display_name
+        display_name_source = "slack" if display_name else None
+    else:
+        analytics_display_name = ""
+        display_name_source = None
+    return CollaboratorIdentity(
+        display_name=commit_name,
+        commit_name=commit_name,
+        commit_email=_github_noreply_email(github_login, github_user_id),
+        github_login=github_login,
+        github_user_id=(
+            github_profile.user_id if github_profile is not None else _positive_int(github_user_id)
+        ),
+        display_name_source=display_name_source,
+        analytics_display_name=analytics_display_name,
     )
-    if display_name and commit_email:
-        return CollaboratorIdentity(
-            display_name=display_name,
-            commit_name=display_name,
-            commit_email=commit_email,
-        )
-    return None
 
 
 async def resolve_triggering_user_identity(
     config: dict[str, Any],
     github_token: str | None = None,
 ) -> CollaboratorIdentity | None:
-    """Resolve the triggering user's git identity.
+    """Resolve the triggering user's git identity, GitHub login required.
 
-    Prefer the GitHub account identity derived from the token when available.
-    Fall back to config metadata when the run originated from GitHub or when
-    Slack/Linear supplied an explicit user name and email.
+    Prefer the GitHub account identity derived from the token, then the config's
+    GitHub login. A sender with no GitHub login has no commit identity: a Slack
+    or Linear address is never an author email.
     """
 
     return await _identity_from_github_token(github_token) or await _identity_from_config(config)
@@ -302,21 +311,15 @@ async def resolve_triggering_user_identity(
 async def resolve_participant_identities(logins: Iterable[str]) -> list[CollaboratorIdentity]:
     """Git identities for thread participants the agent may author commits as."""
     unique = sorted({login.strip() for login in logins if isinstance(login, str) and login.strip()})
-    emails = await asyncio.gather(*(User.email_for_login(login) for login in unique))
-    identities: list[CollaboratorIdentity] = []
-    for login, email in zip(unique, emails, strict=True):
-        commit_email = _github_noreply_email(login) or _normalize_text(email)
-        if not commit_email:
-            continue
-        identities.append(
-            CollaboratorIdentity(
-                display_name=login,
-                commit_name=login,
-                commit_email=commit_email,
-                github_login=login,
-            )
+    return [
+        CollaboratorIdentity(
+            display_name=login,
+            commit_name=login,
+            commit_email=_github_noreply_email(login),
+            github_login=login,
         )
-    return identities
+        for login in unique
+    ]
 
 
 def add_bot_coauthor_trailer(commit_message: str) -> str:

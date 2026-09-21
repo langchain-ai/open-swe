@@ -265,7 +265,7 @@ async def test_title_generation_reads_the_whole_thread() -> None:
     )
     client = type("Client", (), {"threads": threads})()
 
-    person = person_introduction({"id": "github:octocat", "platform": "github"})
+    person = person_introduction({"id": "github:octocat", "github_login": "octocat"})
     prompt = human_input(
         "first", {"sender_id": "github:octocat", "surface": "web", "kind": "human"}
     )

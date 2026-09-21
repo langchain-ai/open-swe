@@ -7,7 +7,7 @@ import pytest
 from langgraph.graph.state import RunnableConfig
 
 from agent import server
-from agent.prompt import construct_system_prompt, participant_context
+from agent.prompt import construct_system_prompt
 from agent.run_config import RunConfig
 from agent.sandboxes import lifecycle
 from agent.tools import workspaces as env_tools
@@ -477,15 +477,15 @@ async def test_refresh_start_refuses_while_one_is_running(
 # --- prompt wiring ---
 
 
-def test_sender_context_includes_workspace_admin_status() -> None:
+def test_person_block_includes_workspace_admin_status() -> None:
     identity = CollaboratorIdentity(
         display_name="alice", commit_name="alice", commit_email="alice@example.com"
     )
     admin = ThreadParticipant(identity=identity, person_id="user:1", workspace_admin=True)
     member = ThreadParticipant(identity=identity, person_id="user:1")
 
-    assert participant_context(admin)["workspace_admin"] == "yes"
-    assert participant_context(member)["workspace_admin"] == "no"
+    assert admin.as_person()["workspace_admin"] == "yes"
+    assert member.as_person()["workspace_admin"] == "no"
 
 
 def test_workspace_instructions_render_in_system_prompt() -> None:
@@ -518,7 +518,7 @@ async def test_roster_admin_flag_is_the_participants_own(monkeypatch: pytest.Mon
     from agent.users import User
 
     monkeypatch.setenv("CONFIGURED_ADMINS", "admin@example.com")
-    monkeypatch.setattr(server, "_person_id_for_login", AsyncMock(return_value="user:bob"))
+    monkeypatch.setattr(server, "_user_for_login", AsyncMock(return_value=None))
     monkeypatch.setattr(server, "load_profile", AsyncMock(return_value=None))
     monkeypatch.setattr(server, "_resolve_user_custom_instructions", AsyncMock(return_value=None))
     monkeypatch.setattr(User, "email_for_login", AsyncMock(return_value="bob@example.com"))

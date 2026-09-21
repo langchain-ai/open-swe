@@ -7,14 +7,9 @@ describe("streamMessagesToUi", () => {
   it("keeps platform turn metadata out of the transcript", () => {
     const messages = streamMessagesToUi([
       new HumanMessage({
-        id: "sender-context",
+        id: "person-block",
         content:
-          '<input-message sender="system:sender-context" surface="automation" kind="system"><content>Sent by **Alice** (`user:1`).</content></input-message>',
-      }),
-      new HumanMessage({
-        id: "participants",
-        content:
-          '<dynamic-context kind="participant" id="github:alice"><display_name>Alice</display_name><git_identity>git config user.name Alice</git_identity></dynamic-context>',
+          '<dynamic-context kind="person" id="github:alice"><display_name>Alice</display_name><commit_name>Alice</commit_name><commit_email>alice@users.noreply.github.com</commit_email></dynamic-context>',
       }),
       new HumanMessage({
         id: "person-message",

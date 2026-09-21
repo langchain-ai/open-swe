@@ -1457,7 +1457,6 @@ def test_process_slack_mention_creates_thread_first_run_without_trace_reply(
         for message in messages
         if isinstance(message["content"], str) and message["content"].startswith("<dynamic-context")
     ]
-    person = next(entity for entity in entities if entity.attrib["id"] == "slack:U123")
     channel = next(entity for entity in entities if entity.attrib["id"] == "slack:C123")
     request_block = messages[-1]["content"][0]
     request = ElementTree.fromstring(request_block["text"]).findtext("content") or ""
@@ -1468,7 +1467,8 @@ def test_process_slack_mention_creates_thread_first_run_without_trace_reply(
         and 'sender="system:slack-context"' in message["content"]
     )
     prompt = ElementTree.fromstring(prompt_message["content"]).findtext("content") or ""
-    assert person.findtext("display_name") == "Mason"
+    # The run describes the trigger sender, so dispatch names them only in the envelope.
+    assert not any(entity.attrib["id"] == "slack:U123" for entity in entities)
     assert channel.attrib["id"] == "slack:C123"
     assert "## Default Repository Hint\nlangchain-ai/open-swe" in prompt
     assert "## Triggering User Time Zone\nAmerica/New_York" in prompt
@@ -2203,23 +2203,25 @@ def test_slack_context_marks_other_bots_as_bots() -> None:
     assert "<sender_type>bot</sender_type>" in intro
 
 
-def test_slack_context_marks_people_without_an_open_swe_account() -> None:
+def test_slack_context_marks_replayed_people_without_an_open_swe_account() -> None:
+    """Replayed authors are introduced here; the run describes the trigger sender."""
     contents = _context_input(
         [
-            {"ts": "1.0", "text": "hi", "user": "U123"},
-            {"ts": "1.1", "text": "hello", "user": "U456"},
+            {"ts": "1.0", "text": "hi", "user": "U456"},
+            {"ts": "1.1", "text": "hello", "user": "U789"},
             {"ts": "9.0", "text": "<@UBOT> do the thing", "user": "U123"},
         ],
-        user_names_by_id={"U123": "Alice", "U456": "Guest"},
-        logins_by_user_id={"U123": "alice-gh"},
+        user_names_by_id={"U123": "Alice", "U456": "Mona", "U789": "Guest"},
+        logins_by_user_id={"U123": "alice-gh", "U456": "mona-gh"},
     )
 
-    linked = next(text for text in contents if 'id="slack:U123"' in text)
-    assert "<github_login>alice-gh</github_login>" in linked
+    linked = next(text for text in contents if 'id="slack:U456"' in text)
+    assert "<github_login>mona-gh</github_login>" in linked
     assert "<open_swe_account>linked</open_swe_account>" in linked
-    unlinked = next(text for text in contents if 'id="slack:U456"' in text)
+    unlinked = next(text for text in contents if 'id="slack:U789"' in text)
     assert "<open_swe_account>unlinked</open_swe_account>" in unlinked
     assert "github_login" not in unlinked
+    assert not any('<dynamic-context kind="person" id="slack:U123"' in t for t in contents)
 
 
 def test_format_slack_messages_for_prompt_labels_bots_and_self() -> None:
@@ -2308,7 +2310,7 @@ def test_slack_trigger_resolves_from_the_triggering_user_not_the_event_ts() -> N
     """A `message_changed` event's `event_ts` matches no message in the window.
 
     Keying the trigger off `event_ts` yields `slack:unknown`, so the agent is
-    told the request came from nobody and the sender-context dedupe misses.
+    told the request came from nobody.
     """
     contents = _trigger_identities(
         [{"ts": "1.0", "text": "please fix it", "user": "U123"}],
@@ -2318,10 +2320,10 @@ def test_slack_trigger_resolves_from_the_triggering_user_not_the_event_ts() -> N
         logins_by_user_id={"U123": "alice-gh"},
     )
 
-    assert not any("slack:unknown" in text for text in contents)
-    trigger = next(text for text in contents if 'id="slack:U123"' in text)
-    assert "<display_name>Alice</display_name>" in trigger
-    assert "<github_login>alice-gh</github_login>" in trigger
+    assert not any("slack:unknown" in str(text) for text in contents)
+    assert 'sender="slack:U123"' in str(contents[-1])
+    # Replaying their earlier message must not introduce the trigger sender either.
+    assert not any('<dynamic-context kind="person"' in str(text) for text in contents)
 
 
 def test_slack_trigger_falls_back_past_open_swes_own_message() -> None:

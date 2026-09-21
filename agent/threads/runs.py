@@ -640,19 +640,13 @@ async def _enrich_run_start_command(
                     }
         except Exception:
             logger.debug("Could not read dashboard thread history for %s", thread_id, exc_info=True)
-    person: PersonIdentity = {
-        "id": sender_id,
-        "platform": "github",
-        "github_login": login,
-    }
+    person: PersonIdentity = {"id": sender_id, "github_login": login}
     if email:
         person["email"] = email
-    person = await User.canonical_person(person)
-    sender_id = person["id"]
+    sender_id = (await User.canonical_person(person))["id"]
     structured = build_input_messages(
         content,
         {"sender_id": sender_id, "surface": "web", "kind": "human"},
-        people=[person],
         systems=(
             [
                 {

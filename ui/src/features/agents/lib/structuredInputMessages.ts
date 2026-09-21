@@ -196,7 +196,7 @@ export function collectStructuredEntities(
   const entities = new Map<string, StructuredEntity>()
   for (const content of contents) {
     const parsed = parseStructuredInput(content)
-    if (parsed.type !== "entity" || parsed.kind === "participant") continue
+    if (parsed.type !== "entity") continue
     entities.set(parsed.id, {
       kind: parsed.kind,
       displayName: parsed.displayName,
