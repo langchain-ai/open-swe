@@ -86,6 +86,7 @@ describe("WorkspacesSection", () => {
     renderSection(true)
 
     expect(await screen.findByText("Preview")).toBeTruthy()
+    expect(screen.queryByRole("button", { name: /^Delete/ })).toBeNull()
     expect(screen.getByText("Snapshot ready")).toBeTruthy()
     expect(screen.getByText(/Updated 1 hour ago/)).toBeTruthy()
     expect(screen.getByText(/Refresh failed/)).toBeTruthy()
@@ -169,6 +170,7 @@ describe("WorkspacesSection", () => {
     expect(await screen.findByText(/Rebuilt 1 hour ago/)).toBeTruthy()
     expect(screen.queryByText("Refresh log")).toBeNull()
     expect(screen.queryByText(/hunter2/)).toBeNull()
+    expect(screen.queryByRole("button", { name: /^Delete/ })).toBeNull()
   })
 
   it("says so when a workspace has never been refreshed", async () => {
