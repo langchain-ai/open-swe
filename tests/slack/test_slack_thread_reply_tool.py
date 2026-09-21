@@ -400,13 +400,52 @@ async def test_slack_thread_reply_builds_option_blocks(monkeypatch: pytest.Monke
     assert action_ids == ["open_swe_option_select_0", "open_swe_option_select_1"]
     assert len(action_ids) == len(set(action_ids))
 
-    plan_blocks = slack_reply_tool._build_option_blocks(
-        "Review", ["Approve & implement", "Request changes"]
+
+@pytest.mark.parametrize(
+    "plan_mode,status,is_plan",
+    [(False, "ready", False), (True, "ready", True), (True, "shared", False)],
+)
+async def test_plan_buttons_require_active_plan_context(
+    monkeypatch: pytest.MonkeyPatch,
+    plan_mode: bool,
+    status: str,
+    is_plan: bool,
+) -> None:
+    config = _config()
+    config["configurable"].update(thread_id="thread-1", plan_mode=plan_mode)
+    monkeypatch.setattr(slack_reply_tool, "get_config", lambda: config)
+    monkeypatch.setattr(
+        slack_reply_tool,
+        "get_active_slack_thread",
+        AsyncMock(return_value={"channel_id": "C1", "thread_ts": "0"}),
     )
-    assert [json.loads(button["value"]) for button in plan_blocks[1]["elements"]] == [
-        {"type": "plan_approval", "action": "approve"},
-        {"type": "plan_approval", "action": "revise"},
-    ]
+    monkeypatch.setattr(
+        slack_reply_tool,
+        "get_plan_content",
+        AsyncMock(return_value={"status": status, "html": "plan"}),
+    )
+    post = AsyncMock(return_value=("2.0", None))
+    monkeypatch.setattr(slack_reply_tool, "_post_and_store_mapping", post)
+
+    await slack_reply_tool.slack_thread_reply(
+        "Review",
+        options=["Approve & implement", "Request changes"],
+        state={},
+    )
+
+    buttons = post.await_args.kwargs["blocks"][1]["elements"]
+    values = [json.loads(button["value"]) for button in buttons]
+    if is_plan:
+        assert [value["action"] for value in values] == ["approve", "revise"]
+        assert all(
+            value["thread_id"] == "thread-1" and value["thread_ts"] == "0" and value["fingerprint"]
+            for value in values
+        )
+    else:
+        assert values == [
+            {"type": "open_swe_option", "response": label}
+            for label in ["Approve & implement", "Request changes"]
+        ]
 
 
 def test_slack_action_ids_are_unique_and_recognized() -> None:
