@@ -1,6 +1,7 @@
 import logging
 import posixpath
 import shlex
+from datetime import UTC, datetime, timedelta
 from typing import Any, Literal
 
 from agent.run_config import RunConfig
@@ -9,6 +10,7 @@ from agent.sandboxes.providers.langsmith import get_async_sandbox_client
 from agent.sandboxes.state import get_sandbox_backend, unwrap_sandbox_backend
 
 logger = logging.getLogger(__name__)
+DEFAULT_DOWNLOAD_URL_EXPIRY_SECONDS = 3600
 
 
 async def resolve_sandbox_file(file_path: str) -> tuple[Any, str, str]:
@@ -39,14 +41,14 @@ async def resolve_sandbox_file(file_path: str) -> tuple[Any, str, str]:
 
 async def create_sandbox_file_download_url(
     file_path: str,
-    expires_in_seconds: int | None = None,
+    expires_in_seconds: int = DEFAULT_DOWNLOAD_URL_EXPIRY_SECONDS,
     content_type: str | None = None,
     content_disposition: Literal["attachment", "inline"] = "attachment",
 ) -> dict[str, Any]:
-    """Implement the `create_sandbox_file_download_url` tool."""
+    """Create a temporary sandbox-scoped download URL; never embed it in a pull request."""
     try:
-        if expires_in_seconds is not None and expires_in_seconds < 1:
-            raise ValueError("expires_in_seconds must be positive or null")
+        if expires_in_seconds < 1:
+            raise ValueError("expires_in_seconds must be positive")
         if content_type is not None:
             content_type = content_type.strip()
             if not content_type or "\r" in content_type or "\n" in content_type:
@@ -70,8 +72,13 @@ async def create_sandbox_file_download_url(
 
     if not download.download_url:
         raise RuntimeError("LangSmith did not return a download URL")
+    expires_at = (
+        download.expires_at
+        or (datetime.now(UTC) + timedelta(seconds=expires_in_seconds)).isoformat()
+    )
     return {
         "url": download.download_url,
         "file_path": path,
-        "expires_at": download.expires_at,
+        "expires_at": expires_at,
+        "note": "This URL is scoped to the current sandbox and stops resolving when the sandbox is reclaimed.",
     }
