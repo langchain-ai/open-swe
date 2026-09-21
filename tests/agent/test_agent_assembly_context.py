@@ -531,10 +531,24 @@ async def test_personal_settings_tool_is_private_and_parent_only(source: str) ->
     assert isinstance(tools, list)
     assert isinstance(subagents, list)
     assert "save_user_settings" in {_registered_tool_name(tool) for tool in tools}
+
+    from langchain.agents.middleware.types import ToolCallRequest
+    from langchain_core.messages import ToolMessage
+
+    handler = AsyncMock(return_value=ToolMessage(content="executed", tool_call_id="settings"))
+    request = MagicMock(spec=ToolCallRequest)
+    request.tool_call = {
+        "name": "save_user_settings",
+        "args": {},
+        "id": "settings",
+        "type": "tool_call",
+    }
     for subagent in subagents:
-        assert "save_user_settings" not in {
-            _registered_tool_name(tool) for tool in subagent.get("tools", [])
-        }
+        guard = next(item for item in subagent["middleware"] if item.name == "_SubagentToolGuard")
+        result = await guard.awrap_tool_call(request, handler)
+        assert isinstance(result, ToolMessage)
+        assert "inside a subagent" in result.content
+    handler.assert_not_awaited()
 
 
 @pytest.mark.parametrize(
@@ -679,8 +693,35 @@ async def test_agent_excludes_sandbox_file_downloads_for_other_providers(
     assert not general_purpose.get("system_prompt")
 
 
+SLACK_TOOL_NAMES = {
+    "slack_add_reaction",
+    "slack_attach_html",
+    "slack_move_thread",
+    "slack_no_reply_needed",
+    "slack_read_thread_messages",
+    "slack_start_new_thread",
+    "slack_reply",
+}
+
+
 @pytest.mark.asyncio
 async def test_dashboard_agent_excludes_slack_tools() -> None:
+    config = _base_config()
+    configurable = config.get("configurable")
+    assert isinstance(configurable, dict)
+    configurable["source"] = "dashboard"
+
+    captured = await _capture_create_deep_agent_kwargs(config)
+    tools = captured["tools"]
+    assert isinstance(tools, list)
+
+    tool_names = {getattr(tool, "name", None) or getattr(tool, "__name__", None) for tool in tools}
+    assert tool_names.isdisjoint(SLACK_TOOL_NAMES)
+
+
+@pytest.mark.asyncio
+async def test_a_web_turn_on_a_slack_thread_keeps_the_slack_tools() -> None:
+    """The tool set cannot move with the surface: that invalidates the cached prefix."""
     config = _base_config()
     configurable = config.get("configurable")
     assert isinstance(configurable, dict)
@@ -696,16 +737,13 @@ async def test_dashboard_agent_excludes_slack_tools() -> None:
     assert isinstance(tools, list)
 
     tool_names = {getattr(tool, "name", None) or getattr(tool, "__name__", None) for tool in tools}
-    assert tool_names.isdisjoint(
-        {
-            "slack_add_reaction",
-            "slack_attach_html",
-            "slack_move_thread",
-            "slack_read_thread_messages",
-            "slack_start_new_thread",
-            "slack_reply",
-        }
+    assert SLACK_TOOL_NAMES <= tool_names
+    middleware = captured["middleware"]
+    assert isinstance(middleware, list)
+    require_reply = next(
+        item for item in middleware if type(item).__name__ == "RequireUserReplyMiddleware"
     )
+    assert require_reply.before_agent({}, MagicMock())["reply_surface"] == "web"
 
 
 @pytest.mark.asyncio

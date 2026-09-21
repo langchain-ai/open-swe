@@ -181,6 +181,11 @@ async def test_main_agent_records_the_incident_report_through_the_tool(
     monkeypatch.setattr(SlackChannel, "fetch", AsyncMock(return_value=dict(CHANNEL)))
     posted = AsyncMock(return_value=("9.0", None))
     monkeypatch.setattr(runtime, "post_slack_thread_reply_with_ts", posted)
+    # The scripted model ends its turn in plain text, so the reply requirement
+    # posts on its behalf; that path is covered in its own suite.
+    monkeypatch.setattr(
+        "agent.slack.tools.reply.slack_reply", AsyncMock(return_value={"success": True})
+    )
     config = _incident_config(
         **({"incident_request": "Open a PR for the confirmed fix"} if requested_action else {})
     )

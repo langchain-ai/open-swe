@@ -2,6 +2,7 @@ import { AIMessage, HumanMessage, ToolMessage } from "@langchain/core/messages"
 import { messageArrivalTimestamp } from "./messageTimestamps"
 import {
   collectStructuredEntities,
+  isSilentSender,
   parseStructuredInput,
 } from "./structuredInputMessages"
 import { humanizeToolName } from "./toolNames"
@@ -392,11 +393,7 @@ export function streamMessagesToUi(
       const chunks = imageChunks(content)
       const parsed = parseStructuredInput(raw.text, structuredEntities)
       if (parsed.type === "entity") return
-      if (
-        parsed.type === "message" &&
-        parsed.sender === "system:sender-context"
-      )
-        return
+      if (parsed.type === "message" && isSilentSender(parsed.sender)) return
       const entity =
         parsed.type === "message"
           ? structuredEntities.get(parsed.sender)

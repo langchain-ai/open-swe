@@ -53,6 +53,7 @@ _TOOL_MODULES = {
     "slack_add_reaction": "agent.slack.tools.add_reaction",
     "slack_attach_html": "agent.slack.tools.attach_html",
     "slack_move_thread": "agent.slack.tools.move_thread",
+    "slack_no_reply_needed": "agent.slack.tools.no_reply_needed",
     "slack_read_channel_messages": "agent.slack.tools.read_channel_messages",
     "slack_read_thread_messages": "agent.slack.tools.read_thread_messages",
     "slack_reply": "agent.slack.tools.reply",
@@ -115,6 +116,7 @@ __all__ = [
     "slack_add_reaction",
     "slack_attach_html",
     "slack_move_thread",
+    "slack_no_reply_needed",
     "slack_read_channel_messages",
     "slack_read_thread_messages",
     "slack_reply",
@@ -134,6 +136,7 @@ if TYPE_CHECKING:
     from agent.slack.tools.attach_html import slack_attach_html
     from agent.slack.tools.manage_code_channel import manage_code_channel
     from agent.slack.tools.move_thread import slack_move_thread
+    from agent.slack.tools.no_reply_needed import slack_no_reply_needed
     from agent.slack.tools.read_channel_messages import slack_read_channel_messages
     from agent.slack.tools.read_thread_messages import slack_read_thread_messages
     from agent.slack.tools.reply import slack_reply

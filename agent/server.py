@@ -125,6 +125,11 @@ from agent.middleware import (
 from agent.middleware.conversation_offloading import ConversationOffloadingMiddleware
 from agent.middleware.model_selection import ModelSelectionState, RoutingMode
 from agent.middleware.prepare_run import PrepareRunState
+from agent.middleware.require_user_reply import (
+    SLACK_REPLY_SURFACE,
+    WEB_REPLY_SURFACE,
+    ReplySurface,
+)
 from agent.middleware.sandbox_circuit_breaker import post_sandbox_unreachable_notification
 from agent.middleware.transcript import TranscriptMiddleware
 from agent.prompt import construct_sender_context, construct_system_prompt
@@ -155,7 +160,7 @@ from agent.sandboxes.tool_runtime import ToolSurface, save_tool_context
 from agent.skill_store.store import ORGANIZATION_SKILLS_NAMESPACE, SKILLS_NAMESPACE
 from agent.slack.dm import is_dm_session
 from agent.thread_title import TITLE_GENERATION_MAX_TOKENS, schedule_thread_title_generation
-from agent.threads.summary import thread_is_private
+from agent.threads.summary import DASHBOARD_SOURCE, thread_is_private
 from agent.tool_loaders.notion_mcp import load_notion_tools
 from agent.tools import (
     approve_plan,
@@ -199,6 +204,7 @@ from agent.tools import (
     slack_add_reaction,
     slack_attach_html,
     slack_move_thread,
+    slack_no_reply_needed,
     slack_read_channel_messages,
     slack_read_thread_messages,
     slack_reply,
@@ -633,12 +639,26 @@ def _sandbox_file_downloads_enabled(cfg: RunConfig) -> bool:
 
 
 def _slack_tools_enabled(cfg: RunConfig) -> bool:
-    """Return whether the run has trusted Slack source context."""
-    if cfg.source not in {"slack", "schedule", "incidents_agent"} or cfg.slack_thread is None:
+    """Return whether the run has trusted Slack source context.
+
+    A web follow-up counts: its `slack_thread` is copied from the thread's own
+    metadata, never from the client, and keeping the tools registered across a
+    surface switch is what keeps the prompt prefix cacheable.
+    """
+    if cfg.source not in {"slack", "schedule", "incidents_agent", DASHBOARD_SOURCE}:
+        return False
+    if cfg.slack_thread is None:
         return False
     if _slack_ask_mode(cfg):
         return bool(cfg.slack_thread.channel_id.strip())
     return bool(cfg.slack_thread.channel_id.strip() and cfg.slack_thread.thread_ts.strip())
+
+
+def _initial_reply_surface(cfg: RunConfig) -> ReplySurface:
+    """Where this run owes its answer, before anything moves mid-run."""
+    if cfg.source == DASHBOARD_SOURCE or not _slack_tools_enabled(cfg):
+        return WEB_REPLY_SURFACE
+    return SLACK_REPLY_SURFACE
 
 
 def _slack_ask_mode(cfg: RunConfig) -> bool:
@@ -1243,6 +1263,7 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
         slack_add_reaction,
         slack_attach_html,
         slack_move_thread,
+        slack_no_reply_needed,
         slack_read_thread_messages,
         slack_reply,
         slack_start_new_thread,
@@ -1282,6 +1303,7 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
         slack_add_reaction,
         slack_attach_html,
         slack_move_thread,
+        slack_no_reply_needed,
         slack_read_channel_messages,
         slack_read_thread_messages,
         slack_reply,
@@ -1332,6 +1354,18 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
     elif stop_summary_mode:
         static_tools = apply_tool_descriptions([slack_read_thread_messages, slack_reply])
     reserved_tool_names = {_registered_tool_name(tool) for tool in static_tools}
+    excluded_tools = (
+        STOP_SUMMARY_EXCLUDED_TOOLS
+        if stop_summary_mode
+        else SLACK_ASK_EXCLUDED_TOOLS
+        if slack_ask_mode
+        else DEEP_AGENT_EXCLUDED_TOOLS | INCIDENT_AUTOMATIC_EXCLUDED_TOOLS
+        if incident_automatic
+        else DEEP_AGENT_EXCLUDED_TOOLS
+    )
+    # Nothing is owed on a run the model cannot answer through: an automatic
+    # incident sweep, for one, has the reply tool taken away on purpose.
+    reply_tool_offered = _registered_tool_name(slack_reply) in reserved_tool_names - excluded_tools
     dynamic_tool_middleware: DynamicToolMiddleware | None = None
     integration_tool_groups: dict[str, IntegrationGroup | Sequence[Any]] = {
         "MCPs": mcp_tools,
@@ -1472,17 +1506,7 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
                     exit_behavior="end",
                 ),
                 ToolErrorMiddleware(),
-                ExcludeToolsMiddleware(
-                    excluded=(
-                        STOP_SUMMARY_EXCLUDED_TOOLS
-                        if stop_summary_mode
-                        else SLACK_ASK_EXCLUDED_TOOLS
-                        if slack_ask_mode
-                        else DEEP_AGENT_EXCLUDED_TOOLS | INCIDENT_AUTOMATIC_EXCLUDED_TOOLS
-                        if incident_automatic
-                        else DEEP_AGENT_EXCLUDED_TOOLS
-                    )
-                ),
+                ExcludeToolsMiddleware(excluded=excluded_tools),
                 SubdirAgentsReadMiddleware(),
                 ToolRetryMiddleware(
                     max_retries=2,
@@ -1497,10 +1521,12 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
                 refresh_github_proxy_before_model,
                 *([] if stop_summary_mode else [check_message_queue_before_model]),
                 TimeoutWrapupMiddleware(),
-                *(
-                    [RequireUserReplyMiddleware(_registered_tool_name(slack_reply))]
-                    if slack_ask_mode
-                    else []
+                RequireUserReplyMiddleware(
+                    _registered_tool_name(slack_reply),
+                    _registered_tool_name(slack_no_reply_needed),
+                    initial_surface=(
+                        _initial_reply_surface(cfg) if reply_tool_offered else WEB_REPLY_SURFACE
+                    ),
                 ),
                 notify_step_limit_reached,
                 record_run_usage,
