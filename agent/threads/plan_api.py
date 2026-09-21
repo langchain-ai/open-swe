@@ -11,8 +11,9 @@ from pydantic import BaseModel, Field, model_validator
 
 from agent.dashboard.oauth import require_same_origin_for_mutations, require_session
 from agent.dispatch import dispatch_agent_run
+from agent.prompts import render_prompt
 from agent.slack.client import post_slack_thread_reply
-from agent.source_context import SourceContext
+from agent.source_context import SlackThreadRef, SourceContext
 from agent.threads.plan_store import (
     PLAN_STATUS_APPROVED,
     PLAN_STATUS_CANCELLED,
@@ -26,6 +27,7 @@ from agent.threads.plan_store import (
     list_plan_comments,
     make_plan_approver,
     plan_file_path_for_thread,
+    plan_fingerprint,
     save_plan_content,
     set_plan_status,
     write_plan_to_sandbox,
@@ -348,6 +350,62 @@ async def reject_plan(
         user_email=session.get("email"),
     )
     return {"status": PLAN_STATUS_REVISING}
+
+
+async def request_plan_changes_from_slack(
+    thread_id: str,
+    *,
+    feedback: str,
+    fingerprint: str,
+    github_login: str | None,
+    slack_thread: SlackThreadRef,
+) -> None:
+    lock = _plan_approval_locks.setdefault(thread_id, asyncio.Lock())
+    async with lock:
+        metadata = await fetch_thread_metadata(thread_id)
+        if not thread_is_promptable(metadata, github_login):
+            raise HTTPException(404, "thread not found")
+        origin = SourceContext.from_metadata(metadata).slack_thread
+        if origin is None or not origin.is_at(slack_thread.channel_id, slack_thread.thread_ts):
+            raise HTTPException(409, "Slack thread is no longer associated")
+        content = await get_plan_content(thread_id, raise_on_error=True) or {}
+        if (
+            metadata.get("plan_mode") is not True
+            or metadata.get("plan_status") != PLAN_STATUS_READY
+            or content.get("status") != PLAN_STATUS_READY
+            or not fingerprint
+            or plan_fingerprint(content) != fingerprint
+        ):
+            raise HTTPException(409, "plan is no longer ready for review")
+        await add_plan_comment(
+            thread_id,
+            author=slack_thread.triggering_user_name or slack_thread.triggering_user_id,
+            author_login=github_login or f"slack:{slack_thread.triggering_user_id}",
+            body=feedback,
+            anchor=None,
+        )
+        comments = await list_plan_comments(thread_id, raise_on_error=True)
+        text = render_prompt("slack/plan-revision.md", feedback=format_plan_comments(comments))
+        await set_plan_status(thread_id, PLAN_STATUS_REVISING, plan_mode=True)
+        try:
+            await dispatch_followup(
+                thread_id,
+                {
+                    **metadata,
+                    "source": "slack",
+                    "source_context": {"slack_thread": slack_thread.dump()},
+                },
+                text,
+                plan_mode=True,
+                github_login=github_login,
+                user_email=slack_thread.triggering_user_email or None,
+            )
+        except Exception:
+            await set_plan_status(thread_id, PLAN_STATUS_READY, plan_mode=True)
+            raise
+        from agent.analytics.emitter import task_rework
+
+        await task_rework(thread_id, source="slack", scope="major", reason="plan_review")
 
 
 def _reject_shared_content(content: dict[str, Any]) -> None:

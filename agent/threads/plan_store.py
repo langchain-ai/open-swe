@@ -9,7 +9,9 @@ Reviewers leave whole-document comments, stored one item per comment under
 store operations (no CRDT/WebSocket).
 """
 
+import hashlib
 import html
+import json
 import logging
 import re
 import uuid
@@ -36,6 +38,11 @@ PLAN_STATUS_SHARED = "shared"
 PLAN_STATUS_REVISING = "revising"
 PLAN_STATUS_APPROVED = "approved"
 PLAN_STATUS_CANCELLED = "cancelled"
+
+
+def plan_fingerprint(content: Mapping[str, object]) -> str:
+    snapshot = {key: content.get(key) for key in ("html", "markdown", "plan_file_path", "revision")}
+    return hashlib.sha256(json.dumps(snapshot, sort_keys=True).encode()).hexdigest()
 
 
 def make_plan_approver(*, actor_id: str, name: str, source: str) -> dict[str, str]:
@@ -79,7 +86,7 @@ async def save_plan_content(
     passes ``clear_comments=False`` so reviewer feedback survives the edit."""
     if plan_file_path is None:
         plan_file_path = await _stored_plan_file_path(thread_id)
-    record: dict[str, Any] = {"status": status}
+    record: dict[str, Any] = {"status": status, "revision": str(uuid.uuid4())}
     if html is not None:
         record["html"] = html
     if markdown is not None:
@@ -150,7 +157,7 @@ async def set_plan_status(
     )
     record: dict[str, Any] = {"status": status}
     if not entering_plan_after_share:
-        for field in ("html", "markdown"):
+        for field in ("html", "markdown", "revision"):
             value = existing.get(field)
             if isinstance(value, str):
                 record[field] = value

@@ -35,11 +35,12 @@ const EDIT_TOOLS = new Set([
 const EXECUTE_TOOLS = new Set(["execute", "bash", "shell", "run_terminal_cmd"])
 const SEARCH_TOOLS = new Set(["glob", "grep", "web_search", "search"])
 const FETCH_TOOLS = new Set(["fetch", "fetch_url", "http_request"])
-const INTERNAL_TOOLS = new Set(["confirming_completion", "no_op"])
+/** Bookkeeping calls the transcript never shows. */
+export const INTERNAL_TOOLS = new Set(["confirming_completion", "no_op"])
 
 type ToolKind = ToolExecutionChunk["toolKind"]
 
-function toolKind(name: string): ToolKind {
+export function toolKind(name: string): ToolKind {
   const lowered = name.toLowerCase()
   if (lowered === "task") return "task"
   if (lowered === "read_only_sql") return "sql"
@@ -59,7 +60,7 @@ function toolKind(name: string): ToolKind {
   return "other"
 }
 
-function toolTitle(name: string, args: Record<string, unknown>): string {
+export function toolTitle(name: string, args: Record<string, unknown>): string {
   const path = args.path ?? args.file_path ?? args.target_file
   if (typeof path === "string" && path.trim()) return `${name} ${path.trim()}`
   const command = args.command
@@ -85,7 +86,9 @@ function parseToolArgs(raw: unknown): Record<string, unknown> {
   return {}
 }
 
-function maybeDiffFromArgs(args: Record<string, unknown>): DiffData | null {
+export function maybeDiffFromArgs(
+  args: Record<string, unknown>
+): DiffData | null {
   const path = args.path ?? args.file_path ?? args.target_file
   if (typeof path !== "string" || !path.trim()) return null
   const oldContent = args.old_string ?? args.original_content
@@ -103,7 +106,8 @@ function maybeDiffFromArgs(args: Record<string, unknown>): DiffData | null {
   }
 }
 
-function mergeTextChunks(chunks: Array<Chunk>): Array<Chunk> {
+/** Only the last prose chunk of an agent turn survives; the earlier ones were partial. */
+export function mergeTextChunks(chunks: Array<Chunk>): Array<Chunk> {
   const textIndices = chunks.flatMap((c, i) => (c.kind === "text" ? [i] : []))
   if (textIndices.length <= 1) return chunks
   const lastText = textIndices[textIndices.length - 1]

@@ -60,7 +60,7 @@ import { visibleQueuedMessages } from "@/features/agents/lib/queuedMessages"
 import { messageArrivalTimestamp } from "@/features/agents/lib/messageTimestamps"
 import { useIsMobile } from "@/lib/useIsMobile"
 import { useSession } from "@/lib/session"
-import { useAgentStream } from "@/features/agents/lib/stream/AgentStreamProvider"
+import { useAgentThreadStream } from "@/features/agents/lib/stream/useAgentThreadStream"
 import {
   threadHydrated,
   threadHydrationFailed,
@@ -86,7 +86,10 @@ function errorMessage(error: unknown): string {
 export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
   const session = useSession()
   const login = session.data?.login
-  const stream = useAgentStream()
+  const { stream } = useAgentThreadStream({
+    transport: "local",
+    threadId: sessionId,
+  })
   const threadQuery = useDesktopLocalThread(sessionId)
   const thread = threadQuery.data
   const queryClient = useQueryClient()

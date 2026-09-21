@@ -168,9 +168,14 @@ class CheckpointFile(BaseModel):
 class TurnCheckpointCompleted(_Body):
     """The commit that records what the sandbox's working tree held at turn end.
 
-    ``commit`` is a parentless commit object no branch points at, written by
-    ``agent.transcript.checkpoints`` without touching HEAD, the index or the
-    working tree, and named by ``checkpoint_ref``. The sandbox is ephemeral, so
+    No writer emits this at present: capturing it ran a git script in the
+    sandbox at the end of every turn, and the run's completion waited on it.
+    The event stays so what was recorded still projects and the wire contract
+    holds for when capture returns, off the run's critical path.
+
+    ``commit`` is a parentless commit object no branch points at, written
+    without touching HEAD, the index or the working tree, and named by
+    ``checkpoint_ref``. The sandbox is ephemeral, so
     the sha is what outlives it: the ref only resolves while the sandbox is
     alive, but the sha still identifies the tree if the ref is ever pushed or
     compared against a pull request. ``checkpoint_turn_count`` is the 1-based

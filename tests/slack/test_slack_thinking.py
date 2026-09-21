@@ -1,5 +1,7 @@
 from unittest.mock import AsyncMock, call
 
+import pytest
+
 from agent.slack import thinking as slack_thinking
 
 
@@ -232,6 +234,8 @@ class _IdleThreadStream:
 def _status_client(store: _AnchorStore, run_id: str) -> AsyncMock:
     client = AsyncMock()
     client.store = store
+    client.runs.list.return_value = []
+    client.threads.get.return_value = {"metadata": {}}
     client.threads.stream = lambda *_args, **_kwargs: _IdleThreadStream(run_id)
     return client
 
@@ -349,3 +353,67 @@ async def test_thread_status_survives_while_another_run_is_active(monkeypatch) -
     )
 
     assert call("C1", "1.0", "") not in set_status.await_args_list
+
+
+@pytest.mark.parametrize("session", [False, True])
+async def test_background_waiting_resumes_and_clears(monkeypatch, session: bool) -> None:
+    set_status = AsyncMock(return_value=True)
+    monkeypatch.setattr(slack_thinking, "set_slack_thread_status", set_status)
+    store = _AnchorStore()
+    client = _status_client(store, "run-1")
+    metadata = {
+        "running_background_tasks": ["cmd-1", "cmd-2"],
+        "source_context": {
+            "slack_thread": {"channel_id": "C1", "thread_ts": "0" if session else "1.0"}
+        },
+    }
+    client.threads.get.return_value = {"metadata": metadata}
+
+    await slack_thinking.show_slack_thinking_status(
+        client=client,
+        thread_id="thread-1",
+        run_id="run-1",
+        channel_id="C1",
+        thread_ts="1.0",
+        session_ts="0" if session else "",
+    )
+    assert set_status.await_args.args == ("C1", "1.0", "Waiting for background tasks…")
+
+    client.runs.list.return_value = [{"run_id": "completion-run"}]
+    await slack_thinking.sync_slack_background_status(client, "thread-1", resume=True)
+    assert set_status.await_args.args == ("C1", "1.0", "Thinking...")
+    set_status.reset_mock()
+    await slack_thinking.sync_slack_background_status(client, "thread-1")
+    set_status.assert_not_awaited()
+
+    client.runs.list.return_value = []
+    metadata["running_background_tasks"] = ["cmd-2"]
+    await slack_thinking.sync_slack_background_status(client, "thread-1")
+    set_status.assert_awaited_once_with("C1", "1.0", "Waiting for background tasks…")
+
+    metadata["running_background_tasks"] = []
+    await slack_thinking.sync_slack_background_status(client, "thread-1")
+    assert set_status.await_args.args == ("C1", "1.0", "")
+    assert store.items == {}
+
+
+async def test_idle_settlement_preserves_newer_session_anchor(monkeypatch) -> None:
+    set_status = AsyncMock(return_value=True)
+    monkeypatch.setattr(slack_thinking, "set_slack_thread_status", set_status)
+    client = _status_client(_AnchorStore(), "run-1")
+    client.threads.get.return_value = {"metadata": {"running_background_tasks": ["cmd-1"]}}
+    await slack_thinking._claim_status_anchor(client, "D1", "0", "222.0")
+    await slack_thinking.clear_slack_thinking_status_if_idle(
+        client, "thread-1", "D1", "111.0", session_ts="0"
+    )
+    set_status.assert_not_awaited()
+
+
+async def test_run_lookup_failure_does_not_replace_working_status(monkeypatch) -> None:
+    set_status = AsyncMock(return_value=True)
+    monkeypatch.setattr(slack_thinking, "set_slack_thread_status", set_status)
+    client = _status_client(_AnchorStore(), "run-1")
+    client.runs.list.side_effect = RuntimeError("unavailable")
+    client.threads.get.return_value = {"metadata": {"running_background_tasks": ["cmd-1"]}}
+    await slack_thinking.clear_slack_thinking_status_if_idle(client, "thread-1", "C1", "1.0")
+    set_status.assert_not_awaited()
