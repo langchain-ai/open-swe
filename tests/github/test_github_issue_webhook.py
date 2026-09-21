@@ -1393,7 +1393,7 @@ def test_process_github_issue_existing_thread_uses_followup_prompt(monkeypatch) 
     assert len(messages) == 1
     request = ElementTree.fromstring(messages[0]["content"])
     assert request.attrib["sender"] == "github:octocat"
-    assert request.findtext("content") == "**octocat:**\n@openswe please handle this"
+    assert (request.text or "").strip() == "**octocat:**\n@openswe please handle this"
     assert request.find("repository") is None
 
 

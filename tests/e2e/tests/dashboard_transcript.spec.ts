@@ -335,8 +335,9 @@ test.describe("transcript rendering", () => {
           ],
           [
             "structured-person",
-            '<input-message sender="github:alice" surface="web" kind="human"><content>Person says &lt;img data-e2e-injected src=x&gt;</content></input-message>',
+            '<input-message sender="github:alice" surface="web" kind="human">\nPerson says &lt;img data-e2e-injected src=x&gt;\n</input-message>',
           ],
+          // Rows already in the database wrap their text in `<content>`.
           [
             "structured-system",
             '<input-message sender="system:scheduler" surface="automation"><content>Automation checks CI</content></input-message>',

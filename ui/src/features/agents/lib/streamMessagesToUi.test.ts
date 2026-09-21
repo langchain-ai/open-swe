@@ -14,7 +14,7 @@ describe("streamMessagesToUi", () => {
       new HumanMessage({
         id: "person-message",
         content:
-          '<input-message sender="github:alice" surface="web" kind="human"><content>Ship it</content></input-message>',
+          '<input-message sender="github:alice" surface="web" kind="human">\nShip it\n</input-message>',
       }),
     ])
 
@@ -40,12 +40,12 @@ describe("streamMessagesToUi", () => {
       new HumanMessage({
         id: "person-message",
         content:
-          '<input-message sender="github:alice" surface="web" kind="human"><content>Hello &lt;b&gt;world&lt;/b&gt;</content></input-message>',
+          '<input-message sender="github:alice" surface="web" kind="human">\nHello &lt;b&gt;world&lt;/b&gt;\n</input-message>',
       }),
       new HumanMessage({
         id: "system-message",
         content:
-          '<input-message sender="system:scheduler" surface="automation"><content>Check CI</content></input-message>',
+          '<input-message sender="system:scheduler" surface="automation">\nCheck CI\n</input-message>',
       }),
       new HumanMessage({ id: "legacy", content: "Legacy message" }),
     ])
@@ -82,7 +82,7 @@ describe("streamMessagesToUi", () => {
       new HumanMessage({
         id: "self-message",
         content:
-          '<input-message sender="system:open-swe" surface="slack" kind="system"><content>on it</content></input-message>',
+          '<input-message sender="system:open-swe" surface="slack" kind="system">\non it\n</input-message>',
       }),
       new HumanMessage({ id: "legacy", content: "Legacy message" }),
     ])
@@ -128,11 +128,19 @@ describe("streamMessagesToUi", () => {
       new HumanMessage({
         id: "structured",
         content:
+          '<input-message sender="github:alice" surface="web" kind="human">\n  indented\n\n</input-message>',
+      }),
+      new HumanMessage({
+        id: "stored",
+        content:
           '<input-message sender="github:alice" surface="web" kind="human"><content>  indented\n</content></input-message>',
       }),
     ])
 
     expect(messages[0]?.chunks).toEqual([
+      { kind: "text", text: "  indented\n" },
+    ])
+    expect(messages[1]?.chunks).toEqual([
       { kind: "text", text: "  indented\n" },
     ])
   })

@@ -72,7 +72,21 @@ github_login: carol
     })
   })
 
-  it("ignores the data fields a real envelope carries beside its content", () => {
+  it("takes the envelope's own text as the message", () => {
+    expect(
+      parseStructuredInput(
+        '<input-message sender="slack:U_ALICE" channel="slack:C_DEMO" surface="slack" kind="human" timestamp="1787165487.000034">\nplease add a greet() helper\n</input-message>'
+      )
+    ).toEqual({
+      type: "message",
+      content: "please add a greet() helper",
+      sender: "slack:U_ALICE",
+      senderKind: "person",
+      surface: "slack",
+    })
+  })
+
+  it("still reads messages stored with a content element", () => {
     expect(
       parseStructuredInput(
         '<input-message sender="slack:U_ALICE" channel="slack:C_DEMO" surface="slack" kind="human">\n<timestamp>1787165487.000034</timestamp>\n<content>please add a greet() helper</content>\n</input-message>'
@@ -86,10 +100,10 @@ github_login: carol
     })
   })
 
-  it("hides a sender_context that follows the content element", () => {
+  it("hides a sender_context spliced in after the text", () => {
     expect(
       parseStructuredInput(
-        '<input-message sender="slack:U_ALICE" surface="slack" kind="human">\n<content>ship it</content>\n<sender_context>Git identity command: `git config user.name \'Alice\'`\n\nCo-authored-by: bot &lt;bot@example.com&gt;</sender_context>\n</input-message>'
+        '<input-message sender="slack:U_ALICE" surface="slack" kind="human">\nship it\n<sender_context>Git identity command: `git config user.name \'Alice\'`\n\nCo-authored-by: bot &lt;bot@example.com&gt;</sender_context>\n</input-message>'
       )
     ).toEqual({
       type: "message",
@@ -103,7 +117,7 @@ github_login: carol
   it("ignores nested data fields", () => {
     expect(
       parseStructuredInput(
-        '<input-message sender="linear:dev@example.com" surface="linear" kind="human">\n<issue>\n<identifier>ENG-1</identifier>\n<labels>\n<item>bug</item>\n</labels>\n</issue>\n<content>Fix it</content>\n</input-message>'
+        '<input-message sender="linear:dev@example.com" surface="linear" kind="human">\nFix it\n<issue>\n<identifier>ENG-1</identifier>\n<labels>\n<item>bug</item>\n</labels>\n</issue>\n</input-message>'
       )
     ).toEqual({
       type: "message",
@@ -115,8 +129,14 @@ github_login: carol
   })
 
   it("falls back to legacy when the body holds unbalanced markup", () => {
-    const content =
+    const stored =
       '<input-message sender="github:alice" surface="web" kind="human">\n<timestamp>1\n<content>hi</content>\n</input-message>'
+    expect(parseStructuredInput(stored)).toEqual({
+      type: "legacy",
+      content: stored,
+    })
+    const content =
+      '<input-message sender="github:alice" surface="web" kind="human">\nhi\n<timestamp>1\n</input-message>'
     expect(parseStructuredInput(content)).toEqual({ type: "legacy", content })
   })
 
@@ -125,7 +145,7 @@ github_login: carol
 
     expect(
       parseStructuredInput(
-        '<input-message sender="github:alice" surface="web" kind="human">\n  <content>Hello &amp; welcome</content>\n</input-message>',
+        '<input-message sender="github:alice" surface="web" kind="human">\nHello &amp; welcome\n</input-message>',
         entities
       )
     ).toEqual({
@@ -137,7 +157,7 @@ github_login: carol
     })
     expect(
       parseStructuredInput(
-        '<input-message sender="system:scheduler" surface="automation"><content>Check CI</content></input-message>',
+        '<input-message sender="system:scheduler" surface="automation">\nCheck CI\n</input-message>',
         entities
       )
     ).toEqual({

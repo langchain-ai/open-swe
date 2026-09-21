@@ -278,8 +278,8 @@ async def test_a_human_message_keeps_the_envelope_it_is_attributed_by(
         id="entity-channel",
     )
     envelope = (
-        '<input-message sender="slack:U1" surface="slack" kind="human">'
-        "<content>add a greet() helper</content></input-message>"
+        '<input-message sender="slack:U1" surface="slack" kind="human">\n'
+        "add a greet() helper\n</input-message>"
     )
     human = HumanMessage(content=envelope, id="human-1")
     # The run appends the sender's person block *after* the turn's message, so

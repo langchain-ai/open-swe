@@ -180,12 +180,15 @@ def message_sender_id(content: object, *, kind: MessageKind | None = None) -> st
     return None
 
 
+def _envelope_body(message: ElementTree.Element) -> str:
+    """The authored text of an envelope, accepting the stored ``<content>`` shape."""
+    return (message.text or "").strip() or (message.findtext("content") or "").strip()
+
+
 def input_message_text(content: object) -> str | None:
     """The authored text carried by a serialized input message, when present."""
     texts = [
-        body.strip()
-        for message in _input_message_elements(content)
-        if (body := message.findtext("content")) and body.strip()
+        body for message in _input_message_elements(content) if (body := _envelope_body(message))
     ]
     return "\n\n".join(texts) or None
 
@@ -323,8 +326,7 @@ def _serialize_message(text: str, context: InputMessageContext) -> str:
             raise ValueError(f"invalid structured data field: {name}")
         else:
             attributes.append(f'{name}="{_xml_attr(value)}"')
-    children.append(f"<content>{_xml_text(text)}</content>")
-    body = "\n".join(children)
+    body = "\n".join([_xml_text(text), *children])
     return f"<input-message {' '.join(attributes)}>\n{body}\n</input-message>"
 
 

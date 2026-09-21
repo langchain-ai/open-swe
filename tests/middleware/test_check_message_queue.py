@@ -82,9 +82,9 @@ async def test_check_message_queue_injects_dashboard_handoff_instruction() -> No
     user_message = ElementTree.fromstring(_envelope(messages[2]))
     assert handoff_entity.attrib["id"] == "system:dashboard-handoff"
     assert handoff_message.attrib["kind"] == "system"
-    assert "conversation has moved to Web" in (handoff_message.findtext("content") or "")
+    assert "conversation has moved to Web" in (handoff_message.text or "")
     assert user_message.attrib["sender"] == "github:octocat"
-    assert user_message.findtext("content") == "continue in web"
+    assert (user_message.text or "").strip() == "continue in web"
     assert messages[2]["id"] == "8a60896d-65ca-4e40-8a2d-1fbe81777001"
     # The handoff is carried by the injected message alone. Rewriting the system
     # prompt would say the same thing while invalidating the whole cached prefix.
@@ -119,7 +119,7 @@ async def test_check_message_queue_injects_pending_autofix_event() -> None:
     message = ElementTree.fromstring(_envelope(result["messages"][-1]))
     assert entity.attrib["id"] == "system:thread-queue"
     assert message.attrib["kind"] == "system"
-    text = message.findtext("content") or ""
+    text = message.text or ""
     assert "PR babysitting event arrived" in text
     # The reviewer's actual comment is carried through, not dropped for a generic nudge.
     assert "rename to userId" in text

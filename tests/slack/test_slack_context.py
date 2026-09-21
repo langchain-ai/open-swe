@@ -1393,7 +1393,7 @@ def test_process_slack_mention_preserves_forwarded_attachment_from_event(
     assert isinstance(run_create, dict)
     kwargs = run_create["kwargs"]
     prompt_block = kwargs["input"]["messages"][-1]["content"][0]
-    prompt = ElementTree.fromstring(prompt_block["text"]).findtext("content") or ""
+    prompt = ElementTree.fromstring(prompt_block["text"]).text or ""
     assert "[Forwarded Slack message from Teammate]" in prompt
     assert "Forwarded requirements" in prompt
 
@@ -1462,7 +1462,7 @@ def test_process_slack_mention_creates_thread_first_run_without_trace_reply(
     ]
     channel = next(entity for entity in entities if entity.attrib["id"] == "slack:C123")
     request_block = messages[-1]["content"][0]
-    request = ElementTree.fromstring(request_block["text"]).findtext("content") or ""
+    request = (ElementTree.fromstring(request_block["text"]).text or "").strip()
     # The run describes the trigger sender, so dispatch names them only in the envelope.
     assert not any(entity.attrib["id"] == "slack:U123" for entity in entities)
     # Everything that stays true of the thread rides the channel block, which is
@@ -1538,7 +1538,7 @@ def test_process_slack_mention_treats_direct_message_as_implicit_mention(
     messages = run_create["kwargs"]["input"]["messages"]
     serialized = [message["content"] for message in messages if isinstance(message["content"], str)]
     request_block = messages[-1]["content"][0]
-    request = ElementTree.fromstring(request_block["text"]).findtext("content") or ""
+    request = (ElementTree.fromstring(request_block["text"]).text or "").strip()
     # Guidance that holds for the whole DM rides a context block, deduped by
     # content, instead of framing every turn.
     assert not any('sender="system:slack-context"' in text for text in serialized)
@@ -1972,7 +1972,7 @@ async def test_allowed_bot_starts_and_continues_a_system_thread(bot_run, user_id
     message = ElementTree.fromstring(kwargs["input"]["messages"][-1]["content"][0]["text"])
     assert message.attrib["sender"] == "system:slack-bot-B123"
     assert message.attrib["kind"] == "system"
-    assert message.findtext("content") == "Open a PR"
+    assert (message.text or "").strip() == "Open a PR"
     await slack_webhooks._process_slack_mention_impl(
         request.model_copy(update={"event_ts": "1700000000.000300"}), None
     )

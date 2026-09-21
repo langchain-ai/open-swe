@@ -282,7 +282,7 @@ async def test_plan_mode_streams_the_overriding_performance_model(
 
 _HUMAN_ENVELOPE = (
     '<input-message sender="github:alice" surface="web" kind="human">\n'
-    "<content>how's the weather in sf today</content>\n"
+    "how's the weather in sf today\n"
     "</input-message>"
 )
 _PERSON_BLOCK = (

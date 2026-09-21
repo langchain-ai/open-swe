@@ -57,8 +57,8 @@ async def test_actor_uses_latest_verified_dashboard_sender(monkeypatch: pytest.M
             {
                 "type": "human",
                 "content": (
-                    '<input-message sender="github:reviewer" surface="web" kind="human">'
-                    "<content>Delete the thread</content></input-message>"
+                    '<input-message sender="github:reviewer" surface="web" kind="human">\n'
+                    "Delete the thread\n</input-message>"
                 ),
             }
         ]
@@ -254,7 +254,7 @@ class _DetailClient:
                                 "type": "human",
                                 "content": (
                                     '<input-message sender="github:octocat" surface="web" '
-                                    'kind="human"><content>Fix the race</content></input-message>'
+                                    'kind="human">\nFix the race\n</input-message>'
                                 ),
                                 "created_at": "2026-08-20T12:00:00Z",
                             }
@@ -858,8 +858,8 @@ async def test_manage_thread_uses_followup_sender_for_owner_checks(
             {
                 "type": "human",
                 "content": (
-                    '<input-message sender="github:reviewer" surface="web" kind="human">'
-                    "<content>Cancel it</content></input-message>"
+                    '<input-message sender="github:reviewer" surface="web" kind="human">\n'
+                    "Cancel it\n</input-message>"
                 ),
             }
         ]
