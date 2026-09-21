@@ -11,6 +11,7 @@ from agent.dashboard.workspace_settings import (
     upsert_instance_settings,
     upsert_workspace_overrides,
 )
+from agent.workspaces.store import WORKSPACES
 from tests.conftest import FakeStore
 
 _ADMIN_SESSION = {"sub": "admin", "email": "admin@example.com"}
@@ -112,14 +113,26 @@ async def test_a_workspace_with_no_repository_is_a_400(admin_client: httpx.Async
     assert "at least one repository" in response.json()["detail"]
 
 
-async def test_a_repeated_workspace_name_is_a_409(admin_client: httpx.AsyncClient) -> None:
+@pytest.mark.parametrize("stale_precheck", [False, True])
+async def test_a_repeated_workspace_name_is_a_409(
+    admin_client: httpx.AsyncClient, monkeypatch: pytest.MonkeyPatch, stale_precheck: bool
+) -> None:
     payload = {"name": "Core", "repos": ["acme/api"]}
-    assert (await admin_client.post("/dashboard/api/workspaces", json=payload)).status_code == 200
+    first = await admin_client.post("/dashboard/api/workspaces", json=payload)
+    assert first.status_code == 200
+    if stale_precheck:
+
+        async def slug_was_free(slug: str) -> bool:
+            return False
+
+        monkeypatch.setattr(WORKSPACES, "slug_exists", slug_was_free)
     second = await admin_client.post(
         "/dashboard/api/workspaces", json={"name": "Core", "repos": ["acme/other"]}
     )
     assert second.status_code == 409
     assert "already exists" in second.json()["detail"]
+    stored = await admin_client.get("/dashboard/api/workspaces/core")
+    assert stored.json() == first.json()
 
 
 async def test_two_creates_of_one_name_at_once_are_a_200_and_a_409(
