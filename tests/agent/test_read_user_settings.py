@@ -1,3 +1,4 @@
+from importlib import import_module
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
@@ -5,6 +6,15 @@ import pytest
 
 from agent.tools.read_user_settings import read_user_settings
 from agent.utils import thread_participants as participants
+
+
+@pytest.fixture(autouse=True)
+def collaborative_scope(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        import_module("agent.tools.read_user_settings"),
+        "private_credential_login",
+        AsyncMock(return_value=None),
+    )
 
 
 @pytest.mark.asyncio
