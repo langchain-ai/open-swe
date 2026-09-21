@@ -1,8 +1,8 @@
-"""How a thread looks to the model as people come and go — executable spec.
+"""What the model receives as people come and go in a thread — executable spec.
 
 Each turn renders through the real dispatch and prepare-run code, its "Then" is
-asserted, and the rendered walkthrough must match ``thread_context.md`` next to
-this file. Regenerate that fixture with ``UPDATE_THREAD_CONTEXT_FIXTURE=1``.
+asserted, and the dump of every message appended must match ``thread_context.md``
+next to this file. Regenerate that fixture with ``UPDATE_THREAD_CONTEXT_FIXTURE=1``.
 """
 
 import os
@@ -13,7 +13,6 @@ from langchain_core.messages import HumanMessage
 
 from agent.input_messages import (
     COLLABORATION_SENDER_ID,
-    SENDER_CONTEXT_SENDER_ID,
     PersonIdentity,
     channel_introduction,
     human_input,
@@ -55,8 +54,6 @@ P_BOB_INSTRUCTED = ThreadParticipant(
 )
 P_CAROL = ThreadParticipant(identity=carol, person_id=CAROL)
 
-ATTRIBUTION_ELISION = "  …Collaborative Attribution rules, unchanged from Turn 1…"
-
 
 class Thread:
     """One thread accumulating state the way dispatch and the run append to it."""
@@ -64,11 +61,11 @@ class Thread:
     def __init__(self) -> None:
         self.state: dict[str, Any] = {"messages": []}
         self.introduced: set[str] = set()
-        self.roster_emitted = False
-        self.doc: list[str] = []
+        self.dump: list[str] = []
 
     def _append(self, content: str) -> None:
         self.state["messages"].append(HumanMessage(content=content))
+        self.dump.append(f"```xml\n{content}\n```\n")
 
     def turn(
         self,
@@ -85,30 +82,29 @@ class Thread:
         display_name: str,
         participants: list[ThreadParticipant],
     ) -> dict[str, Any]:
-        self.doc.append(
-            f"\n## {title}\n\n**Given** {given}  \n**When** {when}  \n**Then** {then}\n"
-        )
-        dispatched: list[tuple[str, str]] = []
+        self.dump.append(f"## {title}\nGiven: {given}\nWhen: {when}\nThen: {then}\n")
+        self.dump.append("### dispatch appends")
+        introduced: list[str] = []
         if CHANNEL not in self.introduced:
             block = channel_introduction(
                 {"id": CHANNEL, "platform": "slack", "name": "open-swe-dev"}
             )
             self.introduced.add(CHANNEL)
-            dispatched.append(("channel introduced once per thread", cast(str, block["content"])))
+            self._append(cast(str, block["content"]))
         if person is not None:
             content = cast(str, person_introduction(person)["content"])
             if content not in self.introduced:
                 self.introduced.add(content)
-                dispatched.append(("person introduced (dedupes on content hash)", content))
+                introduced.append(content)
+                self._append(content)
         context: dict[str, Any] = {"sender_id": person_id, "surface": surface, "kind": "human"}
         if surface == "slack":
             context["channel_id"] = CHANNEL
             context["data"] = {"timestamp": ts}
         envelope = cast(str, human_input(text, context)["content"])
-        dispatched.append(("the message; `sender` is the key the pointer uses", envelope))
-        for _, content in dispatched:
-            self._append(content)
+        self._append(envelope)
 
+        self.dump.append("### run appends")
         roster_msgs = PrepareAgentRunMiddleware._collaboration_messages(
             cast(Any, self.state), construct_collaboration_context(participants)
         )
@@ -117,69 +113,32 @@ class Thread:
             construct_sender_context(display_name, person_id),
             sender_id=person_id,
         )
+        if not roster_msgs:
+            self.dump.append(f"({COLLABORATION_SENDER_ID}: unchanged, not repeated)\n")
         for message in [*roster_msgs, *pointer_msgs]:
             self._append(cast(str, message["content"]))
-
-        roster = cast(str, roster_msgs[-1]["content"]) if roster_msgs else None
-        pointer = cast(str, pointer_msgs[-1]["content"])
-        self.doc.append("**Dispatch appends:**\n")
-        for label, content in dispatched:
-            self._show(label, content)
-        self.doc.append("**The run then appends:**\n")
-        if roster is None:
-            self.doc.append(
-                f"<sub>`{COLLABORATION_SENDER_ID}`</sub> *(unchanged — not repeated)*\n"
-            )
-        else:
-            label = (
-                f"`{COLLABORATION_SENDER_ID}` — roster (re-emitted only because it changed)"
-                if self.roster_emitted
-                else f"`{COLLABORATION_SENDER_ID}` — roster, once per thread"
-            )
-            self._show(label, roster, elide_attribution=self.roster_emitted)
-            self.roster_emitted = True
-        self._show(f"`{SENDER_CONTEXT_SENDER_ID}` — the per-turn pointer", pointer)
         return {
-            "dispatched": dispatched,
-            "roster": roster,
-            "pointer": pointer,
+            "introduced": introduced,
             "envelope": envelope,
+            "roster": cast(str, roster_msgs[-1]["content"]) if roster_msgs else None,
+            "pointer": cast(str, pointer_msgs[-1]["content"]),
         }
-
-    def _show(self, label: str, text: str, *, elide_attribution: bool = False) -> None:
-        if elide_attribution and "### Collaborative Attribution" in text:
-            head = text[: text.index("### Collaborative Attribution")].rstrip()
-            text = f"{head}\n\n{ATTRIBUTION_ELISION}"
-        self.doc.append(f"<sub>{label} · ~{len(text) // 4} tokens</sub>\n\n```xml\n{text}\n```\n")
 
 
 def walkthrough() -> tuple[str, list[dict[str, Any]]]:
     thread = Thread()
-    thread.doc.append(
-        """# How a thread looks to the model
-
-Rendered by `tests/agent/test_thread_context.py` through the real renderers
-(`agent.input_messages`, `agent.prompt`, `agent.server.PrepareAgentRunMiddleware`);
-the test fails if this file and the code disagree. Every block is the exact text
-the model receives; only the Collaborative Attribution boilerplate is elided
-after its first appearance.
-
-Two layers append to the thread. **Dispatch** (Slack webhook / dashboard) adds a
-person's `<dynamic-context>` introduction the first time they appear, then their
-message as an `<input-message>` envelope whose `sender=` is their canonical
-`user:<uuid>`. **The run** then adds the thread-level `system:collaboration`
-roster — every participant's commit identity, permissions and standing
-instructions — only when it has changed, and a one-line `system:sender-context`
-pointer every turn.
-"""
+    thread.dump.append(
+        "# Thread context dump\n"
+        "Every message appended per turn, rendered by test_thread_context.py through "
+        "the real renderers. Regenerate with UPDATE_THREAD_CONTEXT_FIXTURE=1.\n"
     )
     turns: list[dict[str, Any]] = []
 
     t1 = thread.turn(
-        title="Turn 1 — Alice starts the thread from Slack",
-        given="an empty thread; Alice has linked her GitHub account and is a workspace admin",
-        when="she mentions the bot: *add a greet() helper*",
-        then="the channel and Alice are introduced, her message lands, the roster is emitted for the first time, and the pointer names her",
+        title="Turn 1: Alice starts the thread from Slack",
+        given="an empty thread; Alice has a linked GitHub account and is a workspace admin",
+        when="she mentions the bot: add a greet() helper",
+        then="channel and Alice introduced; roster emitted for the first time; pointer names Alice",
         person_id=ALICE,
         person={
             "id": ALICE,
@@ -201,10 +160,10 @@ pointer every turn.
     turns.append(t1)
 
     t2 = thread.turn(
-        title="Turn 2 — Alice follows up",
-        given="Turn 1 has run to completion",
-        when="Alice replies in the same Slack thread: *also add a docstring*",
-        then="only her envelope and the pointer are added — nobody new, nothing about her has changed, so the roster is not repeated",
+        title="Turn 2: Alice follows up",
+        given="turn 1 has run to completion",
+        when="Alice replies in the same Slack thread: also add a docstring",
+        then="only her envelope and the pointer; roster not repeated",
         person_id=ALICE,
         person=None,
         text="also add a docstring",
@@ -218,10 +177,10 @@ pointer every turn.
     turns.append(t2)
 
     t3 = thread.turn(
-        title="Turn 3 — Bob joins",
-        given="Alice's two turns; Bob has a linked account and prefers PRs opened ready for review",
-        when="Bob replies in the thread: *make it return bytes*",
-        then="Bob is introduced, the roster is re-emitted because it gained a participant, and the pointer names Bob",
+        title="Turn 3: Bob joins",
+        given="Bob has a linked account and prefers PRs opened ready for review",
+        when="Bob replies: make it return bytes",
+        then="Bob introduced; roster re-emitted with two participants; pointer names Bob",
         person_id=BOB,
         person={
             "id": BOB,
@@ -236,18 +195,15 @@ pointer every turn.
         display_name="Bob",
         participants=[P_ALICE, P_BOB],
     )
-    assert (
-        t3["roster"] is not None
-        and "**Bob**" in t3["roster"]
-        and "ready for review" in t3["roster"]
-    )
+    assert t3["roster"] is not None
+    assert "**Bob**" in t3["roster"] and "ready for review" in t3["roster"]
     turns.append(t3)
 
     t4 = thread.turn(
-        title="Turn 4 — Alice switches to the web dashboard",
-        given="the thread now has Alice and Bob",
-        when="Alice opens the thread in the dashboard and types *ship it*",
-        then="her envelope carries the same `user:` id as her Slack messages — one person, two surfaces — so the pointer resolves to the same roster entry and the roster is not repeated; her introduction reappears once because the dashboard knows different attributes about her",
+        title="Turn 4: Alice switches to the web dashboard",
+        given="the thread has Alice and Bob",
+        when="Alice types in the dashboard: ship it",
+        then="same user: id as her Slack turns; roster not repeated; her person block reappears once with the dashboard's attributes",
         person_id=ALICE,
         person={
             "id": ALICE,
@@ -266,10 +222,10 @@ pointer every turn.
     turns.append(t4)
 
     t5 = thread.turn(
-        title="Turn 5 — Bob sets standing instructions, then asks for the PR",
-        given="Bob saved personal instructions in the dashboard between turns",
-        when="Bob replies: *open the PR*",
-        then="the roster is re-emitted because Bob's entry changed, carrying his instructions; the pointer names Bob",
+        title="Turn 5: Bob sets standing instructions, then asks for the PR",
+        given="Bob saved personal instructions between turns",
+        when="Bob replies: open the PR",
+        then="roster re-emitted because Bob's entry changed; pointer names Bob",
         person_id=BOB,
         person=None,
         text="open the PR",
@@ -282,10 +238,10 @@ pointer every turn.
     turns.append(t5)
 
     t6 = thread.turn(
-        title="Turn 6 — Carol, who has no Open SWE account, chimes in",
-        given="Carol is in the Slack channel but never signed in to Open SWE",
-        when="she replies: *can it handle unicode?*",
-        then="she is keyed by her Slack id, marked `unlinked`, and gets a roster entry with only what Slack knows about her",
+        title="Turn 6: Carol, with no Open SWE account, chimes in",
+        given="Carol never signed in to Open SWE",
+        when="she replies: can it handle unicode?",
+        then="keyed by her Slack id, marked unlinked; roster entry carries only what Slack knows",
         person_id=CAROL,
         person={
             "id": CAROL,
@@ -300,20 +256,10 @@ pointer every turn.
         participants=[P_ALICE, P_BOB_INSTRUCTED, P_CAROL],
     )
     assert t6["roster"] is not None and f"`{CAROL}`" in t6["roster"]
-    assert any("<open_swe_account>unlinked</open_swe_account>" in c for _, c in t6["dispatched"])
+    assert any("<open_swe_account>unlinked</open_swe_account>" in c for c in t6["introduced"])
     turns.append(t6)
 
-    thread.doc.append(
-        """
-## What this buys
-
-- **Per turn cost** is the envelope plus a ~40-token pointer. Everything about a person is stated once.
-- **The roster re-emits only on change** — a new participant, or someone's settings or standing instructions changing. Nothing run-scoped lives in it: the PR footer, which names the model, is stamped by `open_pull_request` itself.
-- **One person, one id.** Alice's Slack and dashboard messages share `user:…`, so the model never has to guess that two senders are the same human. Carol, who never signed in, keeps her surface id and is visibly `unlinked`.
-- **Nothing expires.** The failure this replaces was a sender block emitted once and described as "this turn only"; three turns later the agent concluded it had no identity and refused to work.
-"""
-    )
-    return "\n".join(thread.doc), turns
+    return "\n".join(thread.dump), turns
 
 
 def test_thread_context_matches_fixture() -> None:

@@ -1,38 +1,18 @@
-# How a thread looks to the model
+# Thread context dump
+Every message appended per turn, rendered by test_thread_context.py through the real renderers. Regenerate with UPDATE_THREAD_CONTEXT_FIXTURE=1.
 
-Rendered by `tests/agent/test_thread_context.py` through the real renderers
-(`agent.input_messages`, `agent.prompt`, `agent.server.PrepareAgentRunMiddleware`);
-the test fails if this file and the code disagree. Every block is the exact text
-the model receives; only the Collaborative Attribution boilerplate is elided
-after its first appearance.
+## Turn 1: Alice starts the thread from Slack
+Given: an empty thread; Alice has a linked GitHub account and is a workspace admin
+When: she mentions the bot: add a greet() helper
+Then: channel and Alice introduced; roster emitted for the first time; pointer names Alice
 
-Two layers append to the thread. **Dispatch** (Slack webhook / dashboard) adds a
-person's `<dynamic-context>` introduction the first time they appear, then their
-message as an `<input-message>` envelope whose `sender=` is their canonical
-`user:<uuid>`. **The run** then adds the thread-level `system:collaboration`
-roster — every participant's commit identity, permissions and standing
-instructions — only when it has changed, and a one-line `system:sender-context`
-pointer every turn.
-
-
-## Turn 1 — Alice starts the thread from Slack
-
-**Given** an empty thread; Alice has linked her GitHub account and is a workspace admin  
-**When** she mentions the bot: *add a greet() helper*  
-**Then** the channel and Alice are introduced, her message lands, the roster is emitted for the first time, and the pointer names her
-
-**Dispatch appends:**
-
-<sub>channel introduced once per thread · ~49 tokens</sub>
-
+### dispatch appends
 ```xml
 <dynamic-context kind="channel" id="slack:C0BQUH14FK3" hash="d1b8aaa39b7590182b5d1473fa00c4a89a9e9e17763ce56b14e54e1938e50eb1">
 <platform>slack</platform>
 <name>open-swe-dev</name>
 </dynamic-context>
 ```
-
-<sub>person introduced (dedupes on content hash) · ~95 tokens</sub>
 
 ```xml
 <dynamic-context kind="person" id="user:0199e0ae-1111-7000-8000-00000000a11c" hash="aa8ad5a1b5ed591a2cd0a0209714f1a63d06b4ce87d4f1f31494ed134b06193b">
@@ -45,8 +25,6 @@ pointer every turn.
 </dynamic-context>
 ```
 
-<sub>the message; `sender` is the key the pointer uses · ~55 tokens</sub>
-
 ```xml
 <input-message sender="user:0199e0ae-1111-7000-8000-00000000a11c" channel="slack:C0BQUH14FK3" surface="slack" kind="human">
 <timestamp>1789991539.477079</timestamp>
@@ -54,9 +32,14 @@ pointer every turn.
 </input-message>
 ```
 
-**The run then appends:**
-
-<sub>`system:collaboration` — roster, once per thread · ~513 tokens</sub>
+### run appends
+```xml
+<dynamic-context kind="system" id="system:collaboration" hash="f9909255e378edcc0336884c2a1b094303e688f97249512fe88b80279fdb8d18">
+<display_name>Collaboration</display_name>
+<platform>open-swe</platform>
+<context_hash>09f28f378d9557d3fec7d2c39bee039850a5348adb8c88e908e1298be73a0056</context_hash>
+</dynamic-context>
+```
 
 ```xml
 <input-message sender="system:collaboration" surface="automation" kind="system">
@@ -88,7 +71,13 @@ If you forget the trailer on an unpushed commit, fix it with `git commit --amend
 </input-message>
 ```
 
-<sub>`system:sender-context` — the per-turn pointer · ~68 tokens</sub>
+```xml
+<dynamic-context kind="system" id="system:sender-context" hash="7b5104a0aef7542075eee1781b98fe41939d7472b7009bff6677b2cee9d9d4c7">
+<display_name>Sender context</display_name>
+<platform>open-swe</platform>
+<subject_id>user:0199e0ae-1111-7000-8000-00000000a11c</subject_id>
+</dynamic-context>
+```
 
 ```xml
 <input-message sender="system:sender-context" surface="automation" kind="system">
@@ -96,17 +85,12 @@ If you forget the trailer on an unpushed commit, fix it with `git commit --amend
 </input-message>
 ```
 
+## Turn 2: Alice follows up
+Given: turn 1 has run to completion
+When: Alice replies in the same Slack thread: also add a docstring
+Then: only her envelope and the pointer; roster not repeated
 
-## Turn 2 — Alice follows up
-
-**Given** Turn 1 has run to completion  
-**When** Alice replies in the same Slack thread: *also add a docstring*  
-**Then** only her envelope and the pointer are added — nobody new, nothing about her has changed, so the roster is not repeated
-
-**Dispatch appends:**
-
-<sub>the message; `sender` is the key the pointer uses · ~55 tokens</sub>
-
+### dispatch appends
 ```xml
 <input-message sender="user:0199e0ae-1111-7000-8000-00000000a11c" channel="slack:C0BQUH14FK3" surface="slack" kind="human">
 <timestamp>1789992088.489369</timestamp>
@@ -114,11 +98,8 @@ If you forget the trailer on an unpushed commit, fix it with `git commit --amend
 </input-message>
 ```
 
-**The run then appends:**
-
-<sub>`system:collaboration`</sub> *(unchanged — not repeated)*
-
-<sub>`system:sender-context` — the per-turn pointer · ~68 tokens</sub>
+### run appends
+(system:collaboration: unchanged, not repeated)
 
 ```xml
 <input-message sender="system:sender-context" surface="automation" kind="system">
@@ -126,17 +107,12 @@ If you forget the trailer on an unpushed commit, fix it with `git commit --amend
 </input-message>
 ```
 
+## Turn 3: Bob joins
+Given: Bob has a linked account and prefers PRs opened ready for review
+When: Bob replies: make it return bytes
+Then: Bob introduced; roster re-emitted with two participants; pointer names Bob
 
-## Turn 3 — Bob joins
-
-**Given** Alice's two turns; Bob has a linked account and prefers PRs opened ready for review  
-**When** Bob replies in the thread: *make it return bytes*  
-**Then** Bob is introduced, the roster is re-emitted because it gained a participant, and the pointer names Bob
-
-**Dispatch appends:**
-
-<sub>person introduced (dedupes on content hash) · ~76 tokens</sub>
-
+### dispatch appends
 ```xml
 <dynamic-context kind="person" id="user:0199e0ae-2222-7000-8000-000000000b0b" hash="6ef8d7bd4b51bc50969fcb19eec50cd4be629bd7a8ee1eea703567d9b4e8683f">
 <display_name>Bob</display_name>
@@ -146,8 +122,6 @@ If you forget the trailer on an unpushed commit, fix it with `git commit --amend
 </dynamic-context>
 ```
 
-<sub>the message; `sender` is the key the pointer uses · ~55 tokens</sub>
-
 ```xml
 <input-message sender="user:0199e0ae-2222-7000-8000-000000000b0b" channel="slack:C0BQUH14FK3" surface="slack" kind="human">
 <timestamp>1789992258.131819</timestamp>
@@ -155,9 +129,14 @@ If you forget the trailer on an unpushed commit, fix it with `git commit --amend
 </input-message>
 ```
 
-**The run then appends:**
-
-<sub>`system:collaboration` — roster (re-emitted only because it changed) · ~296 tokens</sub>
+### run appends
+```xml
+<dynamic-context kind="system" id="system:collaboration" hash="b819dc2566ba672726e47388908b31d6b8d8cf1f922aa5fd1431e7ab178a370a">
+<display_name>Collaboration</display_name>
+<platform>open-swe</platform>
+<context_hash>5b84c73bbae3b1d765d36e157120d7cdd190e1b2968536a21d78b250f9dfb2ed</context_hash>
+</dynamic-context>
+```
 
 ```xml
 <input-message sender="system:collaboration" surface="automation" kind="system">
@@ -178,10 +157,29 @@ Everyone who has posted in this thread. Each incoming message is followed by a `
   - New PRs: ready for review
   - Standing instructions: none
 
-  …Collaborative Attribution rules, unchanged from Turn 1…
+### Collaborative Attribution
+
+Before each commit, set the git identity to the participant whose work it is, and open the PR as its main author — the person who drove the change, not necessarily whoever asked for the PR. Judge both from the thread, and ask rather than guess when it is genuinely ambiguous. Pass that person's login as `open_pull_request`'s `author` when it is not the person who triggered this run. Credit open-swe as the collaborator:
+
+- **Commits**: append this trailer verbatim (on its own line, a blank line after the body) to every commit you author, including follow-ups:
+
+  ```
+  Co-authored-by: open-swe[bot] &lt;open-swe@users.noreply.github.com&gt;
+  ```
+
+- **PR body**: `open_pull_request` appends the `Made by [Open SWE]` footer itself, naming this thread and the model that opened the PR. Do not write one. When you later edit a PR body with `gh`, keep that footer as the last line and never add a second one.
+
+If you forget the trailer on an unpushed commit, fix it with `git commit --amend` before pushing. If it's already pushed, leave it and add the trailer to your next commit; never rewrite remote history.</content>
+</input-message>
 ```
 
-<sub>`system:sender-context` — the per-turn pointer · ~68 tokens</sub>
+```xml
+<dynamic-context kind="system" id="system:sender-context" hash="bf7b5b168fb3a536a25360213c3c4bfc595858e3086d7220fc76083140684539">
+<display_name>Sender context</display_name>
+<platform>open-swe</platform>
+<subject_id>user:0199e0ae-2222-7000-8000-000000000b0b</subject_id>
+</dynamic-context>
+```
 
 ```xml
 <input-message sender="system:sender-context" surface="automation" kind="system">
@@ -189,17 +187,12 @@ Everyone who has posted in this thread. Each incoming message is followed by a `
 </input-message>
 ```
 
+## Turn 4: Alice switches to the web dashboard
+Given: the thread has Alice and Bob
+When: Alice types in the dashboard: ship it
+Then: same user: id as her Slack turns; roster not repeated; her person block reappears once with the dashboard's attributes
 
-## Turn 4 — Alice switches to the web dashboard
-
-**Given** the thread now has Alice and Bob  
-**When** Alice opens the thread in the dashboard and types *ship it*  
-**Then** her envelope carries the same `user:` id as her Slack messages — one person, two surfaces — so the pointer resolves to the same roster entry and the roster is not repeated; her introduction reappears once because the dashboard knows different attributes about her
-
-**Dispatch appends:**
-
-<sub>person introduced (dedupes on content hash) · ~66 tokens</sub>
-
+### dispatch appends
 ```xml
 <dynamic-context kind="person" id="user:0199e0ae-1111-7000-8000-00000000a11c" hash="7552ad8a990a6689927c645ef652b6d0cd3cac9f34432e8e4fb8c71062279471">
 <platform>github</platform>
@@ -208,19 +201,14 @@ Everyone who has posted in this thread. Each incoming message is followed by a `
 </dynamic-context>
 ```
 
-<sub>the message; `sender` is the key the pointer uses · ~34 tokens</sub>
-
 ```xml
 <input-message sender="user:0199e0ae-1111-7000-8000-00000000a11c" surface="web" kind="human">
 <content>ship it</content>
 </input-message>
 ```
 
-**The run then appends:**
-
-<sub>`system:collaboration`</sub> *(unchanged — not repeated)*
-
-<sub>`system:sender-context` — the per-turn pointer · ~68 tokens</sub>
+### run appends
+(system:collaboration: unchanged, not repeated)
 
 ```xml
 <input-message sender="system:sender-context" surface="automation" kind="system">
@@ -228,17 +216,12 @@ Everyone who has posted in this thread. Each incoming message is followed by a `
 </input-message>
 ```
 
+## Turn 5: Bob sets standing instructions, then asks for the PR
+Given: Bob saved personal instructions between turns
+When: Bob replies: open the PR
+Then: roster re-emitted because Bob's entry changed; pointer names Bob
 
-## Turn 5 — Bob sets standing instructions, then asks for the PR
-
-**Given** Bob saved personal instructions in the dashboard between turns  
-**When** Bob replies: *open the PR*  
-**Then** the roster is re-emitted because Bob's entry changed, carrying his instructions; the pointer names Bob
-
-**Dispatch appends:**
-
-<sub>the message; `sender` is the key the pointer uses · ~53 tokens</sub>
-
+### dispatch appends
 ```xml
 <input-message sender="user:0199e0ae-2222-7000-8000-000000000b0b" channel="slack:C0BQUH14FK3" surface="slack" kind="human">
 <timestamp>1789992400.000001</timestamp>
@@ -246,9 +229,14 @@ Everyone who has posted in this thread. Each incoming message is followed by a `
 </input-message>
 ```
 
-**The run then appends:**
-
-<sub>`system:collaboration` — roster (re-emitted only because it changed) · ~311 tokens</sub>
+### run appends
+```xml
+<dynamic-context kind="system" id="system:collaboration" hash="7f1bf491c0442603f025d95e34d74705ad5d0132e8841ac9bf03e5ac175b2afc">
+<display_name>Collaboration</display_name>
+<platform>open-swe</platform>
+<context_hash>9ab0ee6ed07f4415690445d373f4c64000bb7c1c3aefc485fdd74f983381e302</context_hash>
+</dynamic-context>
+```
 
 ```xml
 <input-message sender="system:collaboration" surface="automation" kind="system">
@@ -271,10 +259,21 @@ Everyone who has posted in this thread. Each incoming message is followed by a `
     Never use ripgrep.
     Run `make lint` before every push.
 
-  …Collaborative Attribution rules, unchanged from Turn 1…
-```
+### Collaborative Attribution
 
-<sub>`system:sender-context` — the per-turn pointer · ~68 tokens</sub>
+Before each commit, set the git identity to the participant whose work it is, and open the PR as its main author — the person who drove the change, not necessarily whoever asked for the PR. Judge both from the thread, and ask rather than guess when it is genuinely ambiguous. Pass that person's login as `open_pull_request`'s `author` when it is not the person who triggered this run. Credit open-swe as the collaborator:
+
+- **Commits**: append this trailer verbatim (on its own line, a blank line after the body) to every commit you author, including follow-ups:
+
+  ```
+  Co-authored-by: open-swe[bot] &lt;open-swe@users.noreply.github.com&gt;
+  ```
+
+- **PR body**: `open_pull_request` appends the `Made by [Open SWE]` footer itself, naming this thread and the model that opened the PR. Do not write one. When you later edit a PR body with `gh`, keep that footer as the last line and never add a second one.
+
+If you forget the trailer on an unpushed commit, fix it with `git commit --amend` before pushing. If it's already pushed, leave it and add the trailer to your next commit; never rewrite remote history.</content>
+</input-message>
+```
 
 ```xml
 <input-message sender="system:sender-context" surface="automation" kind="system">
@@ -282,17 +281,12 @@ Everyone who has posted in this thread. Each incoming message is followed by a `
 </input-message>
 ```
 
+## Turn 6: Carol, with no Open SWE account, chimes in
+Given: Carol never signed in to Open SWE
+When: she replies: can it handle unicode?
+Then: keyed by her Slack id, marked unlinked; roster entry carries only what Slack knows
 
-## Turn 6 — Carol, who has no Open SWE account, chimes in
-
-**Given** Carol is in the Slack channel but never signed in to Open SWE  
-**When** she replies: *can it handle unicode?*  
-**Then** she is keyed by her Slack id, marked `unlinked`, and gets a roster entry with only what Slack knows about her
-
-**Dispatch appends:**
-
-<sub>person introduced (dedupes on content hash) · ~62 tokens</sub>
-
+### dispatch appends
 ```xml
 <dynamic-context kind="person" id="slack:U0CAR0L" hash="98ef0a282d1312227c90d79d15b6a450cdb87ee70a2627d95ead3509de26b33b">
 <display_name>Carol</display_name>
@@ -301,8 +295,6 @@ Everyone who has posted in this thread. Each incoming message is followed by a `
 </dynamic-context>
 ```
 
-<sub>the message; `sender` is the key the pointer uses · ~48 tokens</sub>
-
 ```xml
 <input-message sender="slack:U0CAR0L" channel="slack:C0BQUH14FK3" surface="slack" kind="human">
 <timestamp>1789992500.000001</timestamp>
@@ -310,9 +302,14 @@ Everyone who has posted in this thread. Each incoming message is followed by a `
 </input-message>
 ```
 
-**The run then appends:**
-
-<sub>`system:collaboration` — roster (re-emitted only because it changed) · ~362 tokens</sub>
+### run appends
+```xml
+<dynamic-context kind="system" id="system:collaboration" hash="30640d3e6620b60b7d6d03c469fd9845c69015dd82093b816e3991214b5000e3">
+<display_name>Collaboration</display_name>
+<platform>open-swe</platform>
+<context_hash>362a9d7635485bf69453ae0cb30c930b12c2724e364c00999e446d68773662c6</context_hash>
+</dynamic-context>
+```
 
 ```xml
 <input-message sender="system:collaboration" surface="automation" kind="system">
@@ -340,21 +337,32 @@ Everyone who has posted in this thread. Each incoming message is followed by a `
     Never use ripgrep.
     Run `make lint` before every push.
 
-  …Collaborative Attribution rules, unchanged from Turn 1…
+### Collaborative Attribution
+
+Before each commit, set the git identity to the participant whose work it is, and open the PR as its main author — the person who drove the change, not necessarily whoever asked for the PR. Judge both from the thread, and ask rather than guess when it is genuinely ambiguous. Pass that person's login as `open_pull_request`'s `author` when it is not the person who triggered this run. Credit open-swe as the collaborator:
+
+- **Commits**: append this trailer verbatim (on its own line, a blank line after the body) to every commit you author, including follow-ups:
+
+  ```
+  Co-authored-by: open-swe[bot] &lt;open-swe@users.noreply.github.com&gt;
+  ```
+
+- **PR body**: `open_pull_request` appends the `Made by [Open SWE]` footer itself, naming this thread and the model that opened the PR. Do not write one. When you later edit a PR body with `gh`, keep that footer as the last line and never add a second one.
+
+If you forget the trailer on an unpushed commit, fix it with `git commit --amend` before pushing. If it's already pushed, leave it and add the trailer to your next commit; never rewrite remote history.</content>
+</input-message>
 ```
 
-<sub>`system:sender-context` — the per-turn pointer · ~61 tokens</sub>
+```xml
+<dynamic-context kind="system" id="system:sender-context" hash="b0a6d80d409cf0fb3cab12f3c0dc1b3aafaa6eea8ca44340aa9b851583493dff">
+<display_name>Sender context</display_name>
+<platform>open-swe</platform>
+<subject_id>slack:U0CAR0L</subject_id>
+</dynamic-context>
+```
 
 ```xml
 <input-message sender="system:sender-context" surface="automation" kind="system">
 <content>Sent by **Carol** (`slack:U0CAR0L`). Their commit identity, permissions and standing instructions are under Thread Participants.</content>
 </input-message>
 ```
-
-
-## What this buys
-
-- **Per turn cost** is the envelope plus a ~40-token pointer. Everything about a person is stated once.
-- **The roster re-emits only on change** — a new participant, or someone's settings or standing instructions changing. Nothing run-scoped lives in it: the PR footer, which names the model, is stamped by `open_pull_request` itself.
-- **One person, one id.** Alice's Slack and dashboard messages share `user:…`, so the model never has to guess that two senders are the same human. Carol, who never signed in, keeps her surface id and is visibly `unlinked`.
-- **Nothing expires.** The failure this replaces was a sender block emitted once and described as "this turn only"; three turns later the agent concluded it had no identity and refused to work.
