@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, MagicMock, call, patch
 import httpx2
 import langgraph_sdk
 import pytest
+from langchain_core.tools import tool as make_tool
 
 import agent.tools.open_pull_request  # noqa: F401
 
@@ -101,6 +102,20 @@ class _RoutingClient:
 
 def _install_client(monkeypatch: pytest.MonkeyPatch, client: _FakeClient | _RoutingClient) -> None:
     monkeypatch.setattr(opr.httpx2, "AsyncClient", lambda **_kwargs: client)
+
+
+def test_public_tool_schema_hides_runtime_context() -> None:
+    schema = make_tool(opr.open_pull_request).tool_call_schema.model_json_schema()
+    assert set(schema["properties"]) == {
+        "owner",
+        "repo",
+        "head",
+        "base",
+        "title",
+        "body",
+        "draft",
+        "resolves_thread",
+    }
 
 
 def _set_config(
@@ -1092,6 +1107,56 @@ async def test_record_pr_telemetry_records_pr_opened_feedback(
         else []
     )
     assert create_feedback.await_args_list == expected_calls
+
+
+async def test_public_tool_telemetry_uses_routed_model_from_runtime(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _set_config(
+        monkeypatch,
+        {
+            "source": "github",
+            "github_login": "johannes117",
+            "resolved_agent_model_id": "openai:gpt-5.6-sol",
+        },
+    )
+    monkeypatch.setattr(opr, "get_github_app_installation_token", AsyncMock(return_value="bot-tok"))
+    record_usage = AsyncMock()
+    monkeypatch.setattr(opr, "record_agent_pr_usage", record_usage)
+    monkeypatch.setattr(opr, "get_active_slack_thread", AsyncMock(return_value=None))
+    monkeypatch.setattr(opr, "create_langsmith_thread_feedback", AsyncMock(return_value=True))
+    langgraph = MagicMock()
+    langgraph.threads.get = AsyncMock(return_value={"metadata": {}})
+    langgraph.threads.update = AsyncMock()
+    monkeypatch.setattr(opr, "get_client", lambda: langgraph)
+    details = {
+        "html_url": "https://github.com/langchain-ai/open-swe/pull/3",
+        "number": 3,
+        "state": "open",
+        "draft": False,
+        "merged": False,
+        "title": "feat: x",
+        "user": {"login": "octo"},
+    }
+    _install_client(
+        monkeypatch,
+        _FakeClient(post=_FakeResponse(201, details), get=_FakeResponse(200, details)),
+    )
+    runtime = SimpleNamespace(state={"resolved_agent_model_id": "anthropic:claude-opus-5"})
+
+    result = await opr.open_pull_request(
+        "langchain-ai",
+        "open-swe",
+        "open-swe/feature",
+        "main",
+        "feat: x",
+        "body",
+        runtime,
+    )
+
+    assert result["success"] is True
+    record_usage.assert_awaited_once()
+    assert record_usage.await_args.kwargs["model_id"] == "anthropic:claude-opus-5"
 
 
 @pytest.mark.parametrize("top_level_run_id", [False, True])

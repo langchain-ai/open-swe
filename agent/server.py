@@ -802,6 +802,7 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
                 work_dir = await resolve_sandbox_work_dir(sandbox_backend)
             return {
                 "work_dir": work_dir,
+                "resolved_agent_model_id": self._model_id,
                 "rendered_system_prompt": construct_system_prompt(
                     working_dir=work_dir,
                     source="desktop",
@@ -920,6 +921,7 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
                 if attribution_route and not self._plan_mode
                 else {}
             ),
+            "resolved_agent_model_id": attribution_model_id,
             "rendered_system_prompt": construct_system_prompt(
                 working_dir=work_dir,
                 dashboard_base_url=dashboard_base_url(),
