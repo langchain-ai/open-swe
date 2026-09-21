@@ -62,7 +62,9 @@ async def test_reply_records_mapping_with_or_without_pending_choices(
     )
     mapping = AsyncMock()
     monkeypatch.setattr(slack_reply_tool, "store_slack_message_run_mapping", mapping)
-    assert await slack_reply_tool.slack_reply("The answer", options=options) == {"success": True}
+    assert await slack_reply_tool.slack_reply("The answer", "final", options=options) == {
+        "success": True
+    }
     assert mapping.await_count == int(stores_mapping)
 
 
@@ -93,7 +95,7 @@ async def test_reply_restores_status_including_completion_runs(
     monkeypatch.setattr(slack_reply_tool, "restore_slack_thinking_status", thinking_status)
     monkeypatch.setattr(slack_reply_tool, "restore_slack_session_status", session_status)
 
-    assert await slack_reply_tool.slack_reply("The answer") == {"success": True}
+    assert await slack_reply_tool.slack_reply("The answer", "final") == {"success": True}
     post.assert_awaited_once()
     assert thinking_status.await_count == int(thread_ts != "0")
     assert session_status.await_count == int(thread_ts == "0")
@@ -121,7 +123,7 @@ async def test_slack_reply_holds_mutation_lock_while_posting(
     monkeypatch.setattr(slack_reply_tool, "slack_thread_mutation_lock", mutation_lock)
     monkeypatch.setattr(slack_reply_tool, "_post_and_store_mapping", post)
 
-    assert await slack_reply_tool.slack_reply("hello") == {"success": True}
+    assert await slack_reply_tool.slack_reply("hello", "final") == {"success": True}
     assert lock_held is False
 
 
@@ -155,7 +157,7 @@ async def test_code_channel_reply_stays_in_user_started_thread(
     monkeypatch.setattr(slack_reply_tool, "get_active_slack_thread", active_thread)
     monkeypatch.setattr(slack_reply_tool, "_post_and_store_mapping", post)
 
-    assert await slack_reply_tool.slack_reply("threaded") == {"success": True}
+    assert await slack_reply_tool.slack_reply("threaded", "final") == {"success": True}
 
 
 async def test_slack_reply_returns_structured_error_for_msg_too_long(
@@ -174,7 +176,7 @@ async def test_slack_reply_returns_structured_error_for_msg_too_long(
     monkeypatch.setattr(slack_reply_tool, "get_config", _config)
     monkeypatch.setattr(slack_reply_tool, "_post_and_store_mapping", fake_post_and_store_mapping)
 
-    result = await slack_reply_tool.slack_reply("hello")
+    result = await slack_reply_tool.slack_reply("hello", "final")
 
     assert result == {
         "success": False,
@@ -203,7 +205,7 @@ async def test_slack_reply_hints_not_to_retry_channel_errors(
     monkeypatch.setattr(slack_reply_tool, "get_config", _config)
     monkeypatch.setattr(slack_reply_tool, "_post_and_store_mapping", fake_post_and_store_mapping)
 
-    result = await slack_reply_tool.slack_reply("hello")
+    result = await slack_reply_tool.slack_reply("hello", "final")
 
     assert result["success"] is False
     assert result["error"] == slack_error
@@ -229,7 +231,7 @@ async def test_slack_reply_rate_limited_hint_includes_retry_after(
     monkeypatch.setattr(slack_reply_tool, "get_config", _config)
     monkeypatch.setattr(slack_reply_tool, "_post_and_store_mapping", fake_post_and_store_mapping)
 
-    result = await slack_reply_tool.slack_reply("hello")
+    result = await slack_reply_tool.slack_reply("hello", "final")
 
     assert result["success"] is False
     assert result["error"] == "rate_limited: 30"
@@ -254,7 +256,7 @@ async def test_slack_reply_rate_limited_hint_without_retry_after(
     monkeypatch.setattr(slack_reply_tool, "get_config", _config)
     monkeypatch.setattr(slack_reply_tool, "_post_and_store_mapping", fake_post_and_store_mapping)
 
-    result = await slack_reply_tool.slack_reply("hello")
+    result = await slack_reply_tool.slack_reply("hello", "final")
 
     assert result["success"] is False
     assert result["slack_error"] == "rate_limited"
@@ -277,7 +279,7 @@ async def test_slack_reply_uses_post_failed_without_slack_error(
     monkeypatch.setattr(slack_reply_tool, "get_config", _config)
     monkeypatch.setattr(slack_reply_tool, "_post_and_store_mapping", fake_post_and_store_mapping)
 
-    result = await slack_reply_tool.slack_reply("hello")
+    result = await slack_reply_tool.slack_reply("hello", "final")
 
     assert result["success"] is False
     assert result["error"] == "post failed"
@@ -305,7 +307,7 @@ async def test_slack_reply_passes_executing_run_id(
     monkeypatch.setattr(slack_reply_tool, "get_config", lambda: config)
     monkeypatch.setattr(slack_reply_tool, "_post_and_store_mapping", fake_post_and_store_mapping)
 
-    result = await slack_reply_tool.slack_reply("hello")
+    result = await slack_reply_tool.slack_reply("hello", "final")
 
     assert result == {"success": True}
     assert captured["run_id"] == "12345678-1234-5678-1234-567812345678"
@@ -325,7 +327,7 @@ async def test_slack_reply_restores_thinking_status_after_interim_reply(
     )
     monkeypatch.setattr(slack_reply_tool, "restore_slack_thinking_status", restore_status)
 
-    assert await slack_reply_tool.slack_reply("Still working") == {"success": True}
+    assert await slack_reply_tool.slack_reply("Still working", "final") == {"success": True}
     restore_status.assert_awaited_once_with("C1", "1.0")
 
 
@@ -349,7 +351,7 @@ async def test_slack_reply_posts_native_markdown_without_options(
     monkeypatch.setattr(slack_reply_tool, "_post_and_store_mapping", fake_post_and_store_mapping)
 
     message = '```python\nfor value in range(3):\n    print("@Name(U123)", value)\n```'
-    result = await slack_reply_tool.slack_reply(message)
+    result = await slack_reply_tool.slack_reply(message, "final")
 
     assert result == {"success": True}
     assert captured["message"] == message
@@ -364,7 +366,7 @@ async def test_slack_reply_falls_back_to_mrkdwn_over_native_limit(
     monkeypatch.setattr(slack_reply_tool, "get_config", _config)
     monkeypatch.setattr(slack_reply_tool, "_post_and_store_mapping", post)
 
-    assert await slack_reply_tool.slack_reply(message) == {"success": True}
+    assert await slack_reply_tool.slack_reply(message, "final") == {"success": True}
     assert post.await_args.args[2].startswith("*Heading*\n")
     assert post.await_args.kwargs["blocks"] is None
 
@@ -376,7 +378,7 @@ async def test_slack_reply_rejects_oversized_message_with_options(
     monkeypatch.setattr(slack_reply_tool, "get_config", _config)
     monkeypatch.setattr(slack_reply_tool, "_post_and_store_mapping", post)
 
-    result = await slack_reply_tool.slack_reply("x" * 12001, options=["Yes"])
+    result = await slack_reply_tool.slack_reply("x" * 12001, "final", options=["Yes"])
 
     assert result["success"] is False
     assert result["retry"] is True
@@ -392,7 +394,9 @@ async def test_slack_reply_preserves_explicit_blocks_over_limit(
     monkeypatch.setattr(slack_reply_tool, "get_config", _config)
     monkeypatch.setattr(slack_reply_tool, "_post_and_store_mapping", post)
 
-    assert await slack_reply_tool.slack_reply("x" * 12001, blocks=blocks) == {"success": True}
+    assert await slack_reply_tool.slack_reply("x" * 12001, "final", blocks=blocks) == {
+        "success": True
+    }
     assert post.await_args.kwargs["blocks"] is blocks
 
 
@@ -415,7 +419,7 @@ async def test_slack_reply_builds_option_blocks(monkeypatch: pytest.MonkeyPatch)
     monkeypatch.setattr(slack_reply_tool, "get_config", _config)
     monkeypatch.setattr(slack_reply_tool, "_post_and_store_mapping", fake_post_and_store_mapping)
 
-    result = await slack_reply_tool.slack_reply("Pick one", options=["A", "B"])
+    result = await slack_reply_tool.slack_reply("Pick one", "final", options=["A", "B"])
 
     assert result == {"success": True}
     assert captured["channel_id"] == "C1"
@@ -458,6 +462,7 @@ async def test_plan_buttons_require_active_plan_context(
 
     await slack_reply_tool.slack_reply(
         "Review",
+        "final",
         options=["Approve & implement", "Request changes"],
         state={},
     )
@@ -510,7 +515,7 @@ async def test_slack_reply_passes_live_run_id(
     monkeypatch.setattr(slack_reply_tool, "get_config", lambda: config)
     monkeypatch.setattr(slack_reply_tool, "_post_and_store_mapping", fake_post_and_store_mapping)
 
-    assert await slack_reply_tool.slack_reply("Done") == {"success": True}
+    assert await slack_reply_tool.slack_reply("Done", "final") == {"success": True}
     assert captured["run_id"] == str(run_id)
 
 
@@ -541,7 +546,7 @@ async def test_slack_reply_passes_model_reported_usage(
         ]
     }
 
-    result = await slack_reply_tool.slack_reply("Done", state=state)
+    result = await slack_reply_tool.slack_reply("Done", "final", state=state)
 
     assert result == {"success": True}
     usage = captured["usage"]
@@ -575,7 +580,7 @@ async def test_reply_moves_the_thread_to_the_dashboard_when_its_slack_thread_is_
     moved = AsyncMock(return_value=True)
     monkeypatch.setattr(slack_reply_tool, "move_thread_to_dashboard", moved)
 
-    result = await slack_reply_tool.slack_reply("The answer")
+    result = await slack_reply_tool.slack_reply("The answer", "final")
 
     assert result["moved_to_dashboard"] is True
     assert result["retry"] is False
@@ -602,7 +607,7 @@ async def test_reply_stops_calling_slack_once_the_thread_lives_in_the_dashboard(
     post = AsyncMock()
     monkeypatch.setattr(slack_reply_tool, "post_slack_thread_reply_with_ts", post)
 
-    assert (await slack_reply_tool.slack_reply("The answer"))["moved_to_dashboard"] is True
+    assert (await slack_reply_tool.slack_reply("The answer", "final"))["moved_to_dashboard"] is True
     post.assert_not_awaited()
 
 
@@ -631,7 +636,7 @@ async def test_reply_does_not_claim_a_handoff_when_detaching_fails(
     )
     monkeypatch.setattr(slack_reply_tool, "move_thread_to_dashboard", AsyncMock(return_value=False))
 
-    result = await slack_reply_tool.slack_reply("The answer")
+    result = await slack_reply_tool.slack_reply("The answer", "final")
 
     assert result["moved_to_dashboard"] is False
     assert result["retry"] is True

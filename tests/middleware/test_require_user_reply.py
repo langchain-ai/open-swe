@@ -27,8 +27,12 @@ def _state(*messages: Any, **values: Any) -> AgentState:
     )
 
 
-def _call(name: str, call_id: str) -> AIMessage:
-    return AIMessage(content="", tool_calls=[{"name": name, "args": {}, "id": call_id}])
+def _call(name: str, call_id: str, **args: Any) -> AIMessage:
+    return AIMessage(content="", tool_calls=[{"name": name, "args": args, "id": call_id}])
+
+
+def _reply(call_id: str, response_type: str = "final") -> AIMessage:
+    return _call(TOOL, call_id, message="done", response_type=response_type)
 
 
 def _result(call_id: str, *, success: bool = True) -> ToolMessage:
@@ -54,7 +58,7 @@ class TestRequireUserReplyMiddleware:
         result = await _middleware().aafter_model(
             _state(
                 HumanMessage(content="what is up"),
-                _call(TOOL, "call-1"),
+                _reply("call-1"),
                 _result("call-1"),
                 AIMessage(content="done"),
             ),
@@ -62,6 +66,21 @@ class TestRequireUserReplyMiddleware:
         )
 
         assert result == {"reply_nudge_pending": False, "reply_nudges": 0}
+
+    @pytest.mark.asyncio
+    async def test_the_opening_acknowledgement_does_not_end_the_turn(self) -> None:
+        """The Slack prompt orders an ack before any work; it is not the answer."""
+        result = await _middleware().aafter_model(
+            _state(
+                HumanMessage(content="what is up"),
+                _reply("call-1", "progress"),
+                _result("call-1"),
+                AIMessage(content="all good"),
+            ),
+            _runtime(),
+        )
+
+        assert result == {"reply_nudges": 1, "reply_nudge_pending": True, "jump_to": "model"}
 
     @pytest.mark.asyncio
     async def test_declining_to_reply_also_ends_the_turn(self) -> None:
@@ -82,7 +101,7 @@ class TestRequireUserReplyMiddleware:
         result = await _middleware().aafter_model(
             _state(
                 HumanMessage(content="what is up"),
-                _call(TOOL, "call-1"),
+                _reply("call-1"),
                 _result("call-1", success=False),
                 AIMessage(content="I could not post that"),
             ),

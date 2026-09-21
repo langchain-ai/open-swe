@@ -107,15 +107,25 @@ class RequireUserReplyMiddleware(OpenSWEMiddleware):
             "reply_nudge_pending": False,
         }
 
+    def _discharges_turn(self, call: Mapping[str, Any]) -> bool:
+        name = call.get("name")
+        if name == self._no_reply_tool_name:
+            return True
+        # An acknowledgement is not an answer, and the Slack prompt orders one
+        # before any investigation — counting it would leave every turn "replied".
+        args = call.get("args")
+        return name == self._tool_name and (
+            isinstance(args, Mapping) and args.get("response_type") == "final"
+        )
+
     def _satisfied(self, messages: Sequence[BaseMessage]) -> bool:
         tail = _turn_tail(messages)
-        wanted = {self._tool_name, self._no_reply_tool_name}
         call_ids = {
             call.get("id")
             for message in tail
             if isinstance(message, AIMessage)
             for call in message.tool_calls
-            if call.get("name") in wanted
+            if self._discharges_turn(call)
         }
         if not call_ids:
             return False
@@ -133,7 +143,7 @@ class RequireUserReplyMiddleware(OpenSWEMiddleware):
             return
         from agent.slack.tools.reply import slack_reply
 
-        result = await slack_reply(text, state=dict(state))
+        result = await slack_reply(text, "final", state=dict(state))
         logger.warning(
             "Posted the model's final message on its behalf after it ignored the reply tool",
             extra={"reply_tool": self._tool_name, "reply_fallback_result": result},

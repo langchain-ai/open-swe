@@ -387,7 +387,13 @@ def _reply_step(messages: list[BaseMessage]) -> AIMessage:
     )
     return AIMessage(
         content="Replying in the Slack thread with the PR link.",
-        tool_calls=[{"name": "slack_reply", "args": {"message": text}, "id": "call-reply"}],
+        tool_calls=[
+            {
+                "name": "slack_reply",
+                "args": {"message": text, "response_type": "final"},
+                "id": "call-reply",
+            }
+        ],
         response_metadata={"model_name": "fake-scripted-model"},
         usage_metadata={
             "input_tokens": 12_000,
@@ -440,7 +446,7 @@ def _expedite_opened_reply_step(messages: list[BaseMessage]) -> AIMessage:
         tool_calls=[
             {
                 "name": "slack_reply",
-                "args": {"message": text},
+                "args": {"response_type": "final", "message": text},
                 "id": f"call-expedite-opened-{len(messages)}",
             }
         ],
@@ -459,7 +465,7 @@ def _expedite_reply_step(messages: list[BaseMessage]) -> AIMessage:
         tool_calls=[
             {
                 "name": "slack_reply",
-                "args": {"message": text},
+                "args": {"response_type": "final", "message": text},
                 "id": f"call-expedite-reply-{len(messages)}",
             }
         ],
@@ -478,7 +484,7 @@ def _expedite_fixed_reply_step(messages: list[BaseMessage]) -> AIMessage:
         tool_calls=[
             {
                 "name": "slack_reply",
-                "args": {"message": text},
+                "args": {"response_type": "final", "message": text},
                 "id": f"call-expedite-fix-reply-{len(messages)}",
             }
         ],
@@ -494,10 +500,11 @@ def _multi_pr_reply_step(messages: list[BaseMessage]) -> AIMessage:
             {
                 "name": "slack_reply",
                 "args": {
+                    "response_type": "final",
                     "message": (
                         f"Opened pull requests in `{OWNER}/{REPO}` and "
                         f"`{SECOND_OWNER}/{SECOND_REPO}`; latest: <{url}|{SECOND_PR_TITLE}>."
-                    )
+                    ),
                 },
                 "id": "call-multi-pr-reply",
             }
@@ -595,7 +602,8 @@ def _plan_link_step(messages: list[BaseMessage]) -> AIMessage:
             {
                 "name": "slack_reply",
                 "args": {
-                    "message": f"I'm putting together a plan. Follow along and review it here: <{url}|plan review>"
+                    "response_type": "progress",
+                    "message": f"I'm putting together a plan. Follow along and review it here: <{url}|plan review>",
                 },
                 "id": "call-plan-link",
             }
@@ -646,6 +654,7 @@ def _plan_complete_step(messages: list[BaseMessage]) -> AIMessage:
             {
                 "name": "slack_reply",
                 "args": {
+                    "response_type": "final",
                     "message": f"✅ The plan is ready for review: <{url}|open the plan>. "
                     "Take a look, leave comments, and choose what to do next.",
                     "options": ["Approve & implement", "Request changes"],

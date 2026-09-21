@@ -254,7 +254,7 @@ async def test_ask_mode_reply_is_ephemeral(monkeypatch: pytest.MonkeyPatch) -> N
         },
     )
 
-    result = await slack_reply.slack_reply("the answer")
+    result = await slack_reply.slack_reply("the answer", "final")
 
     assert result == {"success": True}
     assert post.await_args.args == ("C1", "U1", "the answer")
@@ -279,7 +279,7 @@ async def test_ask_mode_falls_back_to_mrkdwn_over_native_limit(
         },
     )
 
-    result = await slack_reply.slack_reply("# Heading\n\n" + "x" * 12000)
+    result = await slack_reply.slack_reply("# Heading\n\n" + "x" * 12000, "final")
 
     assert result == {"success": True}
     assert post.await_args.args[2].startswith("*Heading*\n")
@@ -303,7 +303,7 @@ async def test_ask_mode_refuses_options(monkeypatch: pytest.MonkeyPatch) -> None
         },
     )
 
-    refused = await slack_reply.slack_reply("pick one", options=["a", "b"])
+    refused = await slack_reply.slack_reply("pick one", "final", options=["a", "b"])
 
     assert refused["success"] is False
     assert refused["retry"] is True
@@ -335,7 +335,7 @@ async def test_the_first_ask_reply_replaces_the_acknowledgement(
         slack_reply, "get_config", lambda: _ask_config("https://hooks.slack.com/commands/T1/1/x")
     )
 
-    assert await slack_reply.slack_reply("the answer") == {"success": True}
+    assert await slack_reply.slack_reply("the answer", "final") == {"success": True}
 
     assert replace.await_args.args[0] == "https://hooks.slack.com/commands/T1/1/x"
     assert replace.await_args.args[1] == "the answer"
@@ -357,7 +357,7 @@ async def test_a_later_ask_reply_posts_instead_of_replacing(
         slack_reply, "get_config", lambda: _ask_config("https://hooks.slack.com/commands/T1/1/x")
     )
 
-    assert await slack_reply.slack_reply("a follow-up") == {"success": True}
+    assert await slack_reply.slack_reply("a follow-up", "final") == {"success": True}
 
     replace.assert_not_awaited()
     assert post.await_args.args == ("C1", "U1", "a follow-up")
@@ -375,7 +375,7 @@ async def test_an_unreplaceable_acknowledgement_falls_back_to_a_fresh_ephemeral(
         slack_reply, "get_config", lambda: _ask_config("https://hooks.slack.com/commands/T1/1/x")
     )
 
-    assert await slack_reply.slack_reply("the answer") == {"success": True}
+    assert await slack_reply.slack_reply("the answer", "final") == {"success": True}
 
     assert post.await_args.args == ("C1", "U1", "the answer")
 
