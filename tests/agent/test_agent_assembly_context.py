@@ -48,15 +48,23 @@ def saved_thread_scope(monkeypatch):
 @pytest.mark.asyncio
 async def test_public_agent_excludes_personal_skills_and_tools(saved_thread_scope):
     saved_thread_scope["visibility"] = "public"
+    config = _base_config()
+    config["configurable"]["source"] = "dashboard"
     with patch("agent.server._notion_tools_for", new_callable=AsyncMock, return_value=[]) as notion:
-        captured = await _capture_create_deep_agent_kwargs()
+        captured = await _capture_create_deep_agent_kwargs(config)
     assert captured["skills"] == ["/organization-skills/", "/bundled-skills/"]
     assert "/skills/" not in captured["backend"].routes
     tools = captured["tools"]
     assert isinstance(tools, list)
     tool_names = {_registered_tool_name(tool) for tool in tools}
     assert not tool_names.intersection(
-        {"save_user_instructions", "save_user_skill", "delete_user_skill", "read_user_settings"}
+        {
+            "save_user_instructions",
+            "save_user_settings",
+            "save_user_skill",
+            "delete_user_skill",
+            "read_user_settings",
+        }
     )
     notion.assert_awaited_once_with(None)
     from agent.middleware import WorkspaceSkillsMiddleware
@@ -513,6 +521,42 @@ async def test_agent_includes_read_user_settings_schema() -> None:
     assert read_user_settings in general_purpose["tools"]
 
 
+@pytest.mark.parametrize("source", ["dashboard", "slack"])
+async def test_personal_settings_tool_is_private_and_parent_only(source: str) -> None:
+    config = _base_config()
+    config["configurable"]["source"] = source
+    captured = await _capture_create_deep_agent_kwargs(config)
+    tools = captured["tools"]
+    subagents = captured["subagents"]
+    assert isinstance(tools, list)
+    assert isinstance(subagents, list)
+    assert "save_user_settings" in {_registered_tool_name(tool) for tool in tools}
+    for subagent in subagents:
+        assert "save_user_settings" not in {
+            _registered_tool_name(tool) for tool in subagent.get("tools", [])
+        }
+
+
+@pytest.mark.parametrize(
+    "config_patch",
+    [
+        {"github_login": "someone-else"},
+        {"github_login": None},
+        {"background_task_completion": True},
+        {"source": "schedule"},
+    ],
+)
+async def test_personal_settings_tool_not_exposed_to_unauthorized_runs(
+    config_patch: dict[str, object],
+) -> None:
+    config = _base_config()
+    config["configurable"].update({"source": "dashboard", **config_patch})
+    captured = await _capture_create_deep_agent_kwargs(config)
+    tools = captured["tools"]
+    assert isinstance(tools, list)
+    assert "save_user_settings" not in {_registered_tool_name(tool) for tool in tools}
+
+
 @pytest.mark.asyncio
 async def test_agent_includes_thread_tool_schemas() -> None:
     from agent.tools import get_thread, list_threads, manage_thread
@@ -792,6 +836,7 @@ async def test_general_purpose_subagent_cannot_use_slack_tools() -> None:
         "list_threads",
         "manage_thread",
         "read_user_settings",
+        "save_user_settings",
         "submit_thread_feedback",
         "submit_review_assessment_feedback",
     }

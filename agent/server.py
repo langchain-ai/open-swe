@@ -190,6 +190,7 @@ from agent.tools import (
     save_organization_skill,
     save_plan,
     save_user_instructions,
+    save_user_settings,
     save_user_skill,
     schedule_thread_wakeup,
     slack_add_reaction,
@@ -206,6 +207,7 @@ from agent.tools import (
 )
 from agent.tools.admin_gate import actor_has_admin_context, actor_is_admin, is_private_admin_surface
 from agent.tools.manage_review_approval_policy import manage_review_approval_policy
+from agent.tools.save_user_settings import personal_settings_run_allowed
 from agent.tools.submit_review_assessment_feedback import submit_review_assessment_feedback
 from agent.utils import ttl_cache
 from agent.utils.authorship import (
@@ -464,6 +466,7 @@ def _is_subagent_excluded_tool(name: str) -> bool:
         "read_incident",
         "read_only_sql",
         "read_user_settings",
+        "save_user_settings",
         "record_incident_report",
         "search_incidents",
     }
@@ -1249,6 +1252,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         enter_plan_mode,
         save_plan,
         save_user_instructions,
+        *((save_user_settings,) if personal_settings_run_allowed(cfg) else ()),
         save_user_skill,
         delete_user_skill,
         list_threads,
@@ -1285,6 +1289,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
     if credential_login is None:
         personal_tools = (
             save_user_instructions,
+            save_user_settings,
             save_user_skill,
             delete_user_skill,
             read_user_settings,
