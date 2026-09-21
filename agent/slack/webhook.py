@@ -295,9 +295,21 @@ async def _slack_logins_by_user_id(user_ids: list[str]) -> dict[str, str]:
     return logins
 
 
-def _slack_person(user_id: str, name: str = "", github_login: str = "") -> PersonIdentity:
+async def _slack_person_ids_by_user_id(user_ids: list[str]) -> dict[str, str]:
+    """Map Slack user ids to the person entity ids of linked Open SWE accounts."""
+    person_ids: dict[str, str] = {}
+    for user_id in {value for value in user_ids if value}:
+        user = await User.for_identity("slack", user_id)
+        if user is not None:
+            person_ids[user_id] = f"user:{user.id}"
+    return person_ids
+
+
+def _slack_person(
+    user_id: str, name: str = "", github_login: str = "", person_id: str = ""
+) -> PersonIdentity:
     person: PersonIdentity = {
-        "id": f"slack:{user_id}",
+        "id": person_id or f"slack:{user_id}",
         "platform": "slack",
         "open_swe_account": "linked" if github_login else "unlinked",
     }
@@ -313,6 +325,7 @@ def _slack_sender(
     user_names_by_id: dict[str, str],
     logins_by_user_id: dict[str, str],
     bot_user_id: str,
+    person_ids_by_user_id: dict[str, str] | None = None,
 ) -> tuple[str, PersonIdentity | SystemIdentity, MessageKind]:
     """Resolve a thread message to its sender id, identity, and message kind.
 
@@ -338,7 +351,10 @@ def _slack_sender(
         return bot["id"], bot, "system"
     user_id = str(message.get("user"))
     person = _slack_person(
-        user_id, user_names_by_id.get(user_id, ""), logins_by_user_id.get(user_id, "")
+        user_id,
+        user_names_by_id.get(user_id, ""),
+        logins_by_user_id.get(user_id, ""),
+        (person_ids_by_user_id or {}).get(user_id, ""),
     )
     return person["id"], person, "human"
 
@@ -356,6 +372,7 @@ def _slack_context_input(
     user_names_by_id: dict[str, str],
     logins_by_user_id: dict[str, str],
     *,
+    person_ids_by_user_id: dict[str, str] | None = None,
     channel_id: str,
     bot_user_id: str,
     event_ts: str,
@@ -372,7 +389,7 @@ def _slack_context_input(
         if str(message.get("ts", "")) == str(event_ts):
             continue
         sender_id, identity, kind = _slack_sender(
-            message, user_names_by_id, logins_by_user_id, bot_user_id
+            message, user_names_by_id, logins_by_user_id, bot_user_id, person_ids_by_user_id
         )
         if sender_id not in introduced:
             run_messages.append(
@@ -428,6 +445,7 @@ def _slack_context_input(
         trigger_id,
         user_names_by_id.get(trigger_id, ""),
         logins_by_user_id.get(trigger_id, ""),
+        (person_ids_by_user_id or {}).get(trigger_id, ""),
     )
     trigger_sender_id = trigger_person["id"]
     trigger_kind: MessageKind = "human"
@@ -781,6 +799,7 @@ async def _process_slack_mention_impl(
     if user_id and user_name and user_id not in user_names_by_id:
         user_names_by_id[user_id] = user_name
     logins_by_user_id = await _slack_logins_by_user_id([*context_user_ids, user_id])
+    person_ids_by_user_id = await _slack_person_ids_by_user_id([*context_user_ids, user_id])
     if common.thread_is_private(thread_metadata):
         context_messages = [
             message
@@ -1091,6 +1110,7 @@ async def _process_slack_mention_impl(
         context_messages,
         user_names_by_id,
         logins_by_user_id,
+        person_ids_by_user_id=person_ids_by_user_id,
         channel_id=channel_id,
         bot_user_id=bot_user_id,
         event_ts=event_ts,

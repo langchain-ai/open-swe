@@ -4,6 +4,32 @@ import { describe, expect, it } from "vitest"
 import { streamMessagesToUi } from "./streamMessagesToUi"
 
 describe("streamMessagesToUi", () => {
+  it("keeps platform turn metadata out of the transcript", () => {
+    const messages = streamMessagesToUi([
+      new HumanMessage({
+        id: "sender-context",
+        content:
+          '<input-message sender="system:sender-context" surface="automation" kind="system"><content>Metadata for Alice</content></input-message>',
+      }),
+      new HumanMessage({
+        id: "collaboration",
+        content:
+          '<input-message sender="system:collaboration" surface="automation" kind="system"><content>Git identities you may author commits as</content></input-message>',
+      }),
+      new HumanMessage({
+        id: "person-message",
+        content:
+          '<input-message sender="github:alice" surface="web" kind="human"><content>Ship it</content></input-message>',
+      }),
+    ])
+
+    expect(messages).toHaveLength(1)
+    expect(messages[0]).toMatchObject({
+      author: "user",
+      chunks: [{ kind: "text", text: "Ship it" }],
+    })
+  })
+
   it("hides entity introductions and renders structured senders distinctly", () => {
     const messages = streamMessagesToUi([
       new HumanMessage({

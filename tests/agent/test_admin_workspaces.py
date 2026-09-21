@@ -477,8 +477,10 @@ async def test_refresh_start_refuses_while_one_is_running(
 
 
 def test_sender_context_includes_workspace_admin_status() -> None:
-    assert "Workspace admin: yes." in construct_sender_context(None, workspace_admin=True)
-    assert "Workspace admin: no." in construct_sender_context(None)
+    assert "Workspace admin: yes" in construct_sender_context(
+        None, person_id="user:1", workspace_admin=True
+    )
+    assert "Workspace admin: no" in construct_sender_context(None, person_id="user:1")
 
 
 def test_workspace_instructions_render_in_system_prompt() -> None:

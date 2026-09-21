@@ -93,6 +93,14 @@ def _xml_attr(value: object) -> str:
     return escape(str(value), quote=True)
 
 
+def split_person_id(person: PersonIdentity) -> tuple[str, str]:
+    """``(platform, external id)`` from ``person["id"]``; platform may be empty."""
+    platform, separator, external_id = person["id"].partition(":")
+    if not separator:
+        return person.get("platform", ""), platform
+    return platform, external_id
+
+
 def _validate_entity_id(entity_id: str) -> str:
     if not isinstance(entity_id, str) or not entity_id.strip() or ":" not in entity_id:
         raise ValueError("entity id must be a non-empty namespaced identifier")

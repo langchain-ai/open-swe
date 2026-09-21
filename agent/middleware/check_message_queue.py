@@ -24,6 +24,7 @@ from agent.input_messages import (
 )
 from agent.middleware.trace import scrub_middleware_inputs
 from agent.prompts import load_prompt
+from agent.users import User
 from agent.utils.dashboard_handoff import DASHBOARD_HANDOFF_BODY
 from agent.utils.http import DEFAULT_HTTP_TIMEOUT
 from agent.utils.multimodal import fetch_image_block, vision_not_supported_warning
@@ -290,6 +291,7 @@ async def check_message_queue_before_model(  # noqa: PLR0911
                         value = sender.get(key)
                         if isinstance(value, str):
                             cast(dict[str, str], person)[key] = value
+                    person = await User.canonical_person(person)
                     structured = build_input_messages(
                         blocks,
                         {"sender_id": person["id"], "surface": "web", "kind": "human"},

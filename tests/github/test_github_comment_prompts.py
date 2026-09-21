@@ -9,7 +9,11 @@ from langchain_core.outputs import ChatGeneration, ChatResult
 from agent.dashboard.agent_overrides import profile_draft_prs
 from agent.github import comments as github_comments
 from agent.github import webhook as github_webhooks
-from agent.prompt import construct_sender_context, construct_system_prompt
+from agent.prompt import (
+    construct_collaboration_context,
+    construct_sender_context,
+    construct_system_prompt,
+)
 from agent.utils.authorship import (
     OPEN_SWE_BOT_EMAIL,
     OPEN_SWE_BOT_NAME,
@@ -163,17 +167,19 @@ def test_construct_system_prompt_shell_escapes_user_name() -> None:
 
     system_prompt = construct_system_prompt(working_dir="/workspace")
     sender_context = construct_sender_context(
-        identity,
-        model_id="openai:gpt-5.6-luna",
-        reasoning_effort="xhigh",
+        identity, person_id="user:0199e0ae-0000-7000-8000-000000000000"
+    )
+    collaboration_context = construct_collaboration_context(
+        identity, model_id="openai:gpt-5.6-luna", reasoning_effort="xhigh"
     )
 
     assert hostile not in system_prompt
     assert f"git config user.name {shlex.quote(hostile)}" in sender_context
     assert f"git config user.name {hostile}" not in sender_context
+    assert f"git config user.name {hostile}" not in collaboration_context
     assert (
         "Made by [Open SWE](https://github.com/langchain-ai/open-swe) · openai:gpt-5.6-luna (xhigh)"
-    ) in sender_context
+    ) in collaboration_context
 
 
 def test_add_pr_collaboration_note_replaces_legacy_footer() -> None:

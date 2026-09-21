@@ -52,6 +52,7 @@ from agent.threads.summary import (
     repo_config_from_metadata,
     thread_source,
 )
+from agent.users import User
 from agent.utils.dashboard_handoff import DASHBOARD_HANDOFF_BODY
 from agent.utils.json_types import JsonObject, as_thread_dict, thread_metadata
 from agent.utils.thread_ops import langgraph_client
@@ -573,6 +574,8 @@ async def _enrich_run_start_command(
     }
     if email:
         person["email"] = email
+    person = await User.canonical_person(person)
+    sender_id = person["id"]
     structured = build_input_messages(
         content,
         {"sender_id": sender_id, "surface": "web", "kind": "human"},

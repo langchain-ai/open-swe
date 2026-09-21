@@ -521,7 +521,7 @@ def _open_with_body(body: str) -> dict[str, Any]:
 
 def _stub_token(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(opr, "private_credential_login", AsyncMock(return_value="test-owner"))
-    monkeypatch.setattr(opr, "_resolve_pr_author_token", lambda: _coro(("tok", "user")))
+    monkeypatch.setattr(opr, "_resolve_pr_author_token", lambda *_a, **_k: _coro(("tok", "user")))
 
 
 def _stub_plan(monkeypatch: pytest.MonkeyPatch, plan: dict[str, Any] | None) -> None:

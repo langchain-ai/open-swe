@@ -5,6 +5,7 @@ from xml.etree import ElementTree
 import pytest
 
 from agent import thread_feedback
+from agent.users import User
 
 dispatch = importlib.import_module("agent.dispatch")
 
@@ -234,8 +235,8 @@ async def test_dashboard_followup_records_activity_even_if_dispatch_fails(
     assert client.threads.metadata[thread_feedback.ACTIVITY_KEY] == 123000
 
 
-def test_dispatch_slack_identity_includes_verified_context() -> None:
-    run_input = dispatch._dispatch_input(
+async def test_dispatch_slack_identity_includes_verified_context() -> None:
+    run_input = await dispatch._dispatch_input(
         "hello",
         "slack",
         {
@@ -266,3 +267,23 @@ def test_dispatch_slack_identity_includes_verified_context() -> None:
     assert topic is not None
     assert topic.attrib["trust"] == "untrusted"
     assert channel.findtext("purpose") == "Engineering work"
+
+
+@pytest.mark.usefixtures("registry_db")
+async def test_dispatch_keys_a_linked_slack_sender_on_their_person(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("ALLOWED_GITHUB_USERS", "mason-gh")
+    user = await User.sign_in("github", "2001", login="mason-gh")
+    await user.link("slack", "U123", team_id="T1")
+
+    run_input = await dispatch._dispatch_input(
+        "hello",
+        "slack",
+        {"slack_thread": {"triggering_user_id": "U123", "channel_id": "C123"}},
+    )
+
+    person = ElementTree.fromstring(run_input["messages"][0]["content"])
+    envelope = ElementTree.fromstring(run_input["messages"][-1]["content"])
+    assert person.attrib["id"] == f"user:{user.id}"
+    assert envelope.attrib["sender"] == f"user:{user.id}"

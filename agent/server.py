@@ -114,6 +114,7 @@ from agent.middleware.model_selection import ModelSelectionState, RoutingMode
 from agent.middleware.prepare_run import PrepareRunState
 from agent.middleware.sandbox_circuit_breaker import post_sandbox_unreachable_notification
 from agent.prompt import (
+    construct_collaboration_context,
     construct_sender_context,
     construct_system_prompt,
     render_open_swe_shared_base,
@@ -506,6 +507,12 @@ _SENDER_CONTEXT_SYSTEM: SystemIdentity = {
     "platform": "open-swe",
 }
 
+_COLLABORATION_SYSTEM: SystemIdentity = {
+    "id": "system:collaboration",
+    "display_name": "Collaboration",
+    "platform": "open-swe",
+}
+
 
 # Added to an admin thread's tools; see the admin-thread section of the prompt.
 ADMIN_TOOLS = (
@@ -707,10 +714,29 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
         }
 
     @staticmethod
+    def _sender_subject_id(state: PrepareRunState, sender_id: str | None) -> str | None:
+        """The entity the sender context describes: the latest human message's sender."""
+        if sender_id is not None:
+            return sender_id
+        return next(
+            (
+                candidate_id
+                for candidate in reversed(state.get("messages") or [])
+                if isinstance(candidate, HumanMessage)
+                and (candidate_id := message_sender_id(candidate.content, kind="human")) is not None
+            ),
+            None,
+        )
+
+    @staticmethod
     def _sender_context_messages(
-        state: PrepareRunState, sender_context: str, *, sender_id: str | None = None
+        state: PrepareRunState, sender_context: str, *, sender_id: str
     ) -> list[Any]:
         """Sender context as its own message, appended after the run's input.
+
+        Emitted every turn: the block is scoped to the message it follows, so
+        suppressing it as a duplicate left later turns describing a sender the
+        model was told not to carry forward.
 
         Splicing it into the triggering message rewrote history: that message is
         already cached from the run that received it, so every later run sent a
@@ -718,27 +744,27 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
         message, so this arrives as a collapsed context pill rather than markup
         inside the user's own text.
         """
-        if not any(
-            isinstance(candidate, HumanMessage) for candidate in state.get("messages") or []
-        ):
-            return []
-        if sender_id is None:
-            sender_id = next(
-                (
-                    candidate_id
-                    for candidate in reversed(state.get("messages") or [])
-                    if isinstance(candidate, HumanMessage)
-                    and (candidate_id := message_sender_id(candidate.content, kind="human"))
-                    is not None
-                ),
-                None,
-            )
-        if sender_id is None:
-            return []
+        identity: SystemIdentity = {**_SENDER_CONTEXT_SYSTEM, "subject_id": sender_id}
+        return cast(
+            list[Any],
+            build_input_messages(
+                sender_context,
+                {
+                    "sender_id": _SENDER_CONTEXT_SYSTEM["id"],
+                    "surface": "automation",
+                    "kind": "system",
+                },
+                systems=[identity],
+                injected_dynamic_context_hashes=visible_dynamic_context_hashes(state),
+            ),
+        )
+
+    @staticmethod
+    def _collaboration_messages(state: PrepareRunState, collaboration_context: str) -> list[Any]:
+        """Standing attribution rules and roster, reintroduced only when they change."""
         identity: SystemIdentity = {
-            **_SENDER_CONTEXT_SYSTEM,
-            "subject_id": sender_id,
-            "context_hash": hashlib.sha256(sender_context.encode()).hexdigest(),
+            **_COLLABORATION_SYSTEM,
+            "context_hash": hashlib.sha256(collaboration_context.encode()).hexdigest(),
         }
         introduction_hash = dynamic_context_hash(system_introduction(identity)["content"])
         if introduction_hash in visible_dynamic_context_hashes(state):
@@ -746,9 +772,9 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
         return cast(
             list[Any],
             build_input_messages(
-                sender_context,
+                collaboration_context,
                 {
-                    "sender_id": _SENDER_CONTEXT_SYSTEM["id"],
+                    "sender_id": _COLLABORATION_SYSTEM["id"],
                     "surface": "automation",
                     "kind": "system",
                 },
@@ -825,24 +851,41 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
                     cast(ModelSelectionState, state), plan_mode=self._plan_mode
                 )
                 attribution_model_id, attribution_effort = self._routing_defaults[attribution_route]
-            sender_context = construct_sender_context(
-                triggering_user_identity,
-                user_custom_instructions=sender_instructions,
-                draft_prs=self._draft_prs,
-                thread_url=dashboard_thread_url(self._thread_id),
-                model_id=attribution_model_id,
-                reasoning_effort=attribution_effort,
-                workspace_admin=await _workspace_admin(self._config or {}, self._profile_login),
-                participant_identities=participant_identities,
+            bot_id = (
+                cfg.slack_thread.triggering_bot_id
+                if self._source == "slack" and cfg.slack_thread
+                else ""
             )
-        bot_id = (
-            cfg.slack_thread.triggering_bot_id
-            if self._source == "slack" and cfg.slack_thread
-            else ""
-        )
-        sender_messages = self._sender_context_messages(
-            state, sender_context, sender_id=f"system:slack-bot-{bot_id}" if bot_id else None
-        )
+            subject_id = self._sender_subject_id(
+                state, f"system:slack-bot-{bot_id}" if bot_id else None
+            )
+            sender_messages: list[Any] = []
+            if subject_id is not None:
+                sender_messages = [
+                    *self._collaboration_messages(
+                        state,
+                        construct_collaboration_context(
+                            triggering_user_identity,
+                            participant_identities,
+                            thread_url=dashboard_thread_url(self._thread_id),
+                            model_id=attribution_model_id,
+                            reasoning_effort=attribution_effort,
+                        ),
+                    ),
+                    *self._sender_context_messages(
+                        state,
+                        construct_sender_context(
+                            triggering_user_identity,
+                            person_id=subject_id,
+                            user_custom_instructions=sender_instructions,
+                            draft_prs=self._draft_prs,
+                            workspace_admin=await _workspace_admin(
+                                self._config or {}, self._profile_login
+                            ),
+                        ),
+                        sender_id=subject_id,
+                    ),
+                ]
         try:
             async with aphase(self._thread_id, "prepare.record_run"):
                 await client.threads.update(

@@ -45,6 +45,7 @@ from agent.input_messages import (
 )
 from agent.invocation import new_invocation_id, resolve_invocation_id, with_invocation_id
 from agent.run_config import RunConfig
+from agent.users import User
 
 logger = logging.getLogger(__name__)
 
@@ -65,7 +66,9 @@ V3_RUN_STREAM_MODES: tuple[str, ...] = (
 )
 
 
-def _dispatch_input(content: ContentBlocks, source: str, configurable: dict[str, Any]) -> RunInput:
+async def _dispatch_input(
+    content: ContentBlocks, source: str, configurable: dict[str, Any]
+) -> RunInput:
     surface: Surface = (
         source
         if source in {"slack", "linear", "github", "web", "desktop", "eval"}
@@ -119,6 +122,9 @@ def _dispatch_input(content: ContentBlocks, source: str, configurable: dict[str,
     if not sender_id and surface == "linear" and email:
         sender_id = f"linear:{email.lower()}"
         people.append({"id": sender_id, "platform": "linear", "email": email})
+    if sender_id and people:
+        people[-1] = await User.canonical_person(people[-1])
+        sender_id = people[-1]["id"]
     kind = "human" if sender_id else "system"
     if not sender_id:
         sender_id = f"system:{source.replace('_', '-')}"
@@ -328,7 +334,7 @@ async def dispatch_agent_run(
                 systems=systems,
             )
             if context is not None
-            else _dispatch_input(content, source, configurable)
+            else await _dispatch_input(content, source, configurable)
         )
     client = client or dispatch_client()
     if assistant_id == "agent" and source in {"slack", "web", "desktop", "dashboard"}:

@@ -295,7 +295,7 @@ def _text(content: Any) -> str:
 
 
 _FRAMING_SENDER_IDS = ("system:slack-context", "system:dashboard-handoff")
-_METADATA_SENDER_IDS = ("system:sender-context",)
+_METADATA_SENDER_IDS = ("system:sender-context", "system:collaboration")
 
 
 def _is_framing_block(header: str) -> bool:
