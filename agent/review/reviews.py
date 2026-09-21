@@ -713,14 +713,26 @@ class _GithubPreviewPull(BaseModel):
     user: _GithubUser | None = None
 
 
-async def get_pull_request_preview(owner: str, repo: str, pr_number: int) -> PullRequestPreview:
+def _preview_thread(thread: dict[str, Any]) -> PreviewThread:
+    parsed = PreviewThread.model_validate(thread)
+    # Review bots hide their bookkeeping in HTML comments, which would otherwise
+    # be the whole of what a one-line preview shows.
+    return parsed.model_copy(update={"body": _clean_comment_body(parsed.body)})
+
+
+async def get_pull_request_preview(
+    owner: str, repo: str, pr_number: int, token: str
+) -> PullRequestPreview:
     """Description, the largest changed files, and unresolved threads for any PR.
 
     Unlike ``get_review`` this does not need a reviewer thread, so it answers for
     every PR the viewer can reach. Only file metadata is read — the contents live
     behind ``get_review_diff``, which is far too heavy to open a preview with.
+
+    Reads with the caller's own token rather than the App's: the preview only ever
+    shows a PR the caller can already open, so the App installation is beside the
+    point here, unlike the published review a reviewer thread backs.
     """
-    token = await _require_app_token()
     async with github_client(token=token, timeout=_GITHUB_TIMEOUT) as client:
         pull_payload, file_payload, threads = await asyncio.gather(
             _github_get(f"/repos/{owner}/{repo}/pulls/{pr_number}", token),
@@ -753,11 +765,7 @@ async def get_pull_request_preview(owner: str, repo: str, pr_number: int) -> Pul
         deletions=pull.deletions,
         changed_files=pull.changed_files or len(files),
         files=files[:_PREVIEW_FILE_LIMIT],
-        unresolved=(
-            None
-            if threads is None
-            else [PreviewThread.model_validate(thread) for thread in threads]
-        ),
+        unresolved=(None if threads is None else [_preview_thread(thread) for thread in threads]),
     )
 
 

@@ -202,7 +202,10 @@ async def api_get_pull_request_preview(
     session: dict[str, Any] = SESSION_DEP,
 ) -> PullRequestPreview:
     await require_repo_access_for_user(session["sub"], f"{owner}/{repo}")
-    return await get_pull_request_preview(owner, repo, pr_number)
+    token = await get_valid_access_token(session["sub"])
+    if not token:
+        raise HTTPException(401, "GitHub token unavailable, re-login required")
+    return await get_pull_request_preview(owner, repo, pr_number, token)
 
 
 @router.get("/reviews/{owner}/{repo}/{pr_number}/diff")

@@ -152,6 +152,16 @@ For one continuous local instance across worktrees, link `.langgraph_api` to the
 
 Keep state, backups, and environment files ignored by Git. Reuse the existing local environment, including its token-encryption settings, without printing credentials. `.worktreeinclude` copies local state into worktrees; it does not add that state to version control.
 
+## Sign in locally with the `gh` CLI
+
+The dashboard's per-user reads — the PR list, one PR's details, a PR preview — run on the signed-in person's own OAuth token, and the `gh` CLI already holds one. `GET /dashboard/api/auth/dev-login` stores it and mints the session, so a machine-local GitHub App (step 2) is only needed for the App-backed endpoints. With no `GITHUB_APP_CLIENT_ID` configured, **Continue with GitHub** redirects here on its own; `/dashboard/api/auth/dev-login?redirect_to=/agents/reviews` skips the page.
+
+It is refused with a 404 outside `langgraph dev`, which is the only runtime reporting the `local_dev` API variant, and the `ALLOWED_GITHUB_USERS` allowlist still applies — set it to your own login. `DASHBOARD_JWT_SECRET` signs the session.
+
+What still needs the App, and answers `503 GitHub App token unavailable` without one: a published review and its diff, inline review comment reads and writes, and the webhook flows. The reviews list and each PR's preview read as you, so they work.
+
+The `local-gh-dev` skill in `.claude/skills/` walks through the whole loop, including the port and Postgres conflicts between worktrees.
+
 ## Dashboard on the Vite dev server directly
 
 `make dev-ui` is the simple way to develop the UI. Opening Vite on `http://localhost:3000` directly also works:
