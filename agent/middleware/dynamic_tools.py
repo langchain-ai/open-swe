@@ -191,6 +191,8 @@ class DynamicToolMiddleware(OpenSWEMiddleware[DynamicToolState]):
         return self._resolved.get(group, _Resolved()).tools.get(name)
 
     async def abefore_agent(self, state: DynamicToolState, runtime: Runtime) -> dict[str, Any]:  # noqa: ARG002
+        if state.get("_deepagents_forked_context"):
+            return {}
         return {"loaded_integration_tools": Overwrite([])}
 
     async def awrap_model_call(

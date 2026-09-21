@@ -677,7 +677,7 @@ async def upsert_agent_thread_metadata(
 class SlackRepoResolution:
     """A Slack run's repository, plus whether anything actually named it.
 
-    OEP-0003 puts a named repository ahead of a Slack channel's workspace
+    A named repository takes precedence over a Slack channel's workspace
     binding and a deployment-wide default behind it, so routing needs to tell
     the two apart. ``explicit`` is true only for a repository the thread or the
     channel description named.

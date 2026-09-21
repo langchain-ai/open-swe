@@ -141,7 +141,7 @@ Open SWE includes a LangGraph backend, a web dashboard, and an experimental desk
 - **[Installation Guide](docs/INSTALLATION.md)** — Deploy Open SWE for a team: LangGraph Platform or Docker, the GitHub and Slack apps, model providers, environment variables, and the optional Linear trigger
 - **[Development Guide](docs/DEVELOPMENT.md)** — Run it on your machine, with hot reload for the dashboard and an ngrok tunnel for webhooks
 - **[Customization Guide](docs/CUSTOMIZATION.md)** — Change models, sandboxes, tools, skills, prompts, triggers, and middleware
-- **[Open SWE Enhancement Proposals](oeps/README.md)** — Review consequential product, architecture, security, and process decisions
+- **Architecture references:** [Workspaces](docs/reference/workspaces.md) and [expedited Slack review](docs/reference/expedited-slack-review.md)
 
 One deployment serves the API, the webhooks, and the dashboard from a single URL. Locally:
 
