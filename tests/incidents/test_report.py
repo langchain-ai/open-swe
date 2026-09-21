@@ -42,6 +42,62 @@ def test_report_keeps_supported_claims_and_drops_invented_or_partial_citations()
     assert [evidence.id for evidence in report.evidence] == ["slack:1"]
 
 
+def test_investigation_sections_are_cited_and_a_skipped_recurrence_check_is_visible():
+    collected = evidence_tools.EvidenceCollector()
+    collected.evidence = [Evidence(id="slack:1", source="slack", summary="Alert")]
+    draft = ReportDraft.model_validate(
+        {
+            "summary": [{"text": "Upload deadline exhausted", "evidence_ids": ["slack:1"]}],
+            "problem": [
+                {"text": "post_/runs/multipart breached its SLO", "evidence_ids": ["slack:1"]}
+            ],
+            "cause": [{"text": "A 61MB field blew the 60s deadline", "evidence_ids": ["slack:1"]}],
+            "previous_occurrence": [{"text": "INC-1714 on Sept 18", "evidence_ids": ["missing"]}],
+        }
+    )
+
+    report = finalize_report(draft, collected)
+
+    assert report.problem == "post_/runs/multipart breached its SLO [slack:1]"
+    assert report.cause == "A 61MB field blew the 60s deadline [slack:1]"
+    # The uncited recurrence claim is dropped, and what replaces it says the check is
+    # missing rather than reading as "this has never happened before".
+    assert report.previous_occurrence == "No previous-occurrence check was recorded."
+    assert report.gaps
+
+
+def test_sections_without_a_headline_still_conclude_so_the_investigation_publishes():
+    collected = evidence_tools.EvidenceCollector()
+    collected.evidence = [Evidence(id="slack:1", source="slack", summary="Alert")]
+    report = finalize_report(
+        ReportDraft.model_validate(
+            {"problem": [{"text": "The gateway is returning 503s", "evidence_ids": ["slack:1"]}]}
+        ),
+        collected,
+    )
+    # outcome is what releases the one automatic post, so a filled-in investigation that
+    # skipped the headline must not read as inconclusive.
+    assert report.outcome == "findings"
+    assert report.summary == "The gateway is returning 503s [slack:1]"
+
+
+def test_a_recurrence_finding_survives_when_it_is_cited():
+    collected = evidence_tools.EvidenceCollector()
+    collected.evidence = [Evidence(id="incident:1714", source="incident", summary="Prior")]
+    report = finalize_report(
+        ReportDraft.model_validate(
+            {
+                "summary": [{"text": "Second occurrence", "evidence_ids": ["incident:1714"]}],
+                "previous_occurrence": [
+                    {"text": "INC-1714 closed on Sept 18", "evidence_ids": ["incident:1714"]}
+                ],
+            }
+        ),
+        collected,
+    )
+    assert report.previous_occurrence == "INC-1714 closed on Sept 18 [incident:1714]"
+
+
 @pytest.mark.parametrize("references", [[], ["invented"]])
 def test_report_without_supported_summary_remains_inconclusive(references):
     report = finalize_report(

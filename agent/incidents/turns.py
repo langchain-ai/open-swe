@@ -33,9 +33,18 @@ logger = logging.getLogger(__name__)
 # The whole channel is one conversation, like a code channel session.
 SESSION_TS = "0"
 AUTOMATIC_DELAY_SECONDS = 15
+FIRST_INVESTIGATION_REQUEST = (
+    "This incident channel has its first activity. Run the full investigation now, without "
+    "waiting to be asked: identify the problem from the alert, check whether it has happened "
+    "before, size the impact against comparable regions and endpoints, establish the cause, and "
+    "propose the steps to solve it, including any pull request or runbook that already covers "
+    "this failure mode. Record the report with those sections filled in; it is published to the "
+    "channel once."
+)
 AUTOMATIC_REQUEST = (
-    "New activity arrived in the incident channel. Review the new context messages, "
-    "update your investigation, and record the report."
+    "New activity arrived in the incident channel. Review the new context messages and record an "
+    "updated report so the stored investigation and postmortem stay current. This turn does not "
+    "post to the channel, so do not restate what responders already said there."
 )
 FAILURE_NOTICE = (
     "The incident agent hit an error on its last turn. Mention me with a question to retry."
@@ -169,8 +178,19 @@ def _configurable(
     return configurable
 
 
+async def _automatic_request(record: Incident) -> str:
+    """The full flow until the investigation has been published, then quiet upkeep."""
+    latest = await service.REPORTS.get(record.id)
+    published = latest is not None and latest.investigation_posted
+    return AUTOMATIC_REQUEST if published else FIRST_INVESTIGATION_REQUEST
+
+
 def _input(
-    record: Incident, *, request: str | None, requester: PersonIdentity | None
+    record: Incident,
+    *,
+    request: str | None,
+    requester: PersonIdentity | None,
+    automatic_request: str = AUTOMATIC_REQUEST,
 ) -> dict[str, Any]:
     channel = f"slack:{record.channel_id}"
     if request is None:
@@ -178,7 +198,7 @@ def _input(
             "messages": [
                 system_introduction(_INCIDENTS_SYSTEM),
                 system_input(
-                    AUTOMATIC_REQUEST,
+                    automatic_request,
                     {
                         "sender_id": _INCIDENTS_SYSTEM["id"],
                         "channel_id": channel,
@@ -227,7 +247,12 @@ async def dispatch_turn(
     run = await create_durable_run(
         record.thread_id,
         "agent",
-        input=_input(record, request=request, requester=requester),
+        input=_input(
+            record,
+            request=request,
+            requester=requester,
+            automatic_request=AUTOMATIC_REQUEST if explicit else await _automatic_request(record),
+        ),
         source="incidents_agent",
         config={
             "configurable": _configurable(

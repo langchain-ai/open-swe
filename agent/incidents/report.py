@@ -25,7 +25,10 @@ class Claim(BaseModel):
 
 class ReportDraft(BaseModel):
     summary: list[Claim] = Field(default_factory=list, max_length=6)
+    problem: list[Claim] = Field(default_factory=list, max_length=4)
+    previous_occurrence: list[Claim] = Field(default_factory=list, max_length=4)
     impact: list[Claim] = Field(default_factory=list, max_length=6)
+    cause: list[Claim] = Field(default_factory=list, max_length=4)
     next_steps: list[Claim] = Field(default_factory=list, max_length=3)
     hypotheses: list[Hypothesis] = Field(default_factory=list, max_length=8)
     gaps: list[str] = Field(default_factory=list, max_length=10)
@@ -56,22 +59,39 @@ claim. Do not invent IDs or links. A claim with no evidence belongs in an open q
 not a finding. Respect each source tool's scope and time window; disclose incomplete
 coverage.
 
+Work the investigation in this order, and do not stop early because one step came back
+empty. First establish the problem: which monitor, service, and endpoint fired, and what
+the alert actually measures. Second, check whether this happened before: call
+search_incidents, and query the incident tracker when one is connected. A recurrence is
+the single most valuable thing you can report, so name the prior incident, when it closed,
+and how it was resolved. Third, size the impact: prefer aggregate error rates and affected
+volume, and compare against the other regions, environments, or endpoints the same monitor
+covers. Fourth, establish the cause, separating correlation from proof and naming the
+change or condition that explains the telemetry. Fifth, propose the steps to solve it,
+including any existing pull request or runbook that already addresses this failure mode.
+
 Finish every investigative turn by calling record_incident_report exactly once with your
 findings. When the responder only asked to pause, resume, or complete the incident, call
 manage_incident instead; it notifies the channel, and the turn ends without a report. It
-stores the report, updates the postmortem summary, and posts the channel update when a
-responder asked a question, or, unprompted, when the findings changed and the channel has
-been quiet long enough; never post findings through other Slack tools. Record the report
-either way: a held one is offered again on the next turn, so never repost it by hand.
-The summary is also the Slack update: use at most two short sentences about what
-changed or the direct answer. Preserve replay/test context and uncertainty. Use one
-sentence for impact. Keep detailed hypotheses, checks, and open questions in their own
-fields. Consolidate repeated access failures into one gap per source. Use next_steps for
-up to three concrete recommendations, highest priority first, citing the observations
-motivating each; these are proposed actions, never claims of completed work. Leave
-next_steps empty when there is no useful recommendation. Use an empty summary when no
-supported observation can be made. Use gaps to describe missing coverage and questions
-for the few missing facts a responder could supply.
+stores the report, updates the postmortem summary, and posts to the channel when a
+responder asked a question, or once for the first automatic investigation that reaches a
+supported conclusion; never post findings through other Slack tools. Record the report on
+every turn either way, including turns that will not post: the stored report and the
+postmortem are what later turns and the dashboard read, so never repost one by hand.
+
+Fill every field the investigation covered, because they are published as named sections:
+problem, previous_occurrence, impact, cause, and next_steps as the steps to solve. Keep
+each to one or two sentences. State previous_occurrence explicitly even when the search
+came back empty, so a responder can see the check happened. Answer the directed question
+in summary, and otherwise use summary for a one-sentence headline of the current verdict;
+it is what the dashboard and the completion notice show. Preserve replay/test context and
+uncertainty. Keep detailed hypotheses, checks, and open questions in their own fields.
+Consolidate repeated access failures into one gap per source. Use next_steps for up to
+three concrete recommendations, highest priority first, citing the observations motivating
+each; these are proposed actions, never claims of completed work. Leave next_steps empty
+when there is no useful recommendation. Use an empty summary when no supported observation
+can be made. Use gaps to describe missing coverage and questions for the few missing facts
+a responder could supply.
 """
 
 
@@ -89,7 +109,10 @@ def digest_fields(report: IncidentReport) -> dict[str, Any]:
 
     return {
         "summary": bare(report.summary),
+        "problem": bare(report.problem),
+        "previous_occurrence": bare(report.previous_occurrence),
         "impact": bare(report.impact),
+        "cause": bare(report.cause),
         "outcome": report.outcome,
         "next_steps": [bare(step) for step in report.next_steps],
         "hypotheses": [
@@ -147,7 +170,10 @@ def finalize_report(draft: ReportDraft, collector: EvidenceCollector) -> Inciden
         ]
 
     summary = " ".join(render(draft.summary))
+    problem = " ".join(render(draft.problem))
+    previous_occurrence = " ".join(render(draft.previous_occurrence))
     impact = " ".join(render(draft.impact))
+    cause = " ".join(render(draft.cause))
     next_steps = render(draft.next_steps)
     hypotheses = [
         Hypothesis(
@@ -161,11 +187,20 @@ def finalize_report(draft: ReportDraft, collector: EvidenceCollector) -> Inciden
     gaps = collector.gaps + [redact(gap, 500) for gap in draft.gaps]
     if dropped:
         gaps.append("Claims with missing or unknown evidence citations were omitted.")
+    # A turn that fills the sections but skips the headline has still concluded something.
+    # Falling back to the problem keeps the dashboard readable and, because the outcome is
+    # what releases the automatic post, stops a real investigation from going unpublished.
+    headline = summary or problem
     return IncidentReport(
-        summary=summary or "No evidence-backed conclusion was established.",
+        summary=headline or "No evidence-backed conclusion was established.",
+        problem=problem,
+        # A skipped recurrence check is worth showing: it is the section responders rely on
+        # most, and an empty one would otherwise read as "this has never happened before".
+        previous_occurrence=previous_occurrence or "No previous-occurrence check was recorded.",
         impact=impact or "Impact remains unverified.",
+        cause=cause,
         next_steps=next_steps,
-        outcome="findings" if summary else "inconclusive",
+        outcome="findings" if headline else "inconclusive",
         hypotheses=hypotheses,
         evidence=collector.evidence,
         checked=list(dict.fromkeys(collector.checked)),

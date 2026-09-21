@@ -8,7 +8,12 @@ import httpx
 import pytest
 
 from agent.incidents import service, turns
-from agent.incidents.models import Incident, IncidentPolicy
+from agent.incidents.models import (
+    Incident,
+    IncidentPolicy,
+    IncidentReport,
+    IncidentReportRecord,
+)
 from agent.incidents.report import CONTEXT_MARKER
 
 
@@ -97,7 +102,29 @@ async def test_schedule_creates_one_debounced_system_turn(record, policy, platfo
     # Present and null, so a stale question on the thread cannot survive into this turn.
     assert configurable["incident_request"] is None
     assert kwargs["metadata"]["incident_turn"] == "automatic"
-    assert "New activity" in json.dumps(kwargs["input"])
+    # Nothing published yet, so the first turn runs the whole investigation unprompted.
+    assert turns.FIRST_INVESTIGATION_REQUEST in json.dumps(kwargs["input"])
+
+
+async def test_automatic_turns_go_quiet_once_the_investigation_is_published(
+    record, policy, platform
+):
+    """The one automatic message is spent, so later turns only keep the record current."""
+    await service.REPORTS.put(
+        record.id,
+        IncidentReportRecord(
+            incident_id=record.id,
+            report=IncidentReport(summary="Deadline exhausted on oversized uploads"),
+            digest="d1",
+            investigation_posted=True,
+        ),
+    )
+
+    assert await turns.schedule_automatic_turn(record, policy) is True
+
+    rendered = json.dumps(turns.create_durable_run.await_args.kwargs["input"])
+    assert turns.AUTOMATIC_REQUEST in rendered
+    assert turns.FIRST_INVESTIGATION_REQUEST not in rendered
 
 
 async def test_paused_and_completed_incidents_do_not_schedule(record, policy, platform):
