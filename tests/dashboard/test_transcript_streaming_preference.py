@@ -60,6 +60,13 @@ async def test_transcript_streaming_is_off_until_the_user_turns_it_on(
     assert saved.json()["transcript_streaming"] is True
     assert (await client.get(PREFERENCES_URL)).json()["transcript_streaming"] is True
 
+    # A client that predates the field (an older desktop build) saves the other
+    # preferences without it; that must not switch the reader back.
+    saved = await client.put(PREFERENCES_URL, json={"default_visibility": "public"})
+
+    assert saved.json()["default_visibility"] == "public"
+    assert saved.json()["transcript_streaming"] is True
+
 
 async def test_the_session_payload_carries_the_opt_in(
     client: httpx.AsyncClient, store: dict[str, dict[str, Any]]

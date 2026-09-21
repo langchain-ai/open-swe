@@ -22,8 +22,9 @@ class UserPreferencesUpdate(BaseModel):
     local_tracing_project: str | None = None
     default_workspace: str | None = None
     # Opt-in while the transcript event log is rolling out: recording is not
-    # optional, reading from it is.
-    transcript_streaming: bool = False
+    # optional, reading from it is. Omitted (a client built before the field
+    # existed) keeps the stored value rather than switching the reader back.
+    transcript_streaming: bool | None = None
 
 
 def _normalize(record: dict[str, Any] | None) -> dict[str, Any]:
@@ -63,7 +64,11 @@ async def set_user_preferences(login: str, update: UserPreferencesUpdate) -> dic
         "default_workspace": update.default_workspace.strip().lower()
         if update.default_workspace and update.default_workspace.strip()
         else None,
-        "transcript_streaming": update.transcript_streaming,
+        "transcript_streaming": (
+            update.transcript_streaming
+            if update.transcript_streaming is not None
+            else existing.get("transcript_streaming") is True
+        ),
         "created_at": existing.get("created_at") or now_iso(),
         "updated_at": now_iso(),
     }
