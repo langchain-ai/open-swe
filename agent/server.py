@@ -185,6 +185,7 @@ from agent.tools import (
     save_user_instructions,
     save_user_skill,
     schedule_thread_wakeup,
+    set_model_routing_provider,
     slack_add_reaction,
     slack_attach_html,
     slack_move_thread,
@@ -374,6 +375,7 @@ PLAN_MODE_EXCLUDED_TOOLS: frozenset[str] = frozenset(
         "slack_start_new_thread",
         "publish_workspace",
         "refresh_workspace_start",
+        "set_model_routing_provider",
         "delete_workspace",
         "create_automation",
         "update_automation",
@@ -521,6 +523,7 @@ ADMIN_TOOLS = (
     publish_workspace,
     refresh_workspace_start,
     delete_workspace,
+    set_model_routing_provider,
     save_organization_skill,
     delete_organization_skill,
 )
@@ -999,6 +1002,9 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         use_gateway = gateway_env_default()
         profile = None
         fable_enabled = False
+        model_routing_provider = (
+            "jev" if ENV.MODEL_ROUTING_PROVIDER.get().lower() == "jev" else "langchain"
+        )
     else:
         async with aphase(thread_id, "factory.settings_defaults"):
             settings, profile = await asyncio.gather(
@@ -1010,6 +1016,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
             title_defaults = settings.default_thread_title_model
             use_gateway = settings.effective_gateway_enabled
             fable_enabled = settings.fable_enabled
+            model_routing_provider = settings.model_routing_provider
 
     slack_ask_mode = _slack_ask_mode(cfg)
     linear_issue = as_json_object(cfg.linear_issue.model_dump() if cfg.linear_issue else None)
@@ -1367,6 +1374,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
                 route: routed_model_id for route, (routed_model_id, _) in routing_defaults.items()
             },
             routing_mode=model_routing_mode,
+            routing_provider=model_routing_provider,
         )
     subagent_model = _make_model_or_defer(
         subagent_model_id,
