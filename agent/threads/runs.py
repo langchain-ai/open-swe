@@ -27,7 +27,7 @@ from agent.dashboard.workspace_settings import (
     get_workspace_settings,
 )
 from agent.database import postgres
-from agent.dispatch import dispatch_agent_run
+from agent.dispatch import create_durable_run, dispatch_agent_run
 from agent.input_messages import (
     PersonIdentity,
     RunMessage,
@@ -63,6 +63,7 @@ from agent.transcript.events import (
     MessageCompleted,
     MessageSender,
     ThreadCreated,
+    TurnQueued,
     TurnRequested,
 )
 from agent.transcript.turns import open_turn_id, recorded_turn_id
@@ -963,6 +964,82 @@ async def steer_running_thread(
             "message_id": message_id,
             "steered": True,
         },
+    }
+
+
+async def queue_follow_up_run(
+    thread_id: str,
+    login: str,
+    command: dict[str, Any],
+    *,
+    metadata: dict[str, Any],
+    email: str | None = None,
+) -> dict[str, Any]:
+    """Hold a ``run.start`` sent while a run is live until that run ends.
+
+    The message gets its own run, created with LangGraph's ``enqueue`` strategy
+    so the platform starts it when the thread goes idle, from any client and
+    with this browser long gone. The transcript records the turn as requested
+    right away and learns the run id so it can be cancelled before it starts.
+    """
+    params = command.get("params")
+    client_configurable = (
+        params.get("config", {}).get("configurable", {}) if isinstance(params, dict) else {}
+    )
+    content = _command_message_content(params) if isinstance(params, dict) else None
+    offload_requested = (
+        isinstance(client_configurable, dict)
+        and client_configurable.get("offload_conversation") is True
+    ) or (isinstance(content, str) and content.strip() == "/offload")
+    if offload_requested:
+        raise HTTPException(409, "offloading requires an idle conversation")
+
+    enriched = await _enrich_run_start_command(
+        thread_id, login, command, metadata=metadata, email=email
+    )
+    enriched_params = enriched.get("params")
+    if not isinstance(enriched_params, dict):
+        raise HTTPException(500, "run.start enrichment produced no params")
+    config = enriched_params.get("config")
+    config = config if isinstance(config, dict) else {}
+    configurable = config.get("configurable")
+    configurable = configurable if isinstance(configurable, dict) else {}
+    run_metadata = enriched_params.get("metadata")
+    run_input = enriched_params.get("input")
+
+    run = await create_durable_run(
+        thread_id,
+        _ASSISTANT_ID,
+        input=run_input if isinstance(run_input, dict) else {},
+        config={"configurable": configurable},
+        metadata=run_metadata if isinstance(run_metadata, dict) else {},
+        source=DASHBOARD_SOURCE,
+        client=langgraph_client(),
+        multitask_strategy="enqueue",
+    )
+    run_id = run.get("run_id") if isinstance(run, dict) else None
+    if not isinstance(run_id, str) or not run_id:
+        raise HTTPException(502, "LangGraph did not return a run id for the queued follow-up")
+
+    turn_id_raw = configurable.get("transcript_turn_id")
+    if isinstance(turn_id_raw, str) and metadata.get("transcript") == TRANSCRIPT_VERSION:
+        turn_id = uuid.UUID(turn_id_raw)
+        await append(
+            thread_id,
+            [
+                Command(
+                    command_id=f"turn:{turn_id}:queued",
+                    event=TurnQueued(turn_id=turn_id, run_id=run_id),
+                    actor_kind="user",
+                    run_id=run_id,
+                    turn_id=turn_id,
+                )
+            ],
+        )
+    return {
+        "id": command.get("id"),
+        "type": "success",
+        "result": {"thread_id": thread_id, "run_id": run_id, "queued": True},
     }
 
 

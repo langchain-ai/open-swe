@@ -148,6 +148,18 @@ class TurnStarted(_Body):
     run_id: str
 
 
+class TurnQueued(_Body):
+    """A requested turn now has a run waiting behind the live one.
+
+    The run starts on its own when the thread goes idle; until then the turn
+    stays ``requested`` and the run id is what a cancel needs.
+    """
+
+    type: Literal["turn.queued"] = "turn.queued"
+    turn_id: UUID
+    run_id: str
+
+
 class TurnCompleted(_Body):
     type: Literal["turn.completed"] = "turn.completed"
     turn_id: UUID
@@ -294,6 +306,7 @@ type TranscriptEvent = Annotated[
     | ThreadMetaUpdated
     | TurnRequested
     | TurnStarted
+    | TurnQueued
     | TurnCompleted
     | TurnCheckpointCompleted
     | TurnFailed

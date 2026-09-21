@@ -87,7 +87,10 @@ export type TurnItem =
 export interface TranscriptTurnState {
   turnId: string
   state: TurnState
+  /** The run serving the turn, or the one queued to; null until either exists. */
+  runId: string | null
   requestedAt: string
+  startedAt: string | null
   error: string | null
   items: ReadonlyArray<TurnItem>
   /** Bumped whenever this turn or anything it holds changed; the memo key. */
@@ -233,7 +236,9 @@ function turnStates(
     turns[row.turn_id] = {
       turnId: row.turn_id,
       state: row.state,
+      runId: row.run_id ?? null,
       requestedAt: row.requested_at,
+      startedAt: row.started_at ?? null,
       error: row.error,
       items: orderItems(
         Object.values(messages).filter(
@@ -396,7 +401,9 @@ function ensureTurn(
   const turn: TranscriptTurnState = {
     turnId,
     state,
+    runId: null,
     requestedAt: occurredAt,
+    startedAt: state === "running" ? occurredAt : null,
     error: null,
     items: [],
     revision: 0,
@@ -408,6 +415,67 @@ function ensureTurn(
   }
   draft.touched.add(turnId)
   return turn
+}
+
+/**
+ * What the thread does once a turn ended: another turn still open keeps it
+ * running (a queued follow-up is about to start), otherwise `settled`.
+ */
+function settledStatus(
+  draft: Draft,
+  settled: TranscriptThreadStatus
+): TranscriptThreadStatus {
+  return Object.values(draft.state.turns).some(
+    (turn) => turn.state === "requested" || turn.state === "running"
+  )
+    ? "running"
+    : settled
+}
+
+/** Waiting behind the live run: requested, with a run of its own queued. */
+export function isQueuedTurn(turn: TranscriptTurnState): boolean {
+  return turn.state === "requested" && turn.runId !== null
+}
+
+/**
+ * A queued follow-up the user withdrew before it ran. Its message went back to
+ * the composer (or out as a steer), so the turn is not part of the record.
+ */
+function isCancelledBeforeStart(turn: TranscriptTurnState): boolean {
+  return (
+    turn.state === "interrupted" &&
+    turn.runId !== null &&
+    turn.startedAt === null
+  )
+}
+
+/** A follow-up waiting for the live run to end, as the queue shows it. */
+export interface QueuedTurn {
+  turnId: string
+  runId: string
+  /** The human message that opened the turn; its id doubles as the row key. */
+  message: Message
+  requestedAt: string
+}
+
+/** The follow-ups queued behind the live run, oldest first. */
+export function queuedTurns(state: TranscriptState): Array<QueuedTurn> {
+  const out: Array<QueuedTurn> = []
+  for (const turnId of state.turnOrder) {
+    const turn = state.turns[turnId]
+    if (!turn || !isQueuedTurn(turn) || turn.runId === null) continue
+    const message = turnMessages(state, turn).find(
+      (entry) => entry.author === "user"
+    )
+    if (!message) continue
+    out.push({
+      turnId,
+      runId: turn.runId,
+      message,
+      requestedAt: turn.requestedAt,
+    })
+  }
+  return out
 }
 
 function patchTurn(
@@ -526,10 +594,19 @@ export function applyEvent(
     }
     case "turn.started": {
       const payload = event.payload
-      patchTurn(draft, ensureTurn(draft, payload.turn_id, "running", at), {
+      const turn = ensureTurn(draft, payload.turn_id, "running", at)
+      patchTurn(draft, turn, {
         state: "running",
+        startedAt: turn.startedAt ?? at,
       })
       draft.state = { ...draft.state, status: "running" }
+      break
+    }
+    case "turn.queued": {
+      const payload = event.payload
+      const turn = draft.state.turns[payload.turn_id]
+      if (!turn || turn.state !== "requested") break
+      patchTurn(draft, turn, { runId: payload.run_id })
       break
     }
     case "turn.completed": {
@@ -538,7 +615,7 @@ export function applyEvent(
       if (!turn) break
       patchTurn(draft, turn, { state: "completed" })
       dropTransientNotices(draft, payload.turn_id)
-      draft.state = { ...draft.state, status: "idle" }
+      draft.state = { ...draft.state, status: settledStatus(draft, "idle") }
       break
     }
     case "turn.failed": {
@@ -547,7 +624,7 @@ export function applyEvent(
       if (!turn) break
       patchTurn(draft, turn, { state: "failed", error: payload.error })
       dropTransientNotices(draft, payload.turn_id)
-      draft.state = { ...draft.state, status: "error" }
+      draft.state = { ...draft.state, status: settledStatus(draft, "error") }
       break
     }
     case "turn.interrupted": {
@@ -556,7 +633,7 @@ export function applyEvent(
       if (!turn) break
       patchTurn(draft, turn, { state: "interrupted" })
       dropTransientNotices(draft, payload.turn_id)
-      draft.state = { ...draft.state, status: "idle" }
+      draft.state = { ...draft.state, status: settledStatus(draft, "idle") }
       break
     }
     case "message.appended": {
@@ -977,7 +1054,9 @@ export function toMessages(state: TranscriptState): Array<Message> {
   const messages: Array<Message> = []
   for (const turnId of state.turnOrder) {
     const turn = state.turns[turnId]
-    if (turn) messages.push(...turnMessages(state, turn))
+    // Queued follow-ups render in the queue, not the record, until they run.
+    if (!turn || isQueuedTurn(turn) || isCancelledBeforeStart(turn)) continue
+    messages.push(...turnMessages(state, turn))
   }
   messagesCache.set(state.turns, {
     turnOrder: state.turnOrder,

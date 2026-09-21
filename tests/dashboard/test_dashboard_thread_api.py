@@ -3319,3 +3319,60 @@ async def test_steer_running_thread_records_and_delivers_the_follow_up(monkeypat
     assert command.event.sender.login == "teammate"
     assert "also check the tests" in command.event.text
     assert updates[-1]["participant_logins"] == {"teammate": True}
+
+
+async def test_queue_follow_up_run_enqueues_a_run_and_records_the_queued_turn(
+    monkeypatch,
+) -> None:
+    turn = uuid7()
+    created: list[dict[str, object]] = []
+    appended: list[object] = []
+
+    async def fake_enrich(thread_id: str, login: str, command, *, metadata, email=None):
+        return {
+            **command,
+            "params": {
+                "input": {"messages": [{"role": "user", "content": "later please", "id": "m-2"}]},
+                "config": {
+                    "configurable": {"thread_id": thread_id, "transcript_turn_id": str(turn)}
+                },
+                "metadata": {"invocation_id": "inv-1"},
+            },
+        }
+
+    async def fake_create_durable_run(thread_id, assistant_id, **kwargs):
+        created.append({"thread_id": thread_id, "assistant_id": assistant_id, **kwargs})
+        return {"run_id": "run-queued"}
+
+    async def fake_append(thread_id: str, commands) -> AppendResult:
+        appended.extend(commands)
+        return AppendResult(versions=[2], events=[])
+
+    class FakeClient:
+        pass
+
+    patch_thread_module(monkeypatch, "_enrich_run_start_command", fake_enrich)
+    patch_thread_module(monkeypatch, "create_durable_run", fake_create_durable_run)
+    patch_thread_module(monkeypatch, "append", fake_append)
+    patch_thread_module(monkeypatch, "langgraph_client", lambda: FakeClient())
+
+    result = await thread_runs.queue_follow_up_run(
+        "tid",
+        "octocat",
+        {"id": 3, "method": "run.start", "params": {"input": {"messages": []}}},
+        metadata={"source": "dashboard", "transcript": "v2"},
+    )
+
+    assert result == {
+        "id": 3,
+        "type": "success",
+        "result": {"thread_id": "tid", "run_id": "run-queued", "queued": True},
+    }
+    [run] = created
+    assert run["multitask_strategy"] == "enqueue"
+    assert run["input"] == {"messages": [{"role": "user", "content": "later please", "id": "m-2"}]}
+    assert run["config"]["configurable"]["transcript_turn_id"] == str(turn)
+    [command] = appended
+    assert command.command_id == f"turn:{turn}:queued"
+    assert command.event.run_id == "run-queued"
+    assert command.turn_id == turn

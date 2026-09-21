@@ -47,16 +47,11 @@ import {
   useRenameAgentThread,
   useAgentThreadPullRequestStatus,
 } from "@/features/agents/lib/queries"
-import { visiblePendingMessages } from "@/features/agents/lib/queuedMessages"
 import {
-  isQueuedMessageDue,
-  useQueuedMessageStore,
-  useQueuedMessages,
-} from "@/features/agents/lib/queuedMessageStore"
-import type {
-  QueuePhase,
-  QueuedComposerMessage,
-} from "@/features/agents/lib/queuedMessageStore"
+  materializeImages,
+  visiblePendingMessages,
+} from "@/features/agents/lib/queuedMessages"
+import type { QueuedTurn } from "@/features/agents/lib/transcript/reducer"
 import type {
   RestoredDraft,
   SubmitOptions,
@@ -161,8 +156,8 @@ export function AgentThreadView({
   )
   const baseMessages = source.messages
   const isStreaming = thread.status === "running" || source.isRunning
-  const queuedMessages = useQueuedMessages(thread.id)
-  const sendInFlightRef = useRef(false)
+  // Server truth: follow-ups queued behind the live run, from the transcript.
+  const queued = source.queued
 
   const followUpBehavior = session.data?.follow_up_behavior ?? "queue"
   const submitMessage = useCallback(
@@ -172,23 +167,11 @@ export function AgentThreadView({
       options?: SubmitOptions
     ) => {
       scrollControlRef.current?.scrollToBottom()
-      // While a run is live the draft either waits for it to end (the release
-      // effect below then sends it through the same path as a direct send) or
-      // goes straight through, which the server delivers into the live run.
-      // The preference sets the default; ⌘↵ flips it for one message.
+      // While a run is live the message either waits for it as a queued run of
+      // its own, or goes straight in and steers it. The preference sets the
+      // default; ⌘↵ flips it for one message.
       const queue =
         (followUpBehavior === "queue") !== (options?.alternate === true)
-      if (isStreaming && queue && content.trim() !== "/offload") {
-        useQueuedMessageStore.getState().enqueue(thread.id, {
-          text: content,
-          images,
-          modelId: activeSelection?.modelId ?? null,
-          effort: activeSelection?.effort ?? null,
-          planMode: activePlanMode,
-          createdAt: Date.now(),
-        })
-        return
-      }
       if (planFeedbackPending) await rejectPlan(thread.id, false)
       await sendMessage.mutateAsync({
         content,
@@ -196,6 +179,7 @@ export function AgentThreadView({
         model_id: activeSelection?.modelId ?? null,
         effort: activeSelection?.effort ?? null,
         plan_mode: activePlanMode,
+        enqueue: isStreaming && queue && content.trim() !== "/offload",
       })
       setPlanFeedbackPending(false)
     },
@@ -211,87 +195,80 @@ export function AgentThreadView({
     ]
   )
 
-  // Sends one queued message. A rejected start hands it back to the head,
-  // held, so the messages behind it keep their order and the user retries or
-  // edits; unless Stop drained the queue in the meantime, in which case it
-  // already went back to the composer and must not reappear.
-  const sendQueuedMessage = useCallback(
-    async (message: QueuedComposerMessage) => {
-      if (sendInFlightRef.current) return
-      const store = useQueuedMessageStore.getState()
-      const taken = store.take(thread.id, message.id)
-      if (!taken) return
-      const drainGenerationAtTake = store.drainGeneration
-      const holdAgain = () => {
-        if (
-          useQueuedMessageStore.getState().drainGeneration ===
-          drainGenerationAtTake
-        ) {
-          useQueuedMessageStore.getState().holdAtFront(thread.id, taken)
-        }
-      }
-      sendInFlightRef.current = true
-      try {
-        await sendMessage.mutateAsync({
-          content: taken.text,
-          images: taken.images,
-          model_id: taken.modelId,
-          effort: taken.effort,
-          plan_mode: taken.planMode,
-          client_message_id: taken.id,
-          onFailure: holdAgain,
-        })
-      } catch {
-        holdAgain()
-      } finally {
-        sendInFlightRef.current = false
-      }
-    },
-    [sendMessage, thread.id]
-  )
+  const queuedText = (entry: QueuedTurn) =>
+    entry.message.chunks
+      .flatMap((chunk) => (chunk.kind === "text" ? [chunk.text] : []))
+      .join("\n")
+      .trim()
+  const queuedImages = (entry: QueuedTurn) =>
+    entry.message.chunks.filter((chunk) => chunk.kind === "image")
 
   const [restoreDraft, setRestoreDraft] = useState<RestoredDraft | null>(null)
-  const restoreQueuedMessagesToComposer = useCallback(
-    (messages: ReadonlyArray<QueuedComposerMessage>) => {
-      if (messages.length === 0) return
+  const restoreQueuedToComposer = useCallback(
+    async (entries: ReadonlyArray<QueuedTurn>) => {
+      if (entries.length === 0) return
+      const images = await materializeImages(entries.flatMap(queuedImages))
       setRestoreDraft((previous) => ({
         key: (previous?.key ?? 0) + 1,
-        text: messages
-          .map((message) => message.text.trim())
-          .filter(Boolean)
-          .join("\n\n"),
-        images: messages.flatMap((message) => message.images),
+        text: entries.map(queuedText).filter(Boolean).join("\n\n"),
+        images,
       }))
     },
     []
   )
+  // Withdraws a queued follow-up: its run is cancelled before it starts, and
+  // the transcript hides the turn.
+  const withdrawQueued = useCallback(
+    async (entry: QueuedTurn) => {
+      await agentsApi.cancelRun(thread.id, entry.runId)
+    },
+    [thread.id]
+  )
+  const steerInFlightRef = useRef(false)
+  // Send now: the follow-up leaves the queue and goes into the live run.
+  const steerQueued = useCallback(
+    async (entry: QueuedTurn) => {
+      if (steerInFlightRef.current) return
+      steerInFlightRef.current = true
+      try {
+        await withdrawQueued(entry)
+        await sendMessage.mutateAsync({
+          content: queuedText(entry),
+          images: await materializeImages(queuedImages(entry)),
+        })
+      } finally {
+        steerInFlightRef.current = false
+      }
+    },
+    [sendMessage, withdrawQueued]
+  )
   const steerQueuedMessage = useCallback(
     (id: string) => {
-      const message = queuedMessages.find((entry) => entry.id === id)
-      if (message) void sendQueuedMessage(message)
+      const entry = queued.find((candidate) => candidate.message.id === id)
+      if (entry) void steerQueued(entry)
     },
-    [queuedMessages, sendQueuedMessage]
+    [queued, steerQueued]
   )
   // Enter on an empty composer sends the head of the queue now.
   const steerNextQueuedMessage = useCallback(() => {
-    const message = queuedMessages[0]
-    if (message) void sendQueuedMessage(message)
-  }, [queuedMessages, sendQueuedMessage])
+    const entry = queued[0]
+    if (entry) void steerQueued(entry)
+  }, [queued, steerQueued])
   const removeQueuedMessage = useCallback(
     (id: string) => {
-      const message = useQueuedMessageStore.getState().remove(thread.id, id)
-      if (message) restoreQueuedMessagesToComposer([message])
+      const entry = queued.find((candidate) => candidate.message.id === id)
+      if (!entry) return
+      void withdrawQueued(entry).then(() => restoreQueuedToComposer([entry]))
     },
-    [restoreQueuedMessagesToComposer, thread.id]
+    [queued, restoreQueuedToComposer, withdrawQueued]
   )
-  // Stop also cancels the queue: the messages return to the composer instead
-  // of starting a new run the moment the interrupted one settles.
+  // Stop cancels the queued runs along with the live one; their messages come
+  // back to the composer instead of starting the moment the run settles.
   const stopRun = useCallback(async () => {
-    restoreQueuedMessagesToComposer(
-      useQueuedMessageStore.getState().drain(thread.id)
-    )
+    const pending = [...queued]
     await source.stop()
-  }, [restoreQueuedMessagesToComposer, source, thread.id])
+    await restoreQueuedToComposer(pending)
+  }, [queued, restoreQueuedToComposer, source])
   const fixPullRequest = useCallback(
     async (pullRequest: AgentPullRequest) => {
       const result = await agentsApi.getThreadPullRequestContext(
@@ -332,8 +309,12 @@ export function AgentThreadView({
     [thread.id, thread.status]
   )
   const pendingMessages = useMemo(
-    () => visiblePendingMessages(thread.pendingMessages, baseMessages),
-    [baseMessages, thread.pendingMessages]
+    () =>
+      visiblePendingMessages(thread.pendingMessages, [
+        ...baseMessages,
+        ...queued.map((entry) => entry.message),
+      ]),
+    [baseMessages, queued, thread.pendingMessages]
   )
   const visibleMessages = useMemo(
     () => [...baseMessages, ...pendingMessages],
@@ -341,36 +322,17 @@ export function AgentThreadView({
   )
   const queuedRows = useMemo(
     () =>
-      queuedMessages.map((message) => ({
-        id: message.id,
-        content: message.text,
-        images: message.images,
-        createdAt: message.createdAt,
-        held: message.holdUntilUserAction === true,
+      queued.map((entry) => ({
+        id: entry.message.id,
+        content: queuedText(entry),
+        images: queuedImages(entry),
+        createdAt: Date.parse(entry.requestedAt),
       })),
-    [queuedMessages]
+    [queued]
   )
 
-  // Sends the oldest queued message once the run is over. One leaves at a
-  // time; the next waits for the run it starts. "connecting" is the gap
-  // between a send and the message reaching the transcript, when nothing is
-  // due. Send now is the only way out mid-run.
-  const nextQueuedMessage = queuedMessages[0] ?? null
-  const queuePhase: QueuePhase =
-    pendingMessages.length > 0
-      ? "connecting"
-      : isStreaming
-        ? "running"
-        : "ready"
-  useEffect(() => {
-    if (!nextQueuedMessage || sendInFlightRef.current) return
-    if (!isQueuedMessageDue({ message: nextQueuedMessage, phase: queuePhase }))
-      return
-    void sendQueuedMessage(nextQueuedMessage)
-  }, [nextQueuedMessage, queuePhase, sendQueuedMessage])
-
   const hasMessages = visibleMessages.length > 0
-  const hasConversation = hasMessages || queuedMessages.length > 0
+  const hasConversation = hasMessages || queued.length > 0
   // The only file list the UI has: whatever the agent has already touched in
   // this thread. Those are also the paths a follow-up is most likely about.
   const mentionPaths = useMemo(() => editedPaths(baseMessages), [baseMessages])
@@ -557,7 +519,7 @@ export function AgentThreadView({
                   footer={
                     !isStreaming &&
                     !sendMessage.isPending &&
-                    queuedMessages.length === 0 && (
+                    queued.length === 0 && (
                       <ThreadFeedbackCard
                         key={`${thread.id}:${session.data?.login ?? ""}`}
                         threadId={thread.id}

@@ -28,15 +28,6 @@ function setPendingMessage(
   }
 }
 
-function removePendingMessage(thread: AgentThread, id: string): AgentThread {
-  return {
-    ...thread,
-    pendingMessages: thread.pendingMessages?.filter(
-      (message) => message.id !== id
-    ),
-  }
-}
-
 /** Human-readable reason a send failed, shown under the failed bubble. */
 export function describeSendError(error: unknown): string {
   if (error instanceof AgentsApiError) {
@@ -55,8 +46,7 @@ export function describeSendError(error: unknown): string {
  *
  * The start is not awaited: the SDK stream's promise settles only when the
  * run ends. The optimistic row stands in until the message shows up in the
- * transcript. A rejected start marks that row failed, or hands the message
- * back through `onFailure` when the caller wants to keep it.
+ * transcript or the queue. A rejected start marks that row failed.
  */
 export function useSubmitAgentMessage(threadId: string) {
   const queryClient = useQueryClient()
@@ -103,18 +93,13 @@ export function useSubmitAgentMessage(threadId: string) {
       })
       if (vars.plan_mode) configurable.plan_mode = true
 
-      const onFailure = vars.onFailure
       void source
         .startRun({
           message: { id, text: vars.content, images: vars.images },
           configurable,
+          ...(vars.enqueue ? { enqueue: true } : {}),
         })
         .catch((error: unknown) => {
-          if (onFailure) {
-            updateThread((thread) => removePendingMessage(thread, id))
-            onFailure()
-            return
-          }
           updateThread((thread) =>
             setPendingMessage(thread, {
               ...pendingMessage,

@@ -1,4 +1,6 @@
 import type {
+  AnyImageChunk,
+  ImageChunk,
   Message,
   PendingThreadMessage,
   QueuedThreadMessage,
@@ -71,4 +73,47 @@ export function visibleQueuedMessages(
     match.consumed = true
     return false
   })
+}
+
+function blobToBase64(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onerror = () => reject(reader.error)
+    reader.onload = () => {
+      const result = typeof reader.result === "string" ? reader.result : ""
+      resolve(result.slice(result.indexOf(",") + 1))
+    }
+    reader.readAsDataURL(blob)
+  })
+}
+
+/**
+ * Images as the composer holds them. A queued message's images are served by
+ * the transcript, so putting them back in the composer means fetching the bytes
+ * again; one that cannot be fetched is dropped rather than failing the rest.
+ */
+export async function materializeImages(
+  images: ReadonlyArray<AnyImageChunk>
+): Promise<Array<ImageChunk>> {
+  const settled = await Promise.all(
+    images.map(async (image): Promise<ImageChunk | null> => {
+      if ("base64" in image) return image
+      try {
+        const response = await fetch(image.url, {
+          credentials: image.credentials === "session" ? "include" : "omit",
+        })
+        if (!response.ok) return null
+        const blob = await response.blob()
+        return {
+          kind: "image",
+          base64: await blobToBase64(blob),
+          mimeType: image.mimeType ?? blob.type,
+          ...(image.fileName ? { fileName: image.fileName } : {}),
+        }
+      } catch {
+        return null
+      }
+    })
+  )
+  return settled.filter((image): image is ImageChunk => image !== null)
 }

@@ -260,13 +260,17 @@ export interface AgentSchedule {
 export interface QueuedThreadMessage {
   id: string
   content: string
-  images?: Array<ImageChunk>
+  images?: Array<AnyImageChunk>
   createdAt: number
   /** Waits for the user to send it rather than leaving on its own. */
   held?: boolean
 }
 
-export interface PendingThreadMessage extends QueuedThreadMessage {
+export interface PendingThreadMessage extends Omit<
+  QueuedThreadMessage,
+  "images"
+> {
+  images?: Array<ImageChunk>
   status: "sending" | "failed"
   /** Why delivery failed, e.g. `503 Service Unavailable`. */
   error?: string

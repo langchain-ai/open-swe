@@ -868,11 +868,8 @@ export interface SendAgentMessageVariables {
   effort?: string | null
   plan_mode?: boolean
   client_message_id?: string
-  /**
-   * Called instead of marking the optimistic row failed when the start is
-   * rejected, for a caller that keeps the message itself (a queued replay).
-   */
-  onFailure?: () => void
+  /** Queue behind the live run instead of steering it. */
+  enqueue?: boolean
 }
 
 export function useCancelAgentThread(threadId: string) {

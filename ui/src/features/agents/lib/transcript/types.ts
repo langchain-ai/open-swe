@@ -61,8 +61,11 @@ export interface TranscriptThreadRow {
 
 export interface TranscriptTurnRow {
   turn_id: string
+  /** Set once a run serves the turn, or as soon as one is queued for it. */
+  run_id: string | null
   state: TurnState
   requested_at: string
+  started_at: string | null
   error: string | null
 }
 
@@ -144,6 +147,11 @@ export interface TurnPayload {
   turn_id: string
 }
 
+/** A requested turn now has a run waiting behind the live one. */
+export interface TurnQueuedPayload extends TurnPayload {
+  run_id: string
+}
+
 export interface TurnFailedPayload extends TurnPayload {
   error: string
 }
@@ -212,6 +220,7 @@ type Stored<EventType extends string, Payload> = StoredEventEnvelope & {
 export type StoredEvent =
   | Stored<"turn.requested", TurnRequestedPayload>
   | Stored<"turn.started", TurnPayload>
+  | Stored<"turn.queued", TurnQueuedPayload>
   | Stored<"turn.completed", TurnPayload>
   | Stored<"turn.failed", TurnFailedPayload>
   | Stored<"turn.interrupted", TurnPayload>

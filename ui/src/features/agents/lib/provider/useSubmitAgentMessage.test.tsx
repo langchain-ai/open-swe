@@ -161,19 +161,18 @@ describe("useSubmitAgentMessage", () => {
     expect(sidebarStatus(client)).toBe("error")
   })
 
-  it("drops the optimistic row and calls back instead when the caller keeps the message", async () => {
-    source.startRun.mockRejectedValueOnce(new Error("run start failed"))
-    const onFailure = vi.fn()
-    const { client, result } = setup()
+  it("asks the server to queue when told to", async () => {
+    source.isRunning = true
+    const { result } = setup()
 
     await result.current.mutateAsync({
-      content: "try me",
+      content: "after this one",
       images: [],
-      onFailure,
+      enqueue: true,
     })
 
-    await waitFor(() => expect(onFailure).toHaveBeenCalledTimes(1))
-    expect(pendingMessages(client)).toEqual([])
-    expect(sidebarStatus(client)).toBe("running")
+    expect(source.startRun).toHaveBeenCalledWith(
+      expect.objectContaining({ enqueue: true })
+    )
   })
 })

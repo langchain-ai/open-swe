@@ -443,6 +443,10 @@ async def _start_run_for_pending_follow_ups(thread_id: str) -> None:
         login = metadata.get("owner_login")
         if not isinstance(login, str) or not login:
             return
+        # A queued follow-up is about to start and its first model call picks
+        # the leftovers up; nothing to dispatch.
+        if await client.runs.list(thread_id, status="pending", limit=1):
+            return
         run_id = await dispatch_pending_follow_ups(
             thread_id, login, metadata, client=client, multitask_strategy="reject"
         )

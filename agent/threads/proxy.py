@@ -20,6 +20,7 @@ from agent.threads.runs import (
     _enrich_run_start_command,
     _extract_run_id_from_command_response,
     _notify_slack_web_handoff,
+    queue_follow_up_run,
     steer_running_thread,
 )
 from agent.threads.summary import (
@@ -189,18 +190,20 @@ async def proxy_dashboard_thread_commands(
         metadata_run_status = metadata.get("latest_run_status")
         thread_busy = _thread_is_busy(thread) or metadata_run_status in {"pending", "running"}
 
+    start_params = parsed.get("params") if isinstance(parsed.get("params"), dict) else {}
+    # The client's queue-or-steer choice rides the run's multitask strategy.
+    # LangGraph's commands endpoint does not take it, so it is consumed here.
+    enqueue = start_params.pop("multitask_strategy", None) == "enqueue"
     if method == "run.start" and thread_busy:
-        # A follow-up while a run is live joins that run rather than starting
-        # another; the reply keeps the protocol's shape so the client cannot
-        # tell the two apart.
-        steered = await steer_running_thread(
-            thread_id,
-            login,
-            parsed,
-            metadata=metadata,
-            email=email,
+        # A follow-up while a run is live either waits for that run as a queued
+        # run of its own, or joins it. Either reply keeps the protocol's shape
+        # so the client cannot tell them from a plain start.
+        handled = await (
+            queue_follow_up_run(thread_id, login, parsed, metadata=metadata, email=email)
+            if enqueue
+            else steer_running_thread(thread_id, login, parsed, metadata=metadata, email=email)
         )
-        return 200, json.dumps(steered).encode(), "application/json"
+        return 200, json.dumps(handled).encode(), "application/json"
 
     url = f"{langgraph_url().rstrip('/')}/threads/{thread_id}/commands"
     headers = langgraph_proxy_headers(content_type=content_type)
@@ -326,14 +329,25 @@ async def proxy_dashboard_thread_run_cancel(
             params={"wait": wait, "action": action},
         )
     if response.status_code in {200, 202, 204}:
+        from agent.threads.handlers import interrupt_transcript_turns
+
+        await interrupt_transcript_turns(thread_id, [run_id])
+        # Cancelling a queued run leaves the live one untouched, so the thread
+        # only reads as interrupted when nothing else is still running.
         try:
-            await langgraph_client().threads.update(
-                thread_id=thread_id,
-                metadata={
-                    "latest_run_status": "interrupted",
-                    "updated_at_ms": _now_ms(),
-                },
-            )
+            still_running = [
+                run
+                for run in await langgraph_client().runs.list(thread_id, status="running", limit=5)
+                if run.get("run_id") != run_id
+            ]
+            if not still_running:
+                await langgraph_client().threads.update(
+                    thread_id=thread_id,
+                    metadata={
+                        "latest_run_status": "interrupted",
+                        "updated_at_ms": _now_ms(),
+                    },
+                )
         except Exception:
             logger.debug(
                 "Could not update thread metadata after run cancel for %s",
