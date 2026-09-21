@@ -1,5 +1,6 @@
 import asyncio
 from collections.abc import AsyncIterator
+from unittest.mock import AsyncMock, patch
 
 import httpx
 import pytest
@@ -11,6 +12,7 @@ from agent.dashboard.workspace_settings import (
     upsert_instance_settings,
     upsert_workspace_overrides,
 )
+from agent.workspaces import routes as workspace_routes
 from agent.workspaces.store import WORKSPACES
 from tests.conftest import FakeStore
 
@@ -63,6 +65,42 @@ async def test_duplicate_repo_on_update_is_a_409(admin_client: httpx.AsyncClient
     response = await admin_client.put("/dashboard/api/workspaces/oss", json={"repos": ["acme/api"]})
     assert response.status_code == 409
     assert "already belongs to workspace core" in response.json()["detail"]
+
+
+async def test_repo_update_starts_snapshot_rebuild(admin_client: httpx.AsyncClient) -> None:
+    await admin_client.post(
+        "/dashboard/api/workspaces",
+        json={"name": "OSS", "repos": ["acme/oss"], "setup_script": "echo setup"},
+    )
+    with (
+        patch.object(workspace_routes, "ensure_refresh_cron", AsyncMock(return_value="cron-1")),
+        patch.object(
+            workspace_routes, "start_refresh_run", AsyncMock(return_value="run-1")
+        ) as start,
+    ):
+        response = await admin_client.put(
+            "/dashboard/api/workspaces/oss", json={"repos": ["acme/oss", "acme/api"]}
+        )
+
+    assert response.status_code == 200
+    start.assert_awaited_once_with("oss")
+
+
+async def test_non_repo_update_does_not_rebuild_snapshot(admin_client: httpx.AsyncClient) -> None:
+    await admin_client.post(
+        "/dashboard/api/workspaces",
+        json={"name": "OSS", "repos": ["acme/oss"], "setup_script": "echo setup"},
+    )
+    with (
+        patch.object(workspace_routes, "ensure_refresh_cron", AsyncMock(return_value="cron-1")),
+        patch.object(workspace_routes, "start_refresh_run", AsyncMock()) as start,
+    ):
+        response = await admin_client.put(
+            "/dashboard/api/workspaces/oss", json={"prompt": "Be concise"}
+        )
+
+    assert response.status_code == 200
+    start.assert_not_awaited()
 
 
 async def test_options_carry_repos_channels_and_default_flag(
