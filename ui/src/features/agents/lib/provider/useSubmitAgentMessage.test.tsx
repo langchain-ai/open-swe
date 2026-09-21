@@ -177,11 +177,15 @@ describe("useSubmitAgentMessage", () => {
     const { client, result } = setup()
 
     await result.current.mutateAsync({ content: "try me", images: [] })
-    rejectSubmission(new Error("run start failed"))
+    rejectSubmission(new AgentsApiError(503, "Service Unavailable"))
 
     await waitFor(() =>
       expect(pendingMessages(client)).toEqual([
-        expect.objectContaining({ content: "try me", status: "failed" }),
+        expect.objectContaining({
+          content: "try me",
+          status: "failed",
+          error: "503 Service Unavailable",
+        }),
       ])
     )
   })
