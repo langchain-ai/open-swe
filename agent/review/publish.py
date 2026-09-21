@@ -338,9 +338,7 @@ def render_review_body(
             + "\n\n</details>"
         )
         feedback_link = (
-            f", or [rate the latest assessment in Open SWE]({ui_url}#assessment-feedback)"
-            if ui_url
-            else ""
+            f", or [leave a comment in Open SWE]({ui_url}#assessment-feedback)" if ui_url else ""
         )
         parts.append(f"React 👍 or 👎{feedback_link}.")
     links = []
