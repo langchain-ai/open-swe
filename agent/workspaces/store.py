@@ -1236,8 +1236,6 @@ async def _channel_owners(
 
 def _apply(record: Workspace, update: WorkspaceUpdate) -> Workspace:
     """Apply a partial update in memory; only the fields present are written."""
-    if update.name is not None and slugify(update.name) != record.slug:
-        raise ValueError("renaming a workspace across slugs is not supported; create a new one")
     if update.name is not None:
         record.name = update.name.strip()
     if update.prompt is not None:
