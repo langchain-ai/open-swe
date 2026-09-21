@@ -13,13 +13,6 @@ import { InlinePlanArtifact } from "@/features/agents/components/InlinePlanArtif
 import { WorkflowApprovalCard } from "@/features/agents/components/WorkflowApprovalCard"
 import { useLiveMarkdownMessageId } from "@/features/agents/lib/provider/useLiveMarkdownMessageId"
 
-function queuedStatusLabel(isNext: boolean, held: boolean): string {
-  if (held) return "Waiting for you: send it now, or cancel to edit it."
-  if (isNext)
-    return "Sends when the run ends. Send now, or Enter on an empty composer, steers the run with it instead."
-  return "Waits for the message ahead of it."
-}
-
 function QueuedMessages({
   queuedMessages,
   onSteer,
@@ -35,15 +28,15 @@ function QueuedMessages({
     <div className="mb-3 space-y-2" data-testid="queued-messages">
       {queuedMessages.map((message, index) => {
         const imageCount = message.images?.length ?? 0
-        const isNext = index === 0
-        const held = message.held === true
-        const statusLabel = queuedStatusLabel(isNext, held)
+        const statusLabel =
+          index === 0
+            ? "Sends when the run ends. Send now, or Enter on an empty composer, steers the run with it instead."
+            : "Waits for the message ahead of it."
         return (
           <div
             key={message.id}
             className="ml-auto max-w-[85%] rounded-2xl border border-dashed border-border bg-accent/40 px-3 py-2 text-[14px] text-foreground shadow-sm"
             data-testid="queued-message"
-            data-queued-held={held || undefined}
           >
             {message.content && (
               <div className="break-words whitespace-pre-wrap">
@@ -62,10 +55,8 @@ function QueuedMessages({
                 aria-label={`Queued. ${statusLabel}`}
               >
                 <Clock className="size-3.5" aria-hidden />
-                {held ? "Held" : "Queued"}
-                {!held && (
-                  <span className="ml-1 size-1.5 animate-status-pulse rounded-full bg-foreground/60" />
-                )}
+                Queued
+                <span className="ml-1 size-1.5 animate-status-pulse rounded-full bg-foreground/60" />
               </span>
               {(onSteer || onRemove) && (
                 <div className="ml-auto flex items-center gap-0.5">

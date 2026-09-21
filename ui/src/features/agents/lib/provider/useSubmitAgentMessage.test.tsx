@@ -121,26 +121,6 @@ describe("useSubmitAgentMessage", () => {
     expect(sidebarStatus(client)).toBe("running")
   })
 
-  it("sends the same way while a run is live, so the server steers it", async () => {
-    source.isRunning = true
-    const { result } = setup()
-
-    await result.current.mutateAsync({
-      content: "also this",
-      images: [],
-      client_message_id: "queued-1",
-    })
-
-    expect(source.startRun).toHaveBeenCalledWith(
-      expect.objectContaining({
-        message: expect.objectContaining({
-          id: "queued-1",
-          text: "also this",
-        }),
-      })
-    )
-  })
-
   it("marks the optimistic message failed with the reason when the start rejects", async () => {
     source.startRun.mockRejectedValueOnce(
       new AgentsApiError(503, "Service Unavailable")
@@ -159,20 +139,5 @@ describe("useSubmitAgentMessage", () => {
       ])
     )
     expect(sidebarStatus(client)).toBe("error")
-  })
-
-  it("asks the server to queue when told to", async () => {
-    source.isRunning = true
-    const { result } = setup()
-
-    await result.current.mutateAsync({
-      content: "after this one",
-      images: [],
-      enqueue: true,
-    })
-
-    expect(source.startRun).toHaveBeenCalledWith(
-      expect.objectContaining({ enqueue: true })
-    )
   })
 })

@@ -20,6 +20,7 @@ from agent.threads.runs import (
     _enrich_run_start_command,
     _extract_run_id_from_command_response,
     _notify_slack_web_handoff,
+    offload_requested,
     queue_follow_up_run,
     steer_running_thread,
 )
@@ -195,6 +196,8 @@ async def proxy_dashboard_thread_commands(
     # LangGraph's commands endpoint does not take it, so it is consumed here.
     enqueue = start_params.pop("multitask_strategy", None) == "enqueue"
     if method == "run.start" and thread_busy:
+        if offload_requested(start_params):
+            raise HTTPException(409, "offloading requires an idle conversation")
         # A follow-up while a run is live either waits for that run as a queued
         # run of its own, or joins it. Either reply keeps the protocol's shape
         # so the client cannot tell them from a plain start.

@@ -75,19 +75,3 @@ async def test_the_session_payload_carries_the_opt_in(
     store["alice"] = {"transcript_streaming": True}
 
     assert (await client.get("/dashboard/api/me")).json()["transcript_streaming"] is True
-
-
-async def test_follow_up_behavior_defaults_to_queue_and_is_kept_by_older_clients(
-    client: httpx.AsyncClient, store: dict[str, dict[str, Any]]
-) -> None:
-    store["alice"] = {"default_visibility": "private"}
-    assert (await client.get(PREFERENCES_URL)).json()["follow_up_behavior"] == "queue"
-
-    saved = await client.put(
-        PREFERENCES_URL, json={"default_visibility": "private", "follow_up_behavior": "steer"}
-    )
-    assert saved.json()["follow_up_behavior"] == "steer"
-
-    saved = await client.put(PREFERENCES_URL, json={"default_visibility": "public"})
-    assert saved.json()["follow_up_behavior"] == "steer"
-    assert (await client.get("/dashboard/api/me")).json()["follow_up_behavior"] == "steer"

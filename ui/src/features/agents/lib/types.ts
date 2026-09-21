@@ -262,8 +262,6 @@ export interface QueuedThreadMessage {
   content: string
   images?: Array<AnyImageChunk>
   createdAt: number
-  /** Waits for the user to send it rather than leaving on its own. */
-  held?: boolean
 }
 
 export interface PendingThreadMessage extends Omit<

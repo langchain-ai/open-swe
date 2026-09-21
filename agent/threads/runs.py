@@ -842,6 +842,16 @@ async def _enrich_run_start_command(
     return command
 
 
+def offload_requested(params: dict[str, Any]) -> bool:
+    """Whether a ``run.start`` asks to offload the conversation."""
+    config = params.get("config")
+    configurable = config.get("configurable") if isinstance(config, dict) else None
+    content = _command_message_content(params)
+    return (
+        isinstance(configurable, dict) and configurable.get("offload_conversation") is True
+    ) or (isinstance(content, str) and content.strip() == "/offload")
+
+
 async def steer_running_thread(
     thread_id: str,
     login: str,
@@ -860,17 +870,7 @@ async def steer_running_thread(
     params = command.get("params")
     if not isinstance(params, dict):
         params = {}
-    client_config = params.get("config")
-    if not isinstance(client_config, dict):
-        client_config = {}
-    client_configurable = client_config.get("configurable")
-    if not isinstance(client_configurable, dict):
-        client_configurable = {}
-    if client_configurable.get("offload_conversation") is True:
-        raise HTTPException(409, "offloading requires an idle conversation")
     content = _command_message_content(params)
-    if isinstance(content, str) and content.strip() == "/offload":
-        raise HTTPException(409, "offloading requires an idle conversation")
     if not _command_prompt_text(content) and not _dashboard_images_from_content(content):
         raise HTTPException(422, "a follow-up needs a message")
 
@@ -982,18 +982,6 @@ async def queue_follow_up_run(
     with this browser long gone. The transcript records the turn as requested
     right away and learns the run id so it can be cancelled before it starts.
     """
-    params = command.get("params")
-    client_configurable = (
-        params.get("config", {}).get("configurable", {}) if isinstance(params, dict) else {}
-    )
-    content = _command_message_content(params) if isinstance(params, dict) else None
-    offload_requested = (
-        isinstance(client_configurable, dict)
-        and client_configurable.get("offload_conversation") is True
-    ) or (isinstance(content, str) and content.strip() == "/offload")
-    if offload_requested:
-        raise HTTPException(409, "offloading requires an idle conversation")
-
     enriched = await _enrich_run_start_command(
         thread_id, login, command, metadata=metadata, email=email
     )

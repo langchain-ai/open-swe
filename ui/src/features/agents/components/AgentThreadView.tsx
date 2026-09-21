@@ -179,7 +179,7 @@ export function AgentThreadView({
         model_id: activeSelection?.modelId ?? null,
         effort: activeSelection?.effort ?? null,
         plan_mode: activePlanMode,
-        enqueue: isStreaming && queue && content.trim() !== "/offload",
+        enqueue: isStreaming && queue,
       })
       setPlanFeedbackPending(false)
     },

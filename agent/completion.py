@@ -35,6 +35,7 @@ from agent.source_context import SourceContext
 from agent.thread_feedback import schedule_answer_feedback
 from agent.transcript.turns import TurnOutcome, settle_run_turn
 from agent.utils.errors import LAST_MODEL_ERROR_KEY, code_for_error_type
+from agent.utils.json_types import thread_metadata
 from agent.utils.langsmith import get_langsmith_trace_url
 from agent.utils.thread_ops import langgraph_client
 from agent.utils.user_messages import warning
@@ -437,9 +438,7 @@ async def _start_run_for_pending_follow_ups(thread_id: str) -> None:
 
     client = langgraph_client()
     try:
-        thread = await client.threads.get(thread_id)
-        metadata = thread.get("metadata") if isinstance(thread, dict) else None
-        metadata = metadata if isinstance(metadata, dict) else {}
+        metadata = thread_metadata(await client.threads.get(thread_id))
         login = metadata.get("owner_login")
         if not isinstance(login, str) or not login:
             return
