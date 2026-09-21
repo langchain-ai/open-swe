@@ -261,7 +261,9 @@ describe("WorkspacesSection", () => {
     fireEvent.mouseEnter(repositoryHelp)
     fireEvent.mouseMove(repositoryHelp)
     expect(
-      await screen.findByText(/routes new work for it to this workspace/)
+      await screen.findByText(
+        /dashboard, Slack, GitHub issues, or pull requests/
+      )
     ).toBeTruthy()
     fireEvent.click(screen.getByRole("button", { name: "Choose repositories" }))
     fireEvent.change(await screen.findByLabelText("Add a repository by name"), {

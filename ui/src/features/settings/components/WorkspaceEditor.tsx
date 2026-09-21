@@ -83,10 +83,11 @@ export function WorkspaceEditor({
               <QuestionIcon size={15} weight="fill" />
             </TooltipTrigger>
             <TooltipPopup className="max-w-72">
-              Selecting a repository routes new work for it to this workspace,
-              where runs use the workspace&apos;s sandbox, instructions,
-              settings, and connections. A repository can belong to only one
-              workspace.
+              Assigning a repository makes this the workspace for requests
+              targeting that repository, whether submitted from the dashboard,
+              Slack, GitHub issues, or pull requests. Runs use this
+              workspace&apos;s sandbox, instructions, settings, and connections.
+              Each repository can belong to only one workspace.
             </TooltipPopup>
           </Tooltip>
         </span>
