@@ -178,7 +178,20 @@ describe("WorkspaceSettingsPanel", () => {
     const setup = await screen.findByLabelText("Setup script")
     expect((setup as HTMLTextAreaElement).value).toBe("make setup")
     expect(screen.getAllByText("OPENSWE_WORKSPACE_REPOS")).toHaveLength(2)
-    expect(screen.getAllByText("acme/oss")).toHaveLength(2)
+    expect(screen.queryByText('OPENSWE_WORKSPACE_REPOS="acme/oss"')).toBeNull()
+    for (const trigger of screen.getAllByRole("button", {
+      name: "OPENSWE_WORKSPACE_REPOS",
+    })) {
+      fireEvent.click(trigger)
+      const popup = await screen.findByRole("dialog", {
+        name: "Expanded value",
+      })
+      expect(
+        within(popup).getByText('OPENSWE_WORKSPACE_REPOS="acme/oss"')
+      ).toBeTruthy()
+      fireEvent.keyDown(popup, { key: "Escape" })
+      await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull())
+    }
     fireEvent.change(setup, { target: { value: "make setup && make build" } })
     fireEvent.click(screen.getByRole("button", { name: "Save scripts" }))
     await waitFor(() =>
