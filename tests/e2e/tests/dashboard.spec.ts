@@ -284,12 +284,17 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
         values?: { messages?: Array<{ content?: unknown }> };
       };
       return (parsed.values?.messages ?? [])
-        .map((message) => (typeof message.content === "string" ? message.content : ""))
+        .map((message) =>
+          typeof message.content === "string" ? message.content : "",
+        )
         .filter((content) => content.includes('sender="system:collaboration"'));
     };
     const expectOneRoster = (state: string) => {
       const blocks = rosterBlocks(state);
-      expect(blocks, blocks.join("\n\n=== next roster block ===\n\n")).toHaveLength(1);
+      expect(
+        blocks,
+        blocks.join("\n\n=== next roster block ===\n\n"),
+      ).toHaveLength(1);
     };
 
     const editor = page.getByTestId("composer-editor");
@@ -359,7 +364,10 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
     const state = await threadState(page, threadId);
     expect(countIn(state, senderMarker)).toBe(3);
     const rosters = rosterBlocks(state);
-    expect(rosters, rosters.join("\n\n=== next roster block ===\n\n")).toHaveLength(2);
+    expect(
+      rosters,
+      rosters.join("\n\n=== next roster block ===\n\n"),
+    ).toHaveLength(2);
     expect(rosters[0]).toContain("Standing instructions: none");
     expect(rosters[1]).toContain(instructions);
   });
