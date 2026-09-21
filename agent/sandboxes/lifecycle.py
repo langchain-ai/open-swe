@@ -19,7 +19,7 @@ from agent.bridge.store import Bridge
 from agent.config import ENV
 from agent.github.proxy import get_recorded_proxy_base_config, record_proxy_token_expiry
 from agent.github.sandbox_access import SandboxGitHubAccess, workspace_token
-from agent.sandboxes.providers.langsmith import configure_github_proxy, get_sandbox_proxy_config
+from agent.sandboxes.providers.langsmith import configure_sandbox_proxy, get_sandbox_proxy_config
 from agent.sandboxes.providers.registry import SandboxGoneError, create_sandbox
 from agent.sandboxes.state import (
     SANDBOX_BACKENDS,
@@ -166,6 +166,7 @@ async def _create_sandbox_with_proxy(
                     sandbox_backend.id,
                     access,
                     proxy_config,
+                    thread_id=thread_id,
                 )
             record_proxy_token_expiry(
                 thread_id,
@@ -201,11 +202,15 @@ async def _configure_proxy(
     sandbox_id: str,
     access: SandboxGitHubAccess,
     base_proxy_config: dict[str, Any] | None,
+    *,
+    thread_id: str | None = None,
 ) -> None:
     kwargs: dict[str, Any] = {}
     if base_proxy_config is not None:
         kwargs["base_proxy_config"] = base_proxy_config
-    await configure_github_proxy(sandbox_id, access.token, **kwargs)
+    if thread_id is not None:
+        kwargs["thread_id"] = thread_id
+    await configure_sandbox_proxy(sandbox_id, access.token, **kwargs)
 
 
 async def _refresh_github_proxy(
@@ -229,6 +234,7 @@ async def _refresh_github_proxy(
             current_backend.id,
             access,
             base_proxy_config,
+            thread_id=thread_id,
         )
     record_proxy_token_expiry(
         thread_id,
@@ -462,6 +468,9 @@ async def ensure_sandbox_for_thread(
     # proxy's cached backend without awaiting the startup task that produced it,
     # so a backend published before this point would be used by the rest of the
     # run while the initialization that failed is only logged.
+    from agent.sandboxes.tool_access import provision_tool_url
+
+    await provision_tool_url(thread_id, sandbox_backend)
     return set_sandbox_backend(thread_id, sandbox_backend)
 
 
@@ -502,6 +511,9 @@ async def recreate_sandbox_for_thread(
         metadata=sandbox_metadata,
     )
     set_sandbox_backend(thread_id, new_sandbox)
+    from agent.sandboxes.tool_access import provision_tool_url
+
+    await provision_tool_url(thread_id, new_sandbox)
     logger.info(
         "Rebound thread %s from sandbox %s to sandbox %s",
         thread_id,
