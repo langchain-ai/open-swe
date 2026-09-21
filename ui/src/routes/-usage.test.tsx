@@ -1340,6 +1340,17 @@ it.each([
         name: "Average PR cost incomplete",
       }) !== null
     ).toBe(covered < cohortSize)
+    if (covered < cohortSize) {
+      const warning = within(row).getByRole("button", {
+        name: "Average PR cost incomplete",
+      })
+      act(() => warning.focus())
+      await screen.findByText(
+        cost == null
+          ? /The average is unavailable because at least half the PRs lack complete costs/
+          : /The average uses 2 PRs with complete costs/
+      )
+    }
     fireEvent.click(screen.getByText("How these numbers work"))
     expect(
       screen.getByText(/Missing or partial costs are not zero/)

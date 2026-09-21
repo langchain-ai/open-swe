@@ -650,14 +650,16 @@ function PRMergeRateSection({
               model's independent success.
             </p>
             <p>
-              <strong>Avg PR cost</strong> averages the full lifetime thread
-              cost across all PR outcomes, including all runs and contributing
-              models, even outside the selected period or after merge. We assume
-              one PR per thread; multiple PRs each carry the whole thread cost
-              without allocation. When more than half the PRs have a known
-              thread and complete costs for all recorded runs, the average uses
-              only those PRs and shows an incomplete-data indicator. Otherwise
-              it is unavailable. Missing or partial costs are not zero.
+              <strong>Avg PR cost</strong> averages recorded thread cost across
+              all PR outcomes, including all recorded runs and contributing
+              models, even outside the selected period or after merge. Runs
+              missing from analytics or not linked to the thread cannot be
+              included. We assume one PR per thread; multiple PRs each carry the
+              whole thread cost without allocation. When more than half the PRs
+              have a known thread and complete costs for all recorded runs, the
+              average uses only those PRs and shows an incomplete-data
+              indicator. Otherwise it is unavailable. Missing or partial costs
+              are not zero.
             </p>
             {data.suppression_threshold > 1 ? (
               <p>
@@ -1094,7 +1096,7 @@ function AveragePRCost({
 }) {
   const missing = cohort.cohort_size - cohort.prs_with_complete_cost
   const incomplete = missing > 0
-  const explanation = `${missing} of ${cohort.cohort_size} PRs ${missing === 1 ? "is" : "are"} omitted because ${missing === 1 ? "its" : "their"} full thread cost is incomplete. The average uses ${cohort.prs_with_complete_cost} PRs with complete costs.`
+  const explanation = `${missing} of ${cohort.cohort_size} PRs ${missing === 1 ? "is" : "are"} omitted because ${missing === 1 ? "its" : "their"} recorded thread cost is incomplete. ${cohort.avg_pr_cost_usd == null ? "The average is unavailable because at least half the PRs lack complete costs." : `The average uses ${cohort.prs_with_complete_cost} PRs with complete costs.`}`
 
   return (
     <div className="flex items-center justify-end gap-1">
