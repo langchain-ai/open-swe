@@ -21,7 +21,7 @@ from langsmith.sandbox import (
 from pydantic import BaseModel
 
 from agent.config import ENV
-from agent.sandboxes.providers.registry import SandboxGoneError
+from agent.sandboxes.providers.registry import SandboxGoneError, SandboxProxyConfigError
 from agent.sandboxes.retry import retry_transient_sandbox_errors
 
 logger = logging.getLogger(__name__)
@@ -177,7 +177,7 @@ def _install_create_extra_fields(client: AsyncSandboxClient, extra: dict[str, An
 
 class GitHubProxyHeader(TypedDict):
     name: str
-    type: Literal["opaque", "plaintext"]
+    type: Literal["opaque"]
     value: str
 
 
@@ -191,6 +191,8 @@ class GitHubProxyRule(TypedDict):
 def _github_proxy_rules(github_token: str | None) -> list[GitHubProxyRule]:
     basic_auth = base64.b64encode(f"x-access-token:{github_token}".encode()).decode()
     # GitHub enforces repository IDs on the token, including for mixed-case URLs.
+    # LangSmith rejects a header with an empty value, so without a token the
+    # rules carry no Authorization header at all and traffic goes out anonymous.
     return [
         {
             "name": "github-api",
@@ -198,10 +200,12 @@ def _github_proxy_rules(github_token: str | None) -> list[GitHubProxyRule]:
             "headers": [
                 {
                     "name": "Authorization",
-                    "type": "opaque" if github_token else "plaintext",
-                    "value": f"Bearer {github_token}" if github_token else "",
+                    "type": "opaque",
+                    "value": f"Bearer {github_token}",
                 }
-            ],
+            ]
+            if github_token
+            else [],
             # `gh` refuses to run without a token in its environment even though the
             # proxy injects the real one on the wire.
             "env_vars": {"GH_TOKEN": PROXY_GH_TOKEN_PLACEHOLDER},
@@ -424,18 +428,41 @@ async def configure_github_proxy(
     payload = {"proxy_config": proxy_config}
     async with httpx2.AsyncClient(timeout=PROXY_CONFIG_TIMEOUT_SECONDS) as client:
         try:
-            await _patch_proxy_config(client, url, payload, api_key, sandbox_name)
-        except httpx2.HTTPStatusError as exc:
-            if exc.response.status_code != PROXY_CONFIG_NOT_READY_STATUS:
-                raise
-            logger.warning(
-                "Proxy config rejected for sandbox %s; starting it and retrying: %s",
-                sandbox_name,
-                exc,
+            await _patch_proxy_config_starting_if_needed(
+                client, url, payload, api_key, sandbox_name
             )
-            await _start_sandbox_best_effort(sandbox_name)
-            await _patch_proxy_config(client, url, payload, api_key, sandbox_name)
+        except httpx2.HTTPStatusError as exc:
+            # A 400 after the start retry is a sandbox that will not come up, which
+            # callers treat as unreachable; any other 4xx is our request being wrong.
+            if (
+                not exc.response.is_client_error
+                or exc.response.status_code == PROXY_CONFIG_NOT_READY_STATUS
+            ):
+                raise
+            detail = exc.response.text.strip()[:PROXY_CONFIG_ERROR_BODY_CHARS]
+            raise SandboxProxyConfigError(sandbox_name, exc.response.status_code, detail) from exc
     logger.info("Configured GitHub proxy for sandbox %s", sandbox_name)
+
+
+async def _patch_proxy_config_starting_if_needed(
+    client: httpx2.AsyncClient,
+    url: str,
+    payload: dict[str, Any],
+    api_key: str,
+    sandbox_name: str,
+) -> None:
+    try:
+        await _patch_proxy_config(client, url, payload, api_key, sandbox_name)
+    except httpx2.HTTPStatusError as exc:
+        if exc.response.status_code != PROXY_CONFIG_NOT_READY_STATUS:
+            raise
+        logger.warning(
+            "Proxy config rejected for sandbox %s; starting it and retrying: %s",
+            sandbox_name,
+            exc,
+        )
+        await _start_sandbox_best_effort(sandbox_name)
+        await _patch_proxy_config(client, url, payload, api_key, sandbox_name)
 
 
 class WorkspaceServiceURL(BaseModel):

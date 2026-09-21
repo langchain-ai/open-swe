@@ -26,6 +26,7 @@ _ERROR_TYPE_CODES = {
     "RecursionError": "step_limit",
     "SandboxConnectionError": "sandbox_unreachable",
     "SandboxUnreachableError": "sandbox_unreachable",
+    "SandboxProxyConfigError": "sandbox_config_rejected",
 }
 
 

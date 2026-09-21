@@ -20,6 +20,23 @@ class SandboxGoneError(RuntimeError):
     """
 
 
+class SandboxProxyConfigError(RuntimeError):
+    """The provider rejected the proxy configuration Open SWE asked for.
+
+    The sandbox is fine; the request was wrong. Replacing the sandbox would
+    resend the same request, so callers must fail instead of recreating.
+    """
+
+    def __init__(self, sandbox_id: str, status_code: int, detail: str) -> None:
+        self.sandbox_id = sandbox_id
+        self.status_code = status_code
+        self.detail = detail
+        super().__init__(
+            f"LangSmith rejected the proxy configuration for sandbox {sandbox_id} "
+            f"(HTTP {status_code}): {detail or 'no detail'}"
+        )
+
+
 SANDBOX_FACTORIES: dict[str, tuple[str, str]] = {
     "langsmith": ("agent.sandboxes.providers.langsmith", "create_langsmith_sandbox"),
     "daytona": ("agent.sandboxes.providers.daytona", "create_daytona_sandbox"),

@@ -105,6 +105,19 @@ def _get_github_target(cfg: RunConfig) -> tuple[dict[str, str], int] | None:
     return None
 
 
+def sandbox_config_rejected_message(cause: str) -> str:
+    """User-facing text for a proxy configuration the provider refused.
+
+    Unlike an unreachable sandbox this is deterministic: retriggering resends
+    the same request, so the text carries the provider's reason instead of
+    asking for a retry.
+    """
+    return warning(
+        "Open SWE could not configure this thread's sandbox, so this run had "
+        f"nowhere to work. {cause}"
+    )
+
+
 async def post_sandbox_unreachable_notification(
     config: Mapping[str, Any],
     *,
@@ -112,13 +125,19 @@ async def post_sandbox_unreachable_notification(
     sandbox_name: str | None = None,
     replacement_attempted: bool = False,
 ) -> None:
-    cfg = RunConfig.from_config(config)
-
-    message = sandbox_unreachable_message(
-        sandbox_id=sandbox_id,
-        sandbox_name=sandbox_name,
-        replacement_attempted=replacement_attempted,
+    await post_sandbox_notification(
+        config,
+        sandbox_unreachable_message(
+            sandbox_id=sandbox_id,
+            sandbox_name=sandbox_name,
+            replacement_attempted=replacement_attempted,
+        ),
     )
+
+
+async def post_sandbox_notification(config: Mapping[str, Any], message: str) -> None:
+    """Deliver ``message`` on the channel the run was triggered from."""
+    cfg = RunConfig.from_config(config)
 
     slack_target = await _get_slack_target(cfg)
     if slack_target is not None:
@@ -129,7 +148,7 @@ async def post_sandbox_unreachable_notification(
             )
         else:
             await post_slack_thread_reply(channel_id, thread_ts, message)
-        logger.info("Sent sandbox unreachable notification to Slack thread %s", thread_ts)
+        logger.info("Sent sandbox notification to Slack thread %s", thread_ts)
         return
 
     if cfg.linear_issue and cfg.linear_issue.id:
@@ -140,11 +159,11 @@ async def post_sandbox_unreachable_notification(
     if github_target is not None:
         token = get_github_token(config) or await get_github_app_installation_token()
         if not token:
-            logger.info("No GitHub token available for sandbox unreachable notification")
+            logger.info("No GitHub token available for sandbox notification")
             return
         repo, issue_number = github_target
         await post_github_comment(repo, issue_number, message, token=token)
-        logger.info("Sent sandbox unreachable notification to GitHub item #%s", issue_number)
+        logger.info("Sent sandbox notification to GitHub item #%s", issue_number)
         return
 
-    logger.info("No user-facing target found for sandbox unreachable notification")
+    logger.info("No user-facing target found for sandbox notification")
