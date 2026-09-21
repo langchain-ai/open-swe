@@ -21,7 +21,7 @@ from pydantic import BaseModel, ValidationError
 
 from agent.github.app import get_github_app_installation_token
 from agent.github.checks import github_headers
-from agent.github.ci import list_check_runs
+from agent.github.ci import list_check_runs, list_commit_statuses
 from agent.github.http import github_client
 from agent.github.pull_request_diff import build_pr_diff_files
 from agent.github.pull_request_status import fetch_unresolved_review_threads
@@ -723,6 +723,22 @@ class _GithubCheckRun(BaseModel):
     html_url: str | None = None
 
 
+class _GithubCommitStatus(BaseModel):
+    context: str = ""
+    state: str = "pending"
+    target_url: str | None = None
+
+    def as_check(self) -> PreviewCheck:
+        """A legacy commit status in check-run terms, which is how the UI reads both."""
+        pending = self.state == "pending"
+        return PreviewCheck(
+            name=self.context,
+            status="in_progress" if pending else "completed",
+            conclusion=None if pending else self.state,
+            url=self.target_url,
+        )
+
+
 class _GithubUser(BaseModel):
     login: str
     avatar_url: str | None = None
@@ -793,23 +809,33 @@ async def get_pull_request_preview(
     ]
     files.sort(key=lambda entry: entry.additions + entry.deletions, reverse=True)
     head_sha = pull.head.sha if pull.head else ""
-    raw_checks = (
-        await list_check_runs(owner=owner, repo=repo, ref=head_sha, token=token)
+    # CI reaches GitHub as check runs or as legacy commit statuses, and the PR
+    # list counts both — a preview reading only one would contradict the rail.
+    raw_checks, raw_statuses = (
+        await asyncio.gather(
+            list_check_runs(owner=owner, repo=repo, ref=head_sha, token=token),
+            list_commit_statuses(owner=owner, repo=repo, ref=head_sha, token=token),
+        )
         if head_sha
-        else None
+        else (None, None)
     )
     checks = (
         None
-        if raw_checks is None
+        if raw_checks is None and raw_statuses is None
         else [
             PreviewCheck(
                 name=run.name, status=run.status, conclusion=run.conclusion, url=run.html_url
             )
             for run in (
                 _GithubCheckRun.model_validate(item)
-                for item in raw_checks
+                for item in (raw_checks or [])
                 if isinstance(item, dict)
             )
+        ]
+        + [
+            _GithubCommitStatus.model_validate(item).as_check()
+            for item in (raw_statuses or [])
+            if isinstance(item, dict)
         ]
     )
     return PullRequestPreview(

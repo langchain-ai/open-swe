@@ -151,6 +151,14 @@ export function MyPullRequests({
       ...repo,
     ]),
   ].sort()
+  // Layout follows the row actually on screen, not the search param. Filtering
+  // the selected PR out closes the preview and returns the list to full width
+  // instead of stranding it in rail form with no way to close.
+  const selectedRow = selected
+    ? all.find((row) => pullRequestKey(row) === selected)
+    : undefined
+  const railed = Boolean(selectedRow)
+
   const card = (pr: OpenPullRequest) => {
     const key = pullRequestKey(pr)
     return (
@@ -158,7 +166,7 @@ export function MyPullRequests({
         pr={pr}
         login={login}
         outcome={settled[key]}
-        compact={Boolean(selected)}
+        compact={railed}
         selected={selected === key}
         onSelect={() => onFiltersChange({ pr: key })}
         review={
@@ -177,10 +185,6 @@ export function MyPullRequests({
       />
     )
   }
-
-  const selectedRow = selected
-    ? all.find((row) => pullRequestKey(row) === selected)
-    : undefined
 
   return (
     <div className="flex min-h-0 flex-1">
@@ -230,7 +234,7 @@ export function MyPullRequests({
                 onFiltersChange({ status: status.length ? status : undefined })
               }
             />
-            {!selected && (
+            {!railed && (
               <span className="flex items-center gap-1 text-xs text-muted-foreground">
                 Sort
                 {sortOptions.map(([label, key]) => (
@@ -254,7 +258,7 @@ export function MyPullRequests({
                 ))}
               </span>
             )}
-            {!selected && (
+            {!railed && (
               <span
                 aria-live="polite"
                 className="text-xs whitespace-nowrap text-muted-foreground"
@@ -285,6 +289,11 @@ export function MyPullRequests({
                 })
                 void queryClient.invalidateQueries({
                   queryKey: ["my-pr-review-summaries", login],
+                })
+                // An open preview outlives a refresh, so its checks and
+                // comments would otherwise stay as they were when it opened.
+                void queryClient.invalidateQueries({
+                  queryKey: ["pr-preview"],
                 })
               }}
             >
@@ -326,7 +335,7 @@ export function MyPullRequests({
                   <PullRequestList
                     rows={visible}
                     available={matchingRows.length}
-                    compact={Boolean(selected)}
+                    compact={railed}
                     // Unclamped: asking for more rows than are loaded is what
                     // makes the next GitHub page arrive, and reaching the end
                     // again is the only other thing that would grow it.
@@ -341,7 +350,7 @@ export function MyPullRequests({
                   <span>
                     {visible.length} of {filtered.length}
                     {query.hasNextPage ? "+" : ""} PRs
-                    {!selected &&
+                    {!railed &&
                       " · Added/deleted lines include tests and docs. PRs with checks still running are Pending."}
                   </span>
                   {query.isFetchingNextPage ? (

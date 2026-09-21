@@ -64,6 +64,13 @@ export function blockerLabel(pr: OpenPullRequest): string {
       : `${pr.pendingChecks.length} checks running`
   if (pr.reviewRequired) return "Waiting on review"
   if (pr.draft) return "Draft"
+  // Nothing known to be wrong is not the same as known to be fine: claiming
+  // readiness for a PR whose status GitHub never returned would be a lie.
+  if (
+    !pr.statusAvailable ||
+    (pr.ci === "unknown" && pr.reviewDecision === null)
+  )
+    return "Status unavailable"
   if (pr.reviewDecision === "approved") return "Approved, ready to merge"
   return "Ready to merge"
 }
@@ -80,6 +87,11 @@ export function blockerTone(pr: OpenPullRequest): string {
     pr.ci === "pending" ||
     pr.reviewRequired ||
     (pr.unresolvedThreads !== null && pr.unresolvedThreads > 0)
+  )
+    return "text-amber-700 dark:text-amber-400"
+  if (
+    !pr.statusAvailable ||
+    (pr.ci === "unknown" && pr.reviewDecision === null)
   )
     return "text-amber-700 dark:text-amber-400"
   if (pr.reviewDecision === "approved")
