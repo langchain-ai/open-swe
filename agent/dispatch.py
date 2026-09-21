@@ -279,6 +279,10 @@ async def create_durable_run(
         create_kwargs["after_seconds"] = after_seconds
 
     run = await client.runs.create(thread_id, assistant_id, **create_kwargs)
+    if assistant_id == "agent" and RunConfig.from_config(run_config).slack_ask is not True:
+        from agent.slack.thinking import sync_slack_background_status
+
+        await sync_slack_background_status(client, thread_id, resume=True)
     logger.info(
         "Dispatched %s run on thread %s (source=%s, run=%s)",
         assistant_id,

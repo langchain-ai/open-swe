@@ -1,10 +1,12 @@
 import importlib
 from typing import Any
+from unittest.mock import AsyncMock
 from xml.etree import ElementTree
 
 import pytest
 
 from agent import thread_feedback
+from agent.slack import thinking as slack_thinking
 from agent.users import User
 
 dispatch = importlib.import_module("agent.dispatch")
@@ -284,3 +286,36 @@ async def test_dispatch_keys_a_linked_slack_sender_on_their_person(
 
     envelope = ElementTree.fromstring(run_input["messages"][-1]["content"])
     assert envelope.attrib["sender"] == f"user:{user.id}"
+
+
+@pytest.mark.parametrize("background_completion", [False, True])
+@pytest.mark.parametrize("source", ["slack", "dashboard"])
+async def test_dispatch_restores_thinking_for_slack_background_wait(
+    monkeypatch, background_completion: bool, source: str
+) -> None:
+    client = AsyncMock()
+    client.runs.create.return_value = {"run_id": "run-1"}
+    client.runs.list.return_value = [{"run_id": "run-1"}]
+    slack_thread = {"channel_id": "C1", "thread_ts": "1.0"}
+    client.threads.get.return_value = {
+        "metadata": {
+            "running_background_tasks": ["cmd-1"],
+            "source_context": {"slack_thread": slack_thread},
+        }
+    }
+    set_status = AsyncMock(return_value=True)
+    monkeypatch.setattr(slack_thinking, "set_slack_thread_status", set_status)
+    await dispatch.create_durable_run(
+        "thread-1",
+        "agent",
+        input={"messages": []},
+        source=source,
+        client=client,
+        config={
+            "configurable": {
+                **({"slack_thread": slack_thread} if source == "slack" else {}),
+                "background_task_completion": background_completion,
+            }
+        },
+    )
+    set_status.assert_awaited_once_with("C1", "1.0", "Thinking...")

@@ -563,7 +563,9 @@ export function AgentsHome({
       }
       // Seeded so the thread route renders the prompt immediately; the real
       // record lands with the next detail fetch.
-      const thread: AgentThread = optimisticThread(threadId, draft)
+      const thread: AgentThread = optimisticThread(threadId, draft, {
+        recorded: session.data?.transcript_recording === true,
+      })
       queryClient.setQueryData(agentThreadKeys.detail(threadId), thread)
       seedAgentThreadLists(queryClient, thread)
       invalidateAgentThreadLists(queryClient)

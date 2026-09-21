@@ -391,6 +391,12 @@ export interface AgentPullRequestContextResponse {
 export interface AgentThread {
   visibility?: "public" | "private"
   id: string
+  /**
+   * Transcript source for the thread, from its LangGraph metadata. `"v2"` means
+   * the append-only event log serves it; absent means the SDK stream does.
+   */
+  transcript?: "v2"
+
   title: string
   repo: string
   repoFullName: string

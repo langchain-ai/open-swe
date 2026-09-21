@@ -807,7 +807,15 @@ export interface CreateAgentThreadVariables {
  */
 export function optimisticThread(
   threadId: string,
-  vars: CreateAgentThreadVariables
+  vars: CreateAgentThreadVariables,
+  options: {
+    /**
+     * Whether the server records new threads into the transcript log. The seed
+     * has to carry the same `transcript` stamp the server writes, or the thread
+     * page picks the SDK stream first and swaps sources on the next refetch.
+     */
+    recorded?: boolean
+  } = {}
 ): AgentThread {
   const now = Date.now()
   const text = vars.prompt.trim()
@@ -825,6 +833,7 @@ export function optimisticThread(
   return {
     id: threadId,
     visibility: vars.visibility ?? "public",
+    ...(options.recorded ? { transcript: "v2" as const } : {}),
     title: text.slice(0, 80) || "New agent",
     repo: repoFullName.split("/")[1] ?? "",
     repoFullName,
