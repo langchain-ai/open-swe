@@ -1,16 +1,19 @@
 """Sandbox capabilities for the associated thread's tools."""
 
 import shlex
+from typing import TYPE_CHECKING
 from urllib.parse import urlencode, urlsplit
 
 import jwt
-from deepagents.backends.protocol import SandboxBackendProtocol
 from fastapi import HTTPException
 from langgraph_sdk import get_client
 from pydantic import BaseModel, Field, ValidationError
 
 from agent.config import ENV
 from agent.utils.dashboard_links import dashboard_api_base_url
+
+if TYPE_CHECKING:
+    from deepagents.backends.protocol import SandboxBackendProtocol
 
 TOOLS_PATH = "/sandbox-tools"
 TOOLS_HEADER = "X-Open-SWE-Tools-Token"

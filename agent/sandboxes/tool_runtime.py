@@ -17,6 +17,7 @@ from pydantic import BaseModel, JsonValue, TypeAdapter
 from agent.middleware.dynamic_tools import DynamicToolMiddleware
 from agent.run_config import RunConfig
 from agent.sandboxes.tool_data import ToolContext, load_context, save_context
+from agent.sandboxes.tool_models import ToolDescription
 from agent.sandboxes.tool_store import ToolStore
 
 _json = TypeAdapter(JsonValue)
@@ -31,12 +32,6 @@ async def save_tool_context(thread_id: str, config: RunnableConfig) -> None:
         if name in RunConfig.model_fields and name not in {"run_id", "invocation_id"}
     }
     await save_context(thread_id, ToolContext(configurable=values))
-
-
-class ToolDescription(BaseModel):
-    name: str
-    description: str
-    parameters: dict[str, JsonValue]
 
 
 def tool_parameters(tool: BaseTool) -> dict[str, JsonValue]:

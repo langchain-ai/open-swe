@@ -1,6 +1,6 @@
 """Sandbox tool authorization, discovery, and server-side execution."""
 
-from collections.abc import Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable
 from typing import cast
 from unittest.mock import AsyncMock, MagicMock
 
@@ -188,7 +188,7 @@ async def test_http_list_search_invoke_and_reject_context_overrides(
     await tools.prepare(state)
     config: RunnableConfig = {"configurable": {"thread_id": "thread-a"}}
     monkeypatch.setattr(
-        tool_routes, "load_tool_surface", AsyncMock(return_value=(tools, config, state))
+        tool_runtime, "load_tool_surface", AsyncMock(return_value=(tools, config, state))
     )
     client = MagicMock()
     client.threads.get = AsyncMock(return_value={"metadata": {"sandbox_id": "sandbox-a"}})
@@ -291,3 +291,38 @@ async def test_invalid_claims_never_reach_thread_lookup(
         await tool_access.authenticate_tool_access(token)
     assert exc.value.status_code == 401
     client.threads.get.assert_not_awaited()
+
+
+def test_invocation_openapi_declares_raw_arguments_and_result() -> None:
+    app = FastAPI()
+    app.include_router(tool_routes.router)
+    schema = app.openapi()
+    operation = schema["paths"]["/sandbox-tools/invoke/{tool_name}"]["post"]
+    assert operation["requestBody"]["content"]["application/json"]["schema"] == {
+        "$ref": "#/components/schemas/ToolArguments"
+    }
+    assert schema["components"]["schemas"]["ToolArguments"]["type"] == "object"
+    assert operation["responses"]["200"]["content"]["application/json"]["schema"] == {
+        "$ref": "#/components/schemas/ToolResult"
+    }
+
+
+async def test_chunked_request_limit_precedes_json_parsing(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(tool_routes, "MAX_REQUEST_BYTES", 16)
+    app = FastAPI()
+    app.include_router(tool_routes.router)
+
+    async def chunks() -> AsyncIterator[bytes]:
+        yield b'{"value":"'
+        yield b"x" * 16
+        pytest.fail("Oversized request should stop reading the stream")
+
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="https://test"
+    ) as http:
+        response = await http.post(
+            "/sandbox-tools/invoke/integration_echo",
+            content=chunks(),
+            headers={"Content-Type": "application/json"},
+        )
+    assert response.status_code == 413
