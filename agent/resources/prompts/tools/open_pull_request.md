@@ -20,7 +20,9 @@ Background-completion runs cannot publish a user-owned PR because they do not
 retain the requester's identity. Ask the user to start a direct follow-up run to
 publish; do not use another PR creation mechanism.
 
-Push your branch with `git push origin <branch>` BEFORE calling this.
+Push your branch with `git push origin <branch>` BEFORE calling this. The
+`Made by [Open SWE]` footer is appended to the body here, naming the thread and
+the model that opened the PR; do not write one yourself.
 
 For everything else — updating an existing PR, marking it ready for review,
 commenting, reading status — keep using `gh`. If a PR already

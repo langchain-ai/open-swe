@@ -75,6 +75,21 @@ class CollaboratorIdentity:
         return self.display_name
 
 
+@dataclass(frozen=True)
+class ThreadParticipant:
+    """A person in the thread, with everything the agent needs to act for them.
+
+    Described once in the thread-level roster so a turn only has to point at
+    its sender; ``person_id`` is the key that pointer uses.
+    """
+
+    identity: CollaboratorIdentity
+    person_id: str
+    workspace_admin: bool = False
+    draft_prs: bool = True
+    instructions: str = ""
+
+
 def _normalize_text(value: Any) -> str:
     return value.strip() if isinstance(value, str) else ""
 
@@ -321,31 +336,31 @@ def add_pr_collaboration_note(
     pr_body: str,
     identity: CollaboratorIdentity | None = None,
     thread_url: str | None = None,
+    *,
+    model_id: str | None = None,
+    reasoning_effort: str | None = None,
 ) -> str:
-    """Append the Open SWE attribution footer to a PR body.
+    """Make the Open SWE attribution footer the PR body's last line.
 
-    The PR is opened as the triggering user, so the body only credits Open SWE
-    as the collaborator. The footer links the run's thread when available. Any
-    legacy double-attribution footer is replaced.
+    The footer is platform-owned: it names the thread and the model that opened
+    the PR, so an existing one — the agent's own, or a legacy double-attribution
+    line — is replaced rather than kept alongside.
     """
-
-    normalized_body = pr_body.rstrip()
-    note = build_pr_attribution_footer(thread_url)
-    if note in normalized_body:
-        return normalized_body
-    if PR_ATTRIBUTION_TEXT in normalized_body:
-        return normalized_body
-
-    legacy_footers: list[str] = []
-    if identity is not None:
-        legacy_footers.append(
-            f"_Opened collaboratively by {identity.pr_attribution_name} and open-swe._"
-        )
-        legacy_footers.append(f"_Opened collaboratively by {identity.display_name} and open-swe._")
-    for legacy in legacy_footers:
-        if legacy in normalized_body:
-            return normalized_body.replace(legacy, note)
-
-    if not normalized_body:
-        return note
-    return f"{normalized_body}\n\n{note}"
+    note = build_pr_attribution_footer(
+        thread_url, model_id=model_id, reasoning_effort=reasoning_effort
+    )
+    kept: list[str] = []
+    legacy_names = (
+        {identity.pr_attribution_name, identity.display_name} if identity is not None else set()
+    )
+    for line in pr_body.rstrip().splitlines():
+        stripped = line.strip()
+        if stripped.startswith(PR_ATTRIBUTION_TEXT):
+            continue
+        if any(
+            stripped == f"_Opened collaboratively by {name} and open-swe._" for name in legacy_names
+        ):
+            continue
+        kept.append(line)
+    body = "\n".join(kept).rstrip()
+    return f"{body}\n\n{note}" if body else note

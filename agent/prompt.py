@@ -1,5 +1,6 @@
 import logging
 import shlex
+import textwrap
 from collections.abc import Sequence
 from importlib import resources
 from pathlib import Path
@@ -12,7 +13,7 @@ from agent.utils.authorship import (
     OPEN_SWE_BOT_NAME,
     PR_ATTRIBUTION_TEXT,
     CollaboratorIdentity,
-    build_pr_attribution_footer,
+    ThreadParticipant,
 )
 
 logger = logging.getLogger(__name__)
@@ -86,13 +87,6 @@ def _render_repository_scope_section() -> str:
     )
 
 
-def _render_participant_identities(identities: Sequence[CollaboratorIdentity]) -> str:
-    return "\n".join(
-        f"- **{identity.display_name}**: `{_git_identity_command(identity)}`"
-        for identity in identities
-    )
-
-
 def _render_repo_instructions_section(instructions: str | None) -> str:
     if not instructions or not instructions.strip():
         return ""
@@ -110,12 +104,6 @@ def _render_workspace_section(name: str | None, instructions: str | None) -> str
     )
 
 
-def _render_user_instructions_section(instructions: str | None) -> str:
-    if not instructions or not instructions.strip():
-        return ""
-    return render_prompt("system/user-instructions.md", instructions=instructions.strip())
-
-
 def _git_identity_command(identity: CollaboratorIdentity) -> str:
     return (
         f"git config user.name {shlex.quote(identity.commit_name)} "
@@ -123,67 +111,38 @@ def _git_identity_command(identity: CollaboratorIdentity) -> str:
     )
 
 
-def _resolved_identity(identity: CollaboratorIdentity | None) -> CollaboratorIdentity:
-    return identity or CollaboratorIdentity(
-        display_name=OPEN_SWE_BOT_NAME,
-        commit_name=OPEN_SWE_BOT_NAME,
-        commit_email=OPEN_SWE_BOT_EMAIL,
-    )
-
-
-def construct_sender_context(
-    identity: CollaboratorIdentity | None,
-    *,
-    person_id: str,
-    user_custom_instructions: str | None = None,
-    draft_prs: bool = True,
-    workspace_admin: bool = False,
-) -> str:
-    """Who sent the message this follows, rendered fresh for every turn."""
-    resolved_identity = _resolved_identity(identity)
+def _render_participant(participant: ThreadParticipant) -> str:
+    instructions = participant.instructions.strip()
     return render_prompt(
-        "system/sender-context.md",
-        display_name=resolved_identity.display_name,
-        person_id=person_id,
-        workspace_admin="yes" if workspace_admin else "no",
-        git_identity_command=_git_identity_command(resolved_identity),
-        draft_state="as drafts" if draft_prs else "ready for review",
-        user_instructions=_render_user_instructions_section(user_custom_instructions),
+        "system/participant.md",
+        display_name=participant.identity.display_name,
+        person_id=participant.person_id,
+        git_identity_command=_git_identity_command(participant.identity),
+        workspace_admin="yes" if participant.workspace_admin else "no",
+        draft_state="as drafts" if participant.draft_prs else "ready for review",
+        instructions=textwrap.indent(f"\n{instructions}", "    ") if instructions else "none",
     )
 
 
-def construct_collaboration_context(
-    identity: CollaboratorIdentity | None,
-    participant_identities: Sequence[CollaboratorIdentity] = (),
-    *,
-    thread_url: str | None = None,
-    model_id: str | None = None,
-    reasoning_effort: str | None = None,
-) -> str:
-    """Attribution rules and the thread's roster, stable across turns.
+def construct_sender_context(display_name: str, person_id: str) -> str:
+    """The turn's pointer at its sender; everything about them is in the roster."""
+    return render_prompt("system/sender-context.md", display_name=display_name, person_id=person_id)
 
-    Ordered by commit email so alternating senders produce the same text and the
-    block is reintroduced only when the roster itself changes.
+
+def construct_collaboration_context(participants: Sequence[ThreadParticipant]) -> str:
+    """The roster and attribution rules, stable across turns.
+
+    Ordered by person so alternating senders produce the same text and the
+    block is reintroduced only when a participant or their settings change.
     """
-    resolved_identity = _resolved_identity(identity)
-    known = {other.commit_email for other in participant_identities}
-    identities = sorted(
-        [
-            *([resolved_identity] if resolved_identity.commit_email not in known else []),
-            *participant_identities,
-        ],
-        key=lambda candidate: candidate.commit_email,
+    ordered = sorted(
+        participants, key=lambda candidate: (candidate.person_id, candidate.identity.commit_email)
     )
     return render_prompt(
         "system/collaboration.md",
-        participant_identities=_render_participant_identities(identities),
+        participants="\n".join(_render_participant(candidate) for candidate in ordered),
         bot_coauthor_trailer=f"Co-authored-by: {OPEN_SWE_BOT_NAME} <{OPEN_SWE_BOT_EMAIL}>",
         pr_attribution_text=PR_ATTRIBUTION_TEXT,
-        pr_attribution_footer=build_pr_attribution_footer(
-            thread_url,
-            model_id=model_id,
-            reasoning_effort=reasoning_effort,
-        ),
     )
 
 

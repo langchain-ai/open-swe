@@ -202,13 +202,17 @@ from agent.tools import (
 from agent.tools.admin_gate import actor_has_admin_context, actor_is_admin, is_private_admin_surface
 from agent.tools.manage_review_approval_policy import manage_review_approval_policy
 from agent.tools.submit_review_assessment_feedback import submit_review_assessment_feedback
+from agent.users import User
 from agent.utils import ttl_cache
 from agent.utils.authorship import (
+    OPEN_SWE_BOT_EMAIL,
+    OPEN_SWE_BOT_NAME,
     CollaboratorIdentity,
+    ThreadParticipant,
     resolve_participant_identities,
     resolve_triggering_user_identity,
 )
-from agent.utils.dashboard_links import dashboard_base_url, dashboard_plan_url, dashboard_thread_url
+from agent.utils.dashboard_links import dashboard_base_url, dashboard_plan_url
 from agent.utils.deferred_model import make_deferred_error_model
 from agent.utils.gateway import gateway_env_default
 from agent.utils.json_types import as_json_object, thread_metadata
@@ -332,6 +336,70 @@ async def _thread_participant_identities(thread_id: str) -> list[CollaboratorIde
     except Exception:
         logger.debug("Failed to resolve participant identities for %s", thread_id, exc_info=True)
         return []
+
+
+async def _person_id_for_login(login: str) -> str:
+    """The roster key for a GitHub login; the login itself when no person row answers."""
+    try:
+        user = await User.for_login("github", login)
+    except Exception:
+        logger.warning(
+            "Could not resolve a participant; keying them by login",
+            extra={"participant_login": login},
+            exc_info=True,
+        )
+        return f"github:{login}"
+    return f"user:{user.id}" if user is not None else f"github:{login}"
+
+
+async def _thread_participant(
+    identity: CollaboratorIdentity, config: RunnableConfig, *, person_id: str | None = None
+) -> ThreadParticipant:
+    login = identity.github_login or None
+    if login is None:
+        return ThreadParticipant(identity=identity, person_id=person_id or "")
+    resolved_id, profile, workspace_admin, instructions = await asyncio.gather(
+        _person_id_for_login(login),
+        load_profile(login),
+        _workspace_admin(config, login),
+        _resolve_user_custom_instructions(login),
+    )
+    return ThreadParticipant(
+        identity=identity,
+        person_id=person_id or resolved_id,
+        workspace_admin=workspace_admin,
+        draft_prs=profile_draft_prs(profile),
+        instructions=instructions or "",
+    )
+
+
+async def _thread_participants(
+    thread_id: str,
+    config: RunnableConfig,
+    sender: CollaboratorIdentity | None,
+    *,
+    sender_person_id: str,
+) -> list[ThreadParticipant]:
+    """Everyone in the thread, each with the settings the agent acts under for them.
+
+    The sender is keyed by the id their message envelope carries, so the turn's
+    pointer resolves to their roster entry even when no person row exists.
+    """
+    identities = await _thread_participant_identities(thread_id)
+    resolved_sender = sender or CollaboratorIdentity(
+        display_name=OPEN_SWE_BOT_NAME,
+        commit_name=OPEN_SWE_BOT_NAME,
+        commit_email=OPEN_SWE_BOT_EMAIL,
+    )
+    others = [
+        identity for identity in identities if identity.commit_email != resolved_sender.commit_email
+    ]
+    return list(
+        await asyncio.gather(
+            _thread_participant(resolved_sender, config, person_id=sender_person_id),
+            *(_thread_participant(identity, config) for identity in others),
+        )
+    )
 
 
 async def _resolve_user_custom_instructions(login: str | None) -> str | None:
@@ -843,10 +911,6 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
         async with aphase(self._thread_id, "prepare.workspace"):
             workspace = await load_workspace(workspace_slug(cfg))
         async with aphase(self._thread_id, "prepare.sender_context"):
-            sender_instructions, participant_identities = await asyncio.gather(
-                _resolve_user_custom_instructions(self._credential_login),
-                _thread_participant_identities(self._thread_id),
-            )
             attribution_model_id = self._model_id
             attribution_effort = self._effort
             attribution_route = None
@@ -865,28 +929,20 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
             )
             sender_messages: list[Any] = []
             if subject_id is not None:
+                participants = await _thread_participants(
+                    self._thread_id,
+                    self._config or {},
+                    triggering_user_identity,
+                    sender_person_id=subject_id,
+                )
                 sender_messages = [
                     *self._collaboration_messages(
                         state,
-                        construct_collaboration_context(
-                            triggering_user_identity,
-                            participant_identities,
-                            thread_url=dashboard_thread_url(self._thread_id),
-                            model_id=attribution_model_id,
-                            reasoning_effort=attribution_effort,
-                        ),
+                        construct_collaboration_context(participants),
                     ),
                     *self._sender_context_messages(
                         state,
-                        construct_sender_context(
-                            triggering_user_identity,
-                            person_id=subject_id,
-                            user_custom_instructions=sender_instructions,
-                            draft_prs=self._draft_prs,
-                            workspace_admin=await _workspace_admin(
-                                self._config or {}, self._profile_login
-                            ),
-                        ),
+                        construct_sender_context(participants[0].identity.display_name, subject_id),
                         sender_id=subject_id,
                     ),
                 ]

@@ -34,7 +34,7 @@ from agent.slack.code_channels import (
     set_view,
 )
 from agent.threads.plan_store import get_plan_content
-from agent.utils.authorship import PR_ATTRIBUTION_TEXT
+from agent.utils.authorship import PR_ATTRIBUTION_TEXT, add_pr_collaboration_note
 from agent.utils.dashboard_links import dashboard_plan_url, dashboard_thread_url
 from agent.utils.langsmith import create_langsmith_thread_feedback
 
@@ -886,6 +886,30 @@ async def _is_private_repo(client: httpx2.AsyncClient, token: str, owner: str, r
     return bool(data.get("private")) if isinstance(data, dict) else False
 
 
+async def _stamp_attribution_footer(body: str) -> str:
+    """Make the platform footer, naming this run's model, the body's last line."""
+    cfg = _configurable()
+    model_id: str | None = None
+    effort: str | None = None
+    if cfg.thread_id:
+        try:
+            thread = await get_client().threads.get(cfg.thread_id)
+            metadata = thread.get("metadata") if isinstance(thread, dict) else None
+            if isinstance(metadata, dict):
+                model = metadata.get("model")
+                model_id = model if isinstance(model, str) and model else None
+                value = metadata.get("effort")
+                effort = value if isinstance(value, str) and value else None
+        except Exception:
+            logger.debug("Could not read the thread's model for the PR footer", exc_info=True)
+    return add_pr_collaboration_note(
+        body,
+        thread_url=dashboard_thread_url(cfg.thread_id) if cfg.thread_id else None,
+        model_id=model_id,
+        reasoning_effort=effort,
+    )
+
+
 async def _maybe_append_references(
     client: httpx2.AsyncClient, token: str, owner: str, repo: str, body: str
 ) -> str:
@@ -989,7 +1013,9 @@ async def _open_pull_request(
         )
         if preflight_failure is not None:
             return preflight_failure
-        body = await _maybe_append_references(client, token, owner, repo, body)
+        body = await _stamp_attribution_footer(
+            await _maybe_append_references(client, token, owner, repo, body)
+        )
         draft = _effective_draft(draft)
         payload = {
             "title": title,

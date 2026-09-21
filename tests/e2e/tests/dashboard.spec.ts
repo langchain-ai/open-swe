@@ -256,9 +256,9 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
 
   // A turn without sender context is a turn the agent cannot attribute: it read
   // the block as scoped to an earlier message and refused to set a commit
-  // identity at all. The collaboration block is the opposite — standing rules
-  // that must not be repeated.
-  test("repeats sender context every turn and keeps collaboration standing", async ({
+  // identity at all. The roster is the opposite — everything about the people,
+  // stated once, repeated only when one of them changes.
+  test("points at the sender every turn and re-emits the roster only when a participant changes", async ({
     page,
   }) => {
     await loginAs(page, SAME_USER);
@@ -275,10 +275,22 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
     );
     expect(clearInstructions.ok()).toBeTruthy();
 
-    const senderMarker = /who sent the message above/g;
-    const collaborationMarker = /Git identities you may author commits as/g;
+    const senderMarker = /Sent by \*\*/g;
     const countIn = (state: string, marker: RegExp) =>
       state.match(marker)?.length ?? 0;
+    // Every roster block the thread holds, so a repeat fails with the diff, not a count.
+    const rosterBlocks = (state: string): string[] => {
+      const parsed = JSON.parse(state) as {
+        values?: { messages?: Array<{ content?: unknown }> };
+      };
+      return (parsed.values?.messages ?? [])
+        .map((message) => (typeof message.content === "string" ? message.content : ""))
+        .filter((content) => content.includes('sender="system:collaboration"'));
+    };
+    const expectOneRoster = (state: string) => {
+      const blocks = rosterBlocks(state);
+      expect(blocks, blocks.join("\n\n=== next roster block ===\n\n")).toHaveLength(1);
+    };
 
     const editor = page.getByTestId("composer-editor");
     await editor.focus();
@@ -286,7 +298,7 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
     await editor.press("Enter");
     await expect(page).toHaveURL(/\/agents\/[^/]+$/);
     const threadId = threadIdFromUrl(page);
-    await waitForStateToContain(page, threadId, "who sent the message above");
+    await waitForStateToContain(page, threadId, "Sent by **");
     await waitForThreadIdle(page, threadId);
     await expect(page.getByTestId("composer-editor")).toHaveAttribute(
       "contenteditable",
@@ -309,9 +321,7 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
         { timeout: 60_000, intervals: [500] },
       )
       .toBe(2);
-    expect(
-      countIn(await threadState(page, threadId), collaborationMarker),
-    ).toBe(1);
+    expectOneRoster(await threadState(page, threadId));
 
     const instructions = "Always use the sender preference update marker.";
     const origin = new URL(page.url()).origin;
@@ -344,9 +354,14 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
       .toBe(3);
     await waitForThreadIdle(page, threadId);
 
+    // Bob's standing instructions changed, so the roster — where they live — is
+    // re-emitted once; the pointer stays a pointer.
     const state = await threadState(page, threadId);
     expect(countIn(state, senderMarker)).toBe(3);
-    expect(countIn(state, collaborationMarker)).toBe(1);
+    const rosters = rosterBlocks(state);
+    expect(rosters, rosters.join("\n\n=== next roster block ===\n\n")).toHaveLength(2);
+    expect(rosters[0]).toContain("Standing instructions: none");
+    expect(rosters[1]).toContain(instructions);
   });
 
   test("keeps the submitted message and thread view visible while a new chat starts", async ({
