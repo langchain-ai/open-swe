@@ -10,8 +10,13 @@ from agent.dispatch import dispatch_agent_run
 from agent.input_messages import InputMessageContext, SystemIdentity
 from agent.prompts import render_prompt
 from agent.sandboxes.providers.registry import create_sandbox
+from agent.slack.thinking import sync_slack_background_status
 from agent.source_context import SourceContext
 from agent.tools.background_execute import TASK_ROOT, control_script, encoded, execute
+from agent.utils.background_task_state import (
+    RUNNING_BACKGROUND_TASKS_KEY,
+    update_background_task_state,
+)
 from agent.utils.thread_ops import langgraph_url
 
 logger = logging.getLogger(__name__)
@@ -155,12 +160,42 @@ async def monitor_background_tasks(thread_id: str) -> dict[str, Any]:
     metadata = metadata if isinstance(metadata, dict) else {}
     sandbox_id = metadata.get("sandbox_id")
     if not isinstance(sandbox_id, str) or not sandbox_id:
+        await update_background_task_state(client, thread_id, reset=True)
+        await sync_slack_background_status(client, thread_id)
         await _delete_crons(thread_id)
         return {"status": "missing_sandbox"}
     backend = await create_sandbox(sandbox_id)
     tasks = await _list_tasks(backend)
     running = [task for task in tasks if task.get("status") == "running"]
     terminal = [task for task in tasks if task.get("status") in TERMINAL_STATES]
+    running_ids = [task_id for task in running if isinstance((task_id := task.get("task_id")), str)]
+    tracked = metadata.get(RUNNING_BACKGROUND_TASKS_KEY)
+    tracked_ids = (
+        [task_id for task_id in tracked if isinstance(task_id, str)]
+        if isinstance(tracked, list)
+        else []
+    )
+    finished_ids = [
+        task_id for task in terminal if isinstance((task_id := task.get("task_id")), str)
+    ]
+    tracked_successfully = False
+    try:
+        await update_background_task_state(
+            client,
+            thread_id,
+            running=running_ids,
+            finished=[
+                *finished_ids,
+                *(task_id for task_id in tracked_ids if task_id not in running_ids),
+            ],
+        )
+        tracked_successfully = True
+    except Exception:
+        logger.warning(
+            "Could not track background commands",
+            extra={"agent_thread_id": thread_id},
+            exc_info=True,
+        )
     delivered = 0
     for task in terminal:
         task_id = task.get("task_id")
@@ -189,7 +224,7 @@ async def monitor_background_tasks(thread_id: str) -> dict[str, Any]:
             await _unclaim(backend, task_id)
             logger.warning("Failed to deliver background task %s", task_id, exc_info=True)
     pending = any(task.get("notification") != "done" for task in terminal)
-    if not running and not pending:
+    if not running and not pending and tracked_successfully:
         lock = await backend.aexecute(
             f"mkdir -p {shlex.quote(TASK_ROOT)} && mkdir {shlex.quote(MONITOR_LOCK)} 2>/dev/null",
             timeout=10,
@@ -209,4 +244,5 @@ async def monitor_background_tasks(thread_id: str) -> dict[str, Any]:
                 await backend.aexecute(
                     f"rmdir {shlex.quote(MONITOR_LOCK)} 2>/dev/null || true", timeout=10
                 )
+    await sync_slack_background_status(client, thread_id)
     return {"status": "running" if running or pending else "idle", "delivered": delivered}
