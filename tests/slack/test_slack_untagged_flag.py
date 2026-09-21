@@ -9,6 +9,7 @@ from fastapi import BackgroundTasks
 from starlette.requests import Request
 
 from agent.slack import events as slack_events
+from agent.slack import failures as slack_failures
 from agent.slack import routes as slack_routes
 from agent.slack import webhook as slack_service
 from agent.slack.payloads import SlackChannelContext
@@ -274,6 +275,87 @@ async def test_message_update_background_task_rejects_mismatched_delivery_mappin
 
     assert response == {"status": "accepted", "message": "Slack update queued"}
     process.assert_not_awaited()
+
+
+@pytest.mark.parametrize(
+    "failure",
+    [RuntimeError("503"), webhook_common.SlackThreadMappingError("conflict")],
+)
+async def test_message_update_lookup_failure_is_logged_without_reply(
+    monkeypatch: pytest.MonkeyPatch,
+    failure: Exception,
+) -> None:
+    monkeypatch.setattr(webhook_common, "lookup_slack_thread_id", AsyncMock(side_effect=failure))
+    report = AsyncMock()
+    process = AsyncMock()
+    monkeypatch.setattr(slack_failures, "report_slack_failure", report)
+    monkeypatch.setattr(slack_service, "process_slack_mention", process)
+    background_tasks = _FakeBackgroundTasks()
+
+    response = await slack_routes.slack_webhook(
+        cast(Request, _FakeRequest(_message_update_payload())),
+        cast(BackgroundTasks, background_tasks),
+    )
+    await _run_message_update_task(background_tasks)
+
+    assert response == {"status": "accepted", "message": "Slack update queued"}
+    report.assert_not_awaited()
+    process.assert_not_awaited()
+
+
+async def test_message_update_claim_failure_is_logged_without_reply(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        webhook_common, "claim_slack_event", AsyncMock(side_effect=RuntimeError("503"))
+    )
+    report = AsyncMock()
+    monkeypatch.setattr(slack_failures, "report_slack_failure", report)
+    background_tasks = _FakeBackgroundTasks()
+
+    response = await slack_routes.slack_webhook(
+        cast(Request, _FakeRequest(_message_update_payload())),
+        cast(BackgroundTasks, background_tasks),
+    )
+
+    assert response == {"status": "ignored", "reason": "Slack update could not be claimed"}
+    assert background_tasks.tasks == []
+    report.assert_not_awaited()
+
+
+async def test_confirmed_message_update_failure_replies_to_owning_thread(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    failure = RuntimeError("boom")
+    monkeypatch.setattr(
+        webhook_common,
+        "resolve_slack_channel_context",
+        AsyncMock(
+            side_effect=[
+                SlackChannelContext(is_ext_shared=False, is_pending_ext_shared=False),
+                failure,
+            ]
+        ),
+    )
+    report = AsyncMock()
+    monkeypatch.setattr(slack_failures, "report_slack_failure", report)
+    background_tasks = _FakeBackgroundTasks()
+
+    response = await slack_routes.slack_webhook(
+        cast(Request, _FakeRequest(_message_update_payload())),
+        cast(BackgroundTasks, background_tasks),
+    )
+    await _run_message_update_task(background_tasks)
+
+    assert response == {"status": "accepted", "message": "Slack update queued"}
+    report.assert_awaited_once()
+    await_args = report.await_args
+    assert await_args is not None
+    target, reported_failure = await_args.args
+    assert target.channel_id == "C1"
+    assert target.thread_ts == "1786573300.000000"
+    assert target.agent_thread_id == "t1"
+    assert reported_failure is failure
 
 
 async def test_message_update_retries_until_delivery_mapping_exists(

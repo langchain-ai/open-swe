@@ -199,10 +199,7 @@ async def _lookup_delivered_message_update(
     user_id: str,
 ) -> tuple[str | None, JsonObject | None]:
     for delay in (*_MESSAGE_UPDATE_RETRY_DELAYS, None):
-        try:
-            thread_id = await common.lookup_slack_thread_id(langgraph_client, channel_id, thread_ts)
-        except common.SlackThreadMappingError:
-            return None, None
+        thread_id = await common.lookup_slack_thread_id(langgraph_client, channel_id, thread_ts)
         delivered_message = await common.lookup_slack_run_mapping(
             langgraph_client, channel_id, message_ts
         )
@@ -222,18 +219,24 @@ async def _lookup_delivered_message_update(
 
 
 async def _process_slack_message_update(request: SlackRequest) -> None:
-    await run_slack_task(request.target, _process_slack_message_update_impl(request))
-
-
-async def _process_slack_message_update_impl(request: SlackRequest) -> None:
-    langgraph_client = get_langgraph_client()
-    thread_id, delivered_message = await _lookup_delivered_message_update(
-        langgraph_client,
-        request.channel_id,
-        request.thread_ts,
-        request.original_message_ts,
-        request.user_id,
-    )
+    try:
+        thread_id, delivered_message = await _lookup_delivered_message_update(
+            get_langgraph_client(),
+            request.channel_id,
+            request.thread_ts,
+            request.original_message_ts,
+            request.user_id,
+        )
+    except Exception:  # noqa: BLE001
+        common.logger.exception(
+            "Failed to associate Slack message update",
+            extra={
+                "slack_channel_id": request.channel_id,
+                "slack_message_ts": request.original_message_ts,
+                "slack_event_id": request.event_id,
+            },
+        )
+        return
     if not thread_id or not delivered_message:
         common.logger.info(
             "Ignoring undelivered Slack message update channel=%s message=%s",
@@ -241,6 +244,11 @@ async def _process_slack_message_update_impl(request: SlackRequest) -> None:
             request.original_message_ts,
         )
         return
+    request = request.model_copy(update={"thread_id": thread_id})
+    await run_slack_task(request.target, _process_slack_message_update_impl(request))
+
+
+async def _process_slack_message_update_impl(request: SlackRequest) -> None:
     channel_context = await common.resolve_slack_channel_context(
         request.channel_id, use_cache=False
     )
@@ -254,10 +262,10 @@ async def _process_slack_message_update_impl(request: SlackRequest) -> None:
         request.thread_ts,
         slack_user_id=request.user_id,
         channel_context=channel_context,
-        thread_id=thread_id,
+        thread_id=request.thread_id,
     )
     await service.process_slack_mention(
-        request.model_copy(update={"thread_id": thread_id, "channel_context": channel_context}),
+        request.model_copy(update={"channel_context": channel_context}),
         repo,
     )
 
@@ -468,33 +476,45 @@ async def slack_webhook(
     if bot_user_id and user_id == bot_user_id:
         return ignored("Event from this bot user")
 
+    if is_message_update:
+        try:
+            claimed = await common.claim_slack_event(event_id, channel_id, event_ts)
+        except Exception:  # noqa: BLE001
+            common.logger.exception(
+                "Failed to claim Slack message update",
+                extra={
+                    "slack_channel_id": channel_id,
+                    "slack_message_ts": original_message_ts,
+                    "slack_event_id": event_id,
+                },
+            )
+            return ignored("Slack update could not be claimed")
+        if not claimed:
+            return ignored("Duplicate Slack event delivery")
+        background_tasks.add_task(
+            _process_slack_message_update,
+            SlackRequest(
+                channel_id=channel_id,
+                thread_ts=thread_ts,
+                event_ts=event_ts,
+                original_message_ts=original_message_ts,
+                event_id=event_id,
+                user_id=user_id,
+                text=text,
+                attachments=attachments,
+                bot_user_id=bot_user_id,
+                message_update=True,
+                code_channel=in_code_channel,
+                dm_session=in_dm,
+                reply_thread_ts=reply_thread_ts if in_code_channel or in_dm else "",
+            ),
+        )
+        return accepted("Slack update queued")
+
     # From here on the message is addressed to Open SWE: any failure is reported to the thread.
     target = SlackRequestTarget(channel_id=channel_id, thread_ts=thread_ts, event_id=event_id)
 
     async def dispatch() -> WebhookResponse:
-        if is_message_update:
-            if await common.claim_slack_event(event_id, channel_id, event_ts):
-                background_tasks.add_task(
-                    _process_slack_message_update,
-                    SlackRequest(
-                        channel_id=channel_id,
-                        thread_ts=thread_ts,
-                        event_ts=event_ts,
-                        original_message_ts=original_message_ts,
-                        event_id=event_id,
-                        user_id=user_id,
-                        text=text,
-                        attachments=attachments,
-                        bot_user_id=bot_user_id,
-                        message_update=True,
-                        code_channel=in_code_channel,
-                        dm_session=in_dm,
-                        reply_thread_ts=reply_thread_ts if in_code_channel or in_dm else "",
-                    ),
-                )
-                return accepted("Slack update queued")
-            return ignored("Duplicate Slack event delivery")
-
         if channel_context is None:
             return ignored("Slack channel is not eligible")
 
