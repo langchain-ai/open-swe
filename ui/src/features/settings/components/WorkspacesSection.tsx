@@ -1,15 +1,5 @@
 import { useState, type ReactNode } from "react"
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog"
+import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { SettingsSection } from "@/components/AppShell"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -180,14 +170,6 @@ export function WorkspacesSection({
   const channelLabel = (id: string) =>
     slackChannelLabel(channelDirectory.data, id)
 
-  const [deleting, setDeleting] = useState<WorkspaceOption | null>(null)
-  const deleteWorkspace = useMutation({
-    mutationFn: api.deleteWorkspace,
-    onSuccess: async () => {
-      setDeleting(null)
-      await qc.invalidateQueries({ queryKey: WORKSPACE_OPTIONS_KEY })
-    },
-  })
   const [adding, setAdding] = useState(false)
   const [createDraft, setCreateDraft] = useState<WorkspaceDraft>(EMPTY_DRAFT)
   const [creating, setCreating] = useState(false)
@@ -245,62 +227,9 @@ export function WorkspacesSection({
             channelLabel={channelLabel}
             isDefault={workspace.slug === options.default_slug}
             isAdmin={isAdmin}
-            configure={
-              isAdmin ? (
-                <>
-                  {renderConfigure?.(workspace)}
-                  <Button
-                    size="sm"
-                    variant="destructive"
-                    aria-label={`Delete ${workspace.name}`}
-                    onClick={() => {
-                      deleteWorkspace.reset()
-                      setDeleting(workspace)
-                    }}
-                  >
-                    Delete
-                  </Button>
-                </>
-              ) : null
-            }
+            configure={isAdmin ? renderConfigure?.(workspace) : null}
           />
         ))
-      )}
-      {isAdmin && deleting && (
-        <AlertDialog
-          open
-          onOpenChange={(open) => {
-            if (!open && !deleteWorkspace.isPending) setDeleting(null)
-          }}
-        >
-          <AlertDialogContent>
-            <AlertDialogHeader>
-              <AlertDialogTitle>Delete {deleting.name}?</AlertDialogTitle>
-              <AlertDialogDescription>
-                This deletes the workspace, its settings and sandbox snapshot,
-                and releases its repository and Slack channel bindings. This
-                cannot be undone.
-              </AlertDialogDescription>
-            </AlertDialogHeader>
-            {deleteWorkspace.error && (
-              <p role="alert" className="text-xs text-destructive">
-                {deleteWorkspace.error.message}
-              </p>
-            )}
-            <AlertDialogFooter>
-              <AlertDialogCancel disabled={deleteWorkspace.isPending}>
-                Cancel
-              </AlertDialogCancel>
-              <AlertDialogAction
-                variant="destructive"
-                disabled={deleteWorkspace.isPending}
-                onClick={() => deleteWorkspace.mutate(deleting.slug)}
-              >
-                {deleteWorkspace.isPending ? "Deleting…" : "Delete workspace"}
-              </AlertDialogAction>
-            </AlertDialogFooter>
-          </AlertDialogContent>
-        </AlertDialog>
       )}
       {isAdmin &&
         (adding ? (

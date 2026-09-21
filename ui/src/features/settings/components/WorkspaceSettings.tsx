@@ -1,5 +1,16 @@
 import { useState } from "react"
-import { useQuery, useQueryClient } from "@tanstack/react-query"
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
 
 import { SettingsSection } from "@/components/AppShell"
 import { Button } from "@/components/ui/button"
@@ -116,11 +127,22 @@ function GeneralSection({
 export function WorkspaceSettingsPanel({
   slug,
   canEdit,
+  onDeleted,
 }: {
   slug: string
   canEdit: boolean
+  onDeleted: () => void
 }) {
   const qc = useQueryClient()
+  const [deleting, setDeleting] = useState(false)
+  const deleteWorkspace = useMutation({
+    mutationFn: api.deleteWorkspace,
+    onSuccess: async () => {
+      setDeleting(false)
+      await qc.invalidateQueries({ queryKey: workspaceOptionKeys.all })
+      onDeleted()
+    },
+  })
   const record = useQuery({
     queryKey: workspaceRecordKey(slug),
     queryFn: () => api.getWorkspace(slug),
@@ -193,6 +215,62 @@ export function WorkspaceSettingsPanel({
       <ReviewSettings scope={scope} canEdit={canEdit} />
       <ExpeditedReviewSection scope={scope} />
       <MCPConnectionsSection key={slug} scope="workspace" workspace={slug} />
+      {canEdit && (
+        <SettingsSection
+          title="Delete workspace"
+          description="Permanently delete this workspace, its settings, and sandbox snapshot. This cannot be undone."
+        >
+          <div className="px-4 py-3.5">
+            <Button
+              size="sm"
+              variant="destructive"
+              aria-label={`Delete ${record.data.name}`}
+              onClick={() => {
+                deleteWorkspace.reset()
+                setDeleting(true)
+              }}
+            >
+              Delete
+            </Button>
+          </div>
+        </SettingsSection>
+      )}
+      {canEdit && deleting && (
+        <AlertDialog
+          open
+          onOpenChange={(open) => {
+            if (!open && !deleteWorkspace.isPending) setDeleting(false)
+          }}
+        >
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Delete {record.data.name}?</AlertDialogTitle>
+              <AlertDialogDescription>
+                This deletes the workspace, its settings and sandbox snapshot,
+                and releases its repository and Slack channel bindings. This
+                cannot be undone.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            {deleteWorkspace.error && (
+              <p role="alert" className="text-xs text-destructive">
+                {deleteWorkspace.error.message}
+              </p>
+            )}
+            <AlertDialogFooter>
+              <AlertDialogCancel disabled={deleteWorkspace.isPending}>
+                Cancel
+              </AlertDialogCancel>
+              <AlertDialogAction
+                variant="destructive"
+                disabled={deleteWorkspace.isPending}
+                onClick={() => deleteWorkspace.mutate(slug)}
+              >
+                {deleteWorkspace.isPending ? "Deleting…" : "Delete workspace"}
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+      )}
     </>
   )
 }

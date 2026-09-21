@@ -105,19 +105,80 @@ function mockApis(record: WorkspaceRecord = RECORD) {
   vi.spyOn(api, "me").mockRejectedValue(new Error("not signed in"))
 }
 
-function renderPage() {
+function renderPage(canEdit = true, onDeleted = vi.fn()) {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   })
   clients.push(client)
   return render(
     <QueryClientProvider client={client}>
-      <WorkspaceSettingsPanel slug="oss" canEdit />
+      <WorkspaceSettingsPanel
+        slug="oss"
+        canEdit={canEdit}
+        onDeleted={onDeleted}
+      />
     </QueryClientProvider>
   )
 }
 
 describe("WorkspaceSettingsPanel", () => {
+  it("confirms deletion, keeps failures retryable, and leaves the detail page on success", async () => {
+    mockApis()
+    const onDeleted = vi.fn()
+    const remove = vi
+      .spyOn(api, "deleteWorkspace")
+      .mockRejectedValueOnce(new Error("Could not delete the workspace"))
+    renderPage(true, onDeleted)
+
+    fireEvent.click(await screen.findByRole("button", { name: "Delete OSS" }))
+    expect(screen.getByRole("alertdialog").textContent).toContain(
+      "cannot be undone"
+    )
+    fireEvent.click(
+      within(screen.getByRole("alertdialog")).getByRole("button", {
+        name: "Cancel",
+      })
+    )
+    expect(remove).not.toHaveBeenCalled()
+
+    fireEvent.click(screen.getByRole("button", { name: "Delete OSS" }))
+    fireEvent.click(screen.getByRole("button", { name: "Delete workspace" }))
+    expect((await screen.findByRole("alert")).textContent).toBe(
+      "Could not delete the workspace"
+    )
+    expect(remove).toHaveBeenCalledWith("oss", expect.anything())
+    expect(onDeleted).not.toHaveBeenCalled()
+
+    let finish!: () => void
+    remove.mockImplementation(
+      () =>
+        new Promise<void>((resolve) => {
+          finish = resolve
+        })
+    )
+    fireEvent.click(screen.getByRole("button", { name: "Delete workspace" }))
+    expect(
+      (await screen.findByRole("button", { name: "Deleting…" })).hasAttribute(
+        "disabled"
+      )
+    ).toBe(true)
+    expect(
+      within(screen.getByRole("alertdialog"))
+        .getByRole("button", { name: "Cancel" })
+        .hasAttribute("disabled")
+    ).toBe(true)
+    finish()
+    await waitFor(() => expect(onDeleted).toHaveBeenCalledOnce())
+    expect(screen.queryByRole("alertdialog")).toBeNull()
+  })
+
+  it("does not offer deletion without admin access", async () => {
+    mockApis()
+    renderPage(false)
+    await screen.findByLabelText("Workspace name")
+    expect(screen.queryByRole("button", { name: /^Delete/ })).toBeNull()
+  })
+
   it("loads the record into the general form and saves the edited name", async () => {
     mockApis()
     const update = vi
