@@ -39,7 +39,15 @@ def apply() -> None:
     # actual module object by name instead.
     opr = importlib.import_module("agent.tools.open_pull_request")
 
-    from e2e_env import BASE_URL, FAKE_GITHUB_API, FAKE_SLACK_API
+    from e2e_env import (
+        BASE_URL,
+        FAKE_GITHUB_API,
+        FAKE_SLACK_API,
+        OWNER,
+        REPO,
+        SECOND_OWNER,
+        SECOND_REPO,
+    )
 
     # The LLM is the only agent-internal piece we fake, and only by default.
     # Set E2E_REAL_LLM=1 to drive the harness (mock Slack/GitHub, real agent)
@@ -94,6 +102,21 @@ def apply() -> None:
     # Point the real PR/Slack code at the in-process fakes.
     opr.__dict__["GITHUB_API"] = FAKE_GITHUB_API
     slack_http.SLACK_API_BASE_URL = FAKE_SLACK_API
+
+    from agent.github import repos as github_repos
+
+    async def _fake_user_repos(
+        _login: str,
+    ) -> tuple[list[github_repos.InstallationSummary], list[github_repos.RepositorySummary]]:
+        return (
+            [{"id": 42, "account": {"login": OWNER, "type": "Organization"}}],
+            [
+                {"full_name": f"{OWNER}/{REPO}", "private": False},
+                {"full_name": f"{SECOND_OWNER}/{SECOND_REPO}", "private": False},
+            ],
+        )
+
+    github_repos.fetch_user_installations_and_repos = _fake_user_repos
 
     # A PR URL identifies the repository a tool is allowed to act on, so the real
     # parser only accepts github.com. The fake GitHub serves its pull requests
