@@ -1,17 +1,37 @@
+import { LockSimpleIcon } from "@phosphor-icons/react"
+
+import { useRepos } from "@/lib/profile"
+import { cn } from "@/lib/utils"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 import { RepositoryPicker, SlackChannelPicker } from "./WorkspaceBindingPickers"
 import { type WorkspaceOption, type WorkspaceRecord } from "@/lib/api"
 
-export function Chips({ values }: { values: Array<string> }) {
+export function Chips({
+  values,
+  privateRepos,
+}: {
+  values: Array<string>
+  privateRepos?: ReadonlySet<string>
+}) {
   if (values.length === 0) return null
   return (
     <div className="flex flex-wrap gap-1.5">
       {values.map((value) => (
         <span
           key={value}
-          className="rounded-full border border-border px-2 py-0.5 text-[11px] text-muted-foreground"
+          className={cn(
+            "inline-flex items-center gap-1 rounded-full border border-border px-2 py-0.5 text-[11px] text-muted-foreground",
+            privateRepos?.has(value.toLowerCase()) &&
+              "border-violet-200 bg-violet-50 text-violet-700 dark:border-violet-800 dark:bg-violet-950 dark:text-violet-300"
+          )}
         >
+          {privateRepos?.has(value.toLowerCase()) && (
+            <>
+              <LockSimpleIcon size={12} aria-hidden="true" />
+              <span className="sr-only">Private repository: </span>
+            </>
+          )}
           {value}
         </span>
       ))}
@@ -58,6 +78,13 @@ export function WorkspaceEditor({
   workspaces: Array<WorkspaceOption>
   channelLabel: (id: string) => string
 }) {
+  const repositoryDirectory = useRepos()
+  const privateRepos = new Set(
+    (repositoryDirectory.data?.repositories ?? [])
+      .filter((repo) => repo.private)
+      .map((repo) => repo.full_name.toLowerCase())
+  )
+
   return (
     <div className="space-y-3 border-t border-border px-4 py-3.5">
       <label className="block text-sm">
@@ -76,7 +103,7 @@ export function WorkspaceEditor({
           className="mt-1 flex flex-wrap items-center gap-2"
         >
           {draft.repos.length > 0 ? (
-            <Chips values={draft.repos} />
+            <Chips values={draft.repos} privateRepos={privateRepos} />
           ) : (
             <span className="text-xs text-muted-foreground">None yet</span>
           )}
