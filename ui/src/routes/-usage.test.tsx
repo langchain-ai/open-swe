@@ -184,6 +184,8 @@ it("sorts PR outcomes before pagination and toggles column direction", async () 
   const cohort = (model: string, size: number): PRMergeRateCohort => ({
     model_id: model,
     model_attribution_quality: "configured",
+    avg_pr_cost_usd: null,
+    prs_with_complete_cost: 0,
     merged: size,
     closed_without_merge: 0,
     mature_pending: 0,
@@ -1252,6 +1254,7 @@ it("explains omitted PR costs in the average", async () => {
         model_id: "cost-model",
         model_attribution_quality: "configured",
         avg_merge_seconds: 3600,
+        avg_delivery_seconds: null,
         merged: 1,
         closed_without_merge: 0,
         mature_pending: 0,
@@ -1302,6 +1305,7 @@ it.each([
           mature_denominator: 1,
           mature_cohort_merge_share: 1,
           avg_merge_seconds: 3600,
+          avg_delivery_seconds: null,
           avg_pr_cost_usd: cost,
           prs_with_complete_cost: covered,
           efforts: [
