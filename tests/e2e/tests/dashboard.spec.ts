@@ -373,10 +373,8 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
       rosters,
       rosters.join("\n\n=== next roster block ===\n\n"),
     ).toHaveLength(2);
-    expect(rosters[0]).not.toContain("<standing_instructions>");
-    expect(rosters[1]).toContain(
-      `<standing_instructions>${instructions}</standing_instructions>`,
-    );
+    expect(rosters[0]).not.toContain("standing_instructions:");
+    expect(rosters[1]).toContain(`standing_instructions: ${instructions}`);
   });
 
   test("keeps the submitted message and thread view visible while a new chat starts", async ({
