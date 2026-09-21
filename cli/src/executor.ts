@@ -1,3 +1,4 @@
+import { spawn } from "node:child_process"
 import { mkdir, readFile, writeFile } from "node:fs/promises"
 import { dirname, isAbsolute, normalize, resolve } from "node:path"
 
@@ -91,18 +92,6 @@ function concatChunks(chunks: readonly Uint8Array[]): Uint8Array {
   return merged
 }
 
-async function drain(
-  stream: ReadableStream<Uint8Array>,
-  into: Uint8Array[]
-): Promise<void> {
-  const reader = stream.getReader()
-  for (;;) {
-    const { done, value } = await reader.read()
-    if (done) break
-    if (value !== undefined) into.push(value)
-  }
-}
-
 function decodeBase64(value: string): Uint8Array {
   const compact = value.replace(/\s+/g, "")
   if (!BASE64.test(compact) || compact.length % 4 === 1) {
@@ -174,30 +163,40 @@ export class LocalExecutor {
   ): Promise<ExecuteResult> {
     const seconds =
       timeout !== null && timeout > 0 ? timeout : DEFAULT_TIMEOUT_SECONDS
-    const proc = Bun.spawn(["sh", "-c", command], {
+    // Detached puts the shell in its own process group, so a timeout can signal
+    // everything it spawned; killing only `sh` leaves children holding the pipes.
+    const proc = spawn("sh", ["-c", command], {
       cwd: this.root,
-      stdout: "pipe",
-      stderr: "pipe",
+      stdio: ["ignore", "pipe", "pipe"],
       env: commandEnvironment(),
+      detached: true,
     })
+    const signalGroup = (signal: NodeJS.Signals): void => {
+      if (proc.pid === undefined) return
+      try {
+        process.kill(-proc.pid, signal)
+      } catch (cause) {
+        if (errorCode(cause) !== "ESRCH") throw cause
+      }
+    }
 
     const chunks: Uint8Array[] = []
     let timedOut = false
     let escalation: ReturnType<typeof setTimeout> | null = null
-    // Bun.spawn cannot start the child in its own process group, so anything it
-    // backgrounds can outlive these signals.
     const deadline = setTimeout(() => {
       timedOut = true
-      proc.kill("SIGTERM")
-      escalation = setTimeout(() => proc.kill("SIGKILL"), KILL_GRACE_MS)
+      signalGroup("SIGTERM")
+      escalation = setTimeout(() => signalGroup("SIGKILL"), KILL_GRACE_MS)
     }, seconds * 1000)
+    proc.stdout.on("data", (chunk: Buffer) => chunks.push(chunk))
+    proc.stderr.on("data", (chunk: Buffer) => chunks.push(chunk))
 
+    let exitCode: number | null = null
     try {
-      await Promise.all([
-        drain(proc.stdout, chunks),
-        drain(proc.stderr, chunks),
-      ])
-      await proc.exited
+      exitCode = await new Promise<number | null>((done, fail) => {
+        proc.once("error", fail)
+        proc.once("close", (code) => done(code))
+      })
     } finally {
       clearTimeout(deadline)
       if (escalation !== null) clearTimeout(escalation)
@@ -211,7 +210,7 @@ export class LocalExecutor {
         truncated,
       }
     }
-    return { output, exit_code: proc.exitCode, truncated }
+    return { output, exit_code: exitCode, truncated }
   }
 
   async uploadFiles(
