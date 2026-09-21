@@ -5,7 +5,7 @@ requires-python = ">=3.14"
 [manifest]
 constraints = [{ name = "langgraph-api", specifier = ">=0.13.3,<0.14" }]
 overrides = [
-    { name = "deepagents", specifier = "==0.7.15" },
+    { name = "deepagents", specifier = "==0.7.16" },
     { name = "wcmatch", specifier = ">=11.0" },
 ]
 
@@ -686,7 +686,7 @@ wheels = [
 
 [[package]]
 name = "deepagents"
-version = "0.7.15"
+version = "0.7.16"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "langchain" },
@@ -697,9 +697,9 @@ dependencies = [
     { name = "packaging" },
     { name = "wcmatch" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/fc/a5/be1b210a06d1b73ab8ef5d7c80bfcd432d3405e63ffac66613ce0004807b/deepagents-0.7.15.tar.gz", hash = "sha256:bf8922e72627d577739449cc8954517e71a6b2796e8ff880d1385249365e85cf", size = 300771, upload-time = "2026-09-16T21:01:05.793Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/a1/fd/64fcca7a8e06cdc068abd76ae0dc31c1f5be1afa2de4b33f91fb39a1410a/deepagents-0.7.16.tar.gz", hash = "sha256:ea4aa49dbe424d427dc6aa660150f15f5fafe68a679fa8e1fdda55b2e93472a8", size = 301535, upload-time = "2026-09-21T13:29:56.998Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/8d/1a/86b2f25bacfb9f62221e35dfcb4ce943ffdf2fe03a5472c24ff6a7ad89d1/deepagents-0.7.15-py3-none-any.whl", hash = "sha256:49d040f5d065cb20566967465bfbf36da226f3bca839e03446e97cf3fcd02bde", size = 327865, upload-time = "2026-09-16T21:01:04.053Z" },
+    { url = "https://files.pythonhosted.org/packages/20/f4/38c5efe057abf895158d4232b8a6f93d4841b7a4692a85c8f65e245bc4be/deepagents-0.7.16-py3-none-any.whl", hash = "sha256:384bd824303f6654f7d1ad38190ac25104de05419407d5b26c242365e3fda0ba", size = 328598, upload-time = "2026-09-21T13:29:55.613Z" },
 ]
 
 [[package]]
@@ -2123,14 +2123,10 @@ dependencies = [
     { name = "httpx2" },
     { name = "langchain" },
     { name = "langchain-anthropic" },
-    { name = "langchain-daytona" },
-    { name = "langchain-e2b" },
     { name = "langchain-fireworks" },
     { name = "langchain-google-genai" },
     { name = "langchain-mcp-adapters" },
-    { name = "langchain-modal" },
     { name = "langchain-openai" },
-    { name = "langchain-runloop" },
     { name = "langgraph" },
     { name = "langgraph-checkpoint-sqlite" },
     { name = "langgraph-cli", extra = ["inmem"] },
@@ -2155,6 +2151,24 @@ dev = [
     { name = "ruff" },
     { name = "ty" },
 ]
+sandbox-daytona = [
+    { name = "langchain-daytona" },
+]
+sandbox-e2b = [
+    { name = "langchain-e2b" },
+]
+sandbox-modal = [
+    { name = "langchain-modal" },
+]
+sandbox-providers = [
+    { name = "langchain-daytona" },
+    { name = "langchain-e2b" },
+    { name = "langchain-modal" },
+    { name = "langchain-runloop" },
+]
+sandbox-runloop = [
+    { name = "langchain-runloop" },
+]
 
 [package.metadata]
 requires-dist = [
@@ -2162,7 +2176,7 @@ requires-dist = [
     { name = "alembic", specifier = "==1.20.0" },
     { name = "asyncpg", specifier = "==0.31.0" },
     { name = "cryptography", specifier = ">=50.0.0" },
-    { name = "deepagents", specifier = "==0.7.15" },
+    { name = "deepagents", specifier = "==0.7.16" },
     { name = "exa-py", specifier = ">=2.18.1" },
     { name = "fastapi", specifier = ">=0.141.1" },
     { name = "fireworks-ai", specifier = ">=1.2.9" },
@@ -2171,14 +2185,18 @@ requires-dist = [
     { name = "httpx2", specifier = ">=2.12.0,<3.0.0" },
     { name = "langchain", specifier = ">=1.3.16" },
     { name = "langchain-anthropic", specifier = ">=1.6.1" },
-    { name = "langchain-daytona", specifier = ">=0.0.8" },
-    { name = "langchain-e2b", specifier = "==0.0.6" },
+    { name = "langchain-daytona", marker = "extra == 'sandbox-daytona'", specifier = ">=0.0.8" },
+    { name = "langchain-daytona", marker = "extra == 'sandbox-providers'", specifier = ">=0.0.8" },
+    { name = "langchain-e2b", marker = "extra == 'sandbox-e2b'", specifier = "==0.0.6" },
+    { name = "langchain-e2b", marker = "extra == 'sandbox-providers'", specifier = "==0.0.6" },
     { name = "langchain-fireworks", specifier = ">=1.6.0" },
     { name = "langchain-google-genai", specifier = ">=4.3.5" },
     { name = "langchain-mcp-adapters", specifier = ">=0.3.2" },
-    { name = "langchain-modal", specifier = ">=0.0.6" },
+    { name = "langchain-modal", marker = "extra == 'sandbox-modal'", specifier = ">=0.0.6" },
+    { name = "langchain-modal", marker = "extra == 'sandbox-providers'", specifier = ">=0.0.6" },
     { name = "langchain-openai", specifier = ">=1.6.1,<2.0.0" },
-    { name = "langchain-runloop", specifier = ">=0.0.7" },
+    { name = "langchain-runloop", marker = "extra == 'sandbox-providers'", specifier = ">=0.0.7" },
+    { name = "langchain-runloop", marker = "extra == 'sandbox-runloop'", specifier = ">=0.0.7" },
     { name = "langgraph", specifier = ">=1.2.11" },
     { name = "langgraph-checkpoint-sqlite", specifier = ">=3.1.1" },
     { name = "langgraph-cli", extras = ["inmem"], specifier = ">=0.4.31" },
@@ -2199,7 +2217,7 @@ requires-dist = [
     { name = "uvicorn", specifier = ">=0.52.4" },
     { name = "websockets", specifier = ">=16.1.1" },
 ]
-provides-extras = ["dev"]
+provides-extras = ["dev", "sandbox-daytona", "sandbox-modal", "sandbox-runloop", "sandbox-e2b", "sandbox-providers"]
 
 [[package]]
 name = "openai"

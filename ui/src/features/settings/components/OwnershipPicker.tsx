@@ -39,6 +39,7 @@ export interface PickerFilter {
 export interface ManualEntry {
   label: string
   placeholder: string
+  hint?: string
   /** The canonical id for a typed value, or null when it cannot be one. */
   normalize: (raw: string) => string | null
   invalidHint: string
@@ -320,10 +321,16 @@ export function OwnershipPicker({
                   setManualError(null)
                 }}
               />
-              {manualError && (
+              {manualError ? (
                 <span role="alert" className="text-xs text-destructive">
                   {manualError}
                 </span>
+              ) : (
+                manual.hint && (
+                  <span className="text-xs text-muted-foreground">
+                    {manual.hint}
+                  </span>
+                )
               )}
             </div>
             <Button

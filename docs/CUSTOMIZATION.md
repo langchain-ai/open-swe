@@ -30,7 +30,7 @@ By default, Open SWE runs each task in a [LangSmith cloud sandbox](https://docs.
 
 ### Using a custom sandbox snapshot
 
-New sandboxes boot from LangSmith's root snapshot unless the workspace they run in has its own snapshot. Build a snapshot in LangSmith (UI or `SandboxClient.create_snapshot`) from your Docker image and set it as a workspace's base snapshot from the **Workspaces** page.
+New sandboxes boot from LangSmith's root snapshot unless the workspace they run in has its own snapshot. Build a snapshot in LangSmith (UI or `SandboxClient.create_snapshot`) from your Docker image and set it as a workspace's base snapshot from the **Workspaces** page. Workspace setup and update scripts receive the selected repository names in the space-delimited `OPENSWE_WORKSPACE_REPOS` environment variable.
 
 Per-sandbox resources are configured on the deployment:
 
@@ -65,6 +65,8 @@ Set the `SANDBOX_TYPE` environment variable to switch providers. Each provider h
 | `local` | `agent/sandboxes/providers/local.py` | None (no isolation — development only), `SANDBOX_TYPE="local"` |
 
 > **Warning**: `local` runs commands directly on your host with no sandboxing. Only use for local development with human-in-the-loop enabled.
+
+The third-party provider SDKs (`daytona`, `modal`, `runloop`, `e2b`) are optional dependency groups, so a base install only carries the default langsmith and local providers. Selecting one of these providers requires installing its extra — e.g. `uv sync --extra sandbox-e2b` — or all of them with `--extra sandbox-providers`; startup validation fails fast with the install command if it's missing.
 
 For `langsmith`, sandbox provisioning, connection, proxy configuration, and workspace snapshot captures use the deployment’s `LANGSMITH_API_KEY` and `LANGSMITH_ENDPOINT`. A workspace's base snapshot must exist in that LangSmith workspace. The former `SANDBOX_LANGSMITH_API_KEY` and `SANDBOX_LANGSMITH_ENDPOINT` overrides are no longer used.
 

@@ -177,6 +177,21 @@ describe("WorkspaceSettingsPanel", () => {
 
     const setup = await screen.findByLabelText("Setup script")
     expect((setup as HTMLTextAreaElement).value).toBe("make setup")
+    expect(screen.getAllByText("OPENSWE_WORKSPACE_REPOS")).toHaveLength(2)
+    expect(screen.queryByText('OPENSWE_WORKSPACE_REPOS="acme/oss"')).toBeNull()
+    for (const trigger of screen.getAllByRole("button", {
+      name: "OPENSWE_WORKSPACE_REPOS",
+    })) {
+      fireEvent.click(trigger)
+      const popup = await screen.findByRole("dialog", {
+        name: "Expanded value",
+      })
+      expect(
+        within(popup).getByText('OPENSWE_WORKSPACE_REPOS="acme/oss"')
+      ).toBeTruthy()
+      fireEvent.keyDown(popup, { key: "Escape" })
+      await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull())
+    }
     fireEvent.change(setup, { target: { value: "make setup && make build" } })
     fireEvent.click(screen.getByRole("button", { name: "Save scripts" }))
     await waitFor(() =>
@@ -217,8 +232,10 @@ describe("WorkspaceSettingsPanel", () => {
     await waitFor(() => expect(trigger.hasAttribute("disabled")).toBe(false))
     fireEvent.click(trigger)
 
-    // The chip in General plus the option in the dropdown; Core's repo nowhere.
+    // The chip in General plus the option in the portalled dropdown; Core's repo nowhere.
     expect(screen.getAllByText("acme/oss").length).toBeGreaterThan(1)
+    const option = screen.getByRole("button", { name: "acme/oss" })
+    expect(option.closest("section")).toBeNull()
     expect(screen.queryByText("acme/api")).toBeNull()
   })
 
