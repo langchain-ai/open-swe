@@ -1,15 +1,21 @@
 """Read safe settings for verified participants in the active thread."""
 
 import asyncio
+import logging
 from collections.abc import Mapping
 from typing import Any
 
 from langgraph.config import get_config
 
+from agent.credential_scope import private_credential_login
+from agent.dashboard.personal_settings import PROFILE_SETTING_KEYS
 from agent.dashboard.profiles import get_profile, normalize_profile_for_response
 from agent.dashboard.user_credentials import get_notion_status
 from agent.dashboard.user_instructions import get_user_instructions
+from agent.dashboard.user_preferences import get_user_preferences
 from agent.utils.thread_participants import resolve_thread_participant_logins
+
+logger = logging.getLogger(__name__)
 
 _PROFILE_SETTING_KEYS = (
     "default_model",
@@ -23,14 +29,17 @@ _PROFILE_SETTING_KEYS = (
 )
 
 
-def _safe_profile_settings(profile: dict[str, Any] | None) -> dict[str, Any]:
+def _safe_profile_settings(
+    profile: dict[str, Any] | None, *, own_settings: bool = False
+) -> dict[str, Any]:
     if not profile:
         return {}
     normalized = normalize_profile_for_response(profile)
-    return {key: normalized[key] for key in _PROFILE_SETTING_KEYS if key in normalized}
+    keys = PROFILE_SETTING_KEYS if own_settings else _PROFILE_SETTING_KEYS
+    return {key: normalized[key] for key in keys if key in normalized}
 
 
-async def _settings_for_login(login: str) -> dict[str, Any]:
+async def _settings_for_login(login: str, *, own_settings: bool = False) -> dict[str, Any]:
     profile, instruction_record, notion = await asyncio.gather(
         get_profile(login),
         get_user_instructions(login),
@@ -39,7 +48,7 @@ async def _settings_for_login(login: str) -> dict[str, Any]:
     instructions = instruction_record.get("instructions") if instruction_record else ""
     return {
         "login": login,
-        "profile": _safe_profile_settings(profile),
+        "profile": _safe_profile_settings(profile, own_settings=own_settings),
         "instructions": instructions if isinstance(instructions, str) else "",
         "connections": {
             "notion": notion.get("notion", {"connected": False}),
@@ -52,6 +61,19 @@ async def read_user_settings() -> dict[str, Any]:
     config = get_config()
     if not isinstance(config, Mapping):
         return {"success": False, "error": "Missing run config"}
+    try:
+        login = await private_credential_login(config)
+    except Exception:
+        logger.exception("Could not authorize personal settings read")
+        return {"success": False, "error": "Could not verify the active thread requester"}
+    if login:
+        participant = await _settings_for_login(login, own_settings=True)
+        participant["preferences"] = await get_user_preferences(login)
+        return {
+            "success": True,
+            "participants": [participant],
+            "unresolved_participant_count": 0,
+        }
     logins, unresolved_count, error = await resolve_thread_participant_logins(config)
     if error or not logins:
         return {"success": False, "error": error or "No verified participants found"}

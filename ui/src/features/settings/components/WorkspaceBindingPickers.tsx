@@ -187,8 +187,9 @@ export function SlackChannelPicker({
         matches: (item) => !item.warning,
       }}
       manual={{
-        label: "Add a channel by ID",
-        placeholder: "C0123456789",
+        label: "Slack channel ID",
+        placeholder: "Paste a channel ID (for example, C0123456789)",
+        hint: "In Slack, open the channel details and copy the channel ID from the About tab.",
         normalize: (raw) => {
           const value = raw.trim().toUpperCase()
           return CHANNEL_ID_PATTERN.test(value) ? value : null

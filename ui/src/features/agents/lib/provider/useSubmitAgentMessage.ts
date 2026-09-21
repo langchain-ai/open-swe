@@ -11,11 +11,8 @@ import {
   agentThreadKeys,
   setAgentThreadStatus,
 } from "@/features/agents/lib/queries"
-import { useAgentStream } from "@/features/agents/lib/stream/AgentStreamProvider"
-import {
-  modelConfigurable,
-  promptMessage,
-} from "@/features/agents/lib/stream/promptMessage"
+import { useThreadSource } from "@/features/agents/lib/threadSource/ThreadSourceProvider"
+import { modelConfigurable } from "@/features/agents/lib/stream/promptMessage"
 
 function upsertMessage<T extends QueuedThreadMessage>(
   messages: Array<T> | undefined,
@@ -65,12 +62,12 @@ function removeQueuedMessage(thread: AgentThread, id: string): AgentThread {
 /** Submit user messages through the active-run queue or a new stream run. */
 export function useSubmitAgentMessage(threadId: string) {
   const queryClient = useQueryClient()
-  const stream = useAgentStream()
+  const source = useThreadSource()
 
   return useMutation({
     mutationFn: async (vars: SendAgentMessageVariables) => {
       if (vars.content.trim() === "/offload") {
-        if (stream.isLoading) {
+        if (source.isRunning) {
           throw new Error(
             "Wait for the current run to finish before offloading."
           )
@@ -78,11 +75,8 @@ export function useSubmitAgentMessage(threadId: string) {
         if (vars.images?.length) {
           throw new Error("Offloading does not accept attachments.")
         }
-        void stream
-          .submit(
-            {},
-            { config: { configurable: { offload_conversation: true } } }
-          )
+        void source
+          .startRun({ configurable: { offload_conversation: true } })
           .catch(() => setAgentThreadStatus(queryClient, threadId, "error"))
         return
       }
@@ -115,7 +109,7 @@ export function useSubmitAgentMessage(threadId: string) {
         updateThread((thread) => setQueuedMessage(thread, queuedMessage))
       }
 
-      if (stream.isLoading) {
+      if (source.isRunning) {
         updateThread((thread) => setQueuedMessage(thread, queuedMessage))
         try {
           await queue()
@@ -149,12 +143,12 @@ export function useSubmitAgentMessage(threadId: string) {
         effort: vars.effort,
       })
       if (vars.plan_mode) configurable.plan_mode = true
-      const config =
-        Object.keys(configurable).length > 0 ? { configurable } : undefined
 
-      const message = promptMessage(vars.content, vars.images)
-      void stream
-        .submit({ messages: [{ ...message, id }] }, { config })
+      void source
+        .startRun({
+          message: { id, text: vars.content, images: vars.images },
+          configurable,
+        })
         .catch(() => {
           updateThread((thread) =>
             setPendingMessage(thread, { ...pendingMessage, status: "failed" })

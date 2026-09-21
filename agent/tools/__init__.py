@@ -45,6 +45,7 @@ _TOOL_MODULES = {
     "save_organization_skill": ".organization_skills",
     "save_plan": ".save_plan",
     "save_user_instructions": ".save_user_instructions",
+    "save_user_settings": ".save_user_settings",
     "save_user_skill": ".user_skills",
     "delete_user_skill": ".user_skills",
     "schedule_thread_wakeup": ".schedule_thread_wakeup",
@@ -106,6 +107,7 @@ __all__ = [
     "delete_organization_skill",
     "save_plan",
     "save_user_instructions",
+    "save_user_settings",
     "save_user_skill",
     "delete_user_skill",
     "schedule_thread_wakeup",
@@ -171,6 +173,7 @@ if TYPE_CHECKING:
     from agent.tools.resolve_finding_thread import resolve_finding_thread
     from agent.tools.save_plan import save_plan
     from agent.tools.save_user_instructions import save_user_instructions
+    from agent.tools.save_user_settings import save_user_settings
     from agent.tools.schedule_thread_wakeup import schedule_thread_wakeup
     from agent.tools.submit_thread_feedback import submit_thread_feedback
     from agent.tools.threads import get_thread, list_threads, manage_thread

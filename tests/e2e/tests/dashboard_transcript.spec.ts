@@ -5,6 +5,7 @@ import {
   loginAs,
   openRunningThreadViaSlackLink,
   openThreadViaSlackLink,
+  setTranscriptStreaming,
   threadIdFromUrl,
   typeIntoComposer,
   waitForStateToContain,
@@ -177,13 +178,15 @@ test.describe("transcript rendering", () => {
       page.getByRole("link", { name: "Add greet() helper" }).first(),
     ).toBeVisible();
 
+    // The transcript source hydrates from its snapshot once; coming back to
+    // the foreground must not fetch it again.
     const foregroundHydration = page
       .waitForRequest(
         (request) => {
           const path = new URL(request.url()).pathname;
           return (
             request.method() === "GET" &&
-            path === `/dashboard/api/threads/${threadId}/state`
+            path === `/dashboard/api/threads/${threadId}/transcript`
           );
         },
         { timeout: 1_000 },
@@ -207,6 +210,33 @@ test.describe("transcript rendering", () => {
     await expect(
       page.getByRole("link", { name: "Add greet() helper" }).first(),
     ).toBeVisible();
+  });
+
+  // Reading from the transcript is opt-in, so this is the path every user is on
+  // until they flip the switch. Its own user, because the preference is stored
+  // server-side and other workers sign in as `SAME_USER` with it turned on.
+  test("a user who has not opted in hydrates from LangGraph state", async ({
+    page,
+  }) => {
+    await loginAs(page, { login: "carol", email: "carol@example.com" });
+    await setTranscriptStreaming(page, false);
+    const hydrations: Array<string> = [];
+    page.on("request", (request) => {
+      if (request.method() !== "GET") return;
+      const path = new URL(request.url()).pathname;
+      if (/^\/dashboard\/api\/threads\/[^/]+\/(state|transcript)$/.test(path))
+        hydrations.push(path);
+    });
+
+    await openThreadViaSlackLink(page);
+    const threadId = threadIdFromUrl(page);
+    await waitForThreadIdle(page, threadId);
+    await expectTranscriptVisible(page);
+
+    expect(hydrations).toContain(`/dashboard/api/threads/${threadId}/state`);
+    expect(hydrations).not.toContain(
+      `/dashboard/api/threads/${threadId}/transcript`,
+    );
   });
 
   test("renders a web follow-up exactly once", async ({ page }) => {
@@ -279,55 +309,51 @@ test.describe("transcript rendering", () => {
     const threadId = threadIdFromUrl(page);
     await waitForThreadIdle(page, threadId);
 
+    // A new thread is served from the transcript, so the rows the renderer has
+    // to defend against are injected into the snapshot it reads.
     await page.route(
-      `**/dashboard/api/threads/${threadId}/state`,
+      `**/dashboard/api/threads/${threadId}/transcript`,
       async (route) => {
         const response = await route.fetch();
         const body = (await response.json()) as {
-          values?: { messages?: Array<Record<string, unknown>> };
+          turns?: Array<{ turn_id: string }>;
+          messages?: Array<Record<string, unknown>>;
         };
-        const messages = body.values?.messages ?? [];
-        body.values = {
-          ...body.values,
-          messages: [
-            {
-              type: "human",
-              id: "entity-person",
-              content:
-                '<dynamic-context kind="person" id="github:alice"><display_name>Alice</display_name></dynamic-context>',
-            },
-            {
-              type: "human",
-              id: "entity-system",
-              content:
-                '<dynamic-context kind="system" id="system:scheduler"><display_name>Scheduler</display_name></dynamic-context>',
-            },
-            {
-              type: "human",
-              id: "structured-person",
-              content:
-                '<input-message sender="github:alice" surface="web" kind="human"><content>Person says &lt;img data-e2e-injected src=x&gt;</content></input-message>',
-            },
-            {
-              type: "human",
-              id: "structured-system",
-              content:
-                '<input-message sender="system:scheduler" surface="automation"><content>Automation checks CI</content></input-message>',
-            },
-            {
-              type: "human",
-              id: "legacy-e2e",
-              content: "Legacy stays visible",
-            },
-            {
-              type: "ai",
-              id: "live-compaction-summary",
-              content: "SESSION INTENT: internal context must stay hidden",
-              additional_kwargs: { lc_source: "summarization" },
-            },
-            ...messages,
+        const turnId = body.turns?.[0]?.turn_id;
+        if (!turnId) {
+          await route.fulfill({ response });
+          return;
+        }
+        const injected = [
+          [
+            "entity-person",
+            '<dynamic-context kind="person" id="github:alice"><display_name>Alice</display_name></dynamic-context>',
           ],
-        };
+          [
+            "entity-system",
+            '<dynamic-context kind="system" id="system:scheduler"><display_name>Scheduler</display_name></dynamic-context>',
+          ],
+          [
+            "structured-person",
+            '<input-message sender="github:alice" surface="web" kind="human"><content>Person says &lt;img data-e2e-injected src=x&gt;</content></input-message>',
+          ],
+          [
+            "structured-system",
+            '<input-message sender="system:scheduler" surface="automation"><content>Automation checks CI</content></input-message>',
+          ],
+          ["legacy-e2e", "Legacy stays visible"],
+        ].map(([messageId, text], index) => ({
+          message_id: messageId,
+          turn_id: turnId,
+          role: "human",
+          text,
+          reasoning: "",
+          namespace: [],
+          attachments: null,
+          usage: null,
+          created_at: `2000-01-01T00:00:0${index}Z`,
+        }));
+        body.messages = [...injected, ...(body.messages ?? [])];
         await route.fulfill({ response, json: body });
       },
     );
@@ -343,9 +369,6 @@ test.describe("transcript rendering", () => {
     await systemChip.click();
     await expect(page.getByText("Automation checks CI")).toBeVisible();
     await expect(page.getByText("Legacy stays visible")).toBeVisible();
-    await expect(
-      page.getByText("SESSION INTENT: internal context must stay hidden"),
-    ).toHaveCount(0);
     await expect(page.getByText("github:alice", { exact: false })).toHaveCount(
       0,
     );
