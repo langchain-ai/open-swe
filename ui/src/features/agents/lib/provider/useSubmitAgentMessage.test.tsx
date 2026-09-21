@@ -8,7 +8,6 @@ import { useSubmitAgentMessage } from "./useSubmitAgentMessage"
 import type { InfiniteData } from "@tanstack/react-query"
 import type { AgentThread } from "@/features/agents/lib/types"
 import type { ThreadsPage } from "@/features/agents/lib/api"
-import { AgentsApiError } from "@/features/agents/lib/api"
 import {
   SIDEBAR_PAGE_SIZE,
   agentThreadKeys,
@@ -21,23 +20,6 @@ const source = {
 
 vi.mock("@/features/agents/lib/threadSource/ThreadSourceProvider", () => ({
   useThreadSource: () => source,
-}))
-
-const queueMessage = vi.fn()
-
-vi.mock("@/features/agents/lib/api", () => ({
-  agentsApi: {
-    queueMessage: (threadId: string, body: unknown) =>
-      queueMessage(threadId, body),
-  },
-  AgentsApiError: class extends Error {
-    constructor(
-      public readonly status: number,
-      message: string
-    ) {
-      super(message)
-    }
-  },
 }))
 
 const THREAD_ID = "thread-1"
@@ -71,24 +53,12 @@ function setup() {
       pageParams: [0],
     }
   )
-  const queuedCounts: Array<number> = []
-  client.getQueryCache().subscribe(() => {
-    const current = client.getQueryData<AgentThread>(
-      agentThreadKeys.detail(THREAD_ID)
-    )
-    queuedCounts.push(current?.queuedMessages?.length ?? 0)
-  })
   const { result } = renderHook(() => useSubmitAgentMessage(THREAD_ID), {
     wrapper: ({ children }: { children: React.ReactNode }) => (
       <QueryClientProvider client={client}>{children}</QueryClientProvider>
     ),
   })
-  return { client, queuedCounts, result }
-}
-
-function queuedMessages(client: QueryClient) {
-  return client.getQueryData<AgentThread>(agentThreadKeys.detail(THREAD_ID))
-    ?.queuedMessages
+  return { client, result }
 }
 
 function pendingMessages(client: QueryClient) {
@@ -104,132 +74,99 @@ function sidebarStatus(client: QueryClient) {
 
 beforeEach(() => {
   source.isRunning = false
-  source.startRun.mockClear()
-  queueMessage.mockReset()
-  queueMessage.mockResolvedValue(undefined)
+  source.startRun.mockReset()
+  source.startRun.mockResolvedValue(undefined)
 })
 
 describe("useSubmitAgentMessage", () => {
-  it("offloads without adding a user message or queuing a prompt", async () => {
+  it("offloads without adding a user message", async () => {
     const { client, result } = setup()
     await result.current.mutateAsync({ content: "/offload", images: [] })
     expect(source.startRun).toHaveBeenCalledWith({
       configurable: { offload_conversation: true },
     })
-    expect(queueMessage).not.toHaveBeenCalled()
     expect(pendingMessages(client)).toBeUndefined()
-    expect(queuedMessages(client)).toBeUndefined()
   })
 
-  it("rejects offloading during a live run instead of queuing it", async () => {
+  it("rejects offloading during a live run", async () => {
     source.isRunning = true
     const { result } = setup()
     await expect(
       result.current.mutateAsync({ content: "/offload" })
     ).rejects.toThrow("Wait for the current run")
     expect(source.startRun).not.toHaveBeenCalled()
-    expect(queueMessage).not.toHaveBeenCalled()
   })
 
-  it("shows an optimistic user message before the idle probe resolves", async () => {
-    let rejectProbe: (error: Error) => void = () => {}
-    queueMessage.mockImplementationOnce(
-      () =>
-        new Promise((_, reject) => {
-          rejectProbe = reject
-        })
+  it("shows the message as sending without waiting for the run to finish", async () => {
+    // The SDK stream's start settles only when the run ends.
+    source.startRun.mockImplementationOnce(
+      () => new Promise<undefined>(() => {})
     )
-    const { client, queuedCounts, result } = setup()
+    const { client, result } = setup()
 
-    const pending = result.current.mutateAsync({ content: "hi", images: [] })
-    await waitFor(() => expect(pendingMessages(client)).toHaveLength(1))
+    await result.current.mutateAsync({ content: "hi", images: [] })
+
+    expect(pendingMessages(client)).toHaveLength(1)
     const optimisticId = pendingMessages(client)?.[0]?.id
     expect(pendingMessages(client)?.[0]).toMatchObject({
       content: "hi",
       status: "sending",
     })
-    expect(source.startRun).not.toHaveBeenCalled()
-
-    rejectProbe(new AgentsApiError(409, "no active run"))
-    await pending
-
     expect(source.startRun).toHaveBeenCalledWith(
       expect.objectContaining({
         message: expect.objectContaining({ id: optimisticId, text: "hi" }),
       })
     )
-    expect(pendingMessages(client)).toEqual([
-      expect.objectContaining({ id: optimisticId, status: "sending" }),
-    ])
     expect(sidebarStatus(client)).toBe("running")
-    expect(queuedCounts.every((count) => count === 0)).toBe(true)
   })
 
-  it("marks the optimistic message failed when run start rejects", async () => {
-    queueMessage.mockRejectedValueOnce(new AgentsApiError(409, "no active run"))
-    let rejectSubmission: (error: Error) => void = () => {}
-    source.startRun.mockImplementationOnce(
-      () =>
-        new Promise((_, reject) => {
-          rejectSubmission = reject
-        })
+  it("sends the same way while a run is live, so the server steers it", async () => {
+    source.isRunning = true
+    const { result } = setup()
+
+    await result.current.mutateAsync({
+      content: "also this",
+      images: [],
+      client_message_id: "queued-1",
+    })
+
+    expect(source.startRun).toHaveBeenCalledWith(
+      expect.objectContaining({
+        message: expect.objectContaining({
+          id: "queued-1",
+          text: "also this",
+        }),
+      })
     )
+  })
+
+  it("marks the optimistic message failed when the start rejects", async () => {
+    source.startRun.mockRejectedValueOnce(new Error("run start failed"))
     const { client, result } = setup()
 
     await result.current.mutateAsync({ content: "try me", images: [] })
-    rejectSubmission(new Error("run start failed"))
 
     await waitFor(() =>
       expect(pendingMessages(client)).toEqual([
         expect.objectContaining({ content: "try me", status: "failed" }),
       ])
     )
+    expect(sidebarStatus(client)).toBe("error")
   })
 
-  it("shows the queued bubble once a run this client never joined accepts it", async () => {
+  it("drops the optimistic row and calls back instead when the caller keeps the message", async () => {
+    source.startRun.mockRejectedValueOnce(new Error("run start failed"))
+    const onFailure = vi.fn()
     const { client, result } = setup()
 
-    await result.current.mutateAsync({ content: "hi", images: [] })
+    await result.current.mutateAsync({
+      content: "try me",
+      images: [],
+      onFailure,
+    })
 
-    expect(queuedMessages(client)).toHaveLength(1)
+    await waitFor(() => expect(onFailure).toHaveBeenCalledTimes(1))
     expect(pendingMessages(client)).toEqual([])
-    expect(queueMessage).toHaveBeenCalledWith(
-      THREAD_ID,
-      expect.objectContaining({
-        client_message_id: queuedMessages(client)?.[0]?.id,
-      })
-    )
-    expect(source.startRun).not.toHaveBeenCalled()
-  })
-
-  it("shows the queued bubble immediately while this client streams", async () => {
-    source.isRunning = true
-    let acceptQueue: () => void = () => {}
-    queueMessage.mockImplementationOnce(
-      () =>
-        new Promise((resolve) => {
-          acceptQueue = () => resolve(undefined)
-        })
-    )
-    const { client, result } = setup()
-
-    const pending = result.current.mutateAsync({ content: "hi", images: [] })
-    await waitFor(() => expect(queuedMessages(client)).toHaveLength(1))
-    acceptQueue()
-    await pending
-  })
-
-  it("keeps a failed optimistic user message", async () => {
-    queueMessage.mockRejectedValueOnce(new AgentsApiError(502, "unavailable"))
-    const { client, result } = setup()
-
-    await expect(
-      result.current.mutateAsync({ content: "try me", images: [] })
-    ).rejects.toThrow("unavailable")
-
-    expect(pendingMessages(client)).toEqual([
-      expect.objectContaining({ content: "try me", status: "failed" }),
-    ])
-    expect(queuedMessages(client)).toBeUndefined()
+    expect(sidebarStatus(client)).toBe("running")
   })
 })

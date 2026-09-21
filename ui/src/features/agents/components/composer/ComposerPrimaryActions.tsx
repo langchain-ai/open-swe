@@ -17,7 +17,10 @@ export interface ComposerPrimaryActionsProps {
   onSubmit: () => void
   /** Enables the stop button for the thread's live run. */
   activeRun?: ActiveRun
-  /** Direct stop handler for desktop ACP or before LangGraph assigns a thread id. */
+  /**
+   * Stop handler. Required outside a thread stream (desktop ACP, or before
+   * LangGraph assigns a thread id); inside one it replaces the source's stop.
+   */
   onStop?: () => void | Promise<void>
   /** Set false while the composer owns Escape (an open command menu or model picker). */
   stopOnEscape?: boolean
@@ -148,7 +151,9 @@ function ThreadPrimaryActions(props: ComposerPrimaryActionsProps) {
     if (stopping) return
     setStopping(true)
     try {
-      await source.stop()
+      // The view may wrap the stop, e.g. to return queued follow-ups to the
+      // composer before the run is interrupted.
+      await (props.onStop ? props.onStop() : source.stop())
     } finally {
       setStopping(false)
     }
@@ -167,7 +172,7 @@ function ThreadPrimaryActions(props: ComposerPrimaryActionsProps) {
   if (!running) return <SendButton {...props} />
 
   return props.canSubmit ? (
-    <SendButton {...props} canSubmit={!stopping} label="Steer agent" />
+    <SendButton {...props} canSubmit={!stopping} label="Queue message" />
   ) : (
     <StopButton
       disabled={stopping}
@@ -197,7 +202,7 @@ function DirectPrimaryActions(props: ComposerPrimaryActionsProps) {
   )
   if (!running) return <SendButton {...props} />
   return props.canSubmit ? (
-    <SendButton {...props} canSubmit={!stopping} label="Steer agent" />
+    <SendButton {...props} canSubmit={!stopping} label="Queue message" />
   ) : (
     <StopButton
       disabled={stopping}

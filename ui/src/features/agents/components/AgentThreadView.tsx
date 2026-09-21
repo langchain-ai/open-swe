@@ -47,10 +47,18 @@ import {
   useRenameAgentThread,
   useAgentThreadPullRequestStatus,
 } from "@/features/agents/lib/queries"
+import { visiblePendingMessages } from "@/features/agents/lib/queuedMessages"
 import {
-  visiblePendingMessages,
-  visibleQueuedMessages,
-} from "@/features/agents/lib/queuedMessages"
+  isQueuedMessageDue,
+  latestCompletedToolCallId,
+  useQueuedMessageStore,
+  useQueuedMessages,
+} from "@/features/agents/lib/queuedMessageStore"
+import type {
+  QueuePhase,
+  QueuedComposerMessage,
+} from "@/features/agents/lib/queuedMessageStore"
+import type { RestoredDraft } from "@/features/agents/components/composer/ChatComposer"
 import { agentsApi } from "@/features/agents/lib/api"
 import { rejectPlan } from "@/lib/plan"
 import { useSession } from "@/lib/session"
@@ -149,9 +157,28 @@ export function AgentThreadView({
   const activeModel = models.find(
     (model) => model.id === activeSelection?.modelId
   )
+  const baseMessages = source.messages
+  const isStreaming = thread.status === "running" || source.isRunning
+  const queuedMessages = useQueuedMessages(thread.id)
+  const sendInFlightRef = useRef(false)
+
   const submitMessage = useCallback(
     async (content: string, images: Array<ImageChunk>) => {
       scrollControlRef.current?.scrollToBottom()
+      // While a run is live the draft waits for the next tool boundary; the
+      // release effect below sends it through the same path as a direct send.
+      if (isStreaming && content.trim() !== "/offload") {
+        useQueuedMessageStore.getState().enqueue(thread.id, {
+          text: content,
+          images,
+          modelId: activeSelection?.modelId ?? null,
+          effort: activeSelection?.effort ?? null,
+          planMode: activePlanMode,
+          queuedAfterToolCallId: latestCompletedToolCallId(baseMessages),
+          createdAt: Date.now(),
+        })
+        return
+      }
       if (planFeedbackPending) await rejectPlan(thread.id, false)
       await sendMessage.mutateAsync({
         content,
@@ -166,11 +193,94 @@ export function AgentThreadView({
       activePlanMode,
       activeSelection?.effort,
       activeSelection?.modelId,
+      baseMessages,
+      isStreaming,
       planFeedbackPending,
       sendMessage,
       thread.id,
     ]
   )
+
+  // Sends one queued message. A rejected start hands it back to the head,
+  // held, so the messages behind it keep their order and the user retries or
+  // edits; unless Stop drained the queue in the meantime, in which case it
+  // already went back to the composer and must not reappear.
+  const sendQueuedMessage = useCallback(
+    async (message: QueuedComposerMessage) => {
+      if (sendInFlightRef.current) return
+      const store = useQueuedMessageStore.getState()
+      const taken = store.take(
+        thread.id,
+        message.id,
+        latestCompletedToolCallId(baseMessages)
+      )
+      if (!taken) return
+      const drainGenerationAtTake = store.drainGeneration
+      const holdAgain = () => {
+        if (
+          useQueuedMessageStore.getState().drainGeneration ===
+          drainGenerationAtTake
+        ) {
+          useQueuedMessageStore.getState().holdAtFront(thread.id, taken)
+        }
+      }
+      sendInFlightRef.current = true
+      try {
+        await sendMessage.mutateAsync({
+          content: taken.text,
+          images: taken.images,
+          model_id: taken.modelId,
+          effort: taken.effort,
+          plan_mode: taken.planMode,
+          client_message_id: taken.id,
+          onFailure: holdAgain,
+        })
+      } catch {
+        holdAgain()
+      } finally {
+        sendInFlightRef.current = false
+      }
+    },
+    [baseMessages, sendMessage, thread.id]
+  )
+
+  const [restoreDraft, setRestoreDraft] = useState<RestoredDraft | null>(null)
+  const restoreQueuedMessagesToComposer = useCallback(
+    (messages: ReadonlyArray<QueuedComposerMessage>) => {
+      if (messages.length === 0) return
+      setRestoreDraft((previous) => ({
+        key: (previous?.key ?? 0) + 1,
+        text: messages
+          .map((message) => message.text.trim())
+          .filter(Boolean)
+          .join("\n\n"),
+        images: messages.flatMap((message) => message.images),
+      }))
+    },
+    []
+  )
+  const steerQueuedMessage = useCallback(
+    (id: string) => {
+      const message = queuedMessages.find((entry) => entry.id === id)
+      if (message) void sendQueuedMessage(message)
+    },
+    [queuedMessages, sendQueuedMessage]
+  )
+  const removeQueuedMessage = useCallback(
+    (id: string) => {
+      const message = useQueuedMessageStore.getState().remove(thread.id, id)
+      if (message) restoreQueuedMessagesToComposer([message])
+    },
+    [restoreQueuedMessagesToComposer, thread.id]
+  )
+  // Stop also cancels the queue: the messages return to the composer instead
+  // of starting a new run the moment the interrupted one settles.
+  const stopRun = useCallback(async () => {
+    restoreQueuedMessagesToComposer(
+      useQueuedMessageStore.getState().drain(thread.id)
+    )
+    await source.stop()
+  }, [restoreQueuedMessagesToComposer, source, thread.id])
   const fixPullRequest = useCallback(
     async (pullRequest: AgentPullRequest) => {
       const result = await agentsApi.getThreadPullRequestContext(
@@ -206,9 +316,6 @@ export function AgentThreadView({
     [handlePanelCollapsedChange]
   )
 
-  const baseMessages = source.messages
-
-  const isStreaming = thread.status === "running" || source.isRunning
   const activeRun = useMemo(
     () => ({ threadId: thread.id, running: thread.status === "running" }),
     [thread.id, thread.status]
@@ -221,10 +328,46 @@ export function AgentThreadView({
     () => [...baseMessages, ...pendingMessages],
     [baseMessages, pendingMessages]
   )
-  const queuedMessages = useMemo(
-    () => visibleQueuedMessages(thread.queuedMessages, visibleMessages),
-    [thread.queuedMessages, visibleMessages]
+  const queuedRows = useMemo(
+    () =>
+      queuedMessages.map((message) => ({
+        id: message.id,
+        content: message.text,
+        images: message.images,
+        createdAt: message.createdAt,
+        held: message.holdUntilUserAction === true,
+      })),
+    [queuedMessages]
   )
+
+  // Sends the oldest queued message once it is due: a tool call finished
+  // after it was queued, or the run ended. Only one leaves per boundary; the
+  // take inside the send re-anchors the rest. "connecting" is the gap between
+  // a send and the message showing up in the transcript, when nothing is due.
+  const nextQueuedMessage = queuedMessages[0] ?? null
+  const latestToolCallId = useMemo(
+    () => (nextQueuedMessage ? latestCompletedToolCallId(baseMessages) : null),
+    [baseMessages, nextQueuedMessage]
+  )
+  const queuePhase: QueuePhase =
+    pendingMessages.length > 0
+      ? "connecting"
+      : isStreaming
+        ? "running"
+        : "ready"
+  useEffect(() => {
+    if (!nextQueuedMessage || sendInFlightRef.current) return
+    if (
+      !isQueuedMessageDue({
+        message: nextQueuedMessage,
+        phase: queuePhase,
+        latestToolCallId,
+      })
+    )
+      return
+    void sendQueuedMessage(nextQueuedMessage)
+  }, [latestToolCallId, nextQueuedMessage, queuePhase, sendQueuedMessage])
+
   const hasMessages = visibleMessages.length > 0
   const hasConversation = hasMessages || queuedMessages.length > 0
   // The only file list the UI has: whatever the agent has already touched in
@@ -398,7 +541,9 @@ export function AgentThreadView({
                   }
                   onOpenFile={handleOpenFile}
                   loadEarlier={loadEarlier}
-                  queuedMessages={queuedMessages}
+                  queuedMessages={queuedRows}
+                  onSteerQueuedMessage={steerQueuedMessage}
+                  onRemoveQueuedMessage={removeQueuedMessage}
                   isStreaming={isStreaming}
                   streamIsLoading={source.isRunning}
                   scrollControlRef={scrollControlRef}
@@ -447,7 +592,9 @@ export function AgentThreadView({
                 disabled={!canPost}
                 busy={isStreaming}
                 activeRun={activeRun}
+                onStop={stopRun}
                 onSubmit={submitMessage}
+                restoreDraft={restoreDraft}
                 models={models}
                 routed={routed}
                 selection={activeSelection}

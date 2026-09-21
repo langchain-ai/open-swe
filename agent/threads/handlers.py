@@ -10,7 +10,6 @@ from typing import Any
 from fastapi import HTTPException
 
 from agent.dashboard.options import normalize_model_choice
-from agent.dispatch import dispatch_agent_run
 from agent.github.pull_request_checks import PullRequestState, get_pull_request_check_states
 from agent.github.pull_request_context import get_pull_request_context
 from agent.github.pull_request_status import get_pull_request_statuses
@@ -24,9 +23,9 @@ from agent.threads.listing import list_unresolved_dashboard_threads
 from agent.threads.runs import (
     _ASSISTANT_ID,
     ThreadMessageBody,
-    _build_dashboard_configurable,
     _notify_slack_web_handoff,
     _user_message_content,
+    dispatch_pending_follow_ups,
 )
 from agent.threads.summary import (
     _SANDBOX_CREATING_SENTINEL,
@@ -110,67 +109,6 @@ async def get_dashboard_terminal_sandbox(
     return sandbox_id, repo_name
 
 
-async def _queued_dashboard_messages(client: Any, thread_id: str) -> list[dict[str, Any]]:
-    try:
-        item = await client.store.get_item(("queue", thread_id), "pending_messages")
-    except Exception:  # noqa: BLE001
-        logger.debug(
-            "Could not fetch queued messages",
-            extra={"thread_id": thread_id},
-            exc_info=True,
-        )
-        return []
-    value = item.get("value") if isinstance(item, Mapping) else None
-    messages = value.get("messages") if isinstance(value, Mapping) else None
-    if not isinstance(messages, list):
-        return []
-
-    queued: list[dict[str, Any]] = []
-    for entry in messages:
-        content = entry.get("content") if isinstance(entry, Mapping) else None
-        if not isinstance(content, Mapping) or content.get("source") != DASHBOARD_SOURCE:
-            continue
-        queued_id = content.get("queue_id")
-        text = content.get("text")
-        created_at = content.get("created_at_ms")
-        if (
-            not isinstance(queued_id, str)
-            or not queued_id
-            or not isinstance(text, str)
-            or not isinstance(created_at, (int, float))
-            or isinstance(created_at, bool)
-        ):
-            continue
-        images = []
-        raw_images = content.get("images")
-        if isinstance(raw_images, list):
-            for image in raw_images:
-                if not isinstance(image, Mapping):
-                    continue
-                base64_data = image.get("base64")
-                mime_type = image.get("mime_type")
-                if not isinstance(base64_data, str) or not isinstance(mime_type, str):
-                    continue
-                mapped_image = {
-                    "kind": "image",
-                    "base64": base64_data,
-                    "mimeType": mime_type,
-                }
-                file_name = image.get("file_name")
-                if isinstance(file_name, str) and file_name:
-                    mapped_image["fileName"] = file_name
-                images.append(mapped_image)
-        queued.append(
-            {
-                "id": queued_id,
-                "content": text,
-                "images": images,
-                "createdAt": int(created_at),
-            }
-        )
-    return queued
-
-
 async def get_dashboard_thread(
     thread_id: str,
     login: str,
@@ -223,9 +161,6 @@ async def get_dashboard_thread(
             latest_run_status=latest_run_status,
             latest_run_id=latest_run_id,
         )
-    if status == "running":
-        with phase(record, "queued"):
-            summary["queuedMessages"] = await _queued_dashboard_messages(client, thread_id)
     return summary
 
 
@@ -395,26 +330,13 @@ async def cancel_dashboard_thread(
         "updated_at_ms": _now_ms(),
     }
     await client.threads.update(thread_id=thread_id, metadata=metadata_update)
-    queued = await client.store.get_item(("queue", thread_id), "pending_messages")
-    queued_messages = queued.get("value", {}).get("messages", []) if queued else []
-    if queued_messages:
-        try:
-            configurable = await _build_dashboard_configurable(thread_id, login, metadata)
-            run = await dispatch_agent_run(
-                thread_id,
-                None,
-                configurable,
-                source=DASHBOARD_SOURCE,
-                input={"messages": []},
-                client=client,
-            )
-        except Exception as exc:  # noqa: BLE001
-            logger.exception("Failed to submit queued follow-up for thread %s", thread_id)
-            raise HTTPException(502, "stopped run but failed to submit queued follow-up") from exc
-        run_id = run.get("run_id") if isinstance(run, dict) else None
+    try:
+        run_id = await dispatch_pending_follow_ups(thread_id, login, metadata, client=client)
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("Failed to submit queued follow-up for thread %s", thread_id)
+        raise HTTPException(502, "stopped run but failed to submit queued follow-up") from exc
+    if run_id is not None:
         metadata_update.update(latest_run_status="pending", latest_run_id=run_id)
-
-    if queued_messages:
         await client.threads.update(thread_id=thread_id, metadata=metadata_update)
     thread = await client.threads.get(thread_id)
     return await _thread_summary(thread)

@@ -3237,3 +3237,85 @@ def test_admin_cancel_thread_dependency_rejects_non_admin(monkeypatch) -> None:
         deps.require_admin({"sub": "not-admin", "email": "user@example.com"})
 
     assert exc_info.value.status_code == 403
+
+
+async def test_steer_running_thread_records_and_delivers_the_follow_up(monkeypatch) -> None:
+    store = FakeStore()
+    updates: list[dict[str, object]] = []
+    turn = uuid7()
+
+    class FakeThreads:
+        async def update(self, *, thread_id: str, metadata: dict[str, object]) -> None:
+            assert thread_id == "tid"
+            updates.append(metadata)
+
+        async def get_state(self, thread_id: str) -> dict[str, object]:
+            return {"values": {"messages": []}}
+
+    class FakeClient:
+        threads = FakeThreads()
+
+    FakeClient.store = store  # type: ignore[attr-defined]
+
+    appended: list[object] = []
+
+    async def fake_append(thread_id: str, commands) -> AppendResult:
+        assert thread_id == "tid"
+        appended.extend(commands)
+        return AppendResult(versions=[1], events=[])
+
+    async def fake_open_turn_id(thread_id: str) -> UUID:
+        return turn
+
+    patch_thread_module(monkeypatch, "langgraph_client", lambda: FakeClient())
+    patch_thread_module(monkeypatch, "append", fake_append)
+    patch_thread_module(monkeypatch, "open_turn_id", fake_open_turn_id)
+    monkeypatch.setattr("agent.utils.thread_ops.langgraph_client", lambda: FakeClient())
+    monkeypatch.setattr("agent.thread_feedback.note_feedback_activity", AsyncMock())
+
+    result = await thread_runs.steer_running_thread(
+        "tid",
+        "teammate",
+        {
+            "id": 7,
+            "method": "run.start",
+            "params": {
+                "input": {
+                    "messages": [{"role": "user", "content": "also check the tests", "id": "msg-1"}]
+                }
+            },
+        },
+        metadata={
+            "source": "dashboard",
+            "transcript": "v2",
+            "latest_run_id": "run-1",
+            "model": "openai:gpt-5",
+        },
+        email="teammate@example.com",
+    )
+
+    assert result == {
+        "id": 7,
+        "type": "success",
+        "result": {
+            "thread_id": "tid",
+            "run_id": "run-1",
+            "message_id": "msg-1",
+            "steered": True,
+        },
+    }
+    # The running agent finds the message before its next model call.
+    [queued] = store.values(("queue", "tid"))["pending_messages"]["messages"]
+    assert queued["content"]["queue_id"] == "msg-1"
+    assert queued["content"]["text"] == "also check the tests"
+    assert queued["content"]["sender"]["github_login"] == "teammate"
+    assert "source" not in queued["content"]
+    # The transcript shows it on the live turn right away, under the id the
+    # middleware will record it with, so the two writes deduplicate.
+    [command] = appended
+    assert command.command_id == "human:msg-1"
+    assert command.turn_id == turn
+    assert command.event.role == "human"
+    assert command.event.sender.login == "teammate"
+    assert "also check the tests" in command.event.text
+    assert updates[-1]["participant_logins"] == {"teammate": True}

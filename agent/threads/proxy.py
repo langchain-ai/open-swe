@@ -20,6 +20,7 @@ from agent.threads.runs import (
     _enrich_run_start_command,
     _extract_run_id_from_command_response,
     _notify_slack_web_handoff,
+    steer_running_thread,
 )
 from agent.threads.summary import (
     _assert_thread_postable,
@@ -188,6 +189,19 @@ async def proxy_dashboard_thread_commands(
         metadata_run_status = metadata.get("latest_run_status")
         thread_busy = _thread_is_busy(thread) or metadata_run_status in {"pending", "running"}
 
+    if method == "run.start" and thread_busy:
+        # A follow-up while a run is live joins that run rather than starting
+        # another; the reply keeps the protocol's shape so the client cannot
+        # tell the two apart.
+        steered = await steer_running_thread(
+            thread_id,
+            login,
+            parsed,
+            metadata=metadata,
+            email=email,
+        )
+        return 200, json.dumps(steered).encode(), "application/json"
+
     url = f"{langgraph_url().rstrip('/')}/threads/{thread_id}/commands"
     headers = langgraph_proxy_headers(content_type=content_type)
 
@@ -196,7 +210,6 @@ async def proxy_dashboard_thread_commands(
         login,
         parsed,
         metadata=metadata,
-        thread_busy=thread_busy,
         creating=creating,
         email=email,
     )

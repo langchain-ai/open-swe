@@ -228,10 +228,8 @@ async def check_message_queue_before_model(  # noqa: PLR0911
         queued_value = queued_item.value
         queued_messages = queued_value.get("messages", [])
 
-        # Delete early to prevent duplicate processing if middleware runs again
-        await store.adelete(namespace, "pending_messages")
-
         if not queued_messages:
+            await store.adelete(namespace, "pending_messages")
             _flush_blocks(queued_updates, content_blocks, injected)
             return _message_update(queued_updates, thread_id)
 
@@ -313,6 +311,9 @@ async def check_message_queue_before_model(  # noqa: PLR0911
                 content_blocks.append({"type": "text", "text": content})
 
         _flush_blocks(queued_updates, content_blocks, injected)
+        # Cleared only once every message is built: a failure above leaves
+        # them for the next model call instead of losing them.
+        await store.adelete(namespace, "pending_messages")
         return _message_update(queued_updates, thread_id)  # noqa: TRY300
     except Exception:
         logger.exception("Error in check_message_queue_before_model")

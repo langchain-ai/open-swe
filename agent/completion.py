@@ -427,6 +427,39 @@ async def _settle_transcript_turn(thread_id: str, run_id: str | None, status: ob
         )
 
 
+async def _start_run_for_pending_follow_ups(thread_id: str) -> None:
+    """Pick up follow-ups steered into the run after its last model call.
+
+    ``reject`` keeps this from touching a run someone started in the meantime:
+    that run's own first model call drains the same store entry.
+    """
+    from agent.threads.runs import dispatch_pending_follow_ups
+
+    client = langgraph_client()
+    try:
+        thread = await client.threads.get(thread_id)
+        metadata = thread.get("metadata") if isinstance(thread, dict) else None
+        metadata = metadata if isinstance(metadata, dict) else {}
+        login = metadata.get("owner_login")
+        if not isinstance(login, str) or not login:
+            return
+        run_id = await dispatch_pending_follow_ups(
+            thread_id, login, metadata, client=client, multitask_strategy="reject"
+        )
+    except Exception:  # noqa: BLE001
+        logger.warning(
+            "Could not start a run for follow-ups left after a completed run",
+            exc_info=True,
+            extra={"run_completion": {"thread_id": thread_id}},
+        )
+        return
+    if run_id is not None:
+        logger.info(
+            "Started a run for follow-ups left after a completed run",
+            extra={"run_completion": {"thread_id": thread_id, "follow_up_run_id": run_id}},
+        )
+
+
 async def handle_run_completion(payload: dict[str, Any]) -> dict[str, str]:
     """Handle a platform run-completion webhook POST.
 
@@ -440,6 +473,8 @@ async def handle_run_completion(payload: dict[str, Any]) -> dict[str, str]:
         return {"status": "ignored", "reason": "missing thread_id"}
     await _finalize_agent_usage_telemetry(thread_id, status, payload)
     await _settle_transcript_turn(thread_id, run_id, status)
+    if status == "success" or status in _TERMINAL_FAILURE_STATUSES:
+        await _start_run_for_pending_follow_ups(thread_id)
     if status == "success":
         return await _handle_successful_run(thread_id, run_id, payload)
     payload_metadata = payload.get("metadata")

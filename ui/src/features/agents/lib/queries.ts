@@ -609,16 +609,9 @@ export function useAgentThread(threadId: string) {
     queryFn: async ({ queryKey: key }) => {
       const thread = await agentsApi.getThread(threadId)
       const cached = queryClient.getQueryData<AgentThread>(key)
-      const queuedMessages = cached?.queuedMessages
       const pendingMessages = cached?.pendingMessages
-      if (!queuedMessages?.length && !pendingMessages?.length) return thread
-      return {
-        ...thread,
-        ...(thread.status === "running" && queuedMessages?.length
-          ? { queuedMessages }
-          : {}),
-        ...(pendingMessages?.length ? { pendingMessages } : {}),
-      }
+      if (!pendingMessages?.length) return thread
+      return { ...thread, pendingMessages }
     },
     // Server truth heartbeat while a run is live. The SDK's SSE transport does
     // not reconnect once a custom `fetch` is supplied (it needs the dashboard
@@ -875,6 +868,11 @@ export interface SendAgentMessageVariables {
   effort?: string | null
   plan_mode?: boolean
   client_message_id?: string
+  /**
+   * Called instead of marking the optimistic row failed when the start is
+   * rejected, for a caller that keeps the message itself (a queued replay).
+   */
+  onFailure?: () => void
 }
 
 export function useCancelAgentThread(threadId: string) {

@@ -27,8 +27,10 @@ from agent.dashboard.workspace_settings import (
     get_workspace_settings,
 )
 from agent.database import postgres
+from agent.dispatch import dispatch_agent_run
 from agent.input_messages import (
     PersonIdentity,
+    RunMessage,
     build_input_messages,
     dynamic_context_hashes_from_messages,
     injected_dynamic_context_hashes_from_metadata,
@@ -58,14 +60,15 @@ from agent.transcript.attachments import PendingAttachment
 from agent.transcript.engine import Command, append
 from agent.transcript.events import (
     MessageAttachment,
+    MessageCompleted,
     MessageSender,
     ThreadCreated,
     TurnRequested,
 )
-from agent.transcript.turns import recorded_turn_id
+from agent.transcript.turns import open_turn_id, recorded_turn_id
 from agent.utils.dashboard_handoff import DASHBOARD_HANDOFF_BODY
 from agent.utils.json_types import JsonObject, as_thread_dict, thread_metadata
-from agent.utils.thread_ops import langgraph_client
+from agent.utils.thread_ops import langgraph_client, queue_message_for_thread
 from agent.utils.thread_participants import (
     PARTICIPANT_EMAILS_KEY,
     PARTICIPANT_LOGINS_KEY,
@@ -505,21 +508,93 @@ def _validate_command_images(content: Any, *, model_id: str | None) -> None:
         _image_blocks(images, model_id=model_id)
 
 
+async def _attributed_run_messages(
+    thread_id: str,
+    login: str,
+    *,
+    metadata: Mapping[str, Any],
+    content: Any,
+    creating: bool,
+    email: str | None,
+    client: Any,
+) -> tuple[list[RunMessage], set[str], set[str]]:
+    """The human message a dashboard command carries, attributed to its sender.
+
+    Returns the structured messages, the dynamic-context hashes already in the
+    conversation, and the ids of the messages the graph already holds.
+    """
+    if content is None:
+        content = ""
+    sender_id = f"github:{login}"
+    injected = injected_dynamic_context_hashes_from_metadata(metadata)
+    persisted_message_ids: set[str] = set()
+    if not creating:
+        try:
+            prior_state = await client.threads.get_state(thread_id)
+            values = prior_state.get("values") if isinstance(prior_state, dict) else None
+            if isinstance(values, dict):
+                messages = values.get("messages")
+                injected.update(dynamic_context_hashes_from_messages(messages))
+                if isinstance(messages, list):
+                    persisted_message_ids = {
+                        message_id
+                        for message in messages
+                        if isinstance(message, Mapping)
+                        and isinstance(message_id := message.get("id"), str)
+                    }
+        except Exception:
+            logger.debug("Could not read dashboard thread history for %s", thread_id, exc_info=True)
+    person: PersonIdentity = {
+        "id": sender_id,
+        "platform": "github",
+        "github_login": login,
+    }
+    if email:
+        person["email"] = email
+    structured = build_input_messages(
+        content,
+        {"sender_id": sender_id, "surface": "web", "kind": "human"},
+        people=[person],
+        systems=(
+            [
+                {
+                    "id": "system:dashboard-handoff",
+                    "display_name": "Dashboard handoff",
+                    "platform": "open-swe",
+                }
+            ]
+            if metadata.get("source") == "slack"
+            else None
+        ),
+        injected_dynamic_context_hashes=injected,
+    )
+    if metadata.get("source") == "slack":
+        structured.insert(
+            -1,
+            build_input_messages(
+                DASHBOARD_HANDOFF_BODY,
+                {
+                    "sender_id": "system:dashboard-handoff",
+                    "surface": "automation",
+                    "kind": "system",
+                },
+                injected_dynamic_context_hashes={"system:dashboard-handoff"},
+            )[0],
+        )
+    return structured, injected, persisted_message_ids
+
+
 async def _enrich_run_start_command(
     thread_id: str,
     login: str,
     command: dict[str, Any],
     *,
     metadata: dict[str, Any],
-    thread_busy: bool = False,
     creating: bool = False,
     email: str | None = None,
 ) -> dict[str, Any]:
     if command.get("method") != "run.start":
         return command
-
-    if thread_busy:
-        raise HTTPException(409, "thread is already running; queue message instead")
 
     client = langgraph_client()
     params = command.get("params")
@@ -618,64 +693,15 @@ async def _enrich_run_start_command(
             run_model, run_effort = _with_vision_fallback(run_model, run_effort, has_images=True)
         _validate_command_images(content, model_id=run_model)
 
-    if content is None:
-        content = ""
-    sender_id = f"github:{login}"
-    injected = injected_dynamic_context_hashes_from_metadata(metadata)
-    persisted_message_ids: set[str] = set()
-    if not creating:
-        try:
-            prior_state = await client.threads.get_state(thread_id)
-            values = prior_state.get("values") if isinstance(prior_state, dict) else None
-            if isinstance(values, dict):
-                messages = values.get("messages")
-                injected.update(dynamic_context_hashes_from_messages(messages))
-                if isinstance(messages, list):
-                    persisted_message_ids = {
-                        message_id
-                        for message in messages
-                        if isinstance(message, Mapping)
-                        and isinstance(message_id := message.get("id"), str)
-                    }
-        except Exception:
-            logger.debug("Could not read dashboard thread history for %s", thread_id, exc_info=True)
-    person: PersonIdentity = {
-        "id": sender_id,
-        "platform": "github",
-        "github_login": login,
-    }
-    if email:
-        person["email"] = email
-    structured = build_input_messages(
-        content,
-        {"sender_id": sender_id, "surface": "web", "kind": "human"},
-        people=[person],
-        systems=(
-            [
-                {
-                    "id": "system:dashboard-handoff",
-                    "display_name": "Dashboard handoff",
-                    "platform": "open-swe",
-                }
-            ]
-            if metadata.get("source") == "slack"
-            else None
-        ),
-        injected_dynamic_context_hashes=injected,
+    structured, injected, persisted_message_ids = await _attributed_run_messages(
+        thread_id,
+        login,
+        metadata=metadata,
+        content=content,
+        creating=creating,
+        email=email,
+        client=client,
     )
-    if metadata.get("source") == "slack":
-        structured.insert(
-            -1,
-            build_input_messages(
-                DASHBOARD_HANDOFF_BODY,
-                {
-                    "sender_id": "system:dashboard-handoff",
-                    "surface": "automation",
-                    "kind": "system",
-                },
-                injected_dynamic_context_hashes={"system:dashboard-handoff"},
-            )[0],
-        )
     # The transcript keys a human message by the id the graph will carry, so the
     # id is minted here when the client did not send a usable one.
     transcribed = (creating and postgres.configured()) or metadata.get(
@@ -813,6 +839,164 @@ async def _enrich_run_start_command(
     params["metadata"] = run_metadata
     command["params"] = params
     return command
+
+
+async def steer_running_thread(
+    thread_id: str,
+    login: str,
+    command: dict[str, Any],
+    *,
+    metadata: dict[str, Any],
+    email: str | None = None,
+) -> dict[str, Any]:
+    """Deliver a ``run.start`` sent while a run is live into that run.
+
+    The message joins the active turn instead of opening a new one: it is
+    recorded on the transcript right away and left for the run to pick up
+    before its next model call. The reply mirrors the protocol's success
+    envelope so the caller cannot tell a steer from a start.
+    """
+    params = command.get("params")
+    if not isinstance(params, dict):
+        params = {}
+    client_config = params.get("config")
+    if not isinstance(client_config, dict):
+        client_config = {}
+    client_configurable = client_config.get("configurable")
+    if not isinstance(client_configurable, dict):
+        client_configurable = {}
+    if client_configurable.get("offload_conversation") is True:
+        raise HTTPException(409, "offloading requires an idle conversation")
+    content = _command_message_content(params)
+    if isinstance(content, str) and content.strip() == "/offload":
+        raise HTTPException(409, "offloading requires an idle conversation")
+    if not _command_prompt_text(content) and not _dashboard_images_from_content(content):
+        raise HTTPException(422, "a follow-up needs a message")
+
+    # The run keeps the model it started with, so images are held to it.
+    command_images = _dashboard_images_from_content(content)
+    image_blocks = _image_blocks(command_images, model_id=_metadata_model_id(metadata))
+
+    client = langgraph_client()
+    structured, _, persisted_message_ids = await _attributed_run_messages(
+        thread_id,
+        login,
+        metadata=metadata,
+        content=content,
+        creating=False,
+        email=email,
+        client=client,
+    )
+    client_message_id = _command_message_id(params)
+    message_id = (
+        client_message_id
+        if client_message_id and client_message_id not in persisted_message_ids
+        else str(uuid.uuid7())
+    )
+    structured[-1]["id"] = message_id
+
+    turn_id = (
+        await open_turn_id(thread_id) if metadata.get("transcript") == TRANSCRIPT_VERSION else None
+    )
+    if turn_id is not None:
+        attachments, pending = _transcript_attachments(command_images, message_id)
+        await append(
+            thread_id,
+            [
+                Command(
+                    command_id=f"human:{message_id}",
+                    event=MessageCompleted(
+                        turn_id=turn_id,
+                        message_id=message_id,
+                        role="human",
+                        text=_command_prompt_text(structured[-1].get("content")),
+                        sender=MessageSender(login=login, kind=DASHBOARD_SOURCE),
+                        attachments=attachments or None,
+                        created_at=datetime.now(UTC),
+                    ),
+                    actor_kind="user",
+                    turn_id=turn_id,
+                    attachments=pending,
+                )
+            ],
+        )
+
+    payload: dict[str, Any] = {
+        "text": _command_prompt_text(content),
+        "images": list(image_blocks),
+        "sender": {
+            "id": f"github:{login}",
+            "platform": "github",
+            "github_login": login,
+            **({"email": email} if email else {}),
+        },
+        "queue_id": message_id,
+        "surface": "web",
+        "created_at_ms": _now_ms(),
+    }
+    if metadata.get("source") == "slack":
+        payload["source"] = DASHBOARD_SOURCE
+    if not await queue_message_for_thread(thread_id, payload):
+        raise HTTPException(502, "failed to deliver the follow-up to the running agent")
+
+    now_ms = _now_ms()
+    await client.threads.update(
+        thread_id=thread_id,
+        metadata={
+            "updated_at_ms": now_ms,
+            "feedback_last_activity_at_ms": now_ms,
+            PARTICIPANT_LOGINS_KEY: merge_participants(metadata.get(PARTICIPANT_LOGINS_KEY), login),
+            PARTICIPANT_EMAILS_KEY: merge_participants(metadata.get(PARTICIPANT_EMAILS_KEY), email),
+        },
+    )
+    try:
+        await _notify_slack_web_handoff(thread_id, metadata, client)
+    except Exception:
+        logger.exception("Failed to update Slack message for dashboard handoff on %s", thread_id)
+    latest_run_id = metadata.get("latest_run_id")
+    return {
+        "id": command.get("id"),
+        "type": "success",
+        "result": {
+            "thread_id": thread_id,
+            "run_id": latest_run_id if isinstance(latest_run_id, str) else None,
+            "message_id": message_id,
+            "steered": True,
+        },
+    }
+
+
+async def dispatch_pending_follow_ups(
+    thread_id: str,
+    login: str,
+    metadata: Mapping[str, Any],
+    *,
+    client: Any,
+    multitask_strategy: str = "interrupt",
+) -> str | None:
+    """Start a run for follow-ups a finished run never got to.
+
+    A message steered into a run after its last model call is still waiting in
+    the store; the new run's first model call picks it up. Returns the run id,
+    or ``None`` when nothing was waiting.
+    """
+    queued = await client.store.get_item(("queue", thread_id), "pending_messages")
+    value = queued.get("value") if isinstance(queued, Mapping) else None
+    messages = value.get("messages") if isinstance(value, Mapping) else None
+    if not isinstance(messages, list) or not messages:
+        return None
+    configurable = await _build_dashboard_configurable(thread_id, login, metadata)
+    run = await dispatch_agent_run(
+        thread_id,
+        None,
+        configurable,
+        source=DASHBOARD_SOURCE,
+        input={"messages": []},
+        client=client,
+        multitask_strategy=multitask_strategy,
+    )
+    run_id = run.get("run_id") if isinstance(run, dict) else None
+    return run_id if isinstance(run_id, str) else None
 
 
 def _slack_thread_context(metadata: Mapping[str, Any]) -> JsonObject | None:

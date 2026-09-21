@@ -1,5 +1,5 @@
 import { memo, useEffect, useMemo } from "react"
-import { ChevronDown } from "lucide-react"
+import { ArrowUp, ChevronDown, Clock, X } from "lucide-react"
 
 import { SkillPromptText } from "../SkillBadge"
 import { AgentTurn } from "./timeline/AgentTurn"
@@ -13,10 +13,21 @@ import { InlinePlanArtifact } from "@/features/agents/components/InlinePlanArtif
 import { WorkflowApprovalCard } from "@/features/agents/components/WorkflowApprovalCard"
 import { useLiveMarkdownMessageId } from "@/features/agents/lib/provider/useLiveMarkdownMessageId"
 
+function queuedStatusLabel(isNext: boolean, held: boolean): string {
+  if (held) return "Waiting for you: send it now, or cancel to edit it."
+  if (isNext)
+    return "Sends after the next tool call finishes, or when the run ends."
+  return "Waits for the message ahead of it."
+}
+
 function QueuedMessages({
   queuedMessages,
+  onSteer,
+  onRemove,
 }: {
   queuedMessages: NonNullable<MessagesProps["queuedMessages"]>
+  onSteer?: (id: string) => void
+  onRemove?: (id: string) => void
 }) {
   if (queuedMessages.length === 0) return null
 
@@ -24,20 +35,16 @@ function QueuedMessages({
     <div className="mb-3 space-y-2" data-testid="queued-messages">
       {queuedMessages.map((message, index) => {
         const imageCount = message.images?.length ?? 0
+        const isNext = index === 0
+        const held = message.held === true
+        const statusLabel = queuedStatusLabel(isNext, held)
         return (
           <div
             key={message.id}
             className="ml-auto max-w-[85%] rounded-2xl border border-dashed border-border bg-accent/40 px-3 py-2 text-[14px] text-foreground shadow-sm"
             data-testid="queued-message"
+            data-queued-held={held || undefined}
           >
-            <div className="mb-1 flex items-center gap-2 text-[11px] font-medium tracking-wide text-muted-foreground uppercase">
-              <span>
-                {queuedMessages.length > 1
-                  ? `Queued next #${index + 1}`
-                  : "Queued next"}
-              </span>
-              <span className="size-1.5 animate-status-pulse rounded-full bg-foreground/60" />
-            </div>
             {message.content && (
               <div className="break-words whitespace-pre-wrap">
                 <SkillPromptText text={message.content} />
@@ -48,6 +55,49 @@ function QueuedMessages({
                 {imageCount} image{imageCount === 1 ? "" : "s"} attached
               </div>
             )}
+            <div className="mt-2 flex items-center gap-3 text-xs text-muted-foreground">
+              <span
+                className="inline-flex h-6 items-center gap-1"
+                title={statusLabel}
+                aria-label={`Queued. ${statusLabel}`}
+              >
+                <Clock className="size-3.5" aria-hidden />
+                {held ? "Held" : "Queued"}
+                {!held && (
+                  <span className="ml-1 size-1.5 animate-status-pulse rounded-full bg-foreground/60" />
+                )}
+              </span>
+              {(onSteer || onRemove) && (
+                <div className="ml-auto flex items-center gap-0.5">
+                  {onSteer && (
+                    <button
+                      type="button"
+                      className="flex size-6 items-center justify-center rounded-md hover:bg-accent hover:text-foreground"
+                      onPointerDown={(event) => event.preventDefault()}
+                      onClick={() => onSteer(message.id)}
+                      title="Send now"
+                      aria-label="Send now"
+                      data-testid="queued-message-send-now"
+                    >
+                      <ArrowUp className="size-3.5" aria-hidden />
+                    </button>
+                  )}
+                  {onRemove && (
+                    <button
+                      type="button"
+                      className="flex size-6 items-center justify-center rounded-md hover:bg-accent hover:text-foreground"
+                      onPointerDown={(event) => event.preventDefault()}
+                      onClick={() => onRemove(message.id)}
+                      title="Cancel and return to the composer"
+                      aria-label="Cancel and return to the composer"
+                      data-testid="queued-message-cancel"
+                    >
+                      <X className="size-3.5" aria-hidden />
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
           </div>
         )
       })}
@@ -64,6 +114,8 @@ export const Messages = memo(function MessagesComponent({
   footer,
   pollWorkflowApprovalsWhileActive = false,
   queuedMessages = [],
+  onSteerQueuedMessage,
+  onRemoveQueuedMessage,
   isStreaming,
   streamIsLoading,
   isThinking,
@@ -190,7 +242,11 @@ export const Messages = memo(function MessagesComponent({
                 pollWhileActive={pollWorkflowApprovalsWhileActive}
               />
             )}
-            <QueuedMessages queuedMessages={queuedMessages} />
+            <QueuedMessages
+              queuedMessages={queuedMessages}
+              onSteer={onSteerQueuedMessage}
+              onRemove={onRemoveQueuedMessage}
+            />
             {footer}
             <ThinkingSpinner
               isActive={

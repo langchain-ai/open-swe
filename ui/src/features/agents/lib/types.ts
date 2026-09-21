@@ -261,6 +261,8 @@ export interface QueuedThreadMessage {
   content: string
   images?: Array<ImageChunk>
   createdAt: number
+  /** Waits for the user to send it rather than leaving on its own. */
+  held?: boolean
 }
 
 export interface PendingThreadMessage extends QueuedThreadMessage {
@@ -428,7 +430,6 @@ export interface AgentThread {
   codeChannelUrl?: string | null
   sandboxId?: string | null
   messages: Array<Message>
-  queuedMessages?: Array<QueuedThreadMessage>
   pendingMessages?: Array<PendingThreadMessage>
   pr?: AgentPullRequestSummary
   pullRequests?: Array<AgentPullRequest>

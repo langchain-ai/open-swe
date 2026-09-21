@@ -85,6 +85,14 @@ const SLASH_COMMANDS: Array<SlashCommandSpec> = [
   },
 ]
 
+/** Text and attachments handed back to the composer, e.g. a cancelled queued message. */
+export interface RestoredDraft {
+  /** Changes on every restore so the same content can come back twice. */
+  key: number
+  text: string
+  images: Array<ImageChunk>
+}
+
 export interface ChatComposerProps {
   placeholder?: string
   autoFocus?: boolean
@@ -96,6 +104,8 @@ export interface ChatComposerProps {
   activeRun?: ActiveRun
   onStop?: () => void | Promise<void>
   onSubmit?: (value: string, images: Array<ImageChunk>) => void | Promise<void>
+  /** Content to put back in front of whatever is being typed. */
+  restoreDraft?: RestoredDraft | null
   models?: Array<ModelOption>
   selection?: ModelSelection | null
   onSelectionChange?: (next: ModelSelection | null) => void
@@ -225,6 +235,7 @@ export const ChatComposer = memo(function ChatComposer({
   activeRun,
   onStop,
   onSubmit,
+  restoreDraft = null,
   models = [],
   selection = null,
   onSelectionChange,
@@ -368,6 +379,22 @@ export const ChatComposer = memo(function ChatComposer({
     setDismissedTriggerKey(null)
     setActiveItemId(null)
   }, [])
+
+  const restoredKeyRef = useRef<number | null>(null)
+  useEffect(() => {
+    if (!restoreDraft || restoredKeyRef.current === restoreDraft.key) return
+    restoredKeyRef.current = restoreDraft.key
+    const current = editorRef.current?.readSnapshot()?.value ?? value
+    const next = [restoreDraft.text, current]
+      .filter((part) => part.trim().length > 0)
+      .join("\n\n")
+    applyPrompt(next, next.length)
+    if (restoreDraft.images.length > 0) {
+      // oxlint-disable-next-line react/set-state-in-effect
+      setPendingImages((prev) => [...restoreDraft.images, ...prev])
+    }
+    editorRef.current?.focusAtEnd()
+  }, [applyPrompt, restoreDraft, value])
 
   const handleSubmit = useCallback(async () => {
     if (submittingRef.current || disabled) return

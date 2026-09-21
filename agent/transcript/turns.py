@@ -73,6 +73,13 @@ async def settle_run_turn(
     return turn_id
 
 
+async def open_turn_id(thread_id: str) -> UUID | None:
+    """The thread's newest turn that is still requested or running, if any."""
+    if not postgres.configured():
+        return None
+    return await _open_turn(thread_id, None)
+
+
 async def recorded_turn_id(thread_id: str, command_id: str) -> UUID | None:
     """The turn of the event ``command_id`` already appended, if it did.
 
