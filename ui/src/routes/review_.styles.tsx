@@ -26,7 +26,7 @@ function ReviewStylesPage() {
     <AppShell
       user={session.data}
       title="Review Style Prompts"
-      description="An agent browses recent merged PR review feedback on GitHub, then writes a per-repo style guide for the reviewer."
+      description="Customize repository review style and approval policy. Run analysis to learn a style guide from past PR feedback."
       backTo={{ to: "/review", label: "Back to Open SWE Review" }}
     >
       <div className="rounded-lg border border-border bg-card">

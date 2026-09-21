@@ -19,13 +19,20 @@ export function ReviewSettings({
 }) {
   const settings = useScopedSettings(scope)
   const [guidelinesDraft, setGuidelinesDraft] = useState("")
+  const [policyDraft, setPolicyDraft] = useState("")
+
+  const guidelinesValue = settings.data?.org_guidelines ?? ""
+  const policyValue = settings.data?.approval_policy ?? ""
 
   useEffect(() => {
-    if (settings.data) {
-      // oxlint-disable-next-line react/set-state-in-effect
-      setGuidelinesDraft(settings.data.org_guidelines ?? "")
-    }
-  }, [settings.data])
+    // oxlint-disable-next-line react/set-state-in-effect
+    setGuidelinesDraft(guidelinesValue)
+  }, [guidelinesValue])
+
+  useEffect(() => {
+    // oxlint-disable-next-line react/set-state-in-effect
+    setPolicyDraft(policyValue)
+  }, [policyValue])
 
   // Until the settings arrive a toggle would write a value nobody chose.
   const editable = canEdit && settings.data !== undefined
@@ -37,7 +44,11 @@ export function ReviewSettings({
   const guidelinesDirty = trimmedGuidelines !== savedGuidelines
 
   const toggle = (
-    field: "review_draft_prs" | "pr_summaries" | "review_trace_links"
+    field:
+      | "review_draft_prs"
+      | "pr_summaries"
+      | "review_trace_links"
+      | "review_auto_approve"
   ) => (
     <Switch
       checked={!!settings.data?.[field]}
@@ -65,6 +76,7 @@ export function ReviewSettings({
             </p>
           )}
           <Textarea
+            aria-label="Review guidelines"
             className="min-h-[200px] w-full font-mono text-xs"
             value={guidelinesDraft}
             onChange={(e) => setGuidelinesDraft(e.target.value)}
@@ -102,8 +114,68 @@ export function ReviewSettings({
         </div>
       </SettingsSection>
 
+      <SettingsSection
+        title="Approval policy"
+        description="Configure criteria to enable approval assessments. With no applicable policy, reviews have no approval assessment. Repository policies override these criteria."
+      >
+        <div className="flex flex-col gap-2 p-4">
+          <Textarea
+            aria-label="Approval policy"
+            placeholder="e.g. Recommend approval only for low-risk, well-tested changes with no unresolved findings."
+            className="min-h-[160px] w-full font-mono text-xs"
+            value={policyDraft}
+            onChange={(e) => setPolicyDraft(e.target.value)}
+            maxLength={10000}
+            disabled={!editable}
+          />
+          {canEdit && (
+            <div className="flex items-center gap-2">
+              <Button
+                size="sm"
+                disabled={
+                  !editable ||
+                  settings.saving ||
+                  policyDraft.trim() ===
+                    (settings.data?.approval_policy ?? "").trim()
+                }
+                onClick={() =>
+                  settings.save({ approval_policy: policyDraft.trim() || null })
+                }
+              >
+                Save approval policy
+              </Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                disabled={
+                  !editable ||
+                  settings.saving ||
+                  (scoped && settings.inherits("approval_policy"))
+                }
+                onClick={() =>
+                  scoped
+                    ? settings.reset("approval_policy")
+                    : settings.save({ approval_policy: null })
+                }
+              >
+                {scoped
+                  ? "Reset approval policy to instance"
+                  : "Clear approval policy"}
+              </Button>
+            </div>
+          )}
+        </div>
+      </SettingsSection>
+
       <SettingsSection title="Review configuration">
         <div className="divide-y divide-border">
+          <TierRow
+            settings={settings}
+            fields={["review_auto_approve"]}
+            label="Submit GitHub approvals"
+            description="Off by default. When enabled, submit an approval if the configured policy is satisfied, no findings remain, and the reviewed commit is still current. Requires an applicable approval policy. Never merges the PR."
+            control={toggle("review_auto_approve")}
+          />
           <TierRow
             settings={settings}
             fields={["review_draft_prs"]}

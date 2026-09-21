@@ -7,10 +7,22 @@ inline findings, records the GitHub comment/thread IDs for future
 re-reviews, resolves GitHub threads for findings now marked resolved, and
 advances the reviewer thread's ``last_reviewed_sha``.
 
-On a re-review with no new findings to surface, it skips posting a new
+On a re-review with no new findings or assessment, it skips posting a new
 GitHub Review but still resolves fixed threads and updates reviewer state.
 
 Args:
+    assessment: Optional structured advisory approval assessment with the full
+        ``head_sha`` inspected, integer ``risk_score`` (1 = low, 5 = high),
+        ``decision`` (``would_approve`` or ``needs_human_review``), and a short
+        ``explanation`` (up to 1500 characters). Include it after completing a
+        review only when an approval policy is configured. Use the approval policy in the reviewer instructions, including
+        organization and repository overrides. The commit must match the live
+        reviewed head. Unresolved findings force ``needs_human_review``. A new
+        assessment is published even when a re-review has no new findings.
+        GitHub keeps native thumbs-up/down feedback on the review. The host may
+        submit an approval only when the admin has explicitly enabled automatic
+        approval and the reviewed commit is still current. No merge is performed. Assessments are omitted in eval mode and when
+        publication retries with only a subset of findings.
     severity_threshold: Lowest severity to surface as inline GitHub comments
         (default ``medium``). Lower-severity findings stay in state and are
         mentioned in the review summary with a link to the web app, but are
