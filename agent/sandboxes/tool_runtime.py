@@ -60,7 +60,7 @@ class ToolSurface:
             raise RuntimeError("Agent tools node is unavailable")
         tools = dict(node.tools_by_name)
         if self.dynamic:
-            integrations = await self.dynamic.catalog_tools()
+            integrations = await self.dynamic.catalog_tools(state)
             self.integration_names = [tool.name for tool in integrations]
             tools.update({tool.name: tool for tool in integrations})
         excluded = self.excluded | EXCLUDED_TOOLS
