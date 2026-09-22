@@ -152,8 +152,22 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
   const isStreaming = thread.status === "running" || source.isRunning
   // Server truth: follow-ups queued behind the live run, from the transcript.
   const queued = source.queued
+  const login = session.data?.login
+  const userId = session.data?.user_id
+  // Only its sender may act on a queued follow-up; the server enforces it too.
+  const isOwnQueued = useCallback(
+    (entry: QueuedTurn) =>
+      entry.message.structuredSenderId !== undefined &&
+      (entry.message.structuredSenderId === `github:${login}` ||
+        entry.message.structuredSenderId === `user:${userId}`),
+    [login, userId]
+  )
 
-  const followUpBehavior = session.data?.follow_up_behavior ?? "queue"
+  // The SDK stream cannot queue, so a follow-up there always steers.
+  const followUpBehavior =
+    source.kind === "transcript"
+      ? (session.data?.follow_up_behavior ?? "queue")
+      : "steer"
   const submitMessage = useCallback(
     async (
       content: string,
@@ -171,7 +185,7 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
         images,
         model_id: activeSelection?.modelId ?? null,
         effort: activeSelection?.effort ?? null,
-        enqueue: isStreaming && queue,
+        enqueue: isStreaming && queue && source.kind === "transcript",
       })
     },
     [
@@ -180,6 +194,7 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
       followUpBehavior,
       isStreaming,
       sendMessage,
+      source.kind,
     ]
   )
 
@@ -254,9 +269,11 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
   )
   // Enter on an empty composer sends the head of the queue now.
   const steerNextQueuedMessage = useCallback(() => {
-    const entry = queued.find((candidate) => candidate.runId !== null)
+    const entry = queued.find(
+      (candidate) => candidate.runId !== null && isOwnQueued(candidate)
+    )
     if (entry) void steerQueued(entry)
-  }, [queued, steerQueued])
+  }, [isOwnQueued, queued, steerQueued])
   const removeQueuedMessage = useCallback(
     (id: string) => {
       const entry = queued.find((candidate) => candidate.message.id === id)
@@ -270,23 +287,27 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
     },
     [materializeQueuedImages, queued, restoreQueuedToComposer, withdrawQueued]
   )
-  // Stop cancels the queued runs along with the live one; their messages come
-  // back to the composer instead of starting the moment the run settles. Stop
-  // must not wait on a failed image fetch, so it restores what it could and
-  // says what it lost.
+  // Stop cancels the queued runs along with the live one; the user's own come
+  // back to the composer instead of starting the moment the run settles. Only
+  // once the cancel is accepted: otherwise they are still queued. The image
+  // fetch runs alongside the stop, which must not wait on it; a failed fetch
+  // restores what it could and says what it lost.
   const stopRun = useCallback(async () => {
-    const pending = [...queued]
+    const pending = queued.filter(isOwnQueued)
     // A follow-up sent to queue moments ago may not be back from the server
     // yet. Stop cancels its run all the same, so its draft comes back too.
     const known = new Set(pending.map((entry) => entry.message.id))
     const unacknowledged = (thread.pendingMessages ?? []).filter(
       (message) => message.queued && !known.has(message.id)
     )
-    const { images, failed } = await materializeImages([
+    const materialized = materializeImages([
       ...pending.flatMap(queuedImages),
       ...unacknowledged.flatMap((message) => message.images ?? []),
     ])
-    await source.stop()
+    if (!(await source.stop())) {
+      toast.error("Couldn't stop the run.")
+      return
+    }
     if (unacknowledged.length > 0) {
       const dropped = new Set(unacknowledged.map((message) => message.id))
       queryClient.setQueryData<AgentThread>(
@@ -300,6 +321,7 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
           }
       )
     }
+    const { images, failed } = await materialized
     restoreQueuedToComposer(
       [
         ...pending.map(queuedText),
@@ -315,6 +337,7 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
       )
     }
   }, [
+    isOwnQueued,
     queryClient,
     queued,
     restoreQueuedToComposer,
@@ -408,6 +431,7 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
         images: queuedImages(entry),
         createdAt: Date.parse(entry.requestedAt),
         pending: entry.runId === null,
+        mine: isOwnQueued(entry),
       })),
       ...(thread.pendingMessages ?? [])
         .filter((message) => message.queued && !known.has(message.id))
@@ -419,7 +443,7 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
           pending: true,
         })),
     ]
-  }, [queued, thread.pendingMessages])
+  }, [isOwnQueued, queued, thread.pendingMessages])
 
   const hasMessages = visibleMessages.length > 0
   const hasConversation = hasMessages || queuedRows.length > 0
@@ -593,8 +617,12 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
                   onOpenFile={handleOpenFile}
                   loadEarlier={loadEarlier}
                   queuedMessages={queuedRows}
-                  onSteerQueuedMessage={steerQueuedMessage}
-                  onRemoveQueuedMessage={removeQueuedMessage}
+                  onSteerQueuedMessage={
+                    canPost ? steerQueuedMessage : undefined
+                  }
+                  onRemoveQueuedMessage={
+                    canPost ? removeQueuedMessage : undefined
+                  }
                   isStreaming={isStreaming}
                   streamIsLoading={source.isRunning}
                   scrollControlRef={scrollControlRef}

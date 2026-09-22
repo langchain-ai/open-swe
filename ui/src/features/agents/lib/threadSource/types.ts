@@ -53,8 +53,8 @@ interface ThreadSourceShared {
    * does, the transcript log as soon as the command is accepted).
    */
   startRun: (input: ThreadRunInput) => Promise<void>
-  /** Cancel the live run. Resolves once the attempt settled, either way. */
-  stop: () => Promise<void>
+  /** Cancel the live run. Resolves with whether the server accepted it. */
+  stop: () => Promise<boolean>
   /**
    * The thread has turns older than the window that is loaded. Sources that
    * always hold the whole thread report false and a `loadOlder` that does

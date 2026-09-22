@@ -264,11 +264,13 @@ export interface QueuedThreadMessage {
   createdAt: number
   /** The server has not acknowledged it yet, so it cannot be sent now or cancelled. */
   pending?: boolean
+  /** False when someone else sent it: only its sender may send it now or cancel it. */
+  mine?: boolean
 }
 
 export interface PendingThreadMessage extends Omit<
   QueuedThreadMessage,
-  "images" | "pending"
+  "images" | "pending" | "mine"
 > {
   images?: Array<ImageChunk>
   status: "sending" | "failed"

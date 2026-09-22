@@ -1656,6 +1656,30 @@ async def test_run_cancel_rejects_unsurfaced_thread(monkeypatch) -> None:
     assert exc_info.value.status_code == 404
 
 
+async def test_run_cancel_lets_only_the_sender_withdraw_a_queued_follow_up(monkeypatch) -> None:
+    class FakeThreads:
+        async def get(self, thread_id: str) -> dict[str, object]:
+            return {
+                "thread_id": "tid",
+                "metadata": {"source": "dashboard", "owner_login": "owner", "visibility": "public"},
+            }
+
+    class FakeRuns:
+        async def get(self, thread_id: str, run_id: str) -> dict[str, object]:
+            return {"run_id": run_id, "metadata": {"queued_by": "sender"}}
+
+    class FakeClient:
+        threads = FakeThreads()
+        runs = FakeRuns()
+
+    patch_thread_module(monkeypatch, "langgraph_client", lambda: FakeClient())
+
+    with pytest.raises(HTTPException) as exc_info:
+        await thread_proxy.proxy_dashboard_thread_run_cancel("tid", "run-2", "teammate")
+    assert exc_info.value.status_code == 403
+    assert "sender" in exc_info.value.detail
+
+
 async def test_read_endpoints_accessible_by_non_owner(monkeypatch) -> None:
     """Read endpoints (state, stream, history) are accessible by any org member."""
 

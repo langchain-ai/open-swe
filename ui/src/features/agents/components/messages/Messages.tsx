@@ -59,7 +59,7 @@ function QueuedMessages({
                 Queued
                 <span className="ml-1 size-1.5 animate-status-pulse rounded-full bg-foreground/60" />
               </span>
-              {(onSteer || onRemove) && (
+              {(onSteer || onRemove) && message.mine !== false && (
                 <div className="ml-auto flex items-center gap-0.5">
                   {onSteer && (
                     <button

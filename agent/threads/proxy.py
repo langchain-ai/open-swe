@@ -17,6 +17,7 @@ from agent.threads.access import (
 )
 from agent.threads.runs import (
     _ASSISTANT_ID,
+    QUEUED_BY_KEY,
     _enrich_run_start_command,
     _extract_run_id_from_command_response,
     _notify_slack_web_handoff,
@@ -322,7 +323,15 @@ async def proxy_dashboard_thread_run_cancel(
     action: str = "interrupt",
     email: str | None = None,
 ) -> tuple[int, bytes, str | None]:
-    await _authorized_thread_metadata(thread_id, login, email=email)
+    metadata = await _authorized_thread_metadata(thread_id, login, email=email)
+    _assert_thread_postable(metadata, login, email)
+    try:
+        run = await langgraph_client().runs.get(thread_id, run_id)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(404, "run not found") from exc
+    queued_by = (run.get("metadata") or {}).get(QUEUED_BY_KEY)
+    if isinstance(queued_by, str) and login not in {queued_by, metadata.get("owner_login")}:
+        raise HTTPException(403, "only its sender can withdraw a queued follow-up")
     url = f"{langgraph_url().rstrip('/')}/threads/{thread_id}/runs/{run_id}/cancel"
     headers = langgraph_proxy_headers()
     async with httpx2.AsyncClient(timeout=_PROXY_REQUEST_TIMEOUT) as client:

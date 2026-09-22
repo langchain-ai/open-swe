@@ -21,6 +21,7 @@ from langgraph_sdk.client import LangGraphClient
 
 from agent.agent_cost import finalize_agent_invocation_usage
 from agent.config import ENV
+from agent.dispatch import FOLLOW_UP_PICKUP_KIND
 from agent.github.app import get_github_app_installation_token
 from agent.github.comments import post_github_comment
 from agent.invocation import resolve_invocation_id, with_invocation_id
@@ -470,11 +471,15 @@ async def handle_run_completion(payload: dict[str, Any]) -> dict[str, str]:
         return {"status": "ignored", "reason": "missing thread_id"}
     await _finalize_agent_usage_telemetry(thread_id, status, payload)
     await _settle_transcript_turn(thread_id, run_id, status)
-    if status == "success" or status in _TERMINAL_FAILURE_STATUSES:
+    payload_metadata = payload.get("metadata")
+    # A run that failed, or a pickup run that left the store as it found it,
+    # would only fail the same way again: one attempt per leftover.
+    if status == "success" and not (
+        isinstance(payload_metadata, dict) and payload_metadata.get("kind") == FOLLOW_UP_PICKUP_KIND
+    ):
         await _start_run_for_pending_follow_ups(thread_id)
     if status == "success":
         return await _handle_successful_run(thread_id, run_id, payload)
-    payload_metadata = payload.get("metadata")
     if (
         status in _TERMINAL_FAILURE_STATUSES
         and isinstance(payload_metadata, dict)

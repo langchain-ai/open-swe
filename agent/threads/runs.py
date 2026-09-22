@@ -27,7 +27,7 @@ from agent.dashboard.workspace_settings import (
     get_workspace_settings,
 )
 from agent.database import postgres
-from agent.dispatch import create_durable_run, dispatch_agent_run
+from agent.dispatch import FOLLOW_UP_PICKUP_KIND, create_durable_run, dispatch_agent_run
 from agent.input_messages import (
     PersonIdentity,
     RunMessage,
@@ -828,6 +828,9 @@ async def _enrich_run_start_command(
     return command
 
 
+QUEUED_BY_KEY = "queued_by"
+
+
 def offload_requested(params: dict[str, Any]) -> bool:
     """Whether a ``run.start`` asks to offload the conversation."""
     config = params.get("config")
@@ -1012,7 +1015,8 @@ async def queue_follow_up_run(
         _ASSISTANT_ID,
         input=run_input if isinstance(run_input, dict) else {},
         config={"configurable": configurable},
-        metadata=enriched_params["metadata"],
+        # Only its sender may withdraw it (``proxy_dashboard_thread_run_cancel``).
+        metadata={**enriched_params["metadata"], QUEUED_BY_KEY: login},
         source=DASHBOARD_SOURCE,
         client=langgraph_client(),
         multitask_strategy="enqueue",
@@ -1069,6 +1073,7 @@ async def dispatch_pending_follow_ups(
         configurable,
         source=DASHBOARD_SOURCE,
         input={"messages": []},
+        metadata={"kind": FOLLOW_UP_PICKUP_KIND},
         client=client,
         multitask_strategy=multitask_strategy,
     )
