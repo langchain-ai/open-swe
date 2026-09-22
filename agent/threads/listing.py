@@ -1,11 +1,12 @@
 """Searching, filtering and paging the thread list behind the Agents UI."""
 
 import asyncio
-import logging
 from collections.abc import Mapping, Sequence
 from typing import Any, Literal
 
 from fastapi import HTTPException
+from langgraph_sdk.client import LangGraphClient
+from langgraph_sdk.schema import ThreadSelectField
 
 from agent.threads.pins import list_thread_pin_ids, pin_thread, unpin_thread
 from agent.threads.summary import (
@@ -33,11 +34,16 @@ from agent.utils.thread_participants import participant_search_filters
 from agent.workspaces.routing import workspace_for_repo
 from agent.workspaces.store import DEFAULT_WORKSPACE_SLUG
 
-logger = logging.getLogger(__name__)
-
 _THREADS_SEARCH_PAGE = 50
 _THREADS_PAGE_SCAN_CAP = 5000
-_THREAD_LIST_SELECT = ["thread_id", "status", "metadata", "created_at", "updated_at"]
+_THREAD_LIST_SELECT: list[ThreadSelectField] = [
+    "thread_id",
+    "status",
+    "metadata",
+    "created_at",
+    "updated_at",
+]
+_PINNED_THREADS_BATCH_SIZE = 1000
 _RUN_REFRESH_CONCURRENCY = 8
 _RUNNING_METADATA_STATUSES = {"pending", "running"}
 
@@ -215,11 +221,12 @@ async def _summarize_thread(
     thread: ThreadLike,
     *,
     refresh_active_run: bool = True,
+    minimal_run_update: bool = False,
 ) -> dict[str, Any]:
     latest_run_status = latest_run_id = None
     if refresh_active_run and _should_refresh_latest_run(thread):
         thread, latest_run_status, latest_run_id = await _refresh_latest_run_metadata(
-            client, thread
+            client, thread, return_minimal=minimal_run_update
         )
     return await _thread_summary(
         thread,
@@ -231,6 +238,8 @@ async def _summarize_thread(
 async def _summarize_threads(
     client: Any,
     threads: list[ThreadLike],
+    *,
+    minimal_run_update: bool = False,
 ) -> list[dict[str, Any]]:
     semaphore = asyncio.Semaphore(_RUN_REFRESH_CONCURRENCY)
 
@@ -245,6 +254,7 @@ async def _summarize_threads(
             return await _summarize_thread(
                 client,
                 thread,
+                minimal_run_update=minimal_run_update,
             )
 
     return list(await asyncio.gather(*(summarize(thread) for thread in threads)))
@@ -367,26 +377,31 @@ async def list_dashboard_threads(
 
 
 async def _pinned_thread_summaries(
-    client: Any,
+    client: LangGraphClient,
     login: str,
     email: str | None,
-) -> list[dict[str, Any]]:
-    async def load(thread_id: str) -> dict[str, Any] | None:
-        try:
-            thread = await client.threads.get(thread_id)
-        except Exception:  # noqa: BLE001
-            logger.debug("Could not fetch pinned sidebar thread %s", thread_id, exc_info=True)
-            return None
-        if not isinstance(thread, Mapping) or not thread_is_readable(
-            _thread_metadata(thread), login, email
-        ):
-            return None
-        return await _summarize_thread(client, thread)
-
-    summaries = await asyncio.gather(
-        *(load(thread_id) for thread_id in await list_thread_pin_ids(login))
+) -> list[JsonObject]:
+    pin_ids = await list_thread_pin_ids(login)
+    threads_by_id: dict[str, ThreadLike] = {}
+    # Search by ID independently of sidebar filters/pages, selecting no conversation
+    # state. Refresh idle metadata too: external runs and visibility can change.
+    for offset in range(0, len(pin_ids), _PINNED_THREADS_BATCH_SIZE):
+        batch_ids = pin_ids[offset : offset + _PINNED_THREADS_BATCH_SIZE]
+        threads = await client.threads.search(
+            ids=batch_ids,
+            limit=len(batch_ids),
+            select=_THREAD_LIST_SELECT,
+        )
+        for thread in threads:
+            thread_id = _thread_id(thread)
+            if thread_id and thread_is_readable(_thread_metadata(thread), login, email):
+                threads_by_id[thread_id] = thread
+    # Search order is unrelated to pin order; deleted/inaccessible IDs are omitted.
+    return await _summarize_threads(
+        client,
+        [threads_by_id[thread_id] for thread_id in pin_ids if thread_id in threads_by_id],
+        minimal_run_update=True,
     )
-    return [summary for summary in summaries if summary is not None]
 
 
 async def list_dashboard_pinned_threads(
