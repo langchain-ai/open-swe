@@ -19,31 +19,6 @@ _LOCK_RETRY_MAX_SECONDS = 2.0
 _RELEASE_RETRY_DELAYS_SECONDS = (0.5, 1.0, 2.0)
 
 
-def _acquire_retry_delay(attempt: int) -> float:
-    # Jitter keeps waiters on the same lock from retrying in lockstep.
-    ceiling = min(_LOCK_RETRY_MAX_SECONDS, _LOCK_RETRY_BASE_SECONDS * 2**attempt)
-    return ceiling / 2 + random.uniform(0, ceiling / 2)
-
-
-async def _release(client: LangGraphClient, lock_id: str, thread_id: str) -> None:
-    # A failed release holds the lock until its TTL is swept, so ride out brief API outages.
-    for delay in (*_RELEASE_RETRY_DELAYS_SECONDS, None):
-        try:
-            await client.threads.delete(lock_id)
-            return
-        except NotFoundError:
-            return
-        except Exception:
-            if delay is None:
-                logger.warning(
-                    "Failed to release PR state lock",
-                    extra={"agent_thread_id": thread_id, "lock_id": lock_id},
-                    exc_info=True,
-                )
-                return
-            await asyncio.sleep(delay)
-
-
 @asynccontextmanager
 async def agent_thread_pr_state_lock(
     client: LangGraphClient, thread_id: str
@@ -60,9 +35,26 @@ async def agent_thread_pr_state_lock(
                 raise TimeoutError(
                     f"Timed out waiting for PR state lock for thread {thread_id}"
                 ) from None
-            await asyncio.sleep(_acquire_retry_delay(attempt))
+            # Jitter keeps waiters on the same lock from retrying in lockstep.
+            ceiling = min(_LOCK_RETRY_MAX_SECONDS, _LOCK_RETRY_BASE_SECONDS * 2**attempt)
+            await asyncio.sleep(ceiling / 2 + random.uniform(0, ceiling / 2))
             attempt += 1
     try:
         yield
     finally:
-        await _release(client, lock_id, thread_id)
+        # A failed release holds the lock until its TTL is swept, so ride out brief API outages.
+        for delay in (*_RELEASE_RETRY_DELAYS_SECONDS, None):
+            try:
+                await client.threads.delete(lock_id)
+                break
+            except NotFoundError:
+                break
+            except Exception:
+                if delay is None:
+                    logger.warning(
+                        "Failed to release PR state lock",
+                        extra={"agent_thread_id": thread_id},
+                        exc_info=True,
+                    )
+                    break
+                await asyncio.sleep(delay)
