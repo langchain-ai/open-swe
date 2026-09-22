@@ -270,7 +270,7 @@ test.describe("transcript rendering", () => {
 
     await page.getByRole("button", { name: /GPT-5\.6 Sol/ }).click();
     await page.getByText("GPT-5.6 Sol", { exact: true }).last().hover();
-    await page.getByRole("option", { name: /Opus 5/ }).click();
+    await page.getByRole("option", { name: /Opus 5\.5/ }).click();
     await typeIntoComposer(page, "Use Opus for this thread");
     await waitForThreadIdle(page, threadId);
     await waitForThreadNotBusy(page, threadId);
@@ -298,7 +298,7 @@ test.describe("transcript rendering", () => {
         }>;
         return runs[0]?.kwargs?.config?.configurable?.agent_model_id;
       })
-      .toBe("anthropic:claude-opus-5");
+      .toBe("anthropic:claude-opus-5-5");
   });
 
   test("renders structured input envelopes safely and keeps legacy messages", async ({
