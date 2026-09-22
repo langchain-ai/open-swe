@@ -245,15 +245,21 @@ test.describe("Expedited Slack review", () => {
     expect((await approvals(request)).at(-1)?.head_sha).toBe(opened.head_sha);
 
     // The card carries the whole diff, which is the premise of voting from
-    // Slack rather than from GitHub.
+    // Slack rather than from GitHub. Production renders it to a PNG and shows
+    // that; the text fallback only appears when rendering or upload failed, so
+    // asserting the image is what keeps this test on the real path.
     await page.goto("/mock/slack");
     const card = page
       .locator(".msg.bot")
       .filter({ hasText: /Expedited review requested/i })
       .last();
-    await expect(card).toContainText("greet.py");
-    await expect(card).toContainText("def greet(name):");
-    await expect(card).toContainText(/2 distinct reviewers with write access/i);
+    const diff = card.locator("img.block-image");
+    await expect(diff).toBeVisible();
+    await expect(diff).toHaveAttribute("alt", /greet\.py/);
+    expect(
+      await diff.evaluate((img: HTMLImageElement) => img.naturalWidth),
+      "the diff PNG should have rendered, uploaded and decoded",
+    ).toBeGreaterThan(0);
     await shootCard(page, "open", /Expedited review requested/i);
 
     // 6. Alice approves. One vote is not a quorum, so nothing merges — but her

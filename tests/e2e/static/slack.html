@@ -34,6 +34,7 @@
       .who { font-size: 14px; font-weight: 800; }
       .text { margin-top: 3px; white-space: pre-wrap; line-height: 1.45; font-size: 14px; }
       .context { color: #616061; font-size: 12px; margin-top: 5px; }
+      .block-image { display: block; max-width: 100%; margin-top: 8px; border: 1px solid #e0e0e0; border-radius: 6px; }
       .actions button { margin: 8px 6px 0 0; border: 1px solid #bbb; border-radius: 5px; padding: 6px 10px; background: #fff; font-weight: 700; cursor: pointer; }
       .actions button.primary { background: #007a5a; color: #fff; border-color: #007a5a; }
       .composer-wrap { padding: 10px 22px 20px; }
@@ -100,37 +101,6 @@
         await poll();
       }
 
-      /** Slack mrkdwn as a div: `<url|label>` becomes a link, a fence becomes a pre. */
-      function mrkdwn(raw) {
-        const node = document.createElement("div");
-        const fence = /^```\n([\s\S]*)\n```$/.exec(raw ?? "");
-        if (fence) {
-          const pre = document.createElement("pre");
-          pre.textContent = fence[1];
-          node.appendChild(pre);
-          return node;
-        }
-        const body = raw ?? "";
-        const pattern = /<(https?:\/\/[^|>]+)\|([^>]+)>|\*([^*\n]+)\*/g;
-        let cursor = 0;
-        for (const match of body.matchAll(pattern)) {
-          node.append(document.createTextNode(body.slice(cursor, match.index)));
-          if (match[1]) {
-            const link = document.createElement("a");
-            link.href = match[1];
-            link.textContent = match[2];
-            node.appendChild(link);
-          } else {
-            const strong = document.createElement("strong");
-            strong.textContent = match[3];
-            node.appendChild(strong);
-          }
-          cursor = match.index + match[0].length;
-        }
-        node.append(document.createTextNode(body.slice(cursor)));
-        return node;
-      }
-
       function renderMessages(messages) {
         const thread = $("thread");
         thread.replaceChildren();
@@ -153,29 +123,37 @@
           const who = document.createElement("div");
           who.className = "who";
           who.textContent = message.is_bot ? "Open SWE" : userNames[message.user] || message.user;
-          const text = mrkdwn(message.text);
+          const text = document.createElement("div");
           text.className = "text";
+          const linkPattern = /<(https?:\/\/[^|>]+)\|([^>]+)>/g;
+          let cursor = 0;
+          for (const match of message.text.matchAll(linkPattern)) {
+            text.append(document.createTextNode(message.text.slice(cursor, match.index)));
+            const link = document.createElement("a");
+            link.href = match[1];
+            link.textContent = match[2];
+            text.appendChild(link);
+            cursor = match.index + match[0].length;
+          }
+          text.append(document.createTextNode(message.text.slice(cursor)));
           body.append(who, text);
           for (const block of message.blocks || []) {
-            if (block.type === "section" && block.text?.text) {
-              const element = mrkdwn(block.text.text);
-              element.className = "text";
-              body.appendChild(element);
-            }
-            if (block.type === "divider") {
-              body.appendChild(document.createElement("hr"));
-            }
+            // Slack renders an uploaded file inline. Without this the
+            // expedited-review card's diff PNG is invisible to the suite and a
+            // silent fall back to its text diff would go unnoticed.
             if (block.type === "image") {
-              const element = document.createElement("div");
-              element.className = "context";
-              element.textContent = `[image] ${block.alt_text || ""}`;
-              body.appendChild(element);
+              const img = document.createElement("img");
+              img.className = "block-image";
+              img.src = block.image_url || `/mock/slack/files/${block.slack_file?.id}`;
+              img.alt = block.alt_text || "";
+              body.appendChild(img);
             }
             if (block.type === "context") {
               for (const context of block.elements || []) {
-                if (!context.text) continue;
-                const element = mrkdwn(context.text);
+                if (context.type !== "plain_text" || !context.text) continue;
+                const element = document.createElement("div");
                 element.className = "context";
+                element.textContent = context.text;
                 body.appendChild(element);
               }
             }
