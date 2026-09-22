@@ -61,6 +61,8 @@ export interface TranscriptMessageState {
   reasoning: string
   namespace: Namespace
   attachments: ReadonlyArray<TranscriptAttachment>
+  /** The GitHub login of a human message's sender, when the server knows it. */
+  senderLogin: string | null
   createdAt: string
 }
 
@@ -176,6 +178,7 @@ function indexMessages(
       reasoning: row.reasoning,
       namespace: row.namespace,
       attachments: row.attachments ?? [],
+      senderLogin: row.sender?.login ?? null,
       createdAt: row.created_at,
     }
   }
@@ -471,6 +474,8 @@ export interface QueuedTurn {
   runId: string | null
   /** The human message that opened the turn; its id doubles as the row key. */
   message: Message
+  /** Its sender's GitHub login: only they may send it now or cancel it. */
+  senderLogin: string | null
   requestedAt: string
 }
 
@@ -488,6 +493,7 @@ export function queuedTurns(state: TranscriptState): Array<QueuedTurn> {
       turnId,
       runId: turn.runId,
       message,
+      senderLogin: state.messages[message.id]?.senderLogin ?? null,
       requestedAt: turn.requestedAt,
     })
   }
@@ -604,6 +610,7 @@ export function applyEvent(
         reasoning: "",
         namespace: [],
         attachments: payload.attachments,
+        senderLogin: payload.sender?.login ?? null,
         createdAt: at,
       })
       break
@@ -665,6 +672,7 @@ export function applyEvent(
         reasoning: (existing?.reasoning ?? "") + (payload.reasoning ?? ""),
         namespace: payload.namespace,
         attachments: existing?.attachments ?? [],
+        senderLogin: existing?.senderLogin ?? null,
         createdAt: existing?.createdAt ?? at,
       })
       break
@@ -682,6 +690,7 @@ export function applyEvent(
         reasoning: payload.reasoning,
         namespace: payload.namespace,
         attachments: payload.attachments ?? existing?.attachments ?? [],
+        senderLogin: payload.sender?.login ?? existing?.senderLogin ?? null,
         createdAt: payload.created_at || existing?.createdAt || at,
       })
       if (payload.role === "ai" && payload.namespace.length === 0) {

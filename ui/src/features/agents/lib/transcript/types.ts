@@ -69,6 +69,12 @@ export interface TranscriptTurnRow {
   error: string | null
 }
 
+/** Who sent a human message; null on AI messages. */
+export interface TranscriptSender {
+  login: string
+  kind: string
+}
+
 export interface TranscriptMessageRow {
   message_id: string
   turn_id: string
@@ -76,6 +82,7 @@ export interface TranscriptMessageRow {
   text: string
   reasoning: string
   namespace: Namespace
+  sender?: TranscriptSender | null
   attachments: ReadonlyArray<TranscriptAttachment> | null
   /** Set on AI messages the provider reported usage for; null otherwise. */
   usage: TranscriptUsage | null
@@ -140,6 +147,7 @@ export interface TurnRequestedPayload {
   turn_id: string
   message_id: string
   text: string
+  sender?: TranscriptSender
   attachments: ReadonlyArray<TranscriptAttachment>
 }
 
@@ -173,6 +181,7 @@ export interface MessageCompletedPayload {
   role: MessageRole
   text: string
   reasoning: string
+  sender?: TranscriptSender | null
   attachments: ReadonlyArray<TranscriptAttachment> | null
   usage: TranscriptUsage | null
   created_at: string

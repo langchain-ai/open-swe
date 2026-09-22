@@ -156,14 +156,10 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
   // Server truth: follow-ups queued behind the live run, from the transcript.
   const queued = source.queued
   const login = session.data?.login
-  const userId = session.data?.user_id
   // Only its sender may act on a queued follow-up; the server enforces it too.
   const isOwnQueued = useCallback(
-    (entry: QueuedTurn) =>
-      entry.message.structuredSenderId !== undefined &&
-      (entry.message.structuredSenderId === `github:${login}` ||
-        entry.message.structuredSenderId === `user:${userId}`),
-    [login, userId]
+    (entry: QueuedTurn) => login !== undefined && entry.senderLogin === login,
+    [login]
   )
 
   // The SDK stream cannot queue, so a follow-up there always steers.
