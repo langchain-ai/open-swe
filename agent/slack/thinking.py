@@ -90,7 +90,6 @@ def _tool_step(name: str, tool_input: Any) -> tuple[str, str]:
     labels = {
         "ls": ("Inspecting repository files", "Repository directory"),
         "open_pull_request": ("Opening pull request", "GitHub operation"),
-        "request_pr_review": ("Starting pull request review", "GitHub operation"),
         "save_plan": ("Publishing implementation plan", "Plan artifact"),
         "analyzePlan": ("Checking implementation security", "Security analysis"),
     }
@@ -433,10 +432,12 @@ async def clear_slack_thinking_status_if_idle(
     thread_ts: str,
     *,
     session_ts: str = "",
+    metadata: Mapping[str, object] | None = None,
 ) -> None:
     """Settle an idle indicator while preserving background work and newer anchors."""
     try:
-        metadata = thread_metadata(await client.threads.get(thread_id))
+        if metadata is None:
+            metadata = thread_metadata(await client.threads.get(thread_id))
         if await _thread_has_active_runs(client, thread_id):
             return
         waiting = bool(metadata.get(RUNNING_BACKGROUND_TASKS_KEY))
@@ -459,12 +460,24 @@ async def clear_slack_thinking_status_if_idle(
 
 
 async def sync_slack_background_status(
-    client: LangGraphClient, thread_id: str, *, resume: bool = False
+    client: LangGraphClient,
+    thread_id: str,
+    *,
+    resume: bool = False,
+    metadata: Mapping[str, object] | None = None,
+    source_context: SourceContext | None = None,
 ) -> None:
-    """Refresh a thread's background indicator without querying its sandbox."""
+    """Refresh the indicator using a current snapshot or a destination-only hint.
+
+    A source context without Slack is authoritative; None means it is unknown.
+    A destination hint never substitutes for task metadata when settling idle work.
+    """
     try:
-        metadata = thread_metadata(await client.threads.get(thread_id))
-        slack_thread = SourceContext.from_metadata(metadata).slack_thread
+        if source_context is None:
+            if metadata is None:
+                metadata = thread_metadata(await client.threads.get(thread_id))
+            source_context = SourceContext.from_metadata(metadata)
+        slack_thread = source_context.slack_thread
         if slack_thread is None or not slack_thread.location:
             return
         channel_id, thread_ts = slack_thread.location
@@ -482,7 +495,7 @@ async def sync_slack_background_status(
                 await restore_slack_thinking_status(channel_id, thread_ts)
         else:
             await clear_slack_thinking_status_if_idle(
-                client, thread_id, channel_id, thread_ts, session_ts=session_ts
+                client, thread_id, channel_id, thread_ts, session_ts=session_ts, metadata=metadata
             )
     except Exception:
         logger.warning(

@@ -59,6 +59,17 @@ function removeQueuedMessage(thread: AgentThread, id: string): AgentThread {
   }
 }
 
+/** Human-readable reason a send failed, shown under the failed bubble. */
+export function describeSendError(error: unknown): string {
+  if (error instanceof AgentsApiError) {
+    return error.message
+      ? `${error.status} ${error.message}`
+      : `${error.status}`
+  }
+  if (error instanceof Error) return error.message || error.name
+  return String(error)
+}
+
 /** Submit user messages through the active-run queue or a new stream run. */
 export function useSubmitAgentMessage(threadId: string) {
   const queryClient = useQueryClient()
@@ -103,7 +114,6 @@ export function useSubmitAgentMessage(threadId: string) {
           images: vars.images,
           model_id: vars.model_id,
           effort: vars.effort,
-          plan_mode: vars.plan_mode,
           client_message_id: id,
         })
         updateThread((thread) => setQueuedMessage(thread, queuedMessage))
@@ -118,6 +128,7 @@ export function useSubmitAgentMessage(threadId: string) {
             setPendingMessage(removeQueuedMessage(thread, id), {
               ...pendingMessage,
               status: "failed",
+              error: describeSendError(error),
             })
           )
           throw error
@@ -132,7 +143,11 @@ export function useSubmitAgentMessage(threadId: string) {
       } catch (error) {
         if (!(error instanceof AgentsApiError) || error.status !== 409) {
           updateThread((thread) =>
-            setPendingMessage(thread, { ...pendingMessage, status: "failed" })
+            setPendingMessage(thread, {
+              ...pendingMessage,
+              status: "failed",
+              error: describeSendError(error),
+            })
           )
           throw error
         }
@@ -142,16 +157,19 @@ export function useSubmitAgentMessage(threadId: string) {
         modelId: vars.model_id,
         effort: vars.effort,
       })
-      if (vars.plan_mode) configurable.plan_mode = true
 
       void source
         .startRun({
           message: { id, text: vars.content, images: vars.images },
           configurable,
         })
-        .catch(() => {
+        .catch((error: unknown) => {
           updateThread((thread) =>
-            setPendingMessage(thread, { ...pendingMessage, status: "failed" })
+            setPendingMessage(thread, {
+              ...pendingMessage,
+              status: "failed",
+              error: describeSendError(error),
+            })
           )
           setAgentThreadStatus(queryClient, threadId, "error")
         })

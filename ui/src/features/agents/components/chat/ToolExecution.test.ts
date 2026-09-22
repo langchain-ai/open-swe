@@ -51,14 +51,11 @@ describe("formatToolDisplay", () => {
   })
 
   it("sentence-cases raw tool names", () => {
-    expect(formatToolDisplay("enter_plan_mode", "other", {}, repoPath)).toBe(
-      "Enter plan mode"
-    )
     expect(formatToolDisplay("save_plan", "other", {}, repoPath)).toBe(
       "Save plan"
     )
-    expect(formatToolDisplay("slack_thread_reply", "other", {}, repoPath)).toBe(
-      "Slack thread reply"
+    expect(formatToolDisplay("slack_reply", "other", {}, repoPath)).toBe(
+      "Slack reply"
     )
   })
 })

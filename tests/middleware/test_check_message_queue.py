@@ -68,29 +68,69 @@ async def test_check_message_queue_injects_dashboard_handoff_instruction() -> No
         patch("agent.middleware.check_message_queue.get_store", return_value=store),
     ):
         result = await check_message_queue_before_model.abefore_model(
-            cast(LinearNotifyState, {"messages": []}),
+            cast(LinearNotifyState, {"messages": [], "reply_surface": "slack"}),
             MagicMock(),
         )
 
     assert result is not None
+    assert result["reply_surface"] == "web"
     messages = result["messages"]
     # One envelope per message: the transcript parses them individually, so a
     # concatenation would render as raw XML.
-    assert [message["role"] for message in messages] == ["user"] * 4
+    assert [message["role"] for message in messages] == ["user"] * 3
     handoff_entity = ElementTree.fromstring(_envelope(messages[0]))
     handoff_message = ElementTree.fromstring(_envelope(messages[1]))
-    user_entity = ElementTree.fromstring(_envelope(messages[2]))
-    user_message = ElementTree.fromstring(_envelope(messages[3]))
+    user_message = ElementTree.fromstring(_envelope(messages[2]))
     assert handoff_entity.attrib["id"] == "system:dashboard-handoff"
     assert handoff_message.attrib["kind"] == "system"
-    assert "conversation has moved to Web" in (handoff_message.findtext("content") or "")
-    assert user_entity.attrib["id"] == "github:octocat"
-    assert user_message.findtext("content") == "continue in web"
-    assert messages[3]["id"] == "8a60896d-65ca-4e40-8a2d-1fbe81777001"
+    assert "conversation has moved to Web" in (handoff_message.text or "")
+    assert user_message.attrib["sender"] == "github:octocat"
+    assert (user_message.text or "").strip() == "continue in web"
+    assert messages[2]["id"] == "8a60896d-65ca-4e40-8a2d-1fbe81777001"
     # The handoff is carried by the injected message alone. Rewriting the system
     # prompt would say the same thing while invalidating the whole cached prefix.
     assert "rendered_system_prompt" not in result
     assert store.deleted == [(("queue", "thread-1"), "pending_messages")]
+
+
+@pytest.mark.asyncio
+async def test_check_message_queue_announces_the_move_to_web_only_once() -> None:
+    store = _FakeStore(
+        {
+            (("queue", "thread-1"), "pending_messages"): {
+                "messages": [
+                    {
+                        "content": {
+                            "text": "and another thing",
+                            "source": "dashboard",
+                            "queue_id": "8a60896d-65ca-4e40-8a2d-1fbe81777002",
+                            "sender": {
+                                "id": "github:octocat",
+                                "platform": "github",
+                                "github_login": "octocat",
+                            },
+                        }
+                    },
+                ]
+            }
+        }
+    )
+
+    with (
+        patch(
+            "agent.middleware.check_message_queue.get_config",
+            return_value={"configurable": {"thread_id": "thread-1"}},
+        ),
+        patch("agent.middleware.check_message_queue.get_store", return_value=store),
+    ):
+        result = await check_message_queue_before_model.abefore_model(
+            cast(LinearNotifyState, {"messages": [], "reply_surface": "web"}),
+            MagicMock(),
+        )
+
+    assert result is not None
+    envelopes = [_envelope(message) for message in result["messages"]]
+    assert not any("system:dashboard-handoff" in envelope for envelope in envelopes)
 
 
 @pytest.mark.asyncio
@@ -120,7 +160,7 @@ async def test_check_message_queue_injects_pending_autofix_event() -> None:
     message = ElementTree.fromstring(_envelope(result["messages"][-1]))
     assert entity.attrib["id"] == "system:thread-queue"
     assert message.attrib["kind"] == "system"
-    text = message.findtext("content") or ""
+    text = message.text or ""
     assert "PR babysitting event arrived" in text
     # The reviewer's actual comment is carried through, not dropped for a generic nudge.
     assert "rename to userId" in text

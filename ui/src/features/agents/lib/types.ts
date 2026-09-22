@@ -205,6 +205,7 @@ export interface Message {
   author: Author
   timestamp: string
   deliveryStatus?: "sending" | "failed"
+  deliveryError?: string
   optimistic?: boolean
   structuredSenderId?: string
   structuredSenderKind?: "person" | "system"
@@ -265,6 +266,8 @@ export interface QueuedThreadMessage {
 
 export interface PendingThreadMessage extends QueuedThreadMessage {
   status: "sending" | "failed"
+  /** Why delivery failed, e.g. `503 Service Unavailable`. */
+  error?: string
 }
 
 export type WorkflowApprovalStatus = "pending" | "approved" | "rejected"
@@ -404,7 +407,6 @@ export interface AgentThread {
   model: string
   effort?: string | null
   modelSelection?: "auto" | "explicit" | null
-  planMode?: boolean
   planStatus?: string | null
   adminThread?: boolean
   source?: AgentSource

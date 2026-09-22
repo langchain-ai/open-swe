@@ -3,7 +3,7 @@
 It drives the real deepagents loop with a fixed sequence of tool calls that
 implement a tiny feature, push a branch to the fake-GitHub remote, open a PR via
 the real ``open_pull_request`` tool, and post the result back with the real
-``slack_thread_reply`` tool. The final Slack step reads the actual PR URL out of
+``slack_reply`` tool. The final Slack step reads the actual PR URL out of
 the preceding tool result, exactly as a real model would.
 """
 
@@ -42,7 +42,7 @@ from langchain_core.outputs import ChatGeneration, ChatResult
 
 
 def _slack_thread_ts(messages: list[BaseMessage]) -> str:
-    matches = re.findall(r"Thread TS: ([0-9.]+)", "\n".join(_text(m.content) for m in messages))
+    matches = re.findall(r"thread_id: ([0-9.]+)", "\n".join(_text(m.content) for m in messages))
     return matches[-1] if matches else ""
 
 
@@ -253,6 +253,10 @@ class ScriptRule:
 
 
 def _tool_call(name: str, args: ToolArgs, call_id: str) -> ToolCallSpec:
+    # `response_type` is required on the real tool, and a script that leaves it
+    # out means "this reply ends the turn" — the common case here.
+    if name == "slack_reply" and "response_type" not in args:
+        args = {**args, "response_type": "final"}
     return ToolCallSpec(name=name, args=args, call_id=call_id)
 
 
@@ -295,7 +299,6 @@ def _text(content: Any) -> str:
 
 
 _FRAMING_SENDER_IDS = ("system:slack-context", "system:dashboard-handoff")
-_METADATA_SENDER_IDS = ("system:sender-context",)
 
 
 def _is_framing_block(header: str) -> bool:
@@ -305,25 +308,29 @@ def _is_framing_block(header: str) -> bool:
     )
 
 
-def _is_metadata_block(header: str) -> bool:
-    """A system envelope that annotates the turn instead of being one."""
-    return 'kind="system"' in header and any(
-        f'sender="{sender}"' in header for sender in _METADATA_SENDER_IDS
-    )
+def _envelope_follows(messages: list[BaseMessage], index: int) -> bool:
+    """Whether another input envelope arrives in the same dispatch as ``index``."""
+    for later in messages[index + 1 :]:
+        if not isinstance(later, HumanMessage):
+            return False
+        text = _text(later.content).lstrip()
+        if text.startswith("<dynamic-context "):
+            continue
+        return text.startswith("<input-message ")
+    return False
 
 
 def _script_humans(messages: list[BaseMessage]) -> list[HumanMessage]:
     """The user turns a script routes on, recovered from the structured stream.
 
-    A Slack dispatch replays the thread's earlier messages as context before the
-    system block that frames the mention, so only the message after that block is
-    the turn. An instruction Open SWE dispatches to itself — a plan decision, a
-    scheduled wake-up — carries no Slack timestamp and is always a turn, even
-    though it too arrives as a system envelope.
+    A Slack dispatch replays whatever the thread has not been handed yet ahead of
+    the message it was triggered by, and that message is always last, so a Slack
+    envelope is a turn only when nothing else follows it in the same dispatch. An
+    instruction Open SWE dispatches to itself — a plan decision, a scheduled
+    wake-up — carries no Slack timestamp and is always a turn.
     """
     selected: list[HumanMessage] = []
-    slack_request_pending = False
-    for message in messages:
+    for index, message in enumerate(messages):
         if not isinstance(message, HumanMessage):
             continue
         text = _text(message.content).lstrip()
@@ -331,15 +338,13 @@ def _script_humans(messages: list[BaseMessage]) -> list[HumanMessage]:
             continue
         if text.startswith("<input-message "):
             header = text.split(">", 1)[0]
-            if _is_metadata_block(header):
-                continue
             if _is_framing_block(header):
-                slack_request_pending = 'surface="slack"' in header
                 continue
-            if 'surface="slack"' in header and "<timestamp>" in text:
-                if slack_request_pending:
-                    selected.append(message)
-                    slack_request_pending = False
+            if (
+                'surface="slack"' in header
+                and 'timestamp="' in header
+                and _envelope_follows(messages, index)
+            ):
                 continue
         selected.append(message)
     return selected
@@ -356,7 +361,7 @@ def _pr_url_from_messages(messages: list[BaseMessage]) -> str | None:
 
 
 def _plan_url_from_messages(messages: list[BaseMessage]) -> str | None:
-    """The plan-review URL is injected into the system prompt; a real model would read it."""
+    """The artifact URL is injected into the system prompt."""
     for msg in messages:
         match = _PLAN_URL_RE.search(_text(msg.content))
         if match:
@@ -364,30 +369,22 @@ def _plan_url_from_messages(messages: list[BaseMessage]) -> str | None:
     return None
 
 
-def _reviewer_feedback(messages: list[BaseMessage]) -> str | None:
-    """The harvested reviewer comments the backend hands the agent on approval."""
-    humans = [m for m in messages if isinstance(m, HumanMessage)]
-    if not humans:
-        return None
-    text = _text(humans[-1].content)
-    idx = text.lower().find("feedback")
-    if "approved" in text.lower() and idx != -1:
-        return text[idx:].strip()
-    return None
-
-
 def _reply_step(messages: list[BaseMessage]) -> AIMessage:
     url = _pr_url_from_messages(messages) or "(PR url unavailable)"
-    feedback = _reviewer_feedback(messages)
-    extra = f"\n\nReviewer feedback I addressed:\n{feedback}" if feedback else ""
     text = (
         f"✅ Done! I implemented the change and opened a PR: <{url}|{PR_TITLE}>\n\n"
-        f"• Added `{FEATURE_FILE}` with a `greet()` helper.{extra}\n"
+        f"• Added `{FEATURE_FILE}` with a `greet()` helper.\n"
         "Let me know if you'd like any changes."
     )
     return AIMessage(
         content="Replying in the Slack thread with the PR link.",
-        tool_calls=[{"name": "slack_thread_reply", "args": {"message": text}, "id": "call-reply"}],
+        tool_calls=[
+            {
+                "name": "slack_reply",
+                "args": {"message": text, "response_type": "final"},
+                "id": "call-reply",
+            }
+        ],
         response_metadata={"model_name": "fake-scripted-model"},
         usage_metadata={
             "input_tokens": 12_000,
@@ -439,8 +436,8 @@ def _expedite_opened_reply_step(messages: list[BaseMessage]) -> AIMessage:
         content="Reporting the pull request in the Slack thread.",
         tool_calls=[
             {
-                "name": "slack_thread_reply",
-                "args": {"message": text},
+                "name": "slack_reply",
+                "args": {"response_type": "final", "message": text},
                 "id": f"call-expedite-opened-{len(messages)}",
             }
         ],
@@ -458,8 +455,8 @@ def _expedite_reply_step(messages: list[BaseMessage]) -> AIMessage:
         content="Replying in the Slack thread.",
         tool_calls=[
             {
-                "name": "slack_thread_reply",
-                "args": {"message": text},
+                "name": "slack_reply",
+                "args": {"response_type": "final", "message": text},
                 "id": f"call-expedite-reply-{len(messages)}",
             }
         ],
@@ -477,8 +474,8 @@ def _expedite_fixed_reply_step(messages: list[BaseMessage]) -> AIMessage:
         content="Reporting the fix in the Slack thread.",
         tool_calls=[
             {
-                "name": "slack_thread_reply",
-                "args": {"message": text},
+                "name": "slack_reply",
+                "args": {"response_type": "final", "message": text},
                 "id": f"call-expedite-fix-reply-{len(messages)}",
             }
         ],
@@ -492,12 +489,13 @@ def _multi_pr_reply_step(messages: list[BaseMessage]) -> AIMessage:
         content="Replying in the Slack thread with the cross-repository PRs.",
         tool_calls=[
             {
-                "name": "slack_thread_reply",
+                "name": "slack_reply",
                 "args": {
+                    "response_type": "final",
                     "message": (
                         f"Opened pull requests in `{OWNER}/{REPO}` and "
                         f"`{SECOND_OWNER}/{SECOND_REPO}`; latest: <{url}|{SECOND_PR_TITLE}>."
-                    )
+                    ),
                 },
                 "id": "call-multi-pr-reply",
             }
@@ -593,9 +591,10 @@ def _plan_link_step(messages: list[BaseMessage]) -> AIMessage:
         content="Sharing the plan-review link.",
         tool_calls=[
             {
-                "name": "slack_thread_reply",
+                "name": "slack_reply",
                 "args": {
-                    "message": f"I'm putting together a plan. Follow along and review it here: <{url}|plan review>"
+                    "response_type": "final",
+                    "message": f"I'm putting together a plan. Follow along and review it here: <{url}|plan review>",
                 },
                 "id": "call-plan-link",
             }
@@ -644,11 +643,11 @@ def _plan_complete_step(messages: list[BaseMessage]) -> AIMessage:
         content="Announcing the plan is ready.",
         tool_calls=[
             {
-                "name": "slack_thread_reply",
+                "name": "slack_reply",
                 "args": {
+                    "response_type": "final",
                     "message": f"✅ The plan is ready for review: <{url}|open the plan>. "
-                    "Take a look, leave comments, and choose what to do next.",
-                    "options": ["Approve & implement", "Request changes"],
+                    "Take a look and leave comments.",
                 },
                 "id": "call-plan-done",
             }
@@ -837,7 +836,7 @@ SCRIPT_LIBRARY: dict[str, tuple[StepSpec, ...]] = {
         ),
         _tool_step(
             "Continuing the task in its dedicated code channel.",
-            "slack_thread_reply",
+            "slack_reply",
             {
                 "message": "I created this code channel for the investigation. All updates and follow-ups stay in this one Open SWE session."
             },
@@ -853,7 +852,7 @@ SCRIPT_LIBRARY: dict[str, tuple[StepSpec, ...]] = {
     "code_channel_followup": (
         _tool_step(
             "Replying to the unmentioned code-channel follow-up.",
-            "slack_thread_reply",
+            "slack_reply",
             {
                 "message": "Status: the investigation is active, and this unmentioned follow-up reached the same Open SWE session."
             },
@@ -863,7 +862,7 @@ SCRIPT_LIBRARY: dict[str, tuple[StepSpec, ...]] = {
     "iframe": (
         _tool_step(
             "Acknowledging the iframe preview request.",
-            "slack_thread_reply",
+            "slack_reply",
             {"message": "Preparing the iframe preview now."},
             "call-iframe-ack",
         ),
@@ -896,7 +895,7 @@ SCRIPT_LIBRARY: dict[str, tuple[StepSpec, ...]] = {
     "slack_reply_order": (
         _tool_step(
             "Acknowledging the Slack request before starting work.",
-            "slack_thread_reply",
+            "slack_reply",
             {"message": "On it!"},
             "call-order-ack",
         ),
@@ -911,7 +910,7 @@ SCRIPT_LIBRARY: dict[str, tuple[StepSpec, ...]] = {
     "slack_reply_grouped_order": (
         _tool_step(
             "Acknowledging the Slack request before delegating work.",
-            "slack_thread_reply",
+            "slack_reply",
             {"message": "On it!"},
             "call-grouped-order-ack",
         ),
@@ -931,7 +930,7 @@ SCRIPT_LIBRARY: dict[str, tuple[StepSpec, ...]] = {
     "implement": (
         _tool_step(
             "Acknowledging the Slack request before starting work.",
-            "slack_thread_reply",
+            "slack_reply",
             {"message": "On it!"},
             "call-ack",
         ),
@@ -979,7 +978,7 @@ SCRIPT_LIBRARY: dict[str, tuple[StepSpec, ...]] = {
     "expedite": (
         _tool_step(
             "Acknowledging the request.",
-            "slack_thread_reply",
+            "slack_reply",
             {"message": "On it — this is a one-liner, I'll ask for an expedited review."},
             "call-expedite-ack",
         ),
@@ -1030,7 +1029,7 @@ SCRIPT_LIBRARY: dict[str, tuple[StepSpec, ...]] = {
     "multi_pr": (
         _tool_step(
             "Acknowledging the cross-repository request before starting work.",
-            "slack_thread_reply",
+            "slack_reply",
             {"message": "On it!"},
             "call-multi-ack",
         ),
@@ -1073,7 +1072,7 @@ SCRIPT_LIBRARY: dict[str, tuple[StepSpec, ...]] = {
     "many_files": (
         _tool_step(
             "Acknowledging the Slack request before starting work.",
-            "slack_thread_reply",
+            "slack_reply",
             {"message": "On it!"},
             "call-ack",
         ),
@@ -1111,7 +1110,7 @@ SCRIPT_LIBRARY: dict[str, tuple[StepSpec, ...]] = {
         ),
         _tool_step(
             "Confirming the breakout thread was started.",
-            "slack_thread_reply",
+            "slack_reply",
             {"message": "I started a separate Open SWE thread for that aspect."},
             "call-breakout-reply",
         ),
@@ -1128,18 +1127,12 @@ SCRIPT_LIBRARY: dict[str, tuple[StepSpec, ...]] = {
         ),
     ),
     "plan": (
-        _tool_step(
-            "This is worth planning first — entering plan mode.",
-            "enter_plan_mode",
-            {},
-            "call-enter-plan",
-        ),
         _dynamic_step(_plan_link_step),
         _dynamic_step(_plan_research_step),
         _dynamic_step(_write_plan_step),
         _dynamic_step(_save_plan_step),
         _dynamic_step(_plan_complete_step),
-        StepSpec(content="I'll wait for your review and approval before implementing."),
+        StepSpec(content="The requested plan is published as an HTML artifact."),
     ),
     "workspace": (
         # Build here, with ordinary tools, then publish this sandbox as the image.
@@ -1213,18 +1206,6 @@ def _is_pull_request_fix(text: str) -> bool:
     return "Fix merge conflicts and failing CI checks on" in text
 
 
-def _is_approval(text: str) -> bool:
-    t = text.lower()
-    return "the plan has been approved" in t or (
-        ("approve" in t or "approved" in t) and "implement" in t
-    )
-
-
-def _is_revision(text: str) -> bool:
-    t = text.lower()
-    return "needs changes" in t or "publish an updated plan" in t
-
-
 SCRIPT_RULES: tuple[ScriptRule, ...] = (
     ScriptRule("subagent_task", lambda ctx: SUBAGENT_TASK_MARKER in ctx.last_text),
     ScriptRule("delegate", lambda ctx: ctx.human_count <= 1 and DELEGATE_MARKER in ctx.first_text),
@@ -1273,8 +1254,6 @@ SCRIPT_RULES: tuple[ScriptRule, ...] = (
     ScriptRule("expedite", lambda ctx: EXPEDITE_MARKER in ctx.first_text),
     ScriptRule("followup", lambda ctx: _is_move_followup(ctx.last_text)),
     ScriptRule("move", lambda ctx: _is_move_request(ctx.first_text)),
-    ScriptRule("implement", lambda ctx: _is_approval(ctx.last_text)),
-    ScriptRule("plan", lambda ctx: _is_revision(ctx.last_text)),
     ScriptRule("plan", lambda ctx: ctx.human_count <= 1 and _is_plan_request(ctx.first_text)),
     ScriptRule(
         "breakout", lambda ctx: ctx.human_count <= 1 and _is_breakout_request(ctx.first_text)

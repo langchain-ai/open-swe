@@ -87,7 +87,7 @@ async def test_admin_can_view_but_not_open_terminal(private_thread):
     assert await handlers.get_dashboard_terminal_sandbox("private-thread", "alice") == ("sbx", None)
 
 
-async def test_admin_can_read_plan_but_not_approve(private_thread, monkeypatch):
+async def test_admin_can_read_artifact_but_not_mutate(private_thread, monkeypatch):
     thread, _ = private_thread
     for module in (plan_api, workflow_approval_api):
         monkeypatch.setattr(
@@ -102,10 +102,12 @@ async def test_admin_can_read_plan_but_not_approve(private_thread, monkeypatch):
     assert await plan_api.get_plan_comments("private-thread", admin) == {"comments": []}
     await workflow_approval_api.list_workflow_push_approvals("private-thread", admin)
     with pytest.raises(HTTPException) as exc:
-        await plan_api.approve_plan("private-thread", admin)
+        await plan_api.post_plan_comment(
+            "private-thread", plan_api.CommentBody(body="comment"), admin
+        )
     assert exc.value.status_code == 404
     with pytest.raises(HTTPException) as exc:
-        await plan_api.reject_plan("private-thread", None, admin)
+        await plan_api.update_plan("private-thread", plan_api.PlanUpdate(html="<p>edit</p>"), admin)
     assert exc.value.status_code == 404
     with pytest.raises(HTTPException) as exc:
         await workflow_approval_api.approve_workflow_push("private-thread", "fp", admin)

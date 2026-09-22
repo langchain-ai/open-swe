@@ -21,6 +21,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship, selectinload
 
 from agent.database import postgres
 from agent.database.orm import NOW, Base
+from agent.input_messages import PersonIdentity, split_person_id
 from agent.users.authorization import UnauthorizedUser, is_authorized_github_login
 
 logger = logging.getLogger(__name__)
@@ -113,6 +114,66 @@ class User(Base):
                 .order_by(UserIdentity.last_seen_at.desc())
                 .limit(1)
             )
+
+    @classmethod
+    async def for_person(cls, person: PersonIdentity) -> Self | None:
+        """The person an ingress named, or ``None``.
+
+        Every ingress — Slack events and clicks, GitHub webhooks, run dispatch —
+        names people as ``PersonIdentity`` records. Resolution never creates one:
+        people come into being when they sign in, so an unknown identity resolves
+        to ``None`` and the caller decides what that means.
+        """
+        platform, external_id = split_person_id(person)
+        if platform == "slack" and external_id:
+            return await cls.for_identity("slack", external_id)
+        if platform == "github" and external_id:
+            return await cls._for_github_person(external_id, person)
+        login = person.get("github_login", "")
+        if login:
+            return await cls.for_login("github", login)
+        email = person.get("email", "")
+        return await cls.for_email(email) if email else None
+
+    @classmethod
+    async def _for_github_person(cls, external_id: str, person: PersonIdentity) -> Self | None:
+        if external_id.isdigit():
+            user = await cls.for_identity("github", external_id)
+            if user is not None:
+                return user
+        login = person.get("github_login") or (external_id if not external_id.isdigit() else "")
+        return await cls.for_login("github", login) if login else None
+
+    @classmethod
+    async def canonical_person(cls, person: PersonIdentity) -> PersonIdentity:
+        """``person`` re-keyed on the ``users`` row behind it, unchanged when unknown.
+
+        One person reaching Open SWE from Slack and from the dashboard is one
+        entity the model can match across surfaces, instead of two whose
+        relationship it has to infer. Provider handles stay on the record.
+
+        Best effort by design: this sits on the path that starts every run, and
+        a nicer identity key is never worth refusing to start one, so a database
+        that cannot answer leaves the surface's own key in place.
+        """
+        try:
+            user = await cls.for_person(person)
+        except Exception:
+            logger.warning(
+                "Could not resolve a person; keeping their surface identity",
+                extra={"person_key": person["id"]},
+                exc_info=True,
+            )
+            return person
+        return person if user is None else user.as_person(person)
+
+    def as_person(self, person: PersonIdentity) -> PersonIdentity:
+        """``person`` keyed on this row; only the identity key changes.
+
+        What the agent is told about a person is built from this row by the run,
+        so an ingress only needs the key that ties its surface to it.
+        """
+        return {**person, "id": f"user:{self.id}"}
 
     @classmethod
     async def login_for_slack(cls, slack_user_id: str | None) -> str | None:
@@ -271,6 +332,15 @@ class User(Base):
         if stored is None:
             raise RuntimeError(f"user {self.id} vanished during link")
         return stored
+
+    async def rename(self, display_name: str) -> None:
+        """Replace a person's display name, for the one backfill that knows better."""
+        cls = type(self)
+        async with postgres.session() as session:
+            await session.execute(
+                update(cls).where(cls.id == self.id).values(display_name=display_name.strip())
+            )
+            await session.flush()
 
     @classmethod
     async def sync_admins(cls, admins: Collection[str]) -> int:

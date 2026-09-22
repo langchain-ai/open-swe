@@ -46,7 +46,7 @@ export function ReviewTab({ thread }: { thread: AgentThread }) {
   if (detail.error || !detail.data) {
     return (
       <div className="min-h-0 flex-1 overflow-y-auto p-6 text-center text-xs text-muted-foreground/70">
-        No review for this pull request yet.
+        {detail.error?.message ?? "Could not load this pull request."}
       </div>
     )
   }

@@ -123,8 +123,6 @@ export interface SessionUser {
   user_id?: string | null
   slack_user_id?: string | null
   is_admin: boolean
-  /** Mirrors the user's preference, so the thread page has it on first render. */
-  transcript_streaming?: boolean
   /** Whether the server records new threads into the transcript log. */
   transcript_recording?: boolean
   slack_oauth_enabled?: boolean
@@ -162,6 +160,7 @@ export interface Profile {
   branch_prefix?: string | null
   auto_fix_ci?: boolean
   model_routing_enabled?: boolean
+  recent_thread_context_enabled?: boolean
   dm_session_enabled?: boolean
   draft_prs?: boolean
   review_draft_prs?: boolean | null
@@ -178,6 +177,7 @@ export interface ProfileUpdate {
   branch_prefix?: string | null
   auto_fix_ci?: boolean
   model_routing_enabled?: boolean | null
+  recent_thread_context_enabled?: boolean
   dm_session_enabled?: boolean
   draft_prs?: boolean
   review_draft_prs?: boolean | null
@@ -322,6 +322,7 @@ export type UsageLeaderboardSort =
   | "merged_prs"
   | "merged_prs_per_thread"
   | "agent_loc"
+  | "feedback_given"
 export type SortDirection = "asc" | "desc"
 
 export interface AnalyticsMetadata {
@@ -353,6 +354,8 @@ export interface UsageLeaderboardRow {
   merged_prs: number
   merged_prs_per_thread?: number
   agent_loc: number
+  feedback_given: number
+  is_top_feedback_contributor?: boolean
   additions: number
   deletions: number
   total_tokens: number
@@ -502,7 +505,6 @@ export interface UserPreferences {
   local_tracing_project: string | null
   default_local_tracing_project: string
   default_workspace: string | null
-  transcript_streaming: boolean
 }
 
 export interface Skill {
@@ -833,13 +835,20 @@ export interface ReviewDiffGroup {
   files: Array<string>
 }
 
-export interface ReviewDetail extends ReviewSummary {
+/** `status: "none"` is a PR the reviewer graph has never run on. */
+export interface ReviewDetail extends Omit<
+  ReviewSummary,
+  "thread_id" | "status"
+> {
+  thread_id: string | null
+  status: ReviewSummary["status"] | "none"
   assessment?: PublishedReviewAssessment | null
   pr: ReviewPrDetails
   checks: Array<ReviewCheckRun>
   findings: Array<ReviewFinding>
   diff_groups: Array<ReviewDiffGroup>
   diff_groups_stale: boolean
+  guidance: Array<GuidancePoint>
 }
 
 export interface PublishedReviewAssessment {
@@ -849,6 +858,17 @@ export interface PublishedReviewAssessment {
   risk_score: number
   decision: "would_approve" | "needs_human_review"
   explanation: string
+}
+
+/**
+ * One place the author redirected Open SWE that the reviewer could see in the
+ * final change. Recorded during a review, so it is absent until one has run.
+ */
+export interface GuidancePoint {
+  summary: string
+  quote: string
+  /** Empty when the quote matched no stored message. */
+  author: string
 }
 
 export interface ReviewAssessmentFeedbackInput {
@@ -870,6 +890,58 @@ export interface ReviewDiffFile {
   originalContent: string
   modifiedContent: string
   unrenderable?: boolean
+}
+
+export type PreviewFileStatus =
+  | "added"
+  | "removed"
+  | "modified"
+  | "renamed"
+  | "copied"
+  | "changed"
+  | "unchanged"
+
+export interface PreviewFile {
+  path: string
+  status: PreviewFileStatus
+  additions: number
+  deletions: number
+}
+
+export interface PreviewThread {
+  author: string | null
+  body: string
+  path: string
+  line: number | null
+  url: string | null
+}
+
+export interface PreviewCheck {
+  name: string
+  status: string
+  conclusion: string | null
+  url: string | null
+}
+
+export interface PullRequestPreview {
+  title: string
+  body: string
+  author: string | null
+  author_avatar_url: string | null
+  state: string
+  draft: boolean
+  head_ref: string
+  base_ref: string
+  commits: number
+  additions: number
+  deletions: number
+  changed_files: number
+  files: Array<PreviewFile>
+  // null when GitHub could not answer, which is not the same as none unresolved
+  // or no checks configured.
+  unresolved: Array<PreviewThread> | null
+  checks: Array<PreviewCheck> | null
+  guidance: Array<GuidancePoint>
 }
 
 export interface ReviewDiffPayload {
@@ -1325,6 +1397,10 @@ export const api = {
     request<ReviewAssessmentFeedback>(
       `/reviews/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}/feedback/${reviewId}`,
       { method: "PUT", body: JSON.stringify(feedback) }
+    ),
+  getPullRequestPreview: (owner: string, repo: string, number: number) =>
+    request<PullRequestPreview>(
+      `/reviews/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}/preview`
     ),
   getReviewDiff: (owner: string, repo: string, number: number) =>
     request<ReviewDiffPayload>(

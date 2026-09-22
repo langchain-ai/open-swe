@@ -5,6 +5,7 @@ from typing import Annotated, Literal, TypedDict
 from langchain.tools import ToolRuntime
 from pydantic import Field
 
+from agent.analytics.feedback import record_feedback_submission
 from agent.middleware.model_selection import ModelSelectionState, Route, normalize_route
 from agent.run_config import RunConfig
 from agent.thread_feedback import Feedback, feedback_store
@@ -50,6 +51,15 @@ async def submit_thread_feedback(
                 "run_id": run_id,
                 **({"model_route": route} if route else {}),
             },
+        )
+        await record_feedback_submission(
+            feedback_key=f"thread:{cfg.thread_id}",
+            rating=5 if rating == "good" else 1,
+            source=cfg.source or "unknown",
+            run_key=run_id or None,
+            github_login=cfg.github_login,
+            user_email=cfg.user_email,
+            slack_user_id=(cfg.slack_thread.triggering_user_id if cfg.slack_thread else None),
         )
     return ThreadFeedbackResult(
         status="completed",

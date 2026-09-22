@@ -24,8 +24,8 @@ from agent.dashboard.workspace_settings import (
     normalize_workspace_settings_for_response,
 )
 
-STALE_ANTHROPIC = "anthropic:claude-opus-4-7"
-SUPPORTED_ANTHROPIC = "anthropic:claude-opus-5"
+STALE_ANTHROPIC = "anthropic:claude-opus-5"
+SUPPORTED_ANTHROPIC = "anthropic:claude-opus-5-5"
 SUPPORTED_OPENAI = "openai:gpt-5.6-sol"
 SUPPORTED_ASTRA = "openai:gpt-6-astra"
 SUPPORTED_KIMI = "fireworks:accounts/fireworks/models/kimi-k3"

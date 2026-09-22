@@ -17,13 +17,18 @@ from urllib.parse import urljoin, urlparse
 
 import httpx2
 from fastapi import HTTPException, Response
+from langgraph_sdk.errors import NotFoundError
 from pydantic import BaseModel, ValidationError
 
 from agent.github.app import get_github_app_installation_token
 from agent.github.checks import github_headers
+from agent.github.ci import list_check_runs, list_commit_statuses
+from agent.github.http import github_client
 from agent.github.pull_request_diff import build_pr_diff_files
+from agent.github.pull_request_status import fetch_unresolved_review_threads
 from agent.github.webhook import trigger_pr_review_from_ref
 from agent.review.assessment_feedback import ASSESSMENTS
+from agent.review.author_guidance import GuidanceView
 from agent.review.findings import (
     REVIEWER_THREAD_KIND,
     coerce_finding,
@@ -611,23 +616,63 @@ async def list_review_comments(owner: str, repo: str, pr_number: int) -> dict[st
     return {"comments": comments}
 
 
-async def get_review(owner: str, repo: str, pr_number: int) -> dict[str, Any]:
-    thread_id = reviewer_thread_id(owner, repo, pr_number)
-    client = langgraph_client()
+async def _reviewer_thread_for(owner: str, repo: str, pr_number: int) -> ThreadLike | None:
+    """The reviewer thread for this PR, or ``None`` when no review has run."""
     try:
-        thread = await client.threads.get(thread_id)
-    except Exception as exc:  # noqa: BLE001
-        raise HTTPException(404, "review not found") from exc
-    if not isinstance(thread, dict):
-        raise HTTPException(404, "review not found")
-    metadata = thread_metadata(thread)
-    summary = _thread_review_summary(thread)
-    if not summary:
-        raise HTTPException(404, "review not found")
+        thread = await langgraph_client().threads.get(reviewer_thread_id(owner, repo, pr_number))
+    except NotFoundError:
+        return None
+    except Exception:  # noqa: BLE001
+        logger.warning(
+            "reviewer thread read failed",
+            exc_info=True,
+            extra={"repo_full_name": f"{owner}/{repo}", "pr_number": pr_number},
+        )
+        return None
+    return thread if isinstance(thread, dict) else None
 
+
+def _unreviewed_summary(
+    owner: str, repo: str, pr_number: int, pr_payload: dict[str, Any]
+) -> dict[str, Any]:
+    """A review summary for a PR the reviewer has never run on."""
+    author = pr_payload.get("user")
+    return {
+        "thread_id": None,
+        "owner": owner,
+        "repo": repo,
+        "full_name": f"{owner}/{repo}",
+        "number": pr_number,
+        "title": pr_payload.get("title") or f"PR #{pr_number}",
+        "url": pr_payload.get("html_url") or f"https://github.com/{owner}/{repo}/pull/{pr_number}",
+        "head_ref": (pr_payload.get("head") or {}).get("ref") or "",
+        "base_ref": (pr_payload.get("base") or {}).get("ref") or "",
+        "author": (author.get("login") or "") if isinstance(author, dict) else "",
+        "head_sha": (pr_payload.get("head") or {}).get("sha") or "",
+        "watch": False,
+        "status": "none",
+        "counts": _finding_counts([]),
+        "updated_at": pr_payload.get("updated_at"),
+    }
+
+
+async def get_review(owner: str, repo: str, pr_number: int) -> dict[str, Any]:
+    """The review page payload: the PR itself, plus review results when they exist.
+
+    The reviewer graph is optional — a PR it has never run on still renders with
+    its GitHub-sourced details, checks and diff, and no findings.
+    """
     token = await _require_app_token()
-    pr_payload = await _github_get(f"/repos/{owner}/{repo}/pulls/{pr_number}", token)
-    details = _serialize_pr_details(pr_payload if isinstance(pr_payload, dict) else {})
+    raw_pr = await _github_get(f"/repos/{owner}/{repo}/pulls/{pr_number}", token)
+    pr_payload = raw_pr if isinstance(raw_pr, dict) else {}
+    details = _serialize_pr_details(pr_payload)
+
+    thread = await _reviewer_thread_for(owner, repo, pr_number)
+    summary = _thread_review_summary(thread) if thread else None
+    metadata = thread_metadata(thread) if thread else {}
+    if not summary:
+        summary = _unreviewed_summary(owner, repo, pr_number, pr_payload)
+
     head_sha = details["head_sha"] or summary["head_sha"]
     checks = await _fetch_check_runs(owner, repo, head_sha, token)
 
@@ -657,7 +702,207 @@ async def get_review(owner: str, repo: str, pr_number: int) -> dict[str, Any]:
         "diff_groups": diff_groups,
         "diff_groups_stale": diff_groups_stale,
         "assessment": assessment.model_dump() if assessment else None,
+        "guidance": [
+            point.model_dump(mode="json")
+            for point in await GuidanceView.for_pull_request(owner, repo, pr_number)
+        ],
     }
+
+
+_PREVIEW_FILE_LIMIT = 10
+_PREVIEW_FILES_PER_PAGE = 100
+
+
+class PreviewFile(BaseModel):
+    path: str
+    status: str
+    additions: int
+    deletions: int
+
+
+class PreviewThread(BaseModel):
+    author: str | None = None
+    body: str
+    path: str
+    line: int | None = None
+    url: str | None = None
+
+
+class PreviewCheck(BaseModel):
+    name: str
+    status: str
+    conclusion: str | None = None
+    url: str | None = None
+
+
+class PullRequestPreview(BaseModel):
+    title: str
+    body: str
+    author: str | None
+    author_avatar_url: str | None
+    state: str
+    draft: bool
+    head_ref: str
+    base_ref: str
+    commits: int
+    additions: int
+    deletions: int
+    changed_files: int
+    files: list[PreviewFile]
+    # None when GitHub could not answer, which is not the same as none unresolved
+    # or no checks configured.
+    unresolved: list[PreviewThread] | None
+    checks: list[PreviewCheck] | None
+    guidance: list[GuidanceView]
+
+
+class _GithubPreviewFile(BaseModel):
+    filename: str
+    status: str = "modified"
+    additions: int = 0
+    deletions: int = 0
+
+
+class _GithubCheckRun(BaseModel):
+    name: str = ""
+    status: str = "completed"
+    conclusion: str | None = None
+    html_url: str | None = None
+
+
+class _GithubCommitStatus(BaseModel):
+    context: str = ""
+    state: str = "pending"
+    target_url: str | None = None
+
+    def as_check(self) -> PreviewCheck:
+        """A legacy commit status in check-run terms, which is how the UI reads both."""
+        pending = self.state == "pending"
+        return PreviewCheck(
+            name=self.context,
+            status="in_progress" if pending else "completed",
+            conclusion=None if pending else self.state,
+            url=self.target_url,
+        )
+
+
+class _GithubUser(BaseModel):
+    login: str
+    avatar_url: str | None = None
+
+
+class _GithubRef(BaseModel):
+    ref: str = ""
+    sha: str = ""
+
+
+class _GithubPreviewPull(BaseModel):
+    title: str = ""
+    body: str | None = None
+    state: str = "open"
+    draft: bool = False
+    merged: bool = False
+    commits: int = 0
+    additions: int = 0
+    deletions: int = 0
+    changed_files: int = 0
+    user: _GithubUser | None = None
+    head: _GithubRef | None = None
+    base: _GithubRef | None = None
+
+
+def _preview_thread(thread: dict[str, Any]) -> PreviewThread:
+    parsed = PreviewThread.model_validate(thread)
+    # Review bots hide their bookkeeping in HTML comments, which would otherwise
+    # be the whole of what a one-line preview shows.
+    return parsed.model_copy(update={"body": _clean_comment_body(parsed.body)})
+
+
+async def get_pull_request_preview(
+    owner: str, repo: str, pr_number: int, token: str
+) -> PullRequestPreview:
+    """Description, the largest changed files, and unresolved threads for any PR.
+
+    Unlike ``get_review`` this does not need a reviewer thread, so it answers for
+    every PR the viewer can reach. Only file metadata is read — the contents live
+    behind ``get_review_diff``, which is far too heavy to open a preview with.
+
+    Reads with the caller's own token rather than the App's: the preview only ever
+    shows a PR the caller can already open, so the App installation is beside the
+    point here, unlike the published review a reviewer thread backs.
+    """
+    async with github_client(token=token, timeout=_GITHUB_TIMEOUT) as client:
+        pull_payload, file_payload, threads = await asyncio.gather(
+            _github_get(f"/repos/{owner}/{repo}/pulls/{pr_number}", token),
+            _github_get(
+                f"/repos/{owner}/{repo}/pulls/{pr_number}/files",
+                token,
+                params={"per_page": _PREVIEW_FILES_PER_PAGE},
+            ),
+            fetch_unresolved_review_threads(client, owner, repo, pr_number),
+        )
+    pull = _GithubPreviewPull.model_validate(pull_payload if isinstance(pull_payload, dict) else {})
+    raw_files = file_payload if isinstance(file_payload, list) else []
+    files = [
+        PreviewFile(
+            path=entry.filename,
+            status=entry.status,
+            additions=entry.additions,
+            deletions=entry.deletions,
+        )
+        for entry in (
+            _GithubPreviewFile.model_validate(item) for item in raw_files if isinstance(item, dict)
+        )
+    ]
+    files.sort(key=lambda entry: entry.additions + entry.deletions, reverse=True)
+    head_sha = pull.head.sha if pull.head else ""
+    # CI reaches GitHub as check runs or as legacy commit statuses, and the PR
+    # list counts both — a preview reading only one would contradict the rail.
+    raw_checks, raw_statuses = (
+        await asyncio.gather(
+            list_check_runs(owner=owner, repo=repo, ref=head_sha, token=token),
+            list_commit_statuses(owner=owner, repo=repo, ref=head_sha, token=token),
+        )
+        if head_sha
+        else (None, None)
+    )
+    checks = (
+        None
+        if raw_checks is None and raw_statuses is None
+        else [
+            PreviewCheck(
+                name=run.name, status=run.status, conclusion=run.conclusion, url=run.html_url
+            )
+            for run in (
+                _GithubCheckRun.model_validate(item)
+                for item in (raw_checks or [])
+                if isinstance(item, dict)
+            )
+        ]
+        + [
+            _GithubCommitStatus.model_validate(item).as_check()
+            for item in (raw_statuses or [])
+            if isinstance(item, dict)
+        ]
+    )
+    return PullRequestPreview(
+        title=pull.title,
+        body=pull.body or "",
+        author=pull.user.login if pull.user else None,
+        author_avatar_url=pull.user.avatar_url if pull.user else None,
+        state="merged" if pull.merged else pull.state,
+        draft=pull.draft,
+        head_ref=pull.head.ref if pull.head else "",
+        base_ref=pull.base.ref if pull.base else "",
+        commits=pull.commits,
+        checks=checks,
+        additions=pull.additions,
+        deletions=pull.deletions,
+        changed_files=pull.changed_files or len(files),
+        files=files[:_PREVIEW_FILE_LIMIT],
+        unresolved=(None if threads is None else [_preview_thread(thread) for thread in threads]),
+        guidance=await GuidanceView.for_pull_request(owner, repo, pr_number),
+    )
 
 
 async def get_review_diff(owner: str, repo: str, pr_number: int) -> dict[str, Any]:

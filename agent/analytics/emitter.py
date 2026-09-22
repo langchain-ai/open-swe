@@ -365,16 +365,21 @@ async def task_rework(
 
 @fail_soft
 async def feedback_submitted(
-    *, run_key: str, person_key: str, rating: int, producer_version: str
+    *,
+    feedback_key: str,
+    rating: int,
+    source: str,
+    run_key: str | None = None,
+    user_id: UUID | None = None,
 ) -> None:
     sentiment = "negative" if rating <= 2 else "neutral" if rating == 3 else "positive"
     await emit(
         EventName.FEEDBACK_SUBMITTED,
-        f"feedback:{run_key}:{person_key}:{producer_version}",
+        f"feedback:{feedback_key}",
         FeedbackSubmittedPayload(sentiment=sentiment, rating=rating),
-        source="slack",
+        source=source,
         run_id=opaque_id("run", run_key),
-        user_id=opaque_person("slack", person_key),
+        user_id=user_id,
     )
 
 

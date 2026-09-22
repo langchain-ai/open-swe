@@ -7,6 +7,8 @@ import pytest
 
 from agent import thread_feedback
 from agent.slack import thinking as slack_thinking
+from agent.source_context import SourceContext
+from agent.users import User
 
 dispatch = importlib.import_module("agent.dispatch")
 
@@ -236,8 +238,8 @@ async def test_dashboard_followup_records_activity_even_if_dispatch_fails(
     assert client.threads.metadata[thread_feedback.ACTIVITY_KEY] == 123000
 
 
-def test_dispatch_slack_identity_includes_verified_context() -> None:
-    run_input = dispatch._dispatch_input(
+async def test_dispatch_describes_the_channel_and_leaves_the_sender_to_the_run() -> None:
+    run_input = await dispatch._dispatch_input(
         "hello",
         "slack",
         {
@@ -258,16 +260,31 @@ def test_dispatch_slack_identity_includes_verified_context() -> None:
         },
     )
 
-    person = ElementTree.fromstring(run_input["messages"][0]["content"])
-    channel = ElementTree.fromstring(run_input["messages"][1]["content"])
-    assert person.findtext("display_name") == "Mason"
-    assert person.findtext("timezone") == "America/New_York"
-    assert channel.findtext("name") == "eng"
-    assert channel.findtext("topic") == "Ship <safely>"
-    topic = channel.find("topic")
-    assert topic is not None
-    assert topic.attrib["trust"] == "untrusted"
-    assert channel.findtext("purpose") == "Engineering work"
+    channel = ElementTree.fromstring(run_input["messages"][0]["content"])
+    assert len(run_input["messages"]) == 2
+    assert channel.attrib["kind"] == "channel"
+    body = (channel.text or "").strip().splitlines()
+    assert "name: eng" in body
+    assert "topic: Ship <safely>" in body
+    assert "purpose: Engineering work" in body
+
+
+@pytest.mark.usefixtures("registry_db")
+async def test_dispatch_keys_a_linked_slack_sender_on_their_person(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("ALLOWED_GITHUB_USERS", "mason-gh")
+    user = await User.sign_in("github", "2001", login="mason-gh")
+    await user.link("slack", "U123", team_id="T1")
+
+    run_input = await dispatch._dispatch_input(
+        "hello",
+        "slack",
+        {"slack_thread": {"triggering_user_id": "U123", "channel_id": "C123"}},
+    )
+
+    envelope = ElementTree.fromstring(run_input["messages"][-1]["content"])
+    assert envelope.attrib["sender"] == f"user:{user.id}"
 
 
 @pytest.mark.parametrize("background_completion", [False, True])
@@ -301,3 +318,75 @@ async def test_dispatch_restores_thinking_for_slack_background_wait(
         },
     )
     set_status.assert_awaited_once_with("C1", "1.0", "Thinking...")
+    client.threads.get.assert_awaited_once_with("thread-1")
+
+
+async def test_dispatch_uses_moved_slack_destination_from_metadata(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = AsyncMock()
+    client.runs.create.return_value = {"run_id": "run-1"}
+    client.runs.list.return_value = [{"run_id": "run-1"}]
+    client.threads.get.return_value = {
+        "metadata": {"source_context": {"slack_thread": {"channel_id": "C2", "thread_ts": "2.0"}}}
+    }
+    set_status = AsyncMock(return_value=True)
+    monkeypatch.setattr(slack_thinking, "set_slack_thread_status", set_status)
+    await dispatch.create_durable_run(
+        "thread-1",
+        "agent",
+        input={"messages": []},
+        source="slack",
+        client=client,
+        config={"configurable": {"slack_thread": {"channel_id": "C1", "thread_ts": "1.0"}}},
+    )
+    client.threads.get.assert_awaited_once_with("thread-1")
+    set_status.assert_awaited_once_with("C2", "2.0", "Thinking...")
+
+
+async def test_dispatch_skips_status_reads_for_known_non_slack_thread(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = AsyncMock()
+    client.runs.create.return_value = {"run_id": "run-1"}
+    set_status = AsyncMock()
+    monkeypatch.setattr(slack_thinking, "set_slack_thread_status", set_status)
+    await dispatch.create_durable_run(
+        "thread-1",
+        "agent",
+        input={"messages": []},
+        source="dashboard",
+        client=client,
+        config={"configurable": {}},
+        source_context=SourceContext(),
+    )
+    client.threads.get.assert_not_awaited()
+    client.runs.list.assert_not_awaited()
+    client.store.get_item.assert_not_awaited()
+    set_status.assert_not_awaited()
+
+
+async def test_dispatch_reads_task_state_if_run_finishes_before_status_sync(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = AsyncMock()
+    client.runs.create.return_value = {"run_id": "run-1"}
+    client.runs.list.return_value = []
+    client.threads.get.return_value = {
+        "metadata": {
+            "running_background_tasks": ["cmd-1"],
+            "source_context": {"slack_thread": {"channel_id": "C1", "thread_ts": "1.0"}},
+        }
+    }
+    set_status = AsyncMock()
+    monkeypatch.setattr(slack_thinking, "set_slack_thread_status", set_status)
+    await dispatch.create_durable_run(
+        "thread-1",
+        "agent",
+        input={"messages": []},
+        source="slack",
+        client=client,
+        config={"configurable": {"slack_thread": {"channel_id": "C1", "thread_ts": "1.0"}}},
+    )
+    client.threads.get.assert_awaited_once_with("thread-1")
+    set_status.assert_awaited_once_with("C1", "1.0", "Waiting for background tasks…")
