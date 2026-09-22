@@ -1095,9 +1095,11 @@ async def test_record_pr_telemetry_records_pr_opened_feedback(
 
 
 @pytest.mark.parametrize("top_level_run_id", [False, True])
-async def test_record_pr_telemetry_persists_resolves_thread_flag(
+@pytest.mark.parametrize("retitle_thread", [False, True])
+async def test_record_pr_telemetry_persists_thread_options(
     monkeypatch: pytest.MonkeyPatch,
     top_level_run_id: bool,
+    retitle_thread: bool,
 ) -> None:
     _set_config(
         monkeypatch,
@@ -1119,6 +1121,8 @@ async def test_record_pr_telemetry_persists_resolves_thread_flag(
     langgraph.threads.get = AsyncMock(return_value={"metadata": {}})
     langgraph.threads.update = AsyncMock()
     monkeypatch.setattr(opr, "get_client", lambda: langgraph)
+    mirror_metadata = AsyncMock()
+    monkeypatch.setattr(opr, "mirror_thread_metadata", mirror_metadata)
     details = {
         "html_url": "https://github.com/langchain-ai/open-swe/pull/3",
         "number": 3,
@@ -1139,6 +1143,7 @@ async def test_record_pr_telemetry_persists_resolves_thread_flag(
         base="main",
         pr=details,
         resolves_thread=True,
+        retitle_thread=retitle_thread,
     )
 
     usage = opr.record_agent_pr_usage
@@ -1147,6 +1152,13 @@ async def test_record_pr_telemetry_persists_resolves_thread_flag(
     langgraph.threads.update.assert_awaited_once()
     assert langgraph.threads.update.await_args is not None
     metadata = langgraph.threads.update.await_args.kwargs["metadata"]
+    if retitle_thread:
+        assert metadata["title"] == "feat: x"
+        assert metadata["title_seed"] is None
+        mirror_metadata.assert_awaited_once_with("t1", {"title": "feat: x", "title_seed": None})
+    else:
+        assert "title" not in metadata
+        mirror_metadata.assert_not_awaited()
     assert metadata["pull_requests"] == [
         {
             "repo_full_name": "langchain-ai/open-swe",
