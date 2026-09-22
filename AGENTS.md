@@ -21,6 +21,7 @@ Follow [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) for local startup, tunnel conf
 | `agent` | `agent.graphs.agent:traced_agent` | `agent/server.py` |
 | `reviewer` | `agent.graphs.reviewer:traced_reviewer_agent` | `agent/reviewer.py` |
 | `analyzer` | `agent.graphs.analyzer:traced_analyzer` | `agent/analyzer.py` |
+| `review-scout` | `agent.graphs.review_scout:traced_review_scout` | `agent/review_scout/graph.py` |
 | `chat` | `agent.graphs.chat:traced_chat_agent` | `agent/chat.py` |
 | `scheduler` | `agent.graphs.scheduler:get_scheduler` | `agent/scheduler.py` |
 
@@ -35,6 +36,7 @@ The main agent is assembled in `agent/server.py` from the middleware in `agent/m
 - Use absolute imports across packages; same-package imports may start with one dot. Never use parent-relative imports.
 - Keep model-facing prompts (system prompts, tool descriptions, agent wake-up prompts) in Markdown files under `agent/resources/prompts/` and load them with `load_prompt` or `render_prompt` (`$name` placeholders); never inline prompt text in Python. This applies to instructions sent to the model, not ordinary user-facing copy: UI labels, Slack button/modal text, and Slack or GitHub notifications may remain inline.
 - Keep comments minimal and only explain non-obvious reasons.
+- Create database migrations with `make migration m="Short description"`.
 - Use structured logging with a static message and values in `extra`; never interpolate values into log messages. Avoid standard `LogRecord` field names in `extra`.
 - Every new API write operation exposed through UI controls must also be available as an appropriately authorized agent tool. Prefer display-only UI with modifications performed through agent tools unless direct UI controls are explicitly required.
 - Never discard an error. Every `except` either propagates (re-raise, or raise a more useful error) or logs what it swallowed — a bare `except ...: return None` / `pass` hides the failure from everyone debugging it later.

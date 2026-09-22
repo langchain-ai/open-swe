@@ -31,7 +31,6 @@ const REPLY_ITEM_TYPES = new Set<RenderItem["type"]>([
   "text-chunk",
   "reply-item",
   "iframe-item",
-  "sql-item",
 ])
 
 export function splitWorkAndReply(items: Array<RenderItem>): {
@@ -51,7 +50,6 @@ export function splitWorkAndReply(items: Array<RenderItem>): {
     if (
       item.type === "reply-item" ||
       item.type === "iframe-item" ||
-      item.type === "sql-item" ||
       index >= trailingReplyIndex
     ) {
       replyItems.push(item)
@@ -121,6 +119,7 @@ export function countWorkActions(items: Array<RenderItem>): number {
     if (
       item.type === "edit-item" ||
       item.type === "shell-item" ||
+      item.type === "sql-item" ||
       item.type === "tool-item"
     ) {
       return count + 1

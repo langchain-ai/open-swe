@@ -3,6 +3,7 @@
 from collections.abc import Mapping
 from typing import Any, Literal
 
+from fastapi import HTTPException
 from langgraph.config import get_config
 from langgraph_sdk import get_client
 
@@ -16,6 +17,7 @@ from agent.expedited_review.eligibility import (
 )
 from agent.expedited_review.watch import evaluate_approval, retire, start_approval
 from agent.github.ci import fetch_pr
+from agent.github.pull_request_actions import MarkReadyAction, act_on_pull_request
 from agent.github.pull_requests import PullRequest, PullRequestPayload
 from agent.github.token import resolve_github_token
 from agent.prompts import render_prompt
@@ -35,7 +37,7 @@ def _failure(error: str) -> dict[str, Any]:
     return {"success": False, "error": error}
 
 
-def _next_step(status: str, elsewhere: bool) -> str:
+def _next_step(status: str, elsewhere: bool, in_thread: bool) -> str:
     """What the agent should do once the request is registered."""
     if elsewhere:
         return (
@@ -43,11 +45,18 @@ def _next_step(status: str, elsewhere: bool) -> str:
             "request and stays in the Slack thread named here, not the channel you asked "
             'for. Cancel with action="cancel" and ask again to move it.'
         )
-    if status == "open":
-        return "The approval card is posted in the Slack thread; two approvals merge the PR."
+    posted = (
+        "The approval card is posted in the Slack thread; two approvals merge the PR."
+        if status == "open"
+        else "Open SWE is watching the PR and will post the card once checks and reviews "
+        "are clean. Do not poll; you will be told if it is rejected or withdrawn."
+    )
+    if not in_thread:
+        return posted
     return (
-        "Open SWE is watching the PR and will post the card once checks and reviews are "
-        "clean. Do not poll; you will be told if it is rejected or withdrawn."
+        f"{posted} The card is this turn's reply to the person who asked: finish with "
+        "`slack_no_reply_needed` rather than a message announcing the pull request or "
+        "this request."
     )
 
 
@@ -110,7 +119,8 @@ async def expedite_pr_approval(
         await retire(approval, "failed", "Cancelled by the agent.")
         return {"success": True, "cancelled": True}
 
-    channel_id, thread_ts = await _context_location(cfg, thread_id)
+    own_channel, own_thread = await _context_location(cfg, thread_id)
+    channel_id, thread_ts = own_channel, own_thread
     target: SlackChannel | None = None
     if channel.strip():
         target = await SlackChannel.resolve(channel)
@@ -119,9 +129,10 @@ async def expedite_pr_approval(
                 f"Slack channel {channel.strip()!r} was not found. Pass a channel name the "
                 "bot can see or a channel id."
             )
-        # An explicit channel always gets its own thread, including the channel
-        # this run is already talking in.
-        channel_id, thread_ts = target.id, ""
+        # Naming the channel this run already talks in keeps the card in the live
+        # thread; a second root there would strand it from the conversation.
+        if target.id != own_channel or not own_thread:
+            channel_id, thread_ts = target.id, ""
     if not channel_id:
         return _failure(
             "Expedited review posts its approval card in Slack. This thread has no Slack "
@@ -140,7 +151,16 @@ async def expedite_pr_approval(
     if pr.get("state") != "open":
         return _failure("Pull request is not open")
     if pr.get("draft") is True:
-        return _failure("Pull request is a draft; mark it ready for review first")
+        try:
+            await act_on_pull_request(
+                pr_ref.owner,
+                pr_ref.repo,
+                pr_ref.number,
+                MarkReadyAction(action="mark-ready"),
+                token,
+            )
+        except HTTPException as exc:
+            return _failure(f"Pull request is a draft and could not be marked ready: {exc.detail}")
     head = pr.get("head") if isinstance(pr.get("head"), Mapping) else {}
     head_sha = head.get("sha") if isinstance(head, Mapping) else None
     if not isinstance(head_sha, str) or not head_sha:
@@ -155,8 +175,9 @@ async def expedite_pr_approval(
     if isinstance(verdict, Ineligible):
         return _failure(
             f"Not eligible for expedited review: {verdict.reason}. "
-            f"Eligible changes touch at most {MAX_CHANGED_LINES} lines and every changed "
-            "file has to have a readable text diff. Ask for a normal review."
+            f"Eligible changes touch at most {MAX_CHANGED_LINES} lines outside tests, and "
+            "every one of those files has to have a readable text diff. Test files are "
+            "not counted. Ask for a normal review."
         )
 
     payload = PullRequestPayload.model_validate(pr)
@@ -204,7 +225,12 @@ async def expedite_pr_approval(
         "pr_url": pr_ref.url,
         "head_sha": head_sha,
         "changed_lines": verdict.changed_lines,
+        "test_lines": verdict.test_lines,
         "slack_channel_id": channel_id,
         "status": status,
-        "next": _next_step(status, elsewhere),
+        "next": _next_step(
+            status,
+            elsewhere,
+            bool(own_thread) and (channel_id, thread_ts) == (own_channel, own_thread),
+        ),
     }

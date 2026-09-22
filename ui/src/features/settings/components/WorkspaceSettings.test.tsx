@@ -78,9 +78,9 @@ function mockApis(record: WorkspaceRecord = RECORD) {
   })
   vi.spyOn(api, "options").mockResolvedValue({
     models: [],
-    default_agent_model: "anthropic:claude-opus-5",
+    default_agent_model: "anthropic:claude-opus-5-5",
     default_agent_reasoning_effort: "medium",
-    default_agent_subagent_model: "anthropic:claude-opus-5",
+    default_agent_subagent_model: "anthropic:claude-opus-5-5",
     default_agent_subagent_reasoning_effort: "medium",
   })
   vi.spyOn(api, "getWorkspaceSettings").mockResolvedValue({

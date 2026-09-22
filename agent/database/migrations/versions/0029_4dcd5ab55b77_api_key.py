@@ -8,8 +8,8 @@ with that one's repository access. The cascade is what invalidates the keys.
 
 from alembic import op
 
-revision = "0026"
-down_revision = "0025"
+revision = "4dcd5ab55b77"
+down_revision = "b88822514d4f"
 branch_labels = None
 depends_on = None
 

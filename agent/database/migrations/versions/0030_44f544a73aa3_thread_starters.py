@@ -8,8 +8,8 @@ binding a repository never hands it the ability to start one.
 
 from alembic import op
 
-revision = "0027"
-down_revision = "0026"
+revision = "44f544a73aa3"
+down_revision = "4dcd5ab55b77"
 branch_labels = None
 depends_on = None
 

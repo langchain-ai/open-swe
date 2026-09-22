@@ -21,8 +21,9 @@ import {
 } from "@/lib/notifications"
 import { agentsApi } from "@/features/agents/lib/api"
 import { api } from "@/lib/api"
-import type { ThreadVisibility } from "@/lib/api"
+import type { FollowUpBehavior, ThreadVisibility } from "@/lib/api"
 import { useTheme } from "@/lib/theme"
+import { AssistantUiPreference } from "./AssistantUiPreference"
 
 const THEMES: Array<{ value: Theme; label: string }> = [
   { value: "system", label: "System" },
@@ -33,6 +34,11 @@ const THEMES: Array<{ value: Theme; label: string }> = [
 const VISIBILITIES: Array<{ value: ThreadVisibility; label: string }> = [
   { value: "private", label: "Private · only me" },
   { value: "public", label: "Workspace" },
+]
+
+const FOLLOW_UP_BEHAVIORS: Array<{ value: FollowUpBehavior; label: string }> = [
+  { value: "queue", label: "Queue" },
+  { value: "steer", label: "Steer" },
 ]
 
 // Radix's Select rejects an empty-string item value, so "no default" needs a
@@ -50,9 +56,6 @@ export function PreferencesSection() {
     mutationFn: api.saveMyPreferences,
     onSuccess: (data) => {
       qc.setQueryData(["myPreferences"], data)
-      // The session payload carries `transcript_streaming` so the thread page
-      // has it on first render; refetch it or the change lands a reload later.
-      void qc.invalidateQueries({ queryKey: ["session"] })
     },
   })
   const workspaceOptions = useQuery({
@@ -87,6 +90,7 @@ export function PreferencesSection() {
 
   return (
     <SettingsSection title="Preferences">
+      <AssistantUiPreference />
       <SettingsRow
         label="Appearance"
         description="Theme used across the dashboard."
@@ -177,6 +181,38 @@ export function PreferencesSection() {
         }
       />
       <SettingsRow
+        label="Follow-up behavior"
+        description={
+          savePreferences.error
+            ? `Could not save: ${savePreferences.error.message}`
+            : "Queue follow-ups until the run ends, or steer the current run with them. ⌘↵ does the opposite for one message; Enter on an empty composer sends the next queued message now."
+        }
+        control={
+          <Select
+            value={preferences.data?.follow_up_behavior ?? "queue"}
+            onValueChange={(v) =>
+              v &&
+              savePreferences.mutate({
+                ...preferences.data!,
+                follow_up_behavior: v,
+              })
+            }
+            disabled={preferences.isLoading || savePreferences.isPending}
+          >
+            <SelectTrigger className="w-40">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {FOLLOW_UP_BEHAVIORS.map((behavior) => (
+                <SelectItem key={behavior.value} value={behavior.value}>
+                  {behavior.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        }
+      />
+      <SettingsRow
         label="Local tracing project"
         description="Project used for local desktop runs. Leave blank to use the shared cloud project. Restart the desktop app after changing it."
         control={
@@ -223,26 +259,6 @@ export function PreferencesSection() {
           >
             {archiveThreads.isPending ? "Archiving…" : "Archive all"}
           </Button>
-        }
-      />
-      <SettingsRow
-        label="Stream threads from the transcript"
-        description={
-          savePreferences.error
-            ? `Could not save: ${savePreferences.error.message}`
-            : "Read threads from Open SWE's own transcript log instead of the agent's graph state. Faster to load and to follow live, and being rolled out — threads started before it was recording, and threads someone else is streaming, are unaffected. Reopen a thread after changing this."
-        }
-        control={
-          <Switch
-            checked={preferences.data?.transcript_streaming ?? false}
-            onCheckedChange={(v) =>
-              savePreferences.mutate({
-                ...preferences.data!,
-                transcript_streaming: v,
-              })
-            }
-            disabled={preferences.isLoading || savePreferences.isPending}
-          />
         }
       />
       <SettingsRow

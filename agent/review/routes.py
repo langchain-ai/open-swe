@@ -31,6 +31,7 @@ from agent.review.enabled_repos import list_enabled_review_repos, set_review_rep
 from agent.review.eval_jobs import get_reviewer_eval_status
 from agent.review.reviews import (
     PullRequestPreview,
+    ReviewScoutTrigger,
     ReviewSummary,
     create_review_comment,
     get_pull_request_preview,
@@ -41,6 +42,7 @@ from agent.review.reviews import (
     list_reviews,
     proxy_pr_image,
     trigger_re_review,
+    trigger_review_scout,
     update_review_comment,
 )
 from agent.review.style_jobs import (
@@ -240,6 +242,17 @@ async def api_re_review(
 ) -> dict[str, Any]:
     await require_repo_access_for_user(session["sub"], f"{owner}/{repo}")
     return await trigger_re_review(owner, repo, pr_number, session["sub"])
+
+
+@router.post("/reviews/{owner}/{repo}/{pr_number}/scout")
+async def api_run_review_scout(
+    owner: str,
+    repo: str,
+    pr_number: int,
+    session: dict[str, Any] = SESSION_DEP,
+) -> ReviewScoutTrigger:
+    await require_repo_access_for_user(session["sub"], f"{owner}/{repo}")
+    return await trigger_review_scout(owner, repo, pr_number)
 
 
 class ReviewCommentCreate(BaseModel):

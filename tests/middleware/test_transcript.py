@@ -273,25 +273,24 @@ async def test_a_human_message_keeps_the_envelope_it_is_attributed_by(
     middleware = mw.TranscriptMiddleware()
     entity = HumanMessage(
         content=(
-            '<dynamic-context kind="person" id="slack:U1"><handle>bob</handle></dynamic-context>'
+            '<dynamic-context kind="channel" id="slack:C1">\nplatform: slack\n</dynamic-context>'
         ),
-        id="entity-bob",
+        id="entity-channel",
     )
     envelope = (
-        '<input-message sender="slack:U1" surface="slack" kind="human">'
-        "<content>add a greet() helper</content></input-message>"
+        '<input-message sender="slack:U1" surface="slack" kind="human">\n'
+        "add a greet() helper\n</input-message>"
     )
     human = HumanMessage(content=envelope, id="human-1")
-    # The run appends its own annotation of the sender *after* the turn's
-    # message, so the last human message in state is not the request.
-    sender_context = HumanMessage(
+    # The run appends the sender's person block *after* the turn's message, so
+    # the last human message in state is not the request.
+    person = HumanMessage(
         content=(
-            '<input-message sender="system:sender-context" surface="automation" kind="system">'
-            "<content>Workspace admin: yes.</content></input-message>"
+            '<dynamic-context kind="person" id="slack:U1">\ndisplay_name: bob\n</dynamic-context>'
         ),
-        id="sender-context-1",
+        id="person-bob",
     )
-    messages = [entity, human, sender_context]
+    messages = [entity, human, person]
     await middleware.abefore_agent({"messages": messages}, None)
 
     async def model_handler(request: ModelRequest) -> ModelResponse:
@@ -307,8 +306,11 @@ async def test_a_human_message_keeps_the_envelope_it_is_attributed_by(
     # The introduction that names the sender is recorded too, though it renders
     # as nothing: without it the reader has no display name to attribute by.
     recorded = [command for command in engine.commands if command.command_id.startswith("human:")]
-    assert [command.command_id for command in recorded] == ["human:entity-bob"]
-    assert "slack:U1" in (recorded[0].event.text or "")
+    assert [command.command_id for command in recorded] == [
+        "human:entity-channel",
+        "human:person-bob",
+    ]
+    assert "slack:U1" in (recorded[1].event.text or "")
 
 
 async def test_model_failure_records_turn_failed(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -180,6 +180,19 @@ function CloudAgentsPage() {
             }
           />
           <SettingsRow
+            label="Recent working contexts"
+            description="Include a filtered digest of your recent threads in agent runs."
+            control={
+              <Switch
+                checked={profile.data?.recent_thread_context_enabled ?? false}
+                onCheckedChange={(v) =>
+                  persist({ recent_thread_context_enabled: v })
+                }
+                disabled={profile.isLoading || save.isPending}
+              />
+            }
+          />
+          <SettingsRow
             label="Default Model"
             description="Used when adaptive routing is off or no model is specified"
             control={

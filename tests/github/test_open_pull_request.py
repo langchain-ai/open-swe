@@ -222,6 +222,8 @@ def test_uses_user_token_for_slack_with_login(
 
     from agent.dashboard import profiles
 
+    monkeypatch.setattr(opr, "_stamp_attribution_footer", _passthrough_body)
+
     async def fake_user_token(login: str, **_kw: Any) -> str | None:
         assert login == "johannes117"
         return "user-tok"
@@ -519,9 +521,15 @@ def _open_with_body(body: str) -> dict[str, Any]:
     )
 
 
+async def _passthrough_body(body: str) -> str:
+    return body
+
+
 def _stub_token(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(opr, "private_credential_login", AsyncMock(return_value="test-owner"))
-    monkeypatch.setattr(opr, "_resolve_pr_author_token", lambda: _coro(("tok", "user")))
+    monkeypatch.setattr(opr, "_resolve_pr_author_token", lambda *_a, **_k: _coro(("tok", "user")))
+    # Footer stamping has its own test; here the body under assertion stays the caller's.
+    monkeypatch.setattr(opr, "_stamp_attribution_footer", _passthrough_body)
 
 
 def _stub_plan(monkeypatch: pytest.MonkeyPatch, plan: dict[str, Any] | None) -> None:
@@ -580,6 +588,33 @@ def test_slack_reference_precedes_attribution_footer(monkeypatch: pytest.MonkeyP
         "body\n\n## References\n- Slack thread: https://slack.example/stored\n\n"
         "Made by [Open SWE](https://dashboard.example/agents/thread-1)"
     )
+
+
+def test_footer_names_the_model_that_opened_the_pr(monkeypatch: pytest.MonkeyPatch) -> None:
+    _set_config(monkeypatch, {"source": "dashboard", "thread_id": "thread-1"})
+    monkeypatch.setattr(opr, "private_credential_login", AsyncMock(return_value="test-owner"))
+    monkeypatch.setattr(opr, "_resolve_pr_author_token", lambda *_a, **_k: _coro(("tok", "user")))
+    client = _RoutingClient(
+        post=_FakeResponse(201, {"html_url": "u", "number": 1, "user": {}}), get_routes={}
+    )
+    _install_client(monkeypatch, client)
+    monkeypatch.setattr(
+        opr,
+        "get_client",
+        lambda: SimpleNamespace(
+            threads=SimpleNamespace(
+                get=AsyncMock(
+                    return_value={"metadata": {"model": "openai:gpt-5.6-luna", "effort": "xhigh"}}
+                )
+            )
+        ),
+    )
+
+    _open_with_body("body")
+
+    sent_body = client.post_calls[0]["json"]["body"]
+    assert sent_body.count("Made by [Open SWE]") == 1
+    assert sent_body.endswith(" · openai:gpt-5.6-luna (xhigh)")
 
 
 def test_uses_stored_slack_permalink_reference(monkeypatch: pytest.MonkeyPatch) -> None:

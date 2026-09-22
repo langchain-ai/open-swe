@@ -25,9 +25,9 @@ from agent.sandboxes.state import SANDBOX_BACKENDS, SandboxBackendProxy
 from agent.server import DesktopAgentState, _registered_tool_name, get_agent, workspace_slug
 
 _MODEL_DEFAULTS = {
-    "default_agent_model": "openai:gpt-5.6-sol",
+    "default_agent_model": "openai:gpt-6-sol",
     "default_agent_reasoning_effort": "medium",
-    "default_agent_subagent_model": "openai:gpt-5.6-sol",
+    "default_agent_subagent_model": "openai:gpt-6-sol",
     "default_agent_subagent_reasoning_effort": "low",
 }
 
@@ -150,9 +150,9 @@ async def _capture_create_deep_agent_kwargs(
                     **_MODEL_DEFAULTS,
                     "default_agent_routing_fast_model": "google_genai:gemini-3.8-flash",
                     "default_agent_routing_fast_reasoning_effort": "low",
-                    "default_agent_routing_balanced_model": "openai:gpt-5.6-sol",
+                    "default_agent_routing_balanced_model": "openai:gpt-6-sol",
                     "default_agent_routing_balanced_reasoning_effort": "medium",
-                    "default_agent_routing_performance_model": "anthropic:claude-opus-5",
+                    "default_agent_routing_performance_model": "anthropic:claude-opus-5-5",
                     "default_agent_routing_performance_reasoning_effort": "high",
                 }
             ),
@@ -195,7 +195,7 @@ async def test_existing_thread_reloads_sender_draft_preference_into_run_config(
         profile={"draft_prs": False},
         thread_settings={
             "owner_login": "draft-preference-owner",
-            "model_id": "openai:gpt-5.6-sol",
+            "model_id": "openai:gpt-6-sol",
         },
     )
 
@@ -219,11 +219,11 @@ async def test_agent_starts_sandbox_while_loading_settings() -> None:
         return WorkspaceSettings(
             {
                 **_MODEL_DEFAULTS,
-                "default_agent_routing_fast_model": "openai:gpt-5.6-sol",
+                "default_agent_routing_fast_model": "openai:gpt-6-sol",
                 "default_agent_routing_fast_reasoning_effort": "low",
-                "default_agent_routing_balanced_model": "openai:gpt-5.6-sol",
+                "default_agent_routing_balanced_model": "openai:gpt-6-sol",
                 "default_agent_routing_balanced_reasoning_effort": "medium",
-                "default_agent_routing_performance_model": "openai:gpt-5.6-sol",
+                "default_agent_routing_performance_model": "openai:gpt-6-sol",
                 "default_agent_routing_performance_reasoning_effort": "high",
                 "gateway_enabled": False,
                 "fable_enabled": True,
@@ -254,12 +254,12 @@ async def test_agent_starts_sandbox_while_loading_settings() -> None:
 @pytest.mark.parametrize(
     ("configurable_update", "profile", "thread_settings", "expected"),
     [
-        ({}, None, None, "openai:gpt-5.6-sol"),
+        ({}, None, None, "openai:gpt-6-sol"),
         (
-            {"agent_model_id": "anthropic:claude-opus-5", "agent_effort": "high"},
+            {"agent_model_id": "anthropic:claude-opus-5-5", "agent_effort": "high"},
             None,
             None,
-            "anthropic:claude-opus-5",
+            "anthropic:claude-opus-5-5",
         ),
         (
             {},
@@ -270,8 +270,8 @@ async def test_agent_starts_sandbox_while_loading_settings() -> None:
         (
             {},
             None,
-            {"model_id": "anthropic:claude-opus-5", "effort": "high"},
-            "anthropic:claude-opus-5",
+            {"model_id": "anthropic:claude-opus-5-5", "effort": "high"},
+            "anthropic:claude-opus-5-5",
         ),
     ],
 )
@@ -296,7 +296,7 @@ async def test_model_routing_is_applied_when_enabled() -> None:
     config["configurable"]["thread_id"] = "thread-1"
     agent = await _capture_create_deep_agent_kwargs(config, profile={"model_routing_enabled": True})
 
-    assert config["configurable"]["resolved_agent_model_id"] == "openai:gpt-5.6-sol"
+    assert config["configurable"]["resolved_agent_model_id"] == "openai:gpt-6-sol"
     middleware_names = [
         type(middleware).__name__ for middleware in cast(list[object], agent["middleware"])
     ]
@@ -312,8 +312,8 @@ async def test_model_routing_is_applied_when_enabled() -> None:
     calls = cast(list[tuple[str, dict[str, object]]], agent["make_model_calls"])
     assert [model for model, _ in calls[1:4]] == [
         "google_genai:gemini-3.8-flash",
-        "openai:gpt-5.6-sol",
-        "anthropic:claude-opus-5",
+        "openai:gpt-6-sol",
+        "anthropic:claude-opus-5-5",
     ]
 
 
@@ -337,8 +337,8 @@ async def test_model_routing_control_uses_performance_model() -> None:
     calls = cast(list[tuple[str, dict[str, object]]], agent["make_model_calls"])
     assert [model for model, _ in calls[1:4]] == [
         "google_genai:gemini-3.8-flash",
-        "openai:gpt-5.6-sol",
-        "anthropic:claude-opus-5",
+        "openai:gpt-6-sol",
+        "anthropic:claude-opus-5-5",
     ]
 
 
@@ -347,7 +347,7 @@ async def test_model_routing_is_disabled_by_default() -> None:
     config = _base_config()
     agent = await _capture_create_deep_agent_kwargs(config)
 
-    assert config["configurable"]["resolved_agent_model_id"] == "openai:gpt-5.6-sol"
+    assert config["configurable"]["resolved_agent_model_id"] == "openai:gpt-6-sol"
     middleware_names = [
         type(middleware).__name__ for middleware in cast(list[object], agent["middleware"])
     ]
@@ -356,9 +356,9 @@ async def test_model_routing_is_disabled_by_default() -> None:
     assert "model_routing_mode" not in config["metadata"]
     calls = cast(list[tuple[str, dict[str, object]]], agent["make_model_calls"])
     assert [model for model, _ in calls] == [
-        "openai:gpt-5.6-sol",
-        "openai:gpt-5.6-sol",
-        "openai:gpt-5.6-luna",
+        "openai:gpt-6-sol",
+        "openai:gpt-6-sol",
+        "openai:gpt-6-luna",
     ]
 
 
@@ -369,9 +369,9 @@ async def test_model_routing_preference_is_snapshotted_for_existing_thread() -> 
         config,
         profile={"model_routing_enabled": True},
         thread_settings={
-            "model_id": "openai:gpt-5.6-sol",
+            "model_id": "openai:gpt-6-sol",
             "effort": "medium",
-            "subagent_model_id": "openai:gpt-5.6-sol",
+            "subagent_model_id": "openai:gpt-6-sol",
             "subagent_effort": "low",
             "model_routing_enabled": False,
         },

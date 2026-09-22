@@ -26,6 +26,9 @@ REJECT_FEEDBACK_BLOCK = "expedited_review_feedback"
 REJECT_FEEDBACK_ACTION = "feedback"
 
 _MAX_FILE_SECTIONS = 20
+# Slack refuses a section over 3000 characters, and refusing means no card at
+# all. Only a shown test diff ever reaches this; source diffs cap out at 20 lines.
+_MAX_PATCH_LINES = 60
 
 
 def _button_value(action: str, approval: ExpeditedApproval) -> str:
@@ -56,20 +59,41 @@ def _header(approval: ExpeditedApproval, title: str) -> list[Block]:
 
 
 def _diff_sections(files: list[ChangedFile], diff_image_id: str | None) -> list[Block]:
+    shown, named = ChangedFile.rendered(files)
+    trailer = [*_overflow_note(shown), *_test_note(named)]
     if diff_image_id:
-        names = ", ".join(escape(file.filename) for file in files[:_MAX_FILE_SECTIONS])
-        return [image(diff_image_id, f"Diff of {names}"), *_overflow_note(files)]
+        names = ", ".join(escape(file.filename) for file in shown[:_MAX_FILE_SECTIONS])
+        return [image(diff_image_id, f"Diff of {names}"), *trailer]
     sections: list[Block] = []
-    for file in files[:_MAX_FILE_SECTIONS]:
+    for file in shown[:_MAX_FILE_SECTIONS]:
         sections.append(section(f"`{escape(file.filename)}`  +{file.additions} −{file.deletions}"))
-        sections.append(section(code_block(file.patch or "")))
-    return [*sections, *_overflow_note(files)]
+        sections.append(section(code_block(_clip(file.patch or ""))))
+    return [*sections, *trailer]
+
+
+def _clip(patch: str) -> str:
+    lines = patch.splitlines()
+    if len(lines) <= _MAX_PATCH_LINES:
+        return patch
+    return "\n".join(
+        [*lines[:_MAX_PATCH_LINES], f"… {len(lines) - _MAX_PATCH_LINES} more lines on GitHub"]
+    )
 
 
 def _overflow_note(files: list[ChangedFile]) -> list[Block]:
     if len(files) <= _MAX_FILE_SECTIONS:
         return []
     return [context(f"{len(files) - _MAX_FILE_SECTIONS} more files on GitHub.")]
+
+
+def _test_note(tests: list[ChangedFile]) -> list[Block]:
+    """Names the test files the card is not drawing."""
+    if not tests:
+        return []
+    noun = "test file" if len(tests) == 1 else "test files"
+    return [
+        context(f"{ChangedFile.total_lines(tests)} more lines in {len(tests)} {noun}, on GitHub.")
+    ]
 
 
 def _vote_buttons(approval: ExpeditedApproval) -> tuple[ButtonElement, ButtonElement]:

@@ -43,4 +43,39 @@ describe("backendProxy", () => {
     expect(headers.get("content-type")).toBe("application/json")
     expect(headers.get("cookie")).toBe("session=abc")
   })
+
+  it("delivers event-stream chunks before the upstream closes", async () => {
+    let controller!: ReadableStreamDefaultController<Uint8Array>
+    const body = new ReadableStream<Uint8Array>({
+      start(value) {
+        controller = value
+      },
+    })
+    globalThis.fetch = vi.fn(
+      async () =>
+        new Response(body, {
+          headers: { "content-type": "text/event-stream" },
+        })
+    ) as typeof fetch
+    const response = await backendProxy({
+      req: new Request(
+        "https://dashboard.example.com/dashboard/api/threads/thread-a/stream/events",
+        { method: "POST" }
+      ),
+    })
+    const reader = response.body!.getReader()
+    try {
+      controller.enqueue(new TextEncoder().encode("data: first\n\n"))
+      expect(new TextDecoder().decode((await reader.read()).value)).toBe(
+        "data: first\n\n"
+      )
+      controller.enqueue(new TextEncoder().encode("data: second\n\n"))
+      expect(new TextDecoder().decode((await reader.read()).value)).toBe(
+        "data: second\n\n"
+      )
+    } finally {
+      controller.close()
+      await reader.cancel()
+    }
+  })
 })

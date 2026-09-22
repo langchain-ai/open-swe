@@ -376,19 +376,6 @@ export function ModelDefaultsSection({
         <ModelRow
           settings={settings}
           models={models}
-          label="Open SWE Review Diff Grouping"
-          description={`Model used for the review's 'AI sorted' view that groups changed files into a logical walkthrough. ${
-            scoped
-              ? "Unset here it follows the instance setting, and only falls back to the Reviewer subagent default when the instance leaves it unset too."
-              : "Falls back to the Reviewer subagent default when unset."
-          }`}
-          modelField="default_grouping_model"
-          effortField="default_grouping_reasoning_effort"
-          inheritLabel="Reviewer subagent default"
-        />
-        <ModelRow
-          settings={settings}
-          models={models}
           label="Open SWE Review Chat"
           description={`Model used by the 'chat with this PR' assistant on the review page. ${
             scoped

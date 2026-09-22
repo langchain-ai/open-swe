@@ -174,7 +174,7 @@ async def test_get_review_renders_a_pull_request_with_no_reviewer_thread(monkeyp
     assert review["status"] == "none"
     assert review["thread_id"] is None
     assert review["findings"] == []
-    assert review["diff_groups"] == []
+    assert review["walkthrough"] is None
     assert review["assessment"] is None
     assert review["pr"]["title"] == "Add widgets"
     assert review["head_sha"] == "f" * 40

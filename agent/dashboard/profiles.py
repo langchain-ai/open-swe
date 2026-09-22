@@ -57,9 +57,11 @@ class ProfileUpdate(BaseModel):
     branch_prefix: str | None = None
     auto_fix_ci: bool = True
     model_routing_enabled: bool | None = None
+    recent_thread_context_enabled: bool = False
     dm_session_enabled: bool = False
     draft_prs: bool | None = None
     review_draft_prs: bool | None = None
+    experimental_assistant_ui: bool | None = None
 
     @model_validator(mode="after")
     def _normalize_stale_model_pairs(self) -> ProfileUpdate:
@@ -178,6 +180,11 @@ async def upsert_profile(login: str, email: str, update: ProfileUpdate) -> dict[
             if "model_routing_enabled" in update.model_fields_set
             else existing.get("model_routing_enabled")
         ),
+        "recent_thread_context_enabled": (
+            update.recent_thread_context_enabled
+            if "recent_thread_context_enabled" in update.model_fields_set
+            else existing.get("recent_thread_context_enabled", False)
+        ),
         "dm_session_enabled": (
             update.dm_session_enabled
             if "dm_session_enabled" in update.model_fields_set
@@ -187,6 +194,11 @@ async def upsert_profile(login: str, email: str, update: ProfileUpdate) -> dict[
             update.draft_prs if update.draft_prs is not None else existing.get("draft_prs", True)
         ),
         "review_draft_prs": update.review_draft_prs,
+        "experimental_assistant_ui": (
+            update.experimental_assistant_ui
+            if update.experimental_assistant_ui is not None
+            else existing.get("experimental_assistant_ui")
+        ),
         "updated_at": now_iso(),
     }
     for stale_field in (

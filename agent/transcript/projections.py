@@ -34,6 +34,7 @@ from agent.transcript.events import (
     TurnCompleted,
     TurnFailed,
     TurnInterrupted,
+    TurnQueued,
     TurnRequested,
     TurnStarted,
 )
@@ -157,6 +158,8 @@ async def apply(
             await _turn_requested(conn, thread_id, version, event, occurred_at)
         case TurnStarted():
             await _turn_started(conn, thread_id, event, occurred_at)
+        case TurnQueued():
+            await _turn_queued(conn, thread_id, event)
         case TurnCompleted() | TurnFailed() | TurnInterrupted():
             await _turn_ended(conn, thread_id, version, event, run_id, occurred_at)
         case TurnCheckpointCompleted():
@@ -234,6 +237,20 @@ async def _turn_requested(
             "attachments": _models_json(event.attachments),
             "created_at": occurred_at,
         },
+    )
+
+
+async def _turn_queued(conn: AsyncConnection, thread_id: str, event: TurnQueued) -> None:
+    # Only a turn still waiting takes the run id: a queued turn that already
+    # started or was cancelled keeps what those events recorded.
+    await conn.execute(
+        text(
+            """
+            UPDATE thread_turn SET run_id = :run_id
+            WHERE turn_id = :turn_id AND thread_id = :thread_id AND state = 'requested'
+            """
+        ),
+        {"turn_id": event.turn_id, "thread_id": thread_id, "run_id": event.run_id},
     )
 
 

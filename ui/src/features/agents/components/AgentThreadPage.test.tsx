@@ -20,9 +20,6 @@ vi.mock("@/features/agents/lib/threadSource/ThreadSourceProvider", () => ({
   ThreadSourceProvider: ({ children }: { children: React.ReactNode }) =>
     children,
 }))
-vi.mock("@/lib/session", () => ({
-  useSession: () => ({ data: { login: "alice", transcript_streaming: false } }),
-}))
 
 const threadQuery = {
   data: { id: "thread-1", title: "Fix web title" },

@@ -25,6 +25,7 @@ export interface MessagesProps extends ApprovalCallbacks {
   messages: Array<Message>
   /** Cloud threads only; enables the git-sourced changed-files card per turn. */
   threadId?: string
+  showUserNames?: boolean
   /** Identity for remembering the scroll position across navigation. */
   scrollKey?: string
   showPlanArtifact?: boolean
@@ -32,6 +33,10 @@ export interface MessagesProps extends ApprovalCallbacks {
   footer?: React.ReactNode
   pollWorkflowApprovalsWhileActive?: boolean
   queuedMessages?: Array<QueuedThreadMessage>
+  /** Send a queued message now instead of waiting for the run to end. */
+  onSteerQueuedMessage?: (id: string) => void
+  /** Drop a queued message and hand it back to the composer. */
+  onRemoveQueuedMessage?: (id: string) => void
   isStreaming: boolean
   /** Live run signal from `useStream().isLoading` — drives Streamdown token animation. */
   streamIsLoading?: boolean

@@ -8,6 +8,7 @@ from collections.abc import Collection, Iterable
 from typing import Any
 
 from agent.baby_sit import handle_ci_webhook
+from agent.database import postgres
 from agent.expedited_review.watch import handle_github_event as handle_expedited_review_event
 from agent.github.comments import GitHubAuthError
 from agent.github.pull_requests import PullRequest
@@ -22,6 +23,7 @@ from agent.input_messages import (
 )
 from agent.prompts import load_prompt, render_prompt
 from agent.review.findings import FindingInteraction, ReviewerPRMeta, ReviewerSlackThread
+from agent.review.walkthrough import Walkthrough
 from agent.run_config import Repo
 from agent.slack.client import GitHubPrRef
 from agent.source_context import SourceContext
@@ -112,13 +114,9 @@ def build_github_pr_review_prompt(
 
 def _github_person(login: str, user_id: object = None) -> PersonIdentity:
     stable = str(user_id) if user_id not in (None, "") else login or "unknown"
-    person: PersonIdentity = {
-        "id": f"github:{stable}",
-        "platform": "github",
-    }
+    person: PersonIdentity = {"id": f"github:{stable}"}
     if login:
         person["display_name"] = login
-        person["handle"] = login
         person["github_login"] = login
     return person
 
@@ -133,7 +131,6 @@ def _github_human_run_input(
     person = _github_person(login, user_id)
     return {
         "messages": [
-            person_introduction(person),
             human_input(
                 content,
                 {
@@ -197,7 +194,9 @@ def _github_issue_run_input(
             },
         ),
     ]
-    introduced: set[str] = set()
+    # The run describes the trigger sender itself; only replayed authors nobody
+    # resolves need an introduction here.
+    introduced: set[str] = {_github_person(trigger_login, trigger_user_id)["id"]}
     source_messages = [
         {"author": issue_author or trigger_login, "body": description, "type": "description"},
         *comments,
@@ -692,6 +691,21 @@ async def process_github_push_event(payload: dict[str, Any]) -> None:
         )
     ):
         await common.set_reviewer_thread_metadata(thread_id, last_reviewed_sha=head_sha)
+        if postgres.configured():
+            try:
+                await Walkthrough.carry_forward(
+                    repo_config["owner"],
+                    repo_config["name"],
+                    pr_number,
+                    from_sha=last_reviewed_sha,
+                    to_sha=head_sha,
+                )
+            except Exception:
+                common.logger.warning(
+                    "Could not carry the review walkthrough forward",
+                    exc_info=True,
+                    extra={"pr_number": pr_number, "scout_head_sha": head_sha},
+                )
         # The old head's check disappears once the head moves (GitHub only
         # shows checks on the current head), so even though no re-review runs,
         # surface a settled check on the new head.
@@ -980,7 +994,7 @@ async def process_github_pr_comment(payload: dict[str, Any], event_type: str) ->
     trusted = await _trusted_authors(github_login, comments=comments)
     prompt = common.build_pr_prompt(comments, pr_url, repo_config=repo_config, trusted=trusted)
     messages = []
-    introduced: set[str] = set()
+    introduced: set[str] = {_github_person(github_login, github_user_id)["id"]}
     for item in comments:
         author = str(item.get("author") or "unknown")
         person = _github_person(author, github_user_id if author == github_login else None)
