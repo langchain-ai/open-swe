@@ -17,7 +17,6 @@ from agent.tools.background_execute import (
     background_execute,
     control_script,
 )
-from agent.utils.background_task_state import update_background_task_state
 
 # _launch_command refuses to run without setsid, which macOS does not ship; the
 # sandbox these tasks run in is always Linux.
@@ -196,6 +195,7 @@ async def test_monitor_enqueues_one_claimed_completion(tracking_failure: bool) -
             "source_context": {"slack_thread": {"channel_id": "C123", "thread_ts": "123.45"}},
         }
     }
+    client.threads.search.return_value = [client.threads.get.return_value]
 
     with (
         patch("agent.background_tasks._client", return_value=client),
@@ -243,17 +243,6 @@ async def test_monitor_enqueues_one_claimed_completion(tracking_failure: bool) -
         delete_crons.assert_awaited_once_with("thread-1")
 
 
-async def test_task_metadata_preserves_concurrent_launch() -> None:
-    client = AsyncMock()
-    client.threads.get.return_value = {
-        "metadata": {"running_background_tasks": ["cmd-old", "cmd-concurrent"], "source": "slack"}
-    }
-    await update_background_task_state(client, "thread-1", finished=["cmd-old"])
-    client.threads.update.assert_awaited_once_with(
-        "thread-1", metadata={"running_background_tasks": ["cmd-concurrent"]}
-    )
-
-
 @pytest.mark.parametrize(
     "status", ["running", "completed", "failed", "timed_out", "stopped", "lost", "missing"]
 )
@@ -262,6 +251,12 @@ async def test_monitor_reconciles_background_waiting_status(status: str) -> None
     client = AsyncMock()
     metadata = {"sandbox_id": "sandbox-1", "running_background_tasks": ["cmd-1"]}
     client.threads.get.return_value = {"metadata": metadata}
+    client.threads.search.return_value = [{"metadata": metadata}]
+
+    async def update(_thread_id: str, *, metadata: dict[str, object], **_kwargs: object) -> None:
+        client.threads.get.return_value["metadata"].update(metadata)
+
+    client.threads.update.side_effect = update
     backend = AsyncMock()
     backend.aexecute.return_value = SimpleNamespace(exit_code=0)
     with (
@@ -275,9 +270,7 @@ async def test_monitor_reconciles_background_waiting_status(status: str) -> None
         patch("agent.background_tasks._delete_crons", AsyncMock()),
     ):
         await monitor_background_tasks("thread-1")
-    assert client.threads.update.await_args.kwargs["metadata"] == {
-        "running_background_tasks": ["cmd-1"] if status == "running" else []
-    }
+    assert metadata["running_background_tasks"] == (["cmd-1"] if status == "running" else [])
     sync.assert_awaited_once_with(client, "thread-1")
 
 

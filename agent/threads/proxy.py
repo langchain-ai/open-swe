@@ -48,6 +48,22 @@ def require_json_content_type(content_type: str) -> None:
         raise HTTPException(415, "Content-Type must be application/json")
 
 
+def thread_history_payload(body: bytes) -> dict[str, object]:
+    """Bound initial checkpoint discovery without truncating explicit history pages."""
+    try:
+        payload = json.loads(body or b"{}")
+    except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+        raise HTTPException(400, "history body must be a JSON object") from exc
+    if not isinstance(payload, dict):
+        raise HTTPException(400, "history body must be a JSON object")
+    limit = payload.get("limit", _DISCOVERY_HISTORY_LIMIT)
+    if not isinstance(limit, int) or isinstance(limit, bool) or limit < 1:
+        raise HTTPException(400, "history limit must be a positive integer")
+    if not any(payload.get(key) for key in ("before", "checkpoint", "metadata")):
+        payload["limit"] = min(limit, _DISCOVERY_HISTORY_LIMIT)
+    return payload
+
+
 def langgraph_proxy_headers(
     *, content_type: str = "application/json", accept: str | None = None
 ) -> dict[str, str]:
@@ -120,7 +136,7 @@ async def _observe_dashboard_run_ttft(
                     and lifecycle[1] in TERMINAL_LIFECYCLE_EVENTS
                 ):
                     return
-                observation = detector.observe(event)
+                observation = detector.observe(dict(event))
                 if observation is None:
                     continue
                 await record_dashboard_thread_ttft(
@@ -275,17 +291,7 @@ async def proxy_dashboard_thread_history(
 ) -> tuple[int, bytes, str | None]:
     require_json_content_type(content_type)
     await _readable_thread_metadata(thread_id, login=login, email=email)
-    try:
-        payload = json.loads(body or b"{}")
-    except (json.JSONDecodeError, UnicodeDecodeError) as exc:
-        raise HTTPException(400, "history body must be a JSON object") from exc
-    if not isinstance(payload, dict):
-        raise HTTPException(400, "history body must be a JSON object")
-    limit = payload.get("limit", _DISCOVERY_HISTORY_LIMIT)
-    if not isinstance(limit, int) or isinstance(limit, bool) or limit < 1:
-        raise HTTPException(400, "history limit must be a positive integer")
-    if not any(payload.get(key) for key in ("before", "checkpoint", "metadata")):
-        payload["limit"] = min(limit, _DISCOVERY_HISTORY_LIMIT)
+    payload = thread_history_payload(body)
     url = f"{langgraph_url().rstrip('/')}/threads/{thread_id}/history"
     headers = langgraph_proxy_headers(content_type=content_type)
     async with httpx2.AsyncClient(timeout=_PROXY_REQUEST_TIMEOUT) as client:

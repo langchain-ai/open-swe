@@ -1,5 +1,6 @@
 import json
 from contextlib import asynccontextmanager
+from datetime import UTC, datetime
 from typing import Any, Literal
 from unittest.mock import AsyncMock
 
@@ -95,7 +96,12 @@ async def test_new_qualifying_answer_supersedes_old_job(context: Any) -> None:
     assert slack_feedback.post_slack_feedback_prompt.await_args.args == ("t1", "r2", "C1")
 
 
-async def test_merged_pr_waits_five_minutes_after_followup_finishes(context: Any) -> None:
+@pytest.mark.parametrize(
+    "finished_at", ["1970-01-01T00:06:00Z", datetime(1970, 1, 1, 0, 6, tzinfo=UTC)]
+)
+async def test_merged_pr_waits_five_minutes_after_followup_finishes(
+    context: AsyncMock, finished_at: str | datetime
+) -> None:
     payload = await _schedule(context, reason="merged_pr")
     context.runs.list.return_value = [{"run_id": "r2", "status": "running"}]
     await _run(context, payload, 302000)
@@ -103,7 +109,7 @@ async def test_merged_pr_waits_five_minutes_after_followup_finishes(context: Any
     assert await feedback.feedback_prompt_status("t1") == "unavailable"
     slack_feedback.post_slack_feedback_prompt.assert_not_awaited()
     context.runs.list.return_value = [
-        {"run_id": "r2", "status": "success", "updated_at": "1970-01-01T00:06:00Z"}
+        {"run_id": "r2", "status": "success", "updated_at": finished_at}
     ]
     await _run(context, context.runs.create.call_args.kwargs["input"], 602000)
     assert context.runs.create.call_args.kwargs["after_seconds"] == 58

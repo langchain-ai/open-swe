@@ -1,6 +1,9 @@
+import json
 from unittest.mock import AsyncMock, MagicMock
 
+import httpx
 import pytest
+from langgraph_sdk.client import LangGraphClient
 
 from agent.utils import thread_ops
 
@@ -28,3 +31,42 @@ async def test_queue_message_for_thread_deduplicates_queue_id(monkeypatch) -> No
 
     assert queued is True
     client.store.put_item.assert_not_awaited()
+
+
+async def test_active_status_reads_only_status(monkeypatch: pytest.MonkeyPatch) -> None:
+    requests: list[httpx.Request] = []
+
+    async def handle(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        thread = {"thread_id": "thread-1", "status": "busy"}
+        return httpx.Response(200, json=[thread] if request.method == "POST" else thread)
+
+    async with httpx.AsyncClient(
+        base_url="http://langgraph.test", transport=httpx.MockTransport(handle)
+    ) as http:
+        monkeypatch.setattr(thread_ops, "langgraph_client", lambda: LangGraphClient(http))
+        assert await thread_ops.get_thread_active_status("thread-1") is True
+    assert len(requests) == 1
+    assert requests[0].url.path == "/threads/search"
+    assert json.loads(requests[0].content) == {
+        "ids": ["thread-1"],
+        "select": ["status"],
+        "limit": 1,
+        "offset": 0,
+    }
+
+
+@pytest.mark.parametrize("status", [403, 404])
+async def test_missing_or_forbidden_status_remains_unknown(
+    monkeypatch: pytest.MonkeyPatch, status: int
+) -> None:
+    async def handle(request: httpx.Request) -> httpx.Response:
+        if request.method == "POST":
+            return httpx.Response(200, json=[])
+        return httpx.Response(status, json={"detail": "unavailable"})
+
+    async with httpx.AsyncClient(
+        base_url="http://langgraph.test", transport=httpx.MockTransport(handle)
+    ) as http:
+        monkeypatch.setattr(thread_ops, "langgraph_client", lambda: LangGraphClient(http))
+        assert await thread_ops.get_thread_active_status("thread-1") is None

@@ -27,6 +27,7 @@ from agent.threads.proxy import (
     langgraph_proxy_headers,
     require_json_content_type,
     stream_thread_events,
+    thread_history_payload,
 )
 from agent.threads.runs import DASHBOARD_STREAM_MODES
 from agent.utils.json_types import as_json_object
@@ -475,6 +476,7 @@ async def proxy_review_chat_history(
 ) -> tuple[int, bytes, str | None]:
     await assert_chat_thread_access(thread_id, owner, repo, pr_number, login)
     require_json_content_type(content_type)
+    body = json.dumps(thread_history_payload(body)).encode()
     status_code, content, media_type = await _proxy_passthrough(
         "POST", thread_id, "history", body, content_type
     )
