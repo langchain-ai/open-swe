@@ -1384,6 +1384,11 @@ function ReviewBodyInner({
                             : `${linesLeft} lines left`}
                         </span>
                       )}
+                      {!detail.walkthrough &&
+                        diffFiles &&
+                        diffFiles.length > 0 && (
+                          <WalkthroughButton detail={detail} />
+                        )}
                       {diffFiles && diffFiles.length > 0 && (
                         <div className="flex items-center gap-1">
                           <DiffWrapToggle className="size-5" />
@@ -1445,6 +1450,39 @@ function ReviewBodyInner({
         )}
       </div>
     </ExpandedFindingContext.Provider>
+  )
+}
+
+/** Runs the review scout alone, so the walkthrough exists without a full review. */
+function WalkthroughButton({ detail }: { detail: ReviewDetail }) {
+  const qc = useQueryClient()
+  const scout = useMutation({
+    mutationFn: () =>
+      api.runReviewScout(detail.owner, detail.repo, detail.number),
+    onSuccess: () => {
+      void qc.invalidateQueries({
+        queryKey: ["review", detail.owner, detail.repo, detail.number],
+      })
+    },
+  })
+  const running = detail.walkthrough_running || scout.isPending
+  return (
+    <span className="flex items-center gap-2">
+      {scout.error && (
+        <span className="text-[11px] text-destructive">
+          {scout.error.message}
+        </span>
+      )}
+      <button
+        type="button"
+        onClick={() => scout.mutate()}
+        disabled={running}
+        className="inline-flex items-center gap-1 rounded border border-border px-1.5 py-0.5 text-[11px] text-muted-foreground hover:text-foreground disabled:opacity-50"
+      >
+        <ListNumbersIcon className="size-3" />
+        {running ? "Building walkthrough…" : "Build walkthrough"}
+      </button>
+    </span>
   )
 }
 

@@ -53,7 +53,7 @@ class ReviewScoutTarget(BaseModel):
     async def walkthrough(self) -> WalkthroughView | None:
         return await WalkthroughView.for_head(self.owner, self.repo, self.pr_number, self.head_sha)
 
-    async def _active_run(self) -> str | None:
+    async def active_run(self) -> str | None:
         """A scout run already working on this head, so a retry joins it instead of restarting it."""
         client = dispatch_client()
         for status in ("running", "pending"):
@@ -67,13 +67,13 @@ class ReviewScoutTarget(BaseModel):
                     return run.run_id
         return None
 
-    async def _start(self) -> str:
+    async def start(self) -> str:
         """The scout run for this head, started when none is already running.
 
         A newer head interrupts a scout still working on an older one, so only
         the latest head's walkthrough is ever written.
         """
-        active = await self._active_run()
+        active = await self.active_run()
         if active is not None:
             return active
         configurable = {
@@ -113,7 +113,7 @@ class ReviewScoutTarget(BaseModel):
         existing = await self.walkthrough()
         if existing is not None:
             return existing
-        run_id = await self._start()
+        run_id = await self.start()
         try:
             await asyncio.wait_for(
                 dispatch_client().runs.join(self.thread_id, run_id), SCOUT_WAIT_SECONDS
