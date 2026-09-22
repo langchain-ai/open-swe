@@ -46,7 +46,7 @@ WORKSPACE_SETTINGS_NAMESPACE: list[str] = ["workspace_settings"]
 # Cap the guidelines so a runaway value can't dominate the reviewer
 # prompt. Generous enough for a detailed policy, small enough to stay bounded.
 ORG_GUIDELINES_MAX_CHARS = 10_000
-DEFAULT_THREAD_TITLE_MODEL = "openai:gpt-5.6-luna"
+DEFAULT_THREAD_TITLE_MODEL = "openai:gpt-6-luna"
 DEFAULT_THREAD_TITLE_REASONING_EFFORT = "low"
 ANTHROPIC_THREAD_TITLE_MODEL = "anthropic:claude-haiku-4-5"
 # Titles are a one-shot classification; no extended thinking needed.
@@ -335,9 +335,9 @@ def _default_settings() -> dict[str, Any]:
         "default_agent_reasoning_effort": fallback_effort,
         "default_agent_subagent_model": fallback_model,
         "default_agent_subagent_reasoning_effort": fallback_effort,
-        "default_agent_routing_fast_model": "openai:gpt-5.6-luna",
+        "default_agent_routing_fast_model": "openai:gpt-6-luna",
         "default_agent_routing_fast_reasoning_effort": "high",
-        "default_agent_routing_balanced_model": "openai:gpt-5.6-sol",
+        "default_agent_routing_balanced_model": "openai:gpt-6-sol",
         "default_agent_routing_balanced_reasoning_effort": "medium",
         "default_agent_routing_performance_model": "openai:gpt-6-astra",
         "default_agent_routing_performance_reasoning_effort": "low",

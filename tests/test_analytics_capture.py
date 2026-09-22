@@ -89,7 +89,7 @@ async def test_run_started_records_configured_but_not_effective_attribution(
     await emitter.run_started(
         run_key="run",
         thread_key="thread",
-        model="openai:gpt-5.6-sol",
+        model="openai:gpt-6-sol",
         source="api",
         immutable_person_key=123,
         repository_key="owner/repo",

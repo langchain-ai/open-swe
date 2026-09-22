@@ -724,13 +724,13 @@ def test_format_slack_web_link_footer_prefers_session_cost() -> None:
 
 def test_format_slack_run_usage_shortens_model_paths() -> None:
     usage = RunUsageSummary(
-        models=("accounts/fireworks/models/glm-5p3-flash", "openai:gpt-5.6-sol"),
+        models=("accounts/fireworks/models/glm-5p3-flash", "openai:gpt-6-sol"),
         total_tokens=12_345,
     )
 
     footer = slack_utils.format_slack_run_usage(usage)
 
-    assert footer == "glm-5p3-flash + openai:gpt-5.6-sol"
+    assert footer == "glm-5p3-flash + openai:gpt-6-sol"
 
 
 def test_with_slack_session_cost_preserves_blocks_and_is_idempotent() -> None:

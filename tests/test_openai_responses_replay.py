@@ -50,7 +50,7 @@ def test_stateless_responses_replay_preserves_tool_history_without_mutation() ->
     ]
     original_messages = deepcopy(messages)
     model = ChatOpenAI(
-        model="gpt-5.6-sol",
+        model="gpt-6-sol",
         api_key=SecretStr("test"),
         use_responses_api=True,
         store=False,

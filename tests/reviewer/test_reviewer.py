@@ -212,7 +212,7 @@ async def test_reviewer_applies_eval_model_and_effort_overrides() -> None:
             "head_sha": "head",
             "reviewer_model_id": "anthropic:claude-opus-5-5",
             "reviewer_reasoning_effort": "high",
-            "reviewer_subagent_model_id": "openai:gpt-5.6-sol",
+            "reviewer_subagent_model_id": "openai:gpt-6-sol",
             "reviewer_subagent_reasoning_effort": "low",
         },
         "metadata": {},
@@ -245,7 +245,7 @@ async def test_reviewer_applies_eval_model_and_effort_overrides() -> None:
     assert main_model_call.kwargs["thinking"] == {"type": "adaptive", "display": "summarized"}
     assert main_model_call.kwargs["effort"] == "high"
     subagent_model_call = make_model.call_args_list[1]
-    assert subagent_model_call.args == ("openai:gpt-5.6-sol",)
+    assert subagent_model_call.args == ("openai:gpt-6-sol",)
     assert subagent_model_call.kwargs["reasoning"] == {"effort": "low", "summary": "auto"}
 
 

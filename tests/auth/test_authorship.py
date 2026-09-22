@@ -32,12 +32,12 @@ def test_add_bot_coauthor_trailer_is_idempotent() -> None:
 def test_build_pr_attribution_footer_includes_model_details() -> None:
     assert build_pr_attribution_footer(
         "https://openswe.vercel.app/agents/abc-123",
-        model_id="openai:gpt-5.6-luna",
+        model_id="openai:gpt-6-luna",
         reasoning_effort="xhigh",
     ) == (
         "Made by [Open SWE](https://github.com/langchain-ai/open-swe)"
         " · [view thread](https://openswe.vercel.app/agents/abc-123)"
-        " · openai:gpt-5.6-luna (xhigh)"
+        " · openai:gpt-6-luna (xhigh)"
     )
 
 

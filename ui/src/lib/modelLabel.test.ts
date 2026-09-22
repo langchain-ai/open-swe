@@ -7,7 +7,7 @@ describe("safeModelLabel", () => {
     expect(
       safeModelLabel("fireworks:accounts/fireworks/models/glm-5p3 flash")
     ).toBe("fireworks:glm-5p3-flash")
-    expect(safeModelLabel("openai:gpt-5.6-sol")).toBe("openai:gpt-5.6-sol")
+    expect(safeModelLabel("openai:gpt-6-sol")).toBe("openai:gpt-6-sol")
   })
 
   it("limits labels to 48 characters and trims edge hyphens", () => {

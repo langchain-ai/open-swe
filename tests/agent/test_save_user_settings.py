@@ -61,7 +61,7 @@ async def test_private_requester_partial_update_preserves_other_settings_and_use
 ) -> None:
     requester["source"] = source
     profile = {
-        "default_model": "openai:gpt-5.6-sol",
+        "default_model": "openai:gpt-6-sol",
         "reasoning_effort": "high",
         "default_subagent_model": "anthropic:claude-haiku-4-5",
         "subagent_reasoning_effort": "none",
@@ -180,7 +180,7 @@ async def test_invalid_patch_rejects_all_changes(
     settings: dict[str, SettingValue],
 ) -> None:
     fake_store.seed(
-        ["profiles"], "Alice", {"default_model": "openai:gpt-5.6-sol", "reasoning_effort": "high"}
+        ["profiles"], "Alice", {"default_model": "openai:gpt-6-sol", "reasoning_effort": "high"}
     )
     before = deepcopy(fake_store.items)
     assert (await save_user_settings(settings))["ok"] is False
@@ -215,7 +215,7 @@ async def test_dashboard_can_still_toggle_dm_session(fake_store: FakeStore, enab
         "Alice",
         "alice@example.com",
         ProfileUpdate(
-            default_model="openai:gpt-5.6-sol",
+            default_model="openai:gpt-6-sol",
             reasoning_effort="high",
             dm_session_enabled=enabled,
         ),
@@ -228,7 +228,7 @@ async def test_nullable_fields_clear_and_false_values_survive(fake_store: FakeSt
         ["profiles"],
         "alice",
         {
-            "default_model": "openai:gpt-5.6-sol",
+            "default_model": "openai:gpt-6-sol",
             "reasoning_effort": "high",
             "default_subagent_model": "anthropic:claude-haiku-4-5",
             "subagent_reasoning_effort": "none",
@@ -373,9 +373,9 @@ async def test_private_read_rejects_unverified_requesters(
 
 
 async def test_first_model_change_saves_a_complete_pair(fake_store: FakeStore) -> None:
-    await patch_personal_settings("alice", {"default_model": "openai:gpt-5.6-sol"})
+    await patch_personal_settings("alice", {"default_model": "openai:gpt-6-sol"})
     profile = fake_store.values(["profiles"])["alice"]
-    assert profile["default_model"] == "openai:gpt-5.6-sol"
+    assert profile["default_model"] == "openai:gpt-6-sol"
     assert isinstance(profile["reasoning_effort"], str)
 
 

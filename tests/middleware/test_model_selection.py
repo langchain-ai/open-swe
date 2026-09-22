@@ -162,7 +162,7 @@ async def test_routed_model_id_is_streamed_for_the_ui(monkeypatch: pytest.Monkey
         "agent.middleware.model_selection.get_stream_writer",
         lambda: events.append,
     )
-    middleware, _, _ = _middleware(route_model_ids={"fast": "openai:gpt-5.6-sol"})
+    middleware, _, _ = _middleware(route_model_ids={"fast": "openai:gpt-6-sol"})
     state = {"messages": [HumanMessage(content="Update the README")]}
 
     await middleware.abefore_model(cast(Any, state), MagicMock())
@@ -171,7 +171,7 @@ async def test_routed_model_id_is_streamed_for_the_ui(monkeypatch: pytest.Monkey
         {
             "type": "model_routed",
             "route": "fast",
-            "model_id": "openai:gpt-5.6-sol",
+            "model_id": "openai:gpt-6-sol",
         }
     ]
 
