@@ -123,8 +123,6 @@ export interface SessionUser {
   user_id?: string | null
   slack_user_id?: string | null
   is_admin: boolean
-  /** Mirrors the user's preference, so the thread page has it on first render. */
-  transcript_streaming?: boolean
   /** Whether the server records new threads into the transcript log. */
   transcript_recording?: boolean
   slack_oauth_enabled?: boolean
@@ -324,6 +322,7 @@ export type UsageLeaderboardSort =
   | "merged_prs"
   | "merged_prs_per_thread"
   | "agent_loc"
+  | "feedback_given"
 export type SortDirection = "asc" | "desc"
 
 export interface AnalyticsMetadata {
@@ -355,6 +354,8 @@ export interface UsageLeaderboardRow {
   merged_prs: number
   merged_prs_per_thread?: number
   agent_loc: number
+  feedback_given: number
+  is_top_feedback_contributor?: boolean
   additions: number
   deletions: number
   total_tokens: number
@@ -504,7 +505,6 @@ export interface UserPreferences {
   local_tracing_project: string | null
   default_local_tracing_project: string
   default_workspace: string | null
-  transcript_streaming: boolean
 }
 
 export interface Skill {

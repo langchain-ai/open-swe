@@ -176,6 +176,46 @@ it("shows delivery lag separately from suppression, then refreshes to a populate
   client.clear()
 })
 
+it.each([0, 1, 4, 5])(
+  "flags only small nonempty distance samples without inline counts (%i measured)",
+  async (samples) => {
+    vi.spyOn(api, "prMergeRateByModel").mockResolvedValue({
+      ...captured,
+      status: "ready",
+      cohorts: [
+        {
+          model_id: "sample-model",
+          model_attribution_quality: "configured",
+          merged: 8,
+          closed_without_merge: 0,
+          mature_pending: 0,
+          waiting: 0,
+          cohort_size: 8,
+          decided_denominator: 8,
+          decided_merge_rate: 1,
+          mature_denominator: 8,
+          mature_cohort_merge_share: 1,
+          efforts: [],
+          median_distance_basis_points: samples ? 1750 : null,
+          distance_sample_size: samples,
+          avg_merge_seconds: null,
+          avg_delivery_seconds: null,
+        },
+      ],
+    })
+    const client = mountReport()
+    const row = (await screen.findByText("sample-model")).closest("tr")!
+    expect(
+      within(row).getByRole("button", { name: samples ? "17.5%" : "—" })
+    ).toBeTruthy()
+    expect(within(row).queryByText(/measured \/ .* merged/)).toBeNull()
+    expect(within(row).queryByText("Small sample") !== null).toBe(
+      samples > 0 && samples < 5
+    )
+    client.clear()
+  }
+)
+
 it("sorts PR outcomes before pagination and toggles column direction", async () => {
   const cohort = (model: string, size: number): PRMergeRateCohort => ({
     model_id: model,
@@ -284,7 +324,7 @@ it.each([
       "3",
       "1",
       "3",
-      "17.5%",
+      "17.5%Small sample",
       "60%",
       "2h",
       "1d",
@@ -514,6 +554,7 @@ it("shortens model paths while preserving providers across usage tables", async 
         prs_opened: 1,
         merged_prs: 1,
         agent_loc: 1,
+        feedback_given: 0,
         additions: 1,
         deletions: 0,
         total_tokens: 1,
@@ -752,6 +793,7 @@ it("shows usage metrics but removes stale results when a refresh becomes unavail
         merged_prs: 4,
         merged_prs_per_thread: 0.25,
         agent_loc: 35,
+        feedback_given: 0,
         additions: 50,
         deletions: 15,
         total_tokens: 1234,
@@ -802,6 +844,7 @@ it("hides a GitHub login when it duplicates the user name", async () => {
         prs_opened: 0,
         merged_prs: 0,
         agent_loc: 0,
+        feedback_given: 0,
         additions: 0,
         deletions: 0,
         total_tokens: 100,
@@ -882,6 +925,7 @@ const costRow: UsageLeaderboardRow = {
   prs_opened: 0,
   merged_prs: 0,
   agent_loc: 0,
+  feedback_given: 0,
   additions: 0,
   deletions: 0,
   total_tokens: 100,
@@ -890,6 +934,51 @@ const costRow: UsageLeaderboardRow = {
   invocations_with_partial_cost: 0,
   avg_invocation_seconds: 90,
 }
+
+it("explains the feedback trophy on focus", async () => {
+  vi.spyOn(api, "prMergeRateByModel").mockResolvedValue(captured)
+  vi.mocked(api.usageLeaderboard).mockResolvedValue({
+    ...emptyUsage,
+    total_members: 1,
+    rows: [
+      { ...costRow, feedback_given: 3, is_top_feedback_contributor: true },
+    ],
+  })
+  const client = mountReport()
+  const trigger = await screen.findByRole("button", {
+    name: "Top feedback contributor",
+  })
+  act(() => trigger.focus())
+  expect(
+    await screen.findByText("Most feedback given in the selected date range.")
+  ).toBeTruthy()
+  client.clear()
+})
+
+it.each([true, false, undefined])(
+  "shows the feedback trophy only for a global leader (%s)",
+  async (isTopContributor) => {
+    vi.spyOn(api, "prMergeRateByModel").mockResolvedValue(captured)
+    vi.mocked(api.usageLeaderboard).mockResolvedValue({
+      ...emptyUsage,
+      total_members: 20,
+      rows: [
+        {
+          ...costRow,
+          feedback_given: 3,
+          is_top_feedback_contributor: isTopContributor,
+        },
+      ],
+    })
+    const client = mountReport()
+    await screen.findByText("Cost Reader")
+    const trophy = screen.queryByRole("button", {
+      name: "Top feedback contributor",
+    })
+    expect(Boolean(trophy)).toBe(Boolean(isTopContributor))
+    client.clear()
+  }
+)
 
 it.each([
   [5, 2, "2.5"],
@@ -1218,5 +1307,52 @@ it("explains incomplete coverage on focus and removes the indicator when costs r
   await act(() => client.invalidateQueries({ queryKey: ["usageLeaderboard"] }))
   expect(await screen.findByText("$3.75")).toBeTruthy()
   expect(screen.queryByRole("button", { name: "Cost incomplete" })).toBeNull()
+  client.clear()
+})
+
+it("renders feedback counts and resets pagination when sorting feedback in either direction", async () => {
+  vi.spyOn(api, "prMergeRateByModel").mockResolvedValue(captured)
+  vi.mocked(api.usageLeaderboard).mockImplementation(
+    async (_period, _limit, cursor) => ({
+      ...emptyUsage,
+      total_members: 11,
+      next_cursor: cursor ? null : "next-page",
+      rows: [{ ...costRow, feedback_given: 1234 }],
+    })
+  )
+  const client = mountReport()
+  const header = await screen.findByRole("columnheader", {
+    name: "# Feedback Given",
+  })
+  const table = header.closest("table")!
+  expect(within(table).getByText("1,234")).toBeTruthy()
+  fireEvent.click(screen.getByRole("button", { name: "Next" }))
+  expect(await screen.findByText("Page 2 of 2")).toBeTruthy()
+  fireEvent.click(within(header).getByRole("button"))
+  await waitFor(() =>
+    expect(api.usageLeaderboard).toHaveBeenLastCalledWith(
+      "30d",
+      10,
+      undefined,
+      "feedback_given",
+      "desc"
+    )
+  )
+  expect(await screen.findByText("Page 1 of 2")).toBeTruthy()
+  expect(header.getAttribute("aria-sort")).toBe("descending")
+  fireEvent.click(within(header).getByRole("button"))
+  await waitFor(() =>
+    expect(api.usageLeaderboard).toHaveBeenLastCalledWith(
+      "30d",
+      10,
+      undefined,
+      "feedback_given",
+      "asc"
+    )
+  )
+  expect(header.getAttribute("aria-sort")).toBe("ascending")
+  fireEvent.click(screen.getByRole("button", { name: "threads" }))
+  expect(within(table).getByText("1,234")).toBeTruthy()
+  expect(header.getAttribute("aria-sort")).toBe("ascending")
   client.clear()
 })

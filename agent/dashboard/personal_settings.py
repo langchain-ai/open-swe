@@ -34,7 +34,7 @@ PROFILE_SETTING_KEYS = frozenset(
     }
 )
 PREFERENCE_SETTING_KEYS = frozenset(
-    {"default_visibility", "local_tracing_project", "default_workspace", "transcript_streaming"}
+    {"default_visibility", "local_tracing_project", "default_workspace"}
 )
 type SettingValue = str | bool | None
 

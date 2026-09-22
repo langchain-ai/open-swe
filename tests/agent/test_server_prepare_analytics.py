@@ -79,8 +79,11 @@ def _middleware(config: dict[str, Any], *, credential_login: str | None = None) 
         linear_project_id="",
         linear_issue_number="",
         draft_prs=False,
+<<<<<<< HEAD
         recent_thread_context_enabled=False,
         plan_mode=False,
+=======
+>>>>>>> refs/rewritten/onto
         admin_workspaces=False,
         credential_login=credential_login,
     )

@@ -20,8 +20,8 @@ class ModelOption(TypedDict):
 
 SUPPORTED_MODELS: list[ModelOption] = [
     {
-        "id": "anthropic:claude-opus-5",
-        "label": "Opus 5",
+        "id": "anthropic:claude-opus-5-5",
+        "label": "Opus 5.5",
         "efforts": ["low", "medium", "high", "xhigh", "max"],
         "default_effort": "high",
         "supports_images": True,
@@ -249,7 +249,7 @@ def gate_fable_model(
 
 
 DEFAULT_MODEL_ID: str = (
-    "anthropic:claude-opus-5"
+    "anthropic:claude-opus-5-5"
     if ENV.ANTHROPIC_API_KEY.optional() and not ENV.OPENAI_API_KEY.optional()
     else "openai:gpt-5.6-sol"
 )

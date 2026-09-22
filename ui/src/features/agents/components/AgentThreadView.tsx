@@ -52,7 +52,6 @@ import {
   visibleQueuedMessages,
 } from "@/features/agents/lib/queuedMessages"
 import { agentsApi } from "@/features/agents/lib/api"
-import { rejectPlan } from "@/lib/plan"
 import { useSession } from "@/lib/session"
 import { useIsMobile } from "@/lib/useIsMobile"
 import { useThreadSource } from "@/features/agents/lib/threadSource/ThreadSourceProvider"
@@ -66,7 +65,6 @@ import {
 
 interface AgentThreadViewProps {
   thread: AgentThread
-  autoFocusComposer?: boolean
 }
 
 /** Paths the agent has edited this thread, newest last, for `@file` mentions. */
@@ -98,10 +96,7 @@ function CodeChannelLink({ url }: { url?: string | null }) {
   )
 }
 
-export function AgentThreadView({
-  thread,
-  autoFocusComposer = false,
-}: AgentThreadViewProps) {
+export function AgentThreadView({ thread }: AgentThreadViewProps) {
   const renameThread = useRenameAgentThread()
   const sendMessage = useSubmitAgentMessage(thread.id)
   const source = useThreadSource()
@@ -140,11 +135,7 @@ export function AgentThreadView({
     setAutoSelected(next === null)
     setSelection(next)
   }
-  const [planMode, setPlanMode] = useState<boolean | null>(null)
-  const [planFeedbackPending, setPlanFeedbackPending] =
-    useState(autoFocusComposer)
   const scrollControlRef = useRef<MessagesScrollControl | null>(null)
-  const activePlanMode = planMode ?? thread.planMode ?? false
   const routed = source.routed
   const activeModel = models.find(
     (model) => model.id === activeSelection?.modelId
@@ -152,24 +143,14 @@ export function AgentThreadView({
   const submitMessage = useCallback(
     async (content: string, images: Array<ImageChunk>) => {
       scrollControlRef.current?.scrollToBottom()
-      if (planFeedbackPending) await rejectPlan(thread.id, false)
       await sendMessage.mutateAsync({
         content,
         images,
         model_id: activeSelection?.modelId ?? null,
         effort: activeSelection?.effort ?? null,
-        plan_mode: activePlanMode,
       })
-      setPlanFeedbackPending(false)
     },
-    [
-      activePlanMode,
-      activeSelection?.effort,
-      activeSelection?.modelId,
-      planFeedbackPending,
-      sendMessage,
-      thread.id,
-    ]
+    [activeSelection?.effort, activeSelection?.modelId, sendMessage]
   )
   const fixPullRequest = useCallback(
     async (pullRequest: AgentPullRequest) => {
@@ -373,10 +354,7 @@ export function AgentThreadView({
                   messages={visibleMessages}
                   threadId={thread.id}
                   scrollKey={thread.id}
-                  showPlanArtifact={
-                    thread.planStatus === "ready" ||
-                    thread.planStatus === "shared"
-                  }
+                  showPlanArtifact={Boolean(thread.planStatus)}
                   emptyState={
                     <div className="flex min-h-60 items-center justify-center">
                       {hydrationFailed ? (
@@ -441,7 +419,6 @@ export function AgentThreadView({
                       : "Send the first message"
                     : "Only workspace admins can send messages in this thread"
                 }
-                autoFocus={autoFocusComposer}
                 canOffload={!isStreaming}
                 compact
                 disabled={!canPost}
@@ -452,8 +429,6 @@ export function AgentThreadView({
                 routed={routed}
                 selection={activeSelection}
                 onSelectionChange={handleSelectionChange}
-                planMode={activePlanMode}
-                onPlanModeChange={setPlanMode}
                 mentionPaths={mentionPaths}
                 skills={skills.data}
                 contextUsage={{
