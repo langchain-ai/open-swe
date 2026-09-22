@@ -29,6 +29,7 @@ from langgraph_sdk import get_client
 warnings.filterwarnings("ignore", module="langchain_core._api.deprecation")
 
 import asyncio
+from dataclasses import replace
 
 # Suppress Pydantic v1 compatibility warnings from langchain on Python 3.14+
 warnings.filterwarnings("ignore", message=".*Pydantic V1.*", category=UserWarning)
@@ -80,12 +81,9 @@ from agent.desktop import create_desktop_backend, desktop_artifact_routes, is_de
 from agent.desktop_branch import schedule_worktree_branch_rename
 from agent.github.token import resolve_github_token
 from agent.input_messages import (
-    SENDER_CONTEXT_SENDER_ID,
-    SystemIdentity,
-    build_input_messages,
     dynamic_context_hash,
     message_sender_id,
-    system_introduction,
+    person_introduction,
     visible_dynamic_context_hashes,
 )
 from agent.mcp import load_mcp_tools
@@ -131,7 +129,7 @@ from agent.middleware.require_user_reply import (
 )
 from agent.middleware.sandbox_circuit_breaker import post_sandbox_unreachable_notification
 from agent.middleware.transcript import TranscriptMiddleware
-from agent.prompt import construct_sender_context, construct_system_prompt
+from agent.prompt import construct_system_prompt
 from agent.prompts import apply_tool_descriptions, load_prompt
 from agent.run_config import RunConfig
 from agent.runtime.constants import (
@@ -214,17 +212,26 @@ from agent.tools import (
     update_automation,
     web_search,
 )
-from agent.tools.admin_gate import actor_has_admin_context, actor_is_admin, is_private_admin_surface
+from agent.tools.admin_gate import (
+    actor_has_admin_context,
+    actor_is_admin,
+    is_private_admin_surface,
+    participant_is_admin,
+)
 from agent.tools.manage_review_approval_policy import manage_review_approval_policy
 from agent.tools.save_user_settings import personal_settings_run_allowed
 from agent.tools.submit_review_assessment_feedback import submit_review_assessment_feedback
+from agent.users import User
 from agent.utils import ttl_cache
 from agent.utils.authorship import (
+    OPEN_SWE_BOT_EMAIL,
+    OPEN_SWE_BOT_NAME,
     CollaboratorIdentity,
+    ThreadParticipant,
     resolve_participant_identities,
     resolve_triggering_user_identity,
 )
-from agent.utils.dashboard_links import dashboard_base_url, dashboard_plan_url, dashboard_thread_url
+from agent.utils.dashboard_links import dashboard_base_url, dashboard_plan_url
 from agent.utils.deferred_model import make_deferred_error_model
 from agent.utils.gateway import gateway_env_default
 from agent.utils.json_types import as_json_object, thread_metadata
@@ -348,6 +355,92 @@ async def _thread_participant_identities(thread_id: str) -> list[CollaboratorIde
     except Exception:
         logger.debug("Failed to resolve participant identities for %s", thread_id, exc_info=True)
         return []
+
+
+async def _user_for_login(login: str) -> User | None:
+    """The ``users`` row behind a GitHub login, or ``None`` when nothing answers."""
+    try:
+        return await User.for_login("github", login)
+    except Exception:
+        logger.warning(
+            "Could not resolve a participant; describing them from surface data",
+            extra={"participant_login": login},
+            exc_info=True,
+        )
+        return None
+
+
+async def _thread_participant(
+    identity: CollaboratorIdentity,
+    config: RunnableConfig,
+    *,
+    person_id: str | None = None,
+    timezone: str = "",
+) -> ThreadParticipant:
+    login = identity.github_login or None
+    if login is None:
+        return ThreadParticipant(identity=identity, person_id=person_id or "", timezone=timezone)
+    user, profile, workspace_admin, instructions = await asyncio.gather(
+        _user_for_login(login),
+        load_profile(login),
+        participant_is_admin(login),
+        _resolve_user_custom_instructions(login),
+    )
+    display_name = (user.display_name if user else "") or identity.display_name or login
+    return ThreadParticipant(
+        identity=replace(
+            identity,
+            display_name=display_name,
+            commit_name=display_name,
+            commit_email=identity.login_noreply_email,
+        ),
+        person_id=person_id or (f"user:{user.id}" if user else f"github:{login}"),
+        workspace_admin=workspace_admin,
+        draft_prs=profile_draft_prs(profile),
+        instructions=instructions or "",
+        email=(user.email if user else "") or "",
+        timezone=timezone,
+        linked=user is not None,
+    )
+
+
+async def _thread_participants(
+    thread_id: str,
+    config: RunnableConfig,
+    sender: CollaboratorIdentity | None,
+    *,
+    sender_person_id: str,
+    sender_display_name: str = "",
+    sender_timezone: str = "",
+) -> list[ThreadParticipant]:
+    """Everyone in the thread, each with the settings the agent acts under for them.
+
+    The sender is keyed by the id their message envelope carries, so the turn's
+    envelope resolves to their block even when no person row exists. Without a
+    GitHub account they have no commit identity, and the surface's name for them
+    is all anyone knows.
+    """
+    identities = await _thread_participant_identities(thread_id)
+    resolved_sender = sender or (
+        CollaboratorIdentity(display_name=sender_display_name, commit_name="", commit_email="")
+        if sender_display_name
+        else CollaboratorIdentity(
+            display_name=OPEN_SWE_BOT_NAME,
+            commit_name=OPEN_SWE_BOT_NAME,
+            commit_email=OPEN_SWE_BOT_EMAIL,
+        )
+    )
+    others = [
+        identity for identity in identities if identity.commit_email != resolved_sender.commit_email
+    ]
+    return list(
+        await asyncio.gather(
+            _thread_participant(
+                resolved_sender, config, person_id=sender_person_id, timezone=sender_timezone
+            ),
+            *(_thread_participant(identity, config) for identity in others),
+        )
+    )
 
 
 async def _resolve_user_custom_instructions(login: str | None) -> str | None:
@@ -511,13 +604,6 @@ def _general_purpose_subagent(
         ),
     }
     return subagent
-
-
-_SENDER_CONTEXT_SYSTEM: SystemIdentity = {
-    "id": SENDER_CONTEXT_SENDER_ID,
-    "display_name": "Sender context",
-    "platform": "open-swe",
-}
 
 
 # Added to an admin thread's tools; see the admin-thread section of the prompt.
@@ -695,6 +781,7 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
         linear_project_id: str,
         linear_issue_number: str,
         draft_prs: bool,
+        recent_thread_context_enabled: bool,
         admin_workspaces: bool,
         model_selection: ModelSelectionMiddleware | None = None,
         routing_defaults: Mapping[str, tuple[str, str | None]] | None = None,
@@ -713,13 +800,15 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
         self._linear_project_id = linear_project_id
         self._linear_issue_number = linear_issue_number
         self._draft_prs = draft_prs
+        self._recent_thread_context_enabled = recent_thread_context_enabled
         self._admin_workspaces = admin_workspaces
         self._model_selection = model_selection
         self._routing_defaults = dict(routing_defaults or {})
 
     def _recent_context_audience(self, cfg: RunConfig) -> RecentContextAudience | None:
         if (
-            cfg.background_task_completion
+            not self._recent_thread_context_enabled
+            or cfg.background_task_completion
             or not self._profile_login
             or (cfg.slack_thread is not None and cfg.slack_thread.triggering_bot_id)
         ):
@@ -751,59 +840,38 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
             "source": self._source,
             "repo": cfg.repo.model_dump() if cfg.repo else None,
             "draft_prs": self._draft_prs,
+            "recent_thread_context_enabled": self._recent_thread_context_enabled,
             "model": self._model_id,
             "effort": self._effort,
         }
 
     @staticmethod
-    def _sender_context_messages(
-        state: PrepareRunState, sender_context: str, *, sender_id: str | None = None
-    ) -> list[Any]:
-        """Sender context as its own message, appended after the run's input.
-
-        Splicing it into the triggering message rewrote history: that message is
-        already cached from the run that received it, so every later run sent a
-        different byte sequence for it. The transcript renders one envelope per
-        message, so this arrives as a collapsed context pill rather than markup
-        inside the user's own text.
-        """
-        if not any(
-            isinstance(candidate, HumanMessage) for candidate in state.get("messages") or []
-        ):
-            return []
-        if sender_id is None:
-            sender_id = next(
-                (
-                    candidate_id
-                    for candidate in reversed(state.get("messages") or [])
-                    if isinstance(candidate, HumanMessage)
-                    and (candidate_id := message_sender_id(candidate.content, kind="human"))
-                    is not None
-                ),
-                None,
-            )
-        if sender_id is None:
-            return []
-        identity: SystemIdentity = {
-            **_SENDER_CONTEXT_SYSTEM,
-            "subject_id": sender_id,
-            "context_hash": hashlib.sha256(sender_context.encode()).hexdigest(),
-        }
-        introduction_hash = dynamic_context_hash(system_introduction(identity)["content"])
-        if introduction_hash in visible_dynamic_context_hashes(state):
-            return []
-        return cast(
-            list[Any],
-            build_input_messages(
-                sender_context,
-                {
-                    "sender_id": _SENDER_CONTEXT_SYSTEM["id"],
-                    "surface": "automation",
-                    "kind": "system",
-                },
-                systems=[identity],
+    def _sender_subject_id(state: PrepareRunState, sender_id: str | None) -> str | None:
+        """The entity the sender context describes: the latest human message's sender."""
+        if sender_id is not None:
+            return sender_id
+        return next(
+            (
+                candidate_id
+                for candidate in reversed(state.get("messages") or [])
+                if isinstance(candidate, HumanMessage)
+                and (candidate_id := message_sender_id(candidate.content, kind="human")) is not None
             ),
+            None,
         )
+
+    @staticmethod
+    def _participants_messages(
+        state: PrepareRunState, participants: Sequence[ThreadParticipant]
+    ) -> list[Any]:
+        """One person block per participant, sent when theirs is not already visible."""
+        visible = visible_dynamic_context_hashes(state)
+        ordered = sorted(
+            participants,
+            key=lambda candidate: (candidate.identity.display_name.lower(), candidate.person_id),
+        )
+        blocks = [person_introduction(p.as_person()) for p in ordered]
+        return [block for block in blocks if dynamic_context_hash(block["content"]) not in visible]
 
     async def _prepare(self, state: PrepareRunState, runtime: Runtime) -> dict[str, Any]:  # noqa: ARG002
         schedule_thread_title_generation(
@@ -861,11 +929,7 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
             work_dir = await resolve_sandbox_work_dir(sandbox_backend)
         async with aphase(self._thread_id, "prepare.workspace"):
             workspace = await load_workspace(workspace_slug(cfg))
-        async with aphase(self._thread_id, "prepare.sender_context"):
-            sender_instructions, participant_identities = await asyncio.gather(
-                _resolve_user_custom_instructions(self._credential_login),
-                _thread_participant_identities(self._thread_id),
-            )
+        async with aphase(self._thread_id, "prepare.participants"):
             recent_context_audience = self._recent_context_audience(cfg)
             recent_context_task = (
                 asyncio.create_task(
@@ -891,25 +955,30 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
                     cast(ModelSelectionState, state)
                 )
                 attribution_model_id, attribution_effort = self._routing_defaults[attribution_route]
-            sender_context = construct_sender_context(
-                triggering_user_identity,
-                user_custom_instructions=sender_instructions,
-                draft_prs=self._draft_prs,
-                thread_url=dashboard_thread_url(self._thread_id),
-                model_id=attribution_model_id,
-                reasoning_effort=attribution_effort,
-                workspace_admin=await _workspace_admin(self._config or {}, self._profile_login),
-                participant_identities=participant_identities,
+            bot_id = (
+                cfg.slack_thread.triggering_bot_id
+                if self._source == "slack" and cfg.slack_thread
+                else ""
             )
+            subject_id = self._sender_subject_id(
+                state, f"system:slack-bot-{bot_id}" if bot_id else None
+            )
+            sender_messages: list[Any] = []
+            if subject_id is not None:
+                participants = await _thread_participants(
+                    self._thread_id,
+                    self._config or {},
+                    triggering_user_identity,
+                    sender_person_id=subject_id,
+                    sender_display_name=(
+                        cfg.slack_thread.triggering_user_name if cfg.slack_thread else ""
+                    ),
+                    sender_timezone=(
+                        cfg.slack_thread.triggering_user_timezone if cfg.slack_thread else ""
+                    ),
+                )
+                sender_messages = self._participants_messages(state, participants)
         recent_thread_context = await recent_context_task if recent_context_task is not None else ""
-        bot_id = (
-            cfg.slack_thread.triggering_bot_id
-            if self._source == "slack" and cfg.slack_thread
-            else ""
-        )
-        sender_messages = self._sender_context_messages(
-            state, sender_context, sender_id=f"system:slack-bot-{bot_id}" if bot_id else None
-        )
         try:
             async with aphase(self._thread_id, "prepare.record_run"):
                 await client.threads.update(
@@ -1497,6 +1566,11 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
                         linear_project_id=linear_project_id,
                         linear_issue_number=linear_issue_number,
                         draft_prs=sender_draft_prs,
+                        recent_thread_context_enabled=(
+                            sender_profile.get("recent_thread_context_enabled") is True
+                            if sender_profile
+                            else False
+                        ),
                         admin_workspaces=admin_thread,
                         model_selection=model_selection,
                         routing_defaults=routing_defaults,

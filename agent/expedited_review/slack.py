@@ -18,11 +18,8 @@ from agent.slack.responses import FeedbackResponse, WebhookResponse, accepted, i
 logger = logging.getLogger(__name__)
 
 
-def slack_person(slack_user_id: str, handle: str = "") -> PersonIdentity:
-    person: PersonIdentity = {"id": f"slack:{slack_user_id}", "platform": "slack"}
-    if handle:
-        person["handle"] = handle
-    return person
+def slack_person(slack_user_id: str) -> PersonIdentity:
+    return {"id": f"slack:{slack_user_id}"}
 
 
 def is_expedited_review_submission(payload: Mapping[str, object]) -> bool:
@@ -68,7 +65,7 @@ async def handle_button(
         process_vote,
         button.fingerprint,
         decision="approve" if button.action == "approve" else "reject",
-        person=slack_person(user_id, interaction.user.username or interaction.user.name),
+        person=slack_person(user_id),
         channel_id=channel_id,
         thread_ts=thread_ts,
     )
@@ -95,7 +92,7 @@ async def handle_submission(
         process_vote,
         approval_id,
         decision="reject",
-        person=slack_person(user_id, submission.user.username or submission.user.name),
+        person=slack_person(user_id),
         channel_id=channel_id,
         thread_ts=thread_ts,
         feedback=submission.submitted(card.REJECT_FEEDBACK_BLOCK, card.REJECT_FEEDBACK_ACTION),

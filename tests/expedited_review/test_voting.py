@@ -12,7 +12,6 @@ from agent.expedited_review.approvals import ExpeditedApproval
 from agent.expedited_review.readiness import PullRequestSnapshot, Readiness
 from agent.github.pull_requests import PullRequest
 from agent.users import User
-from agent.users.resolve import resolve_person
 
 pytestmark = pytest.mark.usefixtures("registry_db")
 
@@ -112,7 +111,7 @@ async def _vote(approval: ExpeditedApproval, slack_user: str, decision: str = "a
     return await voting.handle_vote(
         current,
         decision="approve" if decision == "approve" else "reject",
-        user=await resolve_person({"id": f"slack:{slack_user}", "platform": "slack"}),
+        user=await User.for_person({"id": f"slack:{slack_user}", "platform": "slack"}),
     )
 
 

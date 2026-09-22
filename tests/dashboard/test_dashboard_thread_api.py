@@ -321,7 +321,7 @@ async def test_enrich_run_start_command_creates_and_stamps_new_thread(monkeypatc
     assert messages[-1]["content"].startswith(
         '<input-message sender="github:octocat" surface="web" kind="human">'
     )
-    assert "<content>Fix the flaky test</content>" in messages[-1]["content"]
+    assert "\nFix the flaky test\n</input-message>" in messages[-1]["content"]
     # Dashboard-only creation hints must not leak into the run config.
     assert "repo_explicitly_none" not in configurable
     assert enriched["params"]["assistant_id"] == "agent"
@@ -967,7 +967,7 @@ async def test_enrich_run_start_command_attributes_non_owner_message(monkeypatch
 
     last = ElementTree.fromstring(enriched["params"]["input"]["messages"][-1]["content"])
     assert last.attrib["sender"] == "github:teammate"
-    assert last.findtext("content") == "fix the bug"
+    assert (last.text or "").strip() == "fix the bug"
     assert updates[-1]["participant_logins"] == {"first": True, "teammate": True}
 
 
@@ -1021,9 +1021,9 @@ async def test_enrich_run_start_command_adds_web_handoff_for_slack_thread(monkey
         "surface": "automation",
         "kind": "system",
     }
-    assert "conversation has moved to Web" in (handoff.findtext("content") or "")
+    assert "conversation has moved to Web" in (handoff.text or "")
     assert user_message.attrib["sender"] == "github:teammate"
-    assert user_message.findtext("content") == "continue here"
+    assert (user_message.text or "").strip() == "continue here"
     assert "id" not in messages[-1]
     assert enriched["params"]["config"]["configurable"]["source"] == "dashboard"
 
@@ -1075,10 +1075,10 @@ async def test_enrich_run_start_command_adds_web_handoff_before_image_blocks(mon
     messages = enriched["params"]["input"]["messages"]
     handoff = ElementTree.fromstring(messages[-2]["content"])
     content = messages[-1]["content"]
-    assert "conversation has moved to Web" in (handoff.findtext("content") or "")
+    assert "conversation has moved to Web" in (handoff.text or "")
     user_message = ElementTree.fromstring(content[0]["text"])
     assert user_message.attrib["sender"] == "github:teammate"
-    assert user_message.findtext("content") == "continue here"
+    assert (user_message.text or "").strip() == "continue here"
 
 
 async def test_enrich_run_start_command_does_not_attribute_owner_message(monkeypatch) -> None:
@@ -1118,7 +1118,7 @@ async def test_enrich_run_start_command_does_not_attribute_owner_message(monkeyp
 
     last = ElementTree.fromstring(enriched["params"]["input"]["messages"][-1]["content"])
     assert last.attrib["sender"] == "github:owner"
-    assert last.findtext("content") == "fix the bug"
+    assert (last.text or "").strip() == "fix the bug"
 
 
 async def test_enrich_run_start_command_allowlists_client_configurable(monkeypatch) -> None:
@@ -1360,8 +1360,8 @@ async def test_proxy_run_start_from_slack_thread_updates_trace_reply(monkeypatch
     messages = outgoing["params"]["input"]["messages"]
     handoff = ElementTree.fromstring(messages[-2]["content"])
     user_message = ElementTree.fromstring(messages[-1]["content"])
-    assert "conversation has moved to Web" in (handoff.findtext("content") or "")
-    assert user_message.findtext("content") == "continue here"
+    assert "conversation has moved to Web" in (handoff.text or "")
+    assert (user_message.text or "").strip() == "continue here"
     assert captured["handoff_update"] == {
         "channel_id": "C1",
         "message_ts": "123.46",

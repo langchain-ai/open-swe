@@ -35,7 +35,7 @@ from agent.github.app import (
 )
 from agent.github.ci import has_repo_write_permission
 from agent.github.http import GITHUB_API_BASE, github_client, github_request
-from agent.input_messages import PersonIdentity
+from agent.input_messages import PersonIdentity, split_person_id
 from agent.prompts import render_prompt
 from agent.slack.client import (
     post_slack_ephemeral_message,
@@ -43,7 +43,6 @@ from agent.slack.client import (
     slack_thread_mutation_lock,
 )
 from agent.users import User
-from agent.users.resolve import resolve_person, split_identity
 from agent.utils.dashboard_links import dashboard_base_url
 from agent.utils.thread_ops import langgraph_client
 
@@ -312,7 +311,7 @@ async def process_vote(
     feedback: str = "",
 ) -> None:
     """Background entry point for a Slack click; answers the clicker ephemerally."""
-    slack_user_id = split_identity(person)[1]
+    slack_user_id = split_person_id(person)[1]
     try:
         approval = await ExpeditedApproval.get(UUID(approval_id))
     except ValueError:
@@ -329,7 +328,7 @@ async def process_vote(
             outcome = await handle_vote(
                 approval,
                 decision=decision,
-                user=await resolve_person(person),
+                user=await User.for_person(person),
                 feedback=feedback,
             )
     except Exception:
