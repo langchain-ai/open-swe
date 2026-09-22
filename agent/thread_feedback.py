@@ -68,7 +68,12 @@ async def _quiet_until(thread_id: str, record: Feedback) -> int | None:
         return None
     finished_at = latest.get("updated_at")
     if finished_at:
-        activity = max(activity, int(datetime.fromisoformat(finished_at).timestamp() * 1000))
+        finished = (
+            finished_at
+            if isinstance(finished_at, datetime)
+            else datetime.fromisoformat(finished_at)
+        )
+        activity = max(activity, int(finished.timestamp() * 1000))
     return activity + DELAY_MS
 
 
