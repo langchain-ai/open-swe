@@ -279,6 +279,34 @@ async def test_schedule_source_with_slack_context_posts_failure_reply(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("status", "metadata", "picks_up"),
+    [
+        ("success", {}, True),
+        # A run that failed before its first model call left the store as it
+        # was; restarting it would only fail again, forever.
+        ("error", {}, False),
+        ("success", {"kind": "follow_up_pickup"}, False),
+    ],
+)
+async def test_leftover_follow_ups_get_one_pickup_run(
+    monkeypatch: pytest.MonkeyPatch, status: str, metadata: dict[str, Any], picks_up: bool
+) -> None:
+    monkeypatch.setattr(
+        completion, "langgraph_client", lambda: _FakeClient({"source": "dashboard"})
+    )
+    monkeypatch.setattr(completion, "schedule_answer_feedback", AsyncMock())
+    pickup = AsyncMock()
+    monkeypatch.setattr(completion, "_start_run_for_pending_follow_ups", pickup)
+
+    await completion.handle_run_completion(
+        {"thread_id": "t1", "run_id": "run-1", "status": status, "metadata": metadata}
+    )
+
+    assert pickup.await_count == (1 if picks_up else 0)
+
+
+@pytest.mark.asyncio
 async def test_success_status_is_ignored(monkeypatch: pytest.MonkeyPatch) -> None:
     client = _FakeClient(_slack_metadata())
     monkeypatch.setattr(completion, "langgraph_client", lambda: client)

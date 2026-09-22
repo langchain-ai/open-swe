@@ -60,7 +60,7 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
     }).toPass({ timeout: 20_000 });
   });
 
-  test("shows an optimistic message before the idle-thread probe completes", async ({
+  test("shows an optimistic message while the send is in flight", async ({
     page,
   }, testInfo) => {
     await loginAs(page, SAME_USER);
@@ -68,26 +68,28 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
     const threadId = threadIdFromUrl(page);
     await waitForThreadIdle(page, threadId);
 
-    let releaseProbe: () => void = () => {};
-    const probeReleased = new Promise<void>((resolve) => {
-      releaseProbe = resolve;
+    // Every send is a `run.start` command; hold it so the optimistic row has
+    // to stand in for the message.
+    let releaseSend: () => void = () => {};
+    const sendReleased = new Promise<void>((resolve) => {
+      releaseSend = resolve;
     });
-    let probeStarted: () => void = () => {};
-    const probeReceived = new Promise<void>((resolve) => {
-      probeStarted = resolve;
+    let sendStarted: () => void = () => {};
+    const sendReceived = new Promise<void>((resolve) => {
+      sendStarted = resolve;
     });
     await page.route(
-      `**/dashboard/api/threads/${threadId}/messages`,
+      `**/dashboard/api/threads/${threadId}/commands`,
       async (route) => {
-        probeStarted();
-        await probeReleased;
+        sendStarted();
+        await sendReleased;
         await route.continue();
       },
     );
 
     const prompt = "Show this immediately while the send is accepted.";
     await typeIntoComposer(page, prompt);
-    await probeReceived;
+    await sendReceived;
 
     const optimisticMessage = page
       .getByTestId("user-message")
@@ -107,7 +109,7 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
       contentType: "image/png",
     });
 
-    releaseProbe();
+    releaseSend();
     await expect(optimisticMessage).toHaveCount(1);
     await waitForStateToContain(page, threadId, prompt);
     await expect(optimisticMessage).toHaveCount(1);
@@ -472,10 +474,9 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
     expect.soft(observations.newChatReturned).toBe(false);
   });
 
-  // Stopping a run must not strand what the user queued behind it: the server
-  // starts a follow-up run for the queue, and the page has to show that run
-  // answering without the user sending anything else.
-  test("answers a queued follow-up after the user stops the active run", async ({
+  // Stopping a run must not strand what the user queued behind it: the queue
+  // goes back into the composer, where the user decides what to do with it.
+  test("returns a queued follow-up to the composer when the user stops the active run", async ({
     page,
   }) => {
     await loginAs(page, SAME_USER);
@@ -489,32 +490,24 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
     }).toPass({ timeout: 60000 });
     await typeIntoComposer(page, queuedText);
     await expect(
-      page.getByTestId("queued-message").filter({ hasText: queuedText }),
+      page
+        .getByTestId("queued-message")
+        .filter({ hasText: queuedText })
+        .and(page.locator("[data-queued-pending='false']")),
     ).toBeVisible();
 
     await page.getByRole("button", { name: "Stop run" }).click();
 
-    // The queue drains into the follow-up run, whose reply is the fake
-    // model's follow-up script (the stopped run never got to its own reply).
     await expect(page.getByTestId("queued-message")).toHaveCount(0, {
       timeout: 30_000,
     });
-    const sentFollowUp = page
-      .getByTestId("user-message")
-      .filter({ hasText: queuedText });
-    await expect(sentFollowUp).toBeVisible({ timeout: 30_000 });
-    const reply = page.getByText(/anything else you'd like changed/);
-    await expect(reply).toBeVisible({ timeout: 30_000 });
-    expect(
-      await sentFollowUp.evaluate(
-        (message, answer) =>
-          Boolean(
-            message.compareDocumentPosition(answer) &
-            Node.DOCUMENT_POSITION_FOLLOWING,
-          ),
-        await reply.elementHandle(),
-      ),
-    ).toBe(true);
+    await expect(page.getByTestId("composer-editor")).toContainText(
+      queuedText,
+      { timeout: 30_000 },
+    );
+    await expect(
+      page.getByTestId("user-message").filter({ hasText: queuedText }),
+    ).toHaveCount(0);
   });
 
   test("answers a queued follow-up after stopping a run this browser started", async ({

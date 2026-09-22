@@ -69,6 +69,9 @@ export function useAgentStreamSource(threadId: string): StreamThreadSource {
     stream,
     threadId,
     messages,
+    // The SDK stream has no view of runs it did not start; a follow-up sent
+    // while it runs steers instead (the transcript source queues).
+    queued: [],
     isRunning: stream.isLoading,
     isHydrating: stream.isThreadLoading,
     hydration: stream.hydrationPromise,
