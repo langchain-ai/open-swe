@@ -280,8 +280,6 @@ export interface WorkspaceSettings {
   default_reviewer_reasoning_effort?: string | null
   default_reviewer_subagent_model?: string | null
   default_reviewer_subagent_reasoning_effort?: string | null
-  default_grouping_model?: string | null
-  default_grouping_reasoning_effort?: string | null
   default_chat_model?: string | null
   default_chat_reasoning_effort?: string | null
   default_thread_title_model?: string | null
@@ -907,11 +905,28 @@ export interface ReviewPrDetails {
   labels: Array<{ name: string; color: string | null }>
 }
 
-export interface ReviewDiffGroup {
+/** Inclusive `[start, end]` line numbers. */
+export type ReviewLineRange = [number, number]
+
+/** Added lines are head line numbers; deleted lines are merge-base line numbers. */
+export interface ReviewWalkthroughFile {
+  path: string
+  added: Array<ReviewLineRange>
+  deleted: Array<ReviewLineRange>
+}
+
+export interface ReviewWalkthroughStep {
   index: number
   title: string
   summary: string
-  files: Array<string>
+  other: boolean
+  files: Array<ReviewWalkthroughFile>
+}
+
+/** The review scout's reading order for the PR's current head. */
+export interface ReviewWalkthrough {
+  head_sha: string
+  steps: Array<ReviewWalkthroughStep>
 }
 
 /** `status: "none"` is a PR the reviewer graph has never run on. */
@@ -925,8 +940,9 @@ export interface ReviewDetail extends Omit<
   pr: ReviewPrDetails
   checks: Array<ReviewCheckRun>
   findings: Array<ReviewFinding>
-  diff_groups: Array<ReviewDiffGroup>
-  diff_groups_stale: boolean
+  walkthrough: ReviewWalkthrough | null
+  /** A review scout is working on this head, so `walkthrough` is on its way. */
+  walkthrough_running: boolean
   guidance: Array<GuidancePoint>
 }
 
@@ -1488,6 +1504,11 @@ export const api = {
   getReviewChat: (owner: string, repo: string, number: number) =>
     request<ReviewChatMeta>(
       `/reviews/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}/chat`
+    ),
+  runReviewScout: (owner: string, repo: string, number: number) =>
+    request<{ started: boolean; run_id: string | null }>(
+      `/reviews/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}/scout`,
+      { method: "POST" }
     ),
   reReview: (owner: string, repo: string, number: number) =>
     request<{

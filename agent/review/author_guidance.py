@@ -1,10 +1,10 @@
-"""The author's steering of an Open SWE pull request, and what the reviewer made of it.
+"""The author's steering of an Open SWE pull request, and what the review scout made of it.
 
 Open SWE already records every human turn: a thread's checkpointed ``messages``
 hold the text and the ``<input-message>`` envelope that says whether a person
 typed it or the platform generated it, and ``pull_request_thread`` maps a PR
 back to the agent threads that produced it. :class:`SteeringHistory` reads those
-turns so they can be put in front of the reviewer.
+turns so they can be put in front of the review scout.
 
 Reading them through ``threads.get_state`` rather than the transcript tables is
 deliberate: the checkpoint is the stable record. Compaction never costs a turn,
@@ -13,15 +13,16 @@ beside it.
 
 Deciding which of them *changed the pull request* needs the code, not the
 conversation — a reply saying "drop the retry wrapper" only counts if the
-wrapper is actually gone. The reviewer is the one process holding the diff and
-the checked-out repo, so it makes that call itself through ``record_guidance``
-and each verdict becomes a :class:`GuidancePoint` row.
+wrapper is actually gone. The review scout reads the whole change before the
+reviewer does, so it makes that call through ``record_guidance``, each verdict
+becomes a :class:`GuidancePoint` row, and the reviewer checks the recorded
+points are carried through.
 
-The quote is a point's identity and the reviewed head is its scope. A re-review
-re-reads the same messages and re-derives points it already recorded, so writing
-by quote keeps the newest verdict instead of accumulating a row per push, and
-carries that row's head forward. Reads then show only the head the newest
-published review stands behind, so a point the latest review no longer
+The quote is a point's identity and the scouted head is its scope. A scout on a
+later push re-reads the same messages and re-derives points it already
+recorded, so writing by quote keeps the newest verdict instead of accumulating a
+row per push, and carries that row's head forward. Reads then show only the
+head the newest finished scout stands behind, so a point it no longer
 recognises stops being shown without anything having to delete it.
 """
 
@@ -158,6 +159,12 @@ class SteeringHistory(BaseModel):
             )
         return turns
 
+    def messages_block(self) -> str:
+        """The follow-up messages as ``<message author="...">`` entries, oldest first."""
+        return "\n".join(
+            f'<message author="{turn.author}">\n{turn.text}\n</message>' for turn in self.follow_ups
+        )
+
     def source_of(self, quote: str) -> HumanTurn | None:
         """The message a quote came from, or ``None`` when it matches nothing."""
         needle = quote.strip().strip('"').lower()
@@ -167,7 +174,7 @@ class SteeringHistory(BaseModel):
 
 
 class GuidanceReview(Base):
-    """The commit the last completed review of a pull request stands behind."""
+    """The commit the last finished review scout of a pull request stands behind."""
 
     __tablename__ = "pull_request_guidance_review"
 
@@ -179,17 +186,14 @@ class GuidanceReview(Base):
 
     @classmethod
     async def complete(cls, owner: str, repo: str, pr_number: int, head_sha: str) -> None:
-        """Mark a review of this head finished, whatever it decided.
+        """Mark a scout of this head finished, whatever it decided.
 
-        Called on every path that finishes a review, including the one that
-        publishes nothing: a review that recognises no guidance still settles
-        the question of what is true at this commit, and only this row can say
-        so, because that outcome writes no point to infer it from.
+        A scout that recognises no guidance still settles the question of what
+        is true at this commit, and only this row can say so, because that
+        outcome writes no point to infer it from.
 
-        A failure here is logged rather than raised. The review has already
-        been published to GitHub by the time this runs, and turning a
-        bookkeeping write into a tool error would have the agent retry the
-        publish.
+        A failure here is logged rather than raised: it is bookkeeping for the
+        guidance card, and must not cost the scout its walkthrough.
         """
         if not head_sha:
             return
@@ -237,15 +241,15 @@ class GuidancePoint(Base):
 
     @classmethod
     async def for_pull_request(cls, owner: str, repo: str, pr_number: int) -> list[Self]:
-        """Points the last completed review stands behind, oldest steering first.
+        """Points the last finished scout stands behind, oldest steering first.
 
-        Scoped to that review's head rather than to the pull request, because a
-        point is only ever a claim about one commit. A re-review that no longer
-        recognises a point does not re-record it, so the row keeps the older
-        head and drops out here — including when the new review recognises
+        Scoped to that scout's head rather than to the pull request, because a
+        point is only ever a claim about one commit. A later scout that no
+        longer recognises a point does not re-record it, so the row keeps the
+        older head and drops out here — including when the new scout recognises
         nothing at all, which no reconciliation triggered by a write could
         cover. A re-recorded point carries its row forward to the new head, so
-        the visible set is always exactly what the last review would say.
+        the visible set is always exactly what the last scout would say.
         """
         latest_head = (
             select(GuidanceReview.head_sha)
@@ -261,6 +265,23 @@ class GuidancePoint(Base):
                     Repository.key == f"{owner}/{repo}".lower(),
                     PullRequest.number == pr_number,
                     cls.head_sha == latest_head,
+                )
+                .order_by(cls.turn_index, cls.id)
+            )
+            return list(rows)
+
+    @classmethod
+    async def for_head(cls, owner: str, repo: str, pr_number: int, head_sha: str) -> list[Self]:
+        """Points recorded against ``head_sha``, oldest steering first."""
+        async with postgres.session() as session:
+            rows = await session.scalars(
+                select(cls)
+                .join(cls.pull_request)
+                .join(PullRequest.repository)
+                .where(
+                    Repository.key == f"{owner}/{repo}".lower(),
+                    PullRequest.number == pr_number,
+                    cls.head_sha == head_sha,
                 )
                 .order_by(cls.turn_index, cls.id)
             )
@@ -368,4 +389,14 @@ class GuidanceView(BaseModel):
             return []
         return [
             cls.of(point) for point in await GuidancePoint.for_pull_request(owner, repo, pr_number)
+        ]
+
+    @classmethod
+    async def for_head(cls, owner: str, repo: str, pr_number: int, head_sha: str) -> list[Self]:
+        """The points the review scout recorded for ``head_sha``."""
+        if not head_sha or not postgres.configured():
+            return []
+        return [
+            cls.of(point)
+            for point in await GuidancePoint.for_head(owner, repo, pr_number, head_sha)
         ]

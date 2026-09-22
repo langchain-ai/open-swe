@@ -7,7 +7,6 @@ from agent.review.reviews import (
     _finding_counts,
     _is_allowed_image_url,
     _require_image_in_pr,
-    _serialize_diff_groups,
     _serialize_finding,
     _thread_review_summary,
     classify_finding,
@@ -148,40 +147,3 @@ async def test_require_image_in_pr_rejects_unreferenced_url(monkeypatch):
 
 def test_review_api_uses_canonical_reviewer_thread_id():
     assert review_api.reviewer_thread_id is reviewer_thread_id
-
-
-def test_serialize_diff_groups_assigns_index_and_drops_invalid():
-    metadata = {
-        "diff_groups": {
-            "head_sha": "abc",
-            "groups": [
-                {"title": "Feature", "summary": "Adds it", "files": ["a.py", "b.py"]},
-                {"title": "   ", "summary": "x", "files": ["c.py"]},
-                {"title": "Empty", "summary": "", "files": []},
-                {"title": "Tests", "summary": "Covers it", "files": ["t.py", 5]},
-            ],
-        }
-    }
-    groups, stale = _serialize_diff_groups(metadata, "abc")
-    assert stale is False
-    assert groups == [
-        {"index": 1, "title": "Feature", "summary": "Adds it", "files": ["a.py", "b.py"]},
-        {"index": 2, "title": "Tests", "summary": "Covers it", "files": ["t.py"]},
-    ]
-
-
-def test_serialize_diff_groups_marks_stale_on_head_mismatch():
-    metadata = {
-        "diff_groups": {
-            "head_sha": "old",
-            "groups": [{"title": "T", "summary": "", "files": ["a.py"]}],
-        }
-    }
-    groups, stale = _serialize_diff_groups(metadata, "new")
-    assert stale is True
-    assert groups[0]["index"] == 1
-
-
-def test_serialize_diff_groups_handles_missing():
-    assert _serialize_diff_groups({}, "abc") == ([], False)
-    assert _serialize_diff_groups({"diff_groups": {"groups": "nope"}}, "abc") == ([], False)

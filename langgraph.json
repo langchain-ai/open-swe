@@ -6,6 +6,7 @@
     "agent": "agent.graphs.agent:traced_agent",
     "reviewer": "agent.graphs.reviewer:traced_reviewer_agent",
     "analyzer": "agent.graphs.analyzer:traced_analyzer",
+    "review-scout": "agent.graphs.review_scout:traced_review_scout",
     "chat": "agent.graphs.chat:traced_chat_agent",
     "scheduler": "agent.graphs.scheduler:get_scheduler"
   },
