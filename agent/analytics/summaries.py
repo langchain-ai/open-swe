@@ -14,20 +14,57 @@ _LATENCY_BOUNDS_MS = [60_000, 300_000, 900_000, 3_600_000, 14_400_000, 86_400_00
 
 
 async def recompute_dirty_partitions(limit: int = 20) -> int:
+    async with transaction() as conn:
+        candidates = await conn.execute(
+            text(
+                "SELECT workspace_id, summary_version, family, partition_date, dimension_key FROM "
+                "dirty_summary_partitions ORDER BY dirty_since LIMIT :limit"
+            ),
+            {"limit": min(max(limit, 1), 100)},
+        )
+        partitions = [dict(row) for row in candidates.mappings()]
     processed = 0
-    for _ in range(min(max(limit, 1), 100)):
+    for partition in partitions:
         async with transaction() as conn:
-            claimed = await conn.execute(
+            scope = json.dumps(partition, default=str, sort_keys=True)
+            if not await conn.scalar(
+                text("SELECT pg_try_advisory_xact_lock(hashtextextended(:scope, 0))"),
+                {"scope": f"analytics-summary:{scope}"},
+            ):
+                continue
+            reason_event_id = await conn.scalar(
                 text(
-                    "SELECT workspace_id, summary_version, family, partition_date, dimension_key FROM "
-                    "dirty_summary_partitions ORDER BY dirty_since FOR UPDATE SKIP LOCKED LIMIT 1"
-                )
+                    "SELECT reason_event_id FROM dirty_summary_partitions "
+                    "WHERE workspace_id = :workspace_id AND summary_version = :summary_version "
+                    "AND family = :family AND partition_date = :partition_date "
+                    "AND dimension_key = :dimension_key"
+                ),
+                partition,
             )
-            row = claimed.mappings().one_or_none()
-            if row is None:
-                break
-            partition = dict(row)
+            if reason_event_id is None:
+                continue
             payload = await _compute(conn, partition)
+            current_reason = await conn.scalar(
+                text(
+                    "SELECT reason_event_id FROM dirty_summary_partitions "
+                    "WHERE workspace_id = :workspace_id AND summary_version = :summary_version "
+                    "AND family = :family AND partition_date = :partition_date "
+                    "AND dimension_key = :dimension_key FOR UPDATE"
+                ),
+                partition,
+            )
+            if current_reason is None:
+                continue
+            if current_reason != reason_event_id:
+                await conn.execute(
+                    text(
+                        "UPDATE dirty_summary_partitions SET dirty_since = clock_timestamp() "
+                        "WHERE workspace_id = :workspace_id AND summary_version = :summary_version "
+                        "AND family = :family AND partition_date = :partition_date "
+                        "AND dimension_key = :dimension_key"
+                    ),
+                    partition,
+                )
             await conn.execute(
                 text(
                     """
@@ -56,9 +93,10 @@ async def recompute_dirty_partitions(limit: int = 20) -> int:
                 text(
                     "DELETE FROM dirty_summary_partitions WHERE workspace_id = :workspace_id AND "
                     "summary_version = :summary_version AND family = :family AND partition_date = "
-                    ":partition_date AND dimension_key = :dimension_key"
+                    ":partition_date AND dimension_key = :dimension_key "
+                    "AND reason_event_id = :reason_event_id"
                 ),
-                partition,
+                {**partition, "reason_event_id": reason_event_id},
             )
         processed += 1
     return processed
