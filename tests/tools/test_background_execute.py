@@ -156,7 +156,9 @@ def _cron(cron_id: str, thread_id: str, metadata: dict[str, str]) -> dict[str, o
     }
 
 
-async def test_delete_crons_removes_legacy_crons_matched_by_payload() -> None:
+async def test_delete_crons_removes_legacy_crons_matched_by_payload(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     tagged = _cron(
         "tagged", "thread-1", {"kind": "background_tasks", "agent_thread_id": "thread-1"}
     )
@@ -165,8 +167,16 @@ async def test_delete_crons_removes_legacy_crons_matched_by_payload() -> None:
         _cron("legacy-2", "thread-1", {"kind": "background_tasks"}),
         _cron("other-thread", "thread-2", {"kind": "background_tasks"}),
     ]
+    monkeypatch.setattr(background_tasks, "_CRON_PAGE_SIZE", 2)
+    scan = [tagged, *legacy]
     client = AsyncMock()
-    client.crons.search.return_value = [tagged, *legacy]
+
+    async def search(*, metadata: dict[str, str], limit: int, offset: int = 0) -> list[object]:
+        if "agent_thread_id" in metadata:
+            return [tagged]
+        return scan[offset : offset + limit]
+
+    client.crons.search.side_effect = search
 
     with patch("agent.background_tasks._client", return_value=client):
         await background_tasks._delete_crons("thread-1")
