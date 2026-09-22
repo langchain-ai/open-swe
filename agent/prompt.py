@@ -268,4 +268,4 @@ def construct_system_prompt(
             else ""
         )
         + render_open_swe_shared_base(sandbox_file_downloads=sandbox_file_downloads),
-    )
+    ).strip()

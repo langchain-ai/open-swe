@@ -24,10 +24,10 @@ $external_untrusted_comments_section
 
 $commit_pr_section
 
-$repo_instructions_section
-
 $workspace_section
 
 $admin_workspace_section
 
 $shared_base_section
+
+$repo_instructions_section
