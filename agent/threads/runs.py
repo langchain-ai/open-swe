@@ -22,6 +22,7 @@ from agent.dashboard.options import (
     normalize_model_choice,
 )
 from agent.dashboard.profiles import get_profile
+from agent.dashboard.repository_usage import record_repository_usage
 from agent.dashboard.user_preferences import get_user_preferences
 from agent.dashboard.workspace_settings import (
     get_workspace_settings,
@@ -333,6 +334,8 @@ async def _create_dashboard_thread_record(
             )
         ],
     )
+    if has_repo:
+        await record_repository_usage(login, f"{repo_config['owner']}/{repo_config['name']}")
     return as_thread_dict(thread)
 
 

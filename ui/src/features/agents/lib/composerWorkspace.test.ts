@@ -112,6 +112,24 @@ describe("pickComposerRepo", () => {
     ).toBeNull()
   })
 
+  it("prefers recent use only when offered and the composer is untouched", () => {
+    const inputs = {
+      override: undefined,
+      recentRepo: "ACME/docs",
+      userDefault: "acme/oss",
+      workspaceDefault: "acme/oss",
+      offered,
+    }
+    expect(pickComposerRepo(inputs)).toBe("acme/docs")
+    expect(pickComposerRepo({ ...inputs, override: null })).toBeNull()
+    expect(pickComposerRepo({ ...inputs, override: "acme/oss" })).toBe(
+      "acme/oss"
+    )
+    expect(
+      pickComposerRepo({ ...inputs, recentRepo: "acme/other-workspace" })
+    ).toBe("acme/oss")
+  })
+
   it("prefers the user's default when offered, else the workspace's, else none", () => {
     expect(
       pickComposerRepo({
