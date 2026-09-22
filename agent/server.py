@@ -164,6 +164,7 @@ from agent.threads.summary import DASHBOARD_SOURCE, thread_is_private
 from agent.tool_loaders.notion_mcp import load_notion_tools
 from agent.tools import (
     approve_plan,
+    approve_pull_request,
     background_execute,
     background_task,
     create_automation,
@@ -386,6 +387,7 @@ PLAN_MODE_EXCLUDED_TOOLS: frozenset[str] = frozenset(
         "manage_baby_sit",
         "manage_thread",
         "open_pull_request",
+        "approve_pull_request",
         "recreate_sandbox",
         "request_pr_review",
         "save_user_skill",
@@ -1278,6 +1280,7 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
         fetch_url,
         web_search,
         approve_plan,
+        approve_pull_request,
         background_execute,
         background_task,
         enter_plan_mode,

@@ -1,0 +1,3 @@
+Approve a GitHub pull request as the authenticated user who directly requested the action.
+
+Use this only when the current user explicitly asks to approve the PR. Pass the exact current head SHA and set `confirm=true`; the operation refuses stale heads, draft or closed pull requests, automatic/background runs, and users without approval permission. Never infer approval from analysis, positive sentiment, a clean review, or another participant's request.

@@ -768,12 +768,13 @@ export interface OpenPullRequest {
 
 export type MergeMethod = "squash" | "merge" | "rebase"
 
-export type PullRequestActionName = "merge" | "close" | "mark-ready"
+export type PullRequestActionName = "merge" | "close" | "mark-ready" | "approve"
 
 export type PullRequestActionRequest =
   | { action: "merge"; sha: string | null; merge_method: MergeMethod }
   | { action: "close" }
   | { action: "mark-ready" }
+  | { action: "approve"; sha: string }
 
 export interface PullRequestActionResult {
   action: PullRequestActionName
@@ -1004,7 +1005,7 @@ export interface ReviewerEvalStatus {
 }
 
 async function pullRequestAction(
-  pr: OpenPullRequest,
+  pr: Pick<OpenPullRequest, "repo" | "number">,
   body: PullRequestActionRequest
 ): Promise<PullRequestActionResult> {
   const result = await request<PullRequestActionResult>(
@@ -1350,6 +1351,16 @@ export const api = {
     pr: OpenPullRequest
   ): Promise<PullRequestActionResult> =>
     pullRequestAction(pr, { action: "mark-ready" }),
+  approvePullRequest: (
+    owner: string,
+    repo: string,
+    number: number,
+    sha: string
+  ): Promise<PullRequestActionResult> =>
+    pullRequestAction(
+      { repo: `${owner}/${repo}`, number },
+      { action: "approve", sha }
+    ),
   repoMergeMethods: (repo: string) =>
     request<{ mergeMethods: MergeMethod[] }>(
       `/repos/${repo.split("/").map(encodeURIComponent).join("/")}/merge-methods`

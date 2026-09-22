@@ -9,7 +9,7 @@ import {
   useState,
 } from "react"
 import { StreamProvider, useStreamContext } from "@langchain/react"
-import { useQuery } from "@tanstack/react-query"
+import { useMutation, useQuery } from "@tanstack/react-query"
 import {
   ArrowUpIcon,
   CodeIcon,
@@ -239,16 +239,34 @@ function LoadingState() {
   )
 }
 
-function ChatBody() {
+function ChatBody({
+  owner,
+  repo,
+  number,
+  headSha,
+}: {
+  owner: string
+  repo: string
+  number: number
+  headSha: string
+}) {
   const composer = useReviewChatComposer()
   const stream = useStreamContext()
   const [value, setValue] = useState("")
   const [attachments, setAttachments] = useState<Array<ChatAttachment>>([])
+  const [commandError, setCommandError] = useState<string | null>(null)
+  const approvalPendingRef = useRef(false)
   const scrollRef = useRef<HTMLDivElement>(null)
   const autoScrollRef = useRef(true)
   const prevTopRef = useRef(0)
   const messages = stream.messages
-  const busy = stream.isLoading
+  const approval = useMutation({
+    mutationFn: () => api.approvePullRequest(owner, repo, number, headSha),
+    retry: false,
+  })
+  const { mutate: approve, reset: resetApproval } = approval
+  const streamBusy = stream.isLoading
+  const busy = streamBusy || approval.isPending
   // True during the one-time getState hydration when switching to / loading an
   // existing thread, before its messages have arrived.
   const hydrating = stream.isThreadLoading
@@ -269,14 +287,34 @@ function ChatBody() {
   }, [])
 
   const send = useCallback(
-    (text: string, atts: Array<ChatAttachment>) => {
+    (text: string, atts: Array<ChatAttachment>): boolean => {
       const trimmed = text.trim()
       const first = atts[0]
-      if ((!trimmed && !first) || busy) return
+      if ((!trimmed && !first) || busy || approvalPendingRef.current)
+        return false
+      if (trimmed === "/approve") {
+        if (first) {
+          setCommandError(
+            "Remove attachments before approving the pull request."
+          )
+          return false
+        }
+        setCommandError(null)
+        resetApproval()
+        approvalPendingRef.current = true
+        approve(undefined, {
+          onSettled: () => {
+            approvalPendingRef.current = false
+          },
+        })
+        return true
+      }
+      setCommandError(null)
       const content = serializeMessage(trimmed, atts)
       void stream.submit({ messages: [{ type: "human", content }] })
+      return true
     },
-    [busy, stream]
+    [approve, busy, resetApproval, stream]
   )
 
   const structuredEntities = collectStructuredEntities(
@@ -299,7 +337,7 @@ function ChatBody() {
   })
 
   const submitComposer = () => {
-    send(value, attachments)
+    if (!send(value, attachments)) return
     setValue("")
     setAttachments([])
   }
@@ -404,7 +442,7 @@ function ChatBody() {
               </div>
             )
           })}
-          {busy && (
+          {streamBusy && (
             <div className="flex justify-start">
               <div className="px-3 py-2 text-xs text-muted-foreground">
                 Thinking…
@@ -415,6 +453,23 @@ function ChatBody() {
       )}
 
       <div className="p-3">
+        {(commandError ||
+          approval.isPending ||
+          approval.isSuccess ||
+          approval.isError) && (
+          <p
+            className={`mb-2 px-2 text-xs ${commandError || approval.isError ? "text-destructive" : "text-muted-foreground"}`}
+            role={commandError || approval.isError ? "alert" : "status"}
+            aria-live="polite"
+          >
+            {commandError ??
+              (approval.isPending
+                ? "Approving pull request…"
+                : approval.isSuccess
+                  ? "Pull request approved."
+                  : approval.error?.message)}
+          </p>
+        )}
         <div className="flex flex-col gap-1.5 rounded-2xl border border-border bg-background px-1.5 py-1.5 transition-colors focus-within:border-ring/60">
           {attachments.length > 0 && (
             <div className="flex flex-wrap gap-1 pt-0.5 pl-2">
@@ -463,12 +518,14 @@ function ChatPanel({
   number,
   assistantId,
   threadId,
+  headSha,
 }: {
   owner: string
   repo: string
   number: number
   assistantId: string
   threadId: string
+  headSha: string
 }) {
   const client = useMemo(
     () => createDashboardClient(reviewChatApiBase(owner, repo, number)),
@@ -483,7 +540,7 @@ function ChatPanel({
         fetch={dashboardFetch}
         threadId={threadId}
       >
-        <ChatBody />
+        <ChatBody owner={owner} repo={repo} number={number} headSha={headSha} />
       </StreamProvider>
     </div>
   )
@@ -493,10 +550,12 @@ export function ReviewChat({
   owner,
   repo,
   number,
+  headSha,
 }: {
   owner: string
   repo: string
   number: number
+  headSha: string
 }) {
   const meta = useQuery({
     queryKey: ["review-chat", owner, repo, number],
@@ -526,6 +585,7 @@ export function ReviewChat({
       owner={owner}
       repo={repo}
       number={number}
+      headSha={headSha}
       assistantId={meta.data.assistant_id}
       threadId={meta.data.thread_id}
     />

@@ -15,7 +15,7 @@ from agent.github.http import (
 from agent.github.pull_request_status import pull_request_identity
 from agent.github.repo_merge_methods import MergeMethod
 
-PullRequestActionName = Literal["merge", "close", "mark-ready"]
+PullRequestActionName = Literal["merge", "close", "mark-ready", "approve"]
 
 # REST cannot clear the draft flag, so marking a PR ready has to go through GraphQL.
 _READY_MUTATION = """
@@ -192,8 +192,54 @@ class MarkReadyAction(_PullRequestActionBase):
             raise HTTPException(502, self.unconfirmed)
 
 
+class ApproveAction(_PullRequestActionBase):
+    action: Literal["approve"]
+    sha: str = Field(pattern=r"^[0-9a-fA-F]{40,64}$")
+
+    transport_failure: ClassVar[str] = (
+        "Could not confirm approval. Refresh to check the PR before retrying."
+    )
+    invalid_response: ClassVar[str] = (
+        "GitHub returned an invalid approval response. Refresh to check the PR."
+    )
+    unconfirmed: ClassVar[str] = "GitHub did not confirm the approval."
+
+    async def perform(self, client: httpx2.AsyncClient, owner: str, repo: str, number: int) -> None:
+        url = f"{GITHUB_API_BASE}/repos/{owner}/{repo}/pulls/{number}"
+        response, pull = await self._request(client, "GET", url)
+        if not response.is_success:
+            raise self._refusal(response, pull)
+        if pull.get("state") != "open":
+            raise HTTPException(409, "Pull request is not open.")
+        if pull.get("draft") is not False:
+            raise HTTPException(409, "Pull request is still a draft.")
+        head = _node(pull, "head")
+        head_sha = head.get("sha") if head is not None else None
+        if not isinstance(head_sha, str):
+            raise HTTPException(502, self.invalid_response)
+        if head_sha.lower() != self.sha.lower():
+            raise HTTPException(409, "Pull request head changed. Refresh before approving.")
+        response, review = await self._request(
+            client,
+            "POST",
+            f"{url}/reviews",
+            {
+                "commit_id": head_sha,
+                "event": "APPROVE",
+                "body": "Approved via Open SWE review chat.",
+            },
+        )
+        if (
+            not response.is_success
+            or review.get("state") != "APPROVED"
+            or review.get("commit_id") != head_sha
+        ):
+            raise self._refusal(response, review)
+
+
 PullRequestAction = Annotated[
-    MergeAction | CloseAction | MarkReadyAction, Field(discriminator="action")
+    MergeAction | CloseAction | MarkReadyAction | ApproveAction,
+    Field(discriminator="action"),
 ]
 
 

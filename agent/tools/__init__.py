@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING, Any
 _TOOL_MODULES = {
     "add_finding": ".add_finding",
     "approve_plan": ".approve_plan",
+    "approve_pull_request": "agent.github.tools.approve_pull_request",
     "background_execute": ".background_execute",
     "background_task": ".background_task",
     "create_automation": ".automations",
@@ -70,6 +71,7 @@ _TOOL_MODULES = {
 __all__ = [
     "add_finding",
     "approve_plan",
+    "approve_pull_request",
     "background_execute",
     "background_task",
     "create_automation",
@@ -133,6 +135,7 @@ __all__ = [
 ]
 
 if TYPE_CHECKING:
+    from agent.github.tools.approve_pull_request import approve_pull_request
     from agent.github.tools.read_repo_file import read_repo_file
     from agent.github.tools.search_repo_code import search_repo_code
     from agent.incidents.tools import manage_incident

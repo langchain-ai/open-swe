@@ -62,6 +62,22 @@ export const githubActions: Record<PullRequestActionName, GithubAction> = {
       await api.markPullRequestReady(pr)
     },
   },
+  approve: {
+    labels: {
+      idle: "Approve",
+      pending: "Approving…",
+      done: "Approved",
+      retry: "Retry approval",
+    },
+    succeeded: (subject) => `Approved ${subject}`,
+    failed: (subject) => `Could not approve ${subject}`,
+    run: async (pr) => {
+      if (!pr.headSha) throw new Error("Refresh before approving.")
+      const [owner, repo] = pr.repo.split("/")
+      if (!owner || !repo) throw new Error("Invalid pull request repository.")
+      await api.approvePullRequest(owner, repo, pr.number, pr.headSha)
+    },
+  },
 }
 
 export function actionLabel(

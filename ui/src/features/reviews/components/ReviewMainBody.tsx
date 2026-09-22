@@ -2633,6 +2633,7 @@ function SidePanel({
             owner={detail.owner}
             repo={detail.repo}
             number={detail.number}
+            headSha={detail.pr.head_sha}
           />
         ) : (
           <div className="divide-y divide-border">

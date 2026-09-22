@@ -7,6 +7,8 @@ from fastapi import HTTPException
 
 from agent.github import pull_request_actions as actions
 from agent.github import pull_request_dashboard_routes as pr_routes
+from agent.github.tools import approve_pull_request as approve_tool
+from agent.run_config import RunConfig
 
 
 @asynccontextmanager
@@ -115,6 +117,83 @@ async def test_a_pull_request_already_out_of_draft_is_ready_without_a_mutation(g
     assert request.await_count == 1
 
 
+async def test_approval_reads_and_pins_the_current_head(github, monkeypatch):
+    monkeypatch.setattr(actions, "GITHUB_API_BASE", "https://fake-gh")
+    sha = "a" * 40
+    request = github(
+        AsyncMock(
+            side_effect=[
+                response({"state": "open", "draft": False, "head": {"sha": sha}}),
+                response({"state": "APPROVED", "commit_id": sha}, 201),
+            ]
+        )
+    )
+    result = await actions.act_on_pull_request(
+        "acme", "app", 7, actions.ApproveAction(action="approve", sha=sha), "user-token"
+    )
+    assert result == actions.PullRequestActionResult(action="approve", done=True)
+    assert [call.args[1:] for call in request.await_args_list] == [
+        ("GET", "https://fake-gh/repos/acme/app/pulls/7"),
+        ("POST", "https://fake-gh/repos/acme/app/pulls/7/reviews"),
+    ]
+    assert request.await_args_list[0].kwargs == {"max_retries": 0}
+    assert request.await_args_list[1].kwargs == {
+        "json": {
+            "commit_id": sha,
+            "event": "APPROVE",
+            "body": "Approved via Open SWE review chat.",
+        },
+        "max_retries": 0,
+    }
+
+
+@pytest.mark.parametrize(
+    "pull,message",
+    [
+        ({"state": "closed", "draft": False, "head": {"sha": "a" * 40}}, "not open"),
+        ({"state": "open", "draft": True, "head": {"sha": "a" * 40}}, "still a draft"),
+        ({"state": "open", "draft": False, "head": {"sha": "b" * 40}}, "head changed"),
+    ],
+)
+async def test_approval_rejects_an_ineligible_or_changed_pull_request(github, pull, message):
+    request = github(AsyncMock(return_value=response(pull)))
+    with pytest.raises(HTTPException, match=message):
+        await actions.act_on_pull_request(
+            "acme",
+            "app",
+            7,
+            actions.ApproveAction(action="approve", sha="a" * 40),
+            "user-token",
+        )
+    assert request.await_count == 1
+
+
+@pytest.mark.parametrize(
+    "payload,status,message",
+    [
+        ({"message": "Reviews may not approve their own pull request"}, 422, "own pull request"),
+        ({"state": "PENDING", "commit_id": "a" * 40}, 201, "did not confirm"),
+        ({"state": "APPROVED", "commit_id": "b" * 40}, 201, "did not confirm"),
+    ],
+)
+async def test_approval_requires_github_confirmation(github, payload, status, message):
+    sha = "a" * 40
+    request = github(
+        AsyncMock(
+            side_effect=[
+                response({"state": "open", "draft": False, "head": {"sha": sha}}),
+                response(payload, status),
+            ]
+        )
+    )
+    with pytest.raises(HTTPException, match=message) as error:
+        await actions.act_on_pull_request(
+            "acme", "app", 7, actions.ApproveAction(action="approve", sha=sha), "user-token"
+        )
+    assert error.value.status_code == (status if 400 <= status < 500 else 502)
+    assert request.await_count == 2
+
+
 async def test_a_refused_mutation_surfaces_githubs_own_message(github):
     github(
         AsyncMock(
@@ -146,6 +225,7 @@ async def test_an_unreadable_pull_request_never_reaches_the_mutation(github):
         actions.MergeAction(action="merge", sha="a" * 40, merge_method="squash"),
         actions.CloseAction(action="close"),
         actions.MarkReadyAction(action="mark-ready"),
+        actions.ApproveAction(action="approve", sha="a" * 40),
     ],
 )
 async def test_every_action_rejects_an_invalid_pull_request(action):
@@ -175,3 +255,59 @@ async def test_the_route_forwards_the_action_with_the_signed_in_users_token(monk
         "acme", "app", 7, action, {"sub": "octocat"}
     ) == actions.PullRequestActionResult(action="mark-ready", done=True)
     act.assert_awaited_once_with("acme", "app", 7, action, "user-token")
+
+
+async def test_approval_tool_uses_the_authenticated_requesters_token(monkeypatch):
+    monkeypatch.setattr(
+        approve_tool.RunConfig,
+        "from_runtime",
+        lambda: RunConfig(source="dashboard"),
+    )
+    monkeypatch.setattr(approve_tool, "pr_author_login", AsyncMock(return_value="octocat"))
+    monkeypatch.setattr(
+        approve_tool, "get_valid_access_token", AsyncMock(return_value="user-token")
+    )
+    act = AsyncMock(return_value=actions.PullRequestActionResult(action="approve", done=True))
+    monkeypatch.setattr(approve_tool, "act_on_pull_request", act)
+    sha = "a" * 40
+    assert await approve_tool.approve_pull_request("acme", "app", 7, sha, True) == {
+        "success": True,
+        "action": "approve",
+    }
+    act.assert_awaited_once_with(
+        "acme",
+        "app",
+        7,
+        actions.ApproveAction(action="approve", sha=sha),
+        "user-token",
+    )
+
+
+async def test_approval_tool_requires_confirmation_before_authorization(monkeypatch):
+    authorize = AsyncMock()
+    monkeypatch.setattr(approve_tool, "pr_author_login", authorize)
+    assert await approve_tool.approve_pull_request("acme", "app", 7, "a" * 40, False) == {
+        "success": False,
+        "error": "Approval requires explicit confirmation.",
+    }
+    authorize.assert_not_awaited()
+
+
+@pytest.mark.parametrize(
+    "config",
+    [
+        RunConfig(source="automation"),
+        RunConfig(source="dashboard", background_task_completion=True),
+        RunConfig(source="slack", schedule_id="schedule"),
+        RunConfig(source="dashboard", watch_key="watch"),
+    ],
+)
+async def test_approval_tool_rejects_noninteractive_runs(monkeypatch, config):
+    monkeypatch.setattr(approve_tool.RunConfig, "from_runtime", lambda: config)
+    authorize = AsyncMock()
+    monkeypatch.setattr(approve_tool, "pr_author_login", authorize)
+    assert await approve_tool.approve_pull_request("acme", "app", 7, "a" * 40, True) == {
+        "success": False,
+        "error": "Approval requires a direct user request.",
+    }
+    authorize.assert_not_awaited()
