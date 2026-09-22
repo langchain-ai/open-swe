@@ -615,7 +615,9 @@ function PRMergeRateSection({
               <strong>Median distance</strong> is the median normalized line
               edit distance between each merged PR’s opening diff and final
               diff. It is calculated only for merged PRs with complete text
-              patches; higher means more post-open editing.
+              patches; higher means more post-open editing. Counts show measured
+              PRs out of all merged PRs. Fewer than 5 measurements is flagged as
+              a small sample, not a statistical confidence estimate.
             </p>
             <p>
               <strong>Merge rate</strong> includes only PRs old enough to have a
@@ -1100,17 +1102,22 @@ function PRMergeRateCells({
         <OpenPRCount cohort={cohort} maturityDays={maturityDays} />
       </td>
       <td className="px-2 py-3 text-right tabular-nums">
-        <Tooltip>
-          <TooltipTrigger className="cursor-help rounded-sm underline decoration-dotted underline-offset-2 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring">
-            {cohort.median_distance_basis_points == null
-              ? "—"
-              : `${(cohort.median_distance_basis_points / 100).toFixed(1)}%`}
-          </TooltipTrigger>
-          <TooltipPopup>
-            {cohort.distance_sample_size ?? 0} merged PR
-            {cohort.distance_sample_size === 1 ? "" : "s"} measured
-          </TooltipPopup>
-        </Tooltip>
+        <span>
+          {cohort.median_distance_basis_points == null
+            ? "—"
+            : `${(cohort.median_distance_basis_points / 100).toFixed(1)}%`}
+        </span>
+        {cohort.distance_sample_size != null && (
+          <div className="text-xs whitespace-nowrap text-muted-foreground">
+            {cohort.distance_sample_size} measured / {cohort.merged} merged
+          </div>
+        )}
+        {(cohort.distance_sample_size ?? 0) > 0 &&
+          (cohort.distance_sample_size ?? 0) < 5 && (
+            <div className="text-xs text-amber-600 dark:text-amber-400">
+              Small sample
+            </div>
+          )}
       </td>
       <td className="px-4 py-3 text-right text-sm font-semibold tabular-nums">
         {cohort.mature_cohort_merge_share == null
