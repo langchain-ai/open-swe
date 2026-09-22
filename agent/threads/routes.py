@@ -14,7 +14,6 @@ from agent.dashboard.deps import ADMIN_DEP, SESSION_DEP, session_is_admin
 from agent.dashboard.user_preferences import get_user_preferences
 from agent.github.pull_request_checks import PullRequestState
 from agent.threads import terminal
-from agent.threads.callers import CallerDep
 from agent.threads.diffs import (
     get_dashboard_thread_branch_diff,
     get_dashboard_thread_recovery_patch,
@@ -46,6 +45,7 @@ from agent.threads.listing import (
     unpin_dashboard_thread,
 )
 from agent.threads.machine_reads import machine_thread, machine_threads
+from agent.threads.principals import PrincipalDep
 from agent.threads.proxy import (
     proxy_dashboard_thread_commands,
     proxy_dashboard_thread_history,
@@ -78,15 +78,15 @@ async def api_get_local_trace_url(
 
 @router.get("/threads")
 async def api_list_threads(
-    caller: CallerDep,
+    principal: PrincipalDep,
     all: bool = False,
     limit: int = 25,
 ) -> list[dict[str, Any]]:
-    if caller.machine:
-        return await machine_threads(caller, limit=limit)
-    if all and not caller.admin:
+    if principal.machine:
+        return await machine_threads(principal, limit=limit)
+    if all and not principal.admin:
         raise HTTPException(403, "admin only")
-    return await list_dashboard_threads(caller.person, email=caller.email, include_all=all)
+    return await list_dashboard_threads(principal.person, email=principal.email, include_all=all)
 
 
 @router.post("/threads/resolve-all")
@@ -236,17 +236,17 @@ async def api_get_thread_pull_request_context(
 @router.get("/threads/{thread_id}")
 async def api_get_thread(
     thread_id: str,
-    caller: CallerDep,
+    principal: PrincipalDep,
     mark_viewed: bool = True,
 ) -> Response:
-    if caller.machine:
-        return JSONResponse(await machine_thread(thread_id, caller))
+    if principal.machine:
+        return JSONResponse(await machine_thread(thread_id, principal))
     timings: dict[str, float] = {}
     started = perf_counter()
     payload = await get_dashboard_thread(
         thread_id,
-        caller.person,
-        email=caller.email,
+        principal.person,
+        email=principal.email,
         mark_viewed=mark_viewed,
         timings=timings,
     )
@@ -441,7 +441,7 @@ async def api_thread_stream_events(
 async def api_thread_commands(
     thread_id: str,
     request: Request,
-    caller: CallerDep,
+    principal: PrincipalDep,
 ) -> Response:
     """Every way a thread is started or continued, whoever is asking.
 
@@ -451,11 +451,11 @@ async def api_thread_commands(
     body = await request.body()
     status_code, content, media_type = await proxy_dashboard_thread_commands(
         thread_id,
-        caller.login or "",
+        principal.login or "",
         body,
-        email=caller.email,
+        email=principal.email,
         content_type=request.headers.get("content-type", "application/json"),
-        caller=caller,
+        principal=principal,
     )
     return Response(content=content, status_code=status_code, media_type=media_type)
 

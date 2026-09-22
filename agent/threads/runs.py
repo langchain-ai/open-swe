@@ -45,7 +45,7 @@ from agent.threads.access import (
     agent_version_metadata,
     resolve_run_email,
 )
-from agent.threads.callers import STARTED_BY_ID, STARTED_BY_NAME, Caller, ThreadType
+from agent.threads.principals import STARTED_BY_ID, STARTED_BY_NAME, Principal, ThreadType
 from agent.threads.summary import (
     DASHBOARD_SOURCE,
     TRANSCRIPT_VERSION,
@@ -529,7 +529,7 @@ async def _requested_visibility(
     """
     requested = requested_thread_type(configurable)
     if requested == "system":
-        # The caller check upstream allows this only for an admin, and an admin's
+        # The principal check upstream allows this only for an admin, and an admin's
         # system thread is not created through the dashboard record at all.
         raise HTTPException(500, "system threads are not created as a person's thread")
     if requested is not None:
@@ -887,7 +887,7 @@ async def _notify_slack_web_handoff(
 
 async def _create_system_thread_record(
     thread_id: str,
-    caller: Caller,
+    principal: Principal,
     *,
     prompt: str,
     title: str | None,
@@ -908,12 +908,12 @@ async def _create_system_thread_record(
         "automation_scope": "workspace",
         "owner_type": "system",
         "visibility": "public",
-        "workspace": caller.workspace,
-        "environment": caller.workspace,
-        STARTED_BY_ID: caller.started_by_id,
-        STARTED_BY_NAME: caller.started_by_name,
-        "created_by": caller.created_by,
-        "title": title or prompt[:80] or caller.started_by_name,
+        "workspace": principal.workspace,
+        "environment": principal.workspace,
+        STARTED_BY_ID: principal.started_by_id,
+        STARTED_BY_NAME: principal.started_by_name,
+        "created_by": principal.created_by,
+        "title": title or prompt[:80] or principal.started_by_name,
         "base_branch": "main",
         "model": "Default",
         "created_at_ms": now_ms,
@@ -927,22 +927,24 @@ async def _create_system_thread_record(
     return as_thread_dict(await client.threads.get(thread_id))
 
 
-async def _system_repo_config(configurable: Mapping[str, Any], caller: Caller) -> dict[str, str]:
+async def _system_repo_config(
+    configurable: Mapping[str, Any], principal: Principal
+) -> dict[str, str]:
     """The repository a machine's thread works in, checked against its workspace.
 
     A federated workflow that names none gets its own repository, which is the
     only one it could have been talking about.
     """
     requested = configurable.get("repo")
-    if requested is None and caller.default_repo:
-        requested = caller.default_repo
+    if requested is None and principal.default_repo:
+        requested = principal.default_repo
     if requested is None:
         return {}
     repo_config = _parse_repo(requested)
     if not repo_config:
         raise HTTPException(422, "repo must be owner/name")
     owner = await workspace_for_repo(repo_config["owner"], repo_config["name"])
-    if owner != caller.workspace:
+    if owner != principal.workspace:
         raise HTTPException(403, "repository is not in this workspace")
     await require_repo_access_for_workspace(f"{repo_config['owner']}/{repo_config['name']}")
     return repo_config
@@ -950,14 +952,14 @@ async def _system_repo_config(configurable: Mapping[str, Any], caller: Caller) -
 
 async def _enrich_system_run_start_command(
     thread_id: str,
-    caller: Caller,
+    principal: Principal,
     command: dict[str, Any],
     *,
     metadata: dict[str, Any],
     thread_busy: bool = False,
     creating: bool = False,
 ) -> dict[str, Any]:
-    """The machine-caller half of ``run.start``.
+    """The machine-principal half of ``run.start``.
 
     The person's path resolves a profile, a model, participants and a GitHub
     token for whoever sent the message. None of that exists here, so this stamps
@@ -965,7 +967,7 @@ async def _enrich_system_run_start_command(
     pipeline — forwarding, streaming, run bookkeeping — shared.
     """
     if command.get("method") != "run.start":
-        raise HTTPException(403, "a machine caller may only start runs")
+        raise HTTPException(403, "a machine principal may only start runs")
     if thread_busy:
         raise HTTPException(409, "thread is already running; queue message instead")
 
@@ -981,38 +983,38 @@ async def _enrich_system_run_start_command(
     requested = requested_thread_type(client_configurable)
     if requested is None:
         raise HTTPException(422, "thread_type is required")
-    caller.authorize(requested)
+    principal.authorize(requested)
 
     content = _command_message_content(params)
     prompt = _command_prompt_text(content)
     if not prompt.strip():
         raise HTTPException(422, "a run needs a prompt")
     if _dashboard_images_from_content(content):
-        raise HTTPException(422, "machine callers cannot attach images")
+        raise HTTPException(422, "machine principals cannot attach images")
 
-    repo_config = await _system_repo_config(client_configurable, caller)
+    repo_config = await _system_repo_config(client_configurable, principal)
     if creating:
         title = client_configurable.get("title")
         metadata = thread_metadata(
             await _create_system_thread_record(
                 thread_id,
-                caller,
+                principal,
                 prompt=prompt,
                 title=title if isinstance(title, str) else None,
                 repo_config=repo_config,
             )
         )
     else:
-        caller.assert_can_post(metadata)
+        principal.assert_can_post(metadata)
 
     invocation_id = new_invocation_id()
     structured = build_input_messages(
         content if content is not None else prompt,
-        {"sender_id": caller.sender_id, "surface": "automation", "kind": "system"},
+        {"sender_id": principal.sender_id, "surface": "automation", "kind": "system"},
         systems=[
             {
-                "id": caller.sender_id,
-                "display_name": caller.started_by_name,
+                "id": principal.sender_id,
+                "display_name": principal.started_by_name,
                 "platform": "open-swe",
             }
         ],
@@ -1027,9 +1029,9 @@ async def _enrich_system_run_start_command(
         {
             "thread_id": thread_id,
             "source": API_SOURCE,
-            "workspace": caller.workspace,
-            "environment": caller.workspace,
-            STARTED_BY_ID: caller.started_by_id,
+            "workspace": principal.workspace,
+            "environment": principal.workspace,
+            STARTED_BY_ID: principal.started_by_id,
         },
         invocation_id,
     )

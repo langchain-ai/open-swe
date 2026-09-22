@@ -1,9 +1,9 @@
-"""What a machine caller may read back about the threads it started.
+"""What a machine principal may read back about the threads it started.
 
 A key and a workflow are not people: they have no viewed state, no pinned list
 and no participants, and the dashboard's per-user reads are all built around
 those. So they get one flat view of a thread and one flat list, scoped by the
-caller id stamped on the threads they started.
+principal id stamped on the threads they started.
 """
 
 import logging
@@ -11,7 +11,7 @@ from typing import Any
 
 from fastapi import HTTPException
 
-from agent.threads.callers import STARTED_BY_ID, Caller
+from agent.threads.principals import STARTED_BY_ID, Principal
 from agent.threads.summary import run_status_to_agent_status
 from agent.utils.dashboard_links import dashboard_thread_url
 from agent.utils.json_types import JsonObject, thread_metadata
@@ -38,8 +38,8 @@ def _view(thread: Any, thread_id: str, metadata: JsonObject) -> JsonObject:
     }
 
 
-async def machine_thread(thread_id: str, caller: Caller) -> JsonObject:
-    """One thread this caller started, or 404."""
+async def machine_thread(thread_id: str, principal: Principal) -> JsonObject:
+    """One thread this principal started, or 404."""
     client = langgraph_client()
     try:
         thread = await client.threads.get(thread_id)
@@ -47,14 +47,14 @@ async def machine_thread(thread_id: str, caller: Caller) -> JsonObject:
         logger.debug("Thread lookup failed for %s", thread_id, exc_info=True)
         raise HTTPException(404, "thread not found") from exc
     metadata = thread_metadata(thread)
-    caller.assert_can_read(metadata)
+    principal.assert_can_read(metadata)
     return _view(thread, thread_id, metadata)
 
 
-async def machine_threads(caller: Caller, *, limit: int = 25) -> list[JsonObject]:
-    """The threads this caller started, newest first."""
+async def machine_threads(principal: Principal, *, limit: int = 25) -> list[JsonObject]:
+    """The threads this principal started, newest first."""
     threads = await langgraph_client().threads.search(
-        metadata={STARTED_BY_ID: caller.started_by_id},
+        metadata={STARTED_BY_ID: principal.started_by_id},
         limit=min(max(limit, 1), MAX_MACHINE_PAGE),
     )
     views: list[JsonObject] = []

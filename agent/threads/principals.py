@@ -1,13 +1,13 @@
 """Whoever is asking to start or read a thread, and what they are allowed to ask for.
 
-Three kinds of caller reach the thread API. A person signs in and gets their own
-threads. A workspace API key and a federated GitHub Actions workflow are
+Three kinds of principal reach the thread API. A person signs in and gets their
+own threads. A workspace API key and a federated GitHub Actions workflow are
 machines: they start threads that belong to a workspace rather than to anyone,
 and they may read back only what they themselves started, because none of the
 dashboard's ownership rules describe them.
 
-Which kind of thread a request creates is never inferred from the caller. The
-request names it, and the caller is checked against it:
+Which kind of thread a request creates is never inferred from who asked. The
+request names it, and the principal is checked against it:
 
 ======================  ==============================================
 ``system``              machines, and admins
@@ -38,7 +38,7 @@ from agent.workspaces.store import WORKSPACES
 
 logger = logging.getLogger(__name__)
 
-CallerKind = Literal["api_key", "github_actions", "person"]
+PrincipalKind = Literal["api_key", "github_actions", "person"]
 ThreadType = Literal["system", "workspace", "private"]
 
 STARTED_BY_ID = "started_by_id"
@@ -48,10 +48,10 @@ _UNAUTHENTICATED = "authenticate with an API key, a federated workflow token, or
 
 
 @dataclass(frozen=True, kw_only=True)
-class Caller:
-    """One authenticated caller. Machines carry a workspace; people carry a login."""
+class Principal:
+    """One authenticated principal. Machines carry a workspace; people carry a login."""
 
-    kind: CallerKind
+    kind: PrincipalKind
     workspace: str = ""
     login: str | None = None
     email: str | None = None
@@ -63,7 +63,7 @@ class Caller:
     default_repo: str = ""
 
     @classmethod
-    def of_key(cls, key: ApiKey) -> Caller:
+    def of_key(cls, key: ApiKey) -> Principal:
         return cls(
             kind="api_key",
             workspace=key.workspace,
@@ -73,7 +73,7 @@ class Caller:
         )
 
     @classmethod
-    def of_workflow(cls, claims: GitHubActionsClaims, workspace: str) -> Caller:
+    def of_workflow(cls, claims: GitHubActionsClaims, workspace: str) -> Principal:
         return cls(
             kind="github_actions",
             workspace=workspace,
@@ -84,7 +84,7 @@ class Caller:
         )
 
     @classmethod
-    def of_login(cls, login: str, email: str | None = None) -> Caller:
+    def of_login(cls, login: str, email: str | None = None) -> Principal:
         return cls(
             kind="person",
             login=login,
@@ -93,7 +93,7 @@ class Caller:
         )
 
     @classmethod
-    def of_person(cls, session: dict[str, Any]) -> Caller:
+    def of_person(cls, session: dict[str, Any]) -> Principal:
         login = session.get("sub")
         if not isinstance(login, str) or not login.strip():
             raise HTTPException(401, "session carries no user")
@@ -107,7 +107,7 @@ class Caller:
     @property
     def person(self) -> str:
         if self.login is None:
-            raise RuntimeError("caller is a machine, not a person")
+            raise RuntimeError("principal is a machine, not a person")
         return self.login
 
     @property
@@ -118,9 +118,9 @@ class Caller:
         return f"github:{self.person}"
 
     def authorize(self, requested: ThreadType) -> None:
-        """Refuse a kind of thread this caller may not create."""
+        """Refuse a kind of thread this principal may not create."""
         if self.machine and requested != "system":
-            raise HTTPException(403, "a machine caller may only start system threads")
+            raise HTTPException(403, "a machine principal may only start system threads")
         if not self.machine and requested == "system" and not self.admin:
             raise HTTPException(403, "only admins may start system threads")
 
@@ -149,7 +149,7 @@ def _bearer(request: Request) -> str:
     return token.strip() if scheme.strip().lower() == "bearer" else ""
 
 
-async def _federated_caller(token: str) -> Caller:
+async def _federated_principal(token: str) -> Principal:
     """The workflow behind a GitHub token, if a workspace lets that repository in."""
     try:
         claims = await verify(token)
@@ -173,11 +173,11 @@ async def _federated_caller(token: str) -> Caller:
             "workspace": workspace,
         },
     )
-    return Caller.of_workflow(claims, workspace)
+    return Principal.of_workflow(claims, workspace)
 
 
-async def require_caller(request: Request) -> Caller:
-    """The caller behind this request, whichever credential it brought.
+async def require_principal(request: Request) -> Principal:
+    """The principal behind this request, whichever credential it brought.
 
     A bearer token is matched against the API keys first and only then checked
     as GitHub's, so nothing is verified against keys it was not minted for.
@@ -186,14 +186,14 @@ async def require_caller(request: Request) -> Caller:
     if token:
         key = await api_key_from_token(token)
         if key is not None:
-            return Caller.of_key(key)
+            return Principal.of_key(key)
         if looks_federated(token):
-            return await _federated_caller(token)
+            return await _federated_principal(token)
     session = optional_session(request)
     if session is None:
         raise HTTPException(401, _UNAUTHENTICATED, headers={"WWW-Authenticate": "Bearer"})
-    return Caller.of_person(session)
+    return Principal.of_person(session)
 
 
-CALLER_DEP = Depends(require_caller)
-CallerDep = Annotated[Caller, CALLER_DEP]
+PRINCIPAL_DEP = Depends(require_principal)
+PrincipalDep = Annotated[Principal, PRINCIPAL_DEP]

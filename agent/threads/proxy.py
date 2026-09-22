@@ -15,7 +15,7 @@ from agent.threads.access import (
     _authorized_thread_metadata,
     _readable_thread_metadata,
 )
-from agent.threads.callers import Caller
+from agent.threads.principals import Principal
 from agent.threads.runs import (
     _ASSISTANT_ID,
     _enrich_run_start_command,
@@ -145,15 +145,15 @@ async def proxy_dashboard_thread_commands(
     *,
     email: str | None = None,
     content_type: str = "application/json",
-    caller: Caller | None = None,
+    principal: Principal | None = None,
 ) -> tuple[int, bytes, str | None]:
     """Forward one command, enriched for whoever sent it.
 
-    ``caller`` is how a machine gets in; every other caller is the person named
-    by ``login``, which is what the dashboard and the agent's own tools pass.
+    ``principal`` is how a machine gets in. Without one the sender is the person
+    named by ``login``, which is what the dashboard and the agent's own tools pass.
     """
     received_at_ms = _now_ms()
-    caller = caller or Caller.of_login(login, email)
+    principal = principal or Principal.of_login(login, email)
     require_json_content_type(content_type)
     try:
         parsed = json.loads(body)
@@ -187,21 +187,21 @@ async def proxy_dashboard_thread_commands(
         metadata = thread_metadata(thread)
         post_command = method in _THREAD_POST_COMMAND_METHODS
         if post_command:
-            caller.assert_can_post(metadata)
+            principal.assert_can_post(metadata)
         else:
-            caller.assert_can_read(metadata)
+            principal.assert_can_read(metadata)
         if method != "run.start" and not (post_command and metadata.get("admin_thread") is True):
-            caller.assert_can_read(metadata)
+            principal.assert_can_read(metadata)
         metadata_run_status = metadata.get("latest_run_status")
         thread_busy = _thread_is_busy(thread) or metadata_run_status in {"pending", "running"}
 
     url = f"{langgraph_url().rstrip('/')}/threads/{thread_id}/commands"
     headers = langgraph_proxy_headers(content_type=content_type)
 
-    if caller.machine:
+    if principal.machine:
         enriched = await _enrich_system_run_start_command(
             thread_id,
-            caller,
+            principal,
             parsed,
             metadata=metadata,
             thread_busy=thread_busy,

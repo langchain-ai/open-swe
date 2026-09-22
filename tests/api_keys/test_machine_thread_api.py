@@ -1,4 +1,4 @@
-"""Machine callers on the one command endpoint the dashboard also uses."""
+"""Machine principals on the one command endpoint the dashboard also uses."""
 
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -9,7 +9,7 @@ from fastapi import HTTPException
 from agent.api_keys.models import ApiKey
 from agent.federation.github_oidc import GitHubActionsClaims
 from agent.threads import runs
-from agent.threads.callers import Caller
+from agent.threads.principals import Principal
 from agent.workspaces.store import WORKSPACES, WorkspaceCreate
 
 
@@ -55,7 +55,7 @@ async def machine(monkeypatch: pytest.MonkeyPatch, registry_db: None) -> _FakeCl
     return client
 
 
-async def _key_caller(workspace: str = "core") -> Caller:
+async def _key_caller(workspace: str = "core") -> Principal:
     workspace_id = await WORKSPACES.id_for_slug(workspace)
     assert workspace_id is not None
     key, _ = await ApiKey.create(
@@ -65,11 +65,11 @@ async def _key_caller(workspace: str = "core") -> Caller:
         expires_at=datetime.now(UTC) + timedelta(days=30),
         created_by="admin",
     )
-    return Caller.of_key(key)
+    return Principal.of_key(key)
 
 
-def _workflow_caller(repository: str = "acme/api", workspace: str = "core") -> Caller:
-    return Caller.of_workflow(
+def _workflow_caller(repository: str = "acme/api", workspace: str = "core") -> Principal:
+    return Principal.of_workflow(
         GitHubActionsClaims(
             sub=f"repo:{repository}:ref:refs/heads/main",
             repository=repository,
@@ -81,11 +81,11 @@ def _workflow_caller(repository: str = "acme/api", workspace: str = "core") -> C
 
 
 async def test_a_key_starts_a_system_thread_with_no_person_on_it(machine: _FakeClient) -> None:
-    caller = await _key_caller()
+    principal = await _key_caller()
 
     enriched = await runs._enrich_system_run_start_command(
         "thread-1",
-        caller,
+        principal,
         _command("Upgrade the linter", thread_type="system", repo="acme/api"),
         metadata={},
         creating=True,
@@ -126,12 +126,12 @@ async def test_a_workflow_defaults_to_its_own_repository(machine: _FakeClient) -
 
 
 async def test_a_repository_in_another_workspace_is_refused(machine: _FakeClient) -> None:
-    caller = await _key_caller()
+    principal = await _key_caller()
 
     with pytest.raises(HTTPException) as refused:
         await runs._enrich_system_run_start_command(
             "thread-3",
-            caller,
+            principal,
             _command("Upgrade the linter", thread_type="system", repo="acme/oss"),
             metadata={},
             creating=True,
@@ -143,12 +143,12 @@ async def test_a_repository_in_another_workspace_is_refused(machine: _FakeClient
 
 @pytest.mark.parametrize("requested", ["workspace", "private"])
 async def test_a_machine_cannot_start_a_person_thread(machine: _FakeClient, requested: str) -> None:
-    caller = await _key_caller()
+    principal = await _key_caller()
 
     with pytest.raises(HTTPException) as refused:
         await runs._enrich_system_run_start_command(
             "thread-4",
-            caller,
+            principal,
             _command("Upgrade the linter", thread_type=requested),
             metadata={},
             creating=True,
@@ -159,12 +159,12 @@ async def test_a_machine_cannot_start_a_person_thread(machine: _FakeClient, requ
 
 
 async def test_the_thread_kind_has_to_be_named(machine: _FakeClient) -> None:
-    caller = await _key_caller()
+    principal = await _key_caller()
 
     with pytest.raises(HTTPException) as refused:
         await runs._enrich_system_run_start_command(
             "thread-5",
-            caller,
+            principal,
             _command("Upgrade the linter"),
             metadata={},
             creating=True,
@@ -176,12 +176,12 @@ async def test_the_thread_kind_has_to_be_named(machine: _FakeClient) -> None:
 def test_only_an_admin_may_ask_for_a_system_thread(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("CONFIGURED_ADMINS", "admin")
 
-    Caller.of_login("admin").authorize("system")
-    Caller.of_login("intern").authorize("workspace")
-    Caller.of_login("intern").authorize("private")
+    Principal.of_login("admin").authorize("system")
+    Principal.of_login("intern").authorize("workspace")
+    Principal.of_login("intern").authorize("private")
 
     with pytest.raises(HTTPException) as refused:
-        Caller.of_login("intern").authorize("system")
+        Principal.of_login("intern").authorize("system")
     assert refused.value.status_code == 403
 
 
