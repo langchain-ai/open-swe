@@ -165,6 +165,7 @@ export interface Profile {
   dm_session_enabled?: boolean
   draft_prs?: boolean
   review_draft_prs?: boolean | null
+  slack_onboarding_dismissed?: boolean
   updated_at?: string
 }
 
@@ -181,6 +182,7 @@ export interface ProfileUpdate {
   dm_session_enabled?: boolean
   draft_prs?: boolean
   review_draft_prs?: boolean | null
+  slack_onboarding_dismissed?: boolean
 }
 
 export interface SlackBotOption {

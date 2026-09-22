@@ -1,6 +1,7 @@
 import { Dialog } from "@base-ui/react/dialog"
 import { useEffect, useState } from "react"
 import { IoLogoSlack } from "react-icons/io5"
+import { toast } from "sonner"
 
 import type { ModelOption } from "@/lib/api"
 import { Button } from "@/components/ui/button"
@@ -20,43 +21,14 @@ import {
 } from "@/lib/profile"
 import { useSession } from "@/lib/session"
 
-const SLACK_ONBOARDING_DISMISSED_KEY = "open-swe.slack-onboarding-dismissed"
-let slackDismissedThisSession = false
-
-function readSlackDismissed() {
-  if (slackDismissedThisSession) return true
-  try {
-    return (
-      window.localStorage.getItem(SLACK_ONBOARDING_DISMISSED_KEY) === "true"
-    )
-  } catch (error) {
-    console.warn("Unable to read Slack onboarding preference", error)
-    return true
-  }
-}
-
-/**
- * First-run onboarding modal: pick a default agent model, then connect Slack.
- *
- * The model step shows until the user has saved a default model; the Slack step
- * shows (where Sign in with Slack is enabled) until their Slack account is
- * linked. Both steps live in the same dialog so a new user is walked through
- * picking a model and connecting Slack in one place. The Slack prompt can be
- * permanently dismissed in the current browser.
- */
+/** Pick a default model, then optionally connect Slack. */
 export function OnboardingDialog() {
   const session = useSession()
   const profile = useProfile()
   const options = useOptions()
   const save = useSaveProfile()
   const [dismissed, setDismissed] = useState(false)
-  const [slackDismissed, setSlackDismissed] = useState(true)
   const [error, setError] = useState<string | null>(null)
-
-  useEffect(() => {
-    // oxlint-disable-next-line react/set-state-in-effect
-    setSlackDismissed(readSlackDismissed())
-  }, [])
 
   const defaultModels = options.data?.models.filter(
     (model) => model.can_be_default !== false
@@ -95,7 +67,10 @@ export function OnboardingDialog() {
   const needsSlack =
     slackEnabled &&
     !slackConnected &&
-    !slackDismissed &&
+    profile.data !== undefined &&
+    !profile.isLoading &&
+    !profile.isError &&
+    !profile.data.slack_onboarding_dismissed &&
     !session.isLoading &&
     !session.isError
   const open = !dismissed && (needsModel || needsSlack)
@@ -104,13 +79,20 @@ export function OnboardingDialog() {
   const dismiss = () => {
     setDismissed(true)
     if (step !== "slack") return
-    slackDismissedThisSession = true
-    setSlackDismissed(true)
-    try {
-      window.localStorage.setItem(SLACK_ONBOARDING_DISMISSED_KEY, "true")
-    } catch (storageError) {
-      console.warn("Unable to save Slack onboarding preference", storageError)
-    }
+    save
+      .mutateAsync(
+        buildProfileUpdate(
+          profile.data,
+          { slack_onboarding_dismissed: true },
+          defaultModel,
+          defaultEffort
+        )
+      )
+      .catch(() =>
+        toast.error(
+          "Couldn't save your Slack prompt preference. It may appear again."
+        )
+      )
   }
 
   const handleSaveModel = () => {

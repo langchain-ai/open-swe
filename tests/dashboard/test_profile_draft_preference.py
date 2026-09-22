@@ -70,6 +70,29 @@ async def test_explicit_draft_preference_is_persisted() -> None:
     assert put_item.await_args.args[2]["draft_prs"] is True
 
 
+@pytest.mark.asyncio
+async def test_slack_dismissal_survives_unrelated_profile_saves() -> None:
+    update = ProfileUpdate(
+        default_model="openai:gpt-5.6-sol",
+        reasoning_effort="medium",
+        slack_onboarding_dismissed=True,
+    )
+    with (
+        patch("agent.dashboard.profiles.get_profile", new_callable=AsyncMock) as get_profile,
+        patch("agent.dashboard.profiles.put_value", new_callable=AsyncMock) as put_value,
+    ):
+        get_profile.return_value = None
+        saved = await upsert_profile("alice", "alice@example.com", update)
+        assert put_value.await_args.args[2]["slack_onboarding_dismissed"] is True
+        get_profile.return_value = saved
+        saved = await upsert_profile(
+            "alice",
+            "alice@example.com",
+            ProfileUpdate(default_model=update.default_model, reasoning_effort="high"),
+        )
+        assert normalize_profile_for_response(saved)["slack_onboarding_dismissed"] is True
+
+
 def test_profile_response_hides_legacy_create_prs_setting() -> None:
     profile = normalize_profile_for_response({"create_prs": True})
 

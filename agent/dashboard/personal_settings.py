@@ -30,6 +30,7 @@ PROFILE_SETTING_KEYS = frozenset(
         "dm_session_enabled",
         "draft_prs",
         "review_draft_prs",
+        "slack_onboarding_dismissed",
     }
 )
 PREFERENCE_SETTING_KEYS = frozenset(
