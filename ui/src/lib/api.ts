@@ -846,6 +846,7 @@ export interface ReviewDetail extends Omit<
   findings: Array<ReviewFinding>
   diff_groups: Array<ReviewDiffGroup>
   diff_groups_stale: boolean
+  guidance: Array<GuidancePoint>
 }
 
 export interface PublishedReviewAssessment {
@@ -863,24 +864,18 @@ export type GuidanceKind =
   | "direction"
   | "preference"
 
+/**
+ * One place the author redirected Open SWE that the reviewer could see in the
+ * final change. Recorded during a review, so it is absent until one has run.
+ */
 export interface GuidancePoint {
   summary: string
   quote: string
   kind: GuidanceKind
-  author: string
-  occurred_at: string
-}
-
-/** Where a person redirected Open SWE while it was building the pull request. */
-export interface AuthorGuidance {
-  owner: string
-  repo: string
-  pr_number: number
-  points: Array<GuidancePoint>
-  thread_ids: Array<string>
-  follow_up_count: number
-  last_message_id: string
-  generated_at: string
+  file: string
+  start_line: number | null
+  author?: string
+  occurred_at?: string
 }
 
 export interface ReviewAssessmentFeedbackInput {
@@ -953,6 +948,7 @@ export interface PullRequestPreview {
   // or no checks configured.
   unresolved: Array<PreviewThread> | null
   checks: Array<PreviewCheck> | null
+  guidance: Array<GuidancePoint>
 }
 
 export interface ReviewDiffPayload {
@@ -1408,10 +1404,6 @@ export const api = {
     request<ReviewAssessmentFeedback>(
       `/reviews/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}/feedback/${reviewId}`,
       { method: "PUT", body: JSON.stringify(feedback) }
-    ),
-  getAuthorGuidance: (owner: string, repo: string, number: number) =>
-    request<AuthorGuidance | null>(
-      `/reviews/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}/guidance`
     ),
   getPullRequestPreview: (owner: string, repo: string, number: number) =>
     request<PullRequestPreview>(

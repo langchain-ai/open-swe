@@ -1,7 +1,4 @@
-import { useQuery } from "@tanstack/react-query"
-
-import type { AuthorGuidance, GuidanceKind, GuidancePoint } from "@/lib/api"
-import { api } from "@/lib/api"
+import type { GuidanceKind, GuidancePoint } from "@/lib/api"
 import { cn } from "@/lib/utils"
 import { dateLabel } from "../lib/dateLabel"
 
@@ -19,19 +16,20 @@ const kindTones: Record<GuidanceKind, string> = {
   preference: "text-muted-foreground",
 }
 
-export function useAuthorGuidance(owner: string, repo: string, number: number) {
-  return useQuery({
-    queryKey: ["author-guidance", owner, repo, number],
-    queryFn: () => api.getAuthorGuidance(owner, repo, number),
-    staleTime: 5 * 60_000,
-    retry: false,
-  })
+/**
+ * Oldest first, so a reader follows the steering in the order it happened. A
+ * point whose quote matched no message has no time to place it by, so it sorts
+ * to the end rather than to the beginning of the day.
+ */
+function inOrder(points: Array<GuidancePoint>): Array<GuidancePoint> {
+  const at = (point: GuidancePoint) => point.occurred_at || "￿"
+  return [...points].sort((a, b) => at(a).localeCompare(at(b)))
 }
 
 function Point({ point }: { point: GuidancePoint }) {
   return (
     <li className="border-l-2 border-border pl-3">
-      <div className="flex items-baseline gap-2 text-xs text-muted-foreground">
+      <div className="flex flex-wrap items-baseline gap-x-2 text-xs text-muted-foreground">
         <span className={cn("font-medium", kindTones[point.kind])}>
           {kindLabels[point.kind]}
         </span>
@@ -39,6 +37,10 @@ function Point({ point }: { point: GuidancePoint }) {
         {point.occurred_at && (
           <span className="tabular-nums">{dateLabel(point.occurred_at)}</span>
         )}
+        <span className="min-w-0 truncate font-mono" title={point.file}>
+          {point.file}
+          {point.start_line !== null && `:${point.start_line}`}
+        </span>
       </div>
       <p className="mt-0.5 text-sm text-foreground">{point.summary}</p>
       <p className="mt-1 text-xs whitespace-pre-wrap text-muted-foreground italic">
@@ -55,34 +57,25 @@ export function GuidancePointList({
 }) {
   return (
     <ul className="space-y-2.5">
-      {points.map((point, index) => (
-        <Point key={`${point.kind}:${index}`} point={point} />
+      {inOrder(points).map((point, index) => (
+        <Point key={`${point.file}:${index}`} point={point} />
       ))}
     </ul>
   )
 }
 
-export function guidanceCount(guidance: AuthorGuidance): string {
-  return `${guidance.points.length} of ${guidance.follow_up_count} ${
-    guidance.follow_up_count === 1 ? "message" : "messages"
-  }`
-}
-
 /**
- * The points where the author steered Open SWE, for a PR Open SWE wrote.
- *
- * The rows are written by the reviewer run, so they are absent until a review
- * has happened; the card renders nothing rather than claiming the author never
- * intervened.
+ * The points where the author steered Open SWE, as the reviewer found them in
+ * the final change. Renders nothing until a review has recorded some.
  */
 export function AuthorGuidanceCard({
-  guidance,
+  points,
   className,
 }: {
-  guidance: AuthorGuidance
+  points: Array<GuidancePoint>
   className?: string
 }) {
-  if (!guidance.points.length) return null
+  if (!points.length) return null
   return (
     <section
       aria-label="How the author steered this PR"
@@ -93,10 +86,10 @@ export function AuthorGuidanceCard({
           How the author steered this PR
         </h3>
         <span className="text-xs text-muted-foreground tabular-nums">
-          {guidanceCount(guidance)}
+          {points.length} {points.length === 1 ? "point" : "points"}
         </span>
       </div>
-      <GuidancePointList points={guidance.points} />
+      <GuidancePointList points={points} />
     </section>
   )
 }

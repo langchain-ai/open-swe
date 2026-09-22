@@ -20,7 +20,6 @@ from agent.review.assessment_feedback import (
     require_assessment_access,
     save_feedback,
 )
-from agent.review.author_guidance import AuthorGuidance, load_author_guidance
 from agent.review.chat import (
     get_review_chat,
     proxy_review_chat_commands,
@@ -193,18 +192,6 @@ async def submit_assessment_feedback(
     session: dict[str, object] = SESSION_DEP,
 ) -> AssessmentFeedback:
     return await save_feedback(owner, repo, pr_number, review_id, str(session["sub"]), submission)
-
-
-@router.get("/reviews/{owner}/{repo}/{pr_number}/guidance")
-async def api_get_author_guidance(
-    owner: str,
-    repo: str,
-    pr_number: int,
-    session: dict[str, Any] = SESSION_DEP,
-) -> AuthorGuidance | None:
-    """The points where the author steered Open SWE, or ``None`` for a PR it did not write."""
-    await require_repo_access_for_user(session["sub"], f"{owner}/{repo}")
-    return await load_author_guidance(owner, repo, pr_number)
 
 
 @router.get("/reviews/{owner}/{repo}/{pr_number}/preview")
