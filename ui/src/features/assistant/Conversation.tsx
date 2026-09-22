@@ -13,9 +13,11 @@ import { useSession } from "@/lib/session"
 import { AssistantMessage } from "./Message"
 import { Composer } from "./Composer"
 import { useThreadMetadata } from "./AssistantProvider"
+import { ThreadLoadTiming } from "./ThreadLoadTiming"
 
 export function Conversation({ initialRepo }: { initialRepo?: string | null }) {
   const aui = useAui()
+  const threadId = useAuiState((state) => state.threadListItem.externalId)
   const { data: thread, error: requestError } = useThreadMetadata()
   const running = useAuiState((state) => state.thread.isRunning)
   const loading = useAuiState((state) => state.thread.isLoading)
@@ -37,6 +39,7 @@ export function Conversation({ initialRepo }: { initialRepo?: string | null }) {
 
   return (
     <div className="flex min-h-0 min-w-0 flex-1">
+      {threadId && <ThreadLoadTiming key={threadId} threadId={threadId} />}
       <ThreadPrimitive.Root
         data-testid="assistant-ui-conversation"
         className="flex min-h-0 min-w-0 flex-1 flex-col"
