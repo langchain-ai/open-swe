@@ -1,0 +1,23 @@
+tests/e2e/tests/dashboard.spec.ts
+  s_7ad70aabdac33d::t_bacedf464fe38e 513,544-551
+uv.lock
+  s_7ad70aabdac33d::t_1c42ffce060219 6-9,1648,1651,1687,1689,1756,1767,1769
+pyproject.toml
+  s_7ad70aabdac33d::t_6e1a559a1c9e3e 75-78
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "7f93b091b51a941bbf17155db229bca4175c03a9",
+  "prompts": {},
+  "sessions": {
+    "s_7ad70aabdac33d": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0cb19-a72b-7911-adf7-f2d6fae78b1a",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "syachamaneni-lc <sreekara.yachamaneni@langchain.dev>"
+    }
+  }
+}
