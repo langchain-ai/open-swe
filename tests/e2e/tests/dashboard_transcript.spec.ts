@@ -262,8 +262,8 @@ test.describe("transcript rendering", () => {
     await waitForThreadIdle(page, threadId);
     await waitForThreadNotBusy(page, threadId);
 
-    await page.getByRole("button", { name: /GPT-5\.6 Sol/ }).click();
-    await page.getByText("GPT-5.6 Sol", { exact: true }).last().hover();
+    await page.getByRole("button", { name: /GPT-6 Sol/ }).click();
+    await page.getByText("GPT-6 Sol", { exact: true }).last().hover();
     await page.getByRole("option", { name: /Opus 5\.5/ }).click();
     await typeIntoComposer(page, "Use Opus for this thread");
     await waitForThreadIdle(page, threadId);
