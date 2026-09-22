@@ -3,6 +3,8 @@ from typing import Any
 from unittest.mock import AsyncMock
 
 import pytest
+from fastapi import HTTPException
+from langgraph_sdk.errors import NotFoundError
 
 from agent.github import repos
 from agent.review import reviews as review_api
@@ -136,3 +138,57 @@ async def test_accessible_repo_full_names_resolves_fresh_each_call(monkeypatch) 
     assert first == frozenset({"acme/repo"})
     assert second == frozenset()
     assert fetch.await_count == 2
+
+
+def _pr_payload() -> dict[str, Any]:
+    return {
+        "title": "Add widgets",
+        "html_url": "https://github.com/acme/app/pull/7",
+        "state": "open",
+        "user": {"login": "octocat", "avatar_url": None},
+        "head": {"sha": "f" * 40, "ref": "feature"},
+        "base": {"ref": "main"},
+        "updated_at": "2026-06-12T00:00:00Z",
+        "additions": 3,
+        "deletions": 1,
+        "changed_files": 2,
+        "commits": 1,
+    }
+
+
+@pytest.mark.asyncio
+async def test_get_review_renders_a_pull_request_with_no_reviewer_thread(monkeypatch) -> None:
+    async def missing_thread(_thread_id: str) -> dict[str, Any]:
+        raise NotFoundError("no thread", response=SimpleNamespace(status_code=404), body=None)
+
+    monkeypatch.setattr(
+        review_api,
+        "langgraph_client",
+        lambda: SimpleNamespace(threads=SimpleNamespace(get=missing_thread)),
+    )
+    monkeypatch.setattr(review_api, "_require_app_token", AsyncMock(return_value="tok"))
+    monkeypatch.setattr(review_api, "_github_get", AsyncMock(return_value=_pr_payload()))
+
+    review = await review_api.get_review("acme", "app", 7)
+
+    assert review["status"] == "none"
+    assert review["thread_id"] is None
+    assert review["findings"] == []
+    assert review["diff_groups"] == []
+    assert review["assessment"] is None
+    assert review["pr"]["title"] == "Add widgets"
+    assert review["head_sha"] == "f" * 40
+    assert review["author"] == "octocat"
+
+
+@pytest.mark.asyncio
+async def test_get_review_propagates_a_pull_request_missing_on_github(monkeypatch) -> None:
+    monkeypatch.setattr(review_api, "_require_app_token", AsyncMock(return_value="tok"))
+    monkeypatch.setattr(
+        review_api, "_github_get", AsyncMock(side_effect=HTTPException(404, "not found on GitHub"))
+    )
+
+    with pytest.raises(HTTPException) as excinfo:
+        await review_api.get_review("acme", "app", 7)
+
+    assert excinfo.value.status_code == 404
