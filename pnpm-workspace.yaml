@@ -11,16 +11,10 @@ allowBuilds:
   unrs-resolver: true
 
 minimumReleaseAgeExclude:
-  - '@langchain/langgraph-sdk@1.11.0'
-  - '@langchain/react@1.1.0'
+  - '@langchain/langgraph-sdk@1.12.0-rc.0'
+  - '@langchain/react@1.2.0-rc.0'
 
 overrides:
-  # TODO: local-only, points at a sibling langgraphjs checkout for the
-  # unreleased serverQueue feature. Breaks install for anyone without that
-  # checkout (CI, other contributors, Docker). Revert to real published
-  # versions once langchain-ai/langgraphjs#2848 ships.
-  '@langchain/langgraph-sdk': 'file:../langgraphjs/libs/sdk'
-  '@langchain/react': 'file:../langgraphjs/libs/sdk-react'
   '@hono/node-server': 2.1.1
   '@pierre/trees>@pierre/theming': 1.0.1
   brace-expansion@2.1.1: 2.1.4
