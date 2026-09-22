@@ -561,7 +561,7 @@ WITH runs AS (
             'rank', rank,
             'user', jsonb_build_object(
                 'name', disclosed_name,
-                'github_login', CASE WHEN NOT :anonymize_others OR :admin OR is_current THEN NULLIF(disclosed_login, '') END,
+                'github_login', CASE WHEN :admin OR is_current THEN NULLIF(disclosed_login, '') END,
                 'email', CASE WHEN is_current THEN NULLIF(email, '') END,
                 'avatar_url', CASE WHEN NOT :anonymize_others OR :admin OR is_current
                     THEN CASE WHEN NULLIF(disclosed_login, '') IS NOT NULL
