@@ -95,7 +95,7 @@ platform: open-swe
 
 ```xml
 <input-message sender="system:dashboard-handoff" surface="automation" kind="system">
-This follow-up was sent from Web. The conversation has moved to Web, so answer in the dashboard stream with a normal assistant message. Do not call slack_thread_reply unless a later Slack message explicitly moves the conversation back to Slack.
+This follow-up was sent from Web. The conversation has moved to Web, so answer in the dashboard stream with a normal assistant message. Do not call slack_reply unless a later Slack message explicitly moves the conversation back to Slack.
 </input-message>
 ```
 

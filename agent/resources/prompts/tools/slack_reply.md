@@ -1,7 +1,14 @@
-Post a message to the current Slack thread and the Web UI.
+Send a message to the person who asked, in Slack and the Web UI. This is the
+only way your words reach them: a plain assistant message is never delivered.
 
 Use this for clarifying questions, essential progress updates, and the final
-answer or outcome. For Slack-triggered information-only requests, put the
+answer or outcome. `response_type` says whether this reply ends your turn.
+Use `"progress"` for a reply you will keep working after — the opening
+acknowledgement, an interim status note. Use `"final"` for anything that leaves
+the asker holding the ball: the answer, the outcome, a failure, a blocking
+question, an approval request. A `progress` reply settles nothing, so a turn
+that ends on one is treated as an unanswered turn.
+For Slack-triggered information-only requests, put the
 complete answer in `message`, not merely a summary, and do not repeat it in
 the final assistant response. Make `message` as concise as possible: default
 to one sentence with only the outcome/status and link, or one blocking

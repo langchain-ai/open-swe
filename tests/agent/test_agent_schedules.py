@@ -1427,7 +1427,7 @@ async def test_launch_scheduled_agent_run_connects_slack_thread(
     run = fake_client.runs.created[0]
     assert run["config"]["configurable"]["slack_thread"] == slack_thread
     prompt = ElementTree.fromstring(run["input"]["messages"][-1]["content"])
-    assert "slack_thread_reply" in (prompt.text or "")
+    assert "slack_reply" in (prompt.text or "")
     association = fake_client.store.items[
         (("slack_thread_map", "C0123456789"), "1784302353.900029")
     ]
