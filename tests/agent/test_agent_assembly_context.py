@@ -522,7 +522,7 @@ async def test_agent_includes_read_user_settings_schema() -> None:
 
 
 @pytest.mark.parametrize("source", ["dashboard", "slack"])
-async def test_personal_settings_tool_is_private_and_parent_only(source: str) -> None:
+async def test_agent_includes_save_user_settings_schema(source: str) -> None:
     config = _base_config()
     config["configurable"]["source"] = source
     captured = await _capture_create_deep_agent_kwargs(config)
@@ -531,10 +531,10 @@ async def test_personal_settings_tool_is_private_and_parent_only(source: str) ->
     assert isinstance(tools, list)
     assert isinstance(subagents, list)
     assert "save_user_settings" in {_registered_tool_name(tool) for tool in tools}
-    for subagent in subagents:
-        assert "save_user_settings" not in {
-            _registered_tool_name(tool) for tool in subagent.get("tools", [])
-        }
+    general_purpose = next(item for item in subagents if item["name"] == "general-purpose")
+    assert "save_user_settings" in {
+        _registered_tool_name(tool) for tool in general_purpose["tools"]
+    }
 
 
 @pytest.mark.parametrize(
