@@ -15,6 +15,7 @@ from agent.analytics.events import (
     FindingObservedPayload,
     FindingStatePayload,
     FindingSurfacedPayload,
+    PRDistanceMeasuredPayload,
     PRObservedPayload,
     PROpenedPayload,
     PRRunLinkedPayload,
@@ -107,6 +108,7 @@ async def run_started(
     run_key: str,
     thread_key: str,
     model: str | None,
+    effort: str | None = None,
     source: str | None,
     immutable_person_key: str | int | None,
     repository_key: str | None,
@@ -120,6 +122,7 @@ async def run_started(
         f"run:{run_key}:started",
         RunStartedPayload(
             configured_model_id=model_id,
+            configured_effort=effort,
             # Configuration alone is not an observation; routing, fallback, and
             # subagents may execute other models. Effective attribution waits
             # for an authoritative provider signal and stays unknown here.
@@ -277,6 +280,7 @@ async def pr_state(
     merged: bool,
     source_version: int | None,
     occurred_at: datetime,
+    distance_basis_points: int | None = None,
 ) -> None:
     name = (
         EventName.PR_MERGED
@@ -289,12 +293,30 @@ async def pr_state(
     await emit(
         name,
         f"github:pr:{pr_key}:{source_version or occurred_at.isoformat()}:{name.value}",
-        PRStatePayload(previous_state=None),
+        PRStatePayload(previous_state=None, distance_basis_points=distance_basis_points),
         occurred_at=occurred_at,
         source="github",
         source_version=source_version,
         pr_id=opaque_id("pr", pr_key),
         repository_id=opaque_id("repository", f"{owner.lower()}/{repo.lower()}"),
+    )
+
+
+async def pr_distance_measured(
+    payload: PRDistanceMeasuredPayload, *, measured_at: datetime
+) -> bool:
+    """Enqueue verified evidence without emitting or reordering a lifecycle transition."""
+    repository = payload.repository_full_name
+    pr_key = f"{repository}#{payload.pr_number}"
+    digest = sha256(payload.model_dump_json().encode()).hexdigest()
+    return await enqueue_event(
+        EventName.PR_DISTANCE_MEASURED,
+        f"pr:{pr_key}:distance:{digest}",
+        payload,
+        occurred_at=measured_at,
+        source="github",
+        pr_id=opaque_id("pr", pr_key),
+        repository_id=opaque_id("repository", repository),
     )
 
 
@@ -343,16 +365,21 @@ async def task_rework(
 
 @fail_soft
 async def feedback_submitted(
-    *, run_key: str, person_key: str, rating: int, producer_version: str
+    *,
+    feedback_key: str,
+    rating: int,
+    source: str,
+    run_key: str | None = None,
+    user_id: UUID | None = None,
 ) -> None:
     sentiment = "negative" if rating <= 2 else "neutral" if rating == 3 else "positive"
     await emit(
         EventName.FEEDBACK_SUBMITTED,
-        f"feedback:{run_key}:{person_key}:{producer_version}",
+        f"feedback:{feedback_key}",
         FeedbackSubmittedPayload(sentiment=sentiment, rating=rating),
-        source="slack",
+        source=source,
         run_id=opaque_id("run", run_key),
-        user_id=opaque_person("slack", person_key),
+        user_id=user_id,
     )
 
 

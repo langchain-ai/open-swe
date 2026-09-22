@@ -1,5 +1,15 @@
 export type StructuredSenderKind = "person" | "system"
 
+/** Senders that steer the model and say nothing a reader of the thread needs. */
+const SILENT_SENDERS = new Set([
+  "system:sender-context",
+  "system:dashboard-handoff",
+])
+
+export function isSilentSender(sender: string): boolean {
+  return SILENT_SENDERS.has(sender)
+}
+
 export type ParsedStructuredInput =
   | {
       type: "entity"

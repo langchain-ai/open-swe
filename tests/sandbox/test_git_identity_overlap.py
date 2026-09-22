@@ -10,6 +10,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from agent.github.sandbox_access import SandboxGitHubAccess
 from agent.sandboxes.lifecycle import SandboxCreateConfig, _create_sandbox_with_proxy
 
 
@@ -41,11 +42,11 @@ async def test_identity_is_written_while_the_proxy_is_configured() -> None:
             return_value=SandboxCreateConfig(snapshot_id="snap"),
         ),
         patch(
-            "agent.sandboxes.lifecycle._resolve_proxy_token",
+            "agent.sandboxes.lifecycle.workspace_token",
             new_callable=AsyncMock,
-            return_value=("token", None, None),
+            return_value=SandboxGitHubAccess("token"),
         ),
-        patch("agent.sandboxes.lifecycle.configure_github_proxy", side_effect=configure),
+        patch("agent.sandboxes.lifecycle.configure_sandbox_proxy", side_effect=configure),
         patch("agent.sandboxes.lifecycle.record_proxy_token_expiry"),
     ):
         assert await _create_sandbox_with_proxy(thread_id="thread-overlap") is backend
@@ -70,11 +71,11 @@ async def test_identity_failure_fails_the_sandbox() -> None:
             return_value=SandboxCreateConfig(snapshot_id="snap"),
         ),
         patch(
-            "agent.sandboxes.lifecycle._resolve_proxy_token",
+            "agent.sandboxes.lifecycle.workspace_token",
             new_callable=AsyncMock,
-            return_value=("token", None, None),
+            return_value=SandboxGitHubAccess("token"),
         ),
-        patch("agent.sandboxes.lifecycle.configure_github_proxy", new_callable=AsyncMock),
+        patch("agent.sandboxes.lifecycle.configure_sandbox_proxy", new_callable=AsyncMock),
         patch("agent.sandboxes.lifecycle.record_proxy_token_expiry"),
         pytest.raises(RuntimeError, match="identity failed"),
     ):
@@ -102,12 +103,12 @@ async def test_a_failed_proxy_does_not_leave_the_identity_write_running() -> Non
             return_value=SandboxCreateConfig(snapshot_id="snap"),
         ),
         patch(
-            "agent.sandboxes.lifecycle._resolve_proxy_token",
+            "agent.sandboxes.lifecycle.workspace_token",
             new_callable=AsyncMock,
-            return_value=("token", None, None),
+            return_value=SandboxGitHubAccess("token"),
         ),
         patch(
-            "agent.sandboxes.lifecycle.configure_github_proxy",
+            "agent.sandboxes.lifecycle.configure_sandbox_proxy",
             new_callable=AsyncMock,
             side_effect=RuntimeError("proxy failed"),
         ),

@@ -9,6 +9,7 @@ import { cn } from "@/lib/utils"
 interface AppShellProps {
   user: SessionUser
   title: string
+  action?: ReactNode
   description?: string
   backTo?: { to: string; label: string }
   className?: string
@@ -18,6 +19,7 @@ interface AppShellProps {
 export function AppShell({
   user,
   title,
+  action,
   description,
   backTo,
   className,
@@ -42,15 +44,18 @@ export function AppShell({
               {backTo.label}
             </Link>
           )}
-          <header className="mb-10">
-            <h1 className="font-heading text-xl font-medium tracking-tight">
-              {title}
-            </h1>
-            {description && (
-              <p className="mt-1.5 max-w-2xl text-xs text-muted-foreground">
-                {description}
-              </p>
-            )}
+          <header className="mb-10 flex flex-wrap items-center justify-between gap-4">
+            <div>
+              <h1 className="font-heading text-xl font-medium tracking-tight">
+                {title}
+              </h1>
+              {description && (
+                <p className="mt-1.5 max-w-2xl text-xs text-muted-foreground">
+                  {description}
+                </p>
+              )}
+            </div>
+            {action}
           </header>
           <div className="space-y-10">{children}</div>
         </div>
@@ -99,6 +104,8 @@ interface SettingsRowProps {
   control: ReactNode
   htmlFor?: string
   comingSoon?: boolean
+  /** A short tag after the label, such as where a value comes from. */
+  badge?: string
 }
 
 /** Label + description on the left, a single control on the right. */
@@ -108,6 +115,7 @@ export function SettingsRow({
   control,
   htmlFor,
   comingSoon,
+  badge,
 }: SettingsRowProps) {
   return (
     <div className="flex flex-col gap-2 px-4 py-3.5 sm:flex-row sm:items-center sm:justify-between sm:gap-8">
@@ -121,9 +129,9 @@ export function SettingsRow({
           >
             {label}
           </span>
-          {comingSoon && (
+          {(comingSoon || badge) && (
             <span className="rounded-sm border border-border bg-muted px-1.5 py-0.5 text-[10px] font-normal text-muted-foreground">
-              Coming soon
+              {comingSoon ? "Coming soon" : badge}
             </span>
           )}
         </span>

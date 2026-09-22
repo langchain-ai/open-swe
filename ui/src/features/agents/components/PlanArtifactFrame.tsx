@@ -259,7 +259,7 @@ export function PlanArtifactFrame({
   onCommentSelected,
   focusCommentId,
   focusCommentKey = 0,
-  title = "Plan artifact",
+  title = "Artifact",
   className,
 }: {
   html: string

@@ -187,11 +187,10 @@ def construct_sender_context(
 def construct_system_prompt(
     working_dir: str,
     dashboard_base_url: str = "",
+    artifact_url: str | None = None,
     linear_project_id: str = "",
     linear_issue_number: str = "",
     default_repo: dict[str, str] | None = None,
-    plan_mode: bool = False,
-    plan_url: str | None = None,
     repo_custom_instructions: str | None = None,
     workspace_name: str | None = None,
     workspace_instructions: str | None = None,
@@ -227,23 +226,11 @@ def construct_system_prompt(
         dashboard_context_section=render_prompt(
             "system/dashboard-context.md",
             dashboard_base_url=dashboard_base_url or "(dashboard URL unavailable)",
+            artifact_url=artifact_url or "(artifact link unavailable)",
         ),
         source_guidance_section=render_prompt(
             "system/source-context.md",
             source_guidance=_render_source_guidance(source, slack_context, slack_ask),
-        ),
-        plan_mode_guidance_section=render_prompt(
-            "system/plan-mode-guidance.md",
-            plan_mode_entry_guidance=load_prompt("system/plan-mode-entry.md"),
-            plan_review_url=plan_url or "(the dashboard plan-review page)",
-        ),
-        plan_mode_section=(
-            render_prompt(
-                "system/plan-mode-active.md",
-                plan_url=plan_url or "(plan-review link unavailable)",
-            )
-            if plan_mode
-            else ""
         ),
         self_awareness_section=load_prompt("system/self-awareness.md"),
         default_prompt_section=default_prompt_section,
@@ -263,9 +250,7 @@ def construct_system_prompt(
             load_prompt("system/admin-workspace.md") if admin_workspaces else ""
         ),
         shared_base_section=(
-            "- If a user asks to change the workspace's sandbox setup, direct them to start "
-            "an admin thread in the Web UI and require them to be a workspace admin. Admin threads "
-            "cannot be started from Slack or with agent thread tools.\n\n"
+            load_prompt("system/workspace-admin-required.md") + "\n\n"
             if not admin_workspaces
             else ""
         )

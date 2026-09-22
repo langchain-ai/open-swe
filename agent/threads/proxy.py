@@ -23,9 +23,9 @@ from agent.threads.runs import (
 )
 from agent.threads.summary import (
     _assert_thread_postable,
-    _assert_thread_readable,
     _now_ms,
     _thread_is_busy,
+    assert_thread_readable,
 )
 from agent.utils.json_types import thread_metadata
 from agent.utils.streaming import TERMINAL_LIFECYCLE_EVENTS, root_lifecycle
@@ -182,9 +182,9 @@ async def proxy_dashboard_thread_commands(
         if post_command:
             _assert_thread_postable(metadata, login, email)
         else:
-            _assert_thread_readable(metadata, login, email)
+            assert_thread_readable(metadata, login, email)
         if method != "run.start" and not (post_command and metadata.get("admin_thread") is True):
-            _assert_thread_readable(metadata, login, email)
+            assert_thread_readable(metadata, login, email)
         metadata_run_status = metadata.get("latest_run_status")
         thread_busy = _thread_is_busy(thread) or metadata_run_status in {"pending", "running"}
 

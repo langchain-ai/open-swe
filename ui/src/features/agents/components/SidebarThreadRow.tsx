@@ -186,7 +186,7 @@ export function SidebarThreadRow({
   archived: boolean
   live?: PullRequestSnapshot
   compact?: boolean
-  /** Nested under a project: indent the content, not the highlight box. */
+  /** Nested under a repository: indent the content, not the highlight box. */
   indent?: boolean
   onNavigate?: () => void
   onDeleteLocal: (threadId?: string) => void
@@ -458,7 +458,7 @@ export function SidebarThreadRow({
             ? undefined
             : item.thread.ownedWorktrees?.length
               ? "This deletes the worktree Open SWE created for it, including any uncommitted changes in it. Its branch and commits are kept."
-              : "This removes its history but does not revert changes made to your project."
+              : "This removes its history but does not revert changes made to your repository."
         }
         error={deleteError}
       />
@@ -497,12 +497,10 @@ function ThreadHoverCard({
           {compactAge(item.updatedAt)}
         </span>
       </div>
-      {item.projectLabel && (
+      {item.repoLabel && (
         <div className="flex min-w-0 items-center gap-1.5 text-muted-foreground">
           <FolderIcon className="size-3.5 shrink-0" />
-          <span className="min-w-0 truncate text-[12px]">
-            {item.projectLabel}
-          </span>
+          <span className="min-w-0 truncate text-[12px]">{item.repoLabel}</span>
         </div>
       )}
       {item.pr && (

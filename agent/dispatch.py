@@ -45,6 +45,7 @@ from agent.input_messages import (
 )
 from agent.invocation import new_invocation_id, resolve_invocation_id, with_invocation_id
 from agent.run_config import RunConfig
+from agent.source_context import SourceContext
 
 logger = logging.getLogger(__name__)
 
@@ -97,15 +98,15 @@ def _dispatch_input(content: ContentBlocks, source: str, configurable: dict[str,
             channel_id = f"slack:{slack_thread.channel_id}"
             channel: ChannelIdentity = {"id": channel_id, "platform": "slack"}
             channel_context = slack_thread.channel_context
-            if isinstance(channel_context, dict):
-                name = channel_context.get("name") or channel_context.get("name_normalized")
-                topic = channel_context.get("topic")
-                purpose = channel_context.get("purpose")
-                if isinstance(name, str) and name:
+            if channel_context is not None:
+                name = channel_context.label
+                topic = channel_context.topic
+                purpose = channel_context.purpose
+                if name:
                     channel["name"] = name
-                if isinstance(topic, str) and topic:
+                if topic:
                     channel["topic"] = topic
-                if isinstance(purpose, str) and purpose:
+                if purpose:
                     channel["purpose"] = purpose
             if slack_thread.thread_ts:
                 channel["thread_id"] = slack_thread.thread_ts
@@ -255,6 +256,7 @@ async def create_durable_run(
     if_not_exists: str = "create",
     stream_resumable: bool = True,
     after_seconds: int | float | None = None,
+    source_context: SourceContext | None = None,
 ) -> Run:
     """Create a run with Open SWE's durable LangGraph defaults."""
     client = client or dispatch_client()
@@ -280,6 +282,13 @@ async def create_durable_run(
         create_kwargs["after_seconds"] = after_seconds
 
     run = await client.runs.create(thread_id, assistant_id, **create_kwargs)
+    cfg = RunConfig.from_config(run_config)
+    if assistant_id == "agent" and cfg.slack_ask is not True:
+        from agent.slack.thinking import sync_slack_background_status
+
+        await sync_slack_background_status(
+            client, thread_id, resume=True, source_context=source_context
+        )
     logger.info(
         "Dispatched %s run on thread %s (source=%s, run=%s)",
         assistant_id,
@@ -305,6 +314,7 @@ async def dispatch_agent_run(
     metadata: dict[str, Any] | None = None,
     client: LangGraphClient | None = None,
     multitask_strategy: str = "interrupt",
+    source_context: SourceContext | None = None,
 ) -> Run:
     """Create a durable run for ``thread_id`` using the requested multitask strategy.
 
@@ -344,4 +354,5 @@ async def dispatch_agent_run(
         source=source,
         client=client,
         multitask_strategy=multitask_strategy,
+        source_context=source_context,
     )

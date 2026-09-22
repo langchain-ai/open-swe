@@ -83,12 +83,14 @@ TOKEN_ENCRYPTION_KEY=""         # openssl rand -base64 32  (encrypts stored GitH
 DASHBOARD_JWT_SECRET=""         # openssl rand -hex 32     (signs the session cookie and OAuth state)
 CONFIGURED_ADMINS=""            # your GitHub login or email; admins see the Admin pages
 
-POSTGRES_URI=""                 # leave unset to use the local container `make dev` starts; or point it at your own database
+POSTGRES_URI=""                 # local dev defaults to localhost:5433; set this to use another database
 ```
 
 `LANGGRAPH_URL` defaults to `http://localhost:2024`, and `DASHBOARD_BASE_URL` / `DASHBOARD_API_BASE_URL` default to it, so none of the three is needed locally. Keep them on localhost when setting `SLACK_PUBLIC_BASE_URL` to the tunnel. You only need one model credential: either a provider key or a gateway key if you route model calls through an LLM gateway, such as the [LangSmith Gateway](INSTALLATION.md#4-model-providers-and-api-keys). How the running model is chosen is covered in the same section. Linear, if you use it, comes from the [Linear](INSTALLATION.md#linear) section of the installation guide, with your ngrok domain as the URL.
 
-Open SWE needs a PostgreSQL database for its own tables, and `langgraph dev` does not provide one: it keeps LangGraph's threads and Store in memory, so the platform's Postgres is not there locally. With `POSTGRES_URI` unset in both the shell and `.env`, `make dev` and `make dev-ui` run a `postgres:16` container named `open-swe-postgres` on `127.0.0.1:5433` and point the backend at it. The container binds to loopback only and keeps its data in a Docker volume of the same name, so stopping or removing the container preserves your local users, workspaces, and settings. `make postgres` starts it on its own, and `make dev` fails with a hint if Docker is not running. Set `POSTGRES_URI` to skip the container and use any database you can create schemas in — see [Analytics storage](INSTALLATION.md#1-create-the-deployment) for what startup migrations create there, including the `repository`, `users`, and `workspace` tables.
+Open SWE needs a PostgreSQL database for its own tables, and `langgraph dev` does not provide one: it keeps LangGraph's threads and Store in memory, so the platform's Postgres is not there locally. In LangGraph's `local_dev` runtime, Open SWE defaults `POSTGRES_URI` to `postgresql://postgres:postgres@127.0.0.1:5433/postgres`; `make dev` and `make dev-ui` run the matching `postgres:16` container named `open-swe-postgres` when no explicit value is set. Docker Compose binds the container to loopback only and keeps its data in the `open-swe-postgres` volume, so stopping or removing the container preserves your local users, workspaces, and settings. `make postgres` starts it on its own; use `docker compose down` to stop it. Set `POSTGRES_URI` to skip the container and use any database you can create schemas in — see [Analytics storage](INSTALLATION.md#1-create-the-deployment) for what startup migrations create there, including the `repository`, `users`, and `workspace` tables.
+
+With a database, every thread created from then on is also recorded into the append-only transcript event log and its LangGraph metadata is stamped `transcript: v2`. Recording is not optional; reading is. **Settings → Preferences → Stream threads from the transcript** is a per-user opt-in, off by default, and only a user who turns it on has their thread pages served from the log instead of from LangGraph state — so the log can be filled and inspected before anyone reads from it, and turning the switch back off is a full rollback for that user. Threads with agent turns from before recording started are never recorded and always read LangGraph state.
 
 `TEST_ANALYTICS_POSTGRES_URI` is the same thing for the test suite, and only for it: the tests that exercise those tables create a throwaway schema per test, migrate it, and drop it afterwards, so point it at a separate database (`postgresql+asyncpg://<user>@localhost:5432/open_swe_test`) rather than the one `make dev` uses. Unset, every such test skips rather than fails, so a run without it proves less than it appears to; CI sets it, so a regression in that code is caught there either way.
 
@@ -152,6 +154,16 @@ For one continuous local instance across worktrees, link `.langgraph_api` to the
 
 Keep state, backups, and environment files ignored by Git. Reuse the existing local environment, including its token-encryption settings, without printing credentials. `.worktreeinclude` copies local state into worktrees; it does not add that state to version control.
 
+## Sign in locally with the `gh` CLI
+
+The dashboard's per-user reads — the PR list, one PR's details, a PR preview — run on the signed-in person's own OAuth token, and the `gh` CLI already holds one. `GET /dashboard/api/auth/dev-login` stores it and mints the session, so a machine-local GitHub App (step 2) is only needed for the App-backed endpoints. With no `GITHUB_APP_CLIENT_ID` configured, **Continue with GitHub** redirects here on its own; `/dashboard/api/auth/dev-login?redirect_to=/agents/reviews` skips the page.
+
+It is refused with a 404 outside `langgraph dev`, which is the only runtime reporting the `local_dev` API variant, and the `ALLOWED_GITHUB_USERS` allowlist still applies — set it to your own login. `DASHBOARD_JWT_SECRET` signs the session.
+
+What still needs the App, and answers `503 GitHub App token unavailable` without one: a published review and its diff, inline review comment reads and writes, and the webhook flows. The reviews list and each PR's preview read as you, so they work.
+
+The `local-gh-dev` skill in `.claude/skills/` walks through the whole loop, including the port and Postgres conflicts between worktrees.
+
 ## Dashboard on the Vite dev server directly
 
 `make dev-ui` is the simple way to develop the UI. Opening Vite on `http://localhost:3000` directly also works:
@@ -188,7 +200,7 @@ The dev server then attaches that session to everything it proxies, and presents
 
 ## Test a PR in preview (LangChain maintainers)
 
-The shared [preview environment](https://dev.open-swe.langchain.dev/agents) combines `main`, `preview-manual`, and open organization-member PRs labeled `preview`; it is not an isolated deployment per PR. (Note: staging follows `main` and is for post-merge testing.)
+The shared [preview environment](https://dev.open-swe.langchain.dev/agents) combines `main`, `preview-manual`, and open PRs labeled `preview` whose branch lives in this repository (anyone with write access; a fork's code stays out); it is not an isolated deployment per PR. (Note: staging follows `main` and is for post-merge testing.)
 
 1. Add the **`preview`** label to your PR.
 2. Run [Deploy open-swe preview](https://github.com/langchain-ai/langchainplus/actions/workflows/deploy_open_swe_preview.yaml) on `main` with **force** unchecked, or wait for a scheduled run at :04, :19, :34, or :49 each hour. Labeling alone does not deploy.

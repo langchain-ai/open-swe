@@ -9,7 +9,6 @@ import {
 
 import { AgentsShell } from "@/features/agents/components/AgentsSidebar"
 import { Skeleton } from "@/components/ui/skeleton"
-import { AgentStreamProvider } from "@/features/agents/lib/stream/AgentStreamProvider"
 import { useExperimentalAssistantUi, useProfile } from "@/lib/profile"
 import { RequireLogin } from "@/lib/auth-redirect"
 import { useSession } from "@/lib/session"
@@ -40,7 +39,6 @@ function AgentsLayout() {
   const session = useSession()
   const profile = useProfile()
   const experimentalAssistantUi = useExperimentalAssistantUi()
-  const navigate = Route.useNavigate()
   const threadMatch = useMatch({
     from: "/agents/$threadId",
     shouldThrow: false,
@@ -56,12 +54,12 @@ function AgentsLayout() {
   const localHome =
     Boolean(homeMatch) &&
     (!session.data ||
-      Boolean(homeMatch?.search.localProject) ||
+      Boolean(homeMatch?.search.localRepo) ||
       (typeof window !== "undefined" &&
         Boolean(window.openSweDesktop) &&
         desktopSource === "local" &&
         !homeMatch?.search.repo &&
-        !homeMatch?.search.noProject))
+        !homeMatch?.search.noRepo))
   const runtimeThreadId = activeLocalSessionId ?? activeThreadId ?? null
   // Only a thread route has to wait for the profile: mounting the runtime the
   // profile does not select hydrates that thread's transcript a second time.
@@ -109,7 +107,7 @@ function AgentsLayout() {
           to="/assistant"
           search={{
             repo: homeMatch?.search.repo,
-            noProject: homeMatch?.search.noProject,
+            noRepo: homeMatch?.search.noRepo,
           }}
           replace
         />
@@ -128,20 +126,7 @@ function AgentsLayout() {
           <Skeleton className="h-40 w-full max-w-md" />
         </main>
       ) : (
-        <AgentStreamProvider
-          threadId={runtimeThreadId}
-          transport={activeLocalSessionId ? "local" : "cloud"}
-          onThreadCreated={(id) => {
-            if (!activeThreadId) {
-              void navigate({
-                to: "/agents/$threadId",
-                params: { threadId: id },
-              })
-            }
-          }}
-        >
-          <Outlet />
-        </AgentStreamProvider>
+        <Outlet />
       )}
     </AgentsShell>
   )

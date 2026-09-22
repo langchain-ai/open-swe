@@ -295,8 +295,8 @@ test("preserves no-project selection despite a default repository", async ({
       json: { ...profile, default_repo: "fakeorg/demo" },
     });
   });
-  await page.goto("/agents?noProject=true");
-  await expect(page).toHaveURL(/\/assistant\?noProject=true$/);
+  await page.goto("/agents?noRepo=true");
+  await expect(page).toHaveURL(/\/assistant\?noRepo=true$/);
   await expect(page.getByRole("combobox", { name: "Repository" })).toHaveValue(
     "",
   );

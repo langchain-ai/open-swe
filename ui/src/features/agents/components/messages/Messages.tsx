@@ -70,10 +70,11 @@ export const Messages = memo(function MessagesComponent({
   settingUpSandbox,
   isOffloading = false,
   reconnectLabel = null,
-  project,
+  localRepo,
   contentWidthClass = "max-w-[42rem]",
   contentPaddingClass = "px-6",
   bottomInset = 0,
+  loadEarlier = null,
   scrollButtonSlot = "internal",
   onShowScrollToBottomChange,
   scrollControlRef,
@@ -82,8 +83,13 @@ export const Messages = memo(function MessagesComponent({
   onAutoApprove,
   onOpenFile,
 }: MessagesProps) {
-  const { scrollRef, contentRef, showScrollToBottom, scrollToBottom } =
-    useTranscriptScroll({ scrollKey, messages, isStreaming })
+  const {
+    scrollRef,
+    contentRef,
+    showScrollToBottom,
+    scrollToBottom,
+    capturePrependAnchor,
+  } = useTranscriptScroll({ scrollKey, messages, isStreaming })
 
   const visibleMessages = useMemo(
     () => messages.filter((message) => !message.hidden),
@@ -107,7 +113,7 @@ export const Messages = memo(function MessagesComponent({
     onShowScrollToBottomChange?.(showScrollToBottom)
   }, [onShowScrollToBottomChange, showScrollToBottom])
 
-  const projectPath = project?.path
+  const repoPath = localRepo?.path
   const lastAgentIndex = visibleMessages.findLastIndex(
     (message) => message.author === "agent"
   )
@@ -115,8 +121,8 @@ export const Messages = memo(function MessagesComponent({
     if (!isStreaming) return undefined
     const lastMessage = visibleMessages.at(-1)
     if (!lastMessage || lastMessage.author !== "agent") return undefined
-    return liveActivityLabel(lastMessage.chunks, projectPath)
-  }, [isStreaming, projectPath, visibleMessages])
+    return liveActivityLabel(lastMessage.chunks, repoPath)
+  }, [isStreaming, repoPath, visibleMessages])
 
   return (
     <TooltipProvider delay={250} closeDelay={0}>
@@ -132,6 +138,21 @@ export const Messages = memo(function MessagesComponent({
             className={`w-full ${contentWidthClass} mx-auto min-w-0 ${contentPaddingClass}`}
             style={bottomInset > 0 ? { paddingBottom: bottomInset } : undefined}
           >
+            {loadEarlier && (
+              <button
+                type="button"
+                disabled={loadEarlier.loading}
+                onClick={() => {
+                  capturePrependAnchor()
+                  loadEarlier.onLoadEarlier()
+                }}
+                className="mb-3 w-full py-1.5 text-center text-xs text-muted-foreground hover:text-foreground disabled:cursor-default"
+              >
+                {loadEarlier.loading
+                  ? "Loading earlier turns…"
+                  : "Load earlier turns"}
+              </button>
+            )}
             {visibleMessages.length === 0 && emptyState}
             {visibleMessages.map((message, index) => {
               const isLastMessage = index === visibleMessages.length - 1
@@ -151,7 +172,7 @@ export const Messages = memo(function MessagesComponent({
                   message={message}
                   isStreaming={messageIsStreaming && !isOffloading}
                   isMarkdownLive={messageIsMarkdownLive}
-                  projectPath={projectPath}
+                  repoPath={repoPath}
                   activityLabel={messageIsStreaming ? activityLabel : undefined}
                   onApprove={onApprove}
                   onReject={onReject}

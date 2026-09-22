@@ -1,8 +1,8 @@
-"""Workspaces: repos, Slack channels, and team settings, plus the sandbox they boot.
+"""Workspaces: repos, Slack channels, and workspace settings, plus the sandbox they boot.
 
 A workspace owns one or more repositories (a repo belongs to exactly one
-workspace), zero or more Slack channels, its MCP connections, and its team
-settings. It also carries the former "environment" fields: a prompt appended
+workspace), zero or more Slack channels, its MCP connections, and its own
+settings overrides. It also carries the former "environment" fields: a prompt appended
 to the agent's system prompt, a ``setup_script`` that provisions a sandbox from
 the base snapshot (clone the repos, install toolchains, warm caches), and an
 optional ``update_script`` that freshens what goes stale in an image — a
@@ -37,6 +37,7 @@ import logging
 import re
 import shlex
 from collections import defaultdict
+from collections.abc import Sequence
 from typing import Any, Literal, TypedDict
 from uuid import UUID
 
@@ -131,6 +132,7 @@ SNAPSHOT_TAG = "latest"
 # snapshot, so any sandbox booted from an image carries the log of the run that
 # produced it — readable in place, without the dashboard.
 DEFAULT_SCRIPT_ROOT = "/open-swe/environment"
+WORKSPACE_REPOS_ENV_VAR = "OPENSWE_WORKSPACE_REPOS"
 DEFAULT_SANDBOX_UPDATE_TIMEOUT_SECONDS = 120
 
 _SLUG_RE = re.compile(r"[^a-z0-9]+")
@@ -243,11 +245,12 @@ def script_log_paths() -> dict[str, str]:
     return {label: script_log_path(label) for label in ("setup", "update")}
 
 
-def script_command(script: str, label: str) -> str:
+def script_command(script: str, label: str, repos: Sequence[str] = ()) -> str:
     """Shell command that writes one of a workspace's scripts, runs it, and logs it.
 
     Base64 so nothing in the script body — quotes, heredocs, newlines — can break
-    out of the command carrying it.
+    out of the command carrying it. ``OPENSWE_WORKSPACE_REPOS`` contains the
+    workspace's repository names separated by spaces.
 
     ``bash -x`` traces each command into the log, which is what makes it useful
     after the fact: a hung or half-finished provision shows the exact step it
@@ -263,10 +266,12 @@ def script_command(script: str, label: str) -> str:
     path = f"{root}/{label}.sh"
     log_path = script_log_path(label)
     encoded = base64.b64encode(script.encode()).decode()
+    workspace_repos = " ".join(repos)
     return (
         f"mkdir -p {shlex.quote(f'{root}/logs')} "
         f"&& printf %s {shlex.quote(encoded)} | base64 -d > {shlex.quote(path)} "
-        f"&& {{ bash -x {shlex.quote(path)} > {shlex.quote(log_path)} 2>&1; }}; "
+        f"&& {{ {WORKSPACE_REPOS_ENV_VAR}={shlex.quote(workspace_repos)} "
+        f"bash -x {shlex.quote(path)} > {shlex.quote(log_path)} 2>&1; }}; "
         f"rc=$?; cat {shlex.quote(log_path)} 2>/dev/null; exit $rc"
     )
 
@@ -781,7 +786,7 @@ class WorkspaceStore:
                 )
         return records
 
-    async def put(self, slug: str, record: Workspace) -> Workspace:
+    async def put(self, slug: str, record: Workspace, *, create_only: bool = False) -> Workspace:
         """Write the row and replace its bindings, in one transaction.
 
         Returns the stored view rather than the record it was handed: a
@@ -790,7 +795,11 @@ class WorkspaceStore:
         """
         try:
             async with postgres.session() as session:
-                row = await session.scalar(select(WorkspaceRow).where(WorkspaceRow.slug == slug))
+                row = (
+                    None
+                    if create_only
+                    else await session.scalar(select(WorkspaceRow).where(WorkspaceRow.slug == slug))
+                )
                 if row is None:
                     row = WorkspaceRow(slug=slug, name=record.name)
                     session.add(row)
@@ -898,7 +907,7 @@ class WorkspaceStore:
         await self._assert_unique(record)
         if await self.slug_exists(record.slug):
             raise WorkspaceConflictError(f"workspace {create.name!r} already exists")
-        return await self.put(record.slug, record)
+        return await self.put(record.slug, record, create_only=True)
 
     async def apply_update(self, slug: str, update: WorkspaceUpdate) -> Workspace:
         record = await self.get(slug)
@@ -1227,8 +1236,6 @@ async def _channel_owners(
 
 def _apply(record: Workspace, update: WorkspaceUpdate) -> Workspace:
     """Apply a partial update in memory; only the fields present are written."""
-    if update.name is not None and slugify(update.name) != record.slug:
-        raise ValueError("renaming a workspace across slugs is not supported; create a new one")
     if update.name is not None:
         record.name = update.name.strip()
     if update.prompt is not None:

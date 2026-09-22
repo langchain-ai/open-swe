@@ -1,21 +1,19 @@
-"""Dashboard API for instance-wide sandbox settings and named workspaces."""
+"""Dashboard API for named workspaces."""
 
+import asyncio
 from typing import Any
 
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import Response
 
-from agent.dashboard.deps import ADMIN_DEP, ADMIN_OR_TOKEN_DEP, SESSION_DEP, session_is_admin
+from agent.dashboard.deps import ADMIN_DEP, SESSION_DEP, session_is_admin
+from agent.dashboard.workspace_settings import delete_workspace_settings, get_workspace_settings
 from agent.workspaces.refresh import (
     ensure_refresh_cron,
     is_refresh_in_flight,
     start_refresh_run,
 )
-from agent.workspaces.sandbox_settings import (
-    SandboxSettingsUpdate,
-    get_sandbox_settings,
-    upsert_sandbox_settings,
-)
+from agent.workspaces.routing import workspace_for_repo
 from agent.workspaces.store import (
     DEFAULT_WORKSPACE_SLUG,
     WORKSPACES,
@@ -28,21 +26,6 @@ from agent.workspaces.store import (
 )
 
 router = APIRouter(tags=["workspaces"])
-
-
-@router.get("/sandbox-settings")
-async def api_get_sandbox_settings(
-    _admin: dict[str, Any] = ADMIN_OR_TOKEN_DEP,
-) -> dict[str, Any]:
-    return await get_sandbox_settings()
-
-
-@router.put("/sandbox-settings")
-async def api_set_sandbox_settings(
-    body: SandboxSettingsUpdate,
-    _admin: dict[str, Any] = ADMIN_OR_TOKEN_DEP,
-) -> dict[str, Any]:
-    return await upsert_sandbox_settings(body, updated_by=_admin.get("sub"))
 
 
 def _normalized_slug(raw: str) -> str:
@@ -87,15 +70,36 @@ async def api_create_workspace(
     return record
 
 
+async def _default_repo_for(slug: str) -> str | None:
+    """The repository a run composed in ``slug`` starts from when none is picked.
+
+    Resolved through the settings tiers, then subject to ownership: a default
+    the workspace inherited from the instance is withheld when another
+    workspace owns that repository, the same rule Slack routing applies.
+    """
+    repo = (await get_workspace_settings(slug)).default_repo
+    if not repo:
+        return None
+    owner = await workspace_for_repo(repo["owner"], repo["name"])
+    if owner is not None and owner != slug:
+        return None
+    return f"{repo['owner']}/{repo['name']}"
+
+
 @router.get("/workspaces/options")
 async def api_workspace_options(
     session: dict[str, Any] = SESSION_DEP,
 ) -> dict[str, Any]:
-    """Pickable workspaces for any signed-in user; refresh logs only for admins."""
-    return {
-        "workspaces": await list_workspace_options(include_logs=session_is_admin(session)),
-        "default_slug": DEFAULT_WORKSPACE_SLUG,
-    }
+    """Pickable workspaces for any signed-in user; refresh logs only for admins.
+
+    Each option carries ``default_repo`` so the composer can preselect it when
+    the workspace is chosen first.
+    """
+    options = await list_workspace_options(include_logs=session_is_admin(session))
+    defaults = await asyncio.gather(*(_default_repo_for(option["slug"]) for option in options))
+    for option, default_repo in zip(options, defaults, strict=True):
+        option["default_repo"] = default_repo
+    return {"workspaces": options, "default_slug": DEFAULT_WORKSPACE_SLUG}
 
 
 @router.get("/workspaces/{slug}")
@@ -115,12 +119,23 @@ async def api_update_workspace(
     body: WorkspaceUpdate,
     _admin: dict[str, Any] = ADMIN_DEP,
 ) -> Workspace:
+    normalized = _normalized_slug(slug)
+    previous = await WORKSPACES.get(normalized)
+    repos_changed = (
+        previous is not None
+        and body.repos is not None
+        and {repo.lower() for repo in body.repos} != {repo.lower() for repo in previous.repos}
+    )
+    if repos_changed and is_refresh_in_flight(previous):
+        raise HTTPException(409, "a refresh of this workspace is already running")
     try:
-        record = await WORKSPACES.apply_update(_normalized_slug(slug), body)
+        record = await WORKSPACES.apply_update(normalized, body)
     except ValueError as e:
         raise _save_conflict(e) from e
     if record.setup_script:
         await ensure_refresh_cron(record.slug)
+        if repos_changed and await start_refresh_run(record.slug) is None:
+            raise HTTPException(502, "workspace was saved but its snapshot rebuild could not start")
     return record
 
 
@@ -153,6 +168,9 @@ async def api_delete_workspace(
     slug: str,
     _admin: dict[str, Any] = ADMIN_DEP,
 ) -> Response:
-    if not await WORKSPACES.remove(_normalized_slug(slug)):
+    normalized = _normalized_slug(slug)
+    if not await WORKSPACES.remove(normalized):
         raise HTTPException(404, "workspace not found")
+    # A later workspace under the same slug must start from the instance record.
+    await delete_workspace_settings(normalized)
     return Response(status_code=204)

@@ -14,6 +14,7 @@ from agent.slack.blocks import (
     context,
     divider,
     escape,
+    image,
     modal,
     section,
     text_input,
@@ -54,14 +55,21 @@ def _header(approval: ExpeditedApproval, title: str) -> list[Block]:
     ]
 
 
-def _diff_sections(files: list[ChangedFile]) -> list[Block]:
+def _diff_sections(files: list[ChangedFile], diff_image_id: str | None) -> list[Block]:
+    if diff_image_id:
+        names = ", ".join(escape(file.filename) for file in files[:_MAX_FILE_SECTIONS])
+        return [image(diff_image_id, f"Diff of {names}"), *_overflow_note(files)]
     sections: list[Block] = []
     for file in files[:_MAX_FILE_SECTIONS]:
         sections.append(section(f"`{escape(file.filename)}`  +{file.additions} −{file.deletions}"))
         sections.append(section(code_block(file.patch or "")))
-    if len(files) > _MAX_FILE_SECTIONS:
-        sections.append(context(f"{len(files) - _MAX_FILE_SECTIONS} more files on GitHub."))
-    return sections
+    return [*sections, *_overflow_note(files)]
+
+
+def _overflow_note(files: list[ChangedFile]) -> list[Block]:
+    if len(files) <= _MAX_FILE_SECTIONS:
+        return []
+    return [context(f"{len(files) - _MAX_FILE_SECTIONS} more files on GitHub.")]
 
 
 def _vote_buttons(approval: ExpeditedApproval) -> tuple[ButtonElement, ButtonElement]:
@@ -100,13 +108,14 @@ def open_card(
     title: str,
     files: list[ChangedFile],
     failing_checks: list[str] | None = None,
+    diff_image_id: str | None = None,
 ) -> tuple[str, list[Block]]:
     """Text fallback and blocks for a card that is accepting votes."""
     pr = approval.pull_request
     blocks: list[Block] = [
         *_header(approval, title),
         divider(),
-        *_diff_sections(files),
+        *_diff_sections(files, diff_image_id),
         divider(),
         section(_vote_summary(approval)),
         *_failing_check_warning(failing_checks or []),
@@ -121,14 +130,19 @@ def open_card(
 
 
 def closed_card(
-    approval: ExpeditedApproval, *, title: str, files: list[ChangedFile], outcome: str
+    approval: ExpeditedApproval,
+    *,
+    title: str,
+    files: list[ChangedFile],
+    outcome: str,
+    diff_image_id: str | None = None,
 ) -> tuple[str, list[Block]]:
     """Text fallback and blocks for a card whose vote is over."""
     pr = approval.pull_request
     blocks: list[Block] = [
         *_header(approval, title),
         divider(),
-        *_diff_sections(files),
+        *_diff_sections(files, diff_image_id),
         divider(),
         section(f"*{escape(outcome)}*"),
         context(_vote_summary(approval)),

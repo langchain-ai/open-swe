@@ -36,10 +36,10 @@ import {
   writeStoredPanelCollapsed,
 } from "@/features/agents/lib/gitPanelPreferences"
 import { Messages } from "@/features/agents/components/messages"
-import type { MessagesScrollControl } from "@/features/agents/components/messages"
-import { latestContextTokens } from "@/features/agents/lib/contextUsage"
-import { streamMessagesToUi } from "@/features/agents/lib/streamMessagesToUi"
-import { messageArrivalTimestamp } from "@/features/agents/lib/messageTimestamps"
+import type {
+  LoadEarlier,
+  MessagesScrollControl,
+} from "@/features/agents/components/messages"
 import { useSubmitAgentMessage } from "@/features/agents/lib/provider/useSubmitAgentMessage"
 import { useModelOptions } from "@/features/agents/lib/provider/useModelOptions"
 import {
@@ -52,26 +52,19 @@ import {
   visibleQueuedMessages,
 } from "@/features/agents/lib/queuedMessages"
 import { agentsApi } from "@/features/agents/lib/api"
-import { rejectPlan } from "@/lib/plan"
 import { useSession } from "@/lib/session"
 import { useIsMobile } from "@/lib/useIsMobile"
-import { useAgentStream } from "@/features/agents/lib/stream/AgentStreamProvider"
-import { useReconnectStatus } from "@/features/agents/lib/stream/useReconnectStatus"
-import {
-  runTranscriptBuilt,
-  runTranscriptCommitted,
-} from "@/lib/perf/streaming"
+import { useThreadSource } from "@/features/agents/lib/threadSource/ThreadSourceProvider"
+import { useConnectionStatus } from "@/features/agents/lib/stream/useReconnectStatus"
+import { runTranscriptCommitted } from "@/lib/perf/streaming"
 import {
   threadHydrated,
   threadHydrationFailed,
-  threadTranscriptBuilt,
   threadTranscriptPainted,
 } from "@/lib/perf/threadLoad"
-import { perfNow } from "@/lib/perf/trace"
 
 interface AgentThreadViewProps {
   thread: AgentThread
-  autoFocusComposer?: boolean
 }
 
 /** Paths the agent has edited this thread, newest last, for `@file` mentions. */
@@ -103,13 +96,10 @@ function CodeChannelLink({ url }: { url?: string | null }) {
   )
 }
 
-export function AgentThreadView({
-  thread,
-  autoFocusComposer = false,
-}: AgentThreadViewProps) {
+export function AgentThreadView({ thread }: AgentThreadViewProps) {
   const renameThread = useRenameAgentThread()
   const sendMessage = useSubmitAgentMessage(thread.id)
-  const stream = useAgentStream()
+  const source = useThreadSource()
   const isMobile = useIsMobile()
   const skills = useAgentSkills()
   const session = useSession()
@@ -145,36 +135,22 @@ export function AgentThreadView({
     setAutoSelected(next === null)
     setSelection(next)
   }
-  const [planMode, setPlanMode] = useState<boolean | null>(null)
-  const [planFeedbackPending, setPlanFeedbackPending] =
-    useState(autoFocusComposer)
   const scrollControlRef = useRef<MessagesScrollControl | null>(null)
-  const activePlanMode = planMode ?? thread.planMode ?? false
-  const routed = stream.routed ?? null
+  const routed = source.routed
   const activeModel = models.find(
     (model) => model.id === activeSelection?.modelId
   )
   const submitMessage = useCallback(
     async (content: string, images: Array<ImageChunk>) => {
       scrollControlRef.current?.scrollToBottom()
-      if (planFeedbackPending) await rejectPlan(thread.id, false)
       await sendMessage.mutateAsync({
         content,
         images,
         model_id: activeSelection?.modelId ?? null,
         effort: activeSelection?.effort ?? null,
-        plan_mode: activePlanMode,
       })
-      setPlanFeedbackPending(false)
     },
-    [
-      activePlanMode,
-      activeSelection?.effort,
-      activeSelection?.modelId,
-      planFeedbackPending,
-      sendMessage,
-      thread.id,
-    ]
+    [activeSelection?.effort, activeSelection?.modelId, sendMessage]
   )
   const fixPullRequest = useCallback(
     async (pullRequest: AgentPullRequest) => {
@@ -187,10 +163,7 @@ export function AgentThreadView({
     },
     [submitMessage, thread.id]
   )
-  const usedTokens = useMemo(
-    () => latestContextTokens(stream.messages),
-    [stream.messages]
-  )
+  const usedTokens = source.contextTokens
 
   // Own the git panel's collapsed state so file links can reveal the panel.
   const [panelCollapsed, setPanelCollapsed] = useState(() =>
@@ -214,20 +187,9 @@ export function AgentThreadView({
     [handlePanelCollapsedChange]
   )
 
-  const baseMessages = useMemo<Array<Message>>(() => {
-    const started = perfNow()
-    const built = streamMessagesToUi(
-      stream.messages,
-      stream.toolCalls,
-      messageArrivalTimestamp
-    )
-    const elapsed = perfNow() - started
-    threadTranscriptBuilt(thread.id, elapsed)
-    runTranscriptBuilt(thread.id, elapsed)
-    return built
-  }, [stream.messages, stream.toolCalls, thread.id])
+  const baseMessages = source.messages
 
-  const isStreaming = thread.status === "running" || stream.isLoading
+  const isStreaming = thread.status === "running" || source.isRunning
   const activeRun = useMemo(
     () => ({ threadId: thread.id, running: thread.status === "running" }),
     [thread.id, thread.status]
@@ -249,22 +211,29 @@ export function AgentThreadView({
   // The only file list the UI has: whatever the agent has already touched in
   // this thread. Those are also the paths a follow-up is most likely about.
   const mentionPaths = useMemo(() => editedPaths(baseMessages), [baseMessages])
-  const isThinking = stream.isLoading
+  const loadEarlier = useMemo<LoadEarlier | null>(
+    () =>
+      source.hasOlder
+        ? { loading: source.isLoadingOlder, onLoadEarlier: source.loadOlder }
+        : null,
+    [source.hasOlder, source.isLoadingOlder, source.loadOlder]
+  )
+  const isThinking = source.isRunning
   const settingUpSandbox = isThinking && baseMessages.length === 0
-  const reconnect = useReconnectStatus("cloud", thread.id)
-  // The transcript hydrates from the SDK (`GET …/state` → `stream.messages`).
-  // Show a loading state during that one-time fetch instead of the empty state.
-  const isHydrating = stream.isThreadLoading && !hasMessages
+  const reconnect = useConnectionStatus(source.connection)
+  // The transcript hydrates once: the SDK's state fetch, or the event log's
+  // snapshot. Show a loading state during it instead of the empty state.
+  const isHydrating = source.isHydrating && !hasMessages
   const hydrationTimedOut = useLoadTimedOut(isHydrating)
   // A failed hydrate is indistinguishable from an empty thread in the snapshot,
-  // so say so rather than claiming the thread has no messages. `stream.error`
+  // so say so rather than claiming the thread has no messages. `source.error`
   // also carries run failures, hence the dedicated hydration signal.
   const [hydrateError, setHydrateError] = useState<unknown>(null)
   useEffect(() => {
     let active = true
     // oxlint-disable-next-line react/set-state-in-effect
     setHydrateError(null)
-    stream.hydrationPromise.catch((error: unknown) => {
+    source.hydration.catch((error: unknown) => {
       if (!active) return
       setHydrateError(error)
       threadHydrationFailed(thread.id)
@@ -272,12 +241,12 @@ export function AgentThreadView({
     return () => {
       active = false
     }
-  }, [stream.hydrationPromise, thread.id])
+  }, [source.hydration, thread.id])
   const hydrationFailed = !hasMessages && hydrateError !== null
 
   useEffect(() => {
-    if (!stream.isThreadLoading) threadHydrated(thread.id)
-  }, [stream.isThreadLoading, thread.id])
+    if (!source.isHydrating) threadHydrated(thread.id)
+  }, [source.isHydrating, thread.id])
 
   // The transcript's first frame: one rAF after the commit that replaced the
   // hydration placeholder. A commit before the frame fires cancels and
@@ -385,10 +354,7 @@ export function AgentThreadView({
                   messages={visibleMessages}
                   threadId={thread.id}
                   scrollKey={thread.id}
-                  showPlanArtifact={
-                    thread.planStatus === "ready" ||
-                    thread.planStatus === "shared"
-                  }
+                  showPlanArtifact={Boolean(thread.planStatus)}
                   emptyState={
                     <div className="flex min-h-60 items-center justify-center">
                       {hydrationFailed ? (
@@ -409,12 +375,13 @@ export function AgentThreadView({
                     </div>
                   }
                   onOpenFile={handleOpenFile}
+                  loadEarlier={loadEarlier}
                   queuedMessages={queuedMessages}
                   isStreaming={isStreaming}
-                  streamIsLoading={stream.isLoading}
+                  streamIsLoading={source.isRunning}
                   scrollControlRef={scrollControlRef}
                   isThinking={isThinking}
-                  isOffloading={stream.isOffloading}
+                  isOffloading={source.isOffloading}
                   reconnectLabel={reconnect.label}
                   settingUpSandbox={settingUpSandbox}
                   pollWorkflowApprovalsWhileActive={isStreaming}
@@ -452,7 +419,6 @@ export function AgentThreadView({
                       : "Send the first message"
                     : "Only workspace admins can send messages in this thread"
                 }
-                autoFocus={autoFocusComposer}
                 canOffload={!isStreaming}
                 compact
                 disabled={!canPost}
@@ -463,8 +429,6 @@ export function AgentThreadView({
                 routed={routed}
                 selection={activeSelection}
                 onSelectionChange={handleSelectionChange}
-                planMode={activePlanMode}
-                onPlanModeChange={setPlanMode}
                 mentionPaths={mentionPaths}
                 skills={skills.data}
                 contextUsage={{

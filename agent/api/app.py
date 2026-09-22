@@ -13,6 +13,7 @@ from agent.config import ENV
 from agent.dashboard import router as dashboard_router
 from agent.github.routes import router as github_webhook_router
 from agent.linear.routes import router as linear_webhook_router
+from agent.sandboxes.tool_routes import router as sandbox_tool_router
 from agent.slack.routes import router as slack_webhook_router
 from agent.threads.plan_api import plan_router
 from agent.threads.workflow_approval_api import workflow_approval_router
@@ -34,7 +35,9 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     from agent.dashboard.oauth import validate_github_login_allowlist
     from agent.database.analytics import activate_reporting, load_workspace
     from agent.sandboxes.providers.registry import validate_sandbox_startup_config
+    from agent.transcript import listener as transcript_listener
     from agent.users import User
+    from agent.users.import_store import import_user_mappings
     from agent.utils.model import close_cached_models, validate_local_dev_llm_config
     from agent.workspaces.store import import_store_records
 
@@ -58,6 +61,19 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
             "Imported workspaces from the LangGraph Store",
             extra={"imported_workspaces": imported},
         )
+    try:
+        # People used to be Store records keyed by GitHub login; this moves them
+        # into the users table and is a no-op once it has.
+        imported_users = await import_user_mappings()
+    except Exception:  # noqa: BLE001
+        # Startup continues: anyone still in the Store cannot vote or be
+        # resolved from Slack until an import succeeds, and nothing else breaks.
+        logger.exception("Importing user mappings from the LangGraph Store failed")
+    else:
+        logger.info(
+            "Imported user mappings from the LangGraph Store",
+            extra={"imported_users": imported_users},
+        )
     if admins := configured_admins():
         await User.sync_admins(admins)
     try:
@@ -67,8 +83,15 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     except Exception:  # noqa: BLE001
         logger.warning("Analytics startup failed", exc_info=True)
     try:
+        await transcript_listener.start()
+    except Exception:  # noqa: BLE001
+        # Transcript readers fall back to in-process notifications; a thread
+        # driven from another process is what goes quiet until this recovers.
+        logger.warning("Transcript listener startup failed", exc_info=True)
+    try:
         yield
     finally:
+        await transcript_listener.stop()
         await stop_worker()
         await database.close()
         await close_cached_models()
@@ -101,6 +124,7 @@ def create_app() -> FastAPI:
     app.include_router(slack_webhook_router)
     app.include_router(health_router)
     app.include_router(github_webhook_router)
+    app.include_router(sandbox_tool_router)
     mount_dashboard_ui(app)
     return app
 

@@ -1,7 +1,7 @@
 """PostgreSQL reporting preserves usage cohorts, identities, and disclosure rules."""
 
 from datetime import UTC, datetime, timedelta
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 from sqlalchemy import text
@@ -98,6 +98,26 @@ async def pr(person_id, *, age=1, state="open", additions=0, deletions=0, **kwar
     return pr_id
 
 
+async def feedback(
+    person_id: UUID | None,
+    *,
+    age: int = 1,
+    withdrawn_at: datetime | None = None,
+    workspace_id: UUID | None = None,
+) -> UUID:
+    feedback_id = uuid4()
+    await insert(
+        "feedback_projection",
+        workspace_id=workspace_id,
+        feedback_id=feedback_id,
+        user_id=person_id,
+        sentiment="positive",
+        submitted_at=NOW - timedelta(days=age),
+        withdrawn_at=withdrawn_at,
+    )
+    return feedback_id
+
+
 async def report(**kwargs):
     return await queries.usage_leaderboard(
         **{"period": "7d", "limit": 100, "current_login": None, "current_email": None, **kwargs}
@@ -117,6 +137,18 @@ async def test_empty_report_exposes_collection_progress(usage_db):
     assert result["reviewer_stats"]["top_categories"] == []
 
 
+async def test_usage_supports_last_24_hours(usage_db):
+    recent = await person("recent")
+    stale = await person("stale")
+    await run(recent, age=0)
+    await run(stale, age=2)
+
+    result = await report(period="24h")
+
+    assert result["period"] == "24h"
+    assert [row["user"]["name"] for row in result["rows"]] == ["recent"]
+
+
 async def test_usage_ranks_run_and_pr_cohorts_with_cost_coverage(usage_db):
     alice = await person("alice", "alice@example.com", display_name="Alice Example")
     bob = await person("bob", "bob@example.com")
@@ -124,10 +156,26 @@ async def test_usage_ranks_run_and_pr_cohorts_with_cost_coverage(usage_db):
     stale = await person("stale")
     model = uuid4()
     await insert("model_directory", model_id=model, provider_model_id="model-a")
-    first_run = await run(alice, duration=60, model_id=model, tokens=4)
-    await run(alice, duration=120, model_id=model, tokens=7)
-    await run(alice, duration=-1, tokens=3)
-    await run(alice, tokens=6)
+    first_thread = uuid4()
+    second_thread = uuid4()
+    first_run = await run(
+        alice,
+        duration=60,
+        model_id=model,
+        configured_effort="high",
+        tokens=4,
+        thread_id=first_thread,
+    )
+    await run(
+        alice,
+        duration=120,
+        model_id=model,
+        configured_effort="high",
+        tokens=7,
+        thread_id=first_thread,
+    )
+    await run(alice, duration=-1, tokens=3, thread_id=second_thread)
+    await run(alice, tokens=6, thread_id=second_thread)
     await run(alice, age=8, duration=10000, tokens=9999)
     await run(alice, age=-1, duration=10000, tokens=9999)
     await run(stale, age=8)
@@ -164,10 +212,14 @@ async def test_usage_ranks_run_and_pr_cohorts_with_cost_coverage(usage_db):
         "avatar_url": "https://github.com/alice.png?size=80",
     }
     assert row["invocations"] == row["agent_runs"] == 4
+    assert row["threads"] == 2
     assert row["avg_invocation_seconds"] == row["avg_run_seconds"] == 90
+    assert row["avg_thread_seconds"] == 180
     assert row["favorite_model"] == "model-a"
+    assert row["favorite_model_effort"] == "high"
     assert row["prs_opened"] == 1
     assert row["merged_prs"] == 0
+    assert row["merged_prs_per_thread"] == 0
     assert row["agent_loc"] == 20
     assert row["additions"] == 12
     assert row["deletions"] == 8
@@ -180,6 +232,166 @@ async def test_usage_ranks_run_and_pr_cohorts_with_cost_coverage(usage_db):
     assert result["rows"][0]["user"]["github_login"] is None
     assert (await report(limit=0))["rows"][0]["rank"] == 1
     assert [row["rank"] for row in (await report(limit=1, offset=1))["rows"]] == [2]
+
+
+async def test_usage_sorting_happens_before_pagination(usage_db):
+    alice = await person("alice", display_name="Alice")
+    bob = await person("bob", display_name="bob")
+    carol = await person("carol", display_name="Carol")
+    await run(alice, tokens=10)
+    await run(bob, tokens=30)
+    await run(carol, tokens=20)
+
+    first = await report(limit=2, sort="total_tokens", direction="desc")
+    assert [row["user"]["name"] for row in first["rows"]] == ["bob", "Carol"]
+    second = await report(
+        limit=2,
+        cursor=first["next_cursor"],
+        sort="total_tokens",
+        direction="desc",
+    )
+    assert [row["user"]["name"] for row in second["rows"]] == ["Alice"]
+    with pytest.raises(ValueError, match="invalid usage leaderboard cursor"):
+        await report(
+            limit=2,
+            cursor=first["next_cursor"],
+            sort="user",
+            direction="asc",
+        )
+
+
+@pytest.mark.parametrize("direction", ["asc", "desc"])
+async def test_avg_invocations_per_thread_sort_handles_members_without_threads(
+    usage_db: UUID, direction: queries.SortDirection
+) -> None:
+    dense = await person("dense", display_name="Dense")
+    sparse = await person("sparse", display_name="Sparse")
+    threadless = await person("threadless", display_name="Threadless")
+    shared_thread = uuid4()
+    await run(dense, thread_id=shared_thread)
+    await run(dense, thread_id=shared_thread)
+    await run(sparse, thread_id=uuid4())
+    await run(threadless)
+    await pr(threadless, state="merged")
+
+    result = await report(sort="avg_invocations_per_thread", direction=direction)
+    averages = {row["user"]["name"]: row["avg_invocations_per_thread"] for row in result["rows"]}
+    assert averages == {"Dense": 2, "Sparse": 1, "Threadless": 0}
+    expected = ["Threadless", "Sparse", "Dense"]
+    if direction == "desc":
+        expected.reverse()
+    assert [row["user"]["name"] for row in result["rows"]] == expected
+
+
+async def test_usage_sorts_by_merged_prs_per_thread(usage_db):
+    alice = await person("alice")
+    bob = await person("bob")
+    await run(alice, thread_id=uuid4())
+    for _ in range(2):
+        await pr(alice, state="merged")
+    for _ in range(2):
+        await run(bob, thread_id=uuid4())
+    for _ in range(3):
+        await pr(bob, state="merged")
+
+    result = await report(sort="merged_prs_per_thread", direction="desc")
+
+    assert [row["user"]["name"] for row in result["rows"]] == ["alice", "bob"]
+    assert [row["merged_prs_per_thread"] for row in result["rows"]] == [2, 1.5]
+
+
+async def test_user_sort_follows_disclosed_names_not_hidden_ones(usage_db):
+    # Hidden members are ordered by the label the viewer sees, so their real names
+    # cannot be inferred from where they land in the list.
+    zeta = await person(email="zeta@example.com")
+    alpha = await person(email="alpha@example.com")
+    mid = await person("mid")
+    for member in (zeta, alpha, mid):
+        await run(member)
+    await pr(zeta, state="merged")
+
+    ordinary = await report(sort="user", direction="asc")
+    assert [row["user"]["name"] for row in ordinary["rows"]] == [
+        "mid",
+        "Open SWE user",
+        "Open SWE user",
+    ]
+    # Masked members tie on their shared label and fall back to rank, not to "alpha"
+    # before "zeta".
+    assert [row["rank"] for row in ordinary["rows"]] == [3, 1, 2]
+
+    admin = await report(sort="user", direction="asc", admin=True)
+    assert [row["user"]["name"] for row in admin["rows"]] == ["alpha", "mid", "zeta"]
+
+
+@pytest.mark.parametrize("direction", ["asc", "desc"])
+async def test_favorite_models_sort_by_displayed_labels_before_pagination(
+    usage_db: UUID, direction: queries.SortDirection
+) -> None:
+    # Alphabetical display order, including sanitizing, truncation ties, and fallbacks.
+    models = [
+        "provider/---Alpha---",
+        None,
+        "fireworks:accounts/fireworks/models/kimi-k3",
+        "google_genai:gemini-3.8-flash",
+        "provider/" + "m" * 48 + "z",
+        "provider/" + "m" * 48 + "a",
+        "provider/model space",
+        "///",
+        "provider/Zulu",
+    ]
+    for index, provider_model_id in enumerate(models):
+        member = await person(f"member-{index}")
+        model_id = None
+        if provider_model_id is not None:
+            model_id = uuid4()
+            await insert("model_directory", model_id=model_id, provider_model_id=provider_model_id)
+        await run(member, model_id=model_id)
+
+    expected = list(range(len(models)))
+    if direction == "desc":
+        expected.reverse()
+        # Equal displayed labels retain rank order in either direction.
+        expected[3:5] = [4, 5]
+    cursor = None
+    actual: list[str] = []
+    while True:
+        page = await report(limit=2, cursor=cursor, sort="favorite_model", direction=direction)
+        actual.extend(row["favorite_model"] for row in page["rows"])
+        cursor = page["next_cursor"]
+        if cursor is None:
+            break
+    assert actual == [models[index] or "default" for index in expected]
+
+
+async def test_favorite_model_effort_is_scoped_to_the_favorite_model(usage_db):
+    reader = await person("reader")
+    favorite_model = uuid4()
+    other_model = uuid4()
+    await insert("model_directory", model_id=favorite_model, provider_model_id="favorite")
+    await insert("model_directory", model_id=other_model, provider_model_id="other")
+    await run(reader, model_id=favorite_model, configured_effort="high")
+    await run(reader, model_id=favorite_model, configured_effort="medium")
+    await run(reader, model_id=favorite_model, configured_effort="medium")
+    for _ in range(4):
+        await run(reader, model_id=other_model, configured_effort="max")
+    for _ in range(3):
+        await run(reader, model_id=favorite_model, configured_effort="high")
+
+    row = (await report())["rows"][0]
+    assert row["favorite_model"] == "favorite"
+    assert row["favorite_model_effort"] == "high"
+
+
+async def test_favorite_model_effort_reports_missing_legacy_values(usage_db):
+    reader = await person("reader")
+    model = uuid4()
+    await insert("model_directory", model_id=model, provider_model_id="favorite")
+    await run(reader, model_id=model)
+
+    row = (await report())["rows"][0]
+    assert row["favorite_model"] == "favorite"
+    assert row["favorite_model_effort"] is None
 
 
 async def test_aliases_and_pr_only_members_preserve_privacy(usage_db):
@@ -209,6 +421,110 @@ async def test_aliases_and_pr_only_members_preserve_privacy(usage_db):
     assert admin["rows"][0]["user"]["github_login"] == "named"
     assert admin["rows"][1]["user"]["name"] == "private"
     assert all(row["user"]["email"] is None for row in admin["rows"])
+
+
+async def test_feedback_counts_active_submissions_by_canonical_person(usage_db: UUID) -> None:
+    canonical = await person("named", "named@example.com")
+    private = await person(email="private@example.com")
+    no_feedback = await person("runner")
+    stale = await person("stale")
+    alias = uuid4()
+    await insert("identity_aliases", alias_person_id=alias, person_id=canonical)
+    await run(alias)
+    await run(canonical)
+    await run(no_feedback)
+    await pr(alias, state="merged")
+    await feedback(alias)
+    await feedback(canonical, age=0)
+    await feedback(canonical, age=7, withdrawn_at=NOW + timedelta(days=1))
+    await feedback(canonical, withdrawn_at=NOW)
+    await feedback(canonical, withdrawn_at=NOW - timedelta(hours=1))
+    await feedback(canonical, age=8)
+    await feedback(canonical, age=-1)
+    await feedback(canonical, workspace_id=uuid4())
+    await feedback(stale, age=8)
+    await feedback(None)
+    await feedback(private)
+
+    ordinary = await report(sort="feedback_given", direction="desc")
+    assert ordinary["total_members"] == 3
+    assert [row["feedback_given"] for row in ordinary["rows"]] == [3, 1, 0]
+    assert ordinary["rows"][0]["invocations"] == 2
+    assert ordinary["rows"][0]["prs_opened"] == 1
+    private_row = ordinary["rows"][1]
+    assert private_row["invocations"] == private_row["prs_opened"] == 0
+    assert private_row["user"] == {
+        "name": "Open SWE user",
+        "github_login": None,
+        "email": None,
+        "avatar_url": None,
+    }
+    own = await report(
+        current_email=" PRIVATE@EXAMPLE.COM ", sort="feedback_given", direction="desc"
+    )
+    assert own["current_user_rank"] == own["rows"][1]["rank"]
+    assert own["rows"][1]["user"]["email"] == "private@example.com"
+    admin = await report(admin=True, sort="feedback_given", direction="desc")
+    assert admin["rows"][1]["user"]["name"] == "private"
+    assert all(row["user"]["email"] is None for row in admin["rows"])
+
+
+@pytest.mark.parametrize("direction", ["asc", "desc"])
+async def test_feedback_sort_preserves_snapshot_and_ties_across_pages(
+    usage_db: UUID, monkeypatch: pytest.MonkeyPatch, direction: queries.SortDirection
+) -> None:
+    first = await person("first", display_name="Same")
+    second = await person("second", display_name="Same")
+    zero = await person("zero")
+    await feedback(first, age=7)
+    withdrawn = await feedback(second, age=7)
+    await run(zero)
+    expected = await report(sort="feedback_given", direction=direction)
+    first_page = await report(limit=1, sort="feedback_given", direction=direction)
+
+    class LaterDatetime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return NOW + timedelta(days=2)
+
+    monkeypatch.setattr(queries, "datetime", LaterDatetime)
+    await feedback(first, age=-1)
+    await feedback(await person("new"), age=-1)
+    async with postgres.transaction() as conn:
+        await conn.execute(
+            text(
+                "UPDATE feedback_projection SET withdrawn_at = :withdrawn WHERE feedback_id = :id"
+            ),
+            {"withdrawn": NOW + timedelta(days=1), "id": withdrawn},
+        )
+    actual = first_page["rows"]
+    cursor = first_page["next_cursor"]
+    while cursor:
+        page = await report(limit=1, cursor=cursor, sort="feedback_given", direction=direction)
+        assert page["as_of"] == first_page["as_of"]
+        assert page["total_members"] == 3
+        actual.extend(page["rows"])
+        cursor = page["next_cursor"]
+    assert actual == expected["rows"]
+    assert [row["feedback_given"] for row in actual] == (
+        [0, 1, 1] if direction == "asc" else [1, 1, 0]
+    )
+    with pytest.raises(queries.InvalidUsageCursor):
+        await report(cursor=first_page["next_cursor"], sort="rank", direction=direction)
+
+
+async def test_feedback_reporting_period_and_cutover(usage_db: UUID) -> None:
+    member = await person("member")
+    for age in (0, 1, 7, 8, 30, 31, 91):
+        await feedback(member, age=age)
+    for period, count in (("24h", 2), ("7d", 3), ("30d", 5), ("all", 6)):
+        assert (await report(period=period))["rows"][0]["feedback_given"] == count
+    async with postgres.transaction() as conn:
+        await conn.execute(
+            text("UPDATE deployment_metadata SET reporting_cutover_at = :cutover"),
+            {"cutover": NOW - timedelta(days=1)},
+        )
+    assert (await report(period="all"))["rows"][0]["feedback_given"] == 2
 
 
 async def test_reviewer_uses_publication_recording_and_surfacing_cohorts(usage_db):
@@ -327,7 +643,7 @@ async def test_reports_require_activation_and_exclude_pre_cutover_facts(usage_db
     assert result["reviewer_stats"]["human_replies"] == 1
     assert result["reporting_cutover_at"] == (NOW - timedelta(days=1)).isoformat()
     outcomes = await queries.pr_merge_rate_by_model(period="all", admin=True)
-    assert outcomes["cohorts"][0]["cohort_size"] == 1
+    assert outcomes["cohorts"] == []
     async with postgres.transaction() as conn:
         await conn.execute(text("UPDATE deployment_metadata SET reporting_cutover_at = NULL"))
     with pytest.raises(RuntimeError, match="not been activated"):

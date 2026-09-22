@@ -1,4 +1,4 @@
-"""Route-level cover for the `untagged_reply` flag handed to the agent prompt."""
+"""Route-level coverage for Slack mention requirements and message edits."""
 
 import json
 from typing import Any, cast
@@ -11,6 +11,7 @@ from starlette.requests import Request
 from agent.slack import events as slack_events
 from agent.slack import routes as slack_routes
 from agent.slack import webhook as slack_service
+from agent.slack.payloads import SlackChannelContext
 from agent.slack.request import SlackRequest
 from agent.webhooks import common as webhook_common
 
@@ -100,8 +101,8 @@ def _patch(monkeypatch: pytest.MonkeyPatch) -> None:
     slack_events.reset_slack_event_claims()
     monkeypatch.setattr("agent.incidents.channels.handle_slack_event", AsyncMock(return_value=None))
 
-    async def channel_context(_channel_id: str, *, use_cache: bool = True) -> dict[str, Any]:
-        return {"is_ext_shared": False, "is_pending_ext_shared": False}
+    async def channel_context(_channel_id: str, *, use_cache: bool = True) -> SlackChannelContext:
+        return SlackChannelContext(is_ext_shared=False, is_pending_ext_shared=False)
 
     async def repo_config(*_args: Any, **_kwargs: Any) -> dict[str, str]:
         return {"owner": "langchain-ai", "name": "open-swe"}
@@ -127,42 +128,36 @@ def _patch(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(webhook_common, "get_slack_repo_config", repo_config)
     monkeypatch.setattr(webhook_common, "SLACK_BOT_USER_ID", "BOT")
     monkeypatch.setattr(webhook_common, "SLACK_BOT_USERNAME", "openswe")
-    # The two-party gate would admit these messages on its own.
-    monkeypatch.setattr(
-        slack_service, "slack_thread_allows_untagged_reply", AsyncMock(return_value=True)
-    )
 
 
-async def _untagged_flag_for(text: str, event_id: str) -> bool:
+@pytest.mark.parametrize(
+    "text",
+    ["<@BOT> please fix this", "hey @openswe please fix this"],
+)
+async def test_tagged_thread_message_is_accepted(text: str) -> None:
     background_tasks = _FakeBackgroundTasks()
+
     response = await slack_routes.slack_webhook(
-        cast(Request, _FakeRequest(_message_payload(text, event_id))),
+        cast(Request, _FakeRequest(_message_payload(text, f"Ev-{text}"))),
         cast(BackgroundTasks, background_tasks),
     )
-    assert response["status"] == "accepted", response
-    return cast(SlackRequest, background_tasks.tasks[0][1][0]).untagged_reply
+
+    assert response["status"] == "accepted"
+    assert len(background_tasks.tasks) == 1
 
 
-async def test_id_mention_is_not_marked_untagged() -> None:
-    assert await _untagged_flag_for("<@BOT> please fix this", "Ev-id") is False
-
-
-async def test_username_mention_is_not_marked_untagged() -> None:
-    assert await _untagged_flag_for("hey @openswe please fix this", "Ev-name") is False
-
-
-async def test_message_without_a_mention_is_marked_untagged() -> None:
-    assert await _untagged_flag_for("how about now", "Ev-plain") is True
-
-
-async def test_file_share_without_a_mention_is_marked_untagged() -> None:
-    payload = _message_payload("the alignment is still wrong", "Ev-file")
-    payload["event"]["subtype"] = "file_share"
+@pytest.mark.parametrize("subtype", ["", "file_share"])
+async def test_untagged_thread_message_is_ignored(subtype: str) -> None:
+    payload = _message_payload("the alignment is still wrong", f"Ev-{subtype}")
+    payload["event"]["subtype"] = subtype
     background_tasks = _FakeBackgroundTasks()
+
     response = await slack_routes.slack_webhook(
         cast(Request, _FakeRequest(payload)), cast(BackgroundTasks, background_tasks)
     )
-    assert cast(dict[str, object], response)["status"] == "accepted"
+
+    assert response == {"status": "ignored", "reason": "Not an app mention or DM"}
+    assert background_tasks.tasks == []
 
 
 async def test_message_update_queues_only_the_new_text() -> None:

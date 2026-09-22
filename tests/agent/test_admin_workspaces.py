@@ -11,6 +11,7 @@ from agent.prompt import construct_sender_context, construct_system_prompt
 from agent.run_config import RunConfig
 from agent.sandboxes import lifecycle
 from agent.tools import workspaces as env_tools
+from agent.users import User
 from agent.workspaces import refresh
 from agent.workspaces.store import Workspace
 
@@ -25,49 +26,25 @@ def _config(**configurable: object) -> RunnableConfig:
 
 
 @pytest.mark.asyncio
-async def test_default_workspace_snapshot_wins_over_base() -> None:
-    with (
-        patch.object(lifecycle, "load_workspace", new_callable=AsyncMock, return_value=_READY),
-        patch.object(
-            lifecycle,
-            "get_admin_base_snapshot_id",
-            new_callable=AsyncMock,
-            return_value="admin-snap",
-        ),
-    ):
+async def test_ready_workspace_snapshot_is_what_new_sandboxes_boot_from() -> None:
+    with patch.object(lifecycle, "load_workspace", new_callable=AsyncMock, return_value=_READY):
         assert (await lifecycle.SandboxCreateConfig.resolve()).snapshot_id == "env-snap"
 
 
 @pytest.mark.asyncio
-async def test_workspace_without_a_captured_snapshot_falls_back_to_base() -> None:
+async def test_workspace_without_a_captured_snapshot_falls_back_to_the_provider_base() -> None:
     never_captured = _READY.model_copy(update={"snapshot_status": "failed", "snapshot_id": None})
-    with (
-        patch.object(
-            lifecycle, "load_workspace", new_callable=AsyncMock, return_value=never_captured
-        ),
-        patch.object(
-            lifecycle,
-            "get_admin_base_snapshot_id",
-            new_callable=AsyncMock,
-            return_value="admin-snap",
-        ),
+    with patch.object(
+        lifecycle, "load_workspace", new_callable=AsyncMock, return_value=never_captured
     ):
-        assert (await lifecycle.SandboxCreateConfig.resolve()).snapshot_id == "admin-snap"
+        assert (await lifecycle.SandboxCreateConfig.resolve()).snapshot_id is None
 
 
 @pytest.mark.asyncio
 async def test_a_nightly_capture_does_not_send_runs_to_the_base_image() -> None:
     """The new id lands only on success, so a refresh in flight changes nothing."""
     capturing = _READY.model_copy(update={"snapshot_status": "capturing"})
-    with (
-        patch.object(lifecycle, "load_workspace", new_callable=AsyncMock, return_value=capturing),
-        patch.object(
-            lifecycle,
-            "get_admin_base_snapshot_id",
-            new_callable=AsyncMock,
-            return_value="admin-snap",
-        ),
-    ):
+    with patch.object(lifecycle, "load_workspace", new_callable=AsyncMock, return_value=capturing):
         assert (await lifecycle.SandboxCreateConfig.resolve()).snapshot_id == "env-snap"
 
 
@@ -76,15 +53,7 @@ async def test_snapshot_resolution_passes_the_threads_workspace() -> None:
     resolve = AsyncMock(
         return_value=_READY.model_copy(update={"slug": "staging", "snapshot_id": "staging-snap"})
     )
-    with (
-        patch.object(lifecycle, "load_workspace", resolve),
-        patch.object(
-            lifecycle,
-            "get_admin_base_snapshot_id",
-            new_callable=AsyncMock,
-            return_value="admin-snap",
-        ),
-    ):
+    with patch.object(lifecycle, "load_workspace", resolve):
         snapshot_id = (await lifecycle.SandboxCreateConfig.resolve("staging")).snapshot_id
 
     assert snapshot_id == "staging-snap"
@@ -150,14 +119,31 @@ async def test_admin_thread_accepts_configured_login(monkeypatch: pytest.MonkeyP
 
 
 @pytest.mark.asyncio
+async def test_admin_thread_accepts_configured_admin_slack_dm(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("CONFIGURED_ADMINS", "ramonn")
+    config = _config(
+        admin_thread=True,
+        source="slack",
+        github_login="ramonn",
+        slack_thread={
+            "channel_id": "D123",
+            "thread_ts": "1700000000.000100",
+            "channel_context": {"is_im": True},
+        },
+    )
+
+    assert await server._admin_thread(config, None) is True
+
+
+@pytest.mark.asyncio
 async def test_workspace_admin_resolves_email_for_github_login(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv("CONFIGURED_ADMINS", "ramon@langchain.dev")
-    with patch(
-        "agent.tools.admin_gate.email_for_login",
-        new_callable=AsyncMock,
-        return_value="ramon@langchain.dev",
+    with patch.object(
+        User, "email_for_login", new_callable=AsyncMock, return_value="ramon@langchain.dev"
     ):
         assert await server._workspace_admin(_config(github_login="ramonn"), None) is True
 

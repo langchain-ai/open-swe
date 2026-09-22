@@ -4,7 +4,7 @@ import hashlib
 import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from typing import Any
+from typing import Any, Self
 
 import aiohttp
 from fastapi import HTTPException
@@ -34,26 +34,25 @@ class _SlackResponse(aiohttp.ClientResponse):
         raise SlackApiError("Slack returned a non-JSON response.", self)
 
 
-@asynccontextmanager
-async def slack_client(
-    *, token: str | None = None, timeout: int = 30
-) -> AsyncIterator[AsyncWebClient]:
-    token = ENV.SLACK_BOT_TOKEN.get() if token is None else token
-    if not token:
-        raise HTTPException(400, "Slack is not configured.")
-    async with aiohttp.ClientSession(
-        timeout=aiohttp.ClientTimeout(total=timeout, sock_connect=min(10, timeout)),
-        response_class=_SlackResponse,
-    ) as session:
-        yield AsyncWebClient(
-            token=token,
-            base_url=SLACK_API_BASE_URL,
-            timeout=timeout,
-            session=session,
-            logger=_SDK_LOGGER,
-            # Callers own backoff; retrying writes after a disconnect can duplicate them.
-            retry_handlers=[],
-        )
+class SlackClient(AsyncWebClient):
+    @classmethod
+    @asynccontextmanager
+    async def bot(cls) -> AsyncIterator[Self]:
+        token = ENV.SLACK_BOT_TOKEN.get()
+        if not token:
+            raise HTTPException(400, "Slack is not configured.")
+        async with aiohttp.ClientSession(
+            timeout=aiohttp.ClientTimeout(total=30, sock_connect=10),
+            response_class=_SlackResponse,
+        ) as session:
+            yield cls(
+                token=token,
+                base_url=SLACK_API_BASE_URL,
+                timeout=30,
+                session=session,
+                logger=_SDK_LOGGER,
+                retry_handlers=[],
+            )
 
 
 def slack_retry_after(exc: Exception) -> str | None:

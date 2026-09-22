@@ -3,6 +3,7 @@ import { AIMessage, HumanMessage, ToolMessage } from "@langchain/core/messages"
 import { messageArrivalTimestamp } from "./messageTimestamps"
 import {
   collectStructuredEntities,
+  isSilentSender,
   parseStructuredInput,
 } from "./structuredInputMessages"
 import { humanizeToolName } from "./toolNames"
@@ -30,15 +31,16 @@ const EDIT_TOOLS = new Set([
 const EXECUTE_TOOLS = new Set(["execute", "bash", "shell", "run_terminal_cmd"])
 const SEARCH_TOOLS = new Set(["glob", "grep", "web_search", "search"])
 const FETCH_TOOLS = new Set(["fetch", "fetch_url", "http_request"])
-const INTERNAL_TOOLS = new Set(["confirming_completion", "no_op"])
+/** Bookkeeping calls the transcript never shows. */
+export const INTERNAL_TOOLS = new Set(["confirming_completion", "no_op"])
 
 type ToolKind = ToolExecutionChunk["toolKind"]
 
-function toolKind(name: string): ToolKind {
+export function toolKind(name: string): ToolKind {
   const lowered = name.toLowerCase()
   if (lowered === "task") return "task"
   if (lowered === "read_only_sql") return "sql"
-  if (lowered === "slack_thread_reply") return "slack"
+  if (lowered === "slack_reply") return "slack"
   if (lowered === "linear_comment") return "linear"
   if (
     EDIT_TOOLS.has(lowered) ||
@@ -54,7 +56,7 @@ function toolKind(name: string): ToolKind {
   return "other"
 }
 
-function toolTitle(name: string, args: Record<string, unknown>): string {
+export function toolTitle(name: string, args: Record<string, unknown>): string {
   const path = args.path ?? args.file_path ?? args.target_file
   if (typeof path === "string" && path.trim()) return `${name} ${path.trim()}`
   const command = args.command
@@ -80,7 +82,8 @@ function parseToolArgs(raw: unknown): Record<string, unknown> {
   return {}
 }
 
-function mergeTextChunks(chunks: Array<Chunk>): Array<Chunk> {
+/** Only the last prose chunk of an agent turn survives; the earlier ones were partial. */
+export function mergeTextChunks(chunks: Array<Chunk>): Array<Chunk> {
   const textIndices = chunks.flatMap((c, i) => (c.kind === "text" ? [i] : []))
   if (textIndices.length <= 1) return chunks
   const lastText = textIndices[textIndices.length - 1]
@@ -320,17 +323,13 @@ export function streamMessagesToUi(
       const chunks = imageChunks(content)
       const parsed = parseStructuredInput(raw.text, structuredEntities)
       if (parsed.type === "entity") return
-      if (
-        parsed.type === "message" &&
-        parsed.sender === "system:sender-context"
-      )
-        return
+      if (parsed.type === "message" && isSilentSender(parsed.sender)) return
       const entity =
         parsed.type === "message"
           ? structuredEntities.get(parsed.sender)
           : undefined
       // Our own replies reach the transcript twice: once forwarded as thread
-      // context, once as the `slack_thread_reply` call that sent them.
+      // context, once as the `slack_reply` call that sent them.
       if (entity?.senderType === "self") return
       const text = parsed.content
       if (text.trim()) chunks.push({ kind: "text", text })

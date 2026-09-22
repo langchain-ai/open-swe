@@ -27,6 +27,8 @@ from agent.utils.timing import phase
 logger = logging.getLogger(__name__)
 
 DASHBOARD_SOURCE = "dashboard"
+# Threads whose transcript is served from the append-only event log.
+TRANSCRIPT_VERSION = "v2"
 # Sources whose threads should surface in the Agents UI (besides "dashboard").
 _SURFACED_SOURCES: tuple[str, ...] = ("dashboard", "github", "slack", "linear", "schedule")
 # PR lifecycle states surfaced to the UI for a thread's associated pull request.
@@ -118,7 +120,7 @@ def thread_is_promptable(metadata: Mapping[str, Any], login: str | None) -> bool
     )
 
 
-def _assert_thread_readable(
+def assert_thread_readable(
     metadata: Mapping[str, Any], login: str | None = None, email: str | None = None
 ) -> None:
     if not thread_is_readable(metadata, login, email):
@@ -379,7 +381,6 @@ async def _thread_summary(
         "branch": metadata.get("branch_name") or metadata.get("base_branch") or "main",
         "model": model,
         "effort": effort,
-        "planMode": metadata.get("plan_mode") is True,
         "modelSelection": (
             metadata.get("model_selection")
             if metadata.get("model_selection") in {"auto", "explicit"}
@@ -387,6 +388,9 @@ async def _thread_summary(
         ),
         "adminThread": metadata.get("admin_thread") is True,
         "visibility": metadata.get("visibility", "public"),
+        "transcript": (
+            TRANSCRIPT_VERSION if metadata.get("transcript") == TRANSCRIPT_VERSION else None
+        ),
         "ownerLogin": metadata.get("owner_login"),
         "continuedFromThreadId": metadata.get("continued_from_thread_id"),
         "environment": metadata.get("environment"),
@@ -487,7 +491,11 @@ async def _latest_run_info(client: Any, thread_id: str) -> tuple[str | None, str
 
 
 async def _refresh_latest_run_metadata(
-    client: Any, thread: ThreadLike, *, timings: dict[str, float] | None = None
+    client: Any,
+    thread: ThreadLike,
+    *,
+    timings: dict[str, float] | None = None,
+    return_minimal: bool = False,
 ) -> tuple[ThreadLike, str | None, str | None]:
     record = timings if timings is not None else {}
     thread_id = thread.get("thread_id") or thread.get("id")
@@ -504,7 +512,11 @@ async def _refresh_latest_run_metadata(
     if metadata_update:
         with phase(record, "thread_update"):
             try:
-                await client.threads.update(thread_id=thread_id, metadata=metadata_update)
+                await client.threads.update(
+                    thread_id=thread_id,
+                    metadata=metadata_update,
+                    **({"return_minimal": True} if return_minimal else {}),
+                )
             except Exception:  # noqa: BLE001
                 logger.debug(
                     "Could not persist latest run metadata for %s", thread_id, exc_info=True

@@ -1,9 +1,10 @@
 """The `/oswe` slash command: one question, one ephemeral answer, no Slack thread.
 
-The agent thread behind the answer is real — it carries the usual `Open in Web`
-link and can be pinned or continued on the dashboard — but it is stamped
-``unlisted`` so one-off questions never fill anyone's thread list. Continuing it
-on the web clears that stamp and the thread becomes an ordinary dashboard one.
+Each invocation gets an agent thread of its own. The thread is real — it carries
+the usual `Open in Web` link and can be pinned or continued on the dashboard —
+but it is stamped ``unlisted`` so one-off questions never fill anyone's thread
+list. Continuing it on the web clears that stamp and the thread becomes an
+ordinary dashboard one.
 """
 
 import logging
@@ -14,14 +15,20 @@ from pydantic import BaseModel
 
 from agent.dispatch import dispatch_agent_run
 from agent.prompts import render_prompt
+from agent.slack.channels import SlackChannel
 from agent.slack.client import (
+    acknowledge_slack_command,
+    clear_slack_command_message,
+    format_slack_messages_for_prompt,
     get_slack_user_info,
+    get_slack_user_names,
     post_slack_ephemeral_message,
-    slack_channel_allows_operations,
+    replace_slack_command_message,
 )
+from agent.slack.payloads import SlackChannelContext
 from agent.slack.webhook import workspace_scoped_default_repo
 from agent.source_context import SlackThreadRef, SourceContext
-from agent.utils.thread_ops import get_thread_active_status, queue_message_for_thread
+from agent.users import User
 from agent.webhooks import common
 from agent.workspaces.routing import resolve_workspace
 
@@ -29,9 +36,16 @@ logger = logging.getLogger(__name__)
 
 ASK_COMMAND = "/oswe"
 MAX_QUESTION_CHARS = 2000
+CHANNEL_CONTEXT_MESSAGE_LIMIT = 30
+CHANNEL_CONTEXT_MAX_TOKENS = 5000
+# No tokenizer in this process, and a Slack transcript is plain prose, so four
+# characters to the token holds the budget closely enough.
+_CHANNEL_CONTEXT_MAX_CHARS = CHANNEL_CONTEXT_MAX_TOKENS * 4
+_CHANNEL_CONTEXT_TRIMMED = "[earlier messages omitted to stay inside the context budget]"
+_NO_CHANNEL_CONTEXT = "(unavailable — this is not a public channel, or it has no messages)"
 _CHANNEL_REFUSAL = "Open SWE cannot answer questions in this channel."
 _START_FAILURE = "Open SWE could not start that request. Try again in a moment."
-_QUEUED = "Added to what I'm already working on for you here."
+_ACKNOWLEDGEMENT = "Working on it — the answer will replace this message, visible only to you."
 
 
 class SlackAskRequest(BaseModel):
@@ -41,15 +55,19 @@ class SlackAskRequest(BaseModel):
     thread_id: str
     command: str = ASK_COMMAND
     team_id: str = ""
+    response_url: str = ""
 
 
-def ask_thread_id(channel_id: str, user_id: str) -> str:
-    """The one scratch thread this person's slash commands share in this channel.
+def ask_thread_id(channel_id: str, user_id: str, invocation: str) -> str:
+    """The thread for one slash-command invocation.
 
     Derived rather than stored so the route can link to it inside Slack's three
-    seconds, and so every later command lands in the same conversation.
+    seconds. `invocation` is unique per command, so two questions never share a
+    thread, and a redelivery of the same command resolves back to the first.
     """
-    return str(uuid.uuid5(uuid.NAMESPACE_URL, f"open-swe:slack-ask:{channel_id}:{user_id}"))
+    return str(
+        uuid.uuid5(uuid.NAMESPACE_URL, f"open-swe:slack-ask:{channel_id}:{user_id}:{invocation}")
+    )
 
 
 async def _slack_user_profile(user_id: str) -> tuple[str, str]:
@@ -63,7 +81,37 @@ async def _slack_user_profile(user_id: str) -> tuple[str, str]:
     return (name if isinstance(name, str) else ""), (email if isinstance(email, str) else "")
 
 
+def _channel_label(channel_context: SlackChannelContext) -> str:
+    """`` (#eng)`` when Slack names the channel, empty when it does not."""
+    label = channel_context.name_normalized.strip() or channel_context.name.strip()
+    return f" (#{label})" if label else ""
+
+
+async def _channel_context(channel_id: str) -> str:
+    """Recent channel messages, oldest trimmed away until they fit the budget."""
+    channel = await SlackChannel.load(channel_id)
+    messages = await channel.messages(CHANNEL_CONTEXT_MESSAGE_LIMIT) if channel else []
+    if not messages:
+        return ""
+    user_ids = [message.user for message in messages if message.user]
+    user_names = await get_slack_user_names(user_ids) if user_ids else {}
+    transcript = format_slack_messages_for_prompt(
+        [message.dump() for message in messages], user_names, include_thread_replies=True
+    )
+    kept: list[str] = []
+    remaining = _CHANNEL_CONTEXT_MAX_CHARS - len(_CHANNEL_CONTEXT_TRIMMED) - 1
+    for line in reversed(transcript.splitlines()):
+        remaining -= len(line) + 1
+        if remaining < 0:
+            kept.append(_CHANNEL_CONTEXT_TRIMMED)
+            break
+        kept.append(line)
+    return "\n".join(reversed(kept))
+
+
 async def _refuse(request: SlackAskRequest, text: str) -> None:
+    if request.response_url and await replace_slack_command_message(request.response_url, text):
+        return
     await post_slack_ephemeral_message(request.channel_id, request.user_id, text)
 
 
@@ -89,20 +137,24 @@ async def _runnable_login(request: SlackAskRequest, login: str | None, email: st
         reason="revoked" if has_record else "unlinked",
         ephemeral=True,
     )
+    if request.response_url:
+        await clear_slack_command_message(request.response_url)
     return None
 
 
 async def _process_slack_ask(request: SlackAskRequest) -> None:
+    if request.response_url:
+        await acknowledge_slack_command(request.response_url, _ACKNOWLEDGEMENT)
     channel_context = await common.resolve_slack_channel_context(request.channel_id)
-    if not slack_channel_allows_operations(channel_context):
+    if not channel_context.allows_operations:
         await _refuse(request, _CHANNEL_REFUSAL)
         return
 
     user_name, user_email = await _slack_user_profile(request.user_id)
     login = await _runnable_login(
         request,
-        await common.login_for_slack_id(request.user_id)
-        or (await common.login_for_email(user_email) if user_email else None),
+        await User.login_for_slack(request.user_id)
+        or (await User.login_for_email(user_email) if user_email else None),
         user_email,
     )
     if login is None:
@@ -162,7 +214,7 @@ async def _process_slack_ask(request: SlackAskRequest) -> None:
         "slack_thread": slack_thread.dump(),
         "source": "slack",
         "slack_ask": True,
-        "plan_mode": False,
+        "slack_ask_response_url": request.response_url,
         "github_login": login,
         "user_email": user_email,
         "workspace": workspace,
@@ -173,20 +225,10 @@ async def _process_slack_ask(request: SlackAskRequest) -> None:
         command=request.command,
         asked_by=user_name or f"<@{request.user_id}>",
         request=request.question,
+        channel_id=request.channel_id,
+        channel_name=_channel_label(channel_context),
+        channel_context=await _channel_context(request.channel_id) or _NO_CHANNEL_CONTEXT,
     )
-    # The thread is shared by every command this person runs in this channel, so
-    # a command sent while the last one is still working joins it instead of
-    # interrupting the work in flight.
-    if await get_thread_active_status(thread_id) and await queue_message_for_thread(
-        thread_id, [{"type": "text", "text": prompt}]
-    ):
-        await _refuse(request, _QUEUED)
-        logger.info(
-            "Queued a Slack slash command",
-            extra={"agent_thread_id": thread_id, "slack_channel": request.channel_id},
-        )
-        return
-
     await dispatch_agent_run(thread_id, prompt, configurable, source="slack")
     logger.info(
         "Started a Slack slash command run",

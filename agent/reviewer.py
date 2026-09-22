@@ -40,15 +40,8 @@ from langchain.agents.middleware.types import AgentMiddleware
 from langchain_core.language_models.chat_models import BaseChatModel
 
 from agent.dashboard.options import gate_fable_model
-from agent.dashboard.team_settings import (
-    get_team_default_grouping_model,
-    get_team_fable_enabled,
-)
-from agent.dashboard.team_settings_cache import (
-    cached_gateway_enabled,
-    cached_org_review_guidelines,
-    cached_team_default_model_pair,
-)
+from agent.dashboard.workspace_settings import get_workspace_settings
+from agent.dashboard.workspace_settings_cache import cached_workspace_settings
 from agent.github.app import get_github_app_installation_token_with_expiry
 from agent.github.thread_token import cache_github_token_for_thread
 from agent.middleware import (
@@ -85,6 +78,7 @@ from agent.review.findings import (
 from agent.review.groups import maybe_generate_and_store_diff_groups
 from agent.review.publish import fetch_pr_review_threads
 from agent.review.reconcile import reconcile_findings_with_review_threads
+from agent.review.styles import get_approval_policy
 from agent.run_config import RunConfig
 from agent.runtime import (
     DEFAULT_LLM_MAX_TOKENS,
@@ -177,6 +171,7 @@ def _reviewer_system_prompt(
     head_sha: str = "",
     reviewer_eval: bool = False,
     org_guidelines: str | None = None,
+    approval_policy: str | None = None,
     repo_style_prompt: str | None = None,
     agents_md_content: str | None = None,
     scoped_agents_md: dict[str, str] | None = None,
@@ -189,6 +184,11 @@ def _reviewer_system_prompt(
         repo_name=repo_name or "<repo>",
         pr_number=pr_number if pr_number != "" else "<pr_number>",
         historical_review_guidance="" if reviewer_eval else HISTORICAL_REVIEW_GUIDANCE,
+        approval_assessment=(
+            render_prompt("reviewer/approval-assessment.md", approval_policy=approval_policy)
+            if approval_policy and not reviewer_eval
+            else ""
+        ),
         repo_checkout_note=_repo_checkout_note(
             repo_ready=repo_ready,
             working_dir=working_dir,
@@ -582,17 +582,16 @@ async def _resolve_grouping_model(cfg: RunConfig, *, use_gateway: bool) -> BaseC
     """Resolve the model for the diff-grouping pass.
 
     Per-run override (``grouping_model_id``/``grouping_reasoning_effort``) wins;
-    otherwise the team default, which itself inherits the reviewer subagent
+    otherwise the workspace default, which itself inherits the reviewer subagent
     model when no grouping-specific model is configured.
     """
+    settings = await get_workspace_settings(cfg.workspace_slug)
     if cfg.grouping_model_id:
         model_id = cfg.grouping_model_id
         effort = cfg.grouping_reasoning_effort
     else:
-        model_id, effort = await get_team_default_grouping_model(cfg.workspace_slug)
-    model_id, effort = gate_fable_model(
-        model_id, effort, fable_enabled=await get_team_fable_enabled(cfg.workspace_slug)
-    )
+        model_id, effort = settings.default_grouping_model
+    model_id, effort = gate_fable_model(model_id, effort, fable_enabled=settings.fable_enabled)
     model_kwargs = provider_model_kwargs(
         model_id,
         effort,
@@ -613,6 +612,15 @@ async def _cached_api_standards_skill() -> str | None:
 class PrepareReviewerRunState(PrepareRunState):
     diff_text: NotRequired[str]
     diff_line_set: NotRequired[dict[str, dict[str, set[int]]] | None]
+    review_approval_policy: NotRequired[str | None]
+
+
+async def _cached_org_guidelines(workspace: str | None) -> str | None:
+    return (await cached_workspace_settings(workspace)).org_review_guidelines
+
+
+async def _review_approval_policy(owner: str, repo: str, workspace: str | None) -> str | None:
+    return await get_approval_policy(owner, repo, await cached_workspace_settings(workspace))
 
 
 async def _ensure_reviewer_sandbox_for_thread(
@@ -637,8 +645,7 @@ async def _ensure_reviewer_sandbox_for_thread(
         await ensure_sandbox_for_thread(
             thread_id,
             workspace_slug=cfg.workspace_slug,
-            github_proxy_token=github_token,
-            github_proxy_repositories=[repo_name] if repo_name else None,
+            github_proxy_repositories=[cfg.repo.full_name] if cfg.repo else [],
             # A reviewer sandbox holds nothing but a checkout `prepare_review_repo`
             # re-derives every run, and reviewer threads outlive their sandbox: one
             # thread per PR, re-triggered on every push. Refusing to replace an
@@ -832,7 +839,12 @@ class PrepareReviewerRunMiddleware(BasePrepareRunMiddleware):
         existing_threads_task = asyncio.create_task(_fetch_existing_threads_block())
         repo_style_task = asyncio.create_task(_fetch_repo_style_prompt())
         agents_md_task = asyncio.create_task(_fetch_agents_md_context())
-        org_guidelines_task = asyncio.create_task(cached_org_review_guidelines(cfg.workspace_slug))
+        org_guidelines_task = asyncio.create_task(_cached_org_guidelines(cfg.workspace_slug))
+        approval_policy = (
+            None
+            if reviewer_eval
+            else await _review_approval_policy(repo_owner, repo_name, cfg.workspace_slug)
+        )
         api_standards_task = asyncio.create_task(_cached_api_standards_skill())
         diff_context = await diff_context_task
         pr_diff_text, pr_diff_line_set = diff_context
@@ -908,6 +920,7 @@ class PrepareReviewerRunMiddleware(BasePrepareRunMiddleware):
             head_sha=head_sha,
             reviewer_eval=reviewer_eval,
             org_guidelines=org_guidelines,
+            approval_policy=approval_policy,
             repo_style_prompt=repo_style_prompt,
             agents_md_content=agents_md_content,
             scoped_agents_md=scoped_agents_md,
@@ -963,6 +976,7 @@ class PrepareReviewerRunMiddleware(BasePrepareRunMiddleware):
         return {
             "work_dir": work_dir,
             "rendered_system_prompt": system_prompt,
+            "review_approval_policy": approval_policy,
             "diff_text": pr_diff_text,
             "diff_line_set": pr_diff_line_set,
         }
@@ -990,21 +1004,22 @@ async def get_reviewer_agent(config: RunnableConfig) -> Pregel:
         (
             (model_id, reasoning_effort),
             (subagent_model_id, subagent_effort),
-        ) = await cached_team_default_model_pair("reviewer", cfg.workspace_slug)
+        ) = (await cached_workspace_settings(cfg.workspace_slug)).default_model_pair("reviewer")
         logger.info(
-            "Using team default reviewer model: model=%s effort=%s",
+            "Using workspace default reviewer model: model=%s effort=%s",
             model_id,
             reasoning_effort,
         )
         logger.info(
-            "Using team default reviewer subagent model: model=%s effort=%s",
+            "Using workspace default reviewer subagent model: model=%s effort=%s",
             subagent_model_id,
             subagent_effort,
         )
     if cfg.reviewer_subagent_model_id:
         subagent_model_id = cfg.reviewer_subagent_model_id
         subagent_effort = cfg.reviewer_subagent_reasoning_effort
-    fable_enabled = await get_team_fable_enabled(cfg.workspace_slug)
+    settings = await cached_workspace_settings(cfg.workspace_slug)
+    fable_enabled = settings.fable_enabled
     model_id, reasoning_effort = gate_fable_model(
         model_id, reasoning_effort, fable_enabled=fable_enabled
     )
@@ -1024,7 +1039,7 @@ async def get_reviewer_agent(config: RunnableConfig) -> Pregel:
         openai_reasoning_default=DEFAULT_LLM_REASONING,
     )
 
-    use_gateway = await cached_gateway_enabled(cfg.workspace_slug)
+    use_gateway = settings.effective_gateway_enabled
     reviewer_model = _make_model_or_defer(model_id, use_gateway=use_gateway, **model_kwargs)
     reviewer_subagent_model = _make_model_or_defer(
         subagent_model_id, use_gateway=use_gateway, **subagent_model_kwargs

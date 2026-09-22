@@ -30,7 +30,8 @@ _WRITE_WORKTREE_TREE = (
 )
 
 
-def _cd_repo(work_dir: str | None, repo_path: str | None = None) -> str:
+def cd_repo_command(work_dir: str | None, repo_path: str | None = None) -> str:
+    """A shell prefix that cds into the sandbox's repository, or exits 3."""
     roots = " ".join(
         shlex.quote(root) for root in ([work_dir] if work_dir else []) + ["/workspace"]
     )
@@ -93,7 +94,7 @@ print(json.dumps({
 }))
 PY"""
     script = script.replace("__MAX_FILES__", str(max_files))
-    return f"{_cd_repo(work_dir, repo_path)}; {resolve_head}; {resolve_trees}; {script}"
+    return f"{cd_repo_command(work_dir, repo_path)}; {resolve_head}; {resolve_trees}; {script}"
 
 
 def _contents_command(
@@ -137,7 +138,7 @@ print(json.dumps({
 }))
 PY"""
     script = script.replace("__PAYLOAD__", payload).replace("__MAX__", str(_MAX_FILE_BYTES))
-    return f"{_cd_repo(work_dir, repo_path)}; {script}"
+    return f"{cd_repo_command(work_dir, repo_path)}; {script}"
 
 
 def _output(response: Any) -> str:

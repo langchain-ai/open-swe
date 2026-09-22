@@ -12,7 +12,7 @@ describe("app location", () => {
   it.each([
     "/agents/thread-1?view=diff#latest",
     "/assistant",
-    "/assistant?noProject=true",
+    "/assistant?noRepo=true",
     "/assistant/thread-1",
     "/incidents",
     "/incidents?view=inactive",

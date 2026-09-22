@@ -17,9 +17,11 @@ from agent.github import webhook as github_webhooks
 from agent.slack import client as slack_utils
 from agent.slack import webhook as slack_webhooks
 from agent.slack.client import GitHubPrRef
+from agent.slack.payloads import SlackChannelContext
 from agent.slack.request import SlackRequest
 from agent.slack.tools.request_pr_review import request_pr_review as request_pr_review_tool
 from agent.thread_ids import github_issue_thread_id
+from agent.users import User
 from agent.webhooks import common as webhook_common
 from tests.conftest import post_signed_github_webhook
 
@@ -42,8 +44,8 @@ def _slack_routing_dependencies(monkeypatch: pytest.MonkeyPatch) -> None:
     async def lookup(*args: object, **kwargs: object) -> None:
         return None
 
-    async def channel_context(*args: object, **kwargs: object) -> dict[str, bool]:
-        return {"is_ext_shared": False, "is_pending_ext_shared": False}
+    async def channel_context(*args: object, **kwargs: object) -> SlackChannelContext:
+        return SlackChannelContext(is_ext_shared=False, is_pending_ext_shared=False)
 
     async def claim(*args: object, **kwargs: object) -> bool:
         return True
@@ -91,17 +93,9 @@ def test_github_issue_thread_id_is_deterministic() -> None:
 
 
 def test_build_github_issue_followup_prompt_only_includes_comment() -> None:
-    from agent.dashboard import user_mappings
-
-    user_mappings.prime_cache(
-        [{"github_login": "bracesproul", "work_email": "brace@x.com", "status": "active"}]
+    prompt = github_webhooks.build_github_issue_followup_prompt(
+        "bracesproul", "Please handle this", trusted={"bracesproul"}
     )
-    try:
-        prompt = github_webhooks.build_github_issue_followup_prompt(
-            "bracesproul", "Please handle this"
-        )
-    finally:
-        user_mappings.clear_cache()
 
     assert prompt == "**bracesproul:**\nPlease handle this"
     assert "## Repository" not in prompt
@@ -606,20 +600,20 @@ async def test_github_webhook_ignores_review_requested(monkeypatch, registry_db)
 def test_slack_webhook_routes_docs_plz_channel_to_agent(monkeypatch) -> None:
     captured: dict[str, object] = {}
 
-    channel_context = {
-        "id": "C123",
-        "name": "docs-plz",
-        "name_normalized": "docs-plz",
-        "topic": "Coordinate work",
-        "purpose": "repo:langchain-ai/open-swe",
-        "description": "Coordinate work\nrepo:langchain-ai/open-swe",
-        "is_ext_shared": False,
-        "is_pending_ext_shared": False,
-    }
+    channel_context = SlackChannelContext(
+        id="C123",
+        name="docs-plz",
+        name_normalized="docs-plz",
+        topic="Coordinate work",
+        purpose="repo:langchain-ai/open-swe",
+        description="Coordinate work\nrepo:langchain-ai/open-swe",
+        is_ext_shared=False,
+        is_pending_ext_shared=False,
+    )
 
     async def fake_get_slack_channel_context(
         channel_id: str, *, use_cache: bool = True
-    ) -> dict[str, str | bool]:
+    ) -> SlackChannelContext:
         captured["channel_context_request"] = channel_id
         return channel_context
 
@@ -627,7 +621,7 @@ def test_slack_webhook_routes_docs_plz_channel_to_agent(monkeypatch) -> None:
         channel_id: str,
         thread_ts: str,
         slack_user_id: str | None = None,
-        channel_context: dict[str, str] | None = None,
+        channel_context: SlackChannelContext | None = None,
         **kwargs: object,
     ) -> dict[str, str]:
         captured["repo_config_request"] = {
@@ -868,6 +862,9 @@ def test_slack_webhook_accepts_unmentioned_direct_message(monkeypatch) -> None:
     monkeypatch.setattr(slack_utils.time, "time", lambda: 1700000000)
     monkeypatch.setattr(webhook_common, "get_slack_repo_config", fake_get_slack_repo_config)
     monkeypatch.setattr(slack_webhooks, "process_slack_mention", fake_process_slack_mention)
+    monkeypatch.setattr(
+        User, "login_for_slack", lambda slack_user_id: asyncio.sleep(0, result=None)
+    )
 
     response = _post_slack_webhook(
         TestClient(app),
@@ -901,58 +898,10 @@ def test_slack_webhook_accepts_unmentioned_direct_message(monkeypatch) -> None:
     assert event_data.treat_all_messages_as_mentions is True
 
 
-def test_slack_webhook_accepts_unmentioned_ready_plan_reply(monkeypatch) -> None:
-    captured: dict[str, object] = {}
-
-    async def fake_ready_plan_reply(channel_id: str, thread_ts: str, user_id: str) -> bool:
-        captured["plan_reply_check"] = (channel_id, thread_ts, user_id)
-        return True
-
-    async def fake_get_slack_repo_config(*args: object, **kwargs: object) -> dict[str, str]:
-        return {"owner": "langchain-ai", "name": "open-swe"}
-
-    async def fake_process_slack_mention(
-        event_data: dict[str, object], repo_config: dict[str, str]
-    ) -> None:
-        captured["event_data"] = event_data
-
+def test_slack_webhook_ignores_unmentioned_thread_reply(monkeypatch) -> None:
     monkeypatch.setattr(webhook_common, "SLACK_SIGNING_SECRET", _TEST_SLACK_SECRET)
     monkeypatch.setattr(webhook_common, "SLACK_BOT_USER_ID", "UBOT")
     monkeypatch.setattr(slack_utils.time, "time", lambda: 1700000000)
-    monkeypatch.setattr(slack_webhooks, "slack_user_can_reply_to_ready_plan", fake_ready_plan_reply)
-    monkeypatch.setattr(webhook_common, "get_slack_repo_config", fake_get_slack_repo_config)
-    monkeypatch.setattr(slack_webhooks, "process_slack_mention", fake_process_slack_mention)
-
-    response = _post_slack_webhook(
-        TestClient(app),
-        {
-            "type": "event_callback",
-            "event": {
-                "type": "message",
-                "channel": "C123",
-                "ts": "1700000000.000200",
-                "thread_ts": "1700000000.000100",
-                "user": "U123",
-                "text": "looks good, go ahead",
-            },
-        },
-    )
-
-    assert response.status_code == 200
-    assert response.json()["message"] == "Slack mention queued"
-    assert captured["plan_reply_check"] == ("C123", "1700000000.000100", "U123")
-    event_data = cast(dict[str, object], captured["event_data"])
-    assert event_data.text == "looks good, go ahead"
-
-
-def test_slack_webhook_ignores_unmentioned_non_plan_reply(monkeypatch) -> None:
-    async def fake_ready_plan_reply(channel_id: str, thread_ts: str, user_id: str) -> bool:
-        return False
-
-    monkeypatch.setattr(webhook_common, "SLACK_SIGNING_SECRET", _TEST_SLACK_SECRET)
-    monkeypatch.setattr(webhook_common, "SLACK_BOT_USER_ID", "UBOT")
-    monkeypatch.setattr(slack_utils.time, "time", lambda: 1700000000)
-    monkeypatch.setattr(slack_webhooks, "slack_user_can_reply_to_ready_plan", fake_ready_plan_reply)
 
     response = _post_slack_webhook(
         TestClient(app),
@@ -972,7 +921,7 @@ def test_slack_webhook_ignores_unmentioned_non_plan_reply(monkeypatch) -> None:
     assert response.status_code == 200
     assert response.json() == {
         "status": "ignored",
-        "reason": "Not an app mention, DM, or plan reply",
+        "reason": "Not an app mention or DM",
     }
 
 
@@ -1257,9 +1206,7 @@ def test_process_github_pr_comment_without_email_skips(
         captured["triggered"] = {"args": args, "kwargs": kwargs}
 
     monkeypatch.setattr(webhook_common, "extract_pr_context", fake_extract_pr_context)
-    monkeypatch.setattr(
-        webhook_common, "email_for_login", lambda login: asyncio.sleep(0, result=None)
-    )
+    monkeypatch.setattr(User, "email_for_login", lambda login: asyncio.sleep(0, result=None))
     monkeypatch.setattr(webhook_common, "react_to_github_comment", fake_react)
     monkeypatch.setattr(webhook_common, "fetch_pr_comments_since_last_tag", fake_fetch_comments)
     monkeypatch.setattr(webhook_common, "trigger_or_queue_run", fake_trigger_or_queue_run)
@@ -1329,12 +1276,13 @@ def test_process_github_issue_uses_resolved_user_token_for_reaction(monkeypatch)
     monkeypatch.setattr(webhook_common, "fetch_issue_comments", fake_fetch_issue_comments)
     monkeypatch.setattr(webhook_common, "get_client", lambda url: _FakeLangGraphClient())
     monkeypatch.setattr(
-        webhook_common,
+        User,
         "email_for_login",
         lambda login: asyncio.sleep(
             0, result="octocat@example.com" if login == "octocat" else None
         ),
     )
+    monkeypatch.setattr(User, "known_logins", lambda logins: asyncio.sleep(0, result=frozenset()))
 
     asyncio.run(
         github_webhooks.process_github_issue(
@@ -1408,15 +1356,15 @@ def test_process_github_issue_existing_thread_uses_followup_prompt(monkeypatch) 
     monkeypatch.setattr(webhook_common, "fetch_issue_comments", fake_fetch_issue_comments)
     monkeypatch.setattr(webhook_common, "get_client", lambda url: _FakeLangGraphClient())
     monkeypatch.setattr(
-        webhook_common,
+        User,
         "email_for_login",
         lambda login: asyncio.sleep(
             0, result="octocat@example.com" if login == "octocat" else None
         ),
     )
+    monkeypatch.setattr(User, "known_logins", lambda logins: asyncio.sleep(0, result=frozenset()))
     monkeypatch.setattr(
-        "agent.dashboard.user_mappings.is_login_mapped",
-        lambda login: login == "octocat",
+        User, "known_logins", lambda logins: asyncio.sleep(0, result=frozenset({"octocat"}))
     )
 
     asyncio.run(

@@ -1,17 +1,17 @@
 """Searching, filtering and paging the thread list behind the Agents UI."""
 
 import asyncio
-import logging
 from collections.abc import Mapping, Sequence
 from typing import Any, Literal
 
 from fastapi import HTTPException
+from langgraph_sdk.client import LangGraphClient
+from langgraph_sdk.schema import ThreadSelectField
 
 from agent.threads.pins import list_thread_pin_ids, pin_thread, unpin_thread
 from agent.threads.summary import (
     _SURFACED_SOURCES,
     DASHBOARD_SOURCE,
-    _assert_thread_readable,
     _is_automation_thread,
     _is_thread_resolved,
     _metadata_repo,
@@ -23,6 +23,7 @@ from agent.threads.summary import (
     _thread_timestamp_ms,
     _thread_updated_ms,
     _ThreadSortBy,
+    assert_thread_readable,
     thread_is_readable,
     thread_is_unlisted,
     thread_source,
@@ -33,11 +34,16 @@ from agent.utils.thread_participants import participant_search_filters
 from agent.workspaces.routing import workspace_for_repo
 from agent.workspaces.store import DEFAULT_WORKSPACE_SLUG
 
-logger = logging.getLogger(__name__)
-
 _THREADS_SEARCH_PAGE = 50
 _THREADS_PAGE_SCAN_CAP = 5000
-_THREAD_LIST_SELECT = ["thread_id", "status", "metadata", "created_at", "updated_at"]
+_THREAD_LIST_SELECT: list[ThreadSelectField] = [
+    "thread_id",
+    "status",
+    "metadata",
+    "created_at",
+    "updated_at",
+]
+_PINNED_THREADS_BATCH_SIZE = 1000
 _RUN_REFRESH_CONCURRENCY = 8
 _RUNNING_METADATA_STATUSES = {"pending", "running"}
 
@@ -215,11 +221,12 @@ async def _summarize_thread(
     thread: ThreadLike,
     *,
     refresh_active_run: bool = True,
+    minimal_run_update: bool = False,
 ) -> dict[str, Any]:
     latest_run_status = latest_run_id = None
     if refresh_active_run and _should_refresh_latest_run(thread):
         thread, latest_run_status, latest_run_id = await _refresh_latest_run_metadata(
-            client, thread
+            client, thread, return_minimal=minimal_run_update
         )
     return await _thread_summary(
         thread,
@@ -231,6 +238,8 @@ async def _summarize_thread(
 async def _summarize_threads(
     client: Any,
     threads: list[ThreadLike],
+    *,
+    minimal_run_update: bool = False,
 ) -> list[dict[str, Any]]:
     semaphore = asyncio.Semaphore(_RUN_REFRESH_CONCURRENCY)
 
@@ -245,6 +254,7 @@ async def _summarize_threads(
             return await _summarize_thread(
                 client,
                 thread,
+                minimal_run_update=minimal_run_update,
             )
 
     return list(await asyncio.gather(*(summarize(thread) for thread in threads)))
@@ -367,26 +377,31 @@ async def list_dashboard_threads(
 
 
 async def _pinned_thread_summaries(
-    client: Any,
+    client: LangGraphClient,
     login: str,
     email: str | None,
-) -> list[dict[str, Any]]:
-    async def load(thread_id: str) -> dict[str, Any] | None:
-        try:
-            thread = await client.threads.get(thread_id)
-        except Exception:  # noqa: BLE001
-            logger.debug("Could not fetch pinned sidebar thread %s", thread_id, exc_info=True)
-            return None
-        if not isinstance(thread, Mapping) or not thread_is_readable(
-            _thread_metadata(thread), login, email
-        ):
-            return None
-        return await _summarize_thread(client, thread)
-
-    summaries = await asyncio.gather(
-        *(load(thread_id) for thread_id in await list_thread_pin_ids(login))
+) -> list[JsonObject]:
+    pin_ids = await list_thread_pin_ids(login)
+    threads_by_id: dict[str, ThreadLike] = {}
+    # Search by ID independently of sidebar filters/pages, selecting no conversation
+    # state. Refresh idle metadata too: external runs and visibility can change.
+    for offset in range(0, len(pin_ids), _PINNED_THREADS_BATCH_SIZE):
+        batch_ids = pin_ids[offset : offset + _PINNED_THREADS_BATCH_SIZE]
+        threads = await client.threads.search(
+            ids=batch_ids,
+            limit=len(batch_ids),
+            select=_THREAD_LIST_SELECT,
+        )
+        for thread in threads:
+            thread_id = _thread_id(thread)
+            if thread_id and thread_is_readable(_thread_metadata(thread), login, email):
+                threads_by_id[thread_id] = thread
+    # Search order is unrelated to pin order; deleted/inaccessible IDs are omitted.
+    return await _summarize_threads(
+        client,
+        [threads_by_id[thread_id] for thread_id in pin_ids if thread_id in threads_by_id],
+        minimal_run_update=True,
     )
-    return [summary for summary in summaries if summary is not None]
 
 
 async def list_dashboard_pinned_threads(
@@ -397,7 +412,7 @@ async def list_dashboard_pinned_threads(
     return await _pinned_thread_summaries(langgraph_client(), login, email)
 
 
-async def list_dashboard_thread_projects(
+async def list_dashboard_thread_repos(
     login: str,
     *,
     email: str | None = None,
@@ -405,6 +420,12 @@ async def list_dashboard_thread_projects(
     include_automations: bool = False,
     include_all: bool = False,
 ) -> list[dict[str, Any]]:
+    """The repositories the viewer's threads ran in, newest activity first.
+
+    Each entry names the workspace that owns the repository so the sidebar can
+    nest repositories under their workspace; an unassigned repository belongs
+    to ``default``.
+    """
     candidates = await _collect_thread_candidates(
         langgraph_client(),
         _participant_search_filters(login, email=email, include_all=include_all),
@@ -413,24 +434,24 @@ async def list_dashboard_thread_projects(
         resolved=None if include_resolved else False,
         scope="all" if include_automations else "interactive",
     )
-    projects: dict[str, dict[str, Any]] = {}
+    repos: dict[str, dict[str, Any]] = {}
     for thread in candidates:
         _, name, full_name = _metadata_repo(_thread_metadata(thread))
         if not full_name:
             continue
         key = full_name.lower()
         updated_at = _thread_updated_ms(thread)
-        current = projects.get(key)
+        current = repos.get(key)
         if current is None or updated_at > current["updatedAt"]:
-            projects[key] = {
+            repos[key] = {
                 "repoFullName": full_name,
                 "name": name,
                 "updatedAt": updated_at,
             }
-    for project in projects.values():
-        owner, _, repo_name = str(project["repoFullName"]).partition("/")
-        project["workspace"] = await workspace_for_repo(owner, repo_name) or DEFAULT_WORKSPACE_SLUG
-    return sorted(projects.values(), key=lambda project: project["updatedAt"], reverse=True)
+    for entry in repos.values():
+        owner, _, repo_name = str(entry["repoFullName"]).partition("/")
+        entry["workspace"] = await workspace_for_repo(owner, repo_name) or DEFAULT_WORKSPACE_SLUG
+    return sorted(repos.values(), key=lambda entry: entry["updatedAt"], reverse=True)
 
 
 async def pin_dashboard_thread(thread_id: str, login: str) -> None:
@@ -441,7 +462,7 @@ async def pin_dashboard_thread(thread_id: str, login: str) -> None:
         raise HTTPException(404, "thread not found") from exc
     if not isinstance(thread, Mapping):
         raise HTTPException(404, "thread not found")
-    _assert_thread_readable(_thread_metadata(thread), login)
+    assert_thread_readable(_thread_metadata(thread), login)
     await pin_thread(login, thread_id)
 
 

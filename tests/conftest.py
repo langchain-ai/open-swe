@@ -216,7 +216,7 @@ def _no_bundled_dashboard(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> No
 
 @pytest.fixture(autouse=True)
 def _reset_ttl_cache() -> Iterator[None]:
-    """Keep the process-global TTL cache from leaking team settings between tests."""
+    """Keep the process-global TTL cache from leaking workspace settings between tests."""
     ttl_cache.clear()
     yield
     ttl_cache.clear()
@@ -265,11 +265,13 @@ def _default_enable_auto_review(monkeypatch: pytest.MonkeyPatch) -> None:
 
 @pytest.fixture
 def slack_api(monkeypatch: pytest.MonkeyPatch):
-    from agent.slack import client, code_channels, http
+    from agent.slack import channels, client, code_channels, http
     from tests.support.slack_api import slack_api_server
 
+    monkeypatch.setenv("SLACK_BOT_TOKEN", "test-slack-token")
     with slack_api_server() as api:
         monkeypatch.setattr(http, "SLACK_API_BASE_URL", api.base_url)
         monkeypatch.setattr(client, "SLACK_BOT_TOKEN", "test-slack-token")
         monkeypatch.setattr(code_channels, "SLACK_BOT_TOKEN", "test-slack-token")
+        monkeypatch.setattr(channels, "SLACK_BOT_TOKEN", "test-slack-token")
         yield api

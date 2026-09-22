@@ -71,6 +71,7 @@ import type { DiffStyle } from "@/features/agents/utils/diffUtils"
 import { Markdown } from "@/features/agents/components/chat/Markdown"
 import { DiffWrapToggle } from "@/features/agents/components/DiffWrapToggle"
 import { PrHeader } from "@/features/reviews/components/PrHeader"
+import { ReviewAssessmentCard } from "@/features/reviews/components/ReviewAssessmentCard"
 import {
   ReviewChat,
   ReviewChatComposerProvider,
@@ -711,7 +712,7 @@ function ReviewBodyInner({
     [viewedStorageKey]
   )
 
-  const readStorageKey = `open-swe.review.read.${detail.thread_id}`
+  const readStorageKey = `open-swe.review.read.${detail.thread_id ?? `${detail.owner}/${detail.repo}/${detail.number}`}`
   const [read, setRead] = useState<Set<string>>(() => {
     if (typeof window === "undefined") return new Set()
     try {
@@ -1282,6 +1283,15 @@ function ReviewBodyInner({
                     deletions: detail.pr.deletions,
                   }}
                 />
+                {detail.assessment && (
+                  <ReviewAssessmentCard
+                    assessment={detail.assessment}
+                    owner={detail.owner}
+                    repo={detail.repo}
+                    number={detail.number}
+                    headSha={detail.pr.head_sha}
+                  />
+                )}
                 <div
                   className={cn(
                     "mt-4 rounded-lg border border-border p-4",
@@ -2633,7 +2643,9 @@ function SidePanel({
                     ? "PR analysis in progress"
                     : detail.status === "error"
                       ? "PR analysis failed"
-                      : "PR analysis complete"}
+                      : detail.status === "none"
+                        ? "Not analyzed yet"
+                        : "PR analysis complete"}
                 </span>
                 <button
                   type="button"
@@ -2642,11 +2654,16 @@ function SidePanel({
                   className="inline-flex items-center gap-1 rounded border border-border px-1.5 py-0.5 text-[11px] text-muted-foreground hover:text-foreground disabled:opacity-50"
                 >
                   <ArrowClockwiseIcon className="size-3" />
-                  Re-review
+                  {detail.status === "none" ? "Review" : "Re-review"}
                 </button>
               </div>
               <div className="mt-2 space-y-1 text-[11px] text-muted-foreground">
-                <div>Reviewing commit {detail.head_sha.slice(0, 7) || "—"}</div>
+                <div>
+                  {detail.status === "none"
+                    ? "Head commit"
+                    : "Reviewing commit"}{" "}
+                  {detail.head_sha.slice(0, 7) || "—"}
+                </div>
                 {detail.watch && <div>Watching for new pushes</div>}
                 {reReview.error && (
                   <div className="text-destructive">
@@ -2659,7 +2676,11 @@ function SidePanel({
             <FindingSection
               icon={BugBeetleIcon}
               label={`${openBugs.length} Bug${openBugs.length === 1 ? "" : "s"}`}
-              emptyLabel="No bugs found."
+              emptyLabel={
+                detail.status === "none"
+                  ? "Not analyzed yet."
+                  : "No bugs found."
+              }
               findings={bugs}
               read={read}
               expandedId={expandedId}
@@ -2670,7 +2691,11 @@ function SidePanel({
             <FindingSection
               icon={FlagIcon}
               label={`${openFlags.length} Flag${openFlags.length === 1 ? "" : "s"}`}
-              emptyLabel="No issues found."
+              emptyLabel={
+                detail.status === "none"
+                  ? "Not analyzed yet."
+                  : "No issues found."
+              }
               findings={flags}
               read={read}
               expandedId={expandedId}

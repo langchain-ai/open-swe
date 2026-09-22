@@ -36,6 +36,10 @@ const VISIBILITIES: Array<{ value: ThreadVisibility; label: string }> = [
   { value: "public", label: "Workspace" },
 ]
 
+// Radix's Select rejects an empty-string item value, so "no default" needs a
+// sentinel that is translated back to null on save.
+const NO_DEFAULT_WORKSPACE = "__no_default_workspace__"
+
 export function PreferencesSection() {
   const { theme, setTheme } = useTheme()
   const qc = useQueryClient()
@@ -45,7 +49,17 @@ export function PreferencesSection() {
   })
   const savePreferences = useMutation({
     mutationFn: api.saveMyPreferences,
-    onSuccess: (data) => qc.setQueryData(["myPreferences"], data),
+    onSuccess: (data) => {
+      qc.setQueryData(["myPreferences"], data)
+      // The session payload carries `transcript_streaming` so the thread page
+      // has it on first render; refetch it or the change lands a reload later.
+      void qc.invalidateQueries({ queryKey: ["session"] })
+    },
+  })
+  const workspaceOptions = useQuery({
+    queryKey: ["workspace-options"],
+    queryFn: api.listWorkspaceOptions,
+    staleTime: 60_000,
   })
   const archiveThreads = useMutation({
     mutationFn: agentsApi.resolveAllThreads,
@@ -126,6 +140,45 @@ export function PreferencesSection() {
         }
       />
       <SettingsRow
+        label="Default workspace"
+        description={
+          savePreferences.error
+            ? `Could not save: ${savePreferences.error.message}`
+            : "Preselected in the composer's workspace picker when the chosen repository does not belong to another workspace."
+        }
+        control={
+          <Select
+            value={preferences.data?.default_workspace ?? NO_DEFAULT_WORKSPACE}
+            onValueChange={(v) =>
+              v &&
+              savePreferences.mutate({
+                ...preferences.data!,
+                default_workspace: v === NO_DEFAULT_WORKSPACE ? null : v,
+              })
+            }
+            disabled={
+              preferences.isLoading ||
+              savePreferences.isPending ||
+              workspaceOptions.isLoading
+            }
+          >
+            <SelectTrigger className="w-48">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value={NO_DEFAULT_WORKSPACE}>
+                Workspace default
+              </SelectItem>
+              {(workspaceOptions.data?.workspaces ?? []).map((workspace) => (
+                <SelectItem key={workspace.slug} value={workspace.slug}>
+                  {workspace.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        }
+      />
+      <SettingsRow
         label="Local tracing project"
         description="Project used for local desktop runs. Leave blank to use the shared cloud project. Restart the desktop app after changing it."
         control={
@@ -172,6 +225,26 @@ export function PreferencesSection() {
           >
             {archiveThreads.isPending ? "Archiving…" : "Archive all"}
           </Button>
+        }
+      />
+      <SettingsRow
+        label="Stream threads from the transcript"
+        description={
+          savePreferences.error
+            ? `Could not save: ${savePreferences.error.message}`
+            : "Read threads from Open SWE's own transcript log instead of the agent's graph state. Faster to load and to follow live, and being rolled out — threads started before it was recording, and threads someone else is streaming, are unaffected. Reopen a thread after changing this."
+        }
+        control={
+          <Switch
+            checked={preferences.data?.transcript_streaming ?? false}
+            onCheckedChange={(v) =>
+              savePreferences.mutate({
+                ...preferences.data!,
+                transcript_streaming: v,
+              })
+            }
+            disabled={preferences.isLoading || savePreferences.isPending}
+          />
         }
       />
       <SettingsRow

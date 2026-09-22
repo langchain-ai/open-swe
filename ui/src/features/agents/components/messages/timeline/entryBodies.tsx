@@ -5,12 +5,18 @@ import type { ToolExecutionChunk } from "@/features/agents/lib/types"
 
 export const ShellEntryBody = memo(function ShellEntryBody({
   chunk,
+  loadedText,
+  loadError,
 }: {
   chunk: ToolExecutionChunk
+  /** Full output fetched on expand; the chunk alone holds only a preview. */
+  loadedText?: string | null
+  loadError?: string | null
 }) {
   const command =
     typeof chunk.input?.command === "string" ? chunk.input.command : ""
-  const output = chunk.output ?? ""
+  const output = loadedText ?? chunk.output ?? ""
+  const pendingOutput = Boolean(chunk.loadOutput) && loadedText == null
 
   return (
     <div className="space-y-1.5">
@@ -21,10 +27,16 @@ export const ShellEntryBody = memo(function ShellEntryBody({
         </pre>
       )}
       {output && <ToolResultBody value={output} />}
-      {!output && chunk.status === "in_progress" && (
+      {loadError && <p className="text-[12px] text-destructive">{loadError}</p>}
+      {!loadError && pendingOutput && (
+        <p className="font-mono text-[12px] text-muted-foreground">
+          {output ? "Loading the rest of the output…" : "Loading output…"}
+        </p>
+      )}
+      {!output && !pendingOutput && chunk.status === "in_progress" && (
         <p className="font-mono text-[12px] text-muted-foreground">Running…</p>
       )}
-      {!output && chunk.status === "pending" && (
+      {!output && !pendingOutput && chunk.status === "pending" && (
         <p className="font-mono text-[12px] text-warning-foreground">
           Waiting for approval…
         </p>

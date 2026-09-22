@@ -4,17 +4,24 @@ from typing import Any, Literal
 
 from fastapi import APIRouter, HTTPException, Request, Response
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel
+from pydantic import AliasGenerator, BaseModel, ConfigDict, Field
+from pydantic.alias_generators import to_camel
 
 from agent.dashboard.deps import ADMIN_DEP, SESSION_DEP, filter_repo_models_for_user
 from agent.dashboard.profiles import get_valid_access_token
 from agent.dashboard.repo_access import require_repo_access_for_user
+from agent.github.pull_request_status import pull_request_identity
 from agent.github.repos import accessible_repo_full_names
 from agent.review.analyzer_cron import remove_continual_cron
+from agent.review.assessment_feedback import (
+    AssessmentFeedback,
+    FeedbackSubmission,
+    feedback_store,
+    require_assessment_access,
+    save_feedback,
+)
 from agent.review.chat import (
-    delete_review_chat_thread,
     get_review_chat,
-    list_review_chat_threads,
     proxy_review_chat_commands,
     proxy_review_chat_history,
     proxy_review_chat_state,
@@ -23,9 +30,13 @@ from agent.review.chat import (
 from agent.review.enabled_repos import list_enabled_review_repos, set_review_repo_enabled
 from agent.review.eval_jobs import get_reviewer_eval_status
 from agent.review.reviews import (
+    PullRequestPreview,
+    ReviewSummary,
     create_review_comment,
+    get_pull_request_preview,
     get_review,
     get_review_diff,
+    get_review_summaries,
     list_review_comments,
     list_reviews,
     proxy_pr_image,
@@ -92,6 +103,39 @@ async def api_list_review_styles(
     ]
 
 
+class ReviewSummaryRef(BaseModel):
+    repo: str = Field(max_length=140)
+    number: int = Field(ge=1)
+
+
+class ReviewSummariesRequest(BaseModel):
+    model_config = ConfigDict(
+        alias_generator=AliasGenerator(validation_alias=to_camel), populate_by_name=True
+    )
+
+    pull_requests: list[ReviewSummaryRef] = Field(max_length=100)
+
+
+@router.post("/reviews/summaries")
+async def api_get_review_summaries(
+    payload: ReviewSummariesRequest,
+    session: dict[str, Any] = SESSION_DEP,
+) -> dict[str, ReviewSummary | None]:
+    identities: list[tuple[str, str, int]] = []
+    for ref in payload.pull_requests:
+        identity = pull_request_identity({"repo_full_name": ref.repo, "number": ref.number})
+        if identity is None:
+            raise HTTPException(422, "invalid pull request reference")
+        identities.append(identity)
+    accessible = await accessible_repo_full_names(session["sub"])
+    authorized = [
+        (owner, repo, number)
+        for owner, repo, number in identities
+        if f"{owner}/{repo}".lower() in accessible
+    ]
+    return await get_review_summaries(authorized) if authorized else {}
+
+
 @router.get("/reviews")
 async def api_list_reviews(
     page: int = 0,
@@ -123,6 +167,45 @@ async def api_get_review(
 ) -> dict[str, Any]:
     await require_repo_access_for_user(session["sub"], f"{owner}/{repo}")
     return await get_review(owner, repo, pr_number)
+
+
+@router.get("/reviews/{owner}/{repo}/{pr_number}/feedback/{review_id}")
+async def get_assessment_feedback(
+    owner: str,
+    repo: str,
+    pr_number: int,
+    review_id: int,
+    session: dict[str, object] = SESSION_DEP,
+) -> AssessmentFeedback | None:
+    login = str(session["sub"])
+    await require_assessment_access(owner, repo, pr_number, review_id, login)
+    return await feedback_store(review_id).get(login.lower())
+
+
+@router.put("/reviews/{owner}/{repo}/{pr_number}/feedback/{review_id}")
+async def submit_assessment_feedback(
+    owner: str,
+    repo: str,
+    pr_number: int,
+    review_id: int,
+    submission: FeedbackSubmission,
+    session: dict[str, object] = SESSION_DEP,
+) -> AssessmentFeedback:
+    return await save_feedback(owner, repo, pr_number, review_id, str(session["sub"]), submission)
+
+
+@router.get("/reviews/{owner}/{repo}/{pr_number}/preview")
+async def api_get_pull_request_preview(
+    owner: str,
+    repo: str,
+    pr_number: int,
+    session: dict[str, Any] = SESSION_DEP,
+) -> PullRequestPreview:
+    await require_repo_access_for_user(session["sub"], f"{owner}/{repo}")
+    token = await get_valid_access_token(session["sub"])
+    if not token:
+        raise HTTPException(401, "GitHub token unavailable, re-login required")
+    return await get_pull_request_preview(owner, repo, pr_number, token)
 
 
 @router.get("/reviews/{owner}/{repo}/{pr_number}/diff")
@@ -258,31 +341,6 @@ async def api_get_review_chat(
     return await get_review_chat(owner, repo, pr_number, session["sub"])
 
 
-@router.get("/reviews/{owner}/{repo}/{pr_number}/chat/threads")
-async def api_list_review_chat_threads(
-    owner: str,
-    repo: str,
-    pr_number: int,
-    session: dict[str, Any] = SESSION_DEP,
-) -> dict[str, Any]:
-    await require_repo_access_for_user(session["sub"], f"{owner}/{repo}")
-    threads = await list_review_chat_threads(owner, repo, pr_number, session["sub"])
-    return {"threads": threads}
-
-
-@router.delete("/reviews/{owner}/{repo}/{pr_number}/chat/threads/{thread_id}")
-async def api_delete_review_chat_thread(
-    owner: str,
-    repo: str,
-    pr_number: int,
-    thread_id: str,
-    session: dict[str, Any] = SESSION_DEP,
-) -> Response:
-    await require_repo_access_for_user(session["sub"], f"{owner}/{repo}")
-    await delete_review_chat_thread(owner, repo, pr_number, session["sub"], thread_id)
-    return Response(status_code=204)
-
-
 @router.post("/reviews/{owner}/{repo}/{pr_number}/chat/threads/{thread_id}/commands")
 async def api_review_chat_commands(
     owner: str,
@@ -405,7 +463,11 @@ async def api_update_review_style_prompt(
     await require_repo_access_for_user(session["sub"], full_name)
     if not await REVIEW_STYLES.get(full_name):
         raise HTTPException(404, "review style not found")
-    return await REVIEW_STYLES.set_custom_prompt(full_name, body.custom_prompt)
+    if "approval_policy" in body.model_fields_set:
+        from agent.dashboard.deps import require_admin
+
+        require_admin(session)
+    return await REVIEW_STYLES.update_prompts(full_name, body)
 
 
 @router.post("/review-styles/{full_name:path}/analyze")
@@ -451,6 +513,10 @@ async def api_delete_review_style(
     record = await REVIEW_STYLES.get(full_name)
     if not record:
         raise HTTPException(404, "review style not found")
+    if record.approval_policy:
+        from agent.dashboard.deps import require_admin
+
+        require_admin(session)
     if record.status == "running":
         await cancel_review_style_analysis(full_name)
     await remove_continual_cron(full_name)

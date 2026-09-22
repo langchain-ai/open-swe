@@ -168,6 +168,63 @@ class TestModelFallbackMiddleware:
         assert calls[1] is override.return_value
 
     @pytest.mark.asyncio
+    async def test_async_falls_over_on_openai_streaming_overload(self) -> None:
+        exc = openai.APIError(
+            "Our servers are currently overloaded. Please try again later.",
+            request=httpx2.Request("POST", "https://api.openai.com/v1/responses"),
+            body=None,
+        )
+        assert not hasattr(exc, "status_code")
+        fallback = MagicMock(name="fallback")
+        request = _make_request()
+        response = ModelResponse(result=[AIMessage(content="ok from fallback")])
+        handler = AsyncMock(side_effect=[exc, response])
+
+        result = await ModelFallbackMiddleware(fallback, backoff_schedule=(0.0,)).awrap_model_call(
+            request, handler
+        )
+
+        assert result is response
+        override = cast(MagicMock, request.override)
+        override.assert_called_once_with(model=fallback)
+        assert handler.await_count == 2
+        handler.assert_awaited_with(override.return_value)
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("error_type", "status", "message"),
+        [
+            (openai.APIError, None, "Unrelated API failure"),
+            (openai.APIError, None, "context_length_exceeded"),
+            (openai.AuthenticationError, 401, "Invalid API key"),
+            (openai.BadRequestError, 400, "Invalid request"),
+            (openai.BadRequestError, 400, "context_length_exceeded"),
+        ],
+    )
+    async def test_async_propagates_non_transient_openai_error(
+        self, error_type: type[openai.APIError], status: int | None, message: str
+    ) -> None:
+        api_request = httpx2.Request("POST", "https://api.openai.com/v1/responses")
+        if issubclass(error_type, openai.APIStatusError):
+            assert status is not None
+            exc = error_type(
+                message, response=httpx2.Response(status, request=api_request), body=None
+            )
+        else:
+            exc = error_type(message, request=api_request, body=None)
+        request = _make_request()
+        handler = AsyncMock(side_effect=exc)
+
+        with pytest.raises(error_type) as raised:
+            await ModelFallbackMiddleware(MagicMock(), backoff_schedule=(0.0,)).awrap_model_call(
+                request, handler
+            )
+
+        assert raised.value is exc
+        handler.assert_awaited_once_with(request)
+        cast(MagicMock, request.override).assert_not_called()
+
+    @pytest.mark.asyncio
     async def test_async_falls_over_on_httpx2_stream_transport_error(self) -> None:
         fallback_model = MagicMock(name="fallback_model")
         middleware = ModelFallbackMiddleware(fallback_model)

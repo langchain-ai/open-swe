@@ -12,7 +12,7 @@ from langchain_core.messages import SystemMessage
 from langgraph.runtime import Runtime
 
 from agent.middleware.trace import OpenSWEMiddleware
-from agent.utils.startup_trace import flush_phases
+from agent.utils.startup_trace import aphase, flush_phases
 
 
 class PrepareRunState(AgentState):
@@ -56,6 +56,8 @@ class BasePrepareRunMiddleware(OpenSWEMiddleware):
         state: AgentState,
         runtime: Runtime,
     ) -> dict[str, Any] | None:
+        if state.get("_deepagents_forked_context"):
+            return None
         try:
             prepared_state = cast(PrepareRunState, state)
             fingerprint = self._prepare_fingerprint(prepared_state, runtime)
@@ -64,7 +66,8 @@ class BasePrepareRunMiddleware(OpenSWEMiddleware):
                 and prepared_state.get("run_prepared_for") == fingerprint
             ):
                 return None
-            updates = await self._prepare(prepared_state, runtime)
+            async with aphase(getattr(self, "_thread_id", None), "prepare.total"):
+                updates = await self._prepare(prepared_state, runtime)
             return {"run_prepared": True, "run_prepared_for": fingerprint, **updates}
         finally:
             # This hook is the first span the startup work can hang off of. A

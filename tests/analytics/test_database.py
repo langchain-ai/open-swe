@@ -9,10 +9,25 @@ from uuid import UUID, uuid4
 import pytest
 from blockbuster import BlockBuster
 from sqlalchemy import make_url, text
+from sqlalchemy.exc import IntegrityError
 
 from agent.database import analytics as database
 from agent.database import postgres
 from tests.analytics.conftest import initialize_database
+
+
+def test_local_dev_defaults_to_local_postgres(monkeypatch):
+    monkeypatch.delenv("POSTGRES_URI", raising=False)
+    monkeypatch.setenv("LANGSMITH_LANGGRAPH_API_VARIANT", "local_dev")
+
+    assert postgres.uri() == "postgresql+asyncpg://postgres:postgres@127.0.0.1:5433/postgres"
+
+
+def test_non_local_runtime_requires_postgres_uri(monkeypatch):
+    monkeypatch.delenv("POSTGRES_URI", raising=False)
+    monkeypatch.delenv("LANGSMITH_LANGGRAPH_API_VARIANT", raising=False)
+
+    assert postgres.uri() is None
 
 
 async def test_migrations_allow_nonblocking_startup_and_restart(deployment_db):
@@ -104,6 +119,42 @@ async def test_migration_preserves_existing_workspace_and_history(deployment_db,
     await postgres.close()
     await initialize_database()
     assert database.workspace_id() == old_workspace
+
+
+async def test_provenance_migration_preserves_legacy_names(deployment_db):
+    migrations = postgres.load_migrations()
+    async with postgres.engine().begin() as conn:
+        await conn.execute(text("CREATE SCHEMA open_swe"))
+        await conn.run_sync(postgres.upgrade, migrations, "open_swe", "0022")
+        await conn.execute(
+            text(
+                "INSERT INTO identity_directory (workspace_id, person_id, display_name, "
+                "anonymize_after) VALUES (:workspace, :person, :name, clock_timestamp())"
+            ),
+            {"workspace": uuid4(), "person": uuid4(), "name": "Legacy Name"},
+        )
+        await conn.run_sync(postgres.upgrade, migrations, "open_swe", "head")
+        row = (
+            (
+                await conn.execute(
+                    text("SELECT display_name, display_name_source FROM identity_directory")
+                )
+            )
+            .mappings()
+            .one()
+        )
+        assert row["display_name"] == "Legacy Name"
+        assert row["display_name_source"] is None
+        for name, source in [(None, "github"), ("  ", "slack"), ("Name", "invalid")]:
+            with pytest.raises(IntegrityError):
+                async with conn.begin_nested():
+                    await conn.execute(
+                        text(
+                            "UPDATE identity_directory SET display_name = :name, "
+                            "display_name_source = :source"
+                        ),
+                        {"name": name, "source": source},
+                    )
 
 
 async def test_standalone_uri_with_sslmode_connects(deployment_db, monkeypatch):

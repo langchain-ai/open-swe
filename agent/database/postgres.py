@@ -30,6 +30,8 @@ MIGRATION_LOCK = 557314367248862439
 
 def uri() -> str | None:
     value = ENV.POSTGRES_URI.optional()
+    if value is None and ENV.LANGSMITH_LANGGRAPH_API_VARIANT.get() == "local_dev":
+        value = "postgresql://postgres:postgres@127.0.0.1:5433/postgres"
     if value is None:
         return None
     if value.startswith("postgres://"):
@@ -104,6 +106,28 @@ async def read_only_transaction() -> AsyncIterator[AsyncConnection]:
             if transaction.is_active:
                 await transaction.rollback()
             await conn.invalidate()
+
+
+@asynccontextmanager
+async def snapshot_transaction() -> AsyncIterator[AsyncConnection]:
+    """A read-only transaction whose every statement sees one database snapshot.
+
+    ``read_only_transaction`` runs at READ COMMITTED, where each statement takes
+    its own snapshot: a multi-statement read can observe rows written after the
+    head version it already read, which is exactly the inconsistency a client
+    reducing a snapshot plus a live event stream would double-apply.
+    """
+    async with engine().connect() as conn:
+        transaction = await conn.begin()
+        try:
+            await conn.execute(text("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY"))
+            await conn.execute(text(f"SET LOCAL search_path TO {SCHEMA}, public"))
+            yield conn
+        finally:
+            # Both settings are transaction-scoped, so the rollback is what
+            # resets them and the connection goes back to the pool.
+            if transaction.is_active:
+                await transaction.rollback()
 
 
 @asynccontextmanager

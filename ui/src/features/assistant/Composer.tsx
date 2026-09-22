@@ -5,7 +5,7 @@ import {
   useAui,
   useAuiState,
 } from "@assistant-ui/react"
-import { ArrowUp, Map, Plus, Square, X } from "lucide-react"
+import { ArrowUp, Plus, Square, X } from "lucide-react"
 import { ModelPicker } from "@/features/agents/components/ModelPicker"
 import { useModelOptions } from "@/features/agents/lib/provider/useModelOptions"
 import { modelConfigurable } from "@/features/agents/lib/stream/promptMessage"
@@ -77,7 +77,6 @@ export function Composer({ initialRepo }: { initialRepo?: string | null }) {
           : (initialRepo ?? profile.data.default_repo)
             ? { repo: initialRepo ?? profile.data.default_repo }
             : {}),
-        plan_mode: thread?.planMode ?? false,
       },
     })
   }, [
@@ -138,17 +137,6 @@ export function Composer({ initialRepo }: { initialRepo?: string | null }) {
             requireImageSupport={hasAttachments}
             triggerClassName="max-w-48 rounded-full px-2 py-1.5 text-xs text-muted-foreground hover:bg-muted"
           />
-          <button
-            type="button"
-            disabled={disabled}
-            aria-label="Plan mode"
-            aria-pressed={config?.plan_mode === true}
-            onClick={() => update({ plan_mode: !config?.plan_mode })}
-            className={`flex items-center gap-1 rounded-full px-2 py-1.5 text-xs ${config?.plan_mode ? "bg-primary/10 text-primary" : "text-muted-foreground"}`}
-          >
-            <Map className="size-3.5" />
-            Plan
-          </button>
           {!thread && (
             <>
               <select

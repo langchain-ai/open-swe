@@ -12,7 +12,7 @@ if model_id == DEFAULT_LLM_MODEL_ID:
 return create_deep_agent(
     model=make_model(model_id, **model_kwargs),
     system_prompt=construct_system_prompt(...),
-    tools=[http_request, fetch_url, slack_thread_reply],
+    tools=[http_request, fetch_url, slack_reply],
     backend=sandbox_backend,
     middleware=[
         ToolErrorMiddleware(),
@@ -30,10 +30,11 @@ By default, Open SWE runs each task in a [LangSmith cloud sandbox](https://docs.
 
 ### Using a custom sandbox snapshot
 
-Build a snapshot in LangSmith (UI or `SandboxClient.create_snapshot`) from your Docker image and point Open SWE at its UUID:
+New sandboxes boot from LangSmith's root snapshot unless the workspace they run in has its own snapshot. Build a snapshot in LangSmith (UI or `SandboxClient.create_snapshot`) from your Docker image and set it as a workspace's base snapshot from the **Workspaces** page. Workspace setup and update scripts receive the selected repository names in the space-delimited `OPENSWE_WORKSPACE_REPOS` environment variable.
+
+Per-sandbox resources are configured on the deployment:
 
 ```bash
-DEFAULT_SANDBOX_SNAPSHOT_ID="<snapshot-uuid>"                      # Optional; defaults to LangSmith's root snapshot
 DEFAULT_SANDBOX_SNAPSHOT_FS_CAPACITY_BYTES="137438953472"          # Optional, default 128 GiB
 DEFAULT_SANDBOX_VCPUS="4"                                          # Optional, default 4
 DEFAULT_SANDBOX_MEM_BYTES="17179869184"                            # Optional, default 16 GiB
@@ -42,8 +43,6 @@ DEFAULT_SANDBOX_DELETE_AFTER_STOP_SECONDS="2592000"                # Optional, d
 ```
 
 This is useful for pre-installing languages, frameworks, or internal tools that your repos depend on — reducing setup time per agent run. The default snapshot includes the GitHub CLI; agents invoke it as `gh <command>` and rely on the LangSmith proxy for the real credentials.
-
-`DEFAULT_SANDBOX_SNAPSHOT_ID` is only the deployment default. Admins can override it at runtime — from the **Sandbox** page or via `PUT /dashboard/api/sandbox-settings` — so a rebuilt image can be rolled out without a redeploy. See [INSTALLATION.md](./INSTALLATION.md) and `examples/github-actions/set-base-snapshot.yml` for the CI flow.
 
 For LangSmith sandboxes, Open SWE configures two GitHub proxy rules whenever a sandbox is created or reattached to a run:
 
@@ -67,7 +66,9 @@ Set the `SANDBOX_TYPE` environment variable to switch providers. Each provider h
 
 > **Warning**: `local` runs commands directly on your host with no sandboxing. Only use for local development with human-in-the-loop enabled.
 
-For `langsmith`, sandbox provisioning, connection, proxy configuration, and workspace snapshot captures use the deployment’s `LANGSMITH_API_KEY` and `LANGSMITH_ENDPOINT`. The `DEFAULT_SANDBOX_SNAPSHOT_ID` must exist in that LangSmith workspace. The former `SANDBOX_LANGSMITH_API_KEY` and `SANDBOX_LANGSMITH_ENDPOINT` overrides are no longer used.
+The third-party provider SDKs (`daytona`, `modal`, `runloop`, `e2b`) are optional dependency groups, so a base install only carries the default langsmith and local providers. Selecting one of these providers requires installing its extra — e.g. `uv sync --extra sandbox-e2b` — or all of them with `--extra sandbox-providers`; startup validation fails fast with the install command if it's missing.
+
+For `langsmith`, sandbox provisioning, connection, proxy configuration, and workspace snapshot captures use the deployment’s `LANGSMITH_API_KEY` and `LANGSMITH_ENDPOINT`. A workspace's base snapshot must exist in that LangSmith workspace. The former `SANDBOX_LANGSMITH_API_KEY` and `SANDBOX_LANGSMITH_ENDPOINT` overrides are no longer used.
 
 ### Adding a new sandbox provider
 
@@ -210,7 +211,7 @@ Routing is opt-in and off by default. Enable it either way:
 | `LANGSMITH_GATEWAY_BASE_URL` | `https://gateway.smith.langchain.com` | Override for a regional or self-hosted gateway host. |
 | `LANGSMITH_GATEWAY_OPENAI_USE_RESPONSES` | `true` | Use the OpenAI Responses API through the gateway. Set to `false` only to force Chat Completions for OpenAI models. |
 
-The admin panel (**Admin → LLM Gateway**) exposes a per-workspace toggle stored in team settings; when set it overrides the `LANGSMITH_GATEWAY_ENABLED` env default (a `None`/unset team value inherits the env default).
+The instance toggle lives under **Admin → LLM Gateway**, and each workspace's settings page (**Workspaces → the workspace → LLM Gateway**) can override it; when set it overrides the `LANGSMITH_GATEWAY_ENABLED` env default (a `None`/unset value inherits the env default).
 
 Routing is applied centrally in `make_model` (`agent/utils/model.py`), which resolves the effective on/off and delegates URL/key wiring to `agent/utils/gateway.py`. **OpenAI, Anthropic, Baseten, Fireworks, and Google Gemini** are routed; Google Vertex (service-account auth) and any other provider call the provider directly with a logged warning. Baseten uses `BASETEN_API_KEY` from LangSmith workspace Provider Secrets through Gateway, or the runtime environment for direct calls.
 
@@ -227,16 +228,15 @@ Open SWE ships with a small set of custom tools on top of the built-in Deep Agen
 | `fetch_url` | `agent/tools/fetch_url.py` | Fetch web pages as markdown |
 | `http_request` | `agent/tools/http_request.py` | HTTP API calls |
 | `slack_attach_html` | `agent/slack/tools/attach_html.py` | Attach sandbox HTML previews to Slack threads |
-| `slack_thread_reply` | `agent/slack/tools/thread_reply.py` | Reply in Slack threads |
+| `slack_reply` | `agent/slack/tools/reply.py` | Reply to the person who asked, in a Slack thread or ephemerally |
 
 ### Workspace MCP servers
 
-Admins can connect generic remote MCP servers under **Admin → Workspace MCPs**.
+Admins can connect generic remote MCP servers under **Admin → Instance MCPs**, which every workspace inherits, or under **Workspaces → the workspace → Workspace MCPs** for one workspace; a workspace connection replaces an inherited one with the same name.
 Connections belong to this Open SWE deployment and are shared across repositories
 and remote coding-agent threads. Enabled connections provide baseline tools for
 all users, limited to the tools selected by an admin. Only admins can manage
-connections or reveal saved credentials. Plan mode continues to block workspace
-MCP tools.
+connections or reveal saved credentials.
 
 1. Choose **Add MCP server** and enter a unique lowercase connection name, an
    HTTPS server URL, and its transport (**Streamable HTTP** or **SSE**).
@@ -444,14 +444,14 @@ def datadog_search(query: str, time_range: str = "1h") -> dict[str, Any]:
 Then register it in `agent/server.py`:
 
 ```python
-from .tools import fetch_url, http_request, slack_thread_reply
+from .tools import fetch_url, http_request, slack_reply
 from .tools.datadog_search import datadog_search
 
 return create_deep_agent(
     ...
     tools=[
         http_request, fetch_url,
-        slack_thread_reply,
+        slack_reply,
         datadog_search,  # new tool
     ],
     ...
@@ -462,7 +462,7 @@ The agent will automatically see the tool's name, docstring, and parameter types
 
 ### Removing tools
 
-If you don't use Slack, remove `slack_thread_reply` from the tools list. If you don't need web fetching, remove `fetch_url`.
+If you don't use Slack, remove `slack_reply` from the tools list. If you don't need web fetching, remove `fetch_url`.
 
 ### Conditional tools
 
@@ -473,7 +473,7 @@ base_tools = [http_request, fetch_url]
 source = config["configurable"].get("source")
 
 if source == "slack":
-    tools = [*base_tools, slack_thread_reply]
+    tools = [*base_tools, slack_reply]
 else:
     tools = base_tools
 
@@ -529,7 +529,7 @@ Slack repo resolution (`get_slack_repo_config` in `agent/webapp.py`) checks, in 
 1. Repo carried over from the existing Slack thread's metadata.
 2. A `repo:owner/name` (or GitHub URL) token in the channel's **topic or purpose** (its "description"). This lets a channel be pinned to a repo without anyone repeating it per-message.
 3. The triggering user's dashboard `default_repo`.
-4. The team default repo.
+4. The workspace's default repository (its own override, else the instance's).
 5. `SLACK_REPO_OWNER`/`SLACK_REPO_NAME`, falling back to `DEFAULT_REPO_OWNER`/`DEFAULT_REPO_NAME`.
 
 Users can still override per-message with `repo:owner/name` syntax in their Slack message (this is read from the message text by the agent). A shorthand `repo:name` (without the org) is also supported — the org defaults to `DEFAULT_REPO_OWNER`.
@@ -607,7 +607,6 @@ The system prompt is assembled in `agent/prompt.py` from modular sections. You c
 | `DEPENDENCY_SECTION` | Installing, vetting, and managing project dependencies |
 | `COMMIT_PR_SECTION` | PR title/body format, lint/format steps, and commit conventions (or `DESKTOP_PR_SECTION`) |
 | `OPEN_SWE_SHARED_BASE` | Shared core guidance: concise style, core behavior, sandbox operations, code style, and communication |
-| `PLAN_MODE_SECTION` | Read-only planning mode instructions |
 
 > **Note:** General code style (`### Working with Code`), communication guidelines (`### Communication`), and core behaviors are composed as subsections of `OPEN_SWE_SHARED_BASE` rather than separate configurable constants.
 

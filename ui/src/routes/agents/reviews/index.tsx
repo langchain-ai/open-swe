@@ -1,15 +1,10 @@
-import { Link, createFileRoute } from "@tanstack/react-router"
+import { createFileRoute } from "@tanstack/react-router"
 import {
   keepPreviousData,
   useQuery,
   useQueryClient,
 } from "@tanstack/react-query"
-import { useState } from "react"
-import {
-  BugBeetleIcon,
-  FlagIcon,
-  GitPullRequestIcon,
-} from "@phosphor-icons/react"
+import { GitPullRequestIcon } from "@phosphor-icons/react"
 
 import type { ReviewSummary } from "@/lib/api"
 import { Button } from "@/components/ui/button"
@@ -17,8 +12,17 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { api } from "@/lib/api"
 import { useSession } from "@/lib/session"
 import { cn } from "@/lib/utils"
+import { MyPullRequests } from "@/features/reviews/MyPullRequests"
+import { PullRequestLinks } from "@/features/reviews/PullRequestLinks"
+import { ReviewCounts } from "@/features/reviews/components/ReviewCounts"
+import {
+  parsePullRequestSelection,
+  validateReviewsSearch,
+  type ReviewsSearch,
+} from "@/features/reviews/search"
 
 export const Route = createFileRoute("/agents/reviews/")({
+  validateSearch: validateReviewsSearch,
   component: ReviewsPage,
 })
 
@@ -40,161 +44,208 @@ function statusBadge(review: ReviewSummary) {
 function ReviewsPage() {
   const session = useSession()
   const queryClient = useQueryClient()
-  const [mine, setMine] = useState(true)
-  const [page, setPage] = useState(0)
+  const filters = Route.useSearch()
+  const navigate = Route.useNavigate()
+  const mine = filters.tab !== "all"
+  const page = filters.page ?? 0
+  const changeFilters = (changes: Partial<ReviewsSearch>, replace = false) => {
+    void navigate({
+      search: (previous) => ({
+        ...previous,
+        ...changes,
+        ...(Object.keys(changes).some((key) =>
+          ["repo", "q", "status", "sort", "direction"].includes(key)
+        )
+          ? { page: undefined }
+          : {}),
+      }),
+      replace,
+    })
+  }
   const reviews = useQuery({
     queryKey: ["reviews", mine, page],
     queryFn: () => api.listReviews(page, mine),
-    enabled: !!session.data,
+    enabled: !!session.data && !mine,
     placeholderData: keepPreviousData,
-    refetchInterval: (query) =>
-      query.state.data?.reviews.some((r) => r.status === "running")
-        ? 5000
-        : false,
+    staleTime: Infinity,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
   })
 
   const prefetch = (nextMine: boolean, nextPage: number) => {
-    if (nextPage < 0) return
+    if (nextPage < 0 || nextMine) return
     void queryClient.prefetchQuery({
       queryKey: ["reviews", nextMine, nextPage],
       queryFn: () => api.listReviews(nextPage, nextMine),
+      staleTime: Infinity,
     })
   }
 
   const items = reviews.data?.reviews ?? []
 
+  const selection = mine ? parsePullRequestSelection(filters.pr) : null
+
   return (
-    <main className="min-w-0 flex-1 overflow-y-auto">
-      <div className="mx-auto max-w-3xl px-6 py-8">
-        <h1 className="font-heading text-base font-medium text-foreground">
-          PR Reviews
-        </h1>
-        <p className="mt-1 text-xs text-muted-foreground">
-          Pull requests reviewed by Open SWE Review. Click into one for the full
-          analysis.
-        </p>
-
-        <div className="mt-6 flex items-center gap-1">
-          {(
-            [
-              [true, "My PRs"],
-              [false, "All"],
-            ] as const
-          ).map(([value, label]) => (
-            <button
-              key={label}
-              type="button"
-              onClick={() => {
-                setMine(value)
-                setPage(0)
-              }}
-              onPointerEnter={() => prefetch(value, 0)}
-              onFocus={() => prefetch(value, 0)}
-              className={cn(
-                "rounded-md px-2.5 py-1 text-xs transition-colors",
-                mine === value
-                  ? "bg-sidebar-row-hover font-medium text-foreground"
-                  : "text-muted-foreground hover:bg-sidebar-row-hover"
-              )}
-            >
-              {label}
-            </button>
-          ))}
-        </div>
-
-        <div className="mt-3 overflow-hidden rounded-lg border border-border bg-card">
-          {reviews.isLoading && (
-            <div className="p-4">
-              <Skeleton className="h-24 w-full" />
+    <main className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+      <div className="flex min-h-0 w-full flex-1 flex-col px-6 py-6">
+        {/* One width for both tabs: switching tabs must not re-centre the
+              page under the button being clicked. */}
+        <div
+          className={cn(
+            "mx-auto flex min-h-0 w-full flex-1 flex-col",
+            !selection && "max-w-6xl"
+          )}
+        >
+          <div className="flex items-center gap-3">
+            <h1 className="font-heading text-base font-medium text-foreground">
+              Pull Requests
+            </h1>
+            <div className="flex items-center gap-1">
+              {(
+                [
+                  [true, "Mine"],
+                  [false, "All Reviews"],
+                ] as const
+              ).map(([value, label]) => (
+                <button
+                  key={label}
+                  type="button"
+                  onClick={() => {
+                    changeFilters({
+                      tab: value ? undefined : "all",
+                      page: undefined,
+                    })
+                  }}
+                  onPointerEnter={() => prefetch(value, 0)}
+                  onFocus={() => prefetch(value, 0)}
+                  className={cn(
+                    "rounded-md px-2.5 py-1 text-xs transition-colors",
+                    mine === value
+                      ? "bg-sidebar-row-hover font-medium text-foreground"
+                      : "text-muted-foreground hover:bg-sidebar-row-hover"
+                  )}
+                >
+                  {label}
+                </button>
+              ))}
             </div>
-          )}
-          {reviews.error && (
-            <p className="px-4 py-3 text-xs text-destructive">
-              {reviews.error.message}
-            </p>
-          )}
-          {reviews.data && items.length === 0 && (
-            <p className="px-4 py-3 text-xs text-muted-foreground">
-              {mine
-                ? "No reviews on your PRs yet. Switch to All to see every review you have access to."
-                : "No reviews yet. Enable repositories under Open SWE Review settings and open a PR."}
-            </p>
-          )}
-          <div className="divide-y divide-border">
-            {items.map((review) => (
-              <Link
-                key={review.thread_id}
-                to="/agents/reviews/$owner/$repo/$number"
-                params={{
-                  owner: review.owner,
-                  repo: review.repo,
-                  number: String(review.number),
-                }}
-                className="flex items-center justify-between gap-4 px-4 py-3 transition-colors hover:bg-sidebar-row-hover"
+            {!mine && (
+              <Button
+                className="ml-auto"
+                size="sm"
+                variant="outline"
+                disabled={reviews.isFetching}
+                onClick={() => void reviews.refetch()}
               >
-                <div className="flex min-w-0 items-center gap-3">
-                  <GitPullRequestIcon className="size-4 shrink-0 text-muted-foreground" />
-                  <div className="min-w-0">
-                    <div className="truncate text-xs font-medium text-foreground">
-                      {review.title}
+                Refresh
+              </Button>
+            )}
+          </div>
+
+          {mine ? (
+            session.data && (
+              <MyPullRequests
+                login={session.data.login}
+                filters={filters}
+                onFiltersChange={changeFilters}
+              />
+            )
+          ) : (
+            <div
+              aria-busy={reviews.isFetching}
+              className="mt-3 min-h-0 flex-1 overflow-y-auto rounded-lg border border-border bg-card"
+            >
+              {reviews.isFetching && reviews.data && (
+                <p
+                  role="status"
+                  className="border-b border-border px-4 py-3 text-xs text-muted-foreground"
+                >
+                  Loading page {page + 1}…
+                </p>
+              )}
+              {reviews.isLoading && (
+                <div className="p-4">
+                  <Skeleton className="h-24 w-full" />
+                </div>
+              )}
+              {reviews.error && (
+                <p className="px-4 py-3 text-xs text-destructive">
+                  {reviews.error.message}
+                </p>
+              )}
+              {reviews.data && items.length === 0 && (
+                <p className="px-4 py-3 text-xs text-muted-foreground">
+                  {mine
+                    ? "No reviews on your PRs yet. Switch to All to see every review you have access to."
+                    : "No reviews yet. Enable repositories under Open SWE Review settings and open a PR."}
+                </p>
+              )}
+              <div
+                className={cn(
+                  "divide-y divide-border",
+                  reviews.isPlaceholderData && "opacity-50"
+                )}
+              >
+                {items.map((review) => (
+                  <div
+                    key={review.thread_id}
+                    className="flex items-center justify-between gap-4 px-4 py-3 transition-colors hover:bg-sidebar-row-hover"
+                  >
+                    <div className="flex min-w-0 items-center gap-3">
+                      <GitPullRequestIcon className="size-4 shrink-0 text-muted-foreground" />
+                      <div className="min-w-0">
+                        <div className="truncate text-xs font-medium text-foreground">
+                          {review.title}
+                        </div>
+                        <PullRequestLinks
+                          repo={`${review.owner}/${review.repo}`}
+                          number={review.number}
+                          title={review.title}
+                        />
+                        <div className="mt-0.5 text-xs text-muted-foreground">
+                          {review.owner}/{review.repo}#{review.number}
+                          {review.author && !mine && (
+                            <span className="ml-2">by {review.author}</span>
+                          )}
+                        </div>
+                      </div>
                     </div>
-                    <div className="mt-0.5 text-xs text-muted-foreground">
-                      {review.owner}/{review.repo}#{review.number}
-                      {review.author && !mine && (
-                        <span className="ml-2">by {review.author}</span>
-                      )}
-                      {review.head_ref && (
-                        <span className="ml-2 font-mono text-[11px]">
-                          {review.head_ref}
-                        </span>
-                      )}
+                    <div className="flex shrink-0 items-center gap-3 text-xs">
+                      {statusBadge(review)}
+                      <ReviewCounts counts={review.counts} />
                     </div>
                   </div>
-                </div>
-                <div className="flex shrink-0 items-center gap-3 text-xs">
-                  {statusBadge(review)}
-                  <span
-                    className={cn(
-                      "inline-flex items-center gap-1",
-                      review.counts.bugs > 0
-                        ? "text-destructive"
-                        : "text-muted-foreground"
-                    )}
-                  >
-                    <BugBeetleIcon className="size-3.5" />
-                    {review.counts.bugs}
-                  </span>
-                  <span className="inline-flex items-center gap-1 text-muted-foreground">
-                    <FlagIcon className="size-3.5" />
-                    {review.counts.flags}
-                  </span>
-                </div>
-              </Link>
-            ))}
-          </div>
-          {(page > 0 || reviews.data?.has_more) && (
-            <div className="flex items-center justify-between gap-4 border-t border-border px-4 py-2 text-xs">
-              <span className="text-muted-foreground">Page {page + 1}</span>
-              <div className="flex items-center gap-2">
-                <Button
-                  size="sm"
-                  variant="outline"
-                  disabled={page === 0}
-                  onPointerEnter={() => prefetch(mine, page - 1)}
-                  onClick={() => setPage((p) => Math.max(0, p - 1))}
-                >
-                  Prev
-                </Button>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  disabled={!reviews.data?.has_more}
-                  onPointerEnter={() => prefetch(mine, page + 1)}
-                  onClick={() => setPage((p) => p + 1)}
-                >
-                  Next
-                </Button>
+                ))}
               </div>
+              {(page > 0 || reviews.data?.has_more) && (
+                <div className="flex items-center justify-between gap-4 border-t border-border px-4 py-2 text-xs">
+                  <span className="text-muted-foreground">Page {page + 1}</span>
+                  <div className="flex items-center gap-2">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      disabled={page === 0 || reviews.isFetching}
+                      onPointerEnter={() => prefetch(mine, page - 1)}
+                      onClick={() =>
+                        changeFilters({
+                          page: Math.max(0, page - 1) || undefined,
+                        })
+                      }
+                    >
+                      Prev
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      disabled={!reviews.data?.has_more || reviews.isFetching}
+                      onPointerEnter={() => prefetch(mine, page + 1)}
+                      onClick={() => changeFilters({ page: page + 1 })}
+                    >
+                      Next
+                    </Button>
+                  </div>
+                </div>
+              )}
             </div>
           )}
         </div>

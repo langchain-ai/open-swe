@@ -36,6 +36,11 @@ export interface WorkEntryView {
   status: AcpToolStatus
   /** Plain-text detail for rows that have no richer renderer of their own. */
   expandedText: string | null
+  /**
+   * Fetches the rest of the output when the row is expanded, for sources whose
+   * transcript holds only a preview. Null when there is nothing more to get.
+   */
+  loadExpandedText: (() => Promise<string>) | null
 }
 
 function iconForChunk(chunk: ToolExecutionChunk): WorkEntryIconName {
@@ -74,20 +79,20 @@ function toneForChunk(chunk: ToolExecutionChunk): WorkEntryTone {
 
 function firstLocationPath(
   chunk: ToolExecutionChunk,
-  projectPath?: string
+  repoPath?: string
 ): string | null {
   const locations = chunk.locations ?? []
   const first = locations[0]
   if (!first) return null
-  const display = stripProjectPath(first.path, projectPath)
+  const display = stripRepoPath(first.path, repoPath)
   return locations.length === 1
     ? display
     : `${display} +${locations.length - 1} more`
 }
 
-function stripProjectPath(path: string, projectPath?: string): string {
-  if (!projectPath || !path.startsWith(projectPath)) return path
-  return path.slice(projectPath.length).replace(/^\/+/, "") || "."
+function stripRepoPath(path: string, repoPath?: string): string {
+  if (!repoPath || !path.startsWith(repoPath)) return path
+  return path.slice(repoPath.length).replace(/^\/+/, "") || "."
 }
 
 function normalizeForCompare(value: string): string {
@@ -102,7 +107,7 @@ const MAX_EXPANDED_TEXT_LENGTH = 4000
 
 function expandedTextForChunk(
   chunk: ToolExecutionChunk,
-  projectPath?: string
+  repoPath?: string
 ): string | null {
   const blocks: Array<string> = []
 
@@ -118,7 +123,7 @@ function expandedTextForChunk(
   const locations = chunk.locations ?? []
   if (!output && locations.length > 0) {
     blocks.push(
-      locations.map((loc) => stripProjectPath(loc.path, projectPath)).join("\n")
+      locations.map((loc) => stripRepoPath(loc.path, repoPath)).join("\n")
     )
   }
 
@@ -139,7 +144,7 @@ export function latestDiff(chunk: ToolExecutionChunk) {
 
 export function describeWorkEntry(
   chunk: ToolExecutionChunk,
-  projectPath?: string
+  repoPath?: string
 ): WorkEntryView {
   const diff = latestDiff(chunk)
   if (diff) {
@@ -164,6 +169,7 @@ export function describeWorkEntry(
       status: chunk.status,
       // The diff itself is the body; a text dump alongside it would be noise.
       expandedText: null,
+      loadExpandedText: null,
     }
   }
 
@@ -171,9 +177,9 @@ export function describeWorkEntry(
     chunk.title,
     chunk.toolKind,
     chunk.input,
-    projectPath
+    repoPath
   )
-  const resolvedPreview = preview ?? firstLocationPath(chunk, projectPath)
+  const resolvedPreview = preview ?? firstLocationPath(chunk, repoPath)
 
   return {
     icon: iconForChunk(chunk),
@@ -186,7 +192,8 @@ export function describeWorkEntry(
     previewTooltip,
     tone: toneForChunk(chunk),
     status: chunk.status,
-    expandedText: expandedTextForChunk(chunk, projectPath),
+    expandedText: expandedTextForChunk(chunk, repoPath),
+    loadExpandedText: chunk.loadOutput ?? null,
   }
 }
 
@@ -221,7 +228,7 @@ function toolActivityVerb(chunk: ToolExecutionChunk): string {
 
 export function liveActivityLabel(
   chunks: Array<Chunk>,
-  projectPath?: string
+  repoPath?: string
 ): string {
   for (let index = chunks.length - 1; index >= 0; index -= 1) {
     const chunk = chunks[index]
@@ -246,7 +253,7 @@ export function liveActivityLabel(
     if (chunk.status === "error") return "Recovering from an error…"
     if (chunk.display?.type === "output_iframe") return "Preparing preview…"
 
-    const entry = describeWorkEntry(chunk, projectPath)
+    const entry = describeWorkEntry(chunk, repoPath)
     const verb = toolActivityVerb(chunk)
     return entry.preview ? `${verb} · ${entry.preview}` : `${verb}…`
   }

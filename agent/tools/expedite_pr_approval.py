@@ -1,4 +1,4 @@
-"""Tool that nominates a tiny pull request for approval from its Slack thread."""
+"""Tool that nominates a tiny pull request for approval from Slack."""
 
 from collections.abc import Mapping
 from typing import Any, Literal
@@ -6,7 +6,7 @@ from typing import Any, Literal
 from langgraph.config import get_config
 from langgraph_sdk import get_client
 
-from agent.dashboard.team_settings import get_team_expedited_review_enabled
+from agent.dashboard.workspace_settings import get_workspace_settings
 from agent.expedited_review.approvals import ExpeditedApproval
 from agent.expedited_review.eligibility import (
     MAX_CHANGED_LINES,
@@ -16,10 +16,18 @@ from agent.expedited_review.eligibility import (
 )
 from agent.expedited_review.watch import evaluate_approval, retire, start_approval
 from agent.github.ci import fetch_pr
-from agent.github.pull_requests import PullRequest
+from agent.github.pull_requests import PullRequest, PullRequestPayload
 from agent.github.token import resolve_github_token
+from agent.prompts import render_prompt
 from agent.run_config import RunConfig
-from agent.slack.client import get_active_slack_thread, parse_github_pr_url
+from agent.slack.blocks import escape
+from agent.slack.channels import SlackChannel
+from agent.slack.client import (
+    GitHubPrRef,
+    get_active_slack_thread,
+    parse_github_pr_url,
+    post_slack_top_level_message_with_ts,
+)
 from agent.tools.manage_baby_sit import dispatch_run_config
 
 
@@ -27,8 +35,56 @@ def _failure(error: str) -> dict[str, Any]:
     return {"success": False, "error": error}
 
 
+def _next_step(status: str, elsewhere: bool) -> str:
+    """What the agent should do once the request is registered."""
+    if elsewhere:
+        return (
+            "This revision was already nominated, so the card belongs to that earlier "
+            "request and stays in the Slack thread named here, not the channel you asked "
+            'for. Cancel with action="cancel" and ask again to move it.'
+        )
+    if status == "open":
+        return "The approval card is posted in the Slack thread; two approvals merge the PR."
+    return (
+        "Open SWE is watching the PR and will post the card once checks and reviews are "
+        "clean. Do not poll; you will be told if it is rejected or withdrawn."
+    )
+
+
+async def _context_location(cfg: RunConfig, thread_id: str) -> tuple[str, str]:
+    """The run's own Slack ``(channel_id, thread_ts)``; either may be empty."""
+    slack_thread = await get_active_slack_thread(
+        get_client(), thread_id, cfg.slack_thread.dump() if cfg.slack_thread else None
+    )
+    channel_id = str((slack_thread or {}).get("channel_id") or "")
+    thread_ts = str((slack_thread or {}).get("thread_ts") or "")
+    if not channel_id and cfg.slack_thread is not None:
+        channel_id = cfg.slack_thread.channel_id.strip()
+    return channel_id, thread_ts
+
+
+async def _post_root_message(
+    channel: SlackChannel, pr_ref: GitHubPrRef, title: str
+) -> tuple[str | None, str | None]:
+    """Open a thread in ``channel`` for the card, joining it when the bot is outside."""
+    text = render_prompt(
+        "slack/expedited-review-requested.md",
+        pr_url=pr_ref.url,
+        label=f"{pr_ref.owner}/{pr_ref.repo}#{pr_ref.number}",
+        title=escape(title),
+    )
+    message_ts, error = await post_slack_top_level_message_with_ts(
+        channel.id, text, unfurl_links=False, unfurl_media=False
+    )
+    if message_ts is None and error == "not_in_channel" and await channel.join():
+        message_ts, error = await post_slack_top_level_message_with_ts(
+            channel.id, text, unfurl_links=False, unfurl_media=False
+        )
+    return message_ts, error
+
+
 async def expedite_pr_approval(
-    pr_url: str, action: Literal["start", "cancel"] = "start"
+    pr_url: str, action: Literal["start", "cancel"] = "start", channel: str = ""
 ) -> dict[str, Any]:
     """Implement the `expedite_pr_approval` tool."""
     pr_ref = parse_github_pr_url(pr_url)
@@ -39,7 +95,7 @@ async def expedite_pr_approval(
     thread_id = cfg.thread_id
     if not thread_id:
         return _failure("No executable agent thread is available")
-    if not await get_team_expedited_review_enabled():
+    if not (await get_workspace_settings()).expedited_review_enabled:
         return _failure(
             "Expedited review is disabled for this Open SWE instance. "
             "An admin can enable it under Settings; ask for a normal review instead."
@@ -54,13 +110,23 @@ async def expedite_pr_approval(
         await retire(approval, "failed", "Cancelled by the agent.")
         return {"success": True, "cancelled": True}
 
-    slack_thread = await get_active_slack_thread(
-        get_client(), thread_id, cfg.slack_thread.dump() if cfg.slack_thread else None
-    )
-    channel_id = str((slack_thread or {}).get("channel_id") or "")
-    thread_ts = str((slack_thread or {}).get("thread_ts") or "")
-    if not channel_id or not thread_ts:
-        return _failure("Expedited review needs a Slack thread to post the approval card in")
+    channel_id, thread_ts = await _context_location(cfg, thread_id)
+    target: SlackChannel | None = None
+    if channel.strip():
+        target = await SlackChannel.resolve(channel)
+        if target is None:
+            return _failure(
+                f"Slack channel {channel.strip()!r} was not found. Pass a channel name the "
+                "bot can see or a channel id."
+            )
+        # An explicit channel always gets its own thread, including the channel
+        # this run is already talking in.
+        channel_id, thread_ts = target.id, ""
+    if not channel_id:
+        return _failure(
+            "Expedited review posts its approval card in Slack. This thread has no Slack "
+            "location, so pass `channel` with the Slack channel name or id to post in."
+        )
 
     try:
         token, _ = await resolve_github_token(
@@ -93,7 +159,34 @@ async def expedite_pr_approval(
             "file has to have a readable text diff. Ask for a normal review."
         )
 
+    payload = PullRequestPayload.model_validate(pr)
+    # An active approval for this same revision is reused rather than replaced, and
+    # it keeps the Slack location it was opened with. Posting another root message
+    # would promise a card that is never going to arrive there.
+    active = await ExpeditedApproval.active_for(pr_ref.owner, pr_ref.repo, pr_ref.number)
+    reused = active is not None and active.head_sha == head_sha
+    settled = active.slack_location if reused and active is not None else None
+    elsewhere = settled is not None and settled != (channel_id, thread_ts)
+    if settled is not None:
+        channel_id, thread_ts = settled
+    elif not reused and not thread_ts:
+        target = target or await SlackChannel.load(channel_id)
+        if target is None:
+            return _failure(f"Slack channel {channel_id} is unavailable")
+        thread_ts, error = await _post_root_message(target, pr_ref, payload.title)
+        if not thread_ts:
+            return _failure(
+                f"Could not post in Slack channel {channel_id}: {error or 'unknown error'}. "
+                "For a private channel, invite the bot first."
+            )
+
     pull_request = await PullRequest.load(pr_ref.owner, pr_ref.repo, pr_ref.number)
+    if not pull_request.title:
+        pull_request.title = payload.title
+        pull_request.head_ref = payload.head_ref
+        pull_request.base_ref = payload.base_ref
+        pull_request.author = payload.author
+        pull_request.author_github_id = payload.author_id
     pull_request = await pull_request.link_thread(thread_id, source="expedited_review")
     approval = await start_approval(
         pull_request=pull_request,
@@ -111,11 +204,7 @@ async def expedite_pr_approval(
         "pr_url": pr_ref.url,
         "head_sha": head_sha,
         "changed_lines": verdict.changed_lines,
+        "slack_channel_id": channel_id,
         "status": status,
-        "next": (
-            "The approval card is posted in the Slack thread; two approvals merge the PR."
-            if status == "open"
-            else "Open SWE is watching the PR and will post the card once checks and reviews "
-            "are clean. Do not poll; you will be told if it is rejected or withdrawn."
-        ),
+        "next": _next_step(status, elsewhere),
     }

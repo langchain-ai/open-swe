@@ -13,7 +13,7 @@ from pydantic import ValidationError
 from agent import store as agent_store
 from agent.dashboard import repo_access
 from agent.dashboard.options import fable_disabled_fallback
-from agent.dashboard.team_settings import TeamSettingsUpdate, upsert_team_settings
+from agent.dashboard.workspace_settings import WorkspaceSettingsUpdate, upsert_workspace_overrides
 from agent.schedules import store as schedules
 from agent.schedules.store import ScheduleCreateBody, ScheduleUpdateBody
 from agent.workspaces.store import WORKSPACES, WorkspaceCreate
@@ -1181,7 +1181,7 @@ async def test_launch_scheduled_agent_run_gates_fable_by_the_repos_workspace(
     model through.
     """
     await WORKSPACES.create(WorkspaceCreate(name="OSS", repos=["langchain-ai/open-swe"]), "alice")
-    await upsert_team_settings(TeamSettingsUpdate(fable_enabled=True), workspace="default")
+    await upsert_workspace_overrides("default", WorkspaceSettingsUpdate(fable_enabled=True))
     record = {
         "id": "sched_1",
         "name": "Weekly dependencies",
@@ -1269,11 +1269,10 @@ async def test_admin_schedule_keeps_tools_without_personal_execution_identity(
     from agent import server
     from agent.run_config import RunConfig
     from agent.tools import automations, organization_skills, workspaces
+    from agent.users import User
 
     monkeypatch.setenv("CONFIGURED_ADMINS", "alice")
-    from agent.tools import admin_gate
-
-    monkeypatch.setattr(admin_gate, "email_for_login", AsyncMock(return_value=None))
+    monkeypatch.setattr(User, "email_for_login", AsyncMock(return_value=None))
     record = {
         "id": "admin-schedule",
         "prompt": "Manage workspace environments",
@@ -1428,7 +1427,7 @@ async def test_launch_scheduled_agent_run_connects_slack_thread(
     run = fake_client.runs.created[0]
     assert run["config"]["configurable"]["slack_thread"] == slack_thread
     prompt = ElementTree.fromstring(run["input"]["messages"][-1]["content"])
-    assert "slack_thread_reply" in (prompt.findtext("content") or "")
+    assert "slack_reply" in (prompt.findtext("content") or "")
     association = fake_client.store.items[
         (("slack_thread_map", "C0123456789"), "1784302353.900029")
     ]

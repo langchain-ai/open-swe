@@ -111,7 +111,7 @@ Open SWE calls models through [LangChain](https://python.langchain.com/) chat mo
 
 **LangSmith LLM Gateway.** Instead of per-provider keys, route every model call through the gateway with one LangSmith key that has the `gateway:invoke` permission, set as `LANGSMITH_GATEWAY_API_KEY`. Setting that key turns the gateway on; `LANGSMITH_GATEWAY_ENABLED=true|false` forces it either way (with `true` and no gateway key, `LANGSMITH_API_KEY` is used, which on LangGraph Platform may lack the permission). `LANGSMITH_GATEWAY_BASE_URL` points at a regional or self-hosted gateway. Admins can also toggle the gateway per team in the dashboard.
 
-**Which model runs.** The deployment default is `anthropic:claude-opus-5` when only an Anthropic key is configured and `openai:gpt-5.6-sol` otherwise, at `medium` reasoning effort; override it with `LLM_MODEL_ID` (`provider:model`) and `LLM_REASONING_EFFORT` (`low`, `medium`, `high`, `max`), and name a `LLM_FALLBACK_MODEL_ID` for when the primary provider fails. Admins set a team default under **Admin → Global defaults**, and each user can pick their own model and effort under **My settings**; the supported list lives in `agent/dashboard/options.py`. Model ids and their providers are described in [CUSTOMIZATION.md](CUSTOMIZATION.md).
+**Which model runs.** The deployment default comes from the supported-model list in `agent/dashboard/options.py` (an Anthropic model when only an Anthropic key is configured, otherwise an OpenAI one); override it with `LLM_MODEL_ID` (`provider:model`) and `LLM_REASONING_EFFORT` (`low`, `medium`, `high`, `max`), and name a `LLM_FALLBACK_MODEL_ID` for when the primary provider fails. Admins set the instance default, which each workspace can override, under **Admin → Global defaults**, and each user can pick their own model and effort under **My settings**. Model ids and their providers are described in [CUSTOMIZATION.md](CUSTOMIZATION.md).
 
 **Other API keys.** `EXA_API_KEY` (from [dashboard.exa.ai](https://dashboard.exa.ai)) enables the web search tool. `REVIEWER_OUTCOMES_DATASET` names the LangSmith dataset the reviewer records finding outcomes in (default `openswe-reviewer-outcomes`).
 
@@ -255,13 +255,13 @@ On LangGraph Platform, set them under the deployment's environment variables; sa
 
 ## 7. Verify it works
 
-**Dashboard.** Open `<URL>`, click **Sign in with GitHub**, and you should land logged in. With your login in `CONFIGURED_ADMINS`, the **Admin** pages (Global defaults, User mappings, Sandbox, …) appear, along with the **Workspaces** page at `/workspaces` that every signed-in user can see. Set **Admin → Global defaults → Default Repository** so runs that name no repository have somewhere to go. Start a task from the composer. Every run gets a sandbox booted from LangSmith's root snapshot; when your repositories need extra toolchains preinstalled, an admin can start an **admin thread** (the Admin toggle in the composer), have the agent set the sandbox up, and capture it from the **Workspaces** page into the `default` workspace, which later runs boot from.
+**Dashboard.** Open `<URL>`, click **Sign in with GitHub**, and you should land logged in. With your login in `CONFIGURED_ADMINS`, the **Admin** pages (Model defaults, Users, Sandbox, …) appear, along with the **Workspaces** page at `/workspaces` that every signed-in user can see. Set **Admin → Global defaults → Default Repository** so runs that name no repository have somewhere to go. Start a task from the composer. Every run gets a sandbox booted from LangSmith's root snapshot; when your repositories need extra toolchains preinstalled, an admin can start an **admin thread** (the Admin toggle in the composer), have the agent set the sandbox up, and capture it from the **Workspaces** page into the `default` workspace, which later runs boot from.
 
 **Slack.** Invite the bot to a channel and mention it: `@Open SWE what's in the repo?`. It replies in a thread. Public runs use the workspace GitHub App for agent operations, and user-owned PRs are opened as the thread's initiating GitHub user. Link the Slack user to a GitHub login before starting the thread, either by signing in to the dashboard once or through [Sign in with Slack](#slack-sign-in-and-code-channels).
 
 **GitHub.** GitHub-triggered conversations are public. Agent GitHub operations use the App installation identity, while PRs use the initiating commenter's OAuth. The commenter must have a linked account; an unmapped commenter is skipped with a warning in the server log. Comment `@openswe what files are in this repo?` on an issue in a repository where the App is installed. Within a few seconds you should see a 👀 reaction, a run in your LangSmith project, and a reply comment. GitHub lists every delivery and its response under the App's **Advanced** tab.
 
-**How a run picks its workspace.** A workspace owns repositories, Slack channels, MCP connections, and team settings, and carries the sandbox prompt/snapshot/scripts described above. New work is routed to a workspace in this order, first match wins: the thread it belongs to already has one; the message that opened the thread carries a `workspace:<slug>` tag (`env:<slug>` still works as an alias); the repository belongs to a workspace; the Slack channel it was posted in is bound to a workspace; the user has a default workspace set under **My settings**; otherwise it falls back to `default`. GitHub events for a repository that no workspace owns follow `OPEN_SWE_UNASSIGNED_REPO_WORKSPACE`: `default` (the default) routes them to the `default` workspace, and `ignore` drops them without creating a run. Workspace records and their repository and Slack-channel bindings live in PostgreSQL (see **Analytics storage** above), not the LangGraph Store; a workspace's MCP connections and team settings do stay in the Store, keyed by the workspace's slug.
+**How a run picks its workspace.** A workspace owns repositories, Slack channels, MCP connections, and workspace settings, and carries the sandbox prompt/snapshot/scripts described above. New work is routed to a workspace in this order, first match wins: the thread it belongs to already has one; the message that opened the thread carries a `workspace:<slug>` tag (`env:<slug>` still works as an alias); the repository belongs to a workspace; the Slack channel it was posted in is bound to a workspace; the user has a default workspace set under **My settings**; otherwise it falls back to `default`. GitHub events for a repository that no workspace owns follow `OPEN_SWE_UNASSIGNED_REPO_WORKSPACE`: `default` (the default) routes them to the `default` workspace, and `ignore` drops them without creating a run. Workspace records and their repository and Slack-channel bindings live in PostgreSQL (see **Analytics storage** above), not the LangGraph Store; a workspace's MCP connections and workspace settings do stay in the Store, keyed by the workspace's slug.
 
 ---
 
@@ -272,7 +272,7 @@ Open a section when you want that feature; everything above keeps working withou
 <details id="slack-sign-in-and-code-channels">
 <summary><strong>Slack: "Sign in with Slack" linking and code channels</strong></summary>
 
-**"Sign in with Slack" account linking.** Lets a user link their Slack identity to their GitHub login from **My settings**, so Slack-triggered runs resolve to the right GitHub user through Slack's verified claims. Without it, an admin links people under **Admin → User mappings**. The manifest already registers the OIDC redirect; make sure the `openid`, `email`, and `profile` user scopes are available, then set `SLACK_CLIENT_ID` and `SLACK_CLIENT_SECRET` from **Basic Information → App Credentials**, and optionally `SLACK_TEAM_ID` (`T...`) to restrict linking to one workspace. When they are unset the link is simply hidden.
+**"Sign in with Slack" account linking.** Lets a user link their Slack identity to their GitHub login from **My settings**, so Slack-triggered runs resolve to the right GitHub user through Slack's verified claims. Without it, Slack senders stay unlinked until they connect from **My settings**; **Admin → Users** shows who has. The manifest already registers the OIDC redirect; make sure the `openid`, `email`, and `profile` user scopes are available, then set `SLACK_CLIENT_ID` and `SLACK_CLIENT_SECRET` from **Basic Information → App Credentials**, and optionally `SLACK_TEAM_ID` (`T...`) to restrict linking to one workspace. When they are unset the link is simply hidden.
 
 **Code channels (early access).** To enable Slack [code channels](https://api.slack.com/partners/code-channels), open **Admin → Slack integration**, turn on **Slack Code Channels**, copy the generated manifest, update the Slack app, and reinstall it. In a code channel the whole channel is one Open SWE session: it answers without an `@`-mention, replies at the channel level by default, reports session status, and keeps the context bar current; the `manage_code_channel` tool covers channel lifecycle, status, views, and canvases. This requires the `code_channels:manage` bot scope, the `agent_session_stopped` and `code_channel_action` bot events, and `features.code_channels.enabled`; `slash_command_url` delivers runtime-registered commands to the signed Open SWE endpoint. If your workspace is not enrolled, leave the toggle off.
 
@@ -285,7 +285,7 @@ The **Incidents** dashboard at `/incidents` investigates public internal Slack c
 
 1. Install or reinstall the Slack manifest above and set `SLACK_APP_ID` from **Basic Information → App ID**. Incidents needs the `channel_created`, `channel_rename`, `channel_archive`, `message.channels`, and `app_mention` events. The manifest includes the public-channel scopes and `users:read` / `users:read.email` needed for authorized Slack controls.
 2. Access follows the rest of Open SWE: any signed-in dashboard user can read incidents, postmortems, and history, and only `CONFIGURED_ADMINS` can change incident settings. In Slack, anyone in an incident channel can pause, resume, or complete it; asking the agent a question or starting an incident manually requires a connected Open SWE account (Sign in with Slack in the dashboard), the same as mentioning Open SWE anywhere else. Reads recheck current channel access.
-3. Optionally give the agent an incident tracker: add its MCP server, for example incident.io at `https://mcp.incident.io/mcp`, under **Admin → Workspace MCPs** following [Workspace MCP servers](CUSTOMIZATION.md#workspace-mcp-servers). The agent uses those tools like any other workspace integration, only for an explicit responder request.
+3. Optionally give the agent an incident tracker: add its MCP server, for example incident.io at `https://mcp.incident.io/mcp`, under **Workspaces → the workspace → MCP connections** following [Workspace MCP servers](CUSTOMIZATION.md#workspace-mcp-servers). The agent uses those tools like any other workspace integration, only for an explicit responder request.
 4. In **Admin → Incidents**, set a channel prefix such as `inc-` and optionally a model and a model-call limit per turn. Enable Incidents, then create a matching public channel or rename one into the prefix. Anyone with a connected Open SWE account can also mention the bot in any public channel and ask it to monitor that channel as an incident; the agent's `manage_incident` tool enrolls it. To turn it off, anyone in the channel mentions the bot with `pause` (stops automatic analysis) or `complete` (ends the incident), asks it in plain words, or uses the buttons on the incident's dashboard page.
 
 Slack findings and control notices use compact messages directly in the incident channel. Questions posted in the channel receive channel replies; questions inside an existing thread receive replies in that thread. Detailed hypotheses, questions, coverage gaps, and citations remain in the incident report and postmortem. Changes only to those detailed hypotheses or questions do not generate another Slack update.
@@ -304,7 +304,7 @@ Public status-page publishing is not implemented. Authorized responders can ask 
 Open SWE listens for Linear comments that mention `@openswe`.
 
 1. **Settings → API → Webhooks → New webhook**: label `Open SWE`, URL `<URL>/webhooks/linear`, a secret from `openssl rand -hex 32` saved as `LINEAR_WEBHOOK_SECRET`, and under **Data change events** only **Comments → Create**.
-2. Add a Linear MCP server named `linear` under **Admin → Workspace MCPs** and select the tools Open SWE may use. Include `save_comment` (or `create_comment` if offered) so the backend can post run, authentication, and sandbox failure notices even after the agent stops.
+2. Add a Linear MCP server named `linear` under **Workspaces → the workspace → MCP connections** and select the tools Open SWE may use. Include `save_comment` (or `create_comment` if offered) so the backend can post run, authentication, and sandbox failure notices even after the agent stops.
 3. Set a workspace default repository under **Open SWE Agent**. Add a `repo:owner/name` token or GitHub URL to a Linear comment when the issue belongs to another repository.
 
 **Verify:** comment `@openswe what files are in this repo?` on an issue, adding `repo:owner/name` when needed.
@@ -324,30 +324,8 @@ The bundled dashboard needs none of this. Read on only if the dashboard is deplo
 
 </details>
 
-<details id="admin-api-credentials">
-<summary><strong>Admin API credentials (CI and scripts)</strong></summary>
-
-Admin-gated endpoints such as `PUT /dashboard/api/team-settings` and `PUT /dashboard/api/sandbox-settings` accept two credentials in place of the browser session cookie, both as `Authorization: Bearer`:
-
-**GitHub Actions OIDC (preferred, no stored secret).** A workflow with `permissions: id-token: write` mints a short-lived token that GitHub signs and scopes to the repo, ref, and audience. Allowlist it on the deployment:
-
-```bash
-ADMIN_OIDC_SUBJECTS="acme/sandbox-images"                       # any workflow/ref in this repo
-# or pin the ref with a full subject:
-# ADMIN_OIDC_SUBJECTS="repo:acme/sandbox-images:ref:refs/heads/main"
-ADMIN_OIDC_AUDIENCE="open-swe"                                  # optional; this is the default
-```
-
-`ADMIN_OIDC_SUBJECTS` is the on/off switch. Entries containing `:` match the token's `sub` claim, `owner/repo` entries match its `repository` claim, and the audience is verified either way. Anyone who can run a workflow on an allowlisted repo/ref gets admin on these endpoints, so keep the list to internal repos.
-
-**Admin personal access token.** The token only needs to identify its owner (`GET /user`), whose login or email must be in `CONFIGURED_ADMINS`. Matching by email needs a token that can read email addresses when the account's email is not public. Prefer a machine user.
-
-`secrets.GITHUB_TOKEN` works for neither. `examples/github-actions/set-base-snapshot.yml` is a copy-ready workflow using the OIDC path.
-
-</details>
-
 <details id="repository-allowlists-mention-handles-and-user-mapping">
-<summary><strong>Repository allowlists, mention handles, and user mapping</strong></summary>
+<summary><strong>Repository allowlists, mention handles, and users</strong></summary>
 
 **Mention handles.** The handles this deployment answers to default to `@openswe,@open-swe,@openswe-dev`; set `OPEN_SWE_MENTION_TAGS` to change them. Handles match on a word boundary, so `@openswe` does not fire on `@openswe-staging`. Set `EXTRA_INTERNAL_BOT_LOGINS` (e.g. `openswe-staging[bot]`) to treat other Open SWE deployments' comments as internal rather than untrusted.
 
@@ -363,9 +341,9 @@ OPEN_SWE_UNASSIGNED_REPO_WORKSPACE="default"   # GitHub events for a repo no wor
 
 Shared backend startup requires at least one entry in `ALLOWED_GITHUB_ORGS` or `ALLOWED_GITHUB_USERS`; an empty value in both stops the server. The desktop app's authenticated private local backend is exempt because it supports local mode without GitHub. When both are configured, they form a union: dashboard login accepts an explicitly listed user **or** an active member of a listed organization. Organization membership is verified server-side with the installation token and fails closed on any API error; install the App in every listed organization and grant **Organization → Members: Read-only**. A GitHub or Linear webhook is accepted if the repo's org is in `ALLOWED_GITHUB_ORGS` **or** the `owner/repo` is in `ALLOWED_GITHUB_REPOS`; both repository allowlists empty allows every installed repository. For Slack and dashboard requests, `ALLOWED_GITHUB_ORGS` also adds a prompt-level guard: editing a repository outside those orgs requires the user to name it with its full `https://github.com/<owner>/<repo>` URL. When team LangSmith credentials are connected, every active member of a listed organization can use the read-only LangSmith trace tools, so only list organizations whose full membership may see team-level trace data.
 
-**User mapping.** Which GitHub users can trigger the agent is controlled by the user mapping (GitHub login ⇄ work email ⇄ optional Slack ID) in the LangGraph Store, managed under **Admin → User mappings**. Signing in to the dashboard records a mapping for that user. An unmapped person who tags Open SWE in Slack gets a run with the GitHub App's installation permissions and a "link your GitHub account" prompt; completing the allowlisted login records a `self` mapping.
+**Users.** A person gets a `users` row on their first dashboard sign-in, with their GitHub account as its first identity; connecting Slack from **My settings** adds the Slack account to the same row, which is how a Slack sender resolves to a GitHub login. **Admin → Users** lists everyone Open SWE knows. An unlinked person who tags Open SWE in Slack gets a run with the GitHub App's installation permissions and a "link your GitHub account" prompt; signing in and connecting Slack completes it. Records from the older Store-backed user mapping are imported into `users` on the first startup that finds them, then deleted.
 
-**Default repository.** Runs that name no repository use **Admin → Global defaults → Default Repository**, seeded from `DEFAULT_REPO_OWNER` / `DEFAULT_REPO_NAME` when set; `SLACK_REPO_OWNER` / `SLACK_REPO_NAME` are a Slack-only fallback.
+**Default repository.** Runs that name no repository use the workspace's default repository (**Workspaces → the workspace → Default repository**, inheriting **Admin → Default repository** unless overridden), seeded from `DEFAULT_REPO_OWNER` / `DEFAULT_REPO_NAME` when set; `SLACK_REPO_OWNER` / `SLACK_REPO_NAME` are a Slack-only fallback.
 
 </details>
 
@@ -391,10 +369,13 @@ Shared backend startup requires at least one entry in `ALLOWED_GITHUB_ORGS` or `
 ### Thread credential scope
 
 Public threads use the GitHub App installation identity for agent GitHub
-operations. PRs from user-owned threads are opened with the original initiator's
-stored GitHub OAuth token, even when another participant starts the run. If that
-token is unavailable, the initiator must sign in again; PR creation does not fall
-back to the bot. Public PR creation first verifies that the target repository is
+operations. PRs from user-owned threads are opened with the authenticated current
+run requester's stored GitHub OAuth token. For example, if Alice starts a Slack
+task and Bob triggers a follow-up run asking to create the PR, the new PR is
+opened as Bob. Alice remains the task owner, and existing PR authors are unchanged.
+If the requester's identity or token is unavailable, PR creation fails without
+falling back to the task owner or bot. The requester must have access to the target
+repository. Public PR creation first verifies that the target repository is
 accessible through the configured workspace installation. System-owned threads, including scheduled automations, open PRs
 as the GitHub App. Existing threads without recorded ownership retain bot PR
 authorship. Scheduled runs check repository access with the workspace GitHub App.
@@ -404,6 +385,18 @@ Admin schedules retain their management tools through authorization tied to the
 scheduled invocation. The graph and tools recheck the creator's current admin
 status; later participants do not inherit that authorization. Automation management
 from these system runs also uses workspace credentials.
+
+Authorship is bound to the publishing run, not inferred from conversation text.
+Slack follow-ups carry their own requester identity whether they interrupt or
+queue behind an active run. Dashboard messages and Slack edits injected into an
+existing run do not change its identity. A collaborator must start a new run to
+publish under their own account. Workflow push approval starts a run with the
+authenticated actor's identity. Background-task
+completion runs cannot reliably identify the launching requester, so PR creation
+from user-owned threads is blocked in those runs. Start a direct user-triggered
+run to publish. System-owned and legacy unowned threads retain bot authorship.
+This prevents the publisher from approving their
+own PR; it does not prevent other task participants from approving it.
 
 Public threads load workspace MCP connections and organization skills. Personal
 Notion connections, user skills, and user custom instructions are available only in a private thread

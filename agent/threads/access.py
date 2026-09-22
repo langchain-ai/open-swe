@@ -6,8 +6,8 @@ from fastapi import HTTPException
 
 from agent.config import ENV
 from agent.dashboard.profiles import get_valid_access_token
-from agent.dashboard.user_mappings import email_for_login
-from agent.threads.summary import _assert_thread_readable
+from agent.threads.summary import assert_thread_readable
+from agent.users import User
 from agent.utils.json_types import ThreadLike, thread_metadata
 from agent.utils.thread_ops import langgraph_client
 
@@ -24,7 +24,7 @@ async def resolve_run_email(login: str, profile: dict[str, Any]) -> str | None:
     the org) over the OAuth profile email, which may be a personal account
     that isn't an org member.
     """
-    mapped = await email_for_login(login)
+    mapped = await User.email_for_login(login)
     return mapped or profile.get("email")
 
 
@@ -49,7 +49,7 @@ async def _authorized_thread(thread_id: str, login: str, *, email: str | None = 
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(404, "thread not found") from exc
     metadata = thread_metadata(thread)
-    _assert_thread_readable(metadata, login, email)
+    assert_thread_readable(metadata, login, email)
     return thread
 
 
@@ -70,7 +70,7 @@ async def _readable_thread(
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(404, "thread not found") from exc
     metadata = thread_metadata(thread)
-    _assert_thread_readable(metadata, login, email)
+    assert_thread_readable(metadata, login, email)
     return thread
 
 

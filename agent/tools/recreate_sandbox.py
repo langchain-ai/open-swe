@@ -5,7 +5,7 @@ from typing import Any
 
 from agent.run_config import RunConfig
 from agent.sandboxes.lifecycle import SandboxSource
-from agent.tools.admin_gate import require_private_admin_thread
+from agent.tools.admin_gate import require_private_admin_surface
 
 logger = logging.getLogger(__name__)
 
@@ -24,7 +24,7 @@ async def recreate_sandbox(
 
     thread_workspace = workspace_slug(cfg)
     if workspace is not None and workspace != thread_workspace:
-        if error := await require_private_admin_thread("boot another workspace's sandbox image"):
+        if error := await require_private_admin_surface("boot another workspace's sandbox image"):
             return {"success": False, "error": error}
 
     try:

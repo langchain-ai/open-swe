@@ -11,12 +11,19 @@ from langchain.agents.middleware.types import ModelRequest
 from langchain_core.tools import StructuredTool
 from langgraph.graph.state import RunnableConfig
 
+from agent.dashboard.workspace_settings import WorkspaceSettings
 from agent.middleware.dynamic_tools import DynamicToolMiddleware
-from agent.middleware.plan_mode import PlanModeMiddleware
 from agent.sandboxes.state import SANDBOX_BACKENDS
 from agent.server import get_agent
 
 _START_TIMEOUT_SECONDS = 2.0
+
+_MODEL_DEFAULTS = {
+    "default_agent_model": "openai:gpt-5.6-sol",
+    "default_agent_reasoning_effort": "medium",
+    "default_agent_subagent_model": "openai:gpt-5.6-sol",
+    "default_agent_subagent_reasoning_effort": "low",
+}
 
 
 class _DummyAgent:
@@ -39,7 +46,7 @@ def _config() -> RunnableConfig:
 @pytest.mark.usefixtures("fake_store")
 @pytest.mark.parametrize("initial_plan_mode", [False, True])
 @pytest.mark.parametrize("github_login", ["octocat", None])
-async def test_workspace_mcps_load_for_non_admins_and_respect_plan_mode(
+async def test_workspace_mcps_load_for_non_admins_with_legacy_plan_state(
     initial_plan_mode: bool,
     github_login: str | None,
     monkeypatch: pytest.MonkeyPatch,
@@ -94,9 +101,9 @@ async def test_workspace_mcps_load_for_non_admins_and_respect_plan_mode(
             return_value="/workspace",
         ),
         patch(
-            "agent.server.cached_team_default_model_pair",
+            "agent.server.cached_workspace_settings",
             new_callable=AsyncMock,
-            return_value=(("openai:gpt-5.6-sol", "medium"), ("openai:gpt-5.6-sol", "low")),
+            return_value=WorkspaceSettings(_MODEL_DEFAULTS),
         ),
         patch("agent.server.load_profile", new_callable=AsyncMock, return_value=None),
         patch("agent.server.load_thread_settings", new_callable=AsyncMock, return_value={}),
@@ -104,7 +111,7 @@ async def test_workspace_mcps_load_for_non_admins_and_respect_plan_mode(
         patch("agent.server.make_model", return_value=MagicMock()),
         patch("agent.server.construct_system_prompt", return_value="prompt"),
         patch("agent.server.create_deep_agent", return_value=_DummyAgent()) as build_agent,
-        patch("agent.tools.admin_gate.email_for_login", new_callable=AsyncMock, return_value=None),
+        patch("agent.users.User.email_for_login", new_callable=AsyncMock, return_value=None),
         patch("agent.server._mcp_tools_for", side_effect=rendezvous([mcp_tool])),
         patch("agent.server._notion_tools_for", side_effect=rendezvous([])),
     ):
@@ -132,20 +139,15 @@ async def test_workspace_mcps_load_for_non_admins_and_respect_plan_mode(
 
     middleware = build_agent.call_args.kwargs["middleware"]
     dynamic = next(item for item in middleware if isinstance(item, DynamicToolMiddleware))
-    plan_mode = next(item for item in middleware if isinstance(item, PlanModeMiddleware))
-    assert middleware.index(dynamic) < middleware.index(plan_mode)
     captured: list[str] = []
 
     async def capture(request: ModelRequest) -> Any:
         captured.extend(tool.name for tool in request.tools)
         return MagicMock()
 
-    async def apply_plan_mode(request: ModelRequest) -> Any:
-        return await plan_mode.awrap_model_call(request, capture)
-
     for state, expected in [
-        ({}, [] if initial_plan_mode else [mcp_tool.name]),
-        ({"plan_mode": True}, []),
+        ({}, [mcp_tool.name]),
+        ({"plan_mode": True}, [mcp_tool.name]),
         ({"plan_mode": False}, [mcp_tool.name]),
     ]:
         captured.clear()
@@ -156,7 +158,7 @@ async def test_workspace_mcps_load_for_non_admins_and_respect_plan_mode(
             runtime=MagicMock(),
             state={**state, "messages": [], "loaded_integration_tools": [mcp_tool.name]},
         )
-        await dynamic.awrap_model_call(request, apply_plan_mode)
+        await dynamic.awrap_model_call(request, capture)
         assert captured == expected
 
     SANDBOX_BACKENDS.pop(thread_id, None)

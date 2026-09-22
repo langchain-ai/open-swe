@@ -1,8 +1,8 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { ImagePlus, Map as MapIcon, Plus, X } from "lucide-react"
+import { ImagePlus, Plus, X } from "lucide-react"
 
 import { ComposerCommandMenu } from "./ComposerCommandMenu"
-import { ComposerControl, ComposerControlIcon } from "./ComposerControl"
+import { ComposerControl } from "./ComposerControl"
 import { ComposerPrimaryActions } from "./ComposerPrimaryActions"
 import {
   ComposerPromptEditor,
@@ -12,7 +12,7 @@ import { ContextWindowMeter } from "./ContextWindowMeter"
 import { WorkspaceSelector } from "./WorkspaceSelector"
 import {
   LocalBranchSelector,
-  LocalProjectSelector,
+  LocalRepoSelector,
   LocalWorkspaceSelector,
   RunTargetSelector,
 } from "./RunTargetSelector"
@@ -40,7 +40,6 @@ import type { ModelSelection } from "@/features/agents/lib/provider/useModelOpti
 import { ModelPicker } from "@/features/agents/components/ModelPicker"
 import { RepoSelector } from "@/features/settings/components/RepoSelector"
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from "@/components/ui/menu"
-import { Tooltip, TooltipPopup, TooltipTrigger } from "@/components/ui/tooltip"
 import { useRegisterAppCommands } from "@/lib/appCommands"
 import { cn } from "@/lib/utils"
 
@@ -67,16 +66,6 @@ const SLASH_COMMANDS: Array<SlashCommandSpec> = [
     command: "offload",
     label: "/offload",
     description: "Offload conversation context",
-  },
-  {
-    command: "plan",
-    label: "/plan",
-    description: "Research read-only and propose a plan first",
-  },
-  {
-    command: "default",
-    label: "/default",
-    description: "Leave plan mode and edit directly",
   },
   {
     command: "model",
@@ -106,23 +95,20 @@ export interface ChatComposerProps {
   /** Desktop-only execution target. Omit this prop to keep the control out of the web UI. */
   runTarget?: RunTarget
   onRunTargetChange?: (next: RunTarget) => void
-  localProjects?: Array<DesktopProject>
-  selectedLocalProjectPath?: string | null
-  selectedLocalProjectBranch?: string | null
-  localProjectBranches?: Array<DesktopProjectRef>
+  localRepos?: Array<DesktopProject>
+  selectedLocalRepoPath?: string | null
+  selectedLocalRepoBranch?: string | null
+  localRepoBranches?: Array<DesktopProjectRef>
   localWorkspaceMode?: DesktopWorkspaceMode
   localWorktreeLabel?: string
   onLocalWorkspaceModeChange?: (next: DesktopWorkspaceMode) => void
-  onSelectLocalProject?: (cwd: string) => void
-  onAddLocalProject?: () => void
-  onRemoveLocalProject?: (cwd: string) => void
-  onRefreshLocalProjectBranch?: () => void
-  onSelectLocalProjectBranch?: (branch: string) => void
-  /** When provided, a Plan mode toggle is shown. Plan mode researches read-only and proposes a plan before editing. */
-  planMode?: boolean
-  onPlanModeChange?: (next: boolean) => void
+  onSelectLocalRepo?: (cwd: string) => void
+  onAddLocalRepo?: () => void
+  onRemoveLocalRepo?: (cwd: string) => void
+  onRefreshLocalRepoBranch?: () => void
+  onSelectLocalRepoBranch?: (branch: string) => void
   /** Workspaces a new thread can boot from. The picker appears only when there are several. */
-  workspaces?: Array<WorkspaceOption>
+  workspaceOptions?: Array<WorkspaceOption>
   selectedWorkspace?: string | null
   onWorkspaceChange?: (slug: string | null) => void
   /** Paths offered by `@` autocomplete — in a thread, the files the agent has touched. */
@@ -209,12 +195,7 @@ export function buildCommandItems(
     }))
 }
 
-/**
- * The prompt composer: a Lexical editor with `@file` chips, `/command`
- * autocomplete, and `$skill` autocomplete, plus the control row (model, plan
- * mode, attachments, context)
- * and the send/stop button.
- */
+/** Prompt editor with autocomplete, model selection, attachments, and send/stop controls. */
 export const ChatComposer = memo(function ChatComposer({
   placeholder = "Ask Open SWE to build, fix bugs, explore",
   autoFocus = false,
@@ -233,21 +214,19 @@ export const ChatComposer = memo(function ChatComposer({
   onRepoChange,
   runTarget,
   onRunTargetChange,
-  localProjects = [],
-  selectedLocalProjectPath = null,
-  selectedLocalProjectBranch = null,
-  localProjectBranches = [],
+  localRepos = [],
+  selectedLocalRepoPath = null,
+  selectedLocalRepoBranch = null,
+  localRepoBranches = [],
   localWorkspaceMode = "local",
   localWorktreeLabel,
   onLocalWorkspaceModeChange,
-  onSelectLocalProject,
-  onAddLocalProject,
-  onRemoveLocalProject,
-  onRefreshLocalProjectBranch,
-  onSelectLocalProjectBranch,
-  planMode = false,
-  onPlanModeChange,
-  workspaces = [],
+  onSelectLocalRepo,
+  onAddLocalRepo,
+  onRemoveLocalRepo,
+  onRefreshLocalRepoBranch,
+  onSelectLocalRepoBranch,
+  workspaceOptions = [],
   selectedWorkspace = null,
   onWorkspaceChange,
   mentionPaths = [],
@@ -439,11 +418,9 @@ export const ChatComposer = memo(function ChatComposer({
         ""
       )
       applyPrompt(next.text, next.cursor)
-      if (item.command === "plan") onPlanModeChange?.(true)
-      if (item.command === "default") onPlanModeChange?.(false)
       if (item.command === "model") setModelPickerOpen(true)
     },
-    [applyPrompt, onPlanModeChange, trigger, value]
+    [applyPrompt, trigger, value]
   )
 
   const handleCommandKeyDown = useCallback(
@@ -473,10 +450,6 @@ export const ChatComposer = memo(function ChatComposer({
         }
       }
 
-      if (key === "Tab" && event.shiftKey && onPlanModeChange) {
-        onPlanModeChange(!planMode)
-        return true
-      }
       if (key === "Enter" && !event.shiftKey) {
         if (canSubmit) void handleSubmit()
         // Swallow it either way: a bare Enter must never insert a newline in a
@@ -491,8 +464,6 @@ export const ChatComposer = memo(function ChatComposer({
       commandItems,
       handleSubmit,
       menuOpen,
-      onPlanModeChange,
-      planMode,
       selectCommandItem,
       triggerKey,
     ]
@@ -630,55 +601,55 @@ export const ChatComposer = memo(function ChatComposer({
       {(onRepoChange ||
         onRunTargetChange ||
         onWorkspaceChange ||
-        onSelectLocalProjectBranch) && (
+        onSelectLocalRepoBranch) && (
         <div className="relative mx-5 -mb-3 flex min-w-0 flex-wrap items-center gap-x-5 gap-y-2 rounded-t-2xl bg-accent px-4 pt-3 pb-5 text-xs dark:bg-muted">
-          {runTarget !== "local" && onRepoChange && (
-            <RepoSelector
-              emptySelectionLabel="Don't work in a project"
-              noMatchesLabel="No matching projects"
-              onRepoChange={onRepoChange}
-              placeholder="Select project"
-              repos={repos}
-              searchPlaceholder="Search projects…"
-              selectedRepo={selectedRepo}
-              side="top"
-            />
-          )}
-          {runTarget === "local" &&
-            onSelectLocalProject &&
-            onAddLocalProject &&
-            onRemoveLocalProject && (
-              <LocalProjectSelector
-                onAddProject={onAddLocalProject}
-                onRemoveProject={onRemoveLocalProject}
-                onSelectProject={onSelectLocalProject}
-                projects={localProjects}
-                selectedProjectPath={selectedLocalProjectPath}
-                side="top"
-              />
-            )}
           {runTarget && onRunTargetChange && (
             <RunTargetSelector onChange={onRunTargetChange} value={runTarget} />
           )}
           {runTarget !== "local" && onWorkspaceChange && (
             <WorkspaceSelector
-              workspaces={workspaces}
+              workspaces={workspaceOptions}
               selectedSlug={selectedWorkspace}
               onChange={onWorkspaceChange}
             />
           )}
+          {runTarget !== "local" && onRepoChange && (
+            <RepoSelector
+              emptySelectionLabel="Don't work in a repository"
+              noMatchesLabel="No matching repositories"
+              onRepoChange={onRepoChange}
+              placeholder="Select repository"
+              repos={repos}
+              searchPlaceholder="Search repositories…"
+              selectedRepo={selectedRepo}
+              side="top"
+            />
+          )}
           {runTarget === "local" &&
-            onRefreshLocalProjectBranch &&
-            onSelectLocalProjectBranch && (
-              <LocalBranchSelector
-                refs={localProjectBranches}
-                disabled={!selectedLocalProjectPath}
-                onRefresh={onRefreshLocalProjectBranch}
-                onSelectBranch={onSelectLocalProjectBranch}
-                selectedBranch={selectedLocalProjectBranch}
+            onSelectLocalRepo &&
+            onAddLocalRepo &&
+            onRemoveLocalRepo && (
+              <LocalRepoSelector
+                onAddRepo={onAddLocalRepo}
+                onRemoveRepo={onRemoveLocalRepo}
+                onSelectRepo={onSelectLocalRepo}
+                repos={localRepos}
+                selectedRepoPath={selectedLocalRepoPath}
+                side="top"
               />
             )}
-          {runTarget === "local" && onSelectLocalProjectBranch && (
+          {runTarget === "local" &&
+            onRefreshLocalRepoBranch &&
+            onSelectLocalRepoBranch && (
+              <LocalBranchSelector
+                refs={localRepoBranches}
+                disabled={!selectedLocalRepoPath}
+                onRefresh={onRefreshLocalRepoBranch}
+                onSelectBranch={onSelectLocalRepoBranch}
+                selectedBranch={selectedLocalRepoBranch}
+              />
+            )}
+          {runTarget === "local" && onSelectLocalRepoBranch && (
             <LocalWorkspaceSelector
               onChange={onLocalWorkspaceModeChange}
               value={localWorkspaceMode}
@@ -794,12 +765,6 @@ export const ChatComposer = memo(function ChatComposer({
                 <ImagePlus />
                 Attach images
               </MenuItem>
-              {onPlanModeChange && (
-                <MenuItem onClick={() => onPlanModeChange(!planMode)}>
-                  <MapIcon />
-                  {planMode ? "Disable plan mode" : "Enable plan mode"}
-                </MenuItem>
-              )}
             </MenuPopup>
           </Menu>
 
@@ -815,26 +780,6 @@ export const ChatComposer = memo(function ChatComposer({
                 selection={selection}
                 triggerClassName="h-7 max-w-full rounded-md px-2 text-xs/relaxed text-muted-foreground/70 hover:bg-muted hover:text-foreground/80"
               />
-            )}
-
-            {planMode && onPlanModeChange && (
-              <Tooltip>
-                <TooltipTrigger
-                  render={
-                    <ComposerControl
-                      aria-label="Exit plan mode"
-                      aria-pressed
-                      className="bg-primary/10 text-primary hover:bg-primary/15 hover:text-primary"
-                      onClick={() => onPlanModeChange(false)}
-                      type="button"
-                    />
-                  }
-                >
-                  <ComposerControlIcon icon={MapIcon} />
-                  <span>Plan</span>
-                </TooltipTrigger>
-                <TooltipPopup side="top">Exit plan mode</TooltipPopup>
-              </Tooltip>
             )}
           </div>
 

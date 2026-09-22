@@ -2,9 +2,9 @@
 
 The platform POSTs a run-completion payload to ``/webhooks/run-complete`` (wired
 as the ``webhook`` on every dispatched run, see ``agent.dispatch``). Successful
-Slack runs enqueue deferred session-cost enrichment and offer private feedback
-when a question was answered. Failures (``error`` / ``timeout``) post a short reply
-so a run that died never leaves the user silent.
+runs schedule a private feedback prompt five quiet minutes later, and successful
+Slack runs enqueue deferred session-cost enrichment. Failures (``error`` /
+``timeout``) post a short reply so a run that died never leaves the user silent.
 
 This decouples "the user gets an answer" from "the agent remembered to reply."
 The reply is idempotent per run when the webhook includes a run id. Older or
@@ -30,8 +30,10 @@ from agent.review.publish import settle_review_check_run
 from agent.session_cost import schedule_session_cost_refresh
 from agent.slack.client import post_slack_thread_reply
 from agent.slack.code_channels import is_code_channel_session, set_session_status
+from agent.slack.thinking import sync_slack_background_status
 from agent.source_context import SourceContext
 from agent.thread_feedback import schedule_answer_feedback
+from agent.transcript.turns import TurnOutcome, settle_run_turn
 from agent.utils.errors import LAST_MODEL_ERROR_KEY, code_for_error_type
 from agent.utils.langsmith import get_langsmith_trace_url
 from agent.utils.thread_ops import langgraph_client
@@ -344,6 +346,7 @@ async def _handle_successful_run(
     if metadata.get("kind") == REVIEWER_THREAD_KIND:
         return {"status": "ignored", "reason": "not an agent Slack run"}
     await _settle_code_channel_session(client, thread_id, metadata)
+    await sync_slack_background_status(client, thread_id)
     payload_metadata = payload.get("metadata")
     automated = (
         isinstance(payload_metadata, dict) and payload_metadata.get("kind") == "thread_wakeup"
@@ -395,10 +398,39 @@ async def _handle_successful_run(
     return {"status": "ok", "reason": "cost refresh scheduled"}
 
 
+async def _settle_transcript_turn(thread_id: str, run_id: str | None, status: object) -> None:
+    """Close the transcript turn of a run that ended without the middleware saying so.
+
+    The middleware emits the same event with the same command id, so whichever
+    of the two arrives second is deduplicated by its receipt.
+    """
+    if status == "success":
+        outcome: TurnOutcome = "completed"
+    elif status in _TERMINAL_FAILURE_STATUSES:
+        outcome = "failed"
+    else:
+        return
+    try:
+        await settle_run_turn(
+            thread_id,
+            run_id,
+            outcome=outcome,
+            error=None if outcome == "completed" else f"run ended as {status}",
+        )
+    except Exception:  # noqa: BLE001
+        # The webhook still has a reply to post; the turn is closed by the
+        # cancel path or by the next run's own events.
+        logger.warning(
+            "Could not settle the transcript turn for a completed run",
+            exc_info=True,
+            extra={"run_completion": {"thread_id": thread_id, "run_id": run_id}},
+        )
+
+
 async def handle_run_completion(payload: dict[str, Any]) -> dict[str, str]:
     """Handle a platform run-completion webhook POST.
 
-    Prompts for Slack feedback, enqueues cost refreshes, and posts failure replies.
+    Schedules feedback prompts, enqueues cost refreshes, and posts failure replies.
     """
     status = payload.get("status")
     thread_id = payload.get("thread_id")
@@ -407,6 +439,7 @@ async def handle_run_completion(payload: dict[str, Any]) -> dict[str, str]:
     if not isinstance(thread_id, str) or not thread_id:
         return {"status": "ignored", "reason": "missing thread_id"}
     await _finalize_agent_usage_telemetry(thread_id, status, payload)
+    await _settle_transcript_turn(thread_id, run_id, status)
     if status == "success":
         return await _handle_successful_run(thread_id, run_id, payload)
     payload_metadata = payload.get("metadata")
@@ -455,6 +488,7 @@ async def handle_run_completion(payload: dict[str, Any]) -> dict[str, str]:
         return await turns.handle_run_completion(thread_id, run_id, str(status))
     await _settle_failed_reviewer_check(thread_id, metadata)
     await _settle_code_channel_session(client, thread_id, metadata)
+    await sync_slack_background_status(client, thread_id)
     if run_id is None:
         # Payloads without run ids fall back to the old per-thread flag; run-scoped
         # dedupe intentionally does not read it so future runs can still report.
@@ -475,6 +509,7 @@ async def handle_run_completion(payload: dict[str, Any]) -> dict[str, str]:
         )
     except Exception:  # noqa: BLE001
         logger.warning("run-complete: could not flag thread %s", thread_id, exc_info=True)
+    await sync_slack_background_status(client, thread_id)
     logger.info(
         "Posted failure reply",
         extra={"failure_reply": {"thread_id": thread_id, "status": status, "code": reason_code}},

@@ -77,10 +77,10 @@ importers:
     dependencies:
       '@assistant-ui/react':
         specifier: ^0.15.18
-        version: 0.15.20(@types/react-dom@19.2.5(@types/react@19.2.18))(@types/react@19.2.18)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(use-sync-external-store@1.6.0(react@19.2.8))
+        version: 0.15.21(@types/react-dom@19.2.5(@types/react@19.2.18))(@types/react@19.2.18)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(use-sync-external-store@1.6.0(react@19.2.8))
       '@assistant-ui/react-langchain':
         specifier: 0.0.30
-        version: 0.0.30(@assistant-ui/tap@0.9.17(@types/react@19.2.18)(react@19.2.8))(@langchain/react@1.1.0(@langchain/core@1.2.9(ws@8.21.3))(react-dom@19.2.8(react@19.2.8))(react@19.2.8))(@types/react@19.2.18)(react@19.2.8)
+        version: 0.0.30(@assistant-ui/tap@0.9.18(@types/react@19.2.18)(react@19.2.8))(@langchain/react@1.1.0(@langchain/core@1.2.9(ws@8.21.3))(react-dom@19.2.8(react@19.2.8))(react@19.2.8))(@types/react@19.2.18)(react@19.2.8)
       '@base-ui/react':
         specifier: ^1.7.0
         version: 1.7.0(@types/react@19.2.18)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
@@ -138,6 +138,9 @@ importers:
       '@tanstack/react-start':
         specifier: ^1.168.53
         version: 1.168.53(crossws@0.4.12(srvx@0.11.22))(esbuild@0.28.2)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(rolldown@1.2.5)(rollup@4.62.4)(supports-color@10.2.2)(vite@8.2.2(@types/node@26.3.0)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.49.2))
+      '@tanstack/react-virtual':
+        specifier: ^3.14.13
+        version: 3.14.13(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
       '@tanstack/router-plugin':
         specifier: ^1.168.38
         version: 1.168.38(@tanstack/react-router@1.170.36(react-dom@19.2.8(react@19.2.8))(react@19.2.8))(esbuild@0.28.2)(rolldown@1.2.5)(rollup@4.62.4)(supports-color@10.2.2)(vite@8.2.2(@types/node@26.3.0)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.49.2))
@@ -147,9 +150,6 @@ importers:
       clsx:
         specifier: ^2.1.1
         version: 2.1.1
-      crossws:
-        specifier: 0.4.12
-        version: 0.4.12(srvx@0.11.22)
       h3:
         specifier: 2.0.1-rc.22
         version: 2.0.1-rc.22(crossws@0.4.12(srvx@0.11.22))
@@ -180,6 +180,9 @@ importers:
       shiki:
         specifier: ^4.4.3
         version: 4.4.3
+      sonner:
+        specifier: ^2.0.8
+        version: 2.0.8(@types/react@19.2.18)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
       streamdown:
         specifier: ^2.6.0
         version: 2.6.0(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(supports-color@10.2.2)
@@ -261,11 +264,11 @@ packages:
     resolution: {integrity: sha512-93Z1N+BQNXysodoicpOIyNh2drHfz/CTf9nnT0FEx72GJcIiwgydD7tGAr78j41LsYn3hlRn+LdGPuBLn1Bl8Q==}
     engines: {node: ^22.13.0 || >=24.0.0}
 
-  '@assistant-ui/core@0.3.19':
-    resolution: {integrity: sha512-1av7i1FyaOvqo4IpRIWKn1Y66eVFcSvQgjpnI6yJOEKja+1LKDEgYBSM2HrjO7SGm6h6NBVMigXnLbhAF9RstQ==}
+  '@assistant-ui/core@0.3.20':
+    resolution: {integrity: sha512-gSY7kI5crnbaXFaF2tObBVekXvQCpBz0D8CqzEkDJrKOwe57gn2K52qBr2hL0o36Ssyg0DmiEAi0LjPG5ZSGqQ==}
     peerDependencies:
-      '@assistant-ui/store': ^0.3.13
-      '@assistant-ui/tap': ^0.9.17
+      '@assistant-ui/store': ^0.3.14
+      '@assistant-ui/tap': ^0.9.18
       '@types/react': '*'
       assistant-cloud: ^0.2.1
       react: ^18 || ^19
@@ -289,8 +292,8 @@ packages:
       '@types/react':
         optional: true
 
-  '@assistant-ui/react@0.15.20':
-    resolution: {integrity: sha512-fyocrnKLfO65S/G8iVs78i9FPIeCdVDDwKZxqZV8yQu/R/KhbXfOUbaqrEZcsyt+vJTxjBv6dl1uYoXfYOMUsg==}
+  '@assistant-ui/react@0.15.21':
+    resolution: {integrity: sha512-5VID3r2YpYFbx6LLfyOSWwRVf4WOJXYsfSN/C67sbCsJsqqBbxeQpn4MB9g73HcyriBkRwqvHY5XXCguyNqP6Q==}
     peerDependencies:
       '@types/react': '*'
       '@types/react-dom': '*'
@@ -302,10 +305,10 @@ packages:
       '@types/react-dom':
         optional: true
 
-  '@assistant-ui/store@0.3.13':
-    resolution: {integrity: sha512-4u5YAMfjgr+jpJUWZ5f1uqXQuxvIiR8SRg1WWlFbIknk5S1Wli4Jp/nTQsOeXsIw0d7Zdb6FKiQw31gqs5z/Ew==}
+  '@assistant-ui/store@0.3.14':
+    resolution: {integrity: sha512-GqHYBD4TfSBTynyBYs2DDnyskfTVNtKHNaXws6dG5//18fb5PJyTYhXjkOSvDqF+dKX5rlOk9Bbd7G0CfJ+xkQ==}
     peerDependencies:
-      '@assistant-ui/tap': ^0.9.17
+      '@assistant-ui/tap': ^0.9.18
       '@types/react': '*'
       react: ^18 || ^19
     peerDependenciesMeta:
@@ -314,8 +317,8 @@ packages:
       react:
         optional: true
 
-  '@assistant-ui/tap@0.9.17':
-    resolution: {integrity: sha512-z53TiHiM3ai8XQ5B60Lg8IKCWM0XRf1Sz1jTQtqiuAATzVd6zeFedSHpxq4i5P0zi5uYVdN/dkGEpVTOyPc3ow==}
+  '@assistant-ui/tap@0.9.18':
+    resolution: {integrity: sha512-JowBf+JbzQRarun3DWy/4H6XZ7v/1fJ154By00Kn7b30thmlA/bh2lOPa9hPPeYaMcsTiYYYu6yWEM+AFMvdIw==}
     peerDependencies:
       '@types/react': '*'
       react: ^18 || ^19
@@ -3106,6 +3109,12 @@ packages:
       react: ^16.8.0 || ^17.0.0 || ^18.0.0 || ^19.0.0
       react-dom: ^16.8.0 || ^17.0.0 || ^18.0.0 || ^19.0.0
 
+  '@tanstack/react-virtual@3.14.13':
+    resolution: {integrity: sha512-JbDTAwtzZ99aOeCrAfW5EsE5KSq5RWh6Af2dtFwyLIIk48Ja7vm6n4axu/43T3vfjFnEGJalxJ1wyYjSQD6bSg==}
+    peerDependencies:
+      react: ^16.8.0 || ^17.0.0 || ^18.0.0 || ^19.0.0
+      react-dom: ^16.8.0 || ^17.0.0 || ^18.0.0 || ^19.0.0
+
   '@tanstack/router-core@1.171.30':
     resolution: {integrity: sha512-wtS1yCAb/k5CJBauvrCyqf2n4/kRc3aiz81tFBJ1QXH4Utsu81xFTMq15AdmNWgWmt2UstUSMfWi4Ua7ph2F+w==}
     engines: {node: '>=20.19'}
@@ -3186,6 +3195,9 @@ packages:
 
   '@tanstack/store@0.11.1':
     resolution: {integrity: sha512-mzTOBhypOuDJAy/D8n2MfUZ1HFkXnmSETviRyhqEC8LUE7/IZQExOTxMANj3KjTofYTkFNpBY67qaVrT41YccA==}
+
+  '@tanstack/virtual-core@3.17.11':
+    resolution: {integrity: sha512-+ILjvtHup6Y2hzQ6YzwMgX1Q+oQpxEGOXCEsCNaPoIP0VxMbizIBTmYTDtkerkIQS8/CbP1BRuyt8V/8BCsy1g==}
 
   '@tanstack/virtual-file-routes@1.162.0':
     resolution: {integrity: sha512-uhOeFyxLcU41HzvrxsGpiWdcMbScY1EDgbZ5K7DVRMYInbLYWAC0EA/kx9wXAoSM8q82bUG2hRl8+EAjE6XAbA==}
@@ -3508,8 +3520,8 @@ packages:
     resolution: {integrity: sha512-Izi8RQcffqCeNVgFigKli1ssklIbpHnCYc6AknXGYoB6grJqyeby7jv12JUQgmTAnIDnbck1uxksT4dzN3PWBA==}
     engines: {node: '>=12'}
 
-  assistant-cloud@0.2.1:
-    resolution: {integrity: sha512-4Ur4Bw13LbTs/pozHftJnaslugXwtR9Od7YjNg+qpRZmWdESbXdCFjPoW/6NsnF4upmKCPWvfTFakqy4LWhcfA==}
+  assistant-cloud@0.2.2:
+    resolution: {integrity: sha512-rScC4VNkUMPnRogMM92mkS87f0qf3Vtc+V7gfaliA0biD64slfvvsmbges3CupoVzJ8Pc4iMP1YhIa+oIjzpzg==}
     peerDependencies:
       '@opentelemetry/api': ^1.9.0
       '@opentelemetry/exporter-trace-otlp-http': '>=0.200.0'
@@ -3525,8 +3537,8 @@ packages:
       ai:
         optional: true
 
-  assistant-stream@0.3.43:
-    resolution: {integrity: sha512-spQk/1g6f1CNN1Lkxt1AQBuphLMHIA/o8I+RpQhQLJ6R0KsDYXSMEpVwXNxNJN2fAUUYvA2xESJv/5cBqV+4+Q==}
+  assistant-stream@0.3.44:
+    resolution: {integrity: sha512-418FRutG6g6WUd8EckGG+ZVOn/rmgop36oyzAMk1bRqktZOlY2RdtBl0yoUpDM/IDPWVNe7baYtSKN3UvjQzoA==}
     peerDependencies:
       ioredis: ^5.10.1 || ^6.0.0
       redis: ^5.12.1
@@ -5952,8 +5964,8 @@ packages:
   safe-buffer@5.1.2:
     resolution: {integrity: sha512-Gd2UZBJDkXlY7GbJxfsE8/nvKkUEU1G38c1siN6QP6a9PT9MmHB8GnpscSmMJSoF8LOIrt8ud/wPtojys4G6+g==}
 
-  safe-content-frame@0.0.30:
-    resolution: {integrity: sha512-t8XO/59b+YaJCmCpJ3aTZ8TyB6LzG7VzCtUO3u8h0jUsK/wCvQPMro8ioCA6AQr0Ve8Cv9zunFp1VcFGm1aybg==}
+  safe-content-frame@0.0.31:
+    resolution: {integrity: sha512-q5oK9CnNBlsCaYSpMjTkveO9BiQU25PHeMykRyh59hlSkr0g0SSeL7P+dtTljKwNt0+m1qWD8982xUcN5jmPPQ==}
 
   safer-buffer@2.1.2:
     resolution: {integrity: sha512-YZo3K82SD7Riyi0E1EQPojLz7kpepnSQI9IyPbHHg1XXXevb5dJI7tpyN2ADxGcQbHG7vcyRHk0cbwqcQriUtg==}
@@ -6095,6 +6107,16 @@ packages:
 
   solid-js@1.9.14:
     resolution: {integrity: sha512-sAEXC0Kk0S1EDg+8ysEWJDbYhA3RRoEjwuySUGlKIemeo0I5YZfOyumNjNs9Sv3y2nmhD+0rW66ag2HsMuQiGQ==}
+
+  sonner@2.0.8:
+    resolution: {integrity: sha512-UM/ByIoFra8yzV75n1o0Puu0bw5U/9UNnDacrJNspekBewIfsQ3D6ez1nvlWpt7aTsO6rujQtifBpycwIivqlg==}
+    peerDependencies:
+      '@types/react': ^18.0.0 || ^19.0.0
+      react: ^18.0.0 || ^19.0.0 || ^19.0.0-rc
+      react-dom: ^18.0.0 || ^19.0.0 || ^19.0.0-rc
+    peerDependenciesMeta:
+      '@types/react':
+        optional: true
 
   source-map-js@1.2.1:
     resolution: {integrity: sha512-UXWMKhLOwVKb728IUtQPXxfYU+usdybtUrK/8uGE8CQMvrhOpwvzDBwj0QhSL7MQc7vIsISBG8VQ8+IDQxpfQA==}
@@ -6878,26 +6900,26 @@ snapshots:
       is-potential-custom-element-name: 1.0.1
       lru-cache: 11.5.2
 
-  '@assistant-ui/core@0.3.19(@assistant-ui/store@0.3.13(@assistant-ui/tap@0.9.17(@types/react@19.2.18)(react@19.2.8))(@types/react@19.2.18)(react@19.2.8))(@assistant-ui/tap@0.9.17(@types/react@19.2.18)(react@19.2.8))(@types/react@19.2.18)(assistant-cloud@0.2.1)(react@19.2.8)':
+  '@assistant-ui/core@0.3.20(@assistant-ui/store@0.3.14(@assistant-ui/tap@0.9.18(@types/react@19.2.18)(react@19.2.8))(@types/react@19.2.18)(react@19.2.8))(@assistant-ui/tap@0.9.18(@types/react@19.2.18)(react@19.2.8))(@types/react@19.2.18)(assistant-cloud@0.2.2)(react@19.2.8)':
     dependencies:
-      '@assistant-ui/store': 0.3.13(@assistant-ui/tap@0.9.17(@types/react@19.2.18)(react@19.2.8))(@types/react@19.2.18)(react@19.2.8)
-      '@assistant-ui/tap': 0.9.17(@types/react@19.2.18)(react@19.2.8)
-      assistant-stream: 0.3.43
+      '@assistant-ui/store': 0.3.14(@assistant-ui/tap@0.9.18(@types/react@19.2.18)(react@19.2.8))(@types/react@19.2.18)(react@19.2.8)
+      '@assistant-ui/tap': 0.9.18(@types/react@19.2.18)(react@19.2.8)
+      assistant-stream: 0.3.44
       nanoid: 6.0.1
     optionalDependencies:
       '@types/react': 19.2.18
-      assistant-cloud: 0.2.1
+      assistant-cloud: 0.2.2
       react: 19.2.8
     transitivePeerDependencies:
       - ioredis
       - redis
 
-  '@assistant-ui/react-langchain@0.0.30(@assistant-ui/tap@0.9.17(@types/react@19.2.18)(react@19.2.8))(@langchain/react@1.1.0(@langchain/core@1.2.9(ws@8.21.3))(react-dom@19.2.8(react@19.2.8))(react@19.2.8))(@types/react@19.2.18)(react@19.2.8)':
+  '@assistant-ui/react-langchain@0.0.30(@assistant-ui/tap@0.9.18(@types/react@19.2.18)(react@19.2.8))(@langchain/react@1.1.0(@langchain/core@1.2.9(ws@8.21.3))(react-dom@19.2.8(react@19.2.8))(react@19.2.8))(@types/react@19.2.18)(react@19.2.8)':
     dependencies:
-      '@assistant-ui/core': 0.3.19(@assistant-ui/store@0.3.13(@assistant-ui/tap@0.9.17(@types/react@19.2.18)(react@19.2.8))(@types/react@19.2.18)(react@19.2.8))(@assistant-ui/tap@0.9.17(@types/react@19.2.18)(react@19.2.8))(@types/react@19.2.18)(assistant-cloud@0.2.1)(react@19.2.8)
-      '@assistant-ui/store': 0.3.13(@assistant-ui/tap@0.9.17(@types/react@19.2.18)(react@19.2.8))(@types/react@19.2.18)(react@19.2.8)
-      assistant-cloud: 0.2.1
-      assistant-stream: 0.3.43
+      '@assistant-ui/core': 0.3.20(@assistant-ui/store@0.3.14(@assistant-ui/tap@0.9.18(@types/react@19.2.18)(react@19.2.8))(@types/react@19.2.18)(react@19.2.8))(@assistant-ui/tap@0.9.18(@types/react@19.2.18)(react@19.2.8))(@types/react@19.2.18)(assistant-cloud@0.2.2)(react@19.2.8)
+      '@assistant-ui/store': 0.3.14(@assistant-ui/tap@0.9.18(@types/react@19.2.18)(react@19.2.8))(@types/react@19.2.18)(react@19.2.8)
+      assistant-cloud: 0.2.2
+      assistant-stream: 0.3.44
       react: 19.2.8
     optionalDependencies:
       '@langchain/react': 1.1.0(@langchain/core@1.2.9(ws@8.21.3))(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
@@ -6911,18 +6933,18 @@ snapshots:
       - ioredis
       - redis
 
-  '@assistant-ui/react@0.15.20(@types/react-dom@19.2.5(@types/react@19.2.18))(@types/react@19.2.18)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(use-sync-external-store@1.6.0(react@19.2.8))':
+  '@assistant-ui/react@0.15.21(@types/react-dom@19.2.5(@types/react@19.2.18))(@types/react@19.2.18)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(use-sync-external-store@1.6.0(react@19.2.8))':
     dependencies:
-      '@assistant-ui/core': 0.3.19(@assistant-ui/store@0.3.13(@assistant-ui/tap@0.9.17(@types/react@19.2.18)(react@19.2.8))(@types/react@19.2.18)(react@19.2.8))(@assistant-ui/tap@0.9.17(@types/react@19.2.18)(react@19.2.8))(@types/react@19.2.18)(assistant-cloud@0.2.1)(react@19.2.8)
-      '@assistant-ui/store': 0.3.13(@assistant-ui/tap@0.9.17(@types/react@19.2.18)(react@19.2.8))(@types/react@19.2.18)(react@19.2.8)
-      '@assistant-ui/tap': 0.9.17(@types/react@19.2.18)(react@19.2.8)
-      assistant-cloud: 0.2.1
-      assistant-stream: 0.3.43
+      '@assistant-ui/core': 0.3.20(@assistant-ui/store@0.3.14(@assistant-ui/tap@0.9.18(@types/react@19.2.18)(react@19.2.8))(@types/react@19.2.18)(react@19.2.8))(@assistant-ui/tap@0.9.18(@types/react@19.2.18)(react@19.2.8))(@types/react@19.2.18)(assistant-cloud@0.2.2)(react@19.2.8)
+      '@assistant-ui/store': 0.3.14(@assistant-ui/tap@0.9.18(@types/react@19.2.18)(react@19.2.8))(@types/react@19.2.18)(react@19.2.8)
+      '@assistant-ui/tap': 0.9.18(@types/react@19.2.18)(react@19.2.8)
+      assistant-cloud: 0.2.2
+      assistant-stream: 0.3.44
       radix-ui: 1.6.7(@types/react-dom@19.2.5(@types/react@19.2.18))(@types/react@19.2.18)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
       react: 19.2.8
       react-dom: 19.2.8(react@19.2.8)
       react-textarea-autosize: 8.5.9(@types/react@19.2.18)(react@19.2.8)
-      safe-content-frame: 0.0.30
+      safe-content-frame: 0.0.31
       zod: 4.6.5
       zustand: 5.0.15(@types/react@19.2.18)(react@19.2.8)(use-sync-external-store@1.6.0(react@19.2.8))
     optionalDependencies:
@@ -6938,14 +6960,14 @@ snapshots:
       - redis
       - use-sync-external-store
 
-  '@assistant-ui/store@0.3.13(@assistant-ui/tap@0.9.17(@types/react@19.2.18)(react@19.2.8))(@types/react@19.2.18)(react@19.2.8)':
+  '@assistant-ui/store@0.3.14(@assistant-ui/tap@0.9.18(@types/react@19.2.18)(react@19.2.8))(@types/react@19.2.18)(react@19.2.8)':
     dependencies:
-      '@assistant-ui/tap': 0.9.17(@types/react@19.2.18)(react@19.2.8)
+      '@assistant-ui/tap': 0.9.18(@types/react@19.2.18)(react@19.2.8)
     optionalDependencies:
       '@types/react': 19.2.18
       react: 19.2.8
 
-  '@assistant-ui/tap@0.9.17(@types/react@19.2.18)(react@19.2.8)':
+  '@assistant-ui/tap@0.9.18(@types/react@19.2.18)(react@19.2.8)':
     optionalDependencies:
       '@types/react': 19.2.18
       react: 19.2.8
@@ -9506,6 +9528,12 @@ snapshots:
       react-dom: 19.2.8(react@19.2.8)
       use-sync-external-store: 1.6.0(react@19.2.8)
 
+  '@tanstack/react-virtual@3.14.13(react-dom@19.2.8(react@19.2.8))(react@19.2.8)':
+    dependencies:
+      '@tanstack/virtual-core': 3.17.11
+      react: 19.2.8
+      react-dom: 19.2.8(react@19.2.8)
+
   '@tanstack/router-core@1.171.30':
     dependencies:
       '@tanstack/history': 1.162.4
@@ -9641,6 +9669,8 @@ snapshots:
       '@tanstack/router-core': 1.171.30
 
   '@tanstack/store@0.11.1': {}
+
+  '@tanstack/virtual-core@3.17.11': {}
 
   '@tanstack/virtual-file-routes@1.162.0': {}
 
@@ -10001,16 +10031,17 @@ snapshots:
 
   assertion-error@2.0.1: {}
 
-  assistant-cloud@0.2.1:
+  assistant-cloud@0.2.2:
     dependencies:
-      assistant-stream: 0.3.43
+      assistant-stream: 0.3.44
     transitivePeerDependencies:
       - ioredis
       - redis
 
-  assistant-stream@0.3.43:
+  assistant-stream@0.3.44:
     dependencies:
       '@standard-schema/spec': 1.1.0
+      '@types/json-schema': 7.0.15
       nanoid: 6.0.1
       secure-json-parse: 4.1.0
 
@@ -12824,7 +12855,7 @@ snapshots:
 
   safe-buffer@5.1.2: {}
 
-  safe-content-frame@0.0.30: {}
+  safe-content-frame@0.0.31: {}
 
   safer-buffer@2.1.2: {}
 
@@ -13009,6 +13040,13 @@ snapshots:
       csstype: 3.2.3
       seroval: 1.5.6
       seroval-plugins: 1.5.6(seroval@1.5.6)
+
+  sonner@2.0.8(@types/react@19.2.18)(react-dom@19.2.8(react@19.2.8))(react@19.2.8):
+    dependencies:
+      react: 19.2.8
+      react-dom: 19.2.8(react@19.2.8)
+    optionalDependencies:
+      '@types/react': 19.2.18
 
   source-map-js@1.2.1: {}
 

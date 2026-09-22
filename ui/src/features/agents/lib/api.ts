@@ -33,7 +33,6 @@ export interface ThreadMessageRequest {
   images?: Array<ImageChunk>
   model_id?: string | null
   effort?: string | null
-  plan_mode?: boolean
   client_message_id?: string
 }
 
@@ -143,10 +142,12 @@ export interface ThreadsPage {
   hasMore?: boolean
 }
 
-export interface SidebarProject {
+export interface SidebarRepo {
   repoFullName: string
   name: string
   updatedAt: number
+  /** Slug of the workspace that owns this repository; `"default"` when unassigned. */
+  workspace: string
 }
 
 const API_BASE = dashboardApiBase()
@@ -155,7 +156,7 @@ export const agentsLangGraphApiUrl = `${API_BASE}/dashboard/api`
 
 const timedFetch = withRequestTiming((input, init) => fetch(input, init))
 
-async function agentsRequest<T>(
+export async function agentsRequest<T>(
   path: string,
   init: RequestInit = {}
 ): Promise<T> {
@@ -240,7 +241,7 @@ function buildThreadsPageQuery(params: ThreadsPageParams): string {
   return query ? `?${query}` : ""
 }
 
-function buildProjectsQuery(params: {
+function buildReposQuery(params: {
   includeResolved?: boolean
   includeAutomations?: boolean
 }): string {
@@ -295,14 +296,14 @@ export const agentsApi = {
         body: JSON.stringify(body),
       }
     ),
-  listThreadProjects: (
+  listThreadRepos: (
     params: {
       includeResolved?: boolean
       includeAutomations?: boolean
     } = {}
   ) =>
-    agentsRequest<Array<SidebarProject>>(
-      `/threads/projects${buildProjectsQuery(params)}`
+    agentsRequest<Array<SidebarRepo>>(
+      `/threads/repos${buildReposQuery(params)}`
     ),
   listPinnedThreads: () => agentsRequest<Array<AgentThread>>("/threads/pinned"),
   listThreadsPage: (params: ThreadsPageParams = {}) =>

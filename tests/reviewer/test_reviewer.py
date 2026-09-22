@@ -7,6 +7,9 @@ from langgraph.graph.state import RunnableConfig
 from langgraph.runtime import Runtime
 
 from agent import reviewer
+from agent.dashboard.workspace_settings import WorkspaceSettings
+
+pytestmark = pytest.mark.usefixtures("fake_store")
 
 
 def test_reviewer_system_prompt_org_guidelines_precede_repo_style() -> None:
@@ -109,7 +112,7 @@ async def test_reviewer_resolves_app_installation_token_at_run_start() -> None:
 
 
 @pytest.mark.asyncio
-async def test_reviewer_reuses_app_token_for_sandbox_proxy() -> None:
+async def test_reviewer_limits_sandbox_to_reviewed_repository_in_workspace() -> None:
     config: RunnableConfig = {
         "configurable": {
             "__is_for_execution__": True,
@@ -157,8 +160,7 @@ async def test_reviewer_reuses_app_token_for_sandbox_proxy() -> None:
     mock_sandbox.assert_awaited_once_with(
         "reviewer-thread-id",
         workspace_slug="oss",
-        github_proxy_token="app-token",
-        github_proxy_repositories=["repo"],
+        github_proxy_repositories=["acme/repo"],
         allow_replacement=True,
     )
 
@@ -404,9 +406,11 @@ async def test_reviewer_inlines_org_guidelines_into_system_prompt() -> None:
             return_value="/workspace",
         ),
         patch(
-            "agent.reviewer.cached_org_review_guidelines",
+            "agent.reviewer.cached_workspace_settings",
             new_callable=AsyncMock,
-            return_value="Never approve a PR that disables a CI gate.",
+            return_value=WorkspaceSettings(
+                {"org_guidelines": "Never approve a PR that disables a CI gate."}
+            ),
         ),
         patch(
             "agent.review.styles.get_repo_custom_prompt",
