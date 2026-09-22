@@ -1,13 +1,18 @@
 """Daily summaries reconcile late events and retained projection history."""
 
+import asyncio
+from collections.abc import Callable
+from contextlib import AbstractAsyncContextManager
 from datetime import timedelta
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncConnection
 
 from agent.analytics import ingestion, summaries
 from agent.analytics.events import (
+    EventEnvelope,
     EventName,
     FindingStatePayload,
     FindingSurfacedPayload,
@@ -347,3 +352,180 @@ async def test_earlier_run_start_moves_cost_and_membership_out_of_previous_day(
             assert cost_row["counters"] == {"runs": 1, "known_cost_runs": 1}
             assert cost_row["sums"] == {"cost_usd": cost}
             assert by_day["distinct_membership", date]["exact_members"] == [person]
+
+
+async def test_summary_batch_releases_completed_partition_before_next_compute(
+    analytics_db: tuple[UUID, Callable[[], AbstractAsyncContextManager[AsyncConnection]]],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    workspace, transaction = analytics_db
+    for day in (0, 1):
+        await ingestion.ingest(
+            event(
+                workspace,
+                EventName.RUN_STARTED,
+                RunStartedPayload(model_attribution_quality="unavailable"),
+                run_id=uuid4(),
+                day=day,
+            )
+        )
+    async with transaction() as conn:
+        await conn.execute(text("DELETE FROM dirty_summary_partitions WHERE family <> 'additive'"))
+        await conn.execute(
+            text("UPDATE dirty_summary_partitions SET dirty_since = partition_date::timestamptz")
+        )
+    computing_second = asyncio.Event()
+    release_second = asyncio.Event()
+    compute = summaries._compute
+
+    async def pause_second(
+        conn: AsyncConnection, partition: dict[str, object]
+    ) -> dict[str, object]:
+        if partition["partition_date"] == (DAY + timedelta(days=1)).date():
+            computing_second.set()
+            await release_second.wait()
+        return await compute(conn, partition)
+
+    monkeypatch.setattr(summaries, "_compute", pause_second)
+    worker = asyncio.create_task(summaries.recompute_dirty_partitions(limit=2))
+    try:
+        await asyncio.wait_for(computing_second.wait(), timeout=5)
+        async with transaction() as conn:
+            counters = await conn.scalar(
+                text("SELECT counters FROM daily_summaries WHERE partition_date = :day"),
+                {"day": DAY.date()},
+            )
+            assert counters == {"run.started": 1}
+            assert (
+                await conn.scalar(
+                    text(
+                        "SELECT count(*) FROM dirty_summary_partitions WHERE partition_date = :day"
+                    ),
+                    {"day": DAY.date()},
+                )
+                == 0
+            )
+        late = event(
+            workspace,
+            EventName.RUN_STARTED,
+            RunStartedPayload(model_attribution_quality="unavailable"),
+            run_id=uuid4(),
+        )
+        assert await asyncio.wait_for(ingestion.ingest(late), timeout=5)
+    finally:
+        release_second.set()
+        await worker
+    await flush_summaries()
+    async with transaction() as conn:
+        counters = await conn.scalar(
+            text(
+                "SELECT counters FROM daily_summaries WHERE family = 'additive' "
+                "AND partition_date = :day"
+            ),
+            {"day": DAY.date()},
+        )
+        assert counters == {"run.started": 2}
+
+
+async def test_concurrent_dirty_dates_and_families_do_not_deadlock(
+    analytics_db: tuple[UUID, Callable[[], AbstractAsyncContextManager[AsyncConnection]]],
+) -> None:
+    workspace, transaction = analytics_db
+    # Choose dates whose unsorted iteration conflicts, regardless of Python's hash seed.
+    first_day = DAY.date()
+    second_offset = next(
+        offset
+        for offset in range(1, 366)
+        if list({first_day, (DAY + timedelta(days=offset)).date()})
+        != list({(DAY + timedelta(days=offset)).date(), first_day})
+    )
+    second_day = (DAY + timedelta(days=second_offset)).date()
+    first_run, second_run = uuid4(), uuid4()
+    async with transaction() as conn:
+        await conn.execute(
+            text(
+                "INSERT INTO run_projection (workspace_id, run_id, started_at) "
+                "VALUES (:workspace, :first_run, :second_day), "
+                "(:workspace, :second_run, :first_day)"
+            ),
+            {
+                "workspace": workspace,
+                "first_run": first_run,
+                "second_run": second_run,
+                "first_day": DAY,
+                "second_day": DAY + timedelta(days=second_offset),
+            },
+        )
+        await conn.execute(
+            text("""
+            CREATE FUNCTION pause_first_dirty_write() RETURNS trigger LANGUAGE plpgsql AS $$
+            BEGIN
+                IF current_setting('test.pause_dirty', true) = 'on' THEN
+                    PERFORM set_config('test.pause_dirty', 'off', true);
+                    PERFORM pg_advisory_xact_lock(173492856);
+                END IF;
+                RETURN NEW;
+            END $$
+        """)
+        )
+        await conn.execute(
+            text("""
+            CREATE TRIGGER pause_dirty AFTER INSERT OR UPDATE ON dirty_summary_partitions
+            FOR EACH ROW EXECUTE FUNCTION pause_first_dirty_write()
+        """)
+        )
+    first = event(
+        workspace,
+        EventName.RUN_STARTED,
+        RunStartedPayload(model_attribution_quality="unavailable"),
+        run_id=first_run,
+    )
+    second = event(
+        workspace,
+        EventName.RUN_STARTED,
+        RunStartedPayload(model_attribution_quality="unavailable"),
+        run_id=second_run,
+        day=second_offset,
+    )
+    pids: asyncio.Queue[int] = asyncio.Queue()
+
+    async def dirty(item: EventEnvelope, *, pause: bool) -> None:
+        async with transaction() as conn:
+            if pause:
+                await conn.execute(text("SELECT set_config('test.pause_dirty', 'on', true)"))
+            pid = await conn.scalar(text("SELECT pg_backend_pid()"))
+            assert isinstance(pid, int)
+            await pids.put(pid)
+            await summaries.mark_dirty(conn, item)
+
+    async def wait_for_lock(conn: AsyncConnection, pid: int) -> None:
+        async with asyncio.timeout(5):
+            while not await conn.scalar(
+                text("SELECT EXISTS (SELECT 1 FROM pg_locks WHERE pid = :pid AND NOT granted)"),
+                {"pid": pid},
+            ):
+                await asyncio.sleep(0.01)
+
+    tasks: list[asyncio.Task[None]] = []
+    try:
+        async with transaction() as gate:
+            await gate.execute(text("SELECT pg_advisory_xact_lock(173492856)"))
+            tasks.append(asyncio.create_task(dirty(first, pause=True)))
+            await wait_for_lock(gate, await pids.get())
+            tasks.append(asyncio.create_task(dirty(second, pause=False)))
+            await wait_for_lock(gate, await pids.get())
+        await asyncio.wait_for(asyncio.gather(*tasks), timeout=5)
+    finally:
+        for task in tasks:
+            if not task.done():
+                task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
+    async with transaction() as conn:
+        rows = (
+            await conn.execute(text("SELECT family, partition_date FROM dirty_summary_partitions"))
+        ).all()
+        assert set(rows) == {
+            (family, day)
+            for family in ("additive", "cost_completeness", "distinct_membership")
+            for day in (first_day, second_day)
+        }

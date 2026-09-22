@@ -14,16 +14,19 @@ _LATENCY_BOUNDS_MS = [60_000, 300_000, 900_000, 3_600_000, 14_400_000, 86_400_00
 
 
 async def recompute_dirty_partitions(limit: int = 20) -> int:
-    async with transaction() as conn:
-        claimed = await conn.execute(
-            text(
-                "SELECT workspace_id, summary_version, family, partition_date, dimension_key FROM "
-                "dirty_summary_partitions ORDER BY dirty_since FOR UPDATE SKIP LOCKED LIMIT :limit"
-            ),
-            {"limit": min(max(limit, 1), 100)},
-        )
-        partitions = [dict(row) for row in claimed.mappings()]
-        for partition in partitions:
+    processed = 0
+    for _ in range(min(max(limit, 1), 100)):
+        async with transaction() as conn:
+            claimed = await conn.execute(
+                text(
+                    "SELECT workspace_id, summary_version, family, partition_date, dimension_key FROM "
+                    "dirty_summary_partitions ORDER BY dirty_since FOR UPDATE SKIP LOCKED LIMIT 1"
+                )
+            )
+            row = claimed.mappings().one_or_none()
+            if row is None:
+                break
+            partition = dict(row)
             payload = await _compute(conn, partition)
             await conn.execute(
                 text(
@@ -57,7 +60,8 @@ async def recompute_dirty_partitions(limit: int = 20) -> int:
                 ),
                 partition,
             )
-        return len(partitions)
+        processed += 1
+    return processed
 
 
 async def _compute(conn: AsyncConnection, partition: dict[str, object]) -> dict[str, object]:
@@ -152,10 +156,17 @@ async def _compute(conn: AsyncConnection, partition: dict[str, object]) -> dict[
     }
 
 
-async def mark_dirty(conn: AsyncConnection, event: EventEnvelope) -> None:
+async def mark_dirty(
+    conn: AsyncConnection,
+    event: EventEnvelope,
+    *,
+    previous_run_start: datetime | None = None,
+) -> None:
     version = ENV.ANALYTICS_SUMMARY_VERSION.get_int(1)
     families = {"additive", "distinct_membership"}
     dates = {event.occurred_at.astimezone(UTC).date()}
+    if previous_run_start is not None:
+        dates.add(previous_run_start.astimezone(UTC).date())
     if event.pr_id is not None:
         families.add("pr_open_cohort")
         opened_at = await conn.scalar(
@@ -188,8 +199,8 @@ async def mark_dirty(conn: AsyncConnection, event: EventEnvelope) -> None:
         )
         if started_at is not None:
             dates.add(started_at.astimezone(UTC).date())
-    for family in families:
-        for partition_date in dates:
+    for family in sorted(families):
+        for partition_date in sorted(dates):
             await conn.execute(
                 text(
                     "INSERT INTO dirty_summary_partitions (workspace_id, summary_version, family, "

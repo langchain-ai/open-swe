@@ -1,7 +1,7 @@
 """Idempotent ingestion, projection, and summary invalidation."""
 
 import json
-from datetime import UTC
+from datetime import UTC, datetime
 from typing import cast
 from uuid import UUID
 
@@ -13,7 +13,6 @@ from agent.analytics.measurements import restore_pr_distance, retain_pr_distance
 from agent.analytics.summaries import mark_dirty
 from agent.config import ENV
 from agent.database import transaction
-from agent.database.analytics import record_capture
 
 _INSERT_ID = text(
     "INSERT INTO event_ids(event_id, occurred_at) VALUES (:event_id, :occurred_at) "
@@ -84,20 +83,6 @@ async def ingest(event: EventEnvelope) -> bool:
         if inserted is None:
             return False
         await conn.execute(_INSERT_EVENT, _params(event))
-        await record_capture(conn)
-        await conn.execute(
-            text(
-                "INSERT INTO additive_event_projection (workspace_id, partition_date, event_name, "
-                "event_count) VALUES (:workspace_id, :partition_date, :event_name, 1) "
-                "ON CONFLICT (workspace_id, partition_date, event_name) DO UPDATE SET "
-                "event_count = additive_event_projection.event_count + 1"
-            ),
-            {
-                "workspace_id": event.workspace_id,
-                "partition_date": event.occurred_at.astimezone(UTC).date(),
-                "event_name": event.event_name.value,
-            },
-        )
         await conn.execute(
             text(
                 "INSERT INTO ingestion_receipts (workspace_id, producer, producer_event_id, "
@@ -114,13 +99,36 @@ async def ingest(event: EventEnvelope) -> bool:
                 "receipt_days": ENV.ANALYTICS_RECEIPT_DAYS.get_int(90),
             },
         )
+        previous_run_start: datetime | None = None
         if event.event_name == EventName.RUN_STARTED:
-            # A corrected start can move a run out of an already summarized UTC day.
-            await mark_dirty(conn, event)
+            previous_run_start = await conn.scalar(
+                text(
+                    "SELECT started_at FROM run_projection WHERE workspace_id = :workspace_id "
+                    "AND run_id = :run_id"
+                ),
+                {"workspace_id": event.workspace_id, "run_id": event.run_id},
+            )
         await _project(conn, event)
-        await mark_dirty(conn, event)
+        await mark_dirty(conn, event, previous_run_start=previous_run_start)
+        # Shared counters and deployment metadata stay locked only through the final writes.
         await conn.execute(
-            text("UPDATE deployment_metadata SET last_processed_at = clock_timestamp()")
+            text(
+                "INSERT INTO additive_event_projection (workspace_id, partition_date, event_name, "
+                "event_count) VALUES (:workspace_id, :partition_date, :event_name, 1) "
+                "ON CONFLICT (workspace_id, partition_date, event_name) DO UPDATE SET "
+                "event_count = additive_event_projection.event_count + 1"
+            ),
+            {
+                "workspace_id": event.workspace_id,
+                "partition_date": event.occurred_at.astimezone(UTC).date(),
+                "event_name": event.event_name.value,
+            },
+        )
+        await conn.execute(
+            text(
+                "UPDATE deployment_metadata SET last_processed_at = clock_timestamp(), "
+                "collection_started_at = COALESCE(collection_started_at, clock_timestamp())"
+            )
         )
     return True
 
