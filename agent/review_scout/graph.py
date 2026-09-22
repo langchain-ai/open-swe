@@ -1,8 +1,9 @@
 """Review scout graph.
 
 Cuts a pull request's full diff into an ordered series of commits a reviewer
-can read top to bottom, then stores them as the PR's walkthrough. Runs on its
-own thread per PR, started by the reviewer on every head it reviews.
+can read top to bottom and stores them as the PR's walkthrough, and records
+where the author's steering changed what shipped. Runs on its own thread per
+PR; the reviewer starts it and waits for both before reviewing.
 """
 
 import logging
@@ -37,6 +38,7 @@ from agent.middleware import (
 from agent.middleware.prepare_run import PrepareRunState
 from agent.middleware.trace import OpenSWEMiddleware
 from agent.prompts import apply_tool_descriptions, render_prompt
+from agent.review.author_guidance import GUIDANCE_CAP, GuidanceReview, SteeringHistory
 from agent.review.walkthrough import Walkthrough
 from agent.review_scout.git import ScoutGitError, finalize, setup_working_tree
 from agent.review_scout.paths import scout_repo_dir
@@ -51,6 +53,7 @@ from agent.runtime import (
 )
 from agent.sandboxes.repo_prep import prepare_review_repo
 from agent.tools.commit_walkthrough_step import commit_walkthrough_step
+from agent.tools.record_guidance import record_guidance
 from agent.utils.deferred_model import make_deferred_error_model
 from agent.utils.model import DEFAULT_LLM_REASONING, make_model, provider_model_kwargs
 
@@ -134,6 +137,12 @@ class PrepareReviewScoutRunMiddleware(BasePrepareRunMiddleware):
             patch_dir=f"{work_dir}/.scout-patches",
             max_steps=MAX_STEPS,
         )
+        history = await SteeringHistory.load(cfg.repo.owner, cfg.repo.name, cfg.pr_number)
+        if history is not None and history.follow_ups:
+            guidance = render_prompt(
+                "review-scout/author-guidance.md", messages=history.messages_block()
+            )
+            system_prompt = f"{system_prompt}\n\n{guidance}"
         return {
             "work_dir": work_dir,
             "rendered_system_prompt": system_prompt,
@@ -160,6 +169,9 @@ class StoreWalkthroughMiddleware(OpenSWEMiddleware[ReviewScoutState]):
             "pr_number": cfg.pr_number,
             "scout_head_sha": cfg.head_sha,
         }
+        # Settles which head the guidance card describes, including when this
+        # run recorded nothing.
+        await GuidanceReview.complete(cfg.repo.owner, cfg.repo.name, cfg.pr_number, cfg.head_sha)
         backend = get_cached_sandbox_backend(self._thread_id)
         repo_dir = await scout_repo_dir(backend, cfg)
         if repo_dir is None:
@@ -231,7 +243,10 @@ async def get_review_scout(config: RunnableConfig) -> Pregel:
     return create_deep_agent(
         model=model,
         system_prompt="",
-        tools=apply_tool_descriptions([commit_walkthrough_step]),
+        tools=apply_tool_descriptions(
+            [commit_walkthrough_step, record_guidance],
+            {"record_guidance": {"cap": GUIDANCE_CAP}},
+        ),
         backend=get_cached_sandbox_backend(thread_id, reconnect=reconnect_backend),
         middleware=cast(
             list[AgentMiddleware[Any, Any, Any]],

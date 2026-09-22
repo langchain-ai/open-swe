@@ -62,7 +62,7 @@ from agent.middleware import (
 from agent.middleware.prepare_run import PrepareRunState
 from agent.middleware.sandbox_circuit_breaker import post_sandbox_unreachable_notification
 from agent.prompts import apply_tool_descriptions, load_prompt, render_prompt
-from agent.review.author_guidance import GUIDANCE_CAP, SteeringHistory
+from agent.review.author_guidance import GuidanceView
 from agent.review.diff import (
     changed_files,
     compute_diff_line_set,
@@ -100,7 +100,6 @@ from agent.tools import (
     http_request,
     list_findings,
     publish_review,
-    record_guidance,
     reply_to_finding_thread,
     resolve_finding_thread,
     update_finding,
@@ -297,17 +296,16 @@ def _format_pr_overview(pr_title: str, pr_body: str) -> str:
     return render_prompt("reviewer/pr-overview.md", title=safe_title, body=safe_body)
 
 
-def _format_author_guidance(history: SteeringHistory | None) -> str:
-    """Render the author's follow-up messages as an untrusted-data block."""
-    if history is None or not history.follow_ups:
+def _format_author_guidance(points: list[GuidanceView]) -> str:
+    """Render the steering points the review scout recorded, or ``""`` without any."""
+    if not points:
         return ""
-    messages = "\n".join(
-        f'<message author="{_safe_login(turn.author)}">\n'
-        f"{_escape_for_data_block(turn.text)}\n"
-        "</message>"
-        for turn in history.follow_ups
-    )
-    return render_prompt("reviewer/author-guidance.md", messages=messages)
+    lines: list[str] = []
+    for point in points:
+        author = f" ({point.author})" if point.author else ""
+        quote = "\n".join(f"  > {line}" for line in point.quote.splitlines())
+        lines.append(f"- {point.summary}{author}\n{quote}")
+    return render_prompt("reviewer/author-guidance.md", points="\n".join(lines))
 
 
 def _format_line_ranges(prefix: str, ranges: list[tuple[int, int]]) -> list[str]:
@@ -477,8 +475,6 @@ _DATA_BLOCK_WRAPPER_TAGS = (
     "body",
     "pr_overview",
     "title",
-    "author_messages",
-    "message",
     "review_walkthrough",
     "step",
     "summary",
@@ -853,17 +849,20 @@ class PrepareReviewerRunMiddleware(BasePrepareRunMiddleware):
         async def _fetch_author_guidance_block() -> str:
             if reviewer_eval or not repo_owner or not repo_name or not isinstance(pr_number, int):
                 return ""
+            # The scout records the steering points; wait for it like the walkthrough.
+            await walkthrough_task
             try:
-                history = await SteeringHistory.load(repo_owner, repo_name, pr_number)
+                points = await GuidanceView.for_head(repo_owner, repo_name, pr_number, head_sha)
             except Exception:
                 logger.exception(
-                    "Failed to load author steering history for %s/%s#%s; continuing without it",
-                    repo_owner,
-                    repo_name,
-                    pr_number,
+                    "Failed to load author guidance; continuing without it",
+                    extra={
+                        "pr_repo_full_name": f"{repo_owner}/{repo_name}",
+                        "pr_number": pr_number,
+                    },
                 )
                 return ""
-            return _format_author_guidance(history)
+            return _format_author_guidance(points)
 
         async def _fetch_repo_style_prompt() -> str | None:
             if not repo_owner or not repo_name:
@@ -1110,15 +1109,13 @@ async def get_reviewer_agent(config: RunnableConfig) -> Pregel:
                 add_finding,
                 update_finding,
                 list_findings,
-                record_guidance,
                 publish_review,
                 resolve_finding_thread,
                 reply_to_finding_thread,
                 web_search,
                 fetch_url,
                 http_request,
-            ],
-            {"record_guidance": {"cap": GUIDANCE_CAP}},
+            ]
         ),
         subagents=[_reviewer_subagent(reviewer_subagent_model)],
         backend=backend,

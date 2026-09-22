@@ -1,16 +1,10 @@
-"""Tool: ``record_guidance``. Records one author steering point the reviewer found in the diff."""
+"""Tool: ``record_guidance``. Records one author steering point the review scout found in the diff."""
 
 import logging
 from typing import Any
 
 from agent.github.pull_requests import PullRequest
 from agent.review.author_guidance import GUIDANCE_CAP, GuidancePoint, SteeringHistory
-from agent.review.findings import (
-    ReviewerThreadMissingError,
-    get_thread_id_from_runtime,
-    resolve_review_head_sha,
-    thread_missing_tool_result,
-)
 from agent.run_config import RunConfig
 
 logger = logging.getLogger(__name__)
@@ -31,22 +25,11 @@ async def record_guidance(summary: str, quote: str) -> dict[str, Any]:
             "error": "quote must be copied verbatim from the message it came from",
         }
     cfg = RunConfig.from_runtime()
-    if cfg.repo is None or cfg.pr_number is None:
-        return {"success": False, "error": "This run is not reviewing a pull request"}
+    if cfg.repo is None or cfg.pr_number is None or not cfg.head_sha or not cfg.thread_id:
+        return {"success": False, "error": "This run is not scouting a pull request"}
     owner, repo, number = cfg.repo.owner, cfg.repo.name, cfg.pr_number
 
-    pull_request = await PullRequest.get(owner, repo, number)
-    if pull_request is None:
-        return {
-            "success": False,
-            "error": f"No stored pull request for {owner}/{repo}#{number}",
-        }
-
-    thread_id = get_thread_id_from_runtime()
-    try:
-        head_sha = await resolve_review_head_sha(thread_id, cfg)
-    except ReviewerThreadMissingError as exc:
-        return thread_missing_tool_result(exc)
+    pull_request = await PullRequest(owner=owner, repo=repo, number=number).ensure()
 
     # Attribution comes from the stored turns, not from the model, which would
     # be free to invent a name; a quote matching nothing stays unattributed.
@@ -59,7 +42,7 @@ async def record_guidance(summary: str, quote: str) -> dict[str, Any]:
         quote=trimmed_quote[:MAX_QUOTE_CHARS],
         author=source.author if source else "",
         turn_index=source.index if source else None,
-        reviewer_thread_id=thread_id,
-        head_sha=head_sha,
+        reviewer_thread_id=cfg.thread_id,
+        head_sha=cfg.head_sha,
     )
     return {"success": True, "recorded": recorded, "cap": GUIDANCE_CAP}
