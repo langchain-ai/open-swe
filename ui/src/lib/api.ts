@@ -322,6 +322,7 @@ export type UsageLeaderboardSort =
   | "merged_prs"
   | "merged_prs_per_thread"
   | "agent_loc"
+  | "feedback_given"
 export type SortDirection = "asc" | "desc"
 
 export interface AnalyticsMetadata {
@@ -353,6 +354,7 @@ export interface UsageLeaderboardRow {
   merged_prs: number
   merged_prs_per_thread?: number
   agent_loc: number
+  feedback_given: number
   additions: number
   deletions: number
   total_tokens: number
@@ -839,7 +841,13 @@ export interface ReviewDiffGroup {
   files: Array<string>
 }
 
-export interface ReviewDetail extends ReviewSummary {
+/** `status: "none"` is a PR the reviewer graph has never run on. */
+export interface ReviewDetail extends Omit<
+  ReviewSummary,
+  "thread_id" | "status"
+> {
+  thread_id: string | null
+  status: ReviewSummary["status"] | "none"
   assessment?: PublishedReviewAssessment | null
   pr: ReviewPrDetails
   checks: Array<ReviewCheckRun>

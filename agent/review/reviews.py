@@ -17,6 +17,7 @@ from urllib.parse import urljoin, urlparse
 
 import httpx2
 from fastapi import HTTPException, Response
+from langgraph_sdk.errors import NotFoundError
 from pydantic import BaseModel, ValidationError
 
 from agent.github.app import get_github_app_installation_token
@@ -614,23 +615,63 @@ async def list_review_comments(owner: str, repo: str, pr_number: int) -> dict[st
     return {"comments": comments}
 
 
-async def get_review(owner: str, repo: str, pr_number: int) -> dict[str, Any]:
-    thread_id = reviewer_thread_id(owner, repo, pr_number)
-    client = langgraph_client()
+async def _reviewer_thread_for(owner: str, repo: str, pr_number: int) -> ThreadLike | None:
+    """The reviewer thread for this PR, or ``None`` when no review has run."""
     try:
-        thread = await client.threads.get(thread_id)
-    except Exception as exc:  # noqa: BLE001
-        raise HTTPException(404, "review not found") from exc
-    if not isinstance(thread, dict):
-        raise HTTPException(404, "review not found")
-    metadata = thread_metadata(thread)
-    summary = _thread_review_summary(thread)
-    if not summary:
-        raise HTTPException(404, "review not found")
+        thread = await langgraph_client().threads.get(reviewer_thread_id(owner, repo, pr_number))
+    except NotFoundError:
+        return None
+    except Exception:  # noqa: BLE001
+        logger.warning(
+            "reviewer thread read failed",
+            exc_info=True,
+            extra={"repo_full_name": f"{owner}/{repo}", "pr_number": pr_number},
+        )
+        return None
+    return thread if isinstance(thread, dict) else None
 
+
+def _unreviewed_summary(
+    owner: str, repo: str, pr_number: int, pr_payload: dict[str, Any]
+) -> dict[str, Any]:
+    """A review summary for a PR the reviewer has never run on."""
+    author = pr_payload.get("user")
+    return {
+        "thread_id": None,
+        "owner": owner,
+        "repo": repo,
+        "full_name": f"{owner}/{repo}",
+        "number": pr_number,
+        "title": pr_payload.get("title") or f"PR #{pr_number}",
+        "url": pr_payload.get("html_url") or f"https://github.com/{owner}/{repo}/pull/{pr_number}",
+        "head_ref": (pr_payload.get("head") or {}).get("ref") or "",
+        "base_ref": (pr_payload.get("base") or {}).get("ref") or "",
+        "author": (author.get("login") or "") if isinstance(author, dict) else "",
+        "head_sha": (pr_payload.get("head") or {}).get("sha") or "",
+        "watch": False,
+        "status": "none",
+        "counts": _finding_counts([]),
+        "updated_at": pr_payload.get("updated_at"),
+    }
+
+
+async def get_review(owner: str, repo: str, pr_number: int) -> dict[str, Any]:
+    """The review page payload: the PR itself, plus review results when they exist.
+
+    The reviewer graph is optional — a PR it has never run on still renders with
+    its GitHub-sourced details, checks and diff, and no findings.
+    """
     token = await _require_app_token()
-    pr_payload = await _github_get(f"/repos/{owner}/{repo}/pulls/{pr_number}", token)
-    details = _serialize_pr_details(pr_payload if isinstance(pr_payload, dict) else {})
+    raw_pr = await _github_get(f"/repos/{owner}/{repo}/pulls/{pr_number}", token)
+    pr_payload = raw_pr if isinstance(raw_pr, dict) else {}
+    details = _serialize_pr_details(pr_payload)
+
+    thread = await _reviewer_thread_for(owner, repo, pr_number)
+    summary = _thread_review_summary(thread) if thread else None
+    metadata = thread_metadata(thread) if thread else {}
+    if not summary:
+        summary = _unreviewed_summary(owner, repo, pr_number, pr_payload)
+
     head_sha = details["head_sha"] or summary["head_sha"]
     checks = await _fetch_check_runs(owner, repo, head_sha, token)
 

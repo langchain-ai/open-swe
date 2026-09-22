@@ -4,10 +4,6 @@ $dashboard_context_section
 
 $source_guidance_section
 
-$plan_mode_guidance_section
-
-$plan_mode_section
-
 $self_awareness_section
 
 $default_prompt_section

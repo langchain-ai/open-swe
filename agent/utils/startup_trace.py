@@ -9,7 +9,7 @@ and replayed once a parent span exists.
 import logging
 import time
 from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, nullcontext
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
@@ -36,6 +36,21 @@ class _Phase:
 
 
 _PHASES: dict[str, list[_Phase]] = {}
+
+
+def _apm_span(name: str, metadata: dict[str, Any]):
+    try:
+        from ddtrace.trace import tracer  # pyright: ignore[reportMissingImports]
+    except ImportError:
+        try:
+            from ddtrace import tracer  # pyright: ignore[reportMissingImports]
+        except ImportError:
+            return nullcontext()
+    span = tracer.trace(name, service="openswe", resource=name)
+    for key, value in metadata.items():
+        if value is not None:
+            span.set_tag(f"startup.{key}", value)
+    return span
 
 
 def _open(thread_id: str, name: str, metadata: dict[str, Any]) -> _Phase | None:
@@ -74,7 +89,8 @@ async def aphase(thread_id: str | None, name: str, **metadata: Any) -> AsyncIter
         return
     phase = _open(thread_id, name, metadata)
     try:
-        yield
+        with _apm_span(f"agent.startup.{name}", {"thread_id": thread_id, **metadata}):
+            yield
     except BaseException as exc:
         _close(phase, exc)
         raise

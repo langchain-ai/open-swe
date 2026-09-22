@@ -417,3 +417,66 @@ async def test_run_lookup_failure_does_not_replace_working_status(monkeypatch) -
     client.threads.get.return_value = {"metadata": {"running_background_tasks": ["cmd-1"]}}
     await slack_thinking.clear_slack_thinking_status_if_idle(client, "thread-1", "C1", "1.0")
     set_status.assert_not_awaited()
+
+
+@pytest.mark.parametrize("provided_metadata", [False, True])
+@pytest.mark.parametrize("waiting", [False, True])
+async def test_status_sync_reuses_metadata_for_idle_settlement(
+    monkeypatch: pytest.MonkeyPatch, provided_metadata: bool, waiting: bool
+) -> None:
+    client = _status_client(_AnchorStore(), "run-1")
+    metadata: dict[str, object] = {
+        "running_background_tasks": ["cmd-1"] if waiting else [],
+        "source_context": {"slack_thread": {"channel_id": "C1", "thread_ts": "1.0"}},
+    }
+    client.threads.get.return_value = {"metadata": metadata}
+    set_status = AsyncMock()
+    monkeypatch.setattr(slack_thinking, "set_slack_thread_status", set_status)
+    await slack_thinking.sync_slack_background_status(
+        client, "thread-1", metadata=metadata if provided_metadata else None
+    )
+    assert client.threads.get.await_count == (0 if provided_metadata else 1)
+    set_status.assert_awaited_once_with(
+        "C1", "1.0", "Waiting for background tasks…" if waiting else ""
+    )
+
+
+async def test_status_sync_does_not_clear_run_started_during_settlement(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = _status_client(_AnchorStore(), "run-1")
+    client.runs.list.side_effect = [[], [], [{"run_id": "new-run"}]]
+    set_status = AsyncMock()
+    monkeypatch.setattr(slack_thinking, "set_slack_thread_status", set_status)
+    await slack_thinking.sync_slack_background_status(
+        client,
+        "thread-1",
+        metadata={"source_context": {"slack_thread": {"channel_id": "C1", "thread_ts": "1.0"}}},
+    )
+    client.threads.get.assert_not_awaited()
+    set_status.assert_not_awaited()
+
+
+@pytest.mark.parametrize("waiting", [False, True])
+async def test_status_sync_preserves_anchor_replaced_during_settlement(
+    monkeypatch: pytest.MonkeyPatch, waiting: bool
+) -> None:
+    client = AsyncMock()
+    client.runs.list.return_value = []
+    client.store.get_item.side_effect = [
+        {"value": {"message_ts": "1.0"}},
+        {"value": {"message_ts": "2.0"}},
+    ]
+    set_status = AsyncMock()
+    monkeypatch.setattr(slack_thinking, "set_slack_thread_status", set_status)
+    await slack_thinking.sync_slack_background_status(
+        client,
+        "thread-1",
+        metadata={
+            "running_background_tasks": ["cmd-1"] if waiting else [],
+            "source_context": {"slack_thread": {"channel_id": "D1", "thread_ts": "0"}},
+        },
+    )
+    client.threads.get.assert_not_awaited()
+    client.store.delete_item.assert_not_awaited()
+    set_status.assert_not_awaited()

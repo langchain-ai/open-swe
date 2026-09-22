@@ -24,6 +24,7 @@ import {
 } from "@/features/agents/lib/streamMessagesToUi"
 import {
   collectStructuredEntities,
+  isSilentSender,
   parseStructuredInput,
 } from "@/features/agents/lib/structuredInputMessages"
 import { contextTokensFromUsageMetadata } from "@/features/agents/lib/contextUsage"
@@ -804,12 +805,11 @@ function buildHumanMessage(
 ): Message | null {
   const parsed = parseStructuredInput(row.text, entities)
   if (parsed.type === "entity") return null
-  if (parsed.type === "message" && parsed.sender === "system:sender-context")
-    return null
+  if (parsed.type === "message" && isSilentSender(parsed.sender)) return null
   const entity =
     parsed.type === "message" ? entities.get(parsed.sender) : undefined
   // Our own replies reach the transcript twice: once forwarded as thread
-  // context, once as the `slack_thread_reply` call that sent them.
+  // context, once as the `slack_reply` call that sent them.
   if (entity?.senderType === "self") return null
   const text = parsed.content
   const chunks: Array<Chunk> = imageChunks(threadId, row.attachments)

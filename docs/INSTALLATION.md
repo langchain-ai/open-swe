@@ -446,8 +446,8 @@ Authorship is bound to the publishing run, not inferred from conversation text.
 Slack follow-ups carry their own requester identity whether they interrupt or
 queue behind an active run. Dashboard messages and Slack edits injected into an
 existing run do not change its identity. A collaborator must start a new run to
-publish under their own account. Plan approval, revision requests, and workflow
-push approval start runs with the authenticated actor's identity. Background-task
+publish under their own account. Workflow push approval starts a run with the
+authenticated actor's identity. Background-task
 completion runs cannot reliably identify the launching requester, so PR creation
 from user-owned threads is blocked in those runs. Start a direct user-triggered
 run to publish. System-owned and legacy unowned threads retain bot authorship.
