@@ -113,7 +113,7 @@ Open SWE calls models through [LangChain](https://python.langchain.com/) chat mo
 
 **Which model runs.** The deployment default comes from the supported-model list in `agent/dashboard/options.py` (an Anthropic model when only an Anthropic key is configured, otherwise an OpenAI one); override it with `LLM_MODEL_ID` (`provider:model`) and `LLM_REASONING_EFFORT` (`low`, `medium`, `high`, `max`), and name a `LLM_FALLBACK_MODEL_ID` for when the primary provider fails. Admins set the instance default, which each workspace can override, under **Admin → Global defaults**, and each user can pick their own model and effort under **My settings**. Model ids and their providers are described in [CUSTOMIZATION.md](CUSTOMIZATION.md).
 
-**Other API keys.** `EXA_API_KEY` (from [dashboard.exa.ai](https://dashboard.exa.ai)) enables the web search tool. `REVIEWER_OUTCOMES_DATASET` names the LangSmith dataset the reviewer records finding outcomes in (default `openswe-reviewer-outcomes`).
+**Other API keys.** `EXA_API_KEY` (from [dashboard.exa.ai](https://dashboard.exa.ai)) enables the default Exa route of the web search tool. To use Parallel's [free Search MCP](https://docs.parallel.ai/integrations/mcp/search-mcp), ask the agent to select `provider="parallel"` in `web_search`. It connects to `https://search.parallel.ai/mcp` without a Parallel account or API key. The agent may send search queries, and returned URLs when full contents are requested, to Parallel during its work. Free access is rate limited. `REVIEWER_OUTCOMES_DATASET` names the LangSmith dataset the reviewer records finding outcomes in (default `openswe-reviewer-outcomes`).
 
 ## 5. Create the Slack app
 

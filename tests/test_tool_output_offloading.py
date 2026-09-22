@@ -2,7 +2,10 @@ import importlib
 import json
 import sys
 import types
+from contextlib import asynccontextmanager
 from typing import Any
+
+from mcp.types import CallToolResult, ListToolsResult, TextContent, Tool
 
 sandbox_output = importlib.import_module("agent.tools.sandbox_output")
 web_search_tool = importlib.import_module("agent.tools.web_search")
@@ -112,3 +115,105 @@ async def test_web_search_returns_bounded_inline_results_without_sandbox(monkeyp
     assert "[results truncated: 100000/200014 chars]" in result["results"]
     assert len(result["results"]) < 100_100
     assert raw_results not in str(result)
+
+
+async def test_web_search_parallel_uses_canonical_tool_without_exa_key(monkeypatch) -> None:
+    monkeypatch.delenv("EXA_API_KEY", raising=False)
+    calls: list[tuple[str, dict[str, object]]] = []
+
+    class Session:
+        async def initialize(self) -> None:
+            pass
+
+        async def list_tools(self) -> ListToolsResult:
+            return ListToolsResult(
+                tools=[
+                    Tool(name="web_search", inputSchema={"type": "object"}),
+                    Tool(name="web_fetch", inputSchema={"type": "object"}),
+                ]
+            )
+
+        async def call_tool(self, name: str, arguments: dict[str, object]) -> CallToolResult:
+            calls.append((name, arguments))
+            if name == "web_search":
+                return CallToolResult(
+                    content=[],
+                    structuredContent={
+                        "session_id": "search-session",
+                        "results": [
+                            {"url": "https://example.com/one", "excerpts": ["One"]},
+                            {"url": "https://example.com/two", "excerpts": ["Two"]},
+                        ],
+                    },
+                )
+            return CallToolResult(
+                content=[],
+                structuredContent={
+                    "results": [{"url": "https://example.com/one", "full_content": "Full page"}],
+                    "errors": [],
+                },
+            )
+
+    @asynccontextmanager
+    async def fake_session(connection):
+        assert connection["headers"] == {"User-Agent": "open-swe"}
+        assert connection["url"] == "https://search.parallel.ai/mcp"
+        yield Session()
+
+    async def no_sandbox(*args: object) -> str:
+        raise ValueError("No sandbox in this test")
+
+    monkeypatch.setattr(web_search_tool, "create_session", fake_session)
+    monkeypatch.setattr(web_search_tool, "write_sandbox_output", no_sandbox)
+
+    result = await web_search_tool.web_search(
+        "python docs", num_results=1, include_contents=True, provider="parallel"
+    )
+
+    assert result["success"] is True
+    payload = json.loads(result["results"])
+    assert payload["results"] == [
+        {"url": "https://example.com/one", "excerpts": ["One"], "full_content": "Full page"}
+    ]
+    assert calls == [
+        ("web_search", {"objective": "python docs", "search_queries": ["python docs"]}),
+        (
+            "web_fetch",
+            {
+                "urls": ["https://example.com/one"],
+                "objective": "python docs",
+                "full_content": True,
+                "session_id": "search-session",
+            },
+        ),
+    ]
+
+
+async def test_web_search_parallel_surfaces_mcp_tool_errors(monkeypatch) -> None:
+    class Session:
+        async def initialize(self) -> None:
+            pass
+
+        async def list_tools(self) -> ListToolsResult:
+            return ListToolsResult(
+                tools=[
+                    Tool(name="web_search", inputSchema={"type": "object"}),
+                    Tool(name="web_fetch", inputSchema={"type": "object"}),
+                ]
+            )
+
+        async def call_tool(self, name: str, arguments: dict[str, object]) -> CallToolResult:
+            return CallToolResult(
+                isError=True, content=[TextContent(type="text", text="Rate limited")]
+            )
+
+    @asynccontextmanager
+    async def fake_session(connection):
+        yield Session()
+
+    monkeypatch.setattr(web_search_tool, "create_session", fake_session)
+
+    result = await web_search_tool.web_search("python docs", provider="parallel")
+
+    assert result["success"] is False
+    assert result["error"] == "RuntimeError: Rate limited"
