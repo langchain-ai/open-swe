@@ -19,6 +19,7 @@ _MIDDLEWARE_MODULES = {
     "record_run_usage": ".record_run_usage",
     "refresh_github_proxy_before_model": ".refresh_github_proxy",
     "RepairOrphanedToolCallsMiddleware": ".repair_orphaned_tool_calls",
+    "RequireUserReplyMiddleware": ".require_user_reply",
     "SanitizeFireworksMessagesMiddleware": ".sanitize_fireworks_messages",
     "SanitizeOpenAIResponsesMiddleware": ".sanitize_openai_responses",
     "SanitizeThinkingBlocksMiddleware": ".sanitize_thinking_blocks",
@@ -48,6 +49,7 @@ __all__ = [
     "PrepareRunState",
     "PullRequestCreationGuardMiddleware",
     "RepairOrphanedToolCallsMiddleware",
+    "RequireUserReplyMiddleware",
     "SanitizeFireworksMessagesMiddleware",
     "SanitizeOpenAIResponsesMiddleware",
     "SanitizeThinkingBlocksMiddleware",
@@ -83,6 +85,7 @@ if TYPE_CHECKING:
     from agent.middleware.record_run_usage import record_run_usage
     from agent.middleware.refresh_github_proxy import refresh_github_proxy_before_model
     from agent.middleware.repair_orphaned_tool_calls import RepairOrphanedToolCallsMiddleware
+    from agent.middleware.require_user_reply import RequireUserReplyMiddleware
     from agent.middleware.sanitize_fireworks_messages import SanitizeFireworksMessagesMiddleware
     from agent.middleware.sanitize_openai_responses import SanitizeOpenAIResponsesMiddleware
     from agent.middleware.sanitize_thinking_blocks import SanitizeThinkingBlocksMiddleware
