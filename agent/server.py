@@ -695,11 +695,7 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
         linear_project_id: str,
         linear_issue_number: str,
         draft_prs: bool,
-<<<<<<< HEAD
         recent_thread_context_enabled: bool,
-        plan_mode: bool,
-=======
->>>>>>> refs/rewritten/onto
         admin_workspaces: bool,
         model_selection: ModelSelectionMiddleware | None = None,
         routing_defaults: Mapping[str, tuple[str, str | None]] | None = None,
@@ -718,11 +714,7 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
         self._linear_project_id = linear_project_id
         self._linear_issue_number = linear_issue_number
         self._draft_prs = draft_prs
-<<<<<<< HEAD
         self._recent_thread_context_enabled = recent_thread_context_enabled
-        self._plan_mode = plan_mode
-=======
->>>>>>> refs/rewritten/onto
         self._admin_workspaces = admin_workspaces
         self._model_selection = model_selection
         self._routing_defaults = dict(routing_defaults or {})
@@ -1509,15 +1501,11 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
                         linear_project_id=linear_project_id,
                         linear_issue_number=linear_issue_number,
                         draft_prs=sender_draft_prs,
-<<<<<<< HEAD
                         recent_thread_context_enabled=(
                             sender_profile.get("recent_thread_context_enabled") is True
                             if sender_profile
                             else False
                         ),
-                        plan_mode=plan_mode,
-=======
->>>>>>> refs/rewritten/onto
                         admin_workspaces=admin_thread,
                         model_selection=model_selection,
                         routing_defaults=routing_defaults,
