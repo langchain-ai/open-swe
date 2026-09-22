@@ -39,7 +39,7 @@ jobs:
         with:
           ref: ${{ needs.typecheck.outputs.sha }}
           fetch-depth: 0
-      - name: Force-push the typechecked commit to prod and annotate released PRs
+      - name: Force-push the typechecked commit to prod and summarize released PRs
         run: |
           RELEASE_COMMITS="$(git log origin/prod..HEAD --format=%s)"
           export RELEASE_COMMITS
@@ -57,10 +57,10 @@ jobs:
           lines = []
           for number, subject in released.items():
               url = f"{os.environ['GITHUB_SERVER_URL']}/{os.environ['GITHUB_REPOSITORY']}/pull/{number}"
-              lines.append(f"{subject} — {url}")
+              lines.append(f"- {subject} — {url}")
           message = "\n".join(lines) or "No new PRs identified in the promoted commits."
-          message = message.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
-          print(f"::notice title=Released PRs::{message}")
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as summary:
+              summary.write(f"## Released PRs\n\n{message}\n")
           PY
 
   release-desktop-nightly:
