@@ -23,6 +23,31 @@ function run(args) {
   if (result.status !== 0) process.exit(result.status || 1);
 }
 
+// githubkit-schemas always ships every REST API version (thousands of files each), but
+// the backend only requests GITHUB_API_VERSION from agent/github/sdk.py.
+const githubkitSchemaDirs = new Set(["core", "v2022_11_28"]);
+
+function pruneGithubkitSchemas(python) {
+  const located = spawnSync(
+    python,
+    ["-c", "import githubkit_schemas; print(githubkit_schemas.__path__[0])"],
+    { encoding: "utf8" },
+  );
+  if (located.error) throw located.error;
+  if (located.status !== 0) {
+    throw new Error(`Could not locate githubkit_schemas: ${located.stderr}`);
+  }
+  const packageRoot = located.stdout.trim();
+  for (const entry of fs.readdirSync(packageRoot, { withFileTypes: true })) {
+    if (entry.isDirectory() && !githubkitSchemaDirs.has(entry.name)) {
+      fs.rmSync(path.join(packageRoot, entry.name), {
+        recursive: true,
+        force: true,
+      });
+    }
+  }
+}
+
 fs.rmSync(outputRoot, { recursive: true, force: true });
 fs.mkdirSync(outputRoot, { recursive: true });
 try {
@@ -75,6 +100,7 @@ try {
   );
   if (result.error) throw result.error;
   if (result.status !== 0) process.exit(result.status || 1);
+  pruneGithubkitSchemas(python);
   fs.cpSync(
     path.join(repositoryRoot, "langgraph.desktop.json"),
     path.join(outputRoot, "langgraph.json"),
