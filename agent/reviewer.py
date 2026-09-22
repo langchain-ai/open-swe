@@ -302,7 +302,7 @@ def _format_author_guidance(history: SteeringHistory | None) -> str:
     if history is None or not history.follow_ups:
         return ""
     messages = "\n".join(
-        f'<message author="{_safe_login(turn.author)}" at="{turn.created_at.isoformat()}">\n'
+        f'<message author="{_safe_login(turn.author)}">\n'
         f"{_escape_for_data_block(turn.text)}\n"
         "</message>"
         for turn in history.follow_ups

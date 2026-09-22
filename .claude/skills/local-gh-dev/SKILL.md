@@ -127,9 +127,14 @@ is stubbed; runs cost money and take minutes.
      -c "SELECT kind, author, summary FROM open_swe.pull_request_guidance"
    ```
 
-A local checkout has no `thread_message` rows, so anything reading a thread's human
-turns sees nothing until you seed them — `scripts/seed_local_author_guidance.py` does
-that for one PR.
+A local checkout has never run an agent, so no thread carries the messages that code
+reading a PR's human turns looks for. `scripts/seed_local_author_guidance.py` writes them
+into one thread's checkpoint and links it to a real PR.
+
+Two traps when writing thread state by hand. `update_state` refuses a thread with no
+`graph_id`, normally set by its first run — set it yourself with `threads.update`. And
+`messages` appends, so an empty list clears nothing and the server will not coerce a
+`RemoveMessage` arriving as state; re-seeding means deleting the thread and recreating it.
 
 ## Checking a page
 

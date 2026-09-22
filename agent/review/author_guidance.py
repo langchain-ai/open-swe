@@ -1,10 +1,15 @@
 """The author's steering of an Open SWE pull request, and what the reviewer made of it.
 
-Open SWE already records every human turn: ``thread_message`` holds the text and
-the ``<input-message>`` envelope that says whether a person typed it or the
-platform generated it, and ``pull_request_thread`` maps a PR back to the agent
-threads that produced it. :class:`SteeringHistory` reads those turns so they can
-be put in front of the reviewer.
+Open SWE already records every human turn: a thread's checkpointed ``messages``
+hold the text and the ``<input-message>`` envelope that says whether a person
+typed it or the platform generated it, and ``pull_request_thread`` maps a PR
+back to the agent threads that produced it. :class:`SteeringHistory` reads those
+turns so they can be put in front of the reviewer.
+
+Reading them through ``threads.get_state`` rather than the transcript tables is
+deliberate: the checkpoint is the stable record. Compaction never costs a turn,
+because deepagents keeps ``state["messages"]`` intact and tracks the summary
+beside it.
 
 Deciding which of them *changed the pull request* needs the code, not the
 conversation — a reply saying "drop the retry wrapper" only counts if the
@@ -22,12 +27,13 @@ recognises stops being shown without anything having to delete it.
 
 import hashlib
 import logging
+from collections.abc import Mapping
 from datetime import datetime
-from typing import Self
+from typing import Any, Self
 from uuid import UUID, uuid7
 
-from pydantic import BaseModel
-from sqlalchemy import ARRAY, ForeignKey, Text, bindparam, delete, func, select, text
+from pydantic import BaseModel, ConfigDict
+from sqlalchemy import ForeignKey, delete, func, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -37,12 +43,28 @@ from agent.database.orm import NOW, Base
 from agent.github.pull_requests import PullRequest
 from agent.github.repositories import Repository
 from agent.input_messages import input_message_text, message_sender_id
+from agent.utils import ttl_cache
+from agent.utils.thread_ops import langgraph_client
 
 logger = logging.getLogger(__name__)
 
 GUIDANCE_CAP = 8
 MAX_FOLLOW_UPS = 40
 MAX_MESSAGE_CHARS = 4_000
+# Long enough that one reviewer run reads each thread's state once, short enough
+# that a later run in the same process sees turns added since.
+_STEERING_CACHE_SECONDS = 300
+
+
+class _StateMessage(BaseModel):
+    """One entry of a thread's checkpointed ``messages``, as the SDK returns it."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    type: str = ""
+    # Absent on a message written straight into state rather than through a run.
+    id: str | None = None
+    content: str | list[dict[str, Any]] = ""
 
 
 class HumanTurn(BaseModel):
@@ -52,7 +74,7 @@ class HumanTurn(BaseModel):
     message_id: str
     author: str
     text: str
-    created_at: datetime
+    index: int = 0
 
 
 class SteeringHistory(BaseModel):
@@ -67,53 +89,71 @@ class SteeringHistory(BaseModel):
 
         A PR the agent produced in one pass has an opening request and nothing
         after it, which is no steering at all.
+
+        Cached briefly: a reviewer run reads this once to build its prompt and
+        again for every point it records, and each read is a whole thread state.
         """
+        return await ttl_cache.cached(
+            f"guidance:steering:{owner}/{repo}#{pr_number}".lower(),
+            _STEERING_CACHE_SECONDS,
+            lambda: cls._load(owner, repo, pr_number),
+        )
+
+    @classmethod
+    async def _load(cls, owner: str, repo: str, pr_number: int) -> Self | None:
         pull_request = await PullRequest.get(owner, repo, pr_number)
         if pull_request is None:
             return None
         thread_ids = await pull_request.linked_threads()
         if not thread_ids:
             return None
-        turns = await cls._human_turns(thread_ids)
+        turns = [turn for thread_id in thread_ids for turn in await cls._human_turns(thread_id)]
         if len(turns) < 2:
             return None
-        return cls(request=turns[0], follow_ups=turns[1:][-MAX_FOLLOW_UPS:])
+        follow_ups = [
+            turn.model_copy(update={"index": index})
+            for index, turn in enumerate(turns[1:][-MAX_FOLLOW_UPS:])
+        ]
+        return cls(request=turns[0], follow_ups=follow_ups)
 
     @staticmethod
-    async def _human_turns(thread_ids: list[str]) -> list[HumanTurn]:
-        """Every message a person typed across these threads, oldest first.
+    async def _human_turns(thread_id: str) -> list[HumanTurn]:
+        """Every message a person typed into one thread, oldest first.
 
-        ``role = 'human'`` covers platform-generated wake-ups too — they ride
+        A ``human`` message covers platform-generated wake-ups too — they ride
         the same channel — so the envelope decides: only a ``kind="human"``
-        ``<input-message>`` was typed by someone.
+        ``<input-message>`` was typed by someone. The sender id names them
+        (``github:<login>``), and the checkpoint keeps the messages in the order
+        they arrived, which is the order the steering happened.
         """
-        statement = text(
-            """
-            SELECT thread_id, message_id, text, sender, created_at
-            FROM thread_message
-            WHERE thread_id = ANY(:thread_ids) AND role = 'human'
-            ORDER BY created_at, message_id
-            """
-        ).bindparams(bindparam("thread_ids", type_=ARRAY(Text)))
-        async with postgres.snapshot_transaction() as conn:
-            rows = (await conn.execute(statement, {"thread_ids": thread_ids})).mappings().all()
+        try:
+            state = await langgraph_client().threads.get_state(thread_id)
+        except Exception:
+            logger.warning(
+                "Could not read thread state for steering history",
+                exc_info=True,
+                extra={"steering_thread_id": thread_id},
+            )
+            return []
+        values = state.get("values") if isinstance(state, Mapping) else None
+        raw = values.get("messages") if isinstance(values, Mapping) else None
         turns: list[HumanTurn] = []
-        for row in rows:
-            raw = row["text"]
-            if not isinstance(raw, str) or message_sender_id(raw, kind="human") is None:
+        for entry in raw if isinstance(raw, list) else []:
+            message = _StateMessage.model_validate(entry)
+            if message.type != "human":
                 continue
-            body = (input_message_text(raw) or "").strip()
+            sender = message_sender_id(message.content, kind="human")
+            if sender is None:
+                continue
+            body = (input_message_text(message.content) or "").strip()
             if not body:
                 continue
-            sender = row["sender"] if isinstance(row["sender"], dict) else {}
-            login = sender.get("login")
             turns.append(
                 HumanTurn(
-                    thread_id=row["thread_id"],
-                    message_id=row["message_id"],
-                    author=login if isinstance(login, str) and login else "unknown",
+                    thread_id=thread_id,
+                    message_id=message.id or "",
+                    author=sender.split(":", 1)[-1] or "unknown",
                     text=body[:MAX_MESSAGE_CHARS],
-                    created_at=row["created_at"],
                 )
             )
         return turns
@@ -185,7 +225,7 @@ class GuidancePoint(Base):
     id: Mapped[UUID] = mapped_column(primary_key=True, default_factory=uuid7)
     quote_hash: Mapped[str] = mapped_column(default="")
     author: Mapped[str] = mapped_column(server_default="", default="")
-    occurred_at: Mapped[datetime | None] = mapped_column(default=None)
+    turn_index: Mapped[int | None] = mapped_column(default=None)
     reviewer_thread_id: Mapped[str] = mapped_column(server_default="", default="")
     head_sha: Mapped[str] = mapped_column(server_default="", default="")
     recorded_at: Mapped[datetime | None] = mapped_column(server_default=NOW, init=False)
@@ -222,7 +262,7 @@ class GuidancePoint(Base):
                     PullRequest.number == pr_number,
                     cls.head_sha == latest_head,
                 )
-                .order_by(cls.occurred_at, cls.id)
+                .order_by(cls.turn_index, cls.id)
             )
             return list(rows)
 
@@ -234,7 +274,7 @@ class GuidancePoint(Base):
         summary: str,
         quote: str,
         author: str,
-        occurred_at: datetime | None,
+        turn_index: int | None,
         reviewer_thread_id: str,
         head_sha: str,
     ) -> int:
@@ -252,7 +292,7 @@ class GuidancePoint(Base):
             "quote": quote,
             "summary": summary,
             "author": author,
-            "occurred_at": occurred_at,
+            "turn_index": turn_index,
             "reviewer_thread_id": reviewer_thread_id,
             "head_sha": head_sha,
         }
@@ -272,9 +312,7 @@ class GuidancePoint(Base):
                         "author": func.coalesce(
                             func.nullif(statement.excluded.author, ""), cls.author
                         ),
-                        "occurred_at": func.coalesce(
-                            statement.excluded.occurred_at, cls.occurred_at
-                        ),
+                        "turn_index": func.coalesce(statement.excluded.turn_index, cls.turn_index),
                         # Reaffirming a point is recording it. Without this the
                         # row keeps the timestamp of the review that first saw
                         # it, and the cap can drop something this very run

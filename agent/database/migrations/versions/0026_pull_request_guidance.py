@@ -18,7 +18,7 @@ def upgrade() -> None:
             quote text NOT NULL,
             summary text NOT NULL,
             author text NOT NULL DEFAULT '',
-            occurred_at timestamptz,
+            turn_index integer,
             reviewer_thread_id text NOT NULL DEFAULT '',
             head_sha text NOT NULL DEFAULT '',
             recorded_at timestamptz NOT NULL DEFAULT clock_timestamp()
@@ -39,7 +39,7 @@ def upgrade() -> None:
     op.execute(
         """
         CREATE INDEX pull_request_guidance_pr_idx
-            ON pull_request_guidance (pull_request_id, occurred_at, id)
+            ON pull_request_guidance (pull_request_id, turn_index, id)
         """
     )
 

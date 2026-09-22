@@ -58,7 +58,7 @@ async def record_guidance(summary: str, quote: str) -> dict[str, Any]:
         summary=trimmed_summary[:MAX_SUMMARY_CHARS],
         quote=trimmed_quote[:MAX_QUOTE_CHARS],
         author=source.author if source else "",
-        occurred_at=source.created_at if source else None,
+        turn_index=source.index if source else None,
         reviewer_thread_id=thread_id,
         head_sha=head_sha,
     )
