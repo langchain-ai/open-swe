@@ -197,7 +197,9 @@ from agent.tools import (
     schedule_thread_wakeup,
     slack_add_reaction,
     slack_attach_html,
+    slack_list_channels,
     slack_move_thread,
+    slack_post_message,
     slack_read_channel_messages,
     slack_read_thread_messages,
     slack_start_new_thread,
@@ -382,6 +384,7 @@ PLAN_MODE_EXCLUDED_TOOLS: frozenset[str] = frozenset(
         "save_user_skill",
         "delete_user_skill",
         "slack_move_thread",
+        "slack_post_message",
         "slack_start_new_thread",
         "publish_workspace",
         "refresh_workspace_start",
@@ -947,7 +950,7 @@ class DesktopAgentState(FilesystemState, DeepAgentState):
     """Desktop agent state including snapshotted skill files."""
 
 
-async def get_agent(config: RunnableConfig) -> Pregel:
+async def _get_agent(config: RunnableConfig) -> Pregel:
     return await build_agent(config)
 
 
@@ -1244,7 +1247,9 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
         manage_incident,
         slack_add_reaction,
         slack_attach_html,
+        slack_list_channels,
         slack_move_thread,
+        slack_post_message,
         slack_read_thread_messages,
         slack_start_new_thread,
         slack_thread_reply,
@@ -1283,7 +1288,9 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
         manage_incident,
         slack_add_reaction,
         slack_attach_html,
+        slack_list_channels,
         slack_move_thread,
+        slack_post_message,
         slack_read_channel_messages,
         slack_read_thread_messages,
         slack_start_new_thread,
@@ -1412,112 +1419,118 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
         if credential_login is None and not local_run
         else None
     )
-    graph = create_deep_agent(
-        model=main_model,
-        system_prompt="",
-        tools=static_tools,
-        subagents=[
-            _general_purpose_subagent(
-                subagent_model,
-                tools=static_tools,
-                workspace_skills=workspace_skills,
-                dynamic_tools=dynamic_tool_middleware,
-                offloading=ConversationOffloadingMiddleware(subagent_model, agent_backend),
-                incident_middleware=IncidentMiddleware(incident_session)
-                if incident_session is not None
-                else None,
-                guard_middleware=_subagent_guard_middleware(local_run),
-                inherited_middleware_exclusions=(
-                    check_message_queue_before_model.name,
-                    *((model_selection.name,) if model_selection else ()),
-                ),
-            ),
-        ],
-        skills=skill_sources,
-        backend=agent_backend,
-        state_schema=DesktopAgentState if local_run else None,
-        middleware=cast(
-            list[AgentMiddleware[Any, Any, Any]],
-            [
-                ConversationOffloadingMiddleware(
-                    main_model, agent_backend, manual=cfg.offload_conversation is True
-                ),
-                PrepareAgentRunMiddleware(
-                    credential_login=credential_login,
-                    thread_id=thread_id,
-                    config=config,
-                    profile_login=profile_login,
-                    repo_instructions=repo_instructions,
-                    model_id=model_id,
-                    effort=profile_effort,
-                    title_model=title_model,
-                    source=source,
-                    user_email=user_email,
-                    linear_project_id=linear_project_id,
-                    linear_issue_number=linear_issue_number,
-                    draft_prs=sender_draft_prs,
-                    plan_mode=plan_mode,
-                    admin_workspaces=admin_thread,
-                    model_selection=model_selection,
-                    routing_defaults=routing_defaults,
-                ),
-                TranscriptMiddleware(),
-                *([IncidentMiddleware(incident_session)] if incident_session is not None else []),
-                *([workspace_skills] if workspace_skills else []),
-                *([dynamic_tool_middleware] if dynamic_tool_middleware else []),
-                SanitizeToolInputsMiddleware(),
-                ValidateImageReadsMiddleware(),
-                ModelCallLimitMiddleware(
-                    run_limit=incident_session.policy.max_model_calls
+    async with aphase(thread_id, "factory.graph_assembly"):
+        graph = create_deep_agent(
+            model=main_model,
+            system_prompt="",
+            tools=static_tools,
+            subagents=[
+                _general_purpose_subagent(
+                    subagent_model,
+                    tools=static_tools,
+                    workspace_skills=workspace_skills,
+                    dynamic_tools=dynamic_tool_middleware,
+                    offloading=ConversationOffloadingMiddleware(subagent_model, agent_backend),
+                    incident_middleware=IncidentMiddleware(incident_session)
                     if incident_session is not None
-                    else MODEL_CALL_RECURSION_LIMIT,
-                    exit_behavior="end",
+                    else None,
+                    guard_middleware=_subagent_guard_middleware(local_run),
+                    inherited_middleware_exclusions=(
+                        check_message_queue_before_model.name,
+                        *((model_selection.name,) if model_selection else ()),
+                    ),
                 ),
-                ToolErrorMiddleware(),
-                ExcludeToolsMiddleware(
-                    excluded=(
-                        STOP_SUMMARY_EXCLUDED_TOOLS
-                        if stop_summary_mode
-                        else SLACK_ASK_EXCLUDED_TOOLS
-                        if slack_ask_mode
-                        else DEEP_AGENT_EXCLUDED_TOOLS | INCIDENT_AUTOMATIC_EXCLUDED_TOOLS
-                        if incident_automatic
-                        else DEEP_AGENT_EXCLUDED_TOOLS
-                    )
-                ),
-                SubdirAgentsReadMiddleware(),
-                ToolRetryMiddleware(
-                    max_retries=2,
-                    tools=["task"],
-                    retry_on=task_retry_on,
-                    on_failure=task_on_failure,
-                    initial_delay=1.0,
-                    max_delay=10.0,
-                ),
-                *([] if local_run else [PullRequestCreationGuardMiddleware()]),
-                WorkflowPushGuardMiddleware(),
-                refresh_github_proxy_before_model,
-                *([] if stop_summary_mode else [check_message_queue_before_model]),
-                TimeoutWrapupMiddleware(),
-                notify_step_limit_reached,
-                record_run_usage,
-                *([model_selection] if model_selection else []),
-                *fallback_middleware,
-                PlanModeMiddleware(
-                    excluded=PLAN_MODE_EXCLUDED_TOOLS | frozenset(tool.name for tool in mcp_tools),
-                    initial=plan_mode,
-                ),
-                SanitizeFireworksMessagesMiddleware(),
-                SanitizeOpenAIResponsesMiddleware(),
-                SanitizeThinkingBlocksMiddleware(),
-                StableToolResultOrderMiddleware(),
-                ModelErrorMiddleware(),
-                # Innermost, so the deadline covers the provider call itself and a
-                # timeout escalates outward to the fallback model.
-                ModelCallTimeoutMiddleware(),
             ],
-        ),
-    ).with_config(bindable_config(config))
+            skills=skill_sources,
+            backend=agent_backend,
+            state_schema=DesktopAgentState if local_run else None,
+            middleware=cast(
+                list[AgentMiddleware[Any, Any, Any]],
+                [
+                    ConversationOffloadingMiddleware(
+                        main_model, agent_backend, manual=cfg.offload_conversation is True
+                    ),
+                    PrepareAgentRunMiddleware(
+                        credential_login=credential_login,
+                        thread_id=thread_id,
+                        config=config,
+                        profile_login=profile_login,
+                        repo_instructions=repo_instructions,
+                        model_id=model_id,
+                        effort=profile_effort,
+                        title_model=title_model,
+                        source=source,
+                        user_email=user_email,
+                        linear_project_id=linear_project_id,
+                        linear_issue_number=linear_issue_number,
+                        draft_prs=sender_draft_prs,
+                        plan_mode=plan_mode,
+                        admin_workspaces=admin_thread,
+                        model_selection=model_selection,
+                        routing_defaults=routing_defaults,
+                    ),
+                    TranscriptMiddleware(),
+                    *(
+                        [IncidentMiddleware(incident_session)]
+                        if incident_session is not None
+                        else []
+                    ),
+                    *([workspace_skills] if workspace_skills else []),
+                    *([dynamic_tool_middleware] if dynamic_tool_middleware else []),
+                    SanitizeToolInputsMiddleware(),
+                    ValidateImageReadsMiddleware(),
+                    ModelCallLimitMiddleware(
+                        run_limit=incident_session.policy.max_model_calls
+                        if incident_session is not None
+                        else MODEL_CALL_RECURSION_LIMIT,
+                        exit_behavior="end",
+                    ),
+                    ToolErrorMiddleware(),
+                    ExcludeToolsMiddleware(
+                        excluded=(
+                            STOP_SUMMARY_EXCLUDED_TOOLS
+                            if stop_summary_mode
+                            else SLACK_ASK_EXCLUDED_TOOLS
+                            if slack_ask_mode
+                            else DEEP_AGENT_EXCLUDED_TOOLS | INCIDENT_AUTOMATIC_EXCLUDED_TOOLS
+                            if incident_automatic
+                            else DEEP_AGENT_EXCLUDED_TOOLS
+                        )
+                    ),
+                    SubdirAgentsReadMiddleware(),
+                    ToolRetryMiddleware(
+                        max_retries=2,
+                        tools=["task"],
+                        retry_on=task_retry_on,
+                        on_failure=task_on_failure,
+                        initial_delay=1.0,
+                        max_delay=10.0,
+                    ),
+                    *([] if local_run else [PullRequestCreationGuardMiddleware()]),
+                    WorkflowPushGuardMiddleware(),
+                    refresh_github_proxy_before_model,
+                    *([] if stop_summary_mode else [check_message_queue_before_model]),
+                    TimeoutWrapupMiddleware(),
+                    notify_step_limit_reached,
+                    record_run_usage,
+                    *([model_selection] if model_selection else []),
+                    *fallback_middleware,
+                    PlanModeMiddleware(
+                        excluded=PLAN_MODE_EXCLUDED_TOOLS
+                        | frozenset(tool.name for tool in mcp_tools),
+                        initial=plan_mode,
+                    ),
+                    SanitizeFireworksMessagesMiddleware(),
+                    SanitizeOpenAIResponsesMiddleware(),
+                    SanitizeThinkingBlocksMiddleware(),
+                    StableToolResultOrderMiddleware(),
+                    ModelErrorMiddleware(),
+                    # Innermost, so the deadline covers the provider call itself and a
+                    # timeout escalates outward to the fallback model.
+                    ModelCallTimeoutMiddleware(),
+                ],
+            ),
+        ).with_config(bindable_config(config))
     if tool_surface is not None:
         tool_surface.graph = graph
         tool_surface.dynamic = dynamic_tool_middleware
@@ -1536,6 +1549,15 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
     elif tools_base_url() and ENV.DASHBOARD_JWT_SECRET.optional() and not local_run:
         await save_tool_context(thread_id, config)
     return graph
+
+
+async def get_agent(config: RunnableConfig) -> Pregel:
+    configurable = (config or {}).get("configurable") or {}
+    thread_id = configurable.get("thread_id")
+    if not isinstance(thread_id, str):
+        return await _get_agent(config)
+    async with aphase(thread_id, "factory.total"):
+        return await _get_agent(config)
 
 
 # langgraph.json entrypoint. Runs trace into LANGSMITH_PROJECT like everything else.

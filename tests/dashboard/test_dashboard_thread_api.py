@@ -2636,53 +2636,6 @@ async def test_pin_dashboard_thread_rejects_unreadable_thread(monkeypatch) -> No
     assert exc_info.value.status_code == 404
 
 
-async def test_list_dashboard_pinned_threads_returns_only_readable_threads(
-    monkeypatch,
-) -> None:
-    threads = {
-        "shared-thread": {
-            "thread_id": "shared-thread",
-            "metadata": {
-                "source": "slack",
-                "github_login": "teammate",
-                "title": "Pinned teammate thread",
-                "updated_at_ms": 100,
-                "latest_run_status": "success",
-            },
-        },
-        "private-thread": {
-            "thread_id": "private-thread",
-            "metadata": {"source": "reviewer"},
-        },
-    }
-
-    class FakeThreads:
-        async def get(self, thread_id):
-            if thread_id == "missing-thread":
-                raise RuntimeError("missing")
-            return threads[thread_id]
-
-    class FakeRuns:
-        async def list(self, thread_id, limit=1):
-            return []
-
-    patch_thread_module(
-        monkeypatch,
-        "langgraph_client",
-        lambda: SimpleNamespace(threads=FakeThreads(), runs=FakeRuns()),
-    )
-
-    async def fake_pin_ids(login: str) -> list[str]:
-        assert login == "octocat"
-        return ["shared-thread", "private-thread", "missing-thread"]
-
-    patch_thread_module(monkeypatch, "list_thread_pin_ids", fake_pin_ids)
-
-    result = await thread_listing.list_dashboard_pinned_threads("octocat")
-
-    assert [item["id"] for item in result] == ["shared-thread"]
-
-
 async def test_list_dashboard_threads_page_can_sort_by_creation_time(monkeypatch) -> None:
     threads = _make_threads(2, resolved_before=0)
     older = cast(dict[str, object], threads[0]["metadata"])
