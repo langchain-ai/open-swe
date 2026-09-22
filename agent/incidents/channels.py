@@ -72,7 +72,7 @@ async def slack_person(user_id: str) -> PersonIdentity:
     """Identity for any human in the channel. Turning an incident off needs nothing more."""
     user = await get_slack_user_info(user_id)
     profile = (user or {}).get("profile")
-    person: PersonIdentity = {"id": f"slack:{user_id}", "platform": "slack"}
+    person: PersonIdentity = {"id": f"slack:{user_id}"}
     name = (
         (profile.get("display_name") or profile.get("real_name"))
         if isinstance(profile, dict)

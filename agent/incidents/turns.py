@@ -16,7 +16,6 @@ from agent.input_messages import (
     PersonIdentity,
     SystemIdentity,
     human_input,
-    person_introduction,
     system_input,
     system_introduction,
 )
@@ -188,13 +187,9 @@ def _input(
                 ),
             ]
         }
-    person: PersonIdentity = requester or {
-        "id": "system:incidents-dashboard",
-        "platform": "open-swe",
-    }
+    person: PersonIdentity = requester or {"id": "system:incidents-dashboard"}
     return {
         "messages": [
-            person_introduction(person),
             human_input(
                 request,
                 {

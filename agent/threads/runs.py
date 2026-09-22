@@ -64,6 +64,7 @@ from agent.transcript.events import (
     TurnRequested,
 )
 from agent.transcript.turns import recorded_turn_id
+from agent.users import User
 from agent.utils.dashboard_handoff import DASHBOARD_HANDOFF_BODY
 from agent.utils.json_types import JsonObject, as_thread_dict, thread_metadata
 from agent.utils.thread_ops import langgraph_client
@@ -667,17 +668,13 @@ async def _enrich_run_start_command(
                     }
         except Exception:
             logger.debug("Could not read dashboard thread history for %s", thread_id, exc_info=True)
-    person: PersonIdentity = {
-        "id": sender_id,
-        "platform": "github",
-        "github_login": login,
-    }
+    person: PersonIdentity = {"id": sender_id, "github_login": login}
     if email:
         person["email"] = email
+    sender_id = (await User.canonical_person(person))["id"]
     structured = build_input_messages(
         content,
         {"sender_id": sender_id, "surface": "web", "kind": "human"},
-        people=[person],
         systems=(
             [
                 {

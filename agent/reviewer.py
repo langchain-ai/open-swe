@@ -63,6 +63,7 @@ from agent.middleware import (
 from agent.middleware.prepare_run import PrepareRunState
 from agent.middleware.sandbox_circuit_breaker import post_sandbox_unreachable_notification
 from agent.prompts import apply_tool_descriptions, load_prompt, render_prompt
+from agent.review.author_guidance import GUIDANCE_CAP, SteeringHistory
 from agent.review.diff import (
     changed_files,
     compute_diff_line_set,
@@ -99,6 +100,7 @@ from agent.tools import (
     http_request,
     list_findings,
     publish_review,
+    record_guidance,
     reply_to_finding_thread,
     resolve_finding_thread,
     update_finding,
@@ -295,6 +297,19 @@ def _format_pr_overview(pr_title: str, pr_body: str) -> str:
     return render_prompt("reviewer/pr-overview.md", title=safe_title, body=safe_body)
 
 
+def _format_author_guidance(history: SteeringHistory | None) -> str:
+    """Render the author's follow-up messages as an untrusted-data block."""
+    if history is None or not history.follow_ups:
+        return ""
+    messages = "\n".join(
+        f'<message author="{_safe_login(turn.author)}">\n'
+        f"{_escape_for_data_block(turn.text)}\n"
+        "</message>"
+        for turn in history.follow_ups
+    )
+    return render_prompt("reviewer/author-guidance.md", messages=messages)
+
+
 def _build_first_review_context(
     *,
     pr_url: str,
@@ -430,6 +445,8 @@ _DATA_BLOCK_WRAPPER_TAGS = (
     "body",
     "pr_overview",
     "title",
+    "author_messages",
+    "message",
 )
 _CLOSING_TAG_RE = re.compile(
     r"</\s*(" + "|".join(_DATA_BLOCK_WRAPPER_TAGS) + r")\s*>",
@@ -813,6 +830,21 @@ class PrepareReviewerRunMiddleware(BasePrepareRunMiddleware):
                 )
                 return ""
 
+        async def _fetch_author_guidance_block() -> str:
+            if reviewer_eval or not repo_owner or not repo_name or not isinstance(pr_number, int):
+                return ""
+            try:
+                history = await SteeringHistory.load(repo_owner, repo_name, pr_number)
+            except Exception:
+                logger.exception(
+                    "Failed to load author steering history for %s/%s#%s; continuing without it",
+                    repo_owner,
+                    repo_name,
+                    pr_number,
+                )
+                return ""
+            return _format_author_guidance(history)
+
         async def _fetch_repo_style_prompt() -> str | None:
             if not repo_owner or not repo_name:
                 return None
@@ -837,6 +869,7 @@ class PrepareReviewerRunMiddleware(BasePrepareRunMiddleware):
         diff_context_task = asyncio.create_task(_fetch_diff_context())
         pr_overview_task = asyncio.create_task(_fetch_pr_overview())
         existing_threads_task = asyncio.create_task(_fetch_existing_threads_block())
+        author_guidance_task = asyncio.create_task(_fetch_author_guidance_block())
         repo_style_task = asyncio.create_task(_fetch_repo_style_prompt())
         agents_md_task = asyncio.create_task(_fetch_agents_md_context())
         org_guidelines_task = asyncio.create_task(_cached_org_guidelines(cfg.workspace_slug))
@@ -859,6 +892,7 @@ class PrepareReviewerRunMiddleware(BasePrepareRunMiddleware):
         )
         pr_overview = await pr_overview_task
         existing_threads_block = await existing_threads_task
+        author_guidance_block = await author_guidance_task
         repo_style_prompt = await repo_style_task
         agents_md_content = await agents_md_task
         scoped_agents_md = await scoped_agents_md_task
@@ -928,6 +962,8 @@ class PrepareReviewerRunMiddleware(BasePrepareRunMiddleware):
         )
         if review_context:
             system_prompt = f"{system_prompt}\n\n{review_context}"
+        if author_guidance_block:
+            system_prompt = f"{system_prompt}\n\n{author_guidance_block}"
         if skill_sources:
             skill_middleware = SkillsMiddleware(backend=sandbox_backend, sources=skill_sources)
             skill_update = (
@@ -1063,13 +1099,15 @@ async def get_reviewer_agent(config: RunnableConfig) -> Pregel:
                 add_finding,
                 update_finding,
                 list_findings,
+                record_guidance,
                 publish_review,
                 resolve_finding_thread,
                 reply_to_finding_thread,
                 web_search,
                 fetch_url,
                 http_request,
-            ]
+            ],
+            {"record_guidance": {"cap": GUIDANCE_CAP}},
         ),
         subagents=[_reviewer_subagent(reviewer_subagent_model)],
         backend=backend,
