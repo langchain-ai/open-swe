@@ -1,0 +1,72 @@
+diff --git a/dist/cjs/util.js b/dist/cjs/util.js
+index 77e64b56872bc65bcb0f60ecfbec84eb3da02c6f..b4a0f324077f1128c4faa0e432351afb57d374b8 100644
+--- a/dist/cjs/util.js
++++ b/dist/cjs/util.js
+@@ -101,8 +101,30 @@ exports.detectElectronPlatform = detectElectronPlatform;
+ /**
+  * This function returns a promise resolving the file path if file binary.
+  */
++// Bounded so walking large bundles does not exhaust file descriptors (EMFILE).
++const MAX_CONCURRENT_BINARY_CHECKS = 64;
++let activeBinaryChecks = 0;
++const pendingBinaryChecks = [];
++async function isBinaryFileBounded(filePath) {
++    if (activeBinaryChecks >= MAX_CONCURRENT_BINARY_CHECKS) {
++        await new Promise((resolve) => pendingBinaryChecks.push(resolve));
++    }
++    else {
++        activeBinaryChecks++;
++    }
++    try {
++        return await (0, isbinaryfile_1.isBinaryFile)(filePath);
++    }
++    finally {
++        const next = pendingBinaryChecks.shift();
++        if (next)
++            next();
++        else
++            activeBinaryChecks--;
++    }
++}
+ async function getFilePathIfBinary(filePath) {
+-    if (await (0, isbinaryfile_1.isBinaryFile)(filePath)) {
++    if (await isBinaryFileBounded(filePath)) {
+         return filePath;
+     }
+     return null;
+diff --git a/dist/esm/util.js b/dist/esm/util.js
+index d3f66d54b1a88e7410d78affe17de87302db02a3..cc3244d79872c43a98232abc8504c982f856af09 100644
+--- a/dist/esm/util.js
++++ b/dist/esm/util.js
+@@ -67,8 +67,30 @@ export async function detectElectronPlatform(opts) {
+ /**
+  * This function returns a promise resolving the file path if file binary.
+  */
++// Bounded so walking large bundles does not exhaust file descriptors (EMFILE).
++const MAX_CONCURRENT_BINARY_CHECKS = 64;
++let activeBinaryChecks = 0;
++const pendingBinaryChecks = [];
++async function isBinaryFileBounded(filePath) {
++    if (activeBinaryChecks >= MAX_CONCURRENT_BINARY_CHECKS) {
++        await new Promise((resolve) => pendingBinaryChecks.push(resolve));
++    }
++    else {
++        activeBinaryChecks++;
++    }
++    try {
++        return await isBinaryFile(filePath);
++    }
++    finally {
++        const next = pendingBinaryChecks.shift();
++        if (next)
++            next();
++        else
++            activeBinaryChecks--;
++    }
++}
+ async function getFilePathIfBinary(filePath) {
+-    if (await isBinaryFile(filePath)) {
++    if (await isBinaryFileBounded(filePath)) {
+         return filePath;
+     }
+     return null;
