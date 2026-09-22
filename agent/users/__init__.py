@@ -1,6 +1,7 @@
 """People and the provider identities they sign in with."""
 
 from agent.users.authorization import UnauthorizedUser, is_authorized_github_login
+from agent.users.display_name_backfill import persist_display_name
 from agent.users.models import Provider, User, UserIdentity
 
 __all__ = [
@@ -9,4 +10,5 @@ __all__ = [
     "User",
     "UserIdentity",
     "is_authorized_github_login",
+    "persist_display_name",
 ]

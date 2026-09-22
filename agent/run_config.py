@@ -160,6 +160,8 @@ class RunConfig(BaseModel):
     admin_thread: bool | None = None
     stop_summary: bool | None = None
     slack_ask: bool | None = None
+    # Slash command callback the `/oswe` acknowledgement is replaced through.
+    slack_ask_response_url: str | None = None
     # Set on a private thread whose transcript was copied from a collaborative one.
     continued_from_thread_id: str | None = None
 

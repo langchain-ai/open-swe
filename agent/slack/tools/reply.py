@@ -1,7 +1,7 @@
 import json
 import logging
 from collections.abc import Mapping
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 
 from langgraph.config import get_config
 from langgraph.prebuilt import InjectedState
@@ -12,9 +12,11 @@ from agent.slack.client import (
     get_active_slack_thread,
     post_slack_ephemeral_reply,
     post_slack_thread_reply_with_ts,
+    replace_slack_command_message,
     slack_thread_mutation_lock,
     store_slack_message_run_mapping,
 )
+from agent.slack.events import claim_slack_event
 from agent.slack.markdown import markdown_to_mrkdwn
 from agent.slack.orphan import (
     dashboard_handoff_message,
@@ -31,13 +33,14 @@ logger = logging.getLogger(__name__)
 _NATIVE_MARKDOWN_MAX_CHARS = 12000
 
 
-async def slack_thread_reply(
+async def slack_reply(
     message: str,
+    response_type: Literal["progress", "final"],
     options: list[str] | None = None,
     blocks: list[dict[str, Any]] | None = None,
     state: Annotated[dict[str, Any] | None, InjectedState] = None,
 ) -> dict[str, Any]:
-    """Implement the `slack_thread_reply` tool."""
+    """Implement the `slack_reply` tool."""
     config = get_config()
     cfg = RunConfig.from_config(config)
     run_id = _current_run_id(config)
@@ -153,16 +156,32 @@ async def _ephemeral_reply(
     if not message.strip():
         return {"success": False, "error": "Message cannot be empty"}
     native_markdown = blocks is None and len(message) <= _NATIVE_MARKDOWN_MAX_CHARS
-    if blocks is None and not native_markdown:
-        message = markdown_to_mrkdwn(message)
+    if blocks is None:
+        if native_markdown:
+            blocks = _build_option_blocks(message, None)
+        else:
+            message = markdown_to_mrkdwn(message)
+    usage = summarize_run_usage(state)
+    response_url = cfg.slack_ask_response_url or ""
+    if response_url and await claim_slack_event(f"slack-ask-answer:{cfg.thread_id}"):
+        if await replace_slack_command_message(
+            response_url,
+            message,
+            blocks=blocks,
+            usage=usage,
+            agent_thread_id=cfg.thread_id,
+        ):
+            return {"success": True}
+        logger.warning(
+            "Could not replace the Slack slash command acknowledgement",
+            extra={"agent_thread_id": cfg.thread_id},
+        )
     posted = await post_slack_ephemeral_reply(
         channel_id,
         user_id,
         message,
-        blocks=blocks
-        if blocks is not None
-        else (_build_option_blocks(message, None) if native_markdown else None),
-        usage=summarize_run_usage(state),
+        blocks=blocks,
+        usage=usage,
         agent_thread_id=cfg.thread_id,
     )
     if not posted:

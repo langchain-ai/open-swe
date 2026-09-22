@@ -12,7 +12,7 @@ if model_id == DEFAULT_LLM_MODEL_ID:
 return create_deep_agent(
     model=make_model(model_id, **model_kwargs),
     system_prompt=construct_system_prompt(...),
-    tools=[http_request, fetch_url, slack_thread_reply],
+    tools=[http_request, fetch_url, slack_reply],
     backend=sandbox_backend,
     middleware=[
         ToolErrorMiddleware(),
@@ -228,7 +228,7 @@ Open SWE ships with a small set of custom tools on top of the built-in Deep Agen
 | `fetch_url` | `agent/tools/fetch_url.py` | Fetch web pages as markdown |
 | `http_request` | `agent/tools/http_request.py` | HTTP API calls |
 | `slack_attach_html` | `agent/slack/tools/attach_html.py` | Attach sandbox HTML previews to Slack threads |
-| `slack_thread_reply` | `agent/slack/tools/thread_reply.py` | Reply in Slack threads |
+| `slack_reply` | `agent/slack/tools/reply.py` | Reply to the person who asked, in a Slack thread or ephemerally |
 
 ### Workspace MCP servers
 
@@ -444,14 +444,14 @@ def datadog_search(query: str, time_range: str = "1h") -> dict[str, Any]:
 Then register it in `agent/server.py`:
 
 ```python
-from .tools import fetch_url, http_request, slack_thread_reply
+from .tools import fetch_url, http_request, slack_reply
 from .tools.datadog_search import datadog_search
 
 return create_deep_agent(
     ...
     tools=[
         http_request, fetch_url,
-        slack_thread_reply,
+        slack_reply,
         datadog_search,  # new tool
     ],
     ...
@@ -462,7 +462,7 @@ The agent will automatically see the tool's name, docstring, and parameter types
 
 ### Removing tools
 
-If you don't use Slack, remove `slack_thread_reply` from the tools list. If you don't need web fetching, remove `fetch_url`.
+If you don't use Slack, remove `slack_reply` from the tools list. If you don't need web fetching, remove `fetch_url`.
 
 ### Conditional tools
 
@@ -473,7 +473,7 @@ base_tools = [http_request, fetch_url]
 source = config["configurable"].get("source")
 
 if source == "slack":
-    tools = [*base_tools, slack_thread_reply]
+    tools = [*base_tools, slack_reply]
 else:
     tools = base_tools
 

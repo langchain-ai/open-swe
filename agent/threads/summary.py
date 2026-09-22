@@ -491,7 +491,11 @@ async def _latest_run_info(client: Any, thread_id: str) -> tuple[str | None, str
 
 
 async def _refresh_latest_run_metadata(
-    client: Any, thread: ThreadLike, *, timings: dict[str, float] | None = None
+    client: Any,
+    thread: ThreadLike,
+    *,
+    timings: dict[str, float] | None = None,
+    return_minimal: bool = False,
 ) -> tuple[ThreadLike, str | None, str | None]:
     record = timings if timings is not None else {}
     thread_id = thread.get("thread_id") or thread.get("id")
@@ -508,7 +512,11 @@ async def _refresh_latest_run_metadata(
     if metadata_update:
         with phase(record, "thread_update"):
             try:
-                await client.threads.update(thread_id=thread_id, metadata=metadata_update)
+                await client.threads.update(
+                    thread_id=thread_id,
+                    metadata=metadata_update,
+                    **({"return_minimal": True} if return_minimal else {}),
+                )
             except Exception:  # noqa: BLE001
                 logger.debug(
                     "Could not persist latest run metadata for %s", thread_id, exc_info=True
