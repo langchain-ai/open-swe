@@ -5,6 +5,7 @@ import shlex
 from typing import Any
 
 from langgraph_sdk import get_client
+from langgraph_sdk.client import LangGraphClient
 
 from agent.dispatch import dispatch_agent_run
 from agent.input_messages import InputMessageContext, SystemIdentity
@@ -23,6 +24,9 @@ logger = logging.getLogger(__name__)
 
 CRON_KIND = "background_tasks"
 CRON_SCHEDULE = "* * * * *"
+# The server drops a `thread_id` key from cron metadata, so crons are tagged with this instead.
+CRON_THREAD_KEY = "agent_thread_id"
+_CRON_PAGE_SIZE = 1000
 TERMINAL_STATES = {"completed", "failed", "timed_out", "stopped", "lost"}
 MONITOR_LOCK = f"{TASK_ROOT}/monitor.lock"
 _BACKGROUND_TASK_SENDER: SystemIdentity = {
@@ -37,14 +41,14 @@ _BACKGROUND_TASK_CONTEXT: InputMessageContext = {
 }
 
 
-def _client():
+def _client() -> LangGraphClient:
     return get_client(url=langgraph_url())
 
 
 async def ensure_background_task_cron(thread_id: str) -> str:
     client = _client()
     crons = await client.crons.search(
-        metadata={"kind": CRON_KIND, "thread_id": thread_id},
+        metadata={"kind": CRON_KIND, CRON_THREAD_KEY: thread_id},
         limit=10,
     )
     ids = [
@@ -61,7 +65,7 @@ async def ensure_background_task_cron(thread_id: str) -> str:
         schedule=CRON_SCHEDULE,
         input={"task": CRON_KIND, "thread_id": thread_id},
         config={"configurable": {"task": CRON_KIND, "thread_id": thread_id}},
-        metadata={"kind": CRON_KIND, "thread_id": thread_id},
+        metadata={"kind": CRON_KIND, CRON_THREAD_KEY: thread_id},
         timezone="UTC",
     )
     cron_id = cron.get("cron_id") if isinstance(cron, dict) else getattr(cron, "cron_id", None)
@@ -70,16 +74,40 @@ async def ensure_background_task_cron(thread_id: str) -> str:
     return cron_id
 
 
+async def _legacy_cron_ids(client: LangGraphClient, thread_id: str) -> list[str]:
+    """Crons created before CRON_THREAD_KEY carry the thread only in their payload.
+
+    Remove once no background-task cron lacks CRON_THREAD_KEY.
+    """
+    ids: list[str] = []
+    offset = 0
+    while True:
+        page = await client.crons.search(
+            metadata={"kind": CRON_KIND}, limit=_CRON_PAGE_SIZE, offset=offset
+        )
+        for cron in page:
+            metadata = cron.get("metadata")
+            if isinstance(metadata, dict) and CRON_THREAD_KEY in metadata:
+                continue
+            payload = cron.get("payload")
+            payload_input = payload.get("input") if isinstance(payload, dict) else None
+            if isinstance(payload_input, dict) and payload_input.get("thread_id") == thread_id:
+                ids.append(cron["cron_id"])
+        if len(page) < _CRON_PAGE_SIZE:
+            return ids
+        offset += _CRON_PAGE_SIZE
+
+
 async def _delete_crons(thread_id: str) -> None:
     client = _client()
     crons = await client.crons.search(
-        metadata={"kind": CRON_KIND, "thread_id": thread_id},
+        metadata={"kind": CRON_KIND, CRON_THREAD_KEY: thread_id},
         limit=10,
     )
-    for cron in crons or []:
-        cron_id = cron.get("cron_id") if isinstance(cron, dict) else None
-        if isinstance(cron_id, str):
-            await client.crons.delete(cron_id)
+    ids = [cron["cron_id"] for cron in crons]
+    ids.extend(await _legacy_cron_ids(client, thread_id))
+    for cron_id in ids:
+        await client.crons.delete(cron_id)
 
 
 def _notification(task: dict[str, Any]) -> str:
