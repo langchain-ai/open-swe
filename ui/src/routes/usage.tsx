@@ -1112,6 +1112,12 @@ function PRMergeRateCells({
             {cohort.distance_sample_size === 1 ? "" : "s"} measured
           </TooltipPopup>
         </Tooltip>
+        {(cohort.distance_sample_size ?? 0) > 0 &&
+          (cohort.distance_sample_size ?? 0) < 5 && (
+            <div className="text-xs text-amber-600 dark:text-amber-400">
+              Small sample
+            </div>
+          )}
       </td>
       <td className="px-4 py-3 text-right text-sm font-semibold tabular-nums">
         {cohort.mature_cohort_merge_share == null

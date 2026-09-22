@@ -176,6 +176,46 @@ it("shows delivery lag separately from suppression, then refreshes to a populate
   client.clear()
 })
 
+it.each([0, 1, 4, 5])(
+  "flags only small nonempty distance samples without inline counts (%i measured)",
+  async (samples) => {
+    vi.spyOn(api, "prMergeRateByModel").mockResolvedValue({
+      ...captured,
+      status: "ready",
+      cohorts: [
+        {
+          model_id: "sample-model",
+          model_attribution_quality: "configured",
+          merged: 8,
+          closed_without_merge: 0,
+          mature_pending: 0,
+          waiting: 0,
+          cohort_size: 8,
+          decided_denominator: 8,
+          decided_merge_rate: 1,
+          mature_denominator: 8,
+          mature_cohort_merge_share: 1,
+          efforts: [],
+          median_distance_basis_points: samples ? 1750 : null,
+          distance_sample_size: samples,
+          avg_merge_seconds: null,
+          avg_delivery_seconds: null,
+        },
+      ],
+    })
+    const client = mountReport()
+    const row = (await screen.findByText("sample-model")).closest("tr")!
+    expect(
+      within(row).getByRole("button", { name: samples ? "17.5%" : "—" })
+    ).toBeTruthy()
+    expect(within(row).queryByText(/measured \/ .* merged/)).toBeNull()
+    expect(within(row).queryByText("Small sample") !== null).toBe(
+      samples > 0 && samples < 5
+    )
+    client.clear()
+  }
+)
+
 it("sorts PR outcomes before pagination and toggles column direction", async () => {
   const cohort = (model: string, size: number): PRMergeRateCohort => ({
     model_id: model,
@@ -284,7 +324,7 @@ it.each([
       "3",
       "1",
       "3",
-      "17.5%",
+      "17.5%Small sample",
       "60%",
       "2h",
       "1d",
