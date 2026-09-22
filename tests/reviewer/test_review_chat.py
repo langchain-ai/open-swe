@@ -1,5 +1,6 @@
 import asyncio
 import importlib
+import json
 import sys
 from types import SimpleNamespace
 from typing import Any
@@ -543,6 +544,48 @@ async def test_proxy_history_normalizes_missing_thread(monkeypatch) -> None:
     )
     assert status == 200
     assert content == b"[]"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("request_body", "expected"),
+    [
+        (b"{}", {"limit": 5}),
+        (b'{"limit": 1000}', {"limit": 5}),
+        (b'{"limit": 2}', {"limit": 2}),
+        (b'{"limit": 20, "before": "cursor"}', {"limit": 20, "before": "cursor"}),
+        (
+            b'{"limit": 20, "metadata": {"run_id": "run-1"}}',
+            {"limit": 20, "metadata": {"run_id": "run-1"}},
+        ),
+    ],
+)
+async def test_proxy_history_bounds_discovery_and_preserves_pagination(
+    monkeypatch: pytest.MonkeyPatch, request_body: bytes, expected: dict[str, object]
+) -> None:
+    async def passthrough(
+        method: str, thread_id: str, suffix: str, body: bytes, content_type: str
+    ) -> tuple[int, bytes, str]:
+        return 200, body, "application/json"
+
+    _patch_thread_metadata(
+        monkeypatch,
+        {
+            "kind": "review_chat",
+            "github_login": "octocat",
+            "repo_owner": "acme",
+            "repo_name": "repo",
+            "pr_number": 7,
+        },
+    )
+    monkeypatch.setattr(review_chat_api, "_proxy_passthrough", passthrough)
+
+    status, body, _ = await review_chat_api.proxy_review_chat_history(
+        "acme", "repo", 7, "octocat", "ct-1", request_body
+    )
+
+    assert status == 200
+    assert json.loads(body) == expected
 
 
 @pytest.mark.asyncio

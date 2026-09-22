@@ -17,7 +17,7 @@ from agent.utils.background_task_state import (
     RUNNING_BACKGROUND_TASKS_KEY,
     update_background_task_state,
 )
-from agent.utils.thread_ops import langgraph_url
+from agent.utils.thread_ops import langgraph_url, read_thread_fields
 
 logger = logging.getLogger(__name__)
 
@@ -155,7 +155,7 @@ async def _list_tasks(backend: Any) -> list[dict[str, Any]]:
 
 async def monitor_background_tasks(thread_id: str) -> dict[str, Any]:
     client = _client()
-    thread = await client.threads.get(thread_id)
+    thread = await read_thread_fields(client, thread_id, ["metadata"])
     metadata = thread.get("metadata") if isinstance(thread, dict) else None
     metadata = metadata if isinstance(metadata, dict) else {}
     sandbox_id = metadata.get("sandbox_id")

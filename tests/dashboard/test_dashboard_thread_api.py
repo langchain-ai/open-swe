@@ -1660,6 +1660,9 @@ async def test_read_endpoints_accessible_by_non_owner(monkeypatch) -> None:
     """Read endpoints (state, stream, history) are accessible by any org member."""
 
     class FakeThreads:
+        async def search(self, *, ids: list[str], select: list[str], limit: int):
+            return [await self.get(thread_id) for thread_id in ids[:limit]]
+
         async def get(self, thread_id: str) -> dict[str, object]:
             assert thread_id == "tid"
             return {
@@ -2657,10 +2660,8 @@ async def test_list_dashboard_pinned_threads_returns_only_readable_threads(
     }
 
     class FakeThreads:
-        async def get(self, thread_id):
-            if thread_id == "missing-thread":
-                raise RuntimeError("missing")
-            return threads[thread_id]
+        async def search(self, *, ids: list[str], select: list[str], limit: int):
+            return [threads[thread_id] for thread_id in ids[:limit] if thread_id in threads]
 
     class FakeRuns:
         async def list(self, thread_id, limit=1):

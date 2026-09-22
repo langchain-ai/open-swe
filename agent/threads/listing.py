@@ -6,6 +6,8 @@ from collections.abc import Mapping, Sequence
 from typing import Any, Literal
 
 from fastapi import HTTPException
+from langgraph_sdk.client import LangGraphClient
+from langgraph_sdk.schema import ThreadSelectField
 
 from agent.threads.pins import list_thread_pin_ids, pin_thread, unpin_thread
 from agent.threads.summary import (
@@ -36,8 +38,15 @@ from agent.workspaces.store import DEFAULT_WORKSPACE_SLUG
 logger = logging.getLogger(__name__)
 
 _THREADS_SEARCH_PAGE = 50
+_THREADS_SCAN_PAGE = 1000
 _THREADS_PAGE_SCAN_CAP = 5000
-_THREAD_LIST_SELECT = ["thread_id", "status", "metadata", "created_at", "updated_at"]
+_THREAD_LIST_SELECT: list[ThreadSelectField] = [
+    "thread_id",
+    "status",
+    "metadata",
+    "created_at",
+    "updated_at",
+]
 _RUN_REFRESH_CONCURRENCY = 8
 _RUNNING_METADATA_STATUSES = {"pending", "running"}
 
@@ -270,6 +279,7 @@ async def _collect_thread_candidates(
     sort_by: _ThreadSortBy = "updated_at",
 ) -> list[ThreadLike]:
     seen: dict[str, ThreadLike] = {}
+    page_size = _THREADS_SCAN_PAGE if target_per_search is None else _THREADS_SEARCH_PAGE
     for search_filter in searches:
         matched_for_search = 0
         offset = 0
@@ -284,7 +294,7 @@ async def _collect_thread_candidates(
             batch = await _search_threads_batch(
                 client,
                 metadata_filter,
-                limit=_THREADS_SEARCH_PAGE,
+                limit=page_size,
                 offset=offset,
                 sort_by=sort_by,
             )
@@ -318,11 +328,11 @@ async def _collect_thread_candidates(
                     continue
                 matched_for_search += 1
                 seen.setdefault(thread_id, thread)
-            if len(batch) < _THREADS_SEARCH_PAGE:
+            if len(batch) < page_size:
                 break
             if target_per_search is not None and matched_for_search >= target_per_search:
                 break
-            offset += _THREADS_SEARCH_PAGE
+            offset += page_size
     return sorted(
         seen.values(), key=lambda thread: _thread_timestamp_ms(thread, sort_by), reverse=True
     )
@@ -367,26 +377,32 @@ async def list_dashboard_threads(
 
 
 async def _pinned_thread_summaries(
-    client: Any,
+    client: LangGraphClient,
     login: str,
     email: str | None,
 ) -> list[dict[str, Any]]:
-    async def load(thread_id: str) -> dict[str, Any] | None:
+    thread_ids = await list_thread_pin_ids(login)
+    readable: dict[str, ThreadLike] = {}
+    for offset in range(0, len(thread_ids), _THREADS_SEARCH_PAGE):
+        batch_ids = thread_ids[offset : offset + _THREADS_SEARCH_PAGE]
         try:
-            thread = await client.threads.get(thread_id)
+            threads = await client.threads.search(
+                ids=batch_ids, limit=len(batch_ids), select=_THREAD_LIST_SELECT
+            )
         except Exception:  # noqa: BLE001
-            logger.debug("Could not fetch pinned sidebar thread %s", thread_id, exc_info=True)
-            return None
-        if not isinstance(thread, Mapping) or not thread_is_readable(
-            _thread_metadata(thread), login, email
-        ):
-            return None
-        return await _summarize_thread(client, thread)
-
-    summaries = await asyncio.gather(
-        *(load(thread_id) for thread_id in await list_thread_pin_ids(login))
+            logger.warning(
+                "Could not fetch pinned sidebar threads",
+                extra={"thread_ids": batch_ids},
+                exc_info=True,
+            )
+            continue
+        for thread in threads:
+            thread_id = _thread_id(thread)
+            if thread_id and thread_is_readable(_thread_metadata(thread), login, email):
+                readable[thread_id] = thread
+    return await _summarize_threads(
+        client, [readable[thread_id] for thread_id in thread_ids if thread_id in readable]
     )
-    return [summary for summary in summaries if summary is not None]
 
 
 async def list_dashboard_pinned_threads(

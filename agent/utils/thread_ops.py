@@ -11,6 +11,8 @@ import logging
 from typing import Any
 
 from langgraph_sdk import get_client
+from langgraph_sdk.client import LangGraphClient
+from langgraph_sdk.schema import Thread, ThreadSelectField
 
 from agent.config import ENV
 
@@ -23,19 +25,34 @@ def langgraph_url() -> str:
     return ENV.LANGGRAPH_URL.get()
 
 
-def langgraph_client():
+def langgraph_client() -> LangGraphClient:
     return get_client(url=langgraph_url())
+
+
+async def read_thread_fields(
+    client: LangGraphClient, thread_id: str, fields: list[ThreadSelectField]
+) -> Thread:
+    """Read a thread without loading its checkpoint values."""
+    threads = await client.threads.search(ids=[thread_id], select=fields, limit=1)
+    if threads:
+        return threads[0]
+    # Preserve the single-thread endpoint's missing/inaccessible-thread errors.
+    return await client.threads.get(thread_id)
 
 
 async def get_thread_active_status(thread_id: str) -> bool | None:
     """Return whether the thread is active, or None when status cannot be determined."""
     try:
-        thread = await langgraph_client().threads.get(thread_id)
-        status = thread.get("status", "idle") if isinstance(thread, dict) else "idle"
-        logger.info("Thread %s status check: status=%s", thread_id, status)
+        thread = await read_thread_fields(langgraph_client(), thread_id, ["status"])
+        status = thread.get("status", "idle")
+        logger.info(
+            "Checked thread status", extra={"agent_thread_id": thread_id, "thread_status": status}
+        )
         return status == "busy"
-    except Exception as exc:  # noqa: BLE001
-        logger.warning("Failed to get thread status for %s: %s", thread_id, exc)
+    except Exception:  # noqa: BLE001
+        logger.warning(
+            "Failed to get thread status", extra={"agent_thread_id": thread_id}, exc_info=True
+        )
         return None
 
 

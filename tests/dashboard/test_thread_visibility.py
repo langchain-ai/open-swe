@@ -25,6 +25,7 @@ def private_thread(monkeypatch):
     client = SimpleNamespace(
         threads=SimpleNamespace(
             get=AsyncMock(return_value=thread),
+            search=AsyncMock(return_value=[thread]),
             update=AsyncMock(),
             create=AsyncMock(),
             get_state=AsyncMock(return_value={"values": {}}),

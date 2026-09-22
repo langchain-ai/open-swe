@@ -9,7 +9,7 @@ from agent.dashboard.profiles import get_valid_access_token
 from agent.threads.summary import assert_thread_readable
 from agent.users import User
 from agent.utils.json_types import ThreadLike, thread_metadata
-from agent.utils.thread_ops import langgraph_client
+from agent.utils.thread_ops import langgraph_client, read_thread_fields
 
 
 def agent_version_metadata() -> dict[str, str]:
@@ -56,17 +56,15 @@ async def _authorized_thread(thread_id: str, login: str, *, email: str | None = 
 async def _authorized_thread_metadata(
     thread_id: str, login: str, *, email: str | None = None
 ) -> dict[str, Any]:
-    thread = await _authorized_thread(thread_id, login, email=email)
-    metadata = thread_metadata(thread)
-    return metadata
+    return await _readable_thread_metadata(thread_id, login=login, email=email)
 
 
 async def _readable_thread(
     thread_id: str, *, login: str | None = None, email: str | None = None
 ) -> ThreadLike:
-    """Fetch a thread and authorize the authenticated caller."""
+    """Fetch thread metadata and authorize the authenticated caller."""
     try:
-        thread = await langgraph_client().threads.get(thread_id)
+        thread = await read_thread_fields(langgraph_client(), thread_id, ["thread_id", "metadata"])
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(404, "thread not found") from exc
     metadata = thread_metadata(thread)
