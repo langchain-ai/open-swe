@@ -24,7 +24,6 @@ from agent.slack.orphan import (
     slack_thread_detached,
 )
 from agent.slack.thinking import restore_slack_session_status, restore_slack_thinking_status
-from agent.threads.plan_store import PLAN_STATUS_READY, get_plan_content, plan_fingerprint
 from agent.utils.json_types import thread_metadata
 from agent.utils.run_usage import RunUsageSummary, summarize_run_usage
 from agent.utils.thread_ops import langgraph_client as get_langgraph_client
@@ -86,20 +85,8 @@ async def slack_reply(
         else str(thread_ts)
     )
 
-    plan_mode = (state or {}).get("plan_mode", cfg.plan_mode) is True
-    plan = None
-    if blocks is None and plan_mode and thread_id and options:
-        content = await get_plan_content(thread_id, raise_on_error=True)
-        if content and content.get("status") == PLAN_STATUS_READY:
-            plan = {
-                "thread_id": thread_id,
-                "thread_ts": str(thread_ts),
-                "fingerprint": plan_fingerprint(content),
-            }
     async with slack_thread_mutation_lock(client, channel_id, thread_ts):
-        slack_blocks = (
-            blocks if blocks is not None else _build_option_blocks(message, options, plan)
-        )
+        slack_blocks = blocks if blocks is not None else _build_option_blocks(message, options)
         if blocks is None and len(message) > _NATIVE_MARKDOWN_MAX_CHARS:
             if options:
                 return _oversized_options_error(message)
@@ -262,9 +249,7 @@ def _oversized_options_error(message: str) -> dict[str, str | int | bool]:
     }
 
 
-def _build_option_blocks(
-    message: str, options: list[str] | None, plan: dict[str, str] | None = None
-) -> list[dict[str, Any]]:
+def _build_option_blocks(message: str, options: list[str] | None) -> list[dict[str, Any]]:
     clean_options = [option.strip() for option in options or [] if option.strip()]
     blocks: list[dict[str, Any]] = [{"type": "markdown", "text": message}]
     if not clean_options:
@@ -276,15 +261,7 @@ def _build_option_blocks(
                 {
                     "type": "button",
                     "text": {"type": "plain_text", "text": option[:75], "emoji": True},
-                    "value": json.dumps(
-                        {
-                            **plan,
-                            "type": "plan_approval",
-                            "action": "approve" if option == "Approve & implement" else "revise",
-                        }
-                        if plan is not None and option in {"Approve & implement", "Request changes"}
-                        else {"type": "open_swe_option", "response": option}
-                    ),
+                    "value": json.dumps({"type": "open_swe_option", "response": option}),
                     "action_id": f"open_swe_option_select_{index}",
                 }
                 for index, option in enumerate(clean_options[:5])

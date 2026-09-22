@@ -7,18 +7,13 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { AgentThreadStreamBoundary } from "@/features/agents/lib/provider/useIsInAgentThreadStream"
 import { ThreadSourceProvider } from "@/features/agents/lib/threadSource/ThreadSourceProvider"
 import { useAgentThread } from "@/features/agents/lib/queries"
-import { useSession } from "@/lib/session"
 import {
   ensureThreadLoad,
   threadDetailFailed,
   threadDetailResolved,
 } from "@/lib/perf/threadLoad"
 
-export function AgentThreadPage(props: {
-  threadId: string
-  active?: boolean
-  autoFocusComposer?: boolean
-}) {
+export function AgentThreadPage(props: { threadId: string; active?: boolean }) {
   return (
     <CatchBoundary
       getResetKey={() => props.threadId}
@@ -39,21 +34,12 @@ export function AgentThreadPage(props: {
 function AgentThreadContent({
   threadId,
   active = true,
-  autoFocusComposer = false,
 }: {
   threadId: string
   active?: boolean
-  autoFocusComposer?: boolean
 }) {
   const threadQuery = useAgentThread(threadId)
-  const session = useSession()
-  // Both halves have to hold: the thread has to be recorded in the event log,
-  // and its reader has to have opted into being served from it. The session is
-  // resolved before any thread page renders, so this costs no request and the
-  // source is picked once rather than swapped under a mounted stream.
-  const transcript =
-    threadQuery.data?.transcript === "v2" &&
-    session.data?.transcript_streaming === true
+  const transcript = threadQuery.data?.transcript === "v2"
   const timedOut = useLoadTimedOut(threadQuery.isPending)
   const title = threadQuery.data?.title
   const hasDetail = threadQuery.data !== undefined
@@ -104,10 +90,7 @@ function AgentThreadContent({
   return (
     <AgentThreadStreamBoundary active={active}>
       <ThreadSourceProvider threadId={threadId} transcript={transcript}>
-        <AgentThreadView
-          thread={threadQuery.data}
-          autoFocusComposer={autoFocusComposer}
-        />
+        <AgentThreadView thread={threadQuery.data} />
       </ThreadSourceProvider>
     </AgentThreadStreamBoundary>
   )

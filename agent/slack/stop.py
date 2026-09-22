@@ -122,7 +122,6 @@ def _summary_configurable(
     configurable: dict[str, Any] = {
         "source": source if source in {"slack", "schedule"} else "slack",
         "slack_thread": dict(slack_thread),
-        "plan_mode": False,
         "stop_summary": True,
     }
 

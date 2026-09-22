@@ -2102,7 +2102,7 @@ def test_thread_model_choice_round_trips_explicit_metadata(
         {
             "metadata": {
                 "model_selection": "explicit",
-                "model": "anthropic:claude-opus-5",
+                "model": "anthropic:claude-opus-5-5",
                 "effort": "high",
             }
         }
@@ -2110,7 +2110,7 @@ def test_thread_model_choice_round_trips_explicit_metadata(
     monkeypatch.setattr(webhook_common, "get_client", lambda url: _FakeClient(threads))
 
     assert asyncio.run(webhook_common.get_thread_model_choice("thread-id")) == (
-        "anthropic:claude-opus-5",
+        "anthropic:claude-opus-5-5",
         "high",
     )
 
@@ -2122,7 +2122,7 @@ def test_thread_model_choice_is_none_for_auto_selection(
         {
             "metadata": {
                 "model_selection": "auto",
-                "model": "anthropic:claude-opus-5",
+                "model": "anthropic:claude-opus-5-5",
                 "effort": "high",
             }
         }

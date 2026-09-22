@@ -156,7 +156,6 @@ class RunConfig(BaseModel):
     grouping_reasoning_effort: str | None = None
 
     # Behavior toggles
-    plan_mode: bool | None = None
     draft_prs: bool | None = None
     admin_thread: bool | None = None
     stop_summary: bool | None = None

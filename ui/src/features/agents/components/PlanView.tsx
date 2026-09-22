@@ -50,7 +50,7 @@ export function planSignInHref(): string {
 export function PlanSignInButton() {
   return (
     <a href={planSignInHref()} className={buttonVariants({ size: "sm" })}>
-      Sign in to view this plan
+      Sign in to view this artifact
     </a>
   )
 }
@@ -58,11 +58,9 @@ export function PlanSignInButton() {
 export function PlanView({
   threadId,
   standalone = false,
-  onApprove,
 }: {
   threadId: string
   standalone?: boolean
-  onApprove?: (runId: string) => void
 }) {
   const mounted = useIsHydrated()
 
@@ -94,8 +92,8 @@ export function PlanView({
         <div className="space-y-3 text-center text-sm text-muted-foreground/70">
           <p>
             {status === 401
-              ? "Please sign in to view this plan."
-              : "This plan could not be found."}
+              ? "Please sign in to view this artifact."
+              : "This artifact could not be found."}
           </p>
           {status === 401 ? <PlanSignInButton /> : null}
           {backLink}
@@ -126,7 +124,7 @@ export function PlanView({
           {backLink}
         </div>
       )}
-      <PlanReview plan={plan} onApprove={onApprove} />
+      <PlanReview plan={plan} />
     </div>
   )
 }

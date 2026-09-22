@@ -9,7 +9,6 @@ from fastapi import APIRouter, Response
 from langgraph_sdk.client import LangGraphClient
 
 from agent.expedited_review import slack as expedited_review
-from agent.slack import plan_feedback
 from agent.slack import webhook as service
 from agent.slack.allowed_bots import resolve_allowed_slack_bot
 from agent.slack.ask import (
@@ -645,8 +644,6 @@ async def slack_interactivity(
     if payload is None:
         common.logger.warning("Failed to parse Slack interactivity payload")
         return {"status": "error", "message": "Invalid payload"}
-    if plan_feedback.is_plan_feedback_submission(payload):
-        return await plan_feedback.handle_submission(payload, background_tasks)
     if is_slack_feedback_payload(payload):
         return await handle_slack_feedback_interaction(payload, background_tasks)
     if expedited_review.is_expedited_review_submission(payload):
@@ -694,8 +691,20 @@ async def slack_interactivity(
     button = SlackButtonValue.parse(parse_json_object((action.value or "{}").encode("utf-8")))
     if button is None:
         return ignored("Invalid action value")
-    if button.type == "plan_approval" and button.action == "revise":
-        return await plan_feedback.open_feedback(interaction, button, background_tasks)
+    if button.type == "plan_approval":
+        if not interaction.channel_id or not interaction.user.id:
+            return ignored("Missing Slack action context")
+        background_tasks.add_task(
+            common.post_slack_ephemeral_message,
+            interaction.channel_id,
+            interaction.user.id,
+            "This plan approval button is no longer active. Plan mode and approval gates "
+            "have been removed. Open the artifact linked in the original message to review it, "
+            "or reply in this thread and mention Open SWE with what you'd like to do next. "
+            "No action was taken.",
+            thread_ts=interaction.message.thread_ts or interaction.container.thread_ts or None,
+        )
+        return accepted("Legacy plan button retired")
 
     channel_id = interaction.channel_id
     if not channel_id:
@@ -795,62 +804,6 @@ async def slack_interactivity(
                 repo,
             )
             return accepted("Workflow push approved, retry queued")
-
-        if button.type == "plan_approval":
-            if not channel_id or not thread_ts:
-                return ignored("Missing Slack action context")
-
-            thread_id = await common.lookup_slack_thread_id(
-                get_langgraph_client(), channel_id, thread_ts
-            )
-            if not thread_id:
-                return ignored("Slack thread is not associated")
-
-            if button.action == "cancel":
-                background_tasks.add_task(
-                    _update_selected_option_message, interaction, action, "Cancel plan"
-                )
-                await common.post_slack_thread_reply(
-                    channel_id=channel_id,
-                    thread_ts=reply_ts,
-                    text="Plan cancelled. No changes will be made.",
-                    agent_thread_id=thread_id,
-                )
-                return accepted("Plan cancelled")
-
-            if button.action == "approve":
-                user_name = interaction.user.name or interaction.user.username or user_id
-                background_tasks.add_task(
-                    _update_selected_option_message, interaction, action, "Approve plan"
-                )
-                repo = (
-                    await common.get_slack_repo_config(
-                        channel_id,
-                        thread_ts,
-                        slack_user_id=user_id,
-                        channel_context=channel_context,
-                    )
-                ).repo
-                background_tasks.add_task(
-                    service.process_slack_plan_approval,
-                    SlackRequest(
-                        thread_id=thread_id,
-                        channel_id=channel_id,
-                        channel_context=channel_context,
-                        thread_ts=thread_ts,
-                        event_ts=interaction.message.ts,
-                        user_id=user_id,
-                        user_name=user_name,
-                        text="approve",
-                        bot_user_id=common.SLACK_BOT_USER_ID,
-                        dm_session=in_dm,
-                        reply_thread_ts=reply_thread_ts,
-                    ),
-                    repo,
-                )
-                return accepted("Plan approval queued")
-
-            return ignored("Unknown plan action")
 
         if button.type != "open_swe_option":
             return ignored("Unknown action type")

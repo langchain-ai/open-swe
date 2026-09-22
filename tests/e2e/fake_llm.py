@@ -360,7 +360,7 @@ def _pr_url_from_messages(messages: list[BaseMessage]) -> str | None:
 
 
 def _plan_url_from_messages(messages: list[BaseMessage]) -> str | None:
-    """The plan-review URL is injected into the system prompt; a real model would read it."""
+    """The artifact URL is injected into the system prompt."""
     for msg in messages:
         match = _PLAN_URL_RE.search(_text(msg.content))
         if match:
@@ -368,25 +368,11 @@ def _plan_url_from_messages(messages: list[BaseMessage]) -> str | None:
     return None
 
 
-def _reviewer_feedback(messages: list[BaseMessage]) -> str | None:
-    """The harvested reviewer comments the backend hands the agent on approval."""
-    humans = [m for m in messages if isinstance(m, HumanMessage)]
-    if not humans:
-        return None
-    text = _text(humans[-1].content)
-    idx = text.lower().find("feedback")
-    if "approved" in text.lower() and idx != -1:
-        return text[idx:].strip()
-    return None
-
-
 def _reply_step(messages: list[BaseMessage]) -> AIMessage:
     url = _pr_url_from_messages(messages) or "(PR url unavailable)"
-    feedback = _reviewer_feedback(messages)
-    extra = f"\n\nReviewer feedback I addressed:\n{feedback}" if feedback else ""
     text = (
         f"✅ Done! I implemented the change and opened a PR: <{url}|{PR_TITLE}>\n\n"
-        f"• Added `{FEATURE_FILE}` with a `greet()` helper.{extra}\n"
+        f"• Added `{FEATURE_FILE}` with a `greet()` helper.\n"
         "Let me know if you'd like any changes."
     )
     return AIMessage(
@@ -660,8 +646,7 @@ def _plan_complete_step(messages: list[BaseMessage]) -> AIMessage:
                 "args": {
                     "response_type": "final",
                     "message": f"✅ The plan is ready for review: <{url}|open the plan>. "
-                    "Take a look, leave comments, and choose what to do next.",
-                    "options": ["Approve & implement", "Request changes"],
+                    "Take a look and leave comments.",
                 },
                 "id": "call-plan-done",
             }
@@ -1141,18 +1126,12 @@ SCRIPT_LIBRARY: dict[str, tuple[StepSpec, ...]] = {
         ),
     ),
     "plan": (
-        _tool_step(
-            "This is worth planning first — entering plan mode.",
-            "enter_plan_mode",
-            {},
-            "call-enter-plan",
-        ),
         _dynamic_step(_plan_link_step),
         _dynamic_step(_plan_research_step),
         _dynamic_step(_write_plan_step),
         _dynamic_step(_save_plan_step),
         _dynamic_step(_plan_complete_step),
-        StepSpec(content="I'll wait for your review and approval before implementing."),
+        StepSpec(content="The requested plan is published as an HTML artifact."),
     ),
     "workspace": (
         # Build here, with ordinary tools, then publish this sandbox as the image.
@@ -1226,18 +1205,6 @@ def _is_pull_request_fix(text: str) -> bool:
     return "Fix merge conflicts and failing CI checks on" in text
 
 
-def _is_approval(text: str) -> bool:
-    t = text.lower()
-    return "the plan has been approved" in t or (
-        ("approve" in t or "approved" in t) and "implement" in t
-    )
-
-
-def _is_revision(text: str) -> bool:
-    t = text.lower()
-    return "needs changes" in t or "publish an updated plan" in t
-
-
 SCRIPT_RULES: tuple[ScriptRule, ...] = (
     ScriptRule("subagent_task", lambda ctx: SUBAGENT_TASK_MARKER in ctx.last_text),
     ScriptRule("delegate", lambda ctx: ctx.human_count <= 1 and DELEGATE_MARKER in ctx.first_text),
@@ -1286,8 +1253,6 @@ SCRIPT_RULES: tuple[ScriptRule, ...] = (
     ScriptRule("expedite", lambda ctx: EXPEDITE_MARKER in ctx.first_text),
     ScriptRule("followup", lambda ctx: _is_move_followup(ctx.last_text)),
     ScriptRule("move", lambda ctx: _is_move_request(ctx.first_text)),
-    ScriptRule("implement", lambda ctx: _is_approval(ctx.last_text)),
-    ScriptRule("plan", lambda ctx: _is_revision(ctx.last_text)),
     ScriptRule("plan", lambda ctx: ctx.human_count <= 1 and _is_plan_request(ctx.first_text)),
     ScriptRule(
         "breakout", lambda ctx: ctx.human_count <= 1 and _is_breakout_request(ctx.first_text)

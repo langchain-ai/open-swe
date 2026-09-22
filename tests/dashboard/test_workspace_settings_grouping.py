@@ -11,7 +11,7 @@ _GROUPING_PAIR = ("google_genai:gemini-3.8-flash", "low")
 _ROUTING_PAIRS = {
     "fast": ("google_genai:gemini-3.8-flash", "low"),
     "balanced": ("openai:gpt-5.6-sol", "medium"),
-    "performance": ("anthropic:claude-opus-5", "high"),
+    "performance": ("anthropic:claude-opus-5-5", "high"),
 }
 
 
