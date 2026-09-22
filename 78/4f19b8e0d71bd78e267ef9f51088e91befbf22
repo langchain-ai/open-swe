@@ -1,0 +1,14 @@
+langgraph.json
+  h_e6aca5e1220677 4
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "784f19b8e0d71bd78e267ef9f51088e91befbf22",
+  "prompts": {},
+  "humans": {
+    "h_e6aca5e1220677": {
+      "author": "syachamaneni-lc <sreekara.yachamaneni@langchain.dev>"
+    }
+  }
+}
