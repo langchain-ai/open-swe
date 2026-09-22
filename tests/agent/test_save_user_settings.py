@@ -305,7 +305,7 @@ async def test_model_effort_patch_uses_dashboard_normalization(fake_store: FakeS
     )
     await patch_personal_settings("alice", {"reasoning_effort": "low"})
     profile = fake_store.values(["profiles"])["alice"]
-    assert profile["default_model"] == "anthropic:claude-opus-5"
+    assert profile["default_model"] == "anthropic:claude-opus-5-5"
     assert profile["reasoning_effort"] == "low"
 
 

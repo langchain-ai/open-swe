@@ -152,7 +152,7 @@ async def _capture_create_deep_agent_kwargs(
                     "default_agent_routing_fast_reasoning_effort": "low",
                     "default_agent_routing_balanced_model": "openai:gpt-5.6-sol",
                     "default_agent_routing_balanced_reasoning_effort": "medium",
-                    "default_agent_routing_performance_model": "anthropic:claude-opus-5",
+                    "default_agent_routing_performance_model": "anthropic:claude-opus-5-5",
                     "default_agent_routing_performance_reasoning_effort": "high",
                 }
             ),
@@ -256,10 +256,10 @@ async def test_agent_starts_sandbox_while_loading_settings() -> None:
     [
         ({}, None, None, "openai:gpt-5.6-sol"),
         (
-            {"agent_model_id": "anthropic:claude-opus-5", "agent_effort": "high"},
+            {"agent_model_id": "anthropic:claude-opus-5-5", "agent_effort": "high"},
             None,
             None,
-            "anthropic:claude-opus-5",
+            "anthropic:claude-opus-5-5",
         ),
         (
             {},
@@ -270,8 +270,8 @@ async def test_agent_starts_sandbox_while_loading_settings() -> None:
         (
             {},
             None,
-            {"model_id": "anthropic:claude-opus-5", "effort": "high"},
-            "anthropic:claude-opus-5",
+            {"model_id": "anthropic:claude-opus-5-5", "effort": "high"},
+            "anthropic:claude-opus-5-5",
         ),
     ],
 )
@@ -313,7 +313,7 @@ async def test_model_routing_is_applied_when_enabled() -> None:
     assert [model for model, _ in calls[1:4]] == [
         "google_genai:gemini-3.8-flash",
         "openai:gpt-5.6-sol",
-        "anthropic:claude-opus-5",
+        "anthropic:claude-opus-5-5",
     ]
 
 
@@ -338,7 +338,7 @@ async def test_model_routing_control_uses_performance_model() -> None:
     assert [model for model, _ in calls[1:4]] == [
         "google_genai:gemini-3.8-flash",
         "openai:gpt-5.6-sol",
-        "anthropic:claude-opus-5",
+        "anthropic:claude-opus-5-5",
     ]
 
 
