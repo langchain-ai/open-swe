@@ -28,6 +28,16 @@ def apply() -> None:
     if _applied:
         return
 
+    # E2E_LOG_FILE captures the server's own logging, which langgraph dev does
+    # not surface: without it a swallowed warning is invisible to the suite.
+    log_file = os.environ.get("E2E_LOG_FILE")
+    if log_file:
+        handler = logging.FileHandler(log_file)
+        handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s %(message)s"))
+        root = logging.getLogger()
+        root.addHandler(handler)
+        root.setLevel(logging.INFO)
+
     import importlib
 
     from agent import server

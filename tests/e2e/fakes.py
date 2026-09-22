@@ -31,9 +31,17 @@ _slack_seq = [1]
 _code_channel_seq = [0]
 
 
+# This counter restarts on every boot while the Slack-location map in the
+# store does not, so a fixed epoch re-issues timestamps a previous session
+# already bound. `bind_slack_thread_id` then refuses the new binding, and a
+# breakout produces no run at all. Salted per boot for the same reason
+# harness.py salts event ids.
+_TS_EPOCH = 1700000000 + int(time.time()) % 1_000_000
+
+
 def next_slack_ts() -> str:
     _slack_seq[0] += 1
-    return f"1700000000.{_slack_seq[0]:06d}"
+    return f"{_TS_EPOCH}.{_slack_seq[0]:06d}"
 
 
 _thread_seq = [0]
