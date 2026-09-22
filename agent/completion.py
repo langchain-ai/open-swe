@@ -446,7 +446,7 @@ async def _start_run_for_pending_follow_ups(thread_id: str) -> None:
         # the leftovers up; nothing to dispatch.
         if await client.runs.list(thread_id, status="pending", limit=1):
             return
-        run_id = await dispatch_pending_follow_ups(
+        await dispatch_pending_follow_ups(
             thread_id, login, metadata, client=client, multitask_strategy="reject"
         )
     except Exception:  # noqa: BLE001
@@ -454,12 +454,6 @@ async def _start_run_for_pending_follow_ups(thread_id: str) -> None:
             "Could not start a run for follow-ups left after a completed run",
             exc_info=True,
             extra={"run_completion": {"thread_id": thread_id}},
-        )
-        return
-    if run_id is not None:
-        logger.info(
-            "Started a run for follow-ups left after a completed run",
-            extra={"run_completion": {"thread_id": thread_id, "follow_up_run_id": run_id}},
         )
 
 

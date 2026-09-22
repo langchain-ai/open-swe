@@ -494,15 +494,13 @@ async def _latest_run_info(client: Any, thread_id: str) -> tuple[str | None, str
         (candidate for candidate in runs if _status_of(candidate) == "running"),
         next((candidate for candidate in runs if _status_of(candidate) == "pending"), runs[0]),
     )
-    raw_status = run.get("status") if isinstance(run, dict) else getattr(run, "status", None)
     raw_id = (
         (run.get("run_id") or run.get("id"))
         if isinstance(run, dict)
         else (getattr(run, "run_id", None) or getattr(run, "id", None))
     )
-    status = raw_status.lower() if isinstance(raw_status, str) else None
     run_id = raw_id if isinstance(raw_id, str) and raw_id else None
-    return status, run_id
+    return _status_of(run), run_id
 
 
 async def _refresh_latest_run_metadata(

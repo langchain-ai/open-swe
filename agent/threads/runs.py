@@ -623,11 +623,9 @@ async def _enrich_run_start_command(
             model_selection = "explicit"
         else:
             model_selection = "auto" if creating else metadata.get("model_selection")
-    offload_requested = client_configurable.get("offload_conversation") is True
+    offloading = offload_requested(params)
     content = _command_message_content(params)
-    if isinstance(content, str) and content.strip() == "/offload":
-        offload_requested = True
-    if offload_requested and creating:
+    if offloading and creating:
         raise HTTPException(400, "offloading requires an existing conversation")
     command_images = _dashboard_images_from_content(content)
     invocation_id = new_invocation_id()
@@ -770,7 +768,7 @@ async def _enrich_run_start_command(
     # request; the middleware's ``turn.started`` opens that turn instead.
     if transcribed:
         turn_id = uuid.uuid7()
-        if message_id is not None and not offload_requested:
+        if message_id is not None and not offloading:
             # Keyed by the message, not the turn: a retried ``run.start`` mints
             # a new turn id but asks for the same message, so its receipt
             # deduplicates it — and the run then has to join the turn that was
@@ -829,7 +827,7 @@ async def _enrich_run_start_command(
         invocation_id,
     )
 
-    if offload_requested:
+    if offloading:
         merged_configurable["offload_conversation"] = True
         params["input"] = {}
 
@@ -1017,14 +1015,8 @@ async def queue_follow_up_run(
     enriched = await _enrich_run_start_command(
         thread_id, login, command, metadata=metadata, email=email
     )
-    enriched_params = enriched.get("params")
-    if not isinstance(enriched_params, dict):
-        raise HTTPException(500, "run.start enrichment produced no params")
-    config = enriched_params.get("config")
-    config = config if isinstance(config, dict) else {}
-    configurable = config.get("configurable")
-    configurable = configurable if isinstance(configurable, dict) else {}
-    run_metadata = enriched_params.get("metadata")
+    enriched_params: dict[str, Any] = enriched["params"]
+    configurable: dict[str, Any] = enriched_params["config"]["configurable"]
     run_input = enriched_params.get("input")
 
     run = await create_durable_run(
@@ -1032,7 +1024,7 @@ async def queue_follow_up_run(
         _ASSISTANT_ID,
         input=run_input if isinstance(run_input, dict) else {},
         config={"configurable": configurable},
-        metadata=run_metadata if isinstance(run_metadata, dict) else {},
+        metadata=enriched_params["metadata"],
         source=DASHBOARD_SOURCE,
         client=langgraph_client(),
         multitask_strategy="enqueue",
