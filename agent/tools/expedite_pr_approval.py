@@ -35,7 +35,7 @@ def _failure(error: str) -> dict[str, Any]:
     return {"success": False, "error": error}
 
 
-def _next_step(status: str, elsewhere: bool) -> str:
+def _next_step(status: str, elsewhere: bool, in_thread: bool) -> str:
     """What the agent should do once the request is registered."""
     if elsewhere:
         return (
@@ -43,11 +43,18 @@ def _next_step(status: str, elsewhere: bool) -> str:
             "request and stays in the Slack thread named here, not the channel you asked "
             'for. Cancel with action="cancel" and ask again to move it.'
         )
-    if status == "open":
-        return "The approval card is posted in the Slack thread; two approvals merge the PR."
+    posted = (
+        "The approval card is posted in the Slack thread; two approvals merge the PR."
+        if status == "open"
+        else "Open SWE is watching the PR and will post the card once checks and reviews "
+        "are clean. Do not poll; you will be told if it is rejected or withdrawn."
+    )
+    if not in_thread:
+        return posted
     return (
-        "Open SWE is watching the PR and will post the card once checks and reviews are "
-        "clean. Do not poll; you will be told if it is rejected or withdrawn."
+        f"{posted} The card is this turn's reply to the person who asked: finish with "
+        "`slack_no_reply_needed` rather than a message announcing the pull request or "
+        "this request."
     )
 
 
@@ -110,7 +117,8 @@ async def expedite_pr_approval(
         await retire(approval, "failed", "Cancelled by the agent.")
         return {"success": True, "cancelled": True}
 
-    channel_id, thread_ts = await _context_location(cfg, thread_id)
+    own_channel, own_thread = await _context_location(cfg, thread_id)
+    channel_id, thread_ts = own_channel, own_thread
     target: SlackChannel | None = None
     if channel.strip():
         target = await SlackChannel.resolve(channel)
@@ -119,9 +127,10 @@ async def expedite_pr_approval(
                 f"Slack channel {channel.strip()!r} was not found. Pass a channel name the "
                 "bot can see or a channel id."
             )
-        # An explicit channel always gets its own thread, including the channel
-        # this run is already talking in.
-        channel_id, thread_ts = target.id, ""
+        # Naming the channel this run already talks in keeps the card in the live
+        # thread; a second root there would strand it from the conversation.
+        if target.id != own_channel or not own_thread:
+            channel_id, thread_ts = target.id, ""
     if not channel_id:
         return _failure(
             "Expedited review posts its approval card in Slack. This thread has no Slack "
@@ -206,5 +215,9 @@ async def expedite_pr_approval(
         "changed_lines": verdict.changed_lines,
         "slack_channel_id": channel_id,
         "status": status,
-        "next": _next_step(status, elsewhere),
+        "next": _next_step(
+            status,
+            elsewhere,
+            bool(own_thread) and (channel_id, thread_ts) == (own_channel, own_thread),
+        ),
     }
