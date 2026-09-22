@@ -3252,8 +3252,13 @@ async def test_steer_running_thread_records_and_delivers_the_follow_up(monkeypat
         async def get_state(self, thread_id: str) -> dict[str, object]:
             return {"values": {"messages": []}}
 
+    class FakeRuns:
+        async def get(self, thread_id: str, run_id: str) -> dict[str, str]:
+            return {"run_id": run_id, "status": "running"}
+
     class FakeClient:
         threads = FakeThreads()
+        runs = FakeRuns()
 
     FakeClient.store = store  # type: ignore[attr-defined]
 
@@ -3264,7 +3269,8 @@ async def test_steer_running_thread_records_and_delivers_the_follow_up(monkeypat
         appended.extend(commands)
         return AppendResult(versions=[1], events=[])
 
-    async def fake_open_turn_id(thread_id: str) -> UUID:
+    async def fake_open_turn_id(thread_id: str, run_id: str | None = None) -> UUID:
+        assert run_id == "run-1"
         return turn
 
     patch_thread_module(monkeypatch, "langgraph_client", lambda: FakeClient())

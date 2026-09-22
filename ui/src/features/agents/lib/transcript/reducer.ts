@@ -432,9 +432,20 @@ function settledStatus(
     : settled
 }
 
-/** Waiting behind the live run: requested, with a run of its own queued. */
-export function isQueuedTurn(turn: TranscriptTurnState): boolean {
-  return turn.state === "requested" && turn.runId !== null
+/**
+ * Waiting behind the live run. A requested turn is queued once its run exists,
+ * and already while another turn is running: the run id only follows the
+ * request by a moment, and the row should not change shape in between.
+ */
+function isQueuedTurn(
+  state: TranscriptState,
+  turn: TranscriptTurnState
+): boolean {
+  if (turn.state !== "requested") return false
+  if (turn.runId !== null) return true
+  return Object.values(state.turns).some(
+    (other) => other.turnId !== turn.turnId && other.state === "running"
+  )
 }
 
 /**
@@ -452,7 +463,8 @@ function isCancelledBeforeStart(turn: TranscriptTurnState): boolean {
 /** A follow-up waiting for the live run to end, as the queue shows it. */
 export interface QueuedTurn {
   turnId: string
-  runId: string
+  /** Null until the server has created the queued run; nothing to cancel yet. */
+  runId: string | null
   /** The human message that opened the turn; its id doubles as the row key. */
   message: Message
   requestedAt: string
@@ -463,7 +475,7 @@ export function queuedTurns(state: TranscriptState): Array<QueuedTurn> {
   const out: Array<QueuedTurn> = []
   for (const turnId of state.turnOrder) {
     const turn = state.turns[turnId]
-    if (!turn || !isQueuedTurn(turn) || turn.runId === null) continue
+    if (!turn || !isQueuedTurn(state, turn)) continue
     const message = turnMessages(state, turn).find(
       (entry) => entry.author === "user"
     )
@@ -1055,7 +1067,8 @@ export function toMessages(state: TranscriptState): Array<Message> {
   for (const turnId of state.turnOrder) {
     const turn = state.turns[turnId]
     // Queued follow-ups render in the queue, not the record, until they run.
-    if (!turn || isQueuedTurn(turn) || isCancelledBeforeStart(turn)) continue
+    if (!turn || isQueuedTurn(state, turn) || isCancelledBeforeStart(turn))
+      continue
     messages.push(...turnMessages(state, turn))
   }
   messagesCache.set(state.turns, {

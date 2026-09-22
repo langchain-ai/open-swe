@@ -73,11 +73,11 @@ async def settle_run_turn(
     return turn_id
 
 
-async def open_turn_id(thread_id: str) -> UUID | None:
-    """The thread's newest turn that is still requested or running, if any."""
+async def open_turn_id(thread_id: str, run_id: str | None = None) -> UUID | None:
+    """The open turn ``run_id`` serves, or the thread's newest open turn without one."""
     if not postgres.configured():
         return None
-    return await _open_turn(thread_id, None)
+    return await _open_turn(thread_id, run_id)
 
 
 async def recorded_turn_id(thread_id: str, command_id: str) -> UUID | None:

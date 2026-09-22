@@ -63,9 +63,10 @@ function QueuedMessages({
                   {onSteer && (
                     <button
                       type="button"
-                      className="flex size-6 items-center justify-center rounded-md hover:bg-accent hover:text-foreground"
+                      className="flex size-6 items-center justify-center rounded-md hover:bg-accent hover:text-foreground disabled:pointer-events-none disabled:opacity-40"
                       onPointerDown={(event) => event.preventDefault()}
                       onClick={() => onSteer(message.id)}
+                      disabled={message.pending}
                       title="Send now"
                       aria-label="Send now"
                       data-testid="queued-message-send-now"
@@ -76,9 +77,10 @@ function QueuedMessages({
                   {onRemove && (
                     <button
                       type="button"
-                      className="flex size-6 items-center justify-center rounded-md hover:bg-accent hover:text-foreground"
+                      className="flex size-6 items-center justify-center rounded-md hover:bg-accent hover:text-foreground disabled:pointer-events-none disabled:opacity-40"
                       onPointerDown={(event) => event.preventDefault()}
                       onClick={() => onRemove(message.id)}
+                      disabled={message.pending}
                       title="Cancel and return to the composer"
                       aria-label="Cancel and return to the composer"
                       data-testid="queued-message-cancel"

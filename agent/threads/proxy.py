@@ -332,9 +332,6 @@ async def proxy_dashboard_thread_run_cancel(
             params={"wait": wait, "action": action},
         )
     if response.status_code in {200, 202, 204}:
-        from agent.threads.handlers import interrupt_transcript_turns
-
-        await interrupt_transcript_turns(thread_id, [run_id])
         # Cancelling a queued run leaves the live one untouched, so the thread
         # only reads as interrupted when nothing else is still running.
         try:

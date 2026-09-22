@@ -262,14 +262,18 @@ export interface QueuedThreadMessage {
   content: string
   images?: Array<AnyImageChunk>
   createdAt: number
+  /** The server has not acknowledged it yet, so it cannot be sent now or cancelled. */
+  pending?: boolean
 }
 
 export interface PendingThreadMessage extends Omit<
   QueuedThreadMessage,
-  "images"
+  "images" | "pending"
 > {
   images?: Array<ImageChunk>
   status: "sending" | "failed"
+  /** Sent to queue behind the live run, so it renders as a queued row. */
+  queued?: boolean
   /** Why delivery failed, e.g. `503 Service Unavailable`. */
   error?: string
 }

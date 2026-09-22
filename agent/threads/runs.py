@@ -896,8 +896,13 @@ async def steer_running_thread(
     )
     structured[-1]["id"] = message_id
 
+    latest_run_id = metadata.get("latest_run_id")
+    live_run_id = latest_run_id if isinstance(latest_run_id, str) and latest_run_id else None
+    # The live run's own turn, never a follow-up queued behind it.
     turn_id = (
-        await open_turn_id(thread_id) if metadata.get("transcript") == TRANSCRIPT_VERSION else None
+        await open_turn_id(thread_id, live_run_id)
+        if metadata.get("transcript") == TRANSCRIPT_VERSION
+        else None
     )
     if turn_id is not None:
         attachments, pending = _transcript_attachments(command_images, message_id)
@@ -939,6 +944,22 @@ async def steer_running_thread(
         payload["source"] = DASHBOARD_SOURCE
     if not await queue_message_for_thread(thread_id, payload):
         raise HTTPException(502, "failed to deliver the follow-up to the running agent")
+    # The run may have ended between the busy check and the store write, past
+    # the completion hook's own look at the store. ``reject`` keeps the two
+    # from racing each other into a second run.
+    if not await _run_is_live(client, thread_id, live_run_id):
+        try:
+            dispatched = await dispatch_pending_follow_ups(
+                thread_id, login, metadata, client=client, multitask_strategy="reject"
+            )
+        except Exception:  # noqa: BLE001
+            logger.warning(
+                "Could not start a run for a follow-up steered after the run ended",
+                exc_info=True,
+                extra={"steer": {"thread_id": thread_id, "message_id": message_id}},
+            )
+        else:
+            live_run_id = dispatched or live_run_id
 
     now_ms = _now_ms()
     await client.threads.update(
@@ -954,17 +975,28 @@ async def steer_running_thread(
         await _notify_slack_web_handoff(thread_id, metadata, client)
     except Exception:
         logger.exception("Failed to update Slack message for dashboard handoff on %s", thread_id)
-    latest_run_id = metadata.get("latest_run_id")
     return {
         "id": command.get("id"),
         "type": "success",
         "result": {
             "thread_id": thread_id,
-            "run_id": latest_run_id if isinstance(latest_run_id, str) else None,
+            "run_id": live_run_id,
             "message_id": message_id,
             "steered": True,
         },
     }
+
+
+async def _run_is_live(client: Any, thread_id: str, run_id: str | None) -> bool:
+    if run_id is None:
+        return False
+    try:
+        run = await client.runs.get(thread_id, run_id)
+    except Exception:  # noqa: BLE001
+        logger.debug("Could not read run %s after steering", run_id, exc_info=True)
+        return False
+    status = run.get("status") if isinstance(run, Mapping) else getattr(run, "status", None)
+    return status in {"pending", "running"}
 
 
 async def queue_follow_up_run(

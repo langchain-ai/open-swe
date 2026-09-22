@@ -43,10 +43,12 @@ import type {
 import { useSubmitAgentMessage } from "@/features/agents/lib/provider/useSubmitAgentMessage"
 import { useModelOptions } from "@/features/agents/lib/provider/useModelOptions"
 import {
+  agentThreadKeys,
   useAgentSkills,
   useRenameAgentThread,
   useAgentThreadPullRequestStatus,
 } from "@/features/agents/lib/queries"
+import { useQueryClient } from "@tanstack/react-query"
 import {
   materializeImages,
   visiblePendingMessages,
@@ -220,6 +222,7 @@ export function AgentThreadView({
   // the transcript hides the turn.
   const withdrawQueued = useCallback(
     async (entry: QueuedTurn) => {
+      if (entry.runId === null) return
       await agentsApi.cancelRun(thread.id, entry.runId)
     },
     [thread.id]
@@ -228,7 +231,7 @@ export function AgentThreadView({
   // Send now: the follow-up leaves the queue and goes into the live run.
   const steerQueued = useCallback(
     async (entry: QueuedTurn) => {
-      if (steerInFlightRef.current) return
+      if (steerInFlightRef.current || entry.runId === null) return
       steerInFlightRef.current = true
       try {
         await withdrawQueued(entry)
@@ -251,13 +254,13 @@ export function AgentThreadView({
   )
   // Enter on an empty composer sends the head of the queue now.
   const steerNextQueuedMessage = useCallback(() => {
-    const entry = queued[0]
+    const entry = queued.find((candidate) => candidate.runId !== null)
     if (entry) void steerQueued(entry)
   }, [queued, steerQueued])
   const removeQueuedMessage = useCallback(
     (id: string) => {
       const entry = queued.find((candidate) => candidate.message.id === id)
-      if (!entry) return
+      if (!entry || entry.runId === null) return
       void withdrawQueued(entry).then(() => restoreQueuedToComposer([entry]))
     },
     [queued, restoreQueuedToComposer, withdrawQueued]
@@ -308,31 +311,69 @@ export function AgentThreadView({
     () => ({ threadId: thread.id, running: thread.status === "running" }),
     [thread.id, thread.status]
   )
+  // An optimistic row sent to queue renders as a queued row from the start,
+  // so it never flashes as a sent message before the server confirms it.
   const pendingMessages = useMemo(
     () =>
-      visiblePendingMessages(thread.pendingMessages, [
-        ...baseMessages,
-        ...queued.map((entry) => entry.message),
-      ]),
+      visiblePendingMessages(
+        thread.pendingMessages?.filter((message) => !message.queued),
+        [...baseMessages, ...queued.map((entry) => entry.message)]
+      ),
     [baseMessages, queued, thread.pendingMessages]
   )
   const visibleMessages = useMemo(
     () => [...baseMessages, ...pendingMessages],
     [baseMessages, pendingMessages]
   )
-  const queuedRows = useMemo(
-    () =>
-      queued.map((entry) => ({
+  // An optimistic row has done its job once the transcript or the queue holds
+  // its id. Dropping it then keeps a withdrawn queued turn from resurfacing it
+  // as "Sending" after the transcript hides that turn.
+  const queryClient = useQueryClient()
+  useEffect(() => {
+    const pending = thread.pendingMessages
+    if (!pending?.length) return
+    const persisted = new Set(
+      [...baseMessages, ...queued.map((entry) => entry.message)].map(
+        (message) => message.id
+      )
+    )
+    if (!pending.some((message) => persisted.has(message.id))) return
+    queryClient.setQueryData<AgentThread>(
+      agentThreadKeys.detail(thread.id),
+      (prev) =>
+        prev && {
+          ...prev,
+          pendingMessages: prev.pendingMessages?.filter(
+            (message) => !persisted.has(message.id)
+          ),
+        }
+    )
+  }, [baseMessages, queryClient, queued, thread.id, thread.pendingMessages])
+
+  const queuedRows = useMemo(() => {
+    const known = new Set(queued.map((entry) => entry.message.id))
+    return [
+      ...queued.map((entry) => ({
         id: entry.message.id,
         content: queuedText(entry),
         images: queuedImages(entry),
         createdAt: Date.parse(entry.requestedAt),
+        pending: entry.runId === null,
       })),
-    [queued]
-  )
+      ...(thread.pendingMessages ?? [])
+        .filter((message) => message.queued && !known.has(message.id))
+        .map((message) => ({
+          id: message.id,
+          content: message.content,
+          images: message.images,
+          createdAt: message.createdAt,
+          pending: true,
+        })),
+    ]
+  }, [queued, thread.pendingMessages])
 
   const hasMessages = visibleMessages.length > 0
-  const hasConversation = hasMessages || queued.length > 0
+  const hasConversation = hasMessages || queuedRows.length > 0
   // The only file list the UI has: whatever the agent has already touched in
   // this thread. Those are also the paths a follow-up is most likely about.
   const mentionPaths = useMemo(() => editedPaths(baseMessages), [baseMessages])
@@ -519,7 +560,7 @@ export function AgentThreadView({
                   footer={
                     !isStreaming &&
                     !sendMessage.isPending &&
-                    queued.length === 0 && (
+                    queuedRows.length === 0 && (
                       <ThreadFeedbackCard
                         key={`${thread.id}:${session.data?.login ?? ""}`}
                         threadId={thread.id}

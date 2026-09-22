@@ -76,6 +76,7 @@ export function useSubmitAgentMessage(threadId: string) {
         images: vars.images,
         createdAt: Date.now(),
         status: "sending",
+        ...(vars.enqueue ? { queued: true } : {}),
       }
       const updateThread = (update: (thread: AgentThread) => AgentThread) =>
         queryClient.setQueryData<AgentThread>(
