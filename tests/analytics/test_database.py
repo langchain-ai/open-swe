@@ -32,6 +32,10 @@ def test_non_local_runtime_requires_postgres_uri(monkeypatch):
 
 async def test_migrations_allow_nonblocking_startup_and_restart(deployment_db):
     detector = BlockBuster()
+    # Online builds use a fresh connection; asyncpg probes password/SSL paths before connecting.
+    detector.functions["os.stat"].can_block_in(
+        "asyncpg/connect_utils.py", "_parse_connect_dsn_and_args"
+    )
     identities = []
     for _ in range(2):
         # asyncpg checks local password/SSL files when opening a new connection.
