@@ -49,6 +49,7 @@ import {
   useAgentThreadPullRequestStatus,
 } from "@/features/agents/lib/queries"
 import { useQueryClient } from "@tanstack/react-query"
+import { toast } from "sonner"
 import {
   materializeImages,
   visiblePendingMessages,
@@ -207,14 +208,28 @@ export function AgentThreadView({
 
   const [restoreDraft, setRestoreDraft] = useState<RestoredDraft | null>(null)
   const restoreQueuedToComposer = useCallback(
-    async (entries: ReadonlyArray<QueuedTurn>) => {
+    (entries: ReadonlyArray<QueuedTurn>, images: Array<ImageChunk>) => {
       if (entries.length === 0) return
-      const images = await materializeImages(entries.flatMap(queuedImages))
       setRestoreDraft((previous) => ({
         key: (previous?.key ?? 0) + 1,
         text: entries.map(queuedText).filter(Boolean).join("\n\n"),
         images,
       }))
+    },
+    []
+  )
+  // The images of a queued follow-up live with its run. Fetch them before that
+  // run is withdrawn: a fetch that fails leaves the follow-up queued, intact.
+  const materializeQueuedImages = useCallback(
+    async (entry: QueuedTurn): Promise<Array<ImageChunk> | null> => {
+      const { images, failed } = await materializeImages(queuedImages(entry))
+      if (failed === 0) return images
+      toast.error(
+        failed === 1
+          ? "Couldn't load the queued message's image, so it stays queued."
+          : `Couldn't load ${failed} of the queued message's images, so it stays queued.`
+      )
+      return null
     },
     []
   )
@@ -234,16 +249,15 @@ export function AgentThreadView({
       if (steerInFlightRef.current || entry.runId === null) return
       steerInFlightRef.current = true
       try {
+        const images = await materializeQueuedImages(entry)
+        if (images === null) return
         await withdrawQueued(entry)
-        await sendMessage.mutateAsync({
-          content: queuedText(entry),
-          images: await materializeImages(queuedImages(entry)),
-        })
+        await sendMessage.mutateAsync({ content: queuedText(entry), images })
       } finally {
         steerInFlightRef.current = false
       }
     },
-    [sendMessage, withdrawQueued]
+    [materializeQueuedImages, sendMessage, withdrawQueued]
   )
   const steerQueuedMessage = useCallback(
     (id: string) => {
@@ -261,16 +275,33 @@ export function AgentThreadView({
     (id: string) => {
       const entry = queued.find((candidate) => candidate.message.id === id)
       if (!entry || entry.runId === null) return
-      void withdrawQueued(entry).then(() => restoreQueuedToComposer([entry]))
+      void (async () => {
+        const images = await materializeQueuedImages(entry)
+        if (images === null) return
+        await withdrawQueued(entry)
+        restoreQueuedToComposer([entry], images)
+      })()
     },
-    [queued, restoreQueuedToComposer, withdrawQueued]
+    [materializeQueuedImages, queued, restoreQueuedToComposer, withdrawQueued]
   )
   // Stop cancels the queued runs along with the live one; their messages come
-  // back to the composer instead of starting the moment the run settles.
+  // back to the composer instead of starting the moment the run settles. Stop
+  // must not wait on a failed image fetch, so it restores what it could and
+  // says what it lost.
   const stopRun = useCallback(async () => {
     const pending = [...queued]
+    const { images, failed } = await materializeImages(
+      pending.flatMap(queuedImages)
+    )
     await source.stop()
-    await restoreQueuedToComposer(pending)
+    restoreQueuedToComposer(pending, images)
+    if (failed > 0) {
+      toast.error(
+        failed === 1
+          ? "Couldn't load one queued image; it was not restored to the composer."
+          : `Couldn't load ${failed} queued images; they were not restored to the composer.`
+      )
+    }
   }, [queued, restoreQueuedToComposer, source])
   const fixPullRequest = useCallback(
     async (pullRequest: AgentPullRequest) => {

@@ -146,6 +146,29 @@ def _message_update(
     return {"messages": queued}
 
 
+async def _consume_queued_messages(
+    store: BaseStore, namespace: tuple[str, ...], consumed: list[dict[str, Any]]
+) -> None:
+    """Remove ``consumed`` from the queue, keeping follow-ups appended since.
+
+    Building the injected messages awaits (model lookup, image fetches), and a
+    follow-up queued during that time is not in the snapshot; deleting the
+    whole entry would drop it without ever delivering it.
+    """
+    current_item = await store.aget(namespace, "pending_messages")
+    current = current_item.value.get("messages", []) if current_item is not None else []
+    if not isinstance(current, list):
+        current = []
+    if current[: len(consumed)] == consumed:
+        remaining = current[len(consumed) :]
+    else:
+        remaining = [message for message in current if message not in consumed]
+    if remaining:
+        await store.aput(namespace, "pending_messages", {"messages": remaining})
+    else:
+        await store.adelete(namespace, "pending_messages")
+
+
 async def _consume_pending_autofix_event(store: BaseStore, thread_id: str) -> str | None:
     """Pull and clear a batched PR-babysitting event from the store (no thread fetch)."""
     namespace = ("autofix", thread_id)
@@ -226,7 +249,8 @@ async def check_message_queue_before_model(  # noqa: PLR0911
             return _message_update(queued_updates, thread_id)
 
         queued_value = queued_item.value
-        queued_messages = queued_value.get("messages", [])
+        # A snapshot: what this call consumes, whatever is appended meanwhile.
+        queued_messages = list(queued_value.get("messages", []))
 
         if not queued_messages:
             await store.adelete(namespace, "pending_messages")
@@ -313,7 +337,7 @@ async def check_message_queue_before_model(  # noqa: PLR0911
         _flush_blocks(queued_updates, content_blocks, injected)
         # Cleared only once every message is built: a failure above leaves
         # them for the next model call instead of losing them.
-        await store.adelete(namespace, "pending_messages")
+        await _consume_queued_messages(store, namespace, queued_messages)
         return _message_update(queued_updates, thread_id)  # noqa: TRY300
     except Exception:
         logger.exception("Error in check_message_queue_before_model")

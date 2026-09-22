@@ -87,14 +87,21 @@ function blobToBase64(blob: Blob): Promise<string> {
   })
 }
 
+export interface MaterializedImages {
+  images: Array<ImageChunk>
+  /** Images whose bytes could not be fetched; they are not in `images`. */
+  failed: number
+}
+
 /**
  * Images as the composer holds them. A queued message's images are served by
  * the transcript, so putting them back in the composer means fetching the bytes
- * again; one that cannot be fetched is dropped rather than failing the rest.
+ * again. Callers decide what a failed fetch means: it is reported, not dropped
+ * silently, because the queued run these images belong to may be about to go.
  */
 export async function materializeImages(
   images: ReadonlyArray<AnyImageChunk>
-): Promise<Array<ImageChunk>> {
+): Promise<MaterializedImages> {
   const settled = await Promise.all(
     images.map(async (image): Promise<ImageChunk | null> => {
       if ("base64" in image) return image
@@ -115,5 +122,8 @@ export async function materializeImages(
       }
     })
   )
-  return settled.filter((image): image is ImageChunk => image !== null)
+  const materialized = settled.filter(
+    (image): image is ImageChunk => image !== null
+  )
+  return { images: materialized, failed: settled.length - materialized.length }
 }

@@ -391,11 +391,9 @@ export const ChatComposer = memo(function ChatComposer({
     return models.some((m) => m.id === selection.modelId && m.supports_images)
   }, [models, pendingImages.length, selection])
 
+  const composerEmpty = value.trim().length === 0 && pendingImages.length === 0
   const canSubmit =
-    !disabled &&
-    !isSubmitting &&
-    selectedModelSupportsImages &&
-    (value.trim().length > 0 || pendingImages.length > 0)
+    !disabled && !isSubmitting && selectedModelSupportsImages && !composerEmpty
 
   const applyPrompt = useCallback((nextValue: string, nextCursor: number) => {
     setValue(nextValue)
@@ -534,7 +532,15 @@ export const ChatComposer = memo(function ChatComposer({
       if (key === "Enter" && !event.shiftKey) {
         if (canSubmit) {
           void handleSubmit({ alternate: event.metaKey || event.ctrlKey })
-        } else if (busy && !disabled && onEmptySubmit) {
+        } else if (
+          composerEmpty &&
+          busy &&
+          !disabled &&
+          !isSubmitting &&
+          onEmptySubmit
+        ) {
+          // Only a truly empty composer sends the queue head. A draft that
+          // cannot be sent (images on a text-only model) must stay put.
           onEmptySubmit()
         }
         // Swallow it either way: a bare Enter must never insert a newline in a
@@ -548,8 +554,10 @@ export const ChatComposer = memo(function ChatComposer({
       busy,
       canSubmit,
       commandItems,
+      composerEmpty,
       disabled,
       handleSubmit,
+      isSubmitting,
       menuOpen,
       onEmptySubmit,
       onPlanModeChange,
