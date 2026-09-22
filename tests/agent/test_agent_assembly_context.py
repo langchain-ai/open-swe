@@ -697,7 +697,9 @@ SLACK_TOOL_NAMES = {
     "slack_add_reaction",
     "slack_attach_html",
     "slack_move_thread",
+    "slack_list_channels",
     "slack_no_reply_needed",
+    "slack_post_message",
     "slack_read_thread_messages",
     "slack_start_new_thread",
     "slack_reply",
@@ -749,6 +751,10 @@ async def test_a_web_turn_on_a_slack_thread_keeps_the_slack_tools() -> None:
 @pytest.mark.asyncio
 @pytest.mark.parametrize("source", ["slack", "schedule"])
 async def test_slack_source_context_includes_slack_tools(source: str) -> None:
+    from langchain.agents.middleware.types import ModelRequest, ModelResponse
+
+    from agent.middleware.plan_mode import PlanModeMiddleware
+
     config = _base_config()
     configurable = config.get("configurable")
     assert isinstance(configurable, dict)
@@ -767,11 +773,39 @@ async def test_slack_source_context_includes_slack_tools(source: str) -> None:
     assert {
         "slack_add_reaction",
         "slack_attach_html",
+        "slack_list_channels",
         "slack_move_thread",
+        "slack_post_message",
         "slack_read_thread_messages",
         "slack_start_new_thread",
         "slack_reply",
     } <= tool_names
+
+    middleware = captured["middleware"]
+    assert isinstance(middleware, list)
+    plan_mode = next(item for item in middleware if isinstance(item, PlanModeMiddleware))
+    observed_names: set[str] = set()
+
+    async def capture(filtered: ModelRequest) -> ModelResponse:
+        observed_names.clear()
+        for tool in filtered.tools:
+            name = tool.get("name") if isinstance(tool, dict) else tool.name
+            assert isinstance(name, str)
+            observed_names.add(name)
+        return ModelResponse(result=[])
+
+    for active in (False, True):
+        request = ModelRequest(
+            model=MagicMock(),
+            messages=[],
+            tools=[{"name": name} for name in tool_names],
+            state={"messages": [], "plan_mode": active},
+            runtime=MagicMock(),
+        )
+
+        await plan_mode.awrap_model_call(request, capture)
+        assert "slack_list_channels" in observed_names
+        assert ("slack_post_message" in observed_names) is not active
 
 
 @pytest.mark.asyncio
@@ -860,7 +894,9 @@ async def test_general_purpose_subagent_cannot_use_slack_tools() -> None:
         "notify_automation_channel",
         "slack_add_reaction",
         "slack_attach_html",
+        "slack_list_channels",
         "slack_move_thread",
+        "slack_post_message",
         "slack_read_thread_messages",
         "slack_start_new_thread",
         "slack_reply",
