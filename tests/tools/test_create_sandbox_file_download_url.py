@@ -8,9 +8,10 @@ download_tool = importlib.import_module("agent.tools.create_sandbox_file_downloa
 
 
 class _AsyncClient:
-    def __init__(self) -> None:
+    def __init__(self, expires_at: str | None = "2026-08-20T12:00:00Z") -> None:
         self.calls: list[tuple[str, str, dict[str, Any]]] = []
         self.closed = False
+        self.expires_at = expires_at
 
     async def __aenter__(self) -> _AsyncClient:
         return self
@@ -23,7 +24,7 @@ class _AsyncClient:
         return SimpleNamespace(
             download_url="https://downloads.example/file?token=secret",
             token="secret",
-            expires_at="2026-08-20T12:00:00Z",
+            expires_at=self.expires_at,
         )
 
 
@@ -71,6 +72,7 @@ async def test_create_download_url_for_relative_path(monkeypatch: pytest.MonkeyP
         "url": "https://downloads.example/file?token=secret",
         "file_path": "/workspace/project/artifacts/demo.mp4",
         "expires_at": "2026-08-20T12:00:00Z",
+        "note": "This URL is scoped to the current sandbox and stops resolving when the sandbox is reclaimed.",
     }
     assert "token" not in result
     assert client.closed is True
@@ -87,25 +89,39 @@ async def test_create_download_url_for_relative_path(monkeypatch: pytest.MonkeyP
     ]
 
 
-async def test_create_download_url_defaults_to_a_non_expiring_link(
+async def test_create_download_url_defaults_to_a_one_hour_expiry(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     backend = _Backend()
     client = _configure(monkeypatch, backend)
 
-    await download_tool.create_sandbox_file_download_url("/workspace/project/result.zip")
+    result = await download_tool.create_sandbox_file_download_url("/workspace/project/result.zip")
 
+    assert result["expires_at"] == "2026-08-20T12:00:00Z"
+    assert result["note"] == (
+        "This URL is scoped to the current sandbox and stops resolving when the sandbox is reclaimed."
+    )
     assert client.calls == [
         (
             "sandbox-1",
             "/workspace/project/result.zip",
             {
-                "expires_in_seconds": None,
+                "expires_in_seconds": 3600,
                 "content_type": None,
                 "content_disposition": "attachment",
             },
         )
     ]
+
+
+async def test_create_download_url_fills_missing_expiry(monkeypatch: pytest.MonkeyPatch) -> None:
+    backend = _Backend()
+    client = _configure(monkeypatch, backend)
+    client.expires_at = None
+
+    result = await download_tool.create_sandbox_file_download_url("result.zip")
+
+    assert result["expires_at"]
 
 
 @pytest.mark.parametrize(

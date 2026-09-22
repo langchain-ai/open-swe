@@ -20,6 +20,12 @@ def test_prompt_composes_artifact_delivery_guidance_with_available_tools() -> No
     assert "`.git/info/exclude`" in download_prompt
     assert "Prefer `output_iframe` for HTML previews" in download_prompt
     assert "`create_sandbox_file_download_url` for images, videos" in download_prompt
+    assert "only in an ephemeral Slack or chat response" in download_prompt
+    assert "Never place a sandbox download URL in a pull request description" in download_prompt
+    assert (
+        "`https://raw.githubusercontent.com/<owner>/<repo>/<commit-sha>/<path>`" in download_prompt
+    )
+    assert "`![alt](url)`" in download_prompt
     assert "use `slack_attach_html`" in download_prompt
 
 
