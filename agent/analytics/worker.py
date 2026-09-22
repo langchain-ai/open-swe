@@ -12,6 +12,7 @@ logger = logging.getLogger(__name__)
 
 _STOP = asyncio.Event()
 _WORKER: asyncio.Task[None] | None = None
+_RETENTION_WORKER: asyncio.Task[None] | None = None
 
 
 async def run_worker() -> None:
@@ -19,7 +20,6 @@ async def run_worker() -> None:
         try:
             delivered = await deliver_batch()
             await recompute_dirty_partitions(limit=20)
-            await enforce_retention()
         except Exception:  # noqa: BLE001
             delivered = 0
             logger.warning("Analytics worker iteration failed", exc_info=True)
@@ -29,17 +29,36 @@ async def run_worker() -> None:
             pass
 
 
+async def run_retention_worker() -> None:
+    while not _STOP.is_set():
+        try:
+            await enforce_retention()
+        except Exception:  # noqa: BLE001
+            logger.warning("Analytics retention failed", exc_info=True)
+        try:
+            await asyncio.wait_for(_STOP.wait(), timeout=60.0)
+        except TimeoutError:
+            continue
+
+
 async def start_worker() -> None:
-    global _WORKER
-    if not configured() or (_WORKER is not None and not _WORKER.done()):
+    global _WORKER, _RETENTION_WORKER
+    if not configured():
         return
     _STOP.clear()
-    _WORKER = asyncio.create_task(run_worker(), name="analytics-outbox-worker")
+    if _WORKER is None or _WORKER.done():
+        _WORKER = asyncio.create_task(run_worker(), name="analytics-outbox-worker")
+    if _RETENTION_WORKER is None or _RETENTION_WORKER.done():
+        _RETENTION_WORKER = asyncio.create_task(
+            run_retention_worker(), name="analytics-retention-worker"
+        )
 
 
 async def stop_worker() -> None:
-    global _WORKER
+    global _WORKER, _RETENTION_WORKER
     _STOP.set()
-    if _WORKER is not None:
-        await _WORKER
+    workers = [worker for worker in (_WORKER, _RETENTION_WORKER) if worker is not None]
+    if workers:
+        await asyncio.gather(*workers)
     _WORKER = None
+    _RETENTION_WORKER = None
