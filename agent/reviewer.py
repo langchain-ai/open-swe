@@ -40,7 +40,6 @@ from langchain.agents.middleware.types import AgentMiddleware
 from langchain_core.language_models.chat_models import BaseChatModel
 
 from agent.dashboard.options import gate_fable_model
-from agent.dashboard.workspace_settings import get_workspace_settings
 from agent.dashboard.workspace_settings_cache import cached_workspace_settings
 from agent.github.app import get_github_app_installation_token_with_expiry
 from agent.github.thread_token import cache_github_token_for_thread
@@ -63,7 +62,7 @@ from agent.middleware import (
 from agent.middleware.prepare_run import PrepareRunState
 from agent.middleware.sandbox_circuit_breaker import post_sandbox_unreachable_notification
 from agent.prompts import apply_tool_descriptions, load_prompt, render_prompt
-from agent.review.author_guidance import GUIDANCE_CAP, SteeringHistory
+from agent.review.author_guidance import GuidanceView
 from agent.review.diff import (
     changed_files,
     compute_diff_line_set,
@@ -76,10 +75,11 @@ from agent.review.findings import Finding
 from agent.review.findings import (
     list_findings as list_findings_async,
 )
-from agent.review.groups import maybe_generate_and_store_diff_groups
 from agent.review.publish import fetch_pr_review_threads
 from agent.review.reconcile import reconcile_findings_with_review_threads
 from agent.review.styles import get_approval_policy
+from agent.review.walkthrough import WalkthroughView
+from agent.review_scout.launch import ReviewScoutTarget
 from agent.run_config import RunConfig
 from agent.runtime import (
     DEFAULT_LLM_MAX_TOKENS,
@@ -100,7 +100,6 @@ from agent.tools import (
     http_request,
     list_findings,
     publish_review,
-    record_guidance,
     reply_to_finding_thread,
     resolve_finding_thread,
     update_finding,
@@ -297,17 +296,48 @@ def _format_pr_overview(pr_title: str, pr_body: str) -> str:
     return render_prompt("reviewer/pr-overview.md", title=safe_title, body=safe_body)
 
 
-def _format_author_guidance(history: SteeringHistory | None) -> str:
-    """Render the author's follow-up messages as an untrusted-data block."""
-    if history is None or not history.follow_ups:
+def _format_author_guidance(points: list[GuidanceView]) -> str:
+    """Render the steering points the review scout recorded, or ``""`` without any."""
+    if not points:
         return ""
-    messages = "\n".join(
-        f'<message author="{_safe_login(turn.author)}">\n'
-        f"{_escape_for_data_block(turn.text)}\n"
-        "</message>"
-        for turn in history.follow_ups
-    )
-    return render_prompt("reviewer/author-guidance.md", messages=messages)
+    lines: list[str] = []
+    for point in points:
+        author = f" ({point.author})" if point.author else ""
+        quote = "\n".join(f"  > {line}" for line in point.quote.splitlines())
+        lines.append(f"- {point.summary}{author}\n{quote}")
+    return render_prompt("reviewer/author-guidance.md", points="\n".join(lines))
+
+
+def _format_line_ranges(prefix: str, ranges: list[tuple[int, int]]) -> list[str]:
+    return [
+        f"{prefix}{start}" if start == end else f"{prefix}{start}-{end}" for start, end in ranges
+    ]
+
+
+def _format_walkthrough(walkthrough: WalkthroughView | None) -> str:
+    """Render the scout's steps as an untrusted-data block, or ``""`` without one."""
+    if walkthrough is None or not walkthrough.steps:
+        return ""
+    steps: list[str] = []
+    for step in walkthrough.steps:
+        files = "\n".join(
+            " ".join(
+                [
+                    _escape_for_data_block(file.path),
+                    *_format_line_ranges("+", file.added),
+                    *_format_line_ranges("-", file.deleted),
+                ]
+            )
+            for file in step.files
+        )
+        steps.append(
+            f'<step index="{step.index}">\n'
+            f"<title>{_escape_for_data_block(step.title)}</title>\n"
+            f"<summary>{_escape_for_data_block(step.summary)}</summary>\n"
+            f"<files>\n{files}\n</files>\n"
+            "</step>"
+        )
+    return render_prompt("reviewer/walkthrough.md", steps="\n".join(steps))
 
 
 def _build_first_review_context(
@@ -445,8 +475,10 @@ _DATA_BLOCK_WRAPPER_TAGS = (
     "body",
     "pr_overview",
     "title",
-    "author_messages",
-    "message",
+    "review_walkthrough",
+    "step",
+    "summary",
+    "files",
 )
 _CLOSING_TAG_RE = re.compile(
     r"</\s*(" + "|".join(_DATA_BLOCK_WRAPPER_TAGS) + r")\s*>",
@@ -568,11 +600,6 @@ def _format_existing_findings(findings: list[Finding]) -> str:
     return "\n".join(lines) if lines else "_(no open findings)_"
 
 
-# Strong references to fire-and-forget background tasks (e.g. the AI-sorted
-# diff grouping pass) so the event loop doesn't garbage-collect them mid-flight.
-_BACKGROUND_TASKS: set[asyncio.Task[None]] = set()
-
-
 def _make_model_or_defer(
     model_id: str,
     *,
@@ -584,38 +611,6 @@ def _make_model_or_defer(
     except Exception as e:  # noqa: BLE001
         logger.warning("Deferring reviewer model setup failure for %s", model_id, exc_info=True)
         return make_deferred_error_model(e, model_id=model_id)
-
-
-def _on_background_task_done(task: asyncio.Task[None]) -> None:
-    _BACKGROUND_TASKS.discard(task)
-    if task.cancelled():
-        return
-    exc = task.exception()
-    if exc is not None:
-        logger.warning("Background reviewer task failed: %s", exc)
-
-
-async def _resolve_grouping_model(cfg: RunConfig, *, use_gateway: bool) -> BaseChatModel:
-    """Resolve the model for the diff-grouping pass.
-
-    Per-run override (``grouping_model_id``/``grouping_reasoning_effort``) wins;
-    otherwise the workspace default, which itself inherits the reviewer subagent
-    model when no grouping-specific model is configured.
-    """
-    settings = await get_workspace_settings(cfg.workspace_slug)
-    if cfg.grouping_model_id:
-        model_id = cfg.grouping_model_id
-        effort = cfg.grouping_reasoning_effort
-    else:
-        model_id, effort = settings.default_grouping_model
-    model_id, effort = gate_fable_model(model_id, effort, fable_enabled=settings.fable_enabled)
-    model_kwargs = provider_model_kwargs(
-        model_id,
-        effort,
-        max_tokens=DEFAULT_LLM_MAX_TOKENS,
-        openai_reasoning_default=DEFAULT_LLM_REASONING,
-    )
-    return _make_model_or_defer(model_id, use_gateway=use_gateway, **model_kwargs)
 
 
 async def _cached_api_standards_skill() -> str | None:
@@ -830,20 +825,44 @@ class PrepareReviewerRunMiddleware(BasePrepareRunMiddleware):
                 )
                 return ""
 
+        async def _await_walkthrough() -> WalkthroughView | None:
+            if reviewer_event == "finding_reply" or reviewer_eval or not isinstance(pr_number, int):
+                return None
+            pr_title, _ = await pr_overview_task
+            target = ReviewScoutTarget(
+                owner=repo_owner,
+                repo=repo_name,
+                pr_number=pr_number,
+                pr_title=pr_title,
+                base_sha=base_sha,
+                head_sha=head_sha,
+                workspace_slug=cfg.workspace_slug,
+            )
+            try:
+                return await target.await_walkthrough()
+            except Exception:
+                logger.warning(
+                    "Reviewing without a walkthrough", exc_info=True, extra=target.log_extra
+                )
+                return None
+
         async def _fetch_author_guidance_block() -> str:
             if reviewer_eval or not repo_owner or not repo_name or not isinstance(pr_number, int):
                 return ""
+            # The scout records the steering points; wait for it like the walkthrough.
+            await walkthrough_task
             try:
-                history = await SteeringHistory.load(repo_owner, repo_name, pr_number)
+                points = await GuidanceView.for_head(repo_owner, repo_name, pr_number, head_sha)
             except Exception:
                 logger.exception(
-                    "Failed to load author steering history for %s/%s#%s; continuing without it",
-                    repo_owner,
-                    repo_name,
-                    pr_number,
+                    "Failed to load author guidance; continuing without it",
+                    extra={
+                        "pr_repo_full_name": f"{repo_owner}/{repo_name}",
+                        "pr_number": pr_number,
+                    },
                 )
                 return ""
-            return _format_author_guidance(history)
+            return _format_author_guidance(points)
 
         async def _fetch_repo_style_prompt() -> str | None:
             if not repo_owner or not repo_name:
@@ -868,6 +887,7 @@ class PrepareReviewerRunMiddleware(BasePrepareRunMiddleware):
 
         diff_context_task = asyncio.create_task(_fetch_diff_context())
         pr_overview_task = asyncio.create_task(_fetch_pr_overview())
+        walkthrough_task = asyncio.create_task(_await_walkthrough())
         existing_threads_task = asyncio.create_task(_fetch_existing_threads_block())
         author_guidance_task = asyncio.create_task(_fetch_author_guidance_block())
         repo_style_task = asyncio.create_task(_fetch_repo_style_prompt())
@@ -962,6 +982,9 @@ class PrepareReviewerRunMiddleware(BasePrepareRunMiddleware):
         )
         if review_context:
             system_prompt = f"{system_prompt}\n\n{review_context}"
+        walkthrough_block = _format_walkthrough(await walkthrough_task)
+        if walkthrough_block:
+            system_prompt = f"{system_prompt}\n\n{walkthrough_block}"
         if author_guidance_block:
             system_prompt = f"{system_prompt}\n\n{author_guidance_block}"
         if skill_sources:
@@ -995,19 +1018,6 @@ class PrepareReviewerRunMiddleware(BasePrepareRunMiddleware):
                         skills_list=skills_list,
                     )
                 )
-
-        if reviewer_event != "finding_reply" and pr_diff_text and self._thread_id:
-            grouping_model = await _resolve_grouping_model(cfg, use_gateway=self._use_gateway)
-            grouping_task = asyncio.create_task(
-                maybe_generate_and_store_diff_groups(
-                    thread_id=self._thread_id,
-                    head_sha=head_sha,
-                    diff_text=pr_diff_text,
-                    model=grouping_model,
-                )
-            )
-            _BACKGROUND_TASKS.add(grouping_task)
-            grouping_task.add_done_callback(_on_background_task_done)
 
         return {
             "work_dir": work_dir,
@@ -1099,15 +1109,13 @@ async def get_reviewer_agent(config: RunnableConfig) -> Pregel:
                 add_finding,
                 update_finding,
                 list_findings,
-                record_guidance,
                 publish_review,
                 resolve_finding_thread,
                 reply_to_finding_thread,
                 web_search,
                 fetch_url,
                 http_request,
-            ],
-            {"record_guidance": {"cap": GUIDANCE_CAP}},
+            ]
         ),
         subagents=[_reviewer_subagent(reviewer_subagent_model)],
         backend=backend,

@@ -123,6 +123,8 @@ export interface SessionUser {
   user_id?: string | null
   slack_user_id?: string | null
   is_admin: boolean
+  /** Mirrors the user's preference: what Enter does while a run is live. */
+  follow_up_behavior?: FollowUpBehavior
   /** Whether the server records new threads into the transcript log. */
   transcript_recording?: boolean
   slack_oauth_enabled?: boolean
@@ -193,6 +195,7 @@ export interface OptionsPayload {
 }
 
 export interface Profile {
+  experimental_assistant_ui?: boolean | null
   login?: string
   email?: string
   default_model?: string
@@ -212,6 +215,7 @@ export interface Profile {
 }
 
 export interface ProfileUpdate {
+  experimental_assistant_ui?: boolean | null
   default_model: string
   reasoning_effort: string
   default_subagent_model?: string | null
@@ -276,8 +280,6 @@ export interface WorkspaceSettings {
   default_reviewer_reasoning_effort?: string | null
   default_reviewer_subagent_model?: string | null
   default_reviewer_subagent_reasoning_effort?: string | null
-  default_grouping_model?: string | null
-  default_grouping_reasoning_effort?: string | null
   default_chat_model?: string | null
   default_chat_reasoning_effort?: string | null
   default_thread_title_model?: string | null
@@ -571,12 +573,15 @@ export interface UserInstructions {
 }
 
 export type ThreadVisibility = "public" | "private"
+/** Queue holds a follow-up until the run ends; steer delivers it into the live run. */
+export type FollowUpBehavior = "queue" | "steer"
 
 export interface UserPreferences {
   default_visibility: ThreadVisibility
   local_tracing_project: string | null
   default_local_tracing_project: string
   default_workspace: string | null
+  follow_up_behavior: FollowUpBehavior
 }
 
 export interface Skill {
@@ -900,11 +905,28 @@ export interface ReviewPrDetails {
   labels: Array<{ name: string; color: string | null }>
 }
 
-export interface ReviewDiffGroup {
+/** Inclusive `[start, end]` line numbers. */
+export type ReviewLineRange = [number, number]
+
+/** Added lines are head line numbers; deleted lines are merge-base line numbers. */
+export interface ReviewWalkthroughFile {
+  path: string
+  added: Array<ReviewLineRange>
+  deleted: Array<ReviewLineRange>
+}
+
+export interface ReviewWalkthroughStep {
   index: number
   title: string
   summary: string
-  files: Array<string>
+  other: boolean
+  files: Array<ReviewWalkthroughFile>
+}
+
+/** The review scout's reading order for the PR's current head. */
+export interface ReviewWalkthrough {
+  head_sha: string
+  steps: Array<ReviewWalkthroughStep>
 }
 
 /** `status: "none"` is a PR the reviewer graph has never run on. */
@@ -918,8 +940,9 @@ export interface ReviewDetail extends Omit<
   pr: ReviewPrDetails
   checks: Array<ReviewCheckRun>
   findings: Array<ReviewFinding>
-  diff_groups: Array<ReviewDiffGroup>
-  diff_groups_stale: boolean
+  walkthrough: ReviewWalkthrough | null
+  /** A review scout is working on this head, so `walkthrough` is on its way. */
+  walkthrough_running: boolean
   guidance: Array<GuidancePoint>
 }
 
@@ -1481,6 +1504,11 @@ export const api = {
   getReviewChat: (owner: string, repo: string, number: number) =>
     request<ReviewChatMeta>(
       `/reviews/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}/chat`
+    ),
+  runReviewScout: (owner: string, repo: string, number: number) =>
+    request<{ started: boolean; run_id: string | null }>(
+      `/reviews/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}/scout`,
+      { method: "POST" }
     ),
   reReview: (owner: string, repo: string, number: number) =>
     request<{

@@ -481,10 +481,10 @@ test.describe("threads workspace", () => {
     );
 
     await page.goto("/agents");
+    await profileStarted.promise;
     await expect(
       page.getByRole("heading", { name: "What should we build?" }),
-    ).toBeVisible();
-    await profileStarted.promise;
+    ).toHaveCount(0);
 
     await page.evaluate(() => {
       const seen = { value: false };

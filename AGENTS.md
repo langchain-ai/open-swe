@@ -21,6 +21,7 @@ Follow [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) for local startup, tunnel conf
 | `agent` | `agent.graphs.agent:traced_agent` | `agent/server.py` |
 | `reviewer` | `agent.graphs.reviewer:traced_reviewer_agent` | `agent/reviewer.py` |
 | `analyzer` | `agent.graphs.analyzer:traced_analyzer` | `agent/analyzer.py` |
+| `review-scout` | `agent.graphs.review_scout:traced_review_scout` | `agent/review_scout/graph.py` |
 | `chat` | `agent.graphs.chat:traced_chat_agent` | `agent/chat.py` |
 | `scheduler` | `agent.graphs.scheduler:get_scheduler` | `agent/scheduler.py` |
 

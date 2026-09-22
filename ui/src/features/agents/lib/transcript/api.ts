@@ -193,6 +193,7 @@ export interface RunStartCommand {
   id: number
   method: "run.start"
   params: {
+    multitask_strategy?: "enqueue"
     input: { messages: Array<Record<string, unknown>> } | null
     config: { configurable: Record<string, unknown> }
     assistant_id: string
@@ -210,16 +211,20 @@ export function runStartCommand({
   threadId,
   message,
   configurable = {},
+  enqueue = false,
 }: {
   threadId: string
   /** Omitted for a message-less run such as `/offload`. */
   message?: RunStartMessage
   configurable?: Record<string, unknown>
+  /** Queue behind the live run instead of steering it. */
+  enqueue?: boolean
 }): RunStartCommand {
   return {
     id: 1,
     method: "run.start",
     params: {
+      ...(enqueue ? { multitask_strategy: "enqueue" as const } : {}),
       input: message
         ? {
             messages: [

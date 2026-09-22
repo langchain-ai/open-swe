@@ -15,12 +15,16 @@ logger = logging.getLogger(__name__)
 USER_PREFERENCES_NAMESPACE: list[str] = ["user_preferences"]
 
 ThreadVisibility = Literal["public", "private"]
+FollowUpBehavior = Literal["queue", "steer"]
 
 
 class UserPreferencesUpdate(BaseModel):
     default_visibility: ThreadVisibility
     local_tracing_project: str | None = None
     default_workspace: str | None = None
+    # What Enter does while a run is live: hold the message until the run ends,
+    # or steer the live run. Omitted keeps the stored value.
+    follow_up_behavior: FollowUpBehavior | None = None
 
 
 def _normalize(record: dict[str, Any] | None) -> dict[str, Any]:
@@ -34,6 +38,9 @@ def _normalize(record: dict[str, Any] | None) -> dict[str, Any]:
         "default_visibility": visibility if visibility in ("public", "private") else "private",
         "local_tracing_project": project if isinstance(project, str) and project.strip() else None,
         "default_workspace": normalized_workspace,
+        "follow_up_behavior": (
+            "steer" if (record or {}).get("follow_up_behavior") == "steer" else "queue"
+        ),
     }
 
 
@@ -59,6 +66,11 @@ async def set_user_preferences(login: str, update: UserPreferencesUpdate) -> dic
         "default_workspace": update.default_workspace.strip().lower()
         if update.default_workspace and update.default_workspace.strip()
         else None,
+        "follow_up_behavior": (
+            update.follow_up_behavior
+            if update.follow_up_behavior is not None
+            else existing.get("follow_up_behavior")
+        ),
         "created_at": existing.get("created_at") or now_iso(),
         "updated_at": now_iso(),
     }

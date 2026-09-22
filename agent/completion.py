@@ -21,6 +21,7 @@ from langgraph_sdk.client import LangGraphClient
 
 from agent.agent_cost import finalize_agent_invocation_usage
 from agent.config import ENV
+from agent.dispatch import FOLLOW_UP_PICKUP_KIND
 from agent.github.app import get_github_app_installation_token
 from agent.github.comments import post_github_comment
 from agent.invocation import resolve_invocation_id, with_invocation_id
@@ -35,6 +36,7 @@ from agent.source_context import SourceContext
 from agent.thread_feedback import schedule_answer_feedback
 from agent.transcript.turns import TurnOutcome, settle_run_turn
 from agent.utils.errors import LAST_MODEL_ERROR_KEY, code_for_error_type
+from agent.utils.json_types import thread_metadata
 from agent.utils.langsmith import get_langsmith_trace_url
 from agent.utils.thread_ops import langgraph_client
 from agent.utils.user_messages import warning
@@ -427,6 +429,35 @@ async def _settle_transcript_turn(thread_id: str, run_id: str | None, status: ob
         )
 
 
+async def _start_run_for_pending_follow_ups(thread_id: str) -> None:
+    """Pick up follow-ups steered into the run after its last model call.
+
+    ``reject`` keeps this from touching a run someone started in the meantime:
+    that run's own first model call drains the same store entry.
+    """
+    from agent.threads.runs import dispatch_pending_follow_ups
+
+    client = langgraph_client()
+    try:
+        metadata = thread_metadata(await client.threads.get(thread_id))
+        login = metadata.get("owner_login")
+        if not isinstance(login, str) or not login:
+            return
+        # A queued follow-up is about to start and its first model call picks
+        # the leftovers up; nothing to dispatch.
+        if await client.runs.list(thread_id, status="pending", limit=1):
+            return
+        await dispatch_pending_follow_ups(
+            thread_id, login, metadata, client=client, multitask_strategy="reject"
+        )
+    except Exception:  # noqa: BLE001
+        logger.warning(
+            "Could not start a run for follow-ups left after a completed run",
+            exc_info=True,
+            extra={"run_completion": {"thread_id": thread_id}},
+        )
+
+
 async def handle_run_completion(payload: dict[str, Any]) -> dict[str, str]:
     """Handle a platform run-completion webhook POST.
 
@@ -440,9 +471,15 @@ async def handle_run_completion(payload: dict[str, Any]) -> dict[str, str]:
         return {"status": "ignored", "reason": "missing thread_id"}
     await _finalize_agent_usage_telemetry(thread_id, status, payload)
     await _settle_transcript_turn(thread_id, run_id, status)
+    payload_metadata = payload.get("metadata")
+    # A run that failed, or a pickup run that left the store as it found it,
+    # would only fail the same way again: one attempt per leftover.
+    if status == "success" and not (
+        isinstance(payload_metadata, dict) and payload_metadata.get("kind") == FOLLOW_UP_PICKUP_KIND
+    ):
+        await _start_run_for_pending_follow_ups(thread_id)
     if status == "success":
         return await _handle_successful_run(thread_id, run_id, payload)
-    payload_metadata = payload.get("metadata")
     if (
         status in _TERMINAL_FAILURE_STATUSES
         and isinstance(payload_metadata, dict)
