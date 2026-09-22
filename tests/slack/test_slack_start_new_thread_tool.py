@@ -224,7 +224,7 @@ async def test_slack_start_new_thread_success(monkeypatch: pytest.MonkeyPatch) -
         "## Breakout Instructions\n"
         "Use the same repo and investigate the follow-up aspect in detail."
     )
-    assert "slack_thread_reply" not in dispatch["content"]
+    assert "slack_reply" not in dispatch["content"]
     assert "trace" not in captured
     assert [item["message_ts"] for item in captured["stored_mappings"]] == [new_ts]
     assert all(item["triggering_user_id"] == "U1" for item in captured["stored_mappings"])

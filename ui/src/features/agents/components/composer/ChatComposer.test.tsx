@@ -189,6 +189,21 @@ describe("ChatComposer stop button", () => {
   })
 })
 
+describe("ChatComposer options", () => {
+  it("offers attachments without a plan-mode toggle", async () => {
+    renderComposer(false)
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "More composer options" })
+    )
+
+    expect(
+      await screen.findByRole("menuitem", { name: "Attach images" })
+    ).toBeTruthy()
+    expect(screen.queryByRole("menuitem", { name: /plan mode/i })).toBeNull()
+  })
+})
+
 describe("ChatComposer skill autocomplete", () => {
   it("omits the model command when no model picker is available", () => {
     const items = buildCommandItems(
@@ -249,27 +264,27 @@ describe("ChatComposer skill autocomplete", () => {
   it("prefers a colliding skill and preserves surrounding prompt text", () => {
     const trigger = {
       kind: "slash-command" as const,
-      query: "plan",
+      query: "model",
       rangeStart: 7,
-      rangeEnd: 12,
+      rangeEnd: 13,
     }
     const items = buildCommandItems(
       trigger,
       [],
       [
         {
-          name: "plan",
-          description: "Create an implementation plan",
+          name: "model",
+          description: "Inspect a model",
           instructions: "",
         },
       ]
     )
 
     expect(items).toEqual([
-      expect.objectContaining({ type: "skill", name: "plan" }),
+      expect.objectContaining({ type: "skill", name: "model" }),
     ])
-    expect(replaceTextRange("Please /plan this", 7, 12, "/plan ").text).toBe(
-      "Please /plan  this"
+    expect(replaceTextRange("Please /model this", 7, 13, "/model ").text).toBe(
+      "Please /model  this"
     )
   })
 })

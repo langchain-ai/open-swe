@@ -19,6 +19,7 @@ from pydantic import (
     SerializerFunctionWrapHandler,
     TypeAdapter,
     model_serializer,
+    model_validator,
 )
 
 SCHEMA_VERSION = 1
@@ -131,6 +132,13 @@ class ThreadMetaUpdated(_Body):
 
 
 class TurnRequested(_Body):
+    @model_validator(mode="before")
+    @classmethod
+    def discard_legacy_plan_mode(cls, value: object) -> object:
+        if isinstance(value, dict):
+            return {key: item for key, item in value.items() if key != "plan_mode"}
+        return value
+
     type: Literal["turn.requested"] = "turn.requested"
     turn_id: UUID
     message_id: str
@@ -139,7 +147,6 @@ class TurnRequested(_Body):
     attachments: list[MessageAttachment] = Field(default_factory=list)
     model_id: str | None = None
     effort: str | None = None
-    plan_mode: bool = False
 
 
 class TurnStarted(_Body):

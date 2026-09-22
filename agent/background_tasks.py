@@ -160,8 +160,8 @@ async def monitor_background_tasks(thread_id: str) -> dict[str, Any]:
     metadata = metadata if isinstance(metadata, dict) else {}
     sandbox_id = metadata.get("sandbox_id")
     if not isinstance(sandbox_id, str) or not sandbox_id:
-        await update_background_task_state(client, thread_id, reset=True)
-        await sync_slack_background_status(client, thread_id)
+        metadata = await update_background_task_state(client, thread_id, reset=True)
+        await sync_slack_background_status(client, thread_id, metadata=metadata)
         await _delete_crons(thread_id)
         return {"status": "missing_sandbox"}
     backend = await create_sandbox(sandbox_id)
@@ -179,8 +179,9 @@ async def monitor_background_tasks(thread_id: str) -> dict[str, Any]:
         task_id for task in terminal if isinstance((task_id := task.get("task_id")), str)
     ]
     tracked_successfully = False
+    status_metadata: dict[str, object] | None = None
     try:
-        await update_background_task_state(
+        status_metadata = await update_background_task_state(
             client,
             thread_id,
             running=running_ids,
@@ -196,6 +197,7 @@ async def monitor_background_tasks(thread_id: str) -> dict[str, Any]:
             extra={"agent_thread_id": thread_id},
             exc_info=True,
         )
+    status_context = SourceContext.from_metadata(status_metadata or metadata)
     delivered = 0
     for task in terminal:
         task_id = task.get("task_id")
@@ -207,6 +209,8 @@ async def monitor_background_tasks(thread_id: str) -> dict[str, Any]:
         try:
             configurable = _dispatch_config(metadata, thread_id)
             configurable["background_task_completion"] = True
+            # A completion run can change task state before delivery finishes.
+            status_metadata = None
             await dispatch_agent_run(
                 thread_id,
                 message,
@@ -216,6 +220,7 @@ async def monitor_background_tasks(thread_id: str) -> dict[str, Any]:
                 systems=[_BACKGROUND_TASK_SENDER],
                 metadata={},
                 multitask_strategy="enqueue",
+                source_context=status_context,
             )
             await _mark_delivered(backend, task_id)
             task["notification"] = "done"
@@ -244,5 +249,7 @@ async def monitor_background_tasks(thread_id: str) -> dict[str, Any]:
                 await backend.aexecute(
                     f"rmdir {shlex.quote(MONITOR_LOCK)} 2>/dev/null || true", timeout=10
                 )
-    await sync_slack_background_status(client, thread_id)
+    await sync_slack_background_status(
+        client, thread_id, metadata=status_metadata, source_context=status_context
+    )
     return {"status": "running" if running or pending else "idle", "delivered": delivered}

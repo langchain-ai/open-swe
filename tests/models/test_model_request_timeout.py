@@ -37,7 +37,7 @@ def test_openai_gets_codex_context_window_profile_override() -> None:
 
 
 def test_anthropic_gets_a_default_request_timeout() -> None:
-    captured = _make_model("anthropic:claude-opus-5")
+    captured = _make_model("anthropic:claude-opus-5-5")
     assert captured["timeout"] == model.DEFAULT_REQUEST_TIMEOUT_SECONDS
     assert "profile" not in captured
 

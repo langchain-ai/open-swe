@@ -223,7 +223,7 @@ def fallback_model_id_for(primary_model_id: str) -> str | None:
     if primary_model_id.startswith("anthropic:"):
         return "openai:gpt-5.6-sol"
     if primary_model_id.startswith("openai:"):
-        return "anthropic:claude-opus-5"
+        return "anthropic:claude-opus-5-5"
     return None
 
 

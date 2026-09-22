@@ -77,7 +77,6 @@ async def test_private_requester_partial_update_preserves_other_settings_and_use
         "default_visibility": "public",
         "local_tracing_project": "keep-project",
         "default_workspace": "keep-workspace",
-        "transcript_streaming": True,
     }
     fake_store.seed(["profiles"], "Alice", profile)
     fake_store.seed(["profiles"], "bob", {"draft_prs": True})
@@ -254,7 +253,6 @@ async def test_nullable_fields_clear_and_false_values_survive(fake_store: FakeSt
         "default_visibility": "private",
         "local_tracing_project": None,
         "default_workspace": None,
-        "transcript_streaming": False,
     }
     assert await patch_personal_settings("alice", patch_values) == patch_values
     saved = {
@@ -307,7 +305,7 @@ async def test_model_effort_patch_uses_dashboard_normalization(fake_store: FakeS
     )
     await patch_personal_settings("alice", {"reasoning_effort": "low"})
     profile = fake_store.values(["profiles"])["alice"]
-    assert profile["default_model"] == "anthropic:claude-opus-5"
+    assert profile["default_model"] == "anthropic:claude-opus-5-5"
     assert profile["reasoning_effort"] == "low"
 
 
@@ -342,7 +340,6 @@ async def test_private_read_exposes_all_ordinary_settings_only_for_requester(
             "default_workspace": "mine",
             "default_visibility": "private",
             "local_tracing_project": "tracing",
-            "transcript_streaming": True,
         },
     )
     fake_store.seed(["profiles"], "bob", {"default_repo": "org/bob"})
@@ -355,7 +352,6 @@ async def test_private_read_exposes_all_ordinary_settings_only_for_requester(
                 "default_workspace": "mine",
                 "default_visibility": "private",
                 "local_tracing_project": "tracing",
-                "transcript_streaming": True,
                 "follow_up_behavior": "queue",
             },
             "instructions": "",

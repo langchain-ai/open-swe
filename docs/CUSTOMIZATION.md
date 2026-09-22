@@ -12,7 +12,7 @@ if model_id == DEFAULT_LLM_MODEL_ID:
 return create_deep_agent(
     model=make_model(model_id, **model_kwargs),
     system_prompt=construct_system_prompt(...),
-    tools=[http_request, fetch_url, slack_thread_reply],
+    tools=[http_request, fetch_url, slack_reply],
     backend=sandbox_backend,
     middleware=[
         ToolErrorMiddleware(),
@@ -144,7 +144,7 @@ LLM_MODEL_ID="anthropic:claude-sonnet-5"
 LLM_REASONING_EFFORT="high"
 ```
 
-When `LLM_MODEL_ID` is unset or blank, an Anthropic-only deployment—`ANTHROPIC_API_KEY` is set while `OPENAI_API_KEY` is unset or empty—defaults to `anthropic:claude-opus-5`. All other deployments default to `openai:gpt-5.6-sol`, including deployments with both keys set. The default reasoning effort is `medium`.
+When `LLM_MODEL_ID` is unset or blank, an Anthropic-only deployment—`ANTHROPIC_API_KEY` is set while `OPENAI_API_KEY` is unset or empty—defaults to `anthropic:claude-opus-5-5`. All other deployments default to `openai:gpt-5.6-sol`, including deployments with both keys set. The default reasoning effort is `medium`.
 
 Either variable can be set independently. When only the model is set, `medium` is used if supported, otherwise that model's catalog default effort is used. The model must be an allowed default in `agent/dashboard/options.py`; unsupported models or incompatible efforts raise a configuration error when defaults are resolved.
 
@@ -228,7 +228,7 @@ Open SWE ships with a small set of custom tools on top of the built-in Deep Agen
 | `fetch_url` | `agent/tools/fetch_url.py` | Fetch web pages as markdown |
 | `http_request` | `agent/tools/http_request.py` | HTTP API calls |
 | `slack_attach_html` | `agent/slack/tools/attach_html.py` | Attach sandbox HTML previews to Slack threads |
-| `slack_thread_reply` | `agent/slack/tools/thread_reply.py` | Reply in Slack threads |
+| `slack_reply` | `agent/slack/tools/reply.py` | Reply to the person who asked, in a Slack thread or ephemerally |
 
 ### Workspace MCP servers
 
@@ -236,8 +236,7 @@ Admins can connect generic remote MCP servers under **Admin → Instance MCPs**,
 Connections belong to this Open SWE deployment and are shared across repositories
 and remote coding-agent threads. Enabled connections provide baseline tools for
 all users, limited to the tools selected by an admin. Only admins can manage
-connections or reveal saved credentials. Plan mode continues to block workspace
-MCP tools.
+connections or reveal saved credentials.
 
 1. Choose **Add MCP server** and enter a unique lowercase connection name, an
    HTTPS server URL, and its transport (**Streamable HTTP** or **SSE**).
@@ -445,14 +444,14 @@ def datadog_search(query: str, time_range: str = "1h") -> dict[str, Any]:
 Then register it in `agent/server.py`:
 
 ```python
-from .tools import fetch_url, http_request, slack_thread_reply
+from .tools import fetch_url, http_request, slack_reply
 from .tools.datadog_search import datadog_search
 
 return create_deep_agent(
     ...
     tools=[
         http_request, fetch_url,
-        slack_thread_reply,
+        slack_reply,
         datadog_search,  # new tool
     ],
     ...
@@ -463,7 +462,7 @@ The agent will automatically see the tool's name, docstring, and parameter types
 
 ### Removing tools
 
-If you don't use Slack, remove `slack_thread_reply` from the tools list. If you don't need web fetching, remove `fetch_url`.
+If you don't use Slack, remove `slack_reply` from the tools list. If you don't need web fetching, remove `fetch_url`.
 
 ### Conditional tools
 
@@ -474,7 +473,7 @@ base_tools = [http_request, fetch_url]
 source = config["configurable"].get("source")
 
 if source == "slack":
-    tools = [*base_tools, slack_thread_reply]
+    tools = [*base_tools, slack_reply]
 else:
     tools = base_tools
 
@@ -608,7 +607,6 @@ The system prompt is assembled in `agent/prompt.py` from modular sections. You c
 | `DEPENDENCY_SECTION` | Installing, vetting, and managing project dependencies |
 | `COMMIT_PR_SECTION` | PR title/body format, lint/format steps, and commit conventions (or `DESKTOP_PR_SECTION`) |
 | `OPEN_SWE_SHARED_BASE` | Shared core guidance: concise style, core behavior, sandbox operations, code style, and communication |
-| `PLAN_MODE_SECTION` | Read-only planning mode instructions |
 
 > **Note:** General code style (`### Working with Code`), communication guidelines (`### Communication`), and core behaviors are composed as subsections of `OPEN_SWE_SHARED_BASE` rather than separate configurable constants.
 

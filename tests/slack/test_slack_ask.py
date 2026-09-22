@@ -8,10 +8,11 @@ from fastapi import BackgroundTasks, Request
 
 from agent.run_config import Repo
 from agent.slack import ask as slack_ask
+from agent.slack import client as slack_client
 from agent.slack import routes as slack_routes
 from agent.slack.channels import SlackChannel
 from agent.slack.payloads import SlackChannelContext, SlackMessage
-from agent.slack.tools import thread_reply as slack_thread_reply
+from agent.slack.tools import reply as slack_reply
 from agent.threads.listing import _metadata_matches_filters
 
 
@@ -239,9 +240,9 @@ def test_unlisted_threads_stay_out_of_the_thread_list() -> None:
 @pytest.mark.asyncio
 async def test_ask_mode_reply_is_ephemeral(monkeypatch: pytest.MonkeyPatch) -> None:
     post = AsyncMock(return_value=True)
-    monkeypatch.setattr(slack_thread_reply, "post_slack_ephemeral_reply", post)
+    monkeypatch.setattr(slack_reply, "post_slack_ephemeral_reply", post)
     monkeypatch.setattr(
-        slack_thread_reply,
+        slack_reply,
         "get_config",
         lambda: {
             "configurable": {
@@ -253,7 +254,7 @@ async def test_ask_mode_reply_is_ephemeral(monkeypatch: pytest.MonkeyPatch) -> N
         },
     )
 
-    result = await slack_thread_reply.slack_thread_reply("the answer")
+    result = await slack_reply.slack_reply("the answer", "final")
 
     assert result == {"success": True}
     assert post.await_args.args == ("C1", "U1", "the answer")
@@ -266,9 +267,9 @@ async def test_ask_mode_falls_back_to_mrkdwn_over_native_limit(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     post = AsyncMock()
-    monkeypatch.setattr(slack_thread_reply, "post_slack_ephemeral_reply", post)
+    monkeypatch.setattr(slack_reply, "post_slack_ephemeral_reply", post)
     monkeypatch.setattr(
-        slack_thread_reply,
+        slack_reply,
         "get_config",
         lambda: {
             "configurable": {
@@ -278,7 +279,7 @@ async def test_ask_mode_falls_back_to_mrkdwn_over_native_limit(
         },
     )
 
-    result = await slack_thread_reply.slack_thread_reply("# Heading\n\n" + "x" * 12000)
+    result = await slack_reply.slack_reply("# Heading\n\n" + "x" * 12000, "final")
 
     assert result == {"success": True}
     assert post.await_args.args[2].startswith("*Heading*\n")
@@ -288,9 +289,9 @@ async def test_ask_mode_falls_back_to_mrkdwn_over_native_limit(
 @pytest.mark.asyncio
 async def test_ask_mode_refuses_options(monkeypatch: pytest.MonkeyPatch) -> None:
     post = AsyncMock(return_value=True)
-    monkeypatch.setattr(slack_thread_reply, "post_slack_ephemeral_reply", post)
+    monkeypatch.setattr(slack_reply, "post_slack_ephemeral_reply", post)
     monkeypatch.setattr(
-        slack_thread_reply,
+        slack_reply,
         "get_config",
         lambda: {
             "configurable": {
@@ -302,8 +303,102 @@ async def test_ask_mode_refuses_options(monkeypatch: pytest.MonkeyPatch) -> None
         },
     )
 
-    refused = await slack_thread_reply.slack_thread_reply("pick one", options=["a", "b"])
+    refused = await slack_reply.slack_reply("pick one", "final", options=["a", "b"])
 
     assert refused["success"] is False
     assert refused["retry"] is True
     post.assert_not_awaited()
+
+
+def _ask_config(response_url: str) -> dict[str, Any]:
+    return {
+        "configurable": {
+            "thread_id": "thread-1",
+            "source": "slack",
+            "slack_ask": True,
+            "slack_ask_response_url": response_url,
+            "slack_thread": {"channel_id": "C1", "triggering_user_id": "U1"},
+        }
+    }
+
+
+@pytest.mark.asyncio
+async def test_the_first_ask_reply_replaces_the_acknowledgement(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    replace = AsyncMock(return_value=True)
+    post = AsyncMock(return_value=True)
+    monkeypatch.setattr(slack_reply, "replace_slack_command_message", replace)
+    monkeypatch.setattr(slack_reply, "post_slack_ephemeral_reply", post)
+    monkeypatch.setattr(slack_reply, "claim_slack_event", AsyncMock(return_value=True))
+    monkeypatch.setattr(
+        slack_reply, "get_config", lambda: _ask_config("https://hooks.slack.com/commands/T1/1/x")
+    )
+
+    assert await slack_reply.slack_reply("the answer", "final") == {"success": True}
+
+    assert replace.await_args.args[0] == "https://hooks.slack.com/commands/T1/1/x"
+    assert replace.await_args.args[1] == "the answer"
+    assert replace.await_args.kwargs["blocks"] == [{"type": "markdown", "text": "the answer"}]
+    post.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_a_later_ask_reply_posts_instead_of_replacing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    replace = AsyncMock(return_value=True)
+    post = AsyncMock(return_value=True)
+    monkeypatch.setattr(slack_reply, "replace_slack_command_message", replace)
+    monkeypatch.setattr(slack_reply, "post_slack_ephemeral_reply", post)
+    # The acknowledgement is already spoken for, so the claim fails.
+    monkeypatch.setattr(slack_reply, "claim_slack_event", AsyncMock(return_value=False))
+    monkeypatch.setattr(
+        slack_reply, "get_config", lambda: _ask_config("https://hooks.slack.com/commands/T1/1/x")
+    )
+
+    assert await slack_reply.slack_reply("a follow-up", "final") == {"success": True}
+
+    replace.assert_not_awaited()
+    assert post.await_args.args == ("C1", "U1", "a follow-up")
+
+
+@pytest.mark.asyncio
+async def test_an_unreplaceable_acknowledgement_falls_back_to_a_fresh_ephemeral(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    post = AsyncMock(return_value=True)
+    monkeypatch.setattr(slack_reply, "replace_slack_command_message", AsyncMock(return_value=False))
+    monkeypatch.setattr(slack_reply, "post_slack_ephemeral_reply", post)
+    monkeypatch.setattr(slack_reply, "claim_slack_event", AsyncMock(return_value=True))
+    monkeypatch.setattr(
+        slack_reply, "get_config", lambda: _ask_config("https://hooks.slack.com/commands/T1/1/x")
+    )
+
+    assert await slack_reply.slack_reply("the answer", "final") == {"success": True}
+
+    assert post.await_args.args == ("C1", "U1", "the answer")
+
+
+@pytest.mark.asyncio
+async def test_the_acknowledgement_only_goes_out_through_the_callback(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[tuple[str, dict[str, Any], str]] = []
+
+    async def capture(response_url: str, payload: dict[str, Any], path_prefix: str) -> bool:
+        calls.append((response_url, payload, path_prefix))
+        return True
+
+    monkeypatch.setattr(slack_ask, "post_slack_ephemeral_message", AsyncMock(return_value=True))
+    monkeypatch.setattr(slack_client, "_post_slack_callback", capture)
+
+    assert await slack_client.acknowledge_slack_command(
+        "https://hooks.slack.com/commands/T1/1/x", "Working on it"
+    )
+
+    response_url, payload, prefix = calls[0]
+    assert prefix == "/commands/"
+    assert payload == {"response_type": "ephemeral", "text": "Working on it"}
+    # No replace_original: this message is the one later replies replace.
+    assert "replace_original" not in payload

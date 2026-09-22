@@ -16,7 +16,7 @@ code runs for real.
 | ---------------------------------------------------------------- | -------------------------------------------------------------------------- |
 | Slack webhook → `process_slack_mention` → run dispatch           | **real** (`agent.webapp`)                                                  |
 | `get_agent`, deepagents loop, tools, middleware, prompt          | **real**                                                                   |
-| `open_pull_request`, `slack_thread_reply` tools                  | **real**                                                                   |
+| `open_pull_request`, `slack_reply` tools                  | **real**                                                                   |
 | Sandbox                                                          | **real** `local` provider, rooted in a throwaway temp dir                  |
 | Git remote ("GitHub")                                            | **real git**, a local bare repo the agent clones/pushes                    |
 | The LLM                                                          | **fake** — a scripted model (`fake_llm.py`) emitting a fixed tool sequence |

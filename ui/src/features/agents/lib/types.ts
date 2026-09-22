@@ -415,7 +415,6 @@ export interface AgentThread {
   model: string
   effort?: string | null
   modelSelection?: "auto" | "explicit" | null
-  planMode?: boolean
   planStatus?: string | null
   adminThread?: boolean
   source?: AgentSource

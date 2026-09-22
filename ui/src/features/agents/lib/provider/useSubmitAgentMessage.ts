@@ -92,7 +92,6 @@ export function useSubmitAgentMessage(threadId: string) {
         modelId: vars.model_id,
         effort: vars.effort,
       })
-      if (vars.plan_mode) configurable.plan_mode = true
 
       void source
         .startRun({

@@ -998,6 +998,7 @@ function usageColumns(
       } — an aggregate ratio, not a per-thread outcome. One thread can open several PRs and many threads open none, so 1.00 does not mean every thread merged a PR.`,
     },
     { key: "agent_loc", label: "Agent LOC", align: "right" },
+    { key: "feedback_given", label: "# Feedback Given", align: "right" },
   ]
 }
 
@@ -1111,6 +1112,12 @@ function PRMergeRateCells({
             {cohort.distance_sample_size === 1 ? "" : "s"} measured
           </TooltipPopup>
         </Tooltip>
+        {(cohort.distance_sample_size ?? 0) > 0 &&
+          (cohort.distance_sample_size ?? 0) < 5 && (
+            <div className="text-xs text-amber-600 dark:text-amber-400">
+              Small sample
+            </div>
+          )}
       </td>
       <td className="px-4 py-3 text-right text-sm font-semibold tabular-nums">
         {cohort.mature_cohort_merge_share == null
@@ -1228,10 +1235,13 @@ function UsageTable({
                   {(row.merged_prs_per_thread ?? 0).toFixed(2)}
                 </td>
                 <td
-                  className="px-4 py-3 text-right tabular-nums"
+                  className="px-2 py-3 text-right tabular-nums"
                   title={`${formatNumber(row.additions)} additions, ${formatNumber(row.deletions)} deletions`}
                 >
                   {formatNumber(row.agent_loc)}
+                </td>
+                <td className="px-4 py-3 text-right tabular-nums">
+                  {formatNumber(row.feedback_given)}
                 </td>
               </tr>
             ))}

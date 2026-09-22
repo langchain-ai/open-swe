@@ -44,6 +44,46 @@ def _envelope(message: dict) -> str:
 
 
 @pytest.mark.asyncio
+async def test_check_message_queue_announces_the_move_to_web_only_once() -> None:
+    store = _FakeStore(
+        {
+            (("queue", "thread-1"), "pending_messages"): {
+                "messages": [
+                    {
+                        "content": {
+                            "text": "and another thing",
+                            "source": "dashboard",
+                            "queue_id": "8a60896d-65ca-4e40-8a2d-1fbe81777002",
+                            "sender": {
+                                "id": "github:octocat",
+                                "platform": "github",
+                                "github_login": "octocat",
+                            },
+                        }
+                    },
+                ]
+            }
+        }
+    )
+
+    with (
+        patch(
+            "agent.middleware.check_message_queue.get_config",
+            return_value={"configurable": {"thread_id": "thread-1"}},
+        ),
+        patch("agent.middleware.check_message_queue.get_store", return_value=store),
+    ):
+        result = await check_message_queue_before_model.abefore_model(
+            cast(LinearNotifyState, {"messages": [], "reply_surface": "web"}),
+            MagicMock(),
+        )
+
+    assert result is not None
+    envelopes = [_envelope(message) for message in result["messages"]]
+    assert not any("system:dashboard-handoff" in envelope for envelope in envelopes)
+
+
+@pytest.mark.asyncio
 async def test_check_message_queue_injects_dashboard_handoff_instruction() -> None:
     store = _FakeStore(
         {
@@ -74,11 +114,12 @@ async def test_check_message_queue_injects_dashboard_handoff_instruction() -> No
         patch("agent.middleware.check_message_queue.get_store", return_value=store),
     ):
         result = await check_message_queue_before_model.abefore_model(
-            cast(LinearNotifyState, {"messages": []}),
+            cast(LinearNotifyState, {"messages": [], "reply_surface": "slack"}),
             MagicMock(),
         )
 
     assert result is not None
+    assert result["reply_surface"] == "web"
     messages = result["messages"]
     # One envelope per message: the transcript parses them individually, so a
     # concatenation would render as raw XML.
