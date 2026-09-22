@@ -275,6 +275,12 @@ class GuidancePoint(Base):
                         "occurred_at": func.coalesce(
                             statement.excluded.occurred_at, cls.occurred_at
                         ),
+                        # Reaffirming a point is recording it. Without this the
+                        # row keeps the timestamp of the review that first saw
+                        # it, and the cap can drop something this very run
+                        # confirmed in favour of something it recorded a moment
+                        # later.
+                        "recorded_at": func.clock_timestamp(),
                     },
                 )
             )
