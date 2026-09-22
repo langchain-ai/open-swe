@@ -72,3 +72,30 @@ def test_a_rename_carrying_a_text_diff_is_eligible() -> None:
     )
 
     assert isinstance(assess_eligibility([moved]), EligibleDiff)
+
+
+def test_test_files_are_outside_the_line_cap_and_the_patch_gate() -> None:
+    verdict = assess_eligibility(
+        [
+            _file("agent/app.py", additions=2),
+            _file("tests/test_app.py", additions=400, patch=None),
+        ]
+    )
+
+    assert isinstance(verdict, EligibleDiff)
+    assert verdict.changed_lines == 2
+    assert verdict.test_lines == 400
+
+
+def test_test_paths_are_recognised_across_languages() -> None:
+    for path in (
+        "tests/expedited_review/test_eligibility.py",
+        "agent/conftest.py",
+        "agent/slack/client_test.go",
+        "ui/src/lib/api.test.ts",
+        "tests/e2e/tests/expedited_review.spec.ts",
+        "internal/testdata/golden.json",
+    ):
+        assert ChangedFile(filename=path).is_test, path
+    for path in ("agent/latest.py", "ui/src/features/contest/Entry.tsx", "docs/protest.md"):
+        assert not ChangedFile(filename=path).is_test, path

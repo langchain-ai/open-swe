@@ -164,8 +164,9 @@ async def expedite_pr_approval(
     if isinstance(verdict, Ineligible):
         return _failure(
             f"Not eligible for expedited review: {verdict.reason}. "
-            f"Eligible changes touch at most {MAX_CHANGED_LINES} lines and every changed "
-            "file has to have a readable text diff. Ask for a normal review."
+            f"Eligible changes touch at most {MAX_CHANGED_LINES} lines outside tests, and "
+            "every one of those files has to have a readable text diff. Test files are "
+            "not counted. Ask for a normal review."
         )
 
     payload = PullRequestPayload.model_validate(pr)
@@ -213,6 +214,7 @@ async def expedite_pr_approval(
         "pr_url": pr_ref.url,
         "head_sha": head_sha,
         "changed_lines": verdict.changed_lines,
+        "test_lines": verdict.test_lines,
         "slack_channel_id": channel_id,
         "status": status,
         "next": _next_step(

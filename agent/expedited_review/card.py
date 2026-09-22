@@ -56,20 +56,31 @@ def _header(approval: ExpeditedApproval, title: str) -> list[Block]:
 
 
 def _diff_sections(files: list[ChangedFile], diff_image_id: str | None) -> list[Block]:
+    reviewed, tests = ChangedFile.split(files)
+    trailer = [*_overflow_note(reviewed), *_test_note(tests)]
     if diff_image_id:
-        names = ", ".join(escape(file.filename) for file in files[:_MAX_FILE_SECTIONS])
-        return [image(diff_image_id, f"Diff of {names}"), *_overflow_note(files)]
+        names = ", ".join(escape(file.filename) for file in reviewed[:_MAX_FILE_SECTIONS])
+        return [image(diff_image_id, f"Diff of {names}"), *trailer]
     sections: list[Block] = []
-    for file in files[:_MAX_FILE_SECTIONS]:
+    for file in reviewed[:_MAX_FILE_SECTIONS]:
         sections.append(section(f"`{escape(file.filename)}`  +{file.additions} −{file.deletions}"))
         sections.append(section(code_block(file.patch or "")))
-    return [*sections, *_overflow_note(files)]
+    return [*sections, *trailer]
 
 
 def _overflow_note(files: list[ChangedFile]) -> list[Block]:
     if len(files) <= _MAX_FILE_SECTIONS:
         return []
     return [context(f"{len(files) - _MAX_FILE_SECTIONS} more files on GitHub.")]
+
+
+def _test_note(tests: list[ChangedFile]) -> list[Block]:
+    """Test files are not part of the vote, so the card names them rather than showing them."""
+    if not tests:
+        return []
+    lines = sum(file.additions + file.deletions for file in tests)
+    noun = "test file" if len(tests) == 1 else "test files"
+    return [context(f"{lines} more lines in {len(tests)} {noun}, on GitHub.")]
 
 
 def _vote_buttons(approval: ExpeditedApproval) -> tuple[ButtonElement, ButtonElement]:
