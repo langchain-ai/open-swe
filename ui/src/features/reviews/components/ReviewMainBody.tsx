@@ -19,6 +19,7 @@ import {
   CheckCircleIcon,
   CheckIcon,
   CircleIcon,
+  CircleNotchIcon,
   CodeIcon,
   CopyIcon,
   FlagIcon,
@@ -30,6 +31,7 @@ import {
   PencilSimpleIcon,
   QuotesIcon,
   RowsIcon,
+  SparkleIcon,
   SquareSplitHorizontalIcon,
   TextBIcon,
   TextHIcon,
@@ -71,6 +73,7 @@ import type { DiffStyle } from "@/features/agents/utils/diffUtils"
 import { Markdown } from "@/features/agents/components/chat/Markdown"
 import { DiffWrapToggle } from "@/features/agents/components/DiffWrapToggle"
 import { PrHeader } from "@/features/reviews/components/PrHeader"
+import { useTriggerReview } from "@/features/reviews/lib/useTriggerReview"
 import { ReviewAssessmentCard } from "@/features/reviews/components/ReviewAssessmentCard"
 import {
   ReviewChat,
@@ -1283,6 +1286,11 @@ function ReviewBodyInner({
                     deletions: detail.pr.deletions,
                   }}
                 />
+                {detail.status === "none" ||
+                (detail.status === "running" &&
+                  detail.findings.length === 0) ? (
+                  <StartReviewCard detail={detail} />
+                ) : null}
                 {detail.assessment && (
                   <ReviewAssessmentCard
                     assessment={detail.assessment}
@@ -2544,6 +2552,46 @@ function ReviewPanelResizeHandle({
   )
 }
 
+function StartReviewCard({ detail }: { detail: ReviewDetail }) {
+  const trigger = useTriggerReview(detail.owner, detail.repo, detail.number)
+  const busy = trigger.isPending || detail.status === "running"
+
+  return (
+    <div className="mt-4 rounded-lg border border-border bg-card p-4">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="min-w-0">
+          <h3 className="text-sm font-medium">
+            {busy ? "Reviewing this pull request" : "Not analyzed yet"}
+          </h3>
+          <p className="mt-0.5 text-xs text-muted-foreground">
+            {busy
+              ? "Findings appear here as the reviewer works through the diff."
+              : "Open SWE has not reviewed this pull request. The diff and checks above are live from GitHub."}
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={() => trigger.mutate()}
+          disabled={busy}
+          className="inline-flex shrink-0 items-center gap-1.5 rounded-md border border-border px-2.5 py-1.5 text-xs font-medium transition-colors hover:bg-muted disabled:opacity-60"
+        >
+          {busy ? (
+            <CircleNotchIcon className="size-3.5 animate-spin" />
+          ) : (
+            <SparkleIcon className="size-3.5" />
+          )}
+          {busy ? "Reviewing…" : "Review this PR"}
+        </button>
+      </div>
+      {trigger.error && (
+        <p role="alert" className="mt-2 text-xs text-destructive">
+          {trigger.error.message}
+        </p>
+      )}
+    </div>
+  )
+}
+
 function SidePanel({
   detail,
   tab,
@@ -2561,15 +2609,8 @@ function SidePanel({
   onMarkAllRead: () => void
   onFindingClick: (finding: ReviewFinding) => void
 }) {
-  const qc = useQueryClient()
-  const reReview = useMutation({
-    mutationFn: () => api.reReview(detail.owner, detail.repo, detail.number),
-    onSuccess: () => {
-      void qc.invalidateQueries({
-        queryKey: ["review", detail.owner, detail.repo, detail.number],
-      })
-    },
-  })
+  const reReview = useTriggerReview(detail.owner, detail.repo, detail.number)
+  const reviewBusy = reReview.isPending || detail.status === "running"
 
   const panelRef = useRef<HTMLDivElement>(null)
   const [width, setWidthState] = useState(() => readStoredReviewPanelWidth())
@@ -2650,11 +2691,19 @@ function SidePanel({
                 <button
                   type="button"
                   onClick={() => reReview.mutate()}
-                  disabled={reReview.isPending || detail.status === "running"}
+                  disabled={reviewBusy}
                   className="inline-flex items-center gap-1 rounded border border-border px-1.5 py-0.5 text-[11px] text-muted-foreground hover:text-foreground disabled:opacity-50"
                 >
-                  <ArrowClockwiseIcon className="size-3" />
-                  {detail.status === "none" ? "Review" : "Re-review"}
+                  {reviewBusy ? (
+                    <CircleNotchIcon className="size-3 animate-spin" />
+                  ) : (
+                    <ArrowClockwiseIcon className="size-3" />
+                  )}
+                  {reviewBusy
+                    ? "Reviewing…"
+                    : detail.status === "none"
+                      ? "Review"
+                      : "Re-review"}
                 </button>
               </div>
               <div className="mt-2 space-y-1 text-[11px] text-muted-foreground">
