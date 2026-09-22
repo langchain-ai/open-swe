@@ -17,6 +17,10 @@ from pydantic import BaseModel, ConfigDict, TypeAdapter, ValidationError
 from agent.github.http import GITHUB_API_BASE, github_client, github_request
 
 MAX_CHANGED_LINES = 20
+# What is actually enforced. A change that lands a few lines over is no harder to
+# read than one that lands under, and bouncing it costs the asker more than the
+# slack costs the voters; the agent is told 20 so it aims there.
+ACCEPTED_CHANGED_LINES = 25
 MAX_FILES = 100
 
 _TEST_PATH = re.compile(
@@ -44,12 +48,36 @@ class ChangedFile(BaseModel):
     def is_test(self) -> bool:
         return _TEST_PATH.search(self.filename) is not None
 
+    @property
+    def changed_lines(self) -> int:
+        return self.additions + self.deletions
+
     @classmethod
     def split(cls, files: list[ChangedFile]) -> tuple[list[ChangedFile], list[ChangedFile]]:
         """``(files the voters have to read, test files)``."""
         return (
             [file for file in files if not file.is_test],
             [file for file in files if file.is_test],
+        )
+
+    @classmethod
+    def total_lines(cls, files: list[ChangedFile]) -> int:
+        return sum(file.changed_lines for file in files)
+
+    @classmethod
+    def rendered(cls, files: list[ChangedFile]) -> tuple[list[ChangedFile], list[ChangedFile]]:
+        """``(files the card draws, test files it only names)``.
+
+        Tests are left off the card only when they are the minority of a change
+        that is mostly source, because there the source is what is being voted
+        on. A test-only or test-heavy change would otherwise show nothing.
+        """
+        reviewed, tests = cls.split(files)
+        if not tests or cls.total_lines(tests) <= cls.total_lines(reviewed):
+            return reviewed, tests
+        return (
+            [*reviewed, *(file for file in tests if file.patch is not None)],
+            [file for file in tests if file.patch is None],
         )
 
 
@@ -90,11 +118,11 @@ def assess_eligibility(files: list[ChangedFile]) -> EligibleDiff | Ineligible:
             return Ineligible(
                 f"`{file.filename}` has no text diff (binary, oversized, or a rename)"
             )
-    changed = sum(file.additions + file.deletions for file in reviewed)
-    test_lines = sum(file.additions + file.deletions for file in tests)
+    changed = ChangedFile.total_lines(reviewed)
+    test_lines = ChangedFile.total_lines(tests)
     if changed + test_lines < 1:
         return Ineligible("the pull request changes no lines")
-    if changed > MAX_CHANGED_LINES:
+    if changed > ACCEPTED_CHANGED_LINES:
         return Ineligible(
             f"the pull request changes {changed} lines outside tests; the limit is "
             f"{MAX_CHANGED_LINES}"

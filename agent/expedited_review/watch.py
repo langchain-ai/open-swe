@@ -155,11 +155,11 @@ async def _files_for(approval: ExpeditedApproval, token: str) -> list[ChangedFil
 
 async def _diff_image_id(approval: ExpeditedApproval, files: list[ChangedFile]) -> str | None:
     """A hosted-but-unposted PNG of the diff, which the card renders inline."""
-    reviewed, _ = ChangedFile.split(files)
-    if not reviewed:
+    shown, _ = ChangedFile.rendered(files)
+    if not shown:
         return None
     try:
-        png = await asyncio.to_thread(render_diff_png, reviewed)
+        png = await asyncio.to_thread(render_diff_png, shown)
     except (ValueError, OSError) as exc:
         logger.warning(
             "Failed to render expedited review diff image",

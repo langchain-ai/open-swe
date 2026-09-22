@@ -100,6 +100,37 @@
         await poll();
       }
 
+      /** Slack mrkdwn as a div: `<url|label>` becomes a link, a fence becomes a pre. */
+      function mrkdwn(raw) {
+        const node = document.createElement("div");
+        const fence = /^```\n([\s\S]*)\n```$/.exec(raw ?? "");
+        if (fence) {
+          const pre = document.createElement("pre");
+          pre.textContent = fence[1];
+          node.appendChild(pre);
+          return node;
+        }
+        const body = raw ?? "";
+        const pattern = /<(https?:\/\/[^|>]+)\|([^>]+)>|\*([^*\n]+)\*/g;
+        let cursor = 0;
+        for (const match of body.matchAll(pattern)) {
+          node.append(document.createTextNode(body.slice(cursor, match.index)));
+          if (match[1]) {
+            const link = document.createElement("a");
+            link.href = match[1];
+            link.textContent = match[2];
+            node.appendChild(link);
+          } else {
+            const strong = document.createElement("strong");
+            strong.textContent = match[3];
+            node.appendChild(strong);
+          }
+          cursor = match.index + match[0].length;
+        }
+        node.append(document.createTextNode(body.slice(cursor)));
+        return node;
+      }
+
       function renderMessages(messages) {
         const thread = $("thread");
         thread.replaceChildren();
@@ -122,27 +153,29 @@
           const who = document.createElement("div");
           who.className = "who";
           who.textContent = message.is_bot ? "Open SWE" : userNames[message.user] || message.user;
-          const text = document.createElement("div");
+          const text = mrkdwn(message.text);
           text.className = "text";
-          const linkPattern = /<(https?:\/\/[^|>]+)\|([^>]+)>/g;
-          let cursor = 0;
-          for (const match of message.text.matchAll(linkPattern)) {
-            text.append(document.createTextNode(message.text.slice(cursor, match.index)));
-            const link = document.createElement("a");
-            link.href = match[1];
-            link.textContent = match[2];
-            text.appendChild(link);
-            cursor = match.index + match[0].length;
-          }
-          text.append(document.createTextNode(message.text.slice(cursor)));
           body.append(who, text);
           for (const block of message.blocks || []) {
+            if (block.type === "section" && block.text?.text) {
+              const element = mrkdwn(block.text.text);
+              element.className = "text";
+              body.appendChild(element);
+            }
+            if (block.type === "divider") {
+              body.appendChild(document.createElement("hr"));
+            }
+            if (block.type === "image") {
+              const element = document.createElement("div");
+              element.className = "context";
+              element.textContent = `[image] ${block.alt_text || ""}`;
+              body.appendChild(element);
+            }
             if (block.type === "context") {
               for (const context of block.elements || []) {
-                if (context.type !== "plain_text" || !context.text) continue;
-                const element = document.createElement("div");
+                if (!context.text) continue;
+                const element = mrkdwn(context.text);
                 element.className = "context";
-                element.textContent = context.text;
                 body.appendChild(element);
               }
             }

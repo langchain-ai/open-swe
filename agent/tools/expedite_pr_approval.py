@@ -3,6 +3,7 @@
 from collections.abc import Mapping
 from typing import Any, Literal
 
+from fastapi import HTTPException
 from langgraph.config import get_config
 from langgraph_sdk import get_client
 
@@ -16,6 +17,7 @@ from agent.expedited_review.eligibility import (
 )
 from agent.expedited_review.watch import evaluate_approval, retire, start_approval
 from agent.github.ci import fetch_pr
+from agent.github.pull_request_actions import MarkReadyAction, act_on_pull_request
 from agent.github.pull_requests import PullRequest, PullRequestPayload
 from agent.github.token import resolve_github_token
 from agent.prompts import render_prompt
@@ -149,7 +151,16 @@ async def expedite_pr_approval(
     if pr.get("state") != "open":
         return _failure("Pull request is not open")
     if pr.get("draft") is True:
-        return _failure("Pull request is a draft; mark it ready for review first")
+        try:
+            await act_on_pull_request(
+                pr_ref.owner,
+                pr_ref.repo,
+                pr_ref.number,
+                MarkReadyAction(action="mark-ready"),
+                token,
+            )
+        except HTTPException as exc:
+            return _failure(f"Pull request is a draft and could not be marked ready: {exc.detail}")
     head = pr.get("head") if isinstance(pr.get("head"), Mapping) else {}
     head_sha = head.get("sha") if isinstance(head, Mapping) else None
     if not isinstance(head_sha, str) or not head_sha:

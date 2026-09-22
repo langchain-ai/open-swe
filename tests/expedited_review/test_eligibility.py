@@ -1,4 +1,5 @@
 from agent.expedited_review.eligibility import (
+    ACCEPTED_CHANGED_LINES,
     MAX_CHANGED_LINES,
     ChangedFile,
     EligibleDiff,
@@ -32,12 +33,17 @@ def test_fingerprint_changes_with_the_patch() -> None:
     assert before.fingerprint != after.fingerprint
 
 
-def test_line_cap_is_inclusive() -> None:
+def test_line_cap_is_inclusive_and_carries_leeway_past_the_advertised_limit() -> None:
     at_cap = assess_eligibility([_file("a.py", additions=MAX_CHANGED_LINES)])
     over_cap = assess_eligibility([_file("a.py", additions=MAX_CHANGED_LINES + 1)])
+    at_leeway = assess_eligibility([_file("a.py", additions=ACCEPTED_CHANGED_LINES)])
+    past_leeway = assess_eligibility([_file("a.py", additions=ACCEPTED_CHANGED_LINES + 1)])
 
     assert isinstance(at_cap, EligibleDiff)
-    assert isinstance(over_cap, Ineligible)
+    assert isinstance(over_cap, EligibleDiff)
+    assert isinstance(at_leeway, EligibleDiff)
+    assert isinstance(past_leeway, Ineligible)
+    assert f"limit is {MAX_CHANGED_LINES}" in past_leeway.reason
 
 
 def test_files_without_a_text_patch_are_refused() -> None:
@@ -99,3 +105,30 @@ def test_test_paths_are_recognised_across_languages() -> None:
         assert ChangedFile(filename=path).is_test, path
     for path in ("agent/latest.py", "ui/src/features/contest/Entry.tsx", "docs/protest.md"):
         assert not ChangedFile(filename=path).is_test, path
+
+
+def test_a_mostly_source_change_keeps_its_tests_off_the_card() -> None:
+    files = [_file("agent/app.py", additions=8), _file("tests/test_app.py", additions=3)]
+
+    shown, named = ChangedFile.rendered(files)
+
+    assert [file.filename for file in shown] == ["agent/app.py"]
+    assert [file.filename for file in named] == ["tests/test_app.py"]
+
+
+def test_a_test_heavy_change_shows_its_tests() -> None:
+    files = [_file("agent/app.py", additions=2), _file("tests/test_app.py", additions=30)]
+
+    shown, named = ChangedFile.rendered(files)
+
+    assert [file.filename for file in shown] == ["agent/app.py", "tests/test_app.py"]
+    assert named == []
+
+
+def test_a_test_heavy_change_still_only_names_tests_it_cannot_draw() -> None:
+    files = [_file("tests/test_app.py", additions=30, patch=None)]
+
+    shown, named = ChangedFile.rendered(files)
+
+    assert shown == []
+    assert [file.filename for file in named] == ["tests/test_app.py"]
