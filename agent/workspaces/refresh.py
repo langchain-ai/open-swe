@@ -164,7 +164,7 @@ async def _release_builder_sandbox(sandbox_id: str) -> None:
 async def _create_builder_sandbox(record: Workspace, snapshot_id: str | None) -> Any:
     from agent.github.sandbox_access import repository_token
     from agent.sandboxes.providers.langsmith import (
-        configure_github_proxy,
+        configure_sandbox_proxy,
         create_langsmith_sandbox,
         get_sandbox_proxy_config,
     )
@@ -179,7 +179,7 @@ async def _create_builder_sandbox(record: Workspace, snapshot_id: str | None) ->
         create_params=create_params,
         **record.sandbox_resources(),
     )
-    await configure_github_proxy(
+    await configure_sandbox_proxy(
         backend.id, access.token, base_proxy_config=get_sandbox_proxy_config(create_params)
     )
     return backend
@@ -196,7 +196,7 @@ def _scripts_to_run(record: Workspace, kind: RefreshKind) -> list[tuple[str, str
         steps.append(
             (
                 "setup",
-                script_command(record.setup_script, "setup"),
+                script_command(record.setup_script, "setup", record.repos),
                 _seconds(ENV.WORKSPACE_REFRESH_TIMEOUT_SECONDS, DEFAULT_SCRIPT_TIMEOUT_SECONDS),
             )
         )
@@ -204,7 +204,7 @@ def _scripts_to_run(record: Workspace, kind: RefreshKind) -> list[tuple[str, str
         steps.append(
             (
                 "update",
-                script_command(record.update_script, "update"),
+                script_command(record.update_script, "update", record.repos),
                 _seconds(ENV.WORKSPACE_UPDATE_TIMEOUT_SECONDS, DEFAULT_UPDATE_TIMEOUT_SECONDS),
             )
         )

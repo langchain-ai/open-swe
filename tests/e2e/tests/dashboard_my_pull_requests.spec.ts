@@ -205,8 +205,10 @@ test.describe("my pull requests", () => {
     await expect(
       card(page, conflict).getByRole("button", { name: "Fix", exact: true }),
     ).toBeEnabled();
+    // Exact, like the assertions above: the title is a button that opens the
+    // preview, and "Nothing to fix" would match a substring search for "Fix".
     await expect(
-      card(page, ok).getByRole("button", { name: "Fix" }),
+      card(page, ok).getByRole("button", { name: "Fix", exact: true }),
     ).toHaveCount(0);
 
     // The fix opens a thread and dispatches a real run, so wait on the

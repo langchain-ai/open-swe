@@ -46,6 +46,11 @@ interface ScrollState {
   frame: number | null
   /** A remembered offset still waiting for enough content to scroll to. */
   pendingRestoreTop: number | null
+  /**
+   * Geometry captured when an older page was asked for, so the content the
+   * user is reading can be put back under their eyes once it prepends.
+   */
+  prependAnchor: { scrollHeight: number; scrollTop: number } | null
 }
 
 /**
@@ -70,6 +75,7 @@ export function useTranscriptScroll({
     previousTop: 0,
     frame: null,
     pendingRestoreTop: null,
+    prependAnchor: null,
   })
   const [showScrollToBottom, setShowScrollToBottom] = useState(false)
 
@@ -101,6 +107,25 @@ export function useTranscriptScroll({
     })
   }, [cancelScheduledJump, jumpToBottom])
 
+  /**
+   * Put the reader back where they were after an older page prepended: the
+   * content above them grew by exactly the difference in scroll height, so
+   * adding it to their offset leaves the same pixels on screen.
+   */
+  const restoreAfterPrepend = useCallback(
+    (el: HTMLElement): boolean => {
+      const anchor = state.current.prependAnchor
+      if (!anchor) return false
+      const grown = el.scrollHeight - anchor.scrollHeight
+      if (grown <= 0) return false
+      state.current.prependAnchor = null
+      el.scrollTop = anchor.scrollTop + grown
+      settle(el, el.scrollTop)
+      return true
+    },
+    [settle]
+  )
+
   const applyPendingRestore = useCallback(
     (el: HTMLElement): boolean => {
       const top = state.current.pendingRestoreTop
@@ -111,6 +136,16 @@ export function useTranscriptScroll({
     },
     [settle]
   )
+
+  /** Called when an older page is asked for, so the prepend can be undone. */
+  const capturePrependAnchor = useCallback(() => {
+    const el = scrollRef.current
+    if (!el) return
+    state.current.prependAnchor = {
+      scrollHeight: el.scrollHeight,
+      scrollTop: el.scrollTop,
+    }
+  }, [])
 
   const scrollToBottom = useCallback(() => {
     state.current.followTail = true
@@ -141,6 +176,7 @@ export function useTranscriptScroll({
   useLayoutEffect(() => {
     const el = scrollRef.current
     if (!el) return
+    if (restoreAfterPrepend(el)) return
     if (applyPendingRestore(el)) {
       // Once the transcript has content the restore is done; later growth
       // must not yank the user back to the remembered offset.
@@ -157,7 +193,13 @@ export function useTranscriptScroll({
     }
     state.current.previousTop = el.scrollTop
     setShowScrollToBottom(!isNearBottom(el))
-  }, [applyPendingRestore, isStreaming, messages, scheduleJumpToBottom])
+  }, [
+    applyPendingRestore,
+    isStreaming,
+    messages,
+    restoreAfterPrepend,
+    scheduleJumpToBottom,
+  ])
 
   // The user's own scrolling decides whether we keep following the tail.
   useEffect(() => {
@@ -187,6 +229,7 @@ export function useTranscriptScroll({
     const content = contentRef.current
     if (!scroller || !content || typeof ResizeObserver === "undefined") return
     const observer = new ResizeObserver(() => {
+      if (restoreAfterPrepend(scroller)) return
       if (applyPendingRestore(scroller)) return
       if (state.current.followTail) {
         scheduleJumpToBottom()
@@ -203,7 +246,13 @@ export function useTranscriptScroll({
     observer.observe(scroller)
     observer.observe(content)
     return () => observer.disconnect()
-  }, [applyPendingRestore, scheduleJumpToBottom])
+  }, [applyPendingRestore, restoreAfterPrepend, scheduleJumpToBottom])
 
-  return { scrollRef, contentRef, showScrollToBottom, scrollToBottom }
+  return {
+    scrollRef,
+    contentRef,
+    showScrollToBottom,
+    scrollToBottom,
+    capturePrependAnchor,
+  }
 }

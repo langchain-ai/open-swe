@@ -86,6 +86,7 @@ describe("WorkspacesSection", () => {
     renderSection(true)
 
     expect(await screen.findByText("Preview")).toBeTruthy()
+    expect(screen.queryByRole("button", { name: /^Delete/ })).toBeNull()
     expect(screen.getByText("Snapshot ready")).toBeTruthy()
     expect(screen.getByText(/Updated 1 hour ago/)).toBeTruthy()
     expect(screen.getByText(/Refresh failed/)).toBeTruthy()
@@ -134,6 +135,10 @@ describe("WorkspacesSection", () => {
       .closest("[data-workspace-row]") as HTMLElement
     expect(defaultRow).toBeTruthy()
     expect(within(defaultRow).getByText("acme/oss")).toBeTruthy()
+    const chip = within(defaultRow).getByRole("link", { name: "acme/oss" })
+    expect(chip.getAttribute("href")).toBe("https://github.com/acme/oss")
+    expect(chip.getAttribute("target")).toBe("_blank")
+    expect(chip.getAttribute("rel")).toBe("noopener noreferrer")
     expect(within(defaultRow).getByText("Default")).toBeTruthy()
     expect(within(previewRow).queryByText("Default")).toBeNull()
   })
@@ -165,6 +170,7 @@ describe("WorkspacesSection", () => {
     expect(await screen.findByText(/Rebuilt 1 hour ago/)).toBeTruthy()
     expect(screen.queryByText("Refresh log")).toBeNull()
     expect(screen.queryByText(/hunter2/)).toBeNull()
+    expect(screen.queryByRole("button", { name: /^Delete/ })).toBeNull()
   })
 
   it("says so when a workspace has never been refreshed", async () => {
@@ -255,6 +261,16 @@ describe("WorkspacesSection", () => {
     fireEvent.change(screen.getByLabelText("Workspace name"), {
       target: { value: "Preview" },
     })
+    const repositoryHelp = screen.getByRole("button", {
+      name: "About workspace repositories",
+    })
+    fireEvent.mouseEnter(repositoryHelp)
+    fireEvent.mouseMove(repositoryHelp)
+    expect(
+      await screen.findByText(
+        /dashboard, Slack, GitHub issues, or pull requests/
+      )
+    ).toBeTruthy()
     fireEvent.click(screen.getByRole("button", { name: "Choose repositories" }))
     fireEvent.change(await screen.findByLabelText("Add a repository by name"), {
       target: { value: "acme/web" },

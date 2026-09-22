@@ -1,5 +1,7 @@
 from unittest.mock import AsyncMock, call
 
+import pytest
+
 from agent.slack import thinking as slack_thinking
 
 
@@ -232,6 +234,8 @@ class _IdleThreadStream:
 def _status_client(store: _AnchorStore, run_id: str) -> AsyncMock:
     client = AsyncMock()
     client.store = store
+    client.runs.list.return_value = []
+    client.threads.get.return_value = {"metadata": {}}
     client.threads.stream = lambda *_args, **_kwargs: _IdleThreadStream(run_id)
     return client
 
@@ -349,3 +353,130 @@ async def test_thread_status_survives_while_another_run_is_active(monkeypatch) -
     )
 
     assert call("C1", "1.0", "") not in set_status.await_args_list
+
+
+@pytest.mark.parametrize("session", [False, True])
+async def test_background_waiting_resumes_and_clears(monkeypatch, session: bool) -> None:
+    set_status = AsyncMock(return_value=True)
+    monkeypatch.setattr(slack_thinking, "set_slack_thread_status", set_status)
+    store = _AnchorStore()
+    client = _status_client(store, "run-1")
+    metadata = {
+        "running_background_tasks": ["cmd-1", "cmd-2"],
+        "source_context": {
+            "slack_thread": {"channel_id": "C1", "thread_ts": "0" if session else "1.0"}
+        },
+    }
+    client.threads.get.return_value = {"metadata": metadata}
+
+    await slack_thinking.show_slack_thinking_status(
+        client=client,
+        thread_id="thread-1",
+        run_id="run-1",
+        channel_id="C1",
+        thread_ts="1.0",
+        session_ts="0" if session else "",
+    )
+    assert set_status.await_args.args == ("C1", "1.0", "Waiting for background tasks…")
+
+    client.runs.list.return_value = [{"run_id": "completion-run"}]
+    await slack_thinking.sync_slack_background_status(client, "thread-1", resume=True)
+    assert set_status.await_args.args == ("C1", "1.0", "Thinking...")
+    set_status.reset_mock()
+    await slack_thinking.sync_slack_background_status(client, "thread-1")
+    set_status.assert_not_awaited()
+
+    client.runs.list.return_value = []
+    metadata["running_background_tasks"] = ["cmd-2"]
+    await slack_thinking.sync_slack_background_status(client, "thread-1")
+    set_status.assert_awaited_once_with("C1", "1.0", "Waiting for background tasks…")
+
+    metadata["running_background_tasks"] = []
+    await slack_thinking.sync_slack_background_status(client, "thread-1")
+    assert set_status.await_args.args == ("C1", "1.0", "")
+    assert store.items == {}
+
+
+async def test_idle_settlement_preserves_newer_session_anchor(monkeypatch) -> None:
+    set_status = AsyncMock(return_value=True)
+    monkeypatch.setattr(slack_thinking, "set_slack_thread_status", set_status)
+    client = _status_client(_AnchorStore(), "run-1")
+    client.threads.get.return_value = {"metadata": {"running_background_tasks": ["cmd-1"]}}
+    await slack_thinking._claim_status_anchor(client, "D1", "0", "222.0")
+    await slack_thinking.clear_slack_thinking_status_if_idle(
+        client, "thread-1", "D1", "111.0", session_ts="0"
+    )
+    set_status.assert_not_awaited()
+
+
+async def test_run_lookup_failure_does_not_replace_working_status(monkeypatch) -> None:
+    set_status = AsyncMock(return_value=True)
+    monkeypatch.setattr(slack_thinking, "set_slack_thread_status", set_status)
+    client = _status_client(_AnchorStore(), "run-1")
+    client.runs.list.side_effect = RuntimeError("unavailable")
+    client.threads.get.return_value = {"metadata": {"running_background_tasks": ["cmd-1"]}}
+    await slack_thinking.clear_slack_thinking_status_if_idle(client, "thread-1", "C1", "1.0")
+    set_status.assert_not_awaited()
+
+
+@pytest.mark.parametrize("provided_metadata", [False, True])
+@pytest.mark.parametrize("waiting", [False, True])
+async def test_status_sync_reuses_metadata_for_idle_settlement(
+    monkeypatch: pytest.MonkeyPatch, provided_metadata: bool, waiting: bool
+) -> None:
+    client = _status_client(_AnchorStore(), "run-1")
+    metadata: dict[str, object] = {
+        "running_background_tasks": ["cmd-1"] if waiting else [],
+        "source_context": {"slack_thread": {"channel_id": "C1", "thread_ts": "1.0"}},
+    }
+    client.threads.get.return_value = {"metadata": metadata}
+    set_status = AsyncMock()
+    monkeypatch.setattr(slack_thinking, "set_slack_thread_status", set_status)
+    await slack_thinking.sync_slack_background_status(
+        client, "thread-1", metadata=metadata if provided_metadata else None
+    )
+    assert client.threads.get.await_count == (0 if provided_metadata else 1)
+    set_status.assert_awaited_once_with(
+        "C1", "1.0", "Waiting for background tasks…" if waiting else ""
+    )
+
+
+async def test_status_sync_does_not_clear_run_started_during_settlement(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = _status_client(_AnchorStore(), "run-1")
+    client.runs.list.side_effect = [[], [], [{"run_id": "new-run"}]]
+    set_status = AsyncMock()
+    monkeypatch.setattr(slack_thinking, "set_slack_thread_status", set_status)
+    await slack_thinking.sync_slack_background_status(
+        client,
+        "thread-1",
+        metadata={"source_context": {"slack_thread": {"channel_id": "C1", "thread_ts": "1.0"}}},
+    )
+    client.threads.get.assert_not_awaited()
+    set_status.assert_not_awaited()
+
+
+@pytest.mark.parametrize("waiting", [False, True])
+async def test_status_sync_preserves_anchor_replaced_during_settlement(
+    monkeypatch: pytest.MonkeyPatch, waiting: bool
+) -> None:
+    client = AsyncMock()
+    client.runs.list.return_value = []
+    client.store.get_item.side_effect = [
+        {"value": {"message_ts": "1.0"}},
+        {"value": {"message_ts": "2.0"}},
+    ]
+    set_status = AsyncMock()
+    monkeypatch.setattr(slack_thinking, "set_slack_thread_status", set_status)
+    await slack_thinking.sync_slack_background_status(
+        client,
+        "thread-1",
+        metadata={
+            "running_background_tasks": ["cmd-1"] if waiting else [],
+            "source_context": {"slack_thread": {"channel_id": "D1", "thread_ts": "0"}},
+        },
+    )
+    client.threads.get.assert_not_awaited()
+    client.store.delete_item.assert_not_awaited()
+    set_status.assert_not_awaited()

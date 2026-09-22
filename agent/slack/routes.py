@@ -9,6 +9,7 @@ from fastapi import APIRouter, Response
 from langgraph_sdk.client import LangGraphClient
 
 from agent.expedited_review import slack as expedited_review
+from agent.slack import plan_feedback
 from agent.slack import webhook as service
 from agent.slack.allowed_bots import resolve_allowed_slack_bot
 from agent.slack.ask import (
@@ -585,8 +586,11 @@ async def slack_command(
             thread_id=thread_id,
             command=command or ASK_COMMAND,
             team_id=value("team_id"),
+            response_url=value("response_url"),
         ),
     )
+    # Empty, deliberately: the acknowledgement goes out through `response_url`
+    # instead, which is the only message a later reply can replace.
     return Response(status_code=200)
 
 
@@ -641,6 +645,8 @@ async def slack_interactivity(
     if payload is None:
         common.logger.warning("Failed to parse Slack interactivity payload")
         return {"status": "error", "message": "Invalid payload"}
+    if plan_feedback.is_plan_feedback_submission(payload):
+        return await plan_feedback.handle_submission(payload, background_tasks)
     if is_slack_feedback_payload(payload):
         return await handle_slack_feedback_interaction(payload, background_tasks)
     if expedited_review.is_expedited_review_submission(payload):
@@ -685,6 +691,12 @@ async def slack_interactivity(
     if action is None:
         return ignored("No Open SWE action")
 
+    button = SlackButtonValue.parse(parse_json_object((action.value or "{}").encode("utf-8")))
+    if button is None:
+        return ignored("Invalid action value")
+    if button.type == "plan_approval" and button.action == "revise":
+        return await plan_feedback.open_feedback(interaction, button, background_tasks)
+
     channel_id = interaction.channel_id
     if not channel_id:
         return ignored("Slack channel is not eligible")
@@ -692,10 +704,6 @@ async def slack_interactivity(
     if not channel_context.allows_operations:
         common.logger.warning("Blocked Slack interaction in ineligible channel=%s", channel_id)
         return ignored("Slack channel is not eligible")
-
-    button = SlackButtonValue.parse(parse_json_object((action.value or "{}").encode("utf-8")))
-    if button is None:
-        return ignored("Invalid action value")
 
     user_id = interaction.user.id
     action_ts = action.action_ts or interaction.message_ts
@@ -842,10 +850,7 @@ async def slack_interactivity(
                 )
                 return accepted("Plan approval queued")
 
-            background_tasks.add_task(
-                _update_selected_option_message, interaction, action, "Request plan changes"
-            )
-            return accepted("Reply to revise the plan")
+            return ignored("Unknown plan action")
 
         if button.type != "open_swe_option":
             return ignored("Unknown action type")
