@@ -6,7 +6,8 @@ import {
 } from "@phosphor-icons/react"
 
 import { Popover, PopoverPopup, PopoverTrigger } from "@/components/ui/popover"
-import { useRefreshRepos } from "@/lib/profile"
+import { prioritizeRepositories } from "@/lib/repositoryUsage"
+import { useProfile, useRefreshRepos } from "@/lib/profile"
 import { cn } from "@/lib/utils"
 
 type RepoOption = { full_name: string }
@@ -45,13 +46,18 @@ export function RepoSelector({
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState("")
   const refresh = useRefreshRepos()
+  const profile = useProfile()
 
   const filteredRepos = useMemo(() => {
-    const all = repos ?? []
+    const all = prioritizeRepositories(
+      repos ?? [],
+      profile.data?.repository_usage,
+      (repo) => repo.full_name
+    )
     const q = query.trim().toLowerCase()
     if (!q) return all
     return all.filter((repo) => repo.full_name.toLowerCase().includes(q))
-  }, [repos, query])
+  }, [repos, query, profile.data?.repository_usage])
 
   return (
     <Popover

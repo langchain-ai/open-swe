@@ -9,7 +9,8 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { Switch } from "@/components/ui/switch"
 import { api } from "@/lib/api"
 import { RequireLogin } from "@/lib/auth-redirect"
-import { useRepos } from "@/lib/profile"
+import { prioritizeRepositories } from "@/lib/repositoryUsage"
+import { useProfile, useRepos } from "@/lib/profile"
 import { useSession } from "@/lib/session"
 
 const PAGE_SIZE = 20
@@ -24,6 +25,7 @@ function RepositoriesOwnerPage() {
   const qc = useQueryClient()
 
   const repos = useRepos()
+  const profile = useProfile()
 
   const autoReview = useQuery({
     queryKey: ["autoReviewRepos"],
@@ -41,10 +43,14 @@ function RepositoriesOwnerPage() {
 
   const ownerRepos = useMemo(
     () =>
-      (repos.data?.repositories ?? [])
-        .filter((r) => r.full_name.split("/")[0] === owner)
-        .sort((a, b) => a.full_name.localeCompare(b.full_name)),
-    [repos.data?.repositories, owner]
+      prioritizeRepositories(
+        (repos.data?.repositories ?? [])
+          .filter((r) => r.full_name.split("/")[0] === owner)
+          .sort((a, b) => a.full_name.localeCompare(b.full_name)),
+        profile.data?.repository_usage,
+        (repo) => repo.full_name
+      ),
+    [repos.data?.repositories, owner, profile.data?.repository_usage]
   )
 
   const autoReviewSet = useMemo(

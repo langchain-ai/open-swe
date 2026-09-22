@@ -6,6 +6,7 @@ import {
   readCachedRepos,
   writeCachedRepos,
 } from "./repoCache"
+import { prioritizeRepositories } from "./repositoryUsage"
 import { useSession } from "./session"
 import type { Profile, ProfileUpdate, ReposPayload } from "./api"
 
@@ -41,11 +42,20 @@ export const REPOS_STALE_TIME_MS = 10 * 60 * 1000
  * instead of waiting on the multi-second GitHub installation fan-out.
  */
 export function useRepos() {
+  const profile = useProfile()
   const session = useSession()
   const login = session.data?.login ?? null
   const cached = login ? readCachedRepos(login) : null
 
   return useQuery({
+    select: (payload) => ({
+      ...payload,
+      repositories: prioritizeRepositories(
+        payload.repositories,
+        profile.data?.repository_usage,
+        (repo) => repo.full_name
+      ),
+    }),
     queryKey: reposQueryKey(login),
     queryFn: async () => {
       try {

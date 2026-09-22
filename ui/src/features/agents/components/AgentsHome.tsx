@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { useNavigate, useRouterState } from "@tanstack/react-router"
 
+import { mostRecentRepository } from "@/lib/repositoryUsage"
 import type {
   DesktopLocalThreadSummary,
   DesktopProjectRef,
@@ -170,13 +171,17 @@ export function AgentsHome({
   const [repoOverride, setRepoOverride] = useState<string | null | undefined>(
     initialNoRepo ? null : initialRepo
   )
+  const recentRepo = mostRecentRepository(
+    reposQuery.data?.repositories ?? [],
+    profileQuery.data?.repository_usage
+  )
   const userDefaultRepo = profileQuery.data?.default_repo ?? null
 
   // Workspace first: an explicit pick, else the owner of a repository named
   // from outside (a link or the profile default), else the user's default,
   // then the instance default.
   const namedRepo = (
-    repoOverride === undefined ? userDefaultRepo : repoOverride
+    repoOverride === undefined ? (recentRepo ?? userDefaultRepo) : repoOverride
   )?.toLowerCase()
   const selectedWorkspace = pickComposerWorkspace({
     override: workspaceOverride,
@@ -200,6 +205,10 @@ export function AgentsHome({
   )
   const repo = pickComposerRepo({
     override: repoOverride,
+    recentRepo: mostRecentRepository(
+      workspaceRepos,
+      profileQuery.data?.repository_usage
+    ),
     userDefault: userDefaultRepo,
     workspaceDefault:
       workspaces.find((workspace) => workspace.slug === selectedWorkspace)
@@ -208,7 +217,6 @@ export function AgentsHome({
   })
   const selectWorkspace = (slug: string | null) => {
     setWorkspaceOverride(slug)
-    // A newly chosen workspace starts from its own default repository.
     setRepoOverride(undefined)
   }
   const selectRepo = (value: string | null) => {
@@ -567,6 +575,7 @@ export function AgentsHome({
         recorded: session.data?.transcript_recording === true,
       })
       queryClient.setQueryData(agentThreadKeys.detail(threadId), thread)
+      void queryClient.invalidateQueries({ queryKey: ["profile"] })
       seedAgentThreadLists(queryClient, thread)
       invalidateAgentThreadLists(queryClient)
       if (pending.stopRequested) {

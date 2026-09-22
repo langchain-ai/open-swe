@@ -68,25 +68,25 @@ export interface ComposerRepoInputs {
   override: string | null | undefined
   /** The signed-in user's saved default repository. */
   userDefault: string | null
+  recentRepo?: string | null
   /** The selected workspace's effective default repository. */
   workspaceDefault: string | null
   /** What the selected workspace may work in; see {@link reposForWorkspace}. */
   offered: ReadonlyArray<RepoOption>
 }
 
-/**
- * The repository a new thread starts in once the workspace is settled: the
- * explicit pick, else the user's default when the workspace may use it, else
- * the workspace's own default, else none.
- */
+/** Resolve explicit, recent, and configured selections within the offered repositories. */
 export function pickComposerRepo({
   override,
+  recentRepo,
   userDefault,
   workspaceDefault,
   offered,
 }: ComposerRepoInputs): string | null {
   if (override !== undefined) return override
-  const wanted = [userDefault, workspaceDefault].map((c) => c?.toLowerCase())
+  const wanted = [recentRepo, userDefault, workspaceDefault].map((c) =>
+    c?.toLowerCase()
+  )
   for (const name of wanted) {
     const match =
       name && offered.find((r) => r.full_name.toLowerCase() === name)

@@ -31,6 +31,7 @@ from agent.dashboard.options import (
     model_supports_effort,
     provider_fallback_pair,
 )
+from agent.dashboard.repository_usage import get_repository_usage
 from agent.encryption import decrypt_token, encrypt_token
 from agent.store import (
     delete_value,
@@ -397,10 +398,11 @@ _SESSION_DEP = Depends(require_session)
 async def get_my_profile(
     session: dict[str, Any] = _SESSION_DEP,
 ) -> dict[str, Any]:
-    profile = await get_profile(session["sub"])
-    if not profile:
-        return {}
-    return normalize_profile_for_response(profile)
+    profile = await get_profile(session["sub"]) or {}
+    return {
+        **normalize_profile_for_response(profile),
+        "repository_usage": await get_repository_usage(session["sub"]),
+    }
 
 
 @router.put("/profile")
@@ -409,4 +411,5 @@ async def put_my_profile(
     session: dict[str, Any] = _SESSION_DEP,
 ) -> dict[str, Any]:
     update.validate_pairing()
-    return await upsert_profile(session["sub"], session.get("email") or "", update)
+    profile = await upsert_profile(session["sub"], session.get("email") or "", update)
+    return {**profile, "repository_usage": await get_repository_usage(session["sub"])}

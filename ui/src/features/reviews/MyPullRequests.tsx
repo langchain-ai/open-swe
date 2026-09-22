@@ -5,7 +5,8 @@ import { Button } from "@/components/ui/button"
 import { MultiSelect } from "@/components/ui/multi-select"
 import { Skeleton } from "@/components/ui/skeleton"
 import { api, type OpenPullRequest, type ReviewSummary } from "@/lib/api"
-import { useRepos } from "@/lib/profile"
+import { prioritizeRepositories } from "@/lib/repositoryUsage"
+import { useProfile, useRepos } from "@/lib/profile"
 import { cn } from "@/lib/utils"
 import {
   PullRequestCard,
@@ -61,6 +62,7 @@ export function MyPullRequests({
   const queryClient = useQueryClient()
   const query = useOpenPullRequests(login, repo, sort, direction)
   const knownRepos = useRepos()
+  const profile = useProfile()
   // Rows whose details have been asked for. Tied to the filter set that grew
   // it, so changing a filter starts the list over without an extra render.
   const [growth, setGrowth] = useState({ key: "", rows: chunkSize })
@@ -145,12 +147,18 @@ export function MyPullRequests({
   )
   // A timed-out search returns no PRs, and filtering by repository is the way
   // out of it, so the options cannot be derived from the PRs themselves.
-  const repoNames = [
-    ...new Set([
-      ...(accessibleRepos.length ? accessibleRepos : all.map((pr) => pr.repo)),
-      ...repo,
-    ]),
-  ].sort()
+  const repoNames = prioritizeRepositories(
+    [
+      ...new Set([
+        ...(accessibleRepos.length
+          ? accessibleRepos
+          : all.map((pr) => pr.repo)),
+        ...repo,
+      ]),
+    ].sort(),
+    profile.data?.repository_usage,
+    (name) => name
+  )
   // Layout follows the row actually on screen, not the search param. Filtering
   // the selected PR out closes the preview and returns the list to full width
   // instead of stranding it in rail form with no way to close.

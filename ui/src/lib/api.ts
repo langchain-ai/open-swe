@@ -150,7 +150,14 @@ export interface OptionsPayload {
   default_agent_subagent_reasoning_effort: string
 }
 
+export interface RepositoryUsage {
+  repo: string
+  use_count: number
+  last_used_at: string
+}
+
 export interface Profile {
+  repository_usage?: Array<RepositoryUsage>
   login?: string
   email?: string
   default_model?: string
