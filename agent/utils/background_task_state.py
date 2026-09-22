@@ -17,8 +17,8 @@ async def update_background_task_state(
     running: Sequence[str] = (),
     finished: Sequence[str] = (),
     reset: bool = False,
-) -> None:
-    """Merge observed task transitions without dropping concurrent launches."""
+) -> dict[str, object]:
+    """Merge transitions under the lock and return the resulting metadata snapshot."""
     async with agent_thread_pr_state_lock(client, thread_id):
         metadata = thread_metadata(await client.threads.get(thread_id))
         previous = metadata.get(RUNNING_BACKGROUND_TASKS_KEY)
@@ -28,7 +28,10 @@ async def update_background_task_state(
             else set()
         )
         active = set() if reset else (active | set(running)) - set(finished)
-        await client.threads.update(
-            thread_id,
-            metadata={RUNNING_BACKGROUND_TASKS_KEY: sorted(active)},
-        )
+        current = sorted(active)
+        if previous != current and not (previous is None and not current):
+            await client.threads.update(
+                thread_id,
+                metadata={RUNNING_BACKGROUND_TASKS_KEY: current},
+            )
+        return {**metadata, RUNNING_BACKGROUND_TASKS_KEY: current}
