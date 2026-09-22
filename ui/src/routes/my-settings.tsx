@@ -30,7 +30,7 @@ function DesktopVersionSection() {
         label="Open SWE Desktop"
         control={
           <span className="text-xs text-muted-foreground">
-            Version {version}
+            Version {version} · Tag desktop-v{version}
           </span>
         }
       />
