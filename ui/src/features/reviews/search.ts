@@ -17,6 +17,20 @@ export interface ReviewsSearch {
   sort?: ReviewSort
   direction?: "asc" | "desc"
   page?: number
+  // The open pull request, as `owner/repo#number` — the same shape as
+  // `pullRequestKey`, so a row can put its own key straight into the URL.
+  pr?: string
+}
+
+const prSelectionPattern = /^[\w.-]+\/[\w.-]+#\d+$/
+
+export function parsePullRequestSelection(
+  value: string | undefined
+): { owner: string; repo: string; number: number } | null {
+  if (!value || !prSelectionPattern.test(value)) return null
+  const [fullName, rawNumber] = value.split("#")
+  const [owner, repo] = fullName!.split("/")
+  return { owner: owner!, repo: repo!, number: Number(rawNumber) }
 }
 
 export function validateReviewsSearch(
@@ -51,5 +65,9 @@ export function validateReviewsSearch(
         ? search.direction
         : undefined,
     page: Number.isInteger(page) && page > 0 && page <= 50 ? page : undefined,
+    pr:
+      typeof search.pr === "string" && prSelectionPattern.test(search.pr)
+        ? search.pr
+        : undefined,
   }
 }
