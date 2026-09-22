@@ -7,6 +7,7 @@ import pytest
 
 from agent import thread_feedback
 from agent.slack import thinking as slack_thinking
+from agent.source_context import SourceContext
 
 dispatch = importlib.import_module("agent.dispatch")
 
@@ -301,3 +302,48 @@ async def test_dispatch_restores_thinking_for_slack_background_wait(
         },
     )
     set_status.assert_awaited_once_with("C1", "1.0", "Thinking...")
+    assert client.threads.get.await_count == (0 if source == "slack" else 1)
+
+
+@pytest.mark.parametrize("explicit_context", [False, True])
+async def test_dispatch_skips_status_reads_for_known_non_slack_thread(
+    monkeypatch: pytest.MonkeyPatch, explicit_context: bool
+) -> None:
+    client = AsyncMock()
+    client.runs.create.return_value = {"run_id": "run-1"}
+    set_status = AsyncMock()
+    monkeypatch.setattr(slack_thinking, "set_slack_thread_status", set_status)
+    await dispatch.create_durable_run(
+        "thread-1",
+        "agent",
+        input={"messages": []},
+        source="dashboard",
+        client=client,
+        config={"configurable": {} if explicit_context else {"slack_thread": None}},
+        source_context=SourceContext() if explicit_context else None,
+    )
+    client.threads.get.assert_not_awaited()
+    client.runs.list.assert_not_awaited()
+    client.store.get_item.assert_not_awaited()
+    set_status.assert_not_awaited()
+
+
+async def test_dispatch_reads_task_state_if_run_finishes_before_status_sync(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = AsyncMock()
+    client.runs.create.return_value = {"run_id": "run-1"}
+    client.runs.list.return_value = []
+    client.threads.get.return_value = {"metadata": {"running_background_tasks": ["cmd-1"]}}
+    set_status = AsyncMock()
+    monkeypatch.setattr(slack_thinking, "set_slack_thread_status", set_status)
+    await dispatch.create_durable_run(
+        "thread-1",
+        "agent",
+        input={"messages": []},
+        source="slack",
+        client=client,
+        config={"configurable": {"slack_thread": {"channel_id": "C1", "thread_ts": "1.0"}}},
+    )
+    client.threads.get.assert_awaited_once_with("thread-1")
+    set_status.assert_awaited_once_with("C1", "1.0", "Waiting for background tasks…")
