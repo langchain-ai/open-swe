@@ -20,6 +20,7 @@ from fastapi import HTTPException, Response
 from langgraph_sdk.errors import NotFoundError
 from pydantic import BaseModel, ValidationError
 
+from agent.database import postgres
 from agent.github.app import get_github_app_installation_token
 from agent.github.checks import github_headers
 from agent.github.ci import list_check_runs, list_commit_statuses
@@ -35,9 +36,11 @@ from agent.review.findings import (
     comment_ids_for_finding,
     is_thread_resolved,
 )
+from agent.review_scout.launch import ReviewScoutTarget
 from agent.thread_ids import reviewer_thread_id
 from agent.utils.json_types import ThreadLike, as_json_object, thread_metadata
 from agent.utils.thread_ops import langgraph_client
+from agent.workspaces.store import WORKSPACES
 
 logger = logging.getLogger(__name__)
 
@@ -168,47 +171,6 @@ def classify_finding(finding: dict[str, Any]) -> Literal["bug", "investigate", "
     if severity != "low":
         return "investigate"
     return "informational"
-
-
-def _serialize_diff_groups(
-    metadata: dict[str, Any], head_sha: str
-) -> tuple[list[dict[str, Any]], bool]:
-    """Serialize the persisted ``diff_groups`` for the AI sorted view.
-
-    Returns ``(groups, stale)`` where each group carries a 1-based ``index``
-    and validated fields, and ``stale`` is True when the groups were generated
-    for a different head SHA than the one currently being rendered.
-    """
-    raw = metadata.get("diff_groups")
-    if not isinstance(raw, dict):
-        return [], False
-    raw_groups = raw.get("groups")
-    if not isinstance(raw_groups, list):
-        return [], False
-    groups: list[dict[str, Any]] = []
-    for group in raw_groups:
-        if not isinstance(group, dict):
-            continue
-        title = group.get("title")
-        if not isinstance(title, str) or not title.strip():
-            continue
-        files = [f for f in (group.get("files") or []) if isinstance(f, str) and f]
-        if not files:
-            continue
-        summary = group.get("summary")
-        groups.append(
-            {
-                "index": len(groups) + 1,
-                "title": title.strip(),
-                "summary": summary.strip() if isinstance(summary, str) else "",
-                "files": files,
-            }
-        )
-    groups_head = raw.get("head_sha")
-    stale = bool(
-        head_sha and isinstance(groups_head, str) and groups_head and groups_head != head_sha
-    )
-    return groups, stale
 
 
 def _finding_counts(findings: list[dict[str, Any]]) -> dict[str, int]:
@@ -688,7 +650,9 @@ async def get_review(owner: str, repo: str, pr_number: int) -> dict[str, Any]:
     for finding in findings:
         finding["group"] = classify_finding(finding)
 
-    diff_groups, diff_groups_stale = _serialize_diff_groups(metadata, head_sha)
+    target = await _scout_target(owner, repo, pr_number, pr_payload)
+    walkthrough = await target.walkthrough() if target else None
+    walkthrough_running = walkthrough is None and target is not None and await _scouting(target)
     assessment_id = metadata.get("review_assessment_id")
     assessment = (
         await ASSESSMENTS.get(str(assessment_id)) if isinstance(assessment_id, int) else None
@@ -699,8 +663,8 @@ async def get_review(owner: str, repo: str, pr_number: int) -> dict[str, Any]:
         "pr": details,
         "checks": checks,
         "findings": findings,
-        "diff_groups": diff_groups,
-        "diff_groups_stale": diff_groups_stale,
+        "walkthrough": walkthrough.model_dump(mode="json") if walkthrough else None,
+        "walkthrough_running": walkthrough_running,
         "assessment": assessment.model_dump() if assessment else None,
         "guidance": [
             point.model_dump(mode="json")
@@ -1044,6 +1008,61 @@ async def proxy_pr_image(owner: str, repo: str, pr_number: int, url: str) -> Res
                 )
 
     raise HTTPException(502, "too many redirects fetching image")
+
+
+class _ScoutRef(BaseModel):
+    sha: str = ""
+
+
+class _ScoutPull(BaseModel):
+    title: str = ""
+    base: _ScoutRef = _ScoutRef()
+    head: _ScoutRef = _ScoutRef()
+
+
+async def _scout_target(
+    owner: str, repo: str, pr_number: int, pr_payload: object
+) -> ReviewScoutTarget | None:
+    """The scout target for the PR's current head, or ``None`` without a database or head."""
+    if not postgres.configured():
+        return None
+    pull = _ScoutPull.model_validate(pr_payload if isinstance(pr_payload, dict) else {})
+    if not pull.base.sha or not pull.head.sha:
+        return None
+    return ReviewScoutTarget(
+        owner=owner,
+        repo=repo,
+        pr_number=pr_number,
+        pr_title=pull.title,
+        base_sha=pull.base.sha,
+        head_sha=pull.head.sha,
+        workspace_slug=await WORKSPACES.owner_of_repo(f"{owner}/{repo}"),
+    )
+
+
+async def _scouting(target: ReviewScoutTarget) -> bool:
+    try:
+        return await target.active_run() is not None
+    except Exception:
+        logger.warning("Could not read review scout runs", exc_info=True, extra=target.log_extra)
+        return False
+
+
+class ReviewScoutTrigger(BaseModel):
+    started: bool
+    run_id: str | None = None
+
+
+async def trigger_review_scout(owner: str, repo: str, pr_number: int) -> ReviewScoutTrigger:
+    """Start the review scout for the PR's current head, or join the one already running."""
+    token = await _require_app_token()
+    pr_payload = await _github_get(f"/repos/{owner}/{repo}/pulls/{pr_number}", token)
+    target = await _scout_target(owner, repo, pr_number, pr_payload)
+    if target is None:
+        raise HTTPException(503, "the review scout needs a database and a pull request head")
+    if await target.walkthrough() is not None:
+        return ReviewScoutTrigger(started=False)
+    return ReviewScoutTrigger(started=True, run_id=await target.start())
 
 
 async def trigger_re_review(owner: str, repo: str, pr_number: int, login: str) -> dict[str, Any]:

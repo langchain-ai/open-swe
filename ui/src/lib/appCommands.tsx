@@ -20,6 +20,7 @@ import {
   shouldIgnoreHotkey,
 } from "@/lib/hotkeys"
 import { useTheme } from "@/lib/theme"
+import { useChatRoutes } from "@/lib/chatRoutes"
 
 export interface AppCommand {
   id: string
@@ -79,6 +80,7 @@ export function AppCommandProvider({
   children: React.ReactNode
 }) {
   const navigate = useNavigate()
+  const chat = useChatRoutes()
   const session = useSession()
   const { toggleTheme } = useTheme()
   const enabled = Boolean(session.data)
@@ -108,13 +110,13 @@ export function AppCommandProvider({
         desktopId: "show-command-palette",
         desktopShortcuts: ["mod+k"],
       },
-      createNewThreadCommand(() => void navigate({ to: "/agents" })),
+      createNewThreadCommand(() => void navigate({ to: chat.home })),
       {
         id: "open-threads",
         label: "Open threads",
         aliases: ["home", "chats", "agents"],
         group: "Navigation",
-        run: () => void navigate({ to: "/agents" }),
+        run: () => void navigate({ to: chat.home }),
       },
       {
         id: "open-skills",
@@ -164,7 +166,7 @@ export function AppCommandProvider({
         desktopShortcuts: ["mod+/"],
       },
     ],
-    [navigate, openPalette, openShortcutReference, toggleTheme]
+    [navigate, chat.home, openPalette, openShortcutReference, toggleTheme]
   )
 
   const register = useCallback((commands: ReadonlyArray<AppCommand>) => {

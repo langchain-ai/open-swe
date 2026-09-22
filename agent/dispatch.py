@@ -55,6 +55,8 @@ LangGraphRunConfig = dict[str, Any]
 
 # The server's legacy-named compatibility marker selects the v3 stream path.
 V3_STREAMING_CONFIG_KEY = "__event_streaming_v2"
+# Run metadata ``kind`` of a run started only to deliver store leftovers.
+FOLLOW_UP_PICKUP_KIND = "follow_up_pickup"
 # The dashboard's ``run.start`` defaults, minus protocol-only channels rejected by
 # the REST ``POST /runs`` schema.
 V3_RUN_STREAM_MODES: tuple[str, ...] = (

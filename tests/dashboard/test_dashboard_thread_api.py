@@ -1656,6 +1656,30 @@ async def test_run_cancel_rejects_unsurfaced_thread(monkeypatch) -> None:
     assert exc_info.value.status_code == 404
 
 
+async def test_run_cancel_lets_only_the_sender_withdraw_a_queued_follow_up(monkeypatch) -> None:
+    class FakeThreads:
+        async def get(self, thread_id: str) -> dict[str, object]:
+            return {
+                "thread_id": "tid",
+                "metadata": {"source": "dashboard", "owner_login": "owner", "visibility": "public"},
+            }
+
+    class FakeRuns:
+        async def get(self, thread_id: str, run_id: str) -> dict[str, object]:
+            return {"run_id": run_id, "metadata": {"queued_by": "sender"}}
+
+    class FakeClient:
+        threads = FakeThreads()
+        runs = FakeRuns()
+
+    patch_thread_module(monkeypatch, "langgraph_client", lambda: FakeClient())
+
+    with pytest.raises(HTTPException) as exc_info:
+        await thread_proxy.proxy_dashboard_thread_run_cancel("tid", "run-2", "teammate")
+    assert exc_info.value.status_code == 403
+    assert "sender" in exc_info.value.detail
+
+
 async def test_read_endpoints_accessible_by_non_owner(monkeypatch) -> None:
     """Read endpoints (state, stream, history) are accessible by any org member."""
 
@@ -2972,7 +2996,11 @@ async def test_cancel_dashboard_thread_interrupts_runs_it_did_not_start(monkeypa
     class FakeRuns:
         async def list(self, thread_id: str, **kwargs: object) -> list[dict[str, str]]:
             calls.append(("list", {"thread_id": thread_id, **kwargs}))
-            return [{"run_id": f"{kwargs['status']}-run"}]
+            runs: list[dict[str, object]] = [{"run_id": f"{kwargs['status']}-run"}]
+            if kwargs["status"] == "pending":
+                # Someone else's queued follow-up is left to run.
+                runs.append({"run_id": "teammate-queued", "metadata": {"queued_by": "teammate"}})
+            return runs
 
         async def cancel_many(self, **kwargs: object) -> None:
             calls.append(("cancel_many", kwargs))
@@ -3190,3 +3218,91 @@ def test_admin_cancel_thread_dependency_rejects_non_admin(monkeypatch) -> None:
         deps.require_admin({"sub": "not-admin", "email": "user@example.com"})
 
     assert exc_info.value.status_code == 403
+
+
+async def test_steer_running_thread_records_and_delivers_the_follow_up(monkeypatch) -> None:
+    store = FakeStore()
+    updates: list[dict[str, object]] = []
+    turn = uuid7()
+
+    class FakeThreads:
+        async def update(self, *, thread_id: str, metadata: dict[str, object]) -> None:
+            assert thread_id == "tid"
+            updates.append(metadata)
+
+        async def get_state(self, thread_id: str) -> dict[str, object]:
+            return {"values": {"messages": []}}
+
+    class FakeRuns:
+        async def get(self, thread_id: str, run_id: str) -> dict[str, str]:
+            return {"run_id": run_id, "status": "running"}
+
+    class FakeClient:
+        threads = FakeThreads()
+        runs = FakeRuns()
+
+    FakeClient.store = store  # type: ignore[attr-defined]
+
+    appended: list[object] = []
+
+    async def fake_append(thread_id: str, commands) -> AppendResult:
+        assert thread_id == "tid"
+        appended.extend(commands)
+        return AppendResult(versions=[1], events=[])
+
+    async def fake_open_turn_id(thread_id: str, run_id: str | None) -> UUID:
+        assert run_id == "run-1"
+        return turn
+
+    patch_thread_module(monkeypatch, "langgraph_client", lambda: FakeClient())
+    patch_thread_module(monkeypatch, "append", fake_append)
+    patch_thread_module(monkeypatch, "open_turn_id", fake_open_turn_id)
+    monkeypatch.setattr("agent.utils.thread_ops.langgraph_client", lambda: FakeClient())
+    monkeypatch.setattr("agent.thread_feedback.note_feedback_activity", AsyncMock())
+
+    result = await thread_runs.steer_running_thread(
+        "tid",
+        "teammate",
+        {
+            "id": 7,
+            "method": "run.start",
+            "params": {
+                "input": {
+                    "messages": [{"role": "user", "content": "also check the tests", "id": "msg-1"}]
+                }
+            },
+        },
+        metadata={
+            "source": "dashboard",
+            "transcript": "v2",
+            "latest_run_id": "run-1",
+            "model": "openai:gpt-5",
+        },
+        email="teammate@example.com",
+    )
+
+    assert result == {
+        "id": 7,
+        "type": "success",
+        "result": {
+            "thread_id": "tid",
+            "run_id": "run-1",
+            "message_id": "msg-1",
+            "steered": True,
+        },
+    }
+    # The running agent finds the message before its next model call.
+    [queued] = store.values(("queue", "tid"))["pending_messages"]["messages"]
+    assert queued["content"]["queue_id"] == "msg-1"
+    assert queued["content"]["text"] == "also check the tests"
+    assert queued["content"]["sender"]["github_login"] == "teammate"
+    assert "source" not in queued["content"]
+    # The transcript shows it on the live turn right away, under the id the
+    # middleware will record it with, so the two writes deduplicate.
+    [command] = appended
+    assert command.command_id == "human:msg-1"
+    assert command.turn_id == turn
+    assert command.event.role == "human"
+    assert command.event.sender.login == "teammate"
+    assert "also check the tests" in command.event.text
+    assert updates[-1]["participant_logins"] == {"teammate": True}
