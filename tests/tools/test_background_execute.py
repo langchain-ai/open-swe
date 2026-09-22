@@ -166,13 +166,7 @@ async def test_delete_crons_removes_legacy_crons_matched_by_payload() -> None:
         _cron("other-thread", "thread-2", {"kind": "background_tasks"}),
     ]
     client = AsyncMock()
-
-    async def search(*, metadata: dict[str, str], limit: int, offset: int = 0) -> list[object]:
-        if "agent_thread_id" in metadata:
-            return [tagged]
-        return [tagged, *legacy] if offset == 0 else []
-
-    client.crons.search.side_effect = search
+    client.crons.search.return_value = [tagged, *legacy]
 
     with patch("agent.background_tasks._client", return_value=client):
         await background_tasks._delete_crons("thread-1")
