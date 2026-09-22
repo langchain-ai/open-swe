@@ -131,7 +131,7 @@ def apply() -> None:
             module.__dict__["parse_github_pr_url"] = _parse_pr_url
 
     # Keep the triggering-user identity lookup offline; the real fallback to
-    # config-derived identity (Slack name/email) still runs.
+    # the config's GitHub login still runs.
     async def _no_github_identity(_token: str | None) -> None:
         return None
 

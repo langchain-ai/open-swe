@@ -12,6 +12,8 @@ $repository_scope_section
 
 $repository_setup_section
 
+$collaboration_section
+
 $task_execution_section
 
 $dependency_section
