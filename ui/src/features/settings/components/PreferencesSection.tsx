@@ -51,9 +51,6 @@ export function PreferencesSection() {
     mutationFn: api.saveMyPreferences,
     onSuccess: (data) => {
       qc.setQueryData(["myPreferences"], data)
-      // The session payload carries `transcript_streaming` so the thread page
-      // has it on first render; refetch it or the change lands a reload later.
-      void qc.invalidateQueries({ queryKey: ["session"] })
     },
   })
   const workspaceOptions = useQuery({
@@ -225,26 +222,6 @@ export function PreferencesSection() {
           >
             {archiveThreads.isPending ? "Archiving…" : "Archive all"}
           </Button>
-        }
-      />
-      <SettingsRow
-        label="Stream threads from the transcript"
-        description={
-          savePreferences.error
-            ? `Could not save: ${savePreferences.error.message}`
-            : "Read threads from Open SWE's own transcript log instead of the agent's graph state. Faster to load and to follow live, and being rolled out — threads started before it was recording, and threads someone else is streaming, are unaffected. Reopen a thread after changing this."
-        }
-        control={
-          <Switch
-            checked={preferences.data?.transcript_streaming ?? false}
-            onCheckedChange={(v) =>
-              savePreferences.mutate({
-                ...preferences.data!,
-                transcript_streaming: v,
-              })
-            }
-            disabled={preferences.isLoading || savePreferences.isPending}
-          />
         }
       />
       <SettingsRow

@@ -71,6 +71,8 @@ export function PullRequestsSection() {
   const disabled = profile.isLoading || save.isPending
   const teamDefaultOn =
     workspaceSettings.data?.effective.review_draft_prs ?? false
+  const expeditedOn =
+    workspaceSettings.data?.effective.expedited_review_enabled ?? false
 
   return (
     <SettingsSection
@@ -79,7 +81,11 @@ export function PullRequestsSection() {
     >
       <SettingsRow
         label="Create PRs as draft"
-        description="New pull requests are created as drafts. Existing pull requests keep their current draft status."
+        description={
+          expeditedOn
+            ? "New pull requests are created as drafts, except ones the agent nominates for expedited Slack review, which it marks ready. Existing pull requests keep their current draft status."
+            : "New pull requests are created as drafts. Existing pull requests keep their current draft status."
+        }
         control={
           <Switch
             checked={profile.data?.draft_prs ?? true}

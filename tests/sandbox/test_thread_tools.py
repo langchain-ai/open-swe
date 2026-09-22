@@ -68,7 +68,7 @@ async def test_capability_carries_binding_and_is_revoked_on_rebinding(
     issued = await tool_access.issue_tool_access("thread-a", "sandbox-a")
     assert issued is not None
     url, token = issued
-    assert url == "https://agent.example.test/sandbox-tools"
+    assert url == "https://agent.example.test/dashboard/api/sandbox-tools"
     claims = jwt.decode(
         token, "test-tools-signing-key", algorithms=["HS256"], audience=tool_access.TOOLS_AUDIENCE
     )
@@ -106,7 +106,9 @@ async def test_proxy_refresh_preserves_tools_and_custom_rules(
     rule = next(rule for rule in rules if rule["name"] == tool_access.TOOLS_RULE)
     assert rule["match_hosts"] == ["agent.example.test"]
     assert rule["headers"][0]["type"] == "opaque"
-    assert rule["env_vars"] == {"OPEN_SWE_TOOLS_URL": "https://agent.example.test/sandbox-tools"}
+    assert rule["env_vars"] == {
+        "OPEN_SWE_TOOLS_URL": "https://agent.example.test/dashboard/api/sandbox-tools"
+    }
     assert "thread-a" not in str(rule) and "sandbox-a" not in str(rule)
     first_token = rule["headers"][0]["value"]
     await langsmith.configure_sandbox_proxy(
@@ -195,22 +197,22 @@ async def test_http_list_search_invoke_and_reject_context_overrides(
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=app), base_url="https://test"
     ) as http:
-        assert (await http.get("/sandbox-tools/list")).status_code == 401
+        assert (await http.get("/dashboard/api/sandbox-tools/list")).status_code == 401
         headers = {tool_access.TOOLS_HEADER: token}
-        result = await http.get("/sandbox-tools/search?q=connected", headers=headers)
+        result = await http.get("/dashboard/api/sandbox-tools/search?q=connected", headers=headers)
         assert result.status_code == 200
         assert result.json()["tools"][0]["name"] == "integration_echo"
         assert result.headers["cache-control"] == "no-store"
-        listed = await http.get("/sandbox-tools/list", headers=headers)
+        listed = await http.get("/dashboard/api/sandbox-tools/list", headers=headers)
         assert listed.json()["total"] == 1
         invoked = await http.post(
-            "/sandbox-tools/invoke/integration_echo",
+            "/dashboard/api/sandbox-tools/invoke/integration_echo",
             headers=headers,
             json={"value": "hello"},
         )
         assert invoked.json() == {"status": "success", "content": "hello"}
         forged = await http.post(
-            "/sandbox-tools/invoke/integration_echo",
+            "/dashboard/api/sandbox-tools/invoke/integration_echo",
             headers=headers,
             json={
                 "value": "hello",
@@ -219,7 +221,7 @@ async def test_http_list_search_invoke_and_reject_context_overrides(
         )
         assert forged.status_code == 422
         large = await http.post(
-            "/sandbox-tools/invoke/integration_echo",
+            "/dashboard/api/sandbox-tools/invoke/integration_echo",
             headers=headers,
             content=b" " * (tool_routes.MAX_REQUEST_BYTES + 1),
         )
@@ -231,15 +233,17 @@ async def test_http_list_search_invoke_and_reject_context_overrides(
             '{"name":"integration_echo","arguments":{"value":"hello"}}',
         ):
             invalid = await http.post(
-                "/sandbox-tools/invoke/integration_echo",
+                "/dashboard/api/sandbox-tools/invoke/integration_echo",
                 headers=headers,
                 content=content,
             )
             assert invalid.status_code == 422
-        unknown = await http.post("/sandbox-tools/invoke/unknown", headers=headers, json={})
+        unknown = await http.post(
+            "/dashboard/api/sandbox-tools/invoke/unknown", headers=headers, json={}
+        )
         assert unknown.status_code == 404
         unauthorized = await http.post(
-            "/sandbox-tools/invoke/integration_echo", json={"value": "hello"}
+            "/dashboard/api/sandbox-tools/invoke/integration_echo", json={"value": "hello"}
         )
         assert unauthorized.status_code == 401
 
@@ -291,7 +295,7 @@ def test_invocation_openapi_declares_raw_arguments_and_result() -> None:
     app = FastAPI()
     app.include_router(tool_routes.router)
     schema = app.openapi()
-    operation = schema["paths"]["/sandbox-tools/invoke/{tool_name}"]["post"]
+    operation = schema["paths"]["/dashboard/api/sandbox-tools/invoke/{tool_name}"]["post"]
     assert operation["requestBody"]["content"]["application/json"]["schema"] == {
         "$ref": "#/components/schemas/ToolArguments"
     }
@@ -315,7 +319,7 @@ async def test_chunked_request_limit_precedes_json_parsing(monkeypatch: pytest.M
         transport=httpx.ASGITransport(app=app), base_url="https://test"
     ) as http:
         response = await http.post(
-            "/sandbox-tools/invoke/integration_echo",
+            "/dashboard/api/sandbox-tools/invoke/integration_echo",
             content=chunks(),
             headers={"Content-Type": "application/json"},
         )

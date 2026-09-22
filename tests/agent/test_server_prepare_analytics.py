@@ -79,6 +79,7 @@ def _middleware(config: dict[str, Any], *, credential_login: str | None = None) 
         linear_project_id="",
         linear_issue_number="",
         draft_prs=False,
+        recent_thread_context_enabled=False,
         admin_workspaces=False,
         credential_login=credential_login,
     )
@@ -114,7 +115,6 @@ def prepare_harness(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
     monkeypatch.setattr(server, "_resolve_user_custom_instructions", _async_none)
     monkeypatch.setattr(server, "_thread_participant_identities", _async_list)
     monkeypatch.setattr(server, "_workspace_admin", _async_false)
-    monkeypatch.setattr(server, "construct_sender_context", lambda *args, **kwargs: "sender")
     monkeypatch.setattr(server, "construct_system_prompt", lambda *args, **kwargs: "system prompt")
 
     class _Threads:

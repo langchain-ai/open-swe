@@ -55,7 +55,7 @@ async def test_concurrent_task_updates_read_after_acquiring_lock() -> None:
     first_read = asyncio.Event()
     contended = asyncio.Event()
 
-    async def create(*, thread_id: str, if_exists: str, ttl: int) -> None:
+    async def create(*, thread_id: str, if_exists: str, ttl: int, metadata: object) -> None:
         nonlocal locked
         if locked:
             contended.set()

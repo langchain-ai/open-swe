@@ -1,8 +1,8 @@
 import { createFileRoute } from "@tanstack/react-router"
-import { useEffect, useState } from "react"
+import { AboutSection } from "@/features/settings/components/AboutSection"
 
 import { AccountSection } from "@/features/settings/components/AccountSection"
-import { AppShell, SettingsRow, SettingsSection } from "@/components/AppShell"
+import { AppShell } from "@/components/AppShell"
 import { ConnectionsSection } from "@/features/settings/components/ConnectionsSection"
 import { MCPConnectionsSection } from "@/features/settings/components/MCPConnectionsSection"
 import { PersonalInstructionsSection } from "@/features/settings/components/PersonalInstructionsSection"
@@ -15,28 +15,6 @@ import { useSession } from "@/lib/session"
 export const Route = createFileRoute("/my-settings")({
   component: MySettingsPage,
 })
-
-function DesktopVersionSection() {
-  const [version, setVersion] = useState<string>()
-
-  useEffect(() => {
-    void window.openSweDesktop?.getVersion().then(setVersion)
-  }, [])
-
-  if (!version) return null
-  return (
-    <SettingsSection title="About">
-      <SettingsRow
-        label="Open SWE Desktop"
-        control={
-          <span className="text-xs text-muted-foreground">
-            Version {version}
-          </span>
-        }
-      />
-    </SettingsSection>
-  )
-}
 
 function MySettingsPage() {
   const session = useSession()
@@ -62,7 +40,7 @@ function MySettingsPage() {
       <ConnectionsSection user={session.data} />
       <MCPConnectionsSection scope="user" />
       <PersonalInstructionsSection />
-      <DesktopVersionSection />
+      <AboutSection user={session.data} />
     </AppShell>
   )
 }

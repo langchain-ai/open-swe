@@ -45,6 +45,7 @@ from e2e_env import (  # noqa: E402
     SECOND_OWNER,
     SECOND_REPO,
     TEST_USERS,
+    UNLINKED_USER,
 )
 from fastapi import HTTPException, Request  # noqa: E402
 from fastapi.responses import (  # noqa: E402
@@ -56,9 +57,12 @@ from fastapi.responses import (  # noqa: E402
 )
 
 # Slack-user directory the fake ``users.info`` resolves: the default sender used
-# by the automated tests plus the named manual-test users.
+# by the automated tests plus the named manual-test users. ``U_CAROL`` is in
+# Slack and nowhere else: no ``users`` row, no GitHub identity, and an address
+# no test user shares, so she stays unresolvable.
 _SLACK_USERS: dict[str, dict[str, str]] = {
     HUMAN_USER: {"name": "devuser", "real_name": "Dev User", "email": "dev@example.com"},
+    UNLINKED_USER: {"name": "carol", "real_name": "Carol", "email": "carol@example.com"},
     **{
         u["slack_id"]: {"name": u["login"], "real_name": u["name"], "email": u["email"]}
         for u in TEST_USERS
@@ -518,9 +522,10 @@ async def slack_send(request: Request) -> JSONResponse:
             channel, thread_ts, user=user_id, text=text, is_bot=False
         )
     else:
-        thread_ts = fakes.new_thread_ts()
-        fakes.add_slack_message(channel, thread_ts, user=user_id, text=text, is_bot=False)
-        event_ts = thread_ts
+        # A thread's opening message is its parent: Slack gives it one ts, which
+        # is both its own and the thread's.
+        event_ts = fakes.add_slack_message(channel, "", user=user_id, text=text, is_bot=False)
+        thread_ts = event_ts
     CURRENT_THREAD["channel"] = channel
     CURRENT_THREAD["thread_ts"] = thread_ts
 
@@ -1385,6 +1390,52 @@ async def slack_archive_code_channel(request: Request) -> JSONResponse:
 @app.get("/fake-slack/chat.getPermalink")
 async def slack_get_permalink(channel: str = "", message_ts: str = "") -> JSONResponse:  # noqa: ARG001
     return _ok({"permalink": f"{BASE_URL}/mock/slack"})
+
+
+# Slack's three-step external upload. Without it the expedited-review card's
+# diff image silently fails to upload and the card degrades to its text
+# fallback, so the suite would test a rendering nobody sees.
+SLACK_FILES: dict[str, bytes] = {}
+
+
+@app.api_route("/fake-slack/files.getUploadURLExternal", methods=["GET", "POST"])
+async def slack_get_upload_url(filename: str = "") -> JSONResponse:
+    file_id = f"F{uuid.uuid4().hex[:10].upper()}"
+    SLACK_FILES[file_id] = b""
+    return _ok({"upload_url": f"{BASE_URL}/fake-slack/upload/{file_id}", "file_id": file_id})
+
+
+@app.post("/fake-slack/upload/{file_id}")
+async def slack_upload_bytes(file_id: str, request: Request) -> JSONResponse:
+    SLACK_FILES[file_id] = await request.body()
+    return JSONResponse({"ok": True})
+
+
+@app.post("/fake-slack/files.completeUploadExternal")
+async def slack_complete_upload(request: Request) -> JSONResponse:
+    # The SDK form-encodes this one, with ``files`` as a JSON string.
+    try:
+        body: object = await request.json()
+    except ValueError:
+        body = dict(await request.form())
+    raw: object = body.get("files") if isinstance(body, dict) else None
+    if isinstance(raw, str):
+        raw = json.loads(raw)
+    items = [item for item in raw if isinstance(item, dict)] if isinstance(raw, list) else []
+    return _ok({"files": [{"id": item.get("id"), "title": item.get("title")} for item in items]})
+
+
+@app.get("/control/slack-files")
+async def control_slack_files() -> JSONResponse:
+    return JSONResponse([{"id": k, "bytes": len(v)} for k, v in SLACK_FILES.items()])
+
+
+@app.get("/mock/slack/files/{file_id}")
+async def mock_slack_file(file_id: str) -> Response:
+    content = SLACK_FILES.get(file_id)
+    if not content:
+        return Response(status_code=404)
+    return Response(content, media_type="image/png")
 
 
 # A dashboard build under ui/.output puts the UI catch-all on the app before the

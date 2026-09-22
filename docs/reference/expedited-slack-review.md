@@ -26,9 +26,19 @@ are already in the Slack thread.
 
 - The agent calls `expedite_pr_approval` with the PR URL; the backend decides
   eligibility.
-- Eligible: 1–10 changed lines, every file with a text diff. Binaries and anything
+- Eligible: 1–20 changed lines, every file with a text diff. Binaries and anything
   GitHub cannot show a patch for are refused, because the card could not show the
-  voters what they are approving.
+  voters what they are approving. 20 is what the agent is told; 25 is what is
+  enforced, since bouncing a change that lands a few lines over costs more than the
+  slack costs the voters.
+- Test files sit outside both gates: they do not count toward the limit and they may
+  arrive without a patch. CI judges tests, and counting them would price a small fix
+  out of shipping with its tests.
+- The card draws the source diff. It draws the test diff too when the change is
+  test-only or test lines are the majority, because otherwise there would be nothing
+  to look at; when tests are the minority of a mostly-source change it names them
+  instead, so the thing being voted on stays readable.
+- A draft pull request is marked ready for review as part of nominating it.
 - No path is refused for being sensitive. A denylist of sensitive paths was tried and
   dropped: it is incomplete by construction, so it stops nobody deliberate, while
   matching path segments blocks unrelated files that merely contain a word like

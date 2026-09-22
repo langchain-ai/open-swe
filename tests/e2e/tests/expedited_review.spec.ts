@@ -46,6 +46,7 @@ type Approval = {
 type PullRequest = {
   number: number;
   state: string;
+  draft: boolean;
   merged: boolean;
   head_sha: string;
   reviews: Array<{ author: string; state: string; commit_id: string }>;
@@ -137,6 +138,12 @@ async function reportCheck(
   });
 }
 
+async function shootCard(page: Page, name: string, matcher: RegExp) {
+  const card = page.locator(".msg.bot").filter({ hasText: matcher }).last();
+  await expect(card).toBeVisible({ timeout: 30_000 });
+  await card.screenshot({ path: `test-results/expedited-review-${name}.png` });
+}
+
 async function clickApprove(page: Page, slackUserId: string) {
   await page.goto("/mock/slack");
   await page.locator("#user").selectOption(slackUserId);
@@ -194,13 +201,9 @@ test.describe("Expedited Slack review", () => {
     const opened = await pull(request);
     expect(opened.state).toBe("open");
     expect(opened.merged).toBe(false);
-
-    // The author marks it ready for review. Open SWE opens drafts when the
-    // requester's profile says so, and expedited review refuses a draft.
-    await control(request, "/control/pull-request-health", {
-      number: PR_NUMBER,
-      draft: false,
-    });
+    // Open SWE opens drafts when the requester's profile says so. Nobody clears
+    // the flag here: nominating the PR is what marks it ready, asserted below.
+    expect(opened.draft).toBe(true);
 
     // 3. GitHub reports the check FAILED, asynchronously. The durable watch
     //    wakes the agent, which fixes the code and pushes.
@@ -222,6 +225,9 @@ test.describe("Expedited Slack review", () => {
     expect(await botMessages(request, threadId)).not.toMatch(
       /Expedited review requested/i,
     );
+    // Nominating a draft marks it ready for review; nothing else in this test
+    // touches the flag.
+    expect((await pull(request)).draft).toBe(false);
 
     // 5. GitHub reports the check GREEN. That webhook is what moves the waiting
     //    approval to open and posts the card — no agent turn involved.
@@ -237,6 +243,24 @@ test.describe("Expedited Slack review", () => {
       })
       .toMatch(/Expedited review requested/i);
     expect((await approvals(request)).at(-1)?.head_sha).toBe(opened.head_sha);
+
+    // The card carries the whole diff, which is the premise of voting from
+    // Slack rather than from GitHub. Production renders it to a PNG and shows
+    // that; the text fallback only appears when rendering or upload failed, so
+    // asserting the image is what keeps this test on the real path.
+    await page.goto("/mock/slack");
+    const card = page
+      .locator(".msg.bot")
+      .filter({ hasText: /Expedited review requested/i })
+      .last();
+    const diff = card.locator("img.block-image");
+    await expect(diff).toBeVisible();
+    await expect(diff).toHaveAttribute("alt", /greet\.py/);
+    expect(
+      await diff.evaluate((img: HTMLImageElement) => img.naturalWidth),
+      "the diff PNG should have rendered, uploaded and decoded",
+    ).toBeGreaterThan(0);
+    await shootCard(page, "open", /Expedited review requested/i);
 
     // 6. Alice approves. One vote is not a quorum, so nothing merges — but her
     //    click has already become a real GitHub review.
@@ -281,5 +305,6 @@ test.describe("Expedited Slack review", () => {
     await expect(
       page.locator(".msg.bot").filter({ hasText: /Merged\./i }),
     ).toBeVisible({ timeout: 30_000 });
+    await shootCard(page, "merged", /Merged\./i);
   });
 });

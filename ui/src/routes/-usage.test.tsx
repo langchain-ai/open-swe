@@ -17,12 +17,20 @@ import {
   ApiError,
   type PRMergeRateCohort,
   type PRMergeRatePayload,
+  type PRMergeRateResponse,
   type UsageLeaderboardPayload,
   type UsageLeaderboardRow,
 } from "@/lib/api"
 import { TooltipProvider } from "@/components/ui/tooltip"
+import { makeQueryClient } from "@/lib/query"
 
 import { UsageAnalytics, UsageDateRange } from "./usage"
+
+const FETCHED_AT = "2026-09-11T12:01:30Z"
+
+function report(payload: PRMergeRatePayload): PRMergeRateResponse {
+  return { payload, fetchedAt: FETCHED_AT }
+}
 
 const captured: PRMergeRatePayload = {
   status: "no_prs",
@@ -93,7 +101,7 @@ afterEach(() => {
 })
 
 it("labels the shared date range and changes it independently of usage scope", async () => {
-  vi.spyOn(api, "prMergeRateByModel").mockResolvedValue(captured)
+  vi.spyOn(api, "prMergeRateByModel").mockResolvedValue(report(captured))
   const onPeriodChange = vi.fn()
   mountReport(onPeriodChange)
   const range = screen.getByRole("combobox", { name: "Date range" })
@@ -113,12 +121,16 @@ it("labels the shared date range and changes it independently of usage scope", a
 })
 
 it("shows delivery lag separately from suppression, then refreshes to a populated report", async () => {
-  const query = vi.spyOn(api, "prMergeRateByModel").mockResolvedValue(captured)
+  const query = vi
+    .spyOn(api, "prMergeRateByModel")
+    .mockResolvedValue(report(captured))
   const client = mountReport()
   expect(await screen.findByText(/No PRs have been recorded/)).toBeTruthy()
-  expect(screen.getByText("Analytics are updating")).toBeTruthy()
+  expect(screen.getByText("Event processing is behind")).toBeTruthy()
   fireEvent.click(screen.getByText("Details"))
-  expect(screen.getByText(/still waiting to be processed/)).toBeTruthy()
+  expect(
+    screen.getAllByText(/still waiting to be processed/).length
+  ).toBeGreaterThan(0)
   expect(screen.getByText(/Reporting since/)).toBeTruthy()
   expect(
     screen
@@ -127,48 +139,50 @@ it("shows delivery lag separately from suppression, then refreshes to a populate
   ).toBe(captured.reporting_cutover_at)
   expect(screen.queryByText(/too small to show/)).toBeNull()
 
-  query.mockResolvedValue({
-    ...captured,
-    status: "ready",
-    last_processed_at: "2026-09-11T12:02:00Z",
-    has_pending_events: false,
-    cohorts: [
-      {
-        model_id: "example-model",
-        model_attribution_quality: "configured",
-        merged: 3,
-        closed_without_merge: 1,
-        mature_pending: 1,
-        waiting: 0,
-        cohort_size: 5,
-        decided_denominator: 4,
-        decided_merge_rate: 0.75,
-        mature_denominator: 5,
-        mature_cohort_merge_share: 0.6,
-        avg_merge_seconds: 172800,
-        avg_delivery_seconds: 7200,
-        efforts: [
-          {
-            effort: "high",
-            merged: 3,
-            closed_without_merge: 1,
-            mature_pending: 1,
-            waiting: 0,
-            cohort_size: 5,
-            decided_denominator: 4,
-            decided_merge_rate: 0.75,
-            mature_denominator: 5,
-            mature_cohort_merge_share: 0.6,
-          },
-        ],
-        median_distance_basis_points: 1750,
-        distance_sample_size: 3,
-      },
-    ],
-  })
+  query.mockResolvedValue(
+    report({
+      ...captured,
+      status: "ready",
+      last_processed_at: "2026-09-11T12:02:00Z",
+      has_pending_events: false,
+      cohorts: [
+        {
+          model_id: "example-model",
+          model_attribution_quality: "configured",
+          merged: 3,
+          closed_without_merge: 1,
+          mature_pending: 1,
+          waiting: 0,
+          cohort_size: 5,
+          decided_denominator: 4,
+          decided_merge_rate: 0.75,
+          mature_denominator: 5,
+          mature_cohort_merge_share: 0.6,
+          avg_merge_seconds: 172800,
+          avg_delivery_seconds: 7200,
+          efforts: [
+            {
+              effort: "high",
+              merged: 3,
+              closed_without_merge: 1,
+              mature_pending: 1,
+              waiting: 0,
+              cohort_size: 5,
+              decided_denominator: 4,
+              decided_merge_rate: 0.75,
+              mature_denominator: 5,
+              mature_cohort_merge_share: 0.6,
+            },
+          ],
+          median_distance_basis_points: 1750,
+          distance_sample_size: 3,
+        },
+      ],
+    })
+  )
   await act(() => client.invalidateQueries())
   expect(await screen.findByText("example-model")).toBeTruthy()
-  expect(screen.getByText("Analytics are up to date")).toBeTruthy()
+  expect(screen.getByText("Event processing is up to date")).toBeTruthy()
   expect(
     screen.getByLabelText("Analytics coverage").querySelector("details")?.open
   ).toBe(true)
@@ -233,17 +247,19 @@ it("sorts PR outcomes before pagination and toggles column direction", async () 
     avg_delivery_seconds: size,
     efforts: [],
   })
-  vi.spyOn(api, "prMergeRateByModel").mockResolvedValue({
-    ...captured,
-    status: "ready",
-    cohorts: [
-      cohort("z-model", 20),
-      cohort("a-model", 1),
-      ...Array.from({ length: 9 }, (_, index) =>
-        cohort(`m-${index}`, index + 2)
-      ),
-    ],
-  })
+  vi.spyOn(api, "prMergeRateByModel").mockResolvedValue(
+    report({
+      ...captured,
+      status: "ready",
+      cohorts: [
+        cohort("z-model", 20),
+        cohort("a-model", 1),
+        ...Array.from({ length: 9 }, (_, index) =>
+          cohort(`m-${index}`, index + 2)
+        ),
+      ],
+    })
+  )
   const client = mountReport()
   expect(await screen.findByText("z-model")).toBeTruthy()
   expect(screen.queryByText("a-model")).toBeNull()
@@ -274,44 +290,46 @@ it.each([
 ] as const)(
   "shows Open totals and age breakdown at %i days on %s",
   async (maturityDays, interaction) => {
-    vi.spyOn(api, "prMergeRateByModel").mockResolvedValue({
-      ...captured,
-      status: "ready",
-      maturity_days: maturityDays,
-      cohorts: [
-        {
-          model_id: "example-model",
-          model_attribution_quality: "configured",
-          merged: 3,
-          closed_without_merge: 1,
-          mature_pending: 1,
-          waiting: 2,
-          cohort_size: 7,
-          decided_denominator: 4,
-          decided_merge_rate: 0.75,
-          mature_denominator: 5,
-          mature_cohort_merge_share: 0.6,
-          avg_merge_seconds: 90000,
-          avg_delivery_seconds: 7200,
-          efforts: [
-            {
-              effort: "high",
-              merged: 3,
-              closed_without_merge: 1,
-              mature_pending: 1,
-              waiting: 2,
-              cohort_size: 7,
-              decided_denominator: 4,
-              decided_merge_rate: 0.75,
-              mature_denominator: 5,
-              mature_cohort_merge_share: 0.6,
-            },
-          ],
-          median_distance_basis_points: 1750,
-          distance_sample_size: 3,
-        },
-      ],
-    })
+    vi.spyOn(api, "prMergeRateByModel").mockResolvedValue(
+      report({
+        ...captured,
+        status: "ready",
+        maturity_days: maturityDays,
+        cohorts: [
+          {
+            model_id: "example-model",
+            model_attribution_quality: "configured",
+            merged: 3,
+            closed_without_merge: 1,
+            mature_pending: 1,
+            waiting: 2,
+            cohort_size: 7,
+            decided_denominator: 4,
+            decided_merge_rate: 0.75,
+            mature_denominator: 5,
+            mature_cohort_merge_share: 0.6,
+            avg_merge_seconds: 90000,
+            avg_delivery_seconds: 7200,
+            efforts: [
+              {
+                effort: "high",
+                merged: 3,
+                closed_without_merge: 1,
+                mature_pending: 1,
+                waiting: 2,
+                cohort_size: 7,
+                decided_denominator: 4,
+                decided_merge_rate: 0.75,
+                mature_denominator: 5,
+                mature_cohort_merge_share: 0.6,
+              },
+            ],
+            median_distance_basis_points: 1750,
+            distance_sample_size: 3,
+          },
+        ],
+      })
+    )
     const client = mountReport()
     const row = (await screen.findByText("example-model")).closest("tr")!
     expect(
@@ -402,10 +420,12 @@ it("shows unavailable attribution thread IDs for admin triage", async () => {
     configurable: true,
     value: { writeText },
   })
-  vi.spyOn(api, "prMergeRateByModel").mockResolvedValue({
-    ...captured,
-    unavailable_thread_ids: [threadId],
-  })
+  vi.spyOn(api, "prMergeRateByModel").mockResolvedValue(
+    report({
+      ...captured,
+      unavailable_thread_ids: [threadId],
+    })
+  )
   const client = mountReport()
   fireEvent.click(await screen.findByText("Unavailable model attribution (1)"))
   expect(screen.getByText(threadId)).toBeTruthy()
@@ -415,53 +435,55 @@ it("shows unavailable attribution thread IDs for admin triage", async () => {
 })
 
 it("expands model totals into reasoning effort rows", async () => {
-  vi.spyOn(api, "prMergeRateByModel").mockResolvedValue({
-    ...captured,
-    status: "ready",
-    cohorts: [
-      {
-        model_id: "example-model",
-        model_attribution_quality: "configured",
-        avg_merge_seconds: 172800,
-        avg_delivery_seconds: 5400,
-        merged: 3,
-        closed_without_merge: 1,
-        mature_pending: 0,
-        waiting: 0,
-        cohort_size: 4,
-        decided_denominator: 4,
-        decided_merge_rate: 0.75,
-        mature_denominator: 4,
-        mature_cohort_merge_share: 0.75,
-        efforts: [
-          {
-            effort: "low",
-            merged: 1,
-            closed_without_merge: 1,
-            mature_pending: 0,
-            waiting: 0,
-            cohort_size: 2,
-            decided_denominator: 2,
-            decided_merge_rate: 0.5,
-            mature_denominator: 2,
-            mature_cohort_merge_share: 0.5,
-          },
-          {
-            effort: "high",
-            merged: 2,
-            closed_without_merge: 0,
-            mature_pending: 0,
-            waiting: 0,
-            cohort_size: 2,
-            decided_denominator: 2,
-            decided_merge_rate: 1,
-            mature_denominator: 2,
-            mature_cohort_merge_share: 1,
-          },
-        ],
-      },
-    ],
-  })
+  vi.spyOn(api, "prMergeRateByModel").mockResolvedValue(
+    report({
+      ...captured,
+      status: "ready",
+      cohorts: [
+        {
+          model_id: "example-model",
+          model_attribution_quality: "configured",
+          avg_merge_seconds: 172800,
+          avg_delivery_seconds: 5400,
+          merged: 3,
+          closed_without_merge: 1,
+          mature_pending: 0,
+          waiting: 0,
+          cohort_size: 4,
+          decided_denominator: 4,
+          decided_merge_rate: 0.75,
+          mature_denominator: 4,
+          mature_cohort_merge_share: 0.75,
+          efforts: [
+            {
+              effort: "low",
+              merged: 1,
+              closed_without_merge: 1,
+              mature_pending: 0,
+              waiting: 0,
+              cohort_size: 2,
+              decided_denominator: 2,
+              decided_merge_rate: 0.5,
+              mature_denominator: 2,
+              mature_cohort_merge_share: 0.5,
+            },
+            {
+              effort: "high",
+              merged: 2,
+              closed_without_merge: 0,
+              mature_pending: 0,
+              waiting: 0,
+              cohort_size: 2,
+              decided_denominator: 2,
+              decided_merge_rate: 1,
+              mature_denominator: 2,
+              mature_cohort_merge_share: 1,
+            },
+          ],
+        },
+      ],
+    })
+  )
   const client = mountReport()
   expect(await screen.findByText(/All efforts/)).toBeTruthy()
   expect(screen.queryByText("Low")).toBeNull()
@@ -474,28 +496,30 @@ it("expands model totals into reasoning effort rows", async () => {
 })
 
 it("shows an em dash for avg time to merge when a group has no merges", async () => {
-  vi.spyOn(api, "prMergeRateByModel").mockResolvedValue({
-    ...captured,
-    status: "ready",
-    cohorts: [
-      {
-        model_id: "example-model",
-        model_attribution_quality: "configured",
-        merged: 0,
-        closed_without_merge: 2,
-        mature_pending: 0,
-        waiting: 0,
-        cohort_size: 2,
-        decided_denominator: 2,
-        decided_merge_rate: 0,
-        mature_denominator: 2,
-        mature_cohort_merge_share: 0,
-        avg_merge_seconds: null,
-        avg_delivery_seconds: null,
-        efforts: [],
-      },
-    ],
-  })
+  vi.spyOn(api, "prMergeRateByModel").mockResolvedValue(
+    report({
+      ...captured,
+      status: "ready",
+      cohorts: [
+        {
+          model_id: "example-model",
+          model_attribution_quality: "configured",
+          merged: 0,
+          closed_without_merge: 2,
+          mature_pending: 0,
+          waiting: 0,
+          cohort_size: 2,
+          decided_denominator: 2,
+          decided_merge_rate: 0,
+          mature_denominator: 2,
+          mature_cohort_merge_share: 0,
+          avg_merge_seconds: null,
+          avg_delivery_seconds: null,
+          efforts: [],
+        },
+      ],
+    })
+  )
   const client = mountReport()
   const row = (await screen.findByText("example-model")).closest("tr")!
   const cells = within(row).getAllByRole("cell")
@@ -505,42 +529,119 @@ it("shows an em dash for avg time to merge when a group has no merges", async ()
   client.clear()
 })
 
+it.each([
+  {
+    name: "unsupported on an older backend when the key is omitted",
+    withKey: false,
+    expected: "Metric unavailable from this backend",
+  },
+  {
+    name: "empty when no PR has valid timing (null)",
+    withKey: true,
+    expected: "No PRs with valid timing in this group",
+  },
+])("marks avg time to PR $name", async ({ withKey, expected }) => {
+  const cohort = {
+    model_id: "example-model",
+    model_attribution_quality: "configured",
+    merged: 0,
+    closed_without_merge: 2,
+    mature_pending: 0,
+    waiting: 0,
+    cohort_size: 2,
+    decided_denominator: 2,
+    decided_merge_rate: 0,
+    mature_denominator: 2,
+    mature_cohort_merge_share: 0,
+    avg_merge_seconds: null,
+    efforts: [] as PRMergeRateCohort["efforts"],
+    ...(withKey ? { avg_delivery_seconds: null } : {}),
+  } as PRMergeRateCohort
+  vi.spyOn(api, "prMergeRateByModel").mockResolvedValue(
+    report({ ...captured, status: "ready", cohorts: [cohort] })
+  )
+  const client = mountReport()
+  const row = (await screen.findByText("example-model")).closest("tr")!
+  const deliveryCell = within(row).getAllByRole("cell").at(-2)!
+  expect(deliveryCell.textContent).toBe("\u2014")
+  expect(within(deliveryCell).getByTitle(expected)).toBeTruthy()
+  client.clear()
+})
+
+it("renders a zero avg time to PR as a real duration, not an empty marker", async () => {
+  vi.spyOn(api, "prMergeRateByModel").mockResolvedValue(
+    report({
+      ...captured,
+      status: "ready",
+      cohorts: [
+        {
+          model_id: "example-model",
+          model_attribution_quality: "configured",
+          merged: 1,
+          closed_without_merge: 0,
+          mature_pending: 0,
+          waiting: 0,
+          cohort_size: 1,
+          decided_denominator: 1,
+          decided_merge_rate: 1,
+          mature_denominator: 1,
+          mature_cohort_merge_share: 1,
+          avg_merge_seconds: 0,
+          avg_delivery_seconds: 0,
+          efforts: [],
+        },
+      ],
+    })
+  )
+  const client = mountReport()
+  const row = (await screen.findByText("example-model")).closest("tr")!
+  const deliveryCell = within(row).getAllByRole("cell").at(-2)!
+  expect(deliveryCell.textContent).not.toBe("\u2014")
+  expect(deliveryCell.textContent).toContain("0")
+  expect(
+    within(deliveryCell).queryByTitle(/valid timing|unavailable/i)
+  ).toBeNull()
+  client.clear()
+})
+
 it("shortens model paths while preserving providers across usage tables", async () => {
-  vi.spyOn(api, "prMergeRateByModel").mockResolvedValue({
-    ...captured,
-    status: "ready",
-    cohorts: [
-      {
-        model_id: "fireworks:accounts/fireworks/models/glm-5p3-flash",
-        model_attribution_quality: "configured",
-        merged: 1,
-        closed_without_merge: 0,
-        mature_pending: 0,
-        waiting: 0,
-        cohort_size: 1,
-        decided_denominator: 1,
-        decided_merge_rate: 1,
-        mature_denominator: 1,
-        mature_cohort_merge_share: 1,
-        avg_merge_seconds: 3600,
-        avg_delivery_seconds: 1800,
-        efforts: [
-          {
-            effort: "medium",
-            merged: 1,
-            closed_without_merge: 0,
-            mature_pending: 0,
-            waiting: 0,
-            cohort_size: 1,
-            decided_denominator: 1,
-            decided_merge_rate: 1,
-            mature_denominator: 1,
-            mature_cohort_merge_share: 1,
-          },
-        ],
-      },
-    ],
-  })
+  vi.spyOn(api, "prMergeRateByModel").mockResolvedValue(
+    report({
+      ...captured,
+      status: "ready",
+      cohorts: [
+        {
+          model_id: "fireworks:accounts/fireworks/models/glm-5p3-flash",
+          model_attribution_quality: "configured",
+          merged: 1,
+          closed_without_merge: 0,
+          mature_pending: 0,
+          waiting: 0,
+          cohort_size: 1,
+          decided_denominator: 1,
+          decided_merge_rate: 1,
+          mature_denominator: 1,
+          mature_cohort_merge_share: 1,
+          avg_merge_seconds: 3600,
+          avg_delivery_seconds: 1800,
+          efforts: [
+            {
+              effort: "medium",
+              merged: 1,
+              closed_without_merge: 0,
+              mature_pending: 0,
+              waiting: 0,
+              cohort_size: 1,
+              decided_denominator: 1,
+              decided_merge_rate: 1,
+              mature_denominator: 1,
+              mature_cohort_merge_share: 1,
+            },
+          ],
+        },
+      ],
+    })
+  )
   vi.mocked(api.usageLeaderboard).mockResolvedValue({
     ...emptyUsage,
     total_members: 1,
@@ -586,13 +687,15 @@ it("offers recovery from unavailability without claiming an empty or suppressed 
     screen.queryByRole("status", { name: "Analytics coverage" })
   ).toBeTruthy()
 
-  query.mockResolvedValue({
-    ...captured,
-    status: "not_started",
-    collection_started_at: null,
-    completeness: "not_started",
-    has_pending_events: false,
-  })
+  query.mockResolvedValue(
+    report({
+      ...captured,
+      status: "not_started",
+      collection_started_at: null,
+      completeness: "not_started",
+      has_pending_events: false,
+    })
+  )
   fireEvent.click(screen.getByRole("button", { name: "Retry" }))
   expect(
     await screen.findByText(
@@ -606,16 +709,16 @@ it("offers recovery from unavailability without claiming an empty or suppressed 
 it("refreshes the usage leaderboard and merge rate report from the coverage footer", async () => {
   let pendingReport: () => void = () => {}
   vi.spyOn(api, "prMergeRateByModel")
-    .mockResolvedValueOnce(captured)
+    .mockResolvedValueOnce(report(captured))
     .mockImplementationOnce(
       () =>
-        new Promise<PRMergeRatePayload>((resolve) => {
-          pendingReport = () => resolve(captured)
+        new Promise<PRMergeRateResponse>((resolve) => {
+          pendingReport = () => resolve(report(captured))
         })
     )
-    .mockResolvedValue(captured)
+    .mockResolvedValue(report(captured))
   const client = mountReport()
-  expect(await screen.findByText("Analytics are updating")).toBeTruthy()
+  expect(await screen.findByText("Event processing is behind")).toBeTruthy()
 
   const beforeUsage = vi.mocked(api.usageLeaderboard).mock.calls.length
   const beforeReport = vi.mocked(api.prMergeRateByModel).mock.calls.length
@@ -647,16 +750,82 @@ it("refreshes the usage leaderboard and merge rate report from the coverage foot
   client.clear()
 })
 
-it("keeps failed delivery visible when all PR groups are suppressed", async () => {
-  vi.spyOn(api, "prMergeRateByModel").mockResolvedValue({
-    ...captured,
-    status: "suppressed",
-    has_pending_events: false,
-    has_failed_events: true,
+it("announces a failed refresh while keeping the last good PR report", async () => {
+  const query = vi
+    .spyOn(api, "prMergeRateByModel")
+    .mockResolvedValue(report(captured))
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false, gcTime: 0 } },
   })
+  render(
+    <QueryClientProvider client={client}>
+      <TooltipProvider>
+        <UsageAnalytics period="30d" login="reader" isAdmin={false} />
+      </TooltipProvider>
+    </QueryClientProvider>
+  )
+  expect(await screen.findByText(/No PRs have been recorded/)).toBeTruthy()
+
+  fireEvent.click(screen.getByText("Details"))
+  query.mockRejectedValue(new ApiError(503, "unavailable"))
+  fireEvent.click(screen.getByRole("button", { name: "Refresh now" }))
+  expect(await screen.findByText(/Last PR report refresh failed/)).toBeTruthy()
+  expect(screen.getByText(/HTTP 503/)).toBeTruthy()
+  // The retained report and its last successful fetch timestamp stay on screen.
+  expect(screen.getByText(/No PRs have been recorded/)).toBeTruthy()
+  expect(screen.getByText(/last fetched by this browser:/)).toBeTruthy()
+  expect(
+    screen.getByText(/last fetched by this browser:/).textContent
+  ).toContain(new Date(FETCHED_AT).toLocaleString())
+
+  query.mockResolvedValue(report(captured))
+  fireEvent.click(screen.getByRole("button", { name: "Refresh now" }))
+  await waitFor(() =>
+    expect(screen.queryByText(/Last PR report refresh failed/)).toBeNull()
+  )
+  client.clear()
+})
+
+it("clears a failed refresh announcement when an automatic refetch succeeds", async () => {
+  const query = vi
+    .spyOn(api, "prMergeRateByModel")
+    .mockResolvedValue(report(captured))
+  const client = makeQueryClient()
+  render(
+    <QueryClientProvider client={client}>
+      <TooltipProvider>
+        <UsageAnalytics period="30d" login="reader" isAdmin={false} />
+      </TooltipProvider>
+    </QueryClientProvider>
+  )
+  expect(await screen.findByText(/No PRs have been recorded/)).toBeTruthy()
+
+  fireEvent.click(screen.getByText("Details"))
+  query.mockRejectedValue(new ApiError(503, "unavailable"))
+  fireEvent.click(screen.getByRole("button", { name: "Refresh now" }))
+  expect(await screen.findByText(/Last PR report refresh failed/)).toBeTruthy()
+
+  // A success the user did not trigger (interval/focus refetch) also clears it.
+  query.mockResolvedValue(report(captured))
+  await act(() => client.refetchQueries({ queryKey: ["prMergeRateByModel"] }))
+  await waitFor(() =>
+    expect(screen.queryByText(/Last PR report refresh failed/)).toBeNull()
+  )
+  client.clear()
+})
+
+it("keeps failed delivery visible when all PR groups are suppressed", async () => {
+  vi.spyOn(api, "prMergeRateByModel").mockResolvedValue(
+    report({
+      ...captured,
+      status: "suppressed",
+      has_pending_events: false,
+      has_failed_events: true,
+    })
+  )
   const client = mountReport()
   expect(await screen.findByText(/too small to show/)).toBeTruthy()
-  expect(screen.getByText("Analytics need attention")).toBeTruthy()
+  expect(screen.getByText("Event processing needs attention")).toBeTruthy()
   expect(
     screen.getAllByText(/Some events could not be processed/).length
   ).toBeGreaterThan(0)
@@ -666,7 +835,7 @@ it("keeps failed delivery visible when all PR groups are suppressed", async () =
 })
 
 it("resets leaderboard pagination when the period changes outside the selector", async () => {
-  vi.spyOn(api, "prMergeRateByModel").mockResolvedValue(captured)
+  vi.spyOn(api, "prMergeRateByModel").mockResolvedValue(report(captured))
   vi.mocked(api.usageLeaderboard).mockImplementation(
     async (period, _limit, cursor) => ({
       ...emptyUsage,
@@ -708,7 +877,7 @@ it("resets leaderboard pagination when the period changes outside the selector",
 })
 
 it("switches the usage count and average duration to threads", async () => {
-  vi.spyOn(api, "prMergeRateByModel").mockResolvedValue(captured)
+  vi.spyOn(api, "prMergeRateByModel").mockResolvedValue(report(captured))
   vi.mocked(api.usageLeaderboard).mockResolvedValue({
     ...emptyUsage,
     total_members: 1,
@@ -766,10 +935,12 @@ it("distinguishes unavailable usage from empty usage and recovers without duplic
   fireEvent.click(screen.getByRole("button", { name: "Retry usage analytics" }))
   expect(await screen.findByText(/No Open SWE Agent usage/)).toBeTruthy()
   expect(screen.getByLabelText("Analytics coverage")).toBeTruthy()
-  expect(screen.getByText("Analytics are updating")).toBeTruthy()
+  expect(screen.getByText("Event processing is behind")).toBeTruthy()
   fireEvent.click(screen.getByText("Details"))
   expect(screen.getByText(/Reporting since/)).toBeTruthy()
-  expect(screen.getByText(/still waiting to be processed/)).toBeTruthy()
+  expect(
+    screen.getAllByText(/still waiting to be processed/).length
+  ).toBeGreaterThan(0)
   expect(screen.getByText("Reviewed PRs")).toBeTruthy()
   expect(
     screen.queryByText("Usage analytics is unavailable on this deployment.")
@@ -778,7 +949,7 @@ it("distinguishes unavailable usage from empty usage and recovers without duplic
 })
 
 it("shows usage metrics but removes stale results when a refresh becomes unavailable", async () => {
-  vi.spyOn(api, "prMergeRateByModel").mockResolvedValue(captured)
+  vi.spyOn(api, "prMergeRateByModel").mockResolvedValue(report(captured))
   vi.mocked(api.usageLeaderboard).mockResolvedValue({
     ...emptyUsage,
     total_members: 1,
@@ -831,7 +1002,7 @@ it("shows usage metrics but removes stale results when a refresh becomes unavail
 })
 
 it("hides a GitHub login when it duplicates the user name", async () => {
-  vi.spyOn(api, "prMergeRateByModel").mockResolvedValue(captured)
+  vi.spyOn(api, "prMergeRateByModel").mockResolvedValue(report(captured))
   vi.mocked(api.usageLeaderboard).mockResolvedValue({
     ...emptyUsage,
     total_members: 1,
@@ -861,7 +1032,7 @@ it("hides a GitHub login when it duplicates the user name", async () => {
 })
 
 it("shows the GitHub username and marks the current user", async () => {
-  vi.spyOn(api, "prMergeRateByModel").mockResolvedValue(captured)
+  vi.spyOn(api, "prMergeRateByModel").mockResolvedValue(report(captured))
   vi.mocked(api.usageLeaderboard).mockResolvedValue({
     ...emptyUsage,
     total_members: 1,
@@ -886,7 +1057,7 @@ it("shows the GitHub username and marks the current user", async () => {
 })
 
 it("links the user name and avatar to their GitHub profile only when a login exists", async () => {
-  vi.spyOn(api, "prMergeRateByModel").mockResolvedValue(captured)
+  vi.spyOn(api, "prMergeRateByModel").mockResolvedValue(report(captured))
   vi.mocked(api.usageLeaderboard).mockResolvedValue({
     ...emptyUsage,
     total_members: 2,
@@ -934,6 +1105,51 @@ const costRow: UsageLeaderboardRow = {
   invocations_with_partial_cost: 0,
   avg_invocation_seconds: 90,
 }
+
+it("explains the feedback trophy on focus", async () => {
+  vi.spyOn(api, "prMergeRateByModel").mockResolvedValue(captured)
+  vi.mocked(api.usageLeaderboard).mockResolvedValue({
+    ...emptyUsage,
+    total_members: 1,
+    rows: [
+      { ...costRow, feedback_given: 3, is_top_feedback_contributor: true },
+    ],
+  })
+  const client = mountReport()
+  const trigger = await screen.findByRole("button", {
+    name: "Top feedback contributor",
+  })
+  act(() => trigger.focus())
+  expect(
+    await screen.findByText("Most feedback given in the selected date range.")
+  ).toBeTruthy()
+  client.clear()
+})
+
+it.each([true, false, undefined])(
+  "shows the feedback trophy only for a global leader (%s)",
+  async (isTopContributor) => {
+    vi.spyOn(api, "prMergeRateByModel").mockResolvedValue(captured)
+    vi.mocked(api.usageLeaderboard).mockResolvedValue({
+      ...emptyUsage,
+      total_members: 20,
+      rows: [
+        {
+          ...costRow,
+          feedback_given: 3,
+          is_top_feedback_contributor: isTopContributor,
+        },
+      ],
+    })
+    const client = mountReport()
+    await screen.findByText("Cost Reader")
+    const trophy = screen.queryByRole("button", {
+      name: "Top feedback contributor",
+    })
+    expect(Boolean(trophy)).toBe(Boolean(isTopContributor))
+    client.clear()
+  }
+)
 
 it.each([
   [5, 2, "2.5"],
@@ -984,7 +1200,7 @@ it.each([
 ] as const)(
   "keeps sorting the visible %s metric when switching scopes",
   async (invocationLabel, threadLabel, invocationSort, threadSort) => {
-    vi.spyOn(api, "prMergeRateByModel").mockResolvedValue(captured)
+    vi.spyOn(api, "prMergeRateByModel").mockResolvedValue(report(captured))
     vi.mocked(api.usageLeaderboard).mockImplementation(
       async (_period, _limit, cursor) => ({
         ...emptyUsage,
@@ -1042,7 +1258,7 @@ it.each([
 )
 
 it("keeps sort controls focused while loading and prevents using a stale page cursor", async () => {
-  vi.spyOn(api, "prMergeRateByModel").mockResolvedValue(captured)
+  vi.spyOn(api, "prMergeRateByModel").mockResolvedValue(report(captured))
   const initial: UsageLeaderboardPayload = {
     ...emptyUsage,
     total_members: 11,
@@ -1113,7 +1329,7 @@ it.each([
 ] as const)(
   "sorts %s from its natural direction and toggles on the next click",
   async (label, sortKey, first, second) => {
-    vi.spyOn(api, "prMergeRateByModel").mockResolvedValue(captured)
+    vi.spyOn(api, "prMergeRateByModel").mockResolvedValue(report(captured))
     vi.mocked(api.usageLeaderboard).mockResolvedValue({
       ...emptyUsage,
       total_members: 1,
@@ -1203,7 +1419,7 @@ it.each([
 ])(
   "distinguishes $name in the cost column",
   async ({ cost, missing, partial, amount, label }) => {
-    vi.spyOn(api, "prMergeRateByModel").mockResolvedValue(captured)
+    vi.spyOn(api, "prMergeRateByModel").mockResolvedValue(report(captured))
     vi.mocked(api.usageLeaderboard).mockResolvedValue({
       ...emptyUsage,
       total_members: 1,
@@ -1230,7 +1446,7 @@ it.each([
 )
 
 it("explains incomplete coverage on focus and removes the indicator when costs recover", async () => {
-  vi.spyOn(api, "prMergeRateByModel").mockResolvedValue(captured)
+  vi.spyOn(api, "prMergeRateByModel").mockResolvedValue(report(captured))
   vi.mocked(api.usageLeaderboard).mockResolvedValue({
     ...emptyUsage,
     total_members: 1,
@@ -1265,8 +1481,147 @@ it("explains incomplete coverage on focus and removes the indicator when costs r
   client.clear()
 })
 
+function stubClipboard(
+  writeText: (text: string) => Promise<void> = () => Promise.resolve()
+) {
+  const stub = vi.fn().mockImplementation(writeText)
+  Object.defineProperty(navigator, "clipboard", {
+    configurable: true,
+    value: { writeText: stub },
+  })
+  return stub
+}
+
+it("copies an allowlisted diagnostics snapshot to the clipboard", async () => {
+  const cohort = {
+    model_id: "example-model",
+    model_attribution_quality: "configured",
+    merged: 0,
+    closed_without_merge: 1,
+    mature_pending: 0,
+    waiting: 0,
+    cohort_size: 1,
+    decided_denominator: 1,
+    decided_merge_rate: 0,
+    mature_denominator: 1,
+    mature_cohort_merge_share: 0,
+    avg_merge_seconds: null,
+    efforts: [],
+  } as PRMergeRateCohort
+  vi.spyOn(api, "prMergeRateByModel").mockResolvedValue(
+    report({ ...captured, status: "ready", cohorts: [cohort] })
+  )
+  const writeText = stubClipboard()
+  const client = mountReport()
+  fireEvent.click(await screen.findByText("Details"))
+  const copy = screen.getByRole("button", { name: "Copy diagnostics" })
+  fireEvent.click(copy)
+  expect(
+    await screen.findByText("Diagnostics copied to clipboard.")
+  ).toBeTruthy()
+
+  expect(writeText).toHaveBeenCalledTimes(1)
+  const text = writeText.mock.calls[0]?.[0] as string
+  const copied = JSON.parse(text)
+  expect(copied.report).toBe("open-swe-analytics-diagnostics")
+  expect(copied.period).toBe("30d")
+  expect(copied.pr_report.fetched_at).toBe(FETCHED_AT)
+  expect(copied.pr_report.server_as_of).toBe(captured.as_of)
+  expect(copied.event_processing.status).toBe("pending")
+  expect(copied.event_processing.reporting_since).toBe(
+    captured.reporting_cutover_at
+  )
+  expect(copied.metrics.avg_delivery_seconds).toEqual({
+    state: "unsupported_by_backend",
+  })
+  // Nothing beyond the allowlisted display state leaves the page.
+  expect(text).not.toContain("unavailable_thread_ids")
+  expect(text).not.toContain("login")
+  expect(text).not.toContain("thread")
+  client.clear()
+})
+
+it.each([
+  [60, 7200],
+  [7200, 60],
+  [null, 0],
+  [null, null],
+])(
+  "copies retained-report availability without a report average (%s, %s)",
+  async (first, second) => {
+    const cohort = {
+      model_id: "example-model",
+      model_attribution_quality: "configured",
+      merged: 1,
+      closed_without_merge: 0,
+      mature_pending: 0,
+      waiting: 0,
+      cohort_size: 1,
+      decided_denominator: 1,
+      decided_merge_rate: 1,
+      mature_denominator: 1,
+      mature_cohort_merge_share: 1,
+      avg_merge_seconds: 3600,
+      avg_delivery_seconds: 7200,
+      efforts: [],
+    } as PRMergeRateCohort
+    const query = vi.spyOn(api, "prMergeRateByModel").mockResolvedValue(
+      report({
+        ...captured,
+        status: "ready",
+        cohorts: [
+          { ...cohort, avg_delivery_seconds: first },
+          { ...cohort, model_id: "other-model", avg_delivery_seconds: second },
+        ],
+      })
+    )
+    const writeText = stubClipboard()
+    const client = mountReport()
+    fireEvent.click(await screen.findByText("Details"))
+
+    // The refresh fails, but the report and its metrics stay on screen.
+    query.mockRejectedValue(new ApiError(503, "unavailable"))
+    fireEvent.click(screen.getByRole("button", { name: "Refresh now" }))
+    expect(
+      await screen.findByText(/Last PR report refresh failed/)
+    ).toBeTruthy()
+
+    fireEvent.click(screen.getByRole("button", { name: "Copy diagnostics" }))
+    expect(
+      await screen.findByText("Diagnostics copied to clipboard.")
+    ).toBeTruthy()
+    const copied = JSON.parse(writeText.mock.calls[0]?.[0] as string)
+    expect(copied.pr_report.last_refresh_failed).toBe(true)
+    expect(copied.metrics.avg_delivery_seconds).toEqual({
+      state: first == null && second == null ? "no_valid_samples" : "numeric",
+    })
+    client.clear()
+  }
+)
+
+it("copies diagnostics from the keyboard and reports a denied clipboard", async () => {
+  vi.spyOn(api, "prMergeRateByModel").mockResolvedValue(report(captured))
+  const writeText = stubClipboard(() =>
+    Promise.reject(new DOMException("denied", "NotAllowedError"))
+  )
+  const client = mountReport()
+  fireEvent.click(await screen.findByText("Details"))
+  const copy = screen.getByRole("button", { name: "Copy diagnostics" })
+  act(() => copy.focus())
+  expect(document.activeElement).toBe(copy)
+  fireEvent.keyDown(copy, { key: "Enter" })
+  fireEvent.click(copy)
+  expect(
+    await screen.findByText(
+      "Clipboard unavailable. Check the browser's clipboard permission."
+    )
+  ).toBeTruthy()
+  expect(writeText).toHaveBeenCalled()
+  client.clear()
+})
+
 it("renders feedback counts and resets pagination when sorting feedback in either direction", async () => {
-  vi.spyOn(api, "prMergeRateByModel").mockResolvedValue(captured)
+  vi.spyOn(api, "prMergeRateByModel").mockResolvedValue(report(captured))
   vi.mocked(api.usageLeaderboard).mockImplementation(
     async (_period, _limit, cursor) => ({
       ...emptyUsage,

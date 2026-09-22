@@ -6,12 +6,12 @@ from agent.dashboard.workspace_settings import (
     WorkspaceSettingsUpdate,
 )
 
-_REVIEWER_SUBAGENT_PAIR = ("openai:gpt-5.6-sol", "low")
+_REVIEWER_SUBAGENT_PAIR = ("openai:gpt-6-sol", "low")
 _GROUPING_PAIR = ("google_genai:gemini-3.8-flash", "low")
 _ROUTING_PAIRS = {
     "fast": ("google_genai:gemini-3.8-flash", "low"),
-    "balanced": ("openai:gpt-5.6-sol", "medium"),
-    "performance": ("anthropic:claude-opus-5", "high"),
+    "balanced": ("openai:gpt-6-sol", "medium"),
+    "performance": ("anthropic:claude-opus-5-5", "high"),
 }
 
 

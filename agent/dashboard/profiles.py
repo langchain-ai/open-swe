@@ -57,6 +57,7 @@ class ProfileUpdate(BaseModel):
     branch_prefix: str | None = None
     auto_fix_ci: bool = True
     model_routing_enabled: bool | None = None
+    recent_thread_context_enabled: bool = False
     dm_session_enabled: bool = False
     draft_prs: bool | None = None
     review_draft_prs: bool | None = None
@@ -178,6 +179,11 @@ async def upsert_profile(login: str, email: str, update: ProfileUpdate) -> dict[
             update.model_routing_enabled
             if "model_routing_enabled" in update.model_fields_set
             else existing.get("model_routing_enabled")
+        ),
+        "recent_thread_context_enabled": (
+            update.recent_thread_context_enabled
+            if "recent_thread_context_enabled" in update.model_fields_set
+            else existing.get("recent_thread_context_enabled", False)
         ),
         "dm_session_enabled": (
             update.dm_session_enabled

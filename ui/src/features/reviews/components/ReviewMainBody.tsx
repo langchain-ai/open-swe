@@ -70,6 +70,7 @@ import type { ChatAttachment } from "@/features/reviews/components/ReviewChat"
 import type { DiffStyle } from "@/features/agents/utils/diffUtils"
 import { Markdown } from "@/features/agents/components/chat/Markdown"
 import { DiffWrapToggle } from "@/features/agents/components/DiffWrapToggle"
+import { AuthorGuidanceCard } from "@/features/reviews/components/AuthorGuidanceCard"
 import { PrHeader } from "@/features/reviews/components/PrHeader"
 import { ReviewAssessmentCard } from "@/features/reviews/components/ReviewAssessmentCard"
 import {
@@ -1292,6 +1293,7 @@ function ReviewBodyInner({
                     headSha={detail.pr.head_sha}
                   />
                 )}
+                <AuthorGuidanceCard points={detail.guidance} className="mt-4" />
                 <div
                   className={cn(
                     "mt-4 rounded-lg border border-border p-4",

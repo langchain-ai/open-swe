@@ -33,7 +33,7 @@ async def test_read_user_settings_returns_redacted_participant_settings() -> Non
             "agent.tools.read_user_settings.get_profile",
             new_callable=AsyncMock,
             return_value={
-                "default_model": "openai:gpt-5.6-sol",
+                "default_model": "openai:gpt-6-sol",
                 "reasoning_effort": "high",
                 "email": "private@example.com",
                 "default_repo": "private/internal",
@@ -60,7 +60,7 @@ async def test_read_user_settings_returns_redacted_participant_settings() -> Non
             {
                 "login": "octocat",
                 "profile": {
-                    "default_model": "openai:gpt-5.6-sol",
+                    "default_model": "openai:gpt-6-sol",
                     "reasoning_effort": "high",
                 },
                 "instructions": "Be concise.",

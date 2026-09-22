@@ -11,6 +11,7 @@ import type {
   PullRequestPreview,
 } from "@/lib/api"
 import { Markdown } from "@/features/agents/components/chat/Markdown"
+import { GuidancePointList } from "./AuthorGuidanceCard"
 import { Skeleton } from "@/components/ui/skeleton"
 import { api } from "@/lib/api"
 import { cn } from "@/lib/utils"
@@ -395,6 +396,15 @@ export function PullRequestDetail({
                 </p>
               )}
             </Section>
+
+            {data.guidance.length > 0 && (
+              <Section
+                heading="How the author steered this PR"
+                count={String(data.guidance.length)}
+              >
+                <GuidancePointList points={data.guidance} />
+              </Section>
+            )}
 
             <Section
               heading="Unresolved comments"

@@ -353,6 +353,7 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
                 <Messages
                   messages={visibleMessages}
                   threadId={thread.id}
+                  showUserNames={thread.visibility !== "private"}
                   scrollKey={thread.id}
                   showPlanArtifact={Boolean(thread.planStatus)}
                   emptyState={

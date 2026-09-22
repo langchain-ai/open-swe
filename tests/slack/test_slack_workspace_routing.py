@@ -158,7 +158,7 @@ async def test_the_vision_fallback_reads_the_resolved_workspaces_model(
     )
     await upsert_instance_settings(
         WorkspaceSettingsUpdate(
-            default_agent_model="anthropic:claude-opus-5",
+            default_agent_model="anthropic:claude-opus-5-5",
             default_agent_reasoning_effort="high",
         )
     )

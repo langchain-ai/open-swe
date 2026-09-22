@@ -123,13 +123,55 @@ export interface SessionUser {
   user_id?: string | null
   slack_user_id?: string | null
   is_admin: boolean
-  /** Mirrors the user's preference, so the thread page has it on first render. */
-  transcript_streaming?: boolean
   /** Whether the server records new threads into the transcript log. */
   transcript_recording?: boolean
   slack_oauth_enabled?: boolean
+  build_info?: BuildInfo
   api_base_url?: string
   slack_base_url?: string
+}
+
+/** Identifiers an artifact discovered about itself; `null` means unavailable, never assumed. */
+export interface BuildInfo {
+  backend: {
+    /** LangGraph Platform revision id — opaque, never a git SHA. */
+    revision_id: string | null
+    commit: string | null
+    built_at: string | null
+    package_version: string | null
+  }
+  dashboard: {
+    commit: string | null
+    built_at: string | null
+    served: boolean
+  }
+}
+
+/** Normalizes session build identifiers, including older backends with no field. */
+export function normalizeBuildInfo(raw: unknown): BuildInfo | null {
+  if (typeof raw !== "object" || raw === null) return null
+  const backend = (raw as { backend?: unknown }).backend
+  if (typeof backend !== "object" || backend === null) return null
+  const b = backend as Partial<BuildInfo["backend"]>
+  const dashboard = (raw as { dashboard?: unknown }).dashboard
+  const d =
+    typeof dashboard === "object" && dashboard !== null
+      ? (dashboard as Partial<BuildInfo["dashboard"]>)
+      : undefined
+  return {
+    backend: {
+      revision_id: typeof b.revision_id === "string" ? b.revision_id : null,
+      commit: typeof b.commit === "string" ? b.commit : null,
+      built_at: typeof b.built_at === "string" ? b.built_at : null,
+      package_version:
+        typeof b.package_version === "string" ? b.package_version : null,
+    },
+    dashboard: {
+      commit: d && typeof d.commit === "string" ? d.commit : null,
+      built_at: d && typeof d.built_at === "string" ? d.built_at : null,
+      served: typeof d?.served === "boolean" ? d.served : false,
+    },
+  }
 }
 
 export interface ModelOption {
@@ -163,6 +205,7 @@ export interface Profile {
   branch_prefix?: string | null
   auto_fix_ci?: boolean
   model_routing_enabled?: boolean
+  recent_thread_context_enabled?: boolean
   dm_session_enabled?: boolean
   draft_prs?: boolean
   review_draft_prs?: boolean | null
@@ -180,6 +223,7 @@ export interface ProfileUpdate {
   branch_prefix?: string | null
   auto_fix_ci?: boolean
   model_routing_enabled?: boolean | null
+  recent_thread_context_enabled?: boolean
   dm_session_enabled?: boolean
   draft_prs?: boolean
   review_draft_prs?: boolean | null
@@ -309,6 +353,21 @@ export interface AdminUsersPage {
 }
 
 export type UsageLeaderboardPeriod = "24h" | "7d" | "30d" | "all"
+
+/** Origin + mount path only, so diagnostics can name the API without tokens or query data. */
+export function describeApiBase(apiBaseUrl: string | undefined): {
+  origin: string | null
+  path: string
+} {
+  const path = `${dashboardApiBase()}/dashboard/api`
+  if (!apiBaseUrl) return { origin: null, path }
+  try {
+    return { origin: new URL(apiBaseUrl).origin, path }
+  } catch {
+    return { origin: null, path }
+  }
+}
+
 export type UsageLeaderboardSort =
   | "rank"
   | "user"
@@ -336,6 +395,8 @@ export interface AnalyticsMetadata {
   has_pending_events: boolean
   has_failed_events: boolean
   as_of: string
+  /** Absent on backends that predate build reporting. */
+  build_info?: BuildInfo
 }
 
 export interface UsageLeaderboardRow {
@@ -357,6 +418,7 @@ export interface UsageLeaderboardRow {
   merged_prs_per_thread?: number
   agent_loc: number
   feedback_given: number
+  is_top_feedback_contributor?: boolean
   additions: number
   deletions: number
   total_tokens: number
@@ -427,7 +489,12 @@ export interface PRMergeRateCohort {
   mature_denominator: number
   mature_cohort_merge_share: number | null
   avg_merge_seconds: number | null
-  avg_delivery_seconds: number | null
+  /**
+   * Present-but-null means every PR in the group lacked valid timing; a missing
+   * key (older backend) means the metric itself is unsupported. Zero is a real
+   * measurement, distinct from both.
+   */
+  avg_delivery_seconds?: number | null
   efforts: PRMergeRateEffort[]
   median_distance_basis_points?: number | null
   distance_sample_size?: number
@@ -442,6 +509,12 @@ export interface PRMergeRatePayload extends AnalyticsMetadata {
   suppression_threshold: number
   cohorts: PRMergeRateCohort[]
   unavailable_thread_ids: string[]
+}
+
+/** The PR report plus when this browser last received it, kept apart from the server's `as_of`. */
+export interface PRMergeRateResponse {
+  payload: PRMergeRatePayload
+  fetchedAt: string
 }
 
 export interface Repository {
@@ -506,7 +579,6 @@ export interface UserPreferences {
   local_tracing_project: string | null
   default_local_tracing_project: string
   default_workspace: string | null
-  transcript_streaming: boolean
 }
 
 export interface Skill {
@@ -850,6 +922,7 @@ export interface ReviewDetail extends Omit<
   findings: Array<ReviewFinding>
   diff_groups: Array<ReviewDiffGroup>
   diff_groups_stale: boolean
+  guidance: Array<GuidancePoint>
 }
 
 export interface PublishedReviewAssessment {
@@ -859,6 +932,17 @@ export interface PublishedReviewAssessment {
   risk_score: number
   decision: "would_approve" | "needs_human_review"
   explanation: string
+}
+
+/**
+ * One place the author redirected Open SWE that the reviewer could see in the
+ * final change. Recorded during a review, so it is absent until one has run.
+ */
+export interface GuidancePoint {
+  summary: string
+  quote: string
+  /** Empty when the quote matched no stored message. */
+  author: string
 }
 
 export interface ReviewAssessmentFeedbackInput {
@@ -931,6 +1015,7 @@ export interface PullRequestPreview {
   // or no checks configured.
   unresolved: Array<PreviewThread> | null
   checks: Array<PreviewCheck> | null
+  guidance: Array<GuidancePoint>
 }
 
 export interface ReviewDiffPayload {
@@ -1313,7 +1398,7 @@ export const api = {
   ) =>
     request<PRMergeRatePayload>(
       `/analytics/pr-merge-rate-by-model?period=${encodeURIComponent(period)}${maturityDays == null ? "" : `&maturity_days=${maturityDays}`}`
-    ),
+    ).then((payload) => ({ payload, fetchedAt: new Date().toISOString() })),
   adminListUsers: (page = 1, pageSize = 20) =>
     request<AdminUsersPage>(`/admin/users?page=${page}&page_size=${pageSize}`),
   listReviews: (page: number, mine: boolean) =>
