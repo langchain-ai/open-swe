@@ -1452,49 +1452,63 @@ it("copies an allowlisted diagnostics snapshot to the clipboard", async () => {
   client.clear()
 })
 
-it("keeps retained-report metrics in the copied snapshot after a failed refresh", async () => {
-  const cohort = {
-    model_id: "example-model",
-    model_attribution_quality: "configured",
-    merged: 1,
-    closed_without_merge: 0,
-    mature_pending: 0,
-    waiting: 0,
-    cohort_size: 1,
-    decided_denominator: 1,
-    decided_merge_rate: 1,
-    mature_denominator: 1,
-    mature_cohort_merge_share: 1,
-    avg_merge_seconds: 3600,
-    avg_delivery_seconds: 7200,
-    efforts: [],
-  } as PRMergeRateCohort
-  const query = vi
-    .spyOn(api, "prMergeRateByModel")
-    .mockResolvedValue(
-      report({ ...captured, status: "ready", cohorts: [cohort] })
+it.each([
+  [60, 7200],
+  [7200, 60],
+  [null, 0],
+  [null, null],
+])(
+  "copies retained-report availability without a report average (%s, %s)",
+  async (first, second) => {
+    const cohort = {
+      model_id: "example-model",
+      model_attribution_quality: "configured",
+      merged: 1,
+      closed_without_merge: 0,
+      mature_pending: 0,
+      waiting: 0,
+      cohort_size: 1,
+      decided_denominator: 1,
+      decided_merge_rate: 1,
+      mature_denominator: 1,
+      mature_cohort_merge_share: 1,
+      avg_merge_seconds: 3600,
+      avg_delivery_seconds: 7200,
+      efforts: [],
+    } as PRMergeRateCohort
+    const query = vi.spyOn(api, "prMergeRateByModel").mockResolvedValue(
+      report({
+        ...captured,
+        status: "ready",
+        cohorts: [
+          { ...cohort, avg_delivery_seconds: first },
+          { ...cohort, model_id: "other-model", avg_delivery_seconds: second },
+        ],
+      })
     )
-  const writeText = stubClipboard()
-  const client = mountReport()
-  fireEvent.click(await screen.findByText("Details"))
+    const writeText = stubClipboard()
+    const client = mountReport()
+    fireEvent.click(await screen.findByText("Details"))
 
-  // The refresh fails, but the report and its metrics stay on screen.
-  query.mockRejectedValue(new ApiError(503, "unavailable"))
-  fireEvent.click(screen.getByRole("button", { name: "Refresh now" }))
-  expect(await screen.findByText(/Last PR report refresh failed/)).toBeTruthy()
+    // The refresh fails, but the report and its metrics stay on screen.
+    query.mockRejectedValue(new ApiError(503, "unavailable"))
+    fireEvent.click(screen.getByRole("button", { name: "Refresh now" }))
+    expect(
+      await screen.findByText(/Last PR report refresh failed/)
+    ).toBeTruthy()
 
-  fireEvent.click(screen.getByRole("button", { name: "Copy diagnostics" }))
-  expect(
-    await screen.findByText("Diagnostics copied to clipboard.")
-  ).toBeTruthy()
-  const copied = JSON.parse(writeText.mock.calls[0]?.[0] as string)
-  expect(copied.pr_report.last_refresh_failed).toBe(true)
-  expect(copied.metrics.avg_delivery_seconds).toEqual({
-    state: "numeric",
-    value: 7200,
-  })
-  client.clear()
-})
+    fireEvent.click(screen.getByRole("button", { name: "Copy diagnostics" }))
+    expect(
+      await screen.findByText("Diagnostics copied to clipboard.")
+    ).toBeTruthy()
+    const copied = JSON.parse(writeText.mock.calls[0]?.[0] as string)
+    expect(copied.pr_report.last_refresh_failed).toBe(true)
+    expect(copied.metrics.avg_delivery_seconds).toEqual({
+      state: first == null && second == null ? "no_valid_samples" : "numeric",
+    })
+    client.clear()
+  }
+)
 
 it("copies diagnostics from the keyboard and reports a denied clipboard", async () => {
   vi.spyOn(api, "prMergeRateByModel").mockResolvedValue(report(captured))

@@ -32,8 +32,8 @@ describe("metricAvailability", () => {
     [false, null, { state: "unsupported_by_backend" }],
     [false, 42, { state: "unsupported_by_backend" }],
     [true, null, { state: "no_valid_samples" }],
-    [true, 0, { state: "numeric", value: 0 }],
-    [true, 3600, { state: "numeric", value: 3600 }],
+    [true, 0, { state: "numeric" }],
+    [true, 3600, { state: "numeric" }],
   ] as const)("supported=%s value=%s is %o", (supported, value, expected) => {
     expect(metricAvailability(supported, value)).toEqual(expected)
   })
@@ -47,7 +47,7 @@ describe("buildUsageDiagnostics", () => {
       reportServerAsOf: metadata.as_of,
       reportFetchedAt: "2026-09-11T12:01:30Z",
       reportRefreshError: null,
-      avgDeliverySeconds: { state: "numeric", value: 0 },
+      avgDeliverySeconds: { state: "numeric" },
     })
     expect(result).not.toHaveProperty("api")
     expect(result).not.toHaveProperty("build")
@@ -66,7 +66,7 @@ describe("buildUsageDiagnostics", () => {
       has_failed_events: false,
     })
     expect(result.metrics).toEqual({
-      avg_delivery_seconds: { state: "numeric", value: 0 },
+      avg_delivery_seconds: { state: "numeric" },
     })
     const serialized = JSON.stringify(result)
     // A fresher leaderboard report must not leak into the PR report's fields.

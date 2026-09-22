@@ -1,7 +1,7 @@
 import type { AnalyticsMetadata, UsageLeaderboardPeriod } from "@/lib/api"
 
 export type MetricAvailability =
-  | { state: "numeric"; value: number }
+  | { state: "numeric" }
   | { state: "no_valid_samples" }
   | { state: "unsupported_by_backend" }
 
@@ -12,7 +12,7 @@ export function metricAvailability(
 ): MetricAvailability {
   if (!supported) return { state: "unsupported_by_backend" }
   if (value == null) return { state: "no_valid_samples" }
-  return { state: "numeric", value }
+  return { state: "numeric" }
 }
 
 export interface UsageDiagnosticsInput {
