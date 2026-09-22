@@ -321,16 +321,17 @@ test.describe("transcript rendering", () => {
         const injected = [
           [
             "entity-person",
-            '<dynamic-context kind="person" id="github:alice"><display_name>Alice</display_name></dynamic-context>',
+            '<dynamic-context kind="person" id="github:alice">\ndisplay_name: Alice\n</dynamic-context>',
           ],
           [
             "entity-system",
-            '<dynamic-context kind="system" id="system:scheduler"><display_name>Scheduler</display_name></dynamic-context>',
+            '<dynamic-context kind="system" id="system:scheduler">\ndisplay_name: Scheduler\n</dynamic-context>',
           ],
           [
             "structured-person",
-            '<input-message sender="github:alice" surface="web" kind="human"><content>Person says &lt;img data-e2e-injected src=x&gt;</content></input-message>',
+            '<input-message sender="github:alice" surface="web" kind="human">\nPerson says &lt;img data-e2e-injected src=x&gt;\n</input-message>',
           ],
+          // Rows already in the database wrap their text in `<content>`.
           [
             "structured-system",
             '<input-message sender="system:scheduler" surface="automation"><content>Automation checks CI</content></input-message>',

@@ -11,7 +11,11 @@ from langgraph.config import get_config
 from langgraph_sdk import get_client
 
 from agent.analytics.usage import record_agent_pr_usage
-from agent.credential_scope import pr_author_login, private_credential_login
+from agent.credential_scope import (
+    PrAuthorNotAParticipant,
+    pr_author_login,
+    private_credential_login,
+)
 from agent.github.app import get_github_app_installation_token
 from agent.github.comments import derive_pr_state
 from agent.github.pull_requests import PullRequest, ThreadLink
@@ -30,7 +34,7 @@ from agent.slack.code_channels import (
     set_view,
 )
 from agent.threads.plan_store import get_plan_content
-from agent.utils.authorship import PR_ATTRIBUTION_TEXT
+from agent.utils.authorship import PR_ATTRIBUTION_TEXT, add_pr_collaboration_note
 from agent.utils.dashboard_links import dashboard_plan_url, dashboard_thread_url
 from agent.utils.langsmith import create_langsmith_thread_feedback
 
@@ -55,9 +59,9 @@ _REPORTED_RESPONSE_HEADERS = (
 )
 
 
-async def _resolve_pr_author_token() -> tuple[str | None, str]:
-    """Use the run requester's OAuth for user-owned threads and the bot for system threads."""
-    login = await pr_author_login()
+async def _resolve_pr_author_token(author: str | None = None) -> tuple[str | None, str]:
+    """Use the requested or requesting person's OAuth, and the bot for system threads."""
+    login = await pr_author_login(author)
     if login is None:
         return await get_github_app_installation_token(), "bot"
     from agent.dashboard.profiles import get_valid_access_token
@@ -882,6 +886,30 @@ async def _is_private_repo(client: httpx2.AsyncClient, token: str, owner: str, r
     return bool(data.get("private")) if isinstance(data, dict) else False
 
 
+async def _stamp_attribution_footer(body: str) -> str:
+    """Make the platform footer, naming this run's model, the body's last line."""
+    cfg = _configurable()
+    model_id: str | None = None
+    effort: str | None = None
+    if cfg.thread_id:
+        try:
+            thread = await get_client().threads.get(cfg.thread_id)
+            metadata = thread.get("metadata") if isinstance(thread, dict) else None
+            if isinstance(metadata, dict):
+                model = metadata.get("model")
+                model_id = model if isinstance(model, str) and model else None
+                value = metadata.get("effort")
+                effort = value if isinstance(value, str) and value else None
+        except Exception:
+            logger.debug("Could not read the thread's model for the PR footer", exc_info=True)
+    return add_pr_collaboration_note(
+        body,
+        thread_url=dashboard_thread_url(cfg.thread_id) if cfg.thread_id else None,
+        model_id=model_id,
+        reasoning_effort=effort,
+    )
+
+
 async def _maybe_append_references(
     client: httpx2.AsyncClient, token: str, owner: str, repo: str, body: str
 ) -> str:
@@ -924,8 +952,24 @@ async def _open_pull_request(
     body: str,
     draft: bool,
     resolves_thread: bool = False,
+    author: str | None = None,
 ) -> dict[str, Any]:
-    token, kind = await _resolve_pr_author_token()
+    try:
+        token, kind = await _resolve_pr_author_token(author)
+    except PrAuthorNotAParticipant as exc:
+        return _failure_payload(
+            code="pr_author_not_a_participant",
+            owner=owner,
+            repo=repo,
+            head=head,
+            base=base,
+            token_kind="user",
+            http_status=None,
+            reason=str(exc),
+            likely_cause="the requested author has not posted in this thread",
+            branch_pushed=None,
+            failed_step="resolve_pr_author_token",
+        )
     if not token:
         return _failure_payload(
             code="no_github_token",
@@ -969,7 +1013,9 @@ async def _open_pull_request(
         )
         if preflight_failure is not None:
             return preflight_failure
-        body = await _maybe_append_references(client, token, owner, repo, body)
+        body = await _stamp_attribution_footer(
+            await _maybe_append_references(client, token, owner, repo, body)
+        )
         draft = _effective_draft(draft)
         payload = {
             "title": title,
@@ -1070,6 +1116,7 @@ async def open_pull_request(
     body: str,
     draft: bool = True,
     resolves_thread: bool = False,
+    author: str = "",
 ) -> dict[str, Any]:
     """Implement the `open_pull_request` tool."""
     return await _open_pull_request(
@@ -1081,4 +1128,5 @@ async def open_pull_request(
         body=body,
         draft=draft,
         resolves_thread=resolves_thread,
+        author=author or None,
     )

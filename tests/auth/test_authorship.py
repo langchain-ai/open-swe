@@ -6,12 +6,14 @@ import pytest
 
 import agent.utils.authorship as authorship
 from agent.github import app as github_app
+from agent.users import User
 from agent.utils import ttl_cache
 from agent.utils.authorship import (
     OPEN_SWE_BOT_EMAIL,
     OPEN_SWE_BOT_NAME,
     add_bot_coauthor_trailer,
     build_pr_attribution_footer,
+    resolve_participant_identities,
     resolve_public_github_profile,
     resolve_triggering_user_identity,
 )
@@ -58,6 +60,33 @@ async def test_resolve_identity_from_config_uses_user_noreply_email() -> None:
     assert not identity.github_profile
     assert identity.display_name_source == "slack"
     assert identity.analytics_display_name == "Mason"
+
+
+async def test_resolve_identity_without_github_login_is_none() -> None:
+    config = {
+        "configurable": {
+            "source": "slack",
+            "user_email": "mason@slack.example",
+            "slack_thread": {
+                "triggering_user_name": "Mason",
+                "triggering_user_email": "mason@slack.example",
+            },
+        }
+    }
+    assert await resolve_triggering_user_identity(config) is None
+
+
+async def test_participant_identity_ignores_users_table_email(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def other_email(login: str | None) -> str:
+        return "mason@work.example"
+
+    monkeypatch.setattr(User, "email_for_login", other_email)
+    identities = await resolve_participant_identities(["mason-gh", " ", "mason-gh"])
+    assert [identity.commit_email for identity in identities] == [
+        "mason-gh@users.noreply.github.com"
+    ]
 
 
 class _FakeResponse:

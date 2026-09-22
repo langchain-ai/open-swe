@@ -7,6 +7,7 @@ from agent.input_messages import (
     build_input_messages,
     build_run_input,
     human_input,
+    input_message_text,
     person_introduction,
     visible_dynamic_context_hashes,
 )
@@ -35,7 +36,7 @@ def test_human_input_escapes_data_and_attributes() -> None:
         "surface": "web",
         "kind": "human",
     }
-    assert root.findtext("content") == '<fix a="b"> & continue'
+    assert (root.text or "").strip() == '<fix a="b"> & continue'
 
 
 def test_multimodal_input_preserves_non_text_blocks_and_order() -> None:
@@ -47,14 +48,43 @@ def test_multimodal_input_preserves_non_text_blocks_and_order() -> None:
 
     assert isinstance(message["content"], list)
     assert message["content"][0] is image
-    assert _parse(message["content"][1]["text"]).findtext("content") == "describe <this>"
+    assert (_parse(message["content"][1]["text"]).text or "").strip() == "describe <this>"
+
+
+def test_structured_data_follows_the_text() -> None:
+    message = human_input(
+        "handle this",
+        {
+            "sender_id": "github:octocat",
+            "surface": "github",
+            "kind": "human",
+            "data": {"delivery": "d1", "issue": {"identifier": "ENG-1"}},
+        },
+    )
+
+    assert isinstance(message["content"], str)
+    root = _parse(message["content"])
+    assert root.get("delivery") == "d1"
+    assert (root.text or "").strip() == "handle this"
+    assert [child.tag for child in root] == ["issue"]
+    assert input_message_text(message["content"]) == "handle this"
+
+
+def test_text_stored_in_a_content_element_is_still_read() -> None:
+    stored = (
+        '<input-message sender="github:octocat" surface="web" kind="human">\n'
+        "<content>fix the flaky test</content>\n"
+        "</input-message>"
+    )
+
+    assert input_message_text(stored) == "fix the flaky test"
 
 
 def test_first_seen_introductions_are_practical_and_mutate_registry() -> None:
     injected = set()
     kwargs = {
-        "people": [{"id": "github:octocat", "platform": "github", "github_login": "octocat"}],
         "channels": [{"id": "slack:C123", "platform": "slack", "topic": "a < b"}],
+        "systems": [{"id": "system:dashboard-handoff", "display_name": "Dashboard handoff"}],
         "injected_dynamic_context_hashes": injected,
     }
     first = build_input_messages(
@@ -82,13 +112,35 @@ def test_first_seen_introductions_are_practical_and_mutate_registry() -> None:
     assert len(second) == 1
     assert len(injected) == 2
     assert all(len(value) == 64 for value in injected)
-    channel_content = first[1]["content"]
+    channel_content = first[0]["content"]
     assert isinstance(channel_content, str)
     channel = _parse(channel_content)
-    topic = channel.find("topic")
-    assert topic is not None
-    assert topic.attrib["trust"] == "untrusted"
-    assert channel.findtext("topic") == "a < b"
+    assert (channel.text or "").strip().splitlines() == [
+        "platform: slack",
+        "topic: a < b",
+    ]
+
+
+def test_a_multi_line_field_indents_its_continuation_lines() -> None:
+    content = person_introduction(
+        {
+            "id": "user:1",
+            "display_name": "Ramon",
+            "standing_instructions": "Never use ripgrep.\n\nPrefer grep: it is fine.",
+        }
+    )["content"]
+    assert isinstance(content, str)
+
+    assert content == (
+        '<dynamic-context kind="person" id="user:1">\n'
+        "display_name: Ramon\n"
+        "standing_instructions:\n"
+        "  Never use ripgrep.\n"
+        "  \n"
+        "  Prefer grep: it is fine.\n"
+        "</dynamic-context>"
+    )
+    assert _parse(content).attrib["id"] == "user:1"
 
 
 def test_run_input_preserves_files() -> None:
