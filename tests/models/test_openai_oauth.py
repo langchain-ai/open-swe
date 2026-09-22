@@ -54,10 +54,10 @@ def test_oauth_model_uses_dedicated_account_transport(monkeypatch: pytest.Monkey
         patch.object(model, "build_desktop_openai_oauth_model", fake_model),
         detect_blocking_calls(),
     ):
-        result = model.make_model("openai:gpt-6-sol", use_gateway=False, max_tokens=123)
+        result = model.make_model("openai:gpt-5.6-sol", use_gateway=False, max_tokens=123)
 
     assert result == "MODEL"
-    assert captured["model_name"] == "gpt-6-sol"
+    assert captured["model_name"] == "gpt-5.6-sol"
     assert "base_url" not in captured
     assert "max_tokens" not in captured
 
@@ -68,7 +68,7 @@ def test_oauth_model_enforces_account_backend_contract(
 ) -> None:
     _configure(monkeypatch)
 
-    result = openai_oauth.build_desktop_openai_oauth_model("gpt-6-sol")
+    result = openai_oauth.build_desktop_openai_oauth_model("gpt-5.6-sol")
 
     assert isinstance(result, _ChatOpenAICodex)
     assert str(result.openai_api_base).rstrip("/") == CHATGPT_CODEX_BASE_URL
@@ -118,7 +118,7 @@ async def test_token_provider_authenticates_to_broker(
             requests.append((url, headers))
             return Response()
 
-    oauth_model = openai_oauth.build_desktop_openai_oauth_model("gpt-6-sol")
+    oauth_model = openai_oauth.build_desktop_openai_oauth_model("gpt-5.6-sol")
     monkeypatch.setattr(openai_oauth.httpx2, "AsyncClient", Client)
     provider = oauth_model.token_provider  # type: ignore[attr-defined]
     first_token = await provider.aget_token()

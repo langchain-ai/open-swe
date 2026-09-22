@@ -7,7 +7,7 @@ from agent.dashboard.profiles import ProfileUpdate, normalize_profile_for_respon
 
 @pytest.mark.asyncio
 async def test_omitted_draft_preference_preserves_existing_value() -> None:
-    update = ProfileUpdate(default_model="openai:gpt-6-sol", reasoning_effort="medium")
+    update = ProfileUpdate(default_model="openai:gpt-5.6-sol", reasoning_effort="medium")
     put_item = AsyncMock()
 
     with (
@@ -37,7 +37,7 @@ async def test_omitted_draft_preference_preserves_existing_value() -> None:
 @pytest.mark.asyncio
 async def test_explicit_model_routing_preference_is_persisted() -> None:
     update = ProfileUpdate(
-        default_model="openai:gpt-6-sol",
+        default_model="openai:gpt-5.6-sol",
         reasoning_effort="medium",
         model_routing_enabled=False,
     )
@@ -58,7 +58,7 @@ async def test_explicit_model_routing_preference_is_persisted() -> None:
 @pytest.mark.asyncio
 async def test_explicit_draft_preference_is_persisted() -> None:
     update = ProfileUpdate(
-        default_model="openai:gpt-6-sol",
+        default_model="openai:gpt-5.6-sol",
         reasoning_effort="medium",
         draft_prs=True,
     )
@@ -84,7 +84,7 @@ def test_profile_response_hides_legacy_create_prs_setting() -> None:
 
 @pytest.mark.asyncio
 async def test_profile_save_removes_legacy_create_prs_setting() -> None:
-    update = ProfileUpdate(default_model="openai:gpt-6-sol", reasoning_effort="medium")
+    update = ProfileUpdate(default_model="openai:gpt-5.6-sol", reasoning_effort="medium")
     put_item = AsyncMock()
 
     with (

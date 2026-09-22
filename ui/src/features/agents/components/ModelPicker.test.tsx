@@ -16,8 +16,8 @@ afterEach(() => cleanup())
 
 const MODELS: Array<ModelOption> = [
   {
-    id: "openai:gpt-6-sol",
-    label: "GPT-6 Sol",
+    id: "openai:gpt-5.6-sol",
+    label: "GPT-5.6 Sol",
     efforts: ["none", "low", "medium", "high", "xhigh"],
     default_effort: "xhigh",
     supports_images: true,
@@ -46,7 +46,7 @@ function openPicker(
   render(
     <ModelPicker
       models={MODELS}
-      selection={{ modelId: "openai:gpt-6-sol", effort: "high" }}
+      selection={{ modelId: "openai:gpt-5.6-sol", effort: "high" }}
       onSelectionChange={onSelectionChange}
       {...props}
     />
@@ -56,7 +56,7 @@ function openPicker(
 }
 
 function openModelPane() {
-  fireEvent.click(screen.getByRole("option", { name: "GPT-6 Sol" }))
+  fireEvent.click(screen.getByRole("option", { name: "GPT-5.6 Sol" }))
 }
 
 describe("ModelPicker", () => {
@@ -67,7 +67,7 @@ describe("ModelPicker", () => {
     fireEvent.keyDown(panel, { key: "ArrowDown" })
     fireEvent.keyDown(panel, { key: "Enter" })
     expect(onSelectionChange).toHaveBeenLastCalledWith({
-      modelId: "openai:gpt-6-sol",
+      modelId: "openai:gpt-5.6-sol",
       effort: "xhigh",
     })
 
@@ -85,13 +85,13 @@ describe("ModelPicker", () => {
     render(
       <ModelPicker
         models={MODELS}
-        selection={{ modelId: "openai:gpt-6-sol", effort: "xhigh" }}
+        selection={{ modelId: "openai:gpt-5.6-sol", effort: "xhigh" }}
         onSelectionChange={vi.fn()}
       />
     )
 
     expect(
-      screen.getByRole("button", { name: /GPT-6 Sol Extra High/ })
+      screen.getByRole("button", { name: /GPT-5.6 Sol Extra High/ })
     ).toBeTruthy()
   })
 
@@ -132,7 +132,7 @@ describe("ModelPicker", () => {
         .getAllByRole("option")
         .map((option) => option.textContent)
     ).toEqual(["None", "Low", "Medium", "High", "Extra High"])
-    expect(screen.getByRole("option", { name: "GPT-6 Sol" })).toBeTruthy()
+    expect(screen.getByRole("option", { name: "GPT-5.6 Sol" })).toBeTruthy()
     expect(screen.queryByRole("listbox", { name: "Models" })).toBeNull()
   })
 
@@ -156,7 +156,7 @@ describe("ModelPicker", () => {
     )
 
     expect(onSelectionChange).toHaveBeenCalledWith({
-      modelId: "openai:gpt-6-sol",
+      modelId: "openai:gpt-5.6-sol",
       effort: "low",
     })
     expect(screen.queryByTestId("model-picker-panel")).toBeNull()
@@ -173,7 +173,7 @@ describe("ModelPicker", () => {
         .map((option) => option.textContent)
     ).toEqual([
       "Auto",
-      "GPT-6 Sol High",
+      "GPT-5.6 Sol High",
       "Gemini 3.8 Flash Medium",
       "Kimi K3 High",
     ])
@@ -230,7 +230,7 @@ describe("ModelPicker", () => {
     fireEvent.keyDown(panel, { key: "Enter" })
 
     expect(onSelectionChange).toHaveBeenCalledWith({
-      modelId: "openai:gpt-6-sol",
+      modelId: "openai:gpt-5.6-sol",
       effort: "medium",
     })
   })

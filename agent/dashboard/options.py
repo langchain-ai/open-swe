@@ -181,6 +181,8 @@ def model_profile_with_context_override(model_id: str) -> dict[str, object] | No
     provider, _, model_name = model_id.partition(":")
     loader = _profile_loader(provider)
     profile = dict(loader(model_name)) if loader is not None else {}
+    if not profile and model_name in {"gpt-6-sol", "gpt-6-luna"} and loader is not None:
+        profile = dict(loader(model_name.replace("gpt-6-", "gpt-5.6-")))
     profile["max_input_tokens"] = context_window
     return profile
 

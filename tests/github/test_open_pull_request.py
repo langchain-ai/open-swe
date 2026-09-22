@@ -1140,7 +1140,7 @@ async def test_record_pr_telemetry_persists_resolves_thread_flag(
             "source": "slack",
             "thread_id": "t1",
             "github_login": "octo",
-            "resolved_agent_model_id": "openai:gpt-6-sol",
+            "resolved_agent_model_id": "openai:gpt-5.6-sol",
             "run_id": "old-run" if top_level_run_id else "run-1",
             "slack_thread": {"channel_id": "C1", "thread_ts": "1.0"},
         },
@@ -1178,7 +1178,7 @@ async def test_record_pr_telemetry_persists_resolves_thread_flag(
 
     usage = opr.record_agent_pr_usage
     usage.assert_awaited_once()
-    assert usage.await_args.kwargs["model_id"] == "openai:gpt-6-sol"
+    assert usage.await_args.kwargs["model_id"] == "openai:gpt-5.6-sol"
     langgraph.threads.update.assert_awaited_once()
     assert langgraph.threads.update.await_args is not None
     metadata = langgraph.threads.update.await_args.kwargs["metadata"]
