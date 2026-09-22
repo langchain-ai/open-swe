@@ -206,13 +206,14 @@ export function AgentThreadView({
   const queuedImages = (entry: QueuedTurn) =>
     entry.message.chunks.filter((chunk) => chunk.kind === "image")
 
+  const queryClient = useQueryClient()
   const [restoreDraft, setRestoreDraft] = useState<RestoredDraft | null>(null)
   const restoreQueuedToComposer = useCallback(
-    (entries: ReadonlyArray<QueuedTurn>, images: Array<ImageChunk>) => {
-      if (entries.length === 0) return
+    (texts: ReadonlyArray<string>, images: Array<ImageChunk>) => {
+      if (texts.length === 0 && images.length === 0) return
       setRestoreDraft((previous) => ({
         key: (previous?.key ?? 0) + 1,
-        text: entries.map(queuedText).filter(Boolean).join("\n\n"),
+        text: texts.filter(Boolean).join("\n\n"),
         images,
       }))
     },
@@ -279,7 +280,7 @@ export function AgentThreadView({
         const images = await materializeQueuedImages(entry)
         if (images === null) return
         await withdrawQueued(entry)
-        restoreQueuedToComposer([entry], images)
+        restoreQueuedToComposer([queuedText(entry)], images)
       })()
     },
     [materializeQueuedImages, queued, restoreQueuedToComposer, withdrawQueued]
@@ -290,11 +291,37 @@ export function AgentThreadView({
   // says what it lost.
   const stopRun = useCallback(async () => {
     const pending = [...queued]
-    const { images, failed } = await materializeImages(
-      pending.flatMap(queuedImages)
+    // A follow-up sent to queue moments ago may not be back from the server
+    // yet. Stop cancels its run all the same, so its draft comes back too.
+    const known = new Set(pending.map((entry) => entry.message.id))
+    const unacknowledged = (thread.pendingMessages ?? []).filter(
+      (message) => message.queued && !known.has(message.id)
     )
+    const { images, failed } = await materializeImages([
+      ...pending.flatMap(queuedImages),
+      ...unacknowledged.flatMap((message) => message.images ?? []),
+    ])
     await source.stop()
-    restoreQueuedToComposer(pending, images)
+    if (unacknowledged.length > 0) {
+      const dropped = new Set(unacknowledged.map((message) => message.id))
+      queryClient.setQueryData<AgentThread>(
+        agentThreadKeys.detail(thread.id),
+        (prev) =>
+          prev && {
+            ...prev,
+            pendingMessages: prev.pendingMessages?.filter(
+              (message) => !dropped.has(message.id)
+            ),
+          }
+      )
+    }
+    restoreQueuedToComposer(
+      [
+        ...pending.map(queuedText),
+        ...unacknowledged.map((message) => message.content),
+      ],
+      images
+    )
     if (failed > 0) {
       toast.error(
         failed === 1
@@ -302,7 +329,14 @@ export function AgentThreadView({
           : `Couldn't load ${failed} queued images; they were not restored to the composer.`
       )
     }
-  }, [queued, restoreQueuedToComposer, source])
+  }, [
+    queryClient,
+    queued,
+    restoreQueuedToComposer,
+    source,
+    thread.id,
+    thread.pendingMessages,
+  ])
   const fixPullRequest = useCallback(
     async (pullRequest: AgentPullRequest) => {
       const result = await agentsApi.getThreadPullRequestContext(
@@ -359,7 +393,6 @@ export function AgentThreadView({
   // An optimistic row has done its job once the transcript or the queue holds
   // its id. Dropping it then keeps a withdrawn queued turn from resurfacing it
   // as "Sending" after the transcript hides that turn.
-  const queryClient = useQueryClient()
   useEffect(() => {
     const pending = thread.pendingMessages
     if (!pending?.length) return

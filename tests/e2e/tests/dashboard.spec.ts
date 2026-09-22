@@ -49,7 +49,7 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
     ).toBeVisible();
   });
 
-  test("shows an optimistic message before the idle-thread probe completes", async ({
+  test("shows an optimistic message while the send is in flight", async ({
     page,
   }, testInfo) => {
     await loginAs(page, SAME_USER);
@@ -57,26 +57,28 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
     const threadId = threadIdFromUrl(page);
     await waitForThreadIdle(page, threadId);
 
-    let releaseProbe: () => void = () => {};
-    const probeReleased = new Promise<void>((resolve) => {
-      releaseProbe = resolve;
+    // Every send is a `run.start` command; hold it so the optimistic row has
+    // to stand in for the message.
+    let releaseSend: () => void = () => {};
+    const sendReleased = new Promise<void>((resolve) => {
+      releaseSend = resolve;
     });
-    let probeStarted: () => void = () => {};
-    const probeReceived = new Promise<void>((resolve) => {
-      probeStarted = resolve;
+    let sendStarted: () => void = () => {};
+    const sendReceived = new Promise<void>((resolve) => {
+      sendStarted = resolve;
     });
     await page.route(
-      `**/dashboard/api/threads/${threadId}/messages`,
+      `**/dashboard/api/threads/${threadId}/commands`,
       async (route) => {
-        probeStarted();
-        await probeReleased;
+        sendStarted();
+        await sendReleased;
         await route.continue();
       },
     );
 
     const prompt = "Show this immediately while the send is accepted.";
     await typeIntoComposer(page, prompt);
-    await probeReceived;
+    await sendReceived;
 
     const optimisticMessage = page
       .getByTestId("user-message")
@@ -96,7 +98,7 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
       contentType: "image/png",
     });
 
-    releaseProbe();
+    releaseSend();
     await expect(optimisticMessage).toHaveCount(1);
     await waitForStateToContain(page, threadId, prompt);
     await expect(optimisticMessage).toHaveCount(1);
@@ -456,7 +458,10 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
     }).toPass({ timeout: 60000 });
     await typeIntoComposer(page, queuedText);
     await expect(
-      page.getByTestId("queued-message").filter({ hasText: queuedText }),
+      page
+        .getByTestId("queued-message")
+        .filter({ hasText: queuedText })
+        .and(page.locator("[data-queued-pending='false']")),
     ).toBeVisible();
 
     await page.getByRole("button", { name: "Stop run" }).click();

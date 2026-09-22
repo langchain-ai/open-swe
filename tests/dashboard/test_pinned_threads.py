@@ -54,7 +54,9 @@ class ThreadAPI:
             )
         _, _, thread_id, *tail = request.url.path.split("/")
         if tail == ["runs"]:
-            assert request.url.params["limit"] == "1"
+            # Bounded: a handful of runs, since follow-ups queued behind the
+            # live run are newer than it.
+            assert int(request.url.params["limit"]) <= 5
             self.active_runs += 1
             self.peak_runs = max(self.peak_runs, self.active_runs)
             await asyncio.sleep(0)

@@ -37,6 +37,7 @@ function QueuedMessages({
             key={message.id}
             className="ml-auto max-w-[85%] rounded-2xl border border-dashed border-border bg-accent/40 px-3 py-2 text-[14px] text-foreground shadow-sm"
             data-testid="queued-message"
+            data-queued-pending={message.pending ? "true" : "false"}
           >
             {message.content && (
               <div className="break-words whitespace-pre-wrap">
