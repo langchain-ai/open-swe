@@ -1,1 +1,1 @@
-Start a Slack thread with a headline root and instructions as the first reply.
+Start an independent Slack thread for separate work, with a headline root and instructions as the first reply. The current conversation remains active. To break out or move the current conversation and stop listening to the original thread, use `slack_move_thread` instead.
