@@ -190,7 +190,6 @@ from agent.tools import (
     recreate_sandbox,
     refresh_workspace_start,
     report_platform_issue,
-    request_pr_review,
     save_organization_skill,
     save_plan,
     save_user_instructions,
@@ -473,7 +472,6 @@ INCIDENT_AUTOMATIC_EXCLUDED_TOOLS: frozenset[str] = frozenset(
         "manage_thread",
         "open_pull_request",
         "recreate_sandbox",
-        "request_pr_review",
         "save_user_skill",
         "delete_user_skill",
         "slack_move_thread",
@@ -1369,7 +1367,6 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
             else ()
         ),
         read_user_settings,
-        request_pr_review,
         recreate_sandbox,
         report_platform_issue,
         schedule_thread_wakeup,
