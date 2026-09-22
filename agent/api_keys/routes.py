@@ -70,10 +70,12 @@ async def api_create_api_key(
     body: ApiKeyCreate,
     admin: dict[str, Any] = ADMIN_KEY_DEP,
 ) -> MintedApiKey:
-    if not await WORKSPACES.slug_exists(body.workspace):
+    workspace_id = await WORKSPACES.id_for_slug(body.workspace)
+    if workspace_id is None:
         raise HTTPException(404, "workspace not found")
     created_by = str(admin.get("sub") or "")
     key, secret = await ApiKey.create(
+        workspace_id=workspace_id,
         workspace=body.workspace,
         name=body.name,
         expires_at=body.expires_at,

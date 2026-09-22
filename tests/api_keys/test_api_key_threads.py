@@ -79,7 +79,10 @@ async def api_client() -> AsyncIterator[httpx.AsyncClient]:
 
 
 async def _mint(workspace: str = "core") -> str:
+    workspace_id = await WORKSPACES.id_for_slug(workspace)
+    assert workspace_id is not None
     _, secret = await ApiKey.create(
+        workspace_id=workspace_id,
         workspace=workspace,
         name="CI",
         expires_at=datetime.now(UTC) + timedelta(days=30),

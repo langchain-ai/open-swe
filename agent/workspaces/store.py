@@ -731,10 +731,12 @@ class WorkspaceStore:
         queries: routing checks a tag or a user's default against it, and a
         workspace an admin just created has to resolve at once.
         """
+        return await self.id_for_slug(slug) is not None
+
+    async def id_for_slug(self, slug: str) -> UUID | None:
+        """The stable id behind ``slug``, for records that must outlive it."""
         async with postgres.session() as session:
-            return (
-                await session.scalar(select(WorkspaceRow.id).where(WorkspaceRow.slug == slug))
-            ) is not None
+            return await session.scalar(select(WorkspaceRow.id).where(WorkspaceRow.slug == slug))
 
     def repo_import_is_pending(self, full_name: str) -> bool:
         """Whether a Store record naming this repository still awaits import."""

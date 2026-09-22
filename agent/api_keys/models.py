@@ -3,6 +3,9 @@
 The secret is returned once, by :meth:`ApiKey.create`, and never stored: the row
 keeps its SHA-256 digest and the last six characters, so a key is matched by
 hashing what the caller presented and looking the digest up whole.
+
+``workspace_id`` is the binding that matters; the slug beside it is what runs
+name themselves after. See the migration for why the id is what a key hangs on.
 """
 
 import hashlib
@@ -11,8 +14,9 @@ import secrets
 import uuid
 from datetime import UTC, datetime
 from typing import Literal, Self
+from uuid import UUID
 
-from sqlalchemy import func, select, update
+from sqlalchemy import ForeignKey, func, select, update
 from sqlalchemy.orm import Mapped, mapped_column
 
 from agent.database import postgres
@@ -34,6 +38,7 @@ class ApiKey(Base):
 
     __tablename__ = "api_key"
 
+    workspace_id: Mapped[UUID] = mapped_column(ForeignKey("workspace.id", ondelete="CASCADE"))
     workspace: Mapped[str]
     name: Mapped[str]
     key_hash: Mapped[str] = mapped_column(unique=True)
@@ -61,11 +66,18 @@ class ApiKey(Base):
 
     @classmethod
     async def create(
-        cls, *, workspace: str, name: str, expires_at: datetime, created_by: str
+        cls,
+        *,
+        workspace_id: UUID,
+        workspace: str,
+        name: str,
+        expires_at: datetime,
+        created_by: str,
     ) -> tuple[Self, str]:
         """Mint a key, returning the record and the plaintext secret exactly once."""
         secret = KEY_PREFIX + secrets.token_urlsafe(SECRET_BYTES)
         key = cls(
+            workspace_id=workspace_id,
             workspace=workspace,
             name=name,
             key_hash=hashlib.sha256(secret.encode()).hexdigest(),
