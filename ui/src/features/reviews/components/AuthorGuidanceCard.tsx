@@ -1,19 +1,5 @@
-import type { GuidanceKind, GuidancePoint } from "@/lib/api"
+import type { GuidancePoint } from "@/lib/api"
 import { cn } from "@/lib/utils"
-
-const kindLabels: Record<GuidanceKind, string> = {
-  correction: "Corrected",
-  constraint: "Ruled out",
-  direction: "Redirected",
-  preference: "Preference",
-}
-
-const kindTones: Record<GuidanceKind, string> = {
-  correction: "text-destructive",
-  constraint: "text-amber-700 dark:text-amber-400",
-  direction: "text-sky-700 dark:text-sky-400",
-  preference: "text-muted-foreground",
-}
 
 /** The summary reads as the point; the author's own words are a click away. */
 function Point({
@@ -35,14 +21,6 @@ function Point({
           </span>
           <span className="min-w-0 flex-1 text-sm text-foreground">
             {point.summary}
-          </span>
-          <span
-            className={cn(
-              "shrink-0 text-xs font-medium",
-              kindTones[point.kind]
-            )}
-          >
-            {kindLabels[point.kind]}
           </span>
           {showAuthor && point.author && (
             <span className="shrink-0 text-xs text-muted-foreground">
@@ -72,7 +50,7 @@ export function GuidancePointList({
     <ul className="space-y-2">
       {points.map((point, index) => (
         <Point
-          key={`${point.kind}:${index}`}
+          key={`${point.author}:${index}`}
           point={point}
           showAuthor={showAuthor}
         />

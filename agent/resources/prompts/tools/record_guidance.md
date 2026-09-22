@@ -8,4 +8,3 @@ Recording a point is not filing a finding. File a finding only when the final ch
 
 - `summary`: one line, past tense, naming what the author changed and what it changed it from. "Rejected the retry wrapper and asked for the error to propagate", never "The user gave feedback about retries".
 - `quote`: the words from the author's message that carry the instruction, copied verbatim and unedited. Trim to the load-bearing sentence or two. A paraphrase loses the reader the link back to what was actually said.
-- `kind`: `correction` when they said something already built was wrong, `constraint` when they ruled an approach, dependency or pattern out, `direction` when they chose a different approach from the one in progress, `preference` when they stated a durable taste about how the work should look.

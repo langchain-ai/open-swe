@@ -4,12 +4,7 @@ import logging
 from typing import Any
 
 from agent.github.pull_requests import PullRequest
-from agent.review.author_guidance import (
-    GUIDANCE_CAP,
-    GuidanceKind,
-    GuidancePoint,
-    SteeringHistory,
-)
+from agent.review.author_guidance import GUIDANCE_CAP, GuidancePoint, SteeringHistory
 from agent.review.findings import (
     ReviewerThreadMissingError,
     get_thread_id_from_runtime,
@@ -22,14 +17,9 @@ logger = logging.getLogger(__name__)
 
 MAX_SUMMARY_CHARS = 200
 MAX_QUOTE_CHARS = 600
-_KINDS: frozenset[str] = frozenset(("correction", "constraint", "direction", "preference"))
 
 
-async def record_guidance(
-    summary: str,
-    quote: str,
-    kind: GuidanceKind,
-) -> dict[str, Any]:
+async def record_guidance(summary: str, quote: str) -> dict[str, Any]:
     """Implement the `record_guidance` tool."""
     trimmed_summary = summary.strip()
     trimmed_quote = quote.strip()
@@ -40,9 +30,6 @@ async def record_guidance(
             "success": False,
             "error": "quote must be copied verbatim from the message it came from",
         }
-    if kind not in _KINDS:
-        return {"success": False, "error": f"Invalid kind: {kind}"}
-
     cfg = RunConfig.from_runtime()
     if cfg.repo is None or cfg.pr_number is None:
         return {"success": False, "error": "This run is not reviewing a pull request"}
@@ -70,7 +57,6 @@ async def record_guidance(
         pull_request,
         summary=trimmed_summary[:MAX_SUMMARY_CHARS],
         quote=trimmed_quote[:MAX_QUOTE_CHARS],
-        kind=kind,
         author=source.author if source else "",
         occurred_at=source.created_at if source else None,
         reviewer_thread_id=thread_id,

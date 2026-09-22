@@ -23,7 +23,7 @@ recognises stops being shown without anything having to delete it.
 import hashlib
 import logging
 from datetime import datetime
-from typing import Literal, Self
+from typing import Self
 from uuid import UUID, uuid7
 
 from pydantic import BaseModel
@@ -34,13 +34,11 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from agent.database import postgres
 from agent.database.orm import NOW, Base
-from agent.github.pull_requests import PullRequest, ReviewLink
+from agent.github.pull_requests import PullRequest
 from agent.github.repositories import Repository
 from agent.input_messages import input_message_text, message_sender_id
 
 logger = logging.getLogger(__name__)
-
-GuidanceKind = Literal["correction", "constraint", "direction", "preference"]
 
 GUIDANCE_CAP = 8
 MAX_FOLLOW_UPS = 40
@@ -128,6 +126,54 @@ class SteeringHistory(BaseModel):
         return next((turn for turn in self.follow_ups if needle in turn.text.lower()), None)
 
 
+class GuidanceReview(Base):
+    """The commit the last completed review of a pull request stands behind."""
+
+    __tablename__ = "pull_request_guidance_review"
+
+    pull_request_id: Mapped[UUID] = mapped_column(
+        ForeignKey("pull_request.id", ondelete="CASCADE"), primary_key=True
+    )
+    head_sha: Mapped[str]
+    completed_at: Mapped[datetime | None] = mapped_column(server_default=NOW, init=False)
+
+    @classmethod
+    async def complete(cls, owner: str, repo: str, pr_number: int, head_sha: str) -> None:
+        """Mark a review of this head finished, whatever it decided.
+
+        Called on every path that finishes a review, including the one that
+        publishes nothing: a review that recognises no guidance still settles
+        the question of what is true at this commit, and only this row can say
+        so, because that outcome writes no point to infer it from.
+
+        A failure here is logged rather than raised. The review has already
+        been published to GitHub by the time this runs, and turning a
+        bookkeeping write into a tool error would have the agent retry the
+        publish.
+        """
+        if not head_sha:
+            return
+        try:
+            pull_request = await PullRequest.get(owner, repo, pr_number)
+            if pull_request is None or pull_request.id is None:
+                return
+            statement = insert(cls).values(pull_request_id=pull_request.id, head_sha=head_sha)
+            async with postgres.session() as session:
+                await session.execute(
+                    statement.on_conflict_do_update(
+                        index_elements=[cls.pull_request_id],
+                        set_={"head_sha": head_sha, "completed_at": func.clock_timestamp()},
+                    )
+                )
+                await session.commit()
+        except Exception:
+            logger.warning(
+                "Could not advance the guidance review head",
+                exc_info=True,
+                extra={"pr_repo_full_name": f"{owner}/{repo}", "pr_number": pr_number},
+            )
+
+
 class GuidancePoint(Base):
     """One steering turn the reviewer located in the final change."""
 
@@ -136,7 +182,6 @@ class GuidancePoint(Base):
     pull_request_id: Mapped[UUID] = mapped_column(ForeignKey("pull_request.id", ondelete="CASCADE"))
     quote: Mapped[str]
     summary: Mapped[str]
-    kind: Mapped[GuidanceKind] = mapped_column(Text)
     id: Mapped[UUID] = mapped_column(primary_key=True, default_factory=uuid7)
     quote_hash: Mapped[str] = mapped_column(default="")
     author: Mapped[str] = mapped_column(server_default="", default="")
@@ -151,23 +196,8 @@ class GuidancePoint(Base):
         return hashlib.sha256(quote.strip().lower().encode()).hexdigest()
 
     @classmethod
-    def _latest_reviewed_head(cls):  # noqa: ANN206
-        """The head SHA of the newest published review of this point's pull request.
-
-        Publishing is what marks a review complete, and it writes the head it
-        reviewed, so this is the commit the visible set must belong to.
-        """
-        return (
-            select(ReviewLink.head_sha)
-            .where(ReviewLink.pull_request_id == cls.pull_request_id, ReviewLink.head_sha != "")
-            .order_by(ReviewLink.published_at.desc(), ReviewLink.id.desc())
-            .limit(1)
-            .scalar_subquery()
-        )
-
-    @classmethod
     async def for_pull_request(cls, owner: str, repo: str, pr_number: int) -> list[Self]:
-        """Points the newest published review stands behind, oldest steering first.
+        """Points the last completed review stands behind, oldest steering first.
 
         Scoped to that review's head rather than to the pull request, because a
         point is only ever a claim about one commit. A re-review that no longer
@@ -177,6 +207,11 @@ class GuidancePoint(Base):
         cover. A re-recorded point carries its row forward to the new head, so
         the visible set is always exactly what the last review would say.
         """
+        latest_head = (
+            select(GuidanceReview.head_sha)
+            .where(GuidanceReview.pull_request_id == cls.pull_request_id)
+            .scalar_subquery()
+        )
         async with postgres.session() as session:
             rows = await session.scalars(
                 select(cls)
@@ -185,7 +220,7 @@ class GuidancePoint(Base):
                 .where(
                     Repository.key == f"{owner}/{repo}".lower(),
                     PullRequest.number == pr_number,
-                    cls.head_sha == cls._latest_reviewed_head(),
+                    cls.head_sha == latest_head,
                 )
                 .order_by(cls.occurred_at, cls.id)
             )
@@ -198,7 +233,6 @@ class GuidancePoint(Base):
         *,
         summary: str,
         quote: str,
-        kind: GuidanceKind,
         author: str,
         occurred_at: datetime | None,
         reviewer_thread_id: str,
@@ -217,7 +251,6 @@ class GuidancePoint(Base):
             "quote_hash": cls.hash_quote(quote),
             "quote": quote,
             "summary": summary,
-            "kind": kind,
             "author": author,
             "occurred_at": occurred_at,
             "reviewer_thread_id": reviewer_thread_id,
@@ -231,12 +264,7 @@ class GuidancePoint(Base):
                     set_={
                         **{
                             key: values[key]
-                            for key in (
-                                "summary",
-                                "kind",
-                                "reviewer_thread_id",
-                                "head_sha",
-                            )
+                            for key in ("summary", "reviewer_thread_id", "head_sha")
                         },
                         # Attribution is matched against the stored turns, which
                         # a later run may fail to reach. Keeping the earlier
@@ -279,17 +307,11 @@ class GuidanceView(BaseModel):
 
     summary: str
     quote: str
-    kind: GuidanceKind
     author: str
 
     @classmethod
     def of(cls, point: GuidancePoint) -> Self:
-        return cls(
-            summary=point.summary,
-            quote=point.quote,
-            kind=point.kind,
-            author=point.author,
-        )
+        return cls(summary=point.summary, quote=point.quote, author=point.author)
 
     @classmethod
     async def for_pull_request(cls, owner: str, repo: str, pr_number: int) -> list[Self]:

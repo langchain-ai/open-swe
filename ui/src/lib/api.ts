@@ -858,12 +858,6 @@ export interface PublishedReviewAssessment {
   explanation: string
 }
 
-export type GuidanceKind =
-  | "correction"
-  | "constraint"
-  | "direction"
-  | "preference"
-
 /**
  * One place the author redirected Open SWE that the reviewer could see in the
  * final change. Recorded during a review, so it is absent until one has run.
@@ -871,7 +865,6 @@ export type GuidanceKind =
 export interface GuidancePoint {
   summary: string
   quote: string
-  kind: GuidanceKind
   /** Empty when the quote matched no stored message. */
   author: string
 }

@@ -17,9 +17,6 @@ def upgrade() -> None:
             quote_hash text NOT NULL,
             quote text NOT NULL,
             summary text NOT NULL,
-            kind text NOT NULL CHECK (
-                kind IN ('correction', 'constraint', 'direction', 'preference')
-            ),
             author text NOT NULL DEFAULT '',
             occurred_at timestamptz,
             reviewer_thread_id text NOT NULL DEFAULT '',
@@ -43,6 +40,19 @@ def upgrade() -> None:
         """
         CREATE INDEX pull_request_guidance_pr_idx
             ON pull_request_guidance (pull_request_id, occurred_at, id)
+        """
+    )
+
+    # The commit the last completed review stands behind. A point is a claim
+    # about one commit, so this is what decides which points are still true —
+    # including when a review recognises none, which writes no point at all.
+    op.execute(
+        """
+        CREATE TABLE pull_request_guidance_review (
+            pull_request_id uuid PRIMARY KEY REFERENCES pull_request (id) ON DELETE CASCADE,
+            head_sha text NOT NULL,
+            completed_at timestamptz NOT NULL DEFAULT clock_timestamp()
+        )
         """
     )
 
