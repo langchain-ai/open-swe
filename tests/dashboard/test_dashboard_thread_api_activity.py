@@ -32,12 +32,9 @@ class FakeRuns:
         self.status = status
         self.run_id = run_id
 
-    async def list(
-        self, thread_id: str, limit: int = 1, status: str | None = None
-    ) -> list[dict[str, str]]:
+    async def list(self, thread_id: str, limit: int = 1) -> list[dict[str, str]]:
         assert thread_id == "tid"
-        runs = [{"run_id": self.run_id, "status": self.status}]
-        return [run for run in runs if status is None or run["status"] == status][:limit]
+        return [{"run_id": self.run_id, "status": self.status}]
 
 
 class FakeStore:

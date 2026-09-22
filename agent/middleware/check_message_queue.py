@@ -167,12 +167,7 @@ async def _consume_queued_messages(
     """
     current_item = await store.aget(namespace, "pending_messages")
     current = current_item.value.get("messages", []) if current_item is not None else []
-    if not isinstance(current, list):
-        current = []
-    if current[: len(consumed)] == consumed:
-        remaining = current[len(consumed) :]
-    else:
-        remaining = [message for message in current if message not in consumed]
+    remaining = [message for message in current if message not in consumed]
     if remaining:
         await store.aput(namespace, "pending_messages", {"messages": remaining})
     else:

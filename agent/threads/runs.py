@@ -857,11 +857,11 @@ async def steer_running_thread(
     if not isinstance(params, dict):
         params = {}
     content = _command_message_content(params)
-    if not _command_prompt_text(content) and not _dashboard_images_from_content(content):
+    command_images = _dashboard_images_from_content(content)
+    if not _command_prompt_text(content) and not command_images:
         raise HTTPException(422, "a follow-up needs a message")
 
     # The run keeps the model it started with, so images are held to it.
-    command_images = _dashboard_images_from_content(content)
     image_blocks = _image_blocks(command_images, model_id=_metadata_model_id(metadata))
 
     client = langgraph_client()

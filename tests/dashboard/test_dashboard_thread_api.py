@@ -3222,7 +3222,7 @@ async def test_steer_running_thread_records_and_delivers_the_follow_up(monkeypat
         appended.extend(commands)
         return AppendResult(versions=[1], events=[])
 
-    async def fake_open_turn_id(thread_id: str, run_id: str | None = None) -> UUID:
+    async def fake_open_turn_id(thread_id: str, run_id: str | None) -> UUID:
         assert run_id == "run-1"
         return turn
 
