@@ -181,7 +181,7 @@ function CloudAgentsPage() {
           />
           <SettingsRow
             label="Recent working contexts"
-            description="Include a privacy-filtered digest of your recent threads in agent runs. Disabled by default."
+            description="Include a filtered digest of your recent threads in agent runs."
             control={
               <Switch
                 checked={profile.data?.recent_thread_context_enabled ?? false}
