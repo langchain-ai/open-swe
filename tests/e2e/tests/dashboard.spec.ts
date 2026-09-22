@@ -68,10 +68,8 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
     const probeReceived = new Promise<void>((resolve) => {
       probeStarted = resolve;
     });
-    // Sending on an idle thread now always goes through stream.submit(),
-    // which dispatches via the commands endpoint (run.start) rather than
-    // the old dedicated /messages endpoint the composer used before the
-    // server-backed queue adapter migration.
+    // Sending on an idle thread goes through stream.submit(), which
+    // dispatches via the commands endpoint (run.start).
     await page.route(
       `**/dashboard/api/threads/${threadId}/commands`,
       async (route) => {
@@ -537,9 +535,9 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
     ).toBeVisible({ timeout: 30_000 });
   });
 
-  // The old queue lived on the client; this one lives on the server. Prove
-  // it: read the pending run straight from the LangGraph API, then hydrate
-  // the same thread in a browser session that never enqueued anything.
+  // Proves the queue lives server-side: read the pending run straight from
+  // the LangGraph API, then hydrate the same thread in a browser session
+  // that never enqueued anything.
   test("a queued follow-up is a real server-side pending run, visible to a fresh browser session", async ({
     page,
     browser,

@@ -178,8 +178,8 @@ async def test_cancel_interrupts_pending_and_running_runs(record, platform):
     )
     assert await turns.has_active_run("thread-1") is True
     # The stubbed `runs.list` always reports "a" as pending (it doesn't model
-    # cancellation taking effect), and queued_context_count now counts real
-    # pending runs alongside the legacy KV queue (empty here) — so 1, not 0.
+    # cancellation taking effect); queued_context_count counts real pending
+    # runs alongside the legacy KV queue (empty here) — so 1, not 0.
     assert await turns.queued_context_count("thread-1") == 1
 
 
