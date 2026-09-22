@@ -1,5 +1,6 @@
 """The one poll tool, across both kinds of background work."""
 
+from pathlib import Path
 from typing import Any, cast
 from unittest.mock import AsyncMock, patch
 
@@ -231,3 +232,110 @@ async def test_a_non_admin_still_reads_their_own_command(member: Any) -> None:
 
     assert result["success"] is True
     assert result["output"] == "ok"
+
+
+# --- waiting and throttling ---
+
+
+@pytest.mark.asyncio
+async def test_wait_returns_after_completion(admin: Any) -> None:
+    status = AsyncMock(
+        side_effect=[
+            {"task_id": "cmd-1", "status": "running"},
+            {"task_id": "cmd-1", "status": "completed", "output": "done"},
+        ]
+    )
+    with (
+        patch("agent.tools.background_task.asyncio.sleep", new_callable=AsyncMock),
+        patch("agent.tools.background_execute.task_status", status),
+    ):
+        result = await background_task("wait", "cmd-1", timeout=10)
+
+    assert result["success"] is True
+    assert result["task_id"] == "cmd-1"
+    assert result["status"] == "completed"
+    assert result["output"] == "done"
+    assert result["timed_out"] is False
+    assert result["waited_seconds"] >= 0
+    assert status.await_count == 2
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "status", ["completed", "failed", "stopped", "timed_out", "lost", "stop_requested"]
+)
+async def test_wait_does_not_sleep_for_terminal_status(admin: Any, status: str) -> None:
+    with (
+        patch(
+            "agent.tools.background_execute.task_status",
+            new_callable=AsyncMock,
+            return_value={"task_id": "cmd-1", "status": status},
+        ),
+        patch("agent.tools.background_task.asyncio.sleep", new_callable=AsyncMock) as sleep,
+    ):
+        result = await background_task("wait", "cmd-1")
+
+    assert result["status"] == status
+    assert result["waited_seconds"] == 0
+    assert result["timed_out"] is False
+    sleep.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_wait_caps_timeout_and_reports_deadline(
+    monkeypatch: pytest.MonkeyPatch, admin: Any
+) -> None:
+    clock = [0.0]
+
+    async def advance(seconds: float) -> None:
+        clock[0] += 300
+
+    with (
+        patch("agent.tools.background_task.time.monotonic", side_effect=lambda: clock[0]),
+        patch("agent.tools.background_task.asyncio.sleep", side_effect=advance) as sleep,
+        patch(
+            "agent.tools.background_execute.task_status",
+            new_callable=AsyncMock,
+            return_value={"task_id": "cmd-1", "status": "running"},
+        ),
+    ):
+        result = await background_task("wait", "cmd-1", timeout=999)
+
+    assert result["timed_out"] is True
+    assert result["waited_seconds"] == 300
+    sleep.assert_awaited_once_with(1)
+
+
+@pytest.mark.asyncio
+async def test_status_throttling_is_scoped_to_model_run(monkeypatch: pytest.MonkeyPatch) -> None:
+    config = {"configurable": {"github_login": "ramonn", "run_id": "run-a"}}
+    monkeypatch.setenv("CONFIGURED_ADMINS", "ramonn")
+    with (
+        patch("agent.run_config.get_config", return_value=config),
+        patch(
+            "agent.tools.background_execute.task_status",
+            new_callable=AsyncMock,
+            return_value={"task_id": "cmd-1", "status": "running"},
+        ),
+    ):
+        import importlib
+
+        background_task_module = importlib.import_module("agent.tools.background_task")
+
+        background_task_module._STATUS_READS.clear()
+        results = [await background_task("status", "cmd-1") for _ in range(6)]
+        config["configurable"]["run_id"] = "run-b"
+        next_run = await background_task("status", "cmd-1")
+        background_task_module._STATUS_READS.clear()
+
+    assert "guidance" not in results[4]
+    assert "guidance" in results[5]
+    assert "guidance" not in next_run
+
+
+def test_prompts_document_wait_instead_of_status_polling() -> None:
+    task_prompt = Path("agent/resources/prompts/tools/background_task.md").read_text()
+    execute_prompt = Path("agent/resources/prompts/tools/background_execute.md").read_text()
+    assert "`wait`" in task_prompt
+    assert "Never repeatedly call `status`" in task_prompt
+    assert 'action="wait"' in execute_prompt
