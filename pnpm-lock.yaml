@@ -22,6 +22,9 @@ overrides:
   postcss: 8.5.26
   undici: 7.29.0
 
+patchedDependencies:
+  '@electron/osx-sign@1.3.3': 086e476aefd85ed72d3d2b9b8580fbf7724951c4c36914c4f662e9182da7e9e2
+
 importers:
 
   .:
@@ -6341,7 +6344,7 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  '@electron/osx-sign@1.3.3(supports-color@10.2.2)':
+  '@electron/osx-sign@1.3.3(patch_hash=086e476aefd85ed72d3d2b9b8580fbf7724951c4c36914c4f662e9182da7e9e2)(supports-color@10.2.2)':
     dependencies:
       compare-version: 0.1.2
       debug: 4.4.3(supports-color@10.2.2)
@@ -8262,7 +8265,7 @@ snapshots:
       '@electron/fuses': 1.8.0
       '@electron/get': 3.1.0(supports-color@10.2.2)
       '@electron/notarize': 2.5.0(supports-color@10.2.2)
-      '@electron/osx-sign': 1.3.3(supports-color@10.2.2)
+      '@electron/osx-sign': 1.3.3(patch_hash=086e476aefd85ed72d3d2b9b8580fbf7724951c4c36914c4f662e9182da7e9e2)(supports-color@10.2.2)
       '@electron/rebuild': 4.2.0(supports-color@10.2.2)
       '@electron/universal': 2.0.3(supports-color@10.2.2)
       '@malept/flatpak-bundler': 0.4.0(supports-color@10.2.2)

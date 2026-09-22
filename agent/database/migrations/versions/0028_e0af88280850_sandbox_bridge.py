@@ -9,8 +9,8 @@ gone for good.
 
 from alembic import op
 
-revision = "0027"
-down_revision = "0026"
+revision = "e0af88280850"
+down_revision = "abb47eb3f8b2"
 branch_labels = None
 depends_on = None
 

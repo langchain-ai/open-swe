@@ -36,7 +36,6 @@ _TOOL_MODULES = {
     "recreate_sandbox": ".recreate_sandbox",
     "refresh_workspace_start": ".workspaces",
     "report_platform_issue": ".report_platform_issue",
-    "request_pr_review": "agent.slack.tools.request_pr_review",
     "reply_to_finding_thread": ".reply_to_finding_thread",
     "resolve_finding_thread": ".resolve_finding_thread",
     "delete_organization_skill": ".organization_skills",
@@ -100,7 +99,6 @@ __all__ = [
     "recreate_sandbox",
     "refresh_workspace_start",
     "report_platform_issue",
-    "request_pr_review",
     "reply_to_finding_thread",
     "resolve_finding_thread",
     "publish_workspace",
@@ -143,7 +141,6 @@ if TYPE_CHECKING:
     from agent.slack.tools.read_channel_messages import slack_read_channel_messages
     from agent.slack.tools.read_thread_messages import slack_read_thread_messages
     from agent.slack.tools.reply import slack_reply
-    from agent.slack.tools.request_pr_review import request_pr_review
     from agent.slack.tools.start_new_thread import slack_start_new_thread
     from agent.tools.add_finding import add_finding
     from agent.tools.automations import (

@@ -66,14 +66,14 @@ def farewell(name):
 EOF
 """.strip()
 
-# The expedited-review flow needs a change small enough to qualify (at most ten
-# changed lines, no protected paths), so it touches one line of one file.
+# The expedited-review flow needs a change small enough to qualify, so it
+# touches one line of one file.
 EXPEDITE_MARKER = "E2E_EXPEDITE"
 EXPEDITE_NOW_MARKER = "E2E_EXPEDITE_NOW"
 EXPEDITE_PR_TITLE = "Fix the greeting punctuation"
 
 # The seeded remote holds only a README, so the first turn writes the file. Two
-# added lines keeps the pull request inside the ten-line eligibility limit.
+# added lines keeps the pull request inside the eligibility limit.
 _EXPEDITE_SETUP_SCRIPT = f"""
 set -e
 rm -rf repo

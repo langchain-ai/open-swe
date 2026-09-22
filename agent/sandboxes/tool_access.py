@@ -15,7 +15,8 @@ from agent.utils.dashboard_links import dashboard_api_base_url
 if TYPE_CHECKING:
     from deepagents.backends.protocol import SandboxBackendProtocol
 
-TOOLS_PATH = "/sandbox-tools"
+# Under /dashboard/api so a dashboard deployment that fronts the backend forwards it.
+TOOLS_PATH = "/dashboard/api/sandbox-tools"
 TOOLS_HEADER = "X-Open-SWE-Tools-Token"
 TOOLS_RULE = "open-swe-thread-tools"
 TOOLS_URL_FILE = "/tmp/open-swe-tools-url"

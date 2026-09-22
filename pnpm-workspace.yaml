@@ -32,3 +32,6 @@ overrides:
   'nanoid@>=3.0.0 <4.0.0': 3.3.18
   postcss: 8.5.26
   undici: 7.29.0
+
+patchedDependencies:
+  '@electron/osx-sign@1.3.3': desktop/patches/@electron__osx-sign@1.3.3.patch

@@ -16,6 +16,7 @@ from langchain.agents.middleware.types import (
 )
 from langchain_core.messages import ToolMessage
 from langgraph.config import get_config
+from langgraph.errors import NodeCancelledError
 from langgraph.prebuilt.tool_node import ToolCallRequest
 from langgraph.types import Command
 from langsmith.sandbox import (
@@ -174,6 +175,8 @@ class ToolErrorMiddleware(OpenSWEMiddleware):
     ) -> ToolMessage | Command:
         try:
             return await handler(request)
+        except NodeCancelledError:
+            raise
         except Exception as e:
             # The command never started, so nothing is known to be wrong with the
             # sandbox: ending the run here would turn a gateway blip into an
