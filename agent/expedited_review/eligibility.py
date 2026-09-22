@@ -46,7 +46,12 @@ class ChangedFile(BaseModel):
 
     @property
     def is_test(self) -> bool:
-        return _TEST_PATH.search(self.filename) is not None
+        """A file crossing into or out of the tests tree is a production change either way."""
+        if _TEST_PATH.search(self.filename) is None:
+            return False
+        return (
+            self.previous_filename is None or _TEST_PATH.search(self.previous_filename) is not None
+        )
 
     @property
     def changed_lines(self) -> int:

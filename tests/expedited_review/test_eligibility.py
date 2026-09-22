@@ -132,3 +132,27 @@ def test_a_test_heavy_change_still_only_names_tests_it_cannot_draw() -> None:
 
     assert shown == []
     assert [file.filename for file in named] == ["tests/test_app.py"]
+
+
+def test_a_move_into_the_tests_tree_is_not_exempt() -> None:
+    """The production file disappears; the voters have to see that."""
+    moved = ChangedFile(
+        filename="tests/critical.py",
+        previous_filename="agent/critical.py",
+        status="renamed",
+        patch=None,
+    )
+
+    assert not moved.is_test
+    assert isinstance(assess_eligibility([moved]), Ineligible)
+
+
+def test_a_move_within_the_tests_tree_stays_exempt() -> None:
+    moved = ChangedFile(
+        filename="tests/unit/test_app.py",
+        previous_filename="tests/test_app.py",
+        status="renamed",
+        patch=None,
+    )
+
+    assert moved.is_test
