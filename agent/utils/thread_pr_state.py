@@ -10,6 +10,8 @@ from contextlib import asynccontextmanager
 from langgraph_sdk.client import LangGraphClient
 from langgraph_sdk.errors import ConflictError, NotFoundError
 
+from agent.utils.json_types import thread_metadata
+
 logger = logging.getLogger(__name__)
 
 _LOCK_TTL_MINUTES = 2
@@ -24,11 +26,17 @@ async def agent_thread_pr_state_lock(
     client: LangGraphClient, thread_id: str
 ) -> AsyncIterator[None]:
     lock_id = str(uuid.uuid5(uuid.NAMESPACE_URL, f"open-swe:pr-state-lock:{thread_id}"))
+    owner = str(uuid.uuid4())
     deadline = asyncio.get_running_loop().time() + _LOCK_TIMEOUT_SECONDS
     attempt = 0
     while True:
         try:
-            await client.threads.create(thread_id=lock_id, if_exists="raise", ttl=_LOCK_TTL_MINUTES)
+            await client.threads.create(
+                thread_id=lock_id,
+                if_exists="raise",
+                ttl=_LOCK_TTL_MINUTES,
+                metadata={"lock_owner": owner},
+            )
             break
         except ConflictError:
             if asyncio.get_running_loop().time() >= deadline:
@@ -43,13 +51,20 @@ async def agent_thread_pr_state_lock(
         yield
     finally:
         # A failed release holds the lock until its TTL is swept, so ride out brief API outages.
+        retrying = False
         for delay in (*_RELEASE_RETRY_DELAYS_SECONDS, None):
             try:
+                # A failed DELETE may still have committed and let another waiter acquire.
+                if retrying and (
+                    thread_metadata(await client.threads.get(lock_id)).get("lock_owner") != owner
+                ):
+                    break
                 await client.threads.delete(lock_id)
                 break
             except NotFoundError:
                 break
             except Exception:
+                retrying = True
                 if delay is None:
                     logger.warning(
                         "Failed to release PR state lock",

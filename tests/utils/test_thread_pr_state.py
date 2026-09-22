@@ -38,12 +38,21 @@ async def test_contended_lock_backs_off_up_to_a_cap(sleeps: list[float]) -> None
         assert ceiling / 2 <= delay <= ceiling
 
 
-async def test_release_retries_transient_failures(sleeps: list[float]) -> None:
+@pytest.mark.parametrize("reacquired", [False, True])
+async def test_release_retries_only_while_still_owned(
+    sleeps: list[float], reacquired: bool
+) -> None:
     client = AsyncMock()
     unavailable = InternalServerError("unavailable", response=_response(503), body=None)
     client.threads.delete.side_effect = [unavailable, unavailable, None]
 
+    async def get(thread_id: str) -> dict[str, object]:
+        owner = client.threads.create.await_args.kwargs["metadata"]["lock_owner"]
+        return {"metadata": {"lock_owner": "other-waiter" if reacquired else owner}}
+
+    client.threads.get.side_effect = get
+
     async with agent_thread_pr_state_lock(client, "thread-1"):
         pass
 
-    assert client.threads.delete.await_count == 3
+    assert client.threads.delete.await_count == (1 if reacquired else 3)
