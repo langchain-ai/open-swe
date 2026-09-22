@@ -1486,7 +1486,7 @@ function UserCell({
                 <span aria-hidden="true">🏆</span>
               </TooltipTrigger>
               <TooltipPopup>
-                Most feedback given in the selected date range (including ties).
+                Most feedback given in the selected date range.
               </TooltipPopup>
             </Tooltip>
           )}

@@ -950,9 +950,7 @@ it("explains the feedback trophy on focus", async () => {
   })
   act(() => trigger.focus())
   expect(
-    await screen.findByText(
-      "Most feedback given in the selected date range (including ties)."
-    )
+    await screen.findByText("Most feedback given in the selected date range.")
   ).toBeTruthy()
   client.clear()
 })
