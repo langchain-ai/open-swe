@@ -12,9 +12,12 @@ wrapper is actually gone. The reviewer is the one process holding the diff and
 the checked-out repo, so it makes that call itself through ``record_guidance``
 and each verdict becomes a :class:`GuidancePoint` row.
 
-The quote is a point's identity. A re-review re-reads the same messages and
-re-derives points it already recorded, so writing by quote keeps the newest
-verdict instead of accumulating a row per push.
+The quote is a point's identity and the reviewed head is its scope. A re-review
+re-reads the same messages and re-derives points it already recorded, so writing
+by quote keeps the newest verdict instead of accumulating a row per push, and
+carries that row's head forward. Reads then show only the head the newest
+published review stands behind, so a point the latest review no longer
+recognises stops being shown without anything having to delete it.
 """
 
 import hashlib
@@ -31,7 +34,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from agent.database import postgres
 from agent.database.orm import NOW, Base
-from agent.github.pull_requests import PullRequest
+from agent.github.pull_requests import PullRequest, ReviewLink
 from agent.github.repositories import Repository
 from agent.input_messages import input_message_text, message_sender_id
 
@@ -148,8 +151,32 @@ class GuidancePoint(Base):
         return hashlib.sha256(quote.strip().lower().encode()).hexdigest()
 
     @classmethod
+    def _latest_reviewed_head(cls):  # noqa: ANN206
+        """The head SHA of the newest published review of this point's pull request.
+
+        Publishing is what marks a review complete, and it writes the head it
+        reviewed, so this is the commit the visible set must belong to.
+        """
+        return (
+            select(ReviewLink.head_sha)
+            .where(ReviewLink.pull_request_id == cls.pull_request_id, ReviewLink.head_sha != "")
+            .order_by(ReviewLink.published_at.desc(), ReviewLink.id.desc())
+            .limit(1)
+            .scalar_subquery()
+        )
+
+    @classmethod
     async def for_pull_request(cls, owner: str, repo: str, pr_number: int) -> list[Self]:
-        """Recorded points, oldest steering first; empty when no review has run."""
+        """Points the newest published review stands behind, oldest steering first.
+
+        Scoped to that review's head rather than to the pull request, because a
+        point is only ever a claim about one commit. A re-review that no longer
+        recognises a point does not re-record it, so the row keeps the older
+        head and drops out here — including when the new review recognises
+        nothing at all, which no reconciliation triggered by a write could
+        cover. A re-recorded point carries its row forward to the new head, so
+        the visible set is always exactly what the last review would say.
+        """
         async with postgres.session() as session:
             rows = await session.scalars(
                 select(cls)
@@ -158,6 +185,7 @@ class GuidancePoint(Base):
                 .where(
                     Repository.key == f"{owner}/{repo}".lower(),
                     PullRequest.number == pr_number,
+                    cls.head_sha == cls._latest_reviewed_head(),
                 )
                 .order_by(cls.occurred_at, cls.id)
             )
