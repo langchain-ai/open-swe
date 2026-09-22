@@ -190,10 +190,7 @@ class GitHubProxyRule(TypedDict):
 
 def _github_proxy_rules(github_token: str | None) -> list[GitHubProxyRule]:
     if not github_token:
-        return [
-            {"name": "github-api", "match_hosts": ["api.github.com"], "headers": []},
-            {"name": "github", "match_hosts": ["github.com", "*.github.com"], "headers": []},
-        ]
+        return []
     basic_auth = base64.b64encode(f"x-access-token:{github_token}".encode()).decode()
     # GitHub enforces repository IDs on the token, including for mixed-case URLs.
     return [

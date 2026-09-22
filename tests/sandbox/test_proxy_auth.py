@@ -130,14 +130,14 @@ class TestConfigureSandboxProxy:
             mock_client.patch = AsyncMock(return_value=MagicMock())
             _mock_async_client(mock_client_cls, mock_client)
 
-            await configure_sandbox_proxy("sandbox-abc123", None)
+            await configure_sandbox_proxy(
+                "sandbox-abc123",
+                None,
+                base_proxy_config={"rules": [{"name": "github", "headers": [{"value": "old"}]}]},
+            )
 
             rules = mock_client.patch.call_args.kwargs["json"]["proxy_config"]["rules"]
-            github_rules = {rule["name"]: rule for rule in rules[:2]}
-            assert set(github_rules) == {"github-api", "github"}
-            for rule in github_rules.values():
-                assert rule["headers"] == []
-                assert "env_vars" not in rule
+            assert not {"github", "github-api"} & {rule["name"] for rule in rules}
 
     async def test_preserves_custom_proxy_config_when_adding_github_auth(self) -> None:
         custom_rule = {"name": "public-api", "match_hosts": ["example.com"]}
