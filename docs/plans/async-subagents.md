@@ -30,7 +30,7 @@ reviewer and chat graphs keep their synchronous subagents.
 
 | Tool | Args | Behaviour |
 |---|---|---|
-| `spawn_agent` | `task_name`, `message`, `model?: fast \| balanced \| performance`, `isolation?: shared \| worktree` (default `shared`) | Create child thread, dispatch forked run, return `{agent_id, task_name, model, worktree?}` |
+| `spawn_agent` | `task_name`, `message`, `fork_turns?: all \| none \| "<n>"` (default `all`), `model?: fast \| balanced \| performance`, `isolation?: shared \| worktree` (default `shared`) | Create child thread, dispatch forked run, return `{agent_id, task_name, model, worktree?}`. `model` is rejected when `fork_turns` is `all` |
 | `merge_agent` | `target` | Worktree children only: rebase the child branch onto the parent's HEAD in the child's worktree, then `git merge --ff-only` in the main worktree. On conflict, abort and return the conflicting files |
 | `wait_agent` | `timeout_s?` (clamp 30s to 10m, default 60s) | Block until any child reaches a terminal status or the parent's queue gets a subagent item; returns a status summary only |
 | `send_message` | `target`, `message` | Parent → child: new run on the child with `multitask_strategy="interrupt"`; the in-flight step is cancelled, checkpointed history is kept, the message is handled immediately. Child → parent (`target = "parent"`): queued to the parent's inbox and delivered before its next model call, waking it if idle; never interrupts |
@@ -43,10 +43,18 @@ budgets the transcript section. The transcript fills newest-first and includes
 tool calls (name, args preview, output preview), not only human/AI text, so the
 tail of the child's work is what fits.
 
-`model` omitted inherits the parent's resolved model and effort. A tier resolves
-through `settings.agent_routing_models` at spawn time and lands in the child's
-configurable as `agent_model_id` / `agent_effort` with `model_selection: "explicit"`,
-which `build_agent` already honours as a per-thread override.
+Model and fork depth follow codex. `fork_turns="all"` (the default) copies the
+whole parent conversation and always inherits the parent's resolved model and
+effort; passing `model` with it is an error, because a full-history fork on a
+different model throws away the prompt-cache prefix and the tool-call history may
+not round-trip across providers. `fork_turns="none"` starts the child with only
+the task message; a positive integer copies the last N turns (a turn is one human
+message and everything up to the next). Only these partial forks accept `model`.
+A tier resolves through `settings.agent_routing_models` at spawn time and lands
+in the child's configurable as `agent_model_id` / `agent_effort` with
+`model_selection: "explicit"`, which `build_agent` already honours as a per-thread
+override. The tool description says so and tells the parent to set `model` only
+when the user, `AGENTS.md`, or a skill asks for it.
 
 Limits: max 4 live children per parent (codex "concurrency slots"), depth 1
 (children never get the spawn tools). Tools are excluded in plan mode and for
@@ -59,9 +67,10 @@ automatic incident turns, same as `task` today.
    `visibility`, participants, `source`; plus `parent_thread_id`,
    `subagent_task_name`, `title = task_name`, `unlisted: true`.
 2. Build fork input like deepagents `_fork_messages`: parent messages with the
-   offloading summary applied, trailing AI tool-call message dropped, then one
-   `HumanMessage` with the fork preamble and the task. Reuse the existing
-   `_FORK_TASK_PREAMBLE` text as a prompt file.
+   offloading summary applied, cut to the last `fork_turns` turns when partial,
+   trailing AI tool-call message dropped, then one `HumanMessage` with the fork
+   preamble and the task. Reuse the existing `_FORK_TASK_PREAMBLE` text as a
+   prompt file. `fork_turns="none"` sends the task message alone.
 3. `dispatch_agent_run(child_id, input=..., configurable=child_cfg, source=parent source)`.
    Child configurable = parent configurable with `parent_thread_id`,
    `subagent_task_name`, model override, and a fresh invocation id.
