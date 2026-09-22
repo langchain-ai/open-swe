@@ -8,6 +8,7 @@ from uuid import UUID, uuid4
 
 import pytest
 from sqlalchemy import text
+from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from agent.analytics import ingestion, summaries
@@ -35,6 +36,104 @@ async def summary_storage(analytics_db, monkeypatch):
 async def flush_summaries():
     while await summaries.recompute_dirty_partitions(limit=100):
         pass
+
+
+@pytest.mark.parametrize("failure", [None, "cancel", "publish"])
+async def test_ingestion_progresses_during_summary_and_invalidation_survives_retry(
+    analytics_db: tuple[UUID, Callable[[], AbstractAsyncContextManager[AsyncConnection]]],
+    monkeypatch: pytest.MonkeyPatch,
+    failure: str | None,
+) -> None:
+    workspace, transaction = analytics_db
+    initial = event(
+        workspace,
+        EventName.RUN_STARTED,
+        RunStartedPayload(model_attribution_quality="unavailable"),
+        run_id=uuid4(),
+    )
+    await ingestion.ingest(initial)
+    async with transaction() as conn:
+        await conn.execute(text("DELETE FROM dirty_summary_partitions WHERE family <> 'additive'"))
+        if failure == "publish":
+            await conn.execute(
+                text("""
+                CREATE FUNCTION reject_summary() RETURNS trigger LANGUAGE plpgsql AS $$
+                BEGIN RAISE EXCEPTION 'summary publish failed'; END; $$
+                """)
+            )
+            await conn.execute(
+                text("""
+                CREATE TRIGGER reject_summary BEFORE DELETE ON dirty_summary_partitions
+                FOR EACH ROW EXECUTE FUNCTION reject_summary()
+                """)
+            )
+    computed, release = asyncio.Event(), asyncio.Event()
+    compute = summaries._compute
+
+    async def paused(conn: AsyncConnection, partition: dict[str, object]) -> dict[str, object]:
+        payload = await compute(conn, partition)
+        computed.set()
+        await release.wait()
+        return payload
+
+    monkeypatch.setattr(summaries, "_compute", paused)
+    worker = asyncio.create_task(summaries.recompute_dirty_partitions(limit=1))
+    arrivals = [
+        event(
+            workspace,
+            EventName.RUN_STARTED,
+            RunStartedPayload(model_attribution_quality="unavailable"),
+            run_id=uuid4(),
+        )
+        for _ in range(2)
+    ]
+    try:
+        await asyncio.wait_for(computed.wait(), timeout=5)
+        assert await asyncio.wait_for(summaries.recompute_dirty_partitions(limit=1), timeout=5) == 0
+        if failure != "publish":
+            assert await asyncio.wait_for(
+                asyncio.gather(*(ingestion.ingest(item) for item in arrivals)), timeout=5
+            ) == [True, True]
+        if failure == "cancel":
+            worker.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await worker
+        else:
+            release.set()
+            if failure == "publish":
+                with pytest.raises(DBAPIError, match="summary publish failed"):
+                    await asyncio.wait_for(worker, timeout=5)
+            else:
+                assert await asyncio.wait_for(worker, timeout=5) == 1
+    finally:
+        release.set()
+        if not worker.done():
+            worker.cancel()
+        await asyncio.gather(worker, return_exceptions=True)
+    monkeypatch.setattr(summaries, "_compute", compute)
+    async with transaction() as conn:
+        assert (
+            await conn.scalar(
+                text("SELECT count(*) FROM dirty_summary_partitions WHERE family = 'additive'")
+            )
+            == 1
+        )
+        counters = await conn.scalar(text("SELECT counters FROM daily_summaries"))
+        assert counters == ({"run.started": 1} if failure is None else None)
+        if failure == "publish":
+            await conn.execute(text("DROP TRIGGER reject_summary ON dirty_summary_partitions"))
+    await asyncio.wait_for(flush_summaries(), timeout=5)
+    for item in [initial, *(arrivals if failure != "publish" else [])]:
+        assert not await ingestion.ingest(item)
+    expected = 1 if failure == "publish" else 3
+    async with transaction() as conn:
+        assert (
+            await conn.scalar(text("SELECT event_count FROM additive_event_projection")) == expected
+        )
+        assert await conn.scalar(
+            text("SELECT counters FROM daily_summaries WHERE family = 'additive'")
+        ) == {"run.started": expected}
+        assert await conn.scalar(text("SELECT count(*) FROM dirty_summary_partitions")) == 0
 
 
 async def test_cost_updates_recompute_the_run_start_day(analytics_db):
