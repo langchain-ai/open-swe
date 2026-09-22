@@ -9,10 +9,13 @@ import {
   SIDEBAR_PAGE_SIZE,
   agentThreadKeys,
   markAgentThreadViewed,
+  optimisticThread,
   setAgentThreadStatus,
   useAgentThreadWorkingTreeDiff,
+  usePinAgentThread,
   useResolveAgentThread,
   useSidebarActiveThread,
+  useSidebarPinnedThreads,
   useSidebarRepoThreads,
   useSidebarRecents,
   useThreadsPage,
@@ -269,6 +272,85 @@ describe("setAgentThreadStatus", () => {
 })
 
 describe("sidebar queries", () => {
+  it("polls independent pins, detects external starts, and stops when all finish", async () => {
+    vi.useFakeTimers()
+    const idle = {
+      ...optimisticThread("outside-page", { prompt: "Old resolved pin" }),
+      status: "finished" as const,
+      resolved: true,
+    }
+    const running = optimisticThread("running-pin", { prompt: "Running pin" })
+    const listPins = vi
+      .spyOn(agentsApi, "listPinnedThreads")
+      .mockResolvedValueOnce([idle, running])
+      .mockResolvedValueOnce([
+        { ...idle, status: "running" },
+        { ...running, status: "finished" },
+      ])
+      .mockResolvedValue([idle, { ...running, status: "finished" }])
+    const client = testClient()
+    client.setQueryData(agentThreadKeys.page(params), page)
+    const { result } = renderHook(() => useSidebarPinnedThreads(), {
+      wrapper: ({ children }) => (
+        <QueryClientProvider client={client}>{children}</QueryClientProvider>
+      ),
+    })
+    await vi.waitFor(() => expect(result.current.data?.[0]).toEqual(idle))
+    await act(() => vi.advanceTimersByTimeAsync(2000))
+    await vi.waitFor(() =>
+      expect(result.current.data?.map((thread) => thread.status)).toEqual([
+        "running",
+        "finished",
+      ])
+    )
+    await act(() => vi.advanceTimersByTimeAsync(2000))
+    await vi.waitFor(() =>
+      expect(
+        result.current.data?.every((thread) => thread.status === "finished")
+      ).toBe(true)
+    )
+    const calls = listPins.mock.calls.length
+    await act(() => vi.advanceTimersByTimeAsync(6000))
+    expect(listPins).toHaveBeenCalledTimes(calls)
+    expect(result.current.data?.map((thread) => thread.id)).toEqual([
+      "outside-page",
+      "running-pin",
+    ])
+  })
+
+  it("refreshes idle pins after pin and unpin mutations", async () => {
+    const pin = {
+      ...optimisticThread("outside-page", { prompt: "Pinned thread" }),
+      status: "finished" as const,
+    }
+    vi.spyOn(agentsApi, "listPinnedThreads")
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([pin])
+      .mockResolvedValue([])
+    vi.spyOn(agentsApi, "pinThread").mockResolvedValue(undefined)
+    const client = testClient()
+    const { result } = renderHook(
+      () => ({
+        pins: useSidebarPinnedThreads(),
+        mutation: usePinAgentThread(),
+      }),
+      {
+        wrapper: ({ children }) => (
+          <QueryClientProvider client={client}>{children}</QueryClientProvider>
+        ),
+      }
+    )
+    await waitFor(() => expect(result.current.pins.data).toEqual([]))
+    await act(() =>
+      result.current.mutation.mutateAsync({ threadId: pin.id, pinned: true })
+    )
+    await waitFor(() => expect(result.current.pins.data).toEqual([pin]))
+    await act(() =>
+      result.current.mutation.mutateAsync({ threadId: pin.id, pinned: false })
+    )
+    await waitFor(() => expect(result.current.pins.data).toEqual([]))
+  })
+
   it("scopes Recents to ownerless threads only in repository mode", async () => {
     const listThreads = vi
       .spyOn(agentsApi, "listThreadsPage")
