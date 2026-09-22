@@ -1477,6 +1477,19 @@ function UserCell({
       <div className="flex min-w-0 flex-col">
         <div className="flex min-w-0 items-center gap-1.5">
           {name}
+          {row.is_top_feedback_contributor && (
+            <Tooltip>
+              <TooltipTrigger
+                aria-label="Top feedback contributor"
+                className="shrink-0 cursor-help rounded-sm focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+              >
+                <span aria-hidden="true">🏆</span>
+              </TooltipTrigger>
+              <TooltipPopup>
+                Most feedback given in the selected date range.
+              </TooltipPopup>
+            </Tooltip>
+          )}
           {isCurrentUser ? (
             <Badge variant="secondary" aria-label="You">
               You
