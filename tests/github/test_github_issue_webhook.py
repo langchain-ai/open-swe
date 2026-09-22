@@ -23,6 +23,7 @@ from agent.slack.tools.request_pr_review import request_pr_review as request_pr_
 from agent.thread_ids import github_issue_thread_id
 from agent.users import User
 from agent.webhooks import common as webhook_common
+from agent.workspaces.store import WORKSPACES, Workspace
 from tests.conftest import post_signed_github_webhook
 
 request_pr_review_module = importlib.import_module("agent.slack.tools.request_pr_review")
@@ -59,6 +60,9 @@ def _slack_routing_dependencies(monkeypatch: pytest.MonkeyPatch) -> None:
 async def _post_github_webhook(
     event_type: str, payload: dict[object, object], *, delivery_id: str | None = None
 ) -> httpx.Response:
+    await WORKSPACES.put(
+        "oss", Workspace(slug="oss", repos=["langchain-ai/open-swe", "langchain-ai/public-demo"])
+    )
     return await post_signed_github_webhook(
         event_type, payload, secret=_TEST_WEBHOOK_SECRET, delivery_id=delivery_id
     )

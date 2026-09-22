@@ -41,7 +41,9 @@ class WorkspaceResolution:
 
 
 async def _slug_exists(slug: str) -> bool:
-    """Whether this name is a workspace; raises when the lookup itself fails."""
+    """Whether this name selects a workspace, including an unconfigured default."""
+    if slug == DEFAULT_WORKSPACE_SLUG:
+        return True
     try:
         return await WORKSPACES.slug_exists(slug)
     except Exception as exc:
@@ -113,7 +115,7 @@ def _unassigned_policy() -> str:
     return value if value in ("default", "ignore") else "default"
 
 
-async def repo_is_routable(owner: str, name: str) -> bool:
+async def repo_is_routable(owner: str, name: str, *, private: bool = False) -> bool:
     """Whether a GitHub event for this repository should be handled at all.
 
     Raises :class:`WorkspaceLookupError` when ownership cannot be read, and when
@@ -130,7 +132,7 @@ async def repo_is_routable(owner: str, name: str) -> bool:
         raise WorkspaceLookupError("workspace population lookup failed") from exc
     if not populated:
         raise WorkspaceLookupError("workspaces have not been imported into PostgreSQL yet")
-    return _unassigned_policy() == "default"
+    return private and _unassigned_policy() == "default"
 
 
 async def _resolve_from_store(
@@ -149,8 +151,7 @@ async def _resolve_from_store(
             return WorkspaceResolution(tagged, "tag")
     if repo is not None:
         owner = await _repo_owner(*repo)
-        if owner is not None:
-            return WorkspaceResolution(owner, "repo")
+        return WorkspaceResolution(owner or DEFAULT_WORKSPACE_SLUG, "repo")
     if slack_channel_id:
         owner = await _channel_owner(slack_channel_id)
         if owner is not None:

@@ -70,32 +70,44 @@ const workspaces = [
   },
 ]
 const accessible = [
-  { full_name: "acme/oss" },
-  { full_name: "acme/tools" },
-  { full_name: "Acme/Internal" },
-  { full_name: "acme/shared" },
+  { full_name: "acme/oss", private: false },
+  { full_name: "acme/tools", private: true },
+  { full_name: "Acme/Internal", private: true },
+  { full_name: "acme/shared", private: true },
+  { full_name: "acme/public", private: false },
 ]
 const names = (repos: Array<{ full_name: string }>) =>
   repos.map((repo) => repo.full_name)
 
 describe("reposForWorkspace", () => {
-  it("offers a workspace the accessible repositories it owns plus its default", () => {
+  it("offers a named workspace only the accessible repositories it owns", () => {
     expect(names(reposForWorkspace("oss", workspaces, accessible))).toEqual([
       "acme/oss",
     ])
-    // An unassigned default inherited from the instance is still usable.
-    expect(names(reposForWorkspace("docs", workspaces, accessible))).toEqual([
-      "acme/shared",
-    ])
+    expect(names(reposForWorkspace("docs", workspaces, accessible))).toEqual([])
   })
 
-  it("offers the default workspace everything no other workspace claims", () => {
+  it("offers the default workspace only private repositories no other workspace claims", () => {
     expect(names(reposForWorkspace("default", workspaces, accessible))).toEqual(
       ["acme/tools", "Acme/Internal", "acme/shared"]
     )
     expect(names(reposForWorkspace(null, [], accessible))).toEqual(
-      names(accessible)
+      ["acme/tools", "Acme/Internal", "acme/shared"]
     )
+  })
+
+  it("offers public repositories only when explicitly assigned to default", () => {
+    const defaults = [
+      {
+        slug: "default",
+        repos: ["ACME/oss"],
+        is_default: true,
+        default_repo: "acme/public",
+      },
+    ]
+    expect(names(reposForWorkspace("default", defaults, accessible))).toEqual([
+      "acme/oss", "acme/tools", "Acme/Internal", "acme/shared",
+    ])
   })
 })
 

@@ -182,7 +182,7 @@ export function AgentsHome({
     repoWorkspace: namedRepo
       ? (workspaces.find((workspace) =>
           workspace.repos.some((r) => r.toLowerCase() === namedRepo)
-        )?.slug ?? null)
+        )?.slug ?? defaultWorkspaceSlug)
       : null,
     userDefault: preferences.data?.default_workspace,
     instanceDefault: defaultWorkspaceSlug,

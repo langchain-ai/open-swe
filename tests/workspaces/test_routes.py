@@ -119,6 +119,22 @@ async def test_options_carry_repos_channels_and_default_flag(
     ]
 
 
+async def test_options_offer_default_without_a_saved_workspace(
+    admin_client: httpx.AsyncClient, fake_store: FakeStore
+) -> None:
+    await admin_client.post(
+        "/dashboard/api/workspaces", json={"name": "OSS", "repos": ["acme/oss"]}
+    )
+
+    response = await admin_client.get("/dashboard/api/workspaces/options")
+
+    assert response.status_code == 200
+    options = {item["slug"]: item for item in response.json()["workspaces"]}
+    assert options["default"]["is_default"] is True
+    assert options["default"]["repos"] == []
+    assert await WORKSPACES.get("default") is None
+
+
 async def test_options_carry_each_workspace_default_repository(
     admin_client: httpx.AsyncClient, fake_store: FakeStore
 ) -> None:

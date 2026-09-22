@@ -393,8 +393,8 @@ ENV.var(
 )
 ENV.var(
     "OPEN_SWE_UNASSIGNED_REPO_WORKSPACE",
-    "Where GitHub events for a repository no workspace owns go: 'default' routes them to the "
-    "default workspace, 'ignore' drops them.",
+    "Where GitHub events for a private repository no workspace owns go: 'default' routes them "
+    "to the default workspace, 'ignore' drops them. Public repositories require a workspace.",
     default="default",
 )
 ENV.var(

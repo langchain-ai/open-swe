@@ -34,7 +34,9 @@ A workspace has an immutable slug and a display name, plus:
 
 - **Repositories.** One or more `owner/name` entries. A repository may appear in exactly one
   workspace; saving a workspace that claims a repository another workspace owns fails. The
-  `default` workspace may list no repositories, because it also receives unassigned work.
+  `default` workspace may list no repositories: it implicitly covers private repositories
+  accessible to the GitHub App that no workspace explicitly owns. Public repositories need
+  an explicit assignment for authenticated access and GitHub webhook runs.
 - **Environment fields**, moved from the environment record unchanged: prompt, base snapshot,
   setup and update scripts, sandbox resources, create parameters, captured snapshot state, and
   the refresh schedule. Snapshot names keep their current form so existing snapshots stay valid.
@@ -97,15 +99,17 @@ Every thread records its workspace at creation and never changes it. Resolution 
 order, and the first match wins:
 
 1. An existing thread's recorded workspace. Follow-ups on issues, PRs, and Slack threads land here.
-2. The repository named by the event or the message, through its owning workspace.
+2. The repository named by the event or the message, through its owning workspace, or
+   `default` if it is unassigned. This outranks the channel and user defaults.
 3. The Slack channel's bound workspace.
 4. The user's default workspace, a per-user preference.
 5. The `default` workspace.
 
 A `workspace:<slug>` tag on a message that opens a thread overrides steps 2 through 5, as the
 `env:` tag does today, and `env:` keeps working as an alias. Instance policy decides what happens
-to a GitHub event for a repository no workspace owns: route it to `default`, which is the
-compatible upgrade behavior, or drop it, which a locked-down install should prefer.
+to a GitHub event for a private repository no workspace owns: route it to `default`, or
+drop it. Public repositories and repositories with unknown visibility require an explicit
+workspace assignment regardless of that policy.
 
 ### Access
 
@@ -113,11 +117,19 @@ Every signed-in user may view and use every workspace, and every configured admi
 every workspace. Public threads remain visible to all signed-in users and private threads to their
 owner and admins, as today. Role-based access per workspace is explicitly deferred.
 
+Managed sandbox GitHub access follows explicit repository assignments. In `default`, it also
+includes private repositories reported by the GitHub App installation that have no explicit
+owner. This implicit set is computed at sandbox creation, reconnect, and credential refresh;
+it is not persisted in `repos` or passed to workspace setup/update scripts. Reviewers and
+analyzers may narrow access further. Ownership must be readable and the legacy workspace
+import must have completed before implicit access is granted. Image builders retain access
+only to the repositories explicitly listed in the workspace.
+
 ### Dashboard
 
 The Environments page becomes the Workspaces page, with repositories and Slack channels editable.
 The composer picks the workspace first and the repository second: the repository list is the
-workspace's own repositories (plus, for `default`, every unassigned one), and choosing a workspace
+workspace's own repositories (plus, for `default`, every unassigned private one), and choosing a workspace
 preselects its default repository. A repository named from outside — a link or the profile default —
 still selects the workspace that owns it. The dashboard has no separate "project" notion: the
 sidebar groups threads by repository, nested under the owning workspace, since every repository sits
@@ -148,17 +160,17 @@ are answered 503 so GitHub retries them rather than routing them to `default` or
 - Per-workspace GitHub or Slack apps. One App and one Slack team per instance.
 - Routing individual Slack messages within a channel to different workspaces.
 - Per-workspace memory. The existing per-user memory stores are unchanged for now.
-- The controls a public workspace needs beyond partitioning: repository-scoped tokens, a per-workspace MCP allowlist for externally triggered runs, and public-safe prompts and outputs. Those are follow-up work that depends on this design.
+- Additional controls for public workspaces: a per-workspace MCP allowlist for externally triggered runs, and public-safe prompts and outputs.
 
 ## Security and privacy
 
 Partitioning settings by workspace removes the accidental path from a public repository's runs to
 internal MCP connections, guidelines, and prompts, provided the public repositories live in a
-workspace that has none of them. It does not, by itself, scope the GitHub installation token or
-mark public content untrusted; see the last non-goal. Repository ownership is validated on save so
-routing is deterministic and a PR is never handled by two workspaces. Unassigned repositories are
-routed by an explicit instance policy rather than silently defaulting, so a locked-down install can
-drop them. No new credentials are introduced, and MCP connection secrets stay encrypted under the
+workspace that has none of them. Sandbox credentials are repository-scoped as described above;
+public content still needs appropriate trust handling. Repository ownership is validated on save so
+routing is deterministic and a PR is never handled by two workspaces. Unassigned private repositories
+follow the instance routing policy, while public GitHub events require an explicit workspace.
+No new credentials are introduced, and MCP connection secrets stay encrypted under the
 workspace they belong to.
 
 ## Alternatives

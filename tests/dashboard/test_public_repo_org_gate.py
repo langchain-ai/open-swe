@@ -7,12 +7,14 @@ from httpx2 import Response
 
 from agent.github import webhook as github_webhooks
 from agent.webhooks import common as webhook_common
+from agent.workspaces.store import WORKSPACES, Workspace
 from tests.conftest import post_signed_github_webhook
 
 _TEST_WEBHOOK_SECRET = "test-secret-for-webhook"
 
 
 async def _post_github_webhook(event_type: str, payload: dict[str, Any]) -> Response:
+    await WORKSPACES.put("oss", Workspace(slug="oss", repos=["langchain-ai/open-swe"]))
     return cast(
         Response,
         await post_signed_github_webhook(event_type, payload, secret=_TEST_WEBHOOK_SECRET),

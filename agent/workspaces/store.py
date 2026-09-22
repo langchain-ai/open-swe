@@ -877,6 +877,27 @@ class WorkspaceStore:
                 .where(WorkspaceSlackChannelRow.channel_id == channel)
             )
 
+    async def unassigned_repos(self, repositories: Sequence[str]) -> set[str]:
+        """Unbound repository keys, excluding ownership still awaiting import."""
+        if not self.import_completed:
+            raise RuntimeError("Workspaces have not been imported into PostgreSQL yet")
+        keys = {normalize_repo_full_name(repo).lower() for repo in repositories}
+        if not keys:
+            return set()
+        async with postgres.session() as session:
+            # Read bindings directly: list_all deliberately skips malformed workspaces.
+            bound = set(
+                await session.scalars(
+                    select(Repository.key)
+                    .join(
+                        WorkspaceRepositoryRow,
+                        WorkspaceRepositoryRow.repository_id == Repository.id,
+                    )
+                    .where(Repository.key.in_(keys))
+                )
+            )
+        return keys - bound - self.unimported_repos
+
     async def _assert_unique(self, record: Workspace) -> None:
         if record.slug != DEFAULT_WORKSPACE_SLUG and not record.repos:
             raise ValueError("a workspace must list at least one repository")
@@ -1411,7 +1432,10 @@ async def list_workspace_options(*, include_logs: bool = False) -> list[dict[str
     Prompts and snapshot ids never appear here; picking a workspace needs
     neither.
     """
-    return [record.option(include_log=include_logs) for record in await WORKSPACES.list_all()]
+    records = await WORKSPACES.list_all()
+    if not any(record.slug == DEFAULT_WORKSPACE_SLUG for record in records):
+        records.insert(0, Workspace(slug=DEFAULT_WORKSPACE_SLUG, name="Default"))
+    return [record.option(include_log=include_logs) for record in records]
 
 
 def parse_workspace_tag(text: str) -> tuple[str | None, str]:

@@ -1,6 +1,7 @@
 """GitHub webhook events are dropped for repos no workspace owns when policy says so."""
 
 from typing import Any
+from unittest.mock import AsyncMock
 
 import httpx
 import pytest
@@ -9,7 +10,7 @@ from agent.github import routes as github_routes
 from agent.github import webhook as github_webhooks
 from agent.webhooks import common as webhook_common
 from agent.workspaces.routing import WorkspaceLookupError
-from agent.workspaces.store import WORKSPACES, WORKSPACES_NAMESPACE, import_store_records
+from agent.workspaces.store import WORKSPACES, WORKSPACES_NAMESPACE, Workspace, import_store_records
 from tests.conftest import FakeStore, post_signed_github_webhook
 
 _TEST_WEBHOOK_SECRET = "test-secret-for-workspace-routing"
@@ -24,7 +25,7 @@ def _unowned_repo_issue_comment_payload() -> dict[str, Any]:
         "action": "created",
         "issue": {"id": 12345, "number": 42, "title": "Fix the flaky test"},
         "comment": {"body": "@open-swe help"},
-        "repository": {"owner": {"login": "acme"}, "name": "unowned"},
+        "repository": {"owner": {"login": "acme"}, "name": "unowned", "private": True},
         "sender": {"login": "octocat"},
     }
 
@@ -69,6 +70,37 @@ async def test_unowned_repo_is_not_ignored_for_workspace_when_policy_unset(
     assert called["event_type"] == "issue_comment"
 
 
+@pytest.mark.parametrize("private", [False, None])
+@pytest.mark.parametrize("assigned", [False, True])
+async def test_public_or_unknown_repository_requires_explicit_assignment(
+    registry_db: None,
+    monkeypatch: pytest.MonkeyPatch,
+    private: bool | None,
+    assigned: bool,
+) -> None:
+    monkeypatch.delenv("OPEN_SWE_UNASSIGNED_REPO_WORKSPACE", raising=False)
+    monkeypatch.setattr(webhook_common, "GITHUB_WEBHOOK_SECRET", _TEST_WEBHOOK_SECRET)
+    if assigned:
+        await WORKSPACES.put("oss", Workspace(slug="oss", repos=["acme/unowned"]))
+    called: list[str] = []
+
+    async def process(payload: dict[str, object], event_type: str) -> None:
+        called.append(event_type)
+
+    monkeypatch.setattr(github_webhooks, "process_github_issue", process)
+    monkeypatch.setattr(
+        webhook_common, "enforce_public_repo_org_gate", AsyncMock(return_value=None)
+    )
+    payload = _unowned_repo_issue_comment_payload()
+    payload["repository"]["private"] = private
+
+    response = await _post_github_webhook("issue_comment", payload)
+
+    assert response.status_code == 200
+    assert response.json()["status"] == ("accepted" if assigned else "ignored")
+    assert called == (["issue_comment"] if assigned else [])
+
+
 async def test_repository_of_a_stranded_store_record_asks_github_to_retry(
     registry_db: None, fake_store: FakeStore, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -104,7 +136,7 @@ async def test_unreadable_workspace_list_asks_github_to_retry(
     """A delivery we cannot route is retryable, so it must not be answered 200."""
     monkeypatch.setattr(webhook_common, "GITHUB_WEBHOOK_SECRET", _TEST_WEBHOOK_SECRET)
 
-    async def unreadable(_owner: str, _name: str) -> bool:
+    async def unreadable(_owner: str, _name: str, *, private: bool = False) -> bool:
         raise WorkspaceLookupError("workspace listing failed")
 
     async def fail_if_called(*args: object, **kwargs: object) -> None:

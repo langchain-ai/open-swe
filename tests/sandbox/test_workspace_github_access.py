@@ -20,7 +20,19 @@ from tests.support.github_sdk import mock_github_sdk
 
 
 @pytest.fixture
-def github(monkeypatch: pytest.MonkeyPatch) -> Iterator[list[dict[str, object]]]:
+def installation_repositories() -> list[dict[str, object]]:
+    return [
+        {"id": 11, "full_name": "acme/api", "private": True},
+        {"id": 22, "full_name": "acme/internal", "private": True},
+        {"id": 33, "full_name": "acme/public", "private": False},
+        {"id": 44, "full_name": "acme/unknown"},
+    ]
+
+
+@pytest.fixture
+def github(
+    monkeypatch: pytest.MonkeyPatch, installation_repositories: list[dict[str, object]]
+) -> Iterator[list[dict[str, object]]]:
     """GitHub issues synthetic tokens encoding their repository permissions."""
     payloads: list[dict[str, object]] = []
     client = httpx2.AsyncClient
@@ -39,12 +51,7 @@ def github(monkeypatch: pytest.MonkeyPatch) -> Iterator[list[dict[str, object]]]
         if request.url.path == "/installation/repositories":
             return httpx.Response(
                 200,
-                json={
-                    "repositories": [
-                        {"id": 11, "full_name": "acme/api"},
-                        {"id": 22, "full_name": "acme/internal"},
-                    ]
-                },
+                json={"repositories": installation_repositories},
             )
         raise AssertionError(f"Unexpected request: {request.method} {request.url}")
 
@@ -123,6 +130,122 @@ async def test_workspace_lookup_failure_cannot_grant_installation_access(
         await lifecycle._create_sandbox_with_proxy(workspace_slug="workspace")
 
     assert github == []
+
+
+@pytest.mark.parametrize("explicit_public", [False, True])
+async def test_default_grants_unassigned_private_repos_and_explicit_public_repos(
+    registry_db: None,
+    github: list[dict[str, object]],
+    explicit_public: bool,
+) -> None:
+    await WORKSPACES.put("internal", Workspace(slug="internal", repos=["ACME/Internal"]))
+    if explicit_public:
+        await WORKSPACES.put("default", Workspace(slug="default", repos=["acme/public"]))
+
+    await lifecycle._create_sandbox_with_proxy(workspace_slug="default", thread_id="thread")
+
+    assert injected_auth(github) == [
+        "x-access-token:repos:11,33" if explicit_public else "x-access-token:repos:11"
+    ]
+
+
+@pytest.mark.parametrize(
+    ("repositories", "expected"),
+    [(["Acme/API"], "x-access-token:repos:11"), (["acme/public"], ""), ([], "")],
+)
+async def test_default_reviewer_scope_can_only_narrow_implicit_access(
+    registry_db: None,
+    github: list[dict[str, object]],
+    repositories: list[str],
+    expected: str,
+) -> None:
+    await lifecycle._create_sandbox_with_proxy(
+        workspace_slug="default", github_proxy_repositories=repositories
+    )
+
+    assert injected_auth(github) == [expected]
+
+
+async def test_default_refresh_revokes_repositories_claimed_by_another_workspace(
+    registry_db: None,
+    monkeypatch: pytest.MonkeyPatch,
+    github: list[dict[str, object]],
+) -> None:
+    backend = await lifecycle._create_sandbox_with_proxy(
+        workspace_slug="default", thread_id="thread"
+    )
+    monkeypatch.setitem(proxy.SANDBOX_BACKENDS, "thread", backend)
+    await WORKSPACES.put("internal", Workspace(slug="internal", repos=["acme/internal"]))
+    assert await proxy.refresh_proxy_token("thread")
+
+    assert injected_auth(github) == ["x-access-token:repos:11,22", "x-access-token:repos:11"]
+
+
+async def test_default_excludes_bindings_even_when_workspace_record_is_unreadable(
+    registry_db: None,
+    github: list[dict[str, object]],
+) -> None:
+    from sqlalchemy import update
+
+    from agent.database import postgres
+    from agent.workspaces.rows import WorkspaceRow
+
+    await WORKSPACES.put("internal", Workspace(slug="internal", repos=["acme/internal"]))
+    async with postgres.session() as session:
+        await session.execute(
+            update(WorkspaceRow).where(WorkspaceRow.slug == "internal").values(create_params=[])
+        )
+
+    await lifecycle._create_sandbox_with_proxy(workspace_slug="default")
+
+    assert injected_auth(github) == ["x-access-token:repos:11"]
+
+
+async def test_default_excludes_repositories_pending_workspace_import(
+    registry_db: None,
+    monkeypatch: pytest.MonkeyPatch,
+    github: list[dict[str, object]],
+) -> None:
+    monkeypatch.setattr(WORKSPACES, "unimported_repos", frozenset({"acme/internal"}))
+
+    await lifecycle._create_sandbox_with_proxy(workspace_slug="default")
+
+    assert injected_auth(github) == ["x-access-token:repos:11"]
+
+
+@pytest.mark.parametrize("populated", [False, True])
+async def test_default_cannot_grant_access_before_workspace_import(
+    registry_db: None,
+    monkeypatch: pytest.MonkeyPatch,
+    github: list[dict[str, object]],
+    populated: bool,
+) -> None:
+    if populated:
+        await WORKSPACES.put("internal", Workspace(slug="internal", repos=["acme/internal"]))
+    monkeypatch.setattr(WORKSPACES, "import_completed", False)
+
+    with pytest.raises(RuntimeError, match="import"):
+        await lifecycle._create_sandbox_with_proxy(workspace_slug="default")
+
+    assert github == []
+
+
+async def test_default_refresh_tracks_visibility_changes_and_new_private_repos(
+    registry_db: None,
+    monkeypatch: pytest.MonkeyPatch,
+    github: list[dict[str, object]],
+    installation_repositories: list[dict[str, object]],
+) -> None:
+    backend = await lifecycle._create_sandbox_with_proxy(
+        workspace_slug="default", thread_id="thread"
+    )
+    monkeypatch.setitem(proxy.SANDBOX_BACKENDS, "thread", backend)
+    installation_repositories[0]["private"] = False
+    installation_repositories.append({"id": 55, "full_name": "acme/new", "private": True})
+
+    assert await proxy.refresh_proxy_token("thread")
+
+    assert injected_auth(github) == ["x-access-token:repos:11,22", "x-access-token:repos:22,55"]
 
 
 async def test_refresh_applies_repository_removal(

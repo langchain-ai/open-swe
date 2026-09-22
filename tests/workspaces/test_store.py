@@ -736,7 +736,7 @@ async def test_repositories_of_an_unreadable_record_fail_closed_until_it_imports
         await repo_is_routable("acme", "legacy")
     assert await workspace_for_repo("acme", "legacy") is None
     assert await repo_is_routable("acme", "oss") is True
-    assert await repo_is_routable("acme", "unrelated") is True
+    assert await repo_is_routable("acme", "unrelated", private=True) is True
 
     fake_store.seed(WORKSPACES_NAMESPACE, "legacy", {**broken, "snapshot_status": "none"})
     assert await import_store_records() == 1

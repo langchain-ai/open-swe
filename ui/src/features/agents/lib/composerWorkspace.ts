@@ -38,28 +38,25 @@ type RepoOption = { full_name: string }
 
 /**
  * The repositories a thread composed in `slug` may work in: the ones the
- * workspace owns plus its default repository, and for the default workspace
- * every accessible repository no other workspace claims. With no matching
- * workspace, everything accessible is offered.
+ * workspace owns, and for the default workspace every accessible private
+ * repository no other workspace claims. An unconfigured default works the same way.
  */
 export function reposForWorkspace(
   slug: string | null,
   workspaces: ReadonlyArray<
     Pick<WorkspaceOption, "slug" | "repos" | "is_default" | "default_repo">
   >,
-  accessible: ReadonlyArray<RepoOption>
+  accessible: ReadonlyArray<RepoOption & { private: boolean }>
 ): Array<RepoOption> {
   const workspace = workspaces.find((candidate) => candidate.slug === slug)
-  if (!workspace) return [...accessible]
   const lower = (name: string) => name.toLowerCase()
   const claimed = new Set(workspaces.flatMap((w) => w.repos.map(lower)))
-  const own = new Set(
-    [...workspace.repos, workspace.default_repo ?? ""].map(lower)
-  )
+  const isDefault = workspace?.is_default ?? (slug === null || slug === "default")
+  const own = new Set(workspace?.repos.map(lower) ?? [])
   return accessible.filter(
-    ({ full_name }) =>
+    ({ full_name, private: isPrivate }) =>
       own.has(lower(full_name)) ||
-      (workspace.is_default && !claimed.has(lower(full_name)))
+      (isDefault && isPrivate && !claimed.has(lower(full_name)))
   )
 }
 

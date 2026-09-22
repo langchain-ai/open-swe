@@ -64,7 +64,9 @@ async def github_webhook(
         repository = f"{webhook_repo_config['owner']}/{webhook_repo_config['name']}"
         try:
             routable = await repo_is_routable(
-                webhook_repo_config["owner"], webhook_repo_config["name"]
+                webhook_repo_config["owner"],
+                webhook_repo_config["name"],
+                private=webhook_repo.get("private") is True,
             )
         except WorkspaceLookupError:
             # Ownership is unknown, so dropping the delivery may drop real work.

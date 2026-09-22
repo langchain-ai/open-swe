@@ -49,7 +49,7 @@ async def test_tag_then_repo_then_channel_then_user_default(fake_store: FakeStor
     ).resolved_by == "repo"
     assert (
         await routing.resolve_workspace(repo=("acme", "unowned"), slack_channel_id="C0SS")
-    ).slug == "oss"
+    ).slug == "default"
     assert (await routing.resolve_workspace(slack_channel_id="C0SS")).resolved_by == "channel"
     assert (await routing.resolve_workspace(login="alice")).resolved_by == "user_default"
     assert (await routing.resolve_workspace(login="bob")) == routing.WorkspaceResolution(
@@ -65,11 +65,24 @@ async def test_unknown_user_default_is_ignored(fake_store: FakeStore) -> None:
     assert (await routing.resolve_workspace(login="alice")).resolved_by == "instance_default"
 
 
+async def test_explicit_default_works_without_a_saved_workspace(fake_store: FakeStore) -> None:
+    await WORKSPACES.create(
+        WorkspaceCreate(name="OSS", repos=["acme/oss"], slack_channel_ids=["C0SS"]), "alice"
+    )
+    await set_user_preferences(
+        "alice", UserPreferencesUpdate(default_visibility="public", default_workspace="oss")
+    )
+
+    result = await routing.resolve_workspace(tag="default", slack_channel_id="C0SS", login="alice")
+
+    assert result == routing.WorkspaceResolution("default", "tag")
+
+
 async def test_unassigned_repo_policy(monkeypatch: pytest.MonkeyPatch) -> None:
     await _seed()
-    assert await routing.repo_is_routable("acme", "unowned") is True
+    assert await routing.repo_is_routable("acme", "unowned", private=True) is True
     monkeypatch.setenv(ENV.OPEN_SWE_UNASSIGNED_REPO_WORKSPACE.name, "ignore")
-    assert await routing.repo_is_routable("acme", "unowned") is False
+    assert await routing.repo_is_routable("acme", "unowned", private=True) is False
     assert await routing.repo_is_routable("acme", "oss") is True
 
 
