@@ -160,6 +160,7 @@ export interface Profile {
   branch_prefix?: string | null
   auto_fix_ci?: boolean
   model_routing_enabled?: boolean
+  recent_thread_context_enabled?: boolean
   dm_session_enabled?: boolean
   draft_prs?: boolean
   review_draft_prs?: boolean | null
@@ -176,6 +177,7 @@ export interface ProfileUpdate {
   branch_prefix?: string | null
   auto_fix_ci?: boolean
   model_routing_enabled?: boolean | null
+  recent_thread_context_enabled?: boolean
   dm_session_enabled?: boolean
   draft_prs?: boolean
   review_draft_prs?: boolean | null

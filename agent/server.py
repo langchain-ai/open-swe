@@ -695,6 +695,7 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
         linear_project_id: str,
         linear_issue_number: str,
         draft_prs: bool,
+        recent_thread_context_enabled: bool,
         admin_workspaces: bool,
         model_selection: ModelSelectionMiddleware | None = None,
         routing_defaults: Mapping[str, tuple[str, str | None]] | None = None,
@@ -713,13 +714,15 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
         self._linear_project_id = linear_project_id
         self._linear_issue_number = linear_issue_number
         self._draft_prs = draft_prs
+        self._recent_thread_context_enabled = recent_thread_context_enabled
         self._admin_workspaces = admin_workspaces
         self._model_selection = model_selection
         self._routing_defaults = dict(routing_defaults or {})
 
     def _recent_context_audience(self, cfg: RunConfig) -> RecentContextAudience | None:
         if (
-            cfg.background_task_completion
+            not self._recent_thread_context_enabled
+            or cfg.background_task_completion
             or not self._profile_login
             or (cfg.slack_thread is not None and cfg.slack_thread.triggering_bot_id)
         ):
@@ -751,6 +754,7 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
             "source": self._source,
             "repo": cfg.repo.model_dump() if cfg.repo else None,
             "draft_prs": self._draft_prs,
+            "recent_thread_context_enabled": self._recent_thread_context_enabled,
             "model": self._model_id,
             "effort": self._effort,
         }
@@ -1497,6 +1501,11 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
                         linear_project_id=linear_project_id,
                         linear_issue_number=linear_issue_number,
                         draft_prs=sender_draft_prs,
+                        recent_thread_context_enabled=(
+                            sender_profile.get("recent_thread_context_enabled") is True
+                            if sender_profile
+                            else False
+                        ),
                         admin_workspaces=admin_thread,
                         model_selection=model_selection,
                         routing_defaults=routing_defaults,
