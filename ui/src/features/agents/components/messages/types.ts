@@ -12,6 +12,11 @@ export interface ApprovalCallbacks {
   onOpenFile?: (filePath: string) => void
 }
 
+export interface LoadEarlier {
+  loading: boolean
+  onLoadEarlier: () => void
+}
+
 export type MessagesScrollControl = {
   scrollToBottom: () => void
 }
@@ -44,6 +49,8 @@ export interface MessagesProps extends ApprovalCallbacks {
   bottomInset?: number
   /** When "external", parent renders the scroll button (e.g. above a floating prompt). */
   scrollButtonSlot?: "internal" | "external"
+  /** Set when turns older than the loaded window remain on the server. */
+  loadEarlier?: LoadEarlier | null
   onShowScrollToBottomChange?: (show: boolean) => void
   scrollControlRef?: React.MutableRefObject<MessagesScrollControl | null>
 }

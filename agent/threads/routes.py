@@ -30,6 +30,7 @@ from agent.threads.handlers import (
     get_dashboard_thread_pull_request_context,
     get_dashboard_thread_pull_request_status,
     get_dashboard_thread_state,
+    interrupt_transcript_turns,
     rename_dashboard_thread,
     resolve_all_dashboard_threads,
     resolve_dashboard_thread,
@@ -362,6 +363,8 @@ async def api_cancel_thread_run(
         action=action,
         email=session.get("email"),
     )
+    if status_code < 400:
+        await interrupt_transcript_turns(thread_id, [run_id])
     return Response(content=content, status_code=status_code, media_type=media_type)
 
 

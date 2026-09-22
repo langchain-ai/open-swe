@@ -89,14 +89,19 @@ describe("OwnershipPicker", () => {
     expect(onChange).toHaveBeenCalledWith(["C4", "C2"])
   })
 
-  it("filters by search and discards changes on cancel", async () => {
+  it("keeps draft selections visible while searching and discards them on cancel", async () => {
     const { onChange } = renderPicker()
 
-    fireEvent.change(await screen.findByLabelText("Search channels"), {
-      target: { value: "maint" },
-    })
-    expect(screen.queryByRole("checkbox", { name: "#oss-help" })).toBeNull()
     fireEvent.click(screen.getByRole("checkbox", { name: "#oss-maintainers" }))
+    fireEvent.change(await screen.findByLabelText("Search channels"), {
+      target: { value: "commits" },
+    })
+
+    expect(screen.getByRole("checkbox", { name: "#oss-help" })).toBeTruthy()
+    expect(
+      screen.getByRole("checkbox", { name: "#oss-maintainers" })
+    ).toBeTruthy()
+    expect(screen.getByText("In this workspace · 2")).toBeTruthy()
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }))
 
     expect(onChange).not.toHaveBeenCalled()

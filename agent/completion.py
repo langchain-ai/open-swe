@@ -29,10 +29,11 @@ from agent.review.findings import REVIEWER_THREAD_KIND
 from agent.review.publish import settle_review_check_run
 from agent.session_cost import schedule_session_cost_refresh
 from agent.slack.client import post_slack_thread_reply
-from agent.slack.client import set_slack_thread_status as clear_slack_thread_status
 from agent.slack.code_channels import is_code_channel_session, set_session_status
+from agent.slack.thinking import sync_slack_background_status
 from agent.source_context import SourceContext
 from agent.thread_feedback import schedule_answer_feedback
+from agent.transcript.turns import TurnOutcome, settle_run_turn
 from agent.utils.errors import LAST_MODEL_ERROR_KEY, code_for_error_type
 from agent.utils.langsmith import get_langsmith_trace_url
 from agent.utils.thread_ops import langgraph_client
@@ -304,32 +305,6 @@ async def _finalize_agent_usage_telemetry(
     )
 
 
-async def _settle_slack_thread_status(
-    client: LangGraphClient, thread_id: str, metadata: dict[str, Any]
-) -> None:
-    """Clear the animated "Thinking..." thread status once no run is left.
-
-    The status persists for a whole run (Slack drops it on each assistant
-    message, so the observer keeps refreshing it); a completion that arrives
-    while another run is still active must not clear that run's status.
-    """
-    try:
-        for status in ("pending", "running"):
-            if await client.runs.list(thread_id, status=status, limit=1):
-                return
-    except Exception:  # noqa: BLE001
-        logger.debug("run-complete: could not list runs for %s", thread_id, exc_info=True)
-        return
-    slack_thread = SourceContext.from_metadata(metadata).slack_thread
-    if slack_thread is None or not slack_thread.channel_id or not slack_thread.thread_ts:
-        return
-    # DM and code-channel sessions keep one status anchored on the newest
-    # message; clearing the session ts would drop a live run's indicator.
-    if slack_thread.thread_ts == "0":
-        return
-    await clear_slack_thread_status(slack_thread.channel_id, slack_thread.thread_ts, "")
-
-
 async def _settle_code_channel_session(
     client: LangGraphClient, thread_id: str, metadata: dict[str, Any]
 ) -> None:
@@ -371,7 +346,7 @@ async def _handle_successful_run(
     if metadata.get("kind") == REVIEWER_THREAD_KIND:
         return {"status": "ignored", "reason": "not an agent Slack run"}
     await _settle_code_channel_session(client, thread_id, metadata)
-    await _settle_slack_thread_status(client, thread_id, metadata)
+    await sync_slack_background_status(client, thread_id)
     payload_metadata = payload.get("metadata")
     automated = (
         isinstance(payload_metadata, dict) and payload_metadata.get("kind") == "thread_wakeup"
@@ -423,6 +398,35 @@ async def _handle_successful_run(
     return {"status": "ok", "reason": "cost refresh scheduled"}
 
 
+async def _settle_transcript_turn(thread_id: str, run_id: str | None, status: object) -> None:
+    """Close the transcript turn of a run that ended without the middleware saying so.
+
+    The middleware emits the same event with the same command id, so whichever
+    of the two arrives second is deduplicated by its receipt.
+    """
+    if status == "success":
+        outcome: TurnOutcome = "completed"
+    elif status in _TERMINAL_FAILURE_STATUSES:
+        outcome = "failed"
+    else:
+        return
+    try:
+        await settle_run_turn(
+            thread_id,
+            run_id,
+            outcome=outcome,
+            error=None if outcome == "completed" else f"run ended as {status}",
+        )
+    except Exception:  # noqa: BLE001
+        # The webhook still has a reply to post; the turn is closed by the
+        # cancel path or by the next run's own events.
+        logger.warning(
+            "Could not settle the transcript turn for a completed run",
+            exc_info=True,
+            extra={"run_completion": {"thread_id": thread_id, "run_id": run_id}},
+        )
+
+
 async def handle_run_completion(payload: dict[str, Any]) -> dict[str, str]:
     """Handle a platform run-completion webhook POST.
 
@@ -435,6 +439,7 @@ async def handle_run_completion(payload: dict[str, Any]) -> dict[str, str]:
     if not isinstance(thread_id, str) or not thread_id:
         return {"status": "ignored", "reason": "missing thread_id"}
     await _finalize_agent_usage_telemetry(thread_id, status, payload)
+    await _settle_transcript_turn(thread_id, run_id, status)
     if status == "success":
         return await _handle_successful_run(thread_id, run_id, payload)
     payload_metadata = payload.get("metadata")
@@ -483,7 +488,7 @@ async def handle_run_completion(payload: dict[str, Any]) -> dict[str, str]:
         return await turns.handle_run_completion(thread_id, run_id, str(status))
     await _settle_failed_reviewer_check(thread_id, metadata)
     await _settle_code_channel_session(client, thread_id, metadata)
-    await _settle_slack_thread_status(client, thread_id, metadata)
+    await sync_slack_background_status(client, thread_id)
     if run_id is None:
         # Payloads without run ids fall back to the old per-thread flag; run-scoped
         # dedupe intentionally does not read it so future runs can still report.
@@ -504,6 +509,7 @@ async def handle_run_completion(payload: dict[str, Any]) -> dict[str, str]:
         )
     except Exception:  # noqa: BLE001
         logger.warning("run-complete: could not flag thread %s", thread_id, exc_info=True)
+    await sync_slack_background_status(client, thread_id)
     logger.info(
         "Posted failure reply",
         extra={"failure_reply": {"thread_id": thread_id, "status": status, "code": reason_code}},

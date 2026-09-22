@@ -164,6 +164,25 @@ export class RunTracker {
     state.span.mark("first_text")
   }
 
+  /**
+   * A transcript-log event reached the browser. `opensRun` starts a span for a
+   * run this client did not submit (a queued message, another tab, Slack);
+   * `text` counts a streamed prose flush.
+   */
+  transcriptEvent(options: { opensRun?: boolean; text?: boolean }): void {
+    if (options.opensRun && (!this.state || this.state.span.ended)) {
+      this.begin({ joined: true })
+      this.state?.span.mark("accepted")
+    }
+    const state = this.state
+    if (!state || state.span.ended) return
+    state.events += 1
+    state.span.mark("first_event")
+    if (!options.text) return
+    state.textDeltas += 1
+    state.span.mark("first_text")
+  }
+
   transcriptBuilt(durationMs: number): void {
     const state = this.state
     if (!state || state.span.ended) return

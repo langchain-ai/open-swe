@@ -359,3 +359,20 @@ def test_recent_context_audience_distinguishes_dm_and_shared_slack() -> None:
     )
     assert middleware._recent_context_audience(group_dm) is None
     assert middleware._recent_context_audience(RunConfig(background_task_completion=True)) is None
+
+
+@pytest.mark.asyncio
+async def test_fork_preserves_prepared_context() -> None:
+    middleware = DummyPrepareMiddleware()
+    state = cast(
+        AgentState,
+        {
+            "messages": [HumanMessage("new delegated task")],
+            "_deepagents_forked_context": True,
+            "run_prepared": True,
+            "run_prepared_for": "parent fingerprint",
+            "rendered_system_prompt": "parent prompt",
+        },
+    )
+    assert await middleware.abefore_agent(state, cast(Runtime[None], MagicMock())) is None
+    assert middleware.calls == 0

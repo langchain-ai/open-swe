@@ -2,8 +2,8 @@
 
 Resolution order, first match wins: the thread's recorded workspace, a
 ``workspace:<slug>`` tag on the opening message, the repository's owner, the
-Slack channel's owner, the user's default, then ``default``. The order is the
-one OEP-0003 specifies; callers never guess on their own.
+Slack channel's owner, the user's default, then ``default``. This is the
+workspace architecture's order; callers never guess on their own.
 
 A storage failure is not an answer: "nothing owns this repository" and "we
 could not find out" lead to opposite decisions, so the lookups here never

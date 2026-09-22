@@ -14,7 +14,6 @@ from uuid import UUID
 from sqlalchemy import text
 
 from agent.database import postgres
-from agent.transcript import checkpoints
 from agent.transcript.engine import Command, append
 from agent.transcript.events import TurnCompleted, TurnFailed, TurnInterrupted
 
@@ -48,15 +47,9 @@ async def settle_run_turn(
         event = TurnFailed(turn_id=turn_id, run_id=run_id, error=error or "run failed")
     else:
         event = TurnInterrupted(turn_id=turn_id, run_id=run_id)
-    # A turn the middleware never closed was never checkpointed either, and a
-    # cancelled turn's work is exactly what someone wants to look at.
-    checkpoint = await checkpoints.checkpoint_command(
-        thread_id, turn_id, run_id=run_id, start_head=None
-    )
     await append(
         thread_id,
         [
-            checkpoint,
             Command(
                 command_id=f"turn:{turn_id}:{outcome}",
                 event=event,
@@ -78,6 +71,28 @@ async def settle_run_turn(
         },
     )
     return turn_id
+
+
+async def recorded_turn_id(thread_id: str, command_id: str) -> UUID | None:
+    """The turn of the event ``command_id`` already appended, if it did.
+
+    A command that was deduplicated by its receipt leaves the caller holding a
+    turn id nothing was written under; this recovers the one that was.
+    """
+    if not postgres.configured():
+        return None
+    async with postgres.read_only_transaction() as conn:
+        result = await conn.execute(
+            text(
+                """
+                SELECT turn_id FROM thread_event
+                WHERE thread_id = :thread_id AND command_id = :command_id
+                LIMIT 1
+                """
+            ),
+            {"thread_id": thread_id, "command_id": command_id},
+        )
+        return result.scalar_one_or_none()
 
 
 async def _open_turn(thread_id: str, run_id: str | None) -> UUID | None:

@@ -339,11 +339,14 @@ test.describe("Plan review", () => {
     await expect(owner.getByTestId("reject-plan")).toBeEnabled();
     await expect(owner.getByTestId("plan-comments")).toBeVisible();
 
+    // Whichever source the thread uses: a legacy thread hydrates from LangGraph
+    // state, a transcript thread from its own snapshot.
     const hydrated = owner.waitForResponse((response) => {
       const path = new URL(response.url()).pathname;
       return (
         response.request().method() === "GET" &&
-        path === `/dashboard/api/threads/${threadId}/state`
+        (path === `/dashboard/api/threads/${threadId}/state` ||
+          path === `/dashboard/api/threads/${threadId}/transcript`)
       );
     });
     await owner.getByTestId("reject-plan").click();

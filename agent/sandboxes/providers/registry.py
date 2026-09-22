@@ -29,6 +29,19 @@ SANDBOX_FACTORIES: dict[str, tuple[str, str]] = {
     "local": ("agent.sandboxes.providers.local", "create_local_sandbox"),
 }
 
+# Providers whose SDKs live in an optional dependency group rather than the base
+# install: SANDBOX_TYPE=<key> requires the sandbox-<key> (or sandbox-providers) extra.
+OPTIONAL_PROVIDER_EXTRAS = {"daytona", "modal", "runloop", "e2b"}
+
+# Top-level SDK modules each optional provider imports; when one of these is the
+# module that triggered a ModuleNotFoundError, its extra isn't installed.
+_PROVIDER_SDK_MODULES = {
+    "daytona": {"daytona", "langchain_daytona"},
+    "modal": {"modal", "langchain_modal"},
+    "runloop": {"runloop_api_client", "langchain_runloop"},
+    "e2b": {"e2b", "langchain_e2b"},
+}
+
 
 def _load_sandbox_factory(sandbox_type: str) -> SandboxFactory:
     factory_path = SANDBOX_FACTORIES.get(sandbox_type)
@@ -36,7 +49,22 @@ def _load_sandbox_factory(sandbox_type: str) -> SandboxFactory:
         supported = ", ".join(sorted(SANDBOX_FACTORIES))
         raise ValueError(f"Invalid sandbox type: {sandbox_type}. Supported types: {supported}")
     module_name, function_name = factory_path
-    factory = getattr(import_module(module_name), function_name)
+    try:
+        module = import_module(module_name)
+    except ModuleNotFoundError as exc:
+        missing_extra = (
+            sandbox_type in OPTIONAL_PROVIDER_EXTRAS
+            and exc.name in _PROVIDER_SDK_MODULES[sandbox_type]
+        )
+        if missing_extra:
+            raise ValueError(
+                f"Sandbox provider {sandbox_type!r} requires the optional "
+                f"'sandbox-{sandbox_type}' dependency group. "
+                f"Install it with: uv sync --extra sandbox-{sandbox_type} "
+                "(or use the 'sandbox-providers' group for all third-party providers)"
+            ) from exc
+        raise
+    factory = getattr(module, function_name)
     if not callable(factory):
         raise TypeError(f"Sandbox factory {module_name}.{function_name} is not callable")
     return factory
@@ -97,11 +125,15 @@ async def create_sandbox(
 def validate_sandbox_startup_config() -> None:
     """Validate the configured sandbox provider's env vars at server startup.
 
-    Raises ValueError if the active provider's configuration is invalid.
-    Called from the FastAPI lifespan hook so errors surface at boot rather
-    than on the first sandbox creation.
+    Raises ValueError if the active provider's configuration is invalid or its
+    optional dependency group is not installed. Called from the FastAPI lifespan
+    hook so errors surface at boot rather than on the first sandbox creation.
     """
     sandbox_type = ENV.SANDBOX_TYPE.get()
+    if sandbox_type in OPTIONAL_PROVIDER_EXTRAS:
+        # Import eagerly so a missing optional extra fails at boot, not on the
+        # first sandbox creation.
+        _load_sandbox_factory(sandbox_type)
     if sandbox_type == "langsmith":
         from agent.sandboxes.providers.langsmith import LangSmithProvider
 
