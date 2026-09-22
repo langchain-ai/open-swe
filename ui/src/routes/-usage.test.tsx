@@ -193,30 +193,32 @@ it("shows delivery lag separately from suppression, then refreshes to a populate
 it.each([0, 1, 4, 5])(
   "flags only small nonempty distance samples without inline counts (%i measured)",
   async (samples) => {
-    vi.spyOn(api, "prMergeRateByModel").mockResolvedValue({
-      ...captured,
-      status: "ready",
-      cohorts: [
-        {
-          model_id: "sample-model",
-          model_attribution_quality: "configured",
-          merged: 8,
-          closed_without_merge: 0,
-          mature_pending: 0,
-          waiting: 0,
-          cohort_size: 8,
-          decided_denominator: 8,
-          decided_merge_rate: 1,
-          mature_denominator: 8,
-          mature_cohort_merge_share: 1,
-          efforts: [],
-          median_distance_basis_points: samples ? 1750 : null,
-          distance_sample_size: samples,
-          avg_merge_seconds: null,
-          avg_delivery_seconds: null,
-        },
-      ],
-    })
+    vi.spyOn(api, "prMergeRateByModel").mockResolvedValue(
+      report({
+        ...captured,
+        status: "ready",
+        cohorts: [
+          {
+            model_id: "sample-model",
+            model_attribution_quality: "configured",
+            merged: 8,
+            closed_without_merge: 0,
+            mature_pending: 0,
+            waiting: 0,
+            cohort_size: 8,
+            decided_denominator: 8,
+            decided_merge_rate: 1,
+            mature_denominator: 8,
+            mature_cohort_merge_share: 1,
+            efforts: [],
+            median_distance_basis_points: samples ? 1750 : null,
+            distance_sample_size: samples,
+            avg_merge_seconds: null,
+            avg_delivery_seconds: null,
+          },
+        ],
+      })
+    )
     const client = mountReport()
     const row = (await screen.findByText("sample-model")).closest("tr")!
     expect(
@@ -1107,7 +1109,7 @@ const costRow: UsageLeaderboardRow = {
 }
 
 it("explains the feedback trophy on focus", async () => {
-  vi.spyOn(api, "prMergeRateByModel").mockResolvedValue(captured)
+  vi.spyOn(api, "prMergeRateByModel").mockResolvedValue(report(captured))
   vi.mocked(api.usageLeaderboard).mockResolvedValue({
     ...emptyUsage,
     total_members: 1,
@@ -1129,7 +1131,7 @@ it("explains the feedback trophy on focus", async () => {
 it.each([true, false, undefined])(
   "shows the feedback trophy only for a global leader (%s)",
   async (isTopContributor) => {
-    vi.spyOn(api, "prMergeRateByModel").mockResolvedValue(captured)
+    vi.spyOn(api, "prMergeRateByModel").mockResolvedValue(report(captured))
     vi.mocked(api.usageLeaderboard).mockResolvedValue({
       ...emptyUsage,
       total_members: 20,
