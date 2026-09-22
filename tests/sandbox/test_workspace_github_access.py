@@ -84,13 +84,9 @@ def injected_auth(payloads: list[dict[str, object]]) -> list[str]:
     for payload in payloads:
         config = payload["proxy_config"]
         assert isinstance(config, dict)
-        rules = config["rules"]
-        for rule in rules:
-            if rule["name"] == "github":
-                value = rule["headers"][0]["value"] if rule["headers"] else ""
-                values.append(
-                    base64.b64decode(value.removeprefix("Basic ")).decode() if value else ""
-                )
+        rule = next((rule for rule in config["rules"] if rule["name"] == "github"), None)
+        value = rule["headers"][0]["value"] if rule and rule["headers"] else ""
+        values.append(base64.b64decode(value.removeprefix("Basic ")).decode() if value else "")
     return values
 
 
@@ -250,18 +246,21 @@ async def test_git_auth_preserves_repository_scope_for_mixed_case_remotes(
         return path.startswith(pattern[:-2]) if pattern.endswith("/*") else path == pattern
 
     rule = next(
-        rule
-        for rule in rules
-        if any(fnmatchcase("github.com", host) for host in rule["match_hosts"])
-        and (
-            not rule.get("match_paths")
-            or any(matches(path, match) for match in rule["match_paths"])
-        )
+        (
+            rule
+            for rule in rules
+            if any(fnmatchcase("github.com", host) for host in rule["match_hosts"])
+            and (
+                not rule.get("match_paths")
+                or any(matches(path, match) for match in rule["match_paths"])
+            )
+        ),
+        None,
     )
     auth = next(
         (
             header["value"]
-            for header in rule["headers"]
+            for header in (rule["headers"] if rule else [])
             if header["name"].lower() == "authorization"
         ),
         "",
