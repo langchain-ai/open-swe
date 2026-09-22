@@ -66,17 +66,70 @@ docker ps --filter name=open-swe-postgres --format '{{.Names}} {{.Status}} {{.Po
 
 It binds `127.0.0.1:5433`, so `POSTGRES_URI=postgresql://postgres:postgres@127.0.0.1:5433/postgres`.
 
-## What does not work without a GitHub App
+## The App token, and why `gh` covers it
 
-Anything reading through an App installation token rather than the caller's:
+Code paths that want an App installation token rather than the caller's — a published
+review and its diff, inline review comments, the reviewer trigger — fall back to the
+`gh` CLI's token under `langgraph dev` (`agent/github/app.py::_local_dev_token`). So
+they work locally, and `503 GitHub App token unavailable` means `gh` is logged out,
+not that the feature needs an App.
 
-- a published review and its diff (`/reviews/{owner}/{repo}/{number}` and `/diff`)
-- inline review comment reads and writes
-- webhook-driven flows
+The fallback is gated on the runtime being `langgraph dev`, so it never widens a
+deployed installation's reach. **That gate is why a standalone script cannot trigger
+agent work**: `uv run python -c "...trigger_re_review(...)"` fails with `No GitHub App
+token available`, because `dev_login_enabled()` is false outside the server. Drive
+those paths over HTTP instead (below).
 
-These answer `503 GitHub App token unavailable`. That is expected locally, not a
-regression. The reviews **list** and each PR's **preview** do work, because they read
-as you.
+## Running a real agent
+
+Agent and reviewer runs work locally against real models and real sandboxes. Nothing
+is stubbed; runs cost money and take minutes.
+
+1. `.env` needs a model key — `ANTHROPIC_API_KEY` or `OPENAI_API_KEY`. With both set,
+   `DEFAULT_MODEL_ID` resolves to the OpenAI model; with only Anthropic, to Claude.
+
+2. Set `SANDBOX_TYPE=local`. `langsmith` sandboxes **cannot work from a laptop**: the
+   run PATCHes a proxy config whose `match_hosts` is the hostname of your
+   `DASHBOARD_API_BASE_URL`, and the sandbox API rejects `localhost` with a bare
+   `422 unknown` whose body never reaches the log. It fails in
+   `PrepareReviewerRunMiddleware.before_agent`, so the agent never starts and the
+   review settles with zero findings — which reads exactly like a model that chose to
+   say nothing. Either use `local`, or expose the dashboard on a real hostname
+   (`make tunnel`, see docs/DEVELOPMENT.md) before using `langsmith`.
+
+3. Get a session cookie, then post the trigger. Mutations are CSRF-checked against
+   `DASHBOARD_BASE_URL`, so send a matching `Origin` — without it you get
+   `403 CSRF check failed`:
+
+   ```bash
+   curl -sS -c /tmp/osw.txt -o /dev/null 'http://127.0.0.1:2026/dashboard/api/auth/dev-login?redirect_to=/review'
+   curl -sS -b /tmp/osw.txt -X POST -H 'Origin: http://localhost:3000' \
+     http://127.0.0.1:2026/dashboard/api/reviews/OWNER/REPO/NUMBER/re-review
+   ```
+
+   A `{"success": true, "thread_id": "..."}` means the run is queued, not finished.
+
+4. Watch it in the backend log. The run is minutes long and the failures worth
+   catching are sandbox provisioning and model auth, so grep for both rather than only
+   for the tool you care about:
+
+   ```bash
+   tail -f logs/backend.log | grep -E --line-buffered "sandbox|Traceback|error_detail=[^N]|publish_review"
+   ```
+
+5. Reviewer output lands where the dashboard reads it — findings in reviewer thread
+   metadata, guidance points in `pull_request_guidance`. Check the table directly when
+   a page looks empty, to tell "the agent recorded nothing" apart from "the read path
+   is broken":
+
+   ```bash
+   docker exec open-swe-postgres psql -U postgres -d postgres \
+     -c "SELECT kind, author, summary FROM open_swe.pull_request_guidance"
+   ```
+
+A local checkout has no `thread_message` rows, so anything reading a thread's human
+turns sees nothing until you seed them — `scripts/seed_local_author_guidance.py` does
+that for one PR.
 
 ## Checking a page
 

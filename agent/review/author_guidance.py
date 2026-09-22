@@ -253,7 +253,6 @@ class GuidanceView(BaseModel):
     quote: str
     kind: GuidanceKind
     author: str
-    occurred_at: datetime | None
 
     @classmethod
     def of(cls, point: GuidancePoint) -> Self:
@@ -262,11 +261,17 @@ class GuidanceView(BaseModel):
             quote=point.quote,
             kind=point.kind,
             author=point.author,
-            occurred_at=point.occurred_at,
         )
 
     @classmethod
     async def for_pull_request(cls, owner: str, repo: str, pr_number: int) -> list[Self]:
+        """The recorded points, or none at all where there is no database to hold them.
+
+        The review page renders for deployments with no ``POSTGRES_URI`` and for
+        pull requests no reviewer has touched; neither is a failure to report.
+        """
+        if not postgres.configured():
+            return []
         return [
             cls.of(point) for point in await GuidancePoint.for_pull_request(owner, repo, pr_number)
         ]
