@@ -52,7 +52,9 @@ _TOOL_MODULES = {
     "search_repo_code": "agent.github.tools.search_repo_code",
     "slack_add_reaction": "agent.slack.tools.add_reaction",
     "slack_attach_html": "agent.slack.tools.attach_html",
+    "slack_list_channels": "agent.slack.tools.channels",
     "slack_move_thread": "agent.slack.tools.move_thread",
+    "slack_post_message": "agent.slack.tools.channels",
     "slack_read_channel_messages": "agent.slack.tools.read_channel_messages",
     "slack_read_thread_messages": "agent.slack.tools.read_thread_messages",
     "slack_start_new_thread": "agent.slack.tools.start_new_thread",
@@ -114,7 +116,9 @@ __all__ = [
     "search_repo_code",
     "slack_add_reaction",
     "slack_attach_html",
+    "slack_list_channels",
     "slack_move_thread",
+    "slack_post_message",
     "slack_read_channel_messages",
     "slack_read_thread_messages",
     "slack_start_new_thread",
@@ -132,6 +136,7 @@ if TYPE_CHECKING:
     from agent.incidents.tools import manage_incident
     from agent.slack.tools.add_reaction import slack_add_reaction
     from agent.slack.tools.attach_html import slack_attach_html
+    from agent.slack.tools.channels import slack_list_channels, slack_post_message
     from agent.slack.tools.manage_code_channel import manage_code_channel
     from agent.slack.tools.move_thread import slack_move_thread
     from agent.slack.tools.read_channel_messages import slack_read_channel_messages
