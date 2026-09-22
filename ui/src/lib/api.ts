@@ -874,8 +874,9 @@ export interface GuidancePoint {
   kind: GuidanceKind
   file: string
   start_line: number | null
-  author?: string
-  occurred_at?: string
+  /** Empty, and no time, when the quote matched no stored message. */
+  author: string
+  occurred_at: string | null
 }
 
 export interface ReviewAssessmentFeedbackInput {

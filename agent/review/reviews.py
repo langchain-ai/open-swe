@@ -28,7 +28,7 @@ from agent.github.pull_request_diff import build_pr_diff_files
 from agent.github.pull_request_status import fetch_unresolved_review_threads
 from agent.github.webhook import trigger_pr_review_from_ref
 from agent.review.assessment_feedback import ASSESSMENTS
-from agent.review.author_guidance import GuidancePoint, coerce_guidance
+from agent.review.author_guidance import GuidanceView
 from agent.review.findings import (
     REVIEWER_THREAD_KIND,
     coerce_finding,
@@ -702,7 +702,10 @@ async def get_review(owner: str, repo: str, pr_number: int) -> dict[str, Any]:
         "diff_groups": diff_groups,
         "diff_groups_stale": diff_groups_stale,
         "assessment": assessment.model_dump() if assessment else None,
-        "guidance": coerce_guidance(metadata.get("guidance")),
+        "guidance": [
+            point.model_dump(mode="json")
+            for point in await GuidanceView.for_pull_request(owner, repo, pr_number)
+        ],
     }
 
 
@@ -750,7 +753,7 @@ class PullRequestPreview(BaseModel):
     # or no checks configured.
     unresolved: list[PreviewThread] | None
     checks: list[PreviewCheck] | None
-    guidance: list[GuidancePoint]
+    guidance: list[GuidanceView]
 
 
 class _GithubPreviewFile(BaseModel):
@@ -898,14 +901,8 @@ async def get_pull_request_preview(
         changed_files=pull.changed_files or len(files),
         files=files[:_PREVIEW_FILE_LIMIT],
         unresolved=(None if threads is None else [_preview_thread(thread) for thread in threads]),
-        guidance=await _preview_guidance(owner, repo, pr_number),
+        guidance=await GuidanceView.for_pull_request(owner, repo, pr_number),
     )
-
-
-async def _preview_guidance(owner: str, repo: str, pr_number: int) -> list[GuidancePoint]:
-    """The reviewer's recorded steering points, empty when no review has run."""
-    thread = await _reviewer_thread_for(owner, repo, pr_number)
-    return coerce_guidance(thread_metadata(thread).get("guidance")) if thread else []
 
 
 async def get_review_diff(owner: str, repo: str, pr_number: int) -> dict[str, Any]:

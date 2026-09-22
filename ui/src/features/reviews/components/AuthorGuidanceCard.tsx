@@ -16,16 +16,6 @@ const kindTones: Record<GuidanceKind, string> = {
   preference: "text-muted-foreground",
 }
 
-/**
- * Oldest first, so a reader follows the steering in the order it happened. A
- * point whose quote matched no message has no time to place it by, so it sorts
- * to the end rather than to the beginning of the day.
- */
-function inOrder(points: Array<GuidancePoint>): Array<GuidancePoint> {
-  const at = (point: GuidancePoint) => point.occurred_at || "￿"
-  return [...points].sort((a, b) => at(a).localeCompare(at(b)))
-}
-
 function Point({ point }: { point: GuidancePoint }) {
   return (
     <li className="border-l-2 border-border pl-3">
@@ -50,6 +40,7 @@ function Point({ point }: { point: GuidancePoint }) {
   )
 }
 
+/** Ordered by the server: oldest steering first, unattributed points last. */
 export function GuidancePointList({
   points,
 }: {
@@ -57,7 +48,7 @@ export function GuidancePointList({
 }) {
   return (
     <ul className="space-y-2.5">
-      {inOrder(points).map((point, index) => (
+      {points.map((point, index) => (
         <Point key={`${point.file}:${index}`} point={point} />
       ))}
     </ul>

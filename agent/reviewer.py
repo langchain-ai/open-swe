@@ -63,7 +63,7 @@ from agent.middleware import (
 from agent.middleware.prepare_run import PrepareRunState
 from agent.middleware.sandbox_circuit_breaker import post_sandbox_unreachable_notification
 from agent.prompts import apply_tool_descriptions, load_prompt, render_prompt
-from agent.review.author_guidance import GUIDANCE_CAP, SteeringHistory, load_steering_history
+from agent.review.author_guidance import GUIDANCE_CAP, SteeringHistory
 from agent.review.diff import (
     changed_files,
     compute_diff_line_set,
@@ -834,7 +834,7 @@ class PrepareReviewerRunMiddleware(BasePrepareRunMiddleware):
             if reviewer_eval or not repo_owner or not repo_name or not isinstance(pr_number, int):
                 return ""
             try:
-                history = await load_steering_history(repo_owner, repo_name, pr_number)
+                history = await SteeringHistory.load(repo_owner, repo_name, pr_number)
             except Exception:
                 logger.exception(
                     "Failed to load author steering history for %s/%s#%s; continuing without it",

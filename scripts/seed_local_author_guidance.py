@@ -24,7 +24,7 @@ from sqlalchemy import text
 from agent.database import postgres
 from agent.github.pull_requests import PullRequest
 from agent.input_messages import human_input
-from agent.review.author_guidance import load_steering_history
+from agent.review.author_guidance import SteeringHistory
 from agent.thread_ids import pr_comment_thread_id
 
 
@@ -106,7 +106,7 @@ async def main() -> int:
     pull_request = await PullRequest(owner=owner, repo=repo, number=int(number)).save()
     await pull_request.link_thread(thread_id, source="local-seed")
 
-    history = await load_steering_history(owner, repo, int(number))
+    history = await SteeringHistory.load(owner, repo, int(number))
     if history is None:
         print("no steering history read back")
         return 1
