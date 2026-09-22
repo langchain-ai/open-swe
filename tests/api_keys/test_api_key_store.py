@@ -33,7 +33,8 @@ async def test_create_stores_only_the_digest_and_suffix(registry_db: None) -> No
     row = await _row(key.id)
     assert row["key_hash"] == hashlib.sha256(secret.encode()).hexdigest()
     assert secret not in str(row.values())
-    assert key.model_dump_json().find(secret) == -1
+    assert secret not in repr(key)
+    assert key.created_at is not None
 
 
 async def test_authenticate_accepts_a_live_key_and_rejects_every_other_state(

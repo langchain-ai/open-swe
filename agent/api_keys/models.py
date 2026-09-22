@@ -12,10 +12,11 @@ import uuid
 from datetime import UTC, datetime
 from typing import Literal, Self
 
-from pydantic import BaseModel, ConfigDict, computed_field
-from sqlalchemy import text
+from sqlalchemy import func, select, update
+from sqlalchemy.orm import Mapped, mapped_column
 
 from agent.database import postgres
+from agent.database.orm import NOW, Base
 
 logger = logging.getLogger(__name__)
 
@@ -27,27 +28,23 @@ SUFFIX_CHARS = 6
 MAX_EXPIRY_DAYS = 365
 NAME_MAX_CHARS = 200
 
-_COLUMNS = (
-    "id, workspace, name, key_suffix, created_by, created_at, expires_at, last_used_at, revoked_at"
-)
 
-
-class ApiKey(BaseModel):
+class ApiKey(Base):
     """One stored key. Never carries the secret."""
 
-    model_config = ConfigDict(frozen=True)
+    __tablename__ = "api_key"
 
-    id: str
-    workspace: str
-    name: str
-    key_suffix: str
-    created_by: str
-    created_at: datetime
-    expires_at: datetime
-    last_used_at: datetime | None = None
-    revoked_at: datetime | None = None
+    workspace: Mapped[str]
+    name: Mapped[str]
+    key_hash: Mapped[str] = mapped_column(unique=True)
+    key_suffix: Mapped[str]
+    created_by: Mapped[str]
+    expires_at: Mapped[datetime]
+    id: Mapped[str] = mapped_column(primary_key=True, default_factory=lambda: uuid.uuid4().hex)
+    created_at: Mapped[datetime | None] = mapped_column(server_default=NOW, init=False)
+    last_used_at: Mapped[datetime | None] = mapped_column(default=None)
+    revoked_at: Mapped[datetime | None] = mapped_column(default=None)
 
-    @computed_field
     @property
     def status(self) -> ApiKeyStatus:
         if self.revoked_at is not None:
@@ -68,66 +65,39 @@ class ApiKey(BaseModel):
     ) -> tuple[Self, str]:
         """Mint a key, returning the record and the plaintext secret exactly once."""
         secret = KEY_PREFIX + secrets.token_urlsafe(SECRET_BYTES)
-        async with postgres.transaction() as conn:
-            row = (
-                (
-                    await conn.execute(
-                        text(f"""
-                            INSERT INTO api_key
-                                (id, workspace, name, key_hash, key_suffix, created_by, expires_at)
-                            VALUES
-                                (:id, :workspace, :name, :key_hash, :key_suffix, :created_by,
-                                 :expires_at)
-                            RETURNING {_COLUMNS}
-                        """),
-                        {
-                            "id": uuid.uuid4().hex,
-                            "workspace": workspace,
-                            "name": name,
-                            "key_hash": hashlib.sha256(secret.encode()).hexdigest(),
-                            "key_suffix": secret[-SUFFIX_CHARS:],
-                            "created_by": created_by,
-                            "expires_at": expires_at,
-                        },
-                    )
-                )
-                .mappings()
-                .one()
-            )
-        return cls.model_validate(dict(row)), secret
+        key = cls(
+            workspace=workspace,
+            name=name,
+            key_hash=hashlib.sha256(secret.encode()).hexdigest(),
+            key_suffix=secret[-SUFFIX_CHARS:],
+            created_by=created_by,
+            expires_at=expires_at,
+        )
+        async with postgres.session() as session:
+            session.add(key)
+            await session.flush()
+        return key, secret
 
     @classmethod
     async def list_all(cls, workspace: str | None = None) -> list[Self]:
-        scope = "WHERE workspace = :workspace" if workspace is not None else ""
-        async with postgres.connection() as conn:
-            rows = (
-                (
-                    await conn.execute(
-                        text(f"SELECT {_COLUMNS} FROM api_key {scope} ORDER BY created_at DESC"),
-                        {"workspace": workspace} if workspace is not None else {},
-                    )
-                )
-                .mappings()
-                .all()
-            )
-        return [cls.model_validate(dict(row)) for row in rows]
+        query = select(cls).order_by(cls.created_at.desc())
+        if workspace is not None:
+            query = query.where(cls.workspace == workspace)
+        async with postgres.session() as session:
+            return list(await session.scalars(query))
 
     @classmethod
     async def revoke(cls, key_id: str) -> bool:
         """Revoke a key, keeping the first revocation time. ``False`` when unknown."""
-        async with postgres.transaction() as conn:
-            row = (
-                await conn.execute(
-                    text("""
-                        UPDATE api_key
-                        SET revoked_at = COALESCE(revoked_at, clock_timestamp())
-                        WHERE id = :id
-                        RETURNING id
-                    """),
-                    {"id": key_id},
-                )
-            ).first()
-        return row is not None
+        async with postgres.session() as session:
+            revoked = await session.scalar(
+                update(cls)
+                .where(cls.id == key_id)
+                .values(revoked_at=func.coalesce(cls.revoked_at, func.clock_timestamp()))
+                .returning(cls.id),
+                execution_options={"synchronize_session": False},
+            )
+        return revoked is not None
 
     @classmethod
     async def authenticate(cls, presented: str) -> Self | None:
@@ -139,26 +109,14 @@ class ApiKey(BaseModel):
         digest = cls.digest(presented)
         if digest is None:
             return None
-        async with postgres.connection() as conn:
-            row = (
-                (
-                    await conn.execute(
-                        text(f"SELECT {_COLUMNS} FROM api_key WHERE key_hash = :key_hash"),
-                        {"key_hash": digest},
-                    )
-                )
-                .mappings()
-                .one_or_none()
-            )
-        if row is None:
-            return None
-        key = cls.model_validate(dict(row))
-        return key if key.status == "active" else None
+        async with postgres.session() as session:
+            key = await session.scalar(select(cls).where(cls.key_hash == digest))
+        return key if key is not None and key.status == "active" else None
 
     @classmethod
     async def touch(cls, key_id: str) -> None:
-        async with postgres.transaction() as conn:
-            await conn.execute(
-                text("UPDATE api_key SET last_used_at = clock_timestamp() WHERE id = :id"),
-                {"id": key_id},
+        async with postgres.session() as session:
+            await session.execute(
+                update(cls).where(cls.id == key_id).values(last_used_at=func.clock_timestamp()),
+                execution_options={"synchronize_session": False},
             )

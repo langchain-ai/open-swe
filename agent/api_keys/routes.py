@@ -6,10 +6,10 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import Response
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from agent.api_keys.deps import ADMIN_KEY_DEP
-from agent.api_keys.models import MAX_EXPIRY_DAYS, NAME_MAX_CHARS, ApiKey
+from agent.api_keys.models import MAX_EXPIRY_DAYS, NAME_MAX_CHARS, ApiKey, ApiKeyStatus
 from agent.workspaces.store import WORKSPACES
 
 logger = logging.getLogger(__name__)
@@ -42,16 +42,26 @@ class ApiKeyCreate(BaseModel):
         return moment
 
 
-class MintedApiKey(BaseModel):
-    """The creation response — the only place the plaintext secret appears."""
+class ApiKeyView(BaseModel):
+    """A stored key as the admin API reports it. Has no field for the secret."""
+
+    model_config = ConfigDict(from_attributes=True)
 
     id: str
     workspace: str
     name: str
     key_suffix: str
     created_by: str
-    created_at: datetime
+    created_at: datetime | None
     expires_at: datetime
+    last_used_at: datetime | None
+    revoked_at: datetime | None
+    status: ApiKeyStatus
+
+
+class MintedApiKey(ApiKeyView):
+    """The creation response — the only place the plaintext secret appears."""
+
     secret: str
 
 
@@ -73,24 +83,16 @@ async def api_create_api_key(
         "Minted a workspace API key",
         extra={"api_key_id": key.id, "workspace": key.workspace, "minted_by": created_by},
     )
-    return MintedApiKey(
-        id=key.id,
-        workspace=key.workspace,
-        name=key.name,
-        key_suffix=key.key_suffix,
-        created_by=key.created_by,
-        created_at=key.created_at,
-        expires_at=key.expires_at,
-        secret=secret,
-    )
+    return MintedApiKey(**ApiKeyView.model_validate(key).model_dump(), secret=secret)
 
 
 @router.get("")
 async def api_list_api_keys(
     workspace: str | None = None,
     _admin: dict[str, Any] = ADMIN_KEY_DEP,
-) -> list[ApiKey]:
-    return await ApiKey.list_all(workspace.strip() if workspace else None)
+) -> list[ApiKeyView]:
+    keys = await ApiKey.list_all(workspace.strip() if workspace else None)
+    return [ApiKeyView.model_validate(key) for key in keys]
 
 
 @router.delete("/{key_id}", status_code=204)
