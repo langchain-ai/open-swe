@@ -198,6 +198,8 @@ it.each([0, 1, 4, 5])(
           efforts: [],
           median_distance_basis_points: samples ? 1750 : null,
           distance_sample_size: samples,
+          avg_merge_seconds: null,
+          avg_delivery_seconds: null,
         },
       ],
     })
