@@ -286,9 +286,6 @@ async def create_durable_run(
     if assistant_id == "agent" and cfg.slack_ask is not True:
         from agent.slack.thinking import sync_slack_background_status
 
-        # Omitted config can still belong to a Slack thread (e.g. a dashboard follow-up).
-        if source_context is None and "slack_thread" in cfg.model_fields_set:
-            source_context = SourceContext(slack_thread=cfg.slack_thread)
         await sync_slack_background_status(
             client, thread_id, resume=True, source_context=source_context
         )

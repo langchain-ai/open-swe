@@ -302,12 +302,34 @@ async def test_dispatch_restores_thinking_for_slack_background_wait(
         },
     )
     set_status.assert_awaited_once_with("C1", "1.0", "Thinking...")
-    assert client.threads.get.await_count == (0 if source == "slack" else 1)
+    client.threads.get.assert_awaited_once_with("thread-1")
 
 
-@pytest.mark.parametrize("explicit_context", [False, True])
+async def test_dispatch_uses_moved_slack_destination_from_metadata(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = AsyncMock()
+    client.runs.create.return_value = {"run_id": "run-1"}
+    client.runs.list.return_value = [{"run_id": "run-1"}]
+    client.threads.get.return_value = {
+        "metadata": {"source_context": {"slack_thread": {"channel_id": "C2", "thread_ts": "2.0"}}}
+    }
+    set_status = AsyncMock(return_value=True)
+    monkeypatch.setattr(slack_thinking, "set_slack_thread_status", set_status)
+    await dispatch.create_durable_run(
+        "thread-1",
+        "agent",
+        input={"messages": []},
+        source="slack",
+        client=client,
+        config={"configurable": {"slack_thread": {"channel_id": "C1", "thread_ts": "1.0"}}},
+    )
+    client.threads.get.assert_awaited_once_with("thread-1")
+    set_status.assert_awaited_once_with("C2", "2.0", "Thinking...")
+
+
 async def test_dispatch_skips_status_reads_for_known_non_slack_thread(
-    monkeypatch: pytest.MonkeyPatch, explicit_context: bool
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     client = AsyncMock()
     client.runs.create.return_value = {"run_id": "run-1"}
@@ -319,8 +341,8 @@ async def test_dispatch_skips_status_reads_for_known_non_slack_thread(
         input={"messages": []},
         source="dashboard",
         client=client,
-        config={"configurable": {} if explicit_context else {"slack_thread": None}},
-        source_context=SourceContext() if explicit_context else None,
+        config={"configurable": {}},
+        source_context=SourceContext(),
     )
     client.threads.get.assert_not_awaited()
     client.runs.list.assert_not_awaited()
@@ -334,7 +356,12 @@ async def test_dispatch_reads_task_state_if_run_finishes_before_status_sync(
     client = AsyncMock()
     client.runs.create.return_value = {"run_id": "run-1"}
     client.runs.list.return_value = []
-    client.threads.get.return_value = {"metadata": {"running_background_tasks": ["cmd-1"]}}
+    client.threads.get.return_value = {
+        "metadata": {
+            "running_background_tasks": ["cmd-1"],
+            "source_context": {"slack_thread": {"channel_id": "C1", "thread_ts": "1.0"}},
+        }
+    }
     set_status = AsyncMock()
     monkeypatch.setattr(slack_thinking, "set_slack_thread_status", set_status)
     await dispatch.create_durable_run(
