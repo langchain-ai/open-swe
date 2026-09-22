@@ -210,10 +210,7 @@ async def get_review_scout(config: RunnableConfig) -> Pregel:
         return create_deep_agent(system_prompt="", tools=[]).with_config(bindable_config(config))
 
     settings = await cached_workspace_settings(cfg.workspace_slug)
-    if cfg.grouping_model_id:
-        model_id, effort = cfg.grouping_model_id, cfg.grouping_reasoning_effort
-    else:
-        model_id, effort = settings.default_grouping_model
+    model_id, effort = settings.review_scout_model
     model_id, effort = gate_fable_model(model_id, effort, fable_enabled=settings.fable_enabled)
     model = _make_model_or_defer(
         model_id,

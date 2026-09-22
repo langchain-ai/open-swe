@@ -48,6 +48,7 @@ WORKSPACE_SETTINGS_NAMESPACE: list[str] = ["workspace_settings"]
 ORG_GUIDELINES_MAX_CHARS = 10_000
 DEFAULT_THREAD_TITLE_MODEL = "openai:gpt-6-luna"
 DEFAULT_THREAD_TITLE_REASONING_EFFORT = "low"
+REVIEW_SCOUT_FALLBACK_MODEL = ("openai:gpt-6-luna", "high")
 ANTHROPIC_THREAD_TITLE_MODEL = "anthropic:claude-haiku-4-5"
 # Titles are a one-shot classification; no extended thinking needed.
 ANTHROPIC_THREAD_TITLE_REASONING_EFFORT = "none"
@@ -90,8 +91,6 @@ class WorkspaceSettingsUpdate(BaseModel):
     default_reviewer_reasoning_effort: str | None = None
     default_reviewer_subagent_model: str | None = None
     default_reviewer_subagent_reasoning_effort: str | None = None
-    default_grouping_model: str | None = None
-    default_grouping_reasoning_effort: str | None = None
     default_chat_model: str | None = None
     default_chat_reasoning_effort: str | None = None
     default_thread_title_model: str | None = None
@@ -148,12 +147,6 @@ class WorkspaceSettingsUpdate(BaseModel):
             self.default_reviewer_subagent_model,
             self.default_reviewer_subagent_reasoning_effort,
         )
-        self.default_grouping_model, self.default_grouping_reasoning_effort = (
-            _normalize_stale_model_pair(
-                self.default_grouping_model,
-                self.default_grouping_reasoning_effort,
-            )
-        )
         self.default_chat_model, self.default_chat_reasoning_effort = _normalize_stale_model_pair(
             self.default_chat_model,
             self.default_chat_reasoning_effort,
@@ -185,11 +178,6 @@ class WorkspaceSettingsUpdate(BaseModel):
             self.default_reviewer_subagent_model,
             self.default_reviewer_subagent_reasoning_effort,
             "reviewer subagent",
-        )
-        _validate_model_effort_pair(
-            self.default_grouping_model,
-            self.default_grouping_reasoning_effort,
-            "review scout",
         )
         _validate_model_effort_pair(
             self.default_chat_model, self.default_chat_reasoning_effort, "review chat"
@@ -235,7 +223,6 @@ class WorkspaceSettingsUpdate(BaseModel):
                 ),
                 ("default_reviewer_model", "default_reviewer_reasoning_effort"),
                 ("default_reviewer_subagent_model", "default_reviewer_subagent_reasoning_effort"),
-                ("default_grouping_model", "default_grouping_reasoning_effort"),
                 ("default_chat_model", "default_chat_reasoning_effort"),
                 ("default_thread_title_model", "default_thread_title_reasoning_effort"),
             ):
@@ -284,7 +271,6 @@ _MODEL_PAIR_FIELDS: tuple[tuple[str, str], ...] = (
     ),
     ("default_reviewer_model", "default_reviewer_reasoning_effort"),
     ("default_reviewer_subagent_model", "default_reviewer_subagent_reasoning_effort"),
-    ("default_grouping_model", "default_grouping_reasoning_effort"),
     ("default_chat_model", "default_chat_reasoning_effort"),
     ("default_thread_title_model", "default_thread_title_reasoning_effort"),
 )
@@ -346,10 +332,6 @@ def _default_settings() -> dict[str, Any]:
         "default_reviewer_reasoning_effort": fallback_effort,
         "default_reviewer_subagent_model": fallback_model,
         "default_reviewer_subagent_reasoning_effort": fallback_effort,
-        # No hardcoded grouping default: unset means "inherit the Reviewer
-        # subagent default".
-        "default_grouping_model": None,
-        "default_grouping_reasoning_effort": None,
         # No hardcoded chat default: unset means "inherit the Agent default".
         "default_chat_model": None,
         "default_chat_reasoning_effort": None,
@@ -637,15 +619,10 @@ class WorkspaceSettings(Mapping[str, Any]):
         }
 
     @property
-    def default_grouping_model(self) -> tuple[str, str]:
-        """The default ``(model_id, reasoning_effort)`` for the review scout.
-
-        When none is configured (or it's no longer supported), inherit the
-        **reviewer subagent** default: the scout is a companion to the reviewer,
-        so it tracks that cheaper tier rather than the primary reviewer model.
-        """
-        model = self.get("default_grouping_model")
-        effort = self.get("default_grouping_reasoning_effort")
+    def review_scout_model(self) -> tuple[str, str]:
+        """The review scout's ``(model_id, reasoning_effort)``: model routing's fast tier."""
+        model = self.get("default_agent_routing_fast_model")
+        effort = self.get("default_agent_routing_fast_reasoning_effort")
         if (
             isinstance(model, str)
             and isinstance(effort, str)
@@ -653,8 +630,8 @@ class WorkspaceSettings(Mapping[str, Any]):
             and model not in NON_DEFAULT_MODEL_IDS
             and model_supports_effort(model, effort)
         ):
-            return _resolve_default_pair(model, effort)
-        return self.default_subagent_model("reviewer")
+            return model, effort
+        return REVIEW_SCOUT_FALLBACK_MODEL
 
     @property
     def default_thread_title_model(self) -> tuple[str, str]:

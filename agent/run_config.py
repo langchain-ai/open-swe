@@ -153,8 +153,6 @@ class RunConfig(BaseModel):
     reviewer_reasoning_effort: str | None = None
     reviewer_subagent_model_id: str | None = None
     reviewer_subagent_reasoning_effort: str | None = None
-    grouping_model_id: str | None = None
-    grouping_reasoning_effort: str | None = None
 
     # Behavior toggles
     draft_prs: bool | None = None
