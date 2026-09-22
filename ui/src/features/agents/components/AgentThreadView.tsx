@@ -40,7 +40,10 @@ import type {
   LoadEarlier,
   MessagesScrollControl,
 } from "@/features/agents/components/messages"
-import { useSubmitAgentMessage } from "@/features/agents/lib/provider/useSubmitAgentMessage"
+import {
+  describeSendError,
+  useSubmitAgentMessage,
+} from "@/features/agents/lib/provider/useSubmitAgentMessage"
 import { useModelOptions } from "@/features/agents/lib/provider/useModelOptions"
 import {
   agentThreadKeys,
@@ -254,6 +257,10 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
         if (images === null) return
         await withdrawQueued(entry)
         await sendMessage.mutateAsync({ content: queuedText(entry), images })
+      } catch (error) {
+        toast.error(
+          `Couldn't send the queued message now: ${describeSendError(error)}`
+        )
       } finally {
         steerInFlightRef.current = false
       }
@@ -283,7 +290,11 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
         if (images === null) return
         await withdrawQueued(entry)
         restoreQueuedToComposer([queuedText(entry)], images)
-      })()
+      })().catch((error: unknown) =>
+        toast.error(
+          `Couldn't cancel the queued message: ${describeSendError(error)}`
+        )
+      )
     },
     [materializeQueuedImages, queued, restoreQueuedToComposer, withdrawQueued]
   )

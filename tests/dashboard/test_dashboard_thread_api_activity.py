@@ -34,6 +34,7 @@ class FakeRuns:
 
     async def list(self, thread_id: str, limit: int = 1) -> list[dict[str, str]]:
         assert thread_id == "tid"
+        assert limit == 1
         return [{"run_id": self.run_id, "status": self.status}]
 
 

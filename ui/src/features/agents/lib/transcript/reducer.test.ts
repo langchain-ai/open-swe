@@ -381,6 +381,25 @@ describe("transcript events", () => {
     expect(ended.status).toBe("running")
     expect(queuedTurns(ended)).toHaveLength(1)
   })
+
+  it("settles while a requested turn has no run that could start it", () => {
+    const orphaned = applyEvent(fromSnapshot(twoTurnSnapshot()), {
+      ...appended(11, {}),
+      event_type: "turn.requested",
+      payload: {
+        turn_id: "turn-3",
+        message_id: "human-3",
+        text: "never started",
+        attachments: [],
+      },
+    })
+    const ended = applyEvent(orphaned, {
+      ...appended(12, {}),
+      event_type: "turn.completed",
+      payload: { turn_id: "turn-2" },
+    })
+    expect(ended.status).toBe("idle")
+  })
 })
 
 function notice(version: number, payload: RunNoticePayload): StoredEvent {

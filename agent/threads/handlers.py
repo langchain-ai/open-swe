@@ -22,6 +22,7 @@ from agent.threads.access import (
 from agent.threads.listing import list_unresolved_dashboard_threads
 from agent.threads.runs import (
     _ASSISTANT_ID,
+    QUEUED_BY_KEY,
     ThreadMessageBody,
     _notify_slack_web_handoff,
     _user_message_content,
@@ -255,16 +256,30 @@ async def send_dashboard_message(
     return await _thread_summary(thread)
 
 
-async def _cancel_active_thread_runs(client: Any, thread_id: str) -> list[str]:
-    """Interrupt every live run on the thread, and report which ones those were."""
+async def _cancel_active_thread_runs(
+    client: Any, thread_id: str, *, stopped_by: str | None = None
+) -> tuple[list[str], bool]:
+    """Interrupt every live run on the thread, and report which ones those were.
+
+    With ``stopped_by``, a follow-up someone else queued is left to run: their
+    message would otherwise vanish, since only the stopper gets theirs back.
+    Also reports whether any such run was kept.
+    """
     run_ids: set[str] = set()
+    kept = False
     for status in ("pending", "running"):
         offset = 0
         while True:
             runs = await client.runs.list(thread_id, status=status, limit=100, offset=offset)
-            run_ids.update(
-                run_id for run in runs if isinstance((run_id := run.get("run_id")), str) and run_id
-            )
+            for run in runs:
+                run_id = run.get("run_id")
+                if not isinstance(run_id, str) or not run_id:
+                    continue
+                queued_by = (run.get("metadata") or {}).get(QUEUED_BY_KEY)
+                if stopped_by is not None and queued_by not in {None, stopped_by}:
+                    kept = True
+                    continue
+                run_ids.add(run_id)
             if len(runs) < 100:
                 break
             offset += len(runs)
@@ -275,7 +290,7 @@ async def _cancel_active_thread_runs(client: Any, thread_id: str) -> list[str]:
             run_ids=cancelled,
             action="interrupt",
         )
-    return cancelled
+    return cancelled, kept
 
 
 async def interrupt_transcript_turns(thread_id: str, run_ids: Sequence[str]) -> None:
@@ -318,7 +333,9 @@ async def cancel_dashboard_thread(
     _assert_thread_postable(metadata, login, email)
 
     try:
-        cancelled_run_ids = await _cancel_active_thread_runs(client, thread_id)
+        cancelled_run_ids, kept_queued = await _cancel_active_thread_runs(
+            client, thread_id, stopped_by=login
+        )
     except Exception as exc:  # noqa: BLE001
         logger.exception("Failed to cancel active runs for thread %s", thread_id)
         raise HTTPException(502, "failed to request thread cancellation") from exc
@@ -329,8 +346,13 @@ async def cancel_dashboard_thread(
         "updated_at_ms": _now_ms(),
     }
     await client.threads.update(thread_id=thread_id, metadata=metadata_update)
+    # A follow-up left queued picks the leftovers up with its first model call.
     try:
-        run_id = await dispatch_pending_follow_ups(thread_id, login, metadata, client=client)
+        run_id = (
+            None
+            if kept_queued
+            else await dispatch_pending_follow_ups(thread_id, login, metadata, client=client)
+        )
     except Exception as exc:  # noqa: BLE001
         logger.exception("Failed to submit queued follow-up for thread %s", thread_id)
         raise HTTPException(502, "stopped run but failed to submit queued follow-up") from exc
@@ -357,7 +379,7 @@ async def admin_cancel_dashboard_thread(
         assert_thread_readable(thread_metadata(thread), login, email)
 
     try:
-        cancelled_run_ids = await _cancel_active_thread_runs(client, thread_id)
+        cancelled_run_ids, _ = await _cancel_active_thread_runs(client, thread_id)
     except Exception as exc:  # noqa: BLE001
         logger.exception("Failed to cancel active runs for thread %s", thread_id)
         raise HTTPException(502, "failed to request thread cancellation") from exc

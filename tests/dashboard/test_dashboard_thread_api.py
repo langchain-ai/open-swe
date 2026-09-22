@@ -2996,7 +2996,11 @@ async def test_cancel_dashboard_thread_interrupts_runs_it_did_not_start(monkeypa
     class FakeRuns:
         async def list(self, thread_id: str, **kwargs: object) -> list[dict[str, str]]:
             calls.append(("list", {"thread_id": thread_id, **kwargs}))
-            return [{"run_id": f"{kwargs['status']}-run"}]
+            runs: list[dict[str, object]] = [{"run_id": f"{kwargs['status']}-run"}]
+            if kwargs["status"] == "pending":
+                # Someone else's queued follow-up is left to run.
+                runs.append({"run_id": "teammate-queued", "metadata": {"queued_by": "teammate"}})
+            return runs
 
         async def cancel_many(self, **kwargs: object) -> None:
             calls.append(("cancel_many", kwargs))

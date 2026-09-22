@@ -419,15 +419,18 @@ function ensureTurn(
 }
 
 /**
- * What the thread does once a turn ended: another turn still open keeps it
- * running (a queued follow-up is about to start), otherwise `settled`.
+ * What the thread does once a turn ended: another turn still running, or one
+ * with a queued run about to start, keeps it running; otherwise `settled`. A
+ * requested turn with no run may never start, so it does not count.
  */
 function settledStatus(
   draft: Draft,
   settled: TranscriptThreadStatus
 ): TranscriptThreadStatus {
   return Object.values(draft.state.turns).some(
-    (turn) => turn.state === "requested" || turn.state === "running"
+    (turn) =>
+      turn.state === "running" ||
+      (turn.state === "requested" && turn.runId !== null)
   )
     ? "running"
     : settled

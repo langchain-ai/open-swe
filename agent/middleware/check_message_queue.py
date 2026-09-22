@@ -275,7 +275,16 @@ async def check_message_queue_before_model(  # noqa: PLR0911
         )
         resolved_model_id: str | None = None
         if has_images:
-            resolved_model_id = await _resolve_thread_model_id(thread_id)
+            # This run's own model first: thread metadata already names the
+            # model of any follow-up queued behind it.
+            run_model = configurable.get("resolved_agent_model_id") or configurable.get(
+                "agent_model_id"
+            )
+            resolved_model_id = (
+                run_model
+                if isinstance(run_model, str) and run_model
+                else await _resolve_thread_model_id(thread_id)
+            )
 
         surface = current_reply_surface(state)
         moved_surface: ReplySurface | None = None

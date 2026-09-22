@@ -63,6 +63,7 @@ from agent.transcript.events import (
     MessageCompleted,
     MessageSender,
     ThreadCreated,
+    TurnFailed,
     TurnQueued,
     TurnRequested,
 )
@@ -811,6 +812,11 @@ async def _enrich_run_start_command(
             },
             **agent_version_metadata(),
             "invocation_started_at": invocation_started_at,
+            **(
+                {RUN_MODEL_KEY: merged_configurable["agent_model_id"]}
+                if isinstance(merged_configurable.get("agent_model_id"), str)
+                else {}
+            ),
         },
         invocation_id,
     )
@@ -829,6 +835,9 @@ async def _enrich_run_start_command(
 
 
 QUEUED_BY_KEY = "queued_by"
+# The model a dashboard run was started with; thread metadata moves on as soon
+# as a follow-up is queued with another one.
+RUN_MODEL_KEY = "agent_model_id"
 
 
 def offload_requested(params: dict[str, Any]) -> bool:
@@ -864,10 +873,17 @@ async def steer_running_thread(
     if not _command_prompt_text(content) and not command_images:
         raise HTTPException(422, "a follow-up needs a message")
 
-    # The run keeps the model it started with, so images are held to it.
-    image_blocks = _image_blocks(command_images, model_id=_metadata_model_id(metadata))
-
     client = langgraph_client()
+    latest_run_id = metadata.get("latest_run_id")
+    live_run_id = latest_run_id if isinstance(latest_run_id, str) and latest_run_id else None
+    # The run keeps the model it started with, so images are held to it. Thread
+    # metadata may already name the model of a follow-up queued behind it.
+    run_model = (await _run_metadata(client, thread_id, live_run_id)).get(RUN_MODEL_KEY)
+    image_blocks = _image_blocks(
+        command_images,
+        model_id=run_model if isinstance(run_model, str) else _metadata_model_id(metadata),
+    )
+
     structured, _, persisted_message_ids = await _attributed_run_messages(
         thread_id,
         login,
@@ -885,8 +901,6 @@ async def steer_running_thread(
     )
     structured[-1]["id"] = message_id
 
-    latest_run_id = metadata.get("latest_run_id")
-    live_run_id = latest_run_id if isinstance(latest_run_id, str) and latest_run_id else None
     # The live run's own turn, never a follow-up queued behind it.
     turn_id = (
         await open_turn_id(thread_id, live_run_id)
@@ -988,6 +1002,18 @@ async def _run_is_live(client: Any, thread_id: str, run_id: str | None) -> bool:
     return status in {"pending", "running"}
 
 
+async def _run_metadata(client: Any, thread_id: str, run_id: str | None) -> Mapping[str, Any]:
+    if run_id is None:
+        return {}
+    try:
+        run = await client.runs.get(thread_id, run_id)
+    except Exception:  # noqa: BLE001
+        logger.debug("Could not read run %s before steering", run_id, exc_info=True)
+        return {}
+    metadata = run.get("metadata") if isinstance(run, Mapping) else None
+    return metadata if isinstance(metadata, Mapping) else {}
+
+
 async def queue_follow_up_run(
     thread_id: str,
     login: str,
@@ -1009,37 +1035,78 @@ async def queue_follow_up_run(
     enriched_params: dict[str, Any] = enriched["params"]
     configurable: dict[str, Any] = enriched_params["config"]["configurable"]
     run_input = enriched_params.get("input")
-
-    run = await create_durable_run(
-        thread_id,
-        _ASSISTANT_ID,
-        input=run_input if isinstance(run_input, dict) else {},
-        config={"configurable": configurable},
-        # Only its sender may withdraw it (``proxy_dashboard_thread_run_cancel``).
-        metadata={**enriched_params["metadata"], QUEUED_BY_KEY: login},
-        source=DASHBOARD_SOURCE,
-        client=langgraph_client(),
-        multitask_strategy="enqueue",
-    )
-    run_id = run.get("run_id") if isinstance(run, dict) else None
-    if not isinstance(run_id, str) or not run_id:
-        raise HTTPException(502, "LangGraph did not return a run id for the queued follow-up")
-
     turn_id_raw = configurable.get("transcript_turn_id")
-    if isinstance(turn_id_raw, str) and metadata.get("transcript") == TRANSCRIPT_VERSION:
-        turn_id = uuid.UUID(turn_id_raw)
-        await append(
+    turn_id = (
+        uuid.UUID(turn_id_raw)
+        if isinstance(turn_id_raw, str) and metadata.get("transcript") == TRANSCRIPT_VERSION
+        else None
+    )
+
+    try:
+        run = await create_durable_run(
             thread_id,
-            [
-                Command(
-                    command_id=f"turn:{turn_id}:queued",
-                    event=TurnQueued(turn_id=turn_id, run_id=run_id),
-                    actor_kind="user",
-                    run_id=run_id,
-                    turn_id=turn_id,
-                )
-            ],
+            _ASSISTANT_ID,
+            input=run_input if isinstance(run_input, dict) else {},
+            config={"configurable": configurable},
+            # Only its sender may withdraw it (``proxy_dashboard_thread_run_cancel``).
+            metadata={**enriched_params["metadata"], QUEUED_BY_KEY: login},
+            source=DASHBOARD_SOURCE,
+            client=langgraph_client(),
+            multitask_strategy="enqueue",
         )
+        run_id = run.get("run_id") if isinstance(run, dict) else None
+        if not isinstance(run_id, str) or not run_id:
+            raise HTTPException(502, "LangGraph did not return a run id for the queued follow-up")
+    except Exception:
+        # No run will ever start the requested turn; left open, it would read
+        # as queued (and the thread as busy) forever.
+        if turn_id is not None:
+            try:
+                await append(
+                    thread_id,
+                    [
+                        Command(
+                            command_id=f"turn:{turn_id}:failed",
+                            event=TurnFailed(
+                                turn_id=turn_id, error="the follow-up could not be queued"
+                            ),
+                            actor_kind="system",
+                            turn_id=turn_id,
+                        )
+                    ],
+                )
+            except Exception:  # noqa: BLE001
+                logger.warning(
+                    "Could not close the turn of a follow-up that failed to queue",
+                    exc_info=True,
+                    extra={"queue": {"thread_id": thread_id, "turn_id": str(turn_id)}},
+                )
+        raise
+
+    if turn_id is not None:
+        # The run exists and will start on its own, so failing the request here
+        # would only invite a retry that queues the message twice. Until this
+        # lands, the row shows as pending and its run's ``turn.started`` fills
+        # the run id in.
+        try:
+            await append(
+                thread_id,
+                [
+                    Command(
+                        command_id=f"turn:{turn_id}:queued",
+                        event=TurnQueued(turn_id=turn_id, run_id=run_id),
+                        actor_kind="user",
+                        run_id=run_id,
+                        turn_id=turn_id,
+                    )
+                ],
+            )
+        except Exception:  # noqa: BLE001
+            logger.warning(
+                "Could not record the queued run of a follow-up",
+                exc_info=True,
+                extra={"queue": {"thread_id": thread_id, "run_id": run_id}},
+            )
     return {
         "id": command.get("id"),
         "type": "success",

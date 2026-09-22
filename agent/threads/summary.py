@@ -470,29 +470,24 @@ async def _thread_summary(
     return summary
 
 
+def _status_of(run: Any) -> str | None:
+    raw = run.get("status") if isinstance(run, dict) else getattr(run, "status", None)
+    return raw.lower() if isinstance(raw, str) else None
+
+
 async def _latest_run_info(client: Any, thread_id: str) -> tuple[str | None, str | None]:
     try:
-        runs = await client.runs.list(thread_id, limit=5)
+        runs = await client.runs.list(thread_id, limit=1)
+        # Follow-ups queued behind the live run are newer than it; the live run
+        # is still the one that says what the thread is doing.
+        if runs and _status_of(runs[0]) == "pending":
+            runs = await client.runs.list(thread_id, status="running", limit=1) or runs
     except Exception:  # noqa: BLE001
         logger.debug("Could not fetch latest run for thread %s", thread_id, exc_info=True)
         return None, None
     if not runs:
         return None, None
-
-    def _status_of(candidate: Any) -> str | None:
-        raw = (
-            candidate.get("status")
-            if isinstance(candidate, dict)
-            else getattr(candidate, "status", None)
-        )
-        return raw.lower() if isinstance(raw, str) else None
-
-    # Follow-ups queued behind the live run are newer than it; the live run is
-    # still the one that says what the thread is doing.
-    run = next(
-        (candidate for candidate in runs if _status_of(candidate) == "running"),
-        next((candidate for candidate in runs if _status_of(candidate) == "pending"), runs[0]),
-    )
+    run = runs[0]
     raw_id = (
         (run.get("run_id") or run.get("id"))
         if isinstance(run, dict)
