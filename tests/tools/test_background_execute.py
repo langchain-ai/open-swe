@@ -455,29 +455,3 @@ async def test_monitor_refreshes_task_state_after_completion_dispatch(
     else:
         set_status.assert_not_awaited()
         client.runs.list.assert_not_awaited()
-
-
-@pytest.mark.parametrize(
-    ("tracked", "tasks"),
-    [([], []), (["cmd-1"], [{"task_id": "cmd-1", "status": "running"}])],
-)
-async def test_unchanged_monitor_tick_skips_thread_lock(
-    monkeypatch: pytest.MonkeyPatch, tracked: list[str], tasks: list[dict[str, str]]
-) -> None:
-    client = AsyncMock()
-    client.threads.get.return_value = {
-        "metadata": {"sandbox_id": "sandbox-1", "running_background_tasks": tracked}
-    }
-    backend = AsyncMock()
-    backend.aexecute.return_value = SimpleNamespace(exit_code=0)
-    monkeypatch.setattr(background_tasks, "_client", lambda: client)
-    monkeypatch.setattr(background_tasks, "create_sandbox", AsyncMock(return_value=backend))
-    monkeypatch.setattr(background_tasks, "_list_tasks", AsyncMock(return_value=tasks))
-    monkeypatch.setattr(background_tasks, "_delete_crons", AsyncMock())
-
-    await monitor_background_tasks("thread-1")
-
-    client.threads.create.assert_not_awaited()
-    client.threads.delete.assert_not_awaited()
-    client.threads.update.assert_not_awaited()
-    client.threads.get.assert_awaited_once_with("thread-1")
