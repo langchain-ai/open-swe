@@ -1,6 +1,5 @@
 import type { GuidanceKind, GuidancePoint } from "@/lib/api"
 import { cn } from "@/lib/utils"
-import { dateLabel } from "../lib/dateLabel"
 
 const kindLabels: Record<GuidanceKind, string> = {
   correction: "Corrected",
@@ -16,26 +15,45 @@ const kindTones: Record<GuidanceKind, string> = {
   preference: "text-muted-foreground",
 }
 
-function Point({ point }: { point: GuidancePoint }) {
+/** The summary reads as the point; the author's own words are a click away. */
+function Point({
+  point,
+  showAuthor,
+}: {
+  point: GuidancePoint
+  showAuthor: boolean
+}) {
   return (
-    <li className="border-l-2 border-border pl-3">
-      <div className="flex flex-wrap items-baseline gap-x-2 text-xs text-muted-foreground">
-        <span className={cn("font-medium", kindTones[point.kind])}>
-          {kindLabels[point.kind]}
-        </span>
-        {point.author && <span>{point.author}</span>}
-        {point.occurred_at && (
-          <span className="tabular-nums">{dateLabel(point.occurred_at)}</span>
-        )}
-        <span className="min-w-0 truncate font-mono" title={point.file}>
-          {point.file}
-          {point.start_line !== null && `:${point.start_line}`}
-        </span>
-      </div>
-      <p className="mt-0.5 text-sm text-foreground">{point.summary}</p>
-      <p className="mt-1 text-xs whitespace-pre-wrap text-muted-foreground italic">
-        “{point.quote}”
-      </p>
+    <li>
+      <details className="group">
+        <summary className="flex cursor-pointer list-none items-baseline gap-2">
+          <span
+            aria-hidden="true"
+            className="shrink-0 text-xs text-muted-foreground transition-transform group-open:rotate-90"
+          >
+            ›
+          </span>
+          <span className="min-w-0 flex-1 text-sm text-foreground">
+            {point.summary}
+          </span>
+          <span
+            className={cn(
+              "shrink-0 text-xs font-medium",
+              kindTones[point.kind]
+            )}
+          >
+            {kindLabels[point.kind]}
+          </span>
+          {showAuthor && point.author && (
+            <span className="shrink-0 text-xs text-muted-foreground">
+              {point.author}
+            </span>
+          )}
+        </summary>
+        <p className="mt-1 ml-5 border-l-2 border-border pl-3 text-xs whitespace-pre-wrap text-muted-foreground italic">
+          {point.quote}
+        </p>
+      </details>
     </li>
   )
 }
@@ -46,10 +64,18 @@ export function GuidancePointList({
 }: {
   points: Array<GuidancePoint>
 }) {
+  // One person steering is the norm, and repeating their name on every row says
+  // nothing. It only earns its place when the points have more than one source.
+  const showAuthor =
+    new Set(points.map((point) => point.author).filter(Boolean)).size > 1
   return (
-    <ul className="space-y-2.5">
+    <ul className="space-y-2">
       {points.map((point, index) => (
-        <Point key={`${point.file}:${index}`} point={point} />
+        <Point
+          key={`${point.kind}:${index}`}
+          point={point}
+          showAuthor={showAuthor}
+        />
       ))}
     </ul>
   )

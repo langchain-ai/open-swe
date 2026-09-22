@@ -29,8 +29,6 @@ async def record_guidance(
     summary: str,
     quote: str,
     kind: GuidanceKind,
-    file: str,
-    start_line: int | None = None,
 ) -> dict[str, Any]:
     """Implement the `record_guidance` tool."""
     trimmed_summary = summary.strip()
@@ -44,14 +42,6 @@ async def record_guidance(
         }
     if kind not in _KINDS:
         return {"success": False, "error": f"Invalid kind: {kind}"}
-    if not file.strip():
-        return {
-            "success": False,
-            "error": (
-                "file must name a path this PR changed where the steering is visible. "
-                "Do not record a point you cannot locate in the final change."
-            ),
-        }
 
     cfg = RunConfig.from_runtime()
     if cfg.repo is None or cfg.pr_number is None:
@@ -81,8 +71,6 @@ async def record_guidance(
         summary=trimmed_summary[:MAX_SUMMARY_CHARS],
         quote=trimmed_quote[:MAX_QUOTE_CHARS],
         kind=kind,
-        file=file.strip(),
-        start_line=start_line,
         author=source.author if source else "",
         occurred_at=source.created_at if source else None,
         reviewer_thread_id=thread_id,

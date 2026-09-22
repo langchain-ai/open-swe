@@ -1,11 +1,11 @@
-Record one point where the pull request's author steered Open SWE, and that you can see in the final change.
+Record one point where the pull request's author steered Open SWE, and that changed what shipped.
 
-Call this only after you have looked at the code. A point qualifies when you can name a file this PR changed where the author's instruction is visible — the thing they asked for is there, the thing they ruled out is gone, or the approach they redirected to is the one that shipped. If you cannot locate it in the change, do not record it: the author telling the agent to rebase, to run a command, or to open a browser steered the session, not the pull request.
+Call this only after you have read the code. Guidance is about the change as a whole, not about a line in it: an instruction can land as a file that exists, an approach that is absent, a name used throughout, or a whole design rebuilt. What qualifies is that the pull request would look different if nobody had said it. What does not qualify is steering the session rather than the work — telling the agent to rebase, run a command, check a log or open a browser leaves nothing behind in the change.
 
-Record at most $cap points, strongest first. Do not file a finding for a point you record here; this is a summary for the reader, not a defect.
+Record at most $cap points, strongest first. Recording nothing is the right answer when the author only ever said "looks good".
+
+Recording a point is not filing a finding. File a finding only when the final change contradicts what the author asked for, or applies it in one place and not another.
 
 - `summary`: one line, past tense, naming what the author changed and what it changed it from. "Rejected the retry wrapper and asked for the error to propagate", never "The user gave feedback about retries".
-- `quote`: the words from the author's message that carry the instruction, copied verbatim. Trim to the load-bearing sentence or two.
-- `kind`: `correction` when they said something already built was wrong, `constraint` when they ruled an approach, file or dependency out, `direction` when they chose a different approach from the one in progress, `preference` when they stated a durable taste about how the code should look.
-- `file`: the path in this PR where the steering is visible.
-- `start_line`: the line in that file, when one line carries it.
+- `quote`: the words from the author's message that carry the instruction, copied verbatim and unedited. Trim to the load-bearing sentence or two. A paraphrase loses the reader the link back to what was actually said.
+- `kind`: `correction` when they said something already built was wrong, `constraint` when they ruled an approach, dependency or pattern out, `direction` when they chose a different approach from the one in progress, `preference` when they stated a durable taste about how the work should look.

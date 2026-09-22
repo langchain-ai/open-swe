@@ -134,10 +134,8 @@ class GuidancePoint(Base):
     quote: Mapped[str]
     summary: Mapped[str]
     kind: Mapped[GuidanceKind] = mapped_column(Text)
-    file: Mapped[str]
     id: Mapped[UUID] = mapped_column(primary_key=True, default_factory=uuid7)
     quote_hash: Mapped[str] = mapped_column(default="")
-    start_line: Mapped[int | None] = mapped_column(default=None)
     author: Mapped[str] = mapped_column(server_default="", default="")
     occurred_at: Mapped[datetime | None] = mapped_column(default=None)
     reviewer_thread_id: Mapped[str] = mapped_column(server_default="", default="")
@@ -173,8 +171,6 @@ class GuidancePoint(Base):
         summary: str,
         quote: str,
         kind: GuidanceKind,
-        file: str,
-        start_line: int | None,
         author: str,
         occurred_at: datetime | None,
         reviewer_thread_id: str,
@@ -194,8 +190,6 @@ class GuidancePoint(Base):
             "quote": quote,
             "summary": summary,
             "kind": kind,
-            "file": file,
-            "start_line": start_line,
             "author": author,
             "occurred_at": occurred_at,
             "reviewer_thread_id": reviewer_thread_id,
@@ -212,8 +206,6 @@ class GuidancePoint(Base):
                             for key in (
                                 "summary",
                                 "kind",
-                                "file",
-                                "start_line",
                                 "reviewer_thread_id",
                                 "head_sha",
                             )
@@ -260,8 +252,6 @@ class GuidanceView(BaseModel):
     summary: str
     quote: str
     kind: GuidanceKind
-    file: str
-    start_line: int | None
     author: str
     occurred_at: datetime | None
 
@@ -271,8 +261,6 @@ class GuidanceView(BaseModel):
             summary=point.summary,
             quote=point.quote,
             kind=point.kind,
-            file=point.file,
-            start_line=point.start_line,
             author=point.author,
             occurred_at=point.occurred_at,
         )

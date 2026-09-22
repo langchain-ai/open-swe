@@ -20,8 +20,6 @@ def upgrade() -> None:
             kind text NOT NULL CHECK (
                 kind IN ('correction', 'constraint', 'direction', 'preference')
             ),
-            file text NOT NULL,
-            start_line integer,
             author text NOT NULL DEFAULT '',
             occurred_at timestamptz,
             reviewer_thread_id text NOT NULL DEFAULT '',
