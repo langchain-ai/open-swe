@@ -7,6 +7,7 @@ import pytest
 from fastapi import BackgroundTasks, Request
 
 from agent.slack import routes as slack_routes
+from agent.slack.model_selector import MODEL_SELECT_ACTION_ID
 from agent.slack.payloads import SlackBlockAction, SlackChannelContext, SlackInteraction
 
 
@@ -52,6 +53,67 @@ def _option_payload() -> dict[str, Any]:
         },
         "user": {"id": "U1"},
     }
+
+
+def _model_payload() -> dict[str, Any]:
+    return {
+        "type": "block_actions",
+        "actions": [
+            {
+                "action_id": MODEL_SELECT_ACTION_ID,
+                "action_ts": "3.0",
+                "type": "static_select",
+                "selected_option": {
+                    "text": {"type": "plain_text", "text": "Sonnet 5"},
+                    "value": "anthropic:claude-sonnet-5",
+                },
+            }
+        ],
+        "channel": {"id": "C1"},
+        "container": {"type": "message", "channel_id": "C1", "message_ts": "2.0"},
+        "message": {"ts": "2.0", "thread_ts": "1.0", "text": "Working"},
+        "user": {"id": "U1"},
+    }
+
+
+@pytest.mark.asyncio
+async def test_model_selection_persists_for_slack_thread(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    payload = _model_payload()
+    threads = type("Threads", (), {"update": AsyncMock()})()
+    client = type("Client", (), {"threads": threads})()
+    ephemeral = AsyncMock(return_value=True)
+    monkeypatch.setattr(slack_routes.common, "verify_slack_signature", lambda **_kwargs: True)
+    monkeypatch.setattr(slack_routes, "get_langgraph_client", lambda: client)
+    monkeypatch.setattr(
+        slack_routes.common, "lookup_slack_thread_id", AsyncMock(return_value="thread-1")
+    )
+    monkeypatch.setattr(
+        slack_routes.common,
+        "resolve_slack_channel_context",
+        AsyncMock(
+            return_value=SlackChannelContext(
+                name="proj-open-swe", is_ext_shared=False, is_pending_ext_shared=False
+            )
+        ),
+    )
+    monkeypatch.setattr(slack_routes.common, "post_slack_ephemeral_message", ephemeral)
+
+    result = await slack_routes.slack_interactivity(_request(payload), BackgroundTasks())
+
+    assert result == {"status": "accepted", "message": "Slack model updated"}
+    threads.update.assert_awaited_once_with(
+        thread_id="thread-1",
+        metadata={
+            "model": "anthropic:claude-sonnet-5",
+            "effort": "high",
+            "model_selection": "explicit",
+        },
+    )
+    ephemeral.assert_awaited_once_with(
+        "C1", "U1", "This thread will use Sonnet 5 (high) on its next turn.", thread_ts="1.0"
+    )
 
 
 @pytest.mark.asyncio

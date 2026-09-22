@@ -34,6 +34,35 @@ def _config() -> dict[str, Any]:
     }
 
 
+async def test_progress_reply_includes_thread_model_selector(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, Any] = {}
+
+    async def post(
+        _channel_id: str, _thread_ts: str, _message: str, **kwargs: Any
+    ) -> tuple[str | None, str | None]:
+        captured.update(kwargs)
+        return "2.0", None
+
+    config = _config()
+    config["configurable"].update(
+        {
+            "agent_model_id": "anthropic:claude-sonnet-5",
+            "resolved_agent_model_id": "anthropic:claude-sonnet-5",
+        }
+    )
+    monkeypatch.setattr(slack_reply_tool, "get_config", lambda: config)
+    monkeypatch.setattr(slack_reply_tool, "_post_and_store_mapping", post)
+
+    assert await slack_reply_tool.slack_reply("Working", "progress") == {"success": True}
+    blocks = captured["blocks"]
+    selector = blocks[-1]["elements"][0]
+    assert selector["type"] == "static_select"
+    assert selector["action_id"] == "open_swe_model_select"
+    assert selector["initial_option"]["value"] == "anthropic:claude-sonnet-5"
+
+
 @pytest.mark.parametrize(
     "options,stores_mapping",
     [

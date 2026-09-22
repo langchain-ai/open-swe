@@ -26,6 +26,11 @@ from agent.slack.failures import (
     answer_slack_request,
     run_slack_task,
 )
+from agent.slack.model_selector import (
+    MODEL_SELECT_ACTION_ID,
+    model_selection,
+    selected_model_id,
+)
 from agent.slack.payloads import (
     SlackBlockAction,
     SlackButtonValue,
@@ -692,6 +697,11 @@ async def slack_interactivity(
 
     action = _first_option_action(interaction.actions)
     if action is None:
+        model_action = next(
+            (item for item in interaction.actions if item.action_id == MODEL_SELECT_ACTION_ID), None
+        )
+        if model_action is not None:
+            return await _handle_model_selection(interaction, model_action)
         return ignored("No Open SWE action")
 
     button = SlackButtonValue.parse(parse_json_object((action.value or "{}").encode("utf-8")))
@@ -854,6 +864,51 @@ async def slack_interactivity(
         return accepted("Slack option queued")
 
     return await answer_slack_request(target, dispatch)
+
+
+async def _handle_model_selection(
+    interaction: SlackInteraction, action: SlackBlockAction
+) -> WebhookResponse:
+    channel_id = interaction.channel_id
+    thread_ts = interaction.thread_ts
+    user_id = interaction.user.id
+    model_id = selected_model_id(action.selected_option)
+    selection = model_selection(model_id or "")
+    if not channel_id or not thread_ts or not user_id or selection is None:
+        return ignored("Invalid model selection")
+
+    channel_context = await common.resolve_slack_channel_context(channel_id, use_cache=False)
+    if not channel_context.allows_operations or is_dm_channel(channel_context):
+        return ignored("Slack channel is not eligible")
+
+    thread_id = await common.lookup_slack_thread_id(get_langgraph_client(), channel_id, thread_ts)
+    if not thread_id:
+        return ignored("Slack thread is not associated")
+
+    model_id, label, effort = selection
+    try:
+        await get_langgraph_client().threads.update(
+            thread_id=thread_id,
+            metadata={
+                "model": model_id,
+                "effort": effort,
+                "model_selection": "explicit",
+            },
+        )
+    except Exception:
+        common.logger.exception(
+            "Could not persist Slack model selection",
+            extra={"agent_thread_id": thread_id, "slack_channel": channel_id},
+        )
+        return {"status": "error", "message": "Could not save model selection"}
+
+    await common.post_slack_ephemeral_message(
+        channel_id,
+        user_id,
+        f"This thread will use {label} ({effort}) on its next turn.",
+        thread_ts=thread_ts,
+    )
+    return accepted("Slack model updated")
 
 
 async def _update_selected_option_message(

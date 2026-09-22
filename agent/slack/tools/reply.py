@@ -19,6 +19,7 @@ from agent.slack.client import (
 )
 from agent.slack.events import claim_slack_event
 from agent.slack.markdown import markdown_to_mrkdwn
+from agent.slack.model_selector import model_selector_block
 from agent.slack.orphan import (
     dashboard_handoff_message,
     move_thread_to_dashboard,
@@ -88,6 +89,15 @@ async def slack_reply(
 
     async with slack_thread_mutation_lock(client, channel_id, thread_ts):
         slack_blocks = blocks if blocks is not None else _build_option_blocks(message, options)
+        if (
+            blocks is None
+            and not options
+            and response_type == "progress"
+            and not is_code_channel_session(str(thread_ts))
+        ):
+            selector = model_selector_block(cfg)
+            if selector is not None:
+                slack_blocks.append(selector)
         if blocks is None and len(message) > _NATIVE_MARKDOWN_MAX_CHARS:
             if options:
                 return _oversized_options_error(message)
