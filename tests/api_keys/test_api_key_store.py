@@ -16,7 +16,9 @@ async def _mint(name: str = "CI", *, workspace: str = "core") -> tuple[ApiKey, s
     """A key on a real workspace, since a key is bound to the workspace row."""
     workspace_id = await WORKSPACES.id_for_slug(workspace)
     if workspace_id is None:
-        record = await WORKSPACES.create(WorkspaceCreate(name=workspace), "admin")
+        record = await WORKSPACES.create(
+            WorkspaceCreate(name=workspace, repos=[f"acme/{workspace}"]), "admin"
+        )
         workspace_id = await WORKSPACES.id_for_slug(record.slug)
     assert workspace_id is not None
     return await ApiKey.create(
@@ -115,6 +117,6 @@ async def test_deleting_a_workspace_invalidates_its_keys(registry_db: None) -> N
     assert await ApiKey.authenticate(secret) is None
     assert await ApiKey.list_all("core") == []
 
-    await WORKSPACES.create(WorkspaceCreate(name="core"), "admin")
+    await WORKSPACES.create(WorkspaceCreate(name="core", repos=["acme/core"]), "admin")
     assert await ApiKey.authenticate(secret) is None
     assert await ApiKey.revoke(key.id) is False
