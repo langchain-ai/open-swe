@@ -17,11 +17,11 @@
 
 import {
   INTERNAL_TOOLS,
-  maybeDiffFromArgs,
   mergeTextChunks,
   toolKind,
   toolTitle,
 } from "@/features/agents/lib/streamMessagesToUi"
+import { maybeDiffFromArgs } from "@/features/agents/lib/toolDisplay"
 import {
   collectStructuredEntities,
   isSilentSender,

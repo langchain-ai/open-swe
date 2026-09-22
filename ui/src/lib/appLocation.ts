@@ -3,7 +3,7 @@ const FALLBACK_LOCATION = "/agents"
 
 function isAppLocation(value: string): boolean {
   const pathname = value.split(/[?#]/, 1)[0]
-  return [FALLBACK_LOCATION, "/incidents"].some(
+  return [FALLBACK_LOCATION, "/assistant", "/incidents"].some(
     (root) => pathname === root || pathname?.startsWith(`${root}/`)
   )
 }
