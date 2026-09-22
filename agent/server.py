@@ -1228,7 +1228,7 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
         adaptive_model_routing = thread_settings.get("model_routing_enabled", False)
         logger.info("Using stored thread settings: model=%s effort=%s", model_id, profile_effort)
 
-    if cfg.source == "dashboard" and cfg.model_selection in {"auto", "explicit"}:
+    if cfg.source in {"dashboard", "slack"} and cfg.model_selection in {"auto", "explicit"}:
         adaptive_model_routing = cfg.model_selection == "auto"
 
     # An explicit per-run model choice is the one thing allowed to move a thread

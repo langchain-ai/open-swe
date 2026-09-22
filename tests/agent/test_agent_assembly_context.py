@@ -396,6 +396,20 @@ async def test_model_routing_control_uses_fast_model() -> None:
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("source", ["dashboard", "slack"])
+async def test_explicit_model_selection_disables_model_routing(source: str) -> None:
+    config = _base_config()
+    config["configurable"].update({"source": source, "model_selection": "explicit"})
+    agent = await _capture_create_deep_agent_kwargs(config, profile={"model_routing_enabled": True})
+
+    middleware_names = [
+        type(middleware).__name__ for middleware in cast(list[object], agent["middleware"])
+    ]
+    assert "ModelSelectionMiddleware" not in middleware_names
+    assert config["metadata"]["model_routing_applied"] is False
+
+
+@pytest.mark.asyncio
 async def test_model_routing_is_disabled_by_default() -> None:
     config = _base_config()
     agent = await _capture_create_deep_agent_kwargs(config)
