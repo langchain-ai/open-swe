@@ -71,6 +71,7 @@ async def test_private_requester_partial_update_preserves_other_settings_and_use
         "draft_prs": False,
         "review_draft_prs": True,
         "model_routing_enabled": True,
+        "recent_thread_context_enabled": True,
         "email": "alice@example.com",
     }
     prefs = {

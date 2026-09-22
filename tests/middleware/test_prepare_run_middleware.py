@@ -323,6 +323,7 @@ def test_recent_context_audience_fails_closed_for_shared_destinations() -> None:
     middleware = object.__new__(PrepareAgentRunMiddleware)
     middleware._profile_login = "alice"
     middleware._credential_login = "alice"
+    middleware._recent_thread_context_enabled = True
     middleware._source = "github"
 
     assert middleware._recent_context_audience(RunConfig()) is None
@@ -336,7 +337,11 @@ def test_recent_context_audience_distinguishes_dm_and_shared_slack() -> None:
     middleware = object.__new__(PrepareAgentRunMiddleware)
     middleware._profile_login = "alice"
     middleware._credential_login = "alice"
+    middleware._recent_thread_context_enabled = False
     middleware._source = "slack"
+
+    assert middleware._recent_context_audience(RunConfig()) is None
+    middleware._recent_thread_context_enabled = True
 
     dm = RunConfig(slack_thread=SlackThreadRef(channel_context=SlackChannelContext(is_im=True)))
     assert middleware._recent_context_audience(dm) == "private"

@@ -6,7 +6,7 @@ Supported profile fields:
 - `default_model`, `reasoning_effort`: the main-agent model and effort.
 - `default_subagent_model`, `subagent_reasoning_effort`: subagent overrides; set both to null to inherit the main model.
 - `default_repo`, `base_branch`, `branch_prefix`: repository/branch defaults; null clears them.
-- `auto_fix_ci`: boolean preference.
+- `auto_fix_ci`, `recent_thread_context_enabled`: boolean preferences.
 - `model_routing_enabled`, `review_draft_prs`: boolean overrides; null inherits the shared default.
 - `draft_prs`: whether newly opened PRs are drafts; use true or false (null keeps the existing preference).
 
