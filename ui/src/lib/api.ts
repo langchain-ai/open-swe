@@ -353,6 +353,7 @@ export interface UsageLeaderboardRow {
   merged_prs_per_thread?: number
   agent_loc: number
   feedback_given: number
+  is_top_feedback_contributor?: boolean
   additions: number
   deletions: number
   total_tokens: number
