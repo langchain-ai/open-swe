@@ -102,6 +102,7 @@ function QueuedMessages({
 export const Messages = memo(function MessagesComponent({
   messages,
   threadId,
+  showUserNames = true,
   scrollKey,
   showPlanArtifact = false,
   emptyState,
@@ -209,7 +210,13 @@ export const Messages = memo(function MessagesComponent({
                 message.author === "user" ||
                 message.structuredSenderKind === "system"
               ) {
-                return <UserMessage key={message.id} message={message} />
+                return (
+                  <UserMessage
+                    key={message.id}
+                    message={message}
+                    showUserName={showUserNames}
+                  />
+                )
               }
 
               return (

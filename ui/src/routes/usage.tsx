@@ -841,7 +841,7 @@ function PRMergeRateTable({
                     setSort(nextSort)
                     setPage(1)
                   }}
-                  className={`${index === 0 ? "pr-0 pl-4" : index === columns.length - 1 ? "pr-4 pl-0" : "px-0"} ${column.align === "right" ? "text-right" : "text-left"}`}
+                  className={`${index === 0 ? "sticky left-0 z-10 bg-card pr-0 pl-4" : index === columns.length - 1 ? "pr-4 pl-0" : "px-0"} ${column.align === "right" ? "text-right" : "text-left"}`}
                 />
               ))}
             </tr>
@@ -857,7 +857,7 @@ function PRMergeRateTable({
               return (
                 <Fragment key={key}>
                   <tr>
-                    <td className="px-4 py-3">
+                    <td className="sticky left-0 z-10 bg-card px-4 py-3">
                       <div className="flex items-center gap-2">
                         {hasMultipleEfforts ? (
                           <button
@@ -913,7 +913,7 @@ function PRMergeRateTable({
                           key={`${key}-${effort.effort ?? "unknown"}`}
                           className="bg-muted/35"
                         >
-                          <td className="py-3 pr-2 pl-11 font-medium">
+                          <td className="sticky left-0 z-10 bg-[color-mix(in_oklab,var(--muted)_35%,var(--card))] py-3 pr-2 pl-11 font-medium">
                             {formatEffort(effort.effort)}
                           </td>
                           <PRMergeRateCells
@@ -1173,7 +1173,7 @@ function UsageTable({
                   sortKey={sort}
                   sortDirection={direction}
                   onSort={onSort}
-                  className={`${index === 0 ? "w-14 pr-0 pl-4" : index === columns.length - 1 ? "pr-4 pl-0" : "px-0"} ${column.align === "right" ? "text-right" : "text-left"}`}
+                  className={`${index === 0 ? "w-14 pr-0 pl-4" : index === columns.length - 1 ? "pr-4 pl-0" : "px-0"} ${column.key === "user" ? "sticky left-0 z-10 bg-card" : ""} ${column.align === "right" ? "text-right" : "text-left"}`}
                 />
               ))}
             </tr>
@@ -1186,7 +1186,7 @@ function UsageTable({
                 key={`${row.rank}-${row.user.github_login ?? row.user.email ?? row.user.name}`}
               >
                 <td className="px-4 py-3 text-muted-foreground">{row.rank}</td>
-                <td className="px-2 py-3">
+                <td className="sticky left-0 z-10 bg-card px-2 py-3">
                   <UserCell
                     row={row}
                     isCurrentUser={row.rank === currentUserRank}
@@ -1477,6 +1477,19 @@ function UserCell({
       <div className="flex min-w-0 flex-col">
         <div className="flex min-w-0 items-center gap-1.5">
           {name}
+          {row.is_top_feedback_contributor && (
+            <Tooltip>
+              <TooltipTrigger
+                aria-label="Top feedback contributor"
+                className="shrink-0 cursor-help rounded-sm focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+              >
+                <span aria-hidden="true">🏆</span>
+              </TooltipTrigger>
+              <TooltipPopup>
+                Most feedback given in the selected date range.
+              </TooltipPopup>
+            </Tooltip>
+          )}
           {isCurrentUser ? (
             <Badge variant="secondary" aria-label="You">
               You

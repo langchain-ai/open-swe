@@ -27,6 +27,7 @@ PROFILE_SETTING_KEYS = frozenset(
         "branch_prefix",
         "auto_fix_ci",
         "model_routing_enabled",
+        "recent_thread_context_enabled",
         "dm_session_enabled",
         "draft_prs",
         "review_draft_prs",

@@ -24,13 +24,13 @@ def _make_model(model_id: str, **kwargs: Any) -> dict[str, Any]:
 
 
 def test_openai_gets_a_default_request_timeout() -> None:
-    captured = _make_model("openai:gpt-5.6-sol")
+    captured = _make_model("openai:gpt-6-sol")
     assert captured["timeout"] == model.DEFAULT_REQUEST_TIMEOUT_SECONDS
     assert captured["max_retries"] == model.DEFAULT_MAX_RETRIES
 
 
 def test_openai_gets_codex_context_window_profile_override() -> None:
-    captured = _make_model("openai:gpt-5.6-sol")
+    captured = _make_model("openai:gpt-6-sol")
     profile = captured["profile"]
     assert profile["max_input_tokens"] == 272_000
     assert profile["tool_calling"] is True
@@ -43,7 +43,7 @@ def test_anthropic_gets_a_default_request_timeout() -> None:
 
 
 def test_explicit_timeout_wins() -> None:
-    assert _make_model("openai:gpt-5.6-sol", timeout=30.0)["timeout"] == 30.0
+    assert _make_model("openai:gpt-6-sol", timeout=30.0)["timeout"] == 30.0
 
 
 def test_unknown_provider_gets_no_timeout() -> None:

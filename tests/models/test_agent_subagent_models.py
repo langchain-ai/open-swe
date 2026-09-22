@@ -9,9 +9,9 @@ from agent.dashboard.workspace_settings import WorkspaceSettings
 from agent.server import get_agent
 
 _MODEL_DEFAULTS = {
-    "default_agent_model": "openai:gpt-5.6-sol",
+    "default_agent_model": "openai:gpt-6-sol",
     "default_agent_reasoning_effort": "medium",
-    "default_agent_subagent_model": "openai:gpt-5.6-sol",
+    "default_agent_subagent_model": "openai:gpt-6-sol",
     "default_agent_subagent_reasoning_effort": "low",
 }
 
@@ -80,7 +80,7 @@ async def test_agent_uses_profile_subagent_model_override() -> None:
             return_value={
                 "default_model": "anthropic:claude-opus-5-5",
                 "reasoning_effort": "high",
-                "default_subagent_model": "openai:gpt-5.6-sol",
+                "default_subagent_model": "openai:gpt-6-sol",
                 "subagent_reasoning_effort": "xhigh",
             },
         ),
@@ -103,7 +103,7 @@ async def test_agent_uses_profile_subagent_model_override() -> None:
     assert main_call.kwargs["effort"] == "high"
 
     subagent_call = make_model.call_args_list[1]
-    assert subagent_call.args == ("openai:gpt-5.6-sol",)
+    assert subagent_call.args == ("openai:gpt-6-sol",)
     assert subagent_call.kwargs["reasoning"] == {"effort": "xhigh", "summary": "auto"}
 
 

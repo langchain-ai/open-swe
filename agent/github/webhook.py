@@ -112,13 +112,9 @@ def build_github_pr_review_prompt(
 
 def _github_person(login: str, user_id: object = None) -> PersonIdentity:
     stable = str(user_id) if user_id not in (None, "") else login or "unknown"
-    person: PersonIdentity = {
-        "id": f"github:{stable}",
-        "platform": "github",
-    }
+    person: PersonIdentity = {"id": f"github:{stable}"}
     if login:
         person["display_name"] = login
-        person["handle"] = login
         person["github_login"] = login
     return person
 
@@ -133,7 +129,6 @@ def _github_human_run_input(
     person = _github_person(login, user_id)
     return {
         "messages": [
-            person_introduction(person),
             human_input(
                 content,
                 {
@@ -197,7 +192,9 @@ def _github_issue_run_input(
             },
         ),
     ]
-    introduced: set[str] = set()
+    # The run describes the trigger sender itself; only replayed authors nobody
+    # resolves need an introduction here.
+    introduced: set[str] = {_github_person(trigger_login, trigger_user_id)["id"]}
     source_messages = [
         {"author": issue_author or trigger_login, "body": description, "type": "description"},
         *comments,
@@ -980,7 +977,7 @@ async def process_github_pr_comment(payload: dict[str, Any], event_type: str) ->
     trusted = await _trusted_authors(github_login, comments=comments)
     prompt = common.build_pr_prompt(comments, pr_url, repo_config=repo_config, trusted=trusted)
     messages = []
-    introduced: set[str] = set()
+    introduced: set[str] = {_github_person(github_login, github_user_id)["id"]}
     for item in comments:
         author = str(item.get("author") or "unknown")
         person = _github_person(author, github_user_id if author == github_login else None)

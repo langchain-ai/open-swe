@@ -162,6 +162,7 @@ export interface Profile {
   branch_prefix?: string | null
   auto_fix_ci?: boolean
   model_routing_enabled?: boolean
+  recent_thread_context_enabled?: boolean
   dm_session_enabled?: boolean
   draft_prs?: boolean
   review_draft_prs?: boolean | null
@@ -178,6 +179,7 @@ export interface ProfileUpdate {
   branch_prefix?: string | null
   auto_fix_ci?: boolean
   model_routing_enabled?: boolean | null
+  recent_thread_context_enabled?: boolean
   dm_session_enabled?: boolean
   draft_prs?: boolean
   review_draft_prs?: boolean | null
@@ -355,6 +357,7 @@ export interface UsageLeaderboardRow {
   merged_prs_per_thread?: number
   agent_loc: number
   feedback_given: number
+  is_top_feedback_contributor?: boolean
   additions: number
   deletions: number
   total_tokens: number
@@ -850,6 +853,7 @@ export interface ReviewDetail extends Omit<
   findings: Array<ReviewFinding>
   diff_groups: Array<ReviewDiffGroup>
   diff_groups_stale: boolean
+  guidance: Array<GuidancePoint>
 }
 
 export interface PublishedReviewAssessment {
@@ -859,6 +863,17 @@ export interface PublishedReviewAssessment {
   risk_score: number
   decision: "would_approve" | "needs_human_review"
   explanation: string
+}
+
+/**
+ * One place the author redirected Open SWE that the reviewer could see in the
+ * final change. Recorded during a review, so it is absent until one has run.
+ */
+export interface GuidancePoint {
+  summary: string
+  quote: string
+  /** Empty when the quote matched no stored message. */
+  author: string
 }
 
 export interface ReviewAssessmentFeedbackInput {
@@ -931,6 +946,7 @@ export interface PullRequestPreview {
   // or no checks configured.
   unresolved: Array<PreviewThread> | null
   checks: Array<PreviewCheck> | null
+  guidance: Array<GuidancePoint>
 }
 
 export interface ReviewDiffPayload {

@@ -935,6 +935,51 @@ const costRow: UsageLeaderboardRow = {
   avg_invocation_seconds: 90,
 }
 
+it("explains the feedback trophy on focus", async () => {
+  vi.spyOn(api, "prMergeRateByModel").mockResolvedValue(captured)
+  vi.mocked(api.usageLeaderboard).mockResolvedValue({
+    ...emptyUsage,
+    total_members: 1,
+    rows: [
+      { ...costRow, feedback_given: 3, is_top_feedback_contributor: true },
+    ],
+  })
+  const client = mountReport()
+  const trigger = await screen.findByRole("button", {
+    name: "Top feedback contributor",
+  })
+  act(() => trigger.focus())
+  expect(
+    await screen.findByText("Most feedback given in the selected date range.")
+  ).toBeTruthy()
+  client.clear()
+})
+
+it.each([true, false, undefined])(
+  "shows the feedback trophy only for a global leader (%s)",
+  async (isTopContributor) => {
+    vi.spyOn(api, "prMergeRateByModel").mockResolvedValue(captured)
+    vi.mocked(api.usageLeaderboard).mockResolvedValue({
+      ...emptyUsage,
+      total_members: 20,
+      rows: [
+        {
+          ...costRow,
+          feedback_given: 3,
+          is_top_feedback_contributor: isTopContributor,
+        },
+      ],
+    })
+    const client = mountReport()
+    await screen.findByText("Cost Reader")
+    const trophy = screen.queryByRole("button", {
+      name: "Top feedback contributor",
+    })
+    expect(Boolean(trophy)).toBe(Boolean(isTopContributor))
+    client.clear()
+  }
+)
+
 it.each([
   [5, 2, "2.5"],
   [0, 0, "—"],
