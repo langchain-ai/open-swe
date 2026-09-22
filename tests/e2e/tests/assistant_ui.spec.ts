@@ -174,13 +174,13 @@ test("restores sidebar navigation, pins, view controls, and search", async ({
   ).toBeVisible();
 
   const row = sidebar.locator(`a[href="/assistant/${id}"]`).first();
-  await row.hover();
-  await row.getByRole("button", { name: "Pin thread" }).click();
+  await row.press("Shift+F10");
+  await page.getByRole("menuitem", { name: "Pin thread" }).click();
   await expect(
     sidebar.getByRole("button", { name: "Pinned", exact: true }),
   ).toBeVisible();
-  await row.hover();
-  await row.getByRole("button", { name: "Unpin thread" }).click();
+  await row.press("Shift+F10");
+  await page.getByRole("menuitem", { name: "Unpin thread" }).click();
   await expect(
     sidebar.getByRole("button", { name: "Pinned", exact: true }),
   ).toHaveCount(0);
