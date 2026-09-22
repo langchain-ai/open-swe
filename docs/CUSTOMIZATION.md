@@ -484,16 +484,23 @@ return create_deep_agent(tools=tools, ...)
 
 ## 4. Triggers
 
-Open SWE supports three invocation surfaces: Linear, Slack, and GitHub. Each is implemented as a webhook endpoint in `agent/webapp.py`. You can add, remove, or modify triggers independently.
+Open SWE supports three invocation surfaces: Linear, Slack, and GitHub. The FastAPI app is assembled in `agent/api/app.py`, and each webhook surface owns its router:
+
+- **Linear**: `agent/linear/routes.py` exposes `linear_webhook()` and delegates event handling to `agent/linear/webhook.py`.
+- **Slack**: `agent/slack/routes.py` exposes the Slack event, command, and interaction endpoints and delegates run orchestration to `agent/slack/webhook.py`.
+- **GitHub**: `agent/github/routes.py` exposes `github_webhook()` and delegates pull request / issue handling to `agent/github/webhook.py`.
+
+You can add, remove, or modify triggers independently by editing the relevant router module and the corresponding `app.include_router(...)` call in `agent/api/app.py`.
 
 ### Removing a trigger
 
 If you don't use Linear, simply don't configure the Linear webhook and remove the env vars. Same for Slack. The webhook endpoints still exist but won't receive events.
 
-To fully remove a trigger's code, delete the corresponding endpoint from `agent/webapp.py`:
+To fully remove a trigger's code, delete the corresponding endpoint from its router module and remove that router from `agent/api/app.py`:
 
-- **Linear**: `linear_webhook()` and `process_linear_issue()`
-- **Slack**: `slack_webhook()` and `process_slack_mention()`
+- **Linear**: `linear_webhook()` in `agent/linear/routes.py`, registered as `linear_webhook_router`.
+- **Slack**: Slack event / command / interaction endpoints in `agent/slack/routes.py`, registered as `slack_webhook_router`.
+- **GitHub**: `github_webhook()` in `agent/github/routes.py`, registered as `github_webhook_router`.
 
 ### Default repository
 
@@ -524,7 +531,7 @@ Linear comments use the triggering user's dashboard default repository, then the
 
 ### Customizing Slack routing
 
-Slack repo resolution (`get_slack_repo_config` in `agent/webapp.py`) checks, in order:
+Slack repo resolution (`get_slack_repo_config` in `agent/webhooks/common.py`, called by `agent/slack/routes.py`) checks, in order:
 
 1. Repo carried over from the existing Slack thread's metadata.
 2. A `repo:owner/name` (or GitHub URL) token in the channel's **topic or purpose** (its "description"). This lets a channel be pinned to a repo without anyone repeating it per-message.
@@ -540,10 +547,14 @@ Reading the channel topic/purpose requires the bot's Slack token to have the `ch
 
 To add a new invocation surface (e.g. Jira, Discord, a custom API):
 
-1. **Add a webhook endpoint** in `agent/webapp.py`:
+1. **Add a router module** for the new surface (for example, `agent/my_trigger/routes.py`) and define the webhook endpoint there:
 
 ```python
-@app.post("/webhooks/my-trigger")
+from fastapi import APIRouter, BackgroundTasks, Request
+
+router = APIRouter()
+
+@router.post("/webhooks/my-trigger")
 async def my_trigger_webhook(request: Request, background_tasks: BackgroundTasks):
     # Parse the incoming event
     payload = await request.json()
@@ -555,6 +566,15 @@ async def my_trigger_webhook(request: Request, background_tasks: BackgroundTasks
     # Create a LangGraph run
     background_tasks.add_task(process_my_trigger, task_description, repo_config)
     return {"status": "accepted"}
+```
+
+Register the router from `agent/api/app.py` with the other webhook routers:
+
+```python
+from agent.my_trigger.routes import router as my_trigger_router
+
+# inside create_app()
+app.include_router(my_trigger_router)
 ```
 
 2. **Create a processing function** that builds the prompt and starts an agent run:
