@@ -35,7 +35,7 @@ The main agent is assembled in `agent/server.py` from the middleware in `agent/m
 - Use absolute imports across packages; same-package imports may start with one dot. Never use parent-relative imports.
 - Keep model-facing prompts (system prompts, tool descriptions, agent wake-up prompts) in Markdown files under `agent/resources/prompts/` and load them with `load_prompt` or `render_prompt` (`$name` placeholders); never inline prompt text in Python. This applies to instructions sent to the model, not ordinary user-facing copy: UI labels, Slack button/modal text, and Slack or GitHub notifications may remain inline.
 - Keep comments minimal and only explain non-obvious reasons.
-- Name new migrations `agent/database/migrations/versions/<next number>_<revision>_<slug>.py`, where `revision` is a random 12-hex ID (`python -c "import uuid; print(uuid.uuid4().hex[:12])"`), never the number. Sequential IDs from parallel branches collide silently: a database stamped by one skips the other.
+- Create database migrations with `make migration m="Short description"`.
 - Use structured logging with a static message and values in `extra`; never interpolate values into log messages. Avoid standard `LogRecord` field names in `extra`.
 - Every new API write operation exposed through UI controls must also be available as an appropriately authorized agent tool. Prefer display-only UI with modifications performed through agent tools unless direct UI controls are explicitly required.
 - Never discard an error. Every `except` either propagates (re-raise, or raise a more useful error) or logs what it swallowed — a bare `except ...: return None` / `pass` hides the failure from everyone debugging it later.
