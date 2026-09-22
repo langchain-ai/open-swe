@@ -5,7 +5,6 @@ import {
   loginAs,
   openRunningThreadViaSlackLink,
   openThreadViaSlackLink,
-  setTranscriptStreaming,
   threadIdFromUrl,
   typeIntoComposer,
   waitForStateToContain,
@@ -212,14 +211,10 @@ test.describe("transcript rendering", () => {
     ).toBeVisible();
   });
 
-  // Reading from the transcript is opt-in, so this is the path every user is on
-  // until they flip the switch. Its own user, because the preference is stored
-  // server-side and other workers sign in as `SAME_USER` with it turned on.
-  test("a user who has not opted in hydrates from LangGraph state", async ({
+  test("a new user hydrates from the transcript by default", async ({
     page,
   }) => {
     await loginAs(page, { login: "carol", email: "carol@example.com" });
-    await setTranscriptStreaming(page, false);
     const hydrations: Array<string> = [];
     page.on("request", (request) => {
       if (request.method() !== "GET") return;
@@ -233,8 +228,7 @@ test.describe("transcript rendering", () => {
     await waitForThreadIdle(page, threadId);
     await expectTranscriptVisible(page);
 
-    expect(hydrations).toContain(`/dashboard/api/threads/${threadId}/state`);
-    expect(hydrations).not.toContain(
+    expect(hydrations).toContain(
       `/dashboard/api/threads/${threadId}/transcript`,
     );
   });

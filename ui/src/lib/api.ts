@@ -123,8 +123,6 @@ export interface SessionUser {
   user_id?: string | null
   slack_user_id?: string | null
   is_admin: boolean
-  /** Mirrors the user's preference, so the thread page has it on first render. */
-  transcript_streaming?: boolean
   /** Whether the server records new threads into the transcript log. */
   transcript_recording?: boolean
   slack_oauth_enabled?: boolean
@@ -504,7 +502,6 @@ export interface UserPreferences {
   local_tracing_project: string | null
   default_local_tracing_project: string
   default_workspace: string | null
-  transcript_streaming: boolean
 }
 
 export interface Skill {
