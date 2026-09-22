@@ -29,6 +29,8 @@ async def api(monkeypatch, fake_store):
 
     monkeypatch.setattr(feedback, "agent_thread_pr_state_lock", unlocked)
     monkeypatch.setattr(feedback, "langgraph_client", lambda: None)
+    analytics = AsyncMock()
+    monkeypatch.setattr(feedback, "record_feedback_submission", analytics)
     await thread_feedback.feedback_store().put("t1", thread_feedback.Feedback(status="ready"))
     app = FastAPI()
     app.include_router(threads_router, prefix="/dashboard/api")
@@ -38,7 +40,9 @@ async def api(monkeypatch, fake_store):
         base_url="http://testserver",
         headers={"origin": "http://testserver"},
     ) as client:
-        yield SimpleNamespace(client=client, metadata=metadata, session=session, quiet=quiet)
+        yield SimpleNamespace(
+            client=client, metadata=metadata, session=session, quiet=quiet, analytics=analytics
+        )
 
 
 @pytest.mark.parametrize("rating", ["bad", "good"])
@@ -53,6 +57,14 @@ async def test_submit_saves_rating_and_comment_and_keeps_first_response(api, rat
     reloaded = await api.client.get("/dashboard/api/threads/t1/feedback")
     assert response.json() == duplicate.json() == reloaded.json()
     assert await thread_feedback.feedback_prompt_status("t1") == "completed"
+    api.analytics.assert_awaited_once_with(
+        feedback_key="thread:t1",
+        rating=5 if rating == "good" else 1,
+        source="dashboard",
+        run_key=None,
+        github_login="owner",
+        user_email=None,
+    )
 
 
 async def test_dismiss_prevents_later_submission(api):

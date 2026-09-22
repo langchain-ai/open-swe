@@ -522,14 +522,12 @@ async def test_agent_includes_read_user_settings_schema() -> None:
 
 
 @pytest.mark.parametrize("source", ["dashboard", "slack"])
-async def test_personal_settings_tool_is_private_and_parent_only(source: str) -> None:
+async def test_personal_settings_tool_available_in_private_conversations(source: str) -> None:
     config = _base_config()
     config["configurable"]["source"] = source
     captured = await _capture_create_deep_agent_kwargs(config)
     tools = captured["tools"]
-    subagents = captured["subagents"]
     assert isinstance(tools, list)
-    assert isinstance(subagents, list)
     assert "save_user_settings" in {_registered_tool_name(tool) for tool in tools}
 
     from langchain.agents.middleware.types import ToolCallRequest
@@ -543,6 +541,8 @@ async def test_personal_settings_tool_is_private_and_parent_only(source: str) ->
         "id": "settings",
         "type": "tool_call",
     }
+    subagents = captured["subagents"]
+    assert isinstance(subagents, list)
     for subagent in subagents:
         guard = next(item for item in subagent["middleware"] if item.name == "_SubagentToolGuard")
         result = await guard.awrap_tool_call(request, handler)
@@ -693,8 +693,37 @@ async def test_agent_excludes_sandbox_file_downloads_for_other_providers(
     assert not general_purpose.get("system_prompt")
 
 
+SLACK_TOOL_NAMES = {
+    "slack_add_reaction",
+    "slack_attach_html",
+    "slack_move_thread",
+    "slack_list_channels",
+    "slack_no_reply_needed",
+    "slack_post_message",
+    "slack_read_thread_messages",
+    "slack_start_new_thread",
+    "slack_reply",
+}
+
+
 @pytest.mark.asyncio
 async def test_dashboard_agent_excludes_slack_tools() -> None:
+    config = _base_config()
+    configurable = config.get("configurable")
+    assert isinstance(configurable, dict)
+    configurable["source"] = "dashboard"
+
+    captured = await _capture_create_deep_agent_kwargs(config)
+    tools = captured["tools"]
+    assert isinstance(tools, list)
+
+    tool_names = {getattr(tool, "name", None) or getattr(tool, "__name__", None) for tool in tools}
+    assert tool_names.isdisjoint(SLACK_TOOL_NAMES)
+
+
+@pytest.mark.asyncio
+async def test_a_web_turn_on_a_slack_thread_keeps_the_slack_tools() -> None:
+    """The tool set cannot move with the surface: that invalidates the cached prefix."""
     config = _base_config()
     configurable = config.get("configurable")
     assert isinstance(configurable, dict)
@@ -710,27 +739,18 @@ async def test_dashboard_agent_excludes_slack_tools() -> None:
     assert isinstance(tools, list)
 
     tool_names = {getattr(tool, "name", None) or getattr(tool, "__name__", None) for tool in tools}
-    assert tool_names.isdisjoint(
-        {
-            "slack_add_reaction",
-            "slack_attach_html",
-            "slack_list_channels",
-            "slack_move_thread",
-            "slack_post_message",
-            "slack_read_thread_messages",
-            "slack_start_new_thread",
-            "slack_thread_reply",
-        }
+    assert SLACK_TOOL_NAMES <= tool_names
+    middleware = captured["middleware"]
+    assert isinstance(middleware, list)
+    require_reply = next(
+        item for item in middleware if type(item).__name__ == "RequireUserReplyMiddleware"
     )
+    assert require_reply.before_agent({}, MagicMock())["reply_surface"] == "web"
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("source", ["slack", "schedule"])
 async def test_slack_source_context_includes_slack_tools(source: str) -> None:
-    from langchain.agents.middleware.types import ModelRequest, ModelResponse
-
-    from agent.middleware.plan_mode import PlanModeMiddleware
-
     config = _base_config()
     configurable = config.get("configurable")
     assert isinstance(configurable, dict)
@@ -754,34 +774,8 @@ async def test_slack_source_context_includes_slack_tools(source: str) -> None:
         "slack_post_message",
         "slack_read_thread_messages",
         "slack_start_new_thread",
-        "slack_thread_reply",
+        "slack_reply",
     } <= tool_names
-
-    middleware = captured["middleware"]
-    assert isinstance(middleware, list)
-    plan_mode = next(item for item in middleware if isinstance(item, PlanModeMiddleware))
-    observed_names: set[str] = set()
-
-    async def capture(filtered: ModelRequest) -> ModelResponse:
-        observed_names.clear()
-        for tool in filtered.tools:
-            name = tool.get("name") if isinstance(tool, dict) else tool.name
-            assert isinstance(name, str)
-            observed_names.add(name)
-        return ModelResponse(result=[])
-
-    for active in (False, True):
-        request = ModelRequest(
-            model=MagicMock(),
-            messages=[],
-            tools=[{"name": name} for name in tool_names],
-            state={"messages": [], "plan_mode": active},
-            runtime=MagicMock(),
-        )
-
-        await plan_mode.awrap_model_call(request, capture)
-        assert "slack_list_channels" in observed_names
-        assert ("slack_post_message" in observed_names) is not active
 
 
 @pytest.mark.asyncio
@@ -816,7 +810,7 @@ async def test_stop_summary_agent_is_read_only_and_slack_only() -> None:
     assert isinstance(middleware, list)
 
     tool_names = {getattr(tool, "name", None) or getattr(tool, "__name__", None) for tool in tools}
-    assert tool_names == {"slack_read_thread_messages", "slack_thread_reply"}
+    assert tool_names == {"slack_read_thread_messages", "slack_reply"}
     middleware_names = {type(item).__name__ for item in middleware}
     assert "ExcludeToolsMiddleware" in middleware_names
     assert "check_message_queue_before_model" not in middleware_names
@@ -875,7 +869,7 @@ async def test_general_purpose_subagent_cannot_use_slack_tools() -> None:
         "slack_post_message",
         "slack_read_thread_messages",
         "slack_start_new_thread",
-        "slack_thread_reply",
+        "slack_reply",
     }
 
     parent_only_names = {
@@ -891,8 +885,7 @@ async def test_general_purpose_subagent_cannot_use_slack_tools() -> None:
         "submit_review_assessment_feedback",
     }
     assert parent_only_names <= parent_names
-    assert gp["tools"] == parent_tools
-    assert subagent_names == parent_names
+    assert subagent_names == parent_names - {"save_user_settings"}
 
     from unittest.mock import AsyncMock, MagicMock
 

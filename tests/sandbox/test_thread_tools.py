@@ -56,13 +56,9 @@ def surface() -> ToolSurface:
     )
     graph = create_agent(
         FakeListChatModel(responses=[]),
-        tools=[
-            StructuredTool.from_function(coroutine=integration_echo, name=name)
-            for name in ("enter_plan_mode", "approve_plan")
-        ],
         middleware=cast(list[AgentMiddleware], [dynamic, DenyValue()]),
     )
-    return ToolSurface(graph=graph, dynamic=dynamic, plan_excluded=frozenset({"integration_echo"}))
+    return ToolSurface(graph=graph, dynamic=dynamic)
 
 
 async def test_capability_carries_binding_and_is_revoked_on_rebinding(
@@ -124,7 +120,7 @@ async def test_proxy_refresh_preserves_tools_and_custom_rules(
     assert rule["headers"][0]["value"] == first_token
 
 
-async def test_restores_idle_context_and_initial_plan_restrictions(
+async def test_restores_idle_context_ignoring_legacy_plan_mode(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from agent import server
@@ -146,12 +142,11 @@ async def test_restores_idle_context_and_initial_plan_restrictions(
         assert config["configurable"]["thread_id"] == "thread-a"
         tool_surface.graph = source.graph
         tool_surface.dynamic = source.dynamic
-        tool_surface.plan_excluded = source.plan_excluded
         return source.graph
 
     monkeypatch.setattr(server, "build_agent", build_agent)
     restored, _, _ = await tool_runtime.load_tool_surface("thread-a")
-    assert "integration_echo" not in restored.tools
+    assert "integration_echo" in restored.tools
 
 
 async def test_mcp_discovery_invocation_and_middleware_without_a_model_call() -> None:
@@ -175,8 +170,7 @@ async def test_mcp_discovery_invocation_and_middleware_without_a_model_call() ->
         with pytest.raises(HTTPException):
             await tools.invoke("thread-a", config, state, name, {})
     await tools.prepare({"plan_mode": True})
-    with pytest.raises(HTTPException):
-        await tools.invoke("thread-a", config, state, "integration_echo", {"value": "hello"})
+    assert "integration_echo" in tools.tools
 
 
 async def test_http_list_search_invoke_and_reject_context_overrides(

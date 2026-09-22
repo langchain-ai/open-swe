@@ -554,6 +554,7 @@ it("shortens model paths while preserving providers across usage tables", async 
         prs_opened: 1,
         merged_prs: 1,
         agent_loc: 1,
+        feedback_given: 0,
         additions: 1,
         deletions: 0,
         total_tokens: 1,
@@ -792,6 +793,7 @@ it("shows usage metrics but removes stale results when a refresh becomes unavail
         merged_prs: 4,
         merged_prs_per_thread: 0.25,
         agent_loc: 35,
+        feedback_given: 0,
         additions: 50,
         deletions: 15,
         total_tokens: 1234,
@@ -842,6 +844,7 @@ it("hides a GitHub login when it duplicates the user name", async () => {
         prs_opened: 0,
         merged_prs: 0,
         agent_loc: 0,
+        feedback_given: 0,
         additions: 0,
         deletions: 0,
         total_tokens: 100,
@@ -922,6 +925,7 @@ const costRow: UsageLeaderboardRow = {
   prs_opened: 0,
   merged_prs: 0,
   agent_loc: 0,
+  feedback_given: 0,
   additions: 0,
   deletions: 0,
   total_tokens: 100,
@@ -1258,5 +1262,52 @@ it("explains incomplete coverage on focus and removes the indicator when costs r
   await act(() => client.invalidateQueries({ queryKey: ["usageLeaderboard"] }))
   expect(await screen.findByText("$3.75")).toBeTruthy()
   expect(screen.queryByRole("button", { name: "Cost incomplete" })).toBeNull()
+  client.clear()
+})
+
+it("renders feedback counts and resets pagination when sorting feedback in either direction", async () => {
+  vi.spyOn(api, "prMergeRateByModel").mockResolvedValue(captured)
+  vi.mocked(api.usageLeaderboard).mockImplementation(
+    async (_period, _limit, cursor) => ({
+      ...emptyUsage,
+      total_members: 11,
+      next_cursor: cursor ? null : "next-page",
+      rows: [{ ...costRow, feedback_given: 1234 }],
+    })
+  )
+  const client = mountReport()
+  const header = await screen.findByRole("columnheader", {
+    name: "# Feedback Given",
+  })
+  const table = header.closest("table")!
+  expect(within(table).getByText("1,234")).toBeTruthy()
+  fireEvent.click(screen.getByRole("button", { name: "Next" }))
+  expect(await screen.findByText("Page 2 of 2")).toBeTruthy()
+  fireEvent.click(within(header).getByRole("button"))
+  await waitFor(() =>
+    expect(api.usageLeaderboard).toHaveBeenLastCalledWith(
+      "30d",
+      10,
+      undefined,
+      "feedback_given",
+      "desc"
+    )
+  )
+  expect(await screen.findByText("Page 1 of 2")).toBeTruthy()
+  expect(header.getAttribute("aria-sort")).toBe("descending")
+  fireEvent.click(within(header).getByRole("button"))
+  await waitFor(() =>
+    expect(api.usageLeaderboard).toHaveBeenLastCalledWith(
+      "30d",
+      10,
+      undefined,
+      "feedback_given",
+      "asc"
+    )
+  )
+  expect(header.getAttribute("aria-sort")).toBe("ascending")
+  fireEvent.click(screen.getByRole("button", { name: "threads" }))
+  expect(within(table).getByText("1,234")).toBeTruthy()
+  expect(header.getAttribute("aria-sort")).toBe("ascending")
   client.clear()
 })

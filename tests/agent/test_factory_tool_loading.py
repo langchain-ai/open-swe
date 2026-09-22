@@ -13,7 +13,6 @@ from langgraph.graph.state import RunnableConfig
 
 from agent.dashboard.workspace_settings import WorkspaceSettings
 from agent.middleware.dynamic_tools import DynamicToolMiddleware
-from agent.middleware.plan_mode import PlanModeMiddleware
 from agent.sandboxes.state import SANDBOX_BACKENDS
 from agent.server import get_agent
 
@@ -47,7 +46,7 @@ def _config() -> RunnableConfig:
 @pytest.mark.usefixtures("fake_store")
 @pytest.mark.parametrize("initial_plan_mode", [False, True])
 @pytest.mark.parametrize("github_login", ["octocat", None])
-async def test_workspace_mcps_load_for_non_admins_and_respect_plan_mode(
+async def test_workspace_mcps_load_for_non_admins_with_legacy_plan_state(
     initial_plan_mode: bool,
     github_login: str | None,
     monkeypatch: pytest.MonkeyPatch,
@@ -140,20 +139,15 @@ async def test_workspace_mcps_load_for_non_admins_and_respect_plan_mode(
 
     middleware = build_agent.call_args.kwargs["middleware"]
     dynamic = next(item for item in middleware if isinstance(item, DynamicToolMiddleware))
-    plan_mode = next(item for item in middleware if isinstance(item, PlanModeMiddleware))
-    assert middleware.index(dynamic) < middleware.index(plan_mode)
     captured: list[str] = []
 
     async def capture(request: ModelRequest) -> Any:
         captured.extend(tool.name for tool in request.tools)
         return MagicMock()
 
-    async def apply_plan_mode(request: ModelRequest) -> Any:
-        return await plan_mode.awrap_model_call(request, capture)
-
     for state, expected in [
-        ({}, [] if initial_plan_mode else [mcp_tool.name]),
-        ({"plan_mode": True}, []),
+        ({}, [mcp_tool.name]),
+        ({"plan_mode": True}, [mcp_tool.name]),
         ({"plan_mode": False}, [mcp_tool.name]),
     ]:
         captured.clear()
@@ -164,7 +158,7 @@ async def test_workspace_mcps_load_for_non_admins_and_respect_plan_mode(
             runtime=MagicMock(),
             state={**state, "messages": [], "loaded_integration_tools": [mcp_tool.name]},
         )
-        await dynamic.awrap_model_call(request, apply_plan_mode)
+        await dynamic.awrap_model_call(request, capture)
         assert captured == expected
 
     SANDBOX_BACKENDS.pop(thread_id, None)

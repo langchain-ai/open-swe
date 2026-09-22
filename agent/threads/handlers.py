@@ -251,7 +251,6 @@ async def send_dashboard_message(
         "unlisted": False,
         "updated_at_ms": now_ms,
         "feedback_last_activity_at_ms": now_ms,
-        "plan_mode": body.plan_mode,
         PARTICIPANT_LOGINS_KEY: merge_participants(metadata.get(PARTICIPANT_LOGINS_KEY), login),
         PARTICIPANT_EMAILS_KEY: merge_participants(metadata.get(PARTICIPANT_EMAILS_KEY), email),
     }
@@ -509,7 +508,6 @@ _CONTINUED_METADATA_KEYS = (
     "effort",
     "resolved_model",
     "resolved_effort",
-    "plan_mode",
     "repo_owner",
     "repo_name",
     "repo_explicitly_none",

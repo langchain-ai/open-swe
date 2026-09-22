@@ -359,7 +359,7 @@ async def test_get_thread_returns_links_cost_last_message_and_actions(
         "run_id": None,
     }
     assert result["thread"]["langsmith"] == result["langsmith"]
-    assert "approve_plan" in result["available_actions"]
+    assert "add_plan_comment" in result["available_actions"]
     assert "approve_workflow_push" in result["available_actions"]
     assert result["transcript"] == {
         "messages": [
@@ -986,7 +986,7 @@ async def test_manage_thread_starts_idle_message_with_fixed_command(
     command = json.loads(awaited.args[2])
     assert isinstance(command["id"], int)
     assert command["method"] == "run.start"
-    assert command["params"]["config"]["configurable"]["plan_mode"] is True
+    assert "plan_mode" not in command["params"]["config"]["configurable"]
 
 
 async def test_manage_thread_update_plan_preserves_format_and_bounds_response(
@@ -1048,28 +1048,23 @@ async def test_manage_thread_rejects_plan_format_conversion(
     update.assert_not_awaited()
 
 
-async def test_manage_thread_delegates_plan_and_workflow_actions(
+async def test_manage_thread_delegates_workflow_actions(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(threads_tool, "_actor", AsyncMock(return_value=_actor()))
     monkeypatch.setattr(
         threads_tool, "get_dashboard_thread", AsyncMock(return_value={"id": "thread-1"})
     )
-    approve_plan = AsyncMock(return_value={"status": "approved", "run_id": "run-1"})
     approve_workflow = AsyncMock(return_value={"status": "approved", "fingerprint": "fp"})
-    monkeypatch.setattr(threads_tool.plan_api, "approve_plan", approve_plan)
     monkeypatch.setattr(
         threads_tool.workflow_approval_api,
         "approve_workflow_push",
         approve_workflow,
     )
 
-    plan_result = await threads_tool.manage_thread("thread-1", "approve_plan")
     workflow_result = await threads_tool.manage_thread(
         "thread-1", "approve_workflow_push", fingerprint="fp"
     )
 
-    assert plan_result == {"success": True, "status": "approved", "run_id": "run-1"}
     assert workflow_result == {"success": True, "status": "approved", "fingerprint": "fp"}
-    approve_plan.assert_awaited_once()
     approve_workflow.assert_awaited_once()

@@ -1,7 +1,14 @@
-Post a message to the current Slack thread and the Web UI.
+Send a message to the person who asked, in Slack and the Web UI. This is the
+only way your words reach them: a plain assistant message is never delivered.
 
 Use this for clarifying questions, essential progress updates, and the final
-answer or outcome. For Slack-triggered information-only requests, put the
+answer or outcome. `response_type` says whether this reply ends your turn.
+Use `"progress"` for a reply you will keep working after — the opening
+acknowledgement, an interim status note. Use `"final"` for anything that leaves
+the asker holding the ball: the answer, the outcome, a failure, a blocking
+question, an approval request. A `progress` reply settles nothing, so a turn
+that ends on one is treated as an unanswered turn.
+For Slack-triggered information-only requests, put the
 complete answer in `message`, not merely a summary, and do not repeat it in
 the final assistant response. Make `message` as concise as possible: default
 to one sentence with only the outcome/status and link, or one blocking
@@ -21,10 +28,6 @@ If supplying explicit `blocks`, use the formatting required by each block type.
 To ask a user to choose from predefined options, pass `options`. Slack will
 render interactive buttons and the web UI will render the same choices.
 The user can still reply manually in the Slack thread.
-
-When a plan is ready, post a concise summary with the dashboard review link and
-pass `options=["Approve & implement", "Request changes"]`. The user can still
-reply manually with feedback.
 
 To mention/tag a user, use Slack's mention format: <@USER_ID>.
 You can find user IDs in the conversation context (e.g. @Name(U06KD8BFY95)).
