@@ -215,7 +215,6 @@ async def _process_slack_ask(request: SlackAskRequest) -> None:
         "source": "slack",
         "slack_ask": True,
         "slack_ask_response_url": request.response_url,
-        "plan_mode": False,
         "github_login": login,
         "user_email": user_email,
         "workspace": workspace,

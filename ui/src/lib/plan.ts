@@ -21,27 +21,11 @@ export interface PlanUser {
   name: string
 }
 
-export type PlanStatus =
-  | "planning"
-  | "ready"
-  | "shared"
-  | "revising"
-  | "approved"
-  | "cancelled"
-
-export interface PlanApprover {
-  id: string
-  name: string
-  source: string
-}
-
 export interface PlanData {
   threadId: string
-  status: PlanStatus
+  status: string
   html: string
   markdown: string
-  approvedBy: PlanApprover | null
-  approvedAt: string | null
   user: PlanUser
 }
 
@@ -134,33 +118,4 @@ export function deletePlanComment(
     `/plan/${encodeURIComponent(threadId)}/comments/${encodeURIComponent(commentId)}`,
     { method: "DELETE" }
   )
-}
-
-export function updatePlan(
-  threadId: string,
-  content: string,
-  format: "html" | "markdown"
-): Promise<{ status: PlanStatus; html?: string; markdown?: string }> {
-  return req(`/plan/${encodeURIComponent(threadId)}`, {
-    method: "PUT",
-    body: JSON.stringify({ [format]: content }),
-  })
-}
-
-export function approvePlan(
-  threadId: string
-): Promise<{ status: string; run_id: string }> {
-  return req(`/plan/${encodeURIComponent(threadId)}/approve`, {
-    method: "POST",
-  })
-}
-
-export function rejectPlan(
-  threadId: string,
-  dispatch = true
-): Promise<{ status: string }> {
-  return req(`/plan/${encodeURIComponent(threadId)}/reject`, {
-    method: "POST",
-    body: JSON.stringify({ dispatch }),
-  })
 }

@@ -435,14 +435,12 @@ async def test_slack_reply_builds_option_blocks(monkeypatch: pytest.MonkeyPatch)
 
 
 @pytest.mark.parametrize(
-    "plan_mode,status,is_plan",
-    [(False, "ready", False), (True, "ready", True), (True, "shared", False)],
+    "plan_mode",
+    [False, True],
 )
-async def test_plan_buttons_require_active_plan_context(
+async def test_legacy_plan_config_uses_ordinary_option_buttons(
     monkeypatch: pytest.MonkeyPatch,
     plan_mode: bool,
-    status: str,
-    is_plan: bool,
 ) -> None:
     config = _config()
     config["configurable"].update(thread_id="thread-1", plan_mode=plan_mode)
@@ -451,11 +449,6 @@ async def test_plan_buttons_require_active_plan_context(
         slack_reply_tool,
         "get_active_slack_thread",
         AsyncMock(return_value={"channel_id": "C1", "thread_ts": "0"}),
-    )
-    monkeypatch.setattr(
-        slack_reply_tool,
-        "get_plan_content",
-        AsyncMock(return_value={"status": status, "html": "plan"}),
     )
     post = AsyncMock(return_value=("2.0", None))
     monkeypatch.setattr(slack_reply_tool, "_post_and_store_mapping", post)
@@ -469,17 +462,10 @@ async def test_plan_buttons_require_active_plan_context(
 
     buttons = post.await_args.kwargs["blocks"][1]["elements"]
     values = [json.loads(button["value"]) for button in buttons]
-    if is_plan:
-        assert [value["action"] for value in values] == ["approve", "revise"]
-        assert all(
-            value["thread_id"] == "thread-1" and value["thread_ts"] == "0" and value["fingerprint"]
-            for value in values
-        )
-    else:
-        assert values == [
-            {"type": "open_swe_option", "response": label}
-            for label in ["Approve & implement", "Request changes"]
-        ]
+    assert values == [
+        {"type": "open_swe_option", "response": label}
+        for label in ["Approve & implement", "Request changes"]
+    ]
 
 
 def test_slack_action_ids_are_unique_and_recognized() -> None:

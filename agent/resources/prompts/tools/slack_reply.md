@@ -29,10 +29,6 @@ To ask a user to choose from predefined options, pass `options`. Slack will
 render interactive buttons and the web UI will render the same choices.
 The user can still reply manually in the Slack thread.
 
-When a plan is ready, post a concise summary with the dashboard review link and
-pass `options=["Approve & implement", "Request changes"]`. The user can still
-reply manually with feedback.
-
 To mention/tag a user, use Slack's mention format: <@USER_ID>.
 You can find user IDs in the conversation context (e.g. @Name(U06KD8BFY95)).
 Example: <@U06KD8BFY95> will tag that user in the message.
