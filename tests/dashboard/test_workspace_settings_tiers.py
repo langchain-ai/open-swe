@@ -194,15 +194,15 @@ async def test_options_refuse_a_workspace_name_that_does_not_slugify() -> None:
     assert refused.value.status_code == 400
 
 
-async def test_usage_leaderboard_privacy_defaults_on_and_inherits(
+async def test_usage_leaderboard_privacy_defaults_off_and_inherits(
     fake_store: FakeStore,
 ) -> None:
     for slug in ("default", "oss"):
-        assert (await get_workspace_settings(slug)).usage_leaderboard_privacy_enabled is True
+        assert (await get_workspace_settings(slug)).usage_leaderboard_privacy_enabled is False
 
-    await upsert_instance_settings(WorkspaceSettingsUpdate(usage_leaderboard_privacy_enabled=False))
-    assert (await get_instance_settings()).usage_leaderboard_privacy_enabled is False
-    assert (await get_workspace_settings("oss")).usage_leaderboard_privacy_enabled is False
+    await upsert_instance_settings(WorkspaceSettingsUpdate(usage_leaderboard_privacy_enabled=True))
+    assert (await get_instance_settings()).usage_leaderboard_privacy_enabled is True
+    assert (await get_workspace_settings("oss")).usage_leaderboard_privacy_enabled is True
 
 
 async def test_a_partial_instance_update_preserves_unrelated_fields(
@@ -228,7 +228,7 @@ async def test_the_privacy_endpoints_read_and_write_the_instance_record(
     fake_store: FakeStore,
 ) -> None:
     read = await workspace_settings.api_get_usage_leaderboard_privacy(_session={"sub": "alice"})
-    assert read == {"usage_leaderboard_privacy_enabled": True}
+    assert read == {"usage_leaderboard_privacy_enabled": False}
 
     saved = await workspace_settings.api_put_usage_leaderboard_privacy(
         workspace_settings.UsageLeaderboardPrivacyUpdate(usage_leaderboard_privacy_enabled=False),

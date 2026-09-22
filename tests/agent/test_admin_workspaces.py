@@ -188,7 +188,7 @@ async def test_privacy_tools_read_and_write_the_instance_toggle(
         read = await get_usage_leaderboard_privacy()
         assert read == {
             "ok": True,
-            "usage_leaderboard_privacy_enabled": True,
+            "usage_leaderboard_privacy_enabled": False,
             "updated_at": None,
         }
 
@@ -514,7 +514,6 @@ async def test_refresh_start_refuses_while_one_is_running(
 # --- prompt wiring ---
 
 
-<<<<<<< HEAD
 def test_person_block_includes_workspace_admin_status() -> None:
     identity = CollaboratorIdentity(
         display_name="alice", commit_name="alice", commit_email="alice@example.com"
@@ -524,18 +523,13 @@ def test_person_block_includes_workspace_admin_status() -> None:
 
     assert admin.as_person()["workspace_admin"] == "yes"
     assert member.as_person()["workspace_admin"] == "no"
-=======
+
+
 def test_admin_threads_get_the_privacy_tools() -> None:
     from agent import tools
 
     assert tools.get_usage_leaderboard_privacy in server.ADMIN_TOOLS
     assert tools.set_usage_leaderboard_privacy in server.ADMIN_TOOLS
-
-
-def test_sender_context_includes_workspace_admin_status() -> None:
-    assert "Workspace admin: yes." in construct_sender_context(None, workspace_admin=True)
-    assert "Workspace admin: no." in construct_sender_context(None)
->>>>>>> cc7f18af4 (fix(analytics): anonymize the usage leaderboard for non-admins behind an instance toggle)
 
 
 def test_workspace_instructions_render_in_system_prompt() -> None:

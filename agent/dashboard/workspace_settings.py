@@ -314,7 +314,7 @@ def _default_settings() -> dict[str, Any]:
         "gateway_enabled": None,
         "fable_enabled": False,
         "expedited_review_enabled": False,
-        "usage_leaderboard_privacy_enabled": True,
+        "usage_leaderboard_privacy_enabled": False,
         "org_guidelines": None,
         "approval_policy": None,
         "review_auto_approve": False,

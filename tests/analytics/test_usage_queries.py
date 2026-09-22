@@ -429,7 +429,6 @@ async def test_aliases_and_pr_only_members_preserve_privacy(usage_db):
     assert all(row["user"]["email"] is None for row in admin["rows"])
 
 
-<<<<<<< HEAD
 async def test_feedback_counts_active_submissions_by_canonical_person(usage_db: UUID) -> None:
     canonical = await person("named", "named@example.com")
     private = await person(email="private@example.com")
@@ -536,7 +535,8 @@ async def test_feedback_reporting_period_and_cutover(usage_db: UUID) -> None:
             {"cutover": NOW - timedelta(days=1)},
         )
     assert (await report(period="all"))["rows"][0]["feedback_given"] == 2
-=======
+
+
 async def test_privacy_enabled_hides_other_members_identities_completely(usage_db):
     alice = await person("alice", "alice@example.com", display_name="Alice Example")
     bob = await person("bob", "bob@example.com")
@@ -640,7 +640,6 @@ async def test_privacy_enabled_sorts_by_disclosed_labels_so_hidden_names_do_not_
     off = await report(sort="user", direction="asc")
     assert [row["user"]["name"] for row in off["rows"]] == ["alpha", "mid", "zeta"]
     assert [row["rank"] for row in off["rows"]] == [2, 3, 1]
->>>>>>> cc7f18af4 (fix(analytics): anonymize the usage leaderboard for non-admins behind an instance toggle)
 
 
 async def test_reviewer_uses_publication_recording_and_surfacing_cohorts(usage_db):
