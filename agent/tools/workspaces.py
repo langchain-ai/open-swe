@@ -250,3 +250,21 @@ async def delete_workspace(name: str) -> dict[str, Any]:
     if not deleted:
         return {"ok": False, "error": f"no workspace named {name!r}"}
     return {"ok": True, "deleted": True}
+
+
+async def set_workspace_thread_starters(name: str, repos: list[str]) -> dict[str, Any]:
+    """Implement the `set_workspace_thread_starters` tool."""
+    if error := await _require_admin():
+        return {"ok": False, "error": error}
+    try:
+        slug = store.slugify(name)
+    except ValueError as exc:
+        return {"ok": False, "error": str(exc)}
+    try:
+        granted = await store.WORKSPACES.set_thread_starters(slug, repos)
+    except ValueError as exc:
+        return {"ok": False, "error": str(exc)}
+    except Exception as exc:
+        logger.exception("Failed to set workspace thread starters", extra={"workspace": slug})
+        return {"ok": False, "error": f"failed to set thread starters: {exc}"}
+    return {"ok": True, "workspace": slug, "thread_starters": granted}

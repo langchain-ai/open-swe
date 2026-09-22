@@ -48,15 +48,30 @@ def _schedule_touch(key_id: str) -> None:
     task.add_done_callback(_TOUCHES.discard)
 
 
+async def api_key_from_token(token: str) -> ApiKey | None:
+    """The live key ``token`` is, or ``None`` when it is not a key at all.
+
+    Non-raising, because the routes that accept a key accept other credentials
+    too: a token that is not one of ours has to fall through to them. A key that
+    authenticates has its use recorded off the request path.
+    """
+    if ApiKey.digest(token) is None or not postgres.configured():
+        return None
+    key = await ApiKey.authenticate(token)
+    if key is None:
+        return None
+    _schedule_touch(key.id)
+    return key
+
+
 async def require_api_key(request: Request) -> ApiKey:
     _require_database()
     scheme, _, token = request.headers.get("Authorization", "").partition(" ")
     if scheme.lower() != "bearer" or not token.strip():
         raise HTTPException(401, _INVALID_KEY, headers={"WWW-Authenticate": "Bearer"})
-    key = await ApiKey.authenticate(token)
+    key = await api_key_from_token(token)
     if key is None:
         raise HTTPException(401, _INVALID_KEY, headers={"WWW-Authenticate": "Bearer"})
-    _schedule_touch(key.id)
     return key
 
 

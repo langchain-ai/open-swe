@@ -36,6 +36,7 @@ _TOOL_MODULES = {
     "read_user_settings": ".read_user_settings",
     "recreate_sandbox": ".recreate_sandbox",
     "refresh_workspace_start": ".workspaces",
+    "set_workspace_thread_starters": ".workspaces",
     "report_platform_issue": ".report_platform_issue",
     "request_pr_review": "agent.slack.tools.request_pr_review",
     "reply_to_finding_thread": ".reply_to_finding_thread",
@@ -98,6 +99,7 @@ __all__ = [
     "read_user_settings",
     "recreate_sandbox",
     "refresh_workspace_start",
+    "set_workspace_thread_starters",
     "report_platform_issue",
     "request_pr_review",
     "reply_to_finding_thread",
@@ -185,6 +187,7 @@ if TYPE_CHECKING:
         list_workspaces,
         publish_workspace,
         refresh_workspace_start,
+        set_workspace_thread_starters,
     )
 
 

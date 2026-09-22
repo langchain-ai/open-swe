@@ -1,10 +1,12 @@
 """Dashboard API for named workspaces."""
 
 import asyncio
+import logging
 from typing import Any
 
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import Response
+from pydantic import BaseModel, Field
 
 from agent.dashboard.deps import ADMIN_DEP, SESSION_DEP, session_is_admin
 from agent.dashboard.workspace_settings import delete_workspace_settings, get_workspace_settings
@@ -24,6 +26,8 @@ from agent.workspaces.store import (
     list_workspace_options,
     slugify,
 )
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["workspaces"])
 
@@ -137,6 +141,50 @@ async def api_update_workspace(
         if repos_changed and await start_refresh_run(record.slug) is None:
             raise HTTPException(502, "workspace was saved but its snapshot rebuild could not start")
     return record
+
+
+class ThreadStarters(BaseModel):
+    """The repositories in a workspace whose workflows may start threads."""
+
+    repos: list[str] = Field(default_factory=list)
+
+
+@router.get("/workspaces/{slug}/thread-starters")
+async def api_get_thread_starters(
+    slug: str,
+    _admin: dict[str, Any] = ADMIN_DEP,
+) -> ThreadStarters:
+    normalized = _normalized_slug(slug)
+    if not await WORKSPACES.slug_exists(normalized):
+        raise HTTPException(404, "workspace not found")
+    return ThreadStarters(repos=await WORKSPACES.thread_starters(normalized))
+
+
+@router.put("/workspaces/{slug}/thread-starters")
+async def api_set_thread_starters(
+    slug: str,
+    body: ThreadStarters,
+    admin: dict[str, Any] = ADMIN_DEP,
+) -> ThreadStarters:
+    """Grant exactly these repositories the right to start threads here.
+
+    The grant is what a federated GitHub Actions token is checked against, so it
+    is the one place that decides which workflows can reach this workspace.
+    """
+    normalized = _normalized_slug(slug)
+    try:
+        granted = await WORKSPACES.set_thread_starters(normalized, body.repos)
+    except ValueError as exc:
+        raise HTTPException(404, "workspace not found") from exc
+    logger.info(
+        "Set the repositories that may start threads in a workspace",
+        extra={
+            "workspace": normalized,
+            "thread_starters": granted,
+            "changed_by": str(admin.get("sub") or ""),
+        },
+    )
+    return ThreadStarters(repos=granted)
 
 
 @router.post("/workspaces/{slug}/refresh")

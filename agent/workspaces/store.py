@@ -42,7 +42,7 @@ from typing import Any, Literal, TypedDict
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, ValidationError, field_validator
-from sqlalchemy import delete, select
+from sqlalchemy import delete, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -863,6 +863,87 @@ class WorkspaceStore:
                 .join(Repository, Repository.id == WorkspaceRepositoryRow.repository_id)
                 .where(Repository.key == key)
             )
+
+    async def thread_starter_of_repo(self, full_name: str) -> str | None:
+        """The slug of the workspace this repository may start threads in, if any.
+
+        The whole trust policy for a federated GitHub Actions token: a workflow
+        gets in only where an admin bound its repository *and* granted it this.
+        """
+        try:
+            key = normalize_repo_full_name(full_name).lower()
+        except ValueError:
+            return None
+        async with postgres.session() as session:
+            return await session.scalar(
+                select(WorkspaceRow.slug)
+                .join(
+                    WorkspaceRepositoryRow, WorkspaceRepositoryRow.workspace_id == WorkspaceRow.id
+                )
+                .join(Repository, Repository.id == WorkspaceRepositoryRow.repository_id)
+                .where(Repository.key == key, WorkspaceRepositoryRow.may_start_threads.is_(True))
+            )
+
+    async def thread_starters(self, slug: str) -> list[str]:
+        """The repositories in ``slug`` that may start threads."""
+        async with postgres.session() as session:
+            return list(
+                await session.scalars(
+                    select(Repository.full_name)
+                    .join(
+                        WorkspaceRepositoryRow,
+                        WorkspaceRepositoryRow.repository_id == Repository.id,
+                    )
+                    .join(WorkspaceRow, WorkspaceRow.id == WorkspaceRepositoryRow.workspace_id)
+                    .where(
+                        WorkspaceRow.slug == slug,
+                        WorkspaceRepositoryRow.may_start_threads.is_(True),
+                    )
+                    .order_by(Repository.key)
+                )
+            )
+
+    async def set_thread_starters(self, slug: str, repos: Sequence[str]) -> list[str]:
+        """Grant exactly ``repos`` the ability to start threads in ``slug``.
+
+        Only repositories already bound to the workspace can be granted it;
+        anything else is ignored rather than silently bound, so the grant can
+        never widen which repositories the workspace owns.
+        """
+        wanted = set()
+        for full_name in repos:
+            try:
+                wanted.add(normalize_repo_full_name(full_name).lower())
+            except ValueError:
+                logger.warning(
+                    "Ignoring an unparseable repository in a thread-starter grant",
+                    extra={"workspace": slug, "repository": full_name},
+                )
+        async with postgres.session() as session:
+            workspace_id = await session.scalar(
+                select(WorkspaceRow.id).where(WorkspaceRow.slug == slug)
+            )
+            if workspace_id is None:
+                raise ValueError(f"no workspace named {slug!r}")
+            bound = (
+                await session.execute(
+                    select(Repository.key, Repository.id)
+                    .join(
+                        WorkspaceRepositoryRow,
+                        WorkspaceRepositoryRow.repository_id == Repository.id,
+                    )
+                    .where(WorkspaceRepositoryRow.workspace_id == workspace_id)
+                )
+            ).tuples()
+            granted = {key: repository_id for key, repository_id in bound if key in wanted}
+            await session.execute(
+                update(WorkspaceRepositoryRow)
+                .where(WorkspaceRepositoryRow.workspace_id == workspace_id)
+                .values(
+                    may_start_threads=WorkspaceRepositoryRow.repository_id.in_(granted.values())
+                )
+            )
+        return await self.thread_starters(slug)
 
     async def owner_of_slack_channel(self, channel_id: str) -> str | None:
         """The slug of the workspace this Slack channel is bound to, if any."""

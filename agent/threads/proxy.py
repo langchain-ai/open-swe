@@ -15,17 +15,17 @@ from agent.threads.access import (
     _authorized_thread_metadata,
     _readable_thread_metadata,
 )
+from agent.threads.callers import Caller
 from agent.threads.runs import (
     _ASSISTANT_ID,
     _enrich_run_start_command,
+    _enrich_system_run_start_command,
     _extract_run_id_from_command_response,
     _notify_slack_web_handoff,
 )
 from agent.threads.summary import (
-    _assert_thread_postable,
     _now_ms,
     _thread_is_busy,
-    assert_thread_readable,
 )
 from agent.utils.json_types import thread_metadata
 from agent.utils.streaming import TERMINAL_LIFECYCLE_EVENTS, root_lifecycle
@@ -145,8 +145,15 @@ async def proxy_dashboard_thread_commands(
     *,
     email: str | None = None,
     content_type: str = "application/json",
+    caller: Caller | None = None,
 ) -> tuple[int, bytes, str | None]:
+    """Forward one command, enriched for whoever sent it.
+
+    ``caller`` is how a machine gets in; every other caller is the person named
+    by ``login``, which is what the dashboard and the agent's own tools pass.
+    """
     received_at_ms = _now_ms()
+    caller = caller or Caller.of_login(login, email)
     require_json_content_type(content_type)
     try:
         parsed = json.loads(body)
@@ -180,26 +187,36 @@ async def proxy_dashboard_thread_commands(
         metadata = thread_metadata(thread)
         post_command = method in _THREAD_POST_COMMAND_METHODS
         if post_command:
-            _assert_thread_postable(metadata, login, email)
+            caller.assert_can_post(metadata)
         else:
-            assert_thread_readable(metadata, login, email)
+            caller.assert_can_read(metadata)
         if method != "run.start" and not (post_command and metadata.get("admin_thread") is True):
-            assert_thread_readable(metadata, login, email)
+            caller.assert_can_read(metadata)
         metadata_run_status = metadata.get("latest_run_status")
         thread_busy = _thread_is_busy(thread) or metadata_run_status in {"pending", "running"}
 
     url = f"{langgraph_url().rstrip('/')}/threads/{thread_id}/commands"
     headers = langgraph_proxy_headers(content_type=content_type)
 
-    enriched = await _enrich_run_start_command(
-        thread_id,
-        login,
-        parsed,
-        metadata=metadata,
-        thread_busy=thread_busy,
-        creating=creating,
-        email=email,
-    )
+    if caller.machine:
+        enriched = await _enrich_system_run_start_command(
+            thread_id,
+            caller,
+            parsed,
+            metadata=metadata,
+            thread_busy=thread_busy,
+            creating=creating,
+        )
+    else:
+        enriched = await _enrich_run_start_command(
+            thread_id,
+            login,
+            parsed,
+            metadata=metadata,
+            thread_busy=thread_busy,
+            creating=creating,
+            email=email,
+        )
     outgoing = json.dumps(enriched).encode()
 
     if method == "run.start":

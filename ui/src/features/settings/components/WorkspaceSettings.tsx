@@ -13,6 +13,7 @@ import {
 } from "@/components/ui/alert-dialog"
 
 import { SettingsSection } from "@/components/AppShell"
+import { ThreadStartersSection } from "./ThreadStartersSection"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import {
@@ -210,6 +211,11 @@ export function WorkspaceSettingsPanel({
         )}
       />
       <DefaultRepoSection scope={scope} repositories={record.data.repos} />
+      <ThreadStartersSection
+        slug={slug}
+        repositories={record.data.repos}
+        canEdit={canEdit}
+      />
       <LLMGatewaySection scope={scope} />
       <FableSection scope={scope} />
       <ReviewSettings scope={scope} canEdit={canEdit} />

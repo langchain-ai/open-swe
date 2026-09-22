@@ -299,11 +299,19 @@ Public status-page publishing is not implemented. Authorized responders can ask 
 </details>
 
 <details id="api-keys">
-<summary><strong>API keys</strong></summary>
+<summary><strong>Machine callers: API keys and GitHub Actions</strong></summary>
 
-An API key lets an external system — CI, a cron box, another service — start Open SWE threads over HTTP without a browser session.
+Two kinds of machine can start Open SWE threads without a browser session. Both post the same command the dashboard posts, to `POST /dashboard/api/threads/<thread_id>/commands`, and both may only start **system** threads: owned by a workspace rather than a person, public, and carrying no GitHub user, so nothing they do borrows anyone's credentials.
 
-**Minting.** Only `CONFIGURED_ADMINS` can mint, list, or revoke keys, from `POST /dashboard/api/admin/api-keys` with a dashboard session. A key is scoped to exactly one workspace and expires at a date you choose, at most 365 days out:
+Every creating command names the kind of thread it wants in `config.configurable.thread_type`:
+
+| `thread_type` | Who may ask for it |
+|---|---|
+| `system` | API keys, federated workflows, and admins |
+| `workspace` | any signed-in person |
+| `private` | any signed-in person |
+
+**API keys.** Only `CONFIGURED_ADMINS` mint, list, or revoke them, and a key is scoped to one workspace with a required expiry at most 365 days out:
 
 ```bash
 curl -X POST "<URL>/dashboard/api/admin/api-keys" \
@@ -311,23 +319,38 @@ curl -X POST "<URL>/dashboard/api/admin/api-keys" \
   -d '{"workspace": "core", "name": "release CI", "expires_at": "2027-01-01T00:00:00Z"}'
 ```
 
-The response is the only place the secret appears: `{"id": …, "workspace": "core", "name": "release CI", "key_suffix": "a1b2c3", "created_by": "octocat", "created_at": …, "expires_at": …, "secret": "osk_…"}`. Store it in your secret manager immediately. The server keeps only the SHA-256 digest of the secret and its last six characters, so a lost key cannot be recovered — mint a new one and revoke the old. `GET /dashboard/api/admin/api-keys?workspace=core` lists keys with `last_used_at`, `revoked_at`, and a `status` of `active`, `expired`, or `revoked`; `DELETE /dashboard/api/admin/api-keys/<id>` revokes one.
-
-**Using a key.** Present it as a bearer token. Threads started this way are system-owned and public, run in the key's workspace, and carry no GitHub user, so the agent works with the GitHub App's installation permissions rather than anyone's personal token. A repository named in the request must belong to the key's workspace.
+The response is the only place the secret appears. The server stores the SHA-256 digest of the secret and its last six characters, so a lost key cannot be recovered: mint a new one and revoke the old. `GET /dashboard/api/admin/api-keys?workspace=core` lists keys with `last_used_at`, `revoked_at` and a `status` of `active`, `expired` or `revoked`; `DELETE /dashboard/api/admin/api-keys/<id>` revokes one. Deleting a workspace deletes its keys, because a slug can be reused.
 
 ```bash
-# Start a thread
-curl -X POST "<URL>/api/v1/threads" \
+curl -X POST "<URL>/dashboard/api/threads/$(uuidgen | tr 'A-Z' 'a-z')/commands" \
   -H 'Authorization: Bearer osk_…' -H 'Content-Type: application/json' \
-  -d '{"prompt": "Upgrade the linter and open a PR", "repo": "acme/api", "title": "Linter upgrade"}'
-# → 201 {"thread_id": "…", "run_id": "…", "url": "https://…/agents/…"}
-
-# Check on it
-curl "<URL>/api/v1/threads/<thread_id>" -H 'Authorization: Bearer osk_…'
-# → 200 {"thread_id": "…", "status": "running", "title": "Linter upgrade", "url": "https://…"}
+  -d '{"id": 1, "method": "run.start", "params": {
+        "input": {"messages": [{"type": "human", "content": "Upgrade the linter and open a PR"}]},
+        "config": {"configurable": {"thread_type": "system", "repo": "acme/api"}}}}'
 ```
 
-`repo` and `title` are optional. A key can only read the threads it started. Unknown, revoked, and expired keys all answer `401 invalid API key`.
+**GitHub Actions, with no stored secret.** A workflow asks GitHub for an OIDC token naming its repository, ref and workflow, and presents that instead of a key. Open SWE verifies GitHub's signature against its published keys, checks the audience, and then checks its own trust policy: the repository must be bound to a workspace *and* granted the right to start threads there. Grant it per workspace under **Start threads from CI** on the workspace's settings page, or with the `set_workspace_thread_starters` agent tool. Binding a repository never implies the grant.
+
+Set `GITHUB_OIDC_AUDIENCE` to the value your workflows request; it defaults to `DASHBOARD_BASE_URL`.
+
+```yaml
+permissions:
+  id-token: write
+steps:
+  - id: token
+    run: |
+      echo "value=$(curl -sH "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
+        "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=<URL>" | jq -r .value)" >> "$GITHUB_OUTPUT"
+  - run: |
+      curl -X POST "<URL>/dashboard/api/threads/$(uuidgen | tr 'A-Z' 'a-z')/commands" \
+        -H "Authorization: Bearer ${{ steps.token.outputs.value }}" \
+        -H 'Content-Type: application/json' \
+        -d '{"id": 1, "method": "run.start", "params": {
+              "input": {"messages": [{"type": "human", "content": "Nightly build failed, investigate"}]},
+              "config": {"configurable": {"thread_type": "system"}}}}'
+```
+
+A workflow that names no `repo` works in its own repository. A machine caller reads back only the threads it started, through `GET /dashboard/api/threads` and `GET /dashboard/api/threads/<id>`; unknown, revoked and expired credentials all answer `401`.
 
 </details>
 
