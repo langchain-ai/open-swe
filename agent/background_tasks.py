@@ -23,6 +23,9 @@ logger = logging.getLogger(__name__)
 
 CRON_KIND = "background_tasks"
 CRON_SCHEDULE = "* * * * *"
+# The server drops a `thread_id` key from cron metadata, so crons are tagged with this instead.
+CRON_THREAD_KEY = "agent_thread_id"
+_CRON_PAGE_SIZE = 1000
 TERMINAL_STATES = {"completed", "failed", "timed_out", "stopped", "lost"}
 MONITOR_LOCK = f"{TASK_ROOT}/monitor.lock"
 _BACKGROUND_TASK_SENDER: SystemIdentity = {
@@ -44,7 +47,7 @@ def _client():
 async def ensure_background_task_cron(thread_id: str) -> str:
     client = _client()
     crons = await client.crons.search(
-        metadata={"kind": CRON_KIND, "thread_id": thread_id},
+        metadata={"kind": CRON_KIND, CRON_THREAD_KEY: thread_id},
         limit=10,
     )
     ids = [
@@ -61,7 +64,7 @@ async def ensure_background_task_cron(thread_id: str) -> str:
         schedule=CRON_SCHEDULE,
         input={"task": CRON_KIND, "thread_id": thread_id},
         config={"configurable": {"task": CRON_KIND, "thread_id": thread_id}},
-        metadata={"kind": CRON_KIND, "thread_id": thread_id},
+        metadata={"kind": CRON_KIND, CRON_THREAD_KEY: thread_id},
         timezone="UTC",
     )
     cron_id = cron.get("cron_id") if isinstance(cron, dict) else getattr(cron, "cron_id", None)
@@ -72,14 +75,30 @@ async def ensure_background_task_cron(thread_id: str) -> str:
 
 async def _delete_crons(thread_id: str) -> None:
     client = _client()
-    crons = await client.crons.search(
-        metadata={"kind": CRON_KIND, "thread_id": thread_id},
-        limit=10,
+    tagged = await client.crons.search(
+        metadata={"kind": CRON_KIND, CRON_THREAD_KEY: thread_id}, limit=10
     )
-    for cron in crons or []:
-        cron_id = cron.get("cron_id") if isinstance(cron, dict) else None
-        if isinstance(cron_id, str):
-            await client.crons.delete(cron_id)
+    cron_ids = [cron["cron_id"] for cron in tagged]
+    # Crons created before CRON_THREAD_KEY lack it, so match those on the payload instead.
+    # Collect every page before deleting so deletes do not shift later offsets.
+    offset = 0
+    while True:
+        page = await client.crons.search(
+            metadata={"kind": CRON_KIND}, limit=_CRON_PAGE_SIZE, offset=offset
+        )
+        for cron in page:
+            payload_input = cron.get("payload", {}).get("input")
+            if (
+                isinstance(payload_input, dict)
+                and payload_input.get("thread_id") == thread_id
+                and cron["cron_id"] not in cron_ids
+            ):
+                cron_ids.append(cron["cron_id"])
+        if len(page) < _CRON_PAGE_SIZE:
+            break
+        offset += _CRON_PAGE_SIZE
+    for cron_id in cron_ids:
+        await client.crons.delete(cron_id)
 
 
 def _notification(task: dict[str, Any]) -> str:
