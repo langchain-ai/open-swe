@@ -128,6 +128,7 @@ class RunConfig(BaseModel):
     # Pull request under review
     pr_number: Int | None = None
     pr_url: str | None = None
+    pr_title: str | None = None
     head_sha: str | None = None
     base_sha: str | None = None
     last_reviewed_sha: str | None = None

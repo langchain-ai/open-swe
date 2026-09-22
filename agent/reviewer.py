@@ -40,7 +40,6 @@ from langchain.agents.middleware.types import AgentMiddleware
 from langchain_core.language_models.chat_models import BaseChatModel
 
 from agent.dashboard.options import gate_fable_model
-from agent.dashboard.workspace_settings import get_workspace_settings
 from agent.dashboard.workspace_settings_cache import cached_workspace_settings
 from agent.github.app import get_github_app_installation_token_with_expiry
 from agent.github.thread_token import cache_github_token_for_thread
@@ -76,10 +75,10 @@ from agent.review.findings import Finding
 from agent.review.findings import (
     list_findings as list_findings_async,
 )
-from agent.review.groups import maybe_generate_and_store_diff_groups
 from agent.review.publish import fetch_pr_review_threads
 from agent.review.reconcile import reconcile_findings_with_review_threads
 from agent.review.styles import get_approval_policy
+from agent.review_scout.launch import start_review_scout
 from agent.run_config import RunConfig
 from agent.runtime import (
     DEFAULT_LLM_MAX_TOKENS,
@@ -568,8 +567,8 @@ def _format_existing_findings(findings: list[Finding]) -> str:
     return "\n".join(lines) if lines else "_(no open findings)_"
 
 
-# Strong references to fire-and-forget background tasks (e.g. the AI-sorted
-# diff grouping pass) so the event loop doesn't garbage-collect them mid-flight.
+# Strong references to fire-and-forget background tasks (e.g. starting the
+# review scout) so the event loop doesn't garbage-collect them mid-flight.
 _BACKGROUND_TASKS: set[asyncio.Task[None]] = set()
 
 
@@ -593,29 +592,6 @@ def _on_background_task_done(task: asyncio.Task[None]) -> None:
     exc = task.exception()
     if exc is not None:
         logger.warning("Background reviewer task failed: %s", exc)
-
-
-async def _resolve_grouping_model(cfg: RunConfig, *, use_gateway: bool) -> BaseChatModel:
-    """Resolve the model for the diff-grouping pass.
-
-    Per-run override (``grouping_model_id``/``grouping_reasoning_effort``) wins;
-    otherwise the workspace default, which itself inherits the reviewer subagent
-    model when no grouping-specific model is configured.
-    """
-    settings = await get_workspace_settings(cfg.workspace_slug)
-    if cfg.grouping_model_id:
-        model_id = cfg.grouping_model_id
-        effort = cfg.grouping_reasoning_effort
-    else:
-        model_id, effort = settings.default_grouping_model
-    model_id, effort = gate_fable_model(model_id, effort, fable_enabled=settings.fable_enabled)
-    model_kwargs = provider_model_kwargs(
-        model_id,
-        effort,
-        max_tokens=DEFAULT_LLM_MAX_TOKENS,
-        openai_reasoning_default=DEFAULT_LLM_REASONING,
-    )
-    return _make_model_or_defer(model_id, use_gateway=use_gateway, **model_kwargs)
 
 
 async def _cached_api_standards_skill() -> str | None:
@@ -996,18 +972,20 @@ class PrepareReviewerRunMiddleware(BasePrepareRunMiddleware):
                     )
                 )
 
-        if reviewer_event != "finding_reply" and pr_diff_text and self._thread_id:
-            grouping_model = await _resolve_grouping_model(cfg, use_gateway=self._use_gateway)
-            grouping_task = asyncio.create_task(
-                maybe_generate_and_store_diff_groups(
-                    thread_id=self._thread_id,
+        if reviewer_event != "finding_reply" and not reviewer_eval and isinstance(pr_number, int):
+            scout_task = asyncio.create_task(
+                start_review_scout(
+                    owner=repo_owner,
+                    repo=repo_name,
+                    pr_number=pr_number,
+                    pr_title=pr_overview[0],
+                    base_sha=base_sha,
                     head_sha=head_sha,
-                    diff_text=pr_diff_text,
-                    model=grouping_model,
+                    workspace_slug=cfg.workspace_slug,
                 )
             )
-            _BACKGROUND_TASKS.add(grouping_task)
-            grouping_task.add_done_callback(_on_background_task_done)
+            _BACKGROUND_TASKS.add(scout_task)
+            scout_task.add_done_callback(_on_background_task_done)
 
         return {
             "work_dir": work_dir,

@@ -376,8 +376,8 @@ export function ModelDefaultsSection({
         <ModelRow
           settings={settings}
           models={models}
-          label="Open SWE Review Diff Grouping"
-          description={`Model used for the review's 'AI sorted' view that groups changed files into a logical walkthrough. ${
+          label="Open SWE Review Scout"
+          description={`Model used by the review scout, which cuts each pull request into the ordered steps of the review's 'AI sorted' view. ${
             scoped
               ? "Unset here it follows the instance setting, and only falls back to the Reviewer subagent default when the instance leaves it unset too."
               : "Falls back to the Reviewer subagent default when unset."

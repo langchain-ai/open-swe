@@ -828,11 +828,28 @@ export interface ReviewPrDetails {
   labels: Array<{ name: string; color: string | null }>
 }
 
-export interface ReviewDiffGroup {
+/** Inclusive `[start, end]` line numbers. */
+export type ReviewLineRange = [number, number]
+
+/** Added lines are head line numbers; deleted lines are merge-base line numbers. */
+export interface ReviewWalkthroughFile {
+  path: string
+  added: Array<ReviewLineRange>
+  deleted: Array<ReviewLineRange>
+}
+
+export interface ReviewWalkthroughStep {
   index: number
   title: string
   summary: string
-  files: Array<string>
+  other: boolean
+  files: Array<ReviewWalkthroughFile>
+}
+
+/** The review scout's reading order for the PR's current head. */
+export interface ReviewWalkthrough {
+  head_sha: string
+  steps: Array<ReviewWalkthroughStep>
 }
 
 /** `status: "none"` is a PR the reviewer graph has never run on. */
@@ -846,8 +863,7 @@ export interface ReviewDetail extends Omit<
   pr: ReviewPrDetails
   checks: Array<ReviewCheckRun>
   findings: Array<ReviewFinding>
-  diff_groups: Array<ReviewDiffGroup>
-  diff_groups_stale: boolean
+  walkthrough: ReviewWalkthrough | null
   guidance: Array<GuidancePoint>
 }
 

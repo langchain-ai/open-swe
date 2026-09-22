@@ -189,7 +189,7 @@ class WorkspaceSettingsUpdate(BaseModel):
         _validate_model_effort_pair(
             self.default_grouping_model,
             self.default_grouping_reasoning_effort,
-            "review diff grouping",
+            "review scout",
         )
         _validate_model_effort_pair(
             self.default_chat_model, self.default_chat_reasoning_effort, "review chat"
@@ -638,12 +638,11 @@ class WorkspaceSettings(Mapping[str, Any]):
 
     @property
     def default_grouping_model(self) -> tuple[str, str]:
-        """The default ``(model_id, reasoning_effort)`` for the review diff-grouping pass.
+        """The default ``(model_id, reasoning_effort)`` for the review scout.
 
-        When no grouping-specific model is configured (or it's no longer
-        supported), inherit the **reviewer subagent** default: the grouping
-        pass is a cheap, fast companion to the reviewer, so it should track that
-        cheaper tier rather than the primary reviewer model.
+        When none is configured (or it's no longer supported), inherit the
+        **reviewer subagent** default: the scout is a companion to the reviewer,
+        so it tracks that cheaper tier rather than the primary reviewer model.
         """
         model = self.get("default_grouping_model")
         effort = self.get("default_grouping_reasoning_effort")

@@ -39,6 +39,7 @@ import {
 } from "@phosphor-icons/react"
 import { IoLogoGithub } from "react-icons/io5"
 import {
+  FileDiff,
   MultiFileDiff,
   Virtualizer,
   WorkerPoolContextProvider,
@@ -49,6 +50,7 @@ import type { FileContents } from "@pierre/diffs/react"
 import type {
   FileDiff as CoreFileDiff,
   DiffLineAnnotation,
+  FileDiffMetadata,
   SelectedLineRange,
   SelectionSide,
 } from "@pierre/diffs"
@@ -73,6 +75,10 @@ import { DiffWrapToggle } from "@/features/agents/components/DiffWrapToggle"
 import { AuthorGuidanceCard } from "@/features/reviews/components/AuthorGuidanceCard"
 import { PrHeader } from "@/features/reviews/components/PrHeader"
 import { ReviewAssessmentCard } from "@/features/reviews/components/ReviewAssessmentCard"
+import {
+  rangeLineCount,
+  walkthroughFileDiff,
+} from "@/features/reviews/lib/walkthroughDiff"
 import {
   ReviewChat,
   ReviewChatComposerProvider,
@@ -409,13 +415,43 @@ function scrollFindingLineToCenter({
   )
 }
 
+/** A file as one walkthrough step shows it: only that step's hunks, unless `fileDiff` is null. */
+interface ResolvedGroupFile {
+  file: ReviewDiffFile
+  fileDiff: FileDiffMetadata | null
+  additions: number
+  deletions: number
+  /** First step the file appears in; scroll targets and diff instances register here. */
+  primary: boolean
+}
+
 interface ResolvedGroup {
   index: number
   title: string
   summary: string
-  files: Array<ReviewDiffFile>
+  files: Array<ResolvedGroupFile>
   additions: number
   deletions: number
+}
+
+function wholeGroupFile(
+  file: ReviewDiffFile,
+  primary: boolean
+): ResolvedGroupFile {
+  return {
+    file,
+    fileDiff: null,
+    additions: file.additions,
+    deletions: file.deletions,
+    primary,
+  }
+}
+
+function sumStats(files: Array<ResolvedGroupFile>) {
+  return {
+    additions: files.reduce((acc, entry) => acc + entry.additions, 0),
+    deletions: files.reduce((acc, entry) => acc + entry.deletions, 0),
+  }
 }
 
 const GROUP_STYLES = {
@@ -542,6 +578,11 @@ function useExpandedFinding(): ExpandedFindingContextValue {
 }
 
 const NO_FINDINGS: Array<ReviewFinding> = []
+const ignoreSection = (_path: string, _node: HTMLDivElement | null) => {}
+const ignoreDiffInstance = (
+  _path: string,
+  _target: RegisteredDiffInstance | null
+) => {}
 
 interface UserSelection {
   file: string
@@ -766,51 +807,70 @@ function ReviewBodyInner({
       .reduce((acc, file) => acc + file.additions + file.deletions, 0)
   }, [diffFiles, viewed])
 
-  // Resolve the AI-sorted groups against the actual diff: drop stale groups
-  // (generated for a previous head) so the file-tree fallback is used, drop
-  // paths no longer in the diff and empty groups, and collect any unassigned
-  // files into a trailing "Other changes" group so nothing ever disappears.
+  // Resolve the scout's steps against the actual diff: each step shows only
+  // the hunks holding its lines, and any file no step claims joins the "Other"
+  // step so nothing ever disappears.
+  const walkthrough = detail.walkthrough
   const groupedView = useMemo<Array<ResolvedGroup> | null>(() => {
-    if (
-      !diffFiles ||
-      detail.diff_groups_stale ||
-      detail.diff_groups.length === 0
-    )
+    if (!diffFiles || !walkthrough || walkthrough.steps.length === 0)
       return null
     const byPath = new Map(diffFiles.map((file) => [file.path, file]))
-    const assigned = new Set<string>()
-    const resolved: Array<Omit<ResolvedGroup, "index">> = []
-    for (const group of detail.diff_groups) {
-      const files: Array<ReviewDiffFile> = []
-      for (const path of group.files) {
-        const file = byPath.get(path)
-        if (file && !assigned.has(path)) {
-          assigned.add(path)
-          files.push(file)
-        }
+    const seen = new Set<string>()
+    const resolved: Array<Omit<ResolvedGroup, "index"> & { other: boolean }> =
+      []
+    for (const step of walkthrough.steps) {
+      const files: Array<ResolvedGroupFile> = []
+      for (const lines of step.files) {
+        const file = byPath.get(lines.path)
+        if (!file) continue
+        const primary = !seen.has(file.path)
+        seen.add(file.path)
+        const hasLines = lines.added.length > 0 || lines.deleted.length > 0
+        files.push(
+          hasLines
+            ? {
+                file,
+                fileDiff: walkthroughFileDiff(file, lines),
+                additions: rangeLineCount(lines.added),
+                deletions: rangeLineCount(lines.deleted),
+                primary,
+              }
+            : wholeGroupFile(file, primary)
+        )
       }
       if (files.length === 0) continue
       resolved.push({
-        title: group.title,
-        summary: group.summary,
+        title: step.title,
+        summary: step.summary,
+        other: step.other,
         files,
-        additions: files.reduce((acc, file) => acc + file.additions, 0),
-        deletions: files.reduce((acc, file) => acc + file.deletions, 0),
+        ...sumStats(files),
       })
     }
-    const leftover = diffFiles.filter((file) => !assigned.has(file.path))
+    const leftover = diffFiles
+      .filter((file) => !seen.has(file.path))
+      .map((file) => wholeGroupFile(file, true))
     if (leftover.length > 0) {
-      resolved.push({
-        title: "Other changes",
-        summary: "",
-        files: leftover,
-        additions: leftover.reduce((acc, file) => acc + file.additions, 0),
-        deletions: leftover.reduce((acc, file) => acc + file.deletions, 0),
-      })
+      const other = resolved.find((group) => group.other)
+      if (other) {
+        other.files = [...other.files, ...leftover]
+        Object.assign(other, sumStats(other.files))
+      } else {
+        resolved.push({
+          title: "Other changes",
+          summary: "",
+          other: true,
+          files: leftover,
+          ...sumStats(leftover),
+        })
+      }
     }
     if (resolved.length === 0) return null
-    return resolved.map((group, i) => ({ ...group, index: i + 1 }))
-  }, [diffFiles, detail.diff_groups, detail.diff_groups_stale])
+    return resolved.map(({ other: _other, ...group }, i) => ({
+      ...group,
+      index: i + 1,
+    }))
+  }, [diffFiles, walkthrough])
 
   const sidebarGroups = useMemo<Array<ReviewSidebarGroup> | null>(() => {
     if (!groupedView) return null
@@ -822,8 +882,7 @@ function ReviewBodyInner({
 
   // The view follows fresh-group availability until the user explicitly picks
   // one, after which the choice persists across PRs.
-  const hasFreshGroups =
-    detail.diff_groups.length > 0 && !detail.diff_groups_stale
+  const hasFreshGroups = (walkthrough?.steps.length ?? 0) > 0
   const [explicitView, setExplicitView] = useState<ReviewSidebarView | null>(
     () => {
       if (typeof window === "undefined") return null
@@ -1146,7 +1205,11 @@ function ReviewBodyInner({
     requestAnimationFrame(snap)
   }, [openComment])
 
-  const renderFileCard = (file: ReviewDiffFile) => {
+  const renderFileCard = (
+    file: ReviewDiffFile,
+    step?: { index: number; entry: ResolvedGroupFile }
+  ) => {
+    const primary = step?.entry.primary ?? true
     // Keep the range highlighted while its comment composer is open, so the
     // user can see exactly which lines they're commenting on.
     const selectedLines =
@@ -1159,8 +1222,11 @@ function ReviewBodyInner({
             : null
     return (
       <FileDiffCard
-        key={file.path}
+        key={step ? `${step.index}:${file.path}` : file.path}
         file={file}
+        fileDiff={step?.entry.fileDiff ?? null}
+        additions={step?.entry.additions ?? file.additions}
+        deletions={step?.entry.deletions ?? file.deletions}
         findings={findingsByFile.get(file.path) ?? NO_FINDINGS}
         selectedLines={selectedLines}
         viewed={viewed.has(file.path)}
@@ -1169,8 +1235,10 @@ function ReviewBodyInner({
         onToggleExpanded={toggleExpanded}
         onSelectLines={selectLines}
         onAddToChat={embedded ? undefined : addToChat}
-        registerSection={registerSection}
-        registerDiffInstance={registerDiffInstance}
+        registerSection={primary ? registerSection : ignoreSection}
+        registerDiffInstance={
+          primary ? registerDiffInstance : ignoreDiffInstance
+        }
         diffStyle={diffStyle}
         owner={detail.owner}
         repo={detail.repo}
@@ -1351,13 +1419,18 @@ function ReviewBodyInner({
                           className="scroll-mt-4 space-y-3"
                         >
                           <GroupHeader group={group} />
-                          {group.files.map(renderFileCard)}
+                          {group.files.map((entry) =>
+                            renderFileCard(entry.file, {
+                              index: group.index,
+                              entry,
+                            })
+                          )}
                         </div>
                       ))}
                     </div>
                   ) : (
                     <div className="space-y-3">
-                      {diffFiles.map(renderFileCard)}
+                      {diffFiles.map((file) => renderFileCard(file))}
                     </div>
                   )}
                 </div>
@@ -1491,6 +1564,9 @@ function GroupHeader({ group }: { group: ResolvedGroup }) {
 
 const FileDiffCard = memo(function FileDiffCard({
   file,
+  fileDiff,
+  additions,
+  deletions,
   findings,
   selectedLines,
   viewed,
@@ -1513,6 +1589,10 @@ const FileDiffCard = memo(function FileDiffCard({
   onCloseOpenComment,
 }: {
   file: ReviewDiffFile
+  /** A walkthrough step's slice of the file; `null` renders the whole diff. */
+  fileDiff: FileDiffMetadata | null
+  additions: number
+  deletions: number
   findings: Array<ReviewFinding>
   selectedLines: SelectedLineRange | null
   viewed: boolean
@@ -1744,8 +1824,8 @@ const FileDiffCard = memo(function FileDiffCard({
           <span className="font-mono font-medium">{file.path}</span>
         </button>
         <span className="flex items-center gap-1.5 font-mono text-[11px]">
-          <span className="text-emerald-500">+{file.additions}</span>
-          <span className="text-red-500">-{file.deletions}</span>
+          <span className="text-emerald-500">+{additions}</span>
+          <span className="text-red-500">-{deletions}</span>
         </span>
         {findings.length > 0 && (
           <span className="inline-flex items-center gap-1 text-[11px] text-amber-500">
@@ -1783,15 +1863,26 @@ const FileDiffCard = memo(function FileDiffCard({
             onMouseUp={handleTextSelection}
             className="overflow-x-auto bg-card font-mono text-[11px] leading-5"
           >
-            <MultiFileDiff<ReviewAnnotation>
-              oldFile={oldFile}
-              newFile={newFile}
-              options={cardOptions}
-              metrics={DIFF_VIRTUAL_METRICS}
-              lineAnnotations={lineAnnotations}
-              selectedLines={selectedLines}
-              renderAnnotation={renderAnnotation}
-            />
+            {fileDiff ? (
+              <FileDiff<ReviewAnnotation>
+                fileDiff={fileDiff}
+                options={cardOptions}
+                metrics={DIFF_VIRTUAL_METRICS}
+                lineAnnotations={lineAnnotations}
+                selectedLines={selectedLines}
+                renderAnnotation={renderAnnotation}
+              />
+            ) : (
+              <MultiFileDiff<ReviewAnnotation>
+                oldFile={oldFile}
+                newFile={newFile}
+                options={cardOptions}
+                metrics={DIFF_VIRTUAL_METRICS}
+                lineAnnotations={lineAnnotations}
+                selectedLines={selectedLines}
+                renderAnnotation={renderAnnotation}
+              />
+            )}
             {visiblePopup && (
               <AddToChatPopup
                 x={visiblePopup.x}
