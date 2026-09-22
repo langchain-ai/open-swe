@@ -154,13 +154,13 @@ test("restores sidebar navigation, pins, view controls, and search", async ({
   await waitForThreadIdle(page, id);
   await page.goto(`/assistant/${id}`);
   const sidebar = page.locator("[data-sidebar-frame]");
-  for (const path of ["threads", "skills", "automations", "reviews"]) {
+  for (const path of ["skills", "automations", "reviews"]) {
     await expect(
       sidebar.locator(`nav a[href^="/agents/${path}"]`),
     ).toBeVisible();
   }
   await expect(sidebar.getByRole("link", { name: "New Thread" })).toBeVisible();
-  await sidebar.getByRole("button", { name: "Projects options" }).click();
+  await sidebar.getByRole("button", { name: "Repositories options" }).click();
   await expect(
     page.getByRole("menuitemcheckbox", { name: "Show archived" }),
   ).toBeVisible();
@@ -380,7 +380,7 @@ test("keeps a draft while running and sends it after native cancellation", async
       return (
         state.values.messages?.some(
           (message) =>
-            message.type === "tool" && message.name === "slack_thread_reply",
+            message.type === "tool" && message.name === "slack_reply",
         ) ?? false
       );
     })
