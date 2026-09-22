@@ -55,6 +55,16 @@ async def recompute_dirty_partitions(limit: int = 20) -> int:
             )
             if current_reason is None:
                 continue
+            if current_reason != reason_event_id:
+                await conn.execute(
+                    text(
+                        "UPDATE dirty_summary_partitions SET dirty_since = clock_timestamp() "
+                        "WHERE workspace_id = :workspace_id AND summary_version = :summary_version "
+                        "AND family = :family AND partition_date = :partition_date "
+                        "AND dimension_key = :dimension_key"
+                    ),
+                    partition,
+                )
             await conn.execute(
                 text(
                     """

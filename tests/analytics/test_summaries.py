@@ -136,6 +136,51 @@ async def test_ingestion_progresses_during_summary_and_invalidation_survives_ret
         assert await conn.scalar(text("SELECT count(*) FROM dirty_summary_partitions")) == 0
 
 
+async def test_invalidated_partition_rotates_behind_later_candidates(
+    analytics_db: tuple[UUID, Callable[[], AbstractAsyncContextManager[AsyncConnection]]],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    workspace, transaction = analytics_db
+    for day in (0, 1):
+        await ingestion.ingest(
+            event(
+                workspace,
+                EventName.RUN_STARTED,
+                RunStartedPayload(model_attribution_quality="unavailable"),
+                run_id=uuid4(),
+                day=day,
+            )
+        )
+    async with transaction() as conn:
+        await conn.execute(text("DELETE FROM dirty_summary_partitions WHERE family <> 'additive'"))
+        await conn.execute(
+            text("UPDATE dirty_summary_partitions SET dirty_since = partition_date::timestamptz")
+        )
+    compute = summaries._compute
+
+    async def invalidate(conn: AsyncConnection, partition: dict[str, object]) -> dict[str, object]:
+        payload = await compute(conn, partition)
+        await ingestion.ingest(
+            event(
+                workspace,
+                EventName.RUN_STARTED,
+                RunStartedPayload(model_attribution_quality="unavailable"),
+                run_id=uuid4(),
+            )
+        )
+        return payload
+
+    monkeypatch.setattr(summaries, "_compute", invalidate)
+    assert await summaries.recompute_dirty_partitions(limit=1) == 1
+    monkeypatch.setattr(summaries, "_compute", compute)
+    assert await summaries.recompute_dirty_partitions(limit=1) == 1
+    async with transaction() as conn:
+        remaining = await conn.scalar(
+            text("SELECT partition_date FROM dirty_summary_partitions WHERE family = 'additive'")
+        )
+        assert remaining == DAY.date()
+
+
 async def test_cost_updates_recompute_the_run_start_day(analytics_db):
     workspace, transaction = analytics_db
     run_id = uuid4()
