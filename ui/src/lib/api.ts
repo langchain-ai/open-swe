@@ -851,6 +851,32 @@ export interface PublishedReviewAssessment {
   explanation: string
 }
 
+export type GuidanceKind =
+  | "correction"
+  | "constraint"
+  | "direction"
+  | "preference"
+
+export interface GuidancePoint {
+  summary: string
+  quote: string
+  kind: GuidanceKind
+  author: string
+  occurred_at: string
+}
+
+/** Where a person redirected Open SWE while it was building the pull request. */
+export interface AuthorGuidance {
+  owner: string
+  repo: string
+  pr_number: number
+  points: Array<GuidancePoint>
+  thread_ids: Array<string>
+  follow_up_count: number
+  last_message_id: string
+  generated_at: string
+}
+
 export interface ReviewAssessmentFeedbackInput {
   rating: "helpful" | "unhelpful"
   comment: string
@@ -1376,6 +1402,10 @@ export const api = {
     request<ReviewAssessmentFeedback>(
       `/reviews/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}/feedback/${reviewId}`,
       { method: "PUT", body: JSON.stringify(feedback) }
+    ),
+  getAuthorGuidance: (owner: string, repo: string, number: number) =>
+    request<AuthorGuidance | null>(
+      `/reviews/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}/guidance`
     ),
   getPullRequestPreview: (owner: string, repo: string, number: number) =>
     request<PullRequestPreview>(

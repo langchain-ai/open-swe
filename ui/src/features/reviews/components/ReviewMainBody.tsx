@@ -70,6 +70,10 @@ import type { ChatAttachment } from "@/features/reviews/components/ReviewChat"
 import type { DiffStyle } from "@/features/agents/utils/diffUtils"
 import { Markdown } from "@/features/agents/components/chat/Markdown"
 import { DiffWrapToggle } from "@/features/agents/components/DiffWrapToggle"
+import {
+  AuthorGuidanceCard,
+  useAuthorGuidance,
+} from "@/features/reviews/components/AuthorGuidanceCard"
 import { PrHeader } from "@/features/reviews/components/PrHeader"
 import { ReviewAssessmentCard } from "@/features/reviews/components/ReviewAssessmentCard"
 import {
@@ -622,6 +626,7 @@ function ReviewBodyInner({
       reviewImageProxyUrl(detail.owner, detail.repo, detail.number, src),
     [detail.owner, detail.repo, detail.number]
   )
+  const guidance = useAuthorGuidance(detail.owner, detail.repo, detail.number)
   const [sideTab, setSideTab] = useState<SideTab>("info")
   const [selectedFile, setSelectedFile] = useState<string | null>(null)
   const fileRefs = useRef<Record<string, HTMLDivElement | null>>({})
@@ -1290,6 +1295,12 @@ function ReviewBodyInner({
                     repo={detail.repo}
                     number={detail.number}
                     headSha={detail.pr.head_sha}
+                  />
+                )}
+                {guidance.data && (
+                  <AuthorGuidanceCard
+                    guidance={guidance.data}
+                    className="mt-4"
                   />
                 )}
                 <div

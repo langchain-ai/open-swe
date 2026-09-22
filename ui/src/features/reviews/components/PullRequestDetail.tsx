@@ -11,6 +11,11 @@ import type {
   PullRequestPreview,
 } from "@/lib/api"
 import { Markdown } from "@/features/agents/components/chat/Markdown"
+import {
+  GuidancePointList,
+  guidanceCount,
+  useAuthorGuidance,
+} from "./AuthorGuidanceCard"
 import { Skeleton } from "@/components/ui/skeleton"
 import { api } from "@/lib/api"
 import { cn } from "@/lib/utils"
@@ -299,6 +304,7 @@ export function PullRequestDetail({
     queryFn: () => api.getPullRequestPreview(owner!, name!, pr.number),
     staleTime: 60_000,
   })
+  const guidance = useAuthorGuidance(owner!, name!, pr.number)
   const data = preview.data
   const failing =
     data?.checks?.filter((check) => checkRank(check) === 0).length ?? 0
@@ -395,6 +401,15 @@ export function PullRequestDetail({
                 </p>
               )}
             </Section>
+
+            {guidance.data && guidance.data.points.length > 0 && (
+              <Section
+                heading="How the author steered this PR"
+                count={guidanceCount(guidance.data)}
+              >
+                <GuidancePointList points={guidance.data.points} />
+              </Section>
+            )}
 
             <Section
               heading="Unresolved comments"

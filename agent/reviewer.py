@@ -63,6 +63,7 @@ from agent.middleware import (
 from agent.middleware.prepare_run import PrepareRunState
 from agent.middleware.sandbox_circuit_breaker import post_sandbox_unreachable_notification
 from agent.prompts import apply_tool_descriptions, load_prompt, render_prompt
+from agent.review.author_guidance import AuthorGuidance, refresh_author_guidance
 from agent.review.diff import (
     changed_files,
     compute_diff_line_set,
@@ -295,6 +296,20 @@ def _format_pr_overview(pr_title: str, pr_body: str) -> str:
     return render_prompt("reviewer/pr-overview.md", title=safe_title, body=safe_body)
 
 
+def _format_author_guidance(guidance: AuthorGuidance | None) -> str:
+    """Render the extracted steering points as an untrusted-data block."""
+    if guidance is None or not guidance.points:
+        return ""
+    points = "\n".join(
+        f'<point kind="{point.kind}" author="{_safe_login(point.author)}">\n'
+        f"{_escape_for_data_block(point.summary)}\n"
+        f"<quote>{_escape_for_data_block(point.quote)}</quote>\n"
+        "</point>"
+        for point in guidance.points
+    )
+    return render_prompt("reviewer/author-guidance.md", points=points)
+
+
 def _build_first_review_context(
     *,
     pr_url: str,
@@ -430,6 +445,9 @@ _DATA_BLOCK_WRAPPER_TAGS = (
     "body",
     "pr_overview",
     "title",
+    "author_guidance",
+    "point",
+    "quote",
 )
 _CLOSING_TAG_RE = re.compile(
     r"</\s*(" + "|".join(_DATA_BLOCK_WRAPPER_TAGS) + r")\s*>",
@@ -813,6 +831,26 @@ class PrepareReviewerRunMiddleware(BasePrepareRunMiddleware):
                 )
                 return ""
 
+        async def _fetch_author_guidance_block() -> str:
+            if reviewer_eval or not repo_owner or not repo_name or not isinstance(pr_number, int):
+                return ""
+            try:
+                guidance = await refresh_author_guidance(
+                    repo_owner,
+                    repo_name,
+                    pr_number,
+                    model=await _resolve_grouping_model(cfg, use_gateway=self._use_gateway),
+                )
+            except Exception:
+                logger.exception(
+                    "Failed to extract author guidance for %s/%s#%s; continuing without it",
+                    repo_owner,
+                    repo_name,
+                    pr_number,
+                )
+                return ""
+            return _format_author_guidance(guidance)
+
         async def _fetch_repo_style_prompt() -> str | None:
             if not repo_owner or not repo_name:
                 return None
@@ -837,6 +875,7 @@ class PrepareReviewerRunMiddleware(BasePrepareRunMiddleware):
         diff_context_task = asyncio.create_task(_fetch_diff_context())
         pr_overview_task = asyncio.create_task(_fetch_pr_overview())
         existing_threads_task = asyncio.create_task(_fetch_existing_threads_block())
+        author_guidance_task = asyncio.create_task(_fetch_author_guidance_block())
         repo_style_task = asyncio.create_task(_fetch_repo_style_prompt())
         agents_md_task = asyncio.create_task(_fetch_agents_md_context())
         org_guidelines_task = asyncio.create_task(_cached_org_guidelines(cfg.workspace_slug))
@@ -859,6 +898,7 @@ class PrepareReviewerRunMiddleware(BasePrepareRunMiddleware):
         )
         pr_overview = await pr_overview_task
         existing_threads_block = await existing_threads_task
+        author_guidance_block = await author_guidance_task
         repo_style_prompt = await repo_style_task
         agents_md_content = await agents_md_task
         scoped_agents_md = await scoped_agents_md_task
@@ -928,6 +968,8 @@ class PrepareReviewerRunMiddleware(BasePrepareRunMiddleware):
         )
         if review_context:
             system_prompt = f"{system_prompt}\n\n{review_context}"
+        if author_guidance_block:
+            system_prompt = f"{system_prompt}\n\n{author_guidance_block}"
         if skill_sources:
             skill_middleware = SkillsMiddleware(backend=sandbox_backend, sources=skill_sources)
             skill_update = (
