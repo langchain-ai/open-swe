@@ -21,6 +21,19 @@ import {
 import { useSession } from "@/lib/session"
 
 const SLACK_ONBOARDING_DISMISSED_KEY = "open-swe.slack-onboarding-dismissed"
+let slackDismissedThisSession = false
+
+function readSlackDismissed() {
+  if (slackDismissedThisSession) return true
+  try {
+    return (
+      window.localStorage.getItem(SLACK_ONBOARDING_DISMISSED_KEY) === "true"
+    )
+  } catch (error) {
+    console.warn("Unable to read Slack onboarding preference", error)
+    return true
+  }
+}
 
 /**
  * First-run onboarding modal: pick a default agent model, then connect Slack.
@@ -37,14 +50,12 @@ export function OnboardingDialog() {
   const options = useOptions()
   const save = useSaveProfile()
   const [dismissed, setDismissed] = useState(false)
-  const [slackDismissed, setSlackDismissed] = useState(false)
+  const [slackDismissed, setSlackDismissed] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
     // oxlint-disable-next-line react/set-state-in-effect
-    setSlackDismissed(
-      window.localStorage.getItem(SLACK_ONBOARDING_DISMISSED_KEY) === "true"
-    )
+    setSlackDismissed(readSlackDismissed())
   }, [])
 
   const defaultModels = options.data?.models.filter(
@@ -90,6 +101,18 @@ export function OnboardingDialog() {
   const open = !dismissed && (needsModel || needsSlack)
   const step: "model" | "slack" = needsModel ? "model" : "slack"
 
+  const dismiss = () => {
+    setDismissed(true)
+    if (step !== "slack") return
+    slackDismissedThisSession = true
+    setSlackDismissed(true)
+    try {
+      window.localStorage.setItem(SLACK_ONBOARDING_DISMISSED_KEY, "true")
+    } catch (storageError) {
+      console.warn("Unable to save Slack onboarding preference", storageError)
+    }
+  }
+
   const handleSaveModel = () => {
     if (!modelId) return
     setError(null)
@@ -109,7 +132,7 @@ export function OnboardingDialog() {
     <Dialog.Root
       open={open}
       onOpenChange={(next) => {
-        if (!next) setDismissed(true)
+        if (!next) dismiss()
       }}
     >
       <Dialog.Portal>
@@ -198,17 +221,7 @@ export function OnboardingDialog() {
                 Linear mentions resolve to you.
               </Dialog.Description>
               <div className="mt-2 flex justify-end gap-2">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => {
-                    window.localStorage.setItem(
-                      SLACK_ONBOARDING_DISMISSED_KEY,
-                      "true"
-                    )
-                    setSlackDismissed(true)
-                  }}
-                >
+                <Button variant="outline" size="sm" onClick={dismiss}>
                   Don't ask again
                 </Button>
                 <Button
