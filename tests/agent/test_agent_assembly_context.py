@@ -541,7 +541,9 @@ async def test_personal_settings_tool_available_in_private_conversations(source:
         "id": "settings",
         "type": "tool_call",
     }
-    for subagent in captured["subagents"]:
+    subagents = captured["subagents"]
+    assert isinstance(subagents, list)
+    for subagent in subagents:
         guard = next(item for item in subagent["middleware"] if item.name == "_SubagentToolGuard")
         result = await guard.awrap_tool_call(request, handler)
         assert isinstance(result, ToolMessage)
