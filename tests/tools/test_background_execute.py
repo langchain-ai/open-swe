@@ -239,6 +239,7 @@ async def test_monitor_enqueues_one_claimed_completion(tracking_failure: bool) -
             "sandbox_id": "sandbox-1",
             "source": "slack",
             "source_context": {"slack_thread": {"channel_id": "C123", "thread_ts": "123.45"}},
+            "running_background_tasks": ["task-1"],
         }
     }
 
@@ -327,7 +328,7 @@ async def test_monitor_reconciles_background_waiting_status(status: str, slack: 
         patch("agent.background_tasks._delete_crons", AsyncMock()),
     ):
         await monitor_background_tasks("thread-1")
-    assert client.threads.get.await_count == 2
+    assert client.threads.get.await_count == (1 if status == "running" else 2)
     if status == "running":
         client.threads.update.assert_not_awaited()
     else:
@@ -423,7 +424,7 @@ async def test_missing_sandbox_resets_tasks_without_redundant_reads(
 
     assert await monitor_background_tasks("thread-1") == {"status": "missing_sandbox"}
 
-    assert client.threads.get.await_count == 2
+    assert client.threads.get.await_count == (2 if tracked else 1)
     assert client.threads.update.await_count == int(tracked)
     set_status.assert_awaited_once_with("C1", "1.0", "")
     delete_crons.assert_awaited_once_with("thread-1")
