@@ -29,19 +29,25 @@ async def record_guidance(summary: str, quote: str) -> dict[str, Any]:
         return {"success": False, "error": "This run is not scouting a pull request"}
     owner, repo, number = cfg.repo.owner, cfg.repo.name, cfg.pr_number
 
-    pull_request = await PullRequest(owner=owner, repo=repo, number=number).ensure()
-
-    # Attribution comes from the stored turns, not from the model, which would
-    # be free to invent a name; a quote matching nothing stays unattributed.
+    # Guidance is only ever a workspace user's own words: the quote must come
+    # from a stored turn, so text in the diff cannot pose as steering.
     history = await SteeringHistory.load(owner, repo, number)
-    source = history.source_of(trimmed_quote) if history else None
+    if history is None:
+        return {"success": False, "error": "No author messages steered this pull request"}
+    source = history.source_of(trimmed_quote)
+    if source is None:
+        return {
+            "success": False,
+            "error": "quote matches none of the author's messages; copy it verbatim",
+        }
 
+    pull_request = await PullRequest(owner=owner, repo=repo, number=number).ensure()
     recorded = await GuidancePoint.record(
         pull_request,
         summary=trimmed_summary[:MAX_SUMMARY_CHARS],
         quote=trimmed_quote[:MAX_QUOTE_CHARS],
-        author=source.author if source else "",
-        turn_index=source.index if source else None,
+        author=source.author,
+        turn_index=source.index,
         reviewer_thread_id=cfg.thread_id,
         head_sha=cfg.head_sha,
     )
