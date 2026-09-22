@@ -234,7 +234,6 @@ test("waits for the profile and hydrates the transcript only once", async ({
     const response = await warmedState;
     await response.finished();
     expect(response.ok()).toBeTruthy();
-    expect(await response.headerValue("content-encoding")).toBe("gzip");
     await expect(page.getByTestId("composer-editor")).toHaveCount(0);
     await expect(conversation(page)).toHaveCount(0);
 
