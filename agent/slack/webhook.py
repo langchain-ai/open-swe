@@ -343,10 +343,16 @@ def _slack_sender(
     return person["id"], person, "human"
 
 
-def _slack_message_text(message: dict[str, Any], bot_user_id: str) -> str:
-    forwarded = common.format_slack_messages_for_prompt(
-        [message], {}, bot_user_id=bot_user_id, bot_username=common.SLACK_BOT_USERNAME
-    )
+def _slack_message_text(
+    message: dict[str, Any],
+    bot_user_id: str,
+    rendered_messages: dict[str, str] | None = None,
+) -> str:
+    forwarded = (rendered_messages or {}).get(str(message.get("ts")))
+    if forwarded is None:
+        forwarded = common.format_slack_messages_for_prompt(
+            [message], {}, bot_user_id=bot_user_id, bot_username=common.SLACK_BOT_USERNAME
+        )
     _, separator, content = forwarded.partition(": ")
     return content if separator else forwarded
 
@@ -364,6 +370,7 @@ def _slack_context_input(
     request_blocks: list[dict[str, Any]],
     operational_context: str,
     trigger_bot: AllowedSlackBot | None = None,
+    rendered_messages: dict[str, str] | None = None,
 ) -> RunInput:
     channel_entity_id = f"slack:{channel_id}"
     run_messages = [channel_introduction({"id": channel_entity_id, "platform": "slack"})]
@@ -388,7 +395,7 @@ def _slack_context_input(
             "kind": kind,
             "data": {"timestamp": str(message.get("ts", ""))},
         }
-        text = _slack_message_text(message, bot_user_id)
+        text = _slack_message_text(message, bot_user_id, rendered_messages)
         run_messages.append(
             human_input(text, message_context)
             if kind == "human"
@@ -445,7 +452,7 @@ def _slack_context_input(
     current_message = next(
         (message for message in messages if str(message.get("ts", "")) == str(event_ts)), {}
     )
-    rendered_request = _slack_message_text(current_message, bot_user_id)
+    rendered_request = _slack_message_text(current_message, bot_user_id, rendered_messages)
     _, separator, forwarded_context = rendered_request.partition("\n")
     if separator and forwarded_context:
         request_text = f"{request_text}\n{forwarded_context}"
@@ -1088,6 +1095,13 @@ async def _process_slack_mention_impl(
         message_update=message_update,
         explicit_request=request.explicit_request,
     )
+    rendered_messages = {
+        str(message.get("ts")): await slack_utils.format_slack_messages_for_prompt_async(
+            [message], {}, bot_user_id=bot_user_id, bot_username=common.SLACK_BOT_USERNAME
+        )
+        for message in [*context_messages, current_message]
+        if isinstance(message, dict)
+    }
     run_input = _slack_context_input(
         context_messages,
         user_names_by_id,
@@ -1100,6 +1114,7 @@ async def _process_slack_mention_impl(
         request_blocks=content_blocks,
         operational_context=operational_context,
         trigger_bot=allowed_bot,
+        rendered_messages=rendered_messages,
     )
     if code_channel:
         await common.set_session_status(channel_id, "processing")

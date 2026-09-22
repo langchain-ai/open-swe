@@ -46,9 +46,18 @@ SLACK_FORWARDED_ATTACHMENT_MAX_COUNT = 10
 SLACK_FORWARDED_ATTACHMENT_MAX_DEPTH = 4
 SLACK_FORWARDED_ATTACHMENT_MAX_NODES = 50
 SLACK_FORWARDED_ATTACHMENT_TEXT_MAX_CHARS = 8000
+SLACK_CHANNEL_LOOKUP_TIMEOUT_SECONDS = 2
 _SLACK_THREAD_MUTATION_LOCK_TTL_MINUTES = 1
 _SLACK_THREAD_MUTATION_LOCK_RETRY_SECONDS = 0.05
 _SLACK_THREAD_MUTATION_LOCK_TIMEOUT_SECONDS = 10
+
+
+class SlackThreadFetchError(Exception):
+    """A Slack thread fetch failed with a normalized Slack error code."""
+
+    def __init__(self, error_code: str) -> None:
+        super().__init__(error_code)
+        self.error_code = error_code
 
 
 @dataclass(frozen=True)
@@ -254,7 +263,9 @@ def select_slack_context_messages(
     return up_to_current, "thread_start"
 
 
-def _format_forwarded_slack_attachments(attachments: Any) -> str:
+def _format_forwarded_slack_attachments(
+    attachments: Any, unreadable_forwarded_channels: set[str] | None = None
+) -> str:
     forwarded: list[str] = []
     rendered_count = 0
     visited_count = 0
@@ -301,7 +312,13 @@ def _format_forwarded_slack_attachments(attachments: Any) -> str:
                 if content:
                     parts.append(content)
                 if source:
-                    parts.append(f"Source: {source}")
+                    source_channel = (parse_slack_message_url(source) or ("", ""))[0]
+                    annotation = (
+                        " (thread not readable by the bot - ask the sender to paste it)"
+                        if source_channel in (unreadable_forwarded_channels or set())
+                        else ""
+                    )
+                    parts.append(f"Source: {source}{annotation}")
                 if len(parts) > 1:
                     indentation = "  " * depth
                     forwarded.append("\n".join(f"{indentation}{part}" for part in parts))
@@ -311,6 +328,20 @@ def _format_forwarded_slack_attachments(attachments: Any) -> str:
 
     visit(attachments, 0)
     return "\n".join(forwarded)
+
+
+def _forwarded_source_urls(attachments: Any) -> list[str]:
+    sources: list[str] = []
+    if not isinstance(attachments, list):
+        return sources
+    for attachment in attachments:
+        if not isinstance(attachment, dict):
+            continue
+        source = attachment.get("from_url")
+        if isinstance(source, str) and source.strip():
+            sources.append(source.strip())
+        sources.extend(_forwarded_source_urls(attachment.get("attachments")))
+    return sources
 
 
 def _slack_thread_reply_marker(message: dict[str, Any]) -> str:
@@ -333,6 +364,7 @@ def format_slack_messages_for_prompt(
     bot_username: str = "",
     *,
     include_thread_replies: bool = False,
+    unreadable_forwarded_channels: set[str] | None = None,
 ) -> str:
     """Format Slack messages, including forwarded context, as readable prompt text."""
     if not messages:
@@ -340,7 +372,9 @@ def format_slack_messages_for_prompt(
 
     lines: list[str] = []
     for message in messages:
-        forwarded = _format_forwarded_slack_attachments(message.get("attachments"))
+        forwarded = _format_forwarded_slack_attachments(
+            message.get("attachments"), unreadable_forwarded_channels
+        )
         text = replace_bot_mention_with_username(
             str(message.get("text", "")),
             bot_user_id=bot_user_id,
@@ -365,6 +399,55 @@ def format_slack_messages_for_prompt(
             line += f"\n{forwarded}"
         lines.append(line)
     return "\n".join(lines)
+
+
+async def format_slack_messages_for_prompt_async(
+    messages: list[dict[str, Any]],
+    user_names_by_id: dict[str, str] | None = None,
+    bot_user_id: str = "",
+    bot_username: str = "",
+    *,
+    include_thread_replies: bool = False,
+) -> str:
+    """Format Slack messages after checking forwarded channel readability."""
+    from agent.slack.channels import SlackChannel
+
+    channel_ids = sorted(
+        {
+            parsed[0]
+            for message in messages
+            for source in _forwarded_source_urls(message.get("attachments"))
+            if (parsed := parse_slack_message_url(source)) is not None
+        }
+    )
+
+    async def load_channel(channel_id: str) -> tuple[SlackChannel | None, bool]:
+        try:
+            channel = await asyncio.wait_for(
+                SlackChannel.load(channel_id), timeout=SLACK_CHANNEL_LOOKUP_TIMEOUT_SECONDS
+            )
+            return channel, False
+        except Exception as exc:
+            logger.warning(
+                "Slack forwarded channel lookup failed",
+                extra={"slack_channel": channel_id, "lookup_error": type(exc).__name__},
+            )
+            return None, True
+
+    loaded = await asyncio.gather(*(load_channel(channel_id) for channel_id in channel_ids))
+    unreadable = {
+        channel_id
+        for channel_id, (channel, lookup_failed) in zip(channel_ids, loaded, strict=True)
+        if channel is None and not lookup_failed
+    }
+    return format_slack_messages_for_prompt(
+        messages,
+        user_names_by_id,
+        bot_user_id,
+        bot_username,
+        include_thread_replies=include_thread_replies,
+        unreadable_forwarded_channels=unreadable,
+    )
 
 
 def _log_automated_warning_sent_to_slack(
@@ -1340,8 +1423,9 @@ async def fetch_slack_thread_messages(channel_id: str, thread_ts: str) -> list[d
                     )
                 )
             except SLACK_REQUEST_ERRORS as exc:
-                logger.warning("Slack thread fetch failed", extra={"slack_error": slack_error(exc)})
-                break
+                error_code = slack_error(exc)
+                logger.warning("Slack thread fetch failed", extra={"slack_error": error_code})
+                raise SlackThreadFetchError(error_code) from exc
 
             batch = payload.get("messages", [])
             if isinstance(batch, list):
