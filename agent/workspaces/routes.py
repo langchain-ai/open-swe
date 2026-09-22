@@ -6,7 +6,7 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import Response
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
 from agent.dashboard.deps import ADMIN_DEP, SESSION_DEP, session_is_admin
 from agent.dashboard.workspace_settings import delete_workspace_settings, get_workspace_settings
@@ -19,6 +19,7 @@ from agent.workspaces.routing import workspace_for_repo
 from agent.workspaces.store import (
     DEFAULT_WORKSPACE_SLUG,
     WORKSPACES,
+    RepositorySettings,
     Workspace,
     WorkspaceConflictError,
     WorkspaceCreate,
@@ -143,48 +144,49 @@ async def api_update_workspace(
     return record
 
 
-class ThreadStarters(BaseModel):
-    """The repositories in a workspace whose workflows may start threads."""
+class RepositoryConfiguration(BaseModel):
+    """Settings to change on one repository. Anything left out keeps its value."""
 
-    repos: list[str] = Field(default_factory=list)
+    may_start_threads: bool | None = None
 
 
-@router.get("/workspaces/{slug}/thread-starters")
-async def api_get_thread_starters(
+@router.get("/workspaces/{slug}/repositories")
+async def api_list_workspace_repositories(
     slug: str,
     _admin: dict[str, Any] = ADMIN_DEP,
-) -> ThreadStarters:
+) -> list[RepositorySettings]:
     normalized = _normalized_slug(slug)
     if not await WORKSPACES.slug_exists(normalized):
         raise HTTPException(404, "workspace not found")
-    return ThreadStarters(repos=await WORKSPACES.thread_starters(normalized))
+    return await WORKSPACES.repository_settings(normalized)
 
 
-@router.put("/workspaces/{slug}/thread-starters")
-async def api_set_thread_starters(
+@router.put("/workspaces/{slug}/repositories/{owner}/{name}")
+async def api_configure_workspace_repository(
     slug: str,
-    body: ThreadStarters,
+    owner: str,
+    name: str,
+    body: RepositoryConfiguration,
     admin: dict[str, Any] = ADMIN_DEP,
-) -> ThreadStarters:
-    """Grant exactly these repositories the right to start threads here.
-
-    The grant is what a federated GitHub Actions token is checked against, so it
-    is the one place that decides which workflows can reach this workspace.
-    """
+) -> RepositorySettings:
+    """Change how one of a workspace's repositories is configured there."""
     normalized = _normalized_slug(slug)
     try:
-        granted = await WORKSPACES.set_thread_starters(normalized, body.repos)
+        settings = await WORKSPACES.configure_repository(
+            normalized, f"{owner}/{name}", may_start_threads=body.may_start_threads
+        )
     except ValueError as exc:
-        raise HTTPException(404, "workspace not found") from exc
+        raise HTTPException(404, str(exc)) from exc
     logger.info(
-        "Set the repositories that may start threads in a workspace",
+        "Configured a workspace repository",
         extra={
             "workspace": normalized,
-            "thread_starters": granted,
+            "repository": settings.repo,
+            "may_start_threads": settings.may_start_threads,
             "changed_by": str(admin.get("sub") or ""),
         },
     )
-    return ThreadStarters(repos=granted)
+    return settings
 
 
 @router.post("/workspaces/{slug}/refresh")

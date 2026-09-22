@@ -633,9 +633,10 @@ export interface WorkspaceRecord {
   refresh_error?: string | null
 }
 
-/** Repositories whose GitHub Actions workflows may start threads in a workspace. */
-export interface ThreadStarters {
-  repos: string[]
+/** How one repository is configured inside a workspace. */
+export interface RepositorySettings {
+  repo: string
+  may_start_threads: boolean
 }
 
 /** What `POST /workspaces/{slug}/refresh` answers. */
@@ -1173,17 +1174,21 @@ export const api = {
     request<void>(`/workspaces/${encodeURIComponent(slug)}`, {
       method: "DELETE",
     }),
-  getThreadStarters: (slug: string) =>
-    request<ThreadStarters>(
-      `/workspaces/${encodeURIComponent(slug)}/thread-starters`
+  listWorkspaceRepositories: (slug: string) =>
+    request<RepositorySettings[]>(
+      `/workspaces/${encodeURIComponent(slug)}/repositories`
     ),
-  setThreadStarters: (slug: string, repos: string[]) =>
-    request<ThreadStarters>(
-      `/workspaces/${encodeURIComponent(slug)}/thread-starters`,
-      {
-        method: "PUT",
-        body: JSON.stringify({ repos } satisfies ThreadStarters),
-      }
+  configureWorkspaceRepository: (
+    slug: string,
+    repo: string,
+    settings: { may_start_threads?: boolean }
+  ) =>
+    request<RepositorySettings>(
+      `/workspaces/${encodeURIComponent(slug)}/repositories/${repo
+        .split("/")
+        .map(encodeURIComponent)
+        .join("/")}`,
+      { method: "PUT", body: JSON.stringify(settings) }
     ),
   /** The instance record every workspace inherits. */
   getInstanceSettings: () => request<WorkspaceSettings>("/settings"),

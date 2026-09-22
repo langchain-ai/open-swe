@@ -329,7 +329,7 @@ curl -X POST "<URL>/dashboard/api/threads/$(uuidgen | tr 'A-Z' 'a-z')/commands" 
         "config": {"configurable": {"thread_type": "system", "repo": "acme/api"}}}}'
 ```
 
-**GitHub Actions, with no stored secret.** A workflow asks GitHub for an OIDC token naming its repository, ref and workflow, and presents that instead of a key. Open SWE verifies GitHub's signature against its published keys, checks the audience, and then checks its own trust policy: the repository must be bound to a workspace *and* granted the right to start threads there. Grant it per workspace under **Start threads from CI** on the workspace's settings page, or with the `set_workspace_thread_starters` agent tool. Binding a repository never implies the grant.
+**GitHub Actions, with no stored secret.** A workflow asks GitHub for an OIDC token naming its repository, ref and workflow, and presents that instead of a key. Open SWE verifies GitHub's signature against its published keys, checks the audience, and then checks its own trust policy: the repository must be bound to a workspace *and* granted the right to start threads there. Grant it per repository under **Repository permissions** on the workspace's settings page, or with the `configure_repository` agent tool. Binding a repository never implies the grant.
 
 Set `GITHUB_OIDC_AUDIENCE` to the value your workflows request; it defaults to `DASHBOARD_BASE_URL`.
 

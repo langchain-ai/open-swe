@@ -36,7 +36,7 @@ _TOOL_MODULES = {
     "read_user_settings": ".read_user_settings",
     "recreate_sandbox": ".recreate_sandbox",
     "refresh_workspace_start": ".workspaces",
-    "set_workspace_thread_starters": ".workspaces",
+    "configure_repository": ".workspaces",
     "report_platform_issue": ".report_platform_issue",
     "request_pr_review": "agent.slack.tools.request_pr_review",
     "reply_to_finding_thread": ".reply_to_finding_thread",
@@ -99,7 +99,7 @@ __all__ = [
     "read_user_settings",
     "recreate_sandbox",
     "refresh_workspace_start",
-    "set_workspace_thread_starters",
+    "configure_repository",
     "report_platform_issue",
     "request_pr_review",
     "reply_to_finding_thread",
@@ -183,11 +183,11 @@ if TYPE_CHECKING:
     from agent.tools.user_skills import delete_user_skill, save_user_skill
     from agent.tools.web_search import web_search
     from agent.tools.workspaces import (
+        configure_repository,
         delete_workspace,
         list_workspaces,
         publish_workspace,
         refresh_workspace_start,
-        set_workspace_thread_starters,
     )
 
 
