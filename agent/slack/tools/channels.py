@@ -8,7 +8,7 @@ from agent.slack.client import (
     convert_mentions_to_slack_format,
     post_slack_top_level_message_with_ts,
 )
-from agent.slack.http import SLACK_REQUEST_ERRORS, slack_client, slack_error
+from agent.slack.http import SLACK_REQUEST_ERRORS, SlackClient, slack_error
 
 logger = logging.getLogger(__name__)
 
@@ -41,7 +41,7 @@ class SlackMessageReceipt(TypedDict):
 async def slack_list_channels(cursor: str | None = None) -> SlackChannelList | SlackChannelError:
     """List a page of public and private channels the Open SWE bot belongs to."""
     try:
-        async with slack_client() as client:
+        async with SlackClient.bot() as client:
             response = await client.users_conversations(
                 types="public_channel,private_channel",
                 exclude_archived=True,

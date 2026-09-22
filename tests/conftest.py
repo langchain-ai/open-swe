@@ -270,7 +270,6 @@ def slack_api(monkeypatch: pytest.MonkeyPatch):
 
     monkeypatch.setenv("SLACK_BOT_TOKEN", "test-slack-token")
     with slack_api_server() as api:
-        monkeypatch.setenv("SLACK_BOT_TOKEN", "test-slack-token")
         monkeypatch.setattr(http, "SLACK_API_BASE_URL", api.base_url)
         monkeypatch.setattr(client, "SLACK_BOT_TOKEN", "test-slack-token")
         monkeypatch.setattr(code_channels, "SLACK_BOT_TOKEN", "test-slack-token")
