@@ -121,6 +121,24 @@ class TestConfigureSandboxProxy:
             assert headers[0]["type"] == "opaque"
             assert headers[0]["value"] == f"Basic {expected_basic}"
 
+    async def test_without_token_sends_no_github_credentials(self) -> None:
+        with (
+            patch("agent.sandboxes.providers.langsmith.httpx2.AsyncClient") as mock_client_cls,
+            patch.dict("os.environ", {"LANGSMITH_API_KEY": "ls-api-key"}),
+        ):
+            mock_client = MagicMock()
+            mock_client.patch = AsyncMock(return_value=MagicMock())
+            _mock_async_client(mock_client_cls, mock_client)
+
+            await configure_sandbox_proxy(
+                "sandbox-abc123",
+                None,
+                base_proxy_config={"rules": [{"name": "github", "headers": [{"value": "old"}]}]},
+            )
+
+            rules = mock_client.patch.call_args.kwargs["json"]["proxy_config"]["rules"]
+            assert not {"github", "github-api"} & {rule["name"] for rule in rules}
+
     async def test_preserves_custom_proxy_config_when_adding_github_auth(self) -> None:
         custom_rule = {"name": "public-api", "match_hosts": ["example.com"]}
         with (

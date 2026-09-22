@@ -28,31 +28,21 @@ SLACK_MESSAGES: dict[tuple[str, str], list[dict[str, Any]]] = {}
 EPHEMERALS: list[dict[str, Any]] = []
 CODE_CHANNELS: dict[str, dict[str, Any]] = {}
 _slack_seq = [1]
+_slack_epoch = int(time.time())
 _code_channel_seq = [0]
 
 
-# This counter restarts on every boot while the Slack-location map in the
-# store does not, so a fixed epoch re-issues timestamps a previous session
-# already bound. `bind_slack_thread_id` then refuses the new binding, and a
-# breakout produces no run at all. Salted per boot for the same reason
-# harness.py salts event ids.
-_TS_EPOCH = 1700000000 + int(time.time()) % 1_000_000
-
-
 def next_slack_ts() -> str:
+    """A globally-unique Slack timestamp, for a message or a thread.
+
+    Slack event dedupe keys a delivery on ``channel:ts`` in the LangGraph store,
+    and thread ids are derived from the thread's ts — both outlive the process,
+    so a counter restarting at the same value would make a rerun's messages look
+    like redeliveries and its threads carry the previous run's state. Seeding
+    the second from the clock keeps every process in its own range, and reset()
+    leaves the counter alone so back-to-back tests never collide either."""
     _slack_seq[0] += 1
-    return f"{_TS_EPOCH}.{_slack_seq[0]:06d}"
-
-
-_thread_seq = [0]
-
-
-def new_thread_ts() -> str:
-    """A globally-unique thread ts so every send maps to a fresh LangGraph thread
-    (the in-mem store persists across restarts, so reused ids would carry state).
-    Not reset by reset(), so back-to-back tests never collide."""
-    _thread_seq[0] += 1
-    return f"{int(time.time())}.{_thread_seq[0]:06d}"
+    return f"{_slack_epoch}.{_slack_seq[0]:06d}"
 
 
 def add_slack_message(

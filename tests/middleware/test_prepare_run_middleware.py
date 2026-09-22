@@ -1,5 +1,4 @@
 import asyncio
-import hashlib
 from typing import Any, cast
 from unittest.mock import MagicMock
 from xml.etree import ElementTree
@@ -10,10 +9,14 @@ from langchain.agents.middleware.types import ModelRequest, ModelResponse
 from langchain_core.messages import HumanMessage
 from langgraph.runtime import Runtime
 
-from agent.input_messages import human_input, system_input, system_introduction
+from agent.input_messages import human_input, person_introduction
 from agent.middleware.prepare_run import BasePrepareRunMiddleware, PrepareRunState
+from agent.run_config import RunConfig
 from agent.server import PrepareAgentRunMiddleware
+from agent.slack.payloads import SlackChannelContext
+from agent.source_context import SlackThreadRef
 from agent.utils import ttl_cache
+from agent.utils.authorship import CollaboratorIdentity, ThreadParticipant
 
 
 class DummyPrepareMiddleware(BasePrepareRunMiddleware):
@@ -104,148 +107,98 @@ def _sender_message(sender_id: str, text: str = "ship it") -> HumanMessage:
     return HumanMessage(content=cast(str, content))
 
 
-def _sender_context_introduction(sender_id: str, sender_context: str = "sender") -> HumanMessage:
-    content = system_introduction(
-        {
-            "id": "system:sender-context",
-            "display_name": "Sender context",
-            "platform": "open-swe",
-            "subject_id": sender_id,
-            "context_hash": hashlib.sha256(sender_context.encode()).hexdigest(),
-        }
-    )["content"]
+def _participant(login: str, *, instructions: str = "") -> ThreadParticipant:
+    identity = CollaboratorIdentity(
+        display_name=login,
+        commit_name=login,
+        commit_email=f"{login}@users.noreply.github.com",
+        github_login=login,
+    )
+    return ThreadParticipant(
+        identity=identity, person_id=f"user:{login}", instructions=instructions
+    )
+
+
+def _participant_block(participant: ThreadParticipant) -> HumanMessage:
+    content = person_introduction(participant.as_person())["content"]
     return HumanMessage(content=cast(str, content))
 
 
-def test_sender_context_arrives_as_its_own_message():
-    latest = _sender_message("github:ramon")
+def test_sender_subject_id_is_none_without_a_human_message():
+    assert (
+        PrepareAgentRunMiddleware._sender_subject_id(cast(PrepareRunState, {"messages": []}), None)
+        is None
+    )
 
-    messages = PrepareAgentRunMiddleware._sender_context_messages(
-        cast(PrepareRunState, {"messages": [latest]}),
-        "sender",
+
+def test_sender_subject_id_prefers_the_latest_human_sender():
+    state = cast(
+        PrepareRunState,
+        {"messages": [_sender_message("github:ramon"), _sender_message("github:alice")]},
+    )
+
+    assert PrepareAgentRunMiddleware._sender_subject_id(state, None) == "github:alice"
+
+
+def test_sender_subject_id_honors_an_explicit_bot_sender():
+    bot_id = "system:slack-bot-B123"
+    state = cast(PrepareRunState, {"messages": [_sender_message("github:someone-else")]})
+
+    assert PrepareAgentRunMiddleware._sender_subject_id(state, bot_id) == bot_id
+
+
+def test_each_participant_is_introduced_by_their_own_context_block():
+    alice, bob = _participant("alice"), _participant("bob")
+
+    messages = PrepareAgentRunMiddleware._participants_messages(
+        cast(PrepareRunState, {"messages": []}), [bob, alice]
     )
 
     assert len(messages) == 2
-    introduction = ElementTree.fromstring(cast(str, messages[0]["content"]))
-    assert introduction.findtext("subject_id") == "github:ramon"
-    assert introduction.findtext("context_hash") == hashlib.sha256(b"sender").hexdigest()
-    envelope = ElementTree.fromstring(cast(str, messages[-1]["content"]))
-    assert envelope.attrib["sender"] == "system:sender-context"
-    assert envelope.attrib["kind"] == "system"
-    assert envelope.findtext("content") == "sender"
+    blocks = [ElementTree.fromstring(cast(str, m["content"])) for m in messages]
+    assert [b.attrib["kind"] for b in blocks] == ["person", "person"]
+    assert [b.attrib["id"] for b in blocks] == ["user:alice", "user:bob"]
+    body = (blocks[0].text or "").strip().splitlines()
+    assert "commit_name: alice" in body
+    assert "commit_email: alice@users.noreply.github.com" in body
 
 
-def test_sender_context_is_skipped_when_visible_for_same_sender():
+def test_a_visible_participant_is_not_repeated_when_someone_joins():
+    alice, bob = _participant("alice"), _participant("bob")
+    state = cast(PrepareRunState, {"messages": [_participant_block(alice)]})
+
+    messages = PrepareAgentRunMiddleware._participants_messages(state, [alice, bob])
+
+    assert len(messages) == 1
+    assert ElementTree.fromstring(cast(str, messages[0]["content"])).attrib["id"] == "user:bob"
+
+
+def test_only_the_changed_participant_is_resent():
+    alice, bob = _participant("alice"), _participant("bob")
     state = cast(
-        PrepareRunState,
-        {
-            "messages": [
-                _sender_context_introduction("github:ramon"),
-                _sender_message("github:ramon", "again"),
-            ]
-        },
+        PrepareRunState, {"messages": [_participant_block(alice), _participant_block(bob)]}
     )
+    bob_now = _participant("bob", instructions="Never use ripgrep.")
 
-    assert PrepareAgentRunMiddleware._sender_context_messages(state, "sender") == []
+    messages = PrepareAgentRunMiddleware._participants_messages(state, [alice, bob_now])
+
+    assert len(messages) == 1
+    block = ElementTree.fromstring(cast(str, messages[0]["content"]))
+    assert block.attrib["id"] == "user:bob"
+    assert "standing_instructions: Never use ripgrep." in (block.text or "")
 
 
-def test_sender_context_is_added_when_same_sender_context_changes():
+def test_participant_blocks_are_restored_after_compaction():
+    alice = _participant("alice")
     state = cast(
         PrepareRunState,
         {
-            "messages": [
-                _sender_context_introduction("github:ramon", "old sender"),
-                _sender_message("github:ramon", "again"),
-            ]
-        },
-    )
-
-    messages = PrepareAgentRunMiddleware._sender_context_messages(state, "new sender")
-    assert len(messages) == 2
-    introduction = ElementTree.fromstring(cast(str, messages[0]["content"]))
-    assert introduction.findtext("subject_id") == "github:ramon"
-    assert introduction.findtext("context_hash") == hashlib.sha256(b"new sender").hexdigest()
-
-
-def test_sender_context_is_added_for_new_sender():
-    state = cast(
-        PrepareRunState,
-        {
-            "messages": [
-                _sender_context_introduction("github:ramon"),
-                _sender_message("github:alice"),
-            ]
-        },
-    )
-
-    messages = PrepareAgentRunMiddleware._sender_context_messages(state, "alice")
-    assert len(messages) == 2
-    introduction = ElementTree.fromstring(cast(str, messages[0]["content"]))
-    assert introduction.findtext("subject_id") == "github:alice"
-
-
-def test_sender_context_is_restored_after_compaction():
-    state = cast(
-        PrepareRunState,
-        {
-            "messages": [
-                _sender_context_introduction("github:ramon"),
-                _sender_message("github:ramon", "again"),
-            ],
+            "messages": [_participant_block(alice), _sender_message("user:alice")],
             "_summarization_event": {"cutoff_index": 1},
         },
     )
 
-    assert len(PrepareAgentRunMiddleware._sender_context_messages(state, "sender")) == 2
-
-
-def test_sender_context_escapes_untrusted_identity_text():
-    message = _sender_message("slack:U1", "ship it <now> & fast")
-    original = message.content
-
-    messages = PrepareAgentRunMiddleware._sender_context_messages(
-        cast(PrepareRunState, {"messages": [message]}),
-        "identity: 'ramon' & <team>",
-    )
-
-    assert message.content == original
-    envelope = ElementTree.fromstring(cast(str, messages[-1]["content"]))
-    assert envelope.findtext("content") == "identity: 'ramon' & <team>"
-
-
-def test_sender_context_skipped_without_a_human_message():
-    assert (
-        PrepareAgentRunMiddleware._sender_context_messages(
-            cast(PrepareRunState, {"messages": []}), "sender"
-        )
-        == []
-    )
-
-
-@pytest.mark.parametrize("has_human_history", [False, True])
-def test_bot_sender_context_uses_bot_identity(has_human_history: bool):
-    bot_id = "system:slack-bot-B123"
-    bot_request = HumanMessage(
-        content=cast(
-            str,
-            system_input(
-                "Open a PR",
-                {"sender_id": bot_id, "surface": "slack", "kind": "system"},
-            )["content"],
-        )
-    )
-    history = [_sender_message("github:someone-else")] if has_human_history else []
-    state = cast(PrepareRunState, {"messages": [*history, bot_request]})
-
-    messages = PrepareAgentRunMiddleware._sender_context_messages(
-        state, "bot owner's context", sender_id=bot_id
-    )
-
-    assert len(messages) == 2
-    introduction = ElementTree.fromstring(cast(str, messages[0]["content"]))
-    assert introduction.findtext("subject_id") == bot_id
-    envelope = ElementTree.fromstring(cast(str, messages[-1]["content"]))
-    assert envelope.findtext("content") == "bot owner's context"
+    assert len(PrepareAgentRunMiddleware._participants_messages(state, [alice])) == 1
 
 
 @pytest.mark.asyncio
@@ -314,6 +267,53 @@ async def test_ttl_cache_exception_without_stale_is_not_cached():
     with pytest.raises(RuntimeError):
         await ttl_cache.cached("k", 60, failing_loader)
     assert calls == 2
+
+
+def test_recent_context_audience_fails_closed_for_shared_destinations() -> None:
+    middleware = object.__new__(PrepareAgentRunMiddleware)
+    middleware._profile_login = "alice"
+    middleware._credential_login = "alice"
+    middleware._recent_thread_context_enabled = True
+    middleware._source = "github"
+
+    assert middleware._recent_context_audience(RunConfig()) is None
+
+    middleware._source = "dashboard"
+    middleware._credential_login = None
+    assert middleware._recent_context_audience(RunConfig()) is None
+
+
+def test_recent_context_audience_distinguishes_dm_and_shared_slack() -> None:
+    middleware = object.__new__(PrepareAgentRunMiddleware)
+    middleware._profile_login = "alice"
+    middleware._credential_login = "alice"
+    middleware._recent_thread_context_enabled = False
+    middleware._source = "slack"
+
+    assert middleware._recent_context_audience(RunConfig()) is None
+    middleware._recent_thread_context_enabled = True
+
+    dm = RunConfig(slack_thread=SlackThreadRef(channel_context=SlackChannelContext(is_im=True)))
+    assert middleware._recent_context_audience(dm) == "private"
+
+    shared = RunConfig(
+        slack_thread=SlackThreadRef(
+            channel_id="C1",
+            team_id="T1",
+            channel_context=SlackChannelContext(is_im=False, is_mpim=False),
+        )
+    )
+    assert middleware._recent_context_audience(shared) == "shared_slack"
+
+    group_dm = RunConfig(
+        slack_thread=SlackThreadRef(
+            channel_id="G1",
+            team_id="T1",
+            channel_context=SlackChannelContext(is_im=False, is_mpim=True),
+        )
+    )
+    assert middleware._recent_context_audience(group_dm) is None
+    assert middleware._recent_context_audience(RunConfig(background_task_completion=True)) is None
 
 
 @pytest.mark.asyncio

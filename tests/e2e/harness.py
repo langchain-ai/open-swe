@@ -45,6 +45,7 @@ from e2e_env import (  # noqa: E402
     SECOND_OWNER,
     SECOND_REPO,
     TEST_USERS,
+    UNLINKED_USER,
 )
 from fastapi import HTTPException, Request  # noqa: E402
 from fastapi.responses import (  # noqa: E402
@@ -56,9 +57,12 @@ from fastapi.responses import (  # noqa: E402
 )
 
 # Slack-user directory the fake ``users.info`` resolves: the default sender used
-# by the automated tests plus the named manual-test users.
+# by the automated tests plus the named manual-test users. ``U_CAROL`` is in
+# Slack and nowhere else: no ``users`` row, no GitHub identity, and an address
+# no test user shares, so she stays unresolvable.
 _SLACK_USERS: dict[str, dict[str, str]] = {
     HUMAN_USER: {"name": "devuser", "real_name": "Dev User", "email": "dev@example.com"},
+    UNLINKED_USER: {"name": "carol", "real_name": "Carol", "email": "carol@example.com"},
     **{
         u["slack_id"]: {"name": u["login"], "real_name": u["name"], "email": u["email"]}
         for u in TEST_USERS
@@ -518,9 +522,10 @@ async def slack_send(request: Request) -> JSONResponse:
             channel, thread_ts, user=user_id, text=text, is_bot=False
         )
     else:
-        thread_ts = fakes.new_thread_ts()
-        fakes.add_slack_message(channel, thread_ts, user=user_id, text=text, is_bot=False)
-        event_ts = thread_ts
+        # A thread's opening message is its parent: Slack gives it one ts, which
+        # is both its own and the thread's.
+        event_ts = fakes.add_slack_message(channel, "", user=user_id, text=text, is_bot=False)
+        thread_ts = event_ts
     CURRENT_THREAD["channel"] = channel
     CURRENT_THREAD["thread_ts"] = thread_ts
 

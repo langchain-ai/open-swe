@@ -17,6 +17,7 @@ from agent.github.thread_token import (
     invalidate_cached_github_token,
 )
 from agent.review.assessment_feedback import ASSESSMENTS, PublishedAssessment
+from agent.review.author_guidance import GuidanceReview
 from agent.review.diff import compute_diff_line_set, fetch_pr_diff, is_range_in_diff
 from agent.review.findings import (
     REVIEW_FINDING_CAP,
@@ -340,6 +341,7 @@ async def _publish_review_async(
             findings=findings,
         )
         await set_reviewer_thread_metadata(thread_id, last_reviewed_sha=head_sha)
+        await GuidanceReview.complete(owner, repo, pr_number, head_sha)
         await _record_reviewer_usage(
             thread_id=thread_id,
             owner=owner,
@@ -573,6 +575,7 @@ async def _publish_review_async(
         )
 
     await set_reviewer_thread_metadata(thread_id, last_reviewed_sha=head_sha)
+    await GuidanceReview.complete(owner, repo, pr_number, head_sha)
     await _record_reviewer_usage(
         thread_id=thread_id,
         owner=owner,

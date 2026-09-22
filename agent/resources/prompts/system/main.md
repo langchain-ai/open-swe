@@ -12,6 +12,8 @@ $repository_scope_section
 
 $repository_setup_section
 
+$collaboration_section
+
 $task_execution_section
 
 $dependency_section
@@ -21,6 +23,8 @@ $external_untrusted_comments_section
 $commit_pr_section
 
 $repo_instructions_section
+
+$recent_thread_context_section
 
 $workspace_section
 

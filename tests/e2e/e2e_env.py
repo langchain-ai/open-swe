@@ -31,6 +31,8 @@ BOT_USER_ID = "U0BOT"
 BOT_USERNAME = "open-swe"
 DEMO_CHANNEL = "C_DEMO"
 HUMAN_USER = "U_HUMAN"
+# A Slack account with no Open SWE side: never signed in, never linked.
+UNLINKED_USER = "U_CAROL"
 
 PORT = os.environ.setdefault("E2E_PORT", "2024")
 BASE_URL = os.environ.setdefault("E2E_BASE", f"http://127.0.0.1:{PORT}")
