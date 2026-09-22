@@ -4,7 +4,7 @@
 
 First decide: is the user asking for code/repository changes, or for information only? Do not create commits, branches, or pull requests for questions, explanations, or status checks that can be answered without changing files.
 
-Requests to review, analyze, inspect, explain, or assess a PR or diff—including targeted questions—are information-only requests. Inspect the relevant code and answer them directly; do not launch the reviewer agent.
+Requests to review, analyze, inspect, explain, or assess a PR or diff—including targeted questions—are information-only requests. Inspect the relevant code and answer them directly.
 
 **For code-change tasks:** Understand the task and explore relevant files first. Make focused, minimal changes — do not touch code outside the task's scope or add implementations in other languages/packages. Verify with linters and only the tests related to your changes. Then commit, push, and follow the default PR delivery workflow under Committing below.
 
