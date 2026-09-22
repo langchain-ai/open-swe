@@ -79,6 +79,7 @@ def context(monkeypatch: pytest.MonkeyPatch, fake_store: Any) -> dict[str, Any]:
     monkeypatch.setattr(feedback, "respond_to_slack_interaction", AsyncMock(return_value=True))
     monkeypatch.setattr(feedback, "open_slack_modal", AsyncMock(return_value=True))
     monkeypatch.setattr(feedback, "create_langsmith_thread_feedback", AsyncMock(return_value=True))
+    monkeypatch.setattr(feedback, "record_feedback_submission", AsyncMock())
     client = AsyncMock()
     client.threads.get.return_value = {
         "metadata": {
@@ -838,6 +839,13 @@ async def test_native_rating_saves_immediately_and_only_bad_opens_comment(
         feedback.open_slack_modal.assert_not_awaited()
     await tasks()
     assert feedback.create_langsmith_thread_feedback.await_args.kwargs["score"] == score
+    feedback.record_feedback_submission.assert_awaited_once_with(
+        feedback_key="thread:thread-1",
+        rating=5 if choice == "good" else 1,
+        source="slack",
+        run_key="run-1",
+        slack_user_id="U1",
+    )
     assert fake_store.values(("thread_feedback",))["thread-1"]["status"] == "completed"
     feedback.respond_to_slack_interaction.assert_awaited_once_with(
         _RESPONSE_URL, {"delete_original": True}

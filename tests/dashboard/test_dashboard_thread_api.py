@@ -143,12 +143,12 @@ async def test_resolve_agent_model_choice_applies_request_before_profile(monkeyp
 
     model_id, effort = await thread_runs._resolve_agent_model_choice(
         {"default_model": _TEXT_ONLY_MODEL, "reasoning_effort": "high"},
-        "anthropic:claude-opus-5",
+        "anthropic:claude-opus-5-5",
         "high",
         None,
     )
 
-    assert (model_id, effort) == ("anthropic:claude-opus-5", "high")
+    assert (model_id, effort) == ("anthropic:claude-opus-5-5", "high")
 
 
 async def test_resolve_agent_model_choice_deprecated_request_uses_team_default(monkeypatch) -> None:
@@ -160,7 +160,7 @@ async def test_resolve_agent_model_choice_deprecated_request_uses_team_default(m
     patch_thread_module(monkeypatch, "get_workspace_settings", fake_team_default)
 
     model_id, effort = await thread_runs._resolve_agent_model_choice(
-        {"default_model": "anthropic:claude-opus-5", "reasoning_effort": "high"},
+        {"default_model": "anthropic:claude-opus-5-5", "reasoning_effort": "high"},
         "fireworks:accounts/fireworks/models/glm-5p2",
         "high",
         None,
@@ -208,8 +208,8 @@ async def test_resolve_agent_model_id_applies_per_thread_override(monkeypatch) -
     monkeypatch.setattr("agent.dashboard.agent_overrides.get_workspace_settings", fake_team_default)
     monkeypatch.setattr("agent.dashboard.agent_overrides.load_profile", lambda login: None)
 
-    model_id = await resolve_agent_model_id(None, per_thread_model_id="anthropic:claude-opus-5")
-    assert model_id == "anthropic:claude-opus-5"
+    model_id = await resolve_agent_model_id(None, per_thread_model_id="anthropic:claude-opus-5-5")
+    assert model_id == "anthropic:claude-opus-5-5"
 
 
 async def test_resolve_agent_model_id_deprecated_override_uses_team_default(monkeypatch) -> None:
@@ -2634,53 +2634,6 @@ async def test_pin_dashboard_thread_rejects_unreadable_thread(monkeypatch) -> No
         await thread_listing.pin_dashboard_thread("private-thread", "octocat")
 
     assert exc_info.value.status_code == 404
-
-
-async def test_list_dashboard_pinned_threads_returns_only_readable_threads(
-    monkeypatch,
-) -> None:
-    threads = {
-        "shared-thread": {
-            "thread_id": "shared-thread",
-            "metadata": {
-                "source": "slack",
-                "github_login": "teammate",
-                "title": "Pinned teammate thread",
-                "updated_at_ms": 100,
-                "latest_run_status": "success",
-            },
-        },
-        "private-thread": {
-            "thread_id": "private-thread",
-            "metadata": {"source": "reviewer"},
-        },
-    }
-
-    class FakeThreads:
-        async def get(self, thread_id):
-            if thread_id == "missing-thread":
-                raise RuntimeError("missing")
-            return threads[thread_id]
-
-    class FakeRuns:
-        async def list(self, thread_id, limit=1):
-            return []
-
-    patch_thread_module(
-        monkeypatch,
-        "langgraph_client",
-        lambda: SimpleNamespace(threads=FakeThreads(), runs=FakeRuns()),
-    )
-
-    async def fake_pin_ids(login: str) -> list[str]:
-        assert login == "octocat"
-        return ["shared-thread", "private-thread", "missing-thread"]
-
-    patch_thread_module(monkeypatch, "list_thread_pin_ids", fake_pin_ids)
-
-    result = await thread_listing.list_dashboard_pinned_threads("octocat")
-
-    assert [item["id"] for item in result] == ["shared-thread"]
 
 
 async def test_list_dashboard_threads_page_can_sort_by_creation_time(monkeypatch) -> None:

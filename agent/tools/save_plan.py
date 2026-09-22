@@ -3,15 +3,12 @@
 import logging
 import re
 from collections.abc import Mapping
-from typing import Annotated, Any
-
-from langgraph.prebuilt import InjectedState
+from typing import Any
 
 from agent.run_config import RunConfig
 from agent.sandboxes.state import get_sandbox_backend
 from agent.threads.plan_store import (
     PLAN_FILE_DIRECTORY,
-    PLAN_STATUS_READY,
     PLAN_STATUS_SHARED,
     save_plan_content,
 )
@@ -24,7 +21,6 @@ _MAX_PLAN_LINES = 20_000
 
 async def save_plan(
     plan_file_path: str,
-    state: Annotated[dict[str, Any] | None, InjectedState] = None,
 ) -> dict[str, Any]:
     """Implement the `save_plan` tool."""
     if not isinstance(plan_file_path, str):
@@ -48,27 +44,13 @@ async def save_plan(
         if not content:
             return {"success": False, "error": "plan file cannot be empty"}
         document = wrap_html_artifact(content, title=_title_from_path(path))
-        await _save(str(thread_id), document, path, plan_mode=_active_plan_mode(state, cfg))
+        await save_plan_content(
+            str(thread_id), html=document, status=PLAN_STATUS_SHARED, plan_file_path=path
+        )
     except Exception as exc:  # noqa: BLE001
         logger.exception("save_plan failed for thread %s", thread_id)
         return {"success": False, "error": f"failed to save plan: {exc}"}
     return {"success": True, "path": path}
-
-
-async def _save(thread_id: str, content: str, path: str, *, plan_mode: bool) -> None:
-    await save_plan_content(
-        thread_id,
-        html=content,
-        status=PLAN_STATUS_READY if plan_mode else PLAN_STATUS_SHARED,
-        plan_file_path=path,
-        plan_mode=plan_mode or None,
-    )
-
-
-def _active_plan_mode(state: dict[str, Any] | None, cfg: RunConfig) -> bool:
-    if isinstance(state, dict) and state.get("plan_mode") is True:
-        return True
-    return cfg.plan_mode is True
 
 
 async def _read_plan_file(thread_id: str, path: str) -> str:

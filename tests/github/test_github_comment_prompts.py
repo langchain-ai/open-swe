@@ -92,7 +92,7 @@ def test_background_task_prompt_continues_without_acknowledging() -> None:
 
     assert "background sandbox command completed" in prompt
     assert "Do not send an initial acknowledgement" in prompt
-    assert "Make `slack_thread_reply` your first tool call" not in prompt
+    assert "Make `slack_reply` your first tool call" not in prompt
 
 
 def test_non_web_source_prompts_use_their_own_delivery_paths() -> None:
@@ -105,7 +105,7 @@ def test_non_web_source_prompts_use_their_own_delivery_paths() -> None:
     for source, guidance in expected.items():
         prompt = construct_system_prompt(working_dir="/workspace", source=source)
         assert guidance in prompt
-        assert "Make `slack_thread_reply` your first tool call" not in prompt
+        assert "Make `slack_reply` your first tool call" not in prompt
 
     scheduled_slack = construct_system_prompt(
         working_dir="/workspace", source="schedule", slack_context=True
@@ -116,7 +116,7 @@ def test_non_web_source_prompts_use_their_own_delivery_paths() -> None:
 def test_dashboard_prompt_omits_slack_tools() -> None:
     prompt = construct_system_prompt(working_dir="/workspace")
 
-    assert "slack_thread_reply" not in prompt
+    assert "slack_reply" not in prompt
     assert "slack_add_reaction" not in prompt
 
 

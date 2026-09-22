@@ -107,7 +107,6 @@ class ThreadMessageBody(BaseModel):
     images: list[DashboardImageBody] = Field(default_factory=list)
     model_id: str | None = None
     effort: str | None = None
-    plan_mode: bool = False
     client_message_id: uuid.UUID | None = None
 
 
@@ -237,7 +236,6 @@ async def _create_dashboard_thread_record(
     title: str | None = None,
     model_id: str | None = None,
     effort: str | None = None,
-    plan_mode: bool = False,
     model_selection: str = "auto",
     visibility: Literal["public", "private"] = "public",
     workspace: str | None = None,
@@ -280,7 +278,6 @@ async def _create_dashboard_thread_record(
         "effort": metadata_effort,
         "resolved_model": resolved_model,
         "resolved_effort": resolved_effort,
-        "plan_mode": plan_mode,
         "model_selection": model_selection,
         "created_at_ms": now_ms,
         "updated_at_ms": now_ms,
@@ -360,8 +357,6 @@ async def _build_dashboard_configurable(
         configurable["repo_explicitly_none"] = True
     for key, value in SourceContext.from_metadata(metadata).dump().items():
         configurable.setdefault(key, value)
-    if metadata.get("plan_mode") is True:
-        configurable["plan_mode"] = True
     model_selection = metadata.get("model_selection")
     if model_selection in {"auto", "explicit"}:
         configurable["model_selection"] = model_selection
@@ -570,7 +565,6 @@ async def _enrich_run_start_command(
         client_configurable.get("agent_model_id"),
         client_configurable.get("agent_effort"),
     )
-    plan_mode_requested = client_configurable.get("plan_mode") is True
     model_selection = client_configurable.get("model_selection")
     if model_selection not in {"auto", "explicit"}:
         if client_configurable.get("agent_model_id"):
@@ -619,7 +613,6 @@ async def _enrich_run_start_command(
             images=command_images,
             model_id=client_configurable.get("agent_model_id"),
             effort=client_configurable.get("agent_effort"),
-            plan_mode=plan_mode_requested,
             model_selection=model_selection or "auto",
             workspace=await _resolve_requested_workspace(
                 client_configurable.get("workspace") or client_configurable.get("environment"),
@@ -731,7 +724,6 @@ async def _enrich_run_start_command(
         "source": DASHBOARD_SOURCE,
         # Continuing on the web promotes a `/oswe` question thread for good.
         "unlisted": False,
-        "plan_mode": plan_mode_requested,
         "model_selection": model_selection,
         PARTICIPANT_LOGINS_KEY: merge_participants(metadata.get(PARTICIPANT_LOGINS_KEY), login),
         PARTICIPANT_EMAILS_KEY: merge_participants(metadata.get(PARTICIPANT_EMAILS_KEY), email),
@@ -801,7 +793,6 @@ async def _enrich_run_start_command(
                             attachments=attachments,
                             model_id=run_model,
                             effort=run_effort,
-                            plan_mode=plan_mode_requested,
                         ),
                         actor_kind="user",
                         turn_id=turn_id,
