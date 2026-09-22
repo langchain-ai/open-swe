@@ -397,24 +397,6 @@ function scrollDiffLineToCenter(
   return true
 }
 
-function scrollFindingLineToCenter({
-  target,
-  finding,
-  scroller,
-}: {
-  target: RegisteredDiffInstance
-  finding: ReviewFinding
-  scroller: HTMLElement
-}): boolean {
-  if (finding.end_line === null) return false
-  return scrollDiffLineToCenter(
-    target,
-    finding.end_line,
-    findingSide(finding),
-    scroller
-  )
-}
-
 /** A file as one walkthrough step shows it: only that step's hunks, unless `fileDiff` is null. */
 interface ResolvedGroupFile {
   file: ReviewDiffFile
@@ -579,10 +561,19 @@ function useExpandedFinding(): ExpandedFindingContextValue {
 
 const NO_FINDINGS: Array<ReviewFinding> = []
 const ignoreSection = (_path: string, _node: HTMLDivElement | null) => {}
-const ignoreDiffInstance = (
-  _path: string,
-  _target: RegisteredDiffInstance | null
-) => {}
+
+/** Scroll to a line in whichever registered slice of the file renders it. */
+function scrollSlicesLineToCenter(
+  slices: Map<string, RegisteredDiffInstance>,
+  lineNumber: number,
+  side: SelectionSide,
+  scroller: HTMLElement
+): boolean {
+  for (const target of slices.values()) {
+    if (scrollDiffLineToCenter(target, lineNumber, side, scroller)) return true
+  }
+  return false
+}
 
 interface UserSelection {
   file: string
@@ -667,8 +658,10 @@ function ReviewBodyInner({
   const [sideTab, setSideTab] = useState<SideTab>("info")
   const [selectedFile, setSelectedFile] = useState<string | null>(null)
   const fileRefs = useRef<Record<string, HTMLDivElement | null>>({})
+  // Per path, one instance per rendered slice: a file split across walkthrough
+  // steps renders once per step, each showing only that step's hunks.
   const diffInstanceRefs = useRef<
-    Record<string, RegisteredDiffInstance | undefined>
+    Record<string, Map<string, RegisteredDiffInstance> | undefined>
   >({})
   const annotationRefs = useRef<Record<string, HTMLElement | null>>({})
   const [expandedFiles, setExpandedFiles] = useState<Record<string, boolean>>(
@@ -994,8 +987,11 @@ function ReviewBodyInner({
     []
   )
   const registerDiffInstance = useCallback(
-    (path: string, target: RegisteredDiffInstance | null) => {
-      if (target) diffInstanceRefs.current[path] = target
+    (path: string, slice: string, target: RegisteredDiffInstance | null) => {
+      const slices = diffInstanceRefs.current[path] ?? new Map()
+      if (target) slices.set(slice, target)
+      else slices.delete(slice)
+      if (slices.size > 0) diffInstanceRefs.current[path] = slices
       else delete diffInstanceRefs.current[path]
     },
     []
@@ -1118,13 +1114,16 @@ function ReviewBodyInner({
           return
         }
 
-        const diffTarget = diffInstanceRefs.current[finding.file]
-        if (diffTarget) {
-          lineScrollDone = scrollFindingLineToCenter({
-            target: diffTarget,
-            finding,
-            scroller,
-          })
+        const slices = diffInstanceRefs.current[finding.file]
+        if (slices) {
+          lineScrollDone =
+            finding.end_line !== null &&
+            scrollSlicesLineToCenter(
+              slices,
+              finding.end_line,
+              findingSide(finding),
+              scroller
+            )
         } else if (!lineScrollDone) {
           const fileNode = fileRefs.current[finding.file]
           if (fileNode) scrollElementToCenter(fileNode, scroller)
@@ -1182,14 +1181,9 @@ function ReviewBodyInner({
         )
         return
       }
-      const diffTarget = diffInstanceRefs.current[path]
-      if (diffTarget) {
-        lineScrollDone = scrollDiffLineToCenter(
-          diffTarget,
-          line,
-          side,
-          scroller
-        )
+      const slices = diffInstanceRefs.current[path]
+      if (slices) {
+        lineScrollDone = scrollSlicesLineToCenter(slices, line, side, scroller)
       } else if (!lineScrollDone) {
         const fileNode = fileRefs.current[path]
         if (fileNode) scrollElementToCenter(fileNode, scroller)
@@ -1236,9 +1230,8 @@ function ReviewBodyInner({
         onSelectLines={selectLines}
         onAddToChat={embedded ? undefined : addToChat}
         registerSection={primary ? registerSection : ignoreSection}
-        registerDiffInstance={
-          primary ? registerDiffInstance : ignoreDiffInstance
-        }
+        slice={step ? String(step.index) : "all"}
+        registerDiffInstance={registerDiffInstance}
         diffStyle={diffStyle}
         owner={detail.owner}
         repo={detail.repo}
@@ -1565,6 +1558,7 @@ function GroupHeader({ group }: { group: ResolvedGroup }) {
 const FileDiffCard = memo(function FileDiffCard({
   file,
   fileDiff,
+  slice,
   additions,
   deletions,
   findings,
@@ -1602,8 +1596,11 @@ const FileDiffCard = memo(function FileDiffCard({
   onSelectLines: (path: string, range: SelectedLineRange | null) => void
   onAddToChat?: (path: string, range: SelectedLineRange) => void
   registerSection: (path: string, node: HTMLDivElement | null) => void
+  /** Which rendering of the file this card is, when a walkthrough splits it. */
+  slice: string
   registerDiffInstance: (
     path: string,
+    slice: string,
     target: RegisteredDiffInstance | null
   ) => void
   diffStyle: DiffStyle
@@ -1706,7 +1703,7 @@ const FileDiffCard = memo(function FileDiffCard({
       onPostRender: (
         node: HTMLElement,
         instance: CoreFileDiff<ReviewAnnotation>
-      ) => registerDiffInstance(file.path, { host: node, instance }),
+      ) => registerDiffInstance(file.path, slice, { host: node, instance }),
     }),
     [
       diffOptions,
@@ -1714,6 +1711,7 @@ const FileDiffCard = memo(function FileDiffCard({
       onStartComment,
       onSelectLines,
       file.path,
+      slice,
       registerDiffInstance,
     ]
   )
@@ -1764,8 +1762,8 @@ const FileDiffCard = memo(function FileDiffCard({
     [registerSection, file.path]
   )
   useEffect(
-    () => () => registerDiffInstance(file.path, null),
-    [file.path, registerDiffInstance]
+    () => () => registerDiffInstance(file.path, slice, null),
+    [file.path, slice, registerDiffInstance]
   )
   const renderAnnotation = useCallback(
     (annotation: DiffLineAnnotation<ReviewAnnotation>) => {

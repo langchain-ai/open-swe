@@ -23,6 +23,9 @@ LEFTOVER_SUMMARY = "Changes the walkthrough did not place in a step."
 _IDENTITY = "-c user.name='Open SWE Review Scout' -c user.email=review-scout@open-swe.invalid"
 _SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 _BLAME_GROUP = "^[0-9a-f]{40} [0-9]+ [0-9]+ [0-9]+$"
+_HUNK_RE = re.compile(r"^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@")
+# Owner for changed lines no commit claims; they join the "Other" step.
+_UNOWNED = -1
 _RECORD = "\x1e"
 _UNIT = "\x1f"
 
@@ -124,8 +127,14 @@ async def finalize(
     if not commits:
         return []
     files = await _changed_files(backend, repo_dir, mb)
-    added, deleted = await _blame(backend, repo_dir, mb, commits, files)
-    return _steps(commits, files, added, deleted)
+    claimed_added, claimed_deleted = await _blame(backend, repo_dir, mb, commits, files)
+    pr_added, pr_deleted = await _pr_changed_lines(backend, repo_dir, mb)
+    return _steps(
+        commits,
+        files,
+        _reconcile(claimed_added, pr_added),
+        _reconcile(claimed_deleted, pr_deleted),
+    )
 
 
 async def _commits(backend: SandboxBackendProtocol, repo_dir: str, mb: str) -> list[_Commit]:
@@ -248,6 +257,64 @@ async def _blame(
     return added, deleted
 
 
+async def _pr_changed_lines(
+    backend: SandboxBackendProtocol, repo_dir: str, mb: str
+) -> tuple[dict[str, set[int]], dict[str, set[int]]]:
+    """The PR diff's own changed lines: added head lines by new path, deleted merge-base lines by old path."""
+    raw = await _run(
+        backend,
+        repo_dir,
+        f"git -c core.quotePath=false diff -U0 --no-color --no-ext-diff -M {mb} HEAD",
+    )
+    added: dict[str, set[int]] = {}
+    deleted: dict[str, set[int]] = {}
+    old_path: str | None = None
+    new_path: str | None = None
+    in_header = False
+    for line in raw.splitlines():
+        if line.startswith("diff --git "):
+            in_header, old_path, new_path = True, None, None
+        elif in_header and line.startswith("--- "):
+            old_path = line[6:] if line.startswith("--- a/") else None
+        elif in_header and line.startswith("+++ "):
+            new_path = line[6:] if line.startswith("+++ b/") else None
+        elif match := _HUNK_RE.match(line):
+            in_header = False
+            old_start, old_count, new_start, new_count = (
+                int(group) if group is not None else 1 for group in match.groups()
+            )
+            if old_path is not None:
+                deleted.setdefault(old_path, set()).update(range(old_start, old_start + old_count))
+            if new_path is not None:
+                added.setdefault(new_path, set()).update(range(new_start, new_start + new_count))
+    return added, deleted
+
+
+def _reconcile(claimed: _Attribution, changed: dict[str, set[int]]) -> _Attribution:
+    """Make the PR diff decide which lines changed and blame decide who owns them.
+
+    Blame over the intermediate commits can align repeated text differently
+    from the PR diff, so it may claim an unchanged line and miss the changed
+    twin next to it. Those misses are handed the owners of the spurious claims
+    in order, and anything still unowned goes to the "Other" step.
+    """
+    result: _Attribution = {}
+    for path in claimed.keys() | changed.keys():
+        lines = changed.get(path, set())
+        owner_of = {n: owner for owner, numbers in claimed.get(path, {}).items() for n in numbers}
+        owners = {n: owner for n, owner in owner_of.items() if n in lines}
+        spurious = [owner_of[n] for n in sorted(owner_of) if n not in lines]
+        orphans = sorted(n for n in lines if n not in owner_of)
+        for index, n in enumerate(orphans):
+            owners[n] = spurious[index] if index < len(spurious) else _UNOWNED
+        per_owner: dict[int, list[int]] = {}
+        for n, owner in owners.items():
+            per_owner.setdefault(owner, []).append(n)
+        if per_owner:
+            result[path] = per_owner
+    return result
+
+
 def _ranges(numbers: list[int]) -> list[LineRange]:
     ranges: list[LineRange] = []
     for n in sorted(set(numbers)):
@@ -265,20 +332,25 @@ def _steps(
     deleted: _Attribution,
 ) -> list[StepDraft]:
     """Group commits into steps, folding every "other" commit into one final step."""
-    step_of: dict[int, int] = {}
     steps: list[StepDraft] = []
     other: StepDraft | None = None
+    other_commits: list[int] = []
+    step_of: dict[int, int] = {}
     for i, commit in enumerate(commits):
         if commit.is_other:
             if other is None:
                 other = StepDraft(title=OTHER_TITLE, summary=commit.summary, is_other=True)
-            step_of[i] = -1
+            other_commits.append(i)
         else:
             step_of[i] = len(steps)
             steps.append(StepDraft(title=commit.title, summary=commit.summary))
+    has_unowned = any(_UNOWNED in owners for owners in (*added.values(), *deleted.values()))
+    if other is None and has_unowned:
+        other = StepDraft(title=OTHER_TITLE, summary=LEFTOVER_SUMMARY, is_other=True)
     if other is not None:
         steps.append(other)
-        step_of = {i: (len(steps) - 1 if s == -1 else s) for i, s in step_of.items()}
+        for i in (*other_commits, _UNOWNED):
+            step_of[i] = len(steps) - 1
 
     per_step: dict[int, dict[str, FileLines]] = {}
 

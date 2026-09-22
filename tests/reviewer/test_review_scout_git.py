@@ -97,3 +97,39 @@ async def test_steps_own_their_lines_and_the_rest_lands_in_other(
         ),
     ]
     assert _git(repo, "rev-parse", "HEAD^{tree}") == _git(repo, "rev-parse", f"{head}^{{tree}}")
+
+
+async def test_owned_lines_are_exactly_the_pr_diffs_changed_lines(tmp_path: Path) -> None:
+    repo = tmp_path / "repeat"
+    repo.mkdir()
+    _git(repo, "init", "-q", "-b", "main")
+    _git(repo, "config", "user.name", "t")
+    _git(repo, "config", "user.email", "t@example.com")
+    target = repo / "f"
+    target.write_text("a\nb\nc\na\nb\nc\n")
+    _git(repo, "add", ".")
+    _git(repo, "commit", "-qm", "base")
+    base = _git(repo, "rev-parse", "HEAD")
+    target.write_text("a\nb\nc\nb\nc\na\nb\nc\n")
+    _git(repo, "commit", "-qam", "head")
+    head = _git(repo, "rev-parse", "HEAD")
+    shell = _LocalShell()
+    merge_base = await setup_working_tree(shell, str(repo), base_sha=base, head_sha=head)
+
+    # An intermediate step blame aligns differently from the PR diff, which adds head lines 4-5.
+    target.write_text("a\nc\nb\nc\na\nb\nc\n")
+    _git(repo, "add", "f")
+    target.write_text("a\nb\nc\nb\nc\na\nb\nc\n")
+    assert await commit_staged(shell, str(repo), title="Step", summary="", other=False)
+
+    steps = await finalize(shell, str(repo), merge_base=merge_base, head_sha=head)
+
+    owned = sorted(
+        n
+        for step in steps
+        for file in step.files
+        for start, end in file.added
+        for n in range(start, end + 1)
+    )
+    assert owned == [4, 5]
+    assert all(not file.deleted for step in steps for file in step.files)
