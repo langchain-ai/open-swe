@@ -177,7 +177,7 @@ it("shows delivery lag separately from suppression, then refreshes to a populate
 })
 
 it.each([0, 1, 4, 5])(
-  "shows distance coverage and flags only small nonempty samples (%i measured)",
+  "flags only small nonempty distance samples without inline counts (%i measured)",
   async (samples) => {
     vi.spyOn(api, "prMergeRateByModel").mockResolvedValue({
       ...captured,
@@ -203,10 +203,10 @@ it.each([0, 1, 4, 5])(
     })
     const client = mountReport()
     const row = (await screen.findByText("sample-model")).closest("tr")!
-    const distanceCell = within(row)
-      .getByText(`${samples} measured / 8 merged`)
-      .closest("td")!
-    expect(within(distanceCell).getByText(samples ? "17.5%" : "—")).toBeTruthy()
+    expect(
+      within(row).getByRole("button", { name: samples ? "17.5%" : "—" })
+    ).toBeTruthy()
+    expect(within(row).queryByText(/measured \/ .* merged/)).toBeNull()
     expect(within(row).queryByText("Small sample") !== null).toBe(
       samples > 0 && samples < 5
     )
@@ -322,7 +322,7 @@ it.each([
       "3",
       "1",
       "3",
-      "17.5%3 measured / 3 mergedSmall sample",
+      "17.5%Small sample",
       "60%",
       "2h",
       "1d",
