@@ -1,4 +1,5 @@
 import re
+from pathlib import Path
 
 from agent.database import postgres
 
@@ -13,3 +14,4 @@ def test_new_migrations_use_random_revision_ids() -> None:
     for script in postgres.load_migrations().walk_revisions():
         if script.revision not in SEQUENTIAL_REVISIONS:
             assert re.fullmatch(r"[0-9a-f]{12}", script.revision), script.path
+            assert re.fullmatch(rf"\d{{4}}_{script.revision}_\w+\.py", Path(script.path).name)
