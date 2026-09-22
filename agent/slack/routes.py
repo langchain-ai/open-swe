@@ -586,8 +586,11 @@ async def slack_command(
             thread_id=thread_id,
             command=command or ASK_COMMAND,
             team_id=value("team_id"),
+            response_url=value("response_url"),
         ),
     )
+    # Empty, deliberately: the acknowledgement goes out through `response_url`
+    # instead, which is the only message a later reply can replace.
     return Response(status_code=200)
 
 

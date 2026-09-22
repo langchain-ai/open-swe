@@ -833,7 +833,13 @@ export interface ReviewDiffGroup {
   files: Array<string>
 }
 
-export interface ReviewDetail extends ReviewSummary {
+/** `status: "none"` is a PR the reviewer graph has never run on. */
+export interface ReviewDetail extends Omit<
+  ReviewSummary,
+  "thread_id" | "status"
+> {
+  thread_id: string | null
+  status: ReviewSummary["status"] | "none"
   assessment?: PublishedReviewAssessment | null
   pr: ReviewPrDetails
   checks: Array<ReviewCheckRun>

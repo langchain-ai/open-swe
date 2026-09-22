@@ -10,6 +10,7 @@ from typing import Any, Literal
 from fastapi import BackgroundTasks
 from pydantic import BaseModel, Field
 
+from agent.analytics.feedback import record_feedback_submission
 from agent.slack.channels import SlackChannel
 from agent.slack.client import (
     lookup_slack_run_message_mapping,
@@ -400,6 +401,15 @@ async def _record_rating(payload: dict[str, Any], background_tasks: BackgroundTa
             background_tasks.add_task(complete_feedback_prompt, record.agent_thread_id, "completed")
             background_tasks.add_task(_acknowledge, record, response_url=response_url)
             background_tasks.add_task(_export_feedback, record)
+            if newly_saved and record.rating is not None:
+                background_tasks.add_task(
+                    record_feedback_submission,
+                    feedback_key=f"thread:{record.agent_thread_id}",
+                    rating=record.rating,
+                    source="slack",
+                    run_key=record.run_id,
+                    slack_user_id=record.user_id,
+                )
             trigger_id = payload.get("trigger_id")
             if newly_saved and choice == "bad" and isinstance(trigger_id, str) and trigger_id:
                 await open_slack_modal(trigger_id, comment_modal(record, response_url))
