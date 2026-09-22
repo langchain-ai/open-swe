@@ -130,8 +130,6 @@ jobs:
           VITE_DATADOG_SESSION_SAMPLE_RATE: "100"
           VITE_DATADOG_SESSION_REPLAY_SAMPLE_RATE: "20"
         run: |
-          # Signing opens every bundled file concurrently; the runner's default limit is 256.
-          ulimit -n 65536
           pnpm run build
           pnpm --filter open-swe-desktop run build:local-backend
           pnpm --filter open-swe-desktop exec electron-builder --mac zip dmg --publish never
