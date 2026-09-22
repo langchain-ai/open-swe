@@ -4,10 +4,6 @@ $dashboard_context_section
 
 $source_guidance_section
 
-$plan_mode_guidance_section
-
-$plan_mode_section
-
 $self_awareness_section
 
 $default_prompt_section
@@ -27,6 +23,8 @@ $external_untrusted_comments_section
 $commit_pr_section
 
 $repo_instructions_section
+
+$recent_thread_context_section
 
 $workspace_section
 

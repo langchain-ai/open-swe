@@ -39,9 +39,29 @@ jobs:
         with:
           ref: ${{ needs.typecheck.outputs.sha }}
           fetch-depth: 0
-      - name: Force-push the typechecked commit to prod
+      - name: Force-push the typechecked commit to prod and annotate released PRs
         run: |
+          RELEASE_COMMITS="$(git log origin/prod..HEAD --format=%s)"
+          export RELEASE_COMMITS
           git push --force origin HEAD:refs/heads/prod
+          python3 - <<'PY'
+          import os
+          import re
+
+          released = {}
+          for subject in os.environ["RELEASE_COMMITS"].splitlines():
+              match = re.search(r"\(#(\d+)\)$|^Merge pull request #(\d+)\b", subject)
+              if match:
+                  number = match.group(1) or match.group(2)
+                  released.setdefault(number, subject)
+          lines = []
+          for number, subject in released.items():
+              url = f"{os.environ['GITHUB_SERVER_URL']}/{os.environ['GITHUB_REPOSITORY']}/pull/{number}"
+              lines.append(f"{subject} — {url}")
+          message = "\n".join(lines) or "No new PRs identified in the promoted commits."
+          message = message.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+          print(f"::notice title=Released PRs::{message}")
+          PY
 
   release-desktop-nightly:
     needs: [typecheck, promote]

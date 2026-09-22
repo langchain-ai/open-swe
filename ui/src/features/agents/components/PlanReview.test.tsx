@@ -13,22 +13,15 @@ import { PlanReview } from "./PlanReview"
 import type { PlanComment, PlanData, PlanTextAnchor } from "@/lib/plan"
 
 const mocks = vi.hoisted(() => ({
-  navigate: vi.fn(),
   addPlanComment: vi.fn(),
   getPlanComments: vi.fn(),
   deletePlanComment: vi.fn(),
-  rejectPlan: vi.fn(),
 }))
 
-vi.mock("@tanstack/react-router", () => ({
-  useNavigate: () => mocks.navigate,
-}))
 vi.mock("@/lib/plan", () => ({
   addPlanComment: mocks.addPlanComment,
-  approvePlan: vi.fn(),
   deletePlanComment: mocks.deletePlanComment,
   getPlanComments: mocks.getPlanComments,
-  rejectPlan: mocks.rejectPlan,
 }))
 vi.mock("@/features/agents/components/PlanArtifactFrame", () => ({
   PlanArtifactFrame: ({
@@ -65,11 +58,9 @@ vi.mock("@/features/agents/components/chat/Markdown", () => ({
 
 const plan: PlanData = {
   threadId: "thread-1",
-  status: "ready",
+  status: "shared",
   html: "<h1>Plan</h1>",
   markdown: "",
-  approvedBy: null,
-  approvedAt: null,
   user: {
     id: "user-1",
     login: "alice",
@@ -97,7 +88,6 @@ beforeEach(() => {
   mocks.getPlanComments.mockResolvedValue([])
   mocks.addPlanComment.mockResolvedValue(comment)
   mocks.deletePlanComment.mockResolvedValue({ ok: true })
-  mocks.rejectPlan.mockResolvedValue({ status: "revising" })
 })
 
 afterEach(() => {
@@ -150,39 +140,34 @@ describe("PlanReview", () => {
     )
   })
 
-  it("returns unanchored feedback to the conversation", async () => {
-    render(<PlanReview plan={plan} />)
+  it("shows historical artifacts without approval or implementation actions", async () => {
+    mocks.getPlanComments.mockResolvedValue([comment])
+    render(<PlanReview plan={{ ...plan, status: "approved" }} />)
 
-    fireEvent.click(screen.getByRole("button", { name: "Request changes" }))
-
-    await waitFor(() =>
-      expect(mocks.navigate).toHaveBeenCalledWith({
-        to: "/agents/$threadId",
-        params: { threadId: "thread-1" },
-        search: { feedback: true },
-      })
+    expect(screen.getByRole("heading", { name: "Artifact" })).toBeTruthy()
+    expect(screen.queryByRole("button", { name: "Approve" })).toBeNull()
+    expect(screen.queryByRole("button", { name: "Request changes" })).toBeNull()
+    expect((await screen.findByTestId("plan-comment")).textContent).toContain(
+      "Clarify this step"
     )
-    expect(mocks.rejectPlan).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole("button", { name: "Select text" }))
+    expect(screen.getByTestId("comment-input")).toBeTruthy()
   })
 
-  it("sends anchored feedback when requesting changes", async () => {
+  it("loads and deletes comments on shared artifacts without decision actions", async () => {
     mocks.getPlanComments.mockResolvedValue([comment])
     render(<PlanReview plan={plan} />)
 
-    const requestChanges = screen.getByRole("button", {
-      name: "Request changes",
-    })
-    await waitFor(() =>
-      expect((requestChanges as HTMLButtonElement).disabled).toBe(false)
+    expect((await screen.findByTestId("plan-comment")).textContent).toContain(
+      "Clarify this step"
     )
-    fireEvent.click(requestChanges)
-
-    await waitFor(() =>
-      expect(mocks.rejectPlan).toHaveBeenCalledWith("thread-1")
+    expect(screen.queryByRole("button", { name: "Approve" })).toBeNull()
+    expect(screen.queryByRole("button", { name: "Request changes" })).toBeNull()
+    fireEvent.click(screen.getByTestId("comment-delete"))
+    await waitFor(() => expect(screen.queryByTestId("plan-comment")).toBeNull())
+    expect(mocks.deletePlanComment).toHaveBeenCalledWith(
+      "thread-1",
+      "comment-1"
     )
-    expect(mocks.navigate).toHaveBeenCalledWith({
-      to: "/agents/$threadId",
-      params: { threadId: "thread-1" },
-    })
   })
 })

@@ -1096,7 +1096,6 @@ def _turn_requested(
             model_id=_string(ids.configurable.get("resolved_agent_model_id"))
             or _string(ids.configurable.get("agent_model_id")),
             effort=_string(ids.configurable.get("agent_effort")),
-            plan_mode=ids.configurable.get("plan_mode") is True,
         ),
         actor_kind="user",
         run_id=state.run_id,

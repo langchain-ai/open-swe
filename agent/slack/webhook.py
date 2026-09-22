@@ -565,24 +565,6 @@ async def process_slack_mention(
         await _notify_slack_processing_error(request, repo.repo if repo else None, exc)
 
 
-async def process_slack_plan_approval(request: SlackRequest, repo: Repo | None) -> None:
-    from agent.threads.plan_api import approve_plan_for_thread
-    from agent.threads.plan_store import make_plan_approver
-
-    try:
-        await approve_plan_for_thread(
-            request.thread_id or "",
-            github_login=await _slack_login(request.user_id),
-            approver=make_plan_approver(
-                actor_id=request.user_id,
-                name=request.user_name or request.user_id or "Slack user",
-                source="slack",
-            ),
-        )
-    except Exception as exc:  # noqa: BLE001
-        await _notify_slack_processing_error(request, repo, exc)
-
-
 async def _notify_slack_processing_error(
     request: SlackRequest, repo: Repo | None, exc: BaseException
 ) -> None:
@@ -1065,10 +1047,6 @@ async def _process_slack_mention_impl(
     if image_model_override:
         configurable["agent_model_id"] = image_model_override[0]
         configurable["agent_effort"] = image_model_override[1]
-
-    thread_plan_mode = await common.get_thread_plan_mode(thread_id)
-    if thread_plan_mode is not None:
-        configurable["plan_mode"] = thread_plan_mode
 
     if thread_model_choice and not image_model_override:
         configurable["agent_model_id"], configurable["agent_effort"] = thread_model_choice

@@ -99,7 +99,6 @@ from agent.middleware import (
     ModelErrorMiddleware,
     ModelFallbackMiddleware,
     ModelSelectionMiddleware,
-    PlanModeMiddleware,
     PullRequestCreationGuardMiddleware,
     RequireUserReplyMiddleware,
     SanitizeFireworksMessagesMiddleware,
@@ -156,12 +155,12 @@ from agent.sandboxes.state import (
 from agent.sandboxes.tool_access import tools_base_url
 from agent.sandboxes.tool_runtime import ToolSurface, save_tool_context
 from agent.skill_store.store import ORGANIZATION_SKILLS_NAMESPACE, SKILLS_NAMESPACE
-from agent.slack.dm import is_dm_session
+from agent.slack.dm import is_dm_channel, is_dm_session
 from agent.thread_title import TITLE_GENERATION_MAX_TOKENS, schedule_thread_title_generation
+from agent.threads.recent_context import RecentContextAudience, recent_thread_context_section
 from agent.threads.summary import DASHBOARD_SOURCE, thread_is_private
 from agent.tool_loaders.notion_mcp import load_notion_tools
 from agent.tools import (
-    approve_plan,
     background_execute,
     background_task,
     create_automation,
@@ -170,7 +169,6 @@ from agent.tools import (
     delete_organization_skill,
     delete_user_skill,
     delete_workspace,
-    enter_plan_mode,
     expedite_pr_approval,
     expose_port,
     fetch_url,
@@ -458,18 +456,13 @@ async def _resolve_user_custom_instructions(login: str | None) -> str | None:
         return None
 
 
-# Mutating external tools hidden from the model while plan mode is active so it
-# can only research and propose a plan. File edit tools stay available so the
-# agent can draft and revise a plan under `/workspace/plans/`; prompt guidance
-# restricts them to that plan file outside cloned repositories. `execute` stays
-# available; plan-mode shell discipline (no mutating commands) is instructed via
-# the system prompt rather than enforced. `http_request` is excluded because it
-# can POST/PUT/PATCH/DELETE to external services — read-only web research goes
-# through `web_search` / `fetch_url`. `task` is excluded because the
-# general-purpose subagent is built with its own tools and does not inherit this
-# exclusion, so delegating to it would bypass the read-only intent.
-PLAN_MODE_EXCLUDED_TOOLS: frozenset[str] = frozenset(
+INCIDENT_AUTOMATIC_EXCLUDED_TOOLS: frozenset[str] = frozenset(
     {
+        "manage_code_channel",
+        "manage_incident",
+        "slack_add_reaction",
+        "slack_attach_html",
+        "slack_reply",
         "task",
         "background_execute",
         "background_task",
@@ -493,21 +486,6 @@ PLAN_MODE_EXCLUDED_TOOLS: frozenset[str] = frozenset(
         "update_automation",
         "trigger_automation",
         "delete_automation",
-    }
-)
-
-# Automatic incident turns are triggered by whatever lands in a public channel, so the
-# prompt cannot be the only boundary: they get the plan-mode research toolset and no
-# Slack posting, PR, HTTP, delegation, or incident-control tools. record_incident_report
-# posts for them.
-# An authorized responder's explicit request restores the normal toolset.
-INCIDENT_AUTOMATIC_EXCLUDED_TOOLS: frozenset[str] = PLAN_MODE_EXCLUDED_TOOLS | frozenset(
-    {
-        "manage_code_channel",
-        "manage_incident",
-        "slack_add_reaction",
-        "slack_attach_html",
-        "slack_reply",
     }
 )
 
@@ -803,7 +781,6 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
         linear_project_id: str,
         linear_issue_number: str,
         draft_prs: bool,
-        plan_mode: bool,
         admin_workspaces: bool,
         model_selection: ModelSelectionMiddleware | None = None,
         routing_defaults: Mapping[str, tuple[str, str | None]] | None = None,
@@ -822,10 +799,34 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
         self._linear_project_id = linear_project_id
         self._linear_issue_number = linear_issue_number
         self._draft_prs = draft_prs
-        self._plan_mode = plan_mode
         self._admin_workspaces = admin_workspaces
         self._model_selection = model_selection
         self._routing_defaults = dict(routing_defaults or {})
+
+    def _recent_context_audience(self, cfg: RunConfig) -> RecentContextAudience | None:
+        if (
+            cfg.background_task_completion
+            or not self._profile_login
+            or (cfg.slack_thread is not None and cfg.slack_thread.triggering_bot_id)
+        ):
+            return None
+        private_owner = (self._credential_login or "").lower() == self._profile_login.lower()
+        if self._source == "dashboard":
+            return "private" if private_owner else None
+        if self._source != "slack" or cfg.slack_thread is None:
+            return None
+        channel_context = cfg.slack_thread.channel_context
+        if is_dm_channel(channel_context):
+            return "private" if private_owner else None
+        if (
+            channel_context is not None
+            and channel_context.is_im is False
+            and channel_context.is_mpim is False
+            and cfg.slack_thread.team_id
+            and cfg.slack_thread.channel_id
+        ):
+            return "shared_slack"
+        return None
 
     def _prepare_config_fingerprint(self) -> Any:
         cfg = RunConfig.from_config(self._config)
@@ -835,7 +836,6 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
             "thread_id": self._thread_id,
             "source": self._source,
             "repo": cfg.repo.model_dump() if cfg.repo else None,
-            "plan_mode": self._plan_mode,
             "draft_prs": self._draft_prs,
             "model": self._model_id,
             "effort": self._effort,
@@ -926,12 +926,29 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
         async with aphase(self._thread_id, "prepare.workspace"):
             workspace = await load_workspace(workspace_slug(cfg))
         async with aphase(self._thread_id, "prepare.participants"):
+            recent_context_audience = self._recent_context_audience(cfg)
+            recent_context_task = (
+                asyncio.create_task(
+                    recent_thread_context_section(
+                        audience=recent_context_audience,
+                        login=self._profile_login,
+                        email=self._user_email or None,
+                        exclude_thread_id=self._thread_id,
+                        slack_team_id=(cfg.slack_thread.team_id if cfg.slack_thread else None),
+                        slack_channel_id=(
+                            cfg.slack_thread.channel_id if cfg.slack_thread else None
+                        ),
+                    )
+                )
+                if recent_context_audience is not None
+                else None
+            )
             attribution_model_id = self._model_id
             attribution_effort = self._effort
             attribution_route = None
             if self._model_selection is not None:
                 attribution_route = await self._model_selection.select_route(
-                    cast(ModelSelectionState, state), plan_mode=self._plan_mode
+                    cast(ModelSelectionState, state)
                 )
                 attribution_model_id, attribution_effort = self._routing_defaults[attribution_route]
             bot_id = (
@@ -957,6 +974,7 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
                     ),
                 )
                 sender_messages = self._participants_messages(state, participants)
+        recent_thread_context = await recent_context_task if recent_context_task is not None else ""
         try:
             async with aphase(self._thread_id, "prepare.record_run"):
                 await client.threads.update(
@@ -966,7 +984,6 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
                         "model": attribution_model_id,
                         "effort": attribution_effort,
                         "source": self._source,
-                        "plan_mode": self._plan_mode,
                         **({"model_route": attribution_route} if attribution_route else {}),
                     },
                 )
@@ -1006,19 +1023,14 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
         return {
             "work_dir": work_dir,
             **({"messages": sender_messages} if sender_messages else {}),
-            **(
-                {"model_route": attribution_route}
-                if attribution_route and not self._plan_mode
-                else {}
-            ),
+            **({"model_route": attribution_route} if attribution_route else {}),
             "rendered_system_prompt": construct_system_prompt(
                 working_dir=work_dir,
                 dashboard_base_url=dashboard_base_url(),
+                artifact_url=dashboard_plan_url(self._thread_id),
                 linear_project_id=self._linear_project_id,
                 linear_issue_number=self._linear_issue_number,
                 default_repo=prompt_default_repo,
-                plan_mode=self._plan_mode,
-                plan_url=dashboard_plan_url(self._thread_id),
                 repo_custom_instructions=self._repo_instructions,
                 workspace_name=workspace.name if workspace else None,
                 workspace_instructions=workspace.instructions if workspace else None,
@@ -1028,6 +1040,7 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
                 slack_ask=_slack_ask_mode(cfg),
                 sandbox_file_downloads=_sandbox_file_downloads_enabled(cfg),
                 continued_from_collaborative=bool(cfg.continued_from_thread_id),
+                recent_thread_context=recent_thread_context,
             ),
         }
 
@@ -1284,16 +1297,6 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
     configurable["resolved_agent_model_id"] = model_id
     user_email = cfg.user_email or ""
 
-    # Plan mode is entered only when the model decides to (the `enter_plan_mode`
-    # tool sets it in run state). The configurable value just carries that
-    # decision across a thread's messages and the approve/reject follow-ups; a
-    # fresh run with nothing set starts out of plan mode. Installed
-    # unconditionally and state-aware: it also restricts tools after a mid-run
-    # `enter_plan_mode` call, not just when plan mode is set up front.
-    plan_mode = cfg.plan_mode is True
-    if plan_mode:
-        logger.info("Plan mode enabled for thread %s", thread_id)
-
     async with aphase(thread_id, "factory.admin_thread"):
         admin_thread = await _admin_thread(config, profile_login)
     private_admin_surface = admin_thread and is_private_admin_surface(cfg)
@@ -1342,10 +1345,8 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
         http_request,
         fetch_url,
         web_search,
-        approve_plan,
         background_execute,
         background_task,
-        enter_plan_mode,
         save_plan,
         save_user_instructions,
         *((save_user_settings,) if personal_settings_run_allowed(cfg) else ()),
@@ -1524,7 +1525,7 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
             subagents=[
                 _general_purpose_subagent(
                     subagent_model,
-                    tools=static_tools,
+                    tools=[tool for tool in static_tools if tool is not save_user_settings],
                     workspace_skills=workspace_skills,
                     dynamic_tools=dynamic_tool_middleware,
                     offloading=ConversationOffloadingMiddleware(subagent_model, agent_backend),
@@ -1561,7 +1562,6 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
                         linear_project_id=linear_project_id,
                         linear_issue_number=linear_issue_number,
                         draft_prs=sender_draft_prs,
-                        plan_mode=plan_mode,
                         admin_workspaces=admin_thread,
                         model_selection=model_selection,
                         routing_defaults=routing_defaults,
@@ -1609,11 +1609,6 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
                     record_run_usage,
                     *([model_selection] if model_selection else []),
                     *fallback_middleware,
-                    PlanModeMiddleware(
-                        excluded=PLAN_MODE_EXCLUDED_TOOLS
-                        | frozenset(tool.name for tool in mcp_tools),
-                        initial=plan_mode,
-                    ),
                     SanitizeFireworksMessagesMiddleware(),
                     SanitizeOpenAIResponsesMiddleware(),
                     SanitizeThinkingBlocksMiddleware(),
@@ -1636,9 +1631,6 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
             else DEEP_AGENT_EXCLUDED_TOOLS | INCIDENT_AUTOMATIC_EXCLUDED_TOOLS
             if incident_automatic
             else DEEP_AGENT_EXCLUDED_TOOLS
-        )
-        tool_surface.plan_excluded = PLAN_MODE_EXCLUDED_TOOLS | frozenset(
-            tool.name for tool in mcp_tools
         )
     elif tools_base_url() and ENV.DASHBOARD_JWT_SECRET.optional() and not local_run:
         await save_tool_context(thread_id, config)

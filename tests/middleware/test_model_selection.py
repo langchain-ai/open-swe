@@ -3,7 +3,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from langchain.agents.middleware.types import ModelRequest, ModelResponse
-from langchain_core.messages import HumanMessage, ToolMessage
+from langchain_core.messages import HumanMessage
 
 from agent.middleware.model_selection import ModelSelectionMiddleware, RouteDecision
 
@@ -125,55 +125,7 @@ async def test_persisted_fast_alt_route_is_migrated_to_fast() -> None:
 
 
 @pytest.mark.asyncio
-async def test_plan_mode_uses_performance_without_persisting_route() -> None:
-    middleware, models, classifier = _middleware()
-    state = {"messages": [HumanMessage(content="Update the docs")], "plan_mode": True}
-
-    state.update(await middleware.abefore_model(cast(Any, state), MagicMock()))
-
-    assert "model_route" not in state
-    assert (await _invoke(middleware, state)).model is models["performance"]
-    classifier.assert_not_awaited()
-
-
-@pytest.mark.asyncio
-async def test_route_is_classified_from_approved_plan_after_plan_mode_exits() -> None:
-    middleware, models, classifier = _middleware()
-    approved_plan = (
-        "Plan mode is now inactive because the plan was approved. Use the reviewed plan below "
-        "as the implementation guide.\n\nImplement the API and UI changes."
-    )
-    state = {
-        "messages": [
-            HumanMessage(content="Build the feature"),
-            ToolMessage(content=approved_plan, tool_call_id="approve-plan"),
-        ],
-        "plan_mode": False,
-    }
-
-    state.update(await middleware.abefore_model(cast(Any, state), MagicMock()))
-
-    assert state["model_route"] == "fast"
-    assert (await _invoke(middleware, state)).model is models["fast"]
-    classifier.assert_awaited_once()
-    assert approved_plan in classifier.await_args.args[0]
-
-
-@pytest.mark.asyncio
-async def test_explicit_plan_mode_overrides_stale_state_without_caching() -> None:
-    middleware, _, classifier = _middleware()
-    state = {
-        "messages": [HumanMessage(content="Implement the approved plan")],
-        "plan_mode": True,
-    }
-
-    assert await middleware.select_route(cast(Any, state), plan_mode=False) == "fast"
-    assert await middleware.select_route(cast(Any, state), plan_mode=True) == "performance"
-    classifier.assert_awaited_once()
-
-
-@pytest.mark.asyncio
-async def test_mid_run_plan_mode_temporarily_overrides_existing_route() -> None:
+async def test_legacy_plan_state_does_not_override_existing_route() -> None:
     middleware, models, classifier = _middleware()
     state = {
         "messages": [HumanMessage(content="Plan the next change")],
@@ -184,7 +136,7 @@ async def test_mid_run_plan_mode_temporarily_overrides_existing_route() -> None:
     state.update(await middleware.abefore_model(cast(Any, state), MagicMock()))
 
     assert state["model_route"] == "fast"
-    assert (await _invoke(middleware, state)).model is models["performance"]
+    assert (await _invoke(middleware, state)).model is models["fast"]
     classifier.assert_not_awaited()
 
     state["plan_mode"] = False
@@ -239,45 +191,6 @@ async def test_routed_model_event_omitted_without_a_known_model_id(
     await middleware.abefore_model(cast(Any, state), MagicMock())
 
     assert events == []
-
-
-@pytest.mark.asyncio
-async def test_plan_mode_streams_the_overriding_performance_model(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    events: list[dict[str, Any]] = []
-    monkeypatch.setattr(
-        "agent.middleware.model_selection.get_stream_writer",
-        lambda: events.append,
-    )
-    middleware, models, classifier = _middleware(
-        route_model_ids={
-            "fast": "openai:gpt-5.6-sol",
-            "performance": "anthropic:claude-opus-5",
-        }
-    )
-    entered_plan_mode = {
-        "messages": [HumanMessage(content="Plan the next change")],
-        "model_route": "fast",
-        "plan_mode": True,
-    }
-    started_in_plan_mode = {
-        "messages": [HumanMessage(content="Plan the next change")],
-        "plan_mode": True,
-    }
-
-    assert await middleware.abefore_model(cast(Any, entered_plan_mode), MagicMock()) == {}
-    assert await middleware.abefore_model(cast(Any, started_in_plan_mode), MagicMock()) == {}
-
-    performance = {
-        "type": "model_routed",
-        "route": "performance",
-        "model_id": "anthropic:claude-opus-5",
-    }
-    assert events == [performance, performance]
-    classifier.assert_not_awaited()
-    assert (await _invoke(middleware, entered_plan_mode)).model is models["performance"]
-    assert (await _invoke(middleware, started_in_plan_mode)).model is models["performance"]
 
 
 _HUMAN_ENVELOPE = (

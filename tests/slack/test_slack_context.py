@@ -59,10 +59,13 @@ class _FakeClient:
         self.threads = threads_client
 
 
-def test_channel_context_preserves_external_sharing_status() -> None:
-    context = SlackChannelPayload.of({"name": "shared", "is_ext_shared": True}).to_context("C123")
+def test_channel_context_preserves_sharing_and_group_dm_status() -> None:
+    context = SlackChannelPayload.of(
+        {"name": "shared", "is_ext_shared": True, "is_mpim": False}
+    ).to_context("C123")
 
     assert context.is_ext_shared is True
+    assert context.is_mpim is False
     assert not context.allows_operations
 
 
@@ -2093,7 +2096,7 @@ def test_thread_model_choice_round_trips_explicit_metadata(
         {
             "metadata": {
                 "model_selection": "explicit",
-                "model": "anthropic:claude-opus-5",
+                "model": "anthropic:claude-opus-5-5",
                 "effort": "high",
             }
         }
@@ -2101,7 +2104,7 @@ def test_thread_model_choice_round_trips_explicit_metadata(
     monkeypatch.setattr(webhook_common, "get_client", lambda url: _FakeClient(threads))
 
     assert asyncio.run(webhook_common.get_thread_model_choice("thread-id")) == (
-        "anthropic:claude-opus-5",
+        "anthropic:claude-opus-5-5",
         "high",
     )
 
@@ -2113,7 +2116,7 @@ def test_thread_model_choice_is_none_for_auto_selection(
         {
             "metadata": {
                 "model_selection": "auto",
-                "model": "anthropic:claude-opus-5",
+                "model": "anthropic:claude-opus-5-5",
                 "effort": "high",
             }
         }

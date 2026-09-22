@@ -1,8 +1,8 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { ImagePlus, Map as MapIcon, Plus, X } from "lucide-react"
+import { ImagePlus, Plus, X } from "lucide-react"
 
 import { ComposerCommandMenu } from "./ComposerCommandMenu"
-import { ComposerControl, ComposerControlIcon } from "./ComposerControl"
+import { ComposerControl } from "./ComposerControl"
 import { ComposerPrimaryActions } from "./ComposerPrimaryActions"
 import {
   ComposerPromptEditor,
@@ -40,7 +40,6 @@ import type { ModelSelection } from "@/features/agents/lib/provider/useModelOpti
 import { ModelPicker } from "@/features/agents/components/ModelPicker"
 import { RepoSelector } from "@/features/settings/components/RepoSelector"
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from "@/components/ui/menu"
-import { Tooltip, TooltipPopup, TooltipTrigger } from "@/components/ui/tooltip"
 import { useRegisterAppCommands } from "@/lib/appCommands"
 import { cn } from "@/lib/utils"
 
@@ -67,16 +66,6 @@ const SLASH_COMMANDS: Array<SlashCommandSpec> = [
     command: "offload",
     label: "/offload",
     description: "Offload conversation context",
-  },
-  {
-    command: "plan",
-    label: "/plan",
-    description: "Research read-only and propose a plan first",
-  },
-  {
-    command: "default",
-    label: "/default",
-    description: "Leave plan mode and edit directly",
   },
   {
     command: "model",
@@ -118,9 +107,6 @@ export interface ChatComposerProps {
   onRemoveLocalRepo?: (cwd: string) => void
   onRefreshLocalRepoBranch?: () => void
   onSelectLocalRepoBranch?: (branch: string) => void
-  /** When provided, a Plan mode toggle is shown. Plan mode researches read-only and proposes a plan before editing. */
-  planMode?: boolean
-  onPlanModeChange?: (next: boolean) => void
   /** Workspaces a new thread can boot from. The picker appears only when there are several. */
   workspaceOptions?: Array<WorkspaceOption>
   selectedWorkspace?: string | null
@@ -209,12 +195,7 @@ export function buildCommandItems(
     }))
 }
 
-/**
- * The prompt composer: a Lexical editor with `@file` chips, `/command`
- * autocomplete, and `$skill` autocomplete, plus the control row (model, plan
- * mode, attachments, context)
- * and the send/stop button.
- */
+/** Prompt editor with autocomplete, model selection, attachments, and send/stop controls. */
 export const ChatComposer = memo(function ChatComposer({
   placeholder = "Ask Open SWE to build, fix bugs, explore",
   autoFocus = false,
@@ -245,8 +226,6 @@ export const ChatComposer = memo(function ChatComposer({
   onRemoveLocalRepo,
   onRefreshLocalRepoBranch,
   onSelectLocalRepoBranch,
-  planMode = false,
-  onPlanModeChange,
   workspaceOptions = [],
   selectedWorkspace = null,
   onWorkspaceChange,
@@ -439,11 +418,9 @@ export const ChatComposer = memo(function ChatComposer({
         ""
       )
       applyPrompt(next.text, next.cursor)
-      if (item.command === "plan") onPlanModeChange?.(true)
-      if (item.command === "default") onPlanModeChange?.(false)
       if (item.command === "model") setModelPickerOpen(true)
     },
-    [applyPrompt, onPlanModeChange, trigger, value]
+    [applyPrompt, trigger, value]
   )
 
   const handleCommandKeyDown = useCallback(
@@ -473,10 +450,6 @@ export const ChatComposer = memo(function ChatComposer({
         }
       }
 
-      if (key === "Tab" && event.shiftKey && onPlanModeChange) {
-        onPlanModeChange(!planMode)
-        return true
-      }
       if (key === "Enter" && !event.shiftKey) {
         if (canSubmit) void handleSubmit()
         // Swallow it either way: a bare Enter must never insert a newline in a
@@ -491,8 +464,6 @@ export const ChatComposer = memo(function ChatComposer({
       commandItems,
       handleSubmit,
       menuOpen,
-      onPlanModeChange,
-      planMode,
       selectCommandItem,
       triggerKey,
     ]
@@ -794,12 +765,6 @@ export const ChatComposer = memo(function ChatComposer({
                 <ImagePlus />
                 Attach images
               </MenuItem>
-              {onPlanModeChange && (
-                <MenuItem onClick={() => onPlanModeChange(!planMode)}>
-                  <MapIcon />
-                  {planMode ? "Disable plan mode" : "Enable plan mode"}
-                </MenuItem>
-              )}
             </MenuPopup>
           </Menu>
 
@@ -815,26 +780,6 @@ export const ChatComposer = memo(function ChatComposer({
                 selection={selection}
                 triggerClassName="h-7 max-w-full rounded-md px-2 text-xs/relaxed text-muted-foreground/70 hover:bg-muted hover:text-foreground/80"
               />
-            )}
-
-            {planMode && onPlanModeChange && (
-              <Tooltip>
-                <TooltipTrigger
-                  render={
-                    <ComposerControl
-                      aria-label="Exit plan mode"
-                      aria-pressed
-                      className="bg-primary/10 text-primary hover:bg-primary/15 hover:text-primary"
-                      onClick={() => onPlanModeChange(false)}
-                      type="button"
-                    />
-                  }
-                >
-                  <ComposerControlIcon icon={MapIcon} />
-                  <span>Plan</span>
-                </TooltipTrigger>
-                <TooltipPopup side="top">Exit plan mode</TooltipPopup>
-              </Tooltip>
             )}
           </div>
 
