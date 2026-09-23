@@ -1,5 +1,4 @@
 import asyncio
-from datetime import UTC, datetime, timedelta
 from typing import Any
 from unittest.mock import AsyncMock
 
@@ -256,7 +255,7 @@ async def test_concurrent_failure_evaluations_dispatch_once(
     assert await baby_sit.evaluate_watch("acme/repo#7") == "duplicate"
 
 
-async def test_success_waits_for_stable_check_set_then_wakes_the_agent(
+async def test_green_webhook_wakes_the_agent_and_stops_the_watch(
     watch_client: _Client, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     await _start_watch(watch_client)
@@ -280,18 +279,16 @@ async def test_success_waits_for_stable_check_set_then_wakes_the_agent(
     monkeypatch.setattr(baby_sit, "post_slack_thread_reply", notify)
     dispatch = AsyncMock(return_value={"run_id": "run-1"})
     monkeypatch.setattr(baby_sit, "dispatch_agent_run", dispatch)
+    payload = {
+        "installation": {"id": 99},
+        "repository": {"owner": {"login": "acme"}, "name": "repo"},
+        "check_run": {"status": "completed", "conclusion": "success", "head_sha": "head-1"},
+    }
 
-    now = datetime(2026, 1, 1, tzinfo=UTC)
-    monkeypatch.setattr(baby_sit, "_now", lambda: now)
-    assert await baby_sit.evaluate_watch("acme/repo#7") == "settling"
-    dispatch.assert_not_awaited()
-
-    monkeypatch.setattr(
-        baby_sit,
-        "_now",
-        lambda: now + timedelta(minutes=baby_sit.CHECK_SET_SETTLE_MINUTES),
-    )
-    assert await baby_sit.evaluate_watch("acme/repo#7") == "stopped"
+    assert await baby_sit.handle_ci_webhook(payload, "check_run") == {
+        "matched": 1,
+        "dispatched": 0,
+    }
     dispatch.assert_awaited_once()
     assert dispatch.await_args is not None
     assert "/baby-sit --ready" in dispatch.await_args.args[1]

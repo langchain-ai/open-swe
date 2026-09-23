@@ -261,13 +261,10 @@ def head_sha_from_check_payload(payload: dict[str, Any], event_type: str) -> str
     return ""
 
 
-def is_failing_ci_payload(payload: dict[str, Any], event_type: str) -> bool:
-    """Return whether a CI webhook payload represents a completed failure."""
+def is_completed_ci_payload(payload: dict[str, Any], event_type: str) -> bool:
+    """Return whether a CI webhook payload reports a finished check, whatever its outcome."""
     if event_type in {"check_run", "check_suite", "workflow_run"}:
-        node = payload.get(event_type) or {}
-        if node.get("status") != "completed":
-            return False
-        return node.get("conclusion") in FAILING_CONCLUSIONS
+        return (payload.get(event_type) or {}).get("status") == "completed"
     if event_type == "status":
-        return payload.get("state") in {"failure", "error"}
+        return payload.get("state") in {"success", "failure", "error"}
     return False

@@ -67,18 +67,16 @@ def test_sha_from_status_event() -> None:
     assert github_ci.branch_from_check_payload(payload, "status") == "b1"
 
 
-def test_is_failing_ci_payload() -> None:
-    assert github_ci.is_failing_ci_payload(
-        {"check_run": {"status": "completed", "conclusion": "failure"}}, "check_run"
-    )
-    assert not github_ci.is_failing_ci_payload(
-        {"check_run": {"status": "completed", "conclusion": "success"}}, "check_run"
-    )
-    assert not github_ci.is_failing_ci_payload(
+def test_is_completed_ci_payload() -> None:
+    for conclusion in ("failure", "success"):
+        assert github_ci.is_completed_ci_payload(
+            {"check_run": {"status": "completed", "conclusion": conclusion}}, "check_run"
+        )
+    assert not github_ci.is_completed_ci_payload(
         {"check_run": {"status": "in_progress", "conclusion": None}}, "check_run"
     )
-    assert github_ci.is_failing_ci_payload({"state": "failure"}, "status")
-    assert not github_ci.is_failing_ci_payload({"state": "pending"}, "status")
+    assert github_ci.is_completed_ci_payload({"state": "success"}, "status")
+    assert not github_ci.is_completed_ci_payload({"state": "pending"}, "status")
 
 
 @pytest.mark.asyncio

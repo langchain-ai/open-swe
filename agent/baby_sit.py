@@ -4,7 +4,6 @@ import hashlib
 import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from langgraph_sdk import get_client
@@ -18,7 +17,7 @@ from agent.github.ci import (
     branch_from_check_payload,
     fetch_pr,
     head_sha_from_check_payload,
-    is_failing_ci_payload,
+    is_completed_ci_payload,
     list_check_runs,
     list_commit_statuses,
 )
@@ -39,7 +38,6 @@ MAX_DISPATCH_KEYS = 30
 MAX_DELIVERY_IDS = 50
 MAX_ALERT_KEYS = 30
 MAX_EVALUATION_ERRORS = 3
-CHECK_SET_SETTLE_MINUTES = 10
 WATCH_LOCK_TTL_MINUTES = 5
 
 
@@ -67,10 +65,6 @@ async def _watch_lock(key: str) -> AsyncIterator[bool]:
             logger.warning("Failed to release baby-sit lock for %s", key, exc_info=True)
 
 
-def _now() -> datetime:
-    return datetime.now(UTC)
-
-
 class BabySitWatch(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
@@ -87,8 +81,6 @@ class BabySitWatch(BaseModel):
     run_config: dict[str, Any] = Field(default_factory=dict)
     source_context: SourceContext = Field(default_factory=SourceContext)
     retry_count: int = 0
-    settled_check_key: str = ""
-    settled_check_at: str | None = None
     dispatch_keys: list[str] = Field(default_factory=list)
     delivery_ids: list[str] = Field(default_factory=list)
     alert_keys: list[str] = Field(default_factory=list)
@@ -96,22 +88,6 @@ class BabySitWatch(BaseModel):
     cron_id: str | None = None
     created_at: str = ""
     updated_at: str = ""
-
-    def check_set_settled(self, key: str) -> bool:
-        """Whether ``key`` has been the check set long enough to trust it as final."""
-        if self.settled_check_key != key:
-            self.settled_check_key = key
-            self.settled_check_at = _now().isoformat()
-            return False
-        if not self.settled_check_at:
-            self.settled_check_at = _now().isoformat()
-            return False
-        try:
-            first_seen = datetime.fromisoformat(self.settled_check_at.replace("Z", "+00:00"))
-        except ValueError:
-            self.settled_check_at = _now().isoformat()
-            return False
-        return _now() - first_seen >= timedelta(minutes=CHECK_SET_SETTLE_MINUTES)
 
     def dispatch_config(self) -> dict[str, Any]:
         configurable = dict(self.run_config)
@@ -234,8 +210,6 @@ async def start_watch(
         run_config=run_config,
         source_context=source_context,
         retry_count=carried.retry_count if carried else 0,
-        settled_check_key=carried.settled_check_key if carried else "",
-        settled_check_at=carried.settled_check_at if carried else None,
         dispatch_keys=list(carried.dispatch_keys) if carried else [],
         delivery_ids=list(carried.delivery_ids) if carried else [],
         alert_keys=list(carried.alert_keys) if carried else [],
@@ -385,20 +359,6 @@ def _failure_key(head_sha: str, retry_count: int) -> str:
     return hashlib.sha256(f"{head_sha}|retry:{retry_count}".encode()).hexdigest()
 
 
-def _check_set_key(check_runs: list[dict[str, Any]], statuses: list[dict[str, Any]]) -> str:
-    checks = sorted(
-        f"check:{run.get('id')}:{run.get('name')}:{run.get('status')}:{run.get('conclusion')}"
-        for run in check_runs
-    )
-    checks.extend(
-        sorted(
-            f"status:{status.get('id')}:{status.get('context')}:{status.get('state')}"
-            for status in statuses
-        )
-    )
-    return hashlib.sha256("|".join(checks).encode()).hexdigest()
-
-
 def aggregate_check_state(
     check_runs: list[dict[str, Any]], statuses: list[dict[str, Any]]
 ) -> tuple[str, list[dict[str, Any]]]:
@@ -481,8 +441,6 @@ async def _evaluate_watch(key: str, *, token: str | None = None) -> str:
     if head_sha != watch.head_sha:
         watch.head_sha = head_sha
         watch.retry_count = 0
-        watch.settled_check_key = ""
-        watch.settled_check_at = None
         watch.dispatch_keys = []
         watch.alert_keys = []
 
@@ -498,14 +456,9 @@ async def _evaluate_watch(key: str, *, token: str | None = None) -> str:
     watch.evaluation_errors = 0
     state, failures = aggregate_check_state(check_runs, statuses)
     if state == "pending":
-        watch.settled_check_key = ""
-        watch.settled_check_at = None
         await WATCHES.save(watch)
         return state
     if state == "success":
-        if not watch.check_set_settled(_check_set_key(check_runs, statuses)):
-            await WATCHES.save(watch)
-            return "settling"
         return await _finish_ready(watch)
     if state == "blocked":
         return await _finish_watch(
@@ -549,7 +502,7 @@ async def _evaluate_watch(key: str, *, token: str | None = None) -> str:
 async def handle_ci_webhook(
     payload: dict[str, Any], event_type: str, *, delivery_id: str | None = None
 ) -> dict[str, int]:
-    if not is_failing_ci_payload(payload, event_type):
+    if not is_completed_ci_payload(payload, event_type):
         return {"matched": 0, "dispatched": 0}
     repository = payload.get("repository")
     owner_node = repository.get("owner") if isinstance(repository, dict) else None

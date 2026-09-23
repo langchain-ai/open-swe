@@ -54,12 +54,11 @@ async function control(
   request: APIRequestContext,
   path: string,
   data: unknown,
-): Promise<unknown> {
+): Promise<void> {
   const res = await request.post(path, { data });
   if (!res.ok()) {
     throw new Error(`POST ${path} → ${res.status()}: ${await res.text()}`);
   }
-  return await res.json();
 }
 
 async function approvals(request: APIRequestContext): Promise<Array<Approval>> {
@@ -287,12 +286,9 @@ test.describe("Expedited Slack review", () => {
     expect(approvedReviews(await pull(request))).toHaveLength(0);
     expect((await approvals(request)).at(-1)?.state).toBe("open");
 
-    // 6. GitHub reports the new head GREEN. The watch's tick wakes the agent,
-    //    which merges on the recorded approvals.
+    // 6. GitHub reports the new head GREEN. That webhook wakes the agent at
+    //    once, which merges on the recorded approvals.
     await reportCheck(request, fixed.head_sha, "success");
-    expect(
-      await control(request, "/control/baby-sit-tick", { number: PR_NUMBER }),
-    ).toEqual({ status: "stopped" });
     await expect
       .poll(async () => (await pull(request)).merged, { timeout: 120_000 })
       .toBe(true);
