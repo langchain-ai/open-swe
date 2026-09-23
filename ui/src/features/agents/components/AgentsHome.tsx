@@ -109,7 +109,10 @@ export function AgentsHome({
   const visibility =
     visibilityOverride ?? preferences.data?.default_visibility ?? "private"
   const workspaceOptionsQuery = useWorkspaceOptions(cloudEnabled)
-  const workspaces = workspaceOptionsQuery.data?.workspaces ?? []
+  const workspaces = useMemo(
+    () => workspaceOptionsQuery.data?.workspaces ?? [],
+    [workspaceOptionsQuery.data]
+  )
   // undefined = untouched, so the run falls back to the repo's own workspace,
   // then the default one.
   const [workspaceOverride, setWorkspaceOverride] = useState<string | null>(
