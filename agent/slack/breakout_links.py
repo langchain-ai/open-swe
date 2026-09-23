@@ -17,4 +17,4 @@ async def post_breakout_link(channel_id: str, source_ts: str, breakout_ts: str) 
         if permalink
         else "Continued in a breakout thread"
     )
-    await post_slack_thread_reply(channel_id, source_ts, f":leftward_arrow_with_hook: {link}")
+    await post_slack_thread_reply(channel_id, source_ts, f":leftwards_arrow_with_hook: {link}")
