@@ -347,12 +347,12 @@ it("keeps displayed column percentages at 100 with repeating fractions", async (
 })
 
 it.each([
-  [14, "hover"],
-  [21, "focus"],
-  [7, "tap"],
+  [14, "hover", "high", "High"],
+  [21, "focus", "low", "Low"],
+  [7, "tap", null, "Unknown / legacy"],
 ] as const)(
   "shows Open totals and age breakdown at %i days on %s",
-  async (maturityDays, interaction) => {
+  async (maturityDays, interaction, effort, effortLabel) => {
     vi.spyOn(api, "prMergeRateByModel").mockResolvedValue(
       report({
         ...captured,
@@ -375,7 +375,7 @@ it.each([
             avg_delivery_seconds: 7200,
             efforts: [
               {
-                effort: "high",
+                effort,
                 merged: 3,
                 closed_without_merge: 1,
                 mature_pending: 1,
@@ -397,7 +397,10 @@ it.each([
     const table = (await screen.findByText("example-model")).closest("table")!
     expect(
       within(table).getAllByRole("columnheader")[1]!.textContent
-    ).toContain("example-model")
+    ).toContain(`example-model${effortLabel} · configured attribution`)
+    expect(
+      within(table).queryByRole("button", { name: /reasoning efforts/ })
+    ).toBeNull()
     const cell = (label: string) =>
       within(table)
         .getByRole("rowheader", { name: label })
