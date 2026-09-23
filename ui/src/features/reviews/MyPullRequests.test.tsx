@@ -167,12 +167,15 @@ const mergeOptions = async (select: HTMLElement) => {
   return names
 }
 const chooseMerge = async (number: number, name: string) => {
-  fireEvent.click(await mergeSelect(number))
+  const select = await mergeSelect(number)
+  fireEvent.click(select)
   fireEvent.keyDown(await screen.findByRole("option", { name }), {
     key: "Enter",
   })
+  await waitFor(() => expect(mergeValue(select)).toBe(name))
 }
-const mergeValue = (select: HTMLElement) => select.textContent
+const mergeValue = (select: HTMLElement) =>
+  select.querySelector('[data-slot="select-value"]')?.textContent
 
 beforeEach(() => {
   vi.mocked(api.repoMergeMethods).mockResolvedValue({

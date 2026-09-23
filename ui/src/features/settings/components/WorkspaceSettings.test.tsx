@@ -295,7 +295,7 @@ describe("WorkspaceSettingsPanel", () => {
 
     // The chip in General plus the option in the portalled dropdown; Core's repo nowhere.
     expect(screen.getAllByText("acme/oss").length).toBeGreaterThan(1)
-    const option = screen.getByRole("button", { name: "acme/oss" })
+    const option = await screen.findByRole("option", { name: "acme/oss" })
     expect(option.closest("section")).toBeNull()
     expect(screen.queryByText("acme/api")).toBeNull()
   })

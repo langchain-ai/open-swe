@@ -8,16 +8,6 @@ import type { DesktopLocalThreadSummary } from "@/desktop"
 import type { AgentThread } from "@/features/agents/lib/types"
 import type { AppCommand } from "@/lib/appCommands"
 
-vi.stubGlobal(
-  "ResizeObserver",
-  class {
-    observe() {}
-    unobserve() {}
-    disconnect() {}
-  }
-)
-Element.prototype.scrollIntoView = vi.fn()
-
 const mocks = vi.hoisted(() => ({
   navigate: vi.fn(),
   fetchNextPage: vi.fn(),

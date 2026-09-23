@@ -9,7 +9,7 @@ async function writeClipboard(text: string): Promise<void> {
     await window.openSweDesktop.writeClipboard(text)
     return
   }
-  if (window.isSecureContext && "clipboard" in navigator) {
+  if (typeof navigator.clipboard?.writeText === "function") {
     try {
       await navigator.clipboard.writeText(text)
       return

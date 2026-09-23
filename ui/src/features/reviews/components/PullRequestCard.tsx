@@ -103,8 +103,10 @@ export function PullRequestCard({
   // controls, and a click that lands on one of those means that control. The
   // title stays a real button so the card is reachable without a pointer.
   const openFromCard = (event: ReactMouseEvent<HTMLDivElement>) => {
-    if (event.target instanceof Element && event.target.closest(interactive))
-      return
+    if (!(event.target instanceof Element)) return
+    // Portalled popups (select options, menus) bubble here through React.
+    if (!event.currentTarget.contains(event.target)) return
+    if (event.target.closest(interactive)) return
     if (window.getSelection()?.toString()) return
     onSelect()
   }
