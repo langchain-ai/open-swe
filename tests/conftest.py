@@ -31,7 +31,7 @@ _MAX_PARAM_ID_CHARS = 40
 def pytest_make_parametrize_id(config: pytest.Config, val: object, argname: str) -> str | None:
     """Keep node IDs short; a 100 KB ID line truncates `gh run view --log-failed` output."""
     if isinstance(val, str) and len(val) > _MAX_PARAM_ID_CHARS:
-        return f"{argname}-len{len(val)}"
+        return f"{argname}-{hashlib.sha256(val.encode()).hexdigest()[:8]}"
     return None
 
 
