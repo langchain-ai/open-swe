@@ -39,6 +39,7 @@ import {
   XIcon,
 } from "@phosphor-icons/react"
 import { IoLogoGithub } from "react-icons/io5"
+import { toast } from "sonner"
 import {
   FileDiff,
   MultiFileDiff,
@@ -1464,8 +1465,24 @@ function WalkthroughCallout({ detail }: { detail: ReviewDetail }) {
         queryKey: ["review", detail.owner, detail.repo, detail.number],
       })
     },
+    onError: (error) =>
+      toast.error("Couldn't start the walkthrough", {
+        description: error.message,
+      }),
   })
   const running = detail.walkthrough_running || scout.isPending
+  // This card only renders while there is no walkthrough, so a scout that
+  // stops running while it is still mounted ended without one.
+  const wasRunning = useRef(detail.walkthrough_running)
+  useEffect(() => {
+    if (wasRunning.current && !detail.walkthrough_running) {
+      toast.error("The walkthrough failed to build", {
+        description:
+          "The review scout finished without producing steps. Try again, or check its review-scout run in LangSmith.",
+      })
+    }
+    wasRunning.current = detail.walkthrough_running
+  }, [detail.walkthrough_running])
   return (
     <div className="mt-4 flex items-center gap-4 rounded-lg border border-primary/40 bg-primary/5 p-4">
       <ListNumbersIcon className="size-6 shrink-0 text-primary" />
@@ -1478,9 +1495,6 @@ function WalkthroughCallout({ detail }: { detail: ReviewDetail }) {
             ? "The review scout is ordering the changes into narrated steps. This takes a few minutes; the page updates on its own."
             : "The review scout orders the changes into narrated steps and moves mechanical edits to the end."}
         </p>
-        {scout.error && (
-          <p className="mt-1 text-xs text-destructive">{scout.error.message}</p>
-        )}
       </div>
       <Button size="lg" onClick={() => scout.mutate()} disabled={running}>
         {running ? (
