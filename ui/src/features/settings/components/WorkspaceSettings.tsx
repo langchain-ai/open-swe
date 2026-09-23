@@ -1,4 +1,5 @@
 import { useState } from "react"
+import { CircleNotchIcon } from "@phosphor-icons/react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 
 import {
@@ -136,6 +137,15 @@ export function WorkspaceSettingsPanel({
 }) {
   const qc = useQueryClient()
   const [deleting, setDeleting] = useState(false)
+  const [repositoryRebuild, setRepositoryRebuild] = useState<{
+    slug: string
+    finishedAt: WorkspaceRecord["refresh_finished_at"]
+  } | null>(null)
+  const awaitingRepositoryRebuild = (workspace: WorkspaceRecord | undefined) =>
+    repositoryRebuild?.slug === slug &&
+    (!workspace ||
+      workspace.refresh_finished_at === repositoryRebuild.finishedAt ||
+      !["success", "failed"].includes(workspace.refresh_status ?? "never"))
   const deleteWorkspace = useMutation({
     mutationFn: api.deleteWorkspace,
     onSuccess: async () => {
@@ -150,7 +160,10 @@ export function WorkspaceSettingsPanel({
     // A rebuild runs in the background; keep the image state and the rebuild
     // button following it until it settles.
     refetchInterval: (query) =>
-      query.state.data?.refresh_status === "refreshing" ? 5000 : false,
+      query.state.data?.refresh_status === "refreshing" ||
+      awaitingRepositoryRebuild(query.state.data)
+        ? 5000
+        : false,
   })
   const options = useWorkspaceOptions(true)
   // Model options follow the workspace: the Fable flag that gates some of
@@ -173,6 +186,20 @@ export function WorkspaceSettingsPanel({
   }
 
   const onSaved = (saved: WorkspaceRecord) => {
+    const previousRepos = new Set(
+      record.data.repos.map((repo) => repo.toLowerCase())
+    )
+    const savedRepos = new Set(saved.repos.map((repo) => repo.toLowerCase()))
+    if (
+      saved.setup_script &&
+      (previousRepos.size !== savedRepos.size ||
+        [...savedRepos].some((repo) => !previousRepos.has(repo)))
+    ) {
+      setRepositoryRebuild({
+        slug,
+        finishedAt: record.data.refresh_finished_at,
+      })
+    }
     qc.setQueryData(workspaceRecordKey(slug), saved)
     void qc.invalidateQueries({ queryKey: workspaceOptionKeys.all })
   }
@@ -198,6 +225,31 @@ export function WorkspaceSettingsPanel({
         channelLabel={channelLabel}
         onSaved={onSaved}
       />
+      {awaitingRepositoryRebuild(record.data) ||
+      record.data.refresh_status === "refreshing" ? (
+        <p
+          role="status"
+          className="flex items-center gap-2 text-sm text-muted-foreground"
+        >
+          <CircleNotchIcon
+            aria-hidden="true"
+            className="size-4 animate-spin motion-reduce:animate-none"
+          />
+          {record.data.refresh_status === "refreshing"
+            ? "Rebuilding sandbox image…"
+            : "Repositories saved. Sandbox image rebuild queued…"}{" "}
+          Existing runs keep their current image.
+        </p>
+      ) : repositoryRebuild?.slug === slug ? (
+        <p
+          role={record.data.refresh_status === "failed" ? "alert" : "status"}
+          className="text-sm text-muted-foreground"
+        >
+          {record.data.refresh_status === "failed"
+            ? `Image rebuild failed. ${record.data.refresh_error ?? "The previous image is still in use."}`
+            : "Sandbox image rebuilt with the saved repositories."}
+        </p>
+      ) : null}
       <WorkspaceSandboxSection
         key={`sandbox:${record.data.setup_script ?? ""}:${record.data.update_script ?? ""}`}
         record={record.data}

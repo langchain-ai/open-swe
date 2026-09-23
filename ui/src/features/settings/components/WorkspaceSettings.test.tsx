@@ -2,6 +2,7 @@
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import {
+  act,
   cleanup,
   fireEvent,
   render,
@@ -206,7 +207,101 @@ describe("WorkspaceSettingsPanel", () => {
         prompt: "Run make test.",
       })
     )
+    await waitFor(() =>
+      expect(
+        (screen.getByLabelText("Workspace name") as HTMLInputElement).value
+      ).toBe("OSS support")
+    )
+    expect(screen.queryByRole("status")).toBeNull()
   })
+
+  it.each(["success", "failed"] as const)(
+    "follows a repository rebuild through stale polls to %s",
+    async (outcome) => {
+      const initial = {
+        ...RECORD,
+        refresh_finished_at: "2026-01-01T00:00:00Z",
+      }
+      mockApis(initial)
+      vi.spyOn(api, "repos").mockResolvedValue({
+        installations: [],
+        repositories: [],
+      })
+      const saved = { ...initial, repos: [] }
+      vi.spyOn(api, "updateWorkspace").mockResolvedValue(saved)
+      renderPage()
+
+      fireEvent.click(
+        await screen.findByRole("button", { name: "Choose repositories" })
+      )
+      fireEvent.click(await screen.findByRole("checkbox", { name: "acme/oss" }))
+      fireEvent.click(
+        screen.getByRole("button", { name: "Save 0 repositories" })
+      )
+      await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull())
+
+      vi.useFakeTimers({
+        toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval"],
+      })
+      try {
+        await act(async () => {
+          fireEvent.click(screen.getByRole("button", { name: "Save" }))
+          await vi.advanceTimersByTimeAsync(1)
+        })
+        expect(screen.getByRole("status").textContent).toContain(
+          "rebuild queued"
+        )
+
+        const getWorkspace = vi
+          .mocked(api.getWorkspace)
+          .mockResolvedValue(saved)
+        const reads = getWorkspace.mock.calls.length
+        await act(async () => {
+          await vi.advanceTimersByTimeAsync(5001)
+        })
+        expect(getWorkspace.mock.calls.length).toBeGreaterThan(reads)
+        expect(screen.getByRole("status").textContent).toContain(
+          "rebuild queued"
+        )
+
+        getWorkspace.mockResolvedValue({
+          ...saved,
+          refresh_status: "refreshing",
+        })
+        await act(async () => {
+          await vi.advanceTimersByTimeAsync(5001)
+        })
+        expect(screen.getByRole("status").textContent).toContain(
+          "Rebuilding sandbox image"
+        )
+
+        getWorkspace.mockResolvedValue({
+          ...saved,
+          refresh_status: outcome,
+          refresh_finished_at: "2026-01-01T00:01:00Z",
+          refresh_error: outcome === "failed" ? "Setup script exited 1" : null,
+        })
+        await act(async () => {
+          await vi.advanceTimersByTimeAsync(5001)
+        })
+        expect(
+          screen.getByRole(outcome === "failed" ? "alert" : "status")
+            .textContent
+        ).toContain(
+          outcome === "failed"
+            ? "Image rebuild failed. Setup script exited 1"
+            : "Sandbox image rebuilt with the saved repositories."
+        )
+        const settledReads = getWorkspace.mock.calls.length
+        await act(async () => {
+          await vi.advanceTimersByTimeAsync(10001)
+        })
+        expect(getWorkspace.mock.calls.length).toBe(settledReads)
+      } finally {
+        vi.useRealTimers()
+      }
+    }
+  )
 
   it("shows a save conflict in the alert region", async () => {
     mockApis()
