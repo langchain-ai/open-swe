@@ -111,6 +111,7 @@ async def test_assessment_on_empty_re_review_respects_existing_findings(
             ):
                 result = await tool.ainvoke(
                     {
+                        "ranking": [],
                         "assessment": _assessment().model_dump(),
                         "state": {"review_approval_policy": "Docs only"},
                     }
@@ -118,6 +119,7 @@ async def test_assessment_on_empty_re_review_respects_existing_findings(
         else:
             result = await tool.ainvoke(
                 {
+                    "ranking": [],
                     "assessment": _assessment().model_dump(),
                     "state": {"review_approval_policy": "Docs only"},
                 }

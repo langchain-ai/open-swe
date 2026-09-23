@@ -740,7 +740,7 @@ async def _link_interaction_authors(session: AsyncSession, rows: list[FindingRow
         .where(UserIdentity.provider == "github", func.lower(UserIdentity.login).in_(logins))
         .order_by(UserIdentity.last_seen_at)
     )
-    user_ids = dict(matches.tuples())
+    user_ids = dict(matches.tuples().all())
     for interaction in pending:
         if interaction.author:
             interaction.author_user_id = user_ids.get(interaction.author.lower())
@@ -821,7 +821,7 @@ async def _stored_findings(thread_ids: list[str]) -> dict[str, list[Finding]]:
                 FindingState.reviewer_thread_id.in_(thread_ids)
             )
         )
-        thread_by_pull_request = dict(states.tuples())
+        thread_by_pull_request = dict(states.tuples().all())
         out: dict[str, list[Finding]] = {
             thread_id: [] for thread_id in thread_by_pull_request.values()
         }
