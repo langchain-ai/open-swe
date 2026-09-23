@@ -140,7 +140,6 @@ async def post_card(
         text,
         blocks=block_payload(blocks),
         agent_thread_id=approval.thread_id or None,
-        reply_broadcast=True,
     )
 
 

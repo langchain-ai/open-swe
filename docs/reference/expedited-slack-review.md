@@ -61,8 +61,8 @@ PR link, revision, author, the diff as the card draws it, and its status. A draf
 card has one button, **Mark ready for review**; otherwise it has **Approve** and
 **Reject**. Once approved, the diff and buttons go and the card
 says who approved. Once merged, the whole card becomes *Expedited review: merged* and
-the PR link. It is posted in the thread and also sent to the channel, so approvers
-outside the thread see it. Reactions are never votes.
+the PR link. It is posted in the thread only, never broadcast to the channel.
+Reactions are never votes.
 
 ### Voting
 
