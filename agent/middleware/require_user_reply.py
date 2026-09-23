@@ -9,9 +9,15 @@ when the conversation moves between Slack and the web.
 import json
 import logging
 from collections.abc import Awaitable, Callable, Mapping, Sequence
-from typing import Any, Literal, NotRequired
+from typing import Annotated, Any, Literal, NotRequired
 
-from langchain.agents.middleware.types import AgentState, ModelRequest, ModelResponse, hook_config
+from langchain.agents.middleware.types import (
+    AgentState,
+    ModelRequest,
+    ModelResponse,
+    OmitFromOutput,
+    hook_config,
+)
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage, ToolMessage
 from langgraph.runtime import Runtime
 
@@ -28,9 +34,9 @@ WEB_REPLY_SURFACE: ReplySurface = "web"
 
 
 class ReplySurfaceState(AgentState):
-    reply_surface: NotRequired[ReplySurface]
-    reply_nudges: NotRequired[int]
-    reply_nudge_pending: NotRequired[bool]
+    reply_surface: NotRequired[Annotated[ReplySurface, OmitFromOutput]]
+    reply_nudges: NotRequired[Annotated[int, OmitFromOutput]]
+    reply_nudge_pending: NotRequired[Annotated[bool, OmitFromOutput]]
 
 
 def current_reply_surface(state: Mapping[str, Any]) -> ReplySurface:

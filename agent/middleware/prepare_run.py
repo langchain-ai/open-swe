@@ -1,12 +1,13 @@
 import hashlib
 import json
 from collections.abc import Awaitable, Callable, Mapping
-from typing import Any, NotRequired, cast
+from typing import Annotated, Any, NotRequired, cast
 
 from langchain.agents.middleware.types import (
     AgentState,
     ModelRequest,
     ModelResponse,
+    OmitFromOutput,
 )
 from langchain_core.messages import SystemMessage
 from langgraph.runtime import Runtime
@@ -16,10 +17,10 @@ from agent.utils.startup_trace import aphase, flush_phases
 
 
 class PrepareRunState(AgentState):
-    run_prepared: NotRequired[bool]
-    run_prepared_for: NotRequired[str]
-    work_dir: NotRequired[str | None]
-    rendered_system_prompt: NotRequired[str | None]
+    run_prepared: NotRequired[Annotated[bool, OmitFromOutput]]
+    run_prepared_for: NotRequired[Annotated[str, OmitFromOutput]]
+    work_dir: NotRequired[Annotated[str | None, OmitFromOutput]]
+    rendered_system_prompt: NotRequired[Annotated[str | None, OmitFromOutput]]
 
 
 def _latest_message_fingerprint(state: Mapping[str, Any]) -> str | None:
