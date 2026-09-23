@@ -61,6 +61,7 @@ const plan: PlanData = {
   status: "shared",
   html: "<h1>Plan</h1>",
   markdown: "",
+  dismissed: false,
   user: {
     id: "user-1",
     login: "alice",

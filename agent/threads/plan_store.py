@@ -86,6 +86,13 @@ async def save_plan_content(
     await _merge_thread_metadata(thread_id, metadata)
 
 
+async def dismiss_plan(thread_id: str, content: dict[str, Any]) -> None:
+    """Hide the current revision's inline preview until a new revision is published."""
+    revision = content.get("revision") or str(uuid.uuid4())
+    record = {**content, "revision": revision, "dismissed_revision": revision}
+    await put_value(PLAN_CONTENT_NAMESPACE, thread_id, record)
+
+
 async def write_plan_to_sandbox(
     thread_id: str, content: str, *, plan_file_path: str | None = None
 ) -> str:
