@@ -15,17 +15,22 @@ from agent.threads.access import (
     _authorized_thread_metadata,
     _readable_thread_metadata,
 )
+from agent.threads.principals import Principal
 from agent.threads.runs import (
     _ASSISTANT_ID,
+    QUEUED_BY_KEY,
     _enrich_run_start_command,
+    _enrich_system_run_start_command,
     _extract_run_id_from_command_response,
     _notify_slack_web_handoff,
+    offload_requested,
+    queue_follow_up_run,
+    steer_running_thread,
 )
 from agent.threads.summary import (
     _assert_thread_postable,
     _now_ms,
     _thread_is_busy,
-    assert_thread_readable,
 )
 from agent.utils.json_types import thread_metadata
 from agent.utils.streaming import TERMINAL_LIFECYCLE_EVENTS, root_lifecycle
@@ -145,8 +150,15 @@ async def proxy_dashboard_thread_commands(
     *,
     email: str | None = None,
     content_type: str = "application/json",
+    principal: Principal | None = None,
 ) -> tuple[int, bytes, str | None]:
+    """Forward one command, enriched for whoever sent it.
+
+    ``principal`` is how a machine gets in. Without one the sender is the person
+    named by ``login``, which is what the dashboard and the agent's own tools pass.
+    """
     received_at_ms = _now_ms()
+    principal = principal or Principal.of_login(login, email)
     require_json_content_type(content_type)
     try:
         parsed = json.loads(body)
@@ -180,26 +192,55 @@ async def proxy_dashboard_thread_commands(
         metadata = thread_metadata(thread)
         post_command = method in _THREAD_POST_COMMAND_METHODS
         if post_command:
-            _assert_thread_postable(metadata, login, email)
+            principal.assert_can_post(metadata)
         else:
-            assert_thread_readable(metadata, login, email)
+            principal.assert_can_read(metadata)
         if method != "run.start" and not (post_command and metadata.get("admin_thread") is True):
-            assert_thread_readable(metadata, login, email)
+            principal.assert_can_read(metadata)
         metadata_run_status = metadata.get("latest_run_status")
         thread_busy = _thread_is_busy(thread) or metadata_run_status in {"pending", "running"}
+
+    start_params = parsed.get("params") if isinstance(parsed.get("params"), dict) else {}
+    # The client's queue-or-steer choice rides the run's multitask strategy.
+    # LangGraph's commands endpoint does not take it, so it is consumed here.
+    enqueue = start_params.pop("multitask_strategy", None) == "enqueue"
+    if method == "run.start" and thread_busy:
+        if offload_requested(start_params):
+            raise HTTPException(409, "offloading requires an idle conversation")
+        # Queueing and steering both attribute the message to a person, which a
+        # machine has none of; it retries instead.
+        if principal.machine:
+            raise HTTPException(409, "thread is already running")
+        # A follow-up while a run is live either waits for that run as a queued
+        # run of its own, or joins it. Either reply keeps the protocol's shape
+        # so the client cannot tell them from a plain start.
+        handled = await (
+            queue_follow_up_run(thread_id, login, parsed, metadata=metadata, email=email)
+            if enqueue
+            else steer_running_thread(thread_id, login, parsed, metadata=metadata, email=email)
+        )
+        return 200, json.dumps(handled).encode(), "application/json"
 
     url = f"{langgraph_url().rstrip('/')}/threads/{thread_id}/commands"
     headers = langgraph_proxy_headers(content_type=content_type)
 
-    enriched = await _enrich_run_start_command(
-        thread_id,
-        login,
-        parsed,
-        metadata=metadata,
-        thread_busy=thread_busy,
-        creating=creating,
-        email=email,
-    )
+    if principal.machine:
+        enriched = await _enrich_system_run_start_command(
+            thread_id,
+            principal,
+            parsed,
+            metadata=metadata,
+            creating=creating,
+        )
+    else:
+        enriched = await _enrich_run_start_command(
+            thread_id,
+            login,
+            parsed,
+            metadata=metadata,
+            creating=creating,
+            email=email,
+        )
     outgoing = json.dumps(enriched).encode()
 
     if method == "run.start":
@@ -303,7 +344,15 @@ async def proxy_dashboard_thread_run_cancel(
     action: str = "interrupt",
     email: str | None = None,
 ) -> tuple[int, bytes, str | None]:
-    await _authorized_thread_metadata(thread_id, login, email=email)
+    metadata = await _authorized_thread_metadata(thread_id, login, email=email)
+    _assert_thread_postable(metadata, login, email)
+    try:
+        run = await langgraph_client().runs.get(thread_id, run_id)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(404, "run not found") from exc
+    queued_by = (run.get("metadata") or {}).get(QUEUED_BY_KEY)
+    if isinstance(queued_by, str) and login not in {queued_by, metadata.get("owner_login")}:
+        raise HTTPException(403, "only its sender can withdraw a queued follow-up")
     url = f"{langgraph_url().rstrip('/')}/threads/{thread_id}/runs/{run_id}/cancel"
     headers = langgraph_proxy_headers()
     async with httpx2.AsyncClient(timeout=_PROXY_REQUEST_TIMEOUT) as client:
@@ -313,14 +362,22 @@ async def proxy_dashboard_thread_run_cancel(
             params={"wait": wait, "action": action},
         )
     if response.status_code in {200, 202, 204}:
+        # Cancelling a queued run leaves the live one untouched, so the thread
+        # only reads as interrupted when nothing else is still running.
         try:
-            await langgraph_client().threads.update(
-                thread_id=thread_id,
-                metadata={
-                    "latest_run_status": "interrupted",
-                    "updated_at_ms": _now_ms(),
-                },
-            )
+            still_running = [
+                run
+                for run in await langgraph_client().runs.list(thread_id, status="running", limit=5)
+                if run.get("run_id") != run_id
+            ]
+            if not still_running:
+                await langgraph_client().threads.update(
+                    thread_id=thread_id,
+                    metadata={
+                        "latest_run_status": "interrupted",
+                        "updated_at_ms": _now_ms(),
+                    },
+                )
         except Exception:
             logger.debug(
                 "Could not update thread metadata after run cancel for %s",

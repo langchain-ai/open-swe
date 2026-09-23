@@ -2,6 +2,7 @@ import type { OpenPullRequest } from "@/lib/api"
 import { PullRequestLinks } from "../PullRequestLinks"
 import {
   canAttemptMerge,
+  canUpdateBranch,
   hasUnresolvedConversations,
   isFixable,
 } from "../lib/status"
@@ -9,6 +10,7 @@ import { ClosePullRequest } from "./ClosePullRequest"
 import { MarkPullRequestReady } from "./MarkPullRequestReady"
 import { MergePullRequest } from "./MergePullRequest"
 import { PullRequestThreadAction } from "./PullRequestThreadAction"
+import { UpdatePullRequestBranch } from "./UpdatePullRequestBranch"
 
 export type PullRequestOutcome = "merged" | "closed"
 
@@ -52,6 +54,9 @@ export function PullRequestActions({
             )}
             {pr.draft === true && (
               <MarkPullRequestReady pr={pr} onReady={onReady} />
+            )}
+            {canUpdateBranch(pr) && (
+              <UpdatePullRequestBranch pr={pr} onUpdated={onReady} />
             )}
             {canAttemptMerge(pr) && (
               <MergePullRequest pr={pr} onMerged={() => onSettled("merged")} />

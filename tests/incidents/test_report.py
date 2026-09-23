@@ -56,7 +56,9 @@ def test_report_without_supported_summary_remains_inconclusive(references):
 
 
 def _envelope(text: str) -> str:
-    return f'<input-message sender="slack:U1" surface="slack" kind="human">\n<content>{text}</content>\n</input-message>'
+    return (
+        f'<input-message sender="slack:U1" surface="slack" kind="human">\n{text}\n</input-message>'
+    )
 
 
 def test_context_headers_become_slack_evidence_once():

@@ -483,6 +483,8 @@ WITH runs AS (
     FROM metrics
 ), ranked AS (
     SELECT *,
+        feedback_given > 0 AND feedback_given = max(feedback_given) OVER ()
+            AS is_top_feedback_contributor,
         -- Sorting and disclosure must agree, so derive each displayed label once here
         -- and let both the ordering and the emitted row read the same column.
         CASE WHEN :admin OR is_current OR NULLIF(github_login, '') IS NOT NULL
@@ -548,6 +550,7 @@ WITH runs AS (
             'avg_invocations_per_thread', avg_invocations_per_thread,
             'prs_opened', prs_opened, 'merged_prs', merged_prs,
             'feedback_given', feedback_given,
+            'is_top_feedback_contributor', is_top_feedback_contributor,
             'merged_prs_per_thread', merged_prs_per_thread,
             'agent_loc', agent_loc, 'additions', additions, 'deletions', deletions,
             'total_tokens', total_tokens, 'total_cost_usd', total_cost_usd,

@@ -19,6 +19,7 @@ import {
   CheckCircleIcon,
   CheckIcon,
   CircleIcon,
+  CircleNotchIcon,
   CodeIcon,
   CopyIcon,
   FlagIcon,
@@ -38,7 +39,9 @@ import {
   XIcon,
 } from "@phosphor-icons/react"
 import { IoLogoGithub } from "react-icons/io5"
+import { toast } from "sonner"
 import {
+  FileDiff,
   MultiFileDiff,
   Virtualizer,
   WorkerPoolContextProvider,
@@ -49,6 +52,7 @@ import type { FileContents } from "@pierre/diffs/react"
 import type {
   FileDiff as CoreFileDiff,
   DiffLineAnnotation,
+  FileDiffMetadata,
   SelectedLineRange,
   SelectionSide,
 } from "@pierre/diffs"
@@ -70,8 +74,13 @@ import type { ChatAttachment } from "@/features/reviews/components/ReviewChat"
 import type { DiffStyle } from "@/features/agents/utils/diffUtils"
 import { Markdown } from "@/features/agents/components/chat/Markdown"
 import { DiffWrapToggle } from "@/features/agents/components/DiffWrapToggle"
+import { AuthorGuidanceCard } from "@/features/reviews/components/AuthorGuidanceCard"
 import { PrHeader } from "@/features/reviews/components/PrHeader"
 import { ReviewAssessmentCard } from "@/features/reviews/components/ReviewAssessmentCard"
+import {
+  rangeLineCount,
+  walkthroughFileDiff,
+} from "@/features/reviews/lib/walkthroughDiff"
 import {
   ReviewChat,
   ReviewChatComposerProvider,
@@ -90,7 +99,7 @@ import {
   useDiffOptions,
   warmDiffHighlighter,
 } from "@/features/agents/utils/diffUtils"
-import { IconButton } from "@/components/ui/button"
+import { Button, IconButton } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Textarea } from "@/components/ui/textarea"
 import { api, reviewImageProxyUrl } from "@/lib/api"
@@ -390,31 +399,43 @@ function scrollDiffLineToCenter(
   return true
 }
 
-function scrollFindingLineToCenter({
-  target,
-  finding,
-  scroller,
-}: {
-  target: RegisteredDiffInstance
-  finding: ReviewFinding
-  scroller: HTMLElement
-}): boolean {
-  if (finding.end_line === null) return false
-  return scrollDiffLineToCenter(
-    target,
-    finding.end_line,
-    findingSide(finding),
-    scroller
-  )
+/** A file as one walkthrough step shows it: only that step's hunks, unless `fileDiff` is null. */
+interface ResolvedGroupFile {
+  file: ReviewDiffFile
+  fileDiff: FileDiffMetadata | null
+  additions: number
+  deletions: number
+  /** First step the file appears in; scroll targets and diff instances register here. */
+  primary: boolean
 }
 
 interface ResolvedGroup {
   index: number
   title: string
   summary: string
-  files: Array<ReviewDiffFile>
+  files: Array<ResolvedGroupFile>
   additions: number
   deletions: number
+}
+
+function wholeGroupFile(
+  file: ReviewDiffFile,
+  primary: boolean
+): ResolvedGroupFile {
+  return {
+    file,
+    fileDiff: null,
+    additions: file.additions,
+    deletions: file.deletions,
+    primary,
+  }
+}
+
+function sumStats(files: Array<ResolvedGroupFile>) {
+  return {
+    additions: files.reduce((acc, entry) => acc + entry.additions, 0),
+    deletions: files.reduce((acc, entry) => acc + entry.deletions, 0),
+  }
 }
 
 const GROUP_STYLES = {
@@ -541,6 +562,20 @@ function useExpandedFinding(): ExpandedFindingContextValue {
 }
 
 const NO_FINDINGS: Array<ReviewFinding> = []
+const ignoreSection = (_path: string, _node: HTMLDivElement | null) => {}
+
+/** Scroll to a line in whichever registered slice of the file renders it. */
+function scrollSlicesLineToCenter(
+  slices: Map<string, RegisteredDiffInstance>,
+  lineNumber: number,
+  side: SelectionSide,
+  scroller: HTMLElement
+): boolean {
+  for (const target of slices.values()) {
+    if (scrollDiffLineToCenter(target, lineNumber, side, scroller)) return true
+  }
+  return false
+}
 
 interface UserSelection {
   file: string
@@ -625,8 +660,10 @@ function ReviewBodyInner({
   const [sideTab, setSideTab] = useState<SideTab>("info")
   const [selectedFile, setSelectedFile] = useState<string | null>(null)
   const fileRefs = useRef<Record<string, HTMLDivElement | null>>({})
+  // Per path, one instance per rendered slice: a file split across walkthrough
+  // steps renders once per step, each showing only that step's hunks.
   const diffInstanceRefs = useRef<
-    Record<string, RegisteredDiffInstance | undefined>
+    Record<string, Map<string, RegisteredDiffInstance> | undefined>
   >({})
   const annotationRefs = useRef<Record<string, HTMLElement | null>>({})
   const [expandedFiles, setExpandedFiles] = useState<Record<string, boolean>>(
@@ -765,51 +802,70 @@ function ReviewBodyInner({
       .reduce((acc, file) => acc + file.additions + file.deletions, 0)
   }, [diffFiles, viewed])
 
-  // Resolve the AI-sorted groups against the actual diff: drop stale groups
-  // (generated for a previous head) so the file-tree fallback is used, drop
-  // paths no longer in the diff and empty groups, and collect any unassigned
-  // files into a trailing "Other changes" group so nothing ever disappears.
+  // Resolve the scout's steps against the actual diff: each step shows only
+  // the hunks holding its lines, and any file no step claims joins the "Other"
+  // step so nothing ever disappears.
+  const walkthrough = detail.walkthrough
   const groupedView = useMemo<Array<ResolvedGroup> | null>(() => {
-    if (
-      !diffFiles ||
-      detail.diff_groups_stale ||
-      detail.diff_groups.length === 0
-    )
+    if (!diffFiles || !walkthrough || walkthrough.steps.length === 0)
       return null
     const byPath = new Map(diffFiles.map((file) => [file.path, file]))
-    const assigned = new Set<string>()
-    const resolved: Array<Omit<ResolvedGroup, "index">> = []
-    for (const group of detail.diff_groups) {
-      const files: Array<ReviewDiffFile> = []
-      for (const path of group.files) {
-        const file = byPath.get(path)
-        if (file && !assigned.has(path)) {
-          assigned.add(path)
-          files.push(file)
-        }
+    const seen = new Set<string>()
+    const resolved: Array<Omit<ResolvedGroup, "index"> & { other: boolean }> =
+      []
+    for (const step of walkthrough.steps) {
+      const files: Array<ResolvedGroupFile> = []
+      for (const lines of step.files) {
+        const file = byPath.get(lines.path)
+        if (!file) continue
+        const primary = !seen.has(file.path)
+        seen.add(file.path)
+        const hasLines = lines.added.length > 0 || lines.deleted.length > 0
+        files.push(
+          hasLines
+            ? {
+                file,
+                fileDiff: walkthroughFileDiff(file, lines),
+                additions: rangeLineCount(lines.added),
+                deletions: rangeLineCount(lines.deleted),
+                primary,
+              }
+            : wholeGroupFile(file, primary)
+        )
       }
       if (files.length === 0) continue
       resolved.push({
-        title: group.title,
-        summary: group.summary,
+        title: step.title,
+        summary: step.summary,
+        other: step.other,
         files,
-        additions: files.reduce((acc, file) => acc + file.additions, 0),
-        deletions: files.reduce((acc, file) => acc + file.deletions, 0),
+        ...sumStats(files),
       })
     }
-    const leftover = diffFiles.filter((file) => !assigned.has(file.path))
+    const leftover = diffFiles
+      .filter((file) => !seen.has(file.path))
+      .map((file) => wholeGroupFile(file, true))
     if (leftover.length > 0) {
-      resolved.push({
-        title: "Other changes",
-        summary: "",
-        files: leftover,
-        additions: leftover.reduce((acc, file) => acc + file.additions, 0),
-        deletions: leftover.reduce((acc, file) => acc + file.deletions, 0),
-      })
+      const other = resolved.find((group) => group.other)
+      if (other) {
+        other.files = [...other.files, ...leftover]
+        Object.assign(other, sumStats(other.files))
+      } else {
+        resolved.push({
+          title: "Other changes",
+          summary: "",
+          other: true,
+          files: leftover,
+          ...sumStats(leftover),
+        })
+      }
     }
     if (resolved.length === 0) return null
-    return resolved.map((group, i) => ({ ...group, index: i + 1 }))
-  }, [diffFiles, detail.diff_groups, detail.diff_groups_stale])
+    return resolved.map(({ other: _other, ...group }, i) => ({
+      ...group,
+      index: i + 1,
+    }))
+  }, [diffFiles, walkthrough])
 
   const sidebarGroups = useMemo<Array<ReviewSidebarGroup> | null>(() => {
     if (!groupedView) return null
@@ -821,8 +877,7 @@ function ReviewBodyInner({
 
   // The view follows fresh-group availability until the user explicitly picks
   // one, after which the choice persists across PRs.
-  const hasFreshGroups =
-    detail.diff_groups.length > 0 && !detail.diff_groups_stale
+  const hasFreshGroups = (walkthrough?.steps.length ?? 0) > 0
   const [explicitView, setExplicitView] = useState<ReviewSidebarView | null>(
     () => {
       if (typeof window === "undefined") return null
@@ -934,8 +989,11 @@ function ReviewBodyInner({
     []
   )
   const registerDiffInstance = useCallback(
-    (path: string, target: RegisteredDiffInstance | null) => {
-      if (target) diffInstanceRefs.current[path] = target
+    (path: string, slice: string, target: RegisteredDiffInstance | null) => {
+      const slices = diffInstanceRefs.current[path] ?? new Map()
+      if (target) slices.set(slice, target)
+      else slices.delete(slice)
+      if (slices.size > 0) diffInstanceRefs.current[path] = slices
       else delete diffInstanceRefs.current[path]
     },
     []
@@ -1058,13 +1116,16 @@ function ReviewBodyInner({
           return
         }
 
-        const diffTarget = diffInstanceRefs.current[finding.file]
-        if (diffTarget) {
-          lineScrollDone = scrollFindingLineToCenter({
-            target: diffTarget,
-            finding,
-            scroller,
-          })
+        const slices = diffInstanceRefs.current[finding.file]
+        if (slices) {
+          lineScrollDone =
+            finding.end_line !== null &&
+            scrollSlicesLineToCenter(
+              slices,
+              finding.end_line,
+              findingSide(finding),
+              scroller
+            )
         } else if (!lineScrollDone) {
           const fileNode = fileRefs.current[finding.file]
           if (fileNode) scrollElementToCenter(fileNode, scroller)
@@ -1122,14 +1183,9 @@ function ReviewBodyInner({
         )
         return
       }
-      const diffTarget = diffInstanceRefs.current[path]
-      if (diffTarget) {
-        lineScrollDone = scrollDiffLineToCenter(
-          diffTarget,
-          line,
-          side,
-          scroller
-        )
+      const slices = diffInstanceRefs.current[path]
+      if (slices) {
+        lineScrollDone = scrollSlicesLineToCenter(slices, line, side, scroller)
       } else if (!lineScrollDone) {
         const fileNode = fileRefs.current[path]
         if (fileNode) scrollElementToCenter(fileNode, scroller)
@@ -1145,7 +1201,11 @@ function ReviewBodyInner({
     requestAnimationFrame(snap)
   }, [openComment])
 
-  const renderFileCard = (file: ReviewDiffFile) => {
+  const renderFileCard = (
+    file: ReviewDiffFile,
+    step?: { index: number; entry: ResolvedGroupFile }
+  ) => {
+    const primary = step?.entry.primary ?? true
     // Keep the range highlighted while its comment composer is open, so the
     // user can see exactly which lines they're commenting on.
     const selectedLines =
@@ -1158,8 +1218,11 @@ function ReviewBodyInner({
             : null
     return (
       <FileDiffCard
-        key={file.path}
+        key={step ? `${step.index}:${file.path}` : file.path}
         file={file}
+        fileDiff={step?.entry.fileDiff ?? null}
+        additions={step?.entry.additions ?? file.additions}
+        deletions={step?.entry.deletions ?? file.deletions}
         findings={findingsByFile.get(file.path) ?? NO_FINDINGS}
         selectedLines={selectedLines}
         viewed={viewed.has(file.path)}
@@ -1168,7 +1231,9 @@ function ReviewBodyInner({
         onToggleExpanded={toggleExpanded}
         onSelectLines={selectLines}
         onAddToChat={embedded ? undefined : addToChat}
-        registerSection={registerSection}
+        registerSection={primary ? registerSection : ignoreSection}
+        slice={step ? String(step.index) : "all"}
+        belowStepHeader={step !== undefined}
         registerDiffInstance={registerDiffInstance}
         diffStyle={diffStyle}
         owner={detail.owner}
@@ -1283,6 +1348,9 @@ function ReviewBodyInner({
                     deletions: detail.pr.deletions,
                   }}
                 />
+                {!detail.walkthrough && detail.pr.changed_files > 0 && (
+                  <WalkthroughCallout detail={detail} />
+                )}
                 {detail.assessment && (
                   <ReviewAssessmentCard
                     assessment={detail.assessment}
@@ -1292,6 +1360,7 @@ function ReviewBodyInner({
                     headSha={detail.pr.head_sha}
                   />
                 )}
+                <AuthorGuidanceCard points={detail.guidance} className="mt-4" />
                 <div
                   className={cn(
                     "mt-4 rounded-lg border border-border p-4",
@@ -1349,13 +1418,18 @@ function ReviewBodyInner({
                           className="scroll-mt-4 space-y-3"
                         >
                           <GroupHeader group={group} />
-                          {group.files.map(renderFileCard)}
+                          {group.files.map((entry) =>
+                            renderFileCard(entry.file, {
+                              index: group.index,
+                              entry,
+                            })
+                          )}
                         </div>
                       ))}
                     </div>
                   ) : (
                     <div className="space-y-3">
-                      {diffFiles.map(renderFileCard)}
+                      {diffFiles.map((file) => renderFileCard(file))}
                     </div>
                   )}
                 </div>
@@ -1377,6 +1451,60 @@ function ReviewBodyInner({
         )}
       </div>
     </ExpandedFindingContext.Provider>
+  )
+}
+
+/** Runs the review scout alone, so the walkthrough exists without a full review. */
+function WalkthroughCallout({ detail }: { detail: ReviewDetail }) {
+  const qc = useQueryClient()
+  const scout = useMutation({
+    mutationFn: () =>
+      api.runReviewScout(detail.owner, detail.repo, detail.number),
+    onSuccess: () => {
+      void qc.invalidateQueries({
+        queryKey: ["review", detail.owner, detail.repo, detail.number],
+      })
+    },
+    onError: (error) =>
+      toast.error("Couldn't start the walkthrough", {
+        description: error.message,
+      }),
+  })
+  const running = detail.walkthrough_running || scout.isPending
+  // This card only renders while there is no walkthrough, so a scout that
+  // stops running while it is still mounted ended without one.
+  const wasRunning = useRef(detail.walkthrough_running)
+  useEffect(() => {
+    if (wasRunning.current && !detail.walkthrough_running) {
+      toast.error("The walkthrough failed to build", {
+        description:
+          "The review scout finished without producing steps. Try again, or check its review-scout run in LangSmith.",
+      })
+    }
+    wasRunning.current = detail.walkthrough_running
+  }, [detail.walkthrough_running])
+  return (
+    <div className="mt-4 flex items-center gap-4 rounded-lg border border-primary/40 bg-primary/5 p-4">
+      <ListNumbersIcon className="size-6 shrink-0 text-primary" />
+      <div className="min-w-0 flex-1">
+        <p className="text-sm font-medium">
+          {running ? "Building the walkthrough…" : "Read this PR step by step"}
+        </p>
+        <p className="mt-0.5 text-xs text-muted-foreground">
+          {running
+            ? "The review scout is ordering the changes into narrated steps. This takes a few minutes; the page updates on its own."
+            : "The review scout orders the changes into narrated steps and moves mechanical edits to the end."}
+        </p>
+      </div>
+      <Button size="lg" onClick={() => scout.mutate()} disabled={running}>
+        {running ? (
+          <CircleNotchIcon className="animate-spin" />
+        ) : (
+          <ListNumbersIcon />
+        )}
+        {running ? "Building…" : "Build walkthrough"}
+      </Button>
+    </div>
   )
 }
 
@@ -1452,10 +1580,8 @@ function VirtualizerBridge({
   return <div ref={probeRef} aria-hidden className="hidden" />
 }
 
-// The block header: number + title + stats, then the block description. Pinned
-// at the top of the diff scroller while scrolling the block (Google-Docs feel),
-// stacked above Pierre's in-diff sticky header (z-index 4). A long description
-// scrolls within the pinned header instead of consuming the viewport.
+// Only the title row is pinned, stacked above Pierre's in-diff sticky header
+// (z-index 4); the description scrolls with the page.
 function GroupHeader({ group }: { group: ResolvedGroup }) {
   const title = useMemo(() => renderInlineCode(group.title), [group.title])
   const summary = useMemo(
@@ -1463,8 +1589,8 @@ function GroupHeader({ group }: { group: ResolvedGroup }) {
     [group.summary]
   )
   return (
-    <div className="sticky top-0 z-[5] border-b border-border bg-background py-2">
-      <div className="flex items-center gap-2">
+    <>
+      <div className="sticky top-0 z-[5] flex h-9 items-center gap-2 border-b border-border bg-background">
         <span className="flex size-5 shrink-0 items-center justify-center rounded bg-accent text-[11px] font-medium text-muted-foreground">
           {group.index}
         </span>
@@ -1479,16 +1605,21 @@ function GroupHeader({ group }: { group: ResolvedGroup }) {
         </span>
       </div>
       {summary && (
-        <div className="mt-2 max-h-40 overflow-y-auto text-xs text-muted-foreground">
+        <div className="text-xs text-muted-foreground">
           <Markdown content={summary} />
         </div>
       )}
-    </div>
+    </>
   )
 }
 
 const FileDiffCard = memo(function FileDiffCard({
   file,
+  fileDiff,
+  slice,
+  belowStepHeader,
+  additions,
+  deletions,
   findings,
   selectedLines,
   viewed,
@@ -1511,6 +1642,10 @@ const FileDiffCard = memo(function FileDiffCard({
   onCloseOpenComment,
 }: {
   file: ReviewDiffFile
+  /** A walkthrough step's slice of the file; `null` renders the whole diff. */
+  fileDiff: FileDiffMetadata | null
+  additions: number
+  deletions: number
   findings: Array<ReviewFinding>
   selectedLines: SelectedLineRange | null
   viewed: boolean
@@ -1520,8 +1655,13 @@ const FileDiffCard = memo(function FileDiffCard({
   onSelectLines: (path: string, range: SelectedLineRange | null) => void
   onAddToChat?: (path: string, range: SelectedLineRange) => void
   registerSection: (path: string, node: HTMLDivElement | null) => void
+  /** The step's pinned title sits above, so the file name pins just below it. */
+  belowStepHeader: boolean
+  /** Which rendering of the file this card is, when a walkthrough splits it. */
+  slice: string
   registerDiffInstance: (
     path: string,
+    slice: string,
     target: RegisteredDiffInstance | null
   ) => void
   diffStyle: DiffStyle
@@ -1624,7 +1764,7 @@ const FileDiffCard = memo(function FileDiffCard({
       onPostRender: (
         node: HTMLElement,
         instance: CoreFileDiff<ReviewAnnotation>
-      ) => registerDiffInstance(file.path, { host: node, instance }),
+      ) => registerDiffInstance(file.path, slice, { host: node, instance }),
     }),
     [
       diffOptions,
@@ -1632,6 +1772,7 @@ const FileDiffCard = memo(function FileDiffCard({
       onStartComment,
       onSelectLines,
       file.path,
+      slice,
       registerDiffInstance,
     ]
   )
@@ -1682,8 +1823,8 @@ const FileDiffCard = memo(function FileDiffCard({
     [registerSection, file.path]
   )
   useEffect(
-    () => () => registerDiffInstance(file.path, null),
-    [file.path, registerDiffInstance]
+    () => () => registerDiffInstance(file.path, slice, null),
+    [file.path, slice, registerDiffInstance]
   )
   const renderAnnotation = useCallback(
     (annotation: DiffLineAnnotation<ReviewAnnotation>) => {
@@ -1725,9 +1866,15 @@ const FileDiffCard = memo(function FileDiffCard({
   return (
     <div
       ref={sectionRef}
-      className="scroll-mt-4 overflow-hidden rounded-lg border border-border"
+      className="scroll-mt-4 overflow-clip rounded-lg border border-border"
     >
-      <div className="flex items-center gap-2 bg-accent px-3 py-2 text-xs">
+      <div
+        className={cn(
+          // accent is translucent; the background underlay keeps code from showing through.
+          "sticky z-[5] flex items-center gap-2 bg-[linear-gradient(var(--accent),var(--accent)),linear-gradient(var(--background),var(--background))] px-3 py-2 text-xs",
+          belowStepHeader ? "top-9" : "top-0"
+        )}
+      >
         <button
           type="button"
           onClick={() => onToggleExpanded(file.path)}
@@ -1742,8 +1889,8 @@ const FileDiffCard = memo(function FileDiffCard({
           <span className="font-mono font-medium">{file.path}</span>
         </button>
         <span className="flex items-center gap-1.5 font-mono text-[11px]">
-          <span className="text-emerald-500">+{file.additions}</span>
-          <span className="text-red-500">-{file.deletions}</span>
+          <span className="text-emerald-500">+{additions}</span>
+          <span className="text-red-500">-{deletions}</span>
         </span>
         {findings.length > 0 && (
           <span className="inline-flex items-center gap-1 text-[11px] text-amber-500">
@@ -1781,15 +1928,29 @@ const FileDiffCard = memo(function FileDiffCard({
             onMouseUp={handleTextSelection}
             className="overflow-x-auto bg-card font-mono text-[11px] leading-5"
           >
-            <MultiFileDiff<ReviewAnnotation>
-              oldFile={oldFile}
-              newFile={newFile}
-              options={cardOptions}
-              metrics={DIFF_VIRTUAL_METRICS}
-              lineAnnotations={lineAnnotations}
-              selectedLines={selectedLines}
-              renderAnnotation={renderAnnotation}
-            />
+            {fileDiff ? (
+              <FileDiff<ReviewAnnotation>
+                fileDiff={fileDiff}
+                // Pierre's worker pool highlights partial diffs out of step with
+                // the rendered window ("deletionLine and additionLine are null").
+                disableWorkerPool
+                options={cardOptions}
+                metrics={DIFF_VIRTUAL_METRICS}
+                lineAnnotations={lineAnnotations}
+                selectedLines={selectedLines}
+                renderAnnotation={renderAnnotation}
+              />
+            ) : (
+              <MultiFileDiff<ReviewAnnotation>
+                oldFile={oldFile}
+                newFile={newFile}
+                options={cardOptions}
+                metrics={DIFF_VIRTUAL_METRICS}
+                lineAnnotations={lineAnnotations}
+                selectedLines={selectedLines}
+                renderAnnotation={renderAnnotation}
+              />
+            )}
             {visiblePopup && (
               <AddToChatPopup
                 x={visiblePopup.x}

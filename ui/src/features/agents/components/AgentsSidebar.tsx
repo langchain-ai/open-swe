@@ -1,4 +1,4 @@
-import { Link, useNavigate } from "@tanstack/react-router"
+import { Link, useNavigate, useRouterState } from "@tanstack/react-router"
 import {
   CaretDownIcon,
   CaretRightIcon,
@@ -105,6 +105,12 @@ import {
   useRegisterAppCommands,
 } from "@/lib/appCommands"
 import { cn } from "@/lib/utils"
+import { useChatRoutes } from "@/lib/chatRoutes"
+import {
+  getLastSectionLocation,
+  sectionOf,
+  useHrefLinkOptions,
+} from "@/lib/appLocation"
 
 interface AgentsSidebarProps {
   user: SessionUser | null
@@ -190,6 +196,7 @@ export function AgentsSidebar({
   layout,
 }: AgentsSidebarProps) {
   const navigate = useNavigate()
+  const chat = useChatRoutes()
   const {
     viewport: scrollViewport,
     edges: scrollEdges,
@@ -198,9 +205,9 @@ export function AgentsSidebar({
   const { openPalette } = useAppCommandControls()
   const openThread = useCallback(
     (threadId: string) => {
-      void navigate({ to: "/agents/$threadId", params: { threadId } })
+      void navigate({ to: chat.thread, params: { threadId } })
     },
-    [navigate]
+    [navigate, chat.thread]
   )
   const {
     prefs,
@@ -215,6 +222,10 @@ export function AgentsSidebar({
   } = useSidebarPrefs()
   const isDesktop =
     typeof window !== "undefined" && Boolean(window.openSweDesktop)
+  const activeSection = useRouterState({
+    select: (state) => sectionOf(state.location.pathname),
+  })
+  const sectionLinkTarget = useHrefLinkOptions()
   const [updateState, setUpdateState] = useState<DesktopUpdateState>({
     status: "idle",
   })
@@ -621,7 +632,7 @@ export function AgentsSidebar({
       onCompose={() => {
         layout.closeOnMobile()
         void navigate({
-          to: "/agents",
+          to: group.localRepoPath ? "/agents" : chat.home,
           search: group.repoFullName
             ? { repo: group.repoFullName }
             : group.localRepoPath
@@ -702,7 +713,7 @@ export function AgentsSidebar({
 
       <div className="flex flex-col gap-0.5 px-2 pb-1">
         <Link
-          to="/agents"
+          to={chat.home}
           onClick={layout.closeOnMobile}
           className="flex w-full items-center gap-2.5 rounded-md px-2.5 py-1.5 text-sm font-medium text-foreground transition-colors hover:bg-sidebar-row-hover"
         >
@@ -739,15 +750,18 @@ export function AgentsSidebar({
               >
                 {NAV.map((item) => {
                   const Icon = item.icon
+                  const active = activeSection === item.to
                   return (
                     <Link
                       key={item.to}
-                      to={item.to}
+                      {...sectionLinkTarget(
+                        active ? item.to : getLastSectionLocation(item.to)
+                      )}
                       onClick={layout.closeOnMobile}
-                      className="flex items-center gap-2.5 rounded-md px-2.5 py-1.5 text-sm text-foreground transition-colors hover:bg-sidebar-row-hover"
-                      activeProps={{
-                        className: "bg-sidebar-row-hover font-medium",
-                      }}
+                      className={cn(
+                        "flex items-center gap-2.5 rounded-md px-2.5 py-1.5 text-sm text-foreground transition-colors hover:bg-sidebar-row-hover",
+                        active && "bg-sidebar-row-hover font-medium"
+                      )}
                     >
                       <Icon className="size-4" />
                       {item.label}
@@ -893,7 +907,7 @@ export function AgentsSidebar({
                       icon={<NotePencilIcon className="size-4" />}
                       onClick={() => {
                         layout.closeOnMobile()
-                        void navigate({ to: "/agents" })
+                        void navigate({ to: chat.home })
                       }}
                     />
                   }

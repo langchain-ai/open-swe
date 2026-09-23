@@ -32,6 +32,7 @@ from agent.review.findings import (
     get_thread_metadata,
     get_thread_slack_ref,
     mark_surfaced,
+    mutate_findings,
     posted_resolution_comment_ids_for_finding,
     replace_findings,
     resolve_review_head_sha,
@@ -80,6 +81,7 @@ async def _record_reviewer_usage(**kwargs: Any) -> None:
 
 
 async def publish_review(
+    ranking: list[str],
     severity_threshold: Severity = "medium",
     state: Annotated[dict[str, Any] | None, InjectedState] = None,
     assessment: ReviewAssessment | None = None,
@@ -100,6 +102,12 @@ async def publish_review(
         return {"success": False, "error": "Missing pr_number in run config"}
     if not head_sha:
         return {"success": False, "error": "Missing head_sha in run config"}
+
+    try:
+        if ranking_error := await _record_ranking(ranking, cfg):
+            return ranking_error
+    except ReviewerThreadMissingError as exc:
+        return thread_missing_tool_result(exc)
 
     if cfg.is_eval:
         if cfg.reviewer_eval_severity_threshold in {"low", "medium", "high", "critical"}:
@@ -149,6 +157,64 @@ async def publish_review(
             ),
             "auth_error": str(exc),
         }
+
+
+async def _record_ranking(ranking: list[str], cfg: RunConfig) -> dict[str, Any] | None:
+    """Store the reviewer's best-first order over the findings this publish would post.
+
+    Returns a tool error instead when ``ranking`` is not exactly that set, once each.
+    """
+    thread_id = get_thread_id_from_runtime()
+    findings = await list_findings_async(thread_id)
+    head_sha = await resolve_review_head_sha(thread_id, cfg) if cfg.re_review else ""
+
+    def is_candidate(finding: Finding) -> bool:
+        if finding.get("status", "open") != "open" or not finding.get("in_diff", True):
+            return False
+        if cfg.is_eval:
+            return not _has_publication_identity(finding)
+        if comment_ids_for_finding(finding):
+            return False
+        return not cfg.re_review or finding.get("first_seen_sha") == head_sha
+
+    expected = [finding["id"] for finding in findings if is_candidate(finding)]
+    known = {finding["id"] for finding in findings}
+    duplicates = sorted({finding_id for finding_id in ranking if ranking.count(finding_id) > 1})
+    unknown = [finding_id for finding_id in ranking if finding_id not in known]
+    missing = [finding_id for finding_id in expected if finding_id not in ranking]
+    if duplicates or unknown or missing:
+        return {
+            "success": False,
+            "error": (
+                "ranking must list every finding in expected_finding_ids exactly once, "
+                "most important first. Nothing was published."
+            ),
+            "expected_finding_ids": expected,
+            "missing": missing,
+            "unknown": unknown,
+            "duplicates": duplicates,
+        }
+
+    expected_ids = set(expected)
+    ranks = {
+        finding_id: position
+        for position, finding_id in enumerate(
+            (finding_id for finding_id in ranking if finding_id in expected_ids), start=1
+        )
+    }
+
+    def _assign(latest: list[Finding]) -> bool:
+        changed = False
+        for finding in latest:
+            rank = ranks.get(finding["id"])
+            if rank is not None and finding.get("rank") != rank:
+                finding["rank"] = rank
+                changed = True
+        return changed
+
+    if ranks:
+        await mutate_findings(thread_id, _assign)
+    return None
 
 
 async def _resolve_review_trace_url(thread_id: str, config_override: bool | None) -> str | None:

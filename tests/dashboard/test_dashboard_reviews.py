@@ -10,6 +10,8 @@ from agent.github import repos
 from agent.review import reviews as review_api
 from agent.review.findings import REVIEWER_THREAD_KIND
 
+pytestmark = pytest.mark.usefixtures("findings_from_metadata")
+
 
 def _thread(owner: str, name: str, number: int, author: str) -> dict[str, Any]:
     return {
@@ -86,7 +88,7 @@ async def test_review_summary_json_keys_match_the_dashboard_client(monkeypatch):
     assert summary is not None
 
     assert summary.model_dump(by_alias=True, mode="json") == review_api._thread_review_summary(
-        thread
+        thread, []
     )
 
 
@@ -174,7 +176,7 @@ async def test_get_review_renders_a_pull_request_with_no_reviewer_thread(monkeyp
     assert review["status"] == "none"
     assert review["thread_id"] is None
     assert review["findings"] == []
-    assert review["diff_groups"] == []
+    assert review["walkthrough"] is None
     assert review["assessment"] is None
     assert review["pr"]["title"] == "Add widgets"
     assert review["head_sha"] == "f" * 40

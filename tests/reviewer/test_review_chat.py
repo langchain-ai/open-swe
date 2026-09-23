@@ -333,7 +333,11 @@ def _client_for_enrich(existing_metadata: dict[str, Any] | None) -> tuple[Any, d
 
 
 def _patch_enrich_deps(
-    monkeypatch, *, metadata: dict[str, Any] | None, current_head: str = "abc123def456"
+    monkeypatch,
+    *,
+    metadata: dict[str, Any] | None,
+    current_head: str = "abc123def456",
+    last_reviewed: str = "",
 ) -> dict[str, Any]:
     client, captured = _client_for_enrich(metadata)
     monkeypatch.setattr(review_chat_api, "langgraph_client", lambda: client)
@@ -355,6 +359,11 @@ def _patch_enrich_deps(
     monkeypatch.setattr(review_chat_api, "fetch_pr_diff", fake_diff)
     monkeypatch.setattr(review_chat_api, "get_github_app_installation_token", fake_token)
     monkeypatch.setattr(review_chat_api, "get_pr_head_sha", fake_head)
+
+    async def fake_last_reviewed(owner, repo, pr_number):
+        return last_reviewed
+
+    monkeypatch.setattr(review_chat_api, "_last_reviewed_sha", fake_last_reviewed)
     return captured
 
 
@@ -417,7 +426,30 @@ async def test_enrich_chat_command_reseeds_on_head_change(monkeypatch) -> None:
     files = params["input"]["files"]
     assert set(files) == {"/pr/overview.md", "/pr/diff.patch", "/pr/findings.md"}
     assert params["config"]["configurable"]["chat_head_sha"] == "abc123def456"
-    assert {"chat_head_sha": "abc123def456"} in captured["updated"]
+    assert {"chat_head_sha": "abc123def456", "chat_review_sha": ""} in captured["updated"]
+
+
+@pytest.mark.asyncio
+async def test_enrich_chat_command_reseeds_when_a_review_publishes_on_the_same_head(
+    monkeypatch,
+) -> None:
+    # The chat started before any review; a review of the same head has since
+    # published, so its findings must replace the seeded "no findings" file.
+    captured = _patch_enrich_deps(
+        monkeypatch,
+        metadata={"kind": "review_chat", "chat_head_sha": "abc123def456"},
+        last_reviewed="abc123def456",
+    )
+    command = {"method": "run.start", "params": {"input": {"messages": []}}}
+
+    enriched = await review_chat_api._enrich_chat_command(
+        command, owner="acme", repo="repo", pr_number=7, login="octocat", thread_id="ct-1"
+    )
+
+    assert "/pr/findings.md" in enriched["params"]["input"]["files"]
+    assert {"chat_head_sha": "abc123def456", "chat_review_sha": "abc123def456"} in captured[
+        "updated"
+    ]
 
 
 @pytest.mark.asyncio

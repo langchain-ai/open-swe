@@ -12,6 +12,7 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as AdminRouteImport } from './routes/admin'
 import { Route as AgentsRouteImport } from './routes/agents'
+import { Route as AssistantRouteImport } from './routes/assistant'
 import { Route as CloudAgentsRouteImport } from './routes/cloud-agents'
 import { Route as IncidentsRouteImport } from './routes/incidents'
 import { Route as IntegrationsRouteImport } from './routes/integrations'
@@ -26,6 +27,8 @@ import { Route as AgentsThreadIdRouteImport } from './routes/agents/$threadId'
 import { Route as AgentsSkillsRouteImport } from './routes/agents/skills'
 import { Route as AgentsInstructionsRouteImport } from './routes/agents_.instructions'
 import { Route as AgentsWorkspacesRouteImport } from './routes/agents_.workspaces'
+import { Route as AssistantIndexRouteImport } from './routes/assistant/index'
+import { Route as AssistantThreadIdRouteImport } from './routes/assistant/$threadId'
 import { Route as IncidentsIndexRouteImport } from './routes/incidents/index'
 import { Route as IncidentsIncidentIdRouteImport } from './routes/incidents/$incidentId'
 import { Route as ReviewStylesRouteImport } from './routes/review_.styles'
@@ -53,6 +56,11 @@ const AdminRoute = AdminRouteImport.update({
 const AgentsRoute = AgentsRouteImport.update({
   id: '/agents',
   path: '/agents',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AssistantRoute = AssistantRouteImport.update({
+  id: '/assistant',
+  path: '/assistant',
   getParentRoute: () => rootRouteImport,
 } as any)
 const CloudAgentsRoute = CloudAgentsRouteImport.update({
@@ -124,6 +132,16 @@ const AgentsWorkspacesRoute = AgentsWorkspacesRouteImport.update({
   id: '/agents_/workspaces',
   path: '/agents/workspaces',
   getParentRoute: () => rootRouteImport,
+} as any)
+const AssistantIndexRoute = AssistantIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => AssistantRoute,
+} as any)
+const AssistantThreadIdRoute = AssistantThreadIdRouteImport.update({
+  id: '/$threadId',
+  path: '/$threadId',
+  getParentRoute: () => AssistantRoute,
 } as any)
 const IncidentsIndexRoute = IncidentsIndexRouteImport.update({
   id: '/',
@@ -197,6 +215,7 @@ export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/admin': typeof AdminRoute
   '/agents': typeof AgentsRouteWithChildren
+  '/assistant': typeof AssistantRouteWithChildren
   '/cloud-agents': typeof CloudAgentsRoute
   '/incidents': typeof IncidentsRouteWithChildren
   '/integrations': typeof IntegrationsRoute
@@ -210,10 +229,12 @@ export interface FileRoutesByFullPath {
   '/agents/skills': typeof AgentsSkillsRoute
   '/agents/instructions': typeof AgentsInstructionsRoute
   '/agents/workspaces': typeof AgentsWorkspacesRoute
+  '/assistant/$threadId': typeof AssistantThreadIdRoute
   '/incidents/$incidentId': typeof IncidentsIncidentIdRoute
   '/review/styles': typeof ReviewStylesRoute
   '/workspaces/$slug': typeof WorkspacesSlugRoute
   '/agents/': typeof AgentsIndexRoute
+  '/assistant/': typeof AssistantIndexRoute
   '/incidents/': typeof IncidentsIndexRoute
   '/agents/$threadId/plan': typeof AgentsThreadIdPlanRoute
   '/agents/automations/$scheduleId': typeof AgentsAutomationsScheduleIdRoute
@@ -240,10 +261,12 @@ export interface FileRoutesByTo {
   '/agents/skills': typeof AgentsSkillsRoute
   '/agents/instructions': typeof AgentsInstructionsRoute
   '/agents/workspaces': typeof AgentsWorkspacesRoute
+  '/assistant/$threadId': typeof AssistantThreadIdRoute
   '/incidents/$incidentId': typeof IncidentsIncidentIdRoute
   '/review/styles': typeof ReviewStylesRoute
   '/workspaces/$slug': typeof WorkspacesSlugRoute
   '/agents': typeof AgentsIndexRoute
+  '/assistant': typeof AssistantIndexRoute
   '/incidents': typeof IncidentsIndexRoute
   '/agents/$threadId/plan': typeof AgentsThreadIdPlanRoute
   '/agents/automations/$scheduleId': typeof AgentsAutomationsScheduleIdRoute
@@ -260,6 +283,7 @@ export interface FileRoutesById {
   '/': typeof IndexRoute
   '/admin': typeof AdminRoute
   '/agents': typeof AgentsRouteWithChildren
+  '/assistant': typeof AssistantRouteWithChildren
   '/cloud-agents': typeof CloudAgentsRoute
   '/incidents': typeof IncidentsRouteWithChildren
   '/integrations': typeof IntegrationsRoute
@@ -273,10 +297,12 @@ export interface FileRoutesById {
   '/agents/skills': typeof AgentsSkillsRoute
   '/agents_/instructions': typeof AgentsInstructionsRoute
   '/agents_/workspaces': typeof AgentsWorkspacesRoute
+  '/assistant/$threadId': typeof AssistantThreadIdRoute
   '/incidents/$incidentId': typeof IncidentsIncidentIdRoute
   '/review_/styles': typeof ReviewStylesRoute
   '/workspaces_/$slug': typeof WorkspacesSlugRoute
   '/agents/': typeof AgentsIndexRoute
+  '/assistant/': typeof AssistantIndexRoute
   '/incidents/': typeof IncidentsIndexRoute
   '/agents/$threadId_/plan': typeof AgentsThreadIdPlanRoute
   '/agents/automations/$scheduleId': typeof AgentsAutomationsScheduleIdRoute
@@ -294,6 +320,7 @@ export interface FileRouteTypes {
     | '/'
     | '/admin'
     | '/agents'
+    | '/assistant'
     | '/cloud-agents'
     | '/incidents'
     | '/integrations'
@@ -307,10 +334,12 @@ export interface FileRouteTypes {
     | '/agents/skills'
     | '/agents/instructions'
     | '/agents/workspaces'
+    | '/assistant/$threadId'
     | '/incidents/$incidentId'
     | '/review/styles'
     | '/workspaces/$slug'
     | '/agents/'
+    | '/assistant/'
     | '/incidents/'
     | '/agents/$threadId/plan'
     | '/agents/automations/$scheduleId'
@@ -337,10 +366,12 @@ export interface FileRouteTypes {
     | '/agents/skills'
     | '/agents/instructions'
     | '/agents/workspaces'
+    | '/assistant/$threadId'
     | '/incidents/$incidentId'
     | '/review/styles'
     | '/workspaces/$slug'
     | '/agents'
+    | '/assistant'
     | '/incidents'
     | '/agents/$threadId/plan'
     | '/agents/automations/$scheduleId'
@@ -356,6 +387,7 @@ export interface FileRouteTypes {
     | '/'
     | '/admin'
     | '/agents'
+    | '/assistant'
     | '/cloud-agents'
     | '/incidents'
     | '/integrations'
@@ -369,10 +401,12 @@ export interface FileRouteTypes {
     | '/agents/skills'
     | '/agents_/instructions'
     | '/agents_/workspaces'
+    | '/assistant/$threadId'
     | '/incidents/$incidentId'
     | '/review_/styles'
     | '/workspaces_/$slug'
     | '/agents/'
+    | '/assistant/'
     | '/incidents/'
     | '/agents/$threadId_/plan'
     | '/agents/automations/$scheduleId'
@@ -389,6 +423,7 @@ export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AdminRoute: typeof AdminRoute
   AgentsRoute: typeof AgentsRouteWithChildren
+  AssistantRoute: typeof AssistantRouteWithChildren
   CloudAgentsRoute: typeof CloudAgentsRoute
   IncidentsRoute: typeof IncidentsRouteWithChildren
   IntegrationsRoute: typeof IntegrationsRoute
@@ -427,6 +462,13 @@ declare module '@tanstack/react-router' {
       path: '/agents'
       fullPath: '/agents'
       preLoaderRoute: typeof AgentsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/assistant': {
+      id: '/assistant'
+      path: '/assistant'
+      fullPath: '/assistant'
+      preLoaderRoute: typeof AssistantRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/cloud-agents': {
@@ -526,6 +568,20 @@ declare module '@tanstack/react-router' {
       fullPath: '/agents/workspaces'
       preLoaderRoute: typeof AgentsWorkspacesRouteImport
       parentRoute: typeof rootRouteImport
+    }
+    '/assistant/': {
+      id: '/assistant/'
+      path: '/'
+      fullPath: '/assistant/'
+      preLoaderRoute: typeof AssistantIndexRouteImport
+      parentRoute: typeof AssistantRoute
+    }
+    '/assistant/$threadId': {
+      id: '/assistant/$threadId'
+      path: '/$threadId'
+      fullPath: '/assistant/$threadId'
+      preLoaderRoute: typeof AssistantThreadIdRouteImport
+      parentRoute: typeof AssistantRoute
     }
     '/incidents/': {
       id: '/incidents/'
@@ -650,6 +706,20 @@ const AgentsRouteChildren: AgentsRouteChildren = {
 const AgentsRouteWithChildren =
   AgentsRoute._addFileChildren(AgentsRouteChildren)
 
+interface AssistantRouteChildren {
+  AssistantThreadIdRoute: typeof AssistantThreadIdRoute
+  AssistantIndexRoute: typeof AssistantIndexRoute
+}
+
+const AssistantRouteChildren: AssistantRouteChildren = {
+  AssistantThreadIdRoute: AssistantThreadIdRoute,
+  AssistantIndexRoute: AssistantIndexRoute,
+}
+
+const AssistantRouteWithChildren = AssistantRoute._addFileChildren(
+  AssistantRouteChildren,
+)
+
 interface IncidentsRouteChildren {
   IncidentsIncidentIdRoute: typeof IncidentsIncidentIdRoute
   IncidentsIndexRoute: typeof IncidentsIndexRoute
@@ -668,6 +738,7 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AdminRoute: AdminRoute,
   AgentsRoute: AgentsRouteWithChildren,
+  AssistantRoute: AssistantRouteWithChildren,
   CloudAgentsRoute: CloudAgentsRoute,
   IncidentsRoute: IncidentsRouteWithChildren,
   IntegrationsRoute: IntegrationsRoute,

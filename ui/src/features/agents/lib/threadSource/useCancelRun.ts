@@ -19,7 +19,7 @@ import type { AgentThread } from "@/features/agents/lib/types"
 export function useCancelRun(
   threadId: string,
   after?: () => Promise<void>
-): () => Promise<void> {
+): () => Promise<boolean> {
   const queryClient = useQueryClient()
   const cancelThread = useCancelAgentThread(threadId)
 
@@ -31,14 +31,15 @@ export function useCancelRun(
       // Cancellation failed (transient 5xx, or a non-owner viewer). Leave the
       // thread's status polling untouched: presenting a stopped state here
       // would strand the UI on a still-running run.
-      return
+      return false
     }
     await after?.()
-    if (cancelled.status === "running") return
+    if (cancelled.status === "running") return true
     queryClient.setQueryData<AgentThread>(
       agentThreadKeys.detail(threadId),
       (prev) => (prev ? { ...prev, status: "interrupted" as const } : prev)
     )
     invalidateAgentThreadLists(queryClient)
+    return true
   }, [after, cancelThread, queryClient, threadId])
 }

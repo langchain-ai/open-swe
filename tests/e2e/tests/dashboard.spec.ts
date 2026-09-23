@@ -43,13 +43,24 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
       .getByRole("link", { name: "Add greet() helper" })
       .first();
     await expect(pullRequestLink).toBeVisible();
-    await pullRequestLink.hover();
+    // The hover card exists only once the thread's PR list has loaded; the PR
+    // pill renders from that same list, so its arrival means the link is a
+    // hover trigger and not a plain anchor.
     await expect(
-      page.getByTestId("pr-hover-card-fakeorg/demo-1"),
+      page.getByRole("link", { name: /Open fakeorg\/demo pull request #1/ }),
     ).toBeVisible();
+    // The transcript is a stick-to-bottom scroller that can still shift after
+    // the reply streams in; a shift under the pointer closes the tooltip, so
+    // hover again until the card stays.
+    await expect(async () => {
+      await pullRequestLink.hover();
+      await expect(
+        page.getByTestId("pr-hover-card-fakeorg/demo-1"),
+      ).toBeVisible({ timeout: 2_000 });
+    }).toPass({ timeout: 20_000 });
   });
 
-  test("shows an optimistic message before the idle-thread probe completes", async ({
+  test("shows an optimistic message while the send is in flight", async ({
     page,
   }, testInfo) => {
     await loginAs(page, SAME_USER);
@@ -57,26 +68,28 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
     const threadId = threadIdFromUrl(page);
     await waitForThreadIdle(page, threadId);
 
-    let releaseProbe: () => void = () => {};
-    const probeReleased = new Promise<void>((resolve) => {
-      releaseProbe = resolve;
+    // Every send is a `run.start` command; hold it so the optimistic row has
+    // to stand in for the message.
+    let releaseSend: () => void = () => {};
+    const sendReleased = new Promise<void>((resolve) => {
+      releaseSend = resolve;
     });
-    let probeStarted: () => void = () => {};
-    const probeReceived = new Promise<void>((resolve) => {
-      probeStarted = resolve;
+    let sendStarted: () => void = () => {};
+    const sendReceived = new Promise<void>((resolve) => {
+      sendStarted = resolve;
     });
     await page.route(
-      `**/dashboard/api/threads/${threadId}/messages`,
+      `**/dashboard/api/threads/${threadId}/commands`,
       async (route) => {
-        probeStarted();
-        await probeReleased;
+        sendStarted();
+        await sendReleased;
         await route.continue();
       },
     );
 
     const prompt = "Show this immediately while the send is accepted.";
     await typeIntoComposer(page, prompt);
-    await probeReceived;
+    await sendReceived;
 
     const optimisticMessage = page
       .getByTestId("user-message")
@@ -96,7 +109,7 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
       contentType: "image/png",
     });
 
-    releaseProbe();
+    releaseSend();
     await expect(optimisticMessage).toHaveCount(1);
     await waitForStateToContain(page, threadId, prompt);
     await expect(optimisticMessage).toHaveCount(1);
@@ -230,12 +243,7 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
   }) => {
     await loginAs(page, SAME_USER);
     await page.goto("/agents");
-    const dismissOnboarding = page.getByRole("button", {
-      name: "Maybe later",
-    });
-    await expect(dismissOnboarding).toBeVisible();
-    await dismissOnboarding.click();
-    await expect(dismissOnboarding).toBeHidden();
+    await dismissOnboardingIfShown(page);
 
     const prompt = "list my open langchainplus PRs";
     await typeIntoComposer(page, prompt);
@@ -247,14 +255,21 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
       .filter({ hasText: prompt });
     await expect(userMessage).toContainText(prompt);
     await expect(userMessage).not.toContainText("sender_context");
-    await waitForStateToContain(page, threadId, "system:sender-context");
+    // The state comes back JSON-encoded, so the attribute quotes are escaped.
+    await waitForStateToContain(
+      page,
+      threadId,
+      '<dynamic-context kind=\\"person\\"',
+    );
 
     await page.reload();
     await expect(userMessage).toContainText(prompt);
     await expect(userMessage).not.toContainText("sender_context");
   });
 
-  test("injects sender context only when one web user's context changes", async ({
+  // The roster states everything about the people once, and repeats a person's
+  // block only when something about them changes.
+  test("re-emits a person block only when that person changes", async ({
     page,
   }) => {
     await loginAs(page, SAME_USER);
@@ -271,16 +286,38 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
     );
     expect(clearInstructions.ok()).toBeTruthy();
 
+    // Every person block the thread holds, so a repeat fails with the diff, not a count.
+    const rosterBlocks = (state: string): string[] => {
+      const parsed = JSON.parse(state) as {
+        values?: { messages?: Array<{ content?: unknown }> };
+      };
+      return (parsed.values?.messages ?? [])
+        .map((message) =>
+          typeof message.content === "string" ? message.content : "",
+        )
+        .filter((content) =>
+          content.includes('<dynamic-context kind="person"'),
+        );
+    };
+    const expectOneRoster = (state: string) => {
+      const blocks = rosterBlocks(state);
+      expect(
+        blocks,
+        blocks.join("\n\n=== next roster block ===\n\n"),
+      ).toHaveLength(1);
+    };
+
     const editor = page.getByTestId("composer-editor");
     await editor.focus();
     await editor.pressSequentially("first sender payload message");
     await editor.press("Enter");
     await expect(page).toHaveURL(/\/agents\/[^/]+$/);
     const threadId = threadIdFromUrl(page);
+    // The state comes back JSON-encoded, so the attribute quotes are escaped.
     await waitForStateToContain(
       page,
       threadId,
-      "This metadata was generated by Open SWE for the sender of this message.",
+      '<dynamic-context kind=\\"person\\"',
     );
     await waitForThreadIdle(page, threadId);
     await expect(page.getByTestId("composer-editor")).toHaveAttribute(
@@ -297,12 +334,8 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
       "second sender payload message",
     );
     await waitForThreadIdle(page, threadId);
-    await page.waitForTimeout(2_000);
 
-    let state = await threadState(page, threadId);
-    const payloadMarker =
-      /This metadata was generated by Open SWE for the sender of this message\./g;
-    expect(state.match(payloadMarker) ?? []).toHaveLength(1);
+    expectOneRoster(await threadState(page, threadId));
 
     const instructions = "Always use the sender preference update marker.";
     const origin = new URL(page.url()).origin;
@@ -327,17 +360,18 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
       "sender preference changed message",
     );
     await waitForStateToContain(page, threadId, instructions);
-    await expect
-      .poll(
-        async () =>
-          (await threadState(page, threadId)).match(payloadMarker)?.length ?? 0,
-        { timeout: 60_000, intervals: [500] },
-      )
-      .toBe(2);
     await waitForThreadIdle(page, threadId);
 
-    state = await threadState(page, threadId);
-    expect(state.match(payloadMarker) ?? []).toHaveLength(2);
+    // The sender's standing instructions changed, so their person block —
+    // where they live — is re-sent once.
+    const state = await threadState(page, threadId);
+    const rosters = rosterBlocks(state);
+    expect(
+      rosters,
+      rosters.join("\n\n=== next roster block ===\n\n"),
+    ).toHaveLength(2);
+    expect(rosters[0]).not.toContain("standing_instructions:");
+    expect(rosters[1]).toContain(`standing_instructions: ${instructions}`);
   });
 
   test("keeps the submitted message and thread view visible while a new chat starts", async ({
@@ -440,10 +474,9 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
     expect.soft(observations.newChatReturned).toBe(false);
   });
 
-  // Stopping a run must not strand what the user queued behind it: the server
-  // starts a follow-up run for the queue, and the page has to show that run
-  // answering without the user sending anything else.
-  test("answers a queued follow-up after the user stops the active run", async ({
+  // Stopping a run must not strand what the user queued behind it: the queue
+  // goes back into the composer, where the user decides what to do with it.
+  test("returns a queued follow-up to the composer when the user stops the active run", async ({
     page,
   }) => {
     await loginAs(page, SAME_USER);
@@ -457,35 +490,27 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
     }).toPass({ timeout: 60000 });
     await typeIntoComposer(page, queuedText);
     await expect(
-      page.getByTestId("queued-message").filter({ hasText: queuedText }),
+      page
+        .getByTestId("queued-message")
+        .filter({ hasText: queuedText })
+        .and(page.locator("[data-queued-pending='false']")),
     ).toBeVisible();
 
     await page.getByRole("button", { name: "Stop run" }).click();
 
-    // The queue drains into the follow-up run, whose reply is the fake
-    // model's follow-up script (the stopped run never got to its own reply).
     await expect(page.getByTestId("queued-message")).toHaveCount(0, {
       timeout: 30_000,
     });
-    const sentFollowUp = page
-      .getByTestId("user-message")
-      .filter({ hasText: queuedText });
-    await expect(sentFollowUp).toBeVisible({ timeout: 30_000 });
-    const reply = page.getByText(/anything else you'd like changed/);
-    await expect(reply).toBeVisible({ timeout: 30_000 });
-    expect(
-      await sentFollowUp.evaluate(
-        (message, answer) =>
-          Boolean(
-            message.compareDocumentPosition(answer) &
-            Node.DOCUMENT_POSITION_FOLLOWING,
-          ),
-        await reply.elementHandle(),
-      ),
-    ).toBe(true);
+    await expect(page.getByTestId("composer-editor")).toContainText(
+      queuedText,
+      { timeout: 30_000 },
+    );
+    await expect(
+      page.getByTestId("user-message").filter({ hasText: queuedText }),
+    ).toHaveCount(0);
   });
 
-  test("answers a queued follow-up after stopping a run this browser started", async ({
+  test("restores a queued follow-up after stopping a browser-started run and answers when resent", async ({
     page,
   }) => {
     await loginAs(page, SAME_USER);
@@ -516,6 +541,18 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
     await expect(page.getByTestId("queued-message")).toHaveCount(0, {
       timeout: 30_000,
     });
+    await expect(page.getByTestId("composer-editor")).toContainText(
+      queuedText,
+      { timeout: 30_000 },
+    );
+    await expect(
+      page.getByTestId("user-message").filter({ hasText: queuedText }),
+    ).toHaveCount(0);
+
+    await page
+      .getByRole("button", { name: "Send message", exact: true })
+      .click();
+
     await expect(
       page.getByTestId("user-message").filter({ hasText: queuedText }),
     ).toBeVisible({ timeout: 30_000 });
@@ -630,13 +667,21 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
     await typeIntoComposer(page, followUp);
     await waitForStateToContain(page, threadId, followUp);
 
-    // The non-owner's message is tagged server-side with their GitHub login, so
-    // the owner can tell who sent it. Read it from the transcript the server
-    // stored: in the sender's own session the bubble is still the SDK's
-    // optimistic echo of what they typed, which carries no envelope.
+    // The non-owner's message is attributed server-side to the person the run
+    // describes, so the owner can tell who sent it. Read it from the transcript
+    // the server stored: in the sender's own session the bubble is still the
+    // SDK's optimistic echo of what they typed, which carries no envelope.
+    await waitForStateToContain(
+      page,
+      threadId,
+      `display_name: ${OTHER_USER.name}`,
+    );
     await page.reload();
     await expect(
-      page.getByText(new RegExp(`@${OTHER_USER.login}`)).first(),
+      page
+        .getByTestId("user-message")
+        .filter({ hasText: followUp })
+        .getByText(OTHER_USER.name, { exact: true }),
     ).toBeVisible();
   });
 

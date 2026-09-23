@@ -23,6 +23,9 @@ logger = logging.getLogger(__name__)
 
 CRON_KIND = "background_tasks"
 CRON_SCHEDULE = "* * * * *"
+# The server drops a `thread_id` key from cron metadata, so crons are tagged with this instead.
+CRON_THREAD_KEY = "agent_thread_id"
+_CRON_PAGE_SIZE = 1000
 TERMINAL_STATES = {"completed", "failed", "timed_out", "stopped", "lost"}
 MONITOR_LOCK = f"{TASK_ROOT}/monitor.lock"
 _BACKGROUND_TASK_SENDER: SystemIdentity = {
@@ -44,7 +47,7 @@ def _client():
 async def ensure_background_task_cron(thread_id: str) -> str:
     client = _client()
     crons = await client.crons.search(
-        metadata={"kind": CRON_KIND, "thread_id": thread_id},
+        metadata={"kind": CRON_KIND, CRON_THREAD_KEY: thread_id},
         limit=10,
     )
     ids = [
@@ -61,7 +64,7 @@ async def ensure_background_task_cron(thread_id: str) -> str:
         schedule=CRON_SCHEDULE,
         input={"task": CRON_KIND, "thread_id": thread_id},
         config={"configurable": {"task": CRON_KIND, "thread_id": thread_id}},
-        metadata={"kind": CRON_KIND, "thread_id": thread_id},
+        metadata={"kind": CRON_KIND, CRON_THREAD_KEY: thread_id},
         timezone="UTC",
     )
     cron_id = cron.get("cron_id") if isinstance(cron, dict) else getattr(cron, "cron_id", None)
@@ -72,14 +75,30 @@ async def ensure_background_task_cron(thread_id: str) -> str:
 
 async def _delete_crons(thread_id: str) -> None:
     client = _client()
-    crons = await client.crons.search(
-        metadata={"kind": CRON_KIND, "thread_id": thread_id},
-        limit=10,
+    tagged = await client.crons.search(
+        metadata={"kind": CRON_KIND, CRON_THREAD_KEY: thread_id}, limit=10
     )
-    for cron in crons or []:
-        cron_id = cron.get("cron_id") if isinstance(cron, dict) else None
-        if isinstance(cron_id, str):
-            await client.crons.delete(cron_id)
+    cron_ids = [cron["cron_id"] for cron in tagged]
+    # Crons created before CRON_THREAD_KEY lack it, so match those on the payload instead.
+    # Collect every page before deleting so deletes do not shift later offsets.
+    offset = 0
+    while True:
+        page = await client.crons.search(
+            metadata={"kind": CRON_KIND}, limit=_CRON_PAGE_SIZE, offset=offset
+        )
+        for cron in page:
+            payload_input = cron.get("payload", {}).get("input")
+            if (
+                isinstance(payload_input, dict)
+                and payload_input.get("thread_id") == thread_id
+                and cron["cron_id"] not in cron_ids
+            ):
+                cron_ids.append(cron["cron_id"])
+        if len(page) < _CRON_PAGE_SIZE:
+            break
+        offset += _CRON_PAGE_SIZE
+    for cron_id in cron_ids:
+        await client.crons.delete(cron_id)
 
 
 def _notification(task: dict[str, Any]) -> str:
@@ -158,9 +177,16 @@ async def monitor_background_tasks(thread_id: str) -> dict[str, Any]:
     thread = await client.threads.get(thread_id)
     metadata = thread.get("metadata") if isinstance(thread, dict) else None
     metadata = metadata if isinstance(metadata, dict) else {}
+    tracked = metadata.get(RUNNING_BACKGROUND_TASKS_KEY)
+    tracked_ids = (
+        [task_id for task_id in tracked if isinstance(task_id, str)]
+        if isinstance(tracked, list)
+        else []
+    )
     sandbox_id = metadata.get("sandbox_id")
     if not isinstance(sandbox_id, str) or not sandbox_id:
-        metadata = await update_background_task_state(client, thread_id, reset=True)
+        if tracked_ids:
+            metadata = await update_background_task_state(client, thread_id, reset=True)
         await sync_slack_background_status(client, thread_id, metadata=metadata)
         await _delete_crons(thread_id)
         return {"status": "missing_sandbox"}
@@ -169,34 +195,33 @@ async def monitor_background_tasks(thread_id: str) -> dict[str, Any]:
     running = [task for task in tasks if task.get("status") == "running"]
     terminal = [task for task in tasks if task.get("status") in TERMINAL_STATES]
     running_ids = [task_id for task in running if isinstance((task_id := task.get("task_id")), str)]
-    tracked = metadata.get(RUNNING_BACKGROUND_TASKS_KEY)
-    tracked_ids = (
-        [task_id for task_id in tracked if isinstance(task_id, str)]
-        if isinstance(tracked, list)
-        else []
-    )
     finished_ids = [
         task_id for task in terminal if isinstance((task_id := task.get("task_id")), str)
     ]
     tracked_successfully = False
     status_metadata: dict[str, object] | None = None
-    try:
-        status_metadata = await update_background_task_state(
-            client,
-            thread_id,
-            running=running_ids,
-            finished=[
-                *finished_ids,
-                *(task_id for task_id in tracked_ids if task_id not in running_ids),
-            ],
-        )
+    # This runs every minute per thread; only take the thread lock when the tracked set changes.
+    if set(running_ids) - set(finished_ids) == set(tracked_ids):
+        status_metadata = metadata
         tracked_successfully = True
-    except Exception:
-        logger.warning(
-            "Could not track background commands",
-            extra={"agent_thread_id": thread_id},
-            exc_info=True,
-        )
+    else:
+        try:
+            status_metadata = await update_background_task_state(
+                client,
+                thread_id,
+                running=running_ids,
+                finished=[
+                    *finished_ids,
+                    *(task_id for task_id in tracked_ids if task_id not in running_ids),
+                ],
+            )
+            tracked_successfully = True
+        except Exception:
+            logger.warning(
+                "Could not track background commands",
+                extra={"agent_thread_id": thread_id},
+                exc_info=True,
+            )
     status_context = SourceContext.from_metadata(status_metadata or metadata)
     delivered = 0
     for task in terminal:

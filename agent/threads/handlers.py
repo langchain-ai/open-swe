@@ -10,7 +10,6 @@ from typing import Any
 from fastapi import HTTPException
 
 from agent.dashboard.options import normalize_model_choice
-from agent.dispatch import dispatch_agent_run
 from agent.github.pull_request_checks import PullRequestState, get_pull_request_check_states
 from agent.github.pull_request_context import get_pull_request_context
 from agent.github.pull_request_status import get_pull_request_statuses
@@ -23,10 +22,11 @@ from agent.threads.access import (
 from agent.threads.listing import list_unresolved_dashboard_threads
 from agent.threads.runs import (
     _ASSISTANT_ID,
+    QUEUED_BY_KEY,
     ThreadMessageBody,
-    _build_dashboard_configurable,
     _notify_slack_web_handoff,
     _user_message_content,
+    dispatch_pending_follow_ups,
 )
 from agent.threads.summary import (
     _SANDBOX_CREATING_SENTINEL,
@@ -37,11 +37,11 @@ from agent.threads.summary import (
     _metadata_model_id,
     _now_ms,
     _refresh_latest_run_metadata,
-    _run_status_to_agent_status,
     _thread_is_busy,
     _thread_run_id,
     _thread_summary,
     assert_thread_readable,
+    run_status_to_agent_status,
     thread_source,
 )
 from agent.transcript.engine import delete_transcript
@@ -110,67 +110,6 @@ async def get_dashboard_terminal_sandbox(
     return sandbox_id, repo_name
 
 
-async def _queued_dashboard_messages(client: Any, thread_id: str) -> list[dict[str, Any]]:
-    try:
-        item = await client.store.get_item(("queue", thread_id), "pending_messages")
-    except Exception:  # noqa: BLE001
-        logger.debug(
-            "Could not fetch queued messages",
-            extra={"thread_id": thread_id},
-            exc_info=True,
-        )
-        return []
-    value = item.get("value") if isinstance(item, Mapping) else None
-    messages = value.get("messages") if isinstance(value, Mapping) else None
-    if not isinstance(messages, list):
-        return []
-
-    queued: list[dict[str, Any]] = []
-    for entry in messages:
-        content = entry.get("content") if isinstance(entry, Mapping) else None
-        if not isinstance(content, Mapping) or content.get("source") != DASHBOARD_SOURCE:
-            continue
-        queued_id = content.get("queue_id")
-        text = content.get("text")
-        created_at = content.get("created_at_ms")
-        if (
-            not isinstance(queued_id, str)
-            or not queued_id
-            or not isinstance(text, str)
-            or not isinstance(created_at, (int, float))
-            or isinstance(created_at, bool)
-        ):
-            continue
-        images = []
-        raw_images = content.get("images")
-        if isinstance(raw_images, list):
-            for image in raw_images:
-                if not isinstance(image, Mapping):
-                    continue
-                base64_data = image.get("base64")
-                mime_type = image.get("mime_type")
-                if not isinstance(base64_data, str) or not isinstance(mime_type, str):
-                    continue
-                mapped_image = {
-                    "kind": "image",
-                    "base64": base64_data,
-                    "mimeType": mime_type,
-                }
-                file_name = image.get("file_name")
-                if isinstance(file_name, str) and file_name:
-                    mapped_image["fileName"] = file_name
-                images.append(mapped_image)
-        queued.append(
-            {
-                "id": queued_id,
-                "content": text,
-                "images": images,
-                "createdAt": int(created_at),
-            }
-        )
-    return queued
-
-
 async def get_dashboard_thread(
     thread_id: str,
     login: str,
@@ -198,7 +137,7 @@ async def get_dashboard_thread(
         client, thread, timings=record
     )
     metadata = thread_metadata(thread)
-    status = _run_status_to_agent_status(
+    status = run_status_to_agent_status(
         thread.get("status") if isinstance(thread.get("status"), str) else "idle",
         latest_run_status
         or (
@@ -223,9 +162,6 @@ async def get_dashboard_thread(
             latest_run_status=latest_run_status,
             latest_run_id=latest_run_id,
         )
-    if status == "running":
-        with phase(record, "queued"):
-            summary["queuedMessages"] = await _queued_dashboard_messages(client, thread_id)
     return summary
 
 
@@ -320,16 +256,30 @@ async def send_dashboard_message(
     return await _thread_summary(thread)
 
 
-async def _cancel_active_thread_runs(client: Any, thread_id: str) -> list[str]:
-    """Interrupt every live run on the thread, and report which ones those were."""
+async def _cancel_active_thread_runs(
+    client: Any, thread_id: str, *, stopped_by: str | None = None
+) -> tuple[list[str], bool]:
+    """Interrupt every live run on the thread, and report which ones those were.
+
+    With ``stopped_by``, a follow-up someone else queued is left to run: their
+    message would otherwise vanish, since only the stopper gets theirs back.
+    Also reports whether any such run was kept.
+    """
     run_ids: set[str] = set()
+    kept = False
     for status in ("pending", "running"):
         offset = 0
         while True:
             runs = await client.runs.list(thread_id, status=status, limit=100, offset=offset)
-            run_ids.update(
-                run_id for run in runs if isinstance((run_id := run.get("run_id")), str) and run_id
-            )
+            for run in runs:
+                run_id = run.get("run_id")
+                if not isinstance(run_id, str) or not run_id:
+                    continue
+                queued_by = (run.get("metadata") or {}).get(QUEUED_BY_KEY)
+                if stopped_by is not None and queued_by not in {None, stopped_by}:
+                    kept = True
+                    continue
+                run_ids.add(run_id)
             if len(runs) < 100:
                 break
             offset += len(runs)
@@ -340,7 +290,7 @@ async def _cancel_active_thread_runs(client: Any, thread_id: str) -> list[str]:
             run_ids=cancelled,
             action="interrupt",
         )
-    return cancelled
+    return cancelled, kept
 
 
 async def interrupt_transcript_turns(thread_id: str, run_ids: Sequence[str]) -> None:
@@ -383,7 +333,9 @@ async def cancel_dashboard_thread(
     _assert_thread_postable(metadata, login, email)
 
     try:
-        cancelled_run_ids = await _cancel_active_thread_runs(client, thread_id)
+        cancelled_run_ids, kept_queued = await _cancel_active_thread_runs(
+            client, thread_id, stopped_by=login
+        )
     except Exception as exc:  # noqa: BLE001
         logger.exception("Failed to cancel active runs for thread %s", thread_id)
         raise HTTPException(502, "failed to request thread cancellation") from exc
@@ -394,26 +346,18 @@ async def cancel_dashboard_thread(
         "updated_at_ms": _now_ms(),
     }
     await client.threads.update(thread_id=thread_id, metadata=metadata_update)
-    queued = await client.store.get_item(("queue", thread_id), "pending_messages")
-    queued_messages = queued.get("value", {}).get("messages", []) if queued else []
-    if queued_messages:
-        try:
-            configurable = await _build_dashboard_configurable(thread_id, login, metadata)
-            run = await dispatch_agent_run(
-                thread_id,
-                None,
-                configurable,
-                source=DASHBOARD_SOURCE,
-                input={"messages": []},
-                client=client,
-            )
-        except Exception as exc:  # noqa: BLE001
-            logger.exception("Failed to submit queued follow-up for thread %s", thread_id)
-            raise HTTPException(502, "stopped run but failed to submit queued follow-up") from exc
-        run_id = run.get("run_id") if isinstance(run, dict) else None
+    # A follow-up left queued picks the leftovers up with its first model call.
+    try:
+        run_id = (
+            None
+            if kept_queued
+            else await dispatch_pending_follow_ups(thread_id, login, metadata, client=client)
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("Failed to submit queued follow-up for thread %s", thread_id)
+        raise HTTPException(502, "stopped run but failed to submit queued follow-up") from exc
+    if run_id is not None:
         metadata_update.update(latest_run_status="pending", latest_run_id=run_id)
-
-    if queued_messages:
         await client.threads.update(thread_id=thread_id, metadata=metadata_update)
     thread = await client.threads.get(thread_id)
     return await _thread_summary(thread)
@@ -435,7 +379,7 @@ async def admin_cancel_dashboard_thread(
         assert_thread_readable(thread_metadata(thread), login, email)
 
     try:
-        cancelled_run_ids = await _cancel_active_thread_runs(client, thread_id)
+        cancelled_run_ids, _ = await _cancel_active_thread_runs(client, thread_id)
     except Exception as exc:  # noqa: BLE001
         logger.exception("Failed to cancel active runs for thread %s", thread_id)
         raise HTTPException(502, "failed to request thread cancellation") from exc

@@ -24,9 +24,9 @@ from agent.dashboard.workspace_settings import (
     normalize_workspace_settings_for_response,
 )
 
-STALE_ANTHROPIC = "anthropic:claude-opus-4-7"
-SUPPORTED_ANTHROPIC = "anthropic:claude-opus-5"
-SUPPORTED_OPENAI = "openai:gpt-5.6-sol"
+STALE_ANTHROPIC = "anthropic:claude-opus-5"
+SUPPORTED_ANTHROPIC = "anthropic:claude-opus-5-5"
+SUPPORTED_OPENAI = "openai:gpt-6-sol"
 SUPPORTED_ASTRA = "openai:gpt-6-astra"
 SUPPORTED_KIMI = "fireworks:accounts/fireworks/models/kimi-k3"
 DEPRECATED_ANTHROPIC = "anthropic:claude-opus-4-8"
@@ -105,9 +105,8 @@ def test_models_with_profile_context_windows_enriches_copies() -> None:
     assert all("context_window" not in model for model in models)
     assert {model["id"]: model.get("context_window") for model in enriched} == {
         "openai:gpt-6-astra": 272_000,
-        "openai:gpt-5.6-sol": 272_000,
-        "openai:gpt-5.6-terra": 272_000,
-        "openai:gpt-5.6-luna": 272_000,
+        "openai:gpt-6-sol": 272_000,
+        "openai:gpt-6-luna": 272_000,
         SUPPORTED_KIMI: 1_048_576,
     }
 
@@ -253,8 +252,8 @@ def test_gate_fable_swaps_to_opus_when_disabled() -> None:
 
 
 def test_gate_fable_leaves_non_fable_ids_alone() -> None:
-    assert gate_fable_model("openai:gpt-5.6-sol", "high", fable_enabled=False) == (
-        "openai:gpt-5.6-sol",
+    assert gate_fable_model("openai:gpt-6-sol", "high", fable_enabled=False) == (
+        "openai:gpt-6-sol",
         "high",
     )
 

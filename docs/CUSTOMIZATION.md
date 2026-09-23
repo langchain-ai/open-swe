@@ -144,7 +144,7 @@ LLM_MODEL_ID="anthropic:claude-sonnet-5"
 LLM_REASONING_EFFORT="high"
 ```
 
-When `LLM_MODEL_ID` is unset or blank, an Anthropic-only deployment—`ANTHROPIC_API_KEY` is set while `OPENAI_API_KEY` is unset or empty—defaults to `anthropic:claude-opus-5`. All other deployments default to `openai:gpt-5.6-sol`, including deployments with both keys set. The default reasoning effort is `medium`.
+When `LLM_MODEL_ID` is unset or blank, an Anthropic-only deployment—`ANTHROPIC_API_KEY` is set while `OPENAI_API_KEY` is unset or empty—defaults to `anthropic:claude-opus-5-5`. All other deployments default to `openai:gpt-6-sol`, including deployments with both keys set. The default reasoning effort is `medium`.
 
 Either variable can be set independently. When only the model is set, `medium` is used if supported, otherwise that model's catalog default effort is used. The model must be an allowed default in `agent/dashboard/options.py`; unsupported models or incompatible efforts raise a configuration error when defaults are resolved.
 
@@ -161,7 +161,7 @@ Use the `provider:model` format:
 model = make_model("anthropic:claude-sonnet-5", temperature=0, max_tokens=16_000)
 
 # OpenAI (uses Responses API by default)
-model = make_model("openai:gpt-5.6-sol", max_tokens=128_000, reasoning={"effort": "medium"})
+model = make_model("openai:gpt-6-sol", max_tokens=128_000, reasoning={"effort": "medium"})
 
 # Google
 model = make_model("google_genai:gemini-2.5-pro", temperature=0, max_tokens=16_000)
@@ -193,7 +193,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         model = make_model("anthropic:claude-sonnet-5", temperature=0, max_tokens=16_000)
     else:
         # Full model for code changes from Linear
-        model = make_model("openai:gpt-5.6-sol", max_tokens=128_000, reasoning={"effort": "medium"})
+        model = make_model("openai:gpt-6-sol", max_tokens=128_000, reasoning={"effort": "medium"})
     
     return create_deep_agent(model=model, ...)
 ```

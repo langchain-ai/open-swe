@@ -1,9 +1,9 @@
 """Read API for the PR review UI.
 
 Reviewer threads (``metadata.kind == "reviewer"``) hold the durable review
-state for a PR: identity (``pr``), findings, watch flag, and head SHA. These
-endpoints surface that state plus live PR details/diff fetched from GitHub
-with the App installation token.
+state for a PR: identity (``pr``), watch flag, and head SHA; their findings
+live in PostgreSQL. These endpoints surface that state plus live PR
+details/diff fetched from GitHub with the App installation token.
 """
 
 import asyncio
@@ -11,7 +11,7 @@ import ipaddress
 import logging
 import re
 import socket
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Sequence
 from typing import Any, Literal
 from urllib.parse import urljoin, urlparse
 
@@ -20,6 +20,7 @@ from fastapi import HTTPException, Response
 from langgraph_sdk.errors import NotFoundError
 from pydantic import BaseModel, ValidationError
 
+from agent.database import postgres
 from agent.github.app import get_github_app_installation_token
 from agent.github.checks import github_headers
 from agent.github.ci import list_check_runs, list_commit_statuses
@@ -28,15 +29,20 @@ from agent.github.pull_request_diff import build_pr_diff_files
 from agent.github.pull_request_status import fetch_unresolved_review_threads
 from agent.github.webhook import trigger_pr_review_from_ref
 from agent.review.assessment_feedback import ASSESSMENTS
+from agent.review.author_guidance import GuidanceView
 from agent.review.findings import (
     REVIEWER_THREAD_KIND,
-    coerce_finding,
+    Finding,
+    FindingLike,
     comment_ids_for_finding,
+    findings_by_thread,
     is_thread_resolved,
 )
+from agent.review_scout.launch import ReviewScoutTarget
 from agent.thread_ids import reviewer_thread_id
 from agent.utils.json_types import ThreadLike, as_json_object, thread_metadata
 from agent.utils.thread_ops import langgraph_client
+from agent.workspaces.store import WORKSPACES
 
 logger = logging.getLogger(__name__)
 
@@ -112,17 +118,17 @@ async def _github_post(path: str, token: str, *, json: dict[str, Any]) -> Any:
     return await _github_write("POST", path, token, json=json)
 
 
-def _findings_list(metadata: dict[str, Any]) -> list[dict[str, Any]]:
-    findings = metadata.get("findings")
-    if not isinstance(findings, list):
-        return []
-    return [f for f in findings if isinstance(f, dict) and isinstance(f.get("id"), str)]
+async def _thread_findings(threads: list[ThreadLike]) -> dict[str, list[Finding]]:
+    return await findings_by_thread(
+        {
+            thread_id: thread_metadata(thread)
+            for thread in threads
+            if isinstance(thread_id := thread.get("thread_id"), str)
+        }
+    )
 
 
-def _serialize_finding(finding: dict[str, Any], head_sha: str | None) -> dict[str, Any]:
-    # Records persisted by older revisions carry the legacy GitHub-identity
-    # fields; normalize before reading them through the accessors.
-    coerce_finding(finding)
+def _serialize_finding(finding: FindingLike, head_sha: str | None) -> dict[str, Any]:
     last_confirmed = finding.get("last_confirmed_sha")
     outdated = bool(
         head_sha
@@ -158,7 +164,7 @@ def _serialize_finding(finding: dict[str, Any], head_sha: str | None) -> dict[st
 _BUG_SEVERITIES = frozenset({"high", "critical"})
 
 
-def classify_finding(finding: dict[str, Any]) -> Literal["bug", "investigate", "informational"]:
+def classify_finding(finding: FindingLike) -> Literal["bug", "investigate", "informational"]:
     """Map our severity/confidence model onto the UI's Bugs/Flags split."""
     severity = finding.get("severity", "low")
     confidence = finding.get("confidence", "medium")
@@ -169,48 +175,7 @@ def classify_finding(finding: dict[str, Any]) -> Literal["bug", "investigate", "
     return "informational"
 
 
-def _serialize_diff_groups(
-    metadata: dict[str, Any], head_sha: str
-) -> tuple[list[dict[str, Any]], bool]:
-    """Serialize the persisted ``diff_groups`` for the AI sorted view.
-
-    Returns ``(groups, stale)`` where each group carries a 1-based ``index``
-    and validated fields, and ``stale`` is True when the groups were generated
-    for a different head SHA than the one currently being rendered.
-    """
-    raw = metadata.get("diff_groups")
-    if not isinstance(raw, dict):
-        return [], False
-    raw_groups = raw.get("groups")
-    if not isinstance(raw_groups, list):
-        return [], False
-    groups: list[dict[str, Any]] = []
-    for group in raw_groups:
-        if not isinstance(group, dict):
-            continue
-        title = group.get("title")
-        if not isinstance(title, str) or not title.strip():
-            continue
-        files = [f for f in (group.get("files") or []) if isinstance(f, str) and f]
-        if not files:
-            continue
-        summary = group.get("summary")
-        groups.append(
-            {
-                "index": len(groups) + 1,
-                "title": title.strip(),
-                "summary": summary.strip() if isinstance(summary, str) else "",
-                "files": files,
-            }
-        )
-    groups_head = raw.get("head_sha")
-    stale = bool(
-        head_sha and isinstance(groups_head, str) and groups_head and groups_head != head_sha
-    )
-    return groups, stale
-
-
-def _finding_counts(findings: list[dict[str, Any]]) -> dict[str, int]:
+def _finding_counts(findings: Sequence[FindingLike]) -> dict[str, int]:
     counts = {"open": 0, "resolved": 0, "dismissed": 0, "bugs": 0, "flags": 0}
     for finding in findings:
         status = finding.get("status", "open")
@@ -263,7 +228,9 @@ def _run_status(thread: ThreadLike, metadata: dict[str, Any]) -> str:
     return "idle"
 
 
-def _thread_review_summary(thread: ThreadLike) -> dict[str, Any] | None:
+def _thread_review_summary(
+    thread: ThreadLike, findings: Sequence[FindingLike]
+) -> dict[str, Any] | None:
     metadata = thread_metadata(thread)
     pr = metadata.get("pr")
     if not isinstance(pr, dict):
@@ -273,7 +240,6 @@ def _thread_review_summary(thread: ThreadLike) -> dict[str, Any] | None:
     number = pr.get("number")
     if not (isinstance(owner, str) and isinstance(name, str) and isinstance(number, int)):
         return None
-    findings = _findings_list(metadata)
     updated_at = thread.get("updated_at")
     return {
         "thread_id": thread.get("thread_id"),
@@ -292,6 +258,11 @@ def _thread_review_summary(thread: ThreadLike) -> dict[str, Any] | None:
         "counts": _finding_counts(findings),
         "updated_at": updated_at if isinstance(updated_at, str) else None,
     }
+
+
+async def _review_summary_of(thread: ThreadLike) -> dict[str, Any] | None:
+    findings = await _thread_findings([thread])
+    return _thread_review_summary(thread, findings.get(thread.get("thread_id"), []))
 
 
 async def list_reviews(
@@ -335,10 +306,11 @@ async def list_reviews(
         )
         if not threads:
             break
+        findings = await _thread_findings(threads)
         for thread in threads:
             if not isinstance(thread, dict):
                 continue
-            summary = _thread_review_summary(thread)
+            summary = _thread_review_summary(thread, findings.get(thread.get("thread_id"), []))
             if not summary:
                 continue
             if is_accessible is not None and not await is_accessible(summary):
@@ -371,7 +343,7 @@ async def get_review_summaries(
                 sort_by="updated_at",
                 sort_order="desc",
             )
-            raw = _thread_review_summary(threads[0]) if threads else None
+            raw = await _review_summary_of(threads[0]) if threads else None
             return f"{owner}/{repo}#{number}".lower(), _as_review_summary(raw)
 
     return dict(await asyncio.gather(*(read(*identity) for identity in identities)))
@@ -667,7 +639,8 @@ async def get_review(owner: str, repo: str, pr_number: int) -> dict[str, Any]:
     details = _serialize_pr_details(pr_payload)
 
     thread = await _reviewer_thread_for(owner, repo, pr_number)
-    summary = _thread_review_summary(thread) if thread else None
+    stored = (await _thread_findings([thread])).get(thread.get("thread_id"), []) if thread else []
+    summary = _thread_review_summary(thread, stored) if thread else None
     metadata = thread_metadata(thread) if thread else {}
     if not summary:
         summary = _unreviewed_summary(owner, repo, pr_number, pr_payload)
@@ -675,7 +648,7 @@ async def get_review(owner: str, repo: str, pr_number: int) -> dict[str, Any]:
     head_sha = details["head_sha"] or summary["head_sha"]
     checks = await _fetch_check_runs(owner, repo, head_sha, token)
 
-    findings = [_serialize_finding(finding, head_sha) for finding in _findings_list(metadata)]
+    findings = [_serialize_finding(finding, head_sha) for finding in stored]
     findings.sort(
         key=lambda f: (
             f["status"] != "open",
@@ -687,7 +660,9 @@ async def get_review(owner: str, repo: str, pr_number: int) -> dict[str, Any]:
     for finding in findings:
         finding["group"] = classify_finding(finding)
 
-    diff_groups, diff_groups_stale = _serialize_diff_groups(metadata, head_sha)
+    target = await _scout_target(owner, repo, pr_number, pr_payload)
+    walkthrough = await target.walkthrough() if target else None
+    walkthrough_running = walkthrough is None and target is not None and await _scouting(target)
     assessment_id = metadata.get("review_assessment_id")
     assessment = (
         await ASSESSMENTS.get(str(assessment_id)) if isinstance(assessment_id, int) else None
@@ -698,9 +673,13 @@ async def get_review(owner: str, repo: str, pr_number: int) -> dict[str, Any]:
         "pr": details,
         "checks": checks,
         "findings": findings,
-        "diff_groups": diff_groups,
-        "diff_groups_stale": diff_groups_stale,
+        "walkthrough": walkthrough.model_dump(mode="json") if walkthrough else None,
+        "walkthrough_running": walkthrough_running,
         "assessment": assessment.model_dump() if assessment else None,
+        "guidance": [
+            point.model_dump(mode="json")
+            for point in await GuidanceView.for_pull_request(owner, repo, pr_number)
+        ],
     }
 
 
@@ -716,6 +695,7 @@ class PreviewFile(BaseModel):
 
 
 class PreviewThread(BaseModel):
+    thread_id: str | None = None
     author: str | None = None
     body: str
     path: str
@@ -748,6 +728,7 @@ class PullRequestPreview(BaseModel):
     # or no checks configured.
     unresolved: list[PreviewThread] | None
     checks: list[PreviewCheck] | None
+    guidance: list[GuidanceView]
 
 
 class _GithubPreviewFile(BaseModel):
@@ -895,6 +876,7 @@ async def get_pull_request_preview(
         changed_files=pull.changed_files or len(files),
         files=files[:_PREVIEW_FILE_LIMIT],
         unresolved=(None if threads is None else [_preview_thread(thread) for thread in threads]),
+        guidance=await GuidanceView.for_pull_request(owner, repo, pr_number),
     )
 
 
@@ -1037,6 +1019,61 @@ async def proxy_pr_image(owner: str, repo: str, pr_number: int, url: str) -> Res
                 )
 
     raise HTTPException(502, "too many redirects fetching image")
+
+
+class _ScoutRef(BaseModel):
+    sha: str = ""
+
+
+class _ScoutPull(BaseModel):
+    title: str = ""
+    base: _ScoutRef = _ScoutRef()
+    head: _ScoutRef = _ScoutRef()
+
+
+async def _scout_target(
+    owner: str, repo: str, pr_number: int, pr_payload: object
+) -> ReviewScoutTarget | None:
+    """The scout target for the PR's current head, or ``None`` without a database or head."""
+    if not postgres.configured():
+        return None
+    pull = _ScoutPull.model_validate(pr_payload if isinstance(pr_payload, dict) else {})
+    if not pull.base.sha or not pull.head.sha:
+        return None
+    return ReviewScoutTarget(
+        owner=owner,
+        repo=repo,
+        pr_number=pr_number,
+        pr_title=pull.title,
+        base_sha=pull.base.sha,
+        head_sha=pull.head.sha,
+        workspace_slug=await WORKSPACES.owner_of_repo(f"{owner}/{repo}"),
+    )
+
+
+async def _scouting(target: ReviewScoutTarget) -> bool:
+    try:
+        return await target.active_run() is not None
+    except Exception:
+        logger.warning("Could not read review scout runs", exc_info=True, extra=target.log_extra)
+        return False
+
+
+class ReviewScoutTrigger(BaseModel):
+    started: bool
+    run_id: str | None = None
+
+
+async def trigger_review_scout(owner: str, repo: str, pr_number: int) -> ReviewScoutTrigger:
+    """Start the review scout for the PR's current head, or join the one already running."""
+    token = await _require_app_token()
+    pr_payload = await _github_get(f"/repos/{owner}/{repo}/pulls/{pr_number}", token)
+    target = await _scout_target(owner, repo, pr_number, pr_payload)
+    if target is None:
+        raise HTTPException(503, "the review scout needs a database and a pull request head")
+    if await target.walkthrough() is not None:
+        return ReviewScoutTrigger(started=False)
+    return ReviewScoutTrigger(started=True, run_id=await target.start())
 
 
 async def trigger_re_review(owner: str, repo: str, pr_number: int, login: str) -> dict[str, Any]:

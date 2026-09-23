@@ -449,6 +449,7 @@ async def test_feedback_counts_active_submissions_by_canonical_person(usage_db: 
     ordinary = await report(sort="feedback_given", direction="desc")
     assert ordinary["total_members"] == 3
     assert [row["feedback_given"] for row in ordinary["rows"]] == [3, 1, 0]
+    assert [row["is_top_feedback_contributor"] for row in ordinary["rows"]] == [True, False, False]
     assert ordinary["rows"][0]["invocations"] == 2
     assert ordinary["rows"][0]["prs_opened"] == 1
     private_row = ordinary["rows"][1]
@@ -506,6 +507,9 @@ async def test_feedback_sort_preserves_snapshot_and_ties_across_pages(
         actual.extend(page["rows"])
         cursor = page["next_cursor"]
     assert actual == expected["rows"]
+    assert [row["is_top_feedback_contributor"] for row in actual] == (
+        [False, True, True] if direction == "asc" else [True, True, False]
+    )
     assert [row["feedback_given"] for row in actual] == (
         [0, 1, 1] if direction == "asc" else [1, 1, 0]
     )

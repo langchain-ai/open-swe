@@ -32,9 +32,9 @@ from agent.workspaces.store import WORKSPACES, WorkspaceCreate
 from tests.conftest import FakeStore, patch_thread_module
 
 _TEXT_ONLY_MODEL = "fireworks:accounts/fireworks/models/deepseek-v4-pro"
-_VISION_MODEL = "openai:gpt-5.6-sol"
+_VISION_MODEL = "openai:gpt-6-sol"
 _FABLE = "anthropic:claude-fable-5-1"
-_PAIR = ("openai:gpt-5.6-sol", "medium")
+_PAIR = ("openai:gpt-6-sol", "medium")
 
 
 @asynccontextmanager
@@ -143,12 +143,12 @@ async def test_resolve_agent_model_choice_applies_request_before_profile(monkeyp
 
     model_id, effort = await thread_runs._resolve_agent_model_choice(
         {"default_model": _TEXT_ONLY_MODEL, "reasoning_effort": "high"},
-        "anthropic:claude-opus-5",
+        "anthropic:claude-opus-5-5",
         "high",
         None,
     )
 
-    assert (model_id, effort) == ("anthropic:claude-opus-5", "high")
+    assert (model_id, effort) == ("anthropic:claude-opus-5-5", "high")
 
 
 async def test_resolve_agent_model_choice_deprecated_request_uses_team_default(monkeypatch) -> None:
@@ -160,7 +160,7 @@ async def test_resolve_agent_model_choice_deprecated_request_uses_team_default(m
     patch_thread_module(monkeypatch, "get_workspace_settings", fake_team_default)
 
     model_id, effort = await thread_runs._resolve_agent_model_choice(
-        {"default_model": "anthropic:claude-opus-5", "reasoning_effort": "high"},
+        {"default_model": "anthropic:claude-opus-5-5", "reasoning_effort": "high"},
         "fireworks:accounts/fireworks/models/glm-5p2",
         "high",
         None,
@@ -208,8 +208,8 @@ async def test_resolve_agent_model_id_applies_per_thread_override(monkeypatch) -
     monkeypatch.setattr("agent.dashboard.agent_overrides.get_workspace_settings", fake_team_default)
     monkeypatch.setattr("agent.dashboard.agent_overrides.load_profile", lambda login: None)
 
-    model_id = await resolve_agent_model_id(None, per_thread_model_id="anthropic:claude-opus-5")
-    assert model_id == "anthropic:claude-opus-5"
+    model_id = await resolve_agent_model_id(None, per_thread_model_id="anthropic:claude-opus-5-5")
+    assert model_id == "anthropic:claude-opus-5-5"
 
 
 async def test_resolve_agent_model_id_deprecated_override_uses_team_default(monkeypatch) -> None:
@@ -321,7 +321,7 @@ async def test_enrich_run_start_command_creates_and_stamps_new_thread(monkeypatc
     assert messages[-1]["content"].startswith(
         '<input-message sender="github:octocat" surface="web" kind="human">'
     )
-    assert "<content>Fix the flaky test</content>" in messages[-1]["content"]
+    assert "\nFix the flaky test\n</input-message>" in messages[-1]["content"]
     # Dashboard-only creation hints must not leak into the run config.
     assert "repo_explicitly_none" not in configurable
     assert enriched["params"]["assistant_id"] == "agent"
@@ -967,7 +967,7 @@ async def test_enrich_run_start_command_attributes_non_owner_message(monkeypatch
 
     last = ElementTree.fromstring(enriched["params"]["input"]["messages"][-1]["content"])
     assert last.attrib["sender"] == "github:teammate"
-    assert last.findtext("content") == "fix the bug"
+    assert (last.text or "").strip() == "fix the bug"
     assert updates[-1]["participant_logins"] == {"first": True, "teammate": True}
 
 
@@ -1021,9 +1021,9 @@ async def test_enrich_run_start_command_adds_web_handoff_for_slack_thread(monkey
         "surface": "automation",
         "kind": "system",
     }
-    assert "conversation has moved to Web" in (handoff.findtext("content") or "")
+    assert "conversation has moved to Web" in (handoff.text or "")
     assert user_message.attrib["sender"] == "github:teammate"
-    assert user_message.findtext("content") == "continue here"
+    assert (user_message.text or "").strip() == "continue here"
     assert "id" not in messages[-1]
     assert enriched["params"]["config"]["configurable"]["source"] == "dashboard"
 
@@ -1075,10 +1075,10 @@ async def test_enrich_run_start_command_adds_web_handoff_before_image_blocks(mon
     messages = enriched["params"]["input"]["messages"]
     handoff = ElementTree.fromstring(messages[-2]["content"])
     content = messages[-1]["content"]
-    assert "conversation has moved to Web" in (handoff.findtext("content") or "")
+    assert "conversation has moved to Web" in (handoff.text or "")
     user_message = ElementTree.fromstring(content[0]["text"])
     assert user_message.attrib["sender"] == "github:teammate"
-    assert user_message.findtext("content") == "continue here"
+    assert (user_message.text or "").strip() == "continue here"
 
 
 async def test_enrich_run_start_command_does_not_attribute_owner_message(monkeypatch) -> None:
@@ -1118,7 +1118,7 @@ async def test_enrich_run_start_command_does_not_attribute_owner_message(monkeyp
 
     last = ElementTree.fromstring(enriched["params"]["input"]["messages"][-1]["content"])
     assert last.attrib["sender"] == "github:owner"
-    assert last.findtext("content") == "fix the bug"
+    assert (last.text or "").strip() == "fix the bug"
 
 
 async def test_enrich_run_start_command_allowlists_client_configurable(monkeypatch) -> None:
@@ -1360,8 +1360,8 @@ async def test_proxy_run_start_from_slack_thread_updates_trace_reply(monkeypatch
     messages = outgoing["params"]["input"]["messages"]
     handoff = ElementTree.fromstring(messages[-2]["content"])
     user_message = ElementTree.fromstring(messages[-1]["content"])
-    assert "conversation has moved to Web" in (handoff.findtext("content") or "")
-    assert user_message.findtext("content") == "continue here"
+    assert "conversation has moved to Web" in (handoff.text or "")
+    assert (user_message.text or "").strip() == "continue here"
     assert captured["handoff_update"] == {
         "channel_id": "C1",
         "message_ts": "123.46",
@@ -1654,6 +1654,30 @@ async def test_run_cancel_rejects_unsurfaced_thread(monkeypatch) -> None:
     with pytest.raises(HTTPException) as exc_info:
         await thread_proxy.proxy_dashboard_thread_run_cancel("tid", "run-1", "teammate")
     assert exc_info.value.status_code == 404
+
+
+async def test_run_cancel_lets_only_the_sender_withdraw_a_queued_follow_up(monkeypatch) -> None:
+    class FakeThreads:
+        async def get(self, thread_id: str) -> dict[str, object]:
+            return {
+                "thread_id": "tid",
+                "metadata": {"source": "dashboard", "owner_login": "owner", "visibility": "public"},
+            }
+
+    class FakeRuns:
+        async def get(self, thread_id: str, run_id: str) -> dict[str, object]:
+            return {"run_id": run_id, "metadata": {"queued_by": "sender"}}
+
+    class FakeClient:
+        threads = FakeThreads()
+        runs = FakeRuns()
+
+    patch_thread_module(monkeypatch, "langgraph_client", lambda: FakeClient())
+
+    with pytest.raises(HTTPException) as exc_info:
+        await thread_proxy.proxy_dashboard_thread_run_cancel("tid", "run-2", "teammate")
+    assert exc_info.value.status_code == 403
+    assert "sender" in exc_info.value.detail
 
 
 async def test_read_endpoints_accessible_by_non_owner(monkeypatch) -> None:
@@ -2972,7 +2996,11 @@ async def test_cancel_dashboard_thread_interrupts_runs_it_did_not_start(monkeypa
     class FakeRuns:
         async def list(self, thread_id: str, **kwargs: object) -> list[dict[str, str]]:
             calls.append(("list", {"thread_id": thread_id, **kwargs}))
-            return [{"run_id": f"{kwargs['status']}-run"}]
+            runs: list[dict[str, object]] = [{"run_id": f"{kwargs['status']}-run"}]
+            if kwargs["status"] == "pending":
+                # Someone else's queued follow-up is left to run.
+                runs.append({"run_id": "teammate-queued", "metadata": {"queued_by": "teammate"}})
+            return runs
 
         async def cancel_many(self, **kwargs: object) -> None:
             calls.append(("cancel_many", kwargs))
@@ -3190,3 +3218,91 @@ def test_admin_cancel_thread_dependency_rejects_non_admin(monkeypatch) -> None:
         deps.require_admin({"sub": "not-admin", "email": "user@example.com"})
 
     assert exc_info.value.status_code == 403
+
+
+async def test_steer_running_thread_records_and_delivers_the_follow_up(monkeypatch) -> None:
+    store = FakeStore()
+    updates: list[dict[str, object]] = []
+    turn = uuid7()
+
+    class FakeThreads:
+        async def update(self, *, thread_id: str, metadata: dict[str, object]) -> None:
+            assert thread_id == "tid"
+            updates.append(metadata)
+
+        async def get_state(self, thread_id: str) -> dict[str, object]:
+            return {"values": {"messages": []}}
+
+    class FakeRuns:
+        async def get(self, thread_id: str, run_id: str) -> dict[str, str]:
+            return {"run_id": run_id, "status": "running"}
+
+    class FakeClient:
+        threads = FakeThreads()
+        runs = FakeRuns()
+
+    FakeClient.store = store  # type: ignore[attr-defined]
+
+    appended: list[object] = []
+
+    async def fake_append(thread_id: str, commands) -> AppendResult:
+        assert thread_id == "tid"
+        appended.extend(commands)
+        return AppendResult(versions=[1], events=[])
+
+    async def fake_open_turn_id(thread_id: str, run_id: str | None) -> UUID:
+        assert run_id == "run-1"
+        return turn
+
+    patch_thread_module(monkeypatch, "langgraph_client", lambda: FakeClient())
+    patch_thread_module(monkeypatch, "append", fake_append)
+    patch_thread_module(monkeypatch, "open_turn_id", fake_open_turn_id)
+    monkeypatch.setattr("agent.utils.thread_ops.langgraph_client", lambda: FakeClient())
+    monkeypatch.setattr("agent.thread_feedback.note_feedback_activity", AsyncMock())
+
+    result = await thread_runs.steer_running_thread(
+        "tid",
+        "teammate",
+        {
+            "id": 7,
+            "method": "run.start",
+            "params": {
+                "input": {
+                    "messages": [{"role": "user", "content": "also check the tests", "id": "msg-1"}]
+                }
+            },
+        },
+        metadata={
+            "source": "dashboard",
+            "transcript": "v2",
+            "latest_run_id": "run-1",
+            "model": "openai:gpt-5",
+        },
+        email="teammate@example.com",
+    )
+
+    assert result == {
+        "id": 7,
+        "type": "success",
+        "result": {
+            "thread_id": "tid",
+            "run_id": "run-1",
+            "message_id": "msg-1",
+            "steered": True,
+        },
+    }
+    # The running agent finds the message before its next model call.
+    [queued] = store.values(("queue", "tid"))["pending_messages"]["messages"]
+    assert queued["content"]["queue_id"] == "msg-1"
+    assert queued["content"]["text"] == "also check the tests"
+    assert queued["content"]["sender"]["github_login"] == "teammate"
+    assert "source" not in queued["content"]
+    # The transcript shows it on the live turn right away, under the id the
+    # middleware will record it with, so the two writes deduplicate.
+    [command] = appended
+    assert command.command_id == "human:msg-1"
+    assert command.turn_id == turn
+    assert command.event.role == "human"
+    assert command.event.sender.login == "teammate"
+    assert "also check the tests" in command.event.text
+    assert updates[-1]["participant_logins"] == {"teammate": True}

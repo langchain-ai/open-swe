@@ -111,8 +111,34 @@ class AddressCommentsIntent(_PullRequestIntentBase):
         return f"Address comments on {full_name}#{number}"
 
 
+class AddressCommentIntent(_PullRequestIntentBase):
+    intent: Literal["address-comment"]
+    comment_url: str = Field(min_length=1, max_length=1000)
+    instructions: str = Field(default="", max_length=10_000)
+
+    dispatches_run: ClassVar[bool] = True
+
+    def prompt(self, url: str) -> str:
+        if not self.comment_url.startswith(f"{url}#"):
+            raise HTTPException(422, "comment does not belong to this pull request")
+        prompt = render_prompt(
+            "runs/pull-request-comment.md", url=url, comment_url=self.comment_url
+        )
+        instructions = self.instructions.strip()
+        if not instructions:
+            return prompt
+        extra = render_prompt(
+            "runs/pull-request-comment-instructions.md", instructions=instructions
+        )
+        return f"{prompt}\n\n{extra}"
+
+    def thread_title(self, full_name: str, number: int) -> str:
+        return f"Address comment on {full_name}#{number}"
+
+
 PullRequestThreadIntent = Annotated[
-    OpenThreadIntent | FixIntent | AddressCommentsIntent, Field(discriminator="intent")
+    OpenThreadIntent | FixIntent | AddressCommentsIntent | AddressCommentIntent,
+    Field(discriminator="intent"),
 ]
 
 

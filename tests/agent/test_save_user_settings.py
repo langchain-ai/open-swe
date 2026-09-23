@@ -61,7 +61,7 @@ async def test_private_requester_partial_update_preserves_other_settings_and_use
 ) -> None:
     requester["source"] = source
     profile = {
-        "default_model": "openai:gpt-5.6-sol",
+        "default_model": "openai:gpt-6-sol",
         "reasoning_effort": "high",
         "default_subagent_model": "anthropic:claude-haiku-4-5",
         "subagent_reasoning_effort": "none",
@@ -71,13 +71,13 @@ async def test_private_requester_partial_update_preserves_other_settings_and_use
         "draft_prs": False,
         "review_draft_prs": True,
         "model_routing_enabled": True,
+        "recent_thread_context_enabled": True,
         "email": "alice@example.com",
     }
     prefs = {
         "default_visibility": "public",
         "local_tracing_project": "keep-project",
         "default_workspace": "keep-workspace",
-        "transcript_streaming": True,
     }
     fake_store.seed(["profiles"], "Alice", profile)
     fake_store.seed(["profiles"], "bob", {"draft_prs": True})
@@ -181,7 +181,7 @@ async def test_invalid_patch_rejects_all_changes(
     settings: dict[str, SettingValue],
 ) -> None:
     fake_store.seed(
-        ["profiles"], "Alice", {"default_model": "openai:gpt-5.6-sol", "reasoning_effort": "high"}
+        ["profiles"], "Alice", {"default_model": "openai:gpt-6-sol", "reasoning_effort": "high"}
     )
     before = deepcopy(fake_store.items)
     assert (await save_user_settings(settings))["ok"] is False
@@ -216,7 +216,7 @@ async def test_dashboard_can_still_toggle_dm_session(fake_store: FakeStore, enab
         "Alice",
         "alice@example.com",
         ProfileUpdate(
-            default_model="openai:gpt-5.6-sol",
+            default_model="openai:gpt-6-sol",
             reasoning_effort="high",
             dm_session_enabled=enabled,
         ),
@@ -229,7 +229,7 @@ async def test_nullable_fields_clear_and_false_values_survive(fake_store: FakeSt
         ["profiles"],
         "alice",
         {
-            "default_model": "openai:gpt-5.6-sol",
+            "default_model": "openai:gpt-6-sol",
             "reasoning_effort": "high",
             "default_subagent_model": "anthropic:claude-haiku-4-5",
             "subagent_reasoning_effort": "none",
@@ -254,7 +254,6 @@ async def test_nullable_fields_clear_and_false_values_survive(fake_store: FakeSt
         "default_visibility": "private",
         "local_tracing_project": None,
         "default_workspace": None,
-        "transcript_streaming": False,
     }
     assert await patch_personal_settings("alice", patch_values) == patch_values
     saved = {
@@ -307,7 +306,7 @@ async def test_model_effort_patch_uses_dashboard_normalization(fake_store: FakeS
     )
     await patch_personal_settings("alice", {"reasoning_effort": "low"})
     profile = fake_store.values(["profiles"])["alice"]
-    assert profile["default_model"] == "anthropic:claude-opus-5"
+    assert profile["default_model"] == "anthropic:claude-opus-5-5"
     assert profile["reasoning_effort"] == "low"
 
 
@@ -342,7 +341,6 @@ async def test_private_read_exposes_all_ordinary_settings_only_for_requester(
             "default_workspace": "mine",
             "default_visibility": "private",
             "local_tracing_project": "tracing",
-            "transcript_streaming": True,
         },
     )
     fake_store.seed(["profiles"], "bob", {"default_repo": "org/bob"})
@@ -355,7 +353,7 @@ async def test_private_read_exposes_all_ordinary_settings_only_for_requester(
                 "default_workspace": "mine",
                 "default_visibility": "private",
                 "local_tracing_project": "tracing",
-                "transcript_streaming": True,
+                "follow_up_behavior": "queue",
             },
             "instructions": "",
             "connections": {"notion": {"connected": False}},
@@ -377,9 +375,9 @@ async def test_private_read_rejects_unverified_requesters(
 
 
 async def test_first_model_change_saves_a_complete_pair(fake_store: FakeStore) -> None:
-    await patch_personal_settings("alice", {"default_model": "openai:gpt-5.6-sol"})
+    await patch_personal_settings("alice", {"default_model": "openai:gpt-6-sol"})
     profile = fake_store.values(["profiles"])["alice"]
-    assert profile["default_model"] == "openai:gpt-5.6-sol"
+    assert profile["default_model"] == "openai:gpt-6-sol"
     assert isinstance(profile["reasoning_effort"], str)
 
 
