@@ -140,7 +140,7 @@ See `deepagents.backends.LangSmithSandbox` and `agent/sandboxes/providers/langsm
 Set optional deployment defaults with `LLM_MODEL_ID` and `LLM_REASONING_EFFORT`:
 
 ```bash
-LLM_MODEL_ID="anthropic:claude-sonnet-5"
+LLM_MODEL_ID="anthropic:claude-opus-5-5"
 LLM_REASONING_EFFORT="high"
 ```
 
@@ -158,7 +158,7 @@ Use the `provider:model` format:
 
 ```python
 # Anthropic
-model = make_model("anthropic:claude-sonnet-5", temperature=0, max_tokens=16_000)
+model = make_model("anthropic:claude-opus-5-5", temperature=0, max_tokens=16_000)
 
 # OpenAI (uses Responses API by default)
 model = make_model("openai:gpt-6-sol", max_tokens=128_000, reasoning={"effort": "medium"})
@@ -172,7 +172,7 @@ The `make_model()` helper in `agent/utils/model.py` wraps `langchain.chat_models
 ```python
 from langchain_anthropic import ChatAnthropic
 
-model = ChatAnthropic(model_name="claude-sonnet-5", temperature=0, max_tokens=16_000)
+model = ChatAnthropic(model_name="claude-opus-5-5", temperature=0, max_tokens=16_000)
 
 return create_deep_agent(
     model=model,
@@ -190,7 +190,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
     
     if source == "slack":
         # Faster model for Slack Q&A
-        model = make_model("anthropic:claude-sonnet-5", temperature=0, max_tokens=16_000)
+        model = make_model("anthropic:claude-opus-5-5", temperature=0, max_tokens=16_000)
     else:
         # Full model for code changes from Linear
         model = make_model("openai:gpt-6-sol", max_tokens=128_000, reasoning={"effort": "medium"})

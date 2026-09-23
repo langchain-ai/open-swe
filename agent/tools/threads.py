@@ -742,6 +742,12 @@ async def get_thread(
             plan_comments_task = tasks.create_task(list_plan_comments(thread_id))
             approvals_task = tasks.create_task(get_workflow_push_approvals(thread_id))
             queued_count_task = tasks.create_task(_queued_message_count(client, thread_id))
+            # Fetched separately from `runs_task` (bounded to the recent-history
+            # window): a pending run enqueued long ago can fall outside that
+            # window while a busy thread accumulates newer completed runs.
+            pending_runs_task = tasks.create_task(
+                client.runs.list(thread_id, status="pending", limit=1000)
+            )
         thread = thread_task.result()
         thread_state = state_task.result()
         runs = runs_task.result()
@@ -749,6 +755,11 @@ async def get_thread(
         plan_comments = plan_comments_task.result()
         approvals = approvals_task.result()
         queued_count = queued_count_task.result()
+        # `queued_count` only sees the legacy in-run injection queue (Slack
+        # context, the `send_dashboard_message` tool). A composer follow-up
+        # enqueued via the server-backed queue adapter is a genuine
+        # LangGraph run instead — count it too.
+        queued_count += len(pending_runs_task.result())
     except HTTPException as exc:
         return _http_failure(exc)
     except Exception:

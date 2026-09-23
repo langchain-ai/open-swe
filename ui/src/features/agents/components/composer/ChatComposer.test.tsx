@@ -33,6 +33,12 @@ const stream = {
 vi.mock("@langchain/react", () => ({
   useStream: () => stream,
   useChannelEffect: () => {},
+  useSubmissionQueue: () => ({
+    entries: [],
+    size: 0,
+    cancel: vi.fn(),
+    clear: vi.fn(),
+  }),
 }))
 
 vi.mock("@/lib/langgraph-client", () => ({

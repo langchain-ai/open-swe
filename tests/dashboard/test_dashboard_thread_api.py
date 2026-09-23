@@ -379,7 +379,7 @@ async def test_enrich_run_start_command_resolves_model_from_repos_workspace(
     await WORKSPACES.create(WorkspaceCreate(name="OSS", repos=["acme/oss"]), "octocat")
     await upsert_instance_settings(
         WorkspaceSettingsUpdate(
-            default_agent_model="anthropic:claude-sonnet-5",
+            default_agent_model="anthropic:claude-opus-5-5",
             default_agent_reasoning_effort="high",
         )
     )
