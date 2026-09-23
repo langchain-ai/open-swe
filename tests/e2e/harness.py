@@ -1414,6 +1414,7 @@ async def slack_get_permalink(channel: str = "", message_ts: str = "") -> JSONRe
 # diff image silently fails to upload and the card degrades to its text
 # fallback, so the suite would test a rendering nobody sees.
 SLACK_FILES: dict[str, bytes] = {}
+SLACK_FILES_COMPLETED: set[str] = set()
 
 
 @app.api_route("/fake-slack/files.getUploadURLExternal", methods=["GET", "POST"])
@@ -1440,7 +1441,18 @@ async def slack_complete_upload(request: Request) -> JSONResponse:
     if isinstance(raw, str):
         raw = json.loads(raw)
     items = [item for item in raw if isinstance(item, dict)] if isinstance(raw, list) else []
+    SLACK_FILES_COMPLETED.update(str(item.get("id")) for item in items)
     return _ok({"files": [{"id": item.get("id"), "title": item.get("title")} for item in items]})
+
+
+@app.api_route("/fake-slack/files.info", methods=["GET", "POST"])
+async def slack_file_info(request: Request) -> JSONResponse:
+    """Report a completed upload as processed, which is when Slack lets a block cite it."""
+    file_id = request.query_params.get("file") or str((await request.form()).get("file") or "")
+    if file_id not in SLACK_FILES:
+        return JSONResponse({"ok": False, "error": "file_not_found"})
+    ready = file_id in SLACK_FILES_COMPLETED and bool(SLACK_FILES[file_id])
+    return _ok({"file": {"id": file_id, "mimetype": "image/png" if ready else ""}})
 
 
 @app.get("/control/slack-files")

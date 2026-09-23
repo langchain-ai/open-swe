@@ -26,6 +26,7 @@ from agent.slack.client import (
     post_slack_thread_reply_with_ts,
     update_slack_message,
     upload_slack_thread_file,
+    wait_for_slack_file,
 )
 
 logger = logging.getLogger(__name__)
@@ -105,6 +106,13 @@ async def _diff_image_id(approval: ExpeditedApproval, files: list[ChangedFile]) 
             "Failed to upload expedited review diff image",
             extra={"approval_id": str(approval.id), "slack_error": error},
         )
+        return None
+    if not await wait_for_slack_file(file_id):
+        logger.warning(
+            "Slack did not finish processing the expedited review diff image",
+            extra={"approval_id": str(approval.id), "slack_file_id": file_id},
+        )
+        return None
     return file_id
 
 

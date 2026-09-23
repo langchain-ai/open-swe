@@ -17,6 +17,7 @@ from urllib.parse import urlparse
 import httpx2
 from langgraph_sdk.client import LangGraphClient
 from langgraph_sdk.errors import ConflictError
+from pydantic import BaseModel, ConfigDict, ValidationError
 from slack_sdk.errors import SlackApiError
 from slack_sdk.web.async_slack_response import AsyncSlackResponse
 
@@ -986,6 +987,34 @@ async def upload_slack_thread_file(
         error = slack_error(exc)
         logger.warning("Slack file upload failed", extra={"slack_error": error})
         return None, error
+
+
+class _SlackFileInfo(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    mimetype: str = ""
+
+
+async def wait_for_slack_file(
+    file_id: str, *, timeout: float = 10.0, interval: float = 0.5
+) -> bool:
+    """Whether Slack finished processing an upload; a block citing it before then is refused."""
+    deadline = time.monotonic() + timeout
+    try:
+        async with SlackClient.bot() as client:
+            while True:
+                response = await client.files_info(file=file_id)
+                if _SlackFileInfo.model_validate(response.get("file") or {}).mimetype:
+                    return True
+                if time.monotonic() >= deadline:
+                    return False
+                await asyncio.sleep(interval)
+    except (*SLACK_REQUEST_ERRORS, ValidationError) as exc:
+        logger.warning(
+            "Slack file status check failed",
+            extra={"slack_error": slack_error(exc), "slack_file_id": file_id},
+        )
+        return False
 
 
 SLACK_FILE_DOWNLOAD_MAX_BYTES = 50 * 1024 * 1024
