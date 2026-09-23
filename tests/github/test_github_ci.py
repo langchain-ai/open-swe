@@ -94,7 +94,9 @@ async def test_required_checks_merge_branch_protection_and_rulesets(
     }
 
     async def request(_client: object, _method: str, url: str, **_: object) -> _FakeResponse:
-        return _FakeResponse(next(body for path, body in responses.items() if url.endswith(path)))
+        return _FakeResponse(
+            responses["rules/branches/main" if "/rules/" in url else "branches/main"]
+        )
 
     monkeypatch.setattr(github_ci, "github_request", request)
 

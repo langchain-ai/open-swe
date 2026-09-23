@@ -226,7 +226,10 @@ test.describe("Expedited Slack review", () => {
     expect(opened.state).toBe("open");
     expect(opened.draft).toBe(true);
     const author = PEOPLE.find((person) => person.login === opened.author);
-    expect(author, `the PR author ${opened.author} should be a test user`).toBeTruthy();
+    expect(
+      author,
+      `the PR author ${opened.author} should be a test user`,
+    ).toBeTruthy();
     const reviewer = PEOPLE.find((person) => person !== author)!;
 
     const posted = await latest(request);
