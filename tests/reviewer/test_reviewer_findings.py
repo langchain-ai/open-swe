@@ -6,13 +6,19 @@ from typing import Any
 from unittest.mock import AsyncMock, patch
 
 import pytest
+from sqlalchemy import select
 
+from agent.database import postgres
 from agent.review.findings import (
     SEVERITY_ORDER,
     DiffSide,
     Finding,
+    FindingRow,
+    InteractionRow,
     ReviewerThreadMissingError,
+    ReviewerThreadUnlinkedError,
     append_finding,
+    append_finding_interaction,
     comment_ids_for_finding,
     filter_findings_for_publish,
     findings_by_thread,
@@ -48,9 +54,11 @@ def _f(**overrides: Any) -> Finding:
     return base
 
 
-def _metadata_client(metadata: dict[str, Any] | None = None) -> AsyncMock:
+def _metadata_client(metadata: dict[str, Any] | None = None, *, number: int = 1) -> AsyncMock:
     client = AsyncMock()
-    client.threads.get.return_value = {"metadata": metadata or {}}
+    client.threads.get.return_value = {
+        "metadata": {"pr": {"owner": "acme", "name": "app", "number": number}, **(metadata or {})}
+    }
     return client
 
 
@@ -171,7 +179,66 @@ async def test_first_access_backfills_metadata_findings_once(
     backfills = [r for r in caplog.records if r.message.startswith("Backfilled reviewer findings")]
     assert len(backfills) == 1
     assert backfills[0].__dict__["reviewer_thread_id"] == "tid"
+    assert backfills[0].__dict__["pr_repo_full_name"] == "acme/app"
+    assert backfills[0].__dict__["pr_number"] == 1
     assert backfills[0].__dict__["finding_count"] == 2
+
+
+@pytest.mark.usefixtures("registry_db")
+async def test_findings_are_stored_under_the_threads_pull_request() -> None:
+    from agent.github.pull_requests import PullRequest
+
+    with patch("agent.review.findings.get_client", return_value=_metadata_client(number=7)):
+        await append_finding("tid", _f(id="f_a"))
+
+    pull_request = await PullRequest.get("acme", "app", 7)
+    assert pull_request is not None
+    async with postgres.session() as session:
+        stored = await session.scalars(
+            select(FindingRow.id).where(FindingRow.pull_request_id == pull_request.id)
+        )
+        assert list(stored) == ["f_a"]
+
+
+@pytest.mark.usefixtures("registry_db")
+async def test_a_thread_without_pull_request_metadata_stores_nothing() -> None:
+    client = AsyncMock()
+    client.threads.get.return_value = {"metadata": {"findings": [_f(id="f_a")]}}
+
+    with patch("agent.review.findings.get_client", return_value=client):
+        with pytest.raises(ReviewerThreadUnlinkedError):
+            await append_finding("tid", _f(id="f_b"))
+
+
+@pytest.mark.usefixtures("registry_db")
+async def test_reply_authors_link_to_registered_users_by_login() -> None:
+    from agent.users.models import User
+
+    user = await User.sign_in("github", "1001", login="trusted-user")
+    finding = _f(id="f_a")
+    with patch("agent.review.findings.get_client", return_value=_metadata_client()):
+        await append_finding("tid", finding)
+        for comment_id, author in ((1, "Trusted-User"), (2, "stranger")):
+            await append_finding_interaction(
+                "tid",
+                "f_a",
+                {
+                    "kind": "human_reply",
+                    "github_comment_id": comment_id,
+                    "author": author,
+                    "body": "hm",
+                },
+            )
+        (persisted,) = await list_findings("tid")
+
+    assert [i["author"] for i in persisted["interactions"]] == ["Trusted-User", "stranger"]
+    async with postgres.session() as session:
+        linked = await session.execute(
+            select(InteractionRow.author, InteractionRow.author_user_id).order_by(
+                InteractionRow.position
+            )
+        )
+        assert list(linked.tuples()) == [("Trusted-User", user.id), ("stranger", None)]
 
 
 @pytest.mark.usefixtures("registry_db")
@@ -207,7 +274,9 @@ async def test_failed_backfill_read_copies_nothing_and_retries_later() -> None:
         assert await list_findings("tid") == []
 
         client.threads.get.side_effect = None
-        client.threads.get.return_value = {"metadata": {"findings": [_f(id="f_legacy")]}}
+        client.threads.get.return_value = _metadata_client(
+            {"findings": [_f(id="f_legacy")]}
+        ).threads.get.return_value
         findings = await list_findings("tid")
 
     assert [f["id"] for f in findings] == ["f_legacy"]
@@ -450,7 +519,7 @@ async def test_findings_by_thread_reads_unmigrated_threads_from_metadata_without
 
     assert [f["id"] for f in result["stored"]] == ["f_stored"]
     assert [f["id"] for f in result["legacy"]] == ["f_meta"]
-    client = _metadata_client({"findings": [_f(id="f_later")]})
+    client = _metadata_client({"findings": [_f(id="f_later")]}, number=2)
     with patch("agent.review.findings.get_client", return_value=client):
         assert [f["id"] for f in await list_findings("legacy")] == ["f_later"]
 

@@ -1,4 +1,4 @@
-"""Reviewer findings, keyed by the reviewer thread that raised them."""
+"""Reviewer findings, stored under the pull request they were raised on."""
 
 from alembic import op
 
@@ -9,12 +9,14 @@ depends_on = None
 
 
 def upgrade() -> None:
-    # A row exists once a thread's findings live here; threads without one still
-    # hold theirs in LangGraph thread metadata and are copied over on first use.
+    # A row exists once a pull request's findings live here; reviewer threads
+    # without one still hold theirs in LangGraph thread metadata and are copied
+    # over on first use.
     op.execute(
         """
-        CREATE TABLE review_finding_set (
-            thread_id text PRIMARY KEY,
+        CREATE TABLE pull_request_finding_state (
+            pull_request_id uuid PRIMARY KEY REFERENCES pull_request (id) ON DELETE CASCADE,
+            reviewer_thread_id text NOT NULL UNIQUE,
             created_at timestamptz NOT NULL DEFAULT clock_timestamp()
         )
         """
@@ -22,8 +24,8 @@ def upgrade() -> None:
 
     op.execute(
         """
-        CREATE TABLE review_finding (
-            thread_id text NOT NULL REFERENCES review_finding_set (thread_id) ON DELETE CASCADE,
+        CREATE TABLE pull_request_finding (
+            pull_request_id uuid NOT NULL REFERENCES pull_request (id) ON DELETE CASCADE,
             id text NOT NULL,
             position integer NOT NULL,
             rank integer,
@@ -55,10 +57,41 @@ def upgrade() -> None:
             resolution_note text,
             diff_hunk text,
             fingerprint text NOT NULL,
-            interactions jsonb NOT NULL DEFAULT '[]'::jsonb,
-            PRIMARY KEY (thread_id, id),
-            UNIQUE (thread_id, position)
+            PRIMARY KEY (pull_request_id, id),
+            UNIQUE (pull_request_id, position)
         )
+        """
+    )
+
+    # author is the GitHub login as the thread shows it; author_user_id links it
+    # when that login belongs to a registered user.
+    op.execute(
+        """
+        CREATE TABLE pull_request_finding_interaction (
+            id uuid PRIMARY KEY,
+            pull_request_id uuid NOT NULL,
+            finding_id text NOT NULL,
+            position integer NOT NULL,
+            kind text,
+            github_comment_id bigint,
+            github_parent_comment_id bigint,
+            author text,
+            author_user_id uuid REFERENCES users (id) ON DELETE SET NULL,
+            body text,
+            created_at text,
+            needs_reassessment boolean,
+            FOREIGN KEY (pull_request_id, finding_id)
+                REFERENCES pull_request_finding (pull_request_id, id) ON DELETE CASCADE,
+            UNIQUE (pull_request_id, finding_id, position)
+        )
+        """
+    )
+
+    op.execute(
+        """
+        CREATE INDEX pull_request_finding_interaction_author_user_idx
+            ON pull_request_finding_interaction (author_user_id)
+            WHERE author_user_id IS NOT NULL
         """
     )
 
