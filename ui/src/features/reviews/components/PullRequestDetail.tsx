@@ -10,11 +10,25 @@ import type {
   PreviewThread,
   PullRequestPreview,
 } from "@/lib/api"
+import { DiffStat } from "@/components/DiffStat"
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@/components/ui/collapsible"
+import { Skeleton } from "@/components/ui/skeleton"
+import { Tooltip, TooltipPopup, TooltipTrigger } from "@/components/ui/tooltip"
+import { TooltipIconButton } from "@/components/ui/tooltip-icon-button"
 import { Markdown } from "@/features/agents/components/chat/Markdown"
 import { GuidancePointList } from "./AuthorGuidanceCard"
-import { Skeleton } from "@/components/ui/skeleton"
 import { api } from "@/lib/api"
 import { cn } from "@/lib/utils"
+import {
+  checkOutcome,
+  checkTones,
+  CheckStatusIcon,
+  type CheckOutcome,
+} from "./CheckStatus"
 import {
   PullRequestActions,
   type PullRequestOutcome,
@@ -31,25 +45,21 @@ const fileMarks: Record<string, string> = {
 }
 
 const fileTones: Record<string, string> = {
-  added: "text-emerald-700 dark:text-emerald-400",
+  added: "text-success-foreground",
   removed: "text-destructive",
-  renamed: "text-sky-700 dark:text-sky-400",
-  copied: "text-sky-700 dark:text-sky-400",
+  renamed: "text-info-foreground",
+  copied: "text-info-foreground",
 }
 
-const passedConclusions = new Set(["success", "neutral", "skipped"])
-
-function checkTone(check: PreviewCheck): string {
-  if (check.status !== "completed") return "text-amber-700 dark:text-amber-400"
-  if (check.conclusion && passedConclusions.has(check.conclusion))
-    return "text-emerald-700 dark:text-emerald-400"
-  return "text-destructive"
+const checkRanks: Record<CheckOutcome, number> = {
+  failed: 0,
+  running: 1,
+  passed: 2,
+  skipped: 2,
 }
 
 function checkRank(check: PreviewCheck): number {
-  if (check.status !== "completed") return 1
-  if (check.conclusion && passedConclusions.has(check.conclusion)) return 2
-  return 0
+  return checkRanks[checkOutcome(check)]
 }
 
 function Section({
@@ -80,24 +90,27 @@ function FileRow({ file }: { file: PreviewFile }) {
   const cut = file.path.lastIndexOf("/")
   return (
     <li className="flex items-baseline gap-2.5 py-1 font-mono text-xs">
-      <span
-        aria-hidden="true"
-        className={cn("w-3 shrink-0", fileTones[file.status])}
-        title={file.status}
-      >
-        {fileMarks[file.status] ?? "M"}
-      </span>
+      <Tooltip>
+        <TooltipTrigger
+          render={
+            <span
+              aria-hidden="true"
+              className={cn("w-3 shrink-0", fileTones[file.status])}
+            />
+          }
+        >
+          {fileMarks[file.status] ?? "M"}
+        </TooltipTrigger>
+        <TooltipPopup>{file.status}</TooltipPopup>
+      </Tooltip>
       <span className="min-w-0 flex-1 truncate" title={file.path}>
         <span className="text-muted-foreground">
           {cut < 0 ? "" : file.path.slice(0, cut + 1)}
         </span>
         <span className="text-foreground">{file.path.slice(cut + 1)}</span>
       </span>
-      <span className="shrink-0 text-emerald-700 tabular-nums dark:text-emerald-400">
-        +{file.additions}
-      </span>
-      <span className="w-12 shrink-0 text-destructive tabular-nums">
-        −{file.deletions}
+      <span className="flex w-24 shrink-0 justify-end">
+        <DiffStat additions={file.additions} deletions={file.deletions} />
       </span>
     </li>
   )
@@ -106,13 +119,7 @@ function FileRow({ file }: { file: PreviewFile }) {
 function CheckRow({ check }: { check: PreviewCheck }) {
   return (
     <li className="flex items-baseline gap-2.5 py-0.5 text-xs">
-      <span className={cn("shrink-0 tabular-nums", checkTone(check))}>
-        {check.status !== "completed"
-          ? "•"
-          : check.conclusion === "success"
-            ? "✓"
-            : "✕"}
-      </span>
+      <CheckStatusIcon check={check} className="self-center" />
       <span className="min-w-0 flex-1 truncate text-foreground">
         {check.url ? (
           <a
@@ -127,7 +134,7 @@ function CheckRow({ check }: { check: PreviewCheck }) {
           check.name
         )}
       </span>
-      <span className={cn("shrink-0", checkTone(check))}>
+      <span className={cn("shrink-0", checkTones[checkOutcome(check)])}>
         {check.status !== "completed"
           ? check.status
           : (check.conclusion ?? "done")}
@@ -149,7 +156,7 @@ const checkGroups = [
 function Checks({ checks }: { checks: Array<PreviewCheck> | null }) {
   if (checks === null) {
     return (
-      <p className="text-xs text-amber-700 dark:text-amber-400">
+      <p className="text-xs text-warning-foreground">
         GitHub did not return the checks for this commit.
       </p>
     )
@@ -173,23 +180,28 @@ function Checks({ checks }: { checks: Array<PreviewCheck> | null }) {
         const group = sorted.filter((check) => checkRank(check) === rank)
         if (!group.length) return null
         return (
-          <details key={label} open={rank === 0} className="group">
-            <summary className="cursor-pointer list-none text-xs text-muted-foreground hover:text-foreground">
-              <span aria-hidden="true" className="inline-block w-3">
+          <Collapsible key={label} defaultOpen={rank === 0}>
+            <CollapsibleTrigger className="group cursor-pointer text-xs text-muted-foreground hover:text-foreground">
+              <span
+                aria-hidden="true"
+                className="inline-block w-3 transition-transform group-data-panel-open:rotate-90"
+              >
                 {"›"}
               </span>
               {label}
               <span className="ml-1.5 tabular-nums">{group.length}</span>
-            </summary>
-            <ul className="mt-1 space-y-0.5 pl-3">
-              {group.map((check) => (
-                <CheckRow
-                  key={`${check.name}:${check.url ?? ""}`}
-                  check={check}
-                />
-              ))}
-            </ul>
-          </details>
+            </CollapsibleTrigger>
+            <CollapsibleContent>
+              <ul className="mt-1 space-y-0.5 pl-3">
+                {group.map((check) => (
+                  <CheckRow
+                    key={`${check.name}:${check.url ?? ""}`}
+                    check={check}
+                  />
+                ))}
+              </ul>
+            </CollapsibleContent>
+          </Collapsible>
         )
       })}
     </div>
@@ -205,7 +217,7 @@ function Conversation({ thread }: { thread: PreviewThread }) {
   }, [])
 
   return (
-    <li className="border-l-2 border-amber-600/40 pl-3">
+    <li className="border-l-2 border-warning/40 pl-3">
       <div className="flex items-baseline gap-2 text-xs text-muted-foreground">
         <span className="font-medium text-foreground">
           {thread.author ?? "Someone"}
@@ -253,7 +265,7 @@ function Conversation({ thread }: { thread: PreviewThread }) {
 function Conversations({ preview }: { preview: PullRequestPreview }) {
   if (preview.unresolved === null) {
     return (
-      <p className="text-xs text-amber-700 dark:text-amber-400">
+      <p className="text-xs text-warning-foreground">
         GitHub did not return the review threads, so unresolved comments cannot
         be counted here. Open the PR to check.
       </p>
@@ -317,12 +329,7 @@ export function PullRequestDetail({
             <span className="truncate">{pr.repo}</span>
             <span className="font-mono tabular-nums">#{pr.number}</span>
             {data && (
-              <span className="tabular-nums">
-                <span className="text-emerald-700 dark:text-emerald-400">
-                  +{data.additions}
-                </span>{" "}
-                <span className="text-destructive">−{data.deletions}</span>
-              </span>
+              <DiffStat additions={data.additions} deletions={data.deletions} />
             )}
           </div>
           <h2 className="mt-1 text-sm font-medium break-words text-foreground">
@@ -350,14 +357,14 @@ export function PullRequestDetail({
             </Link>
           </div>
         </div>
-        <button
-          type="button"
-          aria-label="Close pull request preview"
+        <TooltipIconButton
+          label="Close pull request preview"
           onClick={onClose}
-          className="-mt-1 -mr-1.5 rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-sidebar-row-hover hover:text-foreground"
+          size="icon"
+          className="-mt-1 -mr-1.5"
         >
           <XIcon className="size-4" />
-        </button>
+        </TooltipIconButton>
       </header>
 
       <div className="border-b border-border px-5 py-3">

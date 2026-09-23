@@ -6,7 +6,13 @@ import {
   useWorkflowApprovalDecision,
   useWorkflowApprovals,
 } from "@/features/agents/lib/queries"
+import { DiffStat } from "@/components/DiffStat"
 import { Button } from "@/components/ui/button"
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@/components/ui/collapsible"
 import { cn } from "@/lib/utils"
 
 function shortSha(value: string): string {
@@ -157,20 +163,18 @@ export function WorkflowApprovalCard({
               </div>
             </div>
 
-            <details className="mt-4 rounded-md border border-border">
-              <summary className="flex cursor-pointer items-center justify-between gap-3 p-3 text-xs font-medium text-foreground">
+            <Collapsible className="mt-4 rounded-md border border-border">
+              <CollapsibleTrigger className="flex w-full cursor-pointer items-center justify-between gap-3 p-3 text-left text-xs font-medium text-foreground">
                 <span>Review files and diff</span>
-                <span className="font-normal text-muted-foreground">
+                <span className="flex items-center gap-2 font-normal text-muted-foreground">
                   {approval.diffStats.files} files
-                  <span className="ml-2 text-success-foreground">
-                    +{approval.diffStats.additions}
-                  </span>
-                  <span className="ml-2 text-destructive">
-                    -{approval.diffStats.deletions}
-                  </span>
+                  <DiffStat
+                    additions={approval.diffStats.additions}
+                    deletions={approval.diffStats.deletions}
+                  />
                 </span>
-              </summary>
-              <div className="border-t border-border p-3">
+              </CollapsibleTrigger>
+              <CollapsibleContent className="border-t border-border p-3">
                 <ul className="space-y-1 text-xs text-muted-foreground">
                   {approval.files.map((file) => (
                     <li key={file} className="truncate font-mono" title={file}>
@@ -193,8 +197,8 @@ export function WorkflowApprovalCard({
                     Diff preview is truncated.
                   </p>
                 )}
-              </div>
-            </details>
+              </CollapsibleContent>
+            </Collapsible>
 
             <p className="mt-3 font-mono text-[0.65rem] break-all text-muted-foreground">
               Approval ID: {approval.fingerprint}

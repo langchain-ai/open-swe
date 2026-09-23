@@ -697,7 +697,7 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
 
     const skeleton = page.getByTestId("sidebar-threads-skeleton");
     await expect(skeleton).toBeVisible({ timeout: 30_000 });
-    await expect(page.getByRole("status")).toContainText("Loading threads");
+    await expect(skeleton.getByRole("status")).toContainText("Loading threads");
 
     release();
     await expect(skeleton).toBeHidden({ timeout: 30_000 });

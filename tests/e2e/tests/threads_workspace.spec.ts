@@ -772,7 +772,7 @@ test.describe("automation run history", () => {
     await page.goto("/agents/automations?tab=runs");
     const automations = page
       .getByRole("heading", { name: "Automations", level: 1 })
-      .locator("..");
+      .locator("xpath=ancestor::header/..");
     await expect(
       automations.getByText("Automation runs could not be loaded."),
     ).toBeVisible({ timeout: 20_000 });
@@ -816,7 +816,7 @@ test.describe("automation run history", () => {
     await expect(weekly).toContainText("Running");
     await expect(automations).not.toContainText(TITLES.attention);
 
-    await automations.getByRole("button", { name: "Overview" }).click();
+    await automations.getByRole("tab", { name: "Overview" }).click();
     const scheduleLink = automations.getByRole("link", {
       name: /E2E Daily Health/,
     });

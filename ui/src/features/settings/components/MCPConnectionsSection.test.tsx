@@ -18,6 +18,16 @@ afterEach(() => {
   vi.restoreAllMocks()
 })
 
+const isChecked = (element: HTMLElement) =>
+  element.getAttribute("aria-checked") === "true"
+
+async function chooseOption(label: string, option: string) {
+  fireEvent.click(screen.getByRole("combobox", { name: label }))
+  fireEvent.keyDown(await screen.findByRole("option", { name: option }), {
+    key: "Enter",
+  })
+}
+
 it("scopes workspace MCP requests to the selected workspace", async () => {
   const requestedUrls: string[] = []
   vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
@@ -113,9 +123,7 @@ it.each(["form", "import"])(
       fireEvent.change(screen.getByLabelText("Server URL"), {
         target: { value: "https://mcp.linear.app/mcp" },
       })
-      fireEvent.change(screen.getByLabelText("Authentication"), {
-        target: { value: "oauth" },
-      })
+      await chooseOption("Authentication", "OAuth client credentials")
       fireEvent.change(screen.getByLabelText("Token URL"), {
         target: { value: oauth.token_url },
       })
@@ -161,9 +169,7 @@ it.each(["form", "import"])(
     expect((screen.getByLabelText("Client ID") as HTMLInputElement).value).toBe(
       "test-app"
     )
-    fireEvent.change(screen.getByLabelText("Authentication"), {
-      target: { value: "headers" },
-    })
+    await chooseOption("Authentication", "Headers / API key")
     fireEvent.click(screen.getByRole("button", { name: "Save connection" }))
     await screen.findByRole("button", { name: "Add MCP server" })
     expect(writes[3]?.oauth).toBeNull()
@@ -342,7 +348,7 @@ it("saves personal authentication, discovers tools, and enables only selected to
   const search = await screen.findByRole("checkbox", {
     name: "Allow search",
   })
-  expect((search as HTMLInputElement).checked).toBe(true)
+  expect(isChecked(search)).toBe(true)
   expect(operations).toEqual(["discover", "save"])
   expect(discoveries[0]?.headers).toEqual({
     Authorization: "  Bearer test-secret  ",
@@ -353,8 +359,7 @@ it("saves personal authentication, discovers tools, and enables only selected to
   })
   expect(screen.queryByLabelText("Header 1 value")).toBeNull()
   expect(
-    (screen.getByRole("checkbox", { name: "Allow delete" }) as HTMLInputElement)
-      .checked
+    isChecked(screen.getByRole("checkbox", { name: "Allow delete" }))
   ).toBe(true)
   expect(screen.getByText("2 of 2 selected")).toBeTruthy()
   fireEvent.click(screen.getByRole("button", { name: "Hide tools" }))
@@ -383,8 +388,7 @@ it("saves personal authentication, discovers tools, and enables only selected to
   expect(screen.getByText("0 of 1 selected")).toBeTruthy()
   fireEvent.click(screen.getByRole("button", { name: "Select all" }))
   expect(
-    (screen.getByRole("checkbox", { name: "Allow search" }) as HTMLInputElement)
-      .checked
+    isChecked(screen.getByRole("checkbox", { name: "Allow search" }))
   ).toBe(true)
   fireEvent.click(screen.getByRole("button", { name: "Cancel" }))
   expect(within(incidentCard).queryByLabelText("Server URL")).toBeNull()
@@ -449,13 +453,9 @@ it.each([{ allowedTools: [] }, { allowedTools: ["search"] }])(
     const deleteTool = await screen.findByRole("checkbox", {
       name: "Allow delete",
     })
-    expect((deleteTool as HTMLInputElement).checked).toBe(false)
+    expect(isChecked(deleteTool)).toBe(false)
     expect(
-      (
-        screen.getByRole("checkbox", {
-          name: "Allow search",
-        }) as HTMLInputElement
-      ).checked
+      isChecked(screen.getByRole("checkbox", { name: "Allow search" }))
     ).toBe(allowedTools.includes("search"))
     fireEvent.click(screen.getByRole("button", { name: "Save connection" }))
     await screen.findByRole("button", { name: "Add MCP server" })
@@ -520,7 +520,7 @@ it("keeps a newly saved connection editable when refreshing the list fails", asy
   await screen.findByRole("alert")
   const search = await screen.findByRole("checkbox", { name: "Allow search" })
   expect(screen.getByRole("button", { name: "Cancel" })).toBeTruthy()
-  expect((search as HTMLInputElement).checked).toBe(true)
+  expect(isChecked(search)).toBe(true)
   fireEvent.click(screen.getByRole("button", { name: "Save connection" }))
   await screen.findByRole("button", { name: "Add MCP server" })
   expect(writes.at(-1)?.allowed_tools).toEqual(["search"])

@@ -8,7 +8,9 @@ import { ThinkingSpinner } from "./ThinkingSpinner"
 import { UserMessage } from "./UserMessage"
 import { useTranscriptScroll } from "./useTranscriptScroll"
 import type { MessagesProps } from "./types"
+import { Button, IconButton } from "@/components/ui/button"
 import { TooltipProvider } from "@/components/ui/tooltip"
+import { TooltipIconButton } from "@/components/ui/tooltip-icon-button"
 import { InlinePlanArtifact } from "@/features/agents/components/InlinePlanArtifact"
 import { WorkflowApprovalCard } from "@/features/agents/components/WorkflowApprovalCard"
 import { useLiveMarkdownMessageId } from "@/features/agents/lib/provider/useLiveMarkdownMessageId"
@@ -62,32 +64,26 @@ function QueuedMessages({
               {(onSteer || onRemove) && message.mine !== false && (
                 <div className="ml-auto flex items-center gap-0.5">
                   {onSteer && (
-                    <button
-                      type="button"
-                      className="flex size-6 items-center justify-center rounded-md hover:bg-accent hover:text-foreground disabled:pointer-events-none disabled:opacity-40"
+                    <TooltipIconButton
+                      label="Send now"
                       onPointerDown={(event) => event.preventDefault()}
                       onClick={() => onSteer(message.id)}
                       disabled={message.pending}
-                      title="Send now"
-                      aria-label="Send now"
                       data-testid="queued-message-send-now"
                     >
                       <ArrowUp className="size-3.5" aria-hidden />
-                    </button>
+                    </TooltipIconButton>
                   )}
                   {onRemove && (
-                    <button
-                      type="button"
-                      className="flex size-6 items-center justify-center rounded-md hover:bg-accent hover:text-foreground disabled:pointer-events-none disabled:opacity-40"
+                    <TooltipIconButton
+                      label="Cancel and return to the composer"
                       onPointerDown={(event) => event.preventDefault()}
                       onClick={() => onRemove(message.id)}
                       disabled={message.pending}
-                      title="Cancel and return to the composer"
-                      aria-label="Cancel and return to the composer"
                       data-testid="queued-message-cancel"
                     >
                       <X className="size-3.5" aria-hidden />
-                    </button>
+                    </TooltipIconButton>
                   )}
                 </div>
               )}
@@ -186,19 +182,19 @@ export const Messages = memo(function MessagesComponent({
             style={bottomInset > 0 ? { paddingBottom: bottomInset } : undefined}
           >
             {loadEarlier && (
-              <button
-                type="button"
+              <Button
+                variant="ghost"
                 disabled={loadEarlier.loading}
                 onClick={() => {
                   capturePrependAnchor()
                   loadEarlier.onLoadEarlier()
                 }}
-                className="mb-3 w-full py-1.5 text-center text-xs text-muted-foreground hover:text-foreground disabled:cursor-default"
+                className="mb-3 w-full text-muted-foreground"
               >
                 {loadEarlier.loading
                   ? "Loading earlier turns…"
                   : "Load earlier turns"}
-              </button>
+              </Button>
             )}
             {visibleMessages.length === 0 && emptyState}
             {visibleMessages.map((message, index) => {
@@ -272,15 +268,16 @@ export const Messages = memo(function MessagesComponent({
         </div>
 
         {scrollButtonSlot === "internal" && showScrollToBottom && (
-          <button
-            type="button"
+          <IconButton
+            variant="ghost"
+            size="icon-lg"
             onClick={scrollToBottom}
             aria-label="Scroll to bottom"
-            className="dropdown-glass absolute left-1/2 z-30 inline-flex size-8 -translate-x-1/2 items-center justify-center rounded-full text-muted-foreground transition-colors hover:text-foreground"
+            className="dropdown-glass absolute left-1/2 z-30 -translate-x-1/2 rounded-full text-muted-foreground"
             style={{ bottom: bottomInset > 0 ? bottomInset + 8 : 16 }}
           >
             <ChevronDown className="size-3.5" />
-          </button>
+          </IconButton>
         )}
       </div>
     </TooltipProvider>

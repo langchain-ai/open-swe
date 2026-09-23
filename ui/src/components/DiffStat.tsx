@@ -14,29 +14,30 @@ export function DiffStat({
 }) {
   const total = additions + deletions
   const counts = (
-    <span
-      className={cn(
-        "inline-flex gap-1.5 font-mono tabular-nums",
-        !bar && className
-      )}
-    >
+    <>
       <span className="text-success-foreground">
         +{additions.toLocaleString()}
       </span>
       <span className="text-destructive">−{deletions.toLocaleString()}</span>
-    </span>
+    </>
   )
   const label = `${additions} lines added, ${deletions} lines deleted`
   if (!bar) {
     return (
-      <span aria-label={label} className="inline-flex" role="img">
+      <span
+        aria-label={label}
+        className={cn("inline-flex gap-1.5 font-mono tabular-nums", className)}
+        role="img"
+      >
         {counts}
       </span>
     )
   }
   return (
     <div aria-label={label} className={cn("min-w-24", className)} role="img">
-      {counts}
+      <span className="inline-flex gap-1.5 font-mono tabular-nums">
+        {counts}
+      </span>
       <div
         aria-hidden="true"
         className="mt-1.5 flex h-1 w-20 overflow-hidden rounded-full bg-muted"

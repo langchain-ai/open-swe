@@ -2,13 +2,13 @@ import { createFileRoute } from "@tanstack/react-router"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useMemo, useState } from "react"
 
-import { AppShell } from "@/components/AppShell"
+import { AuthedAppShell } from "@/components/AppShell"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Switch } from "@/components/ui/switch"
+import { Tooltip, TooltipPopup, TooltipTrigger } from "@/components/ui/tooltip"
 import { api } from "@/lib/api"
-import { RequireLogin } from "@/lib/auth-redirect"
 import { useRepos } from "@/lib/profile"
 import { useSession } from "@/lib/session"
 
@@ -72,24 +72,14 @@ function RepositoriesOwnerPage() {
   const pageEnd = Math.min(pageStart + PAGE_SIZE, filteredRepos.length)
   const pageRepos = filteredRepos.slice(pageStart, pageEnd)
 
-  if (session.isLoading) {
-    return (
-      <main className="p-6">
-        <Skeleton className="h-64 w-full" />
-      </main>
-    )
-  }
-  if (!session.data) return <RequireLogin />
-
-  const canEdit = session.data.is_admin
+  const canEdit = !!session.data?.is_admin
   const autoReviewCount = ownerRepos.filter((r) =>
     autoReviewSet.has(r.full_name)
   ).length
   const loading = repos.isLoading || autoReview.isLoading
 
   return (
-    <AppShell
-      user={session.data}
+    <AuthedAppShell
       title={owner}
       description={
         canEdit
@@ -98,119 +88,127 @@ function RepositoriesOwnerPage() {
       }
       backTo={{ to: "/review", label: "Back to Open SWE Review" }}
     >
-      <section className="space-y-3">
-        <div className="flex items-center justify-between">
-          <h2 className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
-            Repositories
-          </h2>
-          <span className="text-xs text-muted-foreground">
-            {autoReviewCount}/{ownerRepos.length} run automatically
-          </span>
-        </div>
-        <Input
-          type="search"
-          value={search}
-          onChange={(event) =>
-            setSearchPosition({ owner, search: event.target.value })
-          }
-          placeholder="Search repositories…"
-          aria-label="Search repositories"
-        />
-        <div className="rounded-lg border border-border bg-card">
-          {loading && (
-            <div className="p-4">
-              <Skeleton className="h-32 w-full" />
-            </div>
-          )}
-          {!loading && filteredRepos.length === 0 && (
-            <p className="px-4 py-3 text-xs text-muted-foreground">
-              {ownerRepos.length === 0
-                ? "No repositories found for this installation."
-                : "No repositories match your search."}
-            </p>
-          )}
-          <ul className="divide-y divide-border">
-            {pageRepos.map((r) => {
-              const runsAutomatically = autoReviewSet.has(r.full_name)
-              return (
-                <li
-                  key={r.full_name}
-                  className="flex items-center justify-between gap-4 px-4 py-3"
-                >
-                  <div className="flex min-w-0 items-center gap-2 text-xs">
-                    <span className="truncate">
-                      <span className="text-muted-foreground">{owner}/</span>
-                      <span className="font-medium text-foreground">
-                        {r.full_name.slice(owner.length + 1)}
-                      </span>
-                    </span>
-                    {r.private && (
-                      <span className="text-[10px] text-muted-foreground">
-                        private
-                      </span>
-                    )}
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs text-muted-foreground">
-                      Run automatically
-                    </span>
-                    <span
-                      title={
-                        !canEdit
-                          ? "Only team admins can modify automatic review settings"
-                          : undefined
-                      }
-                      className={!canEdit ? "cursor-not-allowed" : undefined}
-                    >
-                      <Switch
-                        aria-label={`Run reviews automatically for ${r.full_name}`}
-                        checked={runsAutomatically}
-                        disabled={!canEdit || toggleAutoReview.isPending}
-                        onCheckedChange={(v) =>
-                          toggleAutoReview.mutate({
-                            full_name: r.full_name,
-                            on: v,
-                          })
-                        }
-                      />
-                    </span>
-                  </div>
-                </li>
-              )
-            })}
-          </ul>
-          {filteredRepos.length > PAGE_SIZE && (
-            <div className="flex items-center justify-between gap-4 border-t border-border px-4 py-2 text-xs">
-              <span className="text-muted-foreground">
-                Showing {pageStart + 1}-{pageEnd} of {filteredRepos.length}
-              </span>
-              <div className="flex items-center gap-2">
-                <Button
-                  size="sm"
-                  variant="outline"
-                  disabled={safePage === 0}
-                  onClick={() => setPage((p) => Math.max(0, p - 1))}
-                >
-                  Prev
-                </Button>
-                <span className="text-muted-foreground">
-                  {safePage + 1} / {totalPages}
-                </span>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  disabled={safePage >= totalPages - 1}
-                  onClick={() =>
-                    setPage((p) => Math.min(totalPages - 1, p + 1))
-                  }
-                >
-                  Next
-                </Button>
+      {() => (
+        <section className="space-y-3">
+          <div className="flex items-center justify-between">
+            <h2 className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
+              Repositories
+            </h2>
+            <span className="text-xs text-muted-foreground">
+              {autoReviewCount}/{ownerRepos.length} run automatically
+            </span>
+          </div>
+          <Input
+            type="search"
+            value={search}
+            onChange={(event) =>
+              setSearchPosition({ owner, search: event.target.value })
+            }
+            placeholder="Search repositories…"
+            aria-label="Search repositories"
+          />
+          <div className="rounded-lg border border-border bg-card">
+            {loading && (
+              <div className="p-4">
+                <Skeleton className="h-32 w-full" />
               </div>
-            </div>
-          )}
-        </div>
-      </section>
-    </AppShell>
+            )}
+            {!loading && filteredRepos.length === 0 && (
+              <p className="px-4 py-3 text-xs text-muted-foreground">
+                {ownerRepos.length === 0
+                  ? "No repositories found for this installation."
+                  : "No repositories match your search."}
+              </p>
+            )}
+            <ul className="divide-y divide-border">
+              {pageRepos.map((r) => {
+                const runsAutomatically = autoReviewSet.has(r.full_name)
+                return (
+                  <li
+                    key={r.full_name}
+                    className="flex items-center justify-between gap-4 px-4 py-3"
+                  >
+                    <div className="flex min-w-0 items-center gap-2 text-xs">
+                      <span className="truncate">
+                        <span className="text-muted-foreground">{owner}/</span>
+                        <span className="font-medium text-foreground">
+                          {r.full_name.slice(owner.length + 1)}
+                        </span>
+                      </span>
+                      {r.private && (
+                        <span className="text-[10px] text-muted-foreground">
+                          private
+                        </span>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs text-muted-foreground">
+                        Run automatically
+                      </span>
+                      <Tooltip disabled={canEdit}>
+                        <TooltipTrigger
+                          render={
+                            <span
+                              className={
+                                !canEdit ? "cursor-not-allowed" : undefined
+                              }
+                            />
+                          }
+                        >
+                          <Switch
+                            aria-label={`Run reviews automatically for ${r.full_name}`}
+                            checked={runsAutomatically}
+                            disabled={!canEdit || toggleAutoReview.isPending}
+                            onCheckedChange={(v) =>
+                              toggleAutoReview.mutate({
+                                full_name: r.full_name,
+                                on: v,
+                              })
+                            }
+                          />
+                        </TooltipTrigger>
+                        <TooltipPopup>
+                          Only team admins can modify automatic review settings
+                        </TooltipPopup>
+                      </Tooltip>
+                    </div>
+                  </li>
+                )
+              })}
+            </ul>
+            {filteredRepos.length > PAGE_SIZE && (
+              <div className="flex items-center justify-between gap-4 border-t border-border px-4 py-2 text-xs">
+                <span className="text-muted-foreground">
+                  Showing {pageStart + 1}-{pageEnd} of {filteredRepos.length}
+                </span>
+                <div className="flex items-center gap-2">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    disabled={safePage === 0}
+                    onClick={() => setPage((p) => Math.max(0, p - 1))}
+                  >
+                    Prev
+                  </Button>
+                  <span className="text-muted-foreground">
+                    {safePage + 1} / {totalPages}
+                  </span>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    disabled={safePage >= totalPages - 1}
+                    onClick={() =>
+                      setPage((p) => Math.min(totalPages - 1, p + 1))
+                    }
+                  >
+                    Next
+                  </Button>
+                </div>
+              </div>
+            )}
+          </div>
+        </section>
+      )}
+    </AuthedAppShell>
   )
 }

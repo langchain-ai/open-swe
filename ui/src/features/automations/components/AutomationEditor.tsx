@@ -13,8 +13,13 @@ import type { ModelSelection } from "@/features/agents/lib/provider/useModelOpti
 import { RepoSelector } from "@/features/settings/components/RepoSelector"
 import { AutomationRuns } from "@/features/automations/components/AutomationRuns"
 import { ScheduleTriggerPicker } from "@/features/automations/components/ScheduleTriggerPicker"
+import { useConfirm } from "@/components/ConfirmDialog"
 import { Button } from "@/components/ui/button"
+import { Checkbox } from "@/components/ui/checkbox"
+import { Input } from "@/components/ui/input"
 import { Switch } from "@/components/ui/switch"
+import { Textarea } from "@/components/ui/textarea"
+import { TooltipIconButton } from "@/components/ui/tooltip-icon-button"
 import {
   Select,
   SelectContent,
@@ -36,6 +41,10 @@ import { ModelPicker } from "@/features/agents/components/ModelPicker"
 import { useUnsavedChangesWarning } from "@/features/automations/lib/useUnsavedChangesWarning"
 import { useRepos } from "@/lib/profile"
 import { useSession } from "@/lib/session"
+import { cn } from "@/lib/utils"
+
+const BARE_FIELD =
+  "h-auto rounded-none border-transparent bg-transparent px-0 py-0 text-sm text-foreground focus-visible:border-transparent focus-visible:ring-0 disabled:opacity-100 md:text-sm dark:bg-transparent"
 
 interface AutomationEditorProps {
   mode: "create" | "edit"
@@ -62,6 +71,7 @@ export function AutomationEditor({
   template,
 }: AutomationEditorProps) {
   const navigate = useNavigate()
+  const confirm = useConfirm()
   const session = useSession()
   const canManage = session.data?.is_admin === true
   const reposQuery = useRepos()
@@ -190,9 +200,16 @@ export function AutomationEditor({
     )
   }
 
-  const handleDelete = () => {
+  const handleDelete = async () => {
     if (!schedule) return
-    if (!window.confirm(`Delete "${schedule.name}"?`)) return
+    if (
+      !(await confirm({
+        title: `Delete "${schedule.name}"?`,
+        confirmLabel: "Delete",
+        destructive: true,
+      }))
+    )
+      return
     deleteSchedule.mutate(schedule.id, {
       onSuccess: () => {
         allowNavigation()
@@ -222,7 +239,7 @@ export function AutomationEditor({
               <Button
                 variant="ghost"
                 size="icon"
-                onClick={handleDelete}
+                onClick={() => void handleDelete()}
                 disabled={deleteSchedule.isPending}
                 aria-label="Delete automation"
                 className="text-muted-foreground/70 hover:text-destructive"
@@ -248,12 +265,13 @@ export function AutomationEditor({
             change it.
           </p>
         )}
-        <input
+        <Input
           value={name}
           onChange={(e) => setName(e.target.value)}
           disabled={!canManage}
           placeholder="Untitled automation"
-          className="w-full bg-transparent text-base font-medium text-foreground outline-none placeholder:text-muted-foreground/70"
+          aria-label="Automation name"
+          className={cn(BARE_FIELD, "text-base font-medium md:text-base")}
         />
 
         <div className="mt-3 flex items-center gap-3 text-xs">
@@ -301,30 +319,29 @@ export function AutomationEditor({
             <div className="flex items-center gap-3 rounded-lg px-3 py-2.5">
               <ClockIcon className="size-4 shrink-0 text-muted-foreground" />
               {customMode ? (
-                <input
+                <Input
                   value={cron}
                   onChange={(e) => setCron(e.target.value)}
                   disabled={!canManage}
                   placeholder="0 9 * * 1-5"
-                  className="flex-1 bg-transparent font-mono text-sm text-foreground outline-none placeholder:text-muted-foreground/70"
+                  aria-label="Cron expression"
+                  className={cn(BARE_FIELD, "flex-1 font-mono")}
                 />
               ) : (
                 <span className="flex-1 text-sm text-foreground">
                   {describeCron(cron)}
                 </span>
               )}
-              <button
-                type="button"
+              <TooltipIconButton
+                label="Remove trigger"
                 onClick={() => {
                   setCron(null)
                   setCustomMode(false)
                 }}
-                aria-label="Remove trigger"
                 disabled={!canManage}
-                className="shrink-0 rounded p-1 text-muted-foreground/70 hover:bg-accent hover:text-foreground"
               >
                 <TrashIcon className="size-3.5" />
-              </button>
+              </TooltipIconButton>
             </div>
           )}
           {trigger === "schedule" && cron && (
@@ -340,13 +357,14 @@ export function AutomationEditor({
 
         <SectionLabel>Slack destination</SectionLabel>
         <div className="rounded-xl border border-border bg-card p-3">
-          <input
+          <Input
             value={slackChannelId}
             onChange={(e) => setSlackChannelId(e.target.value)}
             disabled={!canManage}
             placeholder="C0123456789"
             spellCheck={false}
-            className="w-full bg-transparent font-mono text-sm text-foreground outline-none placeholder:text-muted-foreground/70"
+            aria-label="Slack channel ID"
+            className={cn(BARE_FIELD, "font-mono")}
           />
           <div className="mt-3 flex items-center justify-between gap-3 border-t border-border/60 pt-3">
             <span className="text-xs text-muted-foreground">
@@ -380,13 +398,14 @@ export function AutomationEditor({
 
         <SectionLabel>Agent Instructions</SectionLabel>
         <div className="rounded-xl border border-border bg-card p-3">
-          <textarea
+          <Textarea
             value={prompt}
             onChange={(e) => setPrompt(e.target.value)}
             disabled={!canManage}
             placeholder="What should Open SWE do each time this runs?"
             rows={5}
-            className="w-full resize-none bg-transparent text-sm leading-relaxed text-foreground outline-none placeholder:text-muted-foreground/70"
+            aria-label="Agent instructions"
+            className={cn(BARE_FIELD, "field-sizing-fixed leading-relaxed")}
           />
           <div className="mt-2 flex items-center">
             <ModelPicker
@@ -398,12 +417,11 @@ export function AutomationEditor({
           </div>
           {session.data?.is_admin === true && (
             <label className="mt-3 flex cursor-pointer items-start gap-2 border-t border-border/60 pt-3">
-              <input
-                type="checkbox"
+              <Checkbox
                 checked={adminThread}
-                onChange={(event) => setAdminThread(event.target.checked)}
+                onCheckedChange={setAdminThread}
                 disabled={!canManage}
-                className="mt-0.5 size-4 accent-destructive"
+                className="mt-0.5 data-checked:border-destructive data-checked:bg-destructive dark:data-checked:bg-destructive"
               />
               <span>
                 <span className="block text-xs font-medium text-foreground">

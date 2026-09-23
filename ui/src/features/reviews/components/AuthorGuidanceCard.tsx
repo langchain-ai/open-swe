@@ -1,3 +1,8 @@
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@/components/ui/collapsible"
 import type { GuidancePoint } from "@/lib/api"
 import { cn } from "@/lib/utils"
 
@@ -11,11 +16,11 @@ function Point({
 }) {
   return (
     <li>
-      <details className="group">
-        <summary className="flex cursor-pointer list-none items-baseline gap-2">
+      <Collapsible>
+        <CollapsibleTrigger className="group flex w-full cursor-pointer items-baseline gap-2 text-left">
           <span
             aria-hidden="true"
-            className="shrink-0 text-xs text-muted-foreground transition-transform group-open:rotate-90"
+            className="shrink-0 text-xs text-muted-foreground transition-transform group-data-panel-open:rotate-90"
           >
             ›
           </span>
@@ -27,11 +32,13 @@ function Point({
               {point.author}
             </span>
           )}
-        </summary>
-        <p className="mt-1 ml-5 border-l-2 border-border pl-3 text-xs whitespace-pre-wrap text-muted-foreground italic">
-          {point.quote}
-        </p>
-      </details>
+        </CollapsibleTrigger>
+        <CollapsibleContent>
+          <p className="mt-1 ml-5 border-l-2 border-border pl-3 text-xs whitespace-pre-wrap text-muted-foreground italic">
+            {point.quote}
+          </p>
+        </CollapsibleContent>
+      </Collapsible>
     </li>
   )
 }

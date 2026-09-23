@@ -2,7 +2,6 @@ import { Link, useNavigate } from "@tanstack/react-router"
 import {
   CaretDownIcon,
   CaretRightIcon,
-  CircleNotchIcon,
   DownloadSimpleIcon,
   FolderIcon,
   FolderOpenIcon,
@@ -98,12 +97,17 @@ import {
   sidebarRepoOptions,
   sortSidebarThreads,
 } from "@/features/agents/lib/sidebarThreads"
+import { Button } from "@/components/ui/button"
+import { Empty, EmptyDescription } from "@/components/ui/empty"
 import { Skeleton } from "@/components/ui/skeleton"
+import { Spinner } from "@/components/ui/spinner"
 import { TooltipProvider } from "@/components/ui/tooltip"
+import { TooltipIconButton } from "@/components/ui/tooltip-icon-button"
 import {
   useAppCommandControls,
   useRegisterAppCommands,
 } from "@/lib/appCommands"
+import { useCopyToClipboard } from "@/lib/useCopyToClipboard"
 import { cn } from "@/lib/utils"
 import { useChatRoutes } from "@/lib/chatRoutes"
 
@@ -686,18 +690,16 @@ export function AgentsSidebar({
           Open SWE
         </Link>
         <div className="flex items-center gap-1">
-          <button
-            type="button"
-            aria-label="Search"
-            title="Search"
+          <TooltipIconButton
+            label="Search"
             onClick={() => {
               layout.closeOnMobile()
               openPalette()
             }}
-            className="flex size-6 items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground"
+            className="rounded hover:bg-accent"
           >
             <MagnifyingGlassIcon className="size-4" />
-          </button>
+          </TooltipIconButton>
           <SidebarCollapseButton onToggle={layout.toggle} />
         </div>
       </div>
@@ -779,7 +781,7 @@ export function AgentsSidebar({
             )}
             {sourcesLoading && allItems.length > 0 && (
               <div className="flex items-center gap-1.5 px-2.5 py-2 text-xs text-muted-foreground/70">
-                <CircleNotchIcon className="size-3.5 animate-spin" />
+                <Spinner />
                 Loading threads…
               </div>
             )}
@@ -918,11 +920,13 @@ export function AgentsSidebar({
               </section>
             )}
             {isEmpty && !cloudError && !localThreads.isError && (
-              <p className="px-2.5 py-6 text-center text-xs text-muted-foreground/70">
-                {hasActiveFilters(prefs.filters)
-                  ? "No threads match these filters."
-                  : "No threads yet."}
-              </p>
+              <Empty className="px-2.5 py-6">
+                <EmptyDescription className="text-muted-foreground/70">
+                  {hasActiveFilters(prefs.filters)
+                    ? "No threads match these filters."
+                    : "No threads yet."}
+                </EmptyDescription>
+              </Empty>
             )}
           </div>
         </div>
@@ -942,21 +946,18 @@ export function AgentsSidebar({
           )}
         </div>
         {(updateState.status === "ready" || updateInstalling) && (
-          <button
-            type="button"
-            title={
-              updateInstalling ? "Installing update…" : "Restart to update"
-            }
+          <Button
+            size="lg"
             aria-label={
               updateInstalling ? "Installing update" : "Restart to update"
             }
             disabled={updateInstalling}
             onClick={() => void installUpdate()}
-            className="flex h-8 shrink-0 items-center justify-center gap-2 rounded-full bg-primary px-3 text-xs font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-60"
+            className="gap-2 rounded-full px-3"
           >
             {updateInstalling ? (
               <>
-                <CircleNotchIcon className="size-4 animate-spin" />
+                <Spinner className="size-4" />
                 <span>Installing…</span>
               </>
             ) : (
@@ -965,7 +966,7 @@ export function AgentsSidebar({
                 <span>Restart to update</span>
               </>
             )}
-          </button>
+          </Button>
         )}
       </div>
     </SidebarFrame>
@@ -1003,7 +1004,9 @@ function WorkspaceGroupSection({
         <Caret
           className={cn(
             "size-3.5 shrink-0",
-            collapsed ? "block" : "hidden group-hover/workspace:block"
+            collapsed
+              ? "block"
+              : "hidden group-hover/workspace:block group-focus-visible/workspace:block"
           )}
         />
       </button>
@@ -1013,6 +1016,9 @@ function WorkspaceGroupSection({
     </div>
   )
 }
+
+const folderActionClassName =
+  "hidden rounded text-muted-foreground/80 group-focus-within/folder:flex group-hover/folder:flex hover:bg-accent"
 
 function RepoGroup({
   group,
@@ -1107,35 +1113,35 @@ function RepoGroup({
           <Folder className="size-4 shrink-0" />
           <span className="min-w-0 flex-1 truncate">{group.label}</span>
         </button>
-        <button
-          type="button"
-          aria-label={pinned ? `Unpin ${group.label}` : `Pin ${group.label}`}
-          title={pinned ? "Unpin repository" : "Pin repository"}
+        <TooltipIconButton
+          label={pinned ? `Unpin ${group.label}` : `Pin ${group.label}`}
+          tooltip={pinned ? "Unpin repository" : "Pin repository"}
+          size="icon-xs"
           onClick={onTogglePin}
-          className="hidden size-5 shrink-0 items-center justify-center rounded text-muted-foreground/80 group-hover/folder:flex hover:bg-accent hover:text-foreground"
+          className={folderActionClassName}
         >
           {pinned ? (
             <PushPinSlashIcon className="size-3.5" />
           ) : (
             <PushPinIcon className="size-3.5" />
           )}
-        </button>
-        <button
-          type="button"
-          aria-label={`Compose message in ${group.label}`}
-          title="Compose message"
+        </TooltipIconButton>
+        <TooltipIconButton
+          label={`Compose message in ${group.label}`}
+          tooltip="Compose message"
+          size="icon-xs"
           onClick={onCompose}
-          className="hidden size-5 shrink-0 items-center justify-center rounded text-muted-foreground/80 group-hover/folder:flex hover:bg-accent hover:text-foreground"
+          className={folderActionClassName}
         >
           <NotePencilIcon className="size-3.5" />
-        </button>
+        </TooltipIconButton>
       </div>
       {!collapsed && (
         <>
           {shown.map((item) => renderRow(item, pullRequestFor(item)))}
           {shown.length === 0 && loading && (
             <div className="flex items-center gap-1.5 py-1 pr-2.5 pl-6 text-[13px] text-muted-foreground/70">
-              <CircleNotchIcon className="size-3.5 animate-spin" />
+              <Spinner />
               Loading chats…
             </div>
           )}
@@ -1164,7 +1170,7 @@ function RepoGroup({
               disabled={loading}
               className="flex w-full items-center gap-1.5 rounded-lg py-1 pr-2.5 pl-6 text-left text-[13px] text-muted-foreground/70 transition-colors hover:text-foreground disabled:cursor-wait disabled:opacity-60"
             >
-              {loading && <CircleNotchIcon className="size-3.5 animate-spin" />}
+              {loading && <Spinner />}
               {loading ? "Loading…" : "Show more"}
             </button>
           )}
@@ -1273,11 +1279,7 @@ function LoadMoreThreadsOnScroll({
       aria-label={label}
       className="flex w-full items-center justify-center gap-1.5 py-2 text-[13px] text-muted-foreground/70"
     >
-      {loading ? (
-        <CircleNotchIcon className="size-3.5 animate-spin" />
-      ) : (
-        <span className="sr-only">{label}</span>
-      )}
+      {loading ? <Spinner /> : <span className="sr-only">{label}</span>}
     </button>
   )
 }
@@ -1296,6 +1298,7 @@ export function AgentsShell({
   children: React.ReactNode
 }) {
   const layout = useSidebarLayout()
+  const { copy } = useCopyToClipboard()
   // `useMutation` returns a fresh object every render; only `mutate` is stable,
   // and an unstable command array re-registers on every commit.
   const pinThread = usePinAgentThread().mutate
@@ -1336,7 +1339,7 @@ export function AgentsShell({
         aliases: ["copy reference", "pull request", "pr link"],
         shortcuts: ["mod+shift+c"],
         group: "Thread",
-        run: () => navigator.clipboard.writeText(reference),
+        run: () => void copy(reference),
       },
       {
         id: "pin-thread",
@@ -1371,6 +1374,7 @@ export function AgentsShell({
     ]
   }, [
     activeThread,
+    copy,
     layout.toggle,
     pinThread,
     pinnedThreads.data,

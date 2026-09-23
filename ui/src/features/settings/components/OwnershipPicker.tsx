@@ -3,6 +3,7 @@ import { MagnifyingGlassIcon, WarningIcon } from "@phosphor-icons/react"
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
 import {
   Dialog,
@@ -180,13 +181,12 @@ export function OwnershipPicker({
           elsewhere && "opacity-60"
         )}
       >
-        <input
-          type="checkbox"
-          className="mt-1 size-3.5 shrink-0 accent-primary"
+        <Checkbox
+          className="mt-0.5"
           aria-label={item.label}
           checked={checked}
           disabled={locked}
-          onChange={() => toggle(item.id)}
+          onCheckedChange={() => toggle(item.id)}
         />
         {item.icon && (
           <span className="mt-0.5 shrink-0 text-muted-foreground">

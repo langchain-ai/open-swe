@@ -10,7 +10,6 @@ import {
   Clock3,
   FileSearch,
   Hash,
-  LoaderCircle,
   Pause,
   Play,
   RefreshCw,
@@ -19,9 +18,22 @@ import {
 import { useRef, useState } from "react"
 import type { ReactNode } from "react"
 
+import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@/components/ui/collapsible"
+import {
+  Empty,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle,
+} from "@/components/ui/empty"
+import { Spinner } from "@/components/ui/spinner"
 import { Textarea } from "@/components/ui/textarea"
-import { cn } from "@/lib/utils"
 import { incidentsApi } from "./api"
 import { IncidentDocuments } from "./IncidentDocuments"
 import type { IncidentAction } from "./api"
@@ -279,7 +291,7 @@ export function IncidentDetail({ incidentId }: { incidentId: string }) {
                         </h3>
                         <ul className="space-y-2 text-sm leading-relaxed">
                           {report.next_steps!.map((step, index) => (
-                            <li key={index}>
+                            <li key={`${index}-${step}`}>
                               <CitedText
                                 text={step}
                                 evidence={report.evidence}
@@ -297,13 +309,19 @@ export function IncidentDetail({ incidentId }: { incidentId: string }) {
                     </p>
                   </>
                 ) : (
-                  <div className="py-7 text-center">
-                    <FileSearch className="mx-auto mb-3 size-6 text-muted-foreground" />
-                    <h3 className="text-sm font-medium">No findings yet</h3>
-                    <p className="mx-auto mt-2 max-w-sm text-sm leading-relaxed text-muted-foreground">
-                      Findings appear here after the first pass.
-                    </p>
-                  </div>
+                  <Empty className="py-7">
+                    <EmptyHeader>
+                      <EmptyMedia>
+                        <FileSearch className="size-6 text-muted-foreground" />
+                      </EmptyMedia>
+                      <EmptyTitle role="heading" aria-level={3}>
+                        No findings yet
+                      </EmptyTitle>
+                      <EmptyDescription>
+                        Findings appear here after the first pass.
+                      </EmptyDescription>
+                    </EmptyHeader>
+                  </Empty>
                 )}
               </Section>
               {report && (
@@ -316,9 +334,11 @@ export function IncidentDetail({ incidentId }: { incidentId: string }) {
                   }
                 >
                   {report.evidence.length === 0 ? (
-                    <p className="text-sm text-muted-foreground">
-                      No linked evidence has been collected.
-                    </p>
+                    <Empty className="p-0">
+                      <EmptyDescription className="text-sm">
+                        No linked evidence has been collected.
+                      </EmptyDescription>
+                    </Empty>
                   ) : (
                     <ol className="space-y-3">
                       {report.evidence.map((evidence, index) => (
@@ -351,14 +371,16 @@ export function IncidentDetail({ incidentId }: { incidentId: string }) {
                             )}
                           </ExternalLink>
                           {evidence.query && (
-                            <details className="mt-2 text-xs text-muted-foreground">
-                              <summary className="cursor-pointer">
+                            <Collapsible className="mt-2 text-xs text-muted-foreground">
+                              <CollapsibleTrigger className="cursor-pointer">
                                 View query
-                              </summary>
-                              <pre className="mt-2 overflow-x-auto rounded-md bg-muted p-3 font-mono break-all whitespace-pre-wrap">
-                                {evidence.query}
-                              </pre>
-                            </details>
+                              </CollapsibleTrigger>
+                              <CollapsibleContent>
+                                <pre className="mt-2 overflow-x-auto rounded-md bg-muted p-3 font-mono break-all whitespace-pre-wrap">
+                                  {evidence.query}
+                                </pre>
+                              </CollapsibleContent>
+                            </Collapsible>
                           )}
                         </li>
                       ))}
@@ -375,18 +397,18 @@ export function IncidentDetail({ incidentId }: { incidentId: string }) {
                           <h3 className="text-sm font-medium">
                             {hypothesis.title}
                           </h3>
-                          <span
-                            className={cn(
-                              "rounded px-2 py-0.5 text-[11px]",
+                          <Badge
+                            className="text-[11px]"
+                            variant={
                               hypothesis.assessment === "supported"
-                                ? "bg-success/10 text-success-foreground"
+                                ? "success"
                                 : hypothesis.assessment === "rejected"
-                                  ? "bg-muted text-muted-foreground"
-                                  : "bg-warning/10 text-warning-foreground"
-                            )}
+                                  ? "muted"
+                                  : "warning"
+                            }
                           >
                             {humanize(hypothesis.assessment)}
-                          </span>
+                          </Badge>
                         </div>
                         <div className="mt-2 flex flex-wrap gap-2">
                           {hypothesis.evidence_ids.map((id) => {
@@ -498,9 +520,11 @@ export function IncidentDetail({ incidentId }: { incidentId: string }) {
             }
           >
             {activity.length === 0 ? (
-              <p className="text-sm text-muted-foreground">
-                No activity recorded yet.
-              </p>
+              <Empty className="p-0">
+                <EmptyDescription className="text-sm">
+                  No activity recorded yet.
+                </EmptyDescription>
+              </Empty>
             ) : (
               <ol className="space-y-0">
                 {[...activity]
@@ -573,7 +597,7 @@ export function IncidentDetail({ incidentId }: { incidentId: string }) {
               disabled={!question.trim() || command.isPending}
             >
               {command.isPending && command.variables.action === "ask" ? (
-                <LoaderCircle className="size-4 animate-spin" />
+                <Spinner aria-hidden className="size-4" />
               ) : (
                 <ArrowUp className="size-4" />
               )}

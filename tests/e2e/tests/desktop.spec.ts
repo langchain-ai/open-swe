@@ -162,7 +162,7 @@ test("Desktop runs a local thread on the Open SWE graph against the shared fakes
       composer.getByRole("button", { name: "demo", exact: true }),
     ).toBeVisible();
     await expect(
-      composer.getByRole("button", { name: "main", exact: true }),
+      composer.getByRole("combobox").filter({ hasText: /^main$/ }),
     ).toBeVisible();
     const unifiedScreenshot = testInfo.outputPath(
       "desktop-unified-threads.png",

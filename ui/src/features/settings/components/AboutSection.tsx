@@ -118,7 +118,7 @@ function BuildIdentityDetails({ buildInfo }: { buildInfo: BuildInfo | null }) {
               {new Date(bundle.built_at).toLocaleString()}
             </time>
             {differs ? (
-              <span className="text-amber-600 dark:text-amber-400">
+              <span className="text-warning-foreground">
                 {" "}
                 — different from the bundle the backend reports serving.
               </span>

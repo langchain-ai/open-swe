@@ -88,29 +88,26 @@ export function blockerTone(pr: OpenPullRequest): string {
     pr.reviewRequired ||
     (pr.unresolvedThreads !== null && pr.unresolvedThreads > 0)
   )
-    return "text-amber-700 dark:text-amber-400"
+    return "text-warning-foreground"
   if (
     !pr.statusAvailable ||
     (pr.ci === "unknown" && pr.reviewDecision === null)
   )
-    return "text-amber-700 dark:text-amber-400"
-  if (pr.reviewDecision === "approved")
-    return "text-emerald-700 dark:text-emerald-400"
+    return "text-warning-foreground"
+  if (pr.reviewDecision === "approved") return "text-success-foreground"
   return "text-muted-foreground"
 }
 
-export const statusTones: Record<string, string> = {
-  Conflicted: "border-destructive/30 bg-destructive/10 text-destructive",
-  Failing: "border-destructive/30 bg-destructive/10 text-destructive",
-  "Changes Requested":
-    "border-destructive/30 bg-destructive/10 text-destructive",
-  Approved:
-    "border-emerald-600/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400",
-  Pending:
-    "border-amber-600/30 bg-amber-500/10 text-amber-700 dark:text-amber-400",
-  "Review required":
-    "border-amber-600/30 bg-amber-500/10 text-amber-700 dark:text-amber-400",
-  Reviewable: "border-sky-600/30 bg-sky-500/10 text-sky-700 dark:text-sky-400",
+export type StatusVariant = "destructive" | "success" | "warning" | "info"
+
+export const statusVariants: Record<string, StatusVariant> = {
+  Conflicted: "destructive",
+  Failing: "destructive",
+  "Changes Requested": "destructive",
+  Approved: "success",
+  Pending: "warning",
+  "Review required": "warning",
+  Reviewable: "info",
 }
 
 export function isFixable(pr: OpenPullRequest) {

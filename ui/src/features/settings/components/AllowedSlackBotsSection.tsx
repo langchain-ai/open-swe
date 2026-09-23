@@ -4,6 +4,13 @@ import { useState } from "react"
 
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Button } from "@/components/ui/button"
+import {
+  Empty,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle,
+} from "@/components/ui/empty"
 import { Input } from "@/components/ui/input"
 import {
   Popover,
@@ -175,9 +182,9 @@ export function AllowedSlackBotsSection() {
                         item.bot_id === bot.bot_id
                     )
                     return (
-                      <button
+                      <Button
                         key={`${bot.team_id}:${bot.bot_id}`}
-                        type="button"
+                        variant="ghost"
                         disabled={allowed || unavailable}
                         aria-label={
                           allowed
@@ -185,7 +192,7 @@ export function AllowedSlackBotsSection() {
                             : `Allow ${bot.name}`
                         }
                         onClick={() => allow(bot.user_id)}
-                        className="flex w-full items-center gap-2.5 rounded-md px-2 py-2 text-left transition-colors focus-visible:outline-2 focus-visible:outline-ring enabled:hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50"
+                        className="h-auto w-full justify-start gap-2.5 px-2 py-2 text-left font-normal whitespace-normal"
                       >
                         <Avatar size="sm">
                           <AvatarImage src={bot.image_url} alt="" />
@@ -212,7 +219,7 @@ export function AllowedSlackBotsSection() {
                               ? "Verifying…"
                               : "Allow"}
                         </span>
-                      </button>
+                      </Button>
                     )
                   })}
                 </div>
@@ -252,15 +259,19 @@ export function AllowedSlackBotsSection() {
         </p>
       )}
       {bots.data?.length === 0 && (
-        <div className="mt-4 flex items-center gap-3 rounded-lg border border-dashed px-4 py-5">
-          <Robot size={22} className="shrink-0 text-muted-foreground" />
-          <div className="space-y-1">
-            <p className="text-xs font-medium">No Slack bots are allowed.</p>
-            <p className="text-xs text-muted-foreground">
+        <Empty className="mt-4 border px-4 py-5">
+          <EmptyHeader>
+            <EmptyMedia variant="icon">
+              <Robot />
+            </EmptyMedia>
+            <EmptyTitle className="text-xs">
+              No Slack bots are allowed.
+            </EmptyTitle>
+            <EmptyDescription>
               Add a bot from your Slack workspace to get started.
-            </p>
-          </div>
-        </div>
+            </EmptyDescription>
+          </EmptyHeader>
+        </Empty>
       )}
       {!!bots.data?.length && (
         <ul className="mt-4 divide-y rounded-lg border">

@@ -1,17 +1,19 @@
 import { Link, Navigate, createFileRoute } from "@tanstack/react-router"
 import { useMutation, useQuery } from "@tanstack/react-query"
 import { CaretRightIcon } from "@phosphor-icons/react"
-import { useEffect, useMemo, useState } from "react"
+import { useMemo, useState } from "react"
 import type { ReactNode } from "react"
 
 import type { AdminUser } from "@/lib/api"
 import {
-  AppShell,
+  AuthedAppShell,
   SettingsNavRow,
   SettingsRow,
   SettingsSection,
 } from "@/components/AppShell"
+import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import { Empty, EmptyDescription } from "@/components/ui/empty"
 import { Input } from "@/components/ui/input"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Switch } from "@/components/ui/switch"
@@ -20,8 +22,8 @@ import {
   useAdminCancelAgentThread,
   useThreadsPage,
 } from "@/features/agents/lib/queries"
-import { RequireLogin } from "@/lib/auth-redirect"
 import { useSession } from "@/lib/session"
+import { useCopyToClipboard } from "@/lib/useCopyToClipboard"
 import {
   slackAppManifestJson,
   slackManifestPlaceholdersRemain,
@@ -48,82 +50,78 @@ function AdminPage() {
   const modelOptions = useOptions()
   const repos = useRepos()
 
-  if (session.isLoading) {
-    return (
-      <main className="p-6">
-        <Skeleton className="h-64 w-full" />
-      </main>
-    )
-  }
-  if (!session.data) return <RequireLogin />
-  if (!session.data.is_admin) return <Navigate to="/my-settings" />
+  if (session.data && !session.data.is_admin)
+    return <Navigate to="/my-settings" />
 
   return (
-    <AppShell
-      user={session.data}
+    <AuthedAppShell
       title="Admin"
       description="Defaults every workspace inherits, plus instance-wide integrations and user mappings. Open a workspace to override a setting there."
     >
-      <SettingsSection title="Workspaces">
-        <SettingsNavRow
-          to="/workspaces"
-          label="Workspace settings"
-          description="Repositories, Slack channels, sandbox image, and overrides of the defaults below, per workspace."
-        />
-      </SettingsSection>
+      {(user) => (
+        <>
+          <SettingsSection title="Workspaces">
+            <SettingsNavRow
+              to="/workspaces"
+              label="Workspace settings"
+              description="Repositories, Slack channels, sandbox image, and overrides of the defaults below, per workspace."
+            />
+          </SettingsSection>
 
-      <ModelDefaultsSection
-        scope={INSTANCE_SCOPE}
-        models={(modelOptions.data?.models ?? []).filter(
-          (model) => model.can_be_default !== false
-        )}
-      />
-      <DefaultRepoSection
-        scope={INSTANCE_SCOPE}
-        repositories={(repos.data?.repositories ?? []).map(
-          (repo) => repo.full_name
-        )}
-      />
-      <LLMGatewaySection scope={INSTANCE_SCOPE} />
-      <FableSection scope={INSTANCE_SCOPE} />
-      <ReviewSettings scope={INSTANCE_SCOPE} canEdit />
-      <ExpeditedReviewSection scope={INSTANCE_SCOPE} />
-      <MCPConnectionsSection scope="instance" />
+          <ModelDefaultsSection
+            scope={INSTANCE_SCOPE}
+            models={(modelOptions.data?.models ?? []).filter(
+              (model) => model.can_be_default !== false
+            )}
+          />
+          <DefaultRepoSection
+            scope={INSTANCE_SCOPE}
+            repositories={(repos.data?.repositories ?? []).map(
+              (repo) => repo.full_name
+            )}
+          />
+          <LLMGatewaySection scope={INSTANCE_SCOPE} />
+          <FableSection scope={INSTANCE_SCOPE} />
+          <ReviewSettings scope={INSTANCE_SCOPE} canEdit />
+          <ExpeditedReviewSection scope={INSTANCE_SCOPE} />
+          <MCPConnectionsSection scope="instance" />
 
-      <SlackIntegrationSection
-        backendUrl={session.data.slack_base_url ?? session.data.api_base_url}
-      >
-        <AllowedSlackBotsSection />
-      </SlackIntegrationSection>
+          <SlackIntegrationSection
+            backendUrl={user.slack_base_url ?? user.api_base_url}
+          >
+            <AllowedSlackBotsSection />
+          </SlackIntegrationSection>
 
-      <TriggerReviewSection />
+          <TriggerReviewSection />
 
-      <div id="incidents" className="scroll-mt-8">
-        <IncidentSettings />
-      </div>
-
-      <RunningAgentsSection />
-
-      <SettingsSection title="Evals">
-        <Link
-          to="/admin/evals"
-          className="flex items-center justify-between gap-6 px-4 py-3 hover:bg-muted/40"
-        >
-          <div className="flex flex-col gap-0.5">
-            <span className="text-xs font-medium text-foreground">
-              Reviewer eval
-            </span>
-            <span className="text-xs text-muted-foreground">
-              Run the offline reviewer benchmark and watch its output stream
-              live.
-            </span>
+          <div id="incidents" className="scroll-mt-8">
+            <IncidentSettings />
           </div>
-          <CaretRightIcon className="size-3.5 shrink-0 text-muted-foreground" />
-        </Link>
-      </SettingsSection>
 
-      <UsersSection enabled={!!session.data.is_admin} />
-    </AppShell>
+          <RunningAgentsSection />
+
+          <SettingsSection title="Evals">
+            <Link
+              to="/admin/evals"
+              className="flex items-center justify-between gap-6 px-4 py-3 hover:bg-muted/40"
+            >
+              <div className="flex flex-col gap-0.5">
+                <span className="text-xs font-medium text-foreground">
+                  Reviewer eval
+                </span>
+                <span className="text-xs text-muted-foreground">
+                  Run the offline reviewer benchmark and watch its output stream
+                  live.
+                </span>
+              </div>
+              <CaretRightIcon className="size-3.5 shrink-0 text-muted-foreground" />
+            </Link>
+          </SettingsSection>
+
+          <UsersSection enabled={!!user.is_admin} />
+        </>
+      )}
+    </AuthedAppShell>
   )
 }
 
@@ -137,22 +135,25 @@ export function SlackIntegrationSection({
   backendUrl?: string
   children?: ReactNode
 }) {
-  const [enabled, setEnabled] = useState(false)
-  const [copyState, setCopyState] = useState<"idle" | "copied" | "failed">(
-    "idle"
-  )
-
-  useEffect(() => {
-    // oxlint-disable-next-line react/set-state-in-effect
-    setEnabled(
-      window.localStorage.getItem(SLACK_CODE_CHANNELS_STORAGE_KEY) === "true"
-    )
-  }, [])
+  const [enabled, setEnabled] = useState(() => {
+    try {
+      return (
+        window.localStorage.getItem(SLACK_CODE_CHANNELS_STORAGE_KEY) === "true"
+      )
+    } catch (error) {
+      console.warn("Could not read Slack manifest preference", error)
+      return false
+    }
+  })
+  const { copied, copy } = useCopyToClipboard()
 
   const setCodeChannelsEnabled = (next: boolean) => {
     setEnabled(next)
-    setCopyState("idle")
-    window.localStorage.setItem(SLACK_CODE_CHANNELS_STORAGE_KEY, String(next))
+    try {
+      window.localStorage.setItem(SLACK_CODE_CHANNELS_STORAGE_KEY, String(next))
+    } catch (error) {
+      console.warn("Could not save Slack manifest preference", error)
+    }
   }
 
   const manifestConfig = {
@@ -162,17 +163,6 @@ export function SlackIntegrationSection({
       (typeof window === "undefined" ? "" : window.location.origin),
   }
   const placeholdersRemain = slackManifestPlaceholdersRemain(manifestConfig)
-
-  const copyManifest = async () => {
-    try {
-      await navigator.clipboard.writeText(
-        slackAppManifestJson(enabled, manifestConfig)
-      )
-      setCopyState("copied")
-    } catch {
-      setCopyState("failed")
-    }
-  }
 
   return (
     <SettingsSection
@@ -206,12 +196,14 @@ export function SlackIntegrationSection({
               : "Copy the selected manifest — its URLs are filled in from this deployment — then paste it into your Slack app settings and reinstall the app."}
           </span>
         </div>
-        <Button size="sm" variant="outline" onClick={() => void copyManifest()}>
-          {copyState === "copied"
-            ? "Copied"
-            : copyState === "failed"
-              ? "Copy failed"
-              : "Copy manifest"}
+        <Button
+          size="sm"
+          variant="outline"
+          onClick={() =>
+            void copy(slackAppManifestJson(enabled, manifestConfig))
+          }
+        >
+          {copied ? "Copied" : "Copy manifest"}
         </Button>
       </div>
       {children}
@@ -294,7 +286,9 @@ function RunningAgentsSection() {
             })}
           </div>
         ) : (
-          <p className="text-xs text-muted-foreground">No running agents.</p>
+          <Empty className="p-4">
+            <EmptyDescription>No running agents.</EmptyDescription>
+          </Empty>
         )}
 
         {threads.error && (
@@ -423,7 +417,9 @@ function UsersSection({ enabled }: { enabled: boolean }) {
           {users.isLoading ? (
             <Skeleton className="h-32" />
           ) : !items.length ? (
-            <p className="text-xs text-muted-foreground">No users yet.</p>
+            <Empty className="p-4">
+              <EmptyDescription>No users yet.</EmptyDescription>
+            </Empty>
           ) : (
             items.map((user: AdminUser) => (
               <div
@@ -439,11 +435,7 @@ function UsersSection({ enabled }: { enabled: boolean }) {
                     {user.slack_user_id ? ` · Slack ${user.slack_user_id}` : ""}
                   </span>
                 </div>
-                {user.is_admin && (
-                  <span className="text-[10px] font-medium text-muted-foreground">
-                    Admin
-                  </span>
-                )}
+                {user.is_admin && <Badge variant="muted">Admin</Badge>}
               </div>
             ))
           )}

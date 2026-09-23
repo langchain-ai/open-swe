@@ -1,13 +1,6 @@
-import { GitPullRequestIcon } from "@phosphor-icons/react"
-
+import { DiffStat } from "@/components/DiffStat"
+import { PrStateBadge, toPrState } from "@/components/PrState"
 import { cn } from "@/lib/utils"
-
-const STATE_STYLES: Record<string, string> = {
-  open: "border-emerald-600/40 text-emerald-500",
-  draft: "border-border text-muted-foreground",
-  merged: "border-purple-600/40 text-purple-500",
-  closed: "border-red-600/40 text-red-500",
-}
 
 export interface PrHeaderProps {
   url: string
@@ -43,15 +36,7 @@ export function PrHeader({
   return (
     <div className={className}>
       <div className={cn(compact && "flex min-w-0 items-center gap-2")}>
-        <span
-          className={cn(
-            "inline-flex shrink-0 items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] capitalize",
-            STATE_STYLES[state] ?? STATE_STYLES.open
-          )}
-        >
-          <GitPullRequestIcon className="size-3" />
-          {state}
-        </span>
+        <PrStateBadge icon state={toPrState(state)} />
         <h1
           className={cn(
             compact
@@ -108,10 +93,12 @@ export function PrHeader({
             <span className="shrink-0">
               {stats.changedFiles} file{stats.changedFiles === 1 ? "" : "s"}
             </span>
-            <span className="shrink-0 text-emerald-500">
-              +{stats.additions}
+            <span className="shrink-0">
+              <DiffStat
+                additions={stats.additions}
+                deletions={stats.deletions}
+              />
             </span>
-            <span className="shrink-0 text-red-500">-{stats.deletions}</span>
           </>
         )}
       </div>

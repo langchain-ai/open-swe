@@ -69,7 +69,9 @@ describe("SlackIntegrationSection", () => {
 
     fireEvent.click(toggle)
     expect(localStorage.getItem(STORAGE_KEY)).toBe("true")
-    fireEvent.click(screen.getByRole("button", { name: "Copy manifest" }))
+    fireEvent.click(
+      screen.getByRole("button", { name: /^(Copy manifest|Copied)$/ })
+    )
     await waitFor(() => expect(writeText).toHaveBeenCalledTimes(2))
     expect(
       JSON.parse(writeText.mock.calls[1]![0]).features.code_channels.enabled

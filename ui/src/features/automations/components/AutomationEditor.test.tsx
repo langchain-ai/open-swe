@@ -4,6 +4,7 @@ import { renderToStaticMarkup } from "react-dom/server"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
 import { AutomationEditor } from "./AutomationEditor"
+import { ConfirmProvider } from "@/components/ConfirmDialog"
 import { useSession } from "@/lib/session"
 
 vi.mock("@tanstack/react-router", () => ({
@@ -80,7 +81,11 @@ describe("AutomationEditor", () => {
       data: { is_admin: true },
     } as unknown as ReturnType<typeof useSession>)
 
-    const adminMarkup = renderToStaticMarkup(<AutomationEditor mode="create" />)
+    const adminMarkup = renderToStaticMarkup(
+      <ConfirmProvider>
+        <AutomationEditor mode="create" />
+      </ConfirmProvider>
+    )
 
     expect(adminMarkup).toContain("Run as admin thread")
 
@@ -89,7 +94,9 @@ describe("AutomationEditor", () => {
     } as unknown as ReturnType<typeof useSession>)
 
     const memberMarkup = renderToStaticMarkup(
-      <AutomationEditor mode="create" />
+      <ConfirmProvider>
+        <AutomationEditor mode="create" />
+      </ConfirmProvider>
     )
 
     expect(memberMarkup).not.toContain("Run as admin thread")

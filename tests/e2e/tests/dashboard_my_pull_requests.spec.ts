@@ -250,17 +250,21 @@ test.describe("my pull requests", () => {
       `Merge method for PR #${mine.number}`,
     );
     await expect(method).toBeEnabled();
+    await method.click();
+    const rebase = page.getByRole("option", {
+      name: "Rebase merge",
+      exact: true,
+    });
+    await expect(rebase).toHaveCount(1);
     await expect(
-      method.getByRole("option", { name: "Rebase merge", exact: true }),
-    ).toHaveCount(1);
-    await expect(
-      method.getByRole("option", { name: "Squash merge", exact: true }),
+      page.getByRole("option", { name: "Squash merge", exact: true }),
     ).toHaveCount(0);
     await expect(
-      method.getByRole("option", { name: "Merge commit", exact: true }),
+      page.getByRole("option", { name: "Merge commit", exact: true }),
     ).toHaveCount(0);
 
-    await method.selectOption("rebase");
+    await rebase.click();
+    await expect(page.getByRole("listbox")).toHaveCount(0);
     await card(page, mine)
       .getByRole("button", { name: "Merge", exact: true })
       .click();
@@ -304,11 +308,17 @@ test.describe("my pull requests", () => {
     // disabled until then for that reason rather than for want of a choice.
     await expect(method).toBeEnabled();
     await expect(merge).toBeDisabled();
+    await method.click();
     await expect(
-      method.getByRole("option", { name: "Merge commit", exact: true }),
+      page.getByRole("option", { name: "Rebase merge", exact: true }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole("option", { name: "Merge commit", exact: true }),
     ).toHaveCount(0);
 
-    await method.selectOption("squash");
+    await page
+      .getByRole("option", { name: "Squash merge", exact: true })
+      .click();
     await expect(merge).toBeEnabled();
     await merge.click();
 

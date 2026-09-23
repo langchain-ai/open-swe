@@ -14,6 +14,8 @@ import type {
 } from "@pierre/trees"
 import type { ReviewDiffFile } from "@/lib/api"
 import { Skeleton } from "@/components/ui/skeleton"
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
+import { Tooltip, TooltipPopup, TooltipTrigger } from "@/components/ui/tooltip"
 import {
   TREE_UNSAFE_CSS,
   treeThemeStyle,
@@ -92,52 +94,54 @@ function ReviewViewToggle({
   onChange: (view: ReviewSidebarView) => void
 }) {
   return (
-    <div className="flex items-center gap-0.5 rounded-md border border-border p-0.5">
-      <ReviewViewToggleButton
-        active={view === "ai"}
-        label="AI sorted"
-        onClick={() => onChange("ai")}
-      >
+    <ToggleGroup
+      aria-label="Sidebar view"
+      spacing={0.5}
+      size="sm"
+      value={[view]}
+      onValueChange={(values) => {
+        const next = values.find(
+          (value): value is ReviewSidebarView =>
+            value === "ai" || value === "files"
+        )
+        if (next) onChange(next)
+      }}
+      className="rounded-md border border-border p-0.5"
+    >
+      <ReviewViewToggleButton value="ai" label="AI sorted">
         <ListBulletsIcon className="size-3.5" />
       </ReviewViewToggleButton>
-      <ReviewViewToggleButton
-        active={view === "files"}
-        label="File tree"
-        onClick={() => onChange("files")}
-      >
+      <ReviewViewToggleButton value="files" label="File tree">
         <TreeViewIcon className="size-3.5" />
       </ReviewViewToggleButton>
-    </div>
+    </ToggleGroup>
   )
 }
 
 function ReviewViewToggleButton({
-  active,
+  value,
   label,
-  onClick,
   children,
 }: {
-  active: boolean
+  value: ReviewSidebarView
   label: string
-  onClick: () => void
   children: React.ReactNode
 }) {
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      aria-label={label}
-      aria-pressed={active}
-      title={label}
-      className={cn(
-        "flex size-5 items-center justify-center rounded text-muted-foreground/70 transition-colors",
-        active
-          ? "bg-sidebar-row-hover text-foreground"
-          : "hover:text-foreground"
-      )}
-    >
-      {children}
-    </button>
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <ToggleGroupItem
+            value={value}
+            aria-label={label}
+            className="size-5 min-w-5 rounded px-0 text-muted-foreground/70 hover:text-foreground aria-pressed:bg-sidebar-row-hover aria-pressed:text-foreground"
+          />
+        }
+      >
+        {children}
+      </TooltipTrigger>
+      <TooltipPopup>{label}</TooltipPopup>
+    </Tooltip>
   )
 }
 
@@ -201,25 +205,13 @@ const ReviewGroupRow = memo(function ReviewGroupRow({
     () => onSelectGroup(group.index),
     [onSelectGroup, group.index]
   )
-  const onKeyDown = useCallback(
-    (event: React.KeyboardEvent) => {
-      if (event.key === "Enter" || event.key === " ") {
-        event.preventDefault()
-        onSelectGroup(group.index)
-      }
-    },
-    [onSelectGroup, group.index]
-  )
-
   return (
-    <div
-      role="button"
-      tabIndex={0}
+    <button
+      type="button"
       aria-current={active ? "true" : undefined}
       onClick={selectGroup}
-      onKeyDown={onKeyDown}
       className={cn(
-        "flex cursor-pointer items-start gap-2 border-l-2 px-3 py-1.5 text-left transition-colors",
+        "flex w-full cursor-pointer items-start gap-2 border-l-2 px-3 py-1.5 text-left transition-colors",
         active
           ? "border-primary bg-sidebar-row-hover"
           : "border-transparent hover:bg-sidebar-row-hover"
@@ -236,7 +228,7 @@ const ReviewGroupRow = memo(function ReviewGroupRow({
       >
         {title}
       </span>
-    </div>
+    </button>
   )
 })
 

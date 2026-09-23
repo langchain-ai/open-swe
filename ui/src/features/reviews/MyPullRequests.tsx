@@ -2,11 +2,13 @@ import { useQueries, useQueryClient } from "@tanstack/react-query"
 import { useEffect, useState } from "react"
 
 import { Button } from "@/components/ui/button"
+import { Empty, EmptyDescription } from "@/components/ui/empty"
+import { Input } from "@/components/ui/input"
 import { MultiSelect } from "@/components/ui/multi-select"
 import { Skeleton } from "@/components/ui/skeleton"
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { api, type OpenPullRequest, type ReviewSummary } from "@/lib/api"
 import { useRepos } from "@/lib/profile"
-import { cn } from "@/lib/utils"
 import {
   PullRequestCard,
   type PullRequestOutcome,
@@ -17,7 +19,6 @@ import { PullRequestReview } from "./components/PullRequestReview"
 import { refreshPullRequest } from "./lib/cache"
 import { dateLabel } from "./lib/dateLabel"
 import { pullRequestKey, statusLabels } from "./lib/status"
-import { control } from "./lib/styles"
 import { useOpenPullRequests } from "./lib/useOpenPullRequests"
 import { usePullRequestDetails } from "./lib/usePullRequestDetails"
 import { reviewStatuses, type ReviewsSearch, type ReviewSort } from "./search"
@@ -216,8 +217,8 @@ export function MyPullRequests({
                 onFiltersChange({ repo: chosen.length ? chosen : undefined })
               }
             />
-            <input
-              className={cn(control, "min-w-40 flex-1")}
+            <Input
+              className="w-auto min-w-40 flex-1"
               aria-label="Search pull requests"
               placeholder="Search title or PR number…"
               value={search}
@@ -237,25 +238,20 @@ export function MyPullRequests({
             {!railed && (
               <span className="flex items-center gap-1 text-xs text-muted-foreground">
                 Sort
-                {sortOptions.map(([label, key]) => (
-                  <button
-                    key={key}
-                    type="button"
-                    aria-pressed={sort === key}
-                    onClick={() => toggleSort(key)}
-                    className={cn(
-                      "inline-flex items-center gap-1 rounded-md border px-2 py-1",
-                      sort === key
-                        ? "border-border bg-muted text-foreground"
-                        : "border-transparent hover:text-foreground"
-                    )}
-                  >
-                    {label}
-                    <span aria-hidden="true">
-                      {sort === key ? (direction === "asc" ? "↑" : "↓") : "↕"}
-                    </span>
-                  </button>
-                ))}
+                <ToggleGroup aria-label="Sort" spacing={1} value={[sort]}>
+                  {sortOptions.map(([label, key]) => (
+                    <ToggleGroupItem
+                      key={key}
+                      value={key}
+                      onClick={() => toggleSort(key)}
+                    >
+                      {label}
+                      <span aria-hidden="true">
+                        {sort === key ? (direction === "asc" ? "↑" : "↓") : "↕"}
+                      </span>
+                    </ToggleGroupItem>
+                  ))}
+                </ToggleGroup>
               </span>
             )}
             {!railed && (
@@ -312,25 +308,29 @@ export function MyPullRequests({
           {query.isLoading ? (
             <Skeleton className="h-56 w-full" />
           ) : incomplete ? (
-            <p
+            <Empty
               role="status"
-              className="rounded-lg border border-border bg-card px-4 py-12 text-center text-xs text-amber-700 dark:text-amber-400"
+              className="flex-none rounded-lg border border-solid border-border bg-card py-12"
             >
-              GitHub&rsquo;s pull request search timed out, and the partial
-              answer it returned would have hidden most of your PRs. Filter by
-              repository to narrow the search, or refresh to try again.
-            </p>
+              <EmptyDescription className="text-warning-foreground">
+                GitHub&rsquo;s pull request search timed out, and the partial
+                answer it returned would have hidden most of your PRs. Filter by
+                repository to narrow the search, or refresh to try again.
+              </EmptyDescription>
+            </Empty>
           ) : (
             latest && (
               <>
                 {visible.length === 0 ? (
-                  <p className="rounded-lg border border-border bg-card px-4 py-12 text-center text-xs text-muted-foreground">
-                    {detailsLoading || query.isFetchingNextPage
-                      ? "Loading matching PRs…"
-                      : all.length
-                        ? "No PRs match these filters."
-                        : "No open PRs found."}
-                  </p>
+                  <Empty className="flex-none rounded-lg border border-solid border-border bg-card py-12">
+                    <EmptyDescription>
+                      {detailsLoading || query.isFetchingNextPage
+                        ? "Loading matching PRs…"
+                        : all.length
+                          ? "No PRs match these filters."
+                          : "No open PRs found."}
+                    </EmptyDescription>
+                  </Empty>
                 ) : (
                   <PullRequestList
                     rows={visible}

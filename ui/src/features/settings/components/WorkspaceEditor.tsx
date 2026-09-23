@@ -1,5 +1,6 @@
 import { QuestionIcon } from "@phosphor-icons/react"
 
+import { Badge } from "@/components/ui/badge"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 import { Tooltip, TooltipPopup, TooltipTrigger } from "@/components/ui/tooltip"
@@ -21,24 +22,25 @@ export function Chips({
     <div className="flex flex-wrap gap-1.5">
       {values.map((value) => {
         const href = hrefFor?.(value) ?? null
-        const className =
-          "rounded-full border border-border px-2 py-0.5 text-[11px] text-muted-foreground"
         if (!href)
           return (
-            <span key={value} className={className}>
+            <Badge
+              key={value}
+              variant="outline"
+              className="text-muted-foreground"
+            >
               {value}
-            </span>
+            </Badge>
           )
         return (
-          <a
+          <Badge
             key={value}
-            href={href}
-            target="_blank"
-            rel="noopener noreferrer"
-            className={`${className} hover:border-foreground/30 hover:text-foreground`}
+            variant="outline"
+            className="text-muted-foreground hover:border-foreground/30 hover:text-foreground"
+            render={<a href={href} target="_blank" rel="noopener noreferrer" />}
           >
             {value}
-          </a>
+          </Badge>
         )
       })}
     </div>

@@ -1,6 +1,13 @@
 import { useQuery } from "@tanstack/react-query"
 import { useState } from "react"
 
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import { api, type MergeMethod, type OpenPullRequest } from "@/lib/api"
 import { actionLabel, githubActions } from "../lib/githubActions"
 import {
@@ -9,14 +16,8 @@ import {
   readPreferredMergeMethod,
   writePreferredMergeMethod,
 } from "../lib/mergeMethod"
-import { control } from "../lib/styles"
 import { usePullRequestAction } from "../lib/usePullRequestAction"
 import { PullRequestActionButton } from "./PullRequestActionButton"
-
-function asMergeMethod(value: string): MergeMethod | "" | null {
-  if (value === "") return ""
-  return mergeMethods.find((method) => method === value) ?? null
-}
 
 export function MergePullRequest({
   pr,
@@ -64,25 +65,28 @@ export function MergePullRequest({
       onClick={() => merge.mutate()}
       errors={[merge.error]}
     >
-      <select
-        className={control}
-        aria-label={`Merge method for PR #${pr.number}`}
-        value={method}
+      <Select<MergeMethod>
+        items={mergeMethodLabels}
+        value={method || null}
         disabled={allowed.isPending || merge.isPending}
-        onChange={(event) => {
-          const chosen = asMergeMethod(event.target.value)
+        onValueChange={(chosen) => {
           if (chosen !== null) setChoice(chosen)
         }}
       >
-        <option value="" disabled>
-          Merge method
-        </option>
-        {options.map((option) => (
-          <option key={option} value={option}>
-            {mergeMethodLabels[option]}
-          </option>
-        ))}
-      </select>
+        <SelectTrigger
+          size="sm"
+          aria-label={`Merge method for PR #${pr.number}`}
+        >
+          <SelectValue placeholder="Merge method" />
+        </SelectTrigger>
+        <SelectContent>
+          {options.map((option) => (
+            <SelectItem key={option} value={option}>
+              {mergeMethodLabels[option]}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
     </PullRequestActionButton>
   )
 }

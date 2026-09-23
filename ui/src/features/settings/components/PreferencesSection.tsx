@@ -3,6 +3,7 @@ import { useState } from "react"
 
 import type { Theme } from "@/lib/theme"
 import { SettingsRow, SettingsSection } from "@/components/AppShell"
+import { useConfirm } from "@/components/ConfirmDialog"
 import { Button } from "@/components/ui/button"
 import {
   Select,
@@ -47,6 +48,7 @@ const NO_DEFAULT_WORKSPACE = "__no_default_workspace__"
 
 export function PreferencesSection() {
   const { theme, setTheme } = useTheme()
+  const confirm = useConfirm()
   const qc = useQueryClient()
   const preferences = useQuery({
     queryKey: ["myPreferences"],
@@ -247,11 +249,14 @@ export function PreferencesSection() {
             size="sm"
             variant="outline"
             disabled={archiveThreads.isPending}
-            onClick={() => {
+            onClick={async () => {
               if (
-                window.confirm(
-                  "Archive all your threads? They will remain available in the resolved view."
-                )
+                await confirm({
+                  title: "Archive all your threads?",
+                  description:
+                    "They will remain available in the resolved view.",
+                  confirmLabel: "Archive all",
+                })
               ) {
                 archiveThreads.mutate()
               }

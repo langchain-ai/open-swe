@@ -6,12 +6,23 @@ import {
   useAuiState,
 } from "@assistant-ui/react"
 import { ArrowUp, Plus, Square, X } from "lucide-react"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import { ModelPicker } from "@/features/agents/components/ModelPicker"
 import { useModelOptions } from "@/features/agents/lib/provider/useModelOptions"
 import { modelConfigurable } from "@/features/agents/lib/stream/promptMessage"
 import { useWorkspaceOptions } from "@/features/agents/lib/queries"
 import { useProfile, useRepos } from "@/lib/profile"
+import { cn } from "@/lib/utils"
 import { useThreadMetadata } from "./AssistantProvider"
+
+const INLINE_SELECT_TRIGGER =
+  "rounded-full border-transparent bg-transparent px-2 text-muted-foreground hover:bg-muted dark:bg-transparent"
 
 function Attachment() {
   const attachment = useAuiState((state) => state.attachment)
@@ -139,43 +150,59 @@ export function Composer({ initialRepo }: { initialRepo?: string | null }) {
           />
           {!thread && (
             <>
-              <select
-                aria-label="Repository"
-                value={typeof config?.repo === "string" ? config.repo : ""}
-                onChange={(event) =>
+              <Select
+                value={
+                  typeof config?.repo === "string" && config.repo
+                    ? config.repo
+                    : null
+                }
+                onValueChange={(value: string | null) =>
                   update({
-                    repo: event.target.value || null,
-                    repo_explicitly_none: !event.target.value,
+                    repo: value || null,
+                    repo_explicitly_none: !value,
                   })
                 }
-                className="max-w-40 bg-transparent text-xs"
               >
-                <option value="">No repository</option>
-                {repos.data?.repositories.map((repo) => (
-                  <option key={repo.full_name} value={repo.full_name}>
-                    {repo.full_name}
-                  </option>
-                ))}
-              </select>
+                <SelectTrigger
+                  aria-label="Repository"
+                  className={cn(INLINE_SELECT_TRIGGER, "max-w-40")}
+                >
+                  <SelectValue placeholder="No repository" />
+                </SelectTrigger>
+                <SelectContent alignItemWithTrigger={false} align="start">
+                  <SelectItem value={null}>No repository</SelectItem>
+                  {repos.data?.repositories.map((repo) => (
+                    <SelectItem key={repo.full_name} value={repo.full_name}>
+                      {repo.full_name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
               {workspaces.length > 0 && (
-                <select
-                  aria-label="Workspace"
+                <Select
                   value={
                     typeof config?.environment === "string"
                       ? config.environment
-                      : (workspaceQuery.data?.default_slug ?? "")
+                      : (workspaceQuery.data?.default_slug ?? null)
                   }
-                  onChange={(event) =>
-                    update({ environment: event.target.value })
+                  onValueChange={(value: string | null) =>
+                    value && update({ environment: value })
                   }
-                  className="max-w-32 bg-transparent text-xs"
                 >
-                  {workspaces.map((workspace) => (
-                    <option key={workspace.slug} value={workspace.slug}>
-                      {workspace.slug}
-                    </option>
-                  ))}
-                </select>
+                  <SelectTrigger
+                    aria-label="Workspace"
+                    className={cn(INLINE_SELECT_TRIGGER, "max-w-32")}
+                  >
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent alignItemWithTrigger={false} align="start">
+                    {workspaces.map((workspace) => (
+                      <SelectItem key={workspace.slug} value={workspace.slug}>
+                        {workspace.slug}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               )}
             </>
           )}

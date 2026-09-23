@@ -12,7 +12,7 @@ import type {
 } from "@/features/agents/lib/rightPanelStore"
 import type { TerminalGroupsController } from "@/features/agents/lib/terminalGroups"
 import type { TerminalTarget } from "@/features/agents/lib/terminalSession"
-import { Tooltip, TooltipPopup, TooltipTrigger } from "@/components/ui/tooltip"
+import { TooltipIconButton } from "@/components/ui/tooltip-icon-button"
 import {
   TerminalActions,
   TerminalPanel,
@@ -26,6 +26,7 @@ import {
 } from "@/features/agents/lib/rightPanelStore"
 import { terminalTabTitle } from "@/features/agents/lib/terminalTabTitle"
 import { useRegisterAppCommands } from "@/lib/appCommands"
+import { useCopyToClipboard } from "@/lib/useCopyToClipboard"
 import { cn } from "@/lib/utils"
 
 export interface AgentRightPanelProps {
@@ -65,17 +66,14 @@ function PanelControl(props: {
   children: ReactNode
 }) {
   return (
-    <Tooltip>
-      <TooltipTrigger
-        aria-label={props.label}
-        className="rounded-md p-1.5 text-muted-foreground/70 transition-colors hover:bg-accent hover:text-foreground"
-        onClick={props.onClick}
-        type="button"
-      >
-        {props.children}
-      </TooltipTrigger>
-      <TooltipPopup>{props.label}</TooltipPopup>
-    </Tooltip>
+    <TooltipIconButton
+      label={props.label}
+      size="icon"
+      className="text-muted-foreground/70"
+      onClick={props.onClick}
+    >
+      {props.children}
+    </TooltipIconButton>
   )
 }
 
@@ -97,6 +95,7 @@ export function AgentRightPanel(props: AgentRightPanelProps) {
     onCollapsedChange,
   } = props
 
+  const { copy } = useCopyToClipboard()
   const byThreadKey = useRightPanelStore((state) => state.byThreadKey)
   const openSurface = useRightPanelStore((state) => state.open)
   const openTerminalSurface = useRightPanelStore((state) => state.openTerminal)
@@ -255,15 +254,15 @@ export function AgentRightPanel(props: AgentRightPanelProps) {
 
   if (collapsed) {
     return (
-      <button
-        type="button"
+      <TooltipIconButton
+        label="Show panel"
+        size="icon"
+        side="left"
         onClick={() => onCollapsedChange(false)}
-        aria-label="Show panel"
-        title="Show panel"
-        className="fixed top-2 right-2 z-30 flex size-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"
+        className="fixed top-2 right-2 z-30"
       >
         <SidebarSimpleIcon className="size-4" />
-      </button>
+      </TooltipIconButton>
     )
   }
 
@@ -350,10 +349,7 @@ export function AgentRightPanel(props: AgentRightPanelProps) {
         closeSurfacesToRight(threadRef, surface.id)
       }
       onCloseAllSurfaces={() => closeAllSurfaces(threadRef)}
-      onCopyFilePath={(relativePath) => {
-        const nav = navigator as { clipboard?: Clipboard }
-        if (nav.clipboard) void nav.clipboard.writeText(relativePath)
-      }}
+      onCopyFilePath={(relativePath) => void copy(relativePath)}
       onAddTerminal={handleAddTerminal}
       onAddDiff={handleAddDiff}
       terminalAvailable={terminalAvailable}

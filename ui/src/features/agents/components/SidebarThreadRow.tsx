@@ -1,14 +1,10 @@
-import { ContextMenu } from "@base-ui/react/context-menu"
 import { Link, useNavigate } from "@tanstack/react-router"
 import {
   ArchiveIcon,
   ArrowCounterClockwiseIcon,
   CalendarBlankIcon,
   ChatCircleIcon,
-  CircleNotchIcon,
   FolderIcon,
-  GitMergeIcon,
-  GitPullRequestIcon,
   LockIcon,
   PushPinIcon,
   PushPinSlashIcon,
@@ -25,9 +21,22 @@ import { useEffect, useRef, useState } from "react"
 import type { ComponentType, SVGProps } from "react"
 
 import type { PullRequestSnapshot } from "@/features/agents/lib/api"
-import type { AgentSource, AgentThread } from "@/features/agents/lib/types"
+import type { AgentSource } from "@/features/agents/lib/types"
 import type { SidebarThreadItem } from "@/features/agents/lib/sidebarThreads"
-import { Tooltip, TooltipPopup, TooltipTrigger } from "@/components/ui/tooltip"
+import type { PrState } from "@/components/PrState"
+import { PrStateIcon } from "@/components/PrState"
+import {
+  ContextMenu,
+  ContextMenuPopup,
+  ContextMenuTrigger,
+} from "@/components/ui/context-menu"
+import {
+  HoverCard,
+  HoverCardPopup,
+  HoverCardTrigger,
+} from "@/components/ui/hover-card"
+import { Spinner } from "@/components/ui/spinner"
+import { TooltipIconButton } from "@/components/ui/tooltip-icon-button"
 import { DeleteThreadDialog } from "@/features/agents/components/DeleteThreadDialog"
 import { ThreadMenuItems } from "@/features/agents/components/ThreadMenuItems"
 import { useMarkLocalThreadViewed } from "@/features/agents/lib/desktopLocal"
@@ -47,34 +56,6 @@ const SOURCE_META: Record<AgentSource, { icon: Icon; label: string }> = {
   slack: { icon: IoLogoSlack, label: "Triggered from Slack" },
   linear: { icon: SiLinear, label: "Triggered from Linear" },
   schedule: { icon: CalendarBlankIcon, label: "Triggered from a schedule" },
-}
-
-type PrState = NonNullable<AgentThread["pr"]>["state"]
-
-const PR_STATE_META: Record<
-  PrState,
-  { icon: Icon; label: string; className: string }
-> = {
-  draft: {
-    icon: GitPullRequestIcon,
-    label: "Draft pull request",
-    className: "text-muted-foreground/70",
-  },
-  open: {
-    icon: GitPullRequestIcon,
-    label: "Open pull request",
-    className: "text-success-foreground",
-  },
-  merged: {
-    icon: GitMergeIcon,
-    label: "Merged pull request",
-    className: "text-merged-foreground",
-  },
-  closed: {
-    icon: GitPullRequestIcon,
-    label: "Closed pull request",
-    className: "text-destructive",
-  },
 }
 
 /** Codex-style compact age ("17m", "3h", "2d") — the tooltip has no room for prose. */
@@ -146,17 +127,9 @@ function PullRequestIcon({
 }) {
   // Thread metadata records the state the PR had when it was opened; live
   // truth wins so a merged PR stops rendering as open.
-  const meta = PR_STATE_META[live?.state ?? state]
-  const Glyph = meta.icon
   return (
-    <span
-      className={cn("relative flex shrink-0", className)}
-      title={meta.label}
-    >
-      <Glyph
-        className={cn("size-3.5", meta.className)}
-        aria-label={meta.label}
-      />
+    <span className={cn("relative flex shrink-0", className)}>
+      <PrStateIcon state={live?.state ?? state} />
       {live?.checks === "failing" && (
         <span
           className="absolute -right-0.5 -bottom-0.5 size-1.5 rounded-full bg-destructive ring-2 ring-sidebar"
@@ -307,7 +280,7 @@ export function SidebarThreadRow({
         </span>
       </span>
 
-      <span className="flex shrink-0 items-center gap-1.5 group-hover/row:hidden">
+      <span className="flex shrink-0 items-center gap-1.5 group-focus-within/row:hidden group-hover/row:hidden">
         {item.status === "error" && (
           <WarningCircleIcon
             className="size-3.5 text-destructive"
@@ -328,8 +301,8 @@ export function SidebarThreadRow({
         )}
         {item.pr && <PullRequestIcon state={item.pr.state} live={live} />}
         {item.status === "running" ? (
-          <CircleNotchIcon
-            className="size-3.5 animate-spin text-muted-foreground"
+          <Spinner
+            className="text-muted-foreground"
             aria-label="Thread running"
           />
         ) : unread ? (
@@ -340,33 +313,33 @@ export function SidebarThreadRow({
         ) : null}
       </span>
 
-      <span className="-mr-[3px] hidden shrink-0 items-center gap-0.5 group-hover/row:flex">
-        <button
-          type="button"
-          aria-label={pinned ? "Unpin thread" : "Pin thread"}
-          title={pinned ? "Unpin" : "Pin"}
+      <span className="-mr-[3px] hidden shrink-0 items-center gap-0.5 group-focus-within/row:flex group-hover/row:flex">
+        <TooltipIconButton
+          label={pinned ? "Unpin thread" : "Pin thread"}
+          tooltip={pinned ? "Unpin" : "Pin"}
+          size="icon-xs"
           onClick={onPinClick}
-          className="flex size-5 items-center justify-center rounded text-muted-foreground/80 hover:bg-accent hover:text-foreground"
+          className="rounded text-muted-foreground/80 hover:bg-accent"
         >
           {pinned ? (
             <PushPinSlashIcon className="size-3.5" />
           ) : (
             <PushPinIcon className="size-3.5" />
           )}
-        </button>
-        <button
-          type="button"
-          aria-label={archived ? "Unarchive thread" : "Archive thread"}
-          title={archived ? "Unarchive" : "Archive"}
+        </TooltipIconButton>
+        <TooltipIconButton
+          label={archived ? "Unarchive thread" : "Archive thread"}
+          tooltip={archived ? "Unarchive" : "Archive"}
+          size="icon-xs"
           onClick={onArchiveClick}
-          className="flex size-5 items-center justify-center rounded text-muted-foreground/80 hover:bg-accent hover:text-foreground"
+          className="rounded text-muted-foreground/80 hover:bg-accent"
         >
           {archived ? (
             <ArrowCounterClockwiseIcon className="size-3.5" />
           ) : (
             <ArchiveIcon className="size-3.5" />
           )}
-        </button>
+        </TooltipIconButton>
       </span>
     </>
   )
@@ -403,8 +376,8 @@ export function SidebarThreadRow({
 
   return (
     <>
-      <ContextMenu.Root onOpenChange={setContextMenuOpen}>
-        <ContextMenu.Trigger
+      <ContextMenu onOpenChange={setContextMenuOpen}>
+        <ContextMenuTrigger
           className={cn(
             "group/row relative mb-0.5",
             isDeleting && "opacity-50"
@@ -412,38 +385,31 @@ export function SidebarThreadRow({
           onMouseEnter={marquee.measure}
           onMouseLeave={marquee.reset}
         >
-          <Tooltip>
-            <TooltipTrigger render={link}>{rowContent}</TooltipTrigger>
-            <TooltipPopup
-              variant="glass"
+          <HoverCard>
+            <HoverCardTrigger render={link}>{rowContent}</HoverCardTrigger>
+            <HoverCardPopup
               side="right"
               align="start"
               sideOffset={8}
-              className="pointer-events-auto max-w-80 rounded-xl p-3 [--dropdown-glass-background:var(--sidebar)]"
+              className="w-auto max-w-80 shadow-xl shadow-black/25 [--dropdown-glass-background:var(--sidebar)]"
             >
               <ThreadHoverCard item={item} live={live} />
-            </TooltipPopup>
-          </Tooltip>
-        </ContextMenu.Trigger>
-        <ContextMenu.Portal>
-          <ContextMenu.Positioner className="z-50 outline-none">
-            <ContextMenu.Popup className="min-w-[10rem] overflow-hidden rounded-md border border-border bg-popover p-1 text-popover-foreground shadow-md outline-none data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95">
-              <ThreadMenuItems
-                thread={thread}
-                localThread={
-                  item.location === "local" ? item.thread : undefined
-                }
-                pinned={pinned}
-                archived={archived}
-                isDeleting={isDeleting}
-                onTogglePin={onTogglePin}
-                onToggleArchived={onToggleArchived}
-                onDelete={() => setDeleteOpen(true)}
-              />
-            </ContextMenu.Popup>
-          </ContextMenu.Positioner>
-        </ContextMenu.Portal>
-      </ContextMenu.Root>
+            </HoverCardPopup>
+          </HoverCard>
+        </ContextMenuTrigger>
+        <ContextMenuPopup>
+          <ThreadMenuItems
+            thread={thread}
+            localThread={item.location === "local" ? item.thread : undefined}
+            pinned={pinned}
+            archived={archived}
+            isDeleting={isDeleting}
+            onTogglePin={onTogglePin}
+            onToggleArchived={onToggleArchived}
+            onDelete={() => setDeleteOpen(true)}
+          />
+        </ContextMenuPopup>
+      </ContextMenu>
       <DeleteThreadDialog
         open={deleteOpen}
         onOpenChange={(open) => {
@@ -509,7 +475,7 @@ function ThreadHoverCard({
           target="_blank"
           rel="noreferrer"
           onClick={(event) => event.stopPropagation()}
-          className="pointer-events-auto -mx-1 flex min-w-0 items-center gap-1.5 rounded-md px-1 py-0.5 text-muted-foreground hover:bg-accent hover:text-foreground"
+          className="-mx-1 flex min-w-0 items-center gap-1.5 rounded-md px-1 py-0.5 text-muted-foreground hover:bg-accent hover:text-foreground"
         >
           <PullRequestIcon state={item.pr.state} live={live} />
           <span className="min-w-0 truncate text-[12px]">{item.pr.title}</span>

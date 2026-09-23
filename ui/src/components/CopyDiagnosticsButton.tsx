@@ -2,24 +2,17 @@ import { CopyIcon } from "@phosphor-icons/react"
 import { useState } from "react"
 
 import { Button } from "@/components/ui/button"
+import { useCopyToClipboard } from "@/lib/useCopyToClipboard"
 
 export function CopyDiagnosticsButton({
   getDiagnostics,
 }: {
   getDiagnostics: () => object
 }) {
-  const [copyState, setCopyState] = useState<"idle" | "copied" | "denied">(
-    "idle"
-  )
-  const copy = async () => {
-    try {
-      await navigator.clipboard.writeText(
-        JSON.stringify(getDiagnostics(), null, 2)
-      )
-      setCopyState("copied")
-    } catch {
-      setCopyState("denied")
-    }
+  const { copied, copy } = useCopyToClipboard()
+  const [denied, setDenied] = useState(false)
+  const copyDiagnostics = async () => {
+    setDenied(!(await copy(JSON.stringify(getDiagnostics(), null, 2))))
   }
 
   return (
@@ -28,15 +21,15 @@ export function CopyDiagnosticsButton({
         type="button"
         size="sm"
         variant="outline"
-        onClick={() => void copy()}
+        onClick={() => void copyDiagnostics()}
       >
         <CopyIcon aria-hidden="true" className="size-3.5" />
         Copy diagnostics
       </Button>
       <span aria-live="polite" role="status">
-        {copyState === "copied"
+        {copied
           ? "Diagnostics copied to clipboard."
-          : copyState === "denied"
+          : denied
             ? "Clipboard unavailable. Check the browser's clipboard permission."
             : null}
       </span>

@@ -61,7 +61,7 @@ describe("OwnershipPicker", () => {
     expect(screen.getByText("Available · 1")).toBeTruthy()
     expect(screen.getByText("Owned by another workspace · 1")).toBeTruthy()
     const taken = screen.getByRole("checkbox", { name: "#commits" })
-    expect(taken.hasAttribute("disabled")).toBe(true)
+    expect(taken.getAttribute("aria-disabled")).toBe("true")
     expect(screen.getByText("Core")).toBeTruthy()
     // The filter hides the channel the bot is not in, and says so.
     expect(
@@ -148,8 +148,8 @@ describe("OwnershipPicker", () => {
     expect(
       screen
         .getByRole("checkbox", { name: "#commits" })
-        .hasAttribute("disabled")
-    ).toBe(true)
+        .getAttribute("aria-disabled")
+    ).toBe("true")
     fireEvent.click(screen.getByRole("button", { name: "Save 0 channels" }))
     expect(onChange).toHaveBeenCalledWith([])
   })
@@ -158,13 +158,13 @@ describe("OwnershipPicker", () => {
     const { onChange } = renderPicker({ selected: ["C3"] })
 
     const stuck = await screen.findByRole("checkbox", { name: "#commits" })
-    expect(stuck.hasAttribute("disabled")).toBe(false)
+    expect(stuck.getAttribute("aria-disabled")).not.toBe("true")
     fireEvent.click(stuck)
     expect(
       screen
         .getByRole("checkbox", { name: "#commits" })
-        .hasAttribute("disabled")
-    ).toBe(true)
+        .getAttribute("aria-disabled")
+    ).toBe("true")
     fireEvent.click(screen.getByRole("button", { name: "Save 0 channels" }))
 
     expect(onChange).toHaveBeenCalledWith([])

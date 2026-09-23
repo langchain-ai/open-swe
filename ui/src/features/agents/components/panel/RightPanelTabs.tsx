@@ -489,7 +489,11 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
           className="min-w-0 flex-1 rounded-none"
           data-right-panel-tab-list
         >
-          <div className="flex h-full w-max min-w-full items-center gap-1">
+          <div
+            role="tablist"
+            aria-label="Panel surfaces"
+            className="flex h-full w-max min-w-full items-center gap-1"
+          >
             {props.surfaces.map((surface) => {
               const active = surface.id === props.activeSurfaceId
               const pending = props.pendingSurfaceIds.has(surface.id)
@@ -532,6 +536,8 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
                       render={
                         <button
                           type="button"
+                          role="tab"
+                          aria-selected={active}
                           className="flex min-w-0 cursor-pointer items-center"
                           onClick={() => props.onActivate(surface)}
                         >

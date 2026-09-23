@@ -19,9 +19,10 @@ import {
 import type { BaseMessage } from "@langchain/core/messages"
 
 import { Markdown } from "@/features/agents/components/chat/Markdown"
-import { IconButton } from "@/components/ui/button"
+import { Empty, EmptyDescription } from "@/components/ui/empty"
 import { Textarea } from "@/components/ui/textarea"
 import { Skeleton } from "@/components/ui/skeleton"
+import { TooltipIconButton } from "@/components/ui/tooltip-icon-button"
 import { api, reviewChatApiBase } from "@/lib/api"
 import { createDashboardClient, dashboardFetch } from "@/lib/langgraph-client"
 import {
@@ -151,15 +152,13 @@ function AttachmentPill({
       <CodeIcon className="size-3 shrink-0 text-muted-foreground" />
       <span className="truncate font-mono">{label}</span>
       {onRemove && (
-        <IconButton
-          type="button"
-          variant="ghost"
+        <TooltipIconButton
           size="icon-xs"
-          aria-label="Remove attachment"
+          label="Remove attachment"
           onClick={onRemove}
         >
           <XIcon />
-        </IconButton>
+        </TooltipIconButton>
       )}
     </span>
   )
@@ -441,15 +440,16 @@ function ChatBody() {
               rows={1}
               className="max-h-40 min-h-7 flex-1 resize-none rounded-none border-0 bg-transparent px-0 py-1 shadow-none focus-visible:border-transparent focus-visible:ring-0 dark:bg-transparent"
             />
-            <IconButton
-              type="button"
+            <TooltipIconButton
+              variant="default"
+              size="icon"
               onClick={submitComposer}
               disabled={(!value.trim() && attachments.length === 0) || busy}
-              aria-label="Send message"
+              label="Send message"
               className="rounded-full"
             >
               <ArrowUpIcon className="size-4" />
-            </IconButton>
+            </TooltipIconButton>
           </div>
         </div>
       </div>
@@ -514,9 +514,11 @@ export function ReviewChat({
 
   if (meta.isError || !meta.data.available) {
     return (
-      <div className="flex flex-1 items-center justify-center p-6 text-center text-xs text-muted-foreground">
-        Chat becomes available once the review has finished running.
-      </div>
+      <Empty>
+        <EmptyDescription>
+          Chat becomes available once the review has finished running.
+        </EmptyDescription>
+      </Empty>
     )
   }
 
