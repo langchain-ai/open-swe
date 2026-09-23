@@ -9,6 +9,7 @@ depends_on = None
 
 
 def upgrade() -> None:
+    op.execute("ALTER TABLE expedited_approval DROP CONSTRAINT expedited_approval_state_check")
     op.execute(
         """
         UPDATE expedited_approval
@@ -16,7 +17,6 @@ def upgrade() -> None:
         WHERE state IN ('waiting', 'merging', 'failed')
         """
     )
-    op.execute("ALTER TABLE expedited_approval DROP CONSTRAINT expedited_approval_state_check")
     op.execute(
         """
         ALTER TABLE expedited_approval ADD CONSTRAINT expedited_approval_state_check
