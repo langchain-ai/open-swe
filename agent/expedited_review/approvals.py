@@ -46,7 +46,6 @@ class ApprovalVote(Base):
     decision: Mapped[VoteDecision] = mapped_column(Text, default="approve")
     github_review_id: Mapped[int | None] = mapped_column(BigInteger, default=None)
     github_review_sha: Mapped[str] = mapped_column(server_default="", default="")
-    feedback: Mapped[str] = mapped_column(server_default="", default="")
     voted_at: Mapped[datetime | None] = mapped_column(server_default=NOW, init=False)
     voter: Mapped[User] = relationship(init=False)
 

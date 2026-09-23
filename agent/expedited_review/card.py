@@ -7,7 +7,6 @@ from agent.expedited_review.eligibility import ChangedFile
 from agent.slack.blocks import (
     Block,
     ButtonElement,
-    ModalView,
     actions,
     button,
     code_block,
@@ -15,15 +14,10 @@ from agent.slack.blocks import (
     divider,
     escape,
     image,
-    modal,
     section,
-    text_input,
 )
 
 BUTTON_TYPE = "expedited_review"
-REJECT_MODAL_CALLBACK = "expedited_review_reject"
-REJECT_FEEDBACK_BLOCK = "expedited_review_feedback"
-REJECT_FEEDBACK_ACTION = "feedback"
 
 _MAX_FILE_SECTIONS = 20
 # Slack refuses a section over 3000 characters, and refusing means no card at
@@ -101,7 +95,7 @@ def _vote_buttons(approval: ExpeditedApproval) -> tuple[ButtonElement, ButtonEle
             style="primary",
         ),
         button(
-            "Reject and give feedback",
+            "Reject",
             action_id="open_swe_option_select_reject",
             value=_button_value("reject", approval),
             style="danger",
@@ -187,28 +181,3 @@ def closed_card(
         context(_vote_summary(approval)),
     ]
     return f"{outcome} — {pr.url}", blocks
-
-
-def reject_modal(approval: ExpeditedApproval, *, channel_id: str, thread_ts: str) -> ModalView:
-    pr = approval.pull_request
-    return modal(
-        callback_id=REJECT_MODAL_CALLBACK,
-        title="Reject expedited review",
-        submit="Reject",
-        close="Cancel",
-        private_metadata=json.dumps(
-            {"approval_id": str(approval.id), "channel_id": channel_id, "thread_ts": thread_ts}
-        ),
-        blocks=[
-            section(f"Rejecting <{pr.url}|{pr.owner}/{pr.repo}#{pr.number}> ends this vote."),
-            text_input(
-                block_id=REJECT_FEEDBACK_BLOCK,
-                label="Feedback for the agent",
-                action_id=REJECT_FEEDBACK_ACTION,
-                multiline=True,
-                max_length=3000,
-                placeholder="What should change?",
-                optional=True,
-            ),
-        ],
-    )

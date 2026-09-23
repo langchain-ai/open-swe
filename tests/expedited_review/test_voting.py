@@ -151,7 +151,7 @@ async def test_unlinked_read_only_or_tokenless_users_cannot_vote(
     assert (await _stored(approval)).votes == []
 
 
-async def test_rejection_ends_the_vote_and_tells_the_agent_once(
+async def test_rejection_closes_the_card_without_waking_the_agent(
     harness: _Harness, open_approval: OpenApproval
 ) -> None:
     approval = await open_approval()
@@ -163,8 +163,7 @@ async def test_rejection_ends_the_vote_and_tells_the_agent_once(
     assert stored.state == "rejected"
     assert stored.rejection is not None and stored.rejection.github_login == "linus"
     assert "no longer accepting" in late.message
-    assert len(harness.agent_prompts) == 1
-    assert "linus" in harness.agent_prompts[0]
+    assert harness.agent_prompts == []
 
 
 async def test_only_one_open_approval_per_pull_request(open_approval: OpenApproval) -> None:

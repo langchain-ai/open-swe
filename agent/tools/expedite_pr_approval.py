@@ -50,7 +50,7 @@ def _next_step(*, reused: bool, elsewhere: bool, in_thread: bool) -> str:
     posted += (
         " Clicks only record votes. Call `merge_expedited_pr` once checks and reviews are "
         "clean; keep a `/baby-sit` watch on the PR so you are woken when they are. You are "
-        "also woken when someone approves the card or rejects it. Do not poll."
+        "also woken when someone approves the card. Do not poll."
     )
     if reused or not in_thread:
         return posted

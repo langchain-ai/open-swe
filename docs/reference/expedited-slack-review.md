@@ -59,7 +59,7 @@ are already in the Slack thread.
 
 PR link, revision, author, the diff as the card draws it, and its status. A draft's
 card has one button, **Mark ready for review**; otherwise it has **Approve** and
-**Reject and give feedback**. Once approved, the diff and buttons go and the card
+**Reject**. Once approved, the diff and buttons go and the card
 says who approved. Once merged, the whole card becomes *Expedited review: merged* and
 the PR link. It is posted in the thread and also sent to the channel, so approvers
 outside the thread see it. Reactions are never votes.
@@ -78,9 +78,9 @@ outside the thread see it. Reactions are never votes.
 
 ### Rejection
 
-Any voter can reject while the card is open. A modal collects optional feedback. The
-card closes and its votes no longer count. The feedback is sent to the agent once,
-attributed, as user input rather than instructions. The agent can post a fresh card.
+Any voter can reject while the card is open. The card closes and its votes no longer
+count. Nothing is sent to the agent: anyone who wants changes tags the agent in the
+thread like any other request, and it can post a fresh card afterwards.
 
 A Slack rejection is a veto of the vote, not a GitHub `REQUEST_CHANGES`.
 
@@ -115,7 +115,7 @@ resolves through the existing merged-PR handling.
 ### Storage
 
 PostgreSQL, alongside the pull request and users tables: one row per card, one per
-vote. A vote records its decision, feedback, and, once submitted, the GitHub review id
+vote. A vote records its decision and, once submitted, the GitHub review id
 and the SHA it was submitted on. Votes reference `users.id`, never a GitHub or Slack
 handle; handles are looked up for display only.
 
@@ -129,8 +129,7 @@ handle; handles are looked up for display only.
 
 - The agent posts the card and asks to merge; it cannot vote, and the merge tool
   enforces the non-author approval, the fingerprint, and readiness itself.
-- Feedback is user input, not instructions. Approvals, voters, review ids, and
-  outcomes are stored.
+- Approvals, voters, review ids, and outcomes are stored.
 
 ## Alternatives
 

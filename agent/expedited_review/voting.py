@@ -80,7 +80,6 @@ async def handle_vote(
     *,
     decision: CardAction,
     user: User | None,
-    feedback: str = "",
 ) -> VoteOutcome:
     """Record one click. Slow work runs unlocked; the row lock covers only the write."""
     if approval.state != "open":
@@ -95,7 +94,7 @@ async def handle_vote(
             return VoteOutcome("Only the pull request's author can mark it ready for review.")
         return await _mark_ready(approval, voter=voter)
     if decision == "reject":
-        return await _reject(approval, voter=voter, feedback=feedback)
+        return await _reject(approval, voter=voter)
 
     if approval.awaiting_ready:
         return VoteOutcome("The author has to mark this draft ready for review first.")
@@ -159,30 +158,15 @@ async def _mark_ready(approval: ExpeditedApproval, *, voter: Voter) -> VoteOutco
     return VoteOutcome("Marked ready for review. Someone else can approve it now.")
 
 
-async def _reject(approval: ExpeditedApproval, *, voter: Voter, feedback: str) -> VoteOutcome:
-    clean_feedback = " ".join(feedback.split())[:3000]
-    login = voter.github_login
+async def _reject(approval: ExpeditedApproval, *, voter: Voter) -> VoteOutcome:
+    """Close the card; anyone with something to say tags the agent in the thread."""
     async with ExpeditedApproval.locked(approval.id) as (_, row):
         if row is None or row.state != "open":
             return VoteOutcome("This expedited review is no longer accepting votes.")
         row.votes = [vote for vote in row.votes if vote.voter_user_id != voter.user.id]
-        row.votes.append(
-            ApprovalVote(voter_user_id=voter.user.id, decision="reject", feedback=clean_feedback)
-        )
-    outcome = f"Rejected by @{login}." + (f" Feedback: {clean_feedback}" if clean_feedback else "")
-    pr = approval.pull_request
-    await retire(
-        approval,
-        "rejected",
-        outcome,
-        agent_prompt=render_prompt(
-            "runs/expedited-review-rejected.md",
-            pr_url=pr.url,
-            rejector=login,
-            feedback=clean_feedback or "(none given)",
-        ),
-    )
-    return VoteOutcome("Rejected. The agent has been told.")
+        row.votes.append(ApprovalVote(voter_user_id=voter.user.id, decision="reject"))
+    await retire(approval, "rejected", f"Rejected by @{voter.github_login}.")
+    return VoteOutcome("Rejected. Tag the agent in the thread to tell it what to change.")
 
 
 async def process_vote(
@@ -192,7 +176,6 @@ async def process_vote(
     person: PersonIdentity,
     channel_id: str,
     thread_ts: str,
-    feedback: str = "",
 ) -> None:
     """Background entry point for a Slack click; answers the clicker ephemerally."""
     slack_user_id = split_person_id(person)[1]
@@ -213,7 +196,6 @@ async def process_vote(
                 approval,
                 decision=decision,
                 user=await User.for_person(person),
-                feedback=feedback,
             )
     except Exception:
         logger.exception("Expedited review vote failed", extra={"approval_id": approval_id})

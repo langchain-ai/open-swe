@@ -200,16 +200,12 @@ async def retire(
     approval: ExpeditedApproval,
     state: ApprovalState,
     outcome: str,
-    *,
-    agent_prompt: str | None = None,
 ) -> ExpeditedApproval | None:
     """Close an open approval and mark its card; ``None`` if it was already closed."""
     updated = await transition(approval.id, expected=("open",), state=state, detail=outcome)
     if updated is None:
         return None
     await refresh_card(updated, outcome=outcome)
-    if agent_prompt:
-        await notify_agent(updated, agent_prompt)
     return updated
 
 
