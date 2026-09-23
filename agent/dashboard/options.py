@@ -27,28 +27,12 @@ SUPPORTED_MODELS: list[ModelOption] = [
         "supports_images": True,
     },
     {
-        "id": "anthropic:claude-sonnet-5",
-        "label": "Sonnet 5",
-        "efforts": ["low", "medium", "high", "xhigh", "max"],
-        "default_effort": "high",
-        "supports_images": True,
-    },
-    {
         "id": "anthropic:claude-fable-5-1",
         "label": "Fable 5.1",
         "efforts": ["low", "medium", "high", "xhigh", "max"],
         "default_effort": "high",
         "supports_images": True,
         "can_be_default": False,
-    },
-    {
-        "id": "anthropic:claude-haiku-4-5",
-        "label": "Haiku 4.5",
-        # Haiku 4.5 predates the adaptive-thinking/effort params the other
-        # Claude entries rely on, so it is offered without reasoning.
-        "efforts": ["none"],
-        "default_effort": "none",
-        "supports_images": True,
     },
     {
         "id": "openai:gpt-6-astra",
@@ -121,6 +105,8 @@ NON_DEFAULT_MODEL_IDS: frozenset[str] = frozenset(
 DEPRECATED_MODEL_IDS: frozenset[str] = frozenset(
     {
         "anthropic:claude-opus-4-8",
+        "anthropic:claude-sonnet-5",
+        "anthropic:claude-haiku-4-5",
         "anthropic:claude-fable-5",
         "openai:gpt-5.5",
         "openai:gpt-5.6-sol",

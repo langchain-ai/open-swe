@@ -118,6 +118,7 @@ def apply() -> None:
     # rather than weakening the host check that production relies on.
     from agent.slack import client as slack_client
     from agent.slack.client import GitHubPrRef
+    from agent.slack.tools import request_pr_review
 
     _real_parse = slack_client.parse_github_pr_url
     _mock_pr_path = re.compile(r"^/mock/github/([^/]+)/([^/]+)/pull/(\d+)/?$")
@@ -170,7 +171,14 @@ def apply() -> None:
 
     slack_client.parse_github_pr_url = _parse_pr_url
     merge_tool = importlib.import_module("agent.tools.merge_expedited_pr")
-    for module in (manage_baby_sit, expedite_tool, merge_tool, thread_tools, opr):
+    for module in (
+        manage_baby_sit,
+        expedite_tool,
+        merge_tool,
+        thread_tools,
+        opr,
+        request_pr_review,
+    ):
         if "parse_github_pr_url" in module.__dict__:
             module.__dict__["parse_github_pr_url"] = _parse_pr_url
 

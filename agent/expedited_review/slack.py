@@ -26,11 +26,10 @@ async def handle_button(
     decision: CardAction
     if button.action == "approve":
         decision = "approve"
-    elif button.action == "reject":
-        decision = "reject"
     elif button.action == "ready":
         decision = "ready"
-    elif button.action == "dismiss":
+    elif button.action in {"dismiss", "reject"}:
+        # Cards already posted in Slack still carry a Reject button.
         decision = "dismiss"
     else:
         return ignored("Unknown expedited review action")

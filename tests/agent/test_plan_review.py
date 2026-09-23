@@ -386,6 +386,26 @@ async def test_republished_artifact_drops_legacy_approval(
     assert result["approvedAt"] is None
 
 
+async def test_dismissal_clears_when_artifact_is_republished(
+    monkeypatch: pytest.MonkeyPatch, fake_store: FakeStore
+) -> None:
+    from agent.threads import plan_api, plan_store
+
+    session = {"sub": "owner", "email": None}
+    monkeypatch.setattr(plan_store, "_merge_thread_metadata", AsyncMock())
+    monkeypatch.setattr(
+        plan_api,
+        "fetch_thread_metadata",
+        AsyncMock(return_value={"source": "dashboard", "github_login": "owner"}),
+    )
+    await plan_store.save_plan_content("t1", html="<p>v1</p>")
+    await plan_api.update_plan("t1", plan_api.PlanUpdate(dismissed=True), session=session)
+    assert (await plan_api.get_plan("t1", session=session))["dismissed"] is True
+
+    await plan_store.save_plan_content("t1", html="<p>v2</p>")
+    assert (await plan_api.get_plan("t1", session=session))["dismissed"] is False
+
+
 async def test_get_plan_returns_approval_attribution(monkeypatch: pytest.MonkeyPatch) -> None:
     from agent.threads import plan_api
 

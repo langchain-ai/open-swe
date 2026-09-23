@@ -33,7 +33,6 @@ def _clean_oauth_env(monkeypatch: pytest.MonkeyPatch) -> None:
         "OPENAI_API_KEY",
     ):
         monkeypatch.delenv(name, raising=False)
-    model._MODEL_CACHE.clear()
 
 
 def _configure(monkeypatch: pytest.MonkeyPatch) -> None:
