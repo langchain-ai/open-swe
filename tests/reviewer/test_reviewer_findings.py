@@ -1,7 +1,7 @@
-"""Unit tests for the Finding schema + thread-metadata helpers."""
+"""Unit tests for the Finding schema and its PostgreSQL-backed storage."""
 
 import asyncio
-import copy
+import logging
 from typing import Any
 from unittest.mock import AsyncMock, patch
 
@@ -11,9 +11,11 @@ from agent.review.findings import (
     SEVERITY_ORDER,
     DiffSide,
     Finding,
+    ReviewerThreadMissingError,
     append_finding,
     comment_ids_for_finding,
     filter_findings_for_publish,
+    findings_by_thread,
     is_surfaced,
     is_thread_resolved,
     list_findings,
@@ -46,6 +48,23 @@ def _f(**overrides: Any) -> Finding:
     return base
 
 
+def _metadata_client(metadata: dict[str, Any] | None = None) -> AsyncMock:
+    client = AsyncMock()
+    client.threads.get.return_value = {"metadata": metadata or {}}
+    return client
+
+
+def _not_found(method: str = "GET") -> Exception:
+    import httpx2
+    from langgraph_sdk.errors import NotFoundError
+
+    return NotFoundError(
+        "thread tid not found",
+        response=httpx2.Response(404, request=httpx2.Request(method, "http://x")),
+        body=None,
+    )
+
+
 def test_new_finding_id_format() -> None:
     fid = new_finding_id()
     assert fid.startswith("f_")
@@ -68,6 +87,7 @@ def test_new_finding_defaults() -> None:
     assert finding["last_human_reply_at"] is None
     assert finding["resolution_note"] is None
     assert finding["suggestion"] is None
+    assert finding["rank"] is None
 
 
 def test_fingerprint_covers_side_and_full_description() -> None:
@@ -121,41 +141,99 @@ def test_filter_findings_for_publish_is_uncapped_by_default() -> None:
     assert len(filter_findings_for_publish(findings, cap=5)) == 5
 
 
-@pytest.mark.asyncio
+def test_filter_findings_for_publish_orders_by_rank_before_severity() -> None:
+    findings = [
+        _f(id="f_unranked", severity="critical", file="a.py"),
+        _f(id="f_second", severity="critical", file="b.py", rank=2),
+        _f(id="f_first", severity="medium", file="c.py", rank=1),
+    ]
+    surfaced = filter_findings_for_publish(findings, severity_threshold="medium")
+    assert [f["id"] for f in surfaced] == ["f_first", "f_second", "f_unranked"]
+
+
+@pytest.mark.usefixtures("registry_db")
+async def test_first_access_backfills_metadata_findings_once(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    client = _metadata_client({"findings": [_f(id="f_a"), _f(id="f_b", description="other")]})
+
+    with (
+        patch("agent.review.findings.get_client", return_value=client),
+        caplog.at_level(logging.INFO, logger="agent.review.findings"),
+    ):
+        first = await list_findings("tid")
+        client.threads.get.return_value = {"metadata": {"findings": []}}
+        second = await list_findings("tid")
+
+    assert [f["id"] for f in first] == ["f_a", "f_b"]
+    assert second == first
+    client.threads.get.assert_awaited_once()
+    backfills = [r for r in caplog.records if r.message.startswith("Backfilled reviewer findings")]
+    assert len(backfills) == 1
+    assert backfills[0].__dict__["reviewer_thread_id"] == "tid"
+    assert backfills[0].__dict__["finding_count"] == 2
+
+
+@pytest.mark.usefixtures("registry_db")
 async def test_list_findings_returns_empty_on_missing_metadata() -> None:
-    fake_client = AsyncMock()
-    fake_client.threads.get.return_value = {"metadata": {}}
-    with patch("agent.review.findings.get_client", return_value=fake_client):
-        findings = await list_findings("tid")
-    assert findings == []
+    with patch("agent.review.findings.get_client", return_value=_metadata_client()):
+        assert await list_findings("tid") == []
 
 
-@pytest.mark.asyncio
+@pytest.mark.usefixtures("registry_db")
 async def test_list_findings_coerces_bad_entries() -> None:
-    fake_client = AsyncMock()
-    fake_client.threads.get.return_value = {
-        "metadata": {
+    client = _metadata_client(
+        {
             "findings": [
                 {"id": "f_ok", "severity": "high", "file": "x.py"},
                 {"missing_id": True},
                 "not-a-dict",
             ]
         }
-    }
-    with patch("agent.review.findings.get_client", return_value=fake_client):
+    )
+    with patch("agent.review.findings.get_client", return_value=client):
         findings = await list_findings("tid")
     assert [f["id"] for f in findings] == ["f_ok"]
 
 
+@pytest.mark.usefixtures("registry_db")
+async def test_failed_backfill_read_copies_nothing_and_retries_later() -> None:
+    client = _metadata_client()
+    client.threads.get.side_effect = RuntimeError("transient")
+
+    with patch("agent.review.findings.get_client", return_value=client):
+        with pytest.raises(RuntimeError, match="transient"):
+            await mutate_findings("tid", lambda findings: bool(findings.append(_f(id="f_new"))))
+        assert await list_findings("tid") == []
+
+        client.threads.get.side_effect = None
+        client.threads.get.return_value = {"metadata": {"findings": [_f(id="f_legacy")]}}
+        findings = await list_findings("tid")
+
+    assert [f["id"] for f in findings] == ["f_legacy"]
+
+
+@pytest.mark.usefixtures("registry_db")
+async def test_first_access_to_a_missing_thread_raises_domain_error() -> None:
+    client = _metadata_client()
+    client.threads.get.side_effect = _not_found()
+
+    with patch("agent.review.findings.get_client", return_value=client):
+        with pytest.raises(ReviewerThreadMissingError) as excinfo:
+            await replace_findings("tid", [_f(id="f_a")])
+
+    assert excinfo.value.thread_id == "tid"
+
+
 async def _read_persisted(record: dict[str, Any]) -> Finding:
-    fake_client = AsyncMock()
-    fake_client.threads.get.return_value = {"metadata": {"findings": [record]}}
-    with patch("agent.review.findings.get_client", return_value=fake_client):
+    with patch(
+        "agent.review.findings.get_client", return_value=_metadata_client({"findings": [record]})
+    ):
         findings = await list_findings("tid")
     return findings[0]
 
 
-@pytest.mark.asyncio
+@pytest.mark.usefixtures("registry_db")
 async def test_reading_legacy_singulars_folds_them_into_the_canonical_lists() -> None:
     finding = await _read_persisted(
         {
@@ -174,7 +252,7 @@ async def test_reading_legacy_singulars_folds_them_into_the_canonical_lists() ->
     assert surface_state_of(finding) == "surfaced"
 
 
-@pytest.mark.asyncio
+@pytest.mark.usefixtures("registry_db")
 async def test_reading_legacy_resolved_flag_becomes_resolved_surface_state() -> None:
     finding = await _read_persisted(
         {
@@ -189,7 +267,7 @@ async def test_reading_legacy_resolved_flag_becomes_resolved_surface_state() -> 
     assert "github_thread_resolved" not in finding
 
 
-@pytest.mark.asyncio
+@pytest.mark.usefixtures("registry_db")
 async def test_reading_legacy_surface_record_folds_ids_and_state() -> None:
     finding = await _read_persisted(
         {
@@ -214,7 +292,7 @@ async def test_reading_legacy_surface_record_folds_ids_and_state() -> None:
     assert "anchor" not in finding
 
 
-@pytest.mark.asyncio
+@pytest.mark.usefixtures("registry_db")
 async def test_reading_a_never_published_legacy_record_stays_not_surfaced() -> None:
     finding = await _read_persisted(
         {
@@ -232,137 +310,77 @@ async def test_reading_a_never_published_legacy_record_stays_not_surfaced() -> N
     assert is_surfaced(finding) is False
 
 
-@pytest.mark.asyncio
-async def test_reading_a_legacy_record_persists_only_canonical_fields() -> None:
-    metadata: dict[str, Any] = {
-        "findings": [
-            {
-                "id": "f_legacy",
-                "status": "open",
-                "github_review_comment_id": 11,
-                "github_thread_resolved": True,
-                "surface": {"finding_id": "f_legacy", "state": "surfaced"},
-            }
-        ]
-    }
-    fake_client = AsyncMock()
-    fake_client.threads.get.return_value = {"metadata": metadata}
-
-    with patch("agent.review.findings.get_client", return_value=fake_client):
-        await update_finding_fields("tid", "f_legacy", {"status": "resolved"})
-
-    persisted = fake_client.threads.update.await_args.kwargs["metadata"]["findings"][0]
-    assert persisted == {
-        "id": "f_legacy",
-        "status": "resolved",
-        "github_review_id": None,
-        "github_review_comment_ids": [11],
-        "github_review_thread_ids": [],
-        "surface_state": "resolved",
-    }
-
-
-@pytest.mark.asyncio
-async def test_replace_findings_calls_threads_update() -> None:
-    fake_client = AsyncMock()
-    findings = [_f(id="f_x")]
-    with patch("agent.review.findings.get_client", return_value=fake_client):
-        await replace_findings("tid", findings)
-    fake_client.threads.update.assert_awaited_once_with(
-        thread_id="tid", metadata={"findings": findings}
+@pytest.mark.usefixtures("registry_db")
+async def test_a_sparse_legacy_record_is_stored_complete() -> None:
+    client = _metadata_client(
+        {
+            "findings": [
+                {
+                    "id": "f_legacy",
+                    "status": "open",
+                    "github_review_comment_id": 11,
+                    "github_thread_resolved": True,
+                    "surface": {"finding_id": "f_legacy", "state": "surfaced"},
+                }
+            ]
+        }
     )
 
+    with patch("agent.review.findings.get_client", return_value=client):
+        await update_finding_fields("tid", "f_legacy", {"status": "resolved"})
+        (persisted,) = await list_findings("tid")
 
-@pytest.mark.asyncio
+    assert persisted["status"] == "resolved"
+    assert persisted["github_review_comment_ids"] == [11]
+    assert persisted["surface_state"] == "resolved"
+    assert persisted["severity"] == "low"
+    assert persisted["rank"] is None
+    assert persisted["interactions"] == []
+
+
+@pytest.mark.usefixtures("registry_db")
 async def test_append_finding_appends_to_existing_list() -> None:
-    existing = _f(id="f_a")
-    new = _f(id="f_b", description="different")
+    client = _metadata_client({"findings": [_f(id="f_a")]})
 
-    fake_client = AsyncMock()
-    fake_client.threads.get.return_value = {"metadata": {"findings": [existing]}}
-
-    with patch("agent.review.findings.get_client", return_value=fake_client):
-        result = await append_finding("tid", new)
+    with patch("agent.review.findings.get_client", return_value=client):
+        result = await append_finding("tid", _f(id="f_b", description="different"))
+        persisted = await list_findings("tid")
 
     assert result["finding"]["id"] == "f_b"
     assert result["created"] is True
-    args = fake_client.threads.update.await_args
-    persisted = args.kwargs["metadata"]["findings"]
     assert [f["id"] for f in persisted] == ["f_a", "f_b"]
 
 
-@pytest.mark.asyncio
+@pytest.mark.usefixtures("registry_db")
 async def test_concurrent_append_finding_preserves_distinct_findings() -> None:
-    metadata: dict[str, Any] = {"findings": []}
-
-    class Threads:
-        async def get(self, _thread_id: str) -> dict[str, Any]:
-            await asyncio.sleep(0)
-            return {"metadata": copy.deepcopy(metadata)}
-
-        async def update(self, *, thread_id: str, metadata: dict[str, Any]) -> None:
-            assert thread_id == "tid"
-            await asyncio.sleep(0)
-            stored = metadata.get("findings")
-            if isinstance(stored, list):
-                metadata_copy = copy.deepcopy(stored)
-                metadata_holder["findings"] = metadata_copy
-
-    metadata_holder = metadata
-
-    class Client:
-        threads = Threads()
-
-    with patch("agent.review.findings.get_client", return_value=Client()):
+    with patch("agent.review.findings.get_client", return_value=_metadata_client()):
         first, second = await asyncio.gather(
             append_finding("tid", _f(id="f_a", description="first")),
             append_finding("tid", _f(id="f_b", description="second")),
         )
+        persisted = await list_findings("tid")
 
     assert first["created"] is True
     assert second["created"] is True
-    assert {finding["id"] for finding in metadata["findings"]} == {"f_a", "f_b"}
+    assert {finding["id"] for finding in persisted} == {"f_a", "f_b"}
 
 
-@pytest.mark.asyncio
+@pytest.mark.usefixtures("registry_db")
 async def test_concurrent_identical_findings_are_idempotent() -> None:
-    metadata: dict[str, Any] = {"findings": []}
-
-    class Threads:
-        async def get(self, _thread_id: str) -> dict[str, Any]:
-            await asyncio.sleep(0)
-            return {"metadata": copy.deepcopy(metadata)}
-
-        async def update(self, *, thread_id: str, metadata: dict[str, Any]) -> None:
-            assert thread_id == "tid"
-            stored = metadata.get("findings")
-            if isinstance(stored, list):
-                metadata_holder["findings"] = copy.deepcopy(stored)
-
-    metadata_holder = metadata
-
-    class Client:
-        threads = Threads()
-
-    with patch("agent.review.findings.get_client", return_value=Client()):
+    with patch("agent.review.findings.get_client", return_value=_metadata_client()):
         first, second = await asyncio.gather(
             append_finding("tid", _f(id="f_a")),
             append_finding("tid", _f(id="f_b")),
         )
+        persisted = await list_findings("tid")
 
     assert sum(result["created"] for result in (first, second)) == 1
     assert first["finding"]["id"] == second["finding"]["id"]
-    assert len(metadata["findings"]) == 1
+    assert len(persisted) == 1
 
 
-@pytest.mark.asyncio
+@pytest.mark.usefixtures("registry_db")
 async def test_mutate_findings_reads_latest_before_mutating() -> None:
-    """mutate_findings must operate on the freshest persisted list, not a stale
-    snapshot — the mutator receives whatever ``list_findings`` returns now."""
-    latest = [_f(id="f_fresh")]
-    fake_client = AsyncMock()
-    fake_client.threads.get.return_value = {"metadata": {"findings": latest}}
-
     seen: list[str] = []
 
     def _mutator(findings: list[Finding]) -> bool:
@@ -370,69 +388,73 @@ async def test_mutate_findings_reads_latest_before_mutating() -> None:
         findings[0]["status"] = "resolved"
         return True
 
-    with patch("agent.review.findings.get_client", return_value=fake_client):
+    with patch("agent.review.findings.get_client", return_value=_metadata_client()):
+        await append_finding("tid", _f(id="f_fresh"))
         result = await mutate_findings("tid", _mutator)
+        persisted = await list_findings("tid")
 
     assert seen == ["f_fresh"]
     assert result[0]["status"] == "resolved"
-    fake_client.threads.update.assert_awaited_once()
+    assert persisted[0]["status"] == "resolved"
 
 
-@pytest.mark.asyncio
-async def test_mutate_findings_skips_write_when_unchanged() -> None:
-    """A no-op mutation must NOT persist, so it can never clobber a concurrent
-    update that landed between the read and a would-be write."""
-    fake_client = AsyncMock()
-    fake_client.threads.get.return_value = {"metadata": {"findings": [_f(id="f_a")]}}
-
-    with patch("agent.review.findings.get_client", return_value=fake_client):
-        await mutate_findings("tid", lambda _findings: False)
-
-    fake_client.threads.update.assert_not_called()
-
-
-@pytest.mark.asyncio
-async def test_mutate_findings_does_not_write_after_transient_read_failure() -> None:
-    fake_client = AsyncMock()
-    fake_client.threads.get.side_effect = RuntimeError("transient")
-
-    with patch("agent.review.findings.get_client", return_value=fake_client):
-        with pytest.raises(RuntimeError, match="transient"):
-            await mutate_findings("tid", lambda findings: bool(findings.append(_f(id="f_new"))))
-
-    fake_client.threads.update.assert_not_called()
-
-
-@pytest.mark.asyncio
+@pytest.mark.usefixtures("registry_db")
 async def test_update_finding_fields_mutates_only_target() -> None:
-    a = _f(id="f_a", description="orig-a")
-    b = _f(id="f_b", description="orig-b")
+    client = _metadata_client(
+        {"findings": [_f(id="f_a", description="orig-a"), _f(id="f_b", description="orig-b")]}
+    )
 
-    fake_client = AsyncMock()
-    fake_client.threads.get.return_value = {"metadata": {"findings": [a, b]}}
-
-    with patch("agent.review.findings.get_client", return_value=fake_client):
+    with patch("agent.review.findings.get_client", return_value=client):
         updated = await update_finding_fields("tid", "f_b", {"status": "resolved"})
+        persisted = await list_findings("tid")
 
     assert updated is not None
     assert updated["status"] == "resolved"
-    persisted = fake_client.threads.update.await_args.kwargs["metadata"]["findings"]
     by_id = {f["id"]: f for f in persisted}
     assert by_id["f_a"]["status"] == "open"
     assert by_id["f_b"]["status"] == "resolved"
 
 
-@pytest.mark.asyncio
+@pytest.mark.usefixtures("registry_db")
 async def test_update_finding_fields_returns_none_for_unknown_id() -> None:
-    fake_client = AsyncMock()
-    fake_client.threads.get.return_value = {"metadata": {"findings": [_f(id="f_a")]}}
-    with patch("agent.review.findings.get_client", return_value=fake_client):
+    with patch(
+        "agent.review.findings.get_client",
+        return_value=_metadata_client({"findings": [_f(id="f_a")]}),
+    ):
         result = await update_finding_fields("tid", "f_missing", {"status": "resolved"})
+        persisted = await list_findings("tid")
     assert result is None
-    fake_client.threads.update.assert_not_called()
+    assert persisted[0]["status"] == "open"
 
 
-@pytest.mark.asyncio
+@pytest.mark.usefixtures("registry_db")
+async def test_replace_findings_keeps_records_added_since_the_snapshot() -> None:
+    with patch("agent.review.findings.get_client", return_value=_metadata_client()):
+        await append_finding("tid", _f(id="f_a", description="a"))
+        snapshot = await list_findings("tid")
+        await append_finding("tid", _f(id="f_b", description="b"))
+        snapshot[0]["status"] = "resolved"
+        await replace_findings("tid", snapshot)
+        persisted = await list_findings("tid")
+
+    assert [(f["id"], f["status"]) for f in persisted] == [("f_a", "resolved"), ("f_b", "open")]
+
+
+@pytest.mark.usefixtures("registry_db")
+async def test_findings_by_thread_reads_unmigrated_threads_from_metadata_without_copying() -> None:
+    with patch("agent.review.findings.get_client", return_value=_metadata_client()):
+        await append_finding("stored", _f(id="f_stored"))
+
+    unmigrated = {"findings": [_f(id="f_meta")]}
+    result = await findings_by_thread({"stored": {"findings": []}, "legacy": unmigrated})
+
+    assert [f["id"] for f in result["stored"]] == ["f_stored"]
+    assert [f["id"] for f in result["legacy"]] == ["f_meta"]
+    client = _metadata_client({"findings": [_f(id="f_later")]})
+    with patch("agent.review.findings.get_client", return_value=client):
+        assert [f["id"] for f in await list_findings("legacy")] == ["f_later"]
+
+
 async def test_set_reviewer_thread_metadata_includes_kind() -> None:
     fake_client = AsyncMock()
     with patch("agent.review.findings.get_client", return_value=fake_client):
@@ -445,7 +467,6 @@ async def test_set_reviewer_thread_metadata_includes_kind() -> None:
     assert "findings" not in metadata
 
 
-@pytest.mark.asyncio
 async def test_set_reviewer_thread_metadata_persists_head_sha() -> None:
     fake_client = AsyncMock()
     with patch("agent.review.findings.get_client", return_value=fake_client):
@@ -454,27 +475,21 @@ async def test_set_reviewer_thread_metadata_persists_head_sha() -> None:
     assert metadata["head_sha"] == "newhead"
 
 
-@pytest.mark.asyncio
 async def test_resolve_review_head_sha_prefers_metadata_over_config() -> None:
     """A mid-run push records the live head in thread metadata; it must win over
     the stale head frozen in the run's config."""
-    fake_client = AsyncMock()
-    fake_client.threads.get.return_value = {"metadata": {"head_sha": "metahead"}}
+    fake_client = _metadata_client({"head_sha": "metahead"})
     with patch("agent.review.findings.get_client", return_value=fake_client):
         head = await resolve_review_head_sha("tid", RunConfig(head_sha="confighead"))
     assert head == "metahead"
 
 
-@pytest.mark.asyncio
 async def test_resolve_review_head_sha_falls_back_to_config_when_metadata_empty() -> None:
-    fake_client = AsyncMock()
-    fake_client.threads.get.return_value = {"metadata": {}}
-    with patch("agent.review.findings.get_client", return_value=fake_client):
+    with patch("agent.review.findings.get_client", return_value=_metadata_client()):
         head = await resolve_review_head_sha("tid", RunConfig(head_sha="confighead"))
     assert head == "confighead"
 
 
-@pytest.mark.asyncio
 async def test_resolve_review_head_sha_falls_back_without_thread_id() -> None:
     fake_client = AsyncMock()
     with patch("agent.review.findings.get_client", return_value=fake_client):
@@ -483,46 +498,11 @@ async def test_resolve_review_head_sha_falls_back_without_thread_id() -> None:
     fake_client.threads.get.assert_not_called()
 
 
-@pytest.mark.asyncio
-async def test_replace_findings_raises_domain_error_when_thread_missing() -> None:
-    import httpx2
-    from langgraph_sdk.errors import NotFoundError
-
-    from agent.review.findings import ReviewerThreadMissingError
-
-    not_found = NotFoundError(
-        "thread tid not found",
-        response=httpx2.Response(404, request=httpx2.Request("PATCH", "http://x")),
-        body=None,
-    )
-    fake_client = AsyncMock()
-    fake_client.threads.update.side_effect = not_found
-
-    with patch("agent.review.findings.get_client", return_value=fake_client):
-        with pytest.raises(ReviewerThreadMissingError) as excinfo:
-            await replace_findings("tid", [_f(id="f_a")])
-
-    assert excinfo.value.thread_id == "tid"
-    assert "not found" in str(excinfo.value)
-
-
-def _not_found(method: str = "GET") -> Exception:
-    import httpx2
-    from langgraph_sdk.errors import NotFoundError
-
-    return NotFoundError(
-        "thread tid not found",
-        response=httpx2.Response(404, request=httpx2.Request(method, "http://x")),
-        body=None,
-    )
-
-
-@pytest.mark.asyncio
 async def test_get_thread_metadata_raises_domain_error_when_thread_missing() -> None:
     """A missing thread must surface as ReviewerThreadMissingError, not be
     swallowed into ``{}`` — that produced misleading tool results like
     "No finding found" instead of the do-not-retry contract."""
-    from agent.review.findings import ReviewerThreadMissingError, get_thread_metadata
+    from agent.review.findings import get_thread_metadata
 
     fake_client = AsyncMock()
     fake_client.threads.get.side_effect = _not_found()
@@ -532,7 +512,6 @@ async def test_get_thread_metadata_raises_domain_error_when_thread_missing() -> 
             await get_thread_metadata("tid")
 
 
-@pytest.mark.asyncio
 async def test_get_thread_metadata_still_degrades_on_other_failures() -> None:
     from agent.review.findings import get_thread_metadata
 
@@ -543,13 +522,7 @@ async def test_get_thread_metadata_still_degrades_on_other_failures() -> None:
         assert await get_thread_metadata("tid") == {}
 
 
-@pytest.mark.asyncio
 async def test_set_reviewer_thread_metadata_raises_domain_error_when_thread_missing() -> None:
-    from agent.review.findings import (
-        ReviewerThreadMissingError,
-        set_reviewer_thread_metadata,
-    )
-
     fake_client = AsyncMock()
     fake_client.threads.update.side_effect = _not_found("PATCH")
 

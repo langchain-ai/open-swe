@@ -1,33 +1,37 @@
 """Findings storage for the reviewer agent.
 
-Findings live in LangGraph thread metadata under the canonical reviewer thread
-for a PR. This file owns the Finding schema and the read/write helpers that
-the reviewer's tools and webhook handlers go through.
+Findings live in PostgreSQL, keyed by the reviewer thread that raised them;
+thread-level reviewer state (PR identity, head SHA, watch flag) stays in
+LangGraph thread metadata. This file owns the Finding schema and the read/write
+helpers that the reviewer's tools and webhook handlers go through.
 
-Why thread metadata: it survives sandbox eviction, is queryable cross-thread
-via the langgraph SDK (a future UI lists all reviewer threads by filtering on
-``metadata.kind == "reviewer"``), and matches existing patterns the codebase
-already uses for durable non-secret run state like ``sandbox_id``.
+Threads reviewed before findings moved to PostgreSQL still hold them in thread
+metadata. The first access to such a thread copies them over once; a
+``review_finding_set`` row marks a thread whose findings live here.
 """
 
 import asyncio
+import copy
 import hashlib
 import json
 import logging
 import uuid
-import weakref
 from collections.abc import Callable, Mapping
-from typing import Any, Literal, TypedDict, cast
+from datetime import datetime
+from typing import Any, Literal, Self, TypedDict, cast
 
 from langgraph_sdk import get_client
 from langgraph_sdk.errors import NotFoundError as LangGraphSDKNotFoundError
+from sqlalchemy import BigInteger, ForeignKey, select
+from sqlalchemy.dialects.postgresql import JSONB, insert
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import Mapped, mapped_column
 
+from agent.database import postgres
+from agent.database.orm import NOW, Base
 from agent.run_config import RunConfig
 
 logger = logging.getLogger(__name__)
-_FINDING_MUTATION_LOCKS: weakref.WeakValueDictionary[tuple[str, int], asyncio.Lock] = (
-    weakref.WeakValueDictionary()
-)
 
 
 class ReviewerThreadMissingError(RuntimeError):
@@ -147,6 +151,7 @@ class Finding(TypedDict):
     diff_hunk: str | None
     fingerprint: str
     interactions: list[FindingInteraction]
+    rank: int | None
 
 
 class AppendFindingResult(TypedDict):
@@ -245,6 +250,7 @@ def new_finding(
         "diff_hunk": diff_hunk,
         "fingerprint": _finding_fingerprint(file, side, start_line, end_line, description),
         "interactions": [],
+        "rank": None,
     }
     return finding
 
@@ -474,10 +480,182 @@ async def resolve_review_head_sha(thread_id: str, cfg: RunConfig) -> str:
     return meta_head if isinstance(meta_head, str) and meta_head else config_head
 
 
+class FindingSet(Base):
+    """Marks a reviewer thread whose findings are stored in PostgreSQL."""
+
+    __tablename__ = "review_finding_set"
+
+    thread_id: Mapped[str] = mapped_column(primary_key=True)
+    created_at: Mapped[datetime | None] = mapped_column(server_default=NOW, init=False)
+
+
+class FindingRow(Base):
+    __tablename__ = "review_finding"
+
+    thread_id: Mapped[str] = mapped_column(
+        ForeignKey("review_finding_set.thread_id", ondelete="CASCADE"), primary_key=True
+    )
+    id: Mapped[str] = mapped_column(primary_key=True)
+    position: Mapped[int]
+    rank: Mapped[int | None]
+    severity: Mapped[str]
+    confidence: Mapped[str]
+    category: Mapped[str]
+    title: Mapped[str]
+    file: Mapped[str]
+    start_line: Mapped[int | None]
+    end_line: Mapped[int | None]
+    side: Mapped[str]
+    in_diff: Mapped[bool]
+    description: Mapped[str]
+    suggestion: Mapped[str | None]
+    status: Mapped[str]
+    first_seen_sha: Mapped[str]
+    last_confirmed_sha: Mapped[str]
+    github_review_id: Mapped[int | None] = mapped_column(BigInteger)
+    github_review_run_id: Mapped[str | None]
+    github_review_comment_ids: Mapped[list[int]] = mapped_column(JSONB)
+    github_review_thread_ids: Mapped[list[str]] = mapped_column(JSONB)
+    github_resolved_thread_ids: Mapped[list[str]] = mapped_column(JSONB)
+    github_posted_resolution_comment_ids: Mapped[list[int]] = mapped_column(JSONB)
+    surface_state: Mapped[str]
+    last_human_reply_at: Mapped[str | None]
+    last_human_reply_author: Mapped[str | None]
+    last_human_reply_body: Mapped[str | None]
+    last_reconciliation_note: Mapped[str | None]
+    resolution_note: Mapped[str | None]
+    diff_hunk: Mapped[str | None]
+    fingerprint: Mapped[str]
+    interactions: Mapped[list[FindingInteraction]] = mapped_column(JSONB)
+
+    @classmethod
+    def of(cls, thread_id: str, position: int, finding: Finding) -> Self:
+        complete = _complete_finding(finding)
+        return cls(
+            thread_id=thread_id,
+            position=position,
+            **{field: complete[field] for field in FINDING_FIELDS},
+        )
+
+    def assign(self, finding: Finding) -> None:
+        complete = _complete_finding(finding)
+        for field in FINDING_FIELDS:
+            setattr(self, field, complete[field])
+
+    def to_finding(self) -> Finding:
+        return cast(
+            Finding, {field: copy.deepcopy(getattr(self, field)) for field in FINDING_FIELDS}
+        )
+
+
+FINDING_FIELDS: tuple[str, ...] = tuple(Finding.__annotations__)
+
+
+def _complete_finding(finding: Mapping[str, Any]) -> dict[str, Any]:
+    """Fill fields that records persisted by older revisions may lack."""
+    base = new_finding(
+        severity="low",
+        category="",
+        file=finding.get("file") or "",
+        start_line=finding.get("start_line"),
+        end_line=finding.get("end_line"),
+        description=finding.get("description") or "",
+        sha=finding.get("first_seen_sha") or finding.get("last_confirmed_sha") or "",
+        title=finding.get("title"),
+        side=finding.get("side") or "RIGHT",
+        finding_id=finding["id"],
+    )
+    overrides = {
+        field: finding[field]
+        for field in FINDING_FIELDS
+        if field in finding and finding[field] is not None
+    }
+    return {**base, **overrides}
+
+
+async def _ensure_finding_set(thread_id: str) -> None:
+    """Copy a thread's metadata findings into PostgreSQL the first time it is used."""
+    async with postgres.session() as session:
+        if await session.get(FindingSet, thread_id) is not None:
+            return
+    metadata = await _get_thread_metadata_strict(thread_id)
+    legacy = coerce_findings(metadata.get("findings"))
+    async with postgres.session() as session:
+        created = await session.scalar(
+            insert(FindingSet)
+            .values(thread_id=thread_id)
+            .on_conflict_do_nothing()
+            .returning(FindingSet.thread_id)
+        )
+        if created is None:
+            return
+        session.add_all(
+            FindingRow.of(thread_id, position, finding) for position, finding in enumerate(legacy)
+        )
+    if legacy:
+        logger.info(
+            "Backfilled reviewer findings from thread metadata",
+            extra={"reviewer_thread_id": thread_id, "finding_count": len(legacy)},
+        )
+
+
+async def _load_rows(session: AsyncSession, thread_id: str) -> list[FindingRow]:
+    return list(
+        await session.scalars(
+            select(FindingRow)
+            .where(FindingRow.thread_id == thread_id)
+            .order_by(FindingRow.position)
+        )
+    )
+
+
 async def list_findings(thread_id: str) -> list[Finding]:
-    """Return all findings persisted on the reviewer thread."""
-    metadata = await get_thread_metadata(thread_id)
-    return coerce_findings(metadata.get("findings"))
+    """Return all findings recorded for the reviewer thread.
+
+    Raises :class:`ReviewerThreadMissingError` when a thread not yet copied to
+    PostgreSQL does not exist; other failures degrade to no findings.
+    """
+    try:
+        await _ensure_finding_set(thread_id)
+        async with postgres.session() as session:
+            return [row.to_finding() for row in await _load_rows(session, thread_id)]
+    except ReviewerThreadMissingError:
+        raise
+    except Exception:  # noqa: BLE001
+        logger.exception(
+            "Failed to load reviewer findings", extra={"reviewer_thread_id": thread_id}
+        )
+        return []
+
+
+async def findings_by_thread(
+    metadata_by_thread: Mapping[str, dict[str, Any]],
+) -> dict[str, list[Finding]]:
+    """Findings for many reviewer threads at once, without copying any of them.
+
+    A thread not yet copied to PostgreSQL is read from the metadata passed in.
+    """
+    thread_ids = list(metadata_by_thread)
+    if not thread_ids:
+        return {}
+    async with postgres.session() as session:
+        stored = set(
+            await session.scalars(
+                select(FindingSet.thread_id).where(FindingSet.thread_id.in_(thread_ids))
+            )
+        )
+        rows = await session.scalars(
+            select(FindingRow)
+            .where(FindingRow.thread_id.in_(stored))
+            .order_by(FindingRow.thread_id, FindingRow.position)
+        )
+        out: dict[str, list[Finding]] = {thread_id: [] for thread_id in stored}
+        for row in rows:
+            out[row.thread_id].append(row.to_finding())
+    for thread_id, metadata in metadata_by_thread.items():
+        if thread_id not in stored:
+            out[thread_id] = coerce_findings(metadata.get("findings"))
+    return out
 
 
 async def get_finding(thread_id: str, finding_id: str) -> Finding | None:
@@ -491,21 +669,24 @@ async def get_finding(thread_id: str, finding_id: str) -> Finding | None:
 
 async def replace_findings(thread_id: str, findings: list[Finding]) -> None:
     """Merge a findings snapshot without dropping concurrently-added records."""
-    async with _finding_mutation_lock(thread_id):
-        metadata = await _get_thread_metadata_strict(thread_id)
-        latest = coerce_findings(metadata.get("findings"))
+
+    def _merge(latest: list[Finding]) -> bool:
         incoming_by_id = {finding["id"]: finding for finding in findings}
-        merged = [incoming_by_id.pop(finding["id"], finding) for finding in latest]
-        merged.extend(incoming_by_id.values())
-        await _replace_findings_unlocked(thread_id, merged)
+        changed = False
+        for index, finding in enumerate(latest):
+            incoming = incoming_by_id.pop(finding["id"], None)
+            if incoming is not None and incoming != finding:
+                latest[index] = incoming
+                changed = True
+        latest.extend(incoming_by_id.values())
+        return changed or bool(incoming_by_id)
+
+    await mutate_findings(thread_id, _merge)
 
 
-async def _replace_findings_unlocked(thread_id: str, findings: list[Finding]) -> None:
-    client = get_client()
-    try:
-        await client.threads.update(thread_id=thread_id, metadata={"findings": findings})
-    except LangGraphSDKNotFoundError as exc:
-        raise ReviewerThreadMissingError(thread_id, exc) from exc
+async def _record_finding_telemetry(thread_id: str, findings: list[Finding]) -> None:
+    if not findings:
+        return
     from agent.analytics.usage import record_reviewer_finding_state
 
     metadata = await get_thread_metadata(thread_id)
@@ -560,21 +741,32 @@ async def mutate_findings(
     list in place and returns ``True`` when it changed something; we only write
     on change, so a no-op mutation never clobbers a concurrent update.
     """
-    async with _finding_mutation_lock(thread_id):
-        metadata = await _get_thread_metadata_strict(thread_id)
-        findings = coerce_findings(metadata.get("findings"))
-        if mutator(findings):
-            await _replace_findings_unlocked(thread_id, findings)
-        return findings
-
-
-def _finding_mutation_lock(thread_id: str) -> asyncio.Lock:
-    key = (thread_id, id(asyncio.get_running_loop()))
-    lock = _FINDING_MUTATION_LOCKS.get(key)
-    if lock is None:
-        lock = asyncio.Lock()
-        _FINDING_MUTATION_LOCKS[key] = lock
-    return lock
+    await _ensure_finding_set(thread_id)
+    async with postgres.session() as session:
+        await session.execute(
+            select(FindingSet).where(FindingSet.thread_id == thread_id).with_for_update()
+        )
+        rows = await _load_rows(session, thread_id)
+        findings = [row.to_finding() for row in rows]
+        before = {finding["id"]: copy.deepcopy(finding) for finding in findings}
+        if not mutator(findings):
+            return findings
+        rows_by_id = {row.id: row for row in rows}
+        next_position = max((row.position for row in rows), default=-1) + 1
+        changed: list[Finding] = []
+        for finding in findings:
+            row = rows_by_id.pop(finding["id"], None)
+            if row is None:
+                session.add(FindingRow.of(thread_id, next_position, finding))
+                next_position += 1
+                changed.append(finding)
+            elif before[finding["id"]] != finding:
+                row.assign(finding)
+                changed.append(finding)
+        for removed in rows_by_id.values():
+            await session.delete(removed)
+    await _record_finding_telemetry(thread_id, changed)
+    return findings
 
 
 def _current_fingerprint(finding: Finding) -> str:
@@ -666,7 +858,6 @@ async def set_reviewer_thread_metadata(
     last_reviewed_sha: str | None = None,
     head_sha: str | None = None,
     watch: bool | None = None,
-    findings: list[Finding] | None = None,
     slack_thread: ReviewerSlackThread | None = None,
     extra: dict[str, Any] | None = None,
 ) -> None:
@@ -691,8 +882,6 @@ async def set_reviewer_thread_metadata(
         metadata["head_sha"] = head_sha
     if watch is not None:
         metadata["watch"] = watch
-    if findings is not None:
-        metadata["findings"] = findings
     if slack_thread is not None:
         metadata["slack_thread"] = slack_thread
     if extra:
@@ -742,7 +931,8 @@ def filter_findings_for_publish(
 
     - status must be ``open``
     - severity must be at or above ``severity_threshold``
-    - sorted by severity descending, then file/start_line for stable ordering
+    - sorted by the reviewer's ``rank``; unranked findings follow by severity
+      descending, then file/start_line for stable ordering
     - optionally capped at ``cap`` for benchmark runs
     """
     severity_rank = SEVERITY_ORDER[severity_threshold]
@@ -754,6 +944,8 @@ def filter_findings_for_publish(
     ]
     eligible.sort(
         key=lambda f: (
+            f.get("rank") is None,
+            f.get("rank") or 0,
             -SEVERITY_ORDER.get(f.get("severity", "low"), 0),
             f.get("file", ""),
             f.get("start_line") or 0,

@@ -189,6 +189,21 @@ async def registry_db_if_available(monkeypatch: pytest.MonkeyPatch) -> AsyncIter
 
 
 @pytest.fixture
+def findings_from_metadata(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Serve dashboard findings from thread metadata, as for threads not yet in PostgreSQL."""
+    from agent.review import reviews
+    from agent.review.findings import Finding, coerce_findings
+
+    async def read(metadata_by_thread: Mapping[str, dict[str, Any]]) -> dict[str, list[Finding]]:
+        return {
+            thread_id: coerce_findings(metadata.get("findings"))
+            for thread_id, metadata in metadata_by_thread.items()
+        }
+
+    monkeypatch.setattr(reviews, "findings_by_thread", read)
+
+
+@pytest.fixture
 def allowed_bot(fake_store: FakeStore) -> dict[str, Any]:
     bot = {
         "team_id": "T123",

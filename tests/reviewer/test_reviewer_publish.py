@@ -1,6 +1,6 @@
 """Unit tests for the publish_review rendering and orchestration helpers."""
 
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -584,10 +584,11 @@ async def test_publish_review_eval_mode_does_not_call_github() -> None:
         patch("agent.tools.publish_review.get_thread_id_from_runtime", return_value="tid"),
         patch("agent.tools.publish_review.list_findings_async", AsyncMock(return_value=findings)),
         patch("agent.tools.publish_review.set_reviewer_thread_metadata", AsyncMock()) as set_meta,
+        patch("agent.tools.publish_review.mutate_findings", AsyncMock()),
         patch("agent.tools.publish_review.get_github_token") as get_token,
         patch("agent.tools.publish_review.post_pull_request_review", AsyncMock()) as post_review,
     ):
-        result = await publish_review(assessment=_assessment())
+        result = await publish_review(ranking=["f_high", "f_low"], assessment=_assessment())
 
     assert result["success"] is True
     assert result["dry_run"] is True
@@ -634,14 +635,95 @@ async def test_publish_review_eval_mode_uses_configured_cap() -> None:
         patch("agent.tools.publish_review.get_thread_id_from_runtime", return_value="tid"),
         patch("agent.tools.publish_review.list_findings_async", AsyncMock(return_value=findings)),
         patch("agent.tools.publish_review.set_reviewer_thread_metadata", AsyncMock()) as set_meta,
+        patch("agent.tools.publish_review.mutate_findings", AsyncMock()),
     ):
-        result = await publish_review()
+        result = await publish_review(ranking=["f_first", "f_second"])
 
     assert result["surfaced_count"] == 1
     assert set_meta.await_args is not None
     publication = set_meta.await_args.kwargs["extra"]["reviewer_eval_publication"]
     assert publication["cap"] == 1
     assert publication["finding_ids"] == ["f_first"]
+
+
+def _eval_config(**configurable: object) -> dict[str, object]:
+    return {
+        "configurable": {
+            "thread_id": "tid",
+            "repo": {"owner": "o", "name": "r"},
+            "pr_number": 7,
+            "head_sha": "sha",
+            "reviewer_eval": True,
+            **configurable,
+        },
+        "metadata": {},
+    }
+
+
+async def test_publish_review_surfaces_findings_in_the_reviewers_ranked_order() -> None:
+    from agent.tools.publish_review import publish_review
+
+    findings = [
+        _f(id="f_critical", severity="critical", file="a.py", start_line=1, end_line=1),
+        _f(id="f_medium", severity="medium", file="b.py", start_line=2, end_line=2),
+    ]
+
+    async def mutate(_thread_id: str, mutator: Callable[[list[Finding]], bool]) -> list[Finding]:
+        mutator(findings)
+        return findings
+
+    with (
+        patch(
+            "agent.tools.publish_review.get_config", return_value=_eval_config(reviewer_eval_cap=1)
+        ),
+        patch("agent.tools.publish_review.get_thread_id_from_runtime", return_value="tid"),
+        patch("agent.tools.publish_review.list_findings_async", AsyncMock(return_value=findings)),
+        patch("agent.tools.publish_review.mutate_findings", mutate),
+        patch("agent.tools.publish_review.set_reviewer_thread_metadata", AsyncMock()) as set_meta,
+    ):
+        result = await publish_review(ranking=["f_medium", "f_critical"])
+
+    assert result["surfaced_count"] == 1
+    assert set_meta.await_args is not None
+    publication = set_meta.await_args.kwargs["extra"]["reviewer_eval_publication"]
+    assert publication["finding_ids"] == ["f_medium"]
+
+
+@pytest.mark.parametrize(
+    ("ranking", "missing", "unknown", "duplicates"),
+    [
+        (["f_one"], ["f_two"], [], []),
+        (["f_one", "f_two", "f_nope"], [], ["f_nope"], []),
+        (["f_one", "f_two", "f_one"], [], [], ["f_one"]),
+    ],
+)
+async def test_publish_review_rejects_a_ranking_that_is_not_a_total_order(
+    ranking: list[str], missing: list[str], unknown: list[str], duplicates: list[str]
+) -> None:
+    from agent.tools.publish_review import publish_review
+
+    findings = [
+        _f(id="f_one", severity="high", file="a.py", start_line=1, end_line=1),
+        _f(id="f_two", severity="low", file="b.py", start_line=2, end_line=2),
+    ]
+    with (
+        patch("agent.tools.publish_review.get_config", return_value=_eval_config()),
+        patch("agent.tools.publish_review.get_thread_id_from_runtime", return_value="tid"),
+        patch("agent.tools.publish_review.list_findings_async", AsyncMock(return_value=findings)),
+        patch("agent.tools.publish_review.mutate_findings", AsyncMock()) as mutate,
+        patch("agent.tools.publish_review.set_reviewer_thread_metadata", AsyncMock()) as set_meta,
+    ):
+        result = await publish_review(ranking=ranking)
+
+    assert result["success"] is False
+    assert result["expected_finding_ids"] == ["f_one", "f_two"]
+    assert (result["missing"], result["unknown"], result["duplicates"]) == (
+        missing,
+        unknown,
+        duplicates,
+    )
+    mutate.assert_not_awaited()
+    set_meta.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -710,8 +792,9 @@ async def test_publish_review_forwards_trace_link_config_override() -> None:
         ),
         patch("agent.tools.publish_review.get_github_token", return_value="token"),
         patch("agent.tools.publish_review._publish_review_async", publish_async),
+        patch("agent.tools.publish_review._record_ranking", AsyncMock(return_value=None)),
     ):
-        result = await publish_review()
+        result = await publish_review(ranking=[])
 
     assert result == {"success": True}
     assert publish_async.call_args is not None
@@ -2451,8 +2534,9 @@ async def test_publish_review_tool_returns_structured_error_when_thread_missing(
         ),
         patch("agent.tools.publish_review.get_github_token", return_value="token"),
         patch("agent.tools.publish_review._publish_review_async", publish_async),
+        patch("agent.tools.publish_review._record_ranking", AsyncMock(return_value=None)),
     ):
-        result = await publish_review()
+        result = await publish_review(ranking=[])
 
     assert result["success"] is False
     assert result["error"] == "thread_not_found"
