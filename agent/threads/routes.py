@@ -37,7 +37,6 @@ from agent.threads.handlers import (
     send_dashboard_message,
 )
 from agent.threads.listing import (
-    ThreadListScope,
     list_dashboard_pinned_threads,
     list_dashboard_thread_repos,
     list_dashboard_threads,
@@ -154,7 +153,7 @@ async def api_list_threads_page(
     source: str | None = None,
     status: str | None = None,
     q: str | None = None,
-    scope: ThreadListScope = "all",
+    scope: Literal["all", "interactive", "automation"] = "all",
     automation_id: str | None = None,
     repo: str | None = None,
     ownerless: bool = False,

@@ -610,8 +610,6 @@ async def upsert_agent_thread_metadata(
     # through the same surface and must not repoint it.
     if not existing_context.is_empty:
         source_context = existing_context
-    # Likewise its category: an automation someone mentions in Slack stays an
-    # automation, and the thread list searches by category.
     if existing_meta.get("thread_category"):
         metadata.pop("thread_category")
     if source_context is not None and not source_context.is_empty:

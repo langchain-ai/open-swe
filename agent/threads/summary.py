@@ -244,8 +244,7 @@ def _metadata_string(metadata: Mapping[str, Any], key: str) -> str | None:
     return value.strip() if isinstance(value, str) and value.strip() else None
 
 
-# Every thread_category except "automation". The thread list searches each one
-# by name, so a thread with a category missing here is never listed.
+# Every thread_category except "automation"; unlisted categories never appear in the thread list.
 INTERACTIVE_THREAD_CATEGORIES: tuple[str, ...] = ("interactive", "pull_request", "issue")
 
 

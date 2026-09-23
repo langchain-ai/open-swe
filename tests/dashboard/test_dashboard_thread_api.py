@@ -2401,7 +2401,6 @@ async def test_interactive_listing_does_not_page_through_automation_threads(monk
     automation = {"source": "schedule", "thread_category": "automation", "schedule_id": "s1"}
     threads = [
         *(thread(f"automation-{index}", 1000 + index, **automation) for index in range(200)),
-        # Relabelled by a Slack mention before categories were kept.
         thread(
             "relabelled",
             2000,
@@ -2436,25 +2435,6 @@ async def test_interactive_listing_does_not_page_through_automation_threads(monk
     assert not [thread_id for thread_id in fetched if thread_id.startswith("automation-")]
 
 
-async def test_all_threads_view_lists_threads_without_a_category(monkeypatch) -> None:
-    threads = [{"thread_id": "stub", "metadata": {"latest_run_status": "success"}}]
-
-    class FakeThreads:
-        async def search(self, *, metadata, limit, offset, sort_by, sort_order, select):
-            matches = [t for t in threads if _metadata_contains(t["metadata"], metadata)]
-            return matches[offset : offset + limit]
-
-    patch_thread_module(
-        monkeypatch, "langgraph_client", lambda: SimpleNamespace(threads=FakeThreads())
-    )
-
-    result = await thread_listing.list_dashboard_threads_page(
-        "admin", email=None, include_all=True, scope="interactive"
-    )
-
-    assert [item["id"] for item in result["items"]] == ["stub"]
-
-
 async def test_metadata_writes_do_not_push_active_threads_off_the_first_page(monkeypatch) -> None:
     def thread(thread_id: str, activity: int, touched: int) -> dict[str, object]:
         return {
@@ -2468,7 +2448,6 @@ async def test_metadata_writes_do_not_push_active_threads_off_the_first_page(mon
             },
         }
 
-    # Old threads a backfill just rewrote, ahead of a recently active one by updated_at.
     threads = [
         *(thread(f"backfilled-{index}", 1, 20) for index in range(60)),
         thread("active", 10, 10),

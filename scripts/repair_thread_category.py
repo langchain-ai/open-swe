@@ -1,22 +1,8 @@
-"""One-time repair: give every listed thread the ``thread_category`` it should carry.
-
-The thread list searches interactive threads by category so LangGraph's
-metadata index can skip automation threads. Two kinds of thread defeat that
-until they expire: automation threads a Slack mention relabelled
-``interactive`` (``upsert_agent_thread_metadata`` now keeps a thread's
-category), and threads created without a category. This stamps both.
-
-The thread list pages by ``state_updated_at``, which metadata updates leave
-alone, so stamping does not reorder it. The scan reads every thread in the
-deployment and takes a while on large ones; a thread deleted during it (a TTL
-sweep) shifts the pages, so run it again until it finds nothing.
+"""One-time repair: stamp missing or Slack-relabelled ``thread_category`` values.
 
 Usage:
     uv run python scripts/repair_thread_category.py            # count only
     uv run python scripts/repair_thread_category.py --apply
-
-Resolves the deployment URL from ``--url`` or ``LANGGRAPH_URL``, and the API key
-from ``LANGGRAPH_API_KEY`` / ``LANGSMITH_API_KEY``.
 """
 
 import argparse
@@ -38,8 +24,6 @@ from agent.utils.thread_participants import PARTICIPANT_EMAILS_KEY, PARTICIPANT_
 logger = logging.getLogger(__name__)
 
 _PAGE = 500
-# What a viewer's thread list searches by; without one, only the admin
-# all-threads view lists a thread, and it does not filter by category.
 _LISTING_IDENTITY_KEYS = (
     PARTICIPANT_LOGINS_KEY,
     PARTICIPANT_EMAILS_KEY,
@@ -51,7 +35,6 @@ _LISTING_IDENTITY_KEYS = (
 def repaired_category(metadata: Mapping[str, Any]) -> str | None:
     """The category to stamp on a thread, or None when it needs no change."""
     current = metadata.get("thread_category")
-    # Only automations carry these, and a Slack mention never overwrote them.
     if any(
         isinstance(value, str) and value.strip()
         for value in (metadata.get("schedule_id"), metadata.get("automation_scope"))

@@ -35,8 +35,6 @@ from agent.utils.thread_participants import participant_search_filters
 from agent.workspaces.routing import workspace_for_repo
 from agent.workspaces.store import DEFAULT_WORKSPACE_SLUG
 
-ThreadListScope = Literal["all", "interactive", "automation"]
-
 _THREADS_SEARCH_PAGE = 50
 _THREADS_PAGE_SCAN_CAP = 5000
 _THREAD_LIST_SELECT: list[ThreadSelectField] = [
@@ -56,17 +54,12 @@ def _participant_search_filters(
     *,
     email: str | None = None,
     include_all: bool = False,
-    scope: ThreadListScope = "all",
+    scope: Literal["all", "interactive", "automation"] = "all",
 ) -> list[dict[str, Any]]:
-    # The all-threads view stays unsplit: it has no identity keys to fall back on
-    # for threads without a category.
     if include_all:
         return [{}]
     filters = participant_search_filters(login, email)
     if scope == "interactive":
-        # Metadata search cannot exclude a value, and some viewers participate in
-        # thousands of automation threads. Matching each other category lets the
-        # metadata index skip them instead of this module paging past them.
         filters = [
             {**search_filter, "thread_category": category}
             for search_filter in filters
@@ -74,8 +67,7 @@ def _participant_search_filters(
         ]
     # Threads created before participants existed carry only these two keys, and
     # object containment cannot match them. Drop both once those threads have
-    # aged out or been backfilled. They may predate categories too, so they are
-    # never split by category.
+    # aged out or been backfilled.
     filters.append({"github_login": login})
     if email and email.strip():
         filters.append({"triggering_user_email": email.strip().lower()})
@@ -114,8 +106,6 @@ async def _search_threads_batch(
         metadata=metadata,
         limit=limit,
         offset=offset,
-        # Every metadata write (views, resolves, backfills) bumps `updated_at`;
-        # `state_updated_at` moves only with runs, so it tracks activity.
         sort_by="state_updated_at" if sort_by == "updated_at" else sort_by,
         sort_order="desc",
         select=_THREAD_LIST_SELECT,
@@ -134,7 +124,7 @@ def _metadata_matches_filters(
     resolved: bool | None,
     source: str | None,
     query: str | None,
-    scope: ThreadListScope = "all",
+    scope: Literal["all", "interactive", "automation"] = "all",
     automation_id: str | None = None,
     repo: str | None = None,
     ownerless: bool = False,
@@ -288,7 +278,7 @@ async def _collect_thread_candidates(
     resolved: bool | None = None,
     source: str | None = None,
     query: str | None = None,
-    scope: ThreadListScope = "all",
+    scope: Literal["all", "interactive", "automation"] = "all",
     automation_id: str | None = None,
     repo: str | None = None,
     ownerless: bool = False,
@@ -451,7 +441,7 @@ async def list_dashboard_thread_repos(
     nest repositories under their workspace; an unassigned repository belongs
     to ``default``.
     """
-    scope: ThreadListScope = "all" if include_automations else "interactive"
+    scope: Literal["all", "interactive"] = "all" if include_automations else "interactive"
     candidates = await _collect_thread_candidates(
         langgraph_client(),
         _participant_search_filters(login, email=email, include_all=include_all, scope=scope),
@@ -508,7 +498,7 @@ async def list_dashboard_threads_page(
     source: str | None = None,
     status: str | None = None,
     query: str | None = None,
-    scope: ThreadListScope = "all",
+    scope: Literal["all", "interactive", "automation"] = "all",
     automation_id: str | None = None,
     repo: str | None = None,
     ownerless: bool = False,
