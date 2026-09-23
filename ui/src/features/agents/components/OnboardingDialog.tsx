@@ -36,7 +36,16 @@ export function OnboardingDialog() {
   const profile = useProfile()
   const options = useOptions()
   const save = useSaveProfile()
-  const [dismissed, setDismissed] = useState(false)
+  const dismissalKey = `open-swe.onboarding-dismissed:${session.data?.login ?? ""}`
+  const [dismissed, setDismissed] = useState(
+    () =>
+      typeof window !== "undefined" &&
+      window.sessionStorage.getItem(dismissalKey) === "true"
+  )
+  const dismiss = () => {
+    window.sessionStorage.setItem(dismissalKey, "true")
+    setDismissed(true)
+  }
   const [slackDismissed, setSlackDismissed] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -109,7 +118,7 @@ export function OnboardingDialog() {
     <Dialog.Root
       open={open}
       onOpenChange={(next) => {
-        if (!next) setDismissed(true)
+        if (!next) dismiss()
       }}
     >
       <Dialog.Portal>
@@ -164,11 +173,7 @@ export function OnboardingDialog() {
               </div>
               {error && <p className="text-xs text-destructive">{error}</p>}
               <div className="mt-2 flex justify-end gap-2">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setDismissed(true)}
-                >
+                <Button variant="outline" size="sm" onClick={dismiss}>
                   Maybe later
                 </Button>
                 <Button

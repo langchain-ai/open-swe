@@ -50,6 +50,8 @@ import { cn } from "@/lib/utils"
 
 export type { ActiveRun }
 
+const drafts = new Map<string, { value: string; images: Array<ImageChunk> }>()
+
 const MAX_IMAGE_COUNT = 5
 const MAX_IMAGE_BYTES = 10 * 1024 * 1024
 const MAX_MENTION_SUGGESTIONS = 8
@@ -95,6 +97,7 @@ export interface RestoredDraft {
 
 export interface ChatComposerProps {
   placeholder?: string
+  draftKey?: string
   autoFocus?: boolean
   compact?: boolean
   disabled?: boolean
@@ -230,6 +233,7 @@ export function buildCommandItems(
 /** Prompt editor with autocomplete, model selection, attachments, and send/stop controls. */
 export const ChatComposer = memo(function ChatComposer({
   placeholder = "Ask Open SWE to build, fix bugs, explore",
+  draftKey,
   autoFocus = false,
   compact = false,
   disabled = false,
@@ -269,9 +273,21 @@ export const ChatComposer = memo(function ChatComposer({
   contextUsage,
   routed,
 }: ChatComposerProps) {
-  const [value, setValue] = useState("")
-  const [cursor, setCursor] = useState(0)
-  const [pendingImages, setPendingImages] = useState<Array<ImageChunk>>([])
+  const [value, setValue] = useState(() =>
+    draftKey ? (drafts.get(draftKey)?.value ?? "") : ""
+  )
+  const [cursor, setCursor] = useState(value.length)
+  const [pendingImages, setPendingImages] = useState<Array<ImageChunk>>(() =>
+    draftKey ? (drafts.get(draftKey)?.images ?? []) : []
+  )
+  useEffect(() => {
+    if (!draftKey) return
+    if (value || pendingImages.length) {
+      drafts.set(draftKey, { value, images: pendingImages })
+    } else {
+      drafts.delete(draftKey)
+    }
+  }, [draftKey, value, pendingImages])
   const [dragKind, setDragKind] = useState<"files" | "path" | null>(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [activeItemId, setActiveItemId] = useState<string | null>(null)
