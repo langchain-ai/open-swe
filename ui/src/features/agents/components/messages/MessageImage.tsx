@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react"
 
+import { cn } from "@/lib/utils"
 import { fetchImageBlob } from "@/features/agents/lib/transcript/api"
 import type { AnyImageChunk } from "@/features/agents/lib/types"
 
@@ -61,7 +62,11 @@ export function MessageImage({
   if (failed || !src)
     return (
       <div
-        className={className}
+        className={cn(
+          className,
+          "h-32 min-w-32 bg-muted",
+          !failed && "animate-pulse"
+        )}
         data-testid={failed ? "message-image-error" : "message-image-loading"}
         role="img"
         aria-label={
@@ -69,5 +74,11 @@ export function MessageImage({
         }
       />
     )
-  return <img src={src} alt={label} className={className} />
+  return (
+    <img
+      src={src}
+      alt={label}
+      className={cn(className, "animate-in duration-300 fade-in")}
+    />
+  )
 }
