@@ -533,7 +533,10 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
     await expect(page.getByRole("button", { name: "Stop run" })).toBeVisible();
     await typeIntoComposer(page, queuedText);
     await expect(
-      page.getByTestId("queued-message").filter({ hasText: queuedText }),
+      page
+        .getByTestId("queued-message")
+        .filter({ hasText: queuedText })
+        .and(page.locator("[data-queued-pending='false']")),
     ).toBeVisible();
 
     await page.getByRole("button", { name: "Stop run" }).click();

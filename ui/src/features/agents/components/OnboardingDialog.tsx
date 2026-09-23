@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react"
 import { IoLogoSlack } from "react-icons/io5"
+import { toast } from "sonner"
 
 import type { ModelOption } from "@/lib/api"
 import { Button } from "@/components/ui/button"
@@ -25,8 +26,6 @@ import {
 } from "@/lib/profile"
 import { useSession } from "@/lib/session"
 
-const SLACK_ONBOARDING_DISMISSED_KEY = "open-swe.slack-onboarding-dismissed"
-
 /**
  * First-run onboarding modal: pick a default agent model, then connect Slack.
  *
@@ -34,7 +33,7 @@ const SLACK_ONBOARDING_DISMISSED_KEY = "open-swe.slack-onboarding-dismissed"
  * shows (where Sign in with Slack is enabled) until their Slack account is
  * linked. Both steps live in the same dialog so a new user is walked through
  * picking a model and connecting Slack in one place. The Slack prompt can be
- * permanently dismissed in the current browser.
+ * permanently dismissed on the user's profile.
  */
 export function OnboardingDialog() {
   const session = useSession()
@@ -42,15 +41,7 @@ export function OnboardingDialog() {
   const options = useOptions()
   const save = useSaveProfile()
   const [dismissed, setDismissed] = useState(false)
-  const [slackDismissed, setSlackDismissed] = useState(false)
   const [error, setError] = useState<string | null>(null)
-
-  useEffect(() => {
-    // oxlint-disable-next-line react/set-state-in-effect
-    setSlackDismissed(
-      window.localStorage.getItem(SLACK_ONBOARDING_DISMISSED_KEY) === "true"
-    )
-  }, [])
 
   const defaultModels = options.data?.models.filter(
     (model) => model.can_be_default !== false
@@ -89,11 +80,31 @@ export function OnboardingDialog() {
   const needsSlack =
     slackEnabled &&
     !slackConnected &&
-    !slackDismissed &&
+    profile.isSuccess &&
+    !profile.data.slack_onboarding_dismissed &&
     !session.isLoading &&
     !session.isError
   const open = !dismissed && (needsModel || needsSlack)
   const step: "model" | "slack" = needsModel ? "model" : "slack"
+
+  const dismiss = () => {
+    setDismissed(true)
+    if (step !== "slack") return
+    save
+      .mutateAsync(
+        buildProfileUpdate(
+          profile.data,
+          { slack_onboarding_dismissed: true },
+          defaultModel,
+          defaultEffort
+        )
+      )
+      .catch(() =>
+        toast.error(
+          "Couldn't save your Slack prompt preference. It may appear again."
+        )
+      )
+  }
 
   const handleSaveModel = () => {
     if (!modelId) return
@@ -114,7 +125,7 @@ export function OnboardingDialog() {
     <Dialog
       open={open}
       onOpenChange={(next) => {
-        if (!next) setDismissed(true)
+        if (!next) dismiss()
       }}
     >
       <DialogPopup className="max-w-md p-6">
@@ -194,17 +205,7 @@ export function OnboardingDialog() {
               Linear mentions resolve to you.
             </DialogDescription>
             <div className="mt-2 flex justify-end gap-2">
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => {
-                  window.localStorage.setItem(
-                    SLACK_ONBOARDING_DISMISSED_KEY,
-                    "true"
-                  )
-                  setSlackDismissed(true)
-                }}
-              >
+              <Button variant="outline" size="sm" onClick={dismiss}>
                 Don't ask again
               </Button>
               <Button

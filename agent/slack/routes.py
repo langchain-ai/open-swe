@@ -646,8 +646,6 @@ async def slack_interactivity(
         return {"status": "error", "message": "Invalid payload"}
     if is_slack_feedback_payload(payload):
         return await handle_slack_feedback_interaction(payload, background_tasks)
-    if expedited_review.is_expedited_review_submission(payload):
-        return await expedited_review.handle_submission(payload, background_tasks)
 
     interaction = SlackInteraction.parse(payload)
     if interaction is None:
@@ -730,7 +728,7 @@ async def slack_interactivity(
     target = SlackRequestTarget(channel_id=channel_id, thread_ts=reply_ts or action_ts)
 
     async def dispatch() -> WebhookResponse:
-        if button.type == expedited_review.card.BUTTON_TYPE:
+        if button.type == expedited_review.BUTTON_TYPE:
             return await expedited_review.handle_button(interaction, button, background_tasks)
 
         if button.type == "workflow_push_approval":
