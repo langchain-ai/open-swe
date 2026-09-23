@@ -222,7 +222,7 @@ async def test_a_card_closed_before_the_lock_is_taken_writes_nothing(
     approval = await _approved(open_approval, "U_GRACE")
     async with ExpeditedApproval.locked(approval.id) as (_, row):
         assert row is not None
-        row.state = "rejected"
+        row.state = "cancelled"
 
     result = await merge.merge_approved(approval)
 

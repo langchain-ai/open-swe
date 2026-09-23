@@ -175,6 +175,7 @@ from agent.tools import (
     fetch_url,
     get_thread,
     http_request,
+    link_pull_request,
     list_automations,
     list_threads,
     list_workspaces,
@@ -192,6 +193,7 @@ from agent.tools import (
     recreate_sandbox,
     refresh_workspace_start,
     report_platform_issue,
+    request_pr_review,
     save_organization_skill,
     save_plan,
     save_user_instructions,
@@ -473,8 +475,10 @@ INCIDENT_AUTOMATIC_EXCLUDED_TOOLS: frozenset[str] = frozenset(
         "merge_expedited_pr",
         "manage_baby_sit",
         "manage_thread",
+        "link_pull_request",
         "open_pull_request",
         "recreate_sandbox",
+        "request_pr_review",
         "save_user_skill",
         "delete_user_skill",
         "slack_move_thread",
@@ -1375,12 +1379,14 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
         merge_expedited_pr,
         notify_automation_channel,
         open_pull_request,
+        link_pull_request,
         *(
             (output_iframe, create_sandbox_file_download_url, expose_port)
             if sandbox_file_downloads
             else ()
         ),
         read_user_settings,
+        request_pr_review,
         recreate_sandbox,
         report_platform_issue,
         schedule_thread_wakeup,

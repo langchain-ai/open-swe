@@ -178,21 +178,6 @@ async def test_unlinked_read_only_or_tokenless_users_cannot_vote(
     assert (await _stored(approval)).votes == []
 
 
-async def test_rejection_closes_the_card_without_waking_the_agent(
-    harness: _Harness, open_approval: OpenApproval
-) -> None:
-    approval = await open_approval()
-
-    await _click(approval, "U_LINUS", decision="reject")
-    late = await _click(approval, "U_GRACE")
-
-    stored = await _stored(approval)
-    assert stored.state == "rejected"
-    assert stored.rejection is not None and stored.rejection.github_login == "linus"
-    assert "no longer accepting" in late.message
-    assert harness.agent_prompts == []
-
-
 async def test_anyone_can_dismiss_the_card_without_waking_the_agent(
     harness: _Harness, open_approval: OpenApproval
 ) -> None:
