@@ -128,12 +128,6 @@ def open_card(
         *_diff_sections(files, diff_image_id),
         divider(),
         section(_vote_summary(approval)),
-        context(
-            "Approve records your vote. Once checks and reviews are clean, the agent submits "
-            "each approval as a GitHub review and merges. A later commit keeps the votes only "
-            "if it leaves the diff above unchanged. The author may approve, but that vote does "
-            "not become a GitHub review."
-        ),
         actions(*_vote_buttons(approval)),
     ]
     text = f"Expedited review requested for {pr.url} ({approval.head_sha[:12]})"
