@@ -85,7 +85,6 @@ def harness(monkeypatch: pytest.MonkeyPatch) -> _Harness:
     monkeypatch.setattr(watch, "notify_agent", h.notify_agent)
     monkeypatch.setattr(watch, "_delete_cron", AsyncMock())
     monkeypatch.setattr(watch, "add_slack_reaction", AsyncMock(return_value=True))
-    monkeypatch.setattr(watch, "post_slack_thread_reply", AsyncMock(return_value=True))
     return h
 
 
@@ -118,12 +117,11 @@ async def _vote(approval: ExpeditedApproval, slack_user: str, decision: str = "a
 async def test_two_distinct_approvals_merge_pinned_to_the_reviewed_sha(harness: _Harness) -> None:
     approval = await _open_approval()
 
-    first = await _vote(approval, "U_GRACE")
-    second = await _vote(approval, "U_LINUS")
+    await _vote(approval, "U_GRACE")
+    await _vote(approval, "U_LINUS")
 
     stored = await ExpeditedApproval.get(approval.id)
     assert stored is not None
-    assert first.private and not second.private
     assert stored.state == "merged"
     assert sorted(stored.approvers) == ["grace", "linus"]
     assert harness.github_reviews == ["grace", "linus"]

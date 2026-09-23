@@ -39,7 +39,6 @@ from agent.input_messages import PersonIdentity, split_person_id
 from agent.prompts import render_prompt
 from agent.slack.client import (
     post_slack_ephemeral_message,
-    post_slack_thread_reply,
     slack_thread_mutation_lock,
 )
 from agent.users import User
@@ -54,7 +53,6 @@ _MERGE_PERMISSIONS = {"contents": "write", "pull_requests": "write"}
 @dataclass(frozen=True, slots=True)
 class VoteOutcome:
     message: str
-    private: bool = True
 
 
 def _settings_hint(action: str) -> str:
@@ -202,7 +200,7 @@ async def handle_vote(
         return VoteOutcome("Approval recorded. GitHub is unreachable; the merge will be retried.")
     status = await complete_merge(current, readiness, app_token)
     if status == "merged":
-        return VoteOutcome(f"Merged {pr.url}.", private=False)
+        return VoteOutcome(f"Merged {pr.url}.")
     return VoteOutcome("Approval recorded; see the card for the merge outcome.")
 
 
@@ -334,7 +332,4 @@ async def process_vote(
     except Exception:
         logger.exception("Expedited review vote failed", extra={"approval_id": approval_id})
         outcome = VoteOutcome("Something went wrong recording your vote. Try again.")
-    if outcome.private:
-        await post_slack_ephemeral_message(channel_id, slack_user_id, outcome.message, thread_ts)
-    else:
-        await post_slack_thread_reply(channel_id, thread_ts, outcome.message)
+    await post_slack_ephemeral_message(channel_id, slack_user_id, outcome.message, thread_ts)
