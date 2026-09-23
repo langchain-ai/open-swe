@@ -31,7 +31,7 @@ export function ExpeditedReviewSection({ scope }: { scope: SettingsScope }) {
               onCheckedChange={(next) =>
                 settings.save({ expedited_review_enabled: next })
               }
-              disabled={!settings.data || settings.saving}
+              disabled={!settings.data}
             />
           }
         />

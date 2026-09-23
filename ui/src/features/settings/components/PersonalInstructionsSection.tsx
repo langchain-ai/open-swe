@@ -5,7 +5,7 @@ import { SettingsPanel, SettingsSection } from "@/components/AppShell"
 import { Button } from "@/components/ui/button"
 import { InstructionsEditor } from "@/components/InstructionsEditor"
 import { Skeleton } from "@/components/ui/skeleton"
-import { api } from "@/lib/api"
+import { api, type UserInstructions } from "@/lib/api"
 
 export function PersonalInstructionsSection() {
   const qc = useQueryClient()
@@ -20,7 +20,11 @@ export function PersonalInstructionsSection() {
   const value = draft ?? saved
   const dirty = draft !== null && draft !== saved
 
-  const onSuccess = () => {
+  const onSuccess = (text: string) => {
+    qc.setQueryData<UserInstructions>(["myInstructions"], (current) => ({
+      ...current,
+      instructions: text,
+    }))
     void qc.invalidateQueries({ queryKey: ["myInstructions"] })
     setDraft(null)
     setError(null)
@@ -29,12 +33,12 @@ export function PersonalInstructionsSection() {
 
   const save = useMutation({
     mutationFn: (next: string) => api.saveMyInstructions(next),
-    onSuccess,
+    onSuccess: (record) => onSuccess(record.instructions),
     onError,
   })
   const clear = useMutation({
     mutationFn: () => api.deleteMyInstructions(),
-    onSuccess,
+    onSuccess: () => onSuccess(""),
     onError,
   })
   const mutating = save.isPending || clear.isPending

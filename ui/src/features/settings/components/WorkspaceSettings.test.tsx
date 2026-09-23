@@ -16,6 +16,7 @@ import {
   ApiError,
   type WorkspaceSettings,
   type WorkspaceRecord,
+  type WorkspaceSettingsView,
 } from "@/lib/api"
 
 import { WorkspaceSettingsPanel } from "./WorkspaceSettings"
@@ -302,12 +303,14 @@ describe("WorkspaceSettingsPanel", () => {
 
   it("turns an inherited setting into an override and resets it back", async () => {
     mockApis()
+    let stored: WorkspaceSettingsView = { effective: SETTINGS, overrides: {} }
+    vi.spyOn(api, "getWorkspaceSettings").mockImplementation(async () => stored)
     const save = vi
       .spyOn(api, "saveWorkspaceSettings")
-      .mockImplementation(async (_slug, overrides) => ({
-        effective: { ...SETTINGS, ...overrides },
-        overrides,
-      }))
+      .mockImplementation(async (_slug, overrides) => {
+        stored = { effective: { ...SETTINGS, ...overrides }, overrides }
+        return stored
+      })
     renderPage()
 
     const fable = (

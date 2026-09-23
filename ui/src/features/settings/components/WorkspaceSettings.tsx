@@ -175,9 +175,10 @@ export function WorkspaceSettingsPanel({
     qc.setQueryData(workspaceRecordKey(slug), saved)
     void qc.invalidateQueries({ queryKey: workspaceOptionKeys.all })
   }
-  const onRebuildStarted = () => {
+  const onRebuildStarted = async () => {
     // Show the run as underway at once, then let the poll confirm it, so a
     // second click cannot slip in before the record catches up.
+    await qc.cancelQueries({ queryKey: workspaceRecordKey(slug) })
     qc.setQueryData(
       workspaceRecordKey(slug),
       (current: WorkspaceRecord | undefined) =>

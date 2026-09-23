@@ -61,7 +61,9 @@ export function WorkflowApprovalCard({
       className="mt-4 flex w-full flex-col gap-3"
     >
       {approvals.map((approval) => {
-        const busy = decision.isPending
+        const busy =
+          decision.isPending &&
+          decision.variables.fingerprint === approval.fingerprint
         const inherited = approval.inheritedFrom
         return (
           <section

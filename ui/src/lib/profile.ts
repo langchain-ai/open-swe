@@ -1,4 +1,9 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import {
+  useMutation,
+  useMutationState,
+  useQuery,
+  useQueryClient,
+} from "@tanstack/react-query"
 
 import { ApiError, api, DEFAULT_WORKSPACE_SLUG } from "./api"
 import {
@@ -14,12 +19,49 @@ const profileQueryKey = (login: string | undefined) => [
   login ?? null,
 ]
 
+const saveProfileMutationKey = (login: string | undefined) => [
+  "saveProfile",
+  login ?? null,
+]
+
+interface ProfilePatch {
+  login: string | undefined
+  patch: Partial<ProfileUpdate>
+  fallbackModel: string
+  fallbackEffort: string
+}
+
+type ProfileWrite = ProfileUpdate | ProfilePatch
+
+function applyProfileWrite(profile: Profile, write: ProfileWrite): Profile {
+  const { model_routing_enabled, ...rest } =
+    "patch" in write ? write.patch : write
+  return {
+    ...profile,
+    ...rest,
+    ...(model_routing_enabled !== undefined && {
+      model_routing_enabled: model_routing_enabled ?? undefined,
+    }),
+  }
+}
+
+/** The profile, with saves still in flight already applied. */
 export function useProfile() {
   const session = useSession()
+  const login = session.data?.login
+  const pending = useMutationState({
+    filters: {
+      mutationKey: saveProfileMutationKey(login),
+      exact: true,
+      status: "pending",
+    },
+    select: (m) => m.state.variables as ProfileWrite,
+  })
   return useQuery({
-    queryKey: profileQueryKey(session.data?.login),
+    queryKey: profileQueryKey(login),
     queryFn: api.profile,
     enabled: !!session.data,
+    select: (profile) => pending.reduce(applyProfileWrite, profile),
   })
 }
 
@@ -85,16 +127,77 @@ export function useRefreshRepos() {
   })
 }
 
+function useProfileMutationOptions(login: string | undefined) {
+  const qc = useQueryClient()
+  const mutationKey = saveProfileMutationKey(login)
+  return {
+    mutationKey,
+    scope: { id: JSON.stringify(mutationKey) },
+    onMutate: async () => {
+      await qc.cancelQueries({ queryKey: profileQueryKey(login) })
+      return { login }
+    },
+    onSuccess: (
+      saved: Profile,
+      _write: ProfileWrite,
+      context: { login: string | undefined }
+    ) => {
+      qc.setQueryData(profileQueryKey(context.login), saved)
+    },
+    onSettled: async (
+      _saved: Profile | undefined,
+      _error: Error | null,
+      _write: ProfileWrite,
+      context: { login: string | undefined } | undefined
+    ) => {
+      if (!context) return
+      if (
+        qc.isMutating({ mutationKey: saveProfileMutationKey(context.login) }) >
+        1
+      )
+        return
+      await qc.invalidateQueries({ queryKey: profileQueryKey(context.login) })
+    },
+  }
+}
+
+/** Saves a whole profile body; prefer {@link usePatchProfile} when a page owns only some fields. */
 export function useSaveProfile() {
+  const session = useSession()
+  return useMutation({
+    ...useProfileMutationOptions(session.data?.login),
+    mutationFn: (body: ProfileUpdate) => api.saveProfile(body),
+  })
+}
+
+/**
+ * Saves `patch` over the profile the server last confirmed. Saves run one at
+ * a time per account, so each request carries every earlier one's result and
+ * a failed save drops only its own patch.
+ */
+export function usePatchProfile() {
   const qc = useQueryClient()
   const session = useSession()
-  const key = profileQueryKey(session.data?.login)
-  return useMutation({
-    mutationFn: (body: ProfileUpdate) => api.saveProfile(body),
-    onSuccess: (saved) => {
-      qc.setQueryData(key, saved)
-    },
+  const login = session.data?.login
+  const mutation = useMutation({
+    ...useProfileMutationOptions(login),
+    mutationFn: (write: ProfilePatch) =>
+      api.saveProfile(
+        buildProfileUpdate(
+          qc.getQueryData<Profile>(profileQueryKey(write.login)),
+          write.patch,
+          write.fallbackModel,
+          write.fallbackEffort
+        )
+      ),
   })
+  return {
+    patch: (
+      patch: Partial<ProfileUpdate>,
+      fallbackModel: string,
+      fallbackEffort: string
+    ) => mutation.mutateAsync({ login, patch, fallbackModel, fallbackEffort }),
+  }
 }
 
 /**

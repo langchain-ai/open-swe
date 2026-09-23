@@ -15,11 +15,14 @@ import type {
   ThreadsPageParams,
 } from "./api"
 import type {
+  AgentSchedule,
   AgentStatus,
   AgentThread,
   Chunk,
   ImageChunk,
   Message,
+  WorkflowApprovalStatus,
+  WorkflowPushApprovalsResponse,
 } from "./types"
 import { useSidebarPrefsHydrated } from "./sidebarPrefs"
 import type { ChatSort } from "./sidebarPrefs"
@@ -53,13 +56,13 @@ export function invalidateAgentThreadLists(queryClient: QueryClient): void {
   void queryClient.invalidateQueries({ queryKey: agentThreadKeys.lists })
 }
 
-export function setAgentThreadStatus(
+function patchAgentThread(
   queryClient: QueryClient,
   threadId: string,
-  status: AgentStatus
+  patch: Partial<AgentThread>
 ): void {
   const update = (thread: AgentThread) =>
-    thread.id === threadId ? { ...thread, status } : thread
+    thread.id === threadId ? { ...thread, ...patch } : thread
   queryClient.setQueryData<AgentThread>(
     agentThreadKeys.detail(threadId),
     (prev) => (prev ? update(prev) : prev)
@@ -78,9 +81,76 @@ export function setAgentThreadStatus(
         })),
       }
   )
+  queryClient.setQueriesData<ThreadsPage>(
+    { queryKey: ["agent-threads", "lists", "page"] },
+    (prev) => prev && { ...prev, items: prev.items.map(update) }
+  )
   queryClient.setQueryData<AgentThread>(
     agentThreadKeys.sidebarActive(threadId),
     (prev) => (prev ? update(prev) : prev)
+  )
+}
+
+export function setAgentThreadStatus(
+  queryClient: QueryClient,
+  threadId: string,
+  status: AgentStatus
+): void {
+  patchAgentThread(queryClient, threadId, { status })
+}
+
+export function setAgentThreadTitle(
+  queryClient: QueryClient,
+  threadId: string,
+  title: string
+): void {
+  patchAgentThread(queryClient, threadId, { title })
+}
+
+function findCachedAgentThread(
+  queryClient: QueryClient,
+  threadId: string
+): AgentThread | undefined {
+  const matches = (thread: AgentThread) => thread.id === threadId
+  return (
+    queryClient.getQueryData<AgentThread>(agentThreadKeys.detail(threadId)) ??
+    queryClient.getQueryData<AgentThread>(
+      agentThreadKeys.sidebarActive(threadId)
+    ) ??
+    queryClient
+      .getQueryData<Array<AgentThread>>(agentThreadKeys.pinned)
+      ?.find(matches) ??
+    queryClient
+      .getQueriesData<InfiniteData<ThreadsPage>>({
+        queryKey: ["agent-threads", "lists", "infinite-pages"],
+      })
+      .flatMap(([, data]) => data?.pages.flatMap((page) => page.items) ?? [])
+      .find(matches) ??
+    queryClient
+      .getQueriesData<ThreadsPage>({
+        queryKey: ["agent-threads", "lists", "page"],
+      })
+      .flatMap(([, data]) => data?.items ?? [])
+      .find(matches)
+  )
+}
+
+function setAgentThreadPinned(
+  queryClient: QueryClient,
+  threadId: string,
+  pinned: boolean
+): void {
+  const thread = findCachedAgentThread(queryClient, threadId)
+  queryClient.setQueryData<Array<AgentThread>>(
+    agentThreadKeys.pinned,
+    (prev) => {
+      if (!prev) return prev
+      const isPinned = prev.some((candidate) => candidate.id === threadId)
+      if (pinned) return isPinned || !thread ? prev : [thread, ...prev]
+      return isPinned
+        ? prev.filter((candidate) => candidate.id !== threadId)
+        : prev
+    }
   )
 }
 
@@ -107,7 +177,7 @@ function updateThreadPageResolved(
   }
 }
 
-type AgentThreadQuerySnapshot = [QueryKey, unknown, boolean]
+export type AgentThreadQuerySnapshot = [QueryKey, unknown, boolean]
 
 function snapshotAgentThreadQueries(
   queryClient: QueryClient,
@@ -135,10 +205,51 @@ function snapshotAgentThreadQueries(
   return [...direct, ...lists]
 }
 
-function restoreAgentThreadQueries(
-  queryClient: QueryClient,
-  snapshots: Array<AgentThreadQuerySnapshot>,
+export interface AgentThreadOptimisticUpdate {
+  previous: Array<AgentThreadQuerySnapshot>
   optimistic: Map<QueryKey, number | undefined>
+}
+
+/** Cancel in-flight reads of a thread's caches, snapshot them, then apply. */
+export async function beginAgentThreadUpdate(
+  queryClient: QueryClient,
+  threadId: string,
+  apply: () => void
+): Promise<AgentThreadOptimisticUpdate> {
+  await Promise.all([
+    queryClient.cancelQueries({
+      queryKey: agentThreadKeys.detail(threadId),
+      exact: true,
+    }),
+    queryClient.cancelQueries({
+      queryKey: agentThreadKeys.sidebarActive(threadId),
+      exact: true,
+    }),
+    queryClient.cancelQueries({
+      queryKey: agentThreadKeys.pinned,
+      exact: true,
+    }),
+    queryClient.cancelQueries({
+      queryKey: ["agent-threads", "lists", "infinite-pages"],
+    }),
+    queryClient.cancelQueries({
+      queryKey: ["agent-threads", "lists", "page"],
+    }),
+  ])
+  const previous = snapshotAgentThreadQueries(queryClient, threadId)
+  apply()
+  const optimistic = new Map<QueryKey, number | undefined>(
+    previous.map(([key]) => [
+      key,
+      queryClient.getQueryState(key)?.dataUpdatedAt,
+    ])
+  )
+  return { previous, optimistic }
+}
+
+export function restoreAgentThreadQueries(
+  queryClient: QueryClient,
+  { previous: snapshots, optimistic }: AgentThreadOptimisticUpdate
 ): void {
   for (const [key, data, existed] of snapshots) {
     if (queryClient.getQueryState(key)?.dataUpdatedAt !== optimistic.get(key)) {
@@ -198,39 +309,26 @@ export function markAgentThreadViewed(
   )
 }
 
-function setAgentThreadResolved(
+export function setAgentThreadResolved(
   queryClient: QueryClient,
   threadId: string,
   resolved: boolean
 ): void {
   const update = (thread: AgentThread) =>
     thread.id === threadId ? { ...thread, resolved } : thread
-  const detail = queryClient.getQueryData<AgentThread>(
-    agentThreadKeys.detail(threadId)
-  )
-  const sidebarActive = queryClient.getQueryData<AgentThread>(
-    agentThreadKeys.sidebarActive(threadId)
-  )
-  let cachedThread = detail ?? sidebarActive
+  const cachedThread = findCachedAgentThread(queryClient, threadId)
 
   queryClient.setQueryData<AgentThread>(
     agentThreadKeys.detail(threadId),
     (prev) => (prev ? update(prev) : prev)
   )
-  const pinned = queryClient.getQueryData<Array<AgentThread>>(
-    agentThreadKeys.pinned
-  )
-  cachedThread ??= pinned?.find((thread) => thread.id === threadId)
   queryClient.setQueryData<Array<AgentThread>>(agentThreadKeys.pinned, (prev) =>
     prev?.map(update)
   )
-  for (const [key, data] of queryClient.getQueriesData<
-    InfiniteData<ThreadsPage>
-  >({ queryKey: ["agent-threads", "lists", "infinite-pages"] })) {
+  for (const [key] of queryClient.getQueriesData<InfiniteData<ThreadsPage>>({
+    queryKey: ["agent-threads", "lists", "infinite-pages"],
+  })) {
     const params = key[3] as Omit<ThreadsPageParams, "offset">
-    cachedThread ??= data?.pages
-      .flatMap((page) => page.items)
-      .find((thread) => thread.id === threadId)
     queryClient.setQueryData<InfiniteData<ThreadsPage>>(key, (prev) =>
       prev
         ? {
@@ -242,11 +340,10 @@ function setAgentThreadResolved(
         : prev
     )
   }
-  for (const [key, data] of queryClient.getQueriesData<ThreadsPage>({
+  for (const [key] of queryClient.getQueriesData<ThreadsPage>({
     queryKey: ["agent-threads", "lists", "page"],
   })) {
     const params = key[3] as ThreadsPageParams
-    cachedThread ??= data?.items.find((thread) => thread.id === threadId)
     queryClient.setQueryData<ThreadsPage>(key, (prev) =>
       prev ? updateThreadPageResolved(prev, params, threadId, resolved) : prev
     )
@@ -714,7 +811,36 @@ export function useWorkflowApprovalDecision(threadId: string) {
       vars.decision === "approve"
         ? agentsApi.approveWorkflowPush(threadId, vars.fingerprint)
         : agentsApi.rejectWorkflowPush(threadId, vars.fingerprint),
-    onSuccess: () => {
+    onMutate: async (vars) => {
+      const key = agentThreadKeys.workflowApprovals(threadId)
+      await queryClient.cancelQueries({ queryKey: key, exact: true })
+      const previous =
+        queryClient.getQueryData<WorkflowPushApprovalsResponse>(key)
+      const status: WorkflowApprovalStatus =
+        vars.decision === "approve" ? "approved" : "rejected"
+      queryClient.setQueryData<WorkflowPushApprovalsResponse>(
+        key,
+        (prev) =>
+          prev && {
+            ...prev,
+            approvals: prev.approvals.map((approval) =>
+              approval.fingerprint === vars.fingerprint
+                ? { ...approval, status }
+                : approval
+            ),
+          }
+      )
+      return { previous }
+    },
+    onError: (_error, _vars, context) => {
+      if (context?.previous) {
+        queryClient.setQueryData(
+          agentThreadKeys.workflowApprovals(threadId),
+          context.previous
+        )
+      }
+    },
+    onSettled: () => {
       void queryClient.invalidateQueries({
         queryKey: agentThreadKeys.workflowApprovals(threadId),
       })
@@ -750,7 +876,33 @@ export function useUpdateAgentSchedule() {
   return useMutation({
     mutationFn: (vars: { scheduleId: string; body: ScheduleUpdateRequest }) =>
       agentsApi.updateSchedule(vars.scheduleId, vars.body),
-    onSuccess: () => {
+    onMutate: async (vars) => {
+      const { enabled } = vars.body
+      if (enabled == null) return undefined
+      await queryClient.cancelQueries({
+        queryKey: agentScheduleKeys.all,
+        exact: true,
+      })
+      const previous = queryClient.getQueryData<Array<AgentSchedule>>(
+        agentScheduleKeys.all
+      )
+      queryClient.setQueryData<Array<AgentSchedule>>(
+        agentScheduleKeys.all,
+        (prev) =>
+          prev?.map((schedule) =>
+            schedule.id === vars.scheduleId
+              ? { ...schedule, enabled }
+              : schedule
+          )
+      )
+      return { previous }
+    },
+    onError: (_error, _vars, context) => {
+      if (context?.previous) {
+        queryClient.setQueryData(agentScheduleKeys.all, context.previous)
+      }
+    },
+    onSettled: () => {
       queryClient.invalidateQueries({ queryKey: agentScheduleKeys.all })
     },
   })
@@ -929,13 +1081,36 @@ export function useContinueThreadPrivately() {
   })
 }
 
+export function storeAgentThread(
+  queryClient: QueryClient,
+  thread: AgentThread
+): void {
+  queryClient.setQueryData(agentThreadKeys.detail(thread.id), thread)
+  queryClient.setQueryData(agentThreadKeys.sidebarActive(thread.id), thread)
+}
+
+const pinMutationKey = ["agent-threads", "pin"] as const
+
 export function usePinAgentThread() {
   const queryClient = useQueryClient()
 
   return useMutation({
+    mutationKey: pinMutationKey,
     mutationFn: (vars: { threadId: string; pinned: boolean }) =>
       agentsApi.pinThread(vars.threadId, vars.pinned),
-    onSettled: () => invalidateAgentThreadLists(queryClient),
+    onMutate: (vars) =>
+      beginAgentThreadUpdate(queryClient, vars.threadId, () =>
+        setAgentThreadPinned(queryClient, vars.threadId, vars.pinned)
+      ),
+    onError: (_error, _vars, context) => {
+      if (context) restoreAgentThreadQueries(queryClient, context)
+    },
+    onSettled: () => {
+      // A refetch while another pin is in flight would drop its optimistic row.
+      if (queryClient.isMutating({ mutationKey: pinMutationKey }) === 1) {
+        invalidateAgentThreadLists(queryClient)
+      }
+    },
   })
 }
 
@@ -945,13 +1120,14 @@ export function useRenameAgentThread() {
   return useMutation({
     mutationFn: (vars: { threadId: string; title: string }) =>
       agentsApi.renameThread(vars.threadId, vars.title),
-    onSuccess: (thread, vars) => {
-      queryClient.setQueryData(agentThreadKeys.detail(vars.threadId), thread)
-      queryClient.setQueryData(
-        agentThreadKeys.sidebarActive(vars.threadId),
-        thread
-      )
+    onMutate: (vars) =>
+      beginAgentThreadUpdate(queryClient, vars.threadId, () =>
+        setAgentThreadTitle(queryClient, vars.threadId, vars.title)
+      ),
+    onError: (_error, _vars, context) => {
+      if (context) restoreAgentThreadQueries(queryClient, context)
     },
+    onSuccess: (thread) => storeAgentThread(queryClient, thread),
     onSettled: () => invalidateAgentThreadLists(queryClient),
   })
 }
@@ -962,49 +1138,14 @@ export function useResolveAgentThread() {
   return useMutation({
     mutationFn: (vars: { threadId: string; resolved: boolean }) =>
       agentsApi.resolveThread(vars.threadId, vars.resolved),
-    onMutate: async (vars) => {
-      await Promise.all([
-        queryClient.cancelQueries({
-          queryKey: agentThreadKeys.detail(vars.threadId),
-          exact: true,
-        }),
-        queryClient.cancelQueries({
-          queryKey: agentThreadKeys.sidebarActive(vars.threadId),
-          exact: true,
-        }),
-        queryClient.cancelQueries({
-          queryKey: ["agent-threads", "lists", "infinite-pages"],
-        }),
-        queryClient.cancelQueries({
-          queryKey: ["agent-threads", "lists", "page"],
-        }),
-      ])
-      const previous = snapshotAgentThreadQueries(queryClient, vars.threadId)
-      setAgentThreadResolved(queryClient, vars.threadId, vars.resolved)
-      const optimistic = new Map<QueryKey, number | undefined>(
-        previous.map(([key]) => [
-          key,
-          queryClient.getQueryState(key)?.dataUpdatedAt,
-        ])
-      )
-      return { previous, optimistic }
-    },
+    onMutate: (vars) =>
+      beginAgentThreadUpdate(queryClient, vars.threadId, () =>
+        setAgentThreadResolved(queryClient, vars.threadId, vars.resolved)
+      ),
     onError: (_error, _vars, context) => {
-      if (context) {
-        restoreAgentThreadQueries(
-          queryClient,
-          context.previous,
-          context.optimistic
-        )
-      }
+      if (context) restoreAgentThreadQueries(queryClient, context)
     },
-    onSuccess: (thread, vars) => {
-      queryClient.setQueryData(agentThreadKeys.detail(vars.threadId), thread)
-      queryClient.setQueryData(
-        agentThreadKeys.sidebarActive(vars.threadId),
-        thread
-      )
-    },
+    onSuccess: (thread) => storeAgentThread(queryClient, thread),
     onSettled: () => invalidateAgentThreadLists(queryClient),
   })
 }

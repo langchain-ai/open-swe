@@ -145,7 +145,7 @@ export function AgentThreadHeader({
     setDeletingLocal(false)
   }
   const [draft, setDraft] = useState<string | null>(null)
-  const [saving, setSaving] = useState(false)
+  const [savingTitle, setSavingTitle] = useState<string | null>(null)
   const [renameError, setRenameError] = useState<string | null>(null)
   const editingRef = useRef(false)
   const titleButtonRef = useRef<HTMLButtonElement>(null)
@@ -156,7 +156,7 @@ export function AgentThreadHeader({
     setDraft(null)
     const next = draft.trim()
     if (!next || next === title) return
-    setSaving(true)
+    setSavingTitle(next)
     try {
       await onRename(next)
     } catch (error) {
@@ -164,11 +164,11 @@ export function AgentThreadHeader({
         error instanceof Error ? error.message : "Could not rename thread"
       )
     }
-    setSaving(false)
+    setSavingTitle(null)
   }
 
   const startRename = () => {
-    if (!onRename || saving || !title) return
+    if (!onRename || savingTitle !== null || !title) return
     setRenameError(null)
     setEditorWidth(titleButtonRef.current?.getBoundingClientRect().width)
     editingRef.current = true
@@ -280,14 +280,14 @@ export function AgentThreadHeader({
                 type="button"
                 aria-label="Rename thread"
                 ref={titleButtonRef}
-                aria-busy={saving}
-                disabled={saving}
-                title={title}
+                aria-busy={savingTitle !== null}
+                disabled={savingTitle !== null}
+                title={savingTitle ?? title}
                 data-no-drag=""
-                className="min-w-0 truncate rounded-md px-2 py-1 text-left transition-colors hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none disabled:opacity-60"
+                className="min-w-0 truncate rounded-md px-2 py-1 text-left transition-colors hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
                 onClick={startRename}
               >
-                {title}
+                {savingTitle ?? title}
               </button>
             ) : (
               <span className="min-w-0 truncate" title={title}>

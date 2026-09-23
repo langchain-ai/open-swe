@@ -11,6 +11,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { afterEach, expect, it, vi } from "vitest"
 
 import { MCPConnectionsSection } from "./MCPConnectionsSection"
+import { api } from "@/lib/api"
 import type { MCPConnection, MCPConnectionUpdate } from "@/lib/api"
 
 afterEach(() => {
@@ -719,5 +720,43 @@ it("reviews imported connections one at a time without writing on import or skip
       ([, init]) => init?.method === "PUT" || init?.method === "POST"
     )
   ).toBe(false)
+  client.clear()
+})
+
+it("flips a connection at once and flips it back when the save fails", async () => {
+  const saved: MCPConnection = {
+    name: "linear",
+    url: "https://mcp.linear.app/mcp",
+    transport: "streamable_http",
+    enabled: true,
+    allowed_tools: ["search"],
+    header_names: [],
+    revision: "v1",
+    updated_at: "now",
+  }
+  let failSave: (error: Error) => void = () => {}
+  vi.spyOn(api, "getMyMCPs").mockResolvedValue([saved])
+  vi.spyOn(api, "saveMyMCP").mockImplementation(
+    () => new Promise<MCPConnection>((_resolve, reject) => (failSave = reject))
+  )
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  })
+  render(
+    <QueryClientProvider client={client}>
+      <MCPConnectionsSection scope="user" />
+    </QueryClientProvider>
+  )
+
+  fireEvent.click(await screen.findByRole("button", { name: "Disable linear" }))
+  expect(
+    await screen.findByRole("button", { name: "Enable linear" })
+  ).toBeTruthy()
+  expect(screen.getByText(/· Disabled ·/)).toBeTruthy()
+  await waitFor(() => expect(api.saveMyMCP).toHaveBeenCalledTimes(1))
+
+  failSave(new Error("MCP server unreachable"))
+  expect(await screen.findByText("MCP server unreachable")).toBeTruthy()
+  expect(screen.getByRole("button", { name: "Disable linear" })).toBeTruthy()
   client.clear()
 })

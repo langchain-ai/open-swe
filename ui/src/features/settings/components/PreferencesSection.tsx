@@ -1,4 +1,9 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import {
+  useMutation,
+  useMutationState,
+  useQuery,
+  useQueryClient,
+} from "@tanstack/react-query"
 import { useState } from "react"
 
 import type { Theme } from "@/lib/theme"
@@ -21,7 +26,11 @@ import {
 } from "@/lib/notifications"
 import { agentsApi } from "@/features/agents/lib/api"
 import { api } from "@/lib/api"
-import type { FollowUpBehavior, ThreadVisibility } from "@/lib/api"
+import type {
+  FollowUpBehavior,
+  ThreadVisibility,
+  UserPreferences,
+} from "@/lib/api"
 import { useTheme } from "@/lib/theme"
 import { AssistantUiPreference } from "./AssistantUiPreference"
 
@@ -45,18 +54,45 @@ const FOLLOW_UP_BEHAVIORS: Array<{ value: FollowUpBehavior; label: string }> = [
 // sentinel that is translated back to null on save.
 const NO_DEFAULT_WORKSPACE = "__no_default_workspace__"
 
+const PREFERENCES_KEY = ["myPreferences"]
+const SAVE_PREFERENCES_KEY = ["saveMyPreferences"]
+
 export function PreferencesSection() {
   const { theme, setTheme } = useTheme()
   const qc = useQueryClient()
+  const pendingPreferences = useMutationState({
+    filters: {
+      mutationKey: SAVE_PREFERENCES_KEY,
+      exact: true,
+      status: "pending",
+    },
+    select: (m) => m.state.variables as Partial<UserPreferences>,
+  })
   const preferences = useQuery({
-    queryKey: ["myPreferences"],
+    queryKey: PREFERENCES_KEY,
     queryFn: api.getMyPreferences,
+    select: (saved) =>
+      pendingPreferences.reduce<UserPreferences>(
+        (merged, patch) => ({ ...merged, ...patch }),
+        saved
+      ),
   })
   const savePreferences = useMutation({
-    mutationFn: api.saveMyPreferences,
-    onSuccess: (data) => {
-      qc.setQueryData(["myPreferences"], data)
+    mutationKey: SAVE_PREFERENCES_KEY,
+    scope: { id: SAVE_PREFERENCES_KEY.join(":") },
+    mutationFn: (patch: Partial<UserPreferences>) => {
+      const saved = qc.getQueryData<UserPreferences>(PREFERENCES_KEY)
+      if (!saved) throw new Error("Preferences are not loaded.")
+      return api.saveMyPreferences({ ...saved, ...patch })
     },
+    onMutate: () => qc.cancelQueries({ queryKey: PREFERENCES_KEY }),
+    onSuccess: (data) => {
+      qc.setQueryData(PREFERENCES_KEY, data)
+    },
+    onSettled: () =>
+      qc.isMutating({ mutationKey: SAVE_PREFERENCES_KEY }) > 1
+        ? undefined
+        : qc.invalidateQueries({ queryKey: PREFERENCES_KEY }),
   })
   const workspaceOptions = useQuery({
     queryKey: ["workspace-options"],
@@ -122,11 +158,10 @@ export function PreferencesSection() {
             onValueChange={(v) =>
               v &&
               savePreferences.mutate({
-                ...preferences.data!,
                 default_visibility: v,
               })
             }
-            disabled={preferences.isLoading || savePreferences.isPending}
+            disabled={preferences.isLoading}
           >
             <SelectTrigger className="w-40">
               <SelectValue />
@@ -154,15 +189,10 @@ export function PreferencesSection() {
             onValueChange={(v) =>
               v &&
               savePreferences.mutate({
-                ...preferences.data!,
                 default_workspace: v === NO_DEFAULT_WORKSPACE ? null : v,
               })
             }
-            disabled={
-              preferences.isLoading ||
-              savePreferences.isPending ||
-              workspaceOptions.isLoading
-            }
+            disabled={preferences.isLoading || workspaceOptions.isLoading}
           >
             <SelectTrigger className="w-48">
               <SelectValue />
@@ -193,11 +223,10 @@ export function PreferencesSection() {
             onValueChange={(v) =>
               v &&
               savePreferences.mutate({
-                ...preferences.data!,
                 follow_up_behavior: v,
               })
             }
-            disabled={preferences.isLoading || savePreferences.isPending}
+            disabled={preferences.isLoading}
           >
             <SelectTrigger className="w-40">
               <SelectValue />
@@ -223,10 +252,9 @@ export function PreferencesSection() {
               "Shared cloud project"
             }
             defaultValue={preferences.data?.local_tracing_project ?? ""}
-            disabled={preferences.isLoading || savePreferences.isPending}
+            disabled={preferences.isLoading}
             onBlur={(event) =>
               savePreferences.mutate({
-                ...preferences.data!,
                 local_tracing_project: event.target.value.trim() || null,
               })
             }

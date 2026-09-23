@@ -59,6 +59,7 @@ import type {
   PrReviewComment,
   ReviewCheckRun,
   ReviewCommentCreate,
+  ReviewCommentsPayload,
   ReviewDetail,
   ReviewDiffFile,
   ReviewFinding,
@@ -105,6 +106,8 @@ import { useSession } from "@/lib/session"
 import { cn } from "@/lib/utils"
 
 type SideTab = "info" | "chat"
+
+type ReviewRef = Pick<ReviewDetail, "owner" | "repo" | "number">
 
 // Metadata carried by a Pierre diff line annotation. Findings render as the
 // read-only InlineFinding card; a draftComment renders the inline composer; a
@@ -1457,12 +1460,15 @@ function ReviewBodyInner({
 function WalkthroughButton({ detail }: { detail: ReviewDetail }) {
   const qc = useQueryClient()
   const scout = useMutation({
-    mutationFn: () =>
-      api.runReviewScout(detail.owner, detail.repo, detail.number),
-    onSuccess: () => {
-      void qc.invalidateQueries({
-        queryKey: ["review", detail.owner, detail.repo, detail.number],
-      })
+    mutationFn: ({ owner, repo, number }: ReviewRef) =>
+      api.runReviewScout(owner, repo, number),
+    onSuccess: ({ started }, { owner, repo, number }) => {
+      const queryKey = ["review", owner, repo, number]
+      if (started)
+        qc.setQueryData<ReviewDetail>(queryKey, (old) =>
+          old ? { ...old, walkthrough_running: true } : old
+        )
+      void qc.invalidateQueries({ queryKey })
     },
   })
   const running = detail.walkthrough_running || scout.isPending
@@ -1475,7 +1481,7 @@ function WalkthroughButton({ detail }: { detail: ReviewDetail }) {
       )}
       <button
         type="button"
-        onClick={() => scout.mutate()}
+        onClick={() => scout.mutate(detail)}
         disabled={running}
         className="inline-flex items-center gap-1 rounded border border-border px-1.5 py-0.5 text-[11px] text-muted-foreground hover:text-foreground disabled:opacity-50"
       >
@@ -2334,17 +2340,39 @@ function InlineComment({
   const sideLabel = comment.side === "LEFT" ? "L" : "R"
   const editable =
     session.data?.login.toLowerCase() === comment.author.toLowerCase()
+  const commentsKey = ["reviewComments", owner, repo, prNumber]
   const mutation = useMutation({
-    mutationFn: (next: string) =>
+    mutationFn: ({ next }: { next: string; previous: string }) =>
       api.updateReviewComment(owner, repo, prNumber, comment.id, next),
-    onSuccess: (_, next) => {
+    onMutate: async ({ next }) => {
       setBody(next)
-      setDraft(next)
       setEditing(false)
+      await queryClient.cancelQueries({ queryKey: commentsKey })
+      const snapshot =
+        queryClient.getQueryData<ReviewCommentsPayload>(commentsKey)
+      queryClient.setQueryData<ReviewCommentsPayload>(commentsKey, (old) =>
+        old
+          ? {
+              comments: old.comments.map((c) =>
+                c.id === comment.id ? { ...c, body: next } : c
+              ),
+            }
+          : old
+      )
+      return { snapshot }
+    },
+    onSuccess: (_, { next }) => {
+      setDraft(next)
       onUpdate?.({ ...comment, body: next })
-      void queryClient.invalidateQueries({
-        queryKey: ["reviewComments", owner, repo, prNumber],
-      })
+    },
+    onError: (_error, { next, previous }, context) => {
+      queryClient.setQueryData(commentsKey, context?.snapshot)
+      setBody(previous)
+      setDraft(next)
+      setEditing(true)
+    },
+    onSettled: () => {
+      void queryClient.invalidateQueries({ queryKey: commentsKey })
     },
   })
   useEffect(() => {
@@ -2355,7 +2383,8 @@ function InlineComment({
   }, [comment.id, comment.body])
   const submit = () => {
     const next = draft.trim()
-    if (next && next !== body && !mutation.isPending) mutation.mutate(next)
+    if (next && next !== body && !mutation.isPending)
+      mutation.mutate({ next, previous: body })
   }
   const cancel = () => {
     setDraft(body)
@@ -2692,11 +2721,14 @@ function SidePanel({
 }) {
   const qc = useQueryClient()
   const reReview = useMutation({
-    mutationFn: () => api.reReview(detail.owner, detail.repo, detail.number),
-    onSuccess: () => {
-      void qc.invalidateQueries({
-        queryKey: ["review", detail.owner, detail.repo, detail.number],
-      })
+    mutationFn: ({ owner, repo, number }: ReviewRef) =>
+      api.reReview(owner, repo, number),
+    onSuccess: (_result, { owner, repo, number }) => {
+      const queryKey = ["review", owner, repo, number]
+      qc.setQueryData<ReviewDetail>(queryKey, (old) =>
+        old ? { ...old, status: "running" } : old
+      )
+      void qc.invalidateQueries({ queryKey })
     },
   })
 
@@ -2778,7 +2810,7 @@ function SidePanel({
                 </span>
                 <button
                   type="button"
-                  onClick={() => reReview.mutate()}
+                  onClick={() => reReview.mutate(detail)}
                   disabled={reReview.isPending || detail.status === "running"}
                   className="inline-flex items-center gap-1 rounded border border-border px-1.5 py-0.5 text-[11px] text-muted-foreground hover:text-foreground disabled:opacity-50"
                 >

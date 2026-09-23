@@ -14,7 +14,12 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Skeleton } from "@/components/ui/skeleton"
 import { InstructionsEditor } from "@/components/InstructionsEditor"
-import { api, isGithubReauthError, loginUrl } from "@/lib/api"
+import {
+  api,
+  isGithubReauthError,
+  loginUrl,
+  type AgentInstructions,
+} from "@/lib/api"
 import { useRepos } from "@/lib/profile"
 import { normalizeRepoFullName } from "@/lib/repo"
 
@@ -62,9 +67,9 @@ export function AgentInstructionsPanel() {
   const save = useMutation({
     mutationFn: ({ full_name, value }: { full_name: string; value: string }) =>
       api.saveAgentInstructions(full_name, value),
-    onSuccess: () => {
+    onSuccess: (_saved, { full_name }) => {
       void qc.invalidateQueries({ queryKey: ["agentInstructions"] })
-      void qc.invalidateQueries({ queryKey: ["agentInstruction", selected] })
+      void qc.invalidateQueries({ queryKey: ["agentInstruction", full_name] })
       setError(null)
     },
     onError: (e: Error) => setError(formatMutationError(e)),
@@ -72,15 +77,37 @@ export function AgentInstructionsPanel() {
 
   const remove = useMutation({
     mutationFn: (full_name: string) => api.deleteAgentInstructions(full_name),
-    onSuccess: (_data, full_name) => {
-      void qc.invalidateQueries({ queryKey: ["agentInstructions"] })
-      if (selected === full_name) {
+    onMutate: async (full_name) => {
+      await qc.cancelQueries({ queryKey: ["agentInstructions"] })
+      const removed = qc
+        .getQueryData<Array<AgentInstructions>>(["agentInstructions"])
+        ?.find((s) => s.full_name === full_name)
+      qc.setQueryData<Array<AgentInstructions>>(
+        ["agentInstructions"],
+        (current) => current?.filter((s) => s.full_name !== full_name)
+      )
+      const wasSelected = selected === full_name
+      if (wasSelected) {
         setSelected(null)
         setDraft("")
       }
       setError(null)
+      return { removed, wasSelected }
     },
-    onError: (e: Error) => setError(formatMutationError(e)),
+    onError: (e: Error, full_name, context) => {
+      if (context?.wasSelected) setSelected(full_name)
+      const removed = context?.removed
+      if (removed)
+        qc.setQueryData<Array<AgentInstructions>>(
+          ["agentInstructions"],
+          (current) =>
+            current && !current.some((s) => s.full_name === removed.full_name)
+              ? [...current, removed]
+              : current
+        )
+      setError(formatMutationError(e))
+    },
+    onSettled: () => qc.invalidateQueries({ queryKey: ["agentInstructions"] }),
   })
 
   if (instructions.isLoading) {
@@ -245,7 +272,6 @@ export function AgentInstructionsPanel() {
                 size="sm"
                 variant="destructive"
                 className="ml-auto"
-                disabled={remove.isPending}
                 onClick={() => {
                   if (
                     !window.confirm(

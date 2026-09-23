@@ -66,7 +66,6 @@ export function TierRow({
             <Button
               size="sm"
               variant="ghost"
-              disabled={settings.saving}
               onClick={() => settings.reset(...fields)}
               aria-label={`Reset ${label} to the instance value`}
             >
@@ -112,7 +111,7 @@ export function LLMGatewaySection({ scope }: { scope: SettingsScope }) {
                 if (value === null && scoped) settings.reset("gateway_enabled")
                 else settings.save({ gateway_enabled: value })
               }}
-              disabled={!settings.data || settings.saving}
+              disabled={!settings.data}
             >
               <SelectTrigger className="w-48">
                 <SelectValue />
@@ -156,7 +155,7 @@ export function FableSection({ scope }: { scope: SettingsScope }) {
             <Switch
               checked={!!settings.data?.fable_enabled}
               onCheckedChange={(next) => settings.save({ fable_enabled: next })}
-              disabled={!settings.data || settings.saving}
+              disabled={!settings.data}
             />
           }
         />
@@ -201,7 +200,7 @@ export function DefaultRepoSection({
                 emptySelectionLabel="No default repository"
                 triggerClassName="h-7 w-full max-w-none rounded-md border border-input bg-input/20 px-2 py-1.5 text-xs/relaxed text-foreground transition-colors hover:opacity-100 dark:bg-input/30"
                 dropdownClassName="w-56"
-                disabled={!settings.data || settings.saving}
+                disabled={!settings.data}
               />
             </div>
           }
@@ -254,7 +253,7 @@ function ModelRow({
           model={settings.data?.[modelField] ?? null}
           effort={settings.data?.[effortField] ?? null}
           onChange={(model, effort) => settings.save(patch(model, effort))}
-          disabled={!settings.data || settings.saving}
+          disabled={!settings.data}
           inheritLabel={
             inheritLabel && settings.scope.kind === "workspace"
               ? "Inherit instance setting"
@@ -305,7 +304,7 @@ export function ModelDefaultsSection({
               onCheckedChange={(next) =>
                 settings.save({ model_routing_enabled: next })
               }
-              disabled={!settings.data || settings.saving}
+              disabled={!settings.data}
             />
           }
         />

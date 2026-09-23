@@ -164,3 +164,20 @@ it("hides during activity and rechecks eligibility before showing a cached promp
   await act(async () => resolve({ ...ready, status: "unavailable" }))
   expect(screen.queryByRole("form")).toBeNull()
 })
+
+it("confirms Good before the request resolves and restores the rating on failure", async () => {
+  let fail!: (error: Error) => void
+  api.submitThreadFeedback.mockReturnValueOnce(
+    new Promise((_resolve, reject) => {
+      fail = reject
+    })
+  )
+  renderCard()
+  fireEvent.click(await screen.findByRole("button", { name: "Good" }))
+  expect(screen.queryByText("Thanks for your feedback.")).not.toBeNull()
+
+  await act(async () => fail(new Error("Temporary outage")))
+  await screen.findByRole("alert")
+  expect(screen.queryByText("Thanks for your feedback.")).toBeNull()
+  expect(screen.getByRole("button", { name: "Good" })).not.toBeNull()
+})

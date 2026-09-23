@@ -202,6 +202,31 @@ export function MCPConnectionsSection({
     setBusy(false)
   }
 
+  const optimistic = async (
+    apply: (list: MCPConnection[]) => MCPConnection[],
+    revert: (list: MCPConnection[]) => MCPConnection[],
+    action: () => Promise<void>
+  ) => {
+    setError(null)
+    await qc.cancelQueries({ queryKey })
+    qc.setQueryData<MCPConnection[]>(
+      queryKey,
+      (current) => current && apply(current)
+    )
+    try {
+      await action()
+    } catch (e) {
+      qc.setQueryData<MCPConnection[]>(
+        queryKey,
+        (current) => current && revert(current)
+      )
+      setError(
+        e instanceof Error ? e.message : "Unable to update MCP connection"
+      )
+    }
+    await qc.invalidateQueries({ queryKey })
+  }
+
   const save = async (discover: boolean) => {
     if (!draft) return
     await run(async () => {
@@ -742,19 +767,27 @@ export function MCPConnectionsSection({
                     size="sm"
                     variant="outline"
                     disabled={busy}
-                    onClick={() =>
-                      run(async () => {
-                        await client.save({
-                          name: connection.name,
-                          url: connection.url,
-                          transport: connection.transport,
-                          enabled: !connection.enabled,
-                          allowed_tools: connection.allowed_tools,
-                        })
-                        await qc.invalidateQueries({ queryKey })
-                        if (draft?.name === connection.name) closeEditor()
-                      })
-                    }
+                    onClick={() => {
+                      const withEnabled =
+                        (enabled: boolean) => (list: MCPConnection[]) =>
+                          list.map((c) =>
+                            c.name === connection.name ? { ...c, enabled } : c
+                          )
+                      void optimistic(
+                        withEnabled(!connection.enabled),
+                        withEnabled(connection.enabled),
+                        async () => {
+                          await client.save({
+                            name: connection.name,
+                            url: connection.url,
+                            transport: connection.transport,
+                            enabled: !connection.enabled,
+                            allowed_tools: connection.allowed_tools,
+                          })
+                          if (draft?.name === connection.name) closeEditor()
+                        }
+                      )
+                    }}
                     aria-label={`${connection.enabled ? "Disable" : "Enable"} ${connection.name}`}
                   >
                     {connection.enabled ? "Disable" : "Enable"}
@@ -764,11 +797,18 @@ export function MCPConnectionsSection({
                     variant="outline"
                     disabled={busy}
                     onClick={() =>
-                      run(async () => {
-                        await client.remove(connection.name)
-                        await qc.invalidateQueries({ queryKey })
-                        if (draft?.name === connection.name) closeEditor()
-                      })
+                      void optimistic(
+                        (list) =>
+                          list.filter((c) => c.name !== connection.name),
+                        (list) =>
+                          list.some((c) => c.name === connection.name)
+                            ? list
+                            : [...list, connection],
+                        async () => {
+                          await client.remove(connection.name)
+                          if (draft?.name === connection.name) closeEditor()
+                        }
+                      )
                     }
                     aria-label={`Delete ${connection.name}`}
                   >

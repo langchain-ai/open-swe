@@ -132,4 +132,38 @@ describe("Allowed Slack bots", () => {
     )
     expect(screen.getByText("No Slack bots are allowed.")).toBeTruthy()
   })
+
+  it("hides a removed bot at once and restores it when the removal fails", async () => {
+    let failRemoval: () => void = () => {}
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((_url: string, init: RequestInit) =>
+        init.method === "DELETE"
+          ? new Promise<Response>(
+              (resolve) =>
+                (failRemoval = () =>
+                  resolve(
+                    new Response(JSON.stringify({ detail: "Slack is down." }), {
+                      status: 502,
+                    })
+                  ))
+            )
+          : Promise.resolve(new Response(JSON.stringify([BOT])))
+      )
+    )
+    renderSection()
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Remove Release bot" })
+    )
+    await screen.findByText("No Slack bots are allowed.")
+
+    failRemoval()
+    expect(await screen.findByRole("alert")).toHaveProperty(
+      "textContent",
+      "Slack is down."
+    )
+    expect(
+      screen.getByRole("button", { name: "Remove Release bot" })
+    ).toBeTruthy()
+  })
 })

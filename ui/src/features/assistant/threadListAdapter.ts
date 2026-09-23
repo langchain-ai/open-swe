@@ -1,6 +1,14 @@
 import type { QueryClient } from "@tanstack/react-query"
 import type { RemoteThreadListAdapter } from "@assistant-ui/react"
 import { agentsApi } from "@/features/agents/lib/api"
+import {
+  beginAgentThreadUpdate,
+  invalidateAgentThreadLists,
+  restoreAgentThreadQueries,
+  setAgentThreadResolved,
+  setAgentThreadTitle,
+  storeAgentThread,
+} from "@/features/agents/lib/queries"
 import type { AgentThread } from "@/features/agents/lib/types"
 
 export const threadKey = (id: string) => ["assistant-threads", id] as const
@@ -25,6 +33,24 @@ function metadata(thread: AgentThread) {
 export function createThreadListAdapter(
   client: QueryClient
 ): RemoteThreadListAdapter {
+  const updateAgentThread = async (
+    id: string,
+    apply: () => void,
+    request: () => Promise<AgentThread>
+  ) => {
+    const update = await beginAgentThreadUpdate(client, id, apply)
+    try {
+      const thread = await request()
+      client.setQueryData(threadKey(id), thread)
+      storeAgentThread(client, thread)
+    } catch (error) {
+      restoreAgentThreadQueries(client, update)
+      throw error
+    } finally {
+      invalidateAgentThreadLists(client)
+    }
+  }
+
   return {
     async list(params) {
       const page = await agentsApi.listThreadsPage({
@@ -45,16 +71,25 @@ export function createThreadListAdapter(
       return { remoteId: id, externalId: id }
     },
     async rename(id, title) {
-      const thread = await agentsApi.renameThread(id, title)
-      client.setQueryData(threadKey(id), thread)
+      await updateAgentThread(
+        id,
+        () => setAgentThreadTitle(client, id, title),
+        () => agentsApi.renameThread(id, title)
+      )
     },
     async archive(id) {
-      const thread = await agentsApi.resolveThread(id, true)
-      client.setQueryData(threadKey(id), thread)
+      await updateAgentThread(
+        id,
+        () => setAgentThreadResolved(client, id, true),
+        () => agentsApi.resolveThread(id, true)
+      )
     },
     async unarchive(id) {
-      const thread = await agentsApi.resolveThread(id, false)
-      client.setQueryData(threadKey(id), thread)
+      await updateAgentThread(
+        id,
+        () => setAgentThreadResolved(client, id, false),
+        () => agentsApi.resolveThread(id, false)
+      )
     },
     async delete(id) {
       await agentsApi.deleteThread(id)

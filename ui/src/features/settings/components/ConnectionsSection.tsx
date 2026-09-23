@@ -3,7 +3,7 @@ import { useState } from "react"
 import { IoLogoSlack } from "react-icons/io5"
 import { SiNotion } from "react-icons/si"
 
-import type { SessionUser } from "@/lib/api"
+import type { NotionCredentialStatus, SessionUser } from "@/lib/api"
 import { SettingsRow, SettingsSection } from "@/components/AppShell"
 import { Button } from "@/components/ui/button"
 import { api, connectService } from "@/lib/api"
@@ -90,11 +90,21 @@ function NotionRow({ setError }: { setError: SetError }) {
 
   const disconnect = useMutation({
     mutationFn: () => api.disconnectNotion(),
-    onSuccess: () => {
-      void qc.invalidateQueries({ queryKey: ["myNotion"] })
+    onMutate: async () => {
+      await qc.cancelQueries({ queryKey: ["myNotion"] })
+      const previous = qc.getQueryData<NotionCredentialStatus>(["myNotion"])
+      qc.setQueryData<NotionCredentialStatus>(
+        ["myNotion"],
+        (current) => current && { ...current, connected: false }
+      )
       setError(null)
+      return { previous }
     },
-    onError: (e: Error) => setError(e.message),
+    onError: (e: Error, _variables, context) => {
+      qc.setQueryData(["myNotion"], context?.previous)
+      setError(e.message)
+    },
+    onSettled: () => qc.invalidateQueries({ queryKey: ["myNotion"] }),
   })
 
   const connected = !!creds.data?.connected
@@ -119,7 +129,6 @@ function NotionRow({ setError }: { setError: SetError }) {
               variant="outline"
               size="sm"
               onClick={() => disconnect.mutate()}
-              disabled={disconnect.isPending}
             >
               Disconnect
             </Button>

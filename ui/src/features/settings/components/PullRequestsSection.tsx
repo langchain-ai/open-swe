@@ -10,13 +10,8 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { Switch } from "@/components/ui/switch"
-import { api, DEFAULT_WORKSPACE_SLUG } from "@/lib/api"
-import {
-  buildProfileUpdate,
-  useOptions,
-  useProfile,
-  useSaveProfile,
-} from "@/lib/profile"
+import { api, DEFAULT_WORKSPACE_SLUG, type ProfileUpdate } from "@/lib/api"
+import { useOptions, usePatchProfile, useProfile } from "@/lib/profile"
 
 type DraftReviewChoice = "team_default" | "always_on" | "always_off"
 
@@ -35,7 +30,7 @@ function toChoice(value: boolean | null | undefined): DraftReviewChoice {
 export function PullRequestsSection() {
   const profile = useProfile()
   const options = useOptions()
-  const save = useSaveProfile()
+  const save = usePatchProfile()
   // Which team default applies depends on the workspace a pull request's
   // repository belongs to; the user's own workspace is the one answer this
   // page can give, and it is where their new threads run.
@@ -59,16 +54,14 @@ export function PullRequestsSection() {
     firstModel?.default_effort ??
     ""
 
-  const persist = (patch: Parameters<typeof buildProfileUpdate>[1]) => {
+  const persist = (patch: Partial<ProfileUpdate>) => {
     setError(null)
     save
-      .mutateAsync(
-        buildProfileUpdate(profile.data, patch, fallbackModel, fallbackEffort)
-      )
+      .patch(patch, fallbackModel, fallbackEffort)
       .catch((e: Error) => setError(e.message))
   }
 
-  const disabled = profile.isLoading || save.isPending
+  const disabled = profile.isLoading
   const teamDefaultOn =
     workspaceSettings.data?.effective.review_draft_prs ?? false
   const expeditedOn =

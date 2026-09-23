@@ -1,4 +1,7 @@
+import { useQueryClient } from "@tanstack/react-query"
+
 import type { OpenPullRequest } from "@/lib/api"
+import { markPullRequestReady } from "../lib/cache"
 import { actionLabel, githubActions } from "../lib/githubActions"
 import { usePullRequestAction } from "../lib/usePullRequestAction"
 import { PullRequestActionButton } from "./PullRequestActionButton"
@@ -10,10 +13,14 @@ export function MarkPullRequestReady({
   pr: OpenPullRequest
   onReady: () => void
 }) {
+  const queryClient = useQueryClient()
   const ready = usePullRequestAction({
     pr,
     action: "mark-ready",
-    onDone: onReady,
+    onDone: () => {
+      markPullRequestReady(queryClient, pr)
+      onReady()
+    },
   })
   return (
     <PullRequestActionButton

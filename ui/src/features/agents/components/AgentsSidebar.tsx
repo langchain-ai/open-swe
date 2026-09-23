@@ -483,7 +483,10 @@ export function AgentsSidebar({
         .then(() => refreshLocalThreads(item.id))
       return
     }
-    if (!resolveThread.isPending) {
+    if (
+      !resolveThread.isPending ||
+      resolveThread.variables.threadId !== item.id
+    ) {
       resolveThread.mutate({
         threadId: item.id,
         resolved: !isArchived(item),
@@ -495,7 +498,7 @@ export function AgentsSidebar({
       toggleLocalPin(item.id)
       return
     }
-    if (!pinThread.isPending) {
+    if (!pinThread.isPending || pinThread.variables.threadId !== item.id) {
       pinThread.mutate({
         threadId: item.id,
         pinned: !cloudPinnedIds.has(item.id),

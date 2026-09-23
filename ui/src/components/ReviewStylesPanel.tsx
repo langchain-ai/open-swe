@@ -106,12 +106,40 @@ export function ReviewStylesPanel() {
 
   const analyze = useMutation({
     mutationFn: (full_name: string) => api.analyzeReviewStyle(full_name),
-    onSuccess: () => {
-      void qc.invalidateQueries({ queryKey: ["reviewStyles"] })
-      void qc.invalidateQueries({ queryKey: ["reviewStyle", selected] })
+    onMutate: async (full_name) => {
+      await Promise.all([
+        qc.cancelQueries({ queryKey: ["reviewStyles"] }),
+        qc.cancelQueries({ queryKey: ["reviewStyle", full_name] }),
+      ])
+      const snapshot = {
+        list: qc.getQueryData<Array<ReviewStyle>>(["reviewStyles"]),
+        detail: qc.getQueryData<ReviewStyle>(["reviewStyle", full_name]),
+      }
+      const running = (style: ReviewStyle): ReviewStyle =>
+        style.full_name === full_name
+          ? { ...style, status: "running", error: null }
+          : style
+      qc.setQueryData<Array<ReviewStyle>>(["reviewStyles"], (old) =>
+        old?.map(running)
+      )
+      qc.setQueryData<ReviewStyle>(["reviewStyle", full_name], (old) =>
+        old ? running(old) : old
+      )
+      return snapshot
+    },
+    onSuccess: (record) => {
+      qc.setQueryData(["reviewStyle", record.full_name], record)
       setError(null)
     },
-    onError: (e: Error) => setError(formatMutationError(e)),
+    onError: (e: Error, full_name, snapshot) => {
+      qc.setQueryData(["reviewStyles"], snapshot?.list)
+      qc.setQueryData(["reviewStyle", full_name], snapshot?.detail)
+      setError(formatMutationError(e))
+    },
+    onSettled: (_record, _error, full_name) => {
+      void qc.invalidateQueries({ queryKey: ["reviewStyles"] })
+      void qc.invalidateQueries({ queryKey: ["reviewStyle", full_name] })
+    },
   })
 
   const savePrompt = useMutation({
@@ -122,9 +150,9 @@ export function ReviewStylesPanel() {
       full_name: string
       custom_prompt: string
     }) => api.saveReviewStylePrompt(full_name, custom_prompt),
-    onSuccess: () => {
+    onSuccess: (record) => {
+      qc.setQueryData(["reviewStyle", record.full_name], record)
       void qc.invalidateQueries({ queryKey: ["reviewStyles"] })
-      void qc.invalidateQueries({ queryKey: ["reviewStyle", selected] })
       setError(null)
     },
     onError: (e: Error) => setError(formatMutationError(e)),
@@ -132,9 +160,9 @@ export function ReviewStylesPanel() {
 
   const cancelAnalysis = useMutation({
     mutationFn: (full_name: string) => api.cancelReviewStyle(full_name),
-    onSuccess: () => {
+    onSuccess: (record) => {
+      qc.setQueryData(["reviewStyle", record.full_name], record)
       void qc.invalidateQueries({ queryKey: ["reviewStyles"] })
-      void qc.invalidateQueries({ queryKey: ["reviewStyle", selected] })
       setError(null)
     },
     onError: (e: Error) => setError(formatMutationError(e)),
@@ -142,15 +170,28 @@ export function ReviewStylesPanel() {
 
   const removeStyle = useMutation({
     mutationFn: (full_name: string) => api.deleteReviewStyle(full_name),
+    onMutate: async (full_name) => {
+      await qc.cancelQueries({ queryKey: ["reviewStyles"] })
+      const snapshot = qc.getQueryData<Array<ReviewStyle>>(["reviewStyles"])
+      qc.setQueryData<Array<ReviewStyle>>(["reviewStyles"], (old) =>
+        old?.filter((style) => style.full_name !== full_name)
+      )
+      return snapshot
+    },
     onSuccess: (_data, full_name) => {
-      void qc.invalidateQueries({ queryKey: ["reviewStyles"] })
       if (selected === full_name) {
         setSelected(null)
         setDraftPrompt("")
       }
       setError(null)
     },
-    onError: (e: Error) => setError(formatMutationError(e)),
+    onError: (e: Error, _full_name, snapshot) => {
+      qc.setQueryData(["reviewStyles"], snapshot)
+      setError(formatMutationError(e))
+    },
+    onSettled: () => {
+      void qc.invalidateQueries({ queryKey: ["reviewStyles"] })
+    },
   })
 
   if (styles.isLoading) {
@@ -337,9 +378,7 @@ export function ReviewStylesPanel() {
                   size="sm"
                   variant="outline"
                   disabled={cancelAnalysis.isPending}
-                  onClick={() =>
-                    void cancelAnalysis.mutateAsync(active.full_name)
-                  }
+                  onClick={() => cancelAnalysis.mutate(active.full_name)}
                 >
                   Cancel
                 </Button>
@@ -348,7 +387,7 @@ export function ReviewStylesPanel() {
                 size="sm"
                 disabled={!draftPrompt.trim() || savePrompt.isPending}
                 onClick={() =>
-                  void savePrompt.mutateAsync({
+                  savePrompt.mutate({
                     full_name: active.full_name,
                     custom_prompt: draftPrompt,
                   })
@@ -371,7 +410,7 @@ export function ReviewStylesPanel() {
                   ) {
                     return
                   }
-                  void removeStyle.mutateAsync(active.full_name)
+                  removeStyle.mutate(active.full_name)
                 }}
               >
                 Remove
