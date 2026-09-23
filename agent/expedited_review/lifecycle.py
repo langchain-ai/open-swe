@@ -23,6 +23,7 @@ from agent.github.app import (
 from agent.slack.blocks import block_payload
 from agent.slack.client import (
     add_slack_reaction,
+    delete_slack_message,
     post_slack_thread_reply_with_ts,
     update_slack_message,
     upload_slack_thread_file,
@@ -216,6 +217,18 @@ async def retire(
         return None
     await refresh_card(updated, outcome=outcome)
     return updated
+
+
+async def remove_superseded_cards(approval: ExpeditedApproval) -> None:
+    """Delete older cards for ``approval``'s PR, so its thread only ever shows one."""
+    for stale in await ExpeditedApproval.superseded_on_slack(approval.pull_request_id):
+        if stale.id == approval.id:
+            continue
+        if not await delete_slack_message(stale.slack_channel_id, stale.slack_message_ts):
+            continue
+        async with ExpeditedApproval.locked(stale.id) as (_, row):
+            if row is not None:
+                row.slack_message_ts = ""
 
 
 async def mark_merged(approval: ExpeditedApproval) -> None:

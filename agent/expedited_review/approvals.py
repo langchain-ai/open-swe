@@ -159,6 +159,19 @@ class ExpeditedApproval(Base):
             )
 
     @classmethod
+    async def superseded_on_slack(cls, pull_request_id: UUID) -> list[Self]:
+        """Superseded cards for a pull request whose Slack message is still up."""
+        async with postgres.session() as session:
+            rows = await session.scalars(
+                cls._loaded(select(cls)).where(
+                    cls.pull_request_id == pull_request_id,
+                    cls.state == "superseded",
+                    cls.slack_message_ts != "",
+                )
+            )
+            return list(rows)
+
+    @classmethod
     async def all_for_repo(cls, owner: str, repo: str) -> list[Self]:
         """Every approval a repository has ever had, oldest first."""
         async with postgres.session() as session:

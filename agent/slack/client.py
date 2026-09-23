@@ -414,15 +414,18 @@ async def _slack_thread_exists(channel_id: str, thread_ts: str) -> bool:
     return True
 
 
-async def _delete_slack_message(channel_id: str, message_ts: str) -> None:
+async def delete_slack_message(channel_id: str, message_ts: str) -> bool:
+    """Delete one of the bot's own messages; whether Slack confirmed it."""
     try:
         async with SlackClient.bot() as client:
             await client.chat_delete(channel=channel_id, ts=message_ts)
     except SLACK_REQUEST_ERRORS as exc:
         logger.warning(
-            "Orphaned Slack reply could not be removed",
+            "Slack message could not be deleted",
             extra={"slack_error": slack_error(exc), "slack_channel": channel_id},
         )
+        return False
+    return True
 
 
 async def _post_slack_message_with_ts(
@@ -465,7 +468,7 @@ async def _post_slack_message_with_ts(
                 and not _threaded_under(data, reply_ts)
                 and not await _slack_thread_exists(channel_id, reply_ts)
             ):
-                await _delete_slack_message(channel_id, message_ts)
+                await delete_slack_message(channel_id, message_ts)
                 logger.warning(
                     "Slack reply landed outside its thread",
                     extra={"slack_channel": channel_id, "slack_thread_ts": reply_ts},

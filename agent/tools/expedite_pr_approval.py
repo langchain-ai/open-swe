@@ -14,7 +14,7 @@ from agent.expedited_review.eligibility import (
     assess_eligibility,
     fetch_changed_files,
 )
-from agent.expedited_review.lifecycle import post_card, retire
+from agent.expedited_review.lifecycle import post_card, remove_superseded_cards, retire
 from agent.github.ci import fetch_pr
 from agent.github.pull_requests import PullRequest, PullRequestPayload
 from agent.github.token import resolve_github_token
@@ -228,6 +228,7 @@ async def expedite_pr_approval(
         return _failure(f"Could not post the approval card in Slack: {error or 'unknown error'}")
     approval.slack_message_ts = message_ts
     approval = await approval.save()
+    await remove_superseded_cards(approval)
     return {
         "success": True,
         "approval_id": str(approval.id),
