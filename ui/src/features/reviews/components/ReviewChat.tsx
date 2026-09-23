@@ -516,7 +516,7 @@ export function ReviewChat({
     return (
       <Empty>
         <EmptyDescription>
-          Chat becomes available once the review has finished running.
+          Chat is unavailable right now. Reload the page to try again.
         </EmptyDescription>
       </Empty>
     )

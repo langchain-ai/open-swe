@@ -476,22 +476,21 @@ function AnalyticsCoverage({
     tone: string
   } = hasFailedEvents
     ? {
-        label: "Event processing needs attention",
+        label: "Analytics need attention",
         description:
-          "Some captured events could not be processed. Reports may be incomplete.",
+          "Some events could not be processed. Reports may be incomplete.",
         icon: WarningCircleIcon,
         tone: "text-destructive",
       }
     : hasPendingEvents
       ? {
-          label: "Event processing is behind",
-          description:
-            "New activity is still waiting to be processed into reports.",
+          label: "Analytics are updating",
+          description: "New activity is still being processed.",
           icon: ClockCountdownIcon,
           tone: "text-warning-foreground",
         }
       : {
-          label: "Event processing is up to date",
+          label: "Analytics are up to date",
           icon: CheckCircleIcon,
           tone: "text-success-foreground",
         }
