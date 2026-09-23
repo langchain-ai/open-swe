@@ -21,7 +21,7 @@ from agent.github.repo_merge_methods import MergeMethod
 
 logger = logging.getLogger(__name__)
 
-PullRequestActionName = Literal["merge", "close", "mark-ready"]
+PullRequestActionName = Literal["merge", "close", "mark-ready", "update-branch"]
 _COMMENTS_PER_PAGE = 100
 
 # REST cannot clear the draft flag, so marking a PR ready has to go through GraphQL.
@@ -242,8 +242,33 @@ class MarkReadyAction(_PullRequestActionBase):
             raise HTTPException(502, self.unconfirmed)
 
 
+class UpdateBranchAction(_PullRequestActionBase):
+    action: Literal["update-branch"]
+    sha: str = Field(pattern=r"^[0-9a-fA-F]{40,64}$")
+
+    transport_failure: ClassVar[str] = (
+        "Could not confirm the branch update. Refresh to check the PR before retrying."
+    )
+    invalid_response: ClassVar[str] = (
+        "GitHub returned an invalid branch update response. Refresh to check the PR."
+    )
+    unconfirmed: ClassVar[str] = "GitHub did not accept the branch update."
+
+    async def perform(self, client: httpx2.AsyncClient, owner: str, repo: str, number: int) -> None:
+        # GitHub queues the merge and answers 202; expected_head_sha refuses a stale view.
+        response, payload = await self._request(
+            client,
+            "PUT",
+            f"{GITHUB_API_BASE}/repos/{owner}/{repo}/pulls/{number}/update-branch",
+            {"expected_head_sha": self.sha},
+        )
+        if not response.is_success:
+            raise self._refusal(response, payload)
+
+
 PullRequestAction = Annotated[
-    MergeAction | CloseAction | MarkReadyAction, Field(discriminator="action")
+    MergeAction | CloseAction | MarkReadyAction | UpdateBranchAction,
+    Field(discriminator="action"),
 ]
 
 

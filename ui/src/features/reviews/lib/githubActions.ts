@@ -53,6 +53,19 @@ export const githubActions: Record<PullRequestActionName, GithubAction> = {
       await api.closePullRequest(pr, reason)
     },
   },
+  "update-branch": {
+    labels: {
+      idle: "Update branch",
+      pending: "Updating branch…",
+      done: "Branch update queued",
+      retry: "Retry update branch",
+    },
+    succeeded: (subject) => `Merging the base branch into ${subject}`,
+    failed: (subject) => `Could not update ${subject}`,
+    run: async (pr) => {
+      await api.updatePullRequestBranch(pr)
+    },
+  },
   "mark-ready": {
     labels: {
       idle: "Mark ready",

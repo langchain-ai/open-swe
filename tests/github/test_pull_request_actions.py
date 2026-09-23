@@ -233,3 +233,26 @@ async def test_the_route_forwards_the_action_with_the_signed_in_users_token(monk
         "acme", "app", 7, action, {"sub": "octocat"}
     ) == actions.PullRequestActionResult(action="mark-ready", done=True)
     act.assert_awaited_once_with("acme", "app", 7, action, "user-token")
+
+
+@pytest.mark.parametrize("status", [202, 422])
+async def test_updating_the_branch_pins_the_head_the_viewer_saw(github, status):
+    request = github(
+        AsyncMock(return_value=response({"message": "expected head sha didn't match"}, status))
+    )
+    action = actions.UpdateBranchAction(action="update-branch", sha="b" * 40)
+    if status == 202:
+        result = await actions.act_on_pull_request("acme", "app", 7, action, "user-token")
+        assert result == actions.PullRequestActionResult(action="update-branch", done=True)
+    else:
+        with pytest.raises(HTTPException, match="expected head sha") as error:
+            await actions.act_on_pull_request("acme", "app", 7, action, "user-token")
+        assert error.value.status_code == 422
+    assert request.await_args.args[1:] == (
+        "PUT",
+        "https://api.github.com/repos/acme/app/pulls/7/update-branch",
+    )
+    assert request.await_args.kwargs == {
+        "json": {"expected_head_sha": "b" * 40},
+        "max_retries": 0,
+    }

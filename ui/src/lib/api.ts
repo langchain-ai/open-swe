@@ -847,12 +847,17 @@ export interface OpenPullRequest {
 
 export type MergeMethod = "squash" | "merge" | "rebase"
 
-export type PullRequestActionName = "merge" | "close" | "mark-ready"
+export type PullRequestActionName =
+  | "merge"
+  | "close"
+  | "mark-ready"
+  | "update-branch"
 
 export type PullRequestActionRequest =
   | { action: "merge"; sha: string | null; merge_method: MergeMethod }
   | { action: "close"; reason?: string }
   | { action: "mark-ready" }
+  | { action: "update-branch"; sha: string | null }
 
 export interface PullRequestActionResult {
   action: PullRequestActionName
@@ -1489,6 +1494,10 @@ export const api = {
       pr,
       reason ? { action: "close", reason } : { action: "close" }
     ),
+  updatePullRequestBranch: (
+    pr: OpenPullRequest
+  ): Promise<PullRequestActionResult> =>
+    pullRequestAction(pr, { action: "update-branch", sha: pr.headSha }),
   markPullRequestReady: (
     pr: OpenPullRequest
   ): Promise<PullRequestActionResult> =>
