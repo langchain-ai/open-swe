@@ -14,7 +14,7 @@ import type { StructuredEntity } from "./structuredInputMessages"
 import type { Chunk, Message, ToolExecutionChunk } from "./types"
 
 function senderNote(entity: StructuredEntity | undefined): string | undefined {
-  if (entity?.senderType === "bot") return "bot"
+  if (entity?.senderType === "bot") return undefined
   if (entity?.openSweAccount === "unlinked") return "not an Open SWE user"
   return undefined
 }
@@ -352,6 +352,7 @@ export function streamMessagesToUi(
                 entity?.displayName ??
                 (entity?.handle ? `@${entity.handle}` : undefined),
               structuredSenderNote: senderNote(entity),
+              structuredSenderIsBot: entity?.senderType === "bot",
             }
           : {}),
       })
