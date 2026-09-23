@@ -11,8 +11,8 @@ allowBuilds:
   unrs-resolver: true
 
 minimumReleaseAgeExclude:
-  - '@langchain/langgraph-sdk@1.11.0'
-  - '@langchain/react@1.1.0'
+  - '@langchain/langgraph-sdk@1.12.0-rc.0'
+  - '@langchain/react@1.2.0-rc.0'
 
 overrides:
   '@hono/node-server': 2.1.1

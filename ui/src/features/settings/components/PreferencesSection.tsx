@@ -63,6 +63,13 @@ export function PreferencesSection() {
     queryFn: api.listWorkspaceOptions,
     staleTime: 60_000,
   })
+  const workspaceItems = [
+    { value: NO_DEFAULT_WORKSPACE, label: "Workspace default" },
+    ...(workspaceOptions.data?.workspaces ?? []).map((workspace) => ({
+      value: workspace.slug,
+      label: workspace.name,
+    })),
+  ]
   const archiveThreads = useMutation({
     mutationFn: agentsApi.resolveAllThreads,
     onSuccess: () => qc.invalidateQueries({ queryKey: ["agent-threads"] }),
@@ -95,7 +102,11 @@ export function PreferencesSection() {
         label="Appearance"
         description="Theme used across the dashboard."
         control={
-          <Select value={theme} onValueChange={(v) => v && setTheme(v)}>
+          <Select
+            items={THEMES}
+            value={theme}
+            onValueChange={(v) => v && setTheme(v)}
+          >
             <SelectTrigger className="w-40">
               <SelectValue />
             </SelectTrigger>
@@ -118,6 +129,7 @@ export function PreferencesSection() {
         }
         control={
           <Select
+            items={VISIBILITIES}
             value={preferences.data?.default_visibility ?? "private"}
             onValueChange={(v) =>
               v &&
@@ -150,6 +162,7 @@ export function PreferencesSection() {
         }
         control={
           <Select
+            items={workspaceItems}
             value={preferences.data?.default_workspace ?? NO_DEFAULT_WORKSPACE}
             onValueChange={(v) =>
               v &&
@@ -168,12 +181,9 @@ export function PreferencesSection() {
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value={NO_DEFAULT_WORKSPACE}>
-                Workspace default
-              </SelectItem>
-              {(workspaceOptions.data?.workspaces ?? []).map((workspace) => (
-                <SelectItem key={workspace.slug} value={workspace.slug}>
-                  {workspace.name}
+              {workspaceItems.map((workspace) => (
+                <SelectItem key={workspace.value} value={workspace.value}>
+                  {workspace.label}
                 </SelectItem>
               ))}
             </SelectContent>
@@ -189,6 +199,7 @@ export function PreferencesSection() {
         }
         control={
           <Select
+            items={FOLLOW_UP_BEHAVIORS}
             value={preferences.data?.follow_up_behavior ?? "queue"}
             onValueChange={(v) =>
               v &&

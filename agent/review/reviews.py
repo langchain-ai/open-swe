@@ -1,9 +1,9 @@
 """Read API for the PR review UI.
 
 Reviewer threads (``metadata.kind == "reviewer"``) hold the durable review
-state for a PR: identity (``pr``), findings, watch flag, and head SHA. These
-endpoints surface that state plus live PR details/diff fetched from GitHub
-with the App installation token.
+state for a PR: identity (``pr``), watch flag, and head SHA; their findings
+live in PostgreSQL. These endpoints surface that state plus live PR
+details/diff fetched from GitHub with the App installation token.
 """
 
 import asyncio
@@ -11,7 +11,7 @@ import ipaddress
 import logging
 import re
 import socket
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Sequence
 from typing import Any, Literal
 from urllib.parse import urljoin, urlparse
 
@@ -32,8 +32,10 @@ from agent.review.assessment_feedback import ASSESSMENTS
 from agent.review.author_guidance import GuidanceView
 from agent.review.findings import (
     REVIEWER_THREAD_KIND,
-    coerce_finding,
+    Finding,
+    FindingLike,
     comment_ids_for_finding,
+    findings_by_thread,
     is_thread_resolved,
 )
 from agent.review_scout.launch import ReviewScoutTarget
@@ -116,17 +118,17 @@ async def _github_post(path: str, token: str, *, json: dict[str, Any]) -> Any:
     return await _github_write("POST", path, token, json=json)
 
 
-def _findings_list(metadata: dict[str, Any]) -> list[dict[str, Any]]:
-    findings = metadata.get("findings")
-    if not isinstance(findings, list):
-        return []
-    return [f for f in findings if isinstance(f, dict) and isinstance(f.get("id"), str)]
+async def _thread_findings(threads: list[ThreadLike]) -> dict[str, list[Finding]]:
+    return await findings_by_thread(
+        {
+            thread_id: thread_metadata(thread)
+            for thread in threads
+            if isinstance(thread_id := thread.get("thread_id"), str)
+        }
+    )
 
 
-def _serialize_finding(finding: dict[str, Any], head_sha: str | None) -> dict[str, Any]:
-    # Records persisted by older revisions carry the legacy GitHub-identity
-    # fields; normalize before reading them through the accessors.
-    coerce_finding(finding)
+def _serialize_finding(finding: FindingLike, head_sha: str | None) -> dict[str, Any]:
     last_confirmed = finding.get("last_confirmed_sha")
     outdated = bool(
         head_sha
@@ -162,7 +164,7 @@ def _serialize_finding(finding: dict[str, Any], head_sha: str | None) -> dict[st
 _BUG_SEVERITIES = frozenset({"high", "critical"})
 
 
-def classify_finding(finding: dict[str, Any]) -> Literal["bug", "investigate", "informational"]:
+def classify_finding(finding: FindingLike) -> Literal["bug", "investigate", "informational"]:
     """Map our severity/confidence model onto the UI's Bugs/Flags split."""
     severity = finding.get("severity", "low")
     confidence = finding.get("confidence", "medium")
@@ -173,7 +175,7 @@ def classify_finding(finding: dict[str, Any]) -> Literal["bug", "investigate", "
     return "informational"
 
 
-def _finding_counts(findings: list[dict[str, Any]]) -> dict[str, int]:
+def _finding_counts(findings: Sequence[FindingLike]) -> dict[str, int]:
     counts = {"open": 0, "resolved": 0, "dismissed": 0, "bugs": 0, "flags": 0}
     for finding in findings:
         status = finding.get("status", "open")
@@ -226,7 +228,9 @@ def _run_status(thread: ThreadLike, metadata: dict[str, Any]) -> str:
     return "idle"
 
 
-def _thread_review_summary(thread: ThreadLike) -> dict[str, Any] | None:
+def _thread_review_summary(
+    thread: ThreadLike, findings: Sequence[FindingLike]
+) -> dict[str, Any] | None:
     metadata = thread_metadata(thread)
     pr = metadata.get("pr")
     if not isinstance(pr, dict):
@@ -236,7 +240,6 @@ def _thread_review_summary(thread: ThreadLike) -> dict[str, Any] | None:
     number = pr.get("number")
     if not (isinstance(owner, str) and isinstance(name, str) and isinstance(number, int)):
         return None
-    findings = _findings_list(metadata)
     updated_at = thread.get("updated_at")
     return {
         "thread_id": thread.get("thread_id"),
@@ -255,6 +258,11 @@ def _thread_review_summary(thread: ThreadLike) -> dict[str, Any] | None:
         "counts": _finding_counts(findings),
         "updated_at": updated_at if isinstance(updated_at, str) else None,
     }
+
+
+async def _review_summary_of(thread: ThreadLike) -> dict[str, Any] | None:
+    findings = await _thread_findings([thread])
+    return _thread_review_summary(thread, findings.get(thread.get("thread_id"), []))
 
 
 async def list_reviews(
@@ -298,10 +306,11 @@ async def list_reviews(
         )
         if not threads:
             break
+        findings = await _thread_findings(threads)
         for thread in threads:
             if not isinstance(thread, dict):
                 continue
-            summary = _thread_review_summary(thread)
+            summary = _thread_review_summary(thread, findings.get(thread.get("thread_id"), []))
             if not summary:
                 continue
             if is_accessible is not None and not await is_accessible(summary):
@@ -334,7 +343,7 @@ async def get_review_summaries(
                 sort_by="updated_at",
                 sort_order="desc",
             )
-            raw = _thread_review_summary(threads[0]) if threads else None
+            raw = await _review_summary_of(threads[0]) if threads else None
             return f"{owner}/{repo}#{number}".lower(), _as_review_summary(raw)
 
     return dict(await asyncio.gather(*(read(*identity) for identity in identities)))
@@ -630,7 +639,8 @@ async def get_review(owner: str, repo: str, pr_number: int) -> dict[str, Any]:
     details = _serialize_pr_details(pr_payload)
 
     thread = await _reviewer_thread_for(owner, repo, pr_number)
-    summary = _thread_review_summary(thread) if thread else None
+    stored = (await _thread_findings([thread])).get(thread.get("thread_id"), []) if thread else []
+    summary = _thread_review_summary(thread, stored) if thread else None
     metadata = thread_metadata(thread) if thread else {}
     if not summary:
         summary = _unreviewed_summary(owner, repo, pr_number, pr_payload)
@@ -638,7 +648,7 @@ async def get_review(owner: str, repo: str, pr_number: int) -> dict[str, Any]:
     head_sha = details["head_sha"] or summary["head_sha"]
     checks = await _fetch_check_runs(owner, repo, head_sha, token)
 
-    findings = [_serialize_finding(finding, head_sha) for finding in _findings_list(metadata)]
+    findings = [_serialize_finding(finding, head_sha) for finding in stored]
     findings.sort(
         key=lambda f: (
             f["status"] != "open",
@@ -685,6 +695,7 @@ class PreviewFile(BaseModel):
 
 
 class PreviewThread(BaseModel):
+    thread_id: str | None = None
     author: str | None = None
     body: str
     path: str

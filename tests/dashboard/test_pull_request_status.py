@@ -112,6 +112,7 @@ async def test_get_statuses_normalizes_live_state_and_paginates_review_threads(
                                     "reviewThreads": {
                                         "nodes": [
                                             {
+                                                "id": "PRRT_1",
                                                 "isResolved": False,
                                                 "path": "a.py",
                                                 "line": 4,
@@ -144,6 +145,7 @@ async def test_get_statuses_normalizes_live_state_and_paginates_review_threads(
                                 "reviewThreads": {
                                     "nodes": [
                                         {
+                                            "id": "PRRT_2",
                                             "isResolved": False,
                                             "path": "b.py",
                                             "line": None,
@@ -227,6 +229,7 @@ async def test_get_statuses_normalizes_live_state_and_paginates_review_threads(
             "unresolvedReviewThreadCount": 2,
             "unresolvedReviewThreads": [
                 {
+                    "thread_id": "PRRT_1",
                     "author": "alice",
                     "body": "fix this",
                     "path": "a.py",
@@ -234,6 +237,7 @@ async def test_get_statuses_normalizes_live_state_and_paginates_review_threads(
                     "url": "https://github.com/o/r/pull/7#discussion_r1",
                 },
                 {
+                    "thread_id": "PRRT_2",
                     "author": "bob",
                     "body": "question",
                     "path": "b.py",

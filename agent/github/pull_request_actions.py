@@ -1,5 +1,6 @@
 """Act on a pull request using the signed-in user's GitHub permissions."""
 
+import logging
 from typing import Annotated, ClassVar, Literal
 
 import httpx2
@@ -12,10 +13,16 @@ from agent.github.http import (
     github_client,
     github_request,
 )
-from agent.github.pull_request_status import pull_request_identity
+from agent.github.pull_request_status import (
+    fetch_unresolved_review_threads,
+    pull_request_identity,
+)
 from agent.github.repo_merge_methods import MergeMethod
 
-PullRequestActionName = Literal["merge", "close", "mark-ready"]
+logger = logging.getLogger(__name__)
+
+PullRequestActionName = Literal["merge", "close", "mark-ready", "update-branch"]
+_COMMENTS_PER_PAGE = 100
 
 # REST cannot clear the draft flag, so marking a PR ready has to go through GraphQL.
 _READY_MUTATION = """
@@ -130,6 +137,7 @@ class MergeAction(_PullRequestActionBase):
 
 class CloseAction(_PullRequestActionBase):
     action: Literal["close"]
+    reason: str = Field(default="", max_length=65_536)
 
     transport_failure: ClassVar[str] = (
         "Could not confirm close. Refresh to check the PR before retrying."
@@ -139,7 +147,49 @@ class CloseAction(_PullRequestActionBase):
     )
     unconfirmed: ClassVar[str] = "GitHub did not confirm the close."
 
+    async def _latest_comment_body(
+        self, client: httpx2.AsyncClient, owner: str, repo: str, number: int
+    ) -> str | None:
+        issue_url = f"{GITHUB_API_BASE}/repos/{owner}/{repo}/issues/{number}"
+        response, issue = await self._request(client, "GET", issue_url)
+        if not response.is_success:
+            raise self._refusal(response, issue)
+        count = issue.get("comments")
+        if not isinstance(count, int) or count < 1:
+            return None
+        last_page = (count + _COMMENTS_PER_PAGE - 1) // _COMMENTS_PER_PAGE
+        try:
+            listed = await github_request(
+                client,
+                "GET",
+                f"{issue_url}/comments?per_page={_COMMENTS_PER_PAGE}&page={last_page}",
+                max_retries=0,
+            )
+            comments = listed.json()
+        except (httpx2.HTTPError, ValueError) as exc:
+            raise HTTPException(502, self.transport_failure) from exc
+        if not listed.is_success or not isinstance(comments, list) or not comments:
+            logger.warning(
+                "Could not read the latest pull request comment",
+                extra={"pr_repo_full_name": f"{owner}/{repo}", "pr_number": number},
+            )
+            raise HTTPException(502, self.transport_failure)
+        last = comments[-1]
+        body = last.get("body") if isinstance(last, dict) else None
+        return body.strip() if isinstance(body, str) else None
+
     async def perform(self, client: httpx2.AsyncClient, owner: str, repo: str, number: int) -> None:
+        reason = self.reason.strip()
+        # A retry after a failed close must not post the same reason twice.
+        if reason and await self._latest_comment_body(client, owner, repo, number) != reason:
+            response, payload = await self._request(
+                client,
+                "POST",
+                f"{GITHUB_API_BASE}/repos/{owner}/{repo}/issues/{number}/comments",
+                {"body": reason},
+            )
+            if not response.is_success:
+                raise self._refusal(response, payload)
         await self._confirm(
             client,
             "PATCH",
@@ -192,9 +242,113 @@ class MarkReadyAction(_PullRequestActionBase):
             raise HTTPException(502, self.unconfirmed)
 
 
+class UpdateBranchAction(_PullRequestActionBase):
+    action: Literal["update-branch"]
+    sha: str = Field(pattern=r"^[0-9a-fA-F]{40,64}$")
+
+    transport_failure: ClassVar[str] = (
+        "Could not confirm the branch update. Refresh to check the PR before retrying."
+    )
+    invalid_response: ClassVar[str] = (
+        "GitHub returned an invalid branch update response. Refresh to check the PR."
+    )
+    unconfirmed: ClassVar[str] = "GitHub did not accept the branch update."
+
+    async def perform(self, client: httpx2.AsyncClient, owner: str, repo: str, number: int) -> None:
+        # GitHub queues the merge and answers 202; expected_head_sha refuses a stale view.
+        response, payload = await self._request(
+            client,
+            "PUT",
+            f"{GITHUB_API_BASE}/repos/{owner}/{repo}/pulls/{number}/update-branch",
+            {"expected_head_sha": self.sha},
+        )
+        if not response.is_success:
+            raise self._refusal(response, payload)
+
+
 PullRequestAction = Annotated[
-    MergeAction | CloseAction | MarkReadyAction, Field(discriminator="action")
+    MergeAction | CloseAction | MarkReadyAction | UpdateBranchAction,
+    Field(discriminator="action"),
 ]
+
+
+_RESOLVE_THREAD_MUTATION = """
+mutation ResolveReviewThread($threadId: ID!) {
+  resolveReviewThread(input: {threadId: $threadId}) {
+    thread {
+      isResolved
+    }
+  }
+}
+"""
+
+
+class ResolveReviewThreads(BaseModel):
+    thread_ids: list[str] = Field(min_length=1, max_length=500)
+
+
+class ResolveReviewThreadsResult(BaseModel):
+    resolved: list[str]
+    failed: list[str]
+
+
+async def _resolve_review_thread(client: httpx2.AsyncClient, thread_id: str) -> bool:
+    try:
+        response = await github_request(
+            client,
+            "POST",
+            GITHUB_GRAPHQL,
+            json={"query": _RESOLVE_THREAD_MUTATION, "variables": {"threadId": thread_id}},
+        )
+        payload = response.json()
+    except httpx2.HTTPError, ValueError:
+        logger.warning(
+            "Failed to resolve review thread",
+            extra={"review_thread_id": thread_id},
+            exc_info=True,
+        )
+        return False
+    if not isinstance(payload, dict):
+        logger.warning("Unexpected resolve response", extra={"review_thread_id": thread_id})
+        return False
+    thread = _node(payload, "data", "resolveReviewThread", "thread")
+    if thread is None or thread.get("isResolved") is not True:
+        logger.warning(
+            "GitHub did not resolve review thread",
+            extra={
+                "review_thread_id": thread_id,
+                "github_error": _graphql_error_message(payload),
+            },
+        )
+        return False
+    return True
+
+
+async def resolve_review_threads(
+    owner: str, repo: str, number: int, body: ResolveReviewThreads, token: str
+) -> ResolveReviewThreadsResult:
+    """Resolve review threads as the signed-in user, limited to this PR's open threads."""
+    if pull_request_identity({"repo_full_name": f"{owner}/{repo}", "number": number}) is None:
+        raise HTTPException(422, "invalid pull request")
+    async with github_client(token=token) as client:
+        threads = await fetch_unresolved_review_threads(client, owner, repo, number)
+        if threads is None:
+            logger.warning(
+                "Review threads unavailable for resolve",
+                extra={"pr_repo_full_name": f"{owner}/{repo}", "pr_number": number},
+            )
+            raise HTTPException(502, "GitHub did not return the review threads")
+        open_ids = {thread["thread_id"] for thread in threads if thread.get("thread_id")}
+        resolved: list[str] = []
+        failed: list[str] = []
+        # Serial on purpose: GitHub's secondary rate limit punishes concurrent mutations.
+        for thread_id in dict.fromkeys(body.thread_ids):
+            if thread_id not in open_ids:
+                continue
+            (resolved if await _resolve_review_thread(client, thread_id) else failed).append(
+                thread_id
+            )
+    return ResolveReviewThreadsResult(resolved=resolved, failed=failed)
 
 
 async def act_on_pull_request(
@@ -203,5 +357,19 @@ async def act_on_pull_request(
     if pull_request_identity({"repo_full_name": f"{owner}/{repo}", "number": number}) is None:
         raise HTTPException(422, "invalid pull request")
     async with github_client(token=token) as client:
-        await action.perform(client, owner, repo, number)
+        try:
+            await action.perform(client, owner, repo, number)
+        except HTTPException as exc:
+            logger.warning(
+                "Pull request action failed",
+                extra={
+                    "pr_repo_full_name": f"{owner}/{repo}",
+                    "pr_number": number,
+                    "pr_action": action.action,
+                    "status_code": exc.status_code,
+                    "error_detail": exc.detail,
+                },
+                exc_info=exc.__cause__ is not None,
+            )
+            raise
     return PullRequestActionResult(action=action.action, done=True)

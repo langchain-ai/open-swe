@@ -19,6 +19,7 @@ import {
   CheckCircleIcon,
   CheckIcon,
   CircleIcon,
+  CircleNotchIcon,
   CodeIcon,
   CopyIcon,
   FlagIcon,
@@ -38,6 +39,7 @@ import {
   XIcon,
 } from "@phosphor-icons/react"
 import { IoLogoGithub } from "react-icons/io5"
+import { toast } from "sonner"
 import {
   FileDiff,
   MultiFileDiff,
@@ -97,7 +99,7 @@ import {
   useDiffOptions,
   warmDiffHighlighter,
 } from "@/features/agents/utils/diffUtils"
-import { IconButton } from "@/components/ui/button"
+import { Button, IconButton } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Textarea } from "@/components/ui/textarea"
 import { api, reviewImageProxyUrl } from "@/lib/api"
@@ -1231,6 +1233,7 @@ function ReviewBodyInner({
         onAddToChat={embedded ? undefined : addToChat}
         registerSection={primary ? registerSection : ignoreSection}
         slice={step ? String(step.index) : "all"}
+        belowStepHeader={step !== undefined}
         registerDiffInstance={registerDiffInstance}
         diffStyle={diffStyle}
         owner={detail.owner}
@@ -1345,6 +1348,9 @@ function ReviewBodyInner({
                     deletions: detail.pr.deletions,
                   }}
                 />
+                {!detail.walkthrough && detail.pr.changed_files > 0 && (
+                  <WalkthroughCallout detail={detail} />
+                )}
                 {detail.assessment && (
                   <ReviewAssessmentCard
                     assessment={detail.assessment}
@@ -1384,11 +1390,6 @@ function ReviewBodyInner({
                             : `${linesLeft} lines left`}
                         </span>
                       )}
-                      {!detail.walkthrough &&
-                        diffFiles &&
-                        diffFiles.length > 0 && (
-                          <WalkthroughButton detail={detail} />
-                        )}
                       {diffFiles && diffFiles.length > 0 && (
                         <div className="flex items-center gap-1">
                           <DiffWrapToggle className="size-5" />
@@ -1454,7 +1455,7 @@ function ReviewBodyInner({
 }
 
 /** Runs the review scout alone, so the walkthrough exists without a full review. */
-function WalkthroughButton({ detail }: { detail: ReviewDetail }) {
+function WalkthroughCallout({ detail }: { detail: ReviewDetail }) {
   const qc = useQueryClient()
   const scout = useMutation({
     mutationFn: () =>
@@ -1464,25 +1465,46 @@ function WalkthroughButton({ detail }: { detail: ReviewDetail }) {
         queryKey: ["review", detail.owner, detail.repo, detail.number],
       })
     },
+    onError: (error) =>
+      toast.error("Couldn't start the walkthrough", {
+        description: error.message,
+      }),
   })
   const running = detail.walkthrough_running || scout.isPending
+  // This card only renders while there is no walkthrough, so a scout that
+  // stops running while it is still mounted ended without one.
+  const wasRunning = useRef(detail.walkthrough_running)
+  useEffect(() => {
+    if (wasRunning.current && !detail.walkthrough_running) {
+      toast.error("The walkthrough failed to build", {
+        description:
+          "The review scout finished without producing steps. Try again, or check its review-scout run in LangSmith.",
+      })
+    }
+    wasRunning.current = detail.walkthrough_running
+  }, [detail.walkthrough_running])
   return (
-    <span className="flex items-center gap-2">
-      {scout.error && (
-        <span className="text-[11px] text-destructive">
-          {scout.error.message}
-        </span>
-      )}
-      <button
-        type="button"
-        onClick={() => scout.mutate()}
-        disabled={running}
-        className="inline-flex items-center gap-1 rounded border border-border px-1.5 py-0.5 text-[11px] text-muted-foreground hover:text-foreground disabled:opacity-50"
-      >
-        <ListNumbersIcon className="size-3" />
-        {running ? "Building walkthrough…" : "Build walkthrough"}
-      </button>
-    </span>
+    <div className="mt-4 flex items-center gap-4 rounded-lg border border-primary/40 bg-primary/5 p-4">
+      <ListNumbersIcon className="size-6 shrink-0 text-primary" />
+      <div className="min-w-0 flex-1">
+        <p className="text-sm font-medium">
+          {running ? "Building the walkthrough…" : "Read this PR step by step"}
+        </p>
+        <p className="mt-0.5 text-xs text-muted-foreground">
+          {running
+            ? "The review scout is ordering the changes into narrated steps. This takes a few minutes; the page updates on its own."
+            : "The review scout orders the changes into narrated steps and moves mechanical edits to the end."}
+        </p>
+      </div>
+      <Button size="lg" onClick={() => scout.mutate()} disabled={running}>
+        {running ? (
+          <CircleNotchIcon className="animate-spin" />
+        ) : (
+          <ListNumbersIcon />
+        )}
+        {running ? "Building…" : "Build walkthrough"}
+      </Button>
+    </div>
   )
 }
 
@@ -1558,10 +1580,8 @@ function VirtualizerBridge({
   return <div ref={probeRef} aria-hidden className="hidden" />
 }
 
-// The block header: number + title + stats, then the block description. Pinned
-// at the top of the diff scroller while scrolling the block (Google-Docs feel),
-// stacked above Pierre's in-diff sticky header (z-index 4). A long description
-// scrolls within the pinned header instead of consuming the viewport.
+// Only the title row is pinned, stacked above Pierre's in-diff sticky header
+// (z-index 4); the description scrolls with the page.
 function GroupHeader({ group }: { group: ResolvedGroup }) {
   const title = useMemo(() => renderInlineCode(group.title), [group.title])
   const summary = useMemo(
@@ -1569,8 +1589,8 @@ function GroupHeader({ group }: { group: ResolvedGroup }) {
     [group.summary]
   )
   return (
-    <div className="sticky top-0 z-[5] border-b border-border bg-background py-2">
-      <div className="flex items-center gap-2">
+    <>
+      <div className="sticky top-0 z-[5] flex h-9 items-center gap-2 border-b border-border bg-background">
         <span className="flex size-5 shrink-0 items-center justify-center rounded bg-accent text-[11px] font-medium text-muted-foreground">
           {group.index}
         </span>
@@ -1585,11 +1605,11 @@ function GroupHeader({ group }: { group: ResolvedGroup }) {
         </span>
       </div>
       {summary && (
-        <div className="mt-2 max-h-40 overflow-y-auto text-xs text-muted-foreground">
+        <div className="text-xs text-muted-foreground">
           <Markdown content={summary} />
         </div>
       )}
-    </div>
+    </>
   )
 }
 
@@ -1597,6 +1617,7 @@ const FileDiffCard = memo(function FileDiffCard({
   file,
   fileDiff,
   slice,
+  belowStepHeader,
   additions,
   deletions,
   findings,
@@ -1634,6 +1655,8 @@ const FileDiffCard = memo(function FileDiffCard({
   onSelectLines: (path: string, range: SelectedLineRange | null) => void
   onAddToChat?: (path: string, range: SelectedLineRange) => void
   registerSection: (path: string, node: HTMLDivElement | null) => void
+  /** The step's pinned title sits above, so the file name pins just below it. */
+  belowStepHeader: boolean
   /** Which rendering of the file this card is, when a walkthrough splits it. */
   slice: string
   registerDiffInstance: (
@@ -1843,9 +1866,15 @@ const FileDiffCard = memo(function FileDiffCard({
   return (
     <div
       ref={sectionRef}
-      className="scroll-mt-4 overflow-hidden rounded-lg border border-border"
+      className="scroll-mt-4 overflow-clip rounded-lg border border-border"
     >
-      <div className="flex items-center gap-2 bg-accent px-3 py-2 text-xs">
+      <div
+        className={cn(
+          // accent is translucent; the background underlay keeps code from showing through.
+          "sticky z-[5] flex items-center gap-2 bg-[linear-gradient(var(--accent),var(--accent)),linear-gradient(var(--background),var(--background))] px-3 py-2 text-xs",
+          belowStepHeader ? "top-9" : "top-0"
+        )}
+      >
         <button
           type="button"
           onClick={() => onToggleExpanded(file.path)}
@@ -1902,6 +1931,9 @@ const FileDiffCard = memo(function FileDiffCard({
             {fileDiff ? (
               <FileDiff<ReviewAnnotation>
                 fileDiff={fileDiff}
+                // Pierre's worker pool highlights partial diffs out of step with
+                // the rendered window ("deletionLine and additionLine are null").
+                disableWorkerPool
                 options={cardOptions}
                 metrics={DIFF_VIRTUAL_METRICS}
                 lineAnnotations={lineAnnotations}
