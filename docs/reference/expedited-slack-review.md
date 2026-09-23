@@ -57,7 +57,7 @@ are already in the Slack thread.
 
 ### Slack card
 
-PR link, revision, author, the diff as the card draws it, and its status. A draft's
+PR link, author, the diff as the card draws it, and its status. A draft's
 card has one button, **Mark ready for review**; otherwise it has **Approve** and
 **Reject**. Once approved, the diff and buttons go and the card
 says who approved. Once merged, the whole card becomes *Expedited review: merged* and

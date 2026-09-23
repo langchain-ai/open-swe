@@ -41,7 +41,7 @@ def _header(approval: ExpeditedApproval, title: str, author: str) -> list[Block]
     label = f"{pr.owner}/{pr.repo}#{pr.number}"
     return [
         section(f"*Expedited review requested*\n<{pr.url}|{label}> {escape(title)}"),
-        context(f"Revision `{approval.head_sha[:12]}` · author {author}"),
+        context(f"Author {author}"),
     ]
 
 
@@ -152,7 +152,7 @@ def open_card(
         *_voting_diff(approval, files, diff_image_id),
         *_status(approval, author),
     ]
-    text = f"Expedited review requested for {pr.url} ({approval.head_sha[:12]})"
+    text = f"Expedited review requested for {pr.url}"
     return text, blocks
 
 
