@@ -10,7 +10,9 @@ from langgraph_sdk import get_client
 from langgraph_sdk.errors import ConflictError
 from pydantic import BaseModel, ConfigDict, Field
 
+from agent.database import postgres
 from agent.dispatch import dispatch_agent_run
+from agent.expedited_review.approvals import ExpeditedApproval
 from agent.github.app import get_github_app_installation_token
 from agent.github.ci import (
     FAILING_CONCLUSIONS,
@@ -309,13 +311,29 @@ async def _finish_watch(watch: BabySitWatch, message: str) -> str:
     return "stopped"
 
 
+async def _has_expedited_card(watch: BabySitWatch) -> bool:
+    if not postgres.configured():
+        return False
+    try:
+        approval = await ExpeditedApproval.active_for(watch.owner, watch.repo, watch.pr_number)
+    except Exception:
+        logger.warning("Expedited review lookup failed for %s", watch.key, exc_info=True)
+        return False
+    return approval is not None and approval.thread_id in {"", watch.thread_id}
+
+
 async def _finish_ready(watch: BabySitWatch) -> str:
     """Hand a green PR back to its agent thread, which decides whether to merge or report."""
+    prompt = (
+        "runs/baby-sit-ready-expedited.md"
+        if await _has_expedited_card(watch)
+        else "runs/baby-sit-ready.md"
+    )
     try:
         configurable = watch.dispatch_config()
         await dispatch_agent_run(
             watch.thread_id,
-            render_prompt("runs/baby-sit-ready.md", pr_url=watch.pr_url, head_sha=watch.head_sha),
+            render_prompt(prompt, pr_url=watch.pr_url, head_sha=watch.head_sha),
             configurable,
             source=str(configurable.get("source") or "github"),
             metadata={},
