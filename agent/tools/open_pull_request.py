@@ -1130,3 +1130,37 @@ async def open_pull_request(
         resolves_thread=resolves_thread,
         author=author or None,
     )
+
+
+def _ref_name(pr: dict[str, Any], side: str) -> str:
+    branch = pr.get(side)
+    ref = branch.get("ref") if isinstance(branch, dict) else None
+    return ref if isinstance(ref, str) else ""
+
+
+async def link_pull_request(pr_url: str, resolves_thread: bool = False) -> dict[str, Any]:
+    """Implement the `link_pull_request` tool."""
+    ref = parse_github_pr_url(pr_url)
+    if ref is None:
+        return {"success": False, "error": f"Not a GitHub pull request URL: {pr_url}"}
+    token, kind = await _resolve_pr_author_token()
+    if not token:
+        return {"success": False, "error": "No GitHub token was available to read the PR"}
+    async with httpx2.AsyncClient(timeout=30.0) as client:
+        if kind == "user" and not await _workspace_has_repository(client, ref.owner, ref.repo):
+            return {"success": False, "error": f"{ref.owner}/{ref.repo} is not in this workspace"}
+        pr = await _fetch_pr_details(client, token, ref.owner, ref.repo, ref.number)
+        if not pr:
+            return {"success": False, "error": f"Could not read {pr_url}"}
+        await _record_pr_telemetry(
+            client=client,
+            token=token,
+            owner=ref.owner,
+            repo=ref.repo,
+            head=_ref_name(pr, "head"),
+            base=_ref_name(pr, "base"),
+            pr=pr,
+            resolves_thread=resolves_thread,
+            record_opening=False,
+        )
+    return {"success": True, "url": pr.get("html_url"), "number": ref.number}
