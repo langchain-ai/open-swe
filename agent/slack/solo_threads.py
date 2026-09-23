@@ -2,7 +2,6 @@
 
 import asyncio
 import logging
-from time import time
 
 from langgraph_sdk.client import LangGraphClient
 
@@ -13,7 +12,6 @@ from agent.utils.json_types import JsonObject
 
 logger = logging.getLogger(__name__)
 
-SOLO_THREAD_IDLE_SECONDS = 24 * 60 * 60
 _NAMESPACE = "slack_solo_threads"
 _MAX_HISTORY_PAGES = 5
 
@@ -82,10 +80,7 @@ async def allow_solo_thread_followup(
                 return False
             last_seen = value.get("last_seen")
             if not explicit_mention and (
-                not isinstance(last_seen, (int, float))
-                or timestamp < last_seen
-                or timestamp - last_seen > SOLO_THREAD_IDLE_SECONDS
-                or time() - timestamp > SOLO_THREAD_IDLE_SECONDS
+                not isinstance(last_seen, (int, float)) or timestamp < last_seen
             ):
                 return False
             solo = await _thread_is_solo(channel_id, thread_ts, user_id)

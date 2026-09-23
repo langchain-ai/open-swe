@@ -110,7 +110,6 @@ def harness(monkeypatch: pytest.MonkeyPatch) -> _Harness:
     state.history.append({"ts": "1000.0", "user": "U1", "text": "initial question"})
     monkeypatch.setattr(solo_threads.SlackClient, "bot", state.bot)
     monkeypatch.setattr(solo_threads, "slack_thread_mutation_lock", state.mutation_lock)
-    monkeypatch.setattr(solo_threads, "time", lambda: state.now)
     monkeypatch.setattr(routes, "get_langgraph_client", lambda: cast(LangGraphClient, state))
     monkeypatch.setattr(routes.service, "process_slack_mention", state.process)
     monkeypatch.setattr(common, "verify_slack_signature", lambda **_kwargs: True)
@@ -179,16 +178,14 @@ async def test_bots_do_not_disarm_or_gain_followup_routing(harness: _Harness) ->
     assert (await harness.send("continue"))["status"] == "accepted"
 
 
-async def test_idle_expiry_requires_new_mention_and_activity_extends_it(harness: _Harness) -> None:
+async def test_idle_thread_accepts_followups_until_second_human_joins(harness: _Harness) -> None:
     await harness.send("<@BOT> help")
-    harness.now += solo_threads.SOLO_THREAD_IDLE_SECONDS - 2
+    harness.now += 30 * 24 * 60 * 60
     assert (await harness.send("continue"))["status"] == "accepted"
-    harness.now += solo_threads.SOLO_THREAD_IDLE_SECONDS - 2
-    assert (await harness.send("again"))["status"] == "accepted"
-    harness.now += solo_threads.SOLO_THREAD_IDLE_SECONDS
-    assert (await harness.send("too late"))["status"] == "ignored"
-    await harness.send("<@BOT> resume")
-    assert (await harness.send("continue"))["status"] == "accepted"
+    assert harness.requests[-1].treat_all_messages_as_mentions is True
+    assert (await harness.send("I have thoughts", user="U2"))["status"] == "ignored"
+    harness.now += 30 * 24 * 60 * 60
+    assert (await harness.send("continue"))["status"] == "ignored"
 
 
 @pytest.mark.parametrize(
