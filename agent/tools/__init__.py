@@ -34,6 +34,7 @@ _TOOL_MODULES = {
     "read_repo_file": "agent.github.tools.read_repo_file",
     "read_user_settings": ".read_user_settings",
     "record_guidance": ".record_guidance",
+    "request_pr_review": ".request_pr_review",
     "recreate_sandbox": ".recreate_sandbox",
     "refresh_workspace_start": ".workspaces",
     "configure_repository": ".workspaces",
@@ -99,6 +100,7 @@ __all__ = [
     "read_repo_file",
     "read_user_settings",
     "record_guidance",
+    "request_pr_review",
     "recreate_sandbox",
     "refresh_workspace_start",
     "configure_repository",
@@ -177,6 +179,7 @@ if TYPE_CHECKING:
     from agent.tools.recreate_sandbox import recreate_sandbox
     from agent.tools.reply_to_finding_thread import reply_to_finding_thread
     from agent.tools.report_platform_issue import report_platform_issue
+    from agent.tools.request_pr_review import request_pr_review
     from agent.tools.resolve_finding_thread import resolve_finding_thread
     from agent.tools.save_plan import save_plan
     from agent.tools.save_user_instructions import save_user_instructions

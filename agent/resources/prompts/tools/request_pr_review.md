@@ -1,0 +1,1 @@
+Start an Open SWE review for a pull request. Provide either `pr_url` as a full GitHub pull request URL or the explicit `owner`, `repo`, and `pr_number` values. Reviews are started only through this tool, the dashboard, or a GitHub webhook; do not probe `$OPEN_SWE_TOOLS_URL` or claim that a review-trigger tool was available earlier in the session.
