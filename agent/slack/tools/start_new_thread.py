@@ -94,7 +94,7 @@ def _truncate_for_slack(text: str) -> str:
 
 
 def _visible_message(title: str) -> str:
-    return f"*Open SWE breakout thread:* {title}"
+    return f"*Breakout thread:* {title}"
 
 
 def _thread_details(instructions: str, repo: dict[str, str] | None) -> str:

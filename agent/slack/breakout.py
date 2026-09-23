@@ -76,23 +76,23 @@ async def _tell_sender(request: SlackRequest, text: str) -> None:
 async def _move(request: SlackRequest) -> None:
     thread_id = request.thread_id
     if not thread_id or not await common.thread_exists(thread_id):
-        await _tell_sender(request, "There is no Open SWE thread here to break out yet.")
+        await _tell_sender(request, "There is nothing here to break out yet.")
         return
     client = langgraph_client()
     metadata = thread_metadata(await client.threads.get(thread_id))
     if common.thread_is_private(metadata):
-        await _tell_sender(request, "Private Open SWE threads cannot be broken out.")
+        await _tell_sender(request, "Private threads cannot be broken out.")
         return
     active = await get_active_slack_thread(client, thread_id)
     if not active or (active.get("channel_id"), active.get("thread_ts")) != (
         request.channel_id,
         request.thread_ts,
     ):
-        await _tell_sender(request, "This Open SWE thread already lives in another Slack thread.")
+        await _tell_sender(request, "This thread already moved to another Slack thread.")
         return
 
-    title = str(metadata.get("title") or "").strip() or "Open SWE thread"
-    heading = f"*Open SWE breakout thread:* {_title(title)}"
+    title = str(metadata.get("title") or "").strip() or "Untitled"
+    heading = f"*Breakout thread:* {_title(title)}"
     result = await move_slack_thread(
         client,
         thread_id,
@@ -106,7 +106,7 @@ async def _move(request: SlackRequest) -> None:
             "Slack breakout move failed",
             extra={"agent_thread_id": thread_id, "move_error": result.get("error")},
         )
-        await _tell_sender(request, "Open SWE could not move this thread; try again.")
+        await _tell_sender(request, "Could not move this thread; try again.")
         return
     await _link_back(request, new_ts)
 
@@ -114,7 +114,7 @@ async def _move(request: SlackRequest) -> None:
 async def _start(
     request: SlackRequest, instruction: str, repo: common.SlackRepoResolution | None
 ) -> None:
-    heading = f"*Open SWE breakout thread:* {_title(instruction)}"
+    heading = f"*Breakout thread:* {_title(instruction)}"
     new_ts, slack_error = await post_slack_top_level_message_with_ts(
         request.channel_id,
         await _root_text(request, heading),
@@ -123,7 +123,7 @@ async def _start(
     )
     if not new_ts:
         logger.warning("Slack breakout root post failed", extra={"slack_error": slack_error})
-        await _tell_sender(request, "Open SWE could not start a breakout thread; try again.")
+        await _tell_sender(request, "Could not start a breakout thread; try again.")
         return
     await _link_back(request, new_ts)
     thread_id = await common.resolve_slack_thread_id(langgraph_client(), request.channel_id, new_ts)
@@ -151,4 +151,4 @@ async def process_slack_breakout(
             await _move(request)
     except Exception:
         logger.exception("Slack breakout failed", extra={"agent_thread_id": request.thread_id})
-        await _tell_sender(request, "Open SWE could not break out this thread; try again.")
+        await _tell_sender(request, "Could not break out this thread; try again.")

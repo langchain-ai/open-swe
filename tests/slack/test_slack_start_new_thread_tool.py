@@ -184,7 +184,7 @@ async def test_slack_start_new_thread_success(monkeypatch: pytest.MonkeyPatch) -
     }
     assert captured["top_level_post"]["channel_id"] == "C1"
     assert captured["top_level_post"]["text"] == (
-        "*Open SWE breakout thread:* Investigate follow-up\n"
+        "*Breakout thread:* Investigate follow-up\n"
         ":arrow_right_hook: Broken out from <https://p/src|this thread>"
     )
     source_thread_ts = _config()["configurable"]["slack_thread"]["thread_ts"]
