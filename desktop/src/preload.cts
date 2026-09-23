@@ -78,6 +78,8 @@ contextBridge.exposeInMainWorld("openSweDesktop", {
   getLocalPrDiff: (threadId) =>
     ipcRenderer.invoke("desktop:get-local-pr-diff", threadId),
   getProjectDiff: (cwd) => ipcRenderer.invoke("desktop:get-project-diff", cwd),
+  readWorkspacePath: (input) =>
+    ipcRenderer.invoke("desktop:read-workspace-path", { ...input }),
   onProjectsChanged: (callback) => {
     const listener = (_event, projects) => callback(projects);
     ipcRenderer.on("desktop:projects-changed", listener);

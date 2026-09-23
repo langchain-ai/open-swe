@@ -8,6 +8,7 @@ import type {
   AutomationTrigger,
   WorkflowPushApprovalsResponse,
 } from "./types"
+import type { WorkspacePath } from "./workspaceFiles"
 import { dashboardApiBase } from "@/lib/api-base"
 import {
   dashboardApiUrl,
@@ -423,6 +424,10 @@ export const agentsApi = {
   getThreadWorkingTreeDiff: (threadId: string) =>
     agentsRequest<ThreadTurnDiff>(
       `/threads/${encodeURIComponent(threadId)}/working-tree-diff`
+    ),
+  getThreadPath: (threadId: string, path: string) =>
+    agentsRequest<WorkspacePath>(
+      `/threads/${encodeURIComponent(threadId)}/files?path=${encodeURIComponent(path)}`
     ),
   downloadThreadRecoveryPatch: (threadId: string) =>
     agentsBlobRequest(

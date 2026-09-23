@@ -20,6 +20,7 @@ from agent.threads.diffs import (
     get_dashboard_thread_working_tree_diff,
 )
 from agent.threads.feedback import feedback_router
+from agent.threads.files import get_dashboard_thread_path
 from agent.threads.handlers import (
     admin_cancel_dashboard_thread,
     cancel_dashboard_thread,
@@ -286,6 +287,17 @@ async def api_get_thread_branch_diff(
         thread_id,
         session["sub"],
         email=session.get("email"),
+    )
+
+
+@router.get("/threads/{thread_id}/files")
+async def api_get_thread_path(
+    thread_id: str,
+    path: str = "",
+    session: dict[str, Any] = SESSION_DEP,
+) -> dict[str, Any]:
+    return await get_dashboard_thread_path(
+        thread_id, session["sub"], path, email=session.get("email")
     )
 
 
