@@ -522,7 +522,9 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
           onRename={(title) =>
             renameThread.mutateAsync({ threadId: thread.id, title })
           }
-          target="Cloud"
+          target={
+            thread.sandboxId?.startsWith("bridge:") ? "Local CLI" : "Cloud"
+          }
           panelCollapsed={panelCollapsed}
           thread={thread}
         />

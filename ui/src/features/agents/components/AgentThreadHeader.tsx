@@ -82,7 +82,7 @@ export function AgentThreadHeader({
   onVisibilityChange,
 }: {
   title?: string | null
-  target: "Cloud" | "This Mac"
+  target: "Cloud" | "This Mac" | "Local CLI"
   panelCollapsed: boolean
   onRename?: (title: string) => Promise<unknown>
   localThread?: DesktopLocalThreadSummary
