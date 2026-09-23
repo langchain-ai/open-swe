@@ -21,7 +21,13 @@ from slack_sdk.errors import SlackApiError
 from slack_sdk.web.async_slack_response import AsyncSlackResponse
 
 from agent.config import ENV
-from agent.slack.http import SLACK_REQUEST_ERRORS, SlackClient, slack_error, slack_retry_after
+from agent.slack.http import (
+    SLACK_REQUEST_ERRORS,
+    SlackClient,
+    slack_error,
+    slack_error_details,
+    slack_retry_after,
+)
 from agent.source_context import SlackThreadRef, SourceContext
 from agent.thread_ids import slack_thread_id
 from agent.utils.dashboard_links import dashboard_thread_url
@@ -469,7 +475,10 @@ async def _post_slack_message_with_ts(
         return None, None
     except SLACK_REQUEST_ERRORS as exc:
         error = slack_error(exc)
-        logger.warning("Slack message request failed", extra={"slack_error": error})
+        logger.warning(
+            "Slack message request failed",
+            extra={"slack_error": error, "slack_error_details": slack_error_details(exc)},
+        )
         return None, error
 
 
@@ -916,7 +925,10 @@ async def update_slack_message(
         return True, None
     except SLACK_REQUEST_ERRORS as exc:
         error = slack_error(exc)
-        logger.warning("Slack message request failed", extra={"slack_error": error})
+        logger.warning(
+            "Slack message request failed",
+            extra={"slack_error": error, "slack_error_details": slack_error_details(exc)},
+        )
         return False, error
 
 

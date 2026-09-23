@@ -115,17 +115,26 @@ async def post_card(
     location = approval.slack_location
     if location is None:
         return None, "no Slack thread"
-    text, blocks = card.open_card(
-        approval, title=title, files=files, diff_image_id=await _diff_image_id(approval, files)
-    )
-    return await post_slack_thread_reply_with_ts(
-        location[0],
-        location[1],
-        text,
-        blocks=block_payload(blocks),
-        agent_thread_id=approval.thread_id or None,
-        reply_broadcast=True,
-    )
+    diff_image_id = await _diff_image_id(approval, files)
+    while True:
+        text, blocks = card.open_card(
+            approval, title=title, files=files, diff_image_id=diff_image_id
+        )
+        message_ts, error = await post_slack_thread_reply_with_ts(
+            location[0],
+            location[1],
+            text,
+            blocks=block_payload(blocks),
+            agent_thread_id=approval.thread_id or None,
+            reply_broadcast=True,
+        )
+        if message_ts or error != "invalid_blocks" or diff_image_id is None:
+            return message_ts, error
+        logger.warning(
+            "Slack refused the expedited review card with its diff image; posting the text diff",
+            extra={"approval_id": str(approval.id)},
+        )
+        diff_image_id = None
 
 
 async def refresh_card(approval: ExpeditedApproval, *, outcome: str | None = None) -> None:
@@ -136,17 +145,24 @@ async def refresh_card(approval: ExpeditedApproval, *, outcome: str | None = Non
     token = await repo_token(pr.owner, pr.repo)
     files = await _files_for(approval, token) if token else []
     diff_image_id = await _diff_image_id(approval, files)
-    if outcome is None:
-        text, blocks = card.open_card(
-            approval, title=pr.title, files=files, diff_image_id=diff_image_id
+    while True:
+        if outcome is None:
+            text, blocks = card.open_card(
+                approval, title=pr.title, files=files, diff_image_id=diff_image_id
+            )
+        else:
+            text, blocks = card.closed_card(
+                approval, title=pr.title, files=files, outcome=outcome, diff_image_id=diff_image_id
+            )
+        ok, error = await update_slack_message(
+            approval.slack_channel_id,
+            approval.slack_message_ts,
+            text,
+            blocks=block_payload(blocks),
         )
-    else:
-        text, blocks = card.closed_card(
-            approval, title=pr.title, files=files, outcome=outcome, diff_image_id=diff_image_id
-        )
-    ok, error = await update_slack_message(
-        approval.slack_channel_id, approval.slack_message_ts, text, blocks=block_payload(blocks)
-    )
+        if ok or error != "invalid_blocks" or diff_image_id is None:
+            break
+        diff_image_id = None
     if not ok:
         logger.warning(
             "Failed to update expedited review card",
