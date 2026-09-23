@@ -173,6 +173,7 @@ async def test_slack_start_new_thread_success(monkeypatch: pytest.MonkeyPatch) -
         "thread_id": expected_thread_id,
         "thread_ts": new_ts,
         "dashboard_url": f"https://dashboard.example/agents/{expected_thread_id}",
+        "next_step": "End the turn with slack_no_reply_needed; do not reply in the current thread.",
     }
     assert captured["top_level_post"]["channel_id"] == "C1"
     assert captured["top_level_post"]["text"] == (

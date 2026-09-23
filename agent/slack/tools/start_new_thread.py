@@ -336,4 +336,5 @@ async def slack_start_new_thread(
         "thread_id": thread_id,
         "thread_ts": message_ts,
         "dashboard_url": dashboard_thread_url(thread_id),
+        "next_step": "End the turn with slack_no_reply_needed; do not reply in the current thread.",
     }
