@@ -1,4 +1,9 @@
-import { Link, useNavigate } from "@tanstack/react-router"
+import {
+  Link,
+  useNavigate,
+  useRouter,
+  useRouterState,
+} from "@tanstack/react-router"
 import {
   CaretDownIcon,
   CaretRightIcon,
@@ -110,6 +115,7 @@ import {
 import { useCopyToClipboard } from "@/lib/useCopyToClipboard"
 import { cn } from "@/lib/utils"
 import { useChatRoutes } from "@/lib/chatRoutes"
+import { getLastSectionLocation, sectionOf } from "@/lib/appLocation"
 
 interface AgentsSidebarProps {
   user: SessionUser | null
@@ -221,6 +227,18 @@ export function AgentsSidebar({
   } = useSidebarPrefs()
   const isDesktop =
     typeof window !== "undefined" && Boolean(window.openSweDesktop)
+  const activeSection = useRouterState({
+    select: (state) => sectionOf(state.location.pathname),
+  })
+  const router = useRouter()
+  const sectionLinkTarget = (href: string) => {
+    const url = new URL(href, "http://localhost")
+    return {
+      to: url.pathname,
+      search: router.options.parseSearch(url.search),
+      hash: url.hash.slice(1) || undefined,
+    }
+  }
   const [updateState, setUpdateState] = useState<DesktopUpdateState>({
     status: "idle",
   })
@@ -743,15 +761,18 @@ export function AgentsSidebar({
               >
                 {NAV.map((item) => {
                   const Icon = item.icon
+                  const active = activeSection === item.to
                   return (
                     <Link
                       key={item.to}
-                      to={item.to}
+                      {...sectionLinkTarget(
+                        active ? item.to : getLastSectionLocation(item.to)
+                      )}
                       onClick={layout.closeOnMobile}
-                      className="flex items-center gap-2.5 rounded-md px-2.5 py-1.5 text-sm text-foreground transition-colors hover:bg-sidebar-row-hover"
-                      activeProps={{
-                        className: "bg-sidebar-row-hover font-medium",
-                      }}
+                      className={cn(
+                        "flex items-center gap-2.5 rounded-md px-2.5 py-1.5 text-sm text-foreground transition-colors hover:bg-sidebar-row-hover",
+                        active && "bg-sidebar-row-hover font-medium"
+                      )}
                     >
                       <Icon className="size-4" />
                       {item.label}

@@ -51,6 +51,7 @@ query PullRequestReviewThreads($owner: String!, $repo: String!, $number: Int!, $
       reviewThreads(first: 100, after: $cursor) {
         pageInfo { hasNextPage endCursor }
         nodes {
+          id
           isResolved
           path
           line
@@ -448,6 +449,9 @@ async def fetch_unresolved_review_threads(
                     line = thread.get("originalLine")
                 unresolved.append(
                     {
+                        "thread_id": thread.get("id")
+                        if isinstance(thread.get("id"), str)
+                        else None,
                         "author": author.get("login")
                         if isinstance(author, dict) and isinstance(author.get("login"), str)
                         else None,

@@ -122,6 +122,13 @@ export function hasUnresolvedConversations(pr: OpenPullRequest) {
   return pr.unresolvedThreads === null || pr.unresolvedThreads > 0
 }
 
+// A conflicted branch cannot be updated by GitHub; the Fix action covers it.
+export function canUpdateBranch(pr: OpenPullRequest) {
+  return (
+    Boolean(pr.headSha) && pr.mergeable !== false && pr.mergeState !== "dirty"
+  )
+}
+
 // Offer the merge unless GitHub has already refused it. It enforces rules the
 // dashboard cannot see — an unresolved conversation, say — so an attempt that
 // only might fail is still worth offering, and its refusal is the answer. A

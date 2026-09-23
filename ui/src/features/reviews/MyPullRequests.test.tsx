@@ -949,24 +949,27 @@ describe("My PRs", () => {
     mount()
     const card = (await screen.findByText("Change 1")).closest("li")!
     fireEvent.click(within(card).getByRole("button", { name: "Close" }))
-    const dialog = await screen.findByRole("alertdialog")
+    const dialog = await screen.findByRole("dialog")
     expect(within(dialog).getByText("Close acme/app#1?")).toBeTruthy()
     fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }))
-    await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull())
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull())
     expect(api.closePullRequest).not.toHaveBeenCalled()
     expect(screen.getByText("Change 1")).toBeTruthy()
     fireEvent.click(within(card).getByRole("button", { name: "Close" }))
+    const reopened = await screen.findByRole("dialog")
+    fireEvent.change(within(reopened).getByRole("textbox"), {
+      target: { value: "  Superseded by #2  " },
+    })
     fireEvent.click(
-      within(await screen.findByRole("alertdialog")).getByRole("button", {
-        name: "Close pull request",
-      })
+      within(reopened).getByRole("button", { name: "Close pull request" })
     )
     await waitFor(() =>
       expect(within(card).getByText(/^Closed ·/)).toBeTruthy()
     )
     expect(within(card).queryByRole("button", { name: "Close" })).toBeNull()
     expect(api.closePullRequest).toHaveBeenCalledWith(
-      expect.objectContaining({ number: 1 })
+      expect.objectContaining({ number: 1 }),
+      "Superseded by #2"
     )
     expect(toast.success).toHaveBeenCalledWith("Closed acme/app#1")
   })

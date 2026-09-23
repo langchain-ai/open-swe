@@ -1,4 +1,5 @@
-import { QueryCache, QueryClient } from "@tanstack/react-query"
+import { MutationCache, QueryCache, QueryClient } from "@tanstack/react-query"
+import { toast } from "sonner"
 
 export function makeQueryClient() {
   return new QueryClient({
@@ -10,6 +11,17 @@ export function makeQueryClient() {
         if (typeof onRefreshErrorChange === "function") {
           ;(onRefreshErrorChange as (error: null) => void)(null)
         }
+      },
+    }),
+    mutationCache: new MutationCache({
+      onError: (error, _variables, _context, mutation) => {
+        console.error("Mutation failed", {
+          mutationKey: mutation.options.mutationKey,
+          error,
+        })
+        // Mutations with their own onError already tell the user what failed.
+        if (!mutation.options.onError)
+          toast.error("Something went wrong", { description: error.message })
       },
     }),
     defaultOptions: {

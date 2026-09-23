@@ -11,9 +11,9 @@ export type CheckOutcome = "failed" | "running" | "passed" | "skipped"
 
 export function checkOutcome(check: CheckLike): CheckOutcome {
   if (check.status !== "completed") return "running"
-  if (check.conclusion === "success" || check.conclusion === "neutral")
-    return "passed"
-  if (check.conclusion === "skipped") return "skipped"
+  if (check.conclusion === "success") return "passed"
+  if (check.conclusion === "neutral" || check.conclusion === "skipped")
+    return "skipped"
   return "failed"
 }
 
