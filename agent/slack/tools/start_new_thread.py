@@ -12,6 +12,7 @@ from agent.run_config import RunConfig
 from agent.slack.client import (
     bind_slack_thread_id,
     get_active_slack_thread,
+    get_slack_permalink,
     post_slack_thread_reply_with_ts,
     post_slack_top_level_message_with_ts,
     store_slack_run_mapping,
@@ -365,9 +366,12 @@ async def slack_start_new_thread(
             triggering_user_id=new_slack_thread.get("triggering_user_id") or None,
         )
 
+    slack_url = await get_slack_permalink(clean_channel_id, message_ts)
     return {
         "success": True,
         "thread_id": thread_id,
         "thread_ts": message_ts,
         "dashboard_url": dashboard_thread_url(thread_id),
+        "slack_url": slack_url
+        or f"https://slack.com/archives/{clean_channel_id}/p{message_ts.replace('.', '')}",
     }
