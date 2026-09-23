@@ -468,6 +468,10 @@ it("expands model totals into reasoning effort rows", async () => {
               decided_merge_rate: 0.5,
               mature_denominator: 2,
               mature_cohort_merge_share: 0.5,
+              median_distance_basis_points: null,
+              distance_sample_size: 0,
+              avg_delivery_seconds: null,
+              avg_merge_seconds: null,
             },
             {
               effort: "high",
@@ -480,6 +484,10 @@ it("expands model totals into reasoning effort rows", async () => {
               decided_merge_rate: 1,
               mature_denominator: 2,
               mature_cohort_merge_share: 1,
+              median_distance_basis_points: 250,
+              distance_sample_size: 2,
+              avg_delivery_seconds: 1800,
+              avg_merge_seconds: 3600,
             },
           ],
         },
@@ -492,8 +500,28 @@ it("expands model totals into reasoning effort rows", async () => {
   fireEvent.click(
     screen.getByRole("button", { name: /Expand.*reasoning efforts/ })
   )
-  expect(screen.getByText("Low")).toBeTruthy()
-  expect(screen.getByText("High")).toBeTruthy()
+  const low = screen.getByText("Low").closest("tr")!
+  const high = screen.getByText("High").closest("tr")!
+  expect(
+    within(low)
+      .getAllByRole("cell")
+      .map((cell) => cell.textContent)
+  ).toEqual(["Low", "2", "1", "1", "0", "—", "50%", "—", "—"])
+  expect(
+    within(high)
+      .getAllByRole("cell")
+      .map((cell) => cell.textContent)
+  ).toEqual([
+    "High",
+    "2",
+    "2",
+    "0",
+    "0",
+    "2.5%Small sample",
+    "100%",
+    "30m",
+    "1h",
+  ])
   client.clear()
 })
 

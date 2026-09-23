@@ -176,6 +176,8 @@ async def test_later_measurement_does_not_override_lifecycle_and_zero_is_a_sampl
         cohort = report["cohorts"][0]
         assert cohort["distance_sample_size"] == samples
         assert cohort["median_distance_basis_points"] == median
+        assert cohort["efforts"][0]["distance_sample_size"] == samples
+        assert cohort["efforts"][0]["median_distance_basis_points"] == median
         assert cohort["merged"] == 1
         assert cohort["cohort_size"] == 1
         assert cohort["decided_denominator"] == 1

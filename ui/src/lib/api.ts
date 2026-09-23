@@ -474,6 +474,10 @@ export interface PRMergeRateEffort {
   decided_merge_rate: number | null
   mature_denominator: number
   mature_cohort_merge_share: number | null
+  avg_merge_seconds?: number | null
+  avg_delivery_seconds?: number | null
+  median_distance_basis_points?: number | null
+  distance_sample_size?: number
 }
 
 export interface PRMergeRateCohort {

@@ -19,6 +19,7 @@ import { Fragment, useState } from "react"
 import type {
   AnalyticsMetadata,
   PRMergeRateCohort,
+  PRMergeRateEffort,
   PRMergeRatePayload,
   PRMergeRateResponse,
   ReviewerStatsPayload,
@@ -799,7 +800,11 @@ function OpenPRCount({
   )
 }
 
-function AvgTimeToMerge({ cohort }: { cohort: PRMergeRateCohort }) {
+function AvgTimeToMerge({
+  cohort,
+}: {
+  cohort: PRMergeRateCohort | PRMergeRateEffort
+}) {
   return (
     <span>
       {cohort.avg_merge_seconds == null
@@ -809,7 +814,11 @@ function AvgTimeToMerge({ cohort }: { cohort: PRMergeRateCohort }) {
   )
 }
 
-function AvgTimeToPR({ cohort }: { cohort: PRMergeRateCohort }) {
+function AvgTimeToPR({
+  cohort,
+}: {
+  cohort: PRMergeRateCohort | PRMergeRateEffort
+}) {
   if (!("avg_delivery_seconds" in cohort)) {
     // A backend that predates the metric has no key for it at all.
     return (
@@ -1038,14 +1047,10 @@ function PRMergeRateTable({
                             maturityDays={maturityDays}
                           />
                           <td className="px-4 py-3 text-right tabular-nums">
-                            <span title="Average shown at the model level">
-                              —
-                            </span>
+                            <AvgTimeToPR cohort={effort} />
                           </td>
                           <td className="px-4 py-3 text-right tabular-nums">
-                            <span title="Average shown at the model level">
-                              —
-                            </span>
+                            <AvgTimeToMerge cohort={effort} />
                           </td>
                         </tr>
                       ))
