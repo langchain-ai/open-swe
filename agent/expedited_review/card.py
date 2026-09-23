@@ -1,4 +1,4 @@
-"""The Slack message people vote on: the whole diff plus Approve and Reject."""
+"""The Slack message people vote on: the whole diff plus Approve and Dismiss."""
 
 import json
 
@@ -90,12 +90,6 @@ def _vote_buttons(approval: ExpeditedApproval) -> tuple[ButtonElement, ...]:
             action_id="open_swe_option_select_approve",
             value=_button_value("approve", approval),
             style="primary",
-        ),
-        button(
-            "Reject",
-            action_id="open_swe_option_select_reject",
-            value=_button_value("reject", approval),
-            style="danger",
         ),
         _dismiss_button(approval),
     )

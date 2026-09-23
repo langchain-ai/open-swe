@@ -1,4 +1,4 @@
-"""Mark ready, Approve and Reject clicks on an expedited review card.
+"""Mark ready, Approve and Dismiss clicks on an expedited review card.
 
 A voter is a person (``users`` row) reached through their Slack identity whose
 GitHub identity has write access to the repository. Only the author may mark a
@@ -14,7 +14,7 @@ from uuid import UUID
 from fastapi import HTTPException
 
 from agent.dashboard.profiles import get_valid_access_token
-from agent.expedited_review.approvals import ApprovalVote, ExpeditedApproval, slack_mention
+from agent.expedited_review.approvals import ApprovalVote, ExpeditedApproval
 from agent.expedited_review.lifecycle import notify_agent, refresh_card, repo_token, retire
 from agent.github.ci import has_repo_write_permission
 from agent.github.pull_request_actions import MarkReadyAction, act_on_pull_request
@@ -27,7 +27,7 @@ from agent.utils.thread_ops import langgraph_client
 
 logger = logging.getLogger(__name__)
 
-VoteAction = Literal["approve", "reject", "ready"]
+VoteAction = Literal["approve", "ready"]
 CardAction = VoteAction | Literal["dismiss"]
 
 
@@ -105,9 +105,6 @@ async def handle_vote(
         return voter
     authored = approval.is_author(voter.user.id, voter.github_login)
 
-    if decision == "reject":
-        return await _reject(approval, voter=voter)
-
     if approval.awaiting_ready:
         return VoteOutcome("The author has to mark this draft ready for review first.")
     if authored:
@@ -171,19 +168,6 @@ async def _mark_ready(approval: ExpeditedApproval, *, voter: Voter) -> VoteOutco
     if current is not None:
         await refresh_card(current)
     return VoteOutcome("Marked ready for review. Someone else can approve it now.")
-
-
-async def _reject(approval: ExpeditedApproval, *, voter: Voter) -> VoteOutcome:
-    """Close the card; anyone with something to say tags the agent in the thread."""
-    async with ExpeditedApproval.locked(approval.id) as (_, row):
-        if row is None or row.state != "open":
-            return VoteOutcome("This expedited review is no longer accepting votes.")
-        row.votes = [vote for vote in row.votes if vote.voter_user_id != voter.user.id]
-        row.votes.append(ApprovalVote(voter_user_id=voter.user.id, decision="reject"))
-    await retire(
-        approval, "rejected", f"Rejected by {slack_mention(voter.user, voter.github_login)}."
-    )
-    return VoteOutcome("Rejected. Tag the agent in the thread to tell it what to change.")
 
 
 async def dismiss(approval: ExpeditedApproval, slack_user_id: str) -> VoteOutcome:

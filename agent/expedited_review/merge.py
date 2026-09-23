@@ -167,7 +167,7 @@ async def merge_approved(approval: ExpeditedApproval) -> MergeResult:
     if readiness.blockers:
         return MergeResult("not_ready", "Not ready to merge: " + "; ".join(readiness.blockers))
 
-    # Held through the merge so a Reject, Dismiss or second merge call waits for it.
+    # Held through the merge so a Dismiss or second merge call waits for it.
     async with ExpeditedApproval.locked(approval.id) as (_, row):
         if row is None or row.state != "open":
             return MergeResult(
