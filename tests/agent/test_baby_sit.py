@@ -256,7 +256,7 @@ async def test_concurrent_failure_evaluations_dispatch_once(
     assert await baby_sit.evaluate_watch("acme/repo#7") == "duplicate"
 
 
-async def test_success_waits_for_stable_check_set_before_notifying(
+async def test_success_waits_for_stable_check_set_then_wakes_the_agent(
     watch_client: _Client, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     await _start_watch(watch_client)
@@ -278,11 +278,13 @@ async def test_success_waits_for_stable_check_set_before_notifying(
     monkeypatch.setattr(baby_sit, "list_commit_statuses", AsyncMock(return_value=[]))
     notify = AsyncMock(return_value=True)
     monkeypatch.setattr(baby_sit, "post_slack_thread_reply", notify)
+    dispatch = AsyncMock(return_value={"run_id": "run-1"})
+    monkeypatch.setattr(baby_sit, "dispatch_agent_run", dispatch)
 
     now = datetime(2026, 1, 1, tzinfo=UTC)
     monkeypatch.setattr(baby_sit, "_now", lambda: now)
     assert await baby_sit.evaluate_watch("acme/repo#7") == "settling"
-    notify.assert_not_awaited()
+    dispatch.assert_not_awaited()
 
     monkeypatch.setattr(
         baby_sit,
@@ -290,9 +292,10 @@ async def test_success_waits_for_stable_check_set_before_notifying(
         lambda: now + timedelta(minutes=baby_sit.CHECK_SET_SETTLE_MINUTES),
     )
     assert await baby_sit.evaluate_watch("acme/repo#7") == "stopped"
-    notify.assert_awaited_once()
-    assert notify.await_args is not None
-    assert notify.await_args.args[:2] == ("C1", "1.2")
+    dispatch.assert_awaited_once()
+    assert dispatch.await_args is not None
+    assert "/baby-sit --ready" in dispatch.await_args.args[1]
+    notify.assert_not_awaited()
     assert watch_client.store.values == {}
 
 

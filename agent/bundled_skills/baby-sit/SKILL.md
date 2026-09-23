@@ -13,6 +13,7 @@ Use this skill when the user invokes `/baby-sit`, asks in natural language to mo
 - `/baby-sit <PR URL|number>`: monitor that PR; a full canonical URL may target a different repository than the thread default.
 - `/baby-sit stop [PR URL|number]`: stop its active watch.
 - `/baby-sit --continue <PR URL>`: process an automated failure wakeup; do not register a second watch.
+- `/baby-sit --ready <PR URL>`: checks went green and the watch stopped. Follow the wakeup's instructions; do not register another watch.
 
 Always resolve the target to a canonical `https://github.com/<owner>/<repo>/pull/<number>` URL.
 

@@ -103,8 +103,10 @@ class Ineligible:
 
 
 def diff_fingerprint(files: list[ChangedFile]) -> str:
+    """A hash of what the card draws, so a commit touching only unshown tests keeps the votes."""
+    shown, _ = ChangedFile.rendered(files)
     digest = hashlib.sha256()
-    for file in sorted(files, key=lambda f: f.filename):
+    for file in sorted(shown, key=lambda f: f.filename):
         digest.update(file.filename.encode())
         digest.update(b"\0")
         digest.update((file.patch or "").encode())

@@ -61,11 +61,6 @@ class Readiness:
     def ready(self) -> bool:
         return not self.blockers
 
-    @property
-    def terminal(self) -> bool:
-        """The PR can never become ready in its current form."""
-        return self.snapshot.state != "open" or self.snapshot.mergeable is False
-
 
 def _failed_check_blocker(snapshot: PullRequestSnapshot) -> str:
     if not snapshot.failing_checks:

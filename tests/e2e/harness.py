@@ -18,6 +18,7 @@ import sys
 import threading
 import time
 import uuid
+from datetime import UTC, datetime, timedelta
 from html import escape
 from pathlib import Path
 from typing import Any
@@ -288,6 +289,46 @@ async def control_github_event(request: Request) -> JSONResponse:
     )
 
 
+@app.get("/control/thread-idle")
+async def control_thread_idle(thread_id: str) -> JSONResponse:
+    """How many runs an agent thread has had and whether none is queued or running."""
+    runs = await get_client(url=BASE_URL).runs.list(thread_id, limit=100)
+    return JSONResponse(
+        {
+            "runs": len(runs),
+            "idle": all(run["status"] not in {"pending", "running"} for run in runs),
+        }
+    )
+
+
+@app.post("/control/baby-sit-tick")
+async def control_baby_sit_tick(request: Request) -> JSONResponse:
+    """Run the baby-sit watch's fallback cron tick now, past the check-set settle window.
+
+    Production reaches a green verdict only from the 10-minute cron once the
+    check set has stayed unchanged for ``CHECK_SET_SETTLE_MINUTES``; a spec
+    cannot wait that out, so the settle clock is backdated and the real
+    evaluation runs.
+    """
+    from agent import baby_sit
+
+    body = await request.json()
+    key = baby_sit.watch_key(OWNER, REPO, int(body.get("number") or 1))
+    watch = await baby_sit.WATCHES.get(key)
+    if watch is None:
+        raise HTTPException(404, "No baby-sit watch for that pull request")
+    first = await baby_sit.evaluate_watch(key)
+    if first != "settling":
+        return JSONResponse({"status": first})
+    settling = await baby_sit.WATCHES.get(key)
+    assert settling is not None
+    settling.settled_check_at = (
+        datetime.now(UTC) - timedelta(minutes=baby_sit.CHECK_SET_SETTLE_MINUTES)
+    ).isoformat()
+    await baby_sit.WATCHES.save(settling)
+    return JSONResponse({"status": await baby_sit.evaluate_watch(key)})
+
+
 @app.post("/control/collaborator-permission")
 async def control_collaborator_permission(request: Request) -> JSONResponse:
     body = await request.json()
@@ -348,6 +389,7 @@ async def control_expedited_approvals(owner: str = OWNER, repo: str = REPO) -> J
                         "github_login": vote.github_login,
                         "decision": vote.decision,
                         "github_review_id": vote.github_review_id,
+                        "github_review_sha": vote.github_review_sha,
                     }
                     for vote in approval.votes
                 ],

@@ -335,6 +335,28 @@ async def _finish_watch(watch: BabySitWatch, message: str) -> str:
     return "stopped"
 
 
+async def _finish_ready(watch: BabySitWatch) -> str:
+    """Hand a green PR back to its agent thread, which decides whether to merge or report."""
+    try:
+        configurable = watch.dispatch_config()
+        await dispatch_agent_run(
+            watch.thread_id,
+            render_prompt("runs/baby-sit-ready.md", pr_url=watch.pr_url, head_sha=watch.head_sha),
+            configurable,
+            source=str(configurable.get("source") or "github"),
+            metadata={},
+            multitask_strategy="enqueue",
+        )
+    except Exception:
+        logger.warning("Failed to dispatch baby-sit ready wakeup for %s", watch.key, exc_info=True)
+        return await _finish_watch(
+            watch,
+            f"*`/baby-sit` complete:* {watch.pr_url} has no pending or failing checks.",
+        )
+    await stop_watch(watch.key)
+    return "stopped"
+
+
 def _failure_signals(
     check_runs: list[dict[str, Any]], statuses: list[dict[str, Any]]
 ) -> list[dict[str, Any]]:
@@ -484,10 +506,7 @@ async def _evaluate_watch(key: str, *, token: str | None = None) -> str:
         if not watch.check_set_settled(_check_set_key(check_runs, statuses)):
             await WATCHES.save(watch)
             return "settling"
-        return await _finish_watch(
-            watch,
-            f"*`/baby-sit` complete:* {watch.pr_url} has no pending or failing checks.",
-        )
+        return await _finish_ready(watch)
     if state == "blocked":
         return await _finish_watch(
             watch,

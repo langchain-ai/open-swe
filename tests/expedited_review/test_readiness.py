@@ -85,14 +85,9 @@ def test_open_swe_review_only_required_where_enabled() -> None:
     )
 
 
-def test_closed_or_conflicting_pull_requests_are_terminal() -> None:
-    closed = _snapshot(state="closed")
-    conflicting = _snapshot(mergeable=False, mergeable_state="dirty")
+def test_mergeability_still_computing_is_not_ready() -> None:
     computing = _snapshot(mergeable=None, mergeable_state="unknown")
 
-    assert Readiness(closed, readiness_blockers(closed)).terminal
-    assert Readiness(conflicting, readiness_blockers(conflicting)).terminal
-    assert not Readiness(computing, readiness_blockers(computing)).terminal
     assert not Readiness(computing, readiness_blockers(computing)).ready
 
 

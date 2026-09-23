@@ -9,20 +9,16 @@ import {
 // external SaaS boundaries faked:
 //
 //   a user asks for a one-line change in mock Slack ->
-//   the agent implements it, opens a ready PR, starts a durable CI watch, and
-//   nominates the PR for expedited review ->
-//   NO approval card yet: checks have not reported ->
-//   GitHub asynchronously reports a FAILING check -> the watch wakes the agent,
-//   which fixes the code and pushes ->
-//   GitHub reports the check GREEN with no unresolved review threads -> only now
-//   does the card appear in the Slack thread ->
-//   two different people with write access click Approve; each non-author click
-//   becomes a real GitHub APPROVE review ->
-//   the second approval merges the PR, pinned to the reviewed head SHA.
-//
-// Both GitHub deliveries are signed webhooks to the real /webhooks/github
-// route, so the asynchronous half is genuinely asynchronous rather than a
-// direct call into the watch.
+//   the agent implements it, opens the PR, starts a durable CI watch, and posts
+//   the approval card right away, before any check has reported ->
+//   Alice approves: the vote is recorded, nothing reaches GitHub ->
+//   GitHub reports a FAILING check -> the watch wakes the agent, which pushes a
+//   test-only fix the card never drew, so Alice's vote still counts ->
+//   Bob approves: the card has two approvals and wakes the agent, which tries to
+//   merge and is told checks are still running ->
+//   GitHub reports the check GREEN -> the watch wakes the agent, which merges:
+//   each non-author approval becomes a GitHub APPROVE review on the new head,
+//   and the merge is pinned to that head.
 
 const ALICE = { login: "alice", slack_id: "U_ALICE" };
 const BOB = { login: "bob", slack_id: "U_BOB" };
@@ -40,6 +36,7 @@ type Approval = {
     github_login: string;
     decision: string;
     github_review_id: number | null;
+    github_review_sha: string;
   }>;
 };
 
@@ -57,11 +54,12 @@ async function control(
   request: APIRequestContext,
   path: string,
   data: unknown,
-): Promise<void> {
+): Promise<unknown> {
   const res = await request.post(path, { data });
   if (!res.ok()) {
     throw new Error(`POST ${path} → ${res.status()}: ${await res.text()}`);
   }
+  return await res.json();
 }
 
 async function approvals(request: APIRequestContext): Promise<Array<Approval>> {
@@ -154,8 +152,22 @@ async function clickApprove(page: Page, slackUserId: string) {
   await card.getByRole("button", { name: "Approve" }).click();
 }
 
+async function threadRuns(
+  request: APIRequestContext,
+  threadId: string,
+): Promise<{ runs: number; idle: boolean }> {
+  const res = await request.get(
+    `/control/thread-idle?thread_id=${encodeURIComponent(threadId)}`,
+  );
+  return (await res.json()) as { runs: number; idle: boolean };
+}
+
+function approvedReviews(pr: PullRequest) {
+  return pr.reviews.filter((r) => r.state === "APPROVED");
+}
+
 test.describe("Expedited Slack review", () => {
-  test("broken check, agent fix, two approvals, auto-merge", async ({
+  test("card first, votes recorded, test-only fix, merge on green", async ({
     page,
     request,
   }) => {
@@ -186,63 +198,25 @@ test.describe("Expedited Slack review", () => {
     };
     expect(threadId).toBeTruthy();
 
-    // 2. The agent implements it, opens the PR, and starts watching its checks.
-    await expect
-      .poll(async () => (await botMessages(request, threadId)).length, {
-        timeout: 120_000,
-      })
-      .toBeGreaterThan(0);
+    // 2. The agent opens the PR, starts watching its checks, and posts the
+    //    card in the same turn, before any check has reported.
     await expect
       .poll(async () => await botMessages(request, threadId), {
         timeout: 120_000,
       })
       .toMatch(/watching its checks/i);
-
     const opened = await pull(request);
     expect(opened.state).toBe("open");
     expect(opened.merged).toBe(false);
-    // Open SWE opens drafts when the requester's profile says so. Nobody clears
-    // the flag here: nominating the PR is what marks it ready, asserted below.
-    expect(opened.draft).toBe(true);
+    // Posting the card is what marks the draft ready for review.
+    expect(opened.draft).toBe(false);
 
-    // 3. GitHub reports the check FAILED, asynchronously. The durable watch
-    //    wakes the agent, which fixes the code and pushes.
-    await reportCheck(request, opened.head_sha, "failure");
-    await expect
-      .poll(async () => await botMessages(request, threadId), {
-        timeout: 150_000,
-      })
-      .toMatch(/Fixed the failing check/i);
-
-    // 4. In that same turn the agent asked for the expedited review, while the
-    //    check was STILL failing. The request is accepted but parks in
-    //    `waiting` with no card: the readiness gate, asserted directly.
-    await expect
-      .poll(async () => (await approvals(request)).at(-1)?.state, {
-        timeout: 150_000,
-      })
-      .toBe("waiting");
-    expect(await botMessages(request, threadId)).not.toMatch(
+    const posted = (await approvals(request)).at(-1);
+    expect(posted?.state).toBe("open");
+    expect(posted?.head_sha).toBe(opened.head_sha);
+    expect(await botMessages(request, threadId)).toMatch(
       /Expedited review requested/i,
     );
-    // Nominating a draft marks it ready for review; nothing else in this test
-    // touches the flag.
-    expect((await pull(request)).draft).toBe(false);
-
-    // 5. GitHub reports the check GREEN. That webhook is what moves the waiting
-    //    approval to open and posts the card — no agent turn involved.
-    await reportCheck(request, opened.head_sha, "success");
-    await expect
-      .poll(async () => (await approvals(request)).at(-1)?.state, {
-        timeout: 120_000,
-      })
-      .toBe("open");
-    await expect
-      .poll(async () => await botMessages(request, threadId), {
-        timeout: 60_000,
-      })
-      .toMatch(/Expedited review requested/i);
-    expect((await approvals(request)).at(-1)?.head_sha).toBe(opened.head_sha);
 
     // The card carries the whole diff, which is the premise of voting from
     // Slack rather than from GitHub. Production renders it to a PNG and shows
@@ -262,45 +236,85 @@ test.describe("Expedited Slack review", () => {
     ).toBeGreaterThan(0);
     await shootCard(page, "open", /Expedited review requested/i);
 
-    // 6. Alice approves. One vote is not a quorum, so nothing merges — but her
-    //    click has already become a real GitHub review.
+    // 3. Alice approves. The vote is recorded and nothing reaches GitHub.
     await clickApprove(page, ALICE.slack_id);
     await expect
       .poll(async () => (await approvals(request)).at(-1)?.approvers ?? [], {
         timeout: 60_000,
       })
       .toEqual(["alice"]);
-    expect((await pull(request)).merged).toBe(false);
-    const afterAlice = await pull(request);
-    expect(
-      afterAlice.reviews.filter((r) => r.state === "APPROVED"),
-    ).toHaveLength(1);
-    expect(afterAlice.reviews[0]?.author).toBe("alice");
-    expect(afterAlice.reviews[0]?.commit_id).toBe(afterAlice.head_sha);
+    expect(approvedReviews(await pull(request))).toHaveLength(0);
 
-    // 7. Bob approves. Two distinct people is the quorum, so Open SWE merges
-    //    the pull request, conditional on the SHA that was reviewed.
+    // 4. GitHub reports the check FAILED. The watch wakes the agent, which
+    //    pushes a test-only fix. The card never drew that file, so the card
+    //    stays open and Alice's vote still stands.
+    await reportCheck(request, opened.head_sha, "failure");
+    await expect
+      .poll(async () => (await pull(request)).head_sha, { timeout: 150_000 })
+      .not.toBe(opened.head_sha);
+    const fixed = await pull(request);
+    await expect
+      .poll(async () => await botMessages(request, threadId), {
+        timeout: 60_000,
+      })
+      .toMatch(/Fixed the failing check/i);
+    expect((await approvals(request)).at(-1)?.state).toBe("open");
+
+    // 5. Bob approves. Two approvals wake the agent, which tries to merge and
+    //    is told the new head's checks have not reported: still no GitHub write.
+    await expect
+      .poll(async () => (await threadRuns(request, threadId)).idle, {
+        timeout: 60_000,
+      })
+      .toBe(true);
+    const runsBeforeQuorum = (await threadRuns(request, threadId)).runs;
     await clickApprove(page, BOB.slack_id);
     await expect
-      .poll(async () => (await pull(request)).merged, { timeout: 90_000 })
+      .poll(async () => (await approvals(request)).at(-1)?.approvers ?? [], {
+        timeout: 60_000,
+      })
+      .toEqual(["alice", "bob"]);
+    await expect
+      .poll(
+        async () => {
+          const { runs, idle } = await threadRuns(request, threadId);
+          return runs > runsBeforeQuorum && idle;
+        },
+        { timeout: 90_000 },
+      )
+      .toBe(true);
+    expect((await pull(request)).merged).toBe(false);
+    expect(approvedReviews(await pull(request))).toHaveLength(0);
+    expect((await approvals(request)).at(-1)?.state).toBe("open");
+
+    // 6. GitHub reports the new head GREEN. The watch's tick wakes the agent,
+    //    which merges on the recorded approvals.
+    await reportCheck(request, fixed.head_sha, "success");
+    expect(
+      await control(request, "/control/baby-sit-tick", { number: PR_NUMBER }),
+    ).toEqual({ status: "stopped" });
+    await expect
+      .poll(async () => (await pull(request)).merged, { timeout: 120_000 })
       .toBe(true);
 
     const merged = await pull(request);
     expect(merged.state).toBe("closed");
-    expect(
-      merged.reviews.filter((r) => r.state === "APPROVED").map((r) => r.author),
-    ).toEqual(["alice", "bob"]);
+    const reviews = approvedReviews(merged);
+    expect(reviews.map((r) => r.author).toSorted()).toEqual(["alice", "bob"]);
+    for (const review of reviews) {
+      expect(review.commit_id).toBe(fixed.head_sha);
+    }
 
     const final = (await approvals(request)).at(-1)!;
     expect(final.state).toBe("merged");
-    expect(final.approvers.toSorted()).toEqual(["alice", "bob"]);
     // Every vote is attributed to a person and carries the review it produced.
     expect(final.votes.map((v) => v.decision)).toEqual(["approve", "approve"]);
     for (const vote of final.votes) {
       expect(vote.github_review_id).not.toBeNull();
+      expect(vote.github_review_sha).toBe(fixed.head_sha);
     }
 
-    // 8. The card closes out as merged, and the thread says so.
+    // 7. The card closes out as merged.
     await page.goto("/mock/slack");
     await expect(
       page.locator(".msg.bot").filter({ hasText: /Merged\./i }),

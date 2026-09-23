@@ -113,25 +113,11 @@ def _vote_buttons(approval: ExpeditedApproval) -> tuple[ButtonElement, ButtonEle
     )
 
 
-def _failing_check_warning(failing_checks: list[str]) -> list[Block]:
-    if not failing_checks:
-        return []
-    noun = "check" if len(failing_checks) == 1 else "checks"
-    names = ", ".join(escape(name) for name in failing_checks)
-    return [
-        section(
-            f":warning: *GitHub does not require the failing {noun}, so this can still "
-            f"merge:* {names}"
-        )
-    ]
-
-
 def open_card(
     approval: ExpeditedApproval,
     *,
     title: str,
     files: list[ChangedFile],
-    failing_checks: list[str] | None = None,
     diff_image_id: str | None = None,
 ) -> tuple[str, list[Block]]:
     """Text fallback and blocks for a card that is accepting votes."""
@@ -142,10 +128,11 @@ def open_card(
         *_diff_sections(files, diff_image_id),
         divider(),
         section(_vote_summary(approval)),
-        *_failing_check_warning(failing_checks or []),
         context(
-            "Approve submits a GitHub review as you and, on the second approval, merges the "
-            "pull request. The author may approve but that click does not become a GitHub review."
+            "Approve records your vote. Once checks and reviews are clean, the agent submits "
+            "each approval as a GitHub review and merges. A later commit keeps the votes only "
+            "if it leaves the diff above unchanged. The author may approve, but that vote does "
+            "not become a GitHub review."
         ),
         actions(*_vote_buttons(approval)),
     ]

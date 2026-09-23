@@ -33,6 +33,27 @@ def test_fingerprint_changes_with_the_patch() -> None:
     assert before.fingerprint != after.fingerprint
 
 
+def test_fingerprint_ignores_test_files_the_card_does_not_draw() -> None:
+    source = _file("src/app.py", additions=4, patch="+a\n+b\n+c\n+d")
+    before = assess_eligibility([source, _file("tests/test_app.py", additions=1, patch="+x")])
+    after = assess_eligibility([source, _file("tests/test_app.py", additions=2, patch="+x\n+y")])
+    new_source = assess_eligibility([source, _file("src/other.py", patch="+z")])
+
+    assert isinstance(before, EligibleDiff) and isinstance(after, EligibleDiff)
+    assert isinstance(new_source, EligibleDiff)
+    assert before.fingerprint == after.fingerprint
+    assert before.fingerprint != new_source.fingerprint
+
+
+def test_fingerprint_covers_tests_once_the_card_draws_them() -> None:
+    source = _file("src/app.py", additions=1, patch="+a")
+    before = assess_eligibility([source, _file("tests/test_app.py", additions=5, patch="+x")])
+    after = assess_eligibility([source, _file("tests/test_app.py", additions=5, patch="+y")])
+
+    assert isinstance(before, EligibleDiff) and isinstance(after, EligibleDiff)
+    assert before.fingerprint != after.fingerprint
+
+
 def test_line_cap_is_inclusive_and_carries_leeway_past_the_advertised_limit() -> None:
     at_cap = assess_eligibility([_file("a.py", additions=MAX_CHANGED_LINES)])
     over_cap = assess_eligibility([_file("a.py", additions=MAX_CHANGED_LINES + 1)])
