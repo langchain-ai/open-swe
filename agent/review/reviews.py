@@ -959,6 +959,8 @@ async def get_review_diff(owner: str, repo: str, pr_number: int) -> dict[str, An
 # against SSRF (only GitHub-owned hosts are ever contacted).
 
 _ALLOWED_IMAGE_HOST_SUFFIXES = (".githubusercontent.com",)
+# github.com/user-attachments redirects anonymous requests to signed URLs here.
+_GITHUB_ASSET_HOSTS = frozenset({"github-production-user-asset-6210df.s3.amazonaws.com"})
 _MAX_IMAGE_REDIRECTS = 5
 _MAX_IMAGE_BYTES = 25 * 1024 * 1024
 # Only safe raster formats — SVG (image/svg+xml) can execute script in our
@@ -978,7 +980,22 @@ def _is_allowed_image_url(url: str) -> bool:
     if host == "github.com" or host == "www.github.com":
         # On github.com only user-attachment assets are images worth proxying.
         return parsed.path.startswith("/user-attachments/")
-    return any(host.endswith(suffix) for suffix in _ALLOWED_IMAGE_HOST_SUFFIXES)
+    return host in _GITHUB_ASSET_HOSTS or any(
+        host.endswith(suffix) for suffix in _ALLOWED_IMAGE_HOST_SUFFIXES
+    )
+
+
+def _image_request_headers(url: str, token: str) -> dict[str, str]:
+    """Send the token only where it authorizes content.
+
+    github.com answers a bearer token on user-attachments with an HTML page, and
+    the signed asset URL it redirects to rejects any second credential.
+    """
+    host = (urlparse(url).hostname or "").lower()
+    headers = {"Accept": "image/*"}
+    if any(host.endswith(suffix) for suffix in _ALLOWED_IMAGE_HOST_SUFFIXES):
+        headers["Authorization"] = f"Bearer {token}"
+    return headers
 
 
 def _host_resolves_public(hostname: str) -> bool:
@@ -1030,12 +1047,13 @@ async def proxy_pr_image(owner: str, repo: str, pr_number: int, url: str) -> Res
     _validate_image_url(url)
     token = await _require_app_token()
     await _require_image_in_pr(owner, repo, pr_number, url, token)
-    headers = {"Authorization": f"Bearer {token}", "Accept": "image/*"}
 
     current_url = url
     async with httpx2.AsyncClient(timeout=_GITHUB_TIMEOUT, follow_redirects=False) as client:
         for _ in range(_MAX_IMAGE_REDIRECTS + 1):
-            async with client.stream("GET", current_url, headers=headers) as response:
+            async with client.stream(
+                "GET", current_url, headers=_image_request_headers(current_url, token)
+            ) as response:
                 if response.is_redirect:
                     location = response.headers.get("Location")
                     if not location:
