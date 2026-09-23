@@ -1,8 +1,16 @@
 import importlib
 import uuid
+from types import SimpleNamespace
 from typing import Any
+from unittest.mock import AsyncMock
 
 import pytest
+
+from agent.credential_scope import (
+    PrAuthorNotAParticipant,
+    pr_author_login,
+    private_credential_login,
+)
 
 slack_breakout_tool = importlib.import_module("agent.slack.tools.start_new_thread")
 
@@ -14,6 +22,7 @@ async def _fake_trace_url(thread_id: str, **kwargs: object) -> str:
 def _config() -> dict[str, Any]:
     return {
         "configurable": {
+            "thread_id": "parent-thread",
             "repo": {"owner": "langchain-ai", "name": "open-swe"},
             "github_login": "alice",
             "user_email": "alice@example.com",
@@ -35,6 +44,9 @@ class _FakeThreadsClient:
     def __init__(self, captured: dict[str, Any]) -> None:
         self.captured = captured
 
+    async def get(self, thread_id: str) -> dict[str, object]:
+        return {"metadata": {"visibility": "public", "owner_type": "user", "owner_login": "alice"}}
+
     async def create(self, *, thread_id: str, if_exists: str, metadata: dict[str, Any]) -> None:
         self.captured["thread_create"] = {
             "thread_id": thread_id,
@@ -49,6 +61,11 @@ class _FakeThreadsClient:
 class _FakeClient:
     def __init__(self, captured: dict[str, Any]) -> None:
         self.threads = _FakeThreadsClient(captured)
+
+
+@pytest.fixture(autouse=True)
+def parent_client(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(slack_breakout_tool, "langgraph_client", lambda: _FakeClient({}))
 
 
 async def test_slack_start_new_thread_success(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -228,6 +245,111 @@ async def test_slack_start_new_thread_success(monkeypatch: pytest.MonkeyPatch) -
     assert "trace" not in captured
     assert [item["message_ts"] for item in captured["stored_mappings"]] == [new_ts]
     assert all(item["triggering_user_id"] == "U1" for item in captured["stored_mappings"])
+
+
+@pytest.mark.parametrize(
+    ("visibility", "owner_type", "actor", "background", "allowed"),
+    [
+        ("public", "user", "bob", False, True),
+        ("private", "user", "alice", False, True),
+        ("private", "user", "bob", False, False),
+        ("public", "system", "bob", False, True),
+        ("public", "system", "", False, True),
+        ("public", "system", "bob", True, True),
+        ("public", "user", "alice", True, False),
+        ("private", "user", "alice", True, False),
+        ("public", "user", "", False, False),
+        ("private", "system", "alice", False, False),
+        ("unknown", "user", "alice", False, False),
+    ],
+)
+async def test_breakout_preserves_requester_and_credential_scope(
+    monkeypatch: pytest.MonkeyPatch,
+    visibility: str,
+    owner_type: str,
+    actor: str,
+    background: bool,
+    allowed: bool,
+) -> None:
+    config = _config()
+    config["configurable"].update(
+        github_login=actor,
+        user_email=f"{actor}@example.com",
+        background_task_completion=background,
+    )
+    saved_slack = dict(config["configurable"]["slack_thread"])
+    config["configurable"]["slack_thread"].update(
+        triggering_user_id="U2",
+        triggering_user_name=actor,
+        triggering_user_email=f"{actor}@example.com",
+        triggering_event_ts="1700000000.999999",
+    )
+    metadata = {
+        "visibility": visibility,
+        "owner_type": owner_type,
+        "owner_login": "Alice",
+        "source_context": {"slack_thread": saved_slack},
+    }
+    get_thread = AsyncMock(return_value={"metadata": metadata})
+    create = AsyncMock()
+    client = SimpleNamespace(
+        threads=SimpleNamespace(get=get_thread, create=create, update=AsyncMock())
+    )
+    post = AsyncMock(return_value=("1700000000.111111", None))
+    dispatch = AsyncMock(return_value={"run_id": "run-123"})
+    monkeypatch.setattr("agent.run_config.get_config", lambda: config)
+    monkeypatch.setattr(slack_breakout_tool, "langgraph_client", lambda: client)
+    monkeypatch.setattr(slack_breakout_tool, "post_slack_top_level_message_with_ts", post)
+    monkeypatch.setattr(slack_breakout_tool, "post_slack_thread_reply_with_ts", post)
+    monkeypatch.setattr(slack_breakout_tool, "bind_slack_thread_id", AsyncMock())
+    monkeypatch.setattr(slack_breakout_tool, "store_slack_run_mapping", AsyncMock())
+    monkeypatch.setattr(slack_breakout_tool, "get_langsmith_trace_url", _fake_trace_url)
+    monkeypatch.setattr(slack_breakout_tool, "dispatch_agent_run", dispatch)
+
+    result = await slack_breakout_tool.slack_start_new_thread("Title", "Instructions")
+
+    assert result["success"] is allowed
+    if not allowed:
+        post.assert_not_awaited()
+        create.assert_not_awaited()
+        dispatch.assert_not_awaited()
+        return
+    child_metadata = create.call_args.kwargs["metadata"]
+    child_config = dispatch.call_args.args[2]
+    child_config["thread_id"] = result["thread_id"]
+    assert child_metadata["visibility"] == visibility
+    assert child_metadata["source_context"]["slack_thread"]["triggering_user_id"] == "U2"
+    assert child_metadata["source_context"]["slack_thread"]["triggering_user_name"] == actor
+    assert child_metadata["source_context"]["breakout_from"]["message_ts"] == "1700000000.999999"
+    get_thread.return_value = {"metadata": child_metadata}
+    monkeypatch.setattr("langgraph_sdk.get_client", lambda: client)
+    monkeypatch.setattr("agent.run_config.get_config", lambda: {"configurable": child_config})
+    user_owned = owner_type == "user" or bool(actor and not background)
+    assert child_metadata["owner_type"] == ("user" if user_owned else "system")
+    assert await pr_author_login() == (actor if user_owned else None)
+    assert await private_credential_login() == (actor if visibility == "private" else None)
+    if user_owned:
+        assert child_metadata["owner_login"] == actor
+        assert await pr_author_login(actor) == actor
+        if visibility == "public":
+            with pytest.raises(PrAuthorNotAParticipant):
+                await pr_author_login("alice")
+    else:
+        assert "owner_login" not in child_metadata
+        assert await pr_author_login("alice") is None
+
+
+async def test_breakout_rejects_unreadable_parent_scope(monkeypatch: pytest.MonkeyPatch) -> None:
+    get_thread = AsyncMock(side_effect=RuntimeError("store unavailable"))
+    client = SimpleNamespace(threads=SimpleNamespace(get=get_thread))
+    post = AsyncMock()
+    monkeypatch.setattr("agent.run_config.get_config", _config)
+    monkeypatch.setattr(slack_breakout_tool, "langgraph_client", lambda: client)
+    monkeypatch.setattr(slack_breakout_tool, "post_slack_top_level_message_with_ts", post)
+
+    with pytest.raises(RuntimeError, match="store unavailable"):
+        await slack_breakout_tool.slack_start_new_thread("Title", "Instructions")
+    post.assert_not_awaited()
 
 
 async def test_slack_start_new_thread_requires_slack_config(
