@@ -14,6 +14,7 @@ from agent import store as agent_store
 from agent.dashboard import repo_access
 from agent.dashboard.options import fable_disabled_fallback
 from agent.dashboard.workspace_settings import WorkspaceSettingsUpdate, upsert_workspace_overrides
+from agent.schedules import slack_messages
 from agent.schedules import store as schedules
 from agent.schedules.slack_messages import is_triggering_message
 from agent.schedules.store import ScheduleCreateBody, ScheduleUpdateBody
@@ -1641,3 +1642,33 @@ async def test_launch_slack_message_automation_replies_in_the_matching_post_thre
     assert "Investigate the failed deploy" in prompt
     assert "p1784302353900029" in prompt
     assert "untrusted context" in prompt
+
+
+@pytest.mark.parametrize(
+    ("message", "allowed", "expected"),
+    [
+        ({"ts": "1.1", "text": "deploy failed", "user": "U1"}, None, True),
+        (
+            {"ts": "1.1", "text": "deploy failed", "subtype": "bot_message", "bot_id": "B1"},
+            None,
+            False,
+        ),
+        (
+            {"ts": "1.1", "text": "deploy failed", "subtype": "bot_message", "bot_id": "B1"},
+            "B1",
+            True,
+        ),
+    ],
+)
+async def test_only_workspace_allowed_bots_trigger_slack_message_automations(
+    monkeypatch: pytest.MonkeyPatch,
+    message: dict[str, str],
+    allowed: str | None,
+    expected: bool,
+) -> None:
+    async def fake_resolve(team_id: str, bot_id: str, **kwargs: str) -> object | None:
+        return object() if team_id == "T1" and bot_id == allowed else None
+
+    monkeypatch.setattr(slack_messages, "resolve_allowed_slack_bot", fake_resolve)
+
+    assert await slack_messages.is_trusted_sender(message, "T1") is expected

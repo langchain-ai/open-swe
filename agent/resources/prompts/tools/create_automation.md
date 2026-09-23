@@ -8,8 +8,8 @@ Args:
         "slack_channel_message" runs whenever a top-level post in
         ``slack_channel_id`` matches ``message_pattern``; the run replies in
         that post's thread and receives the post as untrusted context. Thread
-        replies, posts that mention Open SWE, and Open SWE's own posts never
-        trigger it.
+        replies, posts that mention Open SWE, Open SWE's own posts, and posts
+        from bots a workspace admin has not allowed never trigger it.
     schedule: Five-field UTC cron expression. Required when ``trigger`` is
         "schedule"; ignored otherwise.
     name: Short display name.

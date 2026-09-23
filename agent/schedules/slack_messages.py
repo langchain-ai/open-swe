@@ -9,6 +9,7 @@ import re2
 from fastapi import HTTPException
 from pydantic import BaseModel, Field, field_validator
 
+from agent.slack.allowed_bots import resolve_allowed_slack_bot
 from agent.slack.client import (
     SlackChannelHistoryError,
     fetch_slack_channel_history,
@@ -69,6 +70,33 @@ def is_triggering_message(message: Mapping[str, Any], bot_user_id: str) -> bool:
     )
 
 
+async def is_trusted_sender(message: Mapping[str, Any], team_id: str) -> bool:
+    """People always count; a bot counts only once a workspace admin has allowed it."""
+    bot_id = message.get("bot_id")
+    if message.get("subtype") != "bot_message" and not bot_id:
+        return True
+    user = message.get("user")
+    app_id = message.get("app_id")
+    return (
+        await resolve_allowed_slack_bot(
+            team_id,
+            bot_id if isinstance(bot_id, str) else "",
+            user_id=user if isinstance(user, str) else "",
+            app_id=app_id if isinstance(app_id, str) else "",
+        )
+        is not None
+    )
+
+
+def _message_team_id(message: Mapping[str, Any]) -> str:
+    team = message.get("team")
+    if isinstance(team, str) and team:
+        return team
+    profile = message.get("bot_profile")
+    team = profile.get("team_id") if isinstance(profile, Mapping) else None
+    return team if isinstance(team, str) else ""
+
+
 def message_matches(pattern: str, text: str) -> bool:
     return compile_message_pattern(pattern).search(text[:_MATCH_TEXT_MAX_CHARS]) is not None
 
@@ -121,7 +149,9 @@ async def preview_message_pattern(body: SlackMessagePreviewBody) -> SlackMessage
     matches: list[SlackMessageMatch] = []
     for message in candidates:
         text = str(message["text"])
-        if compiled.search(text[:_MATCH_TEXT_MAX_CHARS]) is None:
+        if compiled.search(text[:_MATCH_TEXT_MAX_CHARS]) is None or not await is_trusted_sender(
+            message, _message_team_id(message)
+        ):
             continue
         ts = str(message["ts"])
         user = message.get("user") or message.get("username") or message.get("bot_id") or ""

@@ -81,9 +81,9 @@ export function SlackMessageTriggerFields({
       <p className="text-xs text-muted-foreground/70">
         Runs when a new top-level post in this channel matches the pattern (RE2
         syntax, searched anywhere in the text). The agent replies in that post's
-        thread. Thread replies, posts that mention Open SWE, and Open SWE's own
-        posts never trigger it. The Open SWE bot must be a member of the
-        channel.
+        thread. Thread replies, posts that mention Open SWE, Open SWE's own
+        posts, and posts from bots that are not on the workspace's allowed bot
+        list never trigger it. The Open SWE bot must be a member of the channel.
       </p>
 
       {request && (
