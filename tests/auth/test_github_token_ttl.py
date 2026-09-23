@@ -416,8 +416,9 @@ async def test_publish_review_invalidates_cached_token_on_401(
     monkeypatch.setattr(publish_review_module, "invalidate_cached_github_token", fake_invalidate)
     monkeypatch.setattr(publish_review_module, "_publish_review_async", fake_publish)
     monkeypatch.setattr(publish_review_module, "get_thread_id_from_runtime", lambda: "thread-xyz")
+    monkeypatch.setattr(publish_review_module, "_record_ranking", AsyncMock(return_value=None))
 
-    result = await publish_review_module.publish_review()
+    result = await publish_review_module.publish_review(ranking=[])
     assert result["success"] is False
     assert "401" in result["error"]
     assert invalidated["calls"] == 1
