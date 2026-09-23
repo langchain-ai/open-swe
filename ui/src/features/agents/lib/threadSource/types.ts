@@ -70,6 +70,12 @@ interface ThreadSourceShared {
 export interface StreamThreadSource extends ThreadSourceShared {
   kind: "stream"
   stream: AgentStream
+  /**
+   * Cancel one entry from the SDK's own submission queue, by
+   * `queued[].turnId` — keeps the local store in sync, unlike a plain
+   * run-cancel REST call (which leaves it stale until the next hydrate).
+   */
+  cancelQueued: (id: string) => Promise<boolean>
 }
 
 /** The thread is served by the append-only transcript event log. */

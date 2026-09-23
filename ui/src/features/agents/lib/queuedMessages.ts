@@ -1,5 +1,9 @@
+import type { SubmissionQueueEntry } from "@langchain/react"
+
+import type { QueuedTurn } from "@/features/agents/lib/transcript/reducer"
 import type {
   AnyImageChunk,
+  Chunk,
   ImageChunk,
   Message,
   PendingThreadMessage,
@@ -73,6 +77,102 @@ export function visibleQueuedMessages(
     match.consumed = true
     return false
   })
+}
+
+interface QueuedSubmitContentBlock {
+  type?: string
+  text?: string
+  base64?: string
+  mime_type?: string
+  file_name?: string
+}
+interface QueuedSubmitMessage {
+  id?: string
+  content?: string | Array<QueuedSubmitContentBlock>
+}
+interface QueuedSubmitValues {
+  messages?: Array<QueuedSubmitMessage>
+}
+
+/**
+ * Chunks of a queue entry's submitted message. Reads the *last* message in
+ * `values.messages`, not the first — a hydrated entry's list is dynamic-
+ * context preambles followed by the real user message.
+ */
+function queuedEntryChunks(
+  entry: SubmissionQueueEntry
+): { id: string; chunks: Array<Chunk> } | null {
+  const messages = (entry.values as QueuedSubmitValues | null | undefined)
+    ?.messages
+  const raw = messages?.[messages.length - 1]
+  if (!raw?.id) return null
+
+  const chunks: Array<Chunk> = []
+  if (typeof raw.content === "string") {
+    if (raw.content) chunks.push({ kind: "text", text: raw.content })
+  } else if (Array.isArray(raw.content)) {
+    for (const block of raw.content) {
+      if (block.type === "image" && block.base64 && block.mime_type) {
+        chunks.push({
+          kind: "image",
+          base64: block.base64,
+          mimeType: block.mime_type,
+          ...(block.file_name ? { fileName: block.file_name } : {}),
+        })
+      } else if (block.type === "text" && block.text) {
+        chunks.push({ kind: "text", text: block.text })
+      }
+    }
+  }
+  return { id: raw.id, chunks }
+}
+
+/**
+ * Reconstructs a `QueuedTurn` from the SDK's own submission-queue entry
+ * (for "stream"-kind threads, which have no transcript). The SDK carries no
+ * sender attribution, so `senderLogin` here is always the current viewer —
+ * the run's own `queued_by` metadata is the real cancel-authorization gate.
+ */
+export function queueEntryToTurn(
+  entry: SubmissionQueueEntry,
+  login: string | undefined
+): QueuedTurn | null {
+  const found = queuedEntryChunks(entry)
+  if (!found) return null
+  const { id, chunks } = found
+
+  return {
+    turnId: entry.id,
+    runId: entry.runId ?? null,
+    message: {
+      id,
+      author: "user",
+      timestamp: entry.createdAt.toISOString(),
+      chunks,
+    },
+    senderLogin: login ?? null,
+    requestedAt: entry.createdAt.toISOString(),
+  }
+}
+
+/**
+ * Reconstructs the composer display shape from a submission queue entry, for
+ * local/desktop threads (no `ThreadSource`/transcript to route it through).
+ */
+export function queueEntryToMessage(
+  entry: SubmissionQueueEntry
+): QueuedThreadMessage | null {
+  const found = queuedEntryChunks(entry)
+  if (!found) return null
+  const { id, chunks } = found
+  const images = chunks.filter(
+    (chunk): chunk is ImageChunk => chunk.kind === "image"
+  )
+  const content = chunks
+    .filter((chunk) => chunk.kind === "text")
+    .map((chunk) => chunk.text)
+    .join("\n\n")
+  return { id, content, images, createdAt: entry.createdAt.getTime() }
 }
 
 function blobToBase64(blob: Blob): Promise<string> {
