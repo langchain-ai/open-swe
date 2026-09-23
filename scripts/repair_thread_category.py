@@ -6,13 +6,14 @@ until they expire: automation threads a Slack mention relabelled
 ``interactive`` (``upsert_agent_thread_metadata`` now keeps a thread's
 category), and threads created without a category. This stamps both.
 
-Threads are updated oldest-first, so the ``updated_at`` bump from each update
-keeps their relative order. A thread updated by live traffic during the scan
-shifts the pages, so run it again until it finds nothing.
+The thread list pages by ``state_updated_at``, which metadata updates leave
+alone, so stamping does not reorder it. The scan reads every thread in the
+deployment and takes a while on large ones; a thread deleted during it (a TTL
+sweep) shifts the pages, so run it again until it finds nothing.
 
 Usage:
-    uv run python scripts/repair_thread_category.py --dry-run
-    uv run python scripts/repair_thread_category.py
+    uv run python scripts/repair_thread_category.py            # count only
+    uv run python scripts/repair_thread_category.py --apply
 
 Resolves the deployment URL from ``--url`` or ``LANGGRAPH_URL``, and the API key
 from ``LANGGRAPH_API_KEY`` / ``LANGSMITH_API_KEY``.
@@ -37,7 +38,8 @@ from agent.utils.thread_participants import PARTICIPANT_EMAILS_KEY, PARTICIPANT_
 logger = logging.getLogger(__name__)
 
 _PAGE = 500
-# What the thread list searches by; a thread with none of these is never listed.
+# What a viewer's thread list searches by; without one, only the admin
+# all-threads view lists a thread, and it does not filter by category.
 _LISTING_IDENTITY_KEYS = (
     PARTICIPANT_LOGINS_KEY,
     PARTICIPANT_EMAILS_KEY,
@@ -49,8 +51,11 @@ _LISTING_IDENTITY_KEYS = (
 def repaired_category(metadata: Mapping[str, Any]) -> str | None:
     """The category to stamp on a thread, or None when it needs no change."""
     current = metadata.get("thread_category")
-    schedule_id = metadata.get("schedule_id")
-    if isinstance(schedule_id, str) and schedule_id.strip():
+    # Only automations carry these, and a Slack mention never overwrote them.
+    if any(
+        isinstance(value, str) and value.strip()
+        for value in (metadata.get("schedule_id"), metadata.get("automation_scope"))
+    ):
         return None if current == "automation" else "automation"
     if current:
         return None
@@ -85,7 +90,7 @@ async def _threads_to_repair(client: LangGraphClient) -> tuple[int, list[tuple[s
     while batch := await client.threads.search(
         limit=_PAGE,
         offset=scanned,
-        sort_by="updated_at",
+        sort_by="created_at",
         sort_order="asc",
         select=["thread_id", "metadata"],
     ):
@@ -98,12 +103,12 @@ async def _threads_to_repair(client: LangGraphClient) -> tuple[int, list[tuple[s
     return scanned, repairs
 
 
-async def _run(url: str, api_key: str | None, dry_run: bool) -> int:
+async def _run(url: str, api_key: str | None, apply: bool) -> int:
     client = get_client(url=url, api_key=api_key)
     scanned, repairs = await _threads_to_repair(client)
     by_category = Counter(category for _, category in repairs)
     print(f"Scanned {scanned} thread(s); {len(repairs)} need a category: {dict(by_category)}")
-    if dry_run:
+    if not apply:
         return 0
     failures = 0
     for thread_id, category in repairs:
@@ -123,9 +128,9 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Stamp missing or relabelled thread categories.")
     parser.add_argument("--url", default=None, help="Deployment URL (defaults to env).")
     parser.add_argument(
-        "--dry-run",
+        "--apply",
         action="store_true",
-        help="Count the threads that would change without changing them.",
+        help="Stamp the categories; without it the script only counts.",
     )
     return parser.parse_args()
 
@@ -134,7 +139,7 @@ def main() -> None:
     _load_dotenv_if_available()
     logging.basicConfig(level=logging.INFO, format="%(message)s")
     args = parse_args()
-    raise SystemExit(asyncio.run(_run(_resolve_url(args.url), _resolve_api_key(), args.dry_run)))
+    raise SystemExit(asyncio.run(_run(_resolve_url(args.url), _resolve_api_key(), args.apply)))
 
 
 if __name__ == "__main__":

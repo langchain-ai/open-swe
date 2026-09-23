@@ -12,6 +12,7 @@ from agent.threads.pins import list_thread_pin_ids, pin_thread, unpin_thread
 from agent.threads.summary import (
     _SURFACED_SOURCES,
     DASHBOARD_SOURCE,
+    INTERACTIVE_THREAD_CATEGORIES,
     _is_automation_thread,
     _is_thread_resolved,
     _metadata_repo,
@@ -48,7 +49,6 @@ _THREAD_LIST_SELECT: list[ThreadSelectField] = [
 _PINNED_THREADS_BATCH_SIZE = 1000
 _RUN_REFRESH_CONCURRENCY = 8
 _RUNNING_METADATA_STATUSES = {"pending", "running"}
-_INTERACTIVE_THREAD_CATEGORIES = ("interactive", "pull_request", "issue")
 
 
 def _participant_search_filters(
@@ -58,7 +58,11 @@ def _participant_search_filters(
     include_all: bool = False,
     scope: ThreadListScope = "all",
 ) -> list[dict[str, Any]]:
-    filters = [{}] if include_all else participant_search_filters(login, email)
+    # The all-threads view stays unsplit: it has no identity keys to fall back on
+    # for threads without a category.
+    if include_all:
+        return [{}]
+    filters = participant_search_filters(login, email)
     if scope == "interactive":
         # Metadata search cannot exclude a value, and some viewers participate in
         # thousands of automation threads. Matching each other category lets the
@@ -66,10 +70,8 @@ def _participant_search_filters(
         filters = [
             {**search_filter, "thread_category": category}
             for search_filter in filters
-            for category in _INTERACTIVE_THREAD_CATEGORIES
+            for category in INTERACTIVE_THREAD_CATEGORIES
         ]
-    if include_all:
-        return filters
     # Threads created before participants existed carry only these two keys, and
     # object containment cannot match them. Drop both once those threads have
     # aged out or been backfilled. They may predate categories too, so they are
@@ -112,7 +114,9 @@ async def _search_threads_batch(
         metadata=metadata,
         limit=limit,
         offset=offset,
-        sort_by=sort_by,
+        # Every metadata write (views, resolves, backfills) bumps `updated_at`;
+        # `state_updated_at` moves only with runs, so it tracks activity.
+        sort_by="state_updated_at" if sort_by == "updated_at" else sort_by,
         sort_order="desc",
         select=_THREAD_LIST_SELECT,
     )
