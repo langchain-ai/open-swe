@@ -61,6 +61,9 @@ export function useAgentThreadStream({
     assistantId: AGENT_ASSISTANT_ID,
     threadId,
     fetch: dashboardFetch,
+    // Only affects "stream"-kind threads; transcript threads never call
+    // useStream() at all.
+    queue: "server",
     maxReconnectAttempts: MAX_RECONNECT_ATTEMPTS,
     reconnectDelayMs,
     onReconnect,

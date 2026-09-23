@@ -7,6 +7,7 @@ import {
   useState,
 } from "react"
 import { useQueryClient } from "@tanstack/react-query"
+import { useSubmissionQueue } from "@langchain/react"
 import { CircleAlert, X } from "lucide-react"
 import { Link } from "@tanstack/react-router"
 
@@ -14,7 +15,11 @@ import type {
   DesktopLocalPromptInput,
   DesktopLocalThreadSummary,
 } from "@/desktop"
-import type { ImageChunk, Message } from "@/features/agents/lib/types"
+import type {
+  ImageChunk,
+  Message,
+  QueuedThreadMessage,
+} from "@/features/agents/lib/types"
 import type { ModelSelection } from "@/features/agents/lib/provider/useModelOptions"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { AgentPromptBar } from "@/features/agents/components/AgentPromptBar"
@@ -55,8 +60,7 @@ import {
   modelConfigurable,
   promptMessage,
 } from "@/features/agents/lib/stream/promptMessage"
-import { useLocalPromptQueue } from "@/features/agents/lib/stream/useLocalPromptQueue"
-import { visibleQueuedMessages } from "@/features/agents/lib/queuedMessages"
+import { queueEntryToMessage } from "@/features/agents/lib/queuedMessages"
 import { messageArrivalTimestamp } from "@/features/agents/lib/messageTimestamps"
 import { useIsMobile } from "@/lib/useIsMobile"
 import { useSession } from "@/lib/session"
@@ -85,7 +89,6 @@ function errorMessage(error: unknown): string {
 
 export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
   const session = useSession()
-  const login = session.data?.login
   const { stream } = useAgentThreadStream({
     transport: "local",
     threadId: sessionId,
@@ -316,7 +319,8 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
     async (
       prompt: string,
       images: Array<ImageChunk>,
-      promptSkills: DesktopLocalPromptInput["skills"] = []
+      promptSkills: DesktopLocalPromptInput["skills"] = [],
+      enqueue = false
     ) => {
       if (!thread) return false
       setError(null)
@@ -331,7 +335,9 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
         await rememberSelection(activeSelection)
         await stream.submit(
           {
-            messages: [promptMessage(prompt, images)],
+            messages: [
+              { ...promptMessage(prompt, images), id: crypto.randomUUID() },
+            ],
             ...(promptSkills.length ? { files: skillFiles(promptSkills) } : {}),
           },
           {
@@ -342,6 +348,7 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
                 ...modelConfigurable(activeSelection),
               },
             },
+            ...(enqueue ? { multitaskStrategy: "enqueue" as const } : {}),
           }
         )
         return true
@@ -353,14 +360,15 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
     [activeSelection, rememberSelection, stream, thread]
   )
 
-  const queue = useLocalPromptQueue({
-    client: stream.client,
-    sessionId,
-    login,
-    isRunning,
-    submit,
-  })
-  const shownError = error ?? (queue.error ? errorMessage(queue.error) : null)
+  const queueEntries = useSubmissionQueue(stream).entries
+  const queuedMessages = useMemo(
+    () =>
+      queueEntries
+        .map(queueEntryToMessage)
+        .filter((message): message is QueuedThreadMessage => message !== null),
+    [queueEntries]
+  )
+  const shownError = error
 
   useEffect(() => {
     if (modelsLoading || !thread || initialPromptRef.current === sessionId)
@@ -470,9 +478,7 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
             messages={messages}
             scrollKey={sessionId}
             onOpenFile={handleOpenFile}
-            queuedMessages={
-              isRunning ? visibleQueuedMessages(queue.queued, messages) : []
-            }
+            queuedMessages={queuedMessages}
             streamIsLoading={stream.isLoading}
             scrollControlRef={scrollControlRef}
           />
@@ -524,15 +530,7 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
                 const text = terminalContext
                   ? `${prompt}\n\nTerminal selection:\n\`\`\`\n${terminalContext}\n\`\`\``
                   : prompt
-                if (!isRunning) {
-                  await submit(text, images)
-                  return
-                }
-                try {
-                  await queue.enqueue(text, images)
-                } catch (cause) {
-                  setError(errorMessage(cause))
-                }
+                await submit(text, images, [], isRunning)
               }}
               placeholder="Add a follow up"
               skills={skills.data}
