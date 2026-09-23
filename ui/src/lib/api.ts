@@ -960,6 +960,9 @@ export interface ReviewDetail extends Omit<
   walkthrough: ReviewWalkthrough | null
   /** A review scout is working on this head, so `walkthrough` is on its way. */
   walkthrough_running: boolean
+  /** Why the latest scout run on this head failed, when it did. */
+  walkthrough_error: string | null
+  walkthrough_scout_thread_id: string | null
   guidance: Array<GuidancePoint>
 }
 

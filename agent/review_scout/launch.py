@@ -30,6 +30,14 @@ class _ScoutRun(BaseModel):
     metadata: dict[str, object] = {}
 
 
+class _ScoutTask(BaseModel):
+    error: str | None = None
+
+
+class _ScoutState(BaseModel):
+    tasks: list[_ScoutTask] = []
+
+
 class ReviewScoutTarget(BaseModel):
     """The pull request head a scout run describes."""
 
@@ -69,6 +77,22 @@ class ReviewScoutTarget(BaseModel):
                 if run.metadata.get(_HEAD_METADATA_KEY) == self.head_sha:
                     return run.run_id
         return None
+
+    async def last_failure(self) -> str | None:
+        """The error that ended the latest scout run on this head, when it failed."""
+        client = dispatch_client()
+        try:
+            runs = await client.runs.list(self.thread_id, limit=1)
+        except NotFoundError:
+            return None
+        if not runs:
+            return None
+        run = _ScoutRun.model_validate(runs[0])
+        if run.status != "error" or run.metadata.get(_HEAD_METADATA_KEY) != self.head_sha:
+            return None
+        state = _ScoutState.model_validate(await client.threads.get_state(self.thread_id))
+        errors = [task.error for task in state.tasks if task.error]
+        return "\n".join(errors) or "The review scout run ended with an error."
 
     async def start(self) -> str:
         """The scout run for this head, started when none is already running.

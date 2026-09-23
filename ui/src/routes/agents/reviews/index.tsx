@@ -13,6 +13,7 @@ import { api } from "@/lib/api"
 import { useSession } from "@/lib/session"
 import { cn } from "@/lib/utils"
 import { MyPullRequests } from "@/features/reviews/MyPullRequests"
+import { OpenPullRequestInput } from "@/features/reviews/OpenPullRequestInput"
 import { PullRequestLinks } from "@/features/reviews/PullRequestLinks"
 import { ReviewCounts } from "@/features/reviews/components/ReviewCounts"
 import {
@@ -129,6 +130,7 @@ function ReviewsPage() {
                 </button>
               ))}
             </div>
+            <OpenPullRequestInput />
             {!mine && (
               <Button
                 className="ml-auto"

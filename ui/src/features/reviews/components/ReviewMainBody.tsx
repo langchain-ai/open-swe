@@ -1460,11 +1460,10 @@ function WalkthroughCallout({ detail }: { detail: ReviewDetail }) {
   const scout = useMutation({
     mutationFn: () =>
       api.runReviewScout(detail.owner, detail.repo, detail.number),
-    onSuccess: () => {
-      void qc.invalidateQueries({
+    onSuccess: () =>
+      qc.invalidateQueries({
         queryKey: ["review", detail.owner, detail.repo, detail.number],
-      })
-    },
+      }),
     onError: (error) =>
       toast.error("Couldn't start the walkthrough", {
         description: error.message,
@@ -1473,16 +1472,35 @@ function WalkthroughCallout({ detail }: { detail: ReviewDetail }) {
   const running = detail.walkthrough_running || scout.isPending
   // This card only renders while there is no walkthrough, so a scout that
   // stops running while it is still mounted ended without one.
+  const failure = running ? null : detail.walkthrough_error
+  const failureSummary = failure?.split("\n", 1)[0]?.slice(0, 300)
   const wasRunning = useRef(detail.walkthrough_running)
   useEffect(() => {
     if (wasRunning.current && !detail.walkthrough_running) {
       toast.error("The walkthrough failed to build", {
-        description:
-          "The review scout finished without producing steps. Try again, or check its review-scout run in LangSmith.",
+        description: failureSummary
+          ? `The review scout crashed: ${failureSummary}`
+          : "The review scout finished without producing steps. Try again, or check its review-scout run in LangSmith.",
       })
     }
     wasRunning.current = detail.walkthrough_running
-  }, [detail.walkthrough_running])
+  }, [detail.walkthrough_running, failureSummary])
+  useEffect(() => {
+    if (!failure) return
+    console.error("Review scout failed", {
+      pr: `${detail.owner}/${detail.repo}#${detail.number}`,
+      headSha: detail.head_sha,
+      scoutThreadId: detail.walkthrough_scout_thread_id,
+      error: failure,
+    })
+  }, [
+    failure,
+    detail.owner,
+    detail.repo,
+    detail.number,
+    detail.head_sha,
+    detail.walkthrough_scout_thread_id,
+  ])
   return (
     <div className="mt-4 flex items-center gap-4 rounded-lg border border-primary/40 bg-primary/5 p-4">
       <ListNumbersIcon className="size-6 shrink-0 text-primary" />
@@ -1495,6 +1513,13 @@ function WalkthroughCallout({ detail }: { detail: ReviewDetail }) {
             ? "The review scout is ordering the changes into narrated steps. This takes a few minutes; the page updates on its own."
             : "The review scout orders the changes into narrated steps and moves mechanical edits to the end."}
         </p>
+        {failureSummary && (
+          <p className="mt-1.5 text-xs break-words text-destructive">
+            Last attempt failed: {failureSummary}
+            {detail.walkthrough_scout_thread_id &&
+              ` (scout thread ${detail.walkthrough_scout_thread_id})`}
+          </p>
+        )}
       </div>
       <Button size="lg" onClick={() => scout.mutate()} disabled={running}>
         {running ? (

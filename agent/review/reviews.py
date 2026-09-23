@@ -663,6 +663,11 @@ async def get_review(owner: str, repo: str, pr_number: int) -> dict[str, Any]:
     target = await _scout_target(owner, repo, pr_number, pr_payload)
     walkthrough = await target.walkthrough() if target else None
     walkthrough_running = walkthrough is None and target is not None and await _scouting(target)
+    walkthrough_error = (
+        await _scout_failure(target)
+        if walkthrough is None and target is not None and not walkthrough_running
+        else None
+    )
     assessment_id = metadata.get("review_assessment_id")
     assessment = (
         await ASSESSMENTS.get(str(assessment_id)) if isinstance(assessment_id, int) else None
@@ -675,6 +680,8 @@ async def get_review(owner: str, repo: str, pr_number: int) -> dict[str, Any]:
         "findings": findings,
         "walkthrough": walkthrough.model_dump(mode="json") if walkthrough else None,
         "walkthrough_running": walkthrough_running,
+        "walkthrough_error": walkthrough_error,
+        "walkthrough_scout_thread_id": target.thread_id if target else None,
         "assessment": assessment.model_dump() if assessment else None,
         "guidance": [
             point.model_dump(mode="json")
@@ -1057,6 +1064,14 @@ async def _scouting(target: ReviewScoutTarget) -> bool:
     except Exception:
         logger.warning("Could not read review scout runs", exc_info=True, extra=target.log_extra)
         return False
+
+
+async def _scout_failure(target: ReviewScoutTarget) -> str | None:
+    try:
+        return await target.last_failure()
+    except Exception:
+        logger.warning("Could not read review scout failure", exc_info=True, extra=target.log_extra)
+        return None
 
 
 class ReviewScoutTrigger(BaseModel):
