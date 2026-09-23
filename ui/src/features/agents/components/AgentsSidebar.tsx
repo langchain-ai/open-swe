@@ -1,4 +1,9 @@
-import { Link, useNavigate, useRouterState } from "@tanstack/react-router"
+import {
+  Link,
+  useNavigate,
+  useRouter,
+  useRouterState,
+} from "@tanstack/react-router"
 import {
   CaretDownIcon,
   CaretRightIcon,
@@ -221,6 +226,15 @@ export function AgentsSidebar({
   const activeSection = useRouterState({
     select: (state) => sectionOf(state.location.pathname),
   })
+  const router = useRouter()
+  const sectionLinkTarget = (href: string) => {
+    const url = new URL(href, "http://localhost")
+    return {
+      to: url.pathname,
+      search: router.options.parseSearch(url.search),
+      hash: url.hash.slice(1) || undefined,
+    }
+  }
   const [updateState, setUpdateState] = useState<DesktopUpdateState>({
     status: "idle",
   })
@@ -749,7 +763,9 @@ export function AgentsSidebar({
                   return (
                     <Link
                       key={item.to}
-                      to={active ? item.to : getLastSectionLocation(item.to)}
+                      {...sectionLinkTarget(
+                        active ? item.to : getLastSectionLocation(item.to)
+                      )}
                       onClick={layout.closeOnMobile}
                       className={cn(
                         "flex items-center gap-2.5 rounded-md px-2.5 py-1.5 text-sm text-foreground transition-colors hover:bg-sidebar-row-hover",

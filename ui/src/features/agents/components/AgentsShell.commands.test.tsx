@@ -58,6 +58,7 @@ vi.mock("@tanstack/react-router", () => ({
   Link: ({ children }: { children?: React.ReactNode }) => <a>{children}</a>,
   useNavigate: () => stub.noop,
   useRouterState: () => undefined,
+  useRouter: () => ({ options: { parseSearch: () => ({}) } }),
 }))
 
 vi.mock("@/lib/session", () => ({ useSession: () => stub.session }))
