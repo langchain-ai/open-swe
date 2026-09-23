@@ -57,7 +57,10 @@ const {
   removeProject,
 } = require("./project-store.cjs");
 const { beginLogin } = require("./login-server.cjs");
-const { readWorkspacePath } = require("./workspace-files.cjs");
+const {
+  listWorkspaceFiles,
+  readWorkspacePath,
+} = require("./workspace-files.cjs");
 const { OpenAiOAuthManager } = require("./openai-oauth.cjs");
 const { isDesktopCommandId } = require("./commands.cjs");
 const {
@@ -842,13 +845,20 @@ function configureDesktopIpc() {
       return { status: "error", files: [], truncated: false };
     }
   });
-  ipcMain.handle("desktop:read-workspace-path", (event, input) => {
-    requireTrustedDesktopIpc(event);
-    const id = input?.localSessionId;
+  const localWorkspaceRoot = (id: unknown): string => {
     const root =
       threadRoot(localThreadStore.get(id)) ?? projectScopeSession(id)?.cwd;
     if (!root) throw new Error("Local workspace not found");
+    return root;
+  };
+  ipcMain.handle("desktop:read-workspace-path", (event, input) => {
+    requireTrustedDesktopIpc(event);
+    const root = localWorkspaceRoot(input?.localSessionId);
     return readWorkspacePath(root, input.relativePath);
+  });
+  ipcMain.handle("desktop:list-workspace-files", (event, localSessionId) => {
+    requireTrustedDesktopIpc(event);
+    return listWorkspaceFiles(localWorkspaceRoot(localSessionId));
   });
   ipcMain.handle("desktop:get-local-pr-diff", async (event, threadId) => {
     requireTrustedDesktopIpc(event);

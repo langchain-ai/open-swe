@@ -1,4 +1,4 @@
-"""Runs inside a thread's sandbox to list a directory or read a file.
+"""Runs inside a thread's sandbox to list a directory, read a file, or index files.
 
 Delivered as a heredoc by ``agent.threads.files``; ``__PAYLOAD__`` is
 substituted with a base64 JSON blob before execution. Prints a single JSON line.
@@ -11,6 +11,7 @@ import subprocess
 
 PAYLOAD = json.loads(base64.b64decode("__PAYLOAD__").decode())
 MAX_FILE_BYTES = 1024 * 1024
+MAX_INDEX_PATHS = 20000
 
 
 def ignored_paths(root, paths):
@@ -51,9 +52,23 @@ def read_file(target):
     }
 
 
+def file_index(root):
+    result = subprocess.run(
+        ["git", "-C", root, "ls-files", "-z", "--cached", "--others", "--exclude-standard"],
+        capture_output=True,
+    )
+    if result.returncode != 0:
+        return {"error": result.stderr.decode(errors="replace").strip() or "Not a git repository."}
+    paths = [path for path in result.stdout.decode(errors="replace").split("\0") if path]
+    return {"paths": paths[:MAX_INDEX_PATHS], "truncated": len(paths) > MAX_INDEX_PATHS}
+
+
 def main():
-    roots = [PAYLOAD["root"], PAYLOAD["fallback"]]
-    root = os.path.realpath(next(filter(os.path.isdir, roots), roots[-1]))
+    if not os.path.isdir(PAYLOAD["root"]):
+        return {"error": "Workspace not found."}
+    root = os.path.realpath(PAYLOAD["root"])
+    if PAYLOAD["mode"] == "index":
+        return file_index(root)
     relative = PAYLOAD["path"].strip("/")
     target = os.path.realpath(os.path.join(root, relative))
     inside = os.path.commonpath([root, target]) == root

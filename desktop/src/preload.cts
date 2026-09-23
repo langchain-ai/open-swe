@@ -80,6 +80,8 @@ contextBridge.exposeInMainWorld("openSweDesktop", {
   getProjectDiff: (cwd) => ipcRenderer.invoke("desktop:get-project-diff", cwd),
   readWorkspacePath: (input) =>
     ipcRenderer.invoke("desktop:read-workspace-path", { ...input }),
+  listWorkspaceFiles: (localSessionId) =>
+    ipcRenderer.invoke("desktop:list-workspace-files", localSessionId),
   onProjectsChanged: (callback) => {
     const listener = (_event, projects) => callback(projects);
     ipcRenderer.on("desktop:projects-changed", listener);

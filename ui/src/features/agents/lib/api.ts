@@ -8,7 +8,7 @@ import type {
   AutomationTrigger,
   WorkflowPushApprovalsResponse,
 } from "./types"
-import type { WorkspacePath } from "./workspaceFiles"
+import type { WorkspaceFileIndex, WorkspacePath } from "./workspaceFiles"
 import { dashboardApiBase } from "@/lib/api-base"
 import {
   dashboardApiUrl,
@@ -428,6 +428,10 @@ export const agentsApi = {
   getThreadPath: (threadId: string, path: string) =>
     agentsRequest<WorkspacePath>(
       `/threads/${encodeURIComponent(threadId)}/files?path=${encodeURIComponent(path)}`
+    ),
+  getThreadFileIndex: (threadId: string) =>
+    agentsRequest<WorkspaceFileIndex>(
+      `/threads/${encodeURIComponent(threadId)}/file-index`
     ),
   downloadThreadRecoveryPatch: (threadId: string) =>
     agentsBlobRequest(

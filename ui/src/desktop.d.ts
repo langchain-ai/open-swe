@@ -1,5 +1,8 @@
 import type { ThreadPrDiffFile } from "@/features/agents/lib/api"
-import type { WorkspacePath } from "@/features/agents/lib/workspaceFiles"
+import type {
+  WorkspaceFileIndex,
+  WorkspacePath,
+} from "@/features/agents/lib/workspaceFiles"
 import type { AgentPullRequest, ImageChunk } from "@/features/agents/lib/types"
 import type { Skill } from "@/lib/api"
 
@@ -243,6 +246,7 @@ declare global {
         localSessionId: string
         relativePath: string
       }) => Promise<WorkspacePath>
+      listWorkspaceFiles: (localSessionId: string) => Promise<WorkspaceFileIndex>
       terminal: DesktopTerminalBridge
     }
   }

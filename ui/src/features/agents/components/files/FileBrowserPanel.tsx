@@ -68,8 +68,16 @@ export function FileBrowserPanel({
   onOpenFile,
   onRefreshSelectedFile,
 }: FileBrowserPanelProps) {
-  const { entries, load, refresh, ready, error, isPending } =
-    useDirectoryEntries(target)
+  const {
+    entries,
+    load,
+    loadIndex,
+    clearIndex,
+    refresh,
+    ready,
+    error,
+    isPending,
+  } = useDirectoryEntries(target)
   const entryKinds = useMemo(
     () => new Map(entries.map((entry) => [entry.path, entry.kind] as const)),
     [entries]
@@ -165,6 +173,13 @@ export function FileBrowserPanel({
       syncingSelectionRef.current = false
     })
   }, [entryKinds, model, selectedPath, selectedPathRevealId])
+
+  // Search filters the tree's paths, so give it every file while it is open.
+  const searchOpen = search.isOpen
+  useEffect(() => {
+    if (searchOpen) void loadIndex()
+    else clearIndex()
+  }, [clearIndex, loadIndex, searchOpen])
 
   const handleSearchChange = (value: string) => {
     if (value.trim()) search.setValue(value)
