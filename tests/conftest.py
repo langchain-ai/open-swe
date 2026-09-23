@@ -25,6 +25,14 @@ from agent.webhooks import common as webhook_common
 from agent.workspaces.store import WORKSPACES
 
 _THREAD_MODULES: tuple[ModuleType, ...] = (access, diffs, handlers, listing, proxy, runs, summary)
+_MAX_PARAM_ID_CHARS = 40
+
+
+def pytest_make_parametrize_id(config: pytest.Config, val: object, argname: str) -> str | None:
+    """Keep node IDs short; a 100 KB ID line truncates `gh run view --log-failed` output."""
+    if isinstance(val, str) and len(val) > _MAX_PARAM_ID_CHARS:
+        return f"{argname}-len{len(val)}"
+    return None
 
 
 def patch_thread_module(monkeypatch: pytest.MonkeyPatch, name: str, value: Any) -> None:
