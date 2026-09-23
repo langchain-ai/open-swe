@@ -88,6 +88,26 @@ class SteeringHistory(BaseModel):
     request: HumanTurn
     follow_ups: list[HumanTurn]
 
+    @staticmethod
+    async def is_public(owner: str, repo: str, pr_number: int) -> bool:
+        """Require every source thread to be explicitly public before sharing guidance."""
+        try:
+            pull_request = await PullRequest.get(owner, repo, pr_number)
+            if pull_request is None:
+                return False
+            thread_ids = await pull_request.linked_threads()
+            if not thread_ids:
+                return False
+            for thread_id in thread_ids:
+                thread = await langgraph_client().threads.get(thread_id)
+                metadata = thread.get("metadata")
+                if not isinstance(metadata, Mapping) or metadata.get("visibility") != "public":
+                    return False
+            return True
+        except Exception:
+            logger.warning("Could not verify steering history visibility", exc_info=True)
+            return False
+
     @classmethod
     async def load(cls, owner: str, repo: str, pr_number: int) -> Self | None:
         """This PR's human turns, or ``None`` when Open SWE did not write it.
@@ -98,6 +118,8 @@ class SteeringHistory(BaseModel):
         Cached briefly: a reviewer run reads this once to build its prompt and
         again for every point it records, and each read is a whole thread state.
         """
+        if not await cls.is_public(owner, repo, pr_number):
+            return None
         return await ttl_cache.cached(
             f"guidance:steering:{owner}/{repo}#{pr_number}".lower(),
             _STEERING_CACHE_SECONDS,
@@ -410,7 +432,7 @@ class GuidanceView(BaseModel):
         The review page renders for deployments with no ``POSTGRES_URI`` and for
         pull requests no reviewer has touched; neither is a failure to report.
         """
-        if not postgres.configured():
+        if not postgres.configured() or not await SteeringHistory.is_public(owner, repo, pr_number):
             return []
         return [
             cls.of(point) for point in await GuidancePoint.for_pull_request(owner, repo, pr_number)
@@ -419,7 +441,11 @@ class GuidanceView(BaseModel):
     @classmethod
     async def for_head(cls, owner: str, repo: str, pr_number: int, head_sha: str) -> list[Self]:
         """The points the review scout recorded for ``head_sha``."""
-        if not head_sha or not postgres.configured():
+        if (
+            not head_sha
+            or not postgres.configured()
+            or not await SteeringHistory.is_public(owner, repo, pr_number)
+        ):
             return []
         return [
             cls.of(point)
