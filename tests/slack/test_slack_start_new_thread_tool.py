@@ -1,6 +1,7 @@
 import importlib
 import uuid
 from typing import Any
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -160,6 +161,12 @@ async def test_slack_start_new_thread_success(monkeypatch: pytest.MonkeyPatch) -
         "dashboard_thread_url",
         lambda thread_id: f"https://dashboard.example/agents/{thread_id}",
     )
+    source_line = AsyncMock(
+        return_value=":arrow_right_hook: Broken out from <https://p/src|this thread>"
+    )
+    link_back = AsyncMock()
+    monkeypatch.setattr(slack_breakout_tool, "source_thread_line", source_line)
+    monkeypatch.setattr(slack_breakout_tool, "post_breakout_link", link_back)
 
     result = await slack_breakout_tool.slack_start_new_thread(
         "Investigate follow-up",
@@ -177,8 +184,12 @@ async def test_slack_start_new_thread_success(monkeypatch: pytest.MonkeyPatch) -
     }
     assert captured["top_level_post"]["channel_id"] == "C1"
     assert captured["top_level_post"]["text"] == (
-        "*Open SWE breakout thread:* Investigate follow-up"
+        "*Open SWE breakout thread:* Investigate follow-up\n"
+        ":arrow_right_hook: Broken out from <https://p/src|this thread>"
     )
+    source_thread_ts = _config()["configurable"]["slack_thread"]["thread_ts"]
+    source_line.assert_awaited_once_with("C1", source_thread_ts)
+    link_back.assert_awaited_once_with("C1", source_thread_ts, new_ts)
     assert captured["top_level_post"]["unfurl_links"] is False
     assert captured["thread_reply"] == {
         "channel_id": "C1",

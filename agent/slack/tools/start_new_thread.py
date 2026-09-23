@@ -9,6 +9,7 @@ from agent.dashboard.repo_access import require_repo_access_for_user
 from agent.dispatch import dispatch_agent_run
 from agent.prompts import render_prompt
 from agent.run_config import RunConfig
+from agent.slack.breakout_links import post_breakout_link, source_thread_line
 from agent.slack.client import (
     bind_slack_thread_id,
     get_active_slack_thread,
@@ -228,9 +229,14 @@ async def slack_start_new_thread(
             }
 
     clean_channel_id = channel_id.strip()
+    source_line = (
+        await source_thread_line(clean_channel_id, current_thread_ts)
+        if isinstance(current_thread_ts, str) and current_thread_ts
+        else ""
+    )
     message_ts, slack_error = await post_slack_top_level_message_with_ts(
         clean_channel_id,
-        _visible_message(clean_title),
+        "\n".join(line for line in (_visible_message(clean_title), source_line) if line),
         unfurl_links=False,
         unfurl_media=False,
     )
@@ -330,6 +336,8 @@ async def slack_start_new_thread(
             message_ts=message_ts,
             triggering_user_id=new_slack_thread.get("triggering_user_id") or None,
         )
+    if isinstance(current_thread_ts, str) and current_thread_ts:
+        await post_breakout_link(clean_channel_id, current_thread_ts, message_ts)
 
     return {
         "success": True,

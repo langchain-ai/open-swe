@@ -4,12 +4,11 @@ import logging
 import re
 
 from agent.slack import webhook as service
+from agent.slack.breakout_links import post_breakout_link, source_thread_line
 from agent.slack.client import (
     fetch_slack_thread_messages,
     get_active_slack_thread,
-    get_slack_permalink,
     post_slack_ephemeral_reply,
-    post_slack_thread_reply,
     post_slack_top_level_message_with_ts,
     strip_bot_mention,
 )
@@ -56,20 +55,17 @@ async def _participant_mentions(request: SlackRequest) -> str:
     return " ".join(f"<@{user_id}>" for user_id in user_ids)
 
 
-def _root_text(heading: str, mentions: str) -> str:
-    return f"{heading}\n{mentions}" if mentions else heading
+async def _root_text(request: SlackRequest, heading: str) -> str:
+    lines = (
+        heading,
+        await source_thread_line(request.channel_id, request.thread_ts),
+        await _participant_mentions(request),
+    )
+    return "\n".join(line for line in lines if line)
 
 
 async def _link_back(request: SlackRequest, new_ts: str) -> None:
-    permalink = await get_slack_permalink(request.channel_id, new_ts)
-    link = (
-        f"<{permalink}|Continued in a breakout thread>"
-        if permalink
-        else "Continued in a breakout thread"
-    )
-    await post_slack_thread_reply(
-        request.channel_id, request.thread_ts, f":leftward_arrow_with_hook: {link}"
-    )
+    await post_breakout_link(request.channel_id, request.thread_ts, new_ts)
 
 
 async def _tell_sender(request: SlackRequest, text: str) -> None:
@@ -102,7 +98,7 @@ async def _move(request: SlackRequest) -> None:
         thread_id,
         active,
         request.channel_id,
-        _root_text(heading, await _participant_mentions(request)),
+        await _root_text(request, heading),
     )
     new_ts = result.get("thread_ts")
     if not result.get("success") or not isinstance(new_ts, str):
@@ -121,7 +117,7 @@ async def _start(
     heading = f"*Open SWE breakout thread:* {_title(instruction)}"
     new_ts, slack_error = await post_slack_top_level_message_with_ts(
         request.channel_id,
-        _root_text(heading, await _participant_mentions(request)),
+        await _root_text(request, heading),
         unfurl_links=False,
         unfurl_media=False,
     )

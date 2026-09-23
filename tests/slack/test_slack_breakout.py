@@ -57,9 +57,13 @@ def _patch_slack(monkeypatch) -> SimpleNamespace:
         ),
     )
     monkeypatch.setattr(
-        breakout, "get_slack_permalink", AsyncMock(return_value="https://slack/p200")
+        breakout,
+        "source_thread_line",
+        AsyncMock(
+            return_value=":arrow_right_hook: Broken out from <https://slack/p100|this thread>"
+        ),
     )
-    monkeypatch.setattr(breakout, "post_slack_thread_reply", posted.replies)
+    monkeypatch.setattr(breakout, "post_breakout_link", posted.replies)
     monkeypatch.setattr(breakout, "post_slack_ephemeral_reply", posted.ephemeral)
     return posted
 
@@ -78,14 +82,12 @@ async def test_breakout_with_text_starts_new_thread_with_old_transcript(monkeypa
 
     await breakout.process_slack_breakout(_request(), "fix it", None)
 
-    root_text = root.await_args.args[1]
-    assert root_text.startswith("*Open SWE breakout thread:* fix it")
-    assert "<@U_ALICE> <@U_BOB>" in root_text
-    posted.replies.assert_awaited_once_with(
-        "C1",
-        "100.0",
-        ":leftward_arrow_with_hook: <https://slack/p200|Continued in a breakout thread>",
+    assert root.await_args.args[1] == (
+        "*Open SWE breakout thread:* fix it\n"
+        ":arrow_right_hook: Broken out from <https://slack/p100|this thread>\n"
+        "<@U_ALICE> <@U_BOB>"
     )
+    posted.replies.assert_awaited_once_with("C1", "100.0", "200.0")
     sent = mention.await_args.args[0]
     assert (sent.thread_ts, sent.thread_id, sent.text, sent.context_thread_ts) == (
         "200.0",
@@ -118,8 +120,12 @@ async def test_bare_breakout_moves_the_existing_thread(monkeypatch):
 
     _, thread_id, _, channel, message = move.await_args.args
     assert (thread_id, channel) == ("old-thread", "C1")
-    assert message == "*Open SWE breakout thread:* Flaky test\n<@U_ALICE> <@U_BOB>"
-    posted.replies.assert_awaited_once()
+    assert message == (
+        "*Open SWE breakout thread:* Flaky test\n"
+        ":arrow_right_hook: Broken out from <https://slack/p100|this thread>\n"
+        "<@U_ALICE> <@U_BOB>"
+    )
+    posted.replies.assert_awaited_once_with("C1", "100.0", "200.0")
     mention.assert_not_awaited()
 
 
