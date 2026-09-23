@@ -208,6 +208,37 @@ describe("WorkspaceSettingsPanel", () => {
     )
   })
 
+  it("follows an automatic rebuild after saving changed repositories", async () => {
+    mockApis()
+    const updated: WorkspaceRecord = {
+      ...RECORD,
+      repos: ["acme/oss", "acme/new"],
+      refresh_status: "refreshing",
+    }
+    vi.spyOn(api, "updateWorkspace").mockResolvedValue(updated)
+    const getWorkspace = vi.spyOn(api, "getWorkspace")
+    renderPage()
+
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Choose repositories" })
+    )
+    fireEvent.change(
+      screen.getByRole("textbox", { name: "Add a repository by name" }),
+      {
+        target: { value: "acme/new" },
+      }
+    )
+    fireEvent.click(screen.getByRole("button", { name: "Add" }))
+    fireEvent.click(screen.getByRole("button", { name: "Save 2 repositories" }))
+    fireEvent.click(screen.getByRole("button", { name: "Save" }))
+
+    const rebuilding = await screen.findByRole("button", {
+      name: "Rebuilding…",
+    })
+    expect((rebuilding as HTMLButtonElement).disabled).toBe(true)
+    expect(getWorkspace).toHaveBeenCalledOnce()
+  })
+
   it("shows a save conflict in the alert region", async () => {
     mockApis()
     vi.spyOn(api, "updateWorkspace").mockRejectedValue(

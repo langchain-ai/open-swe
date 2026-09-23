@@ -139,8 +139,15 @@ async def api_update_workspace(
         raise _save_conflict(e) from e
     if record.setup_script:
         await ensure_refresh_cron(record.slug)
-        if repos_changed and await start_refresh_run(record.slug) is None:
-            raise HTTPException(502, "workspace was saved but its snapshot rebuild could not start")
+        if repos_changed:
+            run_id = await start_refresh_run(record.slug)
+            if run_id is None:
+                raise HTTPException(
+                    502, "workspace was saved but its snapshot rebuild could not start"
+                )
+            return record.model_copy(
+                update={"refresh_status": "refreshing", "refresh_run_id": run_id}
+            )
     return record
 
 
