@@ -32,6 +32,7 @@ _DEFAULT_RETRY_SECONDS = 30.0
 _MAX_RETRY_SECONDS = 300.0
 _THINKING_STATUS = "Thinking..."
 _STATUS_REFRESH_SECONDS = 90.0
+_STATUS_POLL_SECONDS = 5.0
 _STATUS_ANCHOR_NAMESPACE = "slack_session_status_anchor"
 
 
@@ -378,17 +379,7 @@ async def show_slack_thinking_status(
     thread_ts: str,
     session_ts: str = "",
 ) -> None:
-    """Keep Slack's animated "Thinking..." status alive until the run ends.
-
-    A session (a DM) has no thread to hang the status on, so ``thread_ts`` is the
-    message this run answers and ``session_ts`` names the session that owns the
-    single status: claiming it moves the status off the message that held it, so
-    the indicator is always on the latest one and only there.
-
-    Slack stops the animation when the assistant posts a message, so the status
-    is refreshed in the background for the whole run; the completion webhook
-    clears it once no run is left.
-    """
+    """Reconcile Slack's indicator with active runs independently of completion events."""
     if session_ts:
         previous = await _claim_status_anchor(client, channel_id, session_ts, thread_ts)
         if previous and previous != thread_ts:
@@ -398,31 +389,31 @@ async def show_slack_thinking_status(
             await _release_status_anchor(client, channel_id, session_ts, thread_ts)
         return
 
-    async def refresh() -> None:
-        while True:
-            await asyncio.sleep(_STATUS_REFRESH_SECONDS)
-            await restore_slack_thinking_status(channel_id, thread_ts)
-
-    refresher = asyncio.create_task(refresh())
+    refreshed_at = monotonic()
+    settled = False
     try:
-        async with client.threads.stream(thread_id, assistant_id="agent") as thread_stream:
-            async for event in thread_stream.subscribe(["lifecycle"]):
-                lifecycle = root_lifecycle(event)
-                if (
-                    lifecycle is not None
-                    and lifecycle[0] == run_id
-                    and lifecycle[1] in TERMINAL_LIFECYCLE_EVENTS
-                ):
-                    break
-    except Exception:
-        logger.warning("Slack thinking status observer failed for run %s", run_id, exc_info=True)
+        while not settled:
+            if await _thread_has_active_runs(client, thread_id):
+                if monotonic() - refreshed_at >= _STATUS_REFRESH_SECONDS:
+                    if session_ts:
+                        await restore_slack_session_status(client, channel_id, session_ts)
+                    else:
+                        await restore_slack_thinking_status(channel_id, thread_ts)
+                    refreshed_at = monotonic()
+            else:
+                settled = await clear_slack_thinking_status_if_idle(
+                    client, thread_id, channel_id, thread_ts, session_ts=session_ts
+                )
+            if not settled:
+                await asyncio.sleep(_STATUS_POLL_SECONDS)
     finally:
-        refresher.cancel()
-        await asyncio.shield(
-            clear_slack_thinking_status_if_idle(
-                client, thread_id, channel_id, thread_ts, session_ts=session_ts
+        if not settled:
+            logger.info("Settling interrupted Slack status observer", extra={"run_id": run_id})
+            await asyncio.shield(
+                clear_slack_thinking_status_if_idle(
+                    client, thread_id, channel_id, thread_ts, session_ts=session_ts
+                )
             )
-        )
 
 
 async def clear_slack_thinking_status_if_idle(
@@ -433,30 +424,31 @@ async def clear_slack_thinking_status_if_idle(
     *,
     session_ts: str = "",
     metadata: Mapping[str, object] | None = None,
-) -> None:
-    """Settle an idle indicator while preserving background work and newer anchors."""
+) -> bool:
+    """Return whether an idle indicator was settled or belongs to a newer anchor."""
     try:
         if metadata is None:
             metadata = thread_metadata(await client.threads.get(thread_id))
         if await _thread_has_active_runs(client, thread_id):
-            return
+            return False
         waiting = bool(metadata.get(RUNNING_BACKGROUND_TASKS_KEY))
         if session_ts:
             item = await client.store.get_item((_STATUS_ANCHOR_NAMESPACE, channel_id), session_ts)
             value = item.get("value") if isinstance(item, Mapping) else None
             if not isinstance(value, Mapping) or value.get("message_ts") != thread_ts:
-                return
-            if not waiting and not await _release_status_anchor(
-                client, channel_id, session_ts, thread_ts
-            ):
-                return
-        await set_slack_thread_status(
+                return True
+        if not await set_slack_thread_status(
             channel_id, thread_ts, "Waiting for background tasks…" if waiting else ""
-        )
+        ):
+            return False
+        if session_ts and not waiting:
+            await _release_status_anchor(client, channel_id, session_ts, thread_ts)
+        return True
     except Exception:
         logger.warning(
             "Could not settle Slack status", extra={"agent_thread_id": thread_id}, exc_info=True
         )
+        return False
 
 
 async def sync_slack_background_status(
