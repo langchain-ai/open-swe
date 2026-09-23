@@ -1449,12 +1449,14 @@ async def slack_upload_bytes(file_id: str, request: Request) -> JSONResponse:
 
 @app.post("/fake-slack/files.completeUploadExternal")
 async def slack_complete_upload(request: Request) -> JSONResponse:
-    # The SDK form-encodes this one, with ``files`` as a JSON string.
-    try:
-        body: object = await request.json()
-    except ValueError:
-        body = dict(await request.form())
-    raw: object = body.get("files") if isinstance(body, dict) else None
+    # The SDK sends this one as query parameters, with ``files`` as a JSON string.
+    raw: object = request.query_params.get("files")
+    if raw is None:
+        try:
+            body: object = await request.json()
+        except ValueError:
+            body = dict(await request.form())
+        raw = body.get("files") if isinstance(body, dict) else None
     if isinstance(raw, str):
         raw = json.loads(raw)
     items = [item for item in raw if isinstance(item, dict)] if isinstance(raw, list) else []
