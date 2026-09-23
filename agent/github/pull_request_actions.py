@@ -22,6 +22,7 @@ from agent.github.repo_merge_methods import MergeMethod
 logger = logging.getLogger(__name__)
 
 PullRequestActionName = Literal["merge", "close", "mark-ready"]
+_COMMENTS_PER_PAGE = 100
 
 # REST cannot clear the draft flag, so marking a PR ready has to go through GraphQL.
 _READY_MUTATION = """
@@ -146,9 +147,41 @@ class CloseAction(_PullRequestActionBase):
     )
     unconfirmed: ClassVar[str] = "GitHub did not confirm the close."
 
+    async def _latest_comment_body(
+        self, client: httpx2.AsyncClient, owner: str, repo: str, number: int
+    ) -> str | None:
+        issue_url = f"{GITHUB_API_BASE}/repos/{owner}/{repo}/issues/{number}"
+        response, issue = await self._request(client, "GET", issue_url)
+        if not response.is_success:
+            raise self._refusal(response, issue)
+        count = issue.get("comments")
+        if not isinstance(count, int) or count < 1:
+            return None
+        last_page = (count + _COMMENTS_PER_PAGE - 1) // _COMMENTS_PER_PAGE
+        try:
+            listed = await github_request(
+                client,
+                "GET",
+                f"{issue_url}/comments?per_page={_COMMENTS_PER_PAGE}&page={last_page}",
+                max_retries=0,
+            )
+            comments = listed.json()
+        except (httpx2.HTTPError, ValueError) as exc:
+            raise HTTPException(502, self.transport_failure) from exc
+        if not listed.is_success or not isinstance(comments, list) or not comments:
+            logger.warning(
+                "Could not read the latest pull request comment",
+                extra={"pr_repo_full_name": f"{owner}/{repo}", "pr_number": number},
+            )
+            raise HTTPException(502, self.transport_failure)
+        last = comments[-1]
+        body = last.get("body") if isinstance(last, dict) else None
+        return body.strip() if isinstance(body, str) else None
+
     async def perform(self, client: httpx2.AsyncClient, owner: str, repo: str, number: int) -> None:
         reason = self.reason.strip()
-        if reason:
+        # A retry after a failed close must not post the same reason twice.
+        if reason and await self._latest_comment_body(client, owner, repo, number) != reason:
             response, payload = await self._request(
                 client,
                 "POST",
@@ -275,6 +308,10 @@ async def resolve_review_threads(
     async with github_client(token=token) as client:
         threads = await fetch_unresolved_review_threads(client, owner, repo, number)
         if threads is None:
+            logger.warning(
+                "Review threads unavailable for resolve",
+                extra={"pr_repo_full_name": f"{owner}/{repo}", "pr_number": number},
+            )
             raise HTTPException(502, "GitHub did not return the review threads")
         open_ids = {thread["thread_id"] for thread in threads if thread.get("thread_id")}
         resolved: list[str] = []
@@ -295,5 +332,19 @@ async def act_on_pull_request(
     if pull_request_identity({"repo_full_name": f"{owner}/{repo}", "number": number}) is None:
         raise HTTPException(422, "invalid pull request")
     async with github_client(token=token) as client:
-        await action.perform(client, owner, repo, number)
+        try:
+            await action.perform(client, owner, repo, number)
+        except HTTPException as exc:
+            logger.warning(
+                "Pull request action failed",
+                extra={
+                    "pr_repo_full_name": f"{owner}/{repo}",
+                    "pr_number": number,
+                    "pr_action": action.action,
+                    "status_code": exc.status_code,
+                    "error_detail": exc.detail,
+                },
+                exc_info=exc.__cause__ is not None,
+            )
+            raise
     return PullRequestActionResult(action=action.action, done=True)
