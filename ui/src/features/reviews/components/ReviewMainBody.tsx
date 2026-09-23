@@ -72,7 +72,12 @@ import type {
   ReviewSidebarView,
 } from "@/features/reviews/components/ReviewSidebar"
 import type { ChatAttachment } from "@/features/reviews/components/ReviewChat"
-import type { DiffRange } from "@/features/reviews/lib/chatDiffActions"
+import type {
+  DiffRange,
+  ProposedComment,
+} from "@/features/reviews/lib/chatDiffActions"
+import { useChatDrafts } from "@/features/reviews/lib/chatDrafts"
+import { ProposedCommentCard } from "@/features/reviews/components/ProposedCommentCard"
 import type { DiffStyle } from "@/features/agents/utils/diffUtils"
 import { Markdown } from "@/features/agents/components/chat/Markdown"
 import { DiffWrapToggle } from "@/features/agents/components/DiffWrapToggle"
@@ -122,6 +127,7 @@ type ReviewAnnotation =
   | { kind: "finding"; finding: ReviewFinding }
   | { kind: "draftComment"; path: string; range: SelectedLineRange }
   | { kind: "comment"; comment: PrReviewComment }
+  | { kind: "chatDraft"; draft: ProposedComment }
 
 const REVIEW_VIEW_STORAGE_KEY = "open-swe.review.view"
 const REVIEW_DIFF_STYLE_STORAGE_KEY = "open-swe.review.diffStyle"
@@ -569,6 +575,7 @@ function useExpandedFinding(): ExpandedFindingContextValue {
 }
 
 const NO_FINDINGS: Array<ReviewFinding> = []
+const NO_CHAT_DRAFTS: ReadonlyArray<ProposedComment> = []
 const ignoreSection = (_path: string, _node: HTMLDivElement | null) => {}
 
 /** Scroll to a line in whichever registered slice of the file renders it. */
@@ -792,6 +799,18 @@ function ReviewBodyInner({
     setRead(next)
     persistRead(next)
   }, [detail.findings, persistRead])
+
+  const chatDraftStore = useChatDrafts()
+  const chatDraftsByFile = useMemo(() => {
+    const byFile = new Map<string, Array<ProposedComment>>()
+    for (const draft of chatDraftStore?.comments ?? []) {
+      if (draft.outcome) continue
+      const list = byFile.get(draft.proposal.range.file) ?? []
+      list.push(draft.proposal)
+      byFile.set(draft.proposal.range.file, list)
+    }
+    return byFile
+  }, [chatDraftStore?.comments])
 
   const findingsByFile = useMemo(() => {
     const byFile = new Map<string, Array<ReviewFinding>>()
@@ -1309,6 +1328,11 @@ function ReviewBodyInner({
         additions={step?.entry.additions ?? file.additions}
         deletions={step?.entry.deletions ?? file.deletions}
         findings={findingsByFile.get(file.path) ?? NO_FINDINGS}
+        chatDrafts={
+          embedded
+            ? NO_CHAT_DRAFTS
+            : (chatDraftsByFile.get(file.path) ?? NO_CHAT_DRAFTS)
+        }
         selectedLines={selectedLines}
         viewed={viewed.has(file.path)}
         onToggleViewed={toggleViewed}
@@ -1815,6 +1839,7 @@ const FileDiffCard = memo(function FileDiffCard({
   openComment,
   onUpdateOpenComment,
   onCloseOpenComment,
+  chatDrafts,
 }: {
   file: ReviewDiffFile
   /** A walkthrough step's slice of the file; `null` renders the whole diff. */
@@ -1849,6 +1874,8 @@ const FileDiffCard = memo(function FileDiffCard({
   openComment: PrReviewComment | null
   onUpdateOpenComment?: (comment: PrReviewComment) => void
   onCloseOpenComment?: () => void
+  /** Chat-drafted comments on this file still awaiting the user's decision. */
+  chatDrafts: ReadonlyArray<ProposedComment>
 }) {
   // No chat means no line-selection → "Add to Chat" affordance (embedded view).
   const selectable = Boolean(onAddToChat)
@@ -1903,10 +1930,23 @@ const FileDiffCard = memo(function FileDiffCard({
         metadata: { kind: "comment", comment: openComment },
       })
     }
+    for (const draft of chatDrafts) {
+      extra.push({
+        side: draft.range.side === "LEFT" ? "deletions" : "additions",
+        lineNumber: draft.range.endLine,
+        metadata: { kind: "chatDraft", draft },
+      })
+    }
     return extra.length > 0
       ? [...findingAnnotations, ...extra]
       : findingAnnotations
-  }, [findingAnnotations, commentDraftRange, openComment, file.path])
+  }, [
+    findingAnnotations,
+    commentDraftRange,
+    openComment,
+    chatDrafts,
+    file.path,
+  ])
 
   // The gutter "+" drives comments: a click comments on one line, and a drag down
   // the gutter comments across a range (Pierre's gutter selection, which needs
@@ -2006,6 +2046,17 @@ const FileDiffCard = memo(function FileDiffCard({
       const meta = annotation.metadata
       if (meta.kind === "finding")
         return <InlineFinding finding={meta.finding} />
+      if (meta.kind === "chatDraft")
+        return (
+          <div className="p-2 font-sans">
+            <ProposedCommentCard
+              owner={owner}
+              repo={repo}
+              number={prNumber}
+              id={meta.draft.id}
+            />
+          </div>
+        )
       if (meta.kind === "comment")
         return (
           <InlineComment

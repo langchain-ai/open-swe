@@ -31,8 +31,10 @@ from agent.review.enabled_repos import list_enabled_review_repos, set_review_rep
 from agent.review.eval_jobs import get_reviewer_eval_status
 from agent.review.reviews import (
     PullRequestPreview,
+    PullRequestReviewEvent,
     ReviewScoutTrigger,
     ReviewSummary,
+    SubmittedReview,
     create_review_comment,
     get_pull_request_preview,
     get_review,
@@ -41,6 +43,7 @@ from agent.review.reviews import (
     list_review_comments,
     list_reviews,
     proxy_pr_image,
+    submit_pull_request_review,
     trigger_re_review,
     trigger_review_scout,
     update_review_comment,
@@ -320,6 +323,28 @@ async def api_create_review_comment(
         body=body,
         start_line=comment.start_line,
         start_side=comment.start_side,
+    )
+
+
+class PullRequestReviewSubmit(BaseModel):
+    event: PullRequestReviewEvent
+    body: str = Field(default="", max_length=65_000)
+
+
+@router.post("/reviews/{owner}/{repo}/{pr_number}/submit-review")
+async def api_submit_pull_request_review(
+    owner: str,
+    repo: str,
+    pr_number: int,
+    review: PullRequestReviewSubmit,
+    session: dict[str, Any] = SESSION_DEP,
+) -> SubmittedReview:
+    await require_repo_access_for_user(session["sub"], f"{owner}/{repo}")
+    token = await get_valid_access_token(session["sub"])
+    if not token:
+        raise HTTPException(401, "GitHub re-auth required")
+    return await submit_pull_request_review(
+        owner, repo, pr_number, token=token, event=review.event, body=review.body.strip()
     )
 
 

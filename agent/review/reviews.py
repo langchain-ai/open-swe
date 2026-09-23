@@ -492,6 +492,39 @@ async def create_review_comment(
     )
 
 
+PullRequestReviewEvent = Literal["APPROVE", "REQUEST_CHANGES", "COMMENT"]
+
+
+class SubmittedReview(BaseModel):
+    id: int
+    html_url: str
+    state: str
+
+
+async def submit_pull_request_review(
+    owner: str,
+    repo: str,
+    pr_number: int,
+    *,
+    token: str,
+    event: PullRequestReviewEvent,
+    body: str,
+) -> SubmittedReview:
+    """Submit a review on the PR's live head as the caller; GitHub errors surface verbatim."""
+    if event != "APPROVE" and not body:
+        raise HTTPException(422, "a comment or change request needs a body")
+    head_sha = await get_pr_head_sha(owner, repo, pr_number)
+    if not head_sha:
+        raise HTTPException(502, "could not resolve PR head commit")
+    payload: dict[str, Any] = {"event": event, "commit_id": head_sha}
+    if body:
+        payload["body"] = body
+    result = await _github_post(
+        f"/repos/{owner}/{repo}/pulls/{pr_number}/reviews", token, json=payload
+    )
+    return SubmittedReview.model_validate(result)
+
+
 async def update_review_comment(
     owner: str,
     repo: str,

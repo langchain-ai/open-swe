@@ -768,6 +768,14 @@ export interface ReviewCommentCreate {
   start_side?: "LEFT" | "RIGHT" | null
 }
 
+export type PullRequestReviewEvent = "APPROVE" | "REQUEST_CHANGES" | "COMMENT"
+
+export interface SubmittedReview {
+  id: number
+  html_url: string
+  state: string
+}
+
 export interface ReviewCommentResult {
   id: number
   html_url: string
@@ -1602,6 +1610,16 @@ export const api = {
     }>(
       `/reviews/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}/re-review`,
       { method: "POST" }
+    ),
+  submitPullRequestReview: (
+    owner: string,
+    repo: string,
+    number: number,
+    review: { event: PullRequestReviewEvent; body: string }
+  ) =>
+    request<SubmittedReview>(
+      `/reviews/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}/submit-review`,
+      { method: "POST", body: JSON.stringify(review) }
     ),
   createReviewComment: (
     owner: string,

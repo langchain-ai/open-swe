@@ -66,6 +66,7 @@ from agent.tools import (
     search_repo_code,
     web_search,
 )
+from agent.tools.propose_pr_review import propose_pr_review
 from agent.tools.propose_review_comment import propose_review_comment
 from agent.tools.show_in_diff import show_in_diff
 from agent.utils.deferred_model import make_deferred_error_model
@@ -195,6 +196,7 @@ async def get_chat_agent(config: RunnableConfig) -> Pregel:
                 fetch_url,
                 show_in_diff,
                 propose_review_comment,
+                propose_pr_review,
             ]
         ),
         subagents=[_chat_general_purpose_subagent()],

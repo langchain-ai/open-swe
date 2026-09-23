@@ -20,7 +20,22 @@ export interface ProposedComment {
   body: string
 }
 
-export type ChatDiffAction = ShowInDiffAction | ProposedComment
+export type ReviewEvent = "APPROVE" | "REQUEST_CHANGES" | "COMMENT"
+
+export interface ProposedReview {
+  kind: "review"
+  id: string
+  event: ReviewEvent
+  body: string
+}
+
+export type ChatDiffAction = ShowInDiffAction | ProposedComment | ProposedReview
+
+const REVIEW_EVENTS: ReadonlyArray<ReviewEvent> = [
+  "APPROVE",
+  "REQUEST_CHANGES",
+  "COMMENT",
+]
 
 /** The fields of a LangGraph tool message this module reads. */
 export interface ToolMessageLike {
@@ -69,18 +84,31 @@ function contentObject(content: unknown): Record<string, unknown> | null {
   }
 }
 
-/** The diff action a successful `show_in_diff` or `propose_review_comment` result carries. */
+const ACTION_TOOLS = new Set([
+  "show_in_diff",
+  "propose_review_comment",
+  "propose_pr_review",
+])
+
+/** The page action a successful chat tool result carries. */
 export function chatDiffAction(
   message: ToolMessageLike
 ): ChatDiffAction | null {
   if (message.type !== "tool" || !message.tool_call_id) return null
-  if (
-    message.name !== "show_in_diff" &&
-    message.name !== "propose_review_comment"
-  )
-    return null
+  if (!message.name || !ACTION_TOOLS.has(message.name)) return null
   const result = contentObject(message.content)
   if (!result) return null
+  if (message.name === "propose_pr_review") {
+    const event = REVIEW_EVENTS.find((value) => value === result.event)
+    return result.proposed === true && event
+      ? {
+          kind: "review",
+          id: message.tool_call_id,
+          event,
+          body: typeof result.body === "string" ? result.body : "",
+        }
+      : null
+  }
   const range = parseRange(result.range)
   if (!range) return null
   if (message.name === "show_in_diff") {

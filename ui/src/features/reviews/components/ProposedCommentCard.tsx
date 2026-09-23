@@ -1,9 +1,8 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query"
-import { useState } from "react"
 import { toast } from "sonner"
 
-import type { ProposedComment } from "@/features/reviews/lib/chatDiffActions"
 import { rangeLabel } from "@/features/reviews/lib/chatDiffActions"
+import { useChatDrafts } from "@/features/reviews/lib/chatDrafts"
 import { Button } from "@/components/ui/button"
 import {
   Card,
@@ -16,66 +15,40 @@ import {
 import { Textarea } from "@/components/ui/textarea"
 import { api } from "@/lib/api"
 
-type Outcome = { state: "posted"; url: string } | { state: "discarded" }
-
-function storageKey(id: string): string {
-  return `review-chat-comment:${id}`
-}
-
-function readOutcome(id: string): Outcome | null {
-  try {
-    const raw = window.localStorage.getItem(storageKey(id))
-    return raw ? (JSON.parse(raw) as Outcome) : null
-  } catch (error) {
-    console.warn("Could not read proposed comment outcome", error)
-    return null
-  }
-}
-
-function writeOutcome(id: string, outcome: Outcome) {
-  try {
-    window.localStorage.setItem(storageKey(id), JSON.stringify(outcome))
-  } catch (error) {
-    console.warn("Could not save proposed comment outcome", error)
-  }
-}
-
-/** A review comment the chat drafted; nothing posts until the user confirms. */
+/** A line comment the chat drafted; nothing posts until the user confirms. */
 export function ProposedCommentCard({
   owner,
   repo,
   number,
-  proposal,
+  id,
   onShow,
 }: {
   owner: string
   repo: string
   number: number
-  proposal: ProposedComment
-  onShow: () => void
+  id: string
+  /** Scrolls the diff to the comment's lines; omitted when already shown there. */
+  onShow?: () => void
 }) {
   const queryClient = useQueryClient()
-  const [body, setBody] = useState(proposal.body)
-  const [outcome, setOutcome] = useState<Outcome | null>(() =>
-    readOutcome(proposal.id)
-  )
-  const { range } = proposal
-  const settle = (next: Outcome) => {
-    writeOutcome(proposal.id, next)
-    setOutcome(next)
-  }
+  const drafts = useChatDrafts()
+  const draft = drafts?.comments.find((item) => item.proposal.id === id)
   const post = useMutation({
-    mutationFn: () =>
-      api.createReviewComment(owner, repo, number, {
+    mutationFn: async () => {
+      if (!draft) throw new Error("The draft is no longer available")
+      const { range } = draft.proposal
+      const multiLine = range.startLine < range.endLine
+      return api.createReviewComment(owner, repo, number, {
         path: range.file,
         line: range.endLine,
         side: range.side,
-        body: body.trim(),
-        start_line: range.startLine < range.endLine ? range.startLine : null,
-        start_side: range.startLine < range.endLine ? range.side : null,
-      }),
+        body: draft.body.trim(),
+        start_line: multiLine ? range.startLine : null,
+        start_side: multiLine ? range.side : null,
+      })
+    },
     onSuccess: (result) => {
-      settle({ state: "posted", url: result.html_url })
+      drafts?.settle(id, { state: "posted", url: result.html_url })
       void queryClient.invalidateQueries({
         queryKey: ["reviewComments", owner, repo, number],
       })
@@ -83,10 +56,13 @@ export function ProposedCommentCard({
     onError: (error) =>
       toast.error("Couldn't post the comment", { description: error.message }),
   })
+  if (!drafts || !draft) return null
 
+  const { outcome, body } = draft
+  const { range } = draft.proposal
   const location = `${range.file}:${rangeLabel(range)}`
   return (
-    <Card size="sm" className="w-full">
+    <Card size="sm" className="w-full shrink-0" data-testid="proposed-comment">
       <CardHeader>
         <CardTitle>
           {outcome?.state === "posted"
@@ -96,13 +72,17 @@ export function ProposedCommentCard({
               : "Draft review comment"}
         </CardTitle>
         <CardDescription>
-          <button
-            type="button"
-            onClick={onShow}
-            className="truncate font-mono underline-offset-2 hover:underline"
-          >
-            {location}
-          </button>
+          {onShow ? (
+            <button
+              type="button"
+              onClick={onShow}
+              className="truncate font-mono underline-offset-2 hover:underline"
+            >
+              {location}
+            </button>
+          ) : (
+            <span className="font-mono">{location}</span>
+          )}
         </CardDescription>
       </CardHeader>
       <CardContent>
@@ -114,7 +94,7 @@ export function ProposedCommentCard({
           <Textarea
             aria-label="Comment body"
             value={body}
-            onChange={(event) => setBody(event.target.value)}
+            onChange={(event) => drafts.edit(id, { body: event.target.value })}
             rows={4}
             disabled={post.isPending}
           />
@@ -137,7 +117,7 @@ export function ProposedCommentCard({
               size="sm"
               variant="ghost"
               disabled={post.isPending}
-              onClick={() => settle({ state: "discarded" })}
+              onClick={() => drafts.settle(id, { state: "discarded" })}
             >
               Discard
             </Button>

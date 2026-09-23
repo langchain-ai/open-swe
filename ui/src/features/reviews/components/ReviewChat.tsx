@@ -35,6 +35,11 @@ import {
   type ToolMessageLike,
 } from "@/features/reviews/lib/chatDiffActions"
 import { ProposedCommentCard } from "@/features/reviews/components/ProposedCommentCard"
+import { ProposedReviewCard } from "@/features/reviews/components/ProposedReviewCard"
+import {
+  ChatDraftsProvider,
+  useChatDrafts,
+} from "@/features/reviews/lib/chatDrafts"
 
 // --- Composer bridge ---------------------------------------------------------
 //
@@ -93,7 +98,7 @@ export function ReviewChatComposerProvider({
   )
   return (
     <ReviewChatComposerContext.Provider value={value}>
-      {children}
+      <ChatDraftsProvider>{children}</ChatDraftsProvider>
     </ReviewChatComposerContext.Provider>
   )
 }
@@ -358,6 +363,20 @@ function ChatBody({
     const action = chatDiffAction(toolMessageLike(message))
     return action ? [action] : []
   })
+  const drafts = useChatDrafts()
+  const registerDraft = drafts?.register
+  const draftIds = diffActions
+    .filter((action) => action.kind !== "show")
+    .map((action) => action.id)
+    .join(",")
+  useEffect(() => {
+    if (!registerDraft) return
+    for (const action of diffActions) {
+      if (action.kind !== "show") registerDraft(action)
+    }
+    // diffActions is rebuilt every render; draftIds is its stable identity.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [draftIds, registerDraft])
   const visible: Array<{
     message: BaseMessage
     content: string
@@ -367,7 +386,7 @@ function ChatBody({
     const type = messageType(message)
     if (type === "tool") {
       const action = chatDiffAction(toolMessageLike(message))
-      return action?.kind === "comment"
+      return action && action.kind !== "show"
         ? [{ message, content: "", action }]
         : []
     }
@@ -461,8 +480,19 @@ function ChatBody({
                   owner={owner}
                   repo={repo}
                   number={number}
-                  proposal={action}
+                  id={action.id}
                   onShow={() => composer?.showInDiff(action.range)}
+                />
+              )
+            }
+            if (action?.kind === "review") {
+              return (
+                <ProposedReviewCard
+                  key={action.id}
+                  owner={owner}
+                  repo={repo}
+                  number={number}
+                  id={action.id}
                 />
               )
             }
