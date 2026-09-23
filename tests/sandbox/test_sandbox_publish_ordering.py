@@ -71,6 +71,11 @@ async def test_new_sandbox_persists_its_base_proxy_config() -> None:
             return_value=created,
         ),
         patch(
+            "agent.sandboxes.lifecycle.await_sandbox_egress",
+            new_callable=AsyncMock,
+            return_value=True,
+        ),
+        patch(
             "agent.sandboxes.lifecycle.get_recorded_proxy_base_config",
             return_value=base_proxy_config,
         ),
@@ -84,6 +89,47 @@ async def test_new_sandbox_persists_its_base_proxy_config() -> None:
         metadata={
             "sandbox_id": "sandbox-new",
             "sandbox_base_proxy_config": base_proxy_config,
+            "sandbox_egress_ready": True,
         },
+    )
+    SANDBOX_BACKENDS.clear()
+
+
+@pytest.mark.asyncio
+async def test_egress_probe_completes_before_publication_and_records_failure() -> None:
+    thread_id = "thread-egress-not-ready"
+    SANDBOX_BACKENDS.clear()
+    created = MagicMock(id="sandbox-new")
+    update = AsyncMock()
+    events: list[str] = []
+
+    async def probe(_: object) -> bool:
+        events.append("probe")
+        return False
+
+    async def publish(_: str, __: object) -> None:
+        events.append("publish")
+
+    with (
+        patch(
+            "agent.sandboxes.lifecycle.get_sandbox_metadata",
+            new_callable=AsyncMock,
+            return_value={},
+        ),
+        patch(
+            "agent.sandboxes.lifecycle._create_sandbox_with_proxy",
+            new_callable=AsyncMock,
+            return_value=created,
+        ),
+        patch("agent.sandboxes.lifecycle.await_sandbox_egress", side_effect=probe),
+        patch("agent.sandboxes.lifecycle.client.threads.update", update),
+        patch("agent.sandboxes.tool_access.provision_tool_url", side_effect=publish),
+    ):
+        await ensure_sandbox_for_thread(thread_id)
+
+    assert events == ["probe", "publish"]
+    update.assert_awaited_once_with(
+        thread_id=thread_id,
+        metadata={"sandbox_id": "sandbox-new", "sandbox_egress_ready": False},
     )
     SANDBOX_BACKENDS.clear()

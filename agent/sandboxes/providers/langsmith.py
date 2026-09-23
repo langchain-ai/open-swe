@@ -50,6 +50,8 @@ PROXY_CONFIG_ERROR_BODY_CHARS = 500
 SANDBOX_START_TIMEOUT_SECONDS = 120
 PROXY_GH_TOKEN_PLACEHOLDER = "proxy-injected"
 SERVICE_URL_TIMEOUT_SECONDS = 15.0
+SANDBOX_EGRESS_PROBE_TIMEOUT_SECONDS = 10.0
+SANDBOX_EGRESS_PROBE_REPOSITORY = "https://github.com/langchain-ai/open-swe.git"
 
 
 def _get_langsmith_api_key() -> str | None:
@@ -436,6 +438,37 @@ async def configure_sandbox_proxy(
             await _start_sandbox_best_effort(sandbox_name)
             await _patch_proxy_config(client, url, payload, api_key, sandbox_name)
     logger.info("Configured sandbox proxy", extra={"sandbox_id": sandbox_name})
+
+
+async def await_sandbox_egress(
+    sandbox_backend: SandboxBackendProtocol,
+    *,
+    attempts: int = 5,
+    base_delay: float = 1.0,
+) -> bool:
+    """Wait for plain GitHub access from inside a sandbox."""
+    command = f"git ls-remote --exit-code {SANDBOX_EGRESS_PROBE_REPOSITORY} HEAD"
+    for attempt in range(attempts):
+        try:
+            result = await sandbox_backend.aexecute(
+                command,
+                timeout=SANDBOX_EGRESS_PROBE_TIMEOUT_SECONDS,
+            )
+            if result.exit_code == 0:
+                return True
+        except Exception:
+            logger.debug(
+                "Sandbox egress probe failed",
+                exc_info=True,
+                extra={"sandbox_id": sandbox_backend.id, "attempt": attempt + 1},
+            )
+        if attempt < attempts - 1:
+            await asyncio.sleep(base_delay * 2**attempt)
+    logger.warning(
+        "Sandbox egress probe exhausted retries",
+        extra={"sandbox_id": sandbox_backend.id, "attempts": attempts},
+    )
+    return False
 
 
 class WorkspaceServiceURL(BaseModel):

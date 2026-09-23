@@ -25,6 +25,7 @@ from agent.sandboxes.providers.langsmith import (
     _install_create_extra_fields,
     _merge_sandbox_create_extra_fields,
     _reuse_existing_sandbox,
+    await_sandbox_egress,
     capture_snapshot_with_tag,
     create_langsmith_sandbox,
     create_workspace_service_url,
@@ -44,6 +45,35 @@ def test_sandbox_api_endpoint_no_double_suffix() -> None:
         {"LANGSMITH_ENDPOINT": "https://x.smith.langchain.com/v2/sandboxes"},
     ):
         assert _get_sandbox_api_endpoint() == "https://x.smith.langchain.com/v2/sandboxes"
+
+
+@pytest.mark.asyncio
+async def test_await_sandbox_egress_retries_until_git_succeeds() -> None:
+    backend = MagicMock(id="sandbox-abc")
+    backend.aexecute = AsyncMock(side_effect=[MagicMock(exit_code=1), MagicMock(exit_code=0)])
+
+    with patch(
+        "agent.sandboxes.providers.langsmith.asyncio.sleep", new_callable=AsyncMock
+    ) as sleep:
+        assert await await_sandbox_egress(backend, attempts=3, base_delay=0.25)
+
+    assert backend.aexecute.await_count == 2
+    backend.aexecute.assert_any_await(
+        "git ls-remote --exit-code https://github.com/langchain-ai/open-swe.git HEAD",
+        timeout=10.0,
+    )
+    sleep.assert_awaited_once_with(0.25)
+
+
+@pytest.mark.asyncio
+async def test_await_sandbox_egress_returns_false_after_exhaustion() -> None:
+    backend = MagicMock(id="sandbox-abc")
+    backend.aexecute = AsyncMock(side_effect=RuntimeError("DNS unavailable"))
+
+    with patch("agent.sandboxes.providers.langsmith.asyncio.sleep", new_callable=AsyncMock):
+        assert not await await_sandbox_egress(backend, attempts=2, base_delay=0)
+
+    assert backend.aexecute.await_count == 2
 
 
 def test_nothing_deletes_sandboxes() -> None:
