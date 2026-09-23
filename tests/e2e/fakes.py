@@ -251,6 +251,79 @@ def branch_exists(owner: str, repo: str, branch: str) -> bool:
     return bool(_branch_tip(owner, repo, branch))
 
 
+def push_branch(owner: str, repo: str, branch: str, files: dict[str, str]) -> None:
+    """Push ``branch`` off the base branch with ``files`` written in one commit."""
+    remote = _REMOTES[(owner, repo)]
+    work = remote.parent / f"push-{owner}-{repo}-{branch.replace('/', '-')}"
+    if work.exists():
+        shutil.rmtree(work)
+    ident = ["-c", "user.email=seed@example.com", "-c", "user.name=Seed"]
+    _git("clone", "--branch", BASE_BRANCH, str(remote), str(work))
+    _git("checkout", "-b", branch, cwd=work)
+    for path, content in files.items():
+        target = work / path
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(content)
+    _git("add", "-A", cwd=work)
+    _git(*ident, "commit", "-m", f"Seed {branch}", cwd=work)
+    _git("push", "--force", "origin", branch, cwd=work)
+    shutil.rmtree(work)
+
+
+def resolve_ref(owner: str, repo: str, ref: str) -> str:
+    """A git revision for ``ref``; a pull's synthetic head SHA maps to its pushed branch."""
+    pull = find_pull_by_sha(owner, repo, ref)
+    if pull is not None:
+        return pull["branch_tip"] or pull["head"]
+    return ref
+
+
+def base_sha(pull: dict[str, Any]) -> str:
+    return _branch_tip(pull["owner"], pull["repo"], pull["base"])
+
+
+def file_at_ref(owner: str, repo: str, path: str, ref: str) -> str | None:
+    """The file's contents at ``ref``, or ``None`` when it does not exist there."""
+    remote = _REMOTES.get((owner, repo))
+    if remote is None:
+        return None
+    try:
+        return _git("--git-dir", str(remote), "show", f"{resolve_ref(owner, repo, ref)}:{path}")
+    except subprocess.CalledProcessError:
+        return None
+
+
+def merge_base(owner: str, repo: str, base: str, head: str) -> str | None:
+    remote = _REMOTES.get((owner, repo))
+    if remote is None:
+        return None
+    try:
+        return _git(
+            "--git-dir",
+            str(remote),
+            "merge-base",
+            resolve_ref(owner, repo, base),
+            resolve_ref(owner, repo, head),
+        ).strip()
+    except subprocess.CalledProcessError:
+        return None
+
+
+def compare_files(owner: str, repo: str, base: str, head: str) -> list[dict[str, Any]]:
+    return _diff_files(owner, repo, resolve_ref(owner, repo, base), resolve_ref(owner, repo, head))
+
+
+def pull_diff(pull: dict[str, Any]) -> str:
+    """The pull request's unified diff, as ``Accept: application/vnd.github.diff`` returns it."""
+    remote = _REMOTES.get((pull["owner"], pull["repo"]))
+    if remote is None:
+        return ""
+    try:
+        return _git("--git-dir", str(remote), "diff", f"{pull['base']}...{pull['head']}")
+    except subprocess.CalledProcessError:
+        return ""
+
+
 def pulls() -> list[dict[str, Any]]:
     """Every pull request, with any open one whose branch was pushed moved to the new head.
 
@@ -315,6 +388,7 @@ def create_pull(
         "statuses": [],
         "review_threads": [],
         "reviews": [],
+        "review_comments": [],
         "issue_comments": [],
         "review_decision": "REVIEW_REQUIRED",
         "author": author,
@@ -576,10 +650,40 @@ def submit_review(
         "url": f"https://github.com/{owner}/{repo}/pull/{number}#pullrequestreview-{_review_seq[0]}",
         "submitted_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
     }
+    review["html_url"] = review["url"]
     pull["reviews"].append(review)
     if any(item["state"] == "APPROVED" for item in pull["reviews"]):
         pull["review_decision"] = "APPROVED"
     return review
+
+
+_review_comment_seq = [0]
+
+
+def add_review_comment(
+    number: int, owner: str, repo: str, *, author: str, payload: dict[str, Any]
+) -> dict[str, Any] | None:
+    """Record an inline comment, as ``POST /pulls/{n}/comments`` would."""
+    pull = find_pull(number, owner, repo)
+    if pull is None:
+        return None
+    _review_comment_seq[0] += 1
+    comment_id = _review_comment_seq[0]
+    comment = {
+        "id": comment_id,
+        "user": {"login": author, "avatar_url": ""},
+        "body": str(payload.get("body") or ""),
+        "path": str(payload.get("path") or ""),
+        "line": payload.get("line"),
+        "start_line": payload.get("start_line"),
+        "side": payload.get("side") or "RIGHT",
+        "commit_id": str(payload.get("commit_id") or ""),
+        "position": 1,
+        "html_url": f"https://github.com/{owner}/{repo}/pull/{number}#discussion_r{comment_id}",
+        "created_at": github_timestamp(),
+    }
+    pull["review_comments"].append(comment)
+    return comment
 
 
 def merge_pull(
@@ -625,4 +729,5 @@ def reset() -> None:
     REPO_PRIVATE[0] = False
     _pr_seq[0] = 0
     _review_seq[0] = 0
+    _review_comment_seq[0] = 0
     seed_bare_remotes()

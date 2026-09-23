@@ -244,10 +244,14 @@ async def control_seed_pull_request(request: Request) -> JSONResponse:
     can pick the draft flag, conflict state, checks and reviews up front."""
     body = await request.json()
     owner, name = _split_repo(body.get("repo"))
+    head = str(body.get("head") or "seeded-branch")
+    files = body.get("files")
+    if isinstance(files, dict) and files:
+        fakes.push_branch(owner, name, head, {str(path): str(text) for path, text in files.items()})
     pull = fakes.create_pull(
         owner,
         name,
-        head=str(body.get("head") or "seeded-branch"),
+        head=head,
         base=str(body.get("base") or BASE_BRANCH),
         title=str(body.get("title") or "Seeded pull request"),
         body=str(body.get("body") or ""),
@@ -266,6 +270,65 @@ async def control_seed_pull_request(request: Request) -> JSONResponse:
             "pull_request": fakes.pull_health_json(pull),
         }
     )
+
+
+def _seeded_pull(body: dict[str, Any]) -> dict[str, Any]:
+    owner, name = _split_repo(body.get("repo"))
+    number = body.get("number")
+    pull = fakes.find_pull(number, owner, name) if isinstance(number, int) else None
+    if pull is None:
+        raise HTTPException(404, "No such fake pull request")
+    return pull
+
+
+@app.post("/control/walkthrough")
+async def control_seed_walkthrough(request: Request) -> JSONResponse:
+    """Store a one-step walkthrough for a fake pull request's current head, as a scout would."""
+    from agent.review.walkthrough import FileLines, StepDraft, Walkthrough
+
+    body = await request.json()
+    pull = _seeded_pull(body)
+    await Walkthrough.replace(
+        pull["owner"],
+        pull["repo"],
+        pull["number"],
+        head_sha=pull["head_sha"],
+        merge_base_sha=fakes.base_sha(pull),
+        scout_thread_id="",
+        steps=[
+            StepDraft(
+                title=str(body.get("title") or "Seeded step"),
+                files=[FileLines(path=file["filename"]) for file in pull["files"]],
+            )
+        ],
+    )
+    return JSONResponse({"ok": True})
+
+
+@app.post("/control/guidance")
+async def control_seed_guidance(request: Request) -> JSONResponse:
+    """Record author-guidance points on a fake pull request's head, as a scout would."""
+    from agent.github.pull_requests import PullRequest
+    from agent.review.author_guidance import GuidancePoint, GuidanceReview
+
+    body = await request.json()
+    pull = _seeded_pull(body)
+    record = await PullRequest(
+        owner=pull["owner"], repo=pull["repo"], number=pull["number"]
+    ).ensure()
+    points = body.get("points")
+    for index, point in enumerate(points if isinstance(points, list) else []):
+        await GuidancePoint.record(
+            record,
+            summary=str(point.get("summary") or ""),
+            quote=str(point.get("quote") or ""),
+            author=str(point.get("author") or ""),
+            turn_index=index,
+            reviewer_thread_id="",
+            head_sha=pull["head_sha"],
+        )
+    await GuidanceReview.complete(pull["owner"], pull["repo"], pull["number"], pull["head_sha"])
+    return JSONResponse({"ok": True})
 
 
 @app.post("/control/github-event")
@@ -818,6 +881,7 @@ async def mock_github_data() -> JSONResponse:
                 "body": p["body"],
                 "files": p["files"],
                 "reviews": p["reviews"],
+                "review_comments": p["review_comments"],
                 "issue_comments": p["issue_comments"],
                 "created_at": p["created_at"],
                 "updated_at": p["updated_at"],
@@ -888,6 +952,7 @@ def _gh_pr_json(pr: dict[str, Any]) -> dict[str, Any]:
         "head": {"ref": pr["head"], "sha": pr["head_sha"]},
         "base": {
             "ref": pr["base"],
+            "sha": fakes.base_sha(pr),
             "repo": {
                 "private": fakes.repo_private(),
                 "allow_squash_merge": True,
@@ -1022,11 +1087,59 @@ async def gh_create_pull(owner: str, repo: str, request: Request) -> JSONRespons
 
 
 @app.get("/fake-gh/repos/{owner}/{repo}/pulls/{number}")
-async def gh_get_pull(owner: str, repo: str, number: int) -> JSONResponse:
+async def gh_get_pull(owner: str, repo: str, number: int, request: Request) -> Response:
     pr = fakes.find_pull(number, owner, repo)
     if pr is None:
         return JSONResponse({"message": "Not Found"}, status_code=404)
+    if "vnd.github.diff" in request.headers.get("Accept", ""):
+        return Response(fakes.pull_diff(pr), media_type="text/plain")
     return JSONResponse(_gh_pr_json(pr))
+
+
+@app.get("/fake-gh/repos/{owner}/{repo}/pulls/{number}/comments")
+async def gh_list_pull_comments(owner: str, repo: str, number: int, page: int = 1) -> JSONResponse:
+    pr = fakes.find_pull(number, owner, repo)
+    if pr is None:
+        return JSONResponse({"message": "Not Found"}, status_code=404)
+    return JSONResponse(list(reversed(pr["review_comments"])) if page == 1 else [])
+
+
+@app.post("/fake-gh/repos/{owner}/{repo}/pulls/{number}/comments")
+async def gh_create_pull_comment(
+    owner: str, repo: str, number: int, request: Request
+) -> JSONResponse:
+    """Post an inline comment as the person whose token was used, as GitHub does."""
+    author = _token_login(request)
+    if not author:
+        return JSONResponse({"message": "Resource not accessible by integration"}, status_code=403)
+    comment = fakes.add_review_comment(
+        number, owner, repo, author=author, payload=await request.json()
+    )
+    if comment is None:
+        return JSONResponse({"message": "Not Found"}, status_code=404)
+    return JSONResponse(comment, status_code=201)
+
+
+@app.get("/fake-gh/repos/{owner}/{repo}/compare/{basehead:path}")
+async def gh_compare(owner: str, repo: str, basehead: str) -> JSONResponse:
+    base, _, head = basehead.partition("...")
+    merge_base = fakes.merge_base(owner, repo, base, head)
+    if merge_base is None:
+        return JSONResponse({"message": "Not Found"}, status_code=404)
+    return JSONResponse(
+        {
+            "merge_base_commit": {"sha": merge_base},
+            "files": fakes.compare_files(owner, repo, base, head),
+        }
+    )
+
+
+@app.get("/fake-gh/repos/{owner}/{repo}/contents/{path:path}")
+async def gh_get_contents(owner: str, repo: str, path: str, ref: str = BASE_BRANCH) -> Response:
+    content = fakes.file_at_ref(owner, repo, path, ref)
+    if content is None:
+        return JSONResponse({"message": "Not Found"}, status_code=404)
+    return Response(content, media_type="application/vnd.github.raw+json")
 
 
 @app.patch("/fake-gh/repos/{owner}/{repo}/pulls/{number}")
