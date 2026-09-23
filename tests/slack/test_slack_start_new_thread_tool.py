@@ -66,9 +66,15 @@ class _FakeClient:
 @pytest.fixture(autouse=True)
 def parent_client(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(slack_breakout_tool, "langgraph_client", lambda: _FakeClient({}))
+    monkeypatch.setattr(slack_breakout_tool, "get_slack_permalink", AsyncMock(return_value=None))
 
 
-async def test_slack_start_new_thread_success(monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.parametrize(
+    "permalink", ["https://example.slack.com/archives/C1/p1700000000111111", None]
+)
+async def test_slack_start_new_thread_success(
+    monkeypatch: pytest.MonkeyPatch, permalink: str | None
+) -> None:
     captured: dict[str, Any] = {"stored_mappings": []}
     new_ts = "1700000000.111111"
 
@@ -172,6 +178,8 @@ async def test_slack_start_new_thread_success(monkeypatch: pytest.MonkeyPatch) -
     monkeypatch.setattr(slack_breakout_tool, "dispatch_agent_run", fake_dispatch_agent_run)
     monkeypatch.setattr(slack_breakout_tool, "store_slack_run_mapping", fake_store_mapping)
     monkeypatch.setattr(slack_breakout_tool, "get_langsmith_trace_url", _fake_trace_url)
+    get_permalink = AsyncMock(return_value=permalink)
+    monkeypatch.setattr(slack_breakout_tool, "get_slack_permalink", get_permalink)
     monkeypatch.setattr(
         slack_breakout_tool,
         "dashboard_thread_url",
@@ -190,7 +198,9 @@ async def test_slack_start_new_thread_success(monkeypatch: pytest.MonkeyPatch) -
         "thread_id": expected_thread_id,
         "thread_ts": new_ts,
         "dashboard_url": f"https://dashboard.example/agents/{expected_thread_id}",
+        "slack_url": permalink or "https://slack.com/archives/C1/p1700000000111111",
     }
+    get_permalink.assert_awaited_once_with("C1", new_ts)
     assert captured["top_level_post"]["channel_id"] == "C1"
     assert captured["top_level_post"]["text"] == (
         "*Open SWE breakout thread:* Investigate follow-up"
