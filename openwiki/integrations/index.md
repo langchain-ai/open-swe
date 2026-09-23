@@ -1,5 +1,5 @@
 # Files
 
-- [Dashboard and Desktop Clients](dashboard-ui.md) - The dashboard's FastAPI API, React/TanStack Start serving and proxy boundary, authenticated product capabilities, and the Electron client's supervised local-project execution model.
-- [Observability, Browser, and MCP Integrations](observability-and-mcp.md) - Optional Datadog, LangSmith, Corridor, Notion, Currents, and Stagehand integrations, including credential boundaries, authorization, loading behavior, and LangSmith LLM Gateway routing.
-- [Sandbox Provider Integration](sandbox-providers.md) - How Open SWE selects and operates sandbox providers, binds them safely to threads, and handles LangSmith-specific provisioning, credentials, and execution behavior. Covers provider capabilities, local and desktop exceptions, reviewer preparation, and the extension contract.
+- [Dashboard, Web UI, and Desktop](dashboard-ui.md) - FastAPI dashboard API composition, session-protected management surfaces, React routing and proxy behavior, same-origin UI serving, and Electron supervision of the local LangGraph backend.
+- [MCP, Connected Tools, and Observability](observability-and-mcp.md) - How Open SWE loads credentialed MCP and Notion capabilities, scopes their ownership, and configures LangSmith gateway routing and tracing.
+- [Sandbox Provider Integrations](sandbox-providers.md) - Provider selection, dependency installation, startup validation, and lifecycle integration for Open SWE sandboxes. Covers the LangSmith-specific snapshot, proxy, and execution behavior that is not shared by every provider.

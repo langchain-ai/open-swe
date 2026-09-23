@@ -4,7 +4,7 @@ okf_version: "0.2"
 
 # Files
 
-- [Open SWE Codebase Guide](quickstart.md) - Start here to set up Open SWE, choose the entrypoint and owner for a safe change, and run focused validation. Links route contributors to the detailed architecture, workflow, integration, operations, and testing guides.
+- [Open SWE Engineering Guide](quickstart.md) - Route an Open SWE change to its owning Python/LangGraph runtime or pnpm/turbo dashboard, desktop, and E2E workspace. Use the linked domain guides and focused validation rather than treating this page as a substitute for source and tests.
 
 # Directories
 

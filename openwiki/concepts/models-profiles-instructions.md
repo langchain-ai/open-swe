@@ -1,25 +1,27 @@
 ---
 type: configuration concept
-title: Models, Profiles, and Instructions
-description: Model and reasoning selection, fallback, gateway construction, and the team, profile, and thread layers that govern agent runs. Explains how repository, environment, and sender instructions are persisted and placed into prompts.
-tags: [models, reasoning-effort, profiles, team-defaults, instructions, model-selection, gateway, fable]
+title: Model, Profile, and Instruction Resolution
+description: Explains how workspace defaults, profile preferences, durable thread snapshots, and per-run choices resolve to usable models. Covers provider routing and fallback plus the instruction layers assembled for an agent run.
+tags: [models, profiles, workspace-settings, thread-settings, instructions, gateway, routing]
 sources:
   - id: openwiki-source-09b129ff728dd4990ea2f25e
     resource: repo://agent/dashboard/agent_instructions.py
   - id: openwiki-source-bd55a0c7231ffb3eb9e8ded0
     resource: repo://agent/dashboard/agent_overrides.py
+  - id: openwiki-source-d972879ce069378a70c91ab2
+    resource: repo://agent/dashboard/options_routes.py
   - id: openwiki-source-abba304194f5a40187cffde3
     resource: repo://agent/dashboard/options.py
   - id: openwiki-source-d9f679c15adbf4b3f612d406
     resource: repo://agent/dashboard/profiles.py
-  - id: openwiki-source-61ace7d4952db9ddb8316aeb
-    resource: repo://agent/dashboard/routes.py
-  - id: openwiki-source-23002b87792ed6949edb723b
-    resource: repo://agent/dashboard/team_settings.py
-  - id: openwiki-source-dc33a233b67bb1d08952543c
-    resource: repo://agent/dashboard/thread_api.py
   - id: openwiki-source-9bf84d0c3d7e3b3001405497
     resource: repo://agent/dashboard/user_instructions.py
+  - id: openwiki-source-0a6d03ee63c0e527ce21bf77
+    resource: repo://agent/dashboard/workspace_settings.py
+  - id: openwiki-source-cb4e403499865fd6b797127c
+    resource: repo://agent/input_messages.py
+  - id: openwiki-source-5bbb58a2bed24dc7e0fea26d
+    resource: repo://agent/middleware/model_fallback.py
   - id: openwiki-source-10938886c8b24d0cdc72ad9e
     resource: repo://agent/prompt.py
   - id: openwiki-source-856ade03ef31ac38e1347f7c
@@ -32,91 +34,87 @@ sources:
     resource: repo://agent/utils/thread_settings.py
   - id: openwiki-source-654bec991273a9eb3ccdf2c1
     resource: repo://tests/dashboard/test_dashboard_thread_api.py
-  - id: openwiki-source-72fb34b832807b302aeea76e
-    resource: repo://tests/models/test_model_fallback_resolution.py
 verified:
   - by: openwiki/0.4.2
-    at: 2026-09-08T08:15:30.533Z
-generated: { by: "openwiki/0.4.2", at: "2026-09-08T08:15:30.533Z" }
+    at: 2026-09-23T08:15:27.313Z
+generated: { by: "openwiki/0.4.2", at: "2026-09-23T08:15:27.313Z" }
 ---
 
-# Models, Profiles, and Instructions
+# Model, Profile, and Instruction Resolution
 
-A hosted agent run resolves a valid `(model_id, effort)` pair and a thread-stable repository-instruction value before it builds models. The triggering user's identity, credentials, PR preference, and personal instructions are deliberately re-evaluated for each message. This split lets a multi-party, long-lived thread keep its operational choices while avoiding attribution of one participant's preferences to another. See [Agent graph](../architecture/agent-graph.md), [Authentication and security](auth-and-security.md), [Configuration](../operations/configuration.md), and [Context engineering](../workflows/context-engineering.md).
+A hosted run combines workspace policy, the initiating user's preferences, and durable thread state. The important boundary is **time**: workspace and profile values seed a thread, while a valid explicit run choice can replace the model snapshot; sender identity, personal instructions, and PR preferences are reloaded for each message. This allows a long-lived, multi-person conversation to retain operational settings without applying one participant's personal preferences to another. See [Agent graph](../architecture/agent-graph.md), [Tools](tools.md), [Configuration](../operations/configuration.md), and [Context engineering](../workflows/context-engineering.md).
 
-## Model registry and stale selections
+## Valid model pairs and recovery
 
-`SUPPORTED_MODELS` is the curated selectable-model registry. Each `ModelOption` contains the provider-prefixed id, label, allowed `efforts`, `default_effort`, image capability, and, where applicable, whether it may be saved as a default. `SUPPORTED_MODEL_IDS` is the membership set used during resolution. Effort is not a global enum: for example, Kimi K3 accepts only `low`, `high`, and `max`; Haiku accepts only `none`; and Gemini uses `minimal` through `high`. Always validate a pair with `model_supports_effort`, and validate multimodal input with `model_supports_images`.
+`SUPPORTED_MODELS` is the hand-maintained picker registry. A `ModelOption` identifies a provider-prefixed model, label, allowed `efforts`, default effort, image support, and optional `can_be_default` restriction; `SUPPORTED_MODEL_IDS` is the membership set used by resolvers. Effort is model-specific, not a global enum: for example, Haiku accepts only `none`, Gemini accepts `minimal` through `high`, and Kimi K3 accepts `low`, `high`, and `max`. Use `model_supports_effort` and `model_supports_images` rather than assuming an effort or vision capability.
 
-The dashboard's `/options` response does not mutate this registry. It returns copied records enriched with context-window information, preferring explicit Codex overrides, then a LangChain provider profile, then a small fallback table. It removes Fable choices when the workspace switch is off and gates returned defaults as well.
+`default_model_pair()` is the terminal deployment default. It reads `LLM_MODEL_ID` and `LLM_REASONING_EFFORT`, falling back to a credential-sensitive built-in model and a compatible effort. It rejects an unsupported, non-default-eligible model or unsupported effort with `ValueError`; it never constructs an arbitrary provider/model string.
 
-### Defaults and recovery
+Persisted values can become stale. For an unsupported, non-deprecated model id, `provider_fallback_pair()` selects a supported choice on the same provider, preferring the same Claude family, preserves a supported effort (mapping Gemini `none` to `minimal`), and otherwise uses the replacement's default effort. Explicitly deprecated ids do **not** receive a canonical replacement: `canonical_model_pair()` returns `None`, and deprecated ids bypass provider fallback so the caller defers to its default. Workspace default resolution is therefore always: valid configured pair, same-provider recovery, then `default_model_pair()`.
 
-`default_model_pair()` is the deployment-level terminal default. It reads `LLM_MODEL_ID` and `LLM_REASONING_EFFORT`, with a credential-sensitive built-in model id and default effort as fallbacks. The selected default must be a supported, default-eligible model and support its effort; otherwise it raises `ValueError` rather than constructing an arbitrary model. Local development startup separately validates the credential required by the configured default.
+The `/options` endpoint returns copies enriched with context-window metadata from explicit Codex overrides, LangChain provider profiles, or fallback values; it does not mutate the registry. It also filters Fable options and gates returned defaults for the requested workspace.
 
-A selection that has fallen out of the registry is handled differently from one explicitly listed in `DEPRECATED_MODEL_IDS`:
+## Workspace and profile layers
 
-* For a non-deprecated id, `provider_fallback_pair` chooses the first supported model on the same provider, preferring the same Claude family. It preserves effort where supported (including mapping Gemini `none` to `minimal`) and otherwise uses the fallback model's default effort. An unknown provider yields no pair.
-* Deprecated ids are excluded from that recovery path and defer to a team or deployment default. `DEPRECATED_MODEL_REPLACEMENTS` currently contains empty values and `canonical_model_pair()` returns `None`; there is no automatic canonical migration.
+Workspace settings resolve in three tiers:
 
-All team default resolvers use a valid saved pair first, then same-provider recovery, then `default_model_pair()`. This is the invariant that stale persisted settings still produce a constructible pair.
+1. Hardcoded defaults, including the deployment default model pair.
+2. The instance record, stored at key `"default"` in `["team_settings"]`.
+3. A sparse per-workspace record in `["workspace_settings"]`; missing or `None` fields inherit the lower tier.
 
-## Precedence, roles, and thread lifecycle
+`get_workspace_settings()` fails soft to hardcoded defaults if settings storage is unavailable, because a settings outage must not stop every run. The resulting `WorkspaceSettings` supplies separate main/subagent defaults for agent and reviewer roles, three adaptive-routing tiers, and a title model. Review chat inherits the agent default when no valid chat-specific pair exists. The title resolver can substitute Haiku for an OpenAI title model on an Anthropic-only direct-provider deployment.
 
-Team settings are a single LangGraph Store record keyed `"default"` in `["team_settings"]`. Reads overlay non-null stored fields over hardcoded defaults and fail soft to those defaults on store failure. The team can set main and subagent pairs for agent and reviewer roles; review chat inherits the agent pair when its own pair is absent or invalid, and diff grouping inherits the reviewer subagent pair. Thread-title selection has a separate default and can switch an OpenAI title model to Haiku on an Anthropic-only deployment with neither gateway routing nor desktop OpenAI OAuth.
+Profiles in `["profiles"]`, keyed by GitHub login, contain a default main pair, optional subagent pair, repository and branch preferences, PR/CI preferences, and user routing preference. The profile namespace is deliberately separate from encrypted OAuth records in `["oauth_tokens"]`, so profile saves cannot clobber a concurrent OAuth refresh. Dashboard profile reads surface storage failures; run-start lookup (`load_profile`) logs and returns `None`, sacrificing user overrides rather than the run.
 
-Profiles in `["profiles"]` carry a main pair, optional subagent pair, default repository and branch preferences, and PR/CI preferences. Profile writes are separate from encrypted OAuth records in `["oauth_tokens"]`, preventing concurrent profile saves and token refreshes from overwriting each other. Run-start profile lookup is fail-soft, while dashboard profile reads deliberately surface store failures.
+A profile pair is accepted only when the model is selectable, default-eligible, and supports its effort. A stale non-deprecated id may use same-provider recovery; an absent, deprecated, or unknown-provider selection returns no override and lets the workspace default apply.
+
+## Hosted-run precedence and persistence
 
 ```mermaid
 flowchart TD
-  Team["Team main and subagent pairs"] --> Profile{"No stored thread model"}
-  Profile -- "yes" --> ApplyProfile["Apply valid profile main and optional subagent pair"]
-  Profile -- "no" --> KeepTeam["Keep team pairs"]
-  ApplyProfile --> Stored{"Stored thread model"}
-  KeepTeam --> Stored
-  Stored -- "yes" --> Snapshot["Use stored main and subagent pairs"]
-  Stored -- "no" --> Initial["Use resolved pairs"]
-  Snapshot --> Explicit{"Valid explicit run pair"}
-  Initial --> Explicit
-  Explicit -- "yes" --> Replace["Replace main and subagent pairs"]
-  Explicit -- "no" --> Persist["Persist resolved settings"]
-  Replace --> Persist
-  Persist --> Gate["Apply Fable gate then build models"]
+  Defaults["Resolve workspace main and subagent defaults"] --> Existing{"Thread snapshot has model"}
+  Existing -- "no" --> Profile["Apply valid initiating profile"]
+  Existing -- "yes" --> Snapshot["Use saved model and routing values"]
+  Profile --> Choice["Candidate main and subagent pairs"]
+  Snapshot --> Choice
+  Choice --> Explicit{"Valid explicit run pair"}
+  Explicit -- "yes" --> Replace["Replace both main and subagent pairs"]
+  Explicit -- "no" --> Save["Save agent_settings snapshot"]
+  Replace --> Save
+  Save --> Gate["Apply Fable workspace gate"]
+  Gate --> Build["Build main, subagent, and title models"]
 ```
 
-*Caption: first-run resolution creates the thread snapshot; only a valid explicit run pair intentionally changes its model choice.*
+*Caption: profile settings seed a new thread; a valid explicit run selection is the normal mechanism that changes its durable model snapshot.*
 
-`get_agent` seeds hosted runs from the team pairs. It reads a sender profile only if the thread has no stored main model; a valid profile main pair also becomes the subagent pair unless a valid profile subagent pair is supplied. Stored settings then take precedence. Finally, a valid `configurable.agent_model_id` plus `agent_effort` replaces both pairs and is persisted. `agent_settings` lives in thread metadata, is cached for five minutes, accepts only its typed fields, and reads or writes fail soft; malformed legacy metadata becomes an empty snapshot.
+`build_agent()` first reads `agent_settings` from thread metadata. When a stored `model_id` exists, it does not load a profile for model selection; otherwise it resolves workspace defaults and applies the initiating profile. A profile main pair becomes both main and subagent pair unless a valid profile subagent pair is supplied. A valid `configurable.agent_model_id` **and** `agent_effort` then replaces both pairs. The final pre-gate choice, routing toggle, and repository custom instructions are stored back to the thread.
 
-For selection-only callers, `resolve_agent_model_id` applies supported per-thread id, then valid profile id, then team default. Dashboard run creation uses the full pair in the order team, profile, request. A deprecated request intentionally leaves the team default, rather than allowing the profile to take effect. If dashboard input contains images, a text-only resolved selection is replaced with `default_vision_model_pair()`; direct image-content construction rejects a missing or text-only model with HTTP 422.
+`agent_settings` is a typed, five-minute-cached metadata snapshot containing main/subagent pairs, model-routing preference, and repository instructions. Unknown legacy fields are stripped; an invalid snapshot becomes empty. Reads and writes are fail-soft, so unavailable thread storage does not abort a run, but it means a fresh resolution may not persist.
 
-Fable is a workspace-wide ZDR gate. A Fable option cannot be saved as a normal default, and disabling Fable rewrites submitted Fable team defaults to a non-Fable Anthropic fallback. `gate_fable_model` is also applied after snapshot resolution to main, subagent, and title models, and by dashboard resolution and option listing. Thus a stale snapshot cannot cause a disabled Fable model to be advertised or constructed.
+This snapshot does not freeze all user context. The factory reloads the sender profile to obtain `draft_prs`, and constructs participant context per message. For selection-only callers, `resolve_agent_model_id()` uses supported per-thread id, then valid profile id, then the workspace agent default. Dashboard new-thread selection similarly applies workspace, profile, then request, except a deprecated requested id intentionally retains the workspace default rather than falling back to profile. Image-bearing dashboard creation changes a text-only resolved choice to `default_vision_model_pair()`; direct image construction rejects no model or a text-only model with HTTP 422.
 
-## Provider construction, reasoning, gateway, and runtime fallback
+## Routing, Fable, provider construction, and fallback
 
-`provider_model_kwargs` translates the resolved effort at the provider boundary: OpenAI receives `reasoning` and uses `summary: "auto"` except for `none`; Anthropic receives adaptive, summarized `thinking` and an `effort`; Gemini 3 family models receive `thinking_level`; Fireworks receives `model_kwargs.reasoning_effort`; and Baseten receives `reasoning_effort` only for `low`, `high`, or `max`.
+Fable is a workspace-wide ZDR gate. Fable models cannot be saved as normal defaults; when disabled, writes replace Fable defaults with a safe non-Fable Anthropic fallback. The factory gates resolved main, subagent, and title pairs after storing the snapshot, and `/options` filters Fable choices. Thus turning off Fable takes effect even for a stale snapshot.
 
-`make_model` constructs through `init_chat_model` with six retries and a 600-second timeout for shipped provider prefixes. OpenAI defaults to the Responses API with `store=False`, `output_version="responses/v1"`, and included encrypted reasoning; if gateway routing is not applied and no `OPENAI_API_KEY` exists, desktop OAuth can provide the model instead. Baseten is configured as OpenAI-compatible and, without gateway routing, requires `BASETEN_API_KEY` and its service URL. Models are cached by model id, requested gateway value, max tokens, frozen kwargs, and event-loop id; `close_cached_models` clears the cache and invokes `aclose` or `close`.
+Adaptive routing is separate from model-pair resolution. A profile `model_routing_enabled` value overrides the workspace toggle; otherwise the workspace value applies. That result is snapshotted. Dashboard `model_selection` can set it for a run, while Slack ask mode disables it. When enabled, `ModelSelectionMiddleware` selects from the workspace's `fast`, `balanced`, and `performance` pairs.
 
-Gateway enablement is tri-state: a `True` or `False` team value wins, while `None` inherits `LANGSMITH_GATEWAY_ENABLED` (or the presence of a dedicated gateway key if that variable is unset). When routing is possible, gateway overrides replace direct base URL and API key, and select whether OpenAI uses Responses. A non-routable provider or absent LangSmith key is logged and remains direct rather than failing the run.
+Gateway routing is also distinct. `gateway_enabled=True` or `False` in effective workspace settings is authoritative; `None` inherits `LANGSMITH_GATEWAY_ENABLED`, or (when unset) the presence of `LANGSMITH_GATEWAY_API_KEY`. For routable providers with a LangSmith key, `gateway_overrides()` replaces direct `base_url`, `api_key`, and OpenAI Responses choice. Unsupported providers or missing gateway credentials are logged and proceed directly.
 
-Provider request routing is distinct from runtime model fallback. `ModelFallbackMiddleware` uses `LLM_FALLBACK_MODEL_ID` when set; otherwise Anthropic primaries fall back to OpenAI and OpenAI primaries to Anthropic. Google, local, and self-hosted providers have no automatic cross-provider fallback.
+`provider_model_kwargs()` translates the validated effort at the provider boundary: OpenAI gets `reasoning` (with `summary: "auto"` except for `none`), Anthropic gets adaptive summarized thinking plus effort, Gemini 3 gets `thinking_level`, Fireworks gets `model_kwargs.reasoning_effort`, and Baseten accepts `low`, `high`, or `max`. `make_model()` uses `init_chat_model`, defaults known providers to six retries and a 600-second request timeout, configures OpenAI Responses with `store=False`, `output_version="responses/v1"`, and encrypted reasoning content, and can use desktop OpenAI OAuth when direct OpenAI lacks an API key. Baseten is OpenAI-compatible but requires `BASETEN_API_KEY` without gateway routing. Constructed models are cached per model id, gateway argument, max tokens, frozen kwargs, and event loop; `close_cached_models()` closes and clears them.
+
+Runtime fallback applies only after model construction. `LLM_FALLBACK_MODEL_ID` wins when set; otherwise Anthropic primaries use an OpenAI fallback and OpenAI primaries use an Anthropic fallback. `ModelFallbackMiddleware` alternates primary and fallback on retryable failures, rather than silently rerouting Google, local, or self-hosted providers.
 
 ## Instruction sources and authority
 
-Repository custom instructions are workspace-admin-authored records in `["agent_instructions"]`, keyed by `owner/name`. On a new hosted thread the factory resolves instructions for the effective default repository and saves the text in the thread snapshot. `construct_system_prompt` renders it as **Repository-specific Custom Instructions**, so it is shared by the thread; if lookup fails, that section is absent rather than aborting the run.
+Repository custom instructions are admin-editable `["agent_instructions"]` records keyed by `owner/name`. For a new thread, the factory resolves the effective default repository's instructions and includes them in `agent_settings`; later runs use the snapshot. They are rendered into the shared system prompt as repository-specific custom instructions. If lookup fails, the section is simply absent.
 
-Personal instructions are separate `["user_instructions"]` records keyed by GitHub login, capped at 20,000 characters. They can be changed from the dashboard or by `save_user_instructions`, so keeping them out of the profile avoids competing writers. During prepare-run, the factory loads the triggering user's current text and passes it to `construct_sender_context`, which emits a trusted sender-context message. It explicitly applies to that turn only.
+Workspace instructions come from the resolved workspace record and are rendered into the system prompt on every preparation. Deployment custom instructions are loaded from `DEFAULT_PROMPT_PATH` when configured, otherwise the packaged default prompt. Repository setup requires the agent to read a repository-root `AGENTS.md` after synchronization or clone.
 
-Prompt authority is explicit:
+Personal instructions are distinct `["user_instructions"]` records keyed by GitHub login and capped at 20,000 characters. They are separate from profiles because both the dashboard and `save_user_instructions` can write them. While preparing a run, the factory resolves each participant's current instructions fail-soft and emits their `standing_instructions` in a dynamic person-context message. These are person-scoped context, not a thread-wide system-prompt snapshot; context is reintroduced only when its content is no longer visible after summarization.
 
-1. A repository `AGENTS.md`, if present, overrides prompt defaults with the same authority as the system prompt.
-2. Repository-specific custom instructions are mandatory but yield to `AGENTS.md`.
-3. Environment instructions yield to repository instructions and `AGENTS.md`.
-4. Sender-level personal instructions yield to repository instructions and `AGENTS.md`.
-
-In particular, user instructions are not shared thread instructions and must not override repository policy.
+Authority is explicit in the prompt resources: `AGENTS.md` overrides default behavior; repository custom instructions yield to `AGENTS.md`; workspace instructions yield to repository instructions and `AGENTS.md`; and a person's standing instructions yield to repository instructions and `AGENTS.md`. Personal instructions must therefore be applied only when acting on that person's request and must not override shared repository policy.
 
 ## Change and test guide
 
-When changing the registry, fallback, or profile normalization, exercise `tests/models/test_model_fallback_resolution.py`: it covers provider-preserving recovery, deprecated-id deferral, environment defaults, profile/team behavior, context enrichment, and Fable handling. Dashboard thread tests cover team/profile/request precedence and image validation/fallback. `agent/test_thread_settings.py` covers typed snapshot normalization, caching, and fail-soft persistence, while `models/test_agent_subagent_models.py` covers factory-level inheritance and explicit subagent selection. Update these focused cases when adding a provider, changing an effort set, or altering precedence.
+When modifying the registry, fallback, or normalization, update `tests/models/test_model_fallback_resolution.py`, which covers environment defaults, provider-preserving recovery, deprecated-id deferral, profile and workspace validation, context windows, and Fable. `tests/dashboard/test_dashboard_thread_api.py` covers dashboard precedence and image behavior. `tests/agent/test_thread_settings.py` exercises strict snapshot normalization; `tests/agent/test_agent_assembly_context.py` covers model precedence and routing snapshot behavior. Add focused cases whenever a provider's effort contract, a persistence boundary, or a precedence rule changes.

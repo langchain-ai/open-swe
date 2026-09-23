@@ -1,13 +1,12 @@
 ---
 type: workflow
-title: Pull Request Review Workflow
-description: How Open SWE starts GitHub pull-request reviews, prepares a diff-grounded reviewer run, persists and publishes findings, and reconciles replies, resolutions, and review checks across later pushes.
+title: Pull Request Review Lifecycle
+description: How Open SWE admits automatic and on-demand GitHub pull-request reviews, prepares a diff-grounded reviewer run, stores and publishes findings, and follows later pushes and human feedback.
 tags: [reviewer, pr-review, github, webhooks, findings, reconciliation]
+verified:
+  - by: openwiki/0.4.2
+    at: 2026-09-23T08:15:27.313Z
 sources:
-  - id: openwiki-source-12d25830292f99d633a162d2
-    resource: repo://agent/dashboard/enabled_repos.py
-  - id: openwiki-source-6a5aabdd5f4475a361d59377
-    resource: repo://agent/dashboard/review_api.py
   - id: openwiki-source-3d1c7beecd605173281a3bf6
     resource: repo://agent/github/routes.py
   - id: openwiki-source-ba064e884edcde6097165df2
@@ -22,113 +21,97 @@ sources:
     resource: repo://agent/review/reconcile.py
   - id: openwiki-source-276ab38291eb5741b4c2141c
     resource: repo://agent/reviewer.py
-  - id: openwiki-source-ed9809a543500e4a0b811342
-    resource: repo://agent/slack/tools/request_pr_review.py
-  - id: openwiki-source-2df3763659a7f9d1944f28e7
-    resource: repo://agent/thread_ids.py
-  - id: openwiki-source-f821cbba108557a41969274b
-    resource: repo://agent/tools/add_finding.py
   - id: openwiki-source-c451a6086ffd6238062ba879
     resource: repo://agent/tools/publish_review.py
-  - id: openwiki-source-25a50e8385de61204afe1bcf
-    resource: repo://agent/webhooks/common.py
-  - id: openwiki-source-5bbba7b2a8ea8360ff233d63
-    resource: repo://langgraph.json
-  - id: openwiki-source-03ba010e8e4b61992958c82b
-    resource: repo://tests/reviewer/test_pr_ready_auto_review.py
-  - id: openwiki-source-7df46053b42dbcb9f728130d
-    resource: repo://tests/reviewer/test_reviewer_publish.py
-  - id: openwiki-source-f41a6a24cc19b53c446ee2f0
-    resource: repo://tests/reviewer/test_reviewer_reconcile.py
-  - id: openwiki-source-4bf7492625702a0e33e69023
-    resource: repo://tests/reviewer/test_reviewer_tools.py
-  - id: openwiki-source-83b74fcdcdb9d5b5b177c97b
-    resource: repo://tests/reviewer/test_reviewer_watch.py
-verified:
-  - by: openwiki/0.4.2
-    at: 2026-09-08T08:15:30.533Z
-generated: { by: "openwiki/0.4.2", at: "2026-09-08T08:15:30.533Z" }
+generated: { by: "openwiki/0.4.2", at: "2026-09-23T08:15:27.313Z" }
 ---
 
-# Pull Request Review Workflow
+# Pull Request Review Lifecycle
 
-Open SWE reviews a pull request through a dedicated `reviewer` graph. A PR has one durable reviewer thread and one evolving findings list: later pushes and human replies re-enter that thread rather than creating independent reviews. See [Reviewer and Analyzer Architecture](../architecture/reviewer-and-analyzer.md), [Invocation Workflow](invocation.md), and [PR Creation Workflow](pr-creation.md) for adjacent responsibilities.
+Open SWE reviews a pull request through the dedicated `reviewer` graph. The lifecycle is intentionally PR-centric: a deterministic reviewer thread carries dispatch and watch state, while the PR's findings are durable records that are reconciled with GitHub across later runs. For adjacent graph design, see [Reviewer and Analyzer Architecture](../architecture/reviewer-and-analyzer.md); for generic run dispatch, see [Invocation Workflow](invocation.md).
 
-## Entrypoints and admission
+## Admission: automatic versus on-demand
 
-`POST /webhooks/github` is the signed ingress. It verifies `X-Hub-Signature-256`, ignores unsupported event types or PR actions, parses JSON, and schedules accepted work as FastAPI background tasks. The route applies the public-repository organization gate to first-review and comment/reply paths. Thus webhook processing responds promptly; review execution is asynchronous.
+`POST /webhooks/github` is the signed asynchronous ingress. It verifies `X-Hub-Signature-256`, ignores unsupported event types and PR actions, verifies that the repository belongs to a workspace, and schedules accepted handlers as FastAPI background tasks. A temporarily unreadable workspace lookup returns `503` so GitHub retries rather than silently dropping work.
 
-A review can begin through:
+**Automatic triggers** are deliberately gated:
 
-- **Automatic first review:** `pull_request` actions `opened` and `ready_for_review`. The repository must appear in the enabled-review-repositories record; absence is disabled by default and a store failure also safely reads as disabled. Drafts additionally require the author's `review_draft_prs` setting, with the team setting as fallback.
-- **Explicit request:** the main-agent tool `request_pr_review` accepts a GitHub PR URL, preserves an active Slack thread if present, and delegates to `trigger_pr_review_from_ref`. The dashboard calls that same entrypoint. It fetches PR metadata, ensures the reviewer thread exists, turns on `watch`, posts a temporary in-progress comment, and dispatches the reviewer.
-- **A later push:** a push only becomes a re-review for an open PR whose canonical reviewer thread exists and has `watch=true`.
-- **A reply to a reviewer comment:** a non-bot reply is separately routed before ordinary mention handling and can dispatch a focused reassessment run.
+- `pull_request` `opened` and `ready_for_review` begin an automatic first review only when the repository is in the enabled-review-repositories record. Repositories are disabled by default, and an unavailable enabled-repositories store fails closed (skip review rather than fail the webhook). These automatic PR triggers also pass the public-repository organization gate.
+- A draft is skipped unless its author's effective `review_draft_prs` setting is enabled; the author profile setting falls back to workspace settings.
+- A `push` enters only when auto-review remains enabled. It then must identify an open PR for the branch and an existing watched reviewer thread; it does not create a first review for an arbitrary branch push.
 
-```mermaid
-flowchart TD
-  Ingress["GitHub webhook"] --> Verify["Verify signature and event"]
-  Verify --> First{"PR opened or ready"}
-  Verify --> Push{"Push event"}
-  Verify --> Reply{"Review-comment reply"}
-  First --> Gate{"Repository and draft gates"}
-  Gate -->|"accepted"| Start["Create or update reviewer thread"]
-  Push --> Watch{"Watched PR and changed diff"}
-  Watch -->|"yes"| Start
-  Reply --> Start
-  Start --> Check["Create in-progress check"]
-  Check --> Run["Dispatch reviewer graph"]
-  Run --> Publish["Persist and publish findings"]
-```
-The trigger paths converge on the same per-PR reviewer state.
+**On-demand triggers** do not use the automatic repository-enable gate. The dashboard's re-review action calls `trigger_pr_review_from_ref`, which fetches current PR metadata, obtains a reviewer token, creates the canonical thread if needed, records PR metadata, `head_sha`, and `watch=True`, posts a transient review-started comment, and dispatches the reviewer. This entry point is suitable for an explicit re-review even when no automatic delivery caused it.
 
-## Canonical thread and review state
-
-`reviewer_thread_id(owner, repo, pr_number)` is UUIDv5 over `"{owner}/{repo}/pr/{pr_number}/reviewer"`. Webhooks, the dashboard, and tools all derive it, making the formula a cross-process persisted-data contract: changing it strands existing state.
-
-The LangGraph thread metadata is the durable state owner. It is marked `kind="reviewer"` and contains PR metadata, `head_sha`, `last_reviewed_sha`, `watch`, optional Slack origin, transient status/check identifiers, the current run id, and `findings`. Thread metadata is deliberately used because it survives sandbox eviction and is queryable across threads. Review runs use `assistant_id="reviewer"`, mapped by `langgraph.json` to `agent.graphs.reviewer:traced_reviewer_agent`.
-
-Each finding records its location and diff side, severity and confidence, title and description, lifecycle status (`open`, `resolved`, or `dismissed`), fingerprint, and GitHub publication identity. Reads normalize legacy singular GitHub IDs and nested `surface` data to canonical ID lists plus a forward-only `surface_state`. The storage API serializes mutations per thread/event loop, reads the freshest state, and writes only on change; snapshot replacement merges by finding ID. `append_finding` deduplicates against open findings by fingerprint. A missing reviewer thread raises `ReviewerThreadMissingError`; tools return a structured `thread_not_found` response directing the agent not to retry.
-
-## Reviewer preparation and finding discipline
-
-Before the first model call, `PrepareReviewerRunMiddleware` obtains a GitHub App token, creates or replaces an unreachable sandbox, and deterministically prepares the target checkout. It materializes the review range and computes a per-file, per-side changed-line set. For a re-review, the range is based on `last_reviewed_sha`; otherwise it is the PR range. If preparation fails, the agent is explicitly told that the checkout may be stale and must not be trusted.
-
-The graph exposes review-specific tools—`fetch_review_diff`, finding tools, thread reply/resolution tools, and `publish_review`—rather than change-authoring tools. Its prompt requires concrete, changed-line defects; excludes style-only, speculative, pre-existing, and out-of-diff reports; limits delegation to one disjoint review pass; and asks the parent to validate and publish. Existing PR descriptions, review threads, and author trace content are untrusted data: the prompt delimits them and instructs the model never to follow instructions within them. It can also layer organization guidance, repository review style, base-branch `AGENTS.md`/`CLAUDE.md` rules, and an API standards skill when applicable.
-
-`add_finding` normalizes a missing endpoint of a line range, validates title and severity/confidence/side values, and checks the range against the changed-line set. An out-of-diff anchor returns `success: false`, `in_diff: false`, and a do-not-retry instruction. File-level findings are accepted but cannot be rendered as inline GitHub comments. Suggestions above `MAX_SUGGESTION_LINES` (4) are dropped while retaining the description-only finding.
-
-## Selection and publication
-
-Publication selects only open, in-diff findings at or above the requested severity (default `medium`), orders them by severity then file/line, and caps them at `REVIEW_FINDING_CAP` (6). Confidence is stored for calibration but does not gate publication. A re-review additionally limits new publication to unsurfaced findings first seen at the current head, preventing duplicate comments.
-
-`publish_review` first backfills state from live GitHub threads, resolves the live head from thread metadata rather than trusting a run's frozen config, then emits one GitHub PR Review. Inline comments contain a hidden finding marker, generated title, description, line reference, and optional fenced suggestion; the top-level body is host-formatted and carries a summary marker. Returned review and comment identities are recorded before later thread handling, enabling reconciliation and resolution.
-
-A publish may be successful without posting a review: eval mode is a dry run, and an empty re-review after a known Open SWE review skips another summary while still resolving fixed threads and advancing `last_reviewed_sha`. Only a numeric `review_id` without `dry_run` or `skipped_empty_re_review` confirms GitHub publication. If GitHub returns an unresolved-anchor 422, the tool removes identifiable invalid findings, retries the remaining batch once, and returns `unresolvable_findings` so the agent fixes or resolves them rather than repeating the request.
-
-## Re-review, replies, and settlement
+A reply to an Open SWE inline review comment is a third, focused path: the webhook recognizes a reply before normal mention handling, applies the public-repository gate, and routes it to the reviewer workflow.
 
 ```mermaid
-stateDiagram-v2
-  [*] --> Reviewing: first review or explicit request
-  Reviewing --> Watching: publish advances reviewed SHA
-  Watching --> Watching: unchanged push settles check
-  Watching --> Reviewing: changed push
-  Watching --> Reassessing: human finding reply
-  Reassessing --> Watching: publish or resolve
-  Watching --> Closed: PR closed
-  Closed --> Watching: PR reopened
+sequenceDiagram
+  participant GitHub
+  participant Route as Webhook route
+  participant Handler as Review handler
+  participant Thread as Reviewer thread
+  participant Graph as Reviewer graph
+  participant Store as Findings store
+  participant API as GitHub API
+
+  GitHub->>Route: signed PR event or push
+  Route->>Route: verify workspace and trigger gates
+  Route-->>GitHub: accepted
+  Route->>Handler: background task
+  Handler->>Thread: update PR head and watch state
+  Handler->>API: create review check when dispatching
+  Handler->>Graph: dispatch reviewer run
+  Graph->>Store: add or update findings
+  Graph->>API: publish PR review
+  Graph->>Store: record publication identities
+  Graph->>Thread: advance last reviewed SHA
+  Graph->>API: settle review check
 ```
-The watch lifecycle preserves findings and GitHub thread identity across review runs.
+*Caption: Accepted automatic deliveries update the canonical PR state and asynchronously dispatch the reviewer; publication persists GitHub identity before the review lifecycle is settled.*
 
-On close/reopen transitions, `closed` disables watch and `reopened` enables it. `converted_to_draft` disables watch only when draft reviews are not enabled for that PR author. A watched push is ignored when the head equals `last_reviewed_sha`. When the PR diff is provably unchanged, the system advances `last_reviewed_sha` and creates then completes a success check titled **No new changes to review** on the new head, because GitHub no longer displays the old commit's check. A changed push reconciles live threads, refreshes PR metadata and `head_sha`, creates a new in-progress check, and dispatches a `re_review=True` run with the prior reviewed SHA.
+## Canonical PR state and durable findings
 
-Reconciliation links findings to live review threads first by embedded marker, then stored thread/comment identity. It backfills identities and marks findings surfaced; records only the latest non-bot reply after the bot comment as an interaction requiring reassessment; and marks an open finding resolved only when all matched threads are resolved (outdated threads are terminal but do not count as resolved). It persists only when data changed. A reply webhook reconciles, finds the parent comment's finding, records the reply, and dispatches `reviewer_event="finding_reply"`; that run can reply for clarification, or resolve/dismiss with an agent-authored note.
+`reviewer_thread_id(owner, repo, pr_number)` is UUIDv5 over `"{owner}/{repo}/pr/{pr_number}/reviewer"`. Webhook handlers, dashboard review APIs, and the reviewer re-derive this identifier, so the exact formula is a persisted routing contract: changing it would make existing threads and their metadata unreachable.
 
-Each dispatched automatic review creates an **Open SWE Review** check and saves `review_check_run_id`. Publish settles it with a conclusion based on surfaced findings and clears the ID only after GitHub accepts the completion patch. A failed patch retains the ID and stores `review_check_pending_result`, allowing the after-agent middleware to retry the real result. If a run ends without publishing, that middleware closes the remaining check as `neutral`, not failure, so reviewer infrastructure errors do not appear to be PR code failures. The transient in-progress PR comment is likewise cleared after successful publication paths.
+The LangGraph thread owns **review lifecycle metadata**, including `kind="reviewer"`, PR identity, current `head_sha`, `last_reviewed_sha`, `watch`, optional Slack origin, the current run ID, transient status-comment ID, and review-check state. Dispatches use `assistant_id="reviewer"`, mapped to `agent.graphs.reviewer:traced_reviewer_agent` in `langgraph.json`.
 
-## Operational checks and focused tests
+Findings are instead stored in PostgreSQL under their pull request, with a `pull_request_finding_state` mapping back to the reviewer thread. This separates durable review records from a replaceable sandbox and supports linking human replies to registered GitHub identities. Older threads that still hold metadata findings are migrated on first access. Finding reads normalize legacy singular GitHub identifiers and nested `surface` data into canonical ID lists and a forward-only `surface_state`.
 
-Enable automatic review explicitly with the enabled-review-repositories store; installing the GitHub App alone does not opt a repository in. Operators should investigate a missing completion check through reviewer-thread metadata (`review_check_run_id` and `review_check_pending_result`), token availability, and sandbox preparation failures. A `thread_not_found` tool result is terminal for that run, not a request to retry.
+Writes serialize a current PR finding set with a database row lock. `mutate_findings` writes only if the mutator changed the fresh state, `replace_findings` merges by finding ID so it does not discard concurrently added findings, and `append_finding` de-duplicates open findings by fingerprint. If the backing reviewer thread is absent before migration, tools return the structured `thread_not_found` do-not-retry result rather than inviting a retry.
 
-`tests/reviewer/` provides focused coverage for automatic PR gating (`test_pr_ready_auto_review.py`), watch and unchanged-diff behavior (`test_reviewer_watch.py`), finding storage and tool validation (`test_reviewer_findings.py`, `test_reviewer_tools.py`), reconciliation (`test_reviewer_reconcile.py`), and publishing/status comments/retry behavior (`test_reviewer_publish.py`).
+## Read-only preparation and finding collection
+
+Before the model runs, `PrepareReviewerRunMiddleware` obtains and caches a GitHub App token, provisions a per-thread sandbox (permitting replacement of an unreachable one), and prepares a checkout. It materializes the first-review or re-review diff and provides both diff text and a per-file/per-side changed-line set. A re-review range uses `last_reviewed_sha`; otherwise the PR diff is used. Failure to materialize the local range falls back to a fetched PR diff where possible, while an unavailable checkout is represented to the reviewer as not ready.
+
+The graph exposes review-oriented tools such as `fetch_review_diff`, `add_finding`, `update_finding`, `publish_review`, and finding-thread reply/resolution tools—not code-authoring tools. It loads organization guidance, repository style, and base-branch `AGENTS.md`/`CLAUDE.md` conventions. PR descriptions and existing review-thread bodies are delimited as untrusted data; wrapper-closing tags are neutralized so commenter-controlled text cannot escape its data block. The prompt's review bar excludes style-only, speculative, pre-existing, and out-of-diff reports.
+
+`add_finding` normalizes a one-ended range, requires a generated non-default title, and validates severity, confidence, side, and range ordering. When changed-line context is available, an anchor outside the PR diff returns `success: false`, `in_diff: false`, and an explicit instruction not to retry. File-level findings are accepted but cannot become inline comments. Suggestions longer than `MAX_SUGGESTION_LINES` (4) are dropped while retaining the description-only finding.
+
+## Selecting and publishing a review
+
+Publication considers open, in-diff findings at or above the chosen severity threshold (default `medium`). The reviewer may provide an explicit rank; ranked findings come first, and unranked findings then sort by severity, file, and line. Confidence is recorded but does not itself gate publication. The normal review cap is `REVIEW_FINDING_CAP` (6). On a re-review, publication considers only unsurfaced findings first seen at the effective current head, preventing duplicate inline comments.
+
+`publish_review` first resolves the live head SHA from thread metadata: a push can update it while the run still holds a frozen configuration. It reconciles/backfills from GitHub threads, then posts one GitHub PR Review with a summary body and inline comments for renderable findings. Inline comments include the hidden finding marker and may include a fenced suggestion. After GitHub accepts the review, it records review, comment, run, and thread identities in a coordinated findings write; it then resolves eligible fixed threads, advances `last_reviewed_sha`, removes the transient status comment, and settles the check.
+
+Important publication outcomes are explicit:
+
+- Eval mode is a dry run: it records simulated publication metadata and posts nothing.
+- An empty re-review with a known Open SWE summary skips a redundant summary but still resolves fixed threads and advances `last_reviewed_sha`.
+- A GitHub unresolved-anchor response triggers one selective retry after identifiable bad anchors are removed. If it cannot safely recover, the tool returns `unresolvable_findings` and directs the agent to repair or resolve those findings rather than retry identically.
+- A numeric `review_id` without `dry_run` or `skipped_empty_re_review` is the signal that GitHub received a new review.
+
+## Watches, SHA transitions, and feedback
+
+Closing a PR disables `watch`; reopening re-enables it. Converting to draft disables watch only when the author's effective draft-review setting is off. The watch is a re-review subscription, not a universal push listener.
+
+For a watched open PR, a push short-circuits when its head equals `last_reviewed_sha`. When a comparison proves the PR diff is unchanged, it advances `last_reviewed_sha` and creates then completes a **No new changes to review** success check on the new head, because GitHub only shows checks on the current commit. For a changed diff, the handler reconciles live review threads, updates PR metadata and `head_sha`, creates an in-progress **Open SWE Review** check, and dispatches `re_review=True` with the prior reviewed SHA. `ready_for_review` follows the same SHA discipline: it does not dispatch if `head_sha` already equals `last_reviewed_sha`, but after a prior review it dispatches a re-review prompt asking the graph to reconcile existing findings and publish net-new ones.
+
+Reconciliation matches a GitHub thread first by the embedded finding marker, then recorded thread or comment identity. It backfills publication identities and marks findings surfaced; captures a latest non-bot reply as an interaction requiring reassessment; and changes an open finding to `resolved` only if all matched threads are resolved. Outdated threads are terminal for sweep purposes but do not count as resolved. The reply webhook performs this sweep, finds the parent finding, appends its reply interaction, and dispatches a `reviewer_event="finding_reply"` run.
+
+Automatic first reviews and changed-diff push re-reviews create an **Open SWE Review** check and save `review_check_run_id` in thread metadata. `publish_review` settles that check, clearing the ID only after a successful GitHub completion PATCH. A failed PATCH retains the ID plus `review_check_pending_result`, allowing the after-agent hook to retry the intended conclusion. If a run ends without publishing, `settle_review_check_on_exit` settles the remaining check as `neutral`, so reviewer or sandbox failure is not presented as a defect in the PR.
+
+## Operations and focused tests
+
+Enabling the GitHub App is insufficient for automatic review: operators must opt each repository into the enabled-review-repositories record. For a missing or stuck review, inspect reviewer-thread metadata (`watch`, `head_sha`, `last_reviewed_sha`, `review_check_run_id`, and `review_check_pending_result`), token availability, and sandbox preparation. Treat `thread_not_found` as a terminal storage blocker for that run.
+
+Focused coverage includes automatic PR admission and draft behavior in `tests/reviewer/test_pr_ready_auto_review.py`; watch, SHA, unchanged-diff, and check behavior in `tests/reviewer/test_reviewer_watch.py`; PostgreSQL findings, storage migration, and tool validation in `test_reviewer_findings.py` and `test_reviewer_tools.py`; reconciliation in `test_reviewer_reconcile.py`; and publication, retry, status-comment, and check settlement behavior in `test_reviewer_publish.py`.
