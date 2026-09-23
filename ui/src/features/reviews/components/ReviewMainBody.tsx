@@ -2234,7 +2234,7 @@ function AddToChatPopup({
       <button
         type="button"
         onClick={onAdd}
-        className="inline-flex items-center gap-1.5 rounded-md border border-border bg-popover px-2 py-1 text-[11px] font-medium text-popover-foreground shadow-md hover:bg-muted"
+        className="inline-flex items-center gap-1.5 rounded-md border border-border bg-popover px-2 py-1 text-[11px] font-medium text-popover-foreground shadow-md hover:bg-[linear-gradient(var(--muted),var(--muted)),linear-gradient(var(--popover),var(--popover))]"
       >
         Add to Chat
         <kbd className="rounded border border-border px-1 text-[10px] text-muted-foreground">
