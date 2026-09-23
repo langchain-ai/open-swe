@@ -102,6 +102,7 @@ import { IconButton } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Textarea } from "@/components/ui/textarea"
 import { api, reviewImageProxyUrl } from "@/lib/api"
+import { optimisticUpdate } from "@/lib/optimistic"
 import { useSession } from "@/lib/session"
 import { cn } from "@/lib/utils"
 
@@ -1462,6 +1463,7 @@ function WalkthroughButton({ detail }: { detail: ReviewDetail }) {
   const scout = useMutation({
     mutationFn: ({ owner, repo, number }: ReviewRef) =>
       api.runReviewScout(owner, repo, number),
+    meta: { errorTitle: "Couldn't build walkthrough" },
     onSuccess: ({ started }, { owner, repo, number }) => {
       const queryKey = ["review", owner, repo, number]
       if (started)
@@ -1474,11 +1476,6 @@ function WalkthroughButton({ detail }: { detail: ReviewDetail }) {
   const running = detail.walkthrough_running || scout.isPending
   return (
     <span className="flex items-center gap-2">
-      {scout.error && (
-        <span className="text-[11px] text-destructive">
-          {scout.error.message}
-        </span>
-      )}
       <button
         type="button"
         onClick={() => scout.mutate(detail)}
@@ -2136,6 +2133,7 @@ function CommentComposer({
         prNumber,
         buildCommentPayload(path, range, body)
       ),
+    meta: { silent: true },
     onSuccess: () =>
       queryClient.invalidateQueries({
         queryKey: ["reviewComments", owner, repo, prNumber],
@@ -2344,29 +2342,28 @@ function InlineComment({
   const mutation = useMutation({
     mutationFn: ({ next }: { next: string; previous: string }) =>
       api.updateReviewComment(owner, repo, prNumber, comment.id, next),
+    meta: { errorTitle: "Couldn't update comment" },
     onMutate: async ({ next }) => {
       setBody(next)
       setEditing(false)
-      await queryClient.cancelQueries({ queryKey: commentsKey })
-      const snapshot =
-        queryClient.getQueryData<ReviewCommentsPayload>(commentsKey)
-      queryClient.setQueryData<ReviewCommentsPayload>(commentsKey, (old) =>
-        old
-          ? {
-              comments: old.comments.map((c) =>
-                c.id === comment.id ? { ...c, body: next } : c
-              ),
-            }
-          : old
-      )
-      return { snapshot }
+      return {
+        undo: await optimisticUpdate<ReviewCommentsPayload>(
+          queryClient,
+          commentsKey,
+          (old) => ({
+            comments: old.comments.map((c) =>
+              c.id === comment.id ? { ...c, body: next } : c
+            ),
+          })
+        ),
+      }
     },
     onSuccess: (_, { next }) => {
       setDraft(next)
       onUpdate?.({ ...comment, body: next })
     },
     onError: (_error, { next, previous }, context) => {
-      queryClient.setQueryData(commentsKey, context?.snapshot)
+      context?.undo()
       setBody(previous)
       setDraft(next)
       setEditing(true)
@@ -2465,13 +2462,6 @@ function InlineComment({
               className="resize-y text-xs"
               autoFocus
             />
-            {mutation.isError && (
-              <p className="mt-1.5 text-[11px] text-destructive">
-                {mutation.error instanceof Error
-                  ? mutation.error.message
-                  : "Failed to update comment"}
-              </p>
-            )}
             <div className="mt-2 flex items-center justify-end gap-2">
               <button
                 type="button"
@@ -2723,6 +2713,7 @@ function SidePanel({
   const reReview = useMutation({
     mutationFn: ({ owner, repo, number }: ReviewRef) =>
       api.reReview(owner, repo, number),
+    meta: { errorTitle: "Couldn't start re-review" },
     onSuccess: (_result, { owner, repo, number }) => {
       const queryKey = ["review", owner, repo, number]
       qc.setQueryData<ReviewDetail>(queryKey, (old) =>
@@ -2826,11 +2817,6 @@ function SidePanel({
                   {detail.head_sha.slice(0, 7) || "—"}
                 </div>
                 {detail.watch && <div>Watching for new pushes</div>}
-                {reReview.error && (
-                  <div className="text-destructive">
-                    {reReview.error.message}
-                  </div>
-                )}
               </div>
             </section>
 

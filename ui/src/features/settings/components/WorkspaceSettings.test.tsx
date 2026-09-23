@@ -18,8 +18,12 @@ import {
   type WorkspaceRecord,
   type WorkspaceSettingsView,
 } from "@/lib/api"
+import { reportError } from "@/lib/errorReporting"
+import { makeQueryClient } from "@/lib/query"
 
 import { WorkspaceSettingsPanel } from "./WorkspaceSettings"
+
+vi.mock("@/lib/errorReporting", () => ({ reportError: vi.fn() }))
 
 const RECORD: WorkspaceRecord = {
   slug: "oss",
@@ -107,9 +111,8 @@ function mockApis(record: WorkspaceRecord = RECORD) {
 }
 
 function renderPage(canEdit = true, onDeleted = vi.fn()) {
-  const client = new QueryClient({
-    defaultOptions: { queries: { retry: false } },
-  })
+  const client = makeQueryClient()
+  client.setDefaultOptions({ queries: { retry: false } })
   clients.push(client)
   return render(
     <QueryClientProvider client={client}>
@@ -144,8 +147,15 @@ describe("WorkspaceSettingsPanel", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Delete OSS" }))
     fireEvent.click(screen.getByRole("button", { name: "Delete workspace" }))
-    expect((await screen.findByRole("alert")).textContent).toBe(
-      "Could not delete the workspace"
+    await waitFor(() =>
+      expect(reportError).toHaveBeenCalledWith(
+        expect.objectContaining({
+          title: "Couldn't delete workspace",
+          error: expect.objectContaining({
+            message: "Could not delete the workspace",
+          }),
+        })
+      )
     )
     expect(remove).toHaveBeenCalledWith("oss", expect.anything())
     expect(onDeleted).not.toHaveBeenCalled()

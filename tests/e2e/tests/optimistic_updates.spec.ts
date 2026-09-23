@@ -26,8 +26,41 @@ function deferred() {
   return { promise, resolve };
 }
 
+const failedRequestIds: Array<string> = [];
+
 async function failWith500(route: Route) {
+  failedRequestIds.push(route.request().headers()["x-request-id"] ?? "");
   await route.fulfill({ status: 500, json: { detail: FAILURE_DETAIL } });
+}
+
+function watchErrorReport(page: Page) {
+  return page.waitForResponse(
+    (res) =>
+      res.url().endsWith("/dashboard/api/client-errors") &&
+      res.request().method() === "POST",
+    QUICK,
+  );
+}
+
+/** The toast, the RUM-bound report, and the server log all carry the failed request's ID. */
+async function expectReportedFailure(
+  page: Page,
+  title: string,
+  report: ReturnType<typeof watchErrorReport>,
+) {
+  const requestId = failedRequestIds.at(-1);
+  expect(requestId).toMatch(/^req_[0-9a-f-]{36}$/);
+  const toast = page.locator("[data-sonner-toast]").filter({ hasText: title });
+  await expect(toast).toContainText(FAILURE_DETAIL, QUICK);
+  await expect(toast).toContainText(`ID ${requestId}`, QUICK);
+  const response = await report;
+  expect(response.status()).toBe(204);
+  expect(response.request().postDataJSON()).toMatchObject({
+    error_id: requestId,
+    title,
+    error_message: FAILURE_DETAIL,
+    status: 500,
+  });
 }
 
 async function readInstanceSettings(
@@ -142,9 +175,10 @@ test.describe("optimistic settings saves", () => {
     await summaries.click();
     await expect(summaries).toBeChecked(QUICK);
 
+    const report = watchErrorReport(page);
     firstPutGate.resolve();
     await expect(fable).not.toBeChecked(QUICK);
-    await expect(page.getByText(FAILURE_DETAIL)).toBeVisible(QUICK);
+    await expectReportedFailure(page, "Couldn't save settings", report);
     await expect(summaries).toBeChecked(QUICK);
     await expect.poll(() => puts.length, QUICK).toBe(2);
     expect(puts[1]).toMatchObject({
@@ -293,9 +327,11 @@ test.describe("optimistic thread edits", () => {
       QUICK,
     );
 
+    const report = watchErrorReport(page);
     pin.release();
     await pin.settled;
     await expect(sidebarSection(page, "Pinned")).toHaveCount(0, QUICK);
+    await expectReportedFailure(page, "Couldn't pin or unpin thread", report);
     await page.reload();
     await expect(
       page.locator("aside").getByRole("link", { name: THREAD_TITLE }).first(),
@@ -350,10 +386,11 @@ test.describe("optimistic thread edits", () => {
       page.locator("aside").getByRole("link", { name: next }).first(),
     ).toBeVisible(QUICK);
 
+    const report = watchErrorReport(page);
     rename.release();
     await rename.settled;
     await expect(titleButton).toHaveText(THREAD_TITLE, QUICK);
-    await expect(page.getByRole("alert")).toContainText(FAILURE_DETAIL, QUICK);
+    await expectReportedFailure(page, "Couldn't rename thread", report);
     await expect(
       page.locator("aside").getByRole("link", { name: THREAD_TITLE }).first(),
     ).toBeVisible(QUICK);

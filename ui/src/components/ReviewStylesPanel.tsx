@@ -17,15 +17,10 @@ import { Label } from "@/components/ui/label"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Textarea } from "@/components/ui/textarea"
 import { api, isGithubReauthError, loginUrl } from "@/lib/api"
+import { optimisticUpdate } from "@/lib/optimistic"
 import { useRepos } from "@/lib/profile"
 import { normalizeRepoFullName } from "@/lib/repo"
 import { useSession } from "@/lib/session"
-
-function formatMutationError(e: Error): string {
-  return isGithubReauthError(e)
-    ? "GitHub token expired — sign in again using the link above."
-    : e.message
-}
 
 function statusVariant(status: ReviewStyle["status"]) {
   switch (status) {
@@ -43,7 +38,6 @@ function statusVariant(status: ReviewStyle["status"]) {
 export function ReviewStylesPanel() {
   const session = useSession()
   const qc = useQueryClient()
-  const [error, setError] = useState<string | null>(null)
   const [addRepo, setAddRepo] = useState("")
   const [selected, setSelected] = useState<string | null>(null)
   const [draftPrompt, setDraftPrompt] = useState("")
@@ -85,26 +79,25 @@ export function ReviewStylesPanel() {
   const savePolicy = useMutation({
     mutationFn: ({ repo, policy }: { repo: string; policy: string | null }) =>
       api.saveReviewApprovalPolicy(repo, policy),
+    meta: { errorTitle: "Couldn't save approval policy" },
     onSuccess: (record) => {
       qc.setQueryData(["reviewStyle", record.full_name], record)
       void qc.invalidateQueries({ queryKey: ["reviewStyles"] })
-      setError(null)
     },
-    onError: (e: Error) => setError(formatMutationError(e)),
   })
 
   const createStyle = useMutation({
     mutationFn: (full_name: string) => api.createReviewStyle(full_name),
+    meta: { errorTitle: "Couldn't add repository" },
     onSuccess: (record) => {
       void qc.invalidateQueries({ queryKey: ["reviewStyles"] })
       setSelected(record.full_name)
-      setError(null)
     },
-    onError: (e: Error) => setError(formatMutationError(e)),
   })
 
   const analyze = useMutation({
     mutationFn: (full_name: string) => api.analyzeReviewStyle(full_name),
+    meta: { errorTitle: "Couldn't start analysis" },
     onMutate: async (full_name) => {
       await Promise.all([
         qc.cancelQueries({ queryKey: ["reviewStyles"] }),
@@ -128,12 +121,10 @@ export function ReviewStylesPanel() {
     },
     onSuccess: (record) => {
       qc.setQueryData(["reviewStyle", record.full_name], record)
-      setError(null)
     },
-    onError: (e: Error, full_name, snapshot) => {
+    onError: (_e, full_name, snapshot) => {
       qc.setQueryData(["reviewStyles"], snapshot?.list)
       qc.setQueryData(["reviewStyle", full_name], snapshot?.detail)
-      setError(formatMutationError(e))
     },
     onSettled: (_record, _error, full_name) => {
       void qc.invalidateQueries({ queryKey: ["reviewStyles"] })
@@ -149,45 +140,39 @@ export function ReviewStylesPanel() {
       full_name: string
       custom_prompt: string
     }) => api.saveReviewStylePrompt(full_name, custom_prompt),
+    meta: { errorTitle: "Couldn't save prompt" },
     onSuccess: (record) => {
       qc.setQueryData(["reviewStyle", record.full_name], record)
       void qc.invalidateQueries({ queryKey: ["reviewStyles"] })
-      setError(null)
     },
-    onError: (e: Error) => setError(formatMutationError(e)),
   })
 
   const cancelAnalysis = useMutation({
     mutationFn: (full_name: string) => api.cancelReviewStyle(full_name),
+    meta: { errorTitle: "Couldn't cancel analysis" },
     onSuccess: (record) => {
       qc.setQueryData(["reviewStyle", record.full_name], record)
       void qc.invalidateQueries({ queryKey: ["reviewStyles"] })
-      setError(null)
     },
-    onError: (e: Error) => setError(formatMutationError(e)),
   })
 
   const removeStyle = useMutation({
     mutationFn: (full_name: string) => api.deleteReviewStyle(full_name),
-    onMutate: async (full_name) => {
-      await qc.cancelQueries({ queryKey: ["reviewStyles"] })
-      const snapshot = qc.getQueryData<Array<ReviewStyle>>(["reviewStyles"])
-      qc.setQueryData<Array<ReviewStyle>>(["reviewStyles"], (old) =>
-        old?.filter((style) => style.full_name !== full_name)
-      )
-      return snapshot
-    },
+    meta: { errorTitle: "Couldn't remove repository" },
+    onMutate: async (full_name) => ({
+      undo: await optimisticUpdate<Array<ReviewStyle>>(
+        qc,
+        ["reviewStyles"],
+        (old) => old.filter((style) => style.full_name !== full_name)
+      ),
+    }),
     onSuccess: (_data, full_name) => {
       if (selected === full_name) {
         setSelected(null)
         setDraftPrompt("")
       }
-      setError(null)
     },
-    onError: (e: Error, _full_name, snapshot) => {
-      qc.setQueryData(["reviewStyles"], snapshot)
-      setError(formatMutationError(e))
-    },
+    onError: (_e, _full_name, ctx) => ctx?.undo(),
     onSettled: () => {
       void qc.invalidateQueries({ queryKey: ["reviewStyles"] })
     },
@@ -217,7 +202,9 @@ export function ReviewStylesPanel() {
 
   const githubReauth =
     (repos.isError && isGithubReauthError(repos.error)) ||
-    (error !== null && /github token|re-login required/i.test(error))
+    [savePolicy, createStyle, analyze, savePrompt, cancelAnalysis, removeStyle]
+      .map((m) => m.error)
+      .some(isGithubReauthError)
 
   return (
     <div className="flex flex-col gap-6 p-4">
@@ -464,7 +451,6 @@ export function ReviewStylesPanel() {
             )}
           </>
         )}
-        {error && <p className="text-xs text-destructive">{error}</p>}
       </section>
     </div>
   )

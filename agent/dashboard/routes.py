@@ -5,6 +5,7 @@ from fastapi import APIRouter, Depends
 from agent.analytics.routes import router as analytics_router
 from agent.dashboard.agent_instructions import router as agent_instructions_router
 from agent.dashboard.auth_routes import router as auth_router
+from agent.dashboard.client_errors import router as client_errors_router
 from agent.dashboard.notion_routes import router as notion_router
 from agent.dashboard.oauth import require_same_origin_for_mutations
 from agent.dashboard.options_routes import router as options_router
@@ -34,6 +35,7 @@ router = APIRouter(
 router.include_router(incidents_router)
 router.include_router(incident_documents_router, prefix="/incidents/documents")
 router.include_router(auth_router)
+router.include_router(client_errors_router)
 router.include_router(user_instructions_router)
 router.include_router(user_preferences_router)
 router.include_router(options_router)

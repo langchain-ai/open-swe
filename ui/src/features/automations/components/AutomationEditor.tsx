@@ -114,9 +114,6 @@ export function AutomationEditor({
       activeSelection?.effort !== initialSelection?.effort)
   const allowNavigation = useUnsavedChangesWarning(isDirty)
 
-  const error =
-    createSchedule.error || updateSchedule.error || deleteSchedule.error
-  const errorMessage = error instanceof Error ? error.message : null
   const isSaving = createSchedule.isPending || updateSchedule.isPending
 
   const canSave =
@@ -422,10 +419,6 @@ export function AutomationEditor({
             <SectionLabel>Recent runs</SectionLabel>
             <AutomationRuns automationId={schedule.id} limit={10} />
           </>
-        )}
-
-        {errorMessage && (
-          <p className="mt-4 text-xs text-destructive">{errorMessage}</p>
         )}
       </div>
     </div>

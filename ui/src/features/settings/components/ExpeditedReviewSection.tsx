@@ -36,9 +36,6 @@ export function ExpeditedReviewSection({ scope }: { scope: SettingsScope }) {
           }
         />
       </div>
-      {settings.error && (
-        <p className="px-4 pb-3 text-xs text-destructive">{settings.error}</p>
-      )}
     </SettingsSection>
   )
 }

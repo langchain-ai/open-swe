@@ -4,7 +4,6 @@ import {
   useQuery,
   useQueryClient,
 } from "@tanstack/react-query"
-import { useState } from "react"
 import {
   api,
   type WorkspaceSettings,
@@ -52,7 +51,6 @@ export interface ScopedSettings {
   save: (patch: WorkspaceSettingsOverrides) => void
   /** Drops `fields` from a workspace's record so they inherit again; no-op on the instance. */
   reset: (...fields: Array<keyof WorkspaceSettings>) => void
-  error: string | null
 }
 
 interface Snapshot {
@@ -115,37 +113,27 @@ export function useScopedSettings(
   onSaved?: () => void
 ): ScopedSettings {
   const qc = useQueryClient()
-  const [failure, setFailure] = useState<{
-    key: string
-    message: string
-  } | null>(null)
   const snapshot = useQuery({
     queryKey: settingsQueryKey(scope),
     queryFn: () => load(scope),
   })
   const mutationKey = saveMutationKey(scope)
-  const scopeId = JSON.stringify(mutationKey)
   const mutation = useMutation({
     mutationKey,
-    scope: { id: scopeId },
+    scope: { id: JSON.stringify(mutationKey) },
+    meta: { errorTitle: "Couldn't save settings" },
     mutationFn: (edit: SettingsEdit) => {
       const base = qc.getQueryData<Snapshot>(settingsQueryKey(edit.scope))
       if (!base) throw new Error("Settings are not loaded.")
       return persist(edit.scope, applyEdit(base, edit))
     },
     onMutate: async (edit) => {
-      setFailure(null)
       await qc.cancelQueries({ queryKey: settingsQueryKey(edit.scope) })
     },
     onSuccess: (saved, edit) => {
       qc.setQueryData(settingsQueryKey(edit.scope), saved)
       onSaved?.()
     },
-    onError: (e: Error, edit) =>
-      setFailure({
-        key: JSON.stringify(saveMutationKey(edit.scope)),
-        message: e.message,
-      }),
     onSettled: async (_data, _error, edit) => {
       if (qc.isMutating({ mutationKey: saveMutationKey(edit.scope) }) > 1)
         return
@@ -185,6 +173,5 @@ export function useScopedSettings(
       if (!current || scope.kind !== "workspace") return
       write({}, fields)
     },
-    error: failure?.key === scopeId ? failure.message : null,
   }
 }

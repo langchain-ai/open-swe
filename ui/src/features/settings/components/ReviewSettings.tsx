@@ -202,10 +202,6 @@ export function ReviewSettings({
           These settings are read-only. Ask a workspace admin to change them.
         </p>
       )}
-
-      {settings.error && (
-        <p className="text-xs text-destructive">{settings.error}</p>
-      )}
     </>
   )
 }

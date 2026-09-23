@@ -48,6 +48,7 @@ export function ThreadFeedbackCard({
   const mutation = useMutation({
     mutationFn: (value: ThreadFeedbackSubmission) =>
       agentsApi.submitThreadFeedback(threadId, value),
+    meta: { errorTitle: "Couldn't save feedback" },
     onMutate: (value) => {
       if (!("rating" in value)) return
       setShowComment(value.rating === "bad")
@@ -176,11 +177,6 @@ export function ThreadFeedbackCard({
             Dismiss
           </Button>
         </div>
-      )}
-      {mutation.isError && (
-        <p role="alert" className="w-full text-xs text-destructive">
-          Your feedback could not be saved. Please try again.
-        </p>
       )}
       {showComment && (
         <div className="flex items-center gap-2">

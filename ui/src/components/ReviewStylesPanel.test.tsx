@@ -1,6 +1,6 @@
 /** @vitest-environment jsdom */
 
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
+import { type QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import {
   cleanup,
   fireEvent,
@@ -11,8 +11,11 @@ import {
 import { afterEach, beforeEach, expect, it, vi } from "vitest"
 
 import { api, type ReviewStyle } from "@/lib/api"
+import { reportError } from "@/lib/errorReporting"
+import { makeQueryClient } from "@/lib/query"
 import { ReviewStylesPanel } from "./ReviewStylesPanel"
 
+vi.mock("@/lib/errorReporting", () => ({ reportError: vi.fn() }))
 vi.mock("@/lib/session", () => ({
   useSession: () => ({ data: { login: "me", is_admin: true } }),
 }))
@@ -55,7 +58,8 @@ function deferred<T>(): Deferred<T> {
 let client: QueryClient
 
 beforeEach(() => {
-  client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  client = makeQueryClient()
+  client.setDefaultOptions({ queries: { retry: false } })
   vi.spyOn(api, "listReviewStyles").mockResolvedValue([
     style("acme/api"),
     style("acme/web"),
@@ -97,9 +101,15 @@ it("shows analysis as running before the request returns and reverts on failure"
   await screen.findByRole("button", { name: "Analyzing…" })
   expect(chipStatus("acme/api")).toBe("running")
 
-  request.reject(new Error("analysis unavailable"))
-  await screen.findByText("analysis unavailable")
-  expect(screen.getByRole("button", { name: "Run analysis" })).toBeTruthy()
+  const failure = new Error("analysis unavailable")
+  request.reject(failure)
+  await screen.findByRole("button", { name: "Run analysis" })
+  expect(reportError).toHaveBeenCalledWith(
+    expect.objectContaining({
+      title: "Couldn't start analysis",
+      error: failure,
+    })
+  )
   expect(chipStatus("acme/api")).toBe("completed")
 })
 
@@ -138,9 +148,15 @@ it("removes a repo from the list immediately and restores it when deletion fails
   fireEvent.click(screen.getByRole("button", { name: "Remove" }))
   await waitFor(() => expect(repoChip("acme/api")).toBeNull())
 
-  request.reject(new Error("cannot delete"))
+  const failure = new Error("cannot delete")
+  request.reject(failure)
   await waitFor(() => expect(repoChip("acme/api")).not.toBeNull())
-  expect(screen.getByText("cannot delete")).toBeTruthy()
+  expect(reportError).toHaveBeenCalledWith(
+    expect.objectContaining({
+      title: "Couldn't remove repository",
+      error: failure,
+    })
+  )
 })
 
 it("keeps the saved prompt in the editor once the save settles", async () => {

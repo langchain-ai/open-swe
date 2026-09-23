@@ -25,6 +25,7 @@ import {
   useSidebarRepos,
 } from "@/features/agents/lib/queries"
 import type { ThreadVisibility } from "@/lib/api"
+import { reportError } from "@/lib/errorReporting"
 import { useSession } from "@/lib/session"
 import { cn } from "@/lib/utils"
 
@@ -96,7 +97,6 @@ export function AgentThreadHeader({
   const refreshLocalThreads = useRefreshLocalThreads()
   const { prefs, toggleLocalPin } = useSidebarPrefs()
   const [deletingLocal, setDeletingLocal] = useState(false)
-  const [deleteError, setDeleteError] = useState<string | null>(null)
   const sidebarCollapsed = useSidebarCollapsed()
   const isDesktop =
     typeof window !== "undefined" && Boolean(window.openSweDesktop)
@@ -125,28 +125,21 @@ export function AgentThreadHeader({
       return
     }
     setDeletingLocal(true)
-    setDeleteError(null)
     try {
       const deleted = await window.openSweDesktop?.deleteLocalThread(
         localThread.id
       )
-      if (deleted) {
-        refreshLocalThreads(localThread.id)
-        setDeleteOpen(false)
-        void navigate({ to: "/agents" })
-      } else {
-        setDeleteError("Local Open SWE thread not found")
-      }
+      if (!deleted) throw new Error("Local Open SWE thread not found")
+      refreshLocalThreads(localThread.id)
+      setDeleteOpen(false)
+      void navigate({ to: "/agents" })
     } catch (error) {
-      setDeleteError(
-        error instanceof Error ? error.message : "Could not delete local thread"
-      )
+      reportError({ title: "Couldn't delete thread", error })
     }
     setDeletingLocal(false)
   }
   const [draft, setDraft] = useState<string | null>(null)
   const [savingTitle, setSavingTitle] = useState<string | null>(null)
-  const [renameError, setRenameError] = useState<string | null>(null)
   const editingRef = useRef(false)
   const titleButtonRef = useRef<HTMLButtonElement>(null)
   const [editorWidth, setEditorWidth] = useState<number>()
@@ -160,31 +153,21 @@ export function AgentThreadHeader({
     try {
       await onRename(next)
     } catch (error) {
-      setRenameError(
-        error instanceof Error ? error.message : "Could not rename thread"
-      )
+      // Cloud renames go through a mutation, which reports its own failure.
+      if (localThread) reportError({ title: "Couldn't rename thread", error })
     }
     setSavingTitle(null)
   }
 
   const startRename = () => {
     if (!onRename || savingTitle !== null || !title) return
-    setRenameError(null)
     setEditorWidth(titleButtonRef.current?.getBoundingClientRect().width)
     editingRef.current = true
     setDraft(title)
   }
   const continueThreadPrivately = () => {
     if (!thread || localThread || continuePrivately.isPending) return
-    setRenameError(null)
-    continuePrivately.mutate(thread.id, {
-      onError: (error) =>
-        setRenameError(
-          error instanceof Error
-            ? error.message
-            : "Could not continue privately"
-        ),
-    })
+    continuePrivately.mutate(thread.id)
   }
   const visibilityMenu = thread ? (
     <ThreadVisibilityMenu
@@ -321,14 +304,6 @@ export function AgentThreadHeader({
                 </Menu.Portal>
               </Menu.Root>
             )}
-            {renameError && (
-              <span
-                role="alert"
-                className="absolute top-full left-4 rounded-md border border-destructive/30 bg-background px-2 py-1 text-xs text-destructive"
-              >
-                {renameError}
-              </span>
-            )}
           </div>
         )}
         <div className="ml-auto flex shrink-0 items-center gap-3">
@@ -358,10 +333,7 @@ export function AgentThreadHeader({
       </ContextMenu.Root>
       <DeleteThreadDialog
         open={deleteOpen}
-        onOpenChange={(open) => {
-          setDeleteOpen(open)
-          if (!open) setDeleteError(null)
-        }}
+        onOpenChange={setDeleteOpen}
         threadTitle={title ?? ""}
         isDeleting={isDeleting}
         onConfirm={() => void confirmDelete()}
@@ -372,7 +344,6 @@ export function AgentThreadHeader({
               : "This removes its history but does not revert changes made to your repository."
             : undefined
         }
-        error={deleteError}
       />
     </>
   )

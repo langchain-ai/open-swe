@@ -10,7 +10,11 @@ import {
   type WorkspaceSettingsOverrides,
   type WorkspaceSettingsView,
 } from "@/lib/api"
+import { reportError } from "@/lib/errorReporting"
+import { makeQueryClient } from "@/lib/query"
 import { INSTANCE_SCOPE, useScopedSettings } from "./settingsScope"
+
+vi.mock("@/lib/errorReporting", () => ({ reportError: vi.fn() }))
 
 const BASE: WorkspaceSettings = {
   review_draft_prs: false,
@@ -62,7 +66,7 @@ function renderTwoSections(client: QueryClient) {
 }
 
 function newClient() {
-  return new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  return makeQueryClient()
 }
 
 it("sends a second section's save after the first and keeps both patches", async () => {
@@ -110,7 +114,12 @@ it("drops only the failed patch and reports the failure", async () => {
   act(() => requests[0]!.reject(new Error("forbidden")))
   await waitFor(() => expect(requests).toHaveLength(2))
   expect(requests[1]!.overrides).toEqual({ pr_summaries: true })
-  expect(result.current.a.error).toBe("forbidden")
+  expect(reportError).toHaveBeenCalledWith(
+    expect.objectContaining({
+      title: "Couldn't save settings",
+      error: expect.objectContaining({ message: "forbidden" }),
+    })
+  )
   expect(result.current.a.data?.fable_enabled).toBe(false)
   expect(result.current.a.data?.pr_summaries).toBe(true)
 
@@ -121,7 +130,6 @@ it("drops only the failed patch and reports the failure", async () => {
       overrides: { pr_summaries: true },
     })
   )
-  expect(result.current.a.error).toBe("forbidden")
 })
 
 it("refreshes workspace settings after an instance save", async () => {

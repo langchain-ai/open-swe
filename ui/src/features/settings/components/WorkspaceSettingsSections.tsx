@@ -78,11 +78,6 @@ export function TierRow({
   )
 }
 
-function SaveError({ settings }: { settings: ScopedSettings }) {
-  if (!settings.error) return null
-  return <p className="px-4 pb-3 text-xs text-destructive">{settings.error}</p>
-}
-
 export function LLMGatewaySection({ scope }: { scope: SettingsScope }) {
   const settings = useScopedSettings(scope)
   const mode = gatewayMode(settings.data?.gateway_enabled)
@@ -129,7 +124,6 @@ export function LLMGatewaySection({ scope }: { scope: SettingsScope }) {
           }
         />
       </div>
-      <SaveError settings={settings} />
     </SettingsSection>
   )
 }
@@ -160,7 +154,6 @@ export function FableSection({ scope }: { scope: SettingsScope }) {
           }
         />
       </div>
-      <SaveError settings={settings} />
     </SettingsSection>
   )
 }
@@ -206,7 +199,6 @@ export function DefaultRepoSection({
           }
         />
       </div>
-      <SaveError settings={settings} />
     </SettingsSection>
   )
 }
@@ -386,7 +378,6 @@ export function ModelDefaultsSection({
           inheritLabel="Agent default"
         />
       </div>
-      <SaveError settings={settings} />
     </SettingsSection>
   )
 }

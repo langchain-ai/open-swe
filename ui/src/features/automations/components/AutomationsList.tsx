@@ -209,10 +209,6 @@ function AutomationRow({
     updateSchedule.variables.scheduleId === schedule.id
   const isTesting =
     triggerSchedule.isPending && triggerSchedule.variables === schedule.id
-  const testError =
-    triggerSchedule.isError && triggerSchedule.variables === schedule.id
-      ? triggerSchedule.error.message
-      : null
 
   const onTest = (e: React.MouseEvent) => {
     e.preventDefault()
@@ -278,9 +274,6 @@ function AutomationRow({
             {schedule.slackChannelId && <span>{schedule.slackChannelId}</span>}
             <span>Last run: {formatDate(schedule.lastTriggeredAt)}</span>
           </div>
-          {testError && (
-            <p className="mt-1 text-xs text-destructive">{testError}</p>
-          )}
         </div>
       </Link>
       {schedule.lastThreadId && (

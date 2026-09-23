@@ -38,6 +38,7 @@ export function PullRequestThreadAction({
   })
   const run = useMutation({
     mutationFn: (target: OpenPullRequest) => dispatch(target),
+    meta: { errorTitle: `${toasts.failed} ${pr.repo}#${pr.number}` },
     onSuccess: (result, target) => {
       queryClient.setQueryData<PullRequestThreadStatus>(
         ["pr-thread-status", login, target.repo, target.number],
@@ -47,10 +48,6 @@ export function PullRequestThreadAction({
         `${result.already_running ? toasts.running : toasts.queued} ${target.repo}#${target.number}`
       )
     },
-    onError: (error, target) =>
-      toast.error(`${toasts.failed} ${target.repo}#${target.number}`, {
-        description: error.message,
-      }),
   })
   return (
     <PullRequestActionButton
@@ -79,7 +76,7 @@ export function PullRequestThreadAction({
         run.isSuccess
       }
       onClick={() => run.mutate(pr)}
-      errors={[thread.error, run.error]}
+      errors={[thread.error]}
     />
   )
 }

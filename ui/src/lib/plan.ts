@@ -2,8 +2,12 @@
 
 import { dashboardApiBase } from "./api-base"
 import {
+  DashboardRequestError,
+  REQUEST_ID_HEADER,
   dashboardForwardedHeaders,
   dashboardRequestOrigin,
+  networkError,
+  newRequestId,
 } from "./dashboard-fetch"
 
 const API_BASE = dashboardApiBase()
@@ -48,25 +52,26 @@ export interface PlanComment {
   anchor: PlanTextAnchor | null
 }
 
-export class PlanApiError extends Error {
-  constructor(
-    public readonly status: number,
-    message: string
-  ) {
-    super(message)
+export class PlanApiError extends DashboardRequestError {
+  constructor(status: number, message: string, requestId?: string) {
+    super(status, message, requestId)
     this.name = "PlanApiError"
   }
 }
 
 async function req<T>(path: string, init: RequestInit = {}): Promise<T> {
+  const requestId = newRequestId()
   const res = await fetch(`${apiBase()}/dashboard/api${path}`, {
     ...init,
     credentials: "include",
     headers: {
       "Content-Type": "application/json",
+      [REQUEST_ID_HEADER]: requestId,
       ...dashboardForwardedHeaders(),
       ...init.headers,
     },
+  }).catch((cause: unknown) => {
+    throw networkError(cause, requestId)
   })
   if (!res.ok) {
     let message = res.statusText
@@ -80,7 +85,7 @@ async function req<T>(path: string, init: RequestInit = {}): Promise<T> {
     } catch {
       /* ignore */
     }
-    throw new PlanApiError(res.status, message)
+    throw new PlanApiError(res.status, message, requestId)
   }
   if (res.status === 204) return undefined as T
   return (await res.json()) as T

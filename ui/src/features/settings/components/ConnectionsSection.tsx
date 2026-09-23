@@ -7,9 +7,8 @@ import type { NotionCredentialStatus, SessionUser } from "@/lib/api"
 import { SettingsRow, SettingsSection } from "@/components/AppShell"
 import { Button } from "@/components/ui/button"
 import { api, connectService } from "@/lib/api"
+import { optimisticUpdate } from "@/lib/optimistic"
 import { cn } from "@/lib/utils"
-
-type SetError = (message: string | null) => void
 
 function StatusPill({ connected }: { connected: boolean }) {
   return (
@@ -80,7 +79,7 @@ function SlackRow({ user }: { user: SessionUser }) {
   )
 }
 
-function NotionRow({ setError }: { setError: SetError }) {
+function NotionRow() {
   const qc = useQueryClient()
   const creds = useQuery({
     queryKey: ["myNotion"],
@@ -89,21 +88,16 @@ function NotionRow({ setError }: { setError: SetError }) {
   const [connecting, setConnecting] = useState(false)
 
   const disconnect = useMutation({
+    meta: { errorTitle: "Couldn't disconnect Notion" },
     mutationFn: () => api.disconnectNotion(),
-    onMutate: async () => {
-      await qc.cancelQueries({ queryKey: ["myNotion"] })
-      const previous = qc.getQueryData<NotionCredentialStatus>(["myNotion"])
-      qc.setQueryData<NotionCredentialStatus>(
+    onMutate: async () => ({
+      undo: await optimisticUpdate<NotionCredentialStatus>(
+        qc,
         ["myNotion"],
-        (current) => current && { ...current, connected: false }
-      )
-      setError(null)
-      return { previous }
-    },
-    onError: (e: Error, _variables, context) => {
-      qc.setQueryData(["myNotion"], context?.previous)
-      setError(e.message)
-    },
+        (current) => ({ ...current, connected: false })
+      ),
+    }),
+    onError: (_e, _v, ctx) => ctx?.undo(),
     onSettled: () => qc.invalidateQueries({ queryKey: ["myNotion"] }),
   })
 
@@ -149,16 +143,13 @@ function NotionRow({ setError }: { setError: SetError }) {
 }
 
 export function ConnectionsSection({ user }: { user: SessionUser }) {
-  const [error, setError] = useState<string | null>(null)
-
   return (
     <SettingsSection
       title="Personal connections"
       description="Accounts and credentials Open SWE can use on your behalf. Workspace MCP tools configured by an admin are shared with everyone."
     >
       <SlackRow user={user} />
-      <NotionRow setError={setError} />
-      {error && <p className="px-4 py-2 text-xs text-destructive">{error}</p>}
+      <NotionRow />
     </SettingsSection>
   )
 }

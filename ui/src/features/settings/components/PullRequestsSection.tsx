@@ -1,5 +1,4 @@
 import { useQuery } from "@tanstack/react-query"
-import { useState } from "react"
 
 import { SettingsRow, SettingsSection } from "@/components/AppShell"
 import {
@@ -44,7 +43,6 @@ export function PullRequestsSection() {
     queryKey: ["workspaceSettings", workspace],
     queryFn: () => api.getWorkspaceSettings(workspace),
   })
-  const [error, setError] = useState<string | null>(null)
 
   const firstModel = options.data?.models[0]
   const fallbackModel =
@@ -54,12 +52,8 @@ export function PullRequestsSection() {
     firstModel?.default_effort ??
     ""
 
-  const persist = (patch: Partial<ProfileUpdate>) => {
-    setError(null)
-    save
-      .patch(patch, fallbackModel, fallbackEffort)
-      .catch((e: Error) => setError(e.message))
-  }
+  const persist = (patch: Partial<ProfileUpdate>) =>
+    save.patch(patch, fallbackModel, fallbackEffort)
 
   const disabled = profile.isLoading
   const teamDefaultOn =
@@ -113,7 +107,6 @@ export function PullRequestsSection() {
           </Select>
         }
       />
-      {error && <p className="px-4 py-2 text-xs text-destructive">{error}</p>}
     </SettingsSection>
   )
 }

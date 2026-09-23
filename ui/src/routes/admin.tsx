@@ -227,29 +227,20 @@ export function RunningAgentsSection() {
   })
   const cancel = useAdminCancelAgentThread()
   const [killed, setKilled] = useState<ReadonlySet<string>>(new Set())
-  const [message, setMessage] = useState<{
-    text: string
-    error: boolean
-  } | null>(null)
+  const [message, setMessage] = useState<string | null>(null)
   const running = threads.data?.items.filter((t) => !killed.has(t.id)) ?? []
 
   const kill = (thread: { id: string; title: string }) => {
     setMessage(null)
     setKilled((prev) => new Set(prev).add(thread.id))
     void cancel.mutateAsync(thread.id).then(
+      () => setMessage(`Interruption requested for ${thread.title}.`),
       () =>
-        setMessage({
-          text: `Interruption requested for ${thread.title}.`,
-          error: false,
-        }),
-      (error: Error) => {
         setKilled((prev) => {
           const next = new Set(prev)
           next.delete(thread.id)
           return next
         })
-        setMessage({ text: error.message, error: true })
-      }
     )
   }
 
@@ -311,13 +302,7 @@ export function RunningAgentsSection() {
         {threads.error && (
           <p className="text-xs text-destructive">{threads.error.message}</p>
         )}
-        {message && (
-          <p
-            className={`text-xs ${message.error ? "text-destructive" : "text-muted-foreground"}`}
-          >
-            {message.text}
-          </p>
-        )}
+        {message && <p className="text-xs text-muted-foreground">{message}</p>}
       </div>
     </SettingsSection>
   )
@@ -343,6 +328,7 @@ function TriggerReviewSection() {
       if (!parsed) throw new Error("invalid PR URL")
       return api.reReview(parsed.owner, parsed.repo, parsed.number)
     },
+    meta: { silent: true },
     onSuccess: (result) => {
       setError(null)
       setMessage(

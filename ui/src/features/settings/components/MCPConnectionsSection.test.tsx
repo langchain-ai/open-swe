@@ -13,6 +13,9 @@ import { afterEach, expect, it, vi } from "vitest"
 import { MCPConnectionsSection } from "./MCPConnectionsSection"
 import { api } from "@/lib/api"
 import type { MCPConnection, MCPConnectionUpdate } from "@/lib/api"
+import { reportError } from "@/lib/errorReporting"
+
+vi.mock("@/lib/errorReporting", () => ({ reportError: vi.fn() }))
 
 afterEach(() => {
   cleanup()
@@ -756,7 +759,12 @@ it("flips a connection at once and flips it back when the save fails", async () 
   await waitFor(() => expect(api.saveMyMCP).toHaveBeenCalledTimes(1))
 
   failSave(new Error("MCP server unreachable"))
-  expect(await screen.findByText("MCP server unreachable")).toBeTruthy()
-  expect(screen.getByRole("button", { name: "Disable linear" })).toBeTruthy()
+  expect(
+    await screen.findByRole("button", { name: "Disable linear" })
+  ).toBeTruthy()
+  expect(reportError).toHaveBeenCalledWith({
+    title: "Couldn't disable linear",
+    error: new Error("MCP server unreachable"),
+  })
   client.clear()
 })

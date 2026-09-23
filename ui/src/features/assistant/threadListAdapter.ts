@@ -10,6 +10,7 @@ import {
   storeAgentThread,
 } from "@/features/agents/lib/queries"
 import type { AgentThread } from "@/features/agents/lib/types"
+import { reportError } from "@/lib/errorReporting"
 
 export const threadKey = (id: string) => ["assistant-threads", id] as const
 
@@ -35,6 +36,7 @@ export function createThreadListAdapter(
 ): RemoteThreadListAdapter {
   const updateAgentThread = async (
     id: string,
+    errorTitle: string,
     apply: () => void,
     request: () => Promise<AgentThread>
   ) => {
@@ -45,6 +47,7 @@ export function createThreadListAdapter(
       storeAgentThread(client, thread)
     } catch (error) {
       restoreAgentThreadQueries(client, update)
+      reportError({ title: errorTitle, error })
       throw error
     } finally {
       invalidateAgentThreadLists(client)
@@ -73,6 +76,7 @@ export function createThreadListAdapter(
     async rename(id, title) {
       await updateAgentThread(
         id,
+        "Couldn't rename thread",
         () => setAgentThreadTitle(client, id, title),
         () => agentsApi.renameThread(id, title)
       )
@@ -80,6 +84,7 @@ export function createThreadListAdapter(
     async archive(id) {
       await updateAgentThread(
         id,
+        "Couldn't archive thread",
         () => setAgentThreadResolved(client, id, true),
         () => agentsApi.resolveThread(id, true)
       )
@@ -87,12 +92,18 @@ export function createThreadListAdapter(
     async unarchive(id) {
       await updateAgentThread(
         id,
+        "Couldn't restore thread",
         () => setAgentThreadResolved(client, id, false),
         () => agentsApi.resolveThread(id, false)
       )
     },
     async delete(id) {
-      await agentsApi.deleteThread(id)
+      try {
+        await agentsApi.deleteThread(id)
+      } catch (error) {
+        reportError({ title: "Couldn't delete thread", error })
+        throw error
+      }
       client.removeQueries({ queryKey: threadKey(id) })
     },
     async generateTitle() {

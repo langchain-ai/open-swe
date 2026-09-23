@@ -12,12 +12,7 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { connectService } from "@/lib/api"
-import {
-  buildProfileUpdate,
-  useOptions,
-  useProfile,
-  useSaveProfile,
-} from "@/lib/profile"
+import { useOptions, usePatchProfile, useProfile } from "@/lib/profile"
 import { useSession } from "@/lib/session"
 
 const SLACK_ONBOARDING_DISMISSED_KEY = "open-swe.slack-onboarding-dismissed"
@@ -35,10 +30,9 @@ export function OnboardingDialog() {
   const session = useSession()
   const profile = useProfile()
   const options = useOptions()
-  const save = useSaveProfile()
+  const save = usePatchProfile()
   const [dismissed, setDismissed] = useState(false)
   const [slackDismissed, setSlackDismissed] = useState(false)
-  const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
     // oxlint-disable-next-line react/set-state-in-effect
@@ -92,17 +86,11 @@ export function OnboardingDialog() {
 
   const handleSaveModel = () => {
     if (!modelId) return
-    setError(null)
-    save
-      .mutateAsync(
-        buildProfileUpdate(
-          profile.data,
-          { default_model: modelId, reasoning_effort: effort },
-          defaultModel,
-          defaultEffort
-        )
-      )
-      .catch((e: Error) => setError(e.message))
+    save.patch(
+      { default_model: modelId, reasoning_effort: effort },
+      defaultModel,
+      defaultEffort
+    )
   }
 
   return (
@@ -162,7 +150,6 @@ export function OnboardingDialog() {
                   </Select>
                 </div>
               </div>
-              {error && <p className="text-xs text-destructive">{error}</p>}
               <div className="mt-2 flex justify-end gap-2">
                 <Button
                   variant="outline"

@@ -4,7 +4,11 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
+import { reportError } from "@/lib/errorReporting"
+import { makeQueryClient } from "@/lib/query"
 import { AllowedSlackBotsSection } from "./AllowedSlackBotsSection"
+
+vi.mock("@/lib/errorReporting", () => ({ reportError: vi.fn() }))
 
 const BOT = {
   bot_id: "B123",
@@ -29,9 +33,8 @@ afterEach(() => {
 })
 
 function renderSection() {
-  const client = new QueryClient({
-    defaultOptions: { queries: { retry: false } },
-  })
+  const client = makeQueryClient()
+  client.setDefaultOptions({ queries: { retry: false } })
   clients.push(client)
   return render(
     <QueryClientProvider client={client}>
@@ -158,12 +161,14 @@ describe("Allowed Slack bots", () => {
     await screen.findByText("No Slack bots are allowed.")
 
     failRemoval()
-    expect(await screen.findByRole("alert")).toHaveProperty(
-      "textContent",
-      "Slack is down."
-    )
     expect(
-      screen.getByRole("button", { name: "Remove Release bot" })
+      await screen.findByRole("button", { name: "Remove Release bot" })
     ).toBeTruthy()
+    expect(reportError).toHaveBeenCalledWith(
+      expect.objectContaining({
+        title: "Couldn't remove Slack bot",
+        error: expect.objectContaining({ message: "Slack is down." }),
+      })
+    )
   })
 })

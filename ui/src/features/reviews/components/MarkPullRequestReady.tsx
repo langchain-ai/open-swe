@@ -27,7 +27,6 @@ export function MarkPullRequestReady({
       label={actionLabel(githubActions["mark-ready"].labels, ready)}
       disabled={ready.isPending || ready.isSuccess}
       onClick={() => ready.mutate()}
-      errors={[ready.error]}
     />
   )
 }

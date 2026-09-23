@@ -75,8 +75,8 @@ it("chains a second page's save behind the first and keeps both fields", async (
   await waitFor(() => expect(result.current.profile.data).toBeDefined())
 
   act(() => {
-    void result.current.a.patch({ draft_prs: false }, "m", "e")
-    void result.current.b.patch({ review_draft_prs: true }, "m", "e")
+    result.current.a.patch({ draft_prs: false }, "m", "e")
+    result.current.b.patch({ review_draft_prs: true }, "m", "e")
   })
 
   await waitFor(() => expect(requests).toHaveLength(1))
@@ -106,17 +106,13 @@ it("does not resend a failed save's field with the next one", async () => {
   const { result } = renderTwoPages()
   await waitFor(() => expect(result.current.profile.data).toBeDefined())
 
-  let failure: Promise<unknown> = Promise.resolve()
   act(() => {
-    failure = result.current.a
-      .patch({ draft_prs: false }, "m", "e")
-      .catch((e: unknown) => e)
-    void result.current.b.patch({ review_draft_prs: true }, "m", "e")
+    result.current.a.patch({ draft_prs: false }, "m", "e")
+    result.current.b.patch({ review_draft_prs: true }, "m", "e")
   })
   await waitFor(() => expect(requests).toHaveLength(1))
 
   act(() => requests[0]!.reject(new Error("nope")))
-  await expect(failure).resolves.toBeInstanceOf(Error)
   await waitFor(() => expect(requests).toHaveLength(2))
   expect(requests[1]!.body).toMatchObject({
     draft_prs: true,

@@ -13,7 +13,7 @@ import { WorkflowApprovalCard } from "./WorkflowApprovalCard"
 import type { WorkflowPushApproval } from "@/features/agents/lib/types"
 
 const mocks = vi.hoisted(() => ({
-  mutateAsync: vi.fn(),
+  mutate: vi.fn(),
   useWorkflowApprovals: vi.fn(),
   useWorkflowApprovalDecision: vi.fn(),
 }))
@@ -43,12 +43,11 @@ const approval: WorkflowPushApproval = {
 }
 
 beforeEach(() => {
-  mocks.mutateAsync.mockResolvedValue({})
   mocks.useWorkflowApprovals.mockReturnValue({
     data: { approvals: [approval] },
   })
   mocks.useWorkflowApprovalDecision.mockReturnValue({
-    mutateAsync: mocks.mutateAsync,
+    mutate: mocks.mutate,
     isPending: false,
   })
 })
@@ -97,7 +96,7 @@ describe("WorkflowApprovalCard", () => {
     )
 
     await waitFor(() =>
-      expect(mocks.mutateAsync).toHaveBeenCalledWith({
+      expect(mocks.mutate).toHaveBeenCalledWith({
         fingerprint: "fingerprint-1",
         decision: "approve",
       })

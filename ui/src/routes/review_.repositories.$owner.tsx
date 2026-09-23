@@ -44,6 +44,7 @@ function RepositoriesOwnerPage() {
     mutationKey: autoReviewMutationKey,
     mutationFn: ({ full_name, on }: { full_name: string; on: boolean }) =>
       api.setAutoReviewRepo(full_name, on),
+    meta: { errorTitle: "Couldn't update auto-review" },
     onMutate: async ({ full_name, on }) => {
       setToggling((prev) => new Set(prev).add(full_name))
       await qc.cancelQueries({ queryKey: ["autoReviewRepos"] })

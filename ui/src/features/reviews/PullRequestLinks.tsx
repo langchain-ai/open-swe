@@ -24,6 +24,7 @@ export function PullRequestLinks({
   const navigate = useNavigate()
   const thread = useMutation({
     mutationFn: () => api.openPullRequestThread(repo, number, title),
+    meta: { errorTitle: "Couldn't open agent thread" },
     onSuccess: ({ thread_id }) =>
       navigate({ to: "/agents/$threadId", params: { threadId: thread_id } }),
     retry: false,
@@ -58,11 +59,6 @@ export function PullRequestLinks({
           <IoLogoGithub className="size-3.5" />
         </a>
       </span>
-      {thread.error && (
-        <p role="alert" className="mt-1 text-destructive">
-          {thread.error.message}
-        </p>
-      )}
     </div>
   )
 }

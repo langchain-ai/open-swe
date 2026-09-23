@@ -57,6 +57,7 @@ export function AgentInstructionsPanel() {
   }, [loadedInstructions, loadedRepo])
 
   const create = useMutation({
+    meta: { silent: true },
     mutationFn: (full_name: string) => api.createAgentInstructions(full_name),
     onSuccess: (record) => {
       void qc.invalidateQueries({ queryKey: ["agentInstructions"] })
@@ -67,6 +68,7 @@ export function AgentInstructionsPanel() {
   })
 
   const save = useMutation({
+    meta: { silent: true },
     mutationFn: ({ full_name, value }: { full_name: string; value: string }) =>
       api.saveAgentInstructions(full_name, value),
     onSuccess: (_saved, { full_name }) => {
@@ -78,6 +80,7 @@ export function AgentInstructionsPanel() {
   })
 
   const remove = useMutation({
+    meta: { errorTitle: "Couldn't remove repository instructions" },
     mutationFn: (full_name: string) => api.deleteAgentInstructions(full_name),
     onMutate: async (full_name) => {
       await qc.cancelQueries({ queryKey: ["agentInstructions"] })
@@ -93,10 +96,9 @@ export function AgentInstructionsPanel() {
         setSelected(null)
         setDraft("")
       }
-      setError(null)
       return { removed, wasSelected }
     },
-    onError: (e: Error, full_name, context) => {
+    onError: (_e, full_name, context) => {
       if (context?.wasSelected) setSelected(full_name)
       const removed = context?.removed
       if (removed)
@@ -107,7 +109,6 @@ export function AgentInstructionsPanel() {
               ? [...current, removed]
               : current
         )
-      setError(formatMutationError(e))
     },
     onSettled: () => qc.invalidateQueries({ queryKey: ["agentInstructions"] }),
   })
@@ -131,10 +132,7 @@ export function AgentInstructionsPanel() {
 
   const handleAdd = () => {
     if (!normalizedAddRepo || !canAdd) return
-    void create
-      .mutateAsync(normalizedAddRepo)
-      .then(() => setAddRepo(""))
-      .catch(() => undefined)
+    create.mutate(normalizedAddRepo, { onSuccess: () => setAddRepo("") })
   }
 
   const githubReauth =
@@ -257,7 +255,7 @@ export function AgentInstructionsPanel() {
                 size="sm"
                 disabled={!dirty || save.isPending}
                 onClick={() =>
-                  void save.mutateAsync({
+                  save.mutate({
                     full_name: active.full_name,
                     value: draft,
                   })
@@ -282,7 +280,7 @@ export function AgentInstructionsPanel() {
                   ) {
                     return
                   }
-                  void remove.mutateAsync(active.full_name)
+                  remove.mutate(active.full_name)
                 }}
               >
                 Remove

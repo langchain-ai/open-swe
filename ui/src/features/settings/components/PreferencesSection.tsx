@@ -80,6 +80,7 @@ export function PreferencesSection() {
   const savePreferences = useMutation({
     mutationKey: SAVE_PREFERENCES_KEY,
     scope: { id: SAVE_PREFERENCES_KEY.join(":") },
+    meta: { errorTitle: "Couldn't save preferences" },
     mutationFn: (patch: Partial<UserPreferences>) => {
       const saved = qc.getQueryData<UserPreferences>(PREFERENCES_KEY)
       if (!saved) throw new Error("Preferences are not loaded.")
@@ -100,6 +101,7 @@ export function PreferencesSection() {
     staleTime: 60_000,
   })
   const archiveThreads = useMutation({
+    meta: { errorTitle: "Couldn't archive threads" },
     mutationFn: agentsApi.resolveAllThreads,
     onSuccess: () => qc.invalidateQueries({ queryKey: ["agent-threads"] }),
   })
@@ -147,11 +149,7 @@ export function PreferencesSection() {
       />
       <SettingsRow
         label="Default thread visibility"
-        description={
-          savePreferences.error
-            ? `Could not save: ${savePreferences.error.message}`
-            : "Preselected when you start a cloud thread. Private threads can use your personal integrations and only you can prompt them; workspace threads are open to everyone and run without personal credentials. Visibility cannot change after a thread is created."
-        }
+        description="Preselected when you start a cloud thread. Private threads can use your personal integrations and only you can prompt them; workspace threads are open to everyone and run without personal credentials. Visibility cannot change after a thread is created."
         control={
           <Select
             value={preferences.data?.default_visibility ?? "private"}
@@ -178,11 +176,7 @@ export function PreferencesSection() {
       />
       <SettingsRow
         label="Default workspace"
-        description={
-          savePreferences.error
-            ? `Could not save: ${savePreferences.error.message}`
-            : "Preselected in the composer's workspace picker when the chosen repository does not belong to another workspace."
-        }
+        description="Preselected in the composer's workspace picker when the chosen repository does not belong to another workspace."
         control={
           <Select
             value={preferences.data?.default_workspace ?? NO_DEFAULT_WORKSPACE}
@@ -212,11 +206,7 @@ export function PreferencesSection() {
       />
       <SettingsRow
         label="Follow-up behavior"
-        description={
-          savePreferences.error
-            ? `Could not save: ${savePreferences.error.message}`
-            : "Queue follow-ups until the run ends, or steer the current run with them. ⌘↵ does the opposite for one message; Enter on an empty composer sends the next queued message now."
-        }
+        description="Queue follow-ups until the run ends, or steer the current run with them. ⌘↵ does the opposite for one message; Enter on an empty composer sends the next queued message now."
         control={
           <Select
             value={preferences.data?.follow_up_behavior ?? "queue"}
@@ -264,11 +254,9 @@ export function PreferencesSection() {
       <SettingsRow
         label="Archive all threads"
         description={
-          archiveThreads.error
-            ? `Could not archive threads: ${archiveThreads.error.message}`
-            : archiveThreads.isSuccess
-              ? `${archiveThreads.data.resolved} threads archived.`
-              : "Resolve all threads you have participated in for a clean slate. You can still find them in the resolved view."
+          archiveThreads.isSuccess
+            ? `${archiveThreads.data.resolved} threads archived.`
+            : "Resolve all threads you have participated in for a clean slate. You can still find them in the resolved view."
         }
         control={
           <Button

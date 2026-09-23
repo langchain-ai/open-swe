@@ -7,6 +7,7 @@ import { Button, IconButton } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { api, DEFAULT_WORKSPACE_SLUG } from "@/lib/api"
 import type { MCPConnection, MCPConnectionUpdate } from "@/lib/api"
+import { reportError } from "@/lib/errorReporting"
 import { MCPImport } from "./MCPImport"
 import type { ImportedMCP } from "./MCPImport"
 import { MCPOAuthFields } from "./MCPOAuthFields"
@@ -203,11 +204,11 @@ export function MCPConnectionsSection({
   }
 
   const optimistic = async (
+    errorTitle: string,
     apply: (list: MCPConnection[]) => MCPConnection[],
     revert: (list: MCPConnection[]) => MCPConnection[],
     action: () => Promise<void>
   ) => {
-    setError(null)
     await qc.cancelQueries({ queryKey })
     qc.setQueryData<MCPConnection[]>(
       queryKey,
@@ -220,9 +221,7 @@ export function MCPConnectionsSection({
         queryKey,
         (current) => current && revert(current)
       )
-      setError(
-        e instanceof Error ? e.message : "Unable to update MCP connection"
-      )
+      reportError({ title: errorTitle, error: e })
     }
     await qc.invalidateQueries({ queryKey })
   }
@@ -679,9 +678,9 @@ export function MCPConnectionsSection({
         {connections.isLoading && (
           <p className="text-sm text-muted-foreground">Loading connections…</p>
         )}
-        {((error && !draft) || connections.error) && (
+        {connections.error && (
           <p role="alert" className="text-sm text-destructive">
-            {connections.error?.message || error}
+            {connections.error.message}
           </p>
         )}
         {scope === "workspace" &&
@@ -774,6 +773,7 @@ export function MCPConnectionsSection({
                             c.name === connection.name ? { ...c, enabled } : c
                           )
                       void optimistic(
+                        `Couldn't ${connection.enabled ? "disable" : "enable"} ${connection.name}`,
                         withEnabled(!connection.enabled),
                         withEnabled(connection.enabled),
                         async () => {
@@ -798,6 +798,7 @@ export function MCPConnectionsSection({
                     disabled={busy}
                     onClick={() =>
                       void optimistic(
+                        `Couldn't delete ${connection.name}`,
                         (list) =>
                           list.filter((c) => c.name !== connection.name),
                         (list) =>

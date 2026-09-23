@@ -216,6 +216,7 @@ function useResolveThreads(target: PullRequestRef) {
   return useMutation({
     mutationFn: (threadIds: Array<string>) =>
       api.resolveReviewThreads(target.repo, target.number, threadIds),
+    meta: { errorTitle: "Couldn't resolve conversations" },
     onSuccess: (result) => {
       const resolved = new Set(result.resolved)
       queryClient.setQueryData<PullRequestPreview>(previewKey, (current) =>
@@ -236,10 +237,6 @@ function useResolveThreads(target: PullRequestRef) {
           `Could not resolve ${result.failed.length} conversation${result.failed.length === 1 ? "" : "s"}`
         )
     },
-    onError: (error) =>
-      toast.error("Could not resolve conversations", {
-        description: error.message,
-      }),
   })
 }
 
@@ -259,6 +256,7 @@ function SendToAgent({
         commentUrl,
         instructions
       ),
+    meta: { errorTitle: "Couldn't send comment to agent" },
     onSuccess: (result) => {
       toast.success(
         result.already_running
@@ -267,10 +265,6 @@ function SendToAgent({
       )
       void queryClient.invalidateQueries({ queryKey: ["pr-thread-status"] })
     },
-    onError: (error) =>
-      toast.error("Could not send comment to agent", {
-        description: error.message,
-      }),
   })
   return (
     <TextPopover

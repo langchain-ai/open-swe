@@ -112,6 +112,7 @@ import {
 import { cn } from "@/lib/utils"
 import { useChatRoutes } from "@/lib/chatRoutes"
 import { getLastSectionLocation, sectionOf } from "@/lib/appLocation"
+import { reportError } from "@/lib/errorReporting"
 
 interface AgentsSidebarProps {
   user: SessionUser | null
@@ -481,6 +482,9 @@ export function AgentsSidebar({
       void window.openSweDesktop
         ?.updateLocalThread({ threadId: item.id, archived: !isArchived(item) })
         .then(() => refreshLocalThreads(item.id))
+        .catch((error: unknown) =>
+          reportError({ title: "Couldn't archive or restore thread", error })
+        )
       return
     }
     if (

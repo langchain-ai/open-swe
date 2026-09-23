@@ -29,6 +29,7 @@ import type { ChatSort } from "./sidebarPrefs"
 import type { Skill, SkillInput } from "@/lib/api"
 import { api } from "@/lib/api"
 import { chatRoutes } from "@/lib/chatRoutes"
+import { optimisticUpdate } from "@/lib/optimistic"
 
 export const agentThreadKeys = {
   lists: ["agent-threads", "lists"] as const,
@@ -474,6 +475,7 @@ function useSkillMutation(
   const queryClient = useQueryClient()
   return useMutation({
     mutationFn,
+    meta: { silent: true },
     onSuccess: () => queryClient.invalidateQueries({ queryKey }),
   })
 }
@@ -505,6 +507,7 @@ export function useDeleteAgentSkill(organization = false) {
     : agentSkillKeys.personal
   return useMutation({
     mutationFn: organization ? api.deleteOrganizationSkill : api.deleteSkill,
+    meta: { errorTitle: "Couldn't delete skill" },
     onSuccess: () => queryClient.invalidateQueries({ queryKey }),
   })
 }
@@ -811,35 +814,26 @@ export function useWorkflowApprovalDecision(threadId: string) {
       vars.decision === "approve"
         ? agentsApi.approveWorkflowPush(threadId, vars.fingerprint)
         : agentsApi.rejectWorkflowPush(threadId, vars.fingerprint),
+    meta: { errorTitle: "Couldn't record workflow push decision" },
     onMutate: async (vars) => {
-      const key = agentThreadKeys.workflowApprovals(threadId)
-      await queryClient.cancelQueries({ queryKey: key, exact: true })
-      const previous =
-        queryClient.getQueryData<WorkflowPushApprovalsResponse>(key)
       const status: WorkflowApprovalStatus =
         vars.decision === "approve" ? "approved" : "rejected"
-      queryClient.setQueryData<WorkflowPushApprovalsResponse>(
-        key,
-        (prev) =>
-          prev && {
+      return {
+        undo: await optimisticUpdate<WorkflowPushApprovalsResponse>(
+          queryClient,
+          agentThreadKeys.workflowApprovals(threadId),
+          (prev) => ({
             ...prev,
             approvals: prev.approvals.map((approval) =>
               approval.fingerprint === vars.fingerprint
                 ? { ...approval, status }
                 : approval
             ),
-          }
-      )
-      return { previous }
-    },
-    onError: (_error, _vars, context) => {
-      if (context?.previous) {
-        queryClient.setQueryData(
-          agentThreadKeys.workflowApprovals(threadId),
-          context.previous
-        )
+          })
+        ),
       }
     },
+    onError: (_error, _vars, context) => context?.undo(),
     onSettled: () => {
       void queryClient.invalidateQueries({
         queryKey: agentThreadKeys.workflowApprovals(threadId),
@@ -864,6 +858,7 @@ export function useCreateAgentSchedule() {
 
   return useMutation({
     mutationFn: agentsApi.createSchedule,
+    meta: { errorTitle: "Couldn't create automation" },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: agentScheduleKeys.all })
     },
@@ -876,32 +871,24 @@ export function useUpdateAgentSchedule() {
   return useMutation({
     mutationFn: (vars: { scheduleId: string; body: ScheduleUpdateRequest }) =>
       agentsApi.updateSchedule(vars.scheduleId, vars.body),
+    meta: { errorTitle: "Couldn't update automation" },
     onMutate: async (vars) => {
       const { enabled } = vars.body
       if (enabled == null) return undefined
-      await queryClient.cancelQueries({
-        queryKey: agentScheduleKeys.all,
-        exact: true,
-      })
-      const previous = queryClient.getQueryData<Array<AgentSchedule>>(
-        agentScheduleKeys.all
-      )
-      queryClient.setQueryData<Array<AgentSchedule>>(
-        agentScheduleKeys.all,
-        (prev) =>
-          prev?.map((schedule) =>
-            schedule.id === vars.scheduleId
-              ? { ...schedule, enabled }
-              : schedule
-          )
-      )
-      return { previous }
-    },
-    onError: (_error, _vars, context) => {
-      if (context?.previous) {
-        queryClient.setQueryData(agentScheduleKeys.all, context.previous)
+      return {
+        undo: await optimisticUpdate<Array<AgentSchedule>>(
+          queryClient,
+          agentScheduleKeys.all,
+          (prev) =>
+            prev.map((schedule) =>
+              schedule.id === vars.scheduleId
+                ? { ...schedule, enabled }
+                : schedule
+            )
+        ),
       }
     },
+    onError: (_error, _vars, context) => context?.undo(),
     onSettled: () => {
       queryClient.invalidateQueries({ queryKey: agentScheduleKeys.all })
     },
@@ -913,6 +900,7 @@ export function useTriggerAgentSchedule() {
 
   return useMutation({
     mutationFn: agentsApi.triggerSchedule,
+    meta: { errorTitle: "Couldn't run automation" },
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: agentScheduleKeys.all })
       invalidateAgentThreadLists(queryClient)
@@ -925,6 +913,7 @@ export function useDeleteAgentSchedule() {
 
   return useMutation({
     mutationFn: agentsApi.deleteSchedule,
+    meta: { errorTitle: "Couldn't delete automation" },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: agentScheduleKeys.all })
     },
@@ -1029,6 +1018,7 @@ export function useCancelAgentThread(threadId: string) {
 
   return useMutation({
     mutationFn: () => agentsApi.cancelThread(threadId),
+    meta: { errorTitle: "Couldn't stop the run" },
     onSuccess: (thread) => {
       queryClient.setQueryData(agentThreadKeys.detail(threadId), thread)
       invalidateAgentThreadLists(queryClient)
@@ -1041,6 +1031,7 @@ export function useAdminCancelAgentThread() {
 
   return useMutation({
     mutationFn: (threadId: string) => agentsApi.adminCancelThread(threadId),
+    meta: { errorTitle: "Couldn't cancel thread" },
     onSuccess: (thread) => {
       queryClient.setQueryData(agentThreadKeys.detail(thread.id), thread)
       invalidateAgentThreadLists(queryClient)
@@ -1054,6 +1045,7 @@ export function useDeleteAgentThread() {
 
   return useMutation({
     mutationFn: (threadId: string) => agentsApi.deleteThread(threadId),
+    meta: { errorTitle: "Couldn't delete thread" },
     onSuccess: (_, threadId) => {
       queryClient.removeQueries({ queryKey: agentThreadKeys.detail(threadId) })
       invalidateAgentThreadLists(queryClient)
@@ -1073,6 +1065,7 @@ export function useContinueThreadPrivately() {
   return useMutation({
     mutationFn: (threadId: string) =>
       agentsApi.continueThreadPrivately(threadId),
+    meta: { errorTitle: "Couldn't continue thread privately" },
     onSuccess: (thread) => {
       queryClient.setQueryData(agentThreadKeys.detail(thread.id), thread)
       invalidateAgentThreadLists(queryClient)
@@ -1098,6 +1091,7 @@ export function usePinAgentThread() {
     mutationKey: pinMutationKey,
     mutationFn: (vars: { threadId: string; pinned: boolean }) =>
       agentsApi.pinThread(vars.threadId, vars.pinned),
+    meta: { errorTitle: "Couldn't pin or unpin thread" },
     onMutate: (vars) =>
       beginAgentThreadUpdate(queryClient, vars.threadId, () =>
         setAgentThreadPinned(queryClient, vars.threadId, vars.pinned)
@@ -1120,6 +1114,7 @@ export function useRenameAgentThread() {
   return useMutation({
     mutationFn: (vars: { threadId: string; title: string }) =>
       agentsApi.renameThread(vars.threadId, vars.title),
+    meta: { errorTitle: "Couldn't rename thread" },
     onMutate: (vars) =>
       beginAgentThreadUpdate(queryClient, vars.threadId, () =>
         setAgentThreadTitle(queryClient, vars.threadId, vars.title)
@@ -1138,6 +1133,7 @@ export function useResolveAgentThread() {
   return useMutation({
     mutationFn: (vars: { threadId: string; resolved: boolean }) =>
       agentsApi.resolveThread(vars.threadId, vars.resolved),
+    meta: { errorTitle: "Couldn't archive or restore thread" },
     onMutate: (vars) =>
       beginAgentThreadUpdate(queryClient, vars.threadId, () =>
         setAgentThreadResolved(queryClient, vars.threadId, vars.resolved)

@@ -37,6 +37,7 @@ export function AllowedSlackBotsSection() {
     retry: false,
   })
   const add = useMutation({
+    meta: { silent: true },
     mutationFn: api.allowSlackBot,
     onSuccess: async () => {
       await qc.invalidateQueries({ queryKey: QUERY_KEY })
@@ -46,6 +47,7 @@ export function AllowedSlackBotsSection() {
     },
   })
   const remove = useMutation({
+    meta: { errorTitle: "Couldn't remove Slack bot" },
     mutationFn: (bot: AllowedSlackBot) =>
       api.removeAllowedSlackBot(bot.team_id, bot.bot_id),
     onMutate: async (bot) => {
@@ -65,7 +67,6 @@ export function AllowedSlackBotsSection() {
 
   const pending = add.isPending
   const unavailable = pending || bots.isPending || bots.isError
-  const error = remove.error || bots.error
   const matches = directory.data?.filter((bot) =>
     `${bot.name} ${bot.bot_id} ${bot.user_id}`
       .toLowerCase()
@@ -73,7 +74,6 @@ export function AllowedSlackBotsSection() {
   )
   const allow = (id: string) => {
     if (!id || unavailable) return
-    remove.reset()
     add.mutate({ bot_id: id })
   }
 
@@ -256,9 +256,9 @@ export function AllowedSlackBotsSection() {
           </PopoverPopup>
         </Popover>
       </div>
-      {error && (
+      {bots.error && (
         <p role="alert" className="mt-3 text-xs text-destructive">
-          {error.message}
+          {bots.error.message}
         </p>
       )}
       {bots.isPending && (

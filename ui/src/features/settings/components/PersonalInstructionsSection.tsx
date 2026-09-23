@@ -29,17 +29,17 @@ export function PersonalInstructionsSection() {
     setDraft(null)
     setError(null)
   }
-  const onError = (e: Error) => setError(e.message)
 
   const save = useMutation({
+    meta: { silent: true },
     mutationFn: (next: string) => api.saveMyInstructions(next),
     onSuccess: (record) => onSuccess(record.instructions),
-    onError,
+    onError: (e: Error) => setError(e.message),
   })
   const clear = useMutation({
+    meta: { errorTitle: "Couldn't clear instructions" },
     mutationFn: () => api.deleteMyInstructions(),
     onSuccess: () => onSuccess(""),
-    onError,
   })
   const mutating = save.isPending || clear.isPending
 
@@ -51,7 +51,7 @@ export function PersonalInstructionsSection() {
     ) {
       return
     }
-    void clear.mutateAsync()
+    clear.mutate()
   }
 
   return (
@@ -91,7 +91,7 @@ export function PersonalInstructionsSection() {
               <Button
                 size="sm"
                 disabled={!dirty || mutating}
-                onClick={() => void save.mutateAsync(value)}
+                onClick={() => save.mutate(value)}
               >
                 Save instructions
               </Button>

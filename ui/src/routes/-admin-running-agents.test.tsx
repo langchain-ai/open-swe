@@ -1,10 +1,6 @@
 /** @vitest-environment jsdom */
 
-import {
-  QueryClient,
-  QueryClientProvider,
-  useMutation,
-} from "@tanstack/react-query"
+import { QueryClientProvider, useMutation } from "@tanstack/react-query"
 import {
   cleanup,
   fireEvent,
@@ -15,10 +11,13 @@ import {
 import type { ReactNode } from "react"
 import { afterEach, expect, it, vi } from "vitest"
 
+import { reportError } from "@/lib/errorReporting"
+import { makeQueryClient } from "@/lib/query"
 import { RunningAgentsSection } from "./admin"
 
 const cancelThread = vi.hoisted(() => vi.fn<(id: string) => Promise<void>>())
 
+vi.mock("@/lib/errorReporting", () => ({ reportError: vi.fn() }))
 vi.mock("@tanstack/react-router", async (importOriginal) => ({
   ...(await importOriginal<object>()),
   Link: ({ children }: { children: ReactNode }) => <a>{children}</a>,
@@ -49,7 +48,7 @@ afterEach(() => {
 
 function renderSection() {
   render(
-    <QueryClientProvider client={new QueryClient()}>
+    <QueryClientProvider client={makeQueryClient()}>
       <RunningAgentsSection />
     </QueryClientProvider>
   )
@@ -74,13 +73,16 @@ it("hides a killed thread at once and leaves the others killable", async () => {
   expect(screen.getByText("0 running")).toBeTruthy()
 })
 
-it("brings the thread back with the error when the kill fails", async () => {
-  cancelThread.mockRejectedValue(new Error("not allowed"))
+it("brings the thread back and reports the error when the kill fails", async () => {
+  const failure = new Error("not allowed")
+  cancelThread.mockRejectedValue(failure)
   renderSection()
 
   fireEvent.click(killButtons()[0]!)
 
-  await screen.findByText("not allowed")
-  expect(screen.getByText("First")).toBeTruthy()
+  await screen.findByText("First")
+  expect(reportError).toHaveBeenCalledWith(
+    expect.objectContaining({ error: failure })
+  )
   await waitFor(() => expect(killButtons()).toHaveLength(2))
 })

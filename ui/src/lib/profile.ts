@@ -31,11 +31,8 @@ interface ProfilePatch {
   fallbackEffort: string
 }
 
-type ProfileWrite = ProfileUpdate | ProfilePatch
-
-function applyProfileWrite(profile: Profile, write: ProfileWrite): Profile {
-  const { model_routing_enabled, ...rest } =
-    "patch" in write ? write.patch : write
+function applyProfileWrite(profile: Profile, write: ProfilePatch): Profile {
+  const { model_routing_enabled, ...rest } = write.patch
   return {
     ...profile,
     ...rest,
@@ -55,7 +52,7 @@ export function useProfile() {
       exact: true,
       status: "pending",
     },
-    select: (m) => m.state.variables as ProfileWrite,
+    select: (m) => m.state.variables as ProfilePatch,
   })
   return useQuery({
     queryKey: profileQueryKey(login),
@@ -119,54 +116,12 @@ export function useRefreshRepos() {
   const login = session.data?.login ?? null
   const qc = useQueryClient()
   return useMutation({
+    meta: { errorTitle: "Couldn't refresh repositories" },
     mutationFn: () => api.repos({ refresh: true }),
     onSuccess: (payload) => {
       qc.setQueryData<ReposPayload>(reposQueryKey(login), payload)
       if (login) writeCachedRepos(login, payload)
     },
-  })
-}
-
-function useProfileMutationOptions(login: string | undefined) {
-  const qc = useQueryClient()
-  const mutationKey = saveProfileMutationKey(login)
-  return {
-    mutationKey,
-    scope: { id: JSON.stringify(mutationKey) },
-    onMutate: async () => {
-      await qc.cancelQueries({ queryKey: profileQueryKey(login) })
-      return { login }
-    },
-    onSuccess: (
-      saved: Profile,
-      _write: ProfileWrite,
-      context: { login: string | undefined }
-    ) => {
-      qc.setQueryData(profileQueryKey(context.login), saved)
-    },
-    onSettled: async (
-      _saved: Profile | undefined,
-      _error: Error | null,
-      _write: ProfileWrite,
-      context: { login: string | undefined } | undefined
-    ) => {
-      if (!context) return
-      if (
-        qc.isMutating({ mutationKey: saveProfileMutationKey(context.login) }) >
-        1
-      )
-        return
-      await qc.invalidateQueries({ queryKey: profileQueryKey(context.login) })
-    },
-  }
-}
-
-/** Saves a whole profile body; prefer {@link usePatchProfile} when a page owns only some fields. */
-export function useSaveProfile() {
-  const session = useSession()
-  return useMutation({
-    ...useProfileMutationOptions(session.data?.login),
-    mutationFn: (body: ProfileUpdate) => api.saveProfile(body),
   })
 }
 
@@ -179,8 +134,11 @@ export function usePatchProfile() {
   const qc = useQueryClient()
   const session = useSession()
   const login = session.data?.login
+  const mutationKey = saveProfileMutationKey(login)
   const mutation = useMutation({
-    ...useProfileMutationOptions(login),
+    mutationKey,
+    scope: { id: JSON.stringify(mutationKey) },
+    meta: { errorTitle: "Couldn't save preferences" },
     mutationFn: (write: ProfilePatch) =>
       api.saveProfile(
         buildProfileUpdate(
@@ -190,13 +148,27 @@ export function usePatchProfile() {
           write.fallbackEffort
         )
       ),
+    onMutate: async (write) => {
+      await qc.cancelQueries({ queryKey: profileQueryKey(write.login) })
+    },
+    onSuccess: (saved, write) => {
+      qc.setQueryData(profileQueryKey(write.login), saved)
+    },
+    onSettled: async (_saved, _error, write) => {
+      if (
+        qc.isMutating({ mutationKey: saveProfileMutationKey(write.login) }) > 1
+      )
+        return
+      await qc.invalidateQueries({ queryKey: profileQueryKey(write.login) })
+    },
   })
   return {
     patch: (
       patch: Partial<ProfileUpdate>,
       fallbackModel: string,
       fallbackEffort: string
-    ) => mutation.mutateAsync({ login, patch, fallbackModel, fallbackEffort }),
+    ) => mutation.mutate({ login, patch, fallbackModel, fallbackEffort }),
+    isPending: mutation.isPending,
   }
 }
 
