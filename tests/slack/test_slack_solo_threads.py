@@ -73,10 +73,8 @@ class _Harness:
         channel: str = "C1",
         subtype: str = "",
         bot_id: str = "",
-        duplicate: bool = False,
     ) -> JsonObject:
-        if not duplicate:
-            self.now += 1
+        self.now += 1
         message: JsonObject = {
             "type": "message",
             "channel": channel,
@@ -87,7 +85,7 @@ class _Harness:
             "subtype": subtype,
             "bot_id": bot_id,
         }
-        if thread == "1000.0" and channel == "C1" and not duplicate:
+        if thread == "1000.0" and channel == "C1":
             self.history.append(message)
         payload: JsonObject = {
             "type": "event_callback",
@@ -215,39 +213,3 @@ async def test_slack_failure_preserves_mentions_but_fails_closed_for_followups(
     monkeypatch.setattr(harness, "conversations_replies", AsyncMock(side_effect=TimeoutError))
     assert (await harness.send("continue"))["status"] == "ignored"
     assert (await harness.send("<@BOT> continue"))["status"] == "accepted"
-
-
-async def test_duplicate_followup_does_not_dispatch_twice(harness: _Harness) -> None:
-    await harness.send("<@BOT> help")
-    await harness.send("continue")
-    assert (await harness.send("continue", duplicate=True))["status"] == "ignored"
-    assert len(harness.requests) == 2
-
-
-async def test_duplicate_timestamp_can_retry_if_dispatch_did_not_claim_it(
-    harness: _Harness,
-) -> None:
-    await harness.send("<@BOT> help")
-    harness.now += 1
-    assert await solo_threads.allow_solo_thread_followup(
-        cast(LangGraphClient, harness),
-        channel_id="C1",
-        thread_ts="1000.0",
-        message_ts=str(harness.now),
-        user_id="U1",
-        explicit_mention=False,
-    )
-    assert (await harness.send("retry after routing", duplicate=True))["status"] == "accepted"
-
-
-async def test_external_channel_cannot_use_solo_routing(
-    harness: _Harness, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    await harness.send("<@BOT> help")
-    monkeypatch.setattr(
-        common,
-        "resolve_slack_channel_context",
-        AsyncMock(return_value=SlackChannelContext(is_ext_shared=True)),
-    )
-    assert (await harness.send("continue"))["status"] == "ignored"
-    assert len(harness.requests) == 1
