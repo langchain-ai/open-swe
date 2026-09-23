@@ -43,7 +43,7 @@ from deepagents.backends.store import StoreBackend
 from deepagents.graph import DeepAgentState
 from deepagents.middleware.filesystem import FilesystemState
 from deepagents.middleware.subagents import GENERAL_PURPOSE_SUBAGENT, SubAgent
-from langchain.agents.middleware import ModelCallLimitMiddleware, ToolRetryMiddleware
+from langchain.agents.middleware import AgentState, ModelCallLimitMiddleware, ToolRetryMiddleware
 from langchain.agents.middleware.types import AgentMiddleware, ToolCallRequest
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import HumanMessage, ToolMessage
@@ -80,6 +80,7 @@ from agent.dashboard.workspace_settings_cache import cached_workspace_settings
 from agent.desktop import create_desktop_backend, desktop_artifact_routes, is_desktop_run
 from agent.desktop_branch import schedule_worktree_branch_rename
 from agent.github.token import resolve_github_token
+from agent.incidents.runtime import IncidentSession
 from agent.input_messages import (
     dynamic_context_hash,
     message_sender_id,
@@ -120,6 +121,7 @@ from agent.middleware import (
     task_retry_on,
 )
 from agent.middleware.conversation_offloading import ConversationOffloadingMiddleware
+from agent.middleware.message_content import content_to_text
 from agent.middleware.model_selection import ModelSelectionState, RoutingMode
 from agent.middleware.prepare_run import PrepareRunState
 from agent.middleware.require_user_reply import (
@@ -254,7 +256,32 @@ from agent.workspaces.store import (
     load_workspace,
 )
 
+
+class _IncidentLimitWrapupMiddleware(AgentMiddleware):
+    def __init__(self, session: IncidentSession) -> None:
+        self._session = session
+
+    async def aafter_agent(self, state: AgentState, runtime: Runtime) -> dict[str, Any] | None:
+        del runtime
+        messages = state.get("messages", [])
+        if not messages:
+            return None
+        content = content_to_text(getattr(messages[-1], "content", "") or "")
+        if "Model call limits exceeded" not in content or self._session.report_recorded:
+            return None
+        await self._session._record_incident_report(  # noqa: SLF001
+            summary=[],
+            impact=[],
+            next_steps=[],
+            hypotheses=[],
+            gaps=["Investigation was cut off by the model-call budget."],
+            questions=[],
+        )
+        return None
+
+
 client = get_client()
+
 
 DEFAULT_TOOL_LOADER_TIMEOUT_SECONDS = 5.0
 USER_SKILLS_ROUTE = "/skills/"
@@ -1070,7 +1097,7 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
             tools=[],
         ).with_config(bindable_config(config))
 
-    from agent.incidents.runtime import IncidentMiddleware, IncidentSession, load_incident_session
+    from agent.incidents.runtime import IncidentMiddleware, load_incident_session
 
     incident_session: IncidentSession | None = None
     if cfg.source == "incidents_agent":
@@ -1610,6 +1637,11 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
                         initial_surface=(
                             _initial_reply_surface(cfg) if reply_tool_offered else WEB_REPLY_SURFACE
                         ),
+                    ),
+                    *(
+                        [_IncidentLimitWrapupMiddleware(incident_session)]
+                        if incident_session is not None
+                        else []
                     ),
                     notify_step_limit_reached,
                     record_run_usage,

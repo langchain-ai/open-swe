@@ -99,5 +99,33 @@ class TestNotifyStepLimitReached:
         ):
             result = await notify_step_limit_reached.aafter_agent(state, self._make_runtime())
 
-        assert result is None
+        assert result is not None
+        assert "no Slack notification could be delivered" in result["messages"][0].content
+        mock_post.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_warns_when_active_slack_thread_is_unavailable(self) -> None:
+        state: AgentState = {
+            "messages": [AIMessage(content="Model call limits exceeded: run limit reached")]
+        }
+
+        with (
+            patch(
+                "agent.run_config.get_config",
+                return_value={"configurable": {}},
+            ),
+            patch(
+                "agent.middleware.notify_step_limit.get_active_slack_thread",
+                new_callable=AsyncMock,
+                return_value=None,
+            ),
+            patch(
+                "agent.middleware.notify_step_limit.post_slack_thread_reply",
+                new_callable=AsyncMock,
+            ) as mock_post,
+        ):
+            result = await notify_step_limit_reached.aafter_agent(state, self._make_runtime())
+
+        assert result is not None
+        assert "no Slack notification could be delivered" in result["messages"][0].content
         mock_post.assert_not_called()

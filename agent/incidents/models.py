@@ -16,7 +16,7 @@ class IncidentPolicy(BaseModel):
     channel_prefix: str = "inc-"
     excluded_channel_ids: list[str] = Field(default_factory=list)
     model: str | None = None
-    max_model_calls: int = Field(default=20, ge=1, le=20)
+    max_model_calls: int = Field(default=20, ge=1, le=200)
     version: int = 0
     enabled_at: float = 0
 
