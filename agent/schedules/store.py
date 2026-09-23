@@ -2,7 +2,6 @@
 
 import hashlib
 import logging
-import re
 import uuid
 from typing import Any, Literal
 
@@ -26,6 +25,13 @@ from agent.input_messages import InputMessageContext, build_run_input
 from agent.invocation import new_invocation_id, with_invocation_id
 from agent.prompts import render_prompt
 from agent.run_config import RunConfig
+from agent.schedules.slack_messages import (
+    MESSAGE_PATTERN_MAX_LENGTH,
+    SLACK_CHANNEL_ID_RE,
+    compile_message_pattern,
+    message_matches,
+    slack_message_url,
+)
 from agent.slack.client import (
     bind_slack_thread_id,
     post_slack_top_level_message_with_ts,
@@ -45,9 +51,8 @@ SCHEDULE_RUN_STATE_NAMESPACE: list[str] = ["agent_schedule_run_state"]
 _AGENT_ASSISTANT_ID = "agent"
 _SCHEDULER_ASSISTANT_ID = "scheduler"
 _CRON_FIELD_RANGES = ((0, 59), (0, 23), (1, 31), (1, 12), (0, 7))
-_SLACK_CHANNEL_ID_RE = re.compile(r"^[CG][A-Z0-9]{8,}$")
 SlackNotificationMode = Literal["always", "on_action"]
-AutomationTrigger = Literal["schedule", "github_issue_opened"]
+AutomationTrigger = Literal["schedule", "github_issue_opened", "slack_channel_message"]
 _DEFAULT_SLACK_NOTIFICATION_MODE: SlackNotificationMode = "always"
 _DEFAULT_AUTOMATION_TRIGGER: AutomationTrigger = "schedule"
 _ISSUE_DELIVERY_CLAIM_TTL_MINUTES = 24 * 60
@@ -57,13 +62,20 @@ def _normalize_slack_channel_id(value: str | None) -> str | None:
     channel_id = value.strip().upper() if isinstance(value, str) else ""
     if not channel_id:
         return None
-    if not _SLACK_CHANNEL_ID_RE.fullmatch(channel_id):
+    if not SLACK_CHANNEL_ID_RE.fullmatch(channel_id):
         raise ValueError("slack_channel_id must be a Slack channel ID starting with C or G")
     return channel_id
 
 
 def _slack_notification_mode(record: dict[str, Any]) -> SlackNotificationMode:
     return "on_action" if record.get("slack_notification_mode") == "on_action" else "always"
+
+
+def _valid_message_pattern(value: str | None) -> str | None:
+    if value is None:
+        return None
+    compile_message_pattern(value)
+    return value
 
 
 class ScheduleCreateBody(BaseModel):
@@ -76,6 +88,9 @@ class ScheduleCreateBody(BaseModel):
     effort: str | None = None
     slack_channel_id: str | None = None
     slack_notification_mode: SlackNotificationMode = _DEFAULT_SLACK_NOTIFICATION_MODE
+    message_pattern: str | None = Field(
+        default=None, min_length=1, max_length=MESSAGE_PATTERN_MAX_LENGTH
+    )
     admin_thread: bool = False
 
     @field_validator("schedule")
@@ -89,6 +104,12 @@ class ScheduleCreateBody(BaseModel):
             raise ValueError("schedule is required for scheduled automations")
         if self.trigger == "github_issue_opened" and not self.repo:
             raise ValueError("repo is required for GitHub issue automations")
+        if self.trigger == "slack_channel_message" and not (
+            self.slack_channel_id and self.message_pattern
+        ):
+            raise ValueError(
+                "slack_channel_id and message_pattern are required for Slack message automations"
+            )
         if self.trigger != "schedule":
             self.schedule = None
         return self
@@ -97,6 +118,11 @@ class ScheduleCreateBody(BaseModel):
     @classmethod
     def _valid_slack_channel_id(cls, value: str | None) -> str | None:
         return _normalize_slack_channel_id(value)
+
+    @field_validator("message_pattern")
+    @classmethod
+    def _valid_message_pattern(cls, value: str | None) -> str | None:
+        return _valid_message_pattern(value)
 
 
 class ScheduleUpdateBody(BaseModel):
@@ -110,6 +136,9 @@ class ScheduleUpdateBody(BaseModel):
     enabled: bool | None = None
     slack_channel_id: str | None = None
     slack_notification_mode: SlackNotificationMode | None = None
+    message_pattern: str | None = Field(
+        default=None, min_length=1, max_length=MESSAGE_PATTERN_MAX_LENGTH
+    )
     admin_thread: bool | None = None
 
     @field_validator("schedule")
@@ -121,6 +150,11 @@ class ScheduleUpdateBody(BaseModel):
     @classmethod
     def _valid_slack_channel_id(cls, value: str | None) -> str | None:
         return _normalize_slack_channel_id(value)
+
+    @field_validator("message_pattern")
+    @classmethod
+    def _valid_message_pattern(cls, value: str | None) -> str | None:
+        return _valid_message_pattern(value)
 
 
 def _validate_cron_value(value: str, low: int, high: int) -> None:
@@ -188,6 +222,7 @@ def _schedule_summary(
         "repo": _repo_full_name(repo),
         "slackChannelId": record.get("slack_channel_id"),
         "slackNotificationMode": _slack_notification_mode(record),
+        "messagePattern": record.get("message_pattern"),
         "adminThread": record.get("admin_thread") is True,
         "model": record.get("model"),
         "effort": record.get("effort"),
@@ -358,6 +393,7 @@ async def create_agent_schedule(
         "repo": repo,
         "slack_channel_id": body.slack_channel_id,
         "slack_notification_mode": body.slack_notification_mode,
+        "message_pattern": body.message_pattern,
         "admin_thread": body.admin_thread,
         "model": chosen_model or profile.get("default_model") or "Default",
         "effort": chosen_effort or profile.get("reasoning_effort"),
@@ -436,6 +472,8 @@ async def update_agent_schedule(
         patch["slack_notification_mode"] = (
             body.slack_notification_mode or _DEFAULT_SLACK_NOTIFICATION_MODE
         )
+    if body.message_pattern is not None:
+        patch["message_pattern"] = body.message_pattern
     if body.admin_thread is not None:
         patch["admin_thread"] = body.admin_thread
 
@@ -448,6 +486,12 @@ async def update_agent_schedule(
         updated_repo if isinstance(updated_repo, dict) else None
     ):
         raise HTTPException(422, "repo is required for GitHub issue automations")
+    if trigger == "slack_channel_message" and not (
+        updated.get("slack_channel_id") and updated.get("message_pattern")
+    ):
+        raise HTTPException(
+            422, "slack_channel_id and message_pattern are required for Slack message automations"
+        )
     if trigger != "schedule":
         updated["schedule"] = None
     schedule_changed = updated.get("schedule") != existing.get("schedule")
@@ -637,7 +681,11 @@ async def _agent_run_config(
 
 
 async def _launch_agent_schedule_record(
-    record: dict[str, Any], *, test_run: bool = False, prompt: str | None = None
+    record: dict[str, Any],
+    *,
+    test_run: bool = False,
+    prompt: str | None = None,
+    slack_thread: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     schedule_id = record["id"]
     if not test_run and not record.get("enabled"):
@@ -665,9 +713,12 @@ async def _launch_agent_schedule_record(
 
     client = langgraph_client()
     thread_id = str(uuid.uuid4())
-    slack_thread: dict[str, Any] | None = None
     slack_channel_id = record.get("slack_channel_id")
-    if (
+    if slack_thread is not None:
+        await bind_slack_thread_id(
+            client, slack_thread["channel_id"], slack_thread["thread_ts"], thread_id
+        )
+    elif (
         _slack_notification_mode(record) == "always"
         and isinstance(slack_channel_id, str)
         and slack_channel_id
@@ -920,6 +971,77 @@ async def launch_github_issue_automations(
             extra={"github_delivery": delivery_id, "github_repo": full_name},
         )
     return results
+
+
+def _matches_slack_message_automation(record: dict[str, Any], channel_id: str, text: str) -> bool:
+    pattern = record.get("message_pattern")
+    if (
+        not record.get("enabled")
+        or record.get("trigger") != "slack_channel_message"
+        or record.get("slack_channel_id") != channel_id
+        or not isinstance(pattern, str)
+    ):
+        return False
+    try:
+        return message_matches(pattern, text)
+    except ValueError:
+        logger.exception(
+            "Stored Slack message automation pattern is invalid",
+            extra={"schedule_id": record.get("id")},
+        )
+        return False
+
+
+async def find_slack_message_automation(channel_id: str, text: str) -> dict[str, Any] | None:
+    """Return the oldest enabled automation whose pattern matches a top-level channel post."""
+    matched = sorted(
+        (
+            record
+            for record in await search_all_values(SCHEDULES_NAMESPACE)
+            if _matches_slack_message_automation(record, channel_id, text)
+        ),
+        key=lambda record: str(record.get("created_at") or ""),
+    )
+    if len(matched) > 1:
+        logger.warning(
+            "Multiple Slack message automations matched; launching the oldest",
+            extra={
+                "slack_channel_id": channel_id,
+                "schedule_ids": [record.get("id") for record in matched],
+            },
+        )
+    return matched[0] if matched else None
+
+
+async def launch_slack_message_automation(
+    record: dict[str, Any], channel_id: str, message_ts: str, text: str, author: str
+) -> None:
+    prompt = render_prompt(
+        "runs/slack-channel-message.md",
+        prompt=str(record["prompt"]),
+        permalink=slack_message_url(channel_id, message_ts),
+        author=author,
+        message=format_github_comment_body_for_prompt("", text, trusted=frozenset()),
+    )
+    log_context = {"schedule_id": record.get("id"), "slack_channel_id": channel_id}
+    try:
+        result = await _launch_agent_schedule_record(
+            record,
+            prompt=prompt,
+            slack_thread={
+                "channel_id": channel_id,
+                "thread_ts": message_ts,
+                "triggering_event_ts": message_ts,
+            },
+        )
+    except Exception:
+        logger.exception("Failed to launch Slack message automation", extra=log_context)
+        return
+    if result.get("status") != "started":
+        logger.error(
+            "Slack message automation did not start",
+            extra={**log_context, "launch_status": result.get("status")},
+        )
 
 
 async def launch_scheduled_agent_run(schedule_id: str) -> dict[str, Any]:

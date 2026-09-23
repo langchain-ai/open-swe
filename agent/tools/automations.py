@@ -5,6 +5,7 @@ from typing import Any
 
 from fastapi import HTTPException
 
+from agent.schedules import slack_messages
 from agent.schedules import store as schedules
 from agent.tools.admin_gate import configurable, require_admin
 
@@ -48,6 +49,7 @@ async def create_automation(
     effort: str | None = None,
     slack_channel_id: str | None = None,
     slack_notification_mode: schedules.SlackNotificationMode = "always",
+    message_pattern: str | None = None,
     admin_thread: bool = False,
 ) -> dict[str, Any]:
     """Implement the `create_automation` tool."""
@@ -70,6 +72,7 @@ async def create_automation(
                 effort=effort,
                 slack_channel_id=slack_channel_id,
                 slack_notification_mode=slack_notification_mode,
+                message_pattern=message_pattern,
                 admin_thread=admin_thread,
             ),
             email=email,
@@ -95,6 +98,7 @@ async def update_automation(
     slack_channel_id: str | None = None,
     clear_slack_channel: bool = False,
     slack_notification_mode: schedules.SlackNotificationMode | None = None,
+    message_pattern: str | None = None,
     admin_thread: bool | None = None,
 ) -> dict[str, Any]:
     """Implement the `update_automation` tool."""
@@ -119,6 +123,7 @@ async def update_automation(
         "effort": effort,
         "enabled": enabled,
         "slack_notification_mode": slack_notification_mode,
+        "message_pattern": message_pattern,
         "admin_thread": admin_thread,
     }
     values = {key: value for key, value in values.items() if value is not None}
@@ -138,6 +143,23 @@ async def update_automation(
     except Exception as exc:
         return _error(exc)
     return {"ok": True, "automation": record}
+
+
+async def preview_automation_matches(
+    slack_channel_id: str, message_pattern: str, days: int = 7
+) -> dict[str, Any]:
+    """Implement the `preview_automation_matches` tool."""
+    if error := await require_admin("manage workspace automations"):
+        return {"ok": False, "error": error}
+    try:
+        preview = await slack_messages.preview_message_pattern(
+            slack_messages.SlackMessagePreviewBody(
+                slack_channel_id=slack_channel_id, message_pattern=message_pattern, days=days
+            )
+        )
+    except Exception as exc:
+        return _error(exc)
+    return {"ok": True, **preview}
 
 
 async def trigger_automation(automation_id: str) -> dict[str, Any]:

@@ -35,9 +35,31 @@ export interface ScheduleCreateRequest {
   repo?: string | null
   slack_channel_id?: string | null
   slack_notification_mode?: SlackNotificationMode
+  message_pattern?: string | null
   admin_thread?: boolean
   model_id?: string | null
   effort?: string | null
+}
+
+export interface SlackMessagePreviewRequest {
+  slack_channel_id: string
+  message_pattern: string
+  days?: number
+}
+
+export interface SlackMessageMatch {
+  ts: string
+  user: string
+  text: string
+  permalink: string
+}
+
+export interface SlackMessagePreview {
+  channel_id: string
+  pattern: string
+  days: number
+  scanned: number
+  matches: Array<SlackMessageMatch>
 }
 
 export interface ScheduleUpdateRequest {
@@ -48,6 +70,7 @@ export interface ScheduleUpdateRequest {
   repo?: string | null
   slack_channel_id?: string | null
   slack_notification_mode?: SlackNotificationMode
+  message_pattern?: string | null
   admin_thread?: boolean
   model_id?: string | null
   effort?: string | null
@@ -340,6 +363,11 @@ export const agentsApi = {
         body: JSON.stringify(body),
       }
     ),
+  previewSlackMessagePattern: (body: SlackMessagePreviewRequest) =>
+    agentsRequest<SlackMessagePreview>("/schedules/slack-message-preview", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
   triggerSchedule: (scheduleId: string) =>
     agentsRequest<ScheduleTriggerResult>(
       `/schedules/${encodeURIComponent(scheduleId)}/trigger`,

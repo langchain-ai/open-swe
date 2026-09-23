@@ -6,6 +6,11 @@ from fastapi import APIRouter
 from fastapi.responses import Response
 
 from agent.dashboard.deps import ADMIN_DEP, SESSION_DEP
+from agent.schedules.slack_messages import (
+    SlackMessagePreview,
+    SlackMessagePreviewBody,
+    preview_message_pattern,
+)
 from agent.schedules.store import (
     ScheduleCreateBody,
     ScheduleUpdateBody,
@@ -34,6 +39,14 @@ async def api_create_schedule(
     return await create_agent_schedule(
         admin["sub"], body, email=admin.get("email"), allow_admin_thread=True
     )
+
+
+@router.post("/schedules/slack-message-preview")
+async def api_preview_slack_message_pattern(
+    body: SlackMessagePreviewBody,
+    _admin: dict[str, Any] = ADMIN_DEP,
+) -> SlackMessagePreview:
+    return await preview_message_pattern(body)
 
 
 @router.patch("/schedules/{schedule_id}")

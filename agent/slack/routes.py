@@ -9,6 +9,8 @@ from fastapi import APIRouter, Response
 from langgraph_sdk.client import LangGraphClient
 
 from agent.expedited_review import slack as expedited_review
+from agent.schedules.slack_messages import is_triggering_message
+from agent.schedules.store import find_slack_message_automation, launch_slack_message_automation
 from agent.slack import webhook as service
 from agent.slack.allowed_bots import resolve_allowed_slack_bot
 from agent.slack.ask import (
@@ -261,6 +263,31 @@ async def _process_slack_message_update_impl(request: SlackRequest) -> None:
     )
 
 
+async def _queue_slack_message_automation(
+    background_tasks: common.BackgroundTasks,
+    raw_event: JsonObject,
+    channel_id: str,
+    event_id: str,
+) -> WebhookResponse | None:
+    text = str(raw_event["text"])
+    record = await find_slack_message_automation(channel_id, text)
+    if record is None:
+        return None
+    message_ts = str(raw_event["ts"])
+    if not await common.claim_slack_event(event_id, channel_id, message_ts):
+        return ignored("Duplicate Slack event delivery")
+    user = raw_event.get("user")
+    author = (
+        f"<@{user}>"
+        if isinstance(user, str) and user
+        else f"{raw_event.get('username') or raw_event.get('bot_id') or 'unknown'} (bot)"
+    )
+    background_tasks.add_task(
+        launch_slack_message_automation, record, channel_id, message_ts, text, author
+    )
+    return accepted("Slack message automation queued")
+
+
 @router.post("/webhooks/slack")
 async def slack_webhook(
     request: common.Request, background_tasks: common.BackgroundTasks
@@ -375,6 +402,21 @@ async def slack_webhook(
         return ignored("Duplicate Slack event delivery")
 
     bot_user_id = envelope.bot_user_id(common.SLACK_BOT_USER_ID)
+
+    if (
+        event.type == "message"
+        and channel_id
+        and channel_context is not None
+        and not (event.app_id and event.app_id == envelope.api_app_id)
+        and is_triggering_message(raw_event, bot_user_id)
+        and not (bot_user_id and f"<@{bot_user_id}>" in str(raw_event["text"]))
+        and not await common.is_code_channel(channel_id)
+    ):
+        automation_response = await _queue_slack_message_automation(
+            background_tasks, raw_event, channel_id, event_id
+        )
+        if automation_response is not None:
+            return automation_response
 
     is_message_update = event.type == "message" and event.subtype == "message_changed"
     updated_message = event.message if is_message_update else event
