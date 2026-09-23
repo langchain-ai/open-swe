@@ -100,6 +100,7 @@ async def _dispatch_or_queue_slack_run(
     configurable: dict[str, Any],
     *,
     explicitly_tagged: bool,
+    trigger_ts: str,
 ) -> dict[str, Any]:
     """Dispatch explicit requests immediately and enqueue other Slack follow-ups."""
     if isinstance(run_input, list):
@@ -111,7 +112,7 @@ async def _dispatch_or_queue_slack_run(
             configurable,
             source="slack",
             input=run_input,
-            metadata=common.AGENT_VERSION_METADATA,
+            metadata={**common.AGENT_VERSION_METADATA, "slack_trigger_ts": trigger_ts},
             client=client,
             multitask_strategy="interrupt" if explicitly_tagged else "enqueue",
         )
@@ -1160,6 +1161,7 @@ async def _process_slack_mention_impl(
             run_input,
             configurable,
             explicitly_tagged=explicitly_tagged,
+            trigger_ts=event_ts,
         )
     except Exception:
         # No run means no completion webhook, so nothing else would ever clear
