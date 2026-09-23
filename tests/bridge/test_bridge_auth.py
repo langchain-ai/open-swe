@@ -1,4 +1,4 @@
-"""How a client with no cookie jar authenticates against the dashboard API."""
+"""How the CLI authenticates: the dashboard's own cookie, from its own origin."""
 
 import pytest
 from fastapi import HTTPException
@@ -6,64 +6,73 @@ from starlette.requests import Request
 
 from agent.dashboard import oauth
 
+BACKEND = "https://backend.example"
 
-def _request(*, authorization: str | None = None, cookie: str | None = None) -> Request:
+
+def _request(
+    *,
+    method: str = "POST",
+    cookie: str | None = None,
+    origin: str | None = None,
+) -> Request:
     headers: list[tuple[bytes, bytes]] = []
-    if authorization is not None:
-        headers.append((b"authorization", authorization.encode()))
     if cookie is not None:
         headers.append((b"cookie", cookie.encode()))
+    if origin is not None:
+        headers.append((b"origin", origin.encode()))
     return Request(
         {
             "type": "http",
             "scheme": "https",
             "server": ("backend.example", 443),
-            "method": "GET",
-            "path": "/dashboard/api/bridges/abc/requests",
+            "method": method,
+            "path": "/dashboard/api/bridges",
             "headers": headers,
         }
     )
 
 
 @pytest.fixture(autouse=True)
-def _jwt_secret(monkeypatch: pytest.MonkeyPatch) -> None:
+def _dashboard(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("DASHBOARD_JWT_SECRET", "test-secret")
+    monkeypatch.setenv("DASHBOARD_BASE_URL", "https://dashboard.example")
 
 
-def _session_token(login: str = "test-user") -> str:
-    return oauth.issue_session(
+def _cookie(login: str = "test-user") -> str:
+    token = oauth.issue_session(
         login=login, email=f"{login}@example.com", avatar_url=None, user_id="u-1"
     )
+    return f"{oauth.COOKIE_NAME}={token}"
 
 
-def test_a_bearer_session_authenticates_like_the_cookie() -> None:
-    token = _session_token()
-
-    from_header = oauth.require_session(_request(authorization=f"Bearer {token}"))
-    from_cookie = oauth.require_session(_request(cookie=f"{oauth.COOKIE_NAME}={token}"))
-
-    assert from_header["sub"] == "test-user"
-    assert from_cookie == from_header
+def test_the_session_cookie_names_the_caller() -> None:
+    assert oauth.require_session(_request(cookie=_cookie()))["sub"] == "test-user"
 
 
-def test_the_cookie_wins_over_a_bearer_header() -> None:
-    cookie_token = _session_token("cookie-user")
+def test_a_mutation_from_the_backends_own_origin_is_allowed() -> None:
+    """What the CLI sends: the cookie, and the origin of the API it is calling.
 
-    session = oauth.require_session(
-        _request(
-            authorization=f"Bearer {_session_token('header-user')}",
-            cookie=f"{oauth.COOKIE_NAME}={cookie_token}",
+    The dashboard is not always served from the backend, so this origin is not
+    in the configured allowlist; it passes because a request to an origin is
+    never cross-site with respect to that same origin.
+    """
+    oauth.require_same_origin_for_mutations(_request(cookie=_cookie(), origin=BACKEND))
+
+
+def test_a_mutation_from_somewhere_else_is_refused() -> None:
+    with pytest.raises(HTTPException) as elsewhere:
+        oauth.require_same_origin_for_mutations(
+            _request(cookie=_cookie(), origin="https://attacker.example")
         )
-    )
+    with pytest.raises(HTTPException) as nameless:
+        oauth.require_same_origin_for_mutations(_request(cookie=_cookie()))
 
-    assert session["sub"] == "cookie-user"
+    assert elsewhere.value.status_code == 403
+    assert nameless.value.status_code == 403
 
 
-def test_a_bearer_that_is_not_a_session_is_refused() -> None:
-    with pytest.raises(HTTPException) as unusable:
-        oauth.require_session(_request(authorization="Bearer gho_not-a-session"))
+def test_an_unauthenticated_request_is_refused() -> None:
     with pytest.raises(HTTPException) as absent:
         oauth.require_session(_request())
 
-    assert unusable.value.status_code == 401
     assert absent.value.status_code == 401
