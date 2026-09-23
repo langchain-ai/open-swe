@@ -60,6 +60,7 @@ from agent.utils.thread_ops import langgraph_client
 logger = logging.getLogger(__name__)
 
 ThreadRole = Literal["primary", "secondary"]
+AGENT_OPENED_LINK_SOURCE = "open_pull_request"
 
 _SEARCH_PAGE_SIZE = 50
 _GITHUB_COLUMNS = ("state", "title", "head_ref", "base_ref", "author")
@@ -174,6 +175,14 @@ class PullRequest(Base):
     @property
     def primary_thread_id(self) -> str | None:
         return next((link.thread_id for link in self.threads if link.role == "primary"), None)
+
+    @property
+    def agent_thread_id(self) -> str | None:
+        """The agent thread that opened or updated this PR, primary first."""
+        return next(
+            (link.thread_id for link in self.threads if link.source == AGENT_OPENED_LINK_SOURCE),
+            None,
+        )
 
     @property
     def thread_ids(self) -> list[str]:

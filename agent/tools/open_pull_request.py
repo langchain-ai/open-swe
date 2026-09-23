@@ -18,7 +18,7 @@ from agent.credential_scope import (
 )
 from agent.github.app import get_github_app_installation_token
 from agent.github.comments import derive_pr_state
-from agent.github.pull_requests import PullRequest, ThreadLink
+from agent.github.pull_requests import AGENT_OPENED_LINK_SOURCE, PullRequest, ThreadLink
 from agent.github.token import GitHubUserAuthRequired
 from agent.run_config import RunConfig
 from agent.slack.client import (
@@ -765,7 +765,7 @@ async def _record_pr_telemetry(
                     author=author if isinstance(author, str) else "",
                     author_github_id=author_id if isinstance(author_id, int) else None,
                     resolves_thread=resolves_thread,
-                    threads=[ThreadLink(thread_id=thread_id, source="open_pull_request")],
+                    threads=[ThreadLink(thread_id=thread_id, source=AGENT_OPENED_LINK_SOURCE)],
                 ).save(repository_private=repo_private)
             except Exception:  # noqa: BLE001
                 # The PR exists on GitHub either way; failing the tool over the

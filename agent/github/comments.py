@@ -356,11 +356,13 @@ async def fetch_pr_comments_since_last_tag(
     token: str,
     event_comment: dict[str, Any] | None = None,
     authorized_login: str | None = None,
+    require_tag: bool = True,
 ) -> list[dict[str, Any]]:
     """Fetch all PR comments/reviews since the last @open-swe tag.
 
     Fetches from all 3 GitHub comment sources, merges and sorts chronologically,
-    then returns every comment from the last @open-swe mention onwards.
+    then returns every comment from the last @open-swe mention onwards. Without
+    ``require_tag``, returns only the event comment and a review's own inline comments.
 
     For inline review comments the dict also includes:
     - 'path': file path commented on
@@ -468,6 +470,19 @@ async def fetch_pr_comments_since_last_tag(
 
     # Sort all comments chronologically
     all_comments.sort(key=lambda c: c.get("event_at") or c.get("created_at", ""))
+
+    if not require_tag:
+        if event_comment is None:
+            return []
+        return [
+            c
+            for c in all_comments
+            if c is event_comment
+            or (
+                event_comment["type"] == "review"
+                and c.get("review_id") == event_comment["comment_id"]
+            )
+        ]
 
     tag_indices = [
         i for i, comment in enumerate(all_comments) if mentions_open_swe(comment.get("body"))
