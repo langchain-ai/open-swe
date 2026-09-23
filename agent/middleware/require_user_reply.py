@@ -13,7 +13,6 @@ from typing import Any, Literal, NotRequired
 
 from langchain.agents.middleware.types import AgentState, ModelRequest, ModelResponse, hook_config
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage, ToolMessage
-from langchain_core.runnables import RunnableConfig
 from langgraph.runtime import Runtime
 
 from agent.middleware.message_content import content_to_text
@@ -165,11 +164,7 @@ class RequireUserReplyMiddleware(OpenSWEMiddleware):
         return await handler(request.override(system_message=SystemMessage(content=content)))
 
     @hook_config(can_jump_to=["model"])
-    async def aafter_model(
-        self, state: AgentState, runtime: Runtime, config: RunnableConfig | None = None
-    ) -> dict[str, Any] | None:
-        if (config or {}).get("configurable", {}).get("ls_agent_type") == "subagent":
-            return {"reply_nudge_pending": False}
+    async def aafter_model(self, state: AgentState, runtime: Runtime) -> dict[str, Any] | None:  # noqa: ARG002
         messages = state.get("messages") or []
         last = messages[-1] if messages else None
         settled: dict[str, Any] = {"reply_nudge_pending": False}

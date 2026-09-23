@@ -156,23 +156,6 @@ class TestRequireUserReplyMiddleware:
         assert posted.await_args.args[0] == "all good"
 
     @pytest.mark.asyncio
-    async def test_subagent_completion_never_posts_to_slack(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        import agent.slack.tools.reply as reply_tool
-
-        posted = AsyncMock()
-        monkeypatch.setattr(reply_tool, "slack_reply", posted)
-        result = await _middleware().aafter_model(
-            _state(AIMessage(content="internal report"), reply_nudges=2),
-            _runtime(),
-            {"configurable": {"ls_agent_type": "subagent"}},
-        )
-
-        assert result == {"reply_nudge_pending": False}
-        posted.assert_not_awaited()
-
-    @pytest.mark.asyncio
     async def test_a_spent_budget_with_nothing_to_say_posts_nothing(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
