@@ -12,7 +12,6 @@ export interface WorkspaceEntry {
 
 export interface WorkspaceFileIndex {
   paths: Array<string>
-  truncated: boolean
 }
 
 export type WorkspacePath =

@@ -620,6 +620,8 @@ async function readBranchDiff(repo, baseRef, headRef = null) {
 
 module.exports = {
   addWorktree,
+  git,
+  gitStdin,
   captureCheckpoint,
   readBranchDiff,
   checkoutBranch,

@@ -1,22 +1,18 @@
-const { spawn } = require("node:child_process");
+const { git, gitStdin } = require("./git-diff.cjs");
 const fs = require("node:fs/promises");
 const path = require("node:path");
 
 const MAX_FILE_BYTES = 1024 * 1024;
 const MAX_INDEX_PATHS = 20000;
 
-function ignoredPaths(root: string, paths: string[]) {
-  if (paths.length === 0) return Promise.resolve(new Set<string>());
-  return new Promise<Set<string>>((resolve) => {
-    const child = spawn("git", ["-C", root, "check-ignore", "-z", "--stdin"]);
-    const chunks: Buffer[] = [];
-    child.stdout.on("data", (chunk: Buffer) => chunks.push(chunk));
-    child.on("error", () => resolve(new Set()));
-    child.on("close", () =>
-      resolve(new Set(Buffer.concat(chunks).toString().split("\0"))),
-    );
-    child.stdin.end(`${paths.join("\0")}\0`);
-  });
+async function ignoredPaths(root: string, paths: string[]) {
+  if (paths.length === 0) return new Set<string>();
+  const output = await gitStdin(
+    root,
+    ["check-ignore", "-z", "--stdin"],
+    `${paths.join("\0")}\0`,
+  );
+  return new Set<string>(output.toString().split("\0"));
 }
 
 async function listDirectory(root: string, target: string, relative: string) {
@@ -82,40 +78,16 @@ async function readWorkspacePath(root: string, relativePath: unknown) {
 }
 
 /** Every non-ignored file under `root`, for search. */
-function listWorkspaceFiles(root: string) {
-  return new Promise<{ paths: string[]; truncated: boolean }>(
-    (resolve, reject) => {
-      const child = spawn("git", [
-        "-C",
-        root,
-        "ls-files",
-        "-z",
-        "--cached",
-        "--others",
-        "--exclude-standard",
-      ]);
-      const stdout: Buffer[] = [];
-      const stderr: Buffer[] = [];
-      child.stdout.on("data", (chunk: Buffer) => stdout.push(chunk));
-      child.stderr.on("data", (chunk: Buffer) => stderr.push(chunk));
-      child.on("error", reject);
-      child.on("close", (code: number | null) => {
-        if (code !== 0) {
-          const message = Buffer.concat(stderr).toString().trim();
-          reject(new Error(message || "Not a git repository."));
-          return;
-        }
-        const paths = Buffer.concat(stdout)
-          .toString()
-          .split("\0")
-          .filter(Boolean);
-        resolve({
-          paths: paths.slice(0, MAX_INDEX_PATHS),
-          truncated: paths.length > MAX_INDEX_PATHS,
-        });
-      });
-    },
-  );
+async function listWorkspaceFiles(root: string) {
+  const output = await git(root, [
+    "ls-files",
+    "-z",
+    "--cached",
+    "--others",
+    "--exclude-standard",
+  ]);
+  const paths = output.toString().split("\0").filter(Boolean);
+  return { paths: paths.slice(0, MAX_INDEX_PATHS) };
 }
 
 module.exports = { listWorkspaceFiles, readWorkspacePath };

@@ -2433,15 +2433,10 @@
             },
             "title": "Paths",
             "type": "array"
-          },
-          "truncated": {
-            "title": "Truncated",
-            "type": "boolean"
           }
         },
         "required": [
-          "paths",
-          "truncated"
+          "paths"
         ],
         "title": "WorkspaceFileIndex",
         "type": "object"

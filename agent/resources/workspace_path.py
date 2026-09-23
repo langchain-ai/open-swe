@@ -60,7 +60,7 @@ def file_index(root):
     if result.returncode != 0:
         return {"error": result.stderr.decode(errors="replace").strip() or "Not a git repository."}
     paths = [path for path in result.stdout.decode(errors="replace").split("\0") if path]
-    return {"paths": paths[:MAX_INDEX_PATHS], "truncated": len(paths) > MAX_INDEX_PATHS}
+    return {"paths": paths[:MAX_INDEX_PATHS]}
 
 
 def main():
