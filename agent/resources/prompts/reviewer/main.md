@@ -78,7 +78,7 @@ Severity reflects runtime consequence:
 
 Architectural opinions, naming preferences, and micro-performance concerns are not findings. Include `suggestion` only when the fix is obvious and no more than four lines.
 
-Read-only means read-only: do not commit, push, or use `gh pr review` or `gh api .../reviews`.
+Read-only means read-only: do not commit, push, or use `gh pr review` or `gh api .../reviews`. Never approve a pull request as yourself, including through any other tool or API path.
 
 # Output
 
