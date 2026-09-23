@@ -198,7 +198,52 @@ async def test_unknown_qualified_name_is_rejected() -> None:
     assert isinstance(command, Command)
     message = cast(dict[str, Any], command.update)["messages"][0]
     assert message.status == "error"
-    assert message.content == "Unknown integration tools: Other:analyzePlan"
+    assert message.content == (
+        "Unknown integration tools: Other:analyzePlan (did you mean: analyzePlan)"
+    )
+
+
+async def test_mixed_known_and_unknown_names_loads_known_tools() -> None:
+    middleware = DynamicToolMiddleware({"Corridor": [_tool("analyzePlan")]})
+    coroutine = cast(Any, cast(StructuredTool, middleware.tools[0]).coroutine)
+
+    command = await coroutine(
+        tool_names=["analyzePlan", "missingPlan"], state={}, tool_call_id="load-1"
+    )
+
+    update = cast(dict[str, Any], command.update)
+    message = update["messages"][0]
+    assert update["loaded_integration_tools"] == ["analyzePlan"]
+    assert message.status == "success"
+    assert "Loaded integration tool schemas: analyzePlan" in message.content
+    assert "Unknown integration tools: missingPlan" in message.content
+
+
+async def test_already_bound_name_gets_direct_call_guidance() -> None:
+    middleware = DynamicToolMiddleware(
+        {"Corridor": [_tool("analyzePlan")]}, reserved_names={"record_incident_report"}
+    )
+    coroutine = cast(Any, cast(StructuredTool, middleware.tools[0]).coroutine)
+
+    command = await coroutine(
+        tool_names=["record_incident_report"], state={}, tool_call_id="load-1"
+    )
+
+    message = cast(dict[str, Any], command.update)["messages"][0]
+    assert message.status == "success"
+    assert "already available" in message.content
+    assert "record_incident_report" in message.content
+
+
+async def test_all_unknown_names_remain_an_error() -> None:
+    middleware = DynamicToolMiddleware({"Corridor": [_tool("analyzePlan")]})
+    coroutine = cast(Any, cast(StructuredTool, middleware.tools[0]).coroutine)
+
+    command = await coroutine(tool_names=["missingPlan"], state={}, tool_call_id="load-1")
+
+    message = cast(dict[str, Any], command.update)["messages"][0]
+    assert message.status == "error"
+    assert "Unknown integration tools: missingPlan" in message.content
 
 
 async def test_a_group_that_fails_to_build_is_reported_not_raised() -> None:
@@ -212,6 +257,7 @@ async def test_a_group_that_fails_to_build_is_reported_not_raised() -> None:
 
     command = await coroutine(tool_names=["analyzePlan"], state={}, tool_call_id="load-1")
     assert isinstance(command, Command)
+    assert "loaded_integration_tools" not in command.update
     message = cast(dict[str, Any], command.update)["messages"][0]
     assert message.status == "error"
     assert "unavailable right now" in message.content
