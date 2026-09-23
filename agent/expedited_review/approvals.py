@@ -125,10 +125,6 @@ class ExpeditedApproval(Base):
         """GitHub handles of the approvers, for display."""
         return [vote.github_login for vote in self.approvals]
 
-    @property
-    def rejection(self) -> ApprovalVote | None:
-        return next((vote for vote in self.votes if vote.decision == "reject"), None)
-
     def vote_by(self, user_id: UUID) -> ApprovalVote | None:
         return next((vote for vote in self.votes if vote.voter_user_id == user_id), None)
 

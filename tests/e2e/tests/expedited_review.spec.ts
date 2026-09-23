@@ -12,7 +12,7 @@ import {
 //   the agent implements it, opens a draft PR as that user, starts a durable CI
 //   watch, and posts the card right away. The draft's card offers only "Mark
 //   ready for review", to the PR's author ->
-//   the author marks it ready; the card switches to Approve / Reject ->
+//   the author marks it ready; the card switches to Approve / Dismiss ->
 //   GitHub reports a FAILING check -> the watch wakes the agent, which pushes a
 //   test-only fix the card never drew ->
 //   the other person approves: the card collapses to who approved, and the agent
