@@ -35,7 +35,6 @@ PROFILE_SETTING_KEYS = frozenset(
 )
 PREFERENCE_SETTING_KEYS = frozenset(
     {
-        "default_visibility",
         "local_tracing_project",
         "default_workspace",
         "follow_up_behavior",
@@ -90,7 +89,6 @@ async def patch_personal_settings(
         existing = await get_value(USER_PREFERENCES_NAMESPACE, login) or {}
         preferences = UserPreferencesUpdate.model_validate(
             {
-                "default_visibility": "private",
                 **{key: value for key, value in existing.items() if key in PREFERENCE_SETTING_KEYS},
                 **preferences_patch,
             }

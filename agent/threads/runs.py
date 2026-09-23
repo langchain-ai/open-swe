@@ -22,7 +22,6 @@ from agent.dashboard.options import (
     normalize_model_choice,
 )
 from agent.dashboard.profiles import get_profile
-from agent.dashboard.user_preferences import get_user_preferences
 from agent.dashboard.workspace_settings import (
     get_workspace_settings,
 )
@@ -643,10 +642,7 @@ async def _enrich_run_start_command(
         # forwarded to LangGraph. The repo hint rides in the client
         # configurable; it never reaches the run config (which is rebuilt from
         # the stamped metadata below).
-        visibility = (
-            client_configurable.get("visibility")
-            or (await get_user_preferences(login))["default_visibility"]
-        )
+        visibility = client_configurable.get("visibility") or "public"
         if visibility not in ("public", "private"):
             raise HTTPException(422, "visibility must be public or private")
         repo_config = _parse_repo(client_configurable.get("repo")) or {}

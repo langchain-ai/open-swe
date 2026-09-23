@@ -101,13 +101,7 @@ export function AgentsHome({
     queryFn: api.getMyPreferences,
     enabled: cloudEnabled,
   })
-  // Visibility is fixed once a thread exists, so the only choice is made here,
-  // seeded from the user's default and overridable per thread.
-  const [visibilityOverride, setVisibilityOverride] = useState<
-    "public" | "private" | null
-  >(null)
-  const visibility =
-    visibilityOverride ?? preferences.data?.default_visibility ?? "private"
+  const [visibility, setVisibility] = useState<"public" | "private">("public")
   const workspaceOptionsQuery = useWorkspaceOptions(cloudEnabled)
   const workspaces = workspaceOptionsQuery.data?.workspaces ?? []
   // undefined = untouched, so the run falls back to the repo's own workspace,
@@ -601,9 +595,7 @@ export function AgentsHome({
           target={runTarget === "local" ? "This Mac" : "Cloud"}
           panelCollapsed={panelCollapsed}
           visibility={runTarget === "cloud" ? visibility : undefined}
-          onVisibilityChange={
-            submittedDraft ? undefined : setVisibilityOverride
-          }
+          onVisibilityChange={submittedDraft ? undefined : setVisibility}
         />
         {optimisticDraftThread ? (
           <Messages

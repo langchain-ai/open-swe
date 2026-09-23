@@ -11,7 +11,6 @@ Supported profile fields:
 - `draft_prs`: whether newly opened PRs are drafts; use true or false (null keeps the existing preference).
 
 Supported dashboard preferences:
-- `default_visibility`: `private` or `public`, for future threads only.
 - `default_workspace`: workspace slug; null clears the default.
 - `local_tracing_project`: tracing project; null clears it. Restart the desktop app after changing this.
 - `follow_up_behavior`: `queue` or `steer`. What a message sent while a run is live does: wait for the run to end, or steer the running agent.

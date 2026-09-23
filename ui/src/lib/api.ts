@@ -577,7 +577,6 @@ export type ThreadVisibility = "public" | "private"
 export type FollowUpBehavior = "queue" | "steer"
 
 export interface UserPreferences {
-  default_visibility: ThreadVisibility
   local_tracing_project: string | null
   default_local_tracing_project: string
   default_workspace: string | null
