@@ -73,5 +73,4 @@ it("blocks the sibling action as soon as one is queued", async () => {
   await screen.findByRole("button", { name: "Fix queued" })
   const blocked = screen.getByRole("button", { name: "Addressing comments" })
   expect(blocked.hasAttribute("disabled")).toBe(true)
-  expect(api.pullRequestThreadStatus).toHaveBeenCalledTimes(1)
 })

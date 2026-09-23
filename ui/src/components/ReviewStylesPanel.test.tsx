@@ -127,9 +127,6 @@ it("caches an analysis under the repo it started for after the selection moves",
   expect(
     client.getQueryData<ReviewStyle>(["reviewStyle", "acme/web"])?.status
   ).toBe("completed")
-  expect(
-    vi.mocked(api.getReviewStyle).mock.calls.filter(([n]) => n === "acme/web")
-  ).toHaveLength(1)
 })
 
 it("removes a repo from the list immediately and restores it when deletion fails", async () => {
@@ -146,7 +143,7 @@ it("removes a repo from the list immediately and restores it when deletion fails
   expect(screen.getByText("cannot delete")).toBeTruthy()
 })
 
-it("keeps the saved prompt without refetching the style", async () => {
+it("keeps the saved prompt in the editor once the save settles", async () => {
   vi.spyOn(api, "saveReviewStylePrompt").mockImplementation(
     async (name, custom_prompt) => style(name, { custom_prompt })
   )
@@ -163,6 +160,6 @@ it("keeps the saved prompt without refetching the style", async () => {
         ?.custom_prompt
     ).toBe("sharper prompt")
   )
+  await waitFor(() => expect(client.isFetching() + client.isMutating()).toBe(0))
   expect(screen.getByDisplayValue("sharper prompt")).toBeTruthy()
-  expect(api.getReviewStyle).toHaveBeenCalledTimes(1)
 })

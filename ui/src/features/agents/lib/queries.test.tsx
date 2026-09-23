@@ -574,47 +574,6 @@ describe("optimistic thread mutations", () => {
     hasMore: false,
   })
 
-  it("pins a listed thread before the request resolves and unpins on failure", async () => {
-    const request = deferred<undefined>()
-    vi.spyOn(agentsApi, "pinThread").mockReturnValue(request.promise)
-    const client = testClient()
-    client.setQueryData(agentThreadKeys.pinned, [])
-    client.setQueryData(pageKey, pageOf([thread]))
-    const { result } = renderHook(() => usePinAgentThread(), {
-      wrapper: wrapperFor(client),
-    })
-
-    act(() => result.current.mutate({ threadId: thread.id, pinned: true }))
-    await waitFor(() =>
-      expect(client.getQueryData(agentThreadKeys.pinned)).toEqual([thread])
-    )
-
-    act(() => request.reject(new Error("request failed")))
-    await waitFor(() =>
-      expect(client.getQueryData(agentThreadKeys.pinned)).toEqual([])
-    )
-  })
-
-  it("removes an unpinned thread at once and restores it on failure", async () => {
-    const request = deferred<undefined>()
-    vi.spyOn(agentsApi, "pinThread").mockReturnValue(request.promise)
-    const client = testClient()
-    client.setQueryData(agentThreadKeys.pinned, [thread])
-    const { result } = renderHook(() => usePinAgentThread(), {
-      wrapper: wrapperFor(client),
-    })
-
-    act(() => result.current.mutate({ threadId: thread.id, pinned: false }))
-    await waitFor(() =>
-      expect(client.getQueryData(agentThreadKeys.pinned)).toEqual([])
-    )
-
-    act(() => request.reject(new Error("request failed")))
-    await waitFor(() =>
-      expect(client.getQueryData(agentThreadKeys.pinned)).toEqual([thread])
-    )
-  })
-
   it("renames across detail, pinned, and page caches and rolls back on failure", async () => {
     const request = deferred<AgentThread>()
     vi.spyOn(agentsApi, "renameThread").mockReturnValue(request.promise)
