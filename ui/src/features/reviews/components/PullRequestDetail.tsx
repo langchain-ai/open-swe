@@ -1,7 +1,8 @@
-import { useQuery } from "@tanstack/react-query"
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
 import { XIcon } from "@phosphor-icons/react"
 import { useCallback, useState, type ReactNode } from "react"
+import { toast } from "sonner"
 
 import type {
   OpenPullRequest,
@@ -12,7 +13,9 @@ import type {
 } from "@/lib/api"
 import { Markdown } from "@/features/agents/components/chat/Markdown"
 import { GuidancePointList } from "./AuthorGuidanceCard"
+import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
+import { Textarea } from "@/components/ui/textarea"
 import { api } from "@/lib/api"
 import { cn } from "@/lib/utils"
 import {
@@ -37,28 +40,34 @@ const fileTones: Record<string, string> = {
   copied: "text-sky-700 dark:text-sky-400",
 }
 
-const passedConclusions = new Set(["success", "neutral", "skipped"])
+const skippedConclusions = new Set(["neutral", "skipped"])
 
 function checkTone(check: PreviewCheck): string {
-  if (check.status !== "completed") return "text-amber-700 dark:text-amber-400"
-  if (check.conclusion && passedConclusions.has(check.conclusion))
-    return "text-emerald-700 dark:text-emerald-400"
+  const rank = checkRank(check)
+  if (rank === 1) return "text-amber-700 dark:text-amber-400"
+  if (rank === 2) return "text-emerald-700 dark:text-emerald-400"
+  if (rank === 3) return "text-muted-foreground"
   return "text-destructive"
 }
 
 function checkRank(check: PreviewCheck): number {
   if (check.status !== "completed") return 1
-  if (check.conclusion && passedConclusions.has(check.conclusion)) return 2
+  if (check.conclusion === "success") return 2
+  if (check.conclusion && skippedConclusions.has(check.conclusion)) return 3
   return 0
 }
+
+const checkMarks = ["✕", "•", "✓", "–"] as const
 
 function Section({
   heading,
   count,
+  action,
   children,
 }: {
   heading: string
   count?: string
+  action?: ReactNode
   children: ReactNode
 }) {
   return (
@@ -70,6 +79,7 @@ function Section({
             {count}
           </span>
         )}
+        {action && <div className="ml-auto">{action}</div>}
       </div>
       {children}
     </section>
@@ -107,11 +117,7 @@ function CheckRow({ check }: { check: PreviewCheck }) {
   return (
     <li className="flex items-baseline gap-2.5 py-0.5 text-xs">
       <span className={cn("shrink-0 tabular-nums", checkTone(check))}>
-        {check.status !== "completed"
-          ? "•"
-          : check.conclusion === "success"
-            ? "✓"
-            : "✕"}
+        {checkMarks[checkRank(check)]}
       </span>
       <span className="min-w-0 flex-1 truncate text-foreground">
         {check.url ? (
@@ -144,6 +150,7 @@ const checkGroups = [
   ["Failing", 0],
   ["Running", 1],
   ["Passed", 2],
+  ["Skipped", 3],
 ] as const
 
 function Checks({ checks }: { checks: Array<PreviewCheck> | null }) {
@@ -196,9 +203,128 @@ function Checks({ checks }: { checks: Array<PreviewCheck> | null }) {
   )
 }
 
-function Conversation({ thread }: { thread: PreviewThread }) {
+interface PullRequestRef {
+  repo: string
+  number: number
+}
+
+function useResolveThreads(target: PullRequestRef) {
+  const queryClient = useQueryClient()
+  const [owner, name] = target.repo.split("/")
+  const previewKey = ["pr-preview", owner, name, target.number]
+  return useMutation({
+    mutationFn: (threadIds: Array<string>) =>
+      api.resolveReviewThreads(target.repo, target.number, threadIds),
+    onSuccess: (result) => {
+      const resolved = new Set(result.resolved)
+      queryClient.setQueryData<PullRequestPreview>(previewKey, (current) =>
+        current?.unresolved
+          ? {
+              ...current,
+              unresolved: current.unresolved.filter(
+                (thread) =>
+                  thread.thread_id === null || !resolved.has(thread.thread_id)
+              ),
+            }
+          : current
+      )
+      void queryClient.invalidateQueries({ queryKey: previewKey })
+      void queryClient.invalidateQueries({ queryKey: ["my-pr-details"] })
+      if (result.failed.length)
+        toast.error(
+          `Could not resolve ${result.failed.length} conversation${result.failed.length === 1 ? "" : "s"}`
+        )
+    },
+    onError: (error) =>
+      toast.error("Could not resolve conversations", {
+        description: error.message,
+      }),
+  })
+}
+
+function SendToAgent({
+  target,
+  commentUrl,
+  onDone,
+}: {
+  target: PullRequestRef
+  commentUrl: string
+  onDone: () => void
+}) {
+  const queryClient = useQueryClient()
+  const [instructions, setInstructions] = useState("")
+  const send = useMutation({
+    mutationFn: () =>
+      api.addressPullRequestComment(
+        target.repo,
+        target.number,
+        commentUrl,
+        instructions
+      ),
+    onSuccess: (result) => {
+      toast.success(
+        result.already_running
+          ? `Agent already running on ${target.repo}#${target.number}`
+          : `Sent comment to agent for ${target.repo}#${target.number}`
+      )
+      void queryClient.invalidateQueries({ queryKey: ["pr-thread-status"] })
+      onDone()
+    },
+    onError: (error) =>
+      toast.error("Could not send comment to agent", {
+        description: error.message,
+      }),
+  })
+  const submit = () => {
+    if (!send.isPending) send.mutate()
+  }
+  return (
+    <div className="mt-2 max-w-[72ch]">
+      <Textarea
+        value={instructions}
+        onChange={(event) => setInstructions(event.target.value)}
+        onKeyDown={(event) => {
+          if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
+            event.preventDefault()
+            submit()
+          } else if (event.key === "Escape") {
+            event.preventDefault()
+            onDone()
+          }
+        }}
+        placeholder="Optional instructions for the agent"
+        rows={2}
+        className="resize-y text-xs"
+        autoFocus
+      />
+      <div className="mt-1.5 flex items-center justify-end gap-2">
+        <Button size="xs" variant="outline" onClick={onDone}>
+          Cancel
+        </Button>
+        <Button size="xs" disabled={send.isPending} onClick={submit}>
+          {send.isPending ? "Sending…" : "Send"}
+        </Button>
+      </div>
+    </div>
+  )
+}
+
+function Conversation({
+  thread,
+  target,
+  resolve,
+}: {
+  thread: PreviewThread
+  target: PullRequestRef
+  resolve: ReturnType<typeof useResolveThreads>
+}) {
   const [open, setOpen] = useState(false)
+  const [sending, setSending] = useState(false)
   const [clamped, setClamped] = useState(false)
+  const resolving =
+    resolve.isPending &&
+    thread.thread_id !== null &&
+    resolve.variables.includes(thread.thread_id)
   // Only offer the toggle when there is something hidden to show.
   const measure = useCallback((node: HTMLParagraphElement | null) => {
     if (node) setClamped(node.scrollHeight > node.clientHeight + 1)
@@ -214,16 +340,37 @@ function Conversation({ thread }: { thread: PreviewThread }) {
           {thread.path}
           {thread.line !== null && `:${thread.line}`}
         </span>
-        {thread.url && (
-          <a
-            className="ml-auto shrink-0 hover:text-foreground hover:underline"
-            href={thread.url}
-            target="_blank"
-            rel="noreferrer"
-          >
-            Reply
-          </a>
-        )}
+        <div className="ml-auto flex shrink-0 items-baseline gap-3">
+          {thread.url && (
+            <button
+              type="button"
+              onClick={() => setSending(!sending)}
+              className="hover:text-foreground hover:underline"
+            >
+              Send to agent
+            </button>
+          )}
+          {thread.thread_id && (
+            <button
+              type="button"
+              disabled={resolve.isPending}
+              onClick={() => resolve.mutate([thread.thread_id!])}
+              className="hover:text-foreground hover:underline disabled:opacity-50"
+            >
+              {resolving ? "Resolving…" : "Resolve"}
+            </button>
+          )}
+          {thread.url && (
+            <a
+              className="hover:text-foreground hover:underline"
+              href={thread.url}
+              target="_blank"
+              rel="noreferrer"
+            >
+              Reply
+            </a>
+          )}
+        </div>
       </div>
       {open ? (
         <div className="mt-1 max-w-[72ch]">
@@ -246,11 +393,26 @@ function Conversation({ thread }: { thread: PreviewThread }) {
           {open ? "Show less" : "Show more"}
         </button>
       )}
+      {sending && thread.url && (
+        <SendToAgent
+          target={target}
+          commentUrl={thread.url}
+          onDone={() => setSending(false)}
+        />
+      )}
     </li>
   )
 }
 
-function Conversations({ preview }: { preview: PullRequestPreview }) {
+function Conversations({
+  preview,
+  target,
+  resolve,
+}: {
+  preview: PullRequestPreview
+  target: PullRequestRef
+  resolve: ReturnType<typeof useResolveThreads>
+}) {
   if (preview.unresolved === null) {
     return (
       <p className="text-xs text-amber-700 dark:text-amber-400">
@@ -270,8 +432,14 @@ function Conversations({ preview }: { preview: PullRequestPreview }) {
     <ul className="space-y-2.5">
       {preview.unresolved.map((thread, index) => (
         <Conversation
-          key={thread.url ?? `${thread.path}:${thread.line}:${index}`}
+          key={
+            thread.thread_id ??
+            thread.url ??
+            `${thread.path}:${thread.line}:${index}`
+          }
           thread={thread}
+          target={target}
+          resolve={resolve}
         />
       ))}
     </ul>
@@ -301,6 +469,10 @@ export function PullRequestDetail({
     staleTime: 60_000,
   })
   const data = preview.data
+  const resolve = useResolveThreads(pr)
+  const resolvableIds = (data?.unresolved ?? []).flatMap((thread) =>
+    thread.thread_id ? [thread.thread_id] : []
+  )
   const failing =
     data?.checks?.filter((check) => checkRank(check) === 0).length ?? 0
   const running =
@@ -413,8 +585,23 @@ export function PullRequestDetail({
                   ? undefined
                   : String(data.unresolved.length)
               }
+              action={
+                resolvableIds.length > 1 && (
+                  <button
+                    type="button"
+                    disabled={resolve.isPending}
+                    onClick={() => resolve.mutate(resolvableIds)}
+                    className="text-xs text-muted-foreground hover:text-foreground hover:underline disabled:opacity-50"
+                  >
+                    {resolve.isPending &&
+                    resolve.variables.length === resolvableIds.length
+                      ? "Resolving…"
+                      : "Resolve all"}
+                  </button>
+                )
+              }
             >
-              <Conversations preview={data} />
+              <Conversations preview={data} target={pr} resolve={resolve} />
             </Section>
 
             <Section

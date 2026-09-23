@@ -1,5 +1,6 @@
 """Act on a pull request using the signed-in user's GitHub permissions."""
 
+import logging
 from typing import Annotated, ClassVar, Literal
 
 import httpx2
@@ -12,8 +13,13 @@ from agent.github.http import (
     github_client,
     github_request,
 )
-from agent.github.pull_request_status import pull_request_identity
+from agent.github.pull_request_status import (
+    fetch_unresolved_review_threads,
+    pull_request_identity,
+)
 from agent.github.repo_merge_methods import MergeMethod
+
+logger = logging.getLogger(__name__)
 
 PullRequestActionName = Literal["merge", "close", "mark-ready"]
 
@@ -195,6 +201,81 @@ class MarkReadyAction(_PullRequestActionBase):
 PullRequestAction = Annotated[
     MergeAction | CloseAction | MarkReadyAction, Field(discriminator="action")
 ]
+
+
+_RESOLVE_THREAD_MUTATION = """
+mutation ResolveReviewThread($threadId: ID!) {
+  resolveReviewThread(input: {threadId: $threadId}) {
+    thread {
+      isResolved
+    }
+  }
+}
+"""
+
+
+class ResolveReviewThreads(BaseModel):
+    thread_ids: list[str] = Field(min_length=1, max_length=500)
+
+
+class ResolveReviewThreadsResult(BaseModel):
+    resolved: list[str]
+    failed: list[str]
+
+
+async def _resolve_review_thread(client: httpx2.AsyncClient, thread_id: str) -> bool:
+    try:
+        response = await github_request(
+            client,
+            "POST",
+            GITHUB_GRAPHQL,
+            json={"query": _RESOLVE_THREAD_MUTATION, "variables": {"threadId": thread_id}},
+        )
+        payload = response.json()
+    except httpx2.HTTPError, ValueError:
+        logger.warning(
+            "Failed to resolve review thread",
+            extra={"review_thread_id": thread_id},
+            exc_info=True,
+        )
+        return False
+    if not isinstance(payload, dict):
+        logger.warning("Unexpected resolve response", extra={"review_thread_id": thread_id})
+        return False
+    thread = _node(payload, "data", "resolveReviewThread", "thread")
+    if thread is None or thread.get("isResolved") is not True:
+        logger.warning(
+            "GitHub did not resolve review thread",
+            extra={
+                "review_thread_id": thread_id,
+                "github_error": _graphql_error_message(payload),
+            },
+        )
+        return False
+    return True
+
+
+async def resolve_review_threads(
+    owner: str, repo: str, number: int, body: ResolveReviewThreads, token: str
+) -> ResolveReviewThreadsResult:
+    """Resolve review threads as the signed-in user, limited to this PR's open threads."""
+    if pull_request_identity({"repo_full_name": f"{owner}/{repo}", "number": number}) is None:
+        raise HTTPException(422, "invalid pull request")
+    async with github_client(token=token) as client:
+        threads = await fetch_unresolved_review_threads(client, owner, repo, number)
+        if threads is None:
+            raise HTTPException(502, "GitHub did not return the review threads")
+        open_ids = {thread["thread_id"] for thread in threads if thread.get("thread_id")}
+        resolved: list[str] = []
+        failed: list[str] = []
+        # Serial on purpose: GitHub's secondary rate limit punishes concurrent mutations.
+        for thread_id in dict.fromkeys(body.thread_ids):
+            if thread_id not in open_ids:
+                continue
+            (resolved if await _resolve_review_thread(client, thread_id) else failed).append(
+                thread_id
+            )
+    return ResolveReviewThreadsResult(resolved=resolved, failed=failed)
 
 
 async def act_on_pull_request(
