@@ -695,6 +695,7 @@ class PreviewFile(BaseModel):
 
 
 class PreviewThread(BaseModel):
+    thread_id: str | None = None
     author: str | None = None
     body: str
     path: str

@@ -18,7 +18,7 @@ import {
   useSidebarLayout,
 } from "@/components/sidebar-layout"
 import { cn } from "@/lib/utils"
-import { getLastAppLocation } from "@/lib/appLocation"
+import { getLastAppLocation, useHrefLinkOptions } from "@/lib/appLocation"
 
 type IconType = ComponentType<SVGProps<SVGSVGElement>>
 
@@ -62,6 +62,7 @@ const LINK_CLASS =
 
 export function AppSidebar({ user }: { user: SessionUser }) {
   const layout = useSidebarLayout()
+  const hrefLinkOptions = useHrefLinkOptions()
   const isDesktop =
     typeof window !== "undefined" && Boolean(window.openSweDesktop)
 
@@ -77,7 +78,7 @@ export function AppSidebar({ user }: { user: SessionUser }) {
         )}
       >
         <Link
-          to={getLastAppLocation()}
+          {...hrefLinkOptions(getLastAppLocation())}
           className={cn(LINK_CLASS, "-mx-2.5 font-medium")}
           onClick={layout.closeOnMobile}
         >

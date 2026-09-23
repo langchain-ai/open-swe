@@ -36,6 +36,7 @@ _TOOL_MODULES = {
     "record_guidance": ".record_guidance",
     "recreate_sandbox": ".recreate_sandbox",
     "refresh_workspace_start": ".workspaces",
+    "configure_repository": ".workspaces",
     "report_platform_issue": ".report_platform_issue",
     "reply_to_finding_thread": ".reply_to_finding_thread",
     "resolve_finding_thread": ".resolve_finding_thread",
@@ -100,6 +101,7 @@ __all__ = [
     "record_guidance",
     "recreate_sandbox",
     "refresh_workspace_start",
+    "configure_repository",
     "report_platform_issue",
     "reply_to_finding_thread",
     "resolve_finding_thread",
@@ -186,6 +188,7 @@ if TYPE_CHECKING:
     from agent.tools.user_skills import delete_user_skill, save_user_skill
     from agent.tools.web_search import web_search
     from agent.tools.workspaces import (
+        configure_repository,
         delete_workspace,
         list_workspaces,
         publish_workspace,
