@@ -37,7 +37,6 @@ from agent.slack import client as slack_utils
 from agent.slack.allowed_bots import AllowedSlackBot, resolve_allowed_slack_bot
 from agent.slack.dm import dm_thread_title, is_dm_channel, is_dm_session
 from agent.slack.failures import report_slack_failure
-from agent.slack.latency import PendingSlackFirstResponse
 from agent.slack.payloads import SlackChannelContext
 from agent.slack.request import SlackRequest
 from agent.slack.thinking import (
@@ -101,6 +100,7 @@ async def _dispatch_or_queue_slack_run(
     configurable: dict[str, Any],
     *,
     explicitly_tagged: bool,
+    trigger_ts: str,
 ) -> dict[str, Any]:
     """Dispatch explicit requests immediately and enqueue other Slack follow-ups."""
     if isinstance(run_input, list):
@@ -112,7 +112,7 @@ async def _dispatch_or_queue_slack_run(
             configurable,
             source="slack",
             input=run_input,
-            metadata=common.AGENT_VERSION_METADATA,
+            metadata={**common.AGENT_VERSION_METADATA, "slack_trigger_ts": trigger_ts},
             client=client,
             multitask_strategy="interrupt" if explicitly_tagged else "enqueue",
         )
@@ -1161,6 +1161,7 @@ async def _process_slack_mention_impl(
             run_input,
             configurable,
             explicitly_tagged=explicitly_tagged,
+            trigger_ts=event_ts,
         )
     except Exception:
         # No run means no completion webhook, so nothing else would ever clear
@@ -1174,17 +1175,6 @@ async def _process_slack_mention_impl(
         thread_id,
     )
     run_id = run.get("run_id")
-    if isinstance(run_id, str) and run_id:
-        await PendingSlackFirstResponse(
-            trigger_ts=event_ts,
-            run_id=run_id,
-            agent_thread_id=thread_id,
-            code_channel=code_channel,
-            dm_session=dm_session,
-            reply_thread_timestamps=list(
-                dict.fromkeys(ts for ts in (thread_ts, reply_thread_ts, original_message_ts) if ts)
-            ),
-        ).register(langgraph_client, channel_id)
     if code_channel and isinstance(run_id, str) and run_id:
         stream_thread_ts = reply_thread_ts or thread_ts
         await stream_slack_thinking_steps(
