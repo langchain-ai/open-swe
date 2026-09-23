@@ -206,7 +206,7 @@ function UsageAnalyticsPeriod({
   const [leaderboardPage, setLeaderboardPage] = useState(1)
   const [sort, setSort] = useState<UsageLeaderboardSort>("rank")
   const [direction, setDirection] = useState<SortDirection>("asc")
-  const [usageScope, setUsageScope] = useState<UsageScope>("invocations")
+  const [usageScope, setUsageScope] = useState<UsageScope>("threads")
   const [leaderboardCursors, setLeaderboardCursors] = useState<
     (string | undefined)[]
   >([undefined])

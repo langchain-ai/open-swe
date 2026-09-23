@@ -951,7 +951,7 @@ it("resets leaderboard pagination when the period changes outside the selector",
   client.clear()
 })
 
-it("switches the usage count and average duration to threads", async () => {
+it("defaults usage counts and duration to threads and can switch to invocations", async () => {
   vi.spyOn(api, "prMergeRateByModel").mockResolvedValue(report(captured))
   vi.mocked(api.usageLeaderboard).mockResolvedValue({
     ...emptyUsage,
@@ -968,21 +968,26 @@ it("switches the usage count and average duration to threads", async () => {
   })
   const client = mountReport()
   expect(
-    await screen.findByRole("columnheader", { name: "Invocations" })
+    await screen.findByRole("columnheader", { name: "Threads" })
   ).toBeTruthy()
-  expect(
-    screen.getByRole("columnheader", { name: "Avg Invocation Duration" })
-  ).toBeTruthy()
-
-  fireEvent.click(screen.getByRole("button", { name: "threads" }))
-
-  expect(screen.getByRole("columnheader", { name: "Threads" })).toBeTruthy()
   expect(
     screen.getByRole("columnheader", { name: "Avg Thread Duration" })
   ).toBeTruthy()
+  expect(
+    screen.getByRole("button", { name: "threads" }).getAttribute("aria-pressed")
+  ).toBe("true")
   const row = screen.getByText("Cost Reader").closest("tr")!
   expect(within(row).getByText("2")).toBeTruthy()
   expect(within(row).getByText("2m")).toBeTruthy()
+
+  fireEvent.click(screen.getByRole("button", { name: "invocations" }))
+
+  expect(screen.getByRole("columnheader", { name: "Invocations" })).toBeTruthy()
+  expect(
+    screen.getByRole("columnheader", { name: "Avg Invocation Duration" })
+  ).toBeTruthy()
+  expect(within(row).getByText("4")).toBeTruthy()
+  expect(within(row).getByText("30s")).toBeTruthy()
   client.clear()
 })
 
@@ -1056,7 +1061,7 @@ it("shows usage metrics but removes stale results when a refresh becomes unavail
   expect(screen.getByText("configured-model")).toBeTruthy()
   expect(screen.getByText("1,234")).toBeTruthy()
   expect(screen.getByText("$2.50")).toBeTruthy()
-  expect(screen.getByText("2m")).toBeTruthy()
+  expect(screen.getByRole("columnheader", { name: "Threads" })).toBeTruthy()
   expect(screen.getByText("0.25")).toBeTruthy()
   expect(screen.getByTitle("50 additions, 15 deletions").textContent).toBe("35")
   expect(screen.getByText("7 human replies tracked")).toBeTruthy()
@@ -1285,6 +1290,7 @@ it.each([
       })
     )
     const client = mountReport()
+    fireEvent.click(screen.getByRole("button", { name: "invocations" }))
     fireEvent.click(
       await screen.findByRole("button", { name: invocationLabel })
     )
@@ -1348,6 +1354,7 @@ it("keeps sort controls focused while loading and prevents using a stale page cu
     .mockResolvedValueOnce(initial)
     .mockReturnValue(sorted)
   const client = mountReport()
+  fireEvent.click(screen.getByRole("button", { name: "invocations" }))
   const header = await screen.findByRole("button", {
     name: "Invocations",
   })
@@ -1412,6 +1419,9 @@ it.each([
     })
     const client = mountReport()
     await screen.findByText("Cost Reader")
+    if (label === "Invocations") {
+      fireEvent.click(screen.getByRole("button", { name: "invocations" }))
+    }
 
     for (const direction of [first, second]) {
       fireEvent.click(screen.getByRole("button", { name: label }))
