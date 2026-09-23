@@ -1147,7 +1147,11 @@ async def link_pull_request(pr_url: str, resolves_thread: bool = False) -> dict[
     if not token:
         return {"success": False, "error": "No GitHub token was available to read the PR"}
     async with httpx2.AsyncClient(timeout=30.0) as client:
-        if kind == "user" and not await _workspace_has_repository(client, ref.owner, ref.repo):
+        if (
+            kind == "user"
+            and await private_credential_login() is None
+            and not await _workspace_has_repository(client, ref.owner, ref.repo)
+        ):
             return {"success": False, "error": f"{ref.owner}/{ref.repo} is not in this workspace"}
         pr = await _fetch_pr_details(client, token, ref.owner, ref.repo, ref.number)
         if not pr:
