@@ -774,7 +774,7 @@ async def _process_slack_mention_impl(
     thread_metadata = await common.authorize_github_thread(
         thread_id, (await _slack_login(user_id, user_email) or "") if allowed_bot is None else ""
     )
-    context_thread_ts = reply_thread_ts or thread_ts
+    context_thread_ts = request.context_thread_ts or reply_thread_ts or thread_ts
     thread_messages = (
         []
         if message_update
@@ -801,13 +801,17 @@ async def _process_slack_mention_impl(
     elif current_message is not None and attachments and not current_message.get("attachments"):
         current_message["attachments"] = attachments
 
-    context_messages = common.select_slack_context_messages(
-        thread_messages,
-        event_ts,
-        bot_user_id,
-        common.SLACK_BOT_USERNAME,
-        treat_all_messages_as_mentions=treat_all_messages_as_mentions,
-    )[0]
+    context_messages = (
+        sorted(thread_messages, key=lambda message: common.parse_slack_ts(message.get("ts")))
+        if request.context_thread_ts
+        else common.select_slack_context_messages(
+            thread_messages,
+            event_ts,
+            bot_user_id,
+            common.SLACK_BOT_USERNAME,
+            treat_all_messages_as_mentions=treat_all_messages_as_mentions,
+        )[0]
+    )
     source_messages = (
         [{"ts": event_ts, "text": text, "user": user_id, "attachments": attachments}]
         if message_update

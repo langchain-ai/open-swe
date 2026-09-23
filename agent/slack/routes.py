@@ -18,6 +18,7 @@ from agent.slack.ask import (
     ask_thread_id,
     process_slack_ask,
 )
+from agent.slack.breakout import parse_breakout_command, process_slack_breakout
 from agent.slack.dm import DM_SESSION_TS, dm_session_enabled, is_dm_channel
 from agent.slack.failures import (
     SlackRequestError,
@@ -514,30 +515,37 @@ async def slack_webhook(
             thread_id=thread_id,
         )
         if await common.claim_slack_event(event_id, channel_id, event_ts):
-            background_tasks.add_task(
-                service.process_slack_mention,
-                SlackRequest(
-                    channel_id=channel_id,
-                    channel_context=channel_context,
-                    thread_ts=thread_ts,
-                    event_ts=event_ts,
-                    original_message_ts=original_message_ts,
-                    event_id=event_id,
-                    user_id=user_id,
-                    text=text,
-                    attachments=attachments,
-                    bot_user_id=bot_user_id,
-                    thread_id=thread_id,
-                    treat_all_messages_as_mentions=is_direct_message or in_code_channel,
-                    code_channel=in_code_channel,
-                    dm_session=in_dm,
-                    reply_thread_ts=reply_thread_ts if in_code_channel or in_dm else "",
-                    team_id=team_id,
-                    triggering_bot_id=allowed_bot.bot_id if allowed_bot else "",
-                    triggering_bot_app_id=updated_message.app_id if allowed_bot else "",
-                ),
-                repo,
+            request = SlackRequest(
+                channel_id=channel_id,
+                channel_context=channel_context,
+                thread_ts=thread_ts,
+                event_ts=event_ts,
+                original_message_ts=original_message_ts,
+                event_id=event_id,
+                user_id=user_id,
+                text=text,
+                attachments=attachments,
+                bot_user_id=bot_user_id,
+                thread_id=thread_id,
+                treat_all_messages_as_mentions=is_direct_message or in_code_channel,
+                code_channel=in_code_channel,
+                dm_session=in_dm,
+                reply_thread_ts=reply_thread_ts if in_code_channel or in_dm else "",
+                team_id=team_id,
+                triggering_bot_id=allowed_bot.bot_id if allowed_bot else "",
+                triggering_bot_app_id=updated_message.app_id if allowed_bot else "",
             )
+            breakout_instruction = (
+                None
+                if in_code_channel or in_dm or allowed_bot is not None
+                else parse_breakout_command(text, bot_user_id)
+            )
+            if breakout_instruction is not None:
+                background_tasks.add_task(
+                    process_slack_breakout, request, breakout_instruction, repo
+                )
+                return accepted("Slack breakout queued")
+            background_tasks.add_task(service.process_slack_mention, request, repo)
             return accepted("Slack mention queued")
 
         common.logger.info("Ignoring duplicate delivery of Slack event %s", event_id)
