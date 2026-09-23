@@ -20,7 +20,6 @@ from fastapi import HTTPException
 from agent.dashboard.options import SUPPORTED_MODEL_IDS, canonical_model_pair, model_supports_effort
 from agent.github.app import get_github_app_installation_token
 from agent.review.diff import fetch_pr_diff
-from agent.review.findings import REVIEWER_THREAD_KIND
 from agent.review.reviews import classify_finding, get_pr_head_sha, get_review
 from agent.thread_ids import review_chat_thread_id, reviewer_thread_id
 from agent.threads.proxy import (
@@ -49,19 +48,14 @@ def _now_ms() -> int:
 _TITLE_MAX_CHARS = 60
 
 
-async def _reviewer_thread_exists(owner: str, repo: str, pr_number: int) -> bool:
-    try:
-        thread = await langgraph_client().threads.get(reviewer_thread_id(owner, repo, pr_number))
-    except Exception:  # noqa: BLE001
-        return False
-    metadata = thread.get("metadata") if isinstance(thread, dict) else None
-    return isinstance(metadata, dict) and metadata.get("kind") == REVIEWER_THREAD_KIND
-
-
 async def get_review_chat(owner: str, repo: str, pr_number: int, login: str) -> dict[str, Any]:
-    """Chat availability for this PR, and the one thread this user chats in."""
+    """Chat availability for this PR, and the one thread this user chats in.
+
+    Chat seeds itself from the PR's diff and details, so it needs no review to
+    have run; findings are simply empty until one does.
+    """
     return {
-        "available": await _reviewer_thread_exists(owner, repo, pr_number),
+        "available": True,
         "assistant_id": _CHAT_ASSISTANT_ID,
         "thread_id": review_chat_thread_id(owner, repo, pr_number, login),
     }
