@@ -25,6 +25,7 @@ _TOOL_MODULES = {
     "manage_code_channel": "agent.slack.tools.manage_code_channel",
     "manage_incident": "agent.incidents.tools",
     "manage_thread": ".threads",
+    "merge_expedited_pr": ".merge_expedited_pr",
     "notify_automation_channel": ".notify_automation_channel",
     "open_pull_request": ".open_pull_request",
     "output_iframe": ".output_iframe",
@@ -89,6 +90,7 @@ __all__ = [
     "manage_code_channel",
     "manage_incident",
     "manage_thread",
+    "merge_expedited_pr",
     "notify_automation_channel",
     "open_pull_request",
     "output_iframe",
@@ -163,6 +165,7 @@ if TYPE_CHECKING:
     from agent.tools.list_findings import list_findings
     from agent.tools.list_review_findings import list_review_findings
     from agent.tools.manage_baby_sit import manage_baby_sit
+    from agent.tools.merge_expedited_pr import merge_expedited_pr
     from agent.tools.notify_automation_channel import notify_automation_channel
     from agent.tools.open_pull_request import open_pull_request
     from agent.tools.organization_skills import delete_organization_skill, save_organization_skill

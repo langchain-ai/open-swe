@@ -182,6 +182,7 @@ from agent.tools import (
     manage_code_channel,
     manage_incident,
     manage_thread,
+    merge_expedited_pr,
     notify_automation_channel,
     open_pull_request,
     output_iframe,
@@ -469,6 +470,7 @@ INCIDENT_AUTOMATIC_EXCLUDED_TOOLS: frozenset[str] = frozenset(
         "expose_port",
         "http_request",
         "expedite_pr_approval",
+        "merge_expedited_pr",
         "manage_baby_sit",
         "manage_thread",
         "open_pull_request",
@@ -1370,6 +1372,7 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
         manage_thread,
         manage_baby_sit,
         expedite_pr_approval,
+        merge_expedited_pr,
         notify_automation_channel,
         open_pull_request,
         *(
@@ -1420,7 +1423,9 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
         or not ENV.SLACK_BOT_TOKEN.get()
         or not (await cached_workspace_settings(settings_workspace)).expedited_review_enabled
     ):
-        static_tools = [tool for tool in static_tools if tool is not expedite_pr_approval]
+        static_tools = [
+            tool for tool in static_tools if tool not in (expedite_pr_approval, merge_expedited_pr)
+        ]
     incident_automatic = incident_session is not None and incident_session.explicit_request is None
     if incident_session is not None:
         static_tools.extend(incident_session.tools)
