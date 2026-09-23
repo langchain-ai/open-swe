@@ -2376,6 +2376,66 @@ async def test_list_dashboard_threads_page_scopes_automation_runs(monkeypatch) -
     assert automation["items"][0]["automationId"] == "schedule-1"
 
 
+def _metadata_contains(document: object, subset: object) -> bool:
+    if isinstance(subset, dict):
+        return isinstance(document, dict) and all(
+            key in document and _metadata_contains(document[key], value)
+            for key, value in subset.items()
+        )
+    return document == subset
+
+
+async def test_interactive_listing_does_not_page_through_automation_threads(monkeypatch) -> None:
+    def thread(thread_id: str, updated_at_ms: int, **metadata: object) -> dict[str, object]:
+        return {
+            "thread_id": thread_id,
+            "metadata": {
+                "source": "dashboard",
+                "participant_logins": {"octocat": True},
+                "latest_run_status": "success",
+                "updated_at_ms": updated_at_ms,
+                **metadata,
+            },
+        }
+
+    automation = {"source": "schedule", "thread_category": "automation", "schedule_id": "s1"}
+    threads = [
+        *(thread(f"automation-{index}", 1000 + index, **automation) for index in range(200)),
+        # Relabelled by a Slack mention before categories were kept.
+        thread(
+            "relabelled",
+            2000,
+            **{**automation, "source": "slack", "thread_category": "interactive"},
+        ),
+        thread("chat", 3, thread_category="interactive"),
+        thread("pr", 2, thread_category="pull_request"),
+        {
+            "thread_id": "legacy",
+            "metadata": {"github_login": "octocat", "latest_run_status": "success"},
+        },
+    ]
+    fetched: list[str] = []
+
+    class FakeThreads:
+        async def search(self, *, metadata, limit, offset, sort_by, sort_order, select):
+            matches = [t for t in threads if _metadata_contains(t["metadata"], metadata)]
+            matches.sort(key=thread_listing._thread_updated_ms, reverse=True)
+            page = matches[offset : offset + limit]
+            fetched.extend(cast(str, t["thread_id"]) for t in page)
+            return page
+
+    patch_thread_module(
+        monkeypatch, "langgraph_client", lambda: SimpleNamespace(threads=FakeThreads())
+    )
+
+    result = await thread_listing.list_dashboard_threads_page(
+        "octocat", email=None, scope="interactive"
+    )
+
+    assert [item["id"] for item in result["items"]] == ["chat", "pr", "legacy"]
+    assert not [thread_id for thread_id in fetched if thread_id.startswith("automation-")]
+
+
 async def test_list_dashboard_threads_page_scopes_search_to_requested_participant(
     monkeypatch,
 ) -> None:

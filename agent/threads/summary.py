@@ -252,7 +252,7 @@ def _is_automation_thread(metadata: Mapping[str, Any]) -> bool:
     )
 
 
-def _thread_classification(metadata: Mapping[str, Any]) -> tuple[str, str, str]:
+def thread_classification(metadata: Mapping[str, Any]) -> tuple[str, str, str]:
     source = thread_source(metadata)
     origin = _metadata_string(metadata, "origin") or source
     trigger_kind = _metadata_string(metadata, "trigger_kind") or (
@@ -366,7 +366,7 @@ async def _thread_summary(
     pr_url = metadata.get("pr_url")
     pr_title = metadata.get("pr_title")
     pr_state = metadata.get("pr_state")
-    thread_category, origin, trigger_kind = _thread_classification(metadata)
+    thread_category, origin, trigger_kind = thread_classification(metadata)
 
     thread_id = thread.get("thread_id") or thread.get("id")
     trace_url = await get_langsmith_trace_url(thread_id) if isinstance(thread_id, str) else None

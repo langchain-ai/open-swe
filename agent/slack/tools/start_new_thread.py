@@ -311,6 +311,7 @@ async def slack_start_new_thread(
 
     metadata: dict[str, Any] = {
         "source": "slack",
+        "thread_category": "interactive",
         "title": clean_title[:80],
         "visibility": visibility,
         "owner_type": owner_type,

@@ -34,6 +34,8 @@ from agent.utils.thread_participants import participant_search_filters
 from agent.workspaces.routing import workspace_for_repo
 from agent.workspaces.store import DEFAULT_WORKSPACE_SLUG
 
+ThreadListScope = Literal["all", "interactive", "automation"]
+
 _THREADS_SEARCH_PAGE = 50
 _THREADS_PAGE_SCAN_CAP = 5000
 _THREAD_LIST_SELECT: list[ThreadSelectField] = [
@@ -46,17 +48,32 @@ _THREAD_LIST_SELECT: list[ThreadSelectField] = [
 _PINNED_THREADS_BATCH_SIZE = 1000
 _RUN_REFRESH_CONCURRENCY = 8
 _RUNNING_METADATA_STATUSES = {"pending", "running"}
+_INTERACTIVE_THREAD_CATEGORIES = ("interactive", "pull_request", "issue")
 
 
 def _participant_search_filters(
-    login: str, *, email: str | None = None, include_all: bool = False
+    login: str,
+    *,
+    email: str | None = None,
+    include_all: bool = False,
+    scope: ThreadListScope = "all",
 ) -> list[dict[str, Any]]:
+    filters = [{}] if include_all else participant_search_filters(login, email)
+    if scope == "interactive":
+        # Metadata search cannot exclude a value, and some viewers participate in
+        # thousands of automation threads. Matching each other category lets the
+        # metadata index skip them instead of this module paging past them.
+        filters = [
+            {**search_filter, "thread_category": category}
+            for search_filter in filters
+            for category in _INTERACTIVE_THREAD_CATEGORIES
+        ]
     if include_all:
-        return [{}]
-    filters = participant_search_filters(login, email)
+        return filters
     # Threads created before participants existed carry only these two keys, and
     # object containment cannot match them. Drop both once those threads have
-    # aged out or been backfilled.
+    # aged out or been backfilled. They may predate categories too, so they are
+    # never split by category.
     filters.append({"github_login": login})
     if email and email.strip():
         filters.append({"triggering_user_email": email.strip().lower()})
@@ -113,7 +130,7 @@ def _metadata_matches_filters(
     resolved: bool | None,
     source: str | None,
     query: str | None,
-    scope: Literal["all", "interactive", "automation"] = "all",
+    scope: ThreadListScope = "all",
     automation_id: str | None = None,
     repo: str | None = None,
     ownerless: bool = False,
@@ -267,7 +284,7 @@ async def _collect_thread_candidates(
     resolved: bool | None = None,
     source: str | None = None,
     query: str | None = None,
-    scope: Literal["all", "interactive", "automation"] = "all",
+    scope: ThreadListScope = "all",
     automation_id: str | None = None,
     repo: str | None = None,
     ownerless: bool = False,
@@ -279,9 +296,8 @@ async def _collect_thread_candidates(
     surfaced_only: bool = False,
     sort_by: _ThreadSortBy = "updated_at",
 ) -> list[ThreadLike]:
-    seen: dict[str, ThreadLike] = {}
-    for search_filter in searches:
-        matched_for_search = 0
+    async def collect_matches(search_filter: dict[str, Any]) -> list[tuple[str, ThreadLike]]:
+        matched: list[tuple[str, ThreadLike]] = []
         offset = 0
         metadata_filter = _search_metadata_filter(
             search_filter,
@@ -326,13 +342,18 @@ async def _collect_thread_candidates(
                 thread_id = _thread_id(thread)
                 if not thread_id:
                     continue
-                matched_for_search += 1
-                seen.setdefault(thread_id, thread)
+                matched.append((thread_id, thread))
             if len(batch) < _THREADS_SEARCH_PAGE:
                 break
-            if target_per_search is not None and matched_for_search >= target_per_search:
+            if target_per_search is not None and len(matched) >= target_per_search:
                 break
             offset += _THREADS_SEARCH_PAGE
+        return matched
+
+    seen: dict[str, ThreadLike] = {}
+    for matched in await asyncio.gather(*(collect_matches(search) for search in searches)):
+        for thread_id, thread in matched:
+            seen.setdefault(thread_id, thread)
     return sorted(
         seen.values(), key=lambda thread: _thread_timestamp_ms(thread, sort_by), reverse=True
     )
@@ -426,13 +447,14 @@ async def list_dashboard_thread_repos(
     nest repositories under their workspace; an unassigned repository belongs
     to ``default``.
     """
+    scope: ThreadListScope = "all" if include_automations else "interactive"
     candidates = await _collect_thread_candidates(
         langgraph_client(),
-        _participant_search_filters(login, email=email, include_all=include_all),
+        _participant_search_filters(login, email=email, include_all=include_all, scope=scope),
         viewer_login=login,
         viewer_email=email,
         resolved=None if include_resolved else False,
-        scope="all" if include_automations else "interactive",
+        scope=scope,
     )
     repos: dict[str, dict[str, Any]] = {}
     for thread in candidates:
@@ -482,7 +504,7 @@ async def list_dashboard_threads_page(
     source: str | None = None,
     status: str | None = None,
     query: str | None = None,
-    scope: Literal["all", "interactive", "automation"] = "all",
+    scope: ThreadListScope = "all",
     automation_id: str | None = None,
     repo: str | None = None,
     ownerless: bool = False,
@@ -498,7 +520,9 @@ async def list_dashboard_threads_page(
     searches = (
         [{"thread_category": "automation"}, {"source": "schedule"}]
         if scope == "automation" and filter_participant_login is None
-        else _participant_search_filters(search_login, email=search_email, include_all=include_all)
+        else _participant_search_filters(
+            search_login, email=search_email, include_all=include_all, scope=scope
+        )
     )
     safe_offset = max(offset, 0)
     safe_limit = min(max(limit, 1), 100)

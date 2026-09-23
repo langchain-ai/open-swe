@@ -705,6 +705,22 @@ async def test_upsert_agent_thread_metadata_clears_pr_attention_on_follow_up() -
 
 
 @pytest.mark.asyncio
+async def test_upsert_agent_thread_metadata_keeps_existing_category() -> None:
+    metadata = await _slack_follow_up(
+        _follow_up_client(
+            {
+                "source": "schedule",
+                "created_at_ms": 1,
+                "thread_category": "automation",
+                "schedule_id": "s1",
+            }
+        )
+    )
+
+    assert "thread_category" not in metadata
+
+
+@pytest.mark.asyncio
 async def test_upsert_agent_thread_metadata_unresolves_auto_resolved_thread() -> None:
     metadata = await _slack_follow_up(
         _follow_up_client(
