@@ -164,6 +164,7 @@ from agent.tool_loaders.notion_mcp import load_notion_tools
 from agent.tools import (
     background_execute,
     background_task,
+    configure_repository,
     create_automation,
     create_sandbox_file_download_url,
     delete_automation,
@@ -480,6 +481,7 @@ INCIDENT_AUTOMATIC_EXCLUDED_TOOLS: frozenset[str] = frozenset(
         "slack_start_new_thread",
         "publish_workspace",
         "refresh_workspace_start",
+        "configure_repository",
         "delete_workspace",
         "create_automation",
         "update_automation",
@@ -615,6 +617,7 @@ ADMIN_TOOLS = (
     list_workspaces,
     publish_workspace,
     refresh_workspace_start,
+    configure_repository,
     delete_workspace,
     save_organization_skill,
     delete_organization_skill,

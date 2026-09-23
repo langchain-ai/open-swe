@@ -207,12 +207,12 @@ function senderKind(
   attributes: Record<string, string>,
   entities: ReadonlyMap<string, StructuredEntity>
 ): StructuredSenderKind {
+  const entity = entities.get(attributes.sender ?? "")
+  if (entity?.senderType === "bot") return "person"
   const explicit = attributes.kind?.toLowerCase()
   if (explicit === "system" || explicit === "automation") return "system"
   if (explicit === "human" || explicit === "person") return "person"
-  return entities.get(attributes.sender ?? "")?.kind === "system"
-    ? "system"
-    : "person"
+  return entity?.kind === "system" ? "system" : "person"
 }
 
 export function parseStructuredInput(

@@ -76,6 +76,9 @@ class WorkspaceRepositoryRow(Base):
         ForeignKey("repository.id", ondelete="CASCADE"), primary_key=True
     )
     workspace_id: Mapped[UUID] = mapped_column(ForeignKey("workspace.id", ondelete="CASCADE"))
+    # Whether a workflow in this repository may federate its own GitHub OIDC
+    # token into a run. Binding a repository must not imply it.
+    may_start_threads: Mapped[bool] = mapped_column(server_default="false", default=False)
     linked_at: Mapped[datetime | None] = mapped_column(server_default=NOW, init=False)
 
 

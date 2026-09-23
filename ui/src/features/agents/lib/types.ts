@@ -211,6 +211,7 @@ export interface Message {
   structuredSenderKind?: "person" | "system"
   structuredSenderName?: string
   structuredSenderNote?: string
+  structuredSenderIsBot?: boolean
   structuredSurface?: string
   /** Id of the user message that opened this agent run and keys its diff artifact. */
   turnKey?: string

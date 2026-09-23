@@ -184,6 +184,21 @@ open_swe_account: unlinked
     expect(entities.get("slack:U456")?.openSweAccount).toBe("unlinked")
   })
 
+  it("renders Slack bot messages as ordinary messages, not collapsed context", () => {
+    const bot = `<dynamic-context kind="system" id="system:slack-bot-B9">
+display_name: Deploybot
+sender_type: bot
+</dynamic-context>`
+    const entities = collectStructuredEntities([bot])
+
+    expect(
+      parseStructuredInput(
+        '<input-message sender="system:slack-bot-B9" surface="slack" kind="system">\nDeploy failed\n</input-message>',
+        entities
+      )
+    ).toMatchObject({ type: "message", senderKind: "person" })
+  })
+
   it("decodes escaped markup as plain text and supports numeric entities", () => {
     expect(
       decodeXmlText("&lt;img src=x onerror=alert(1)&gt; &#x26; &#38;")
