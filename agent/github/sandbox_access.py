@@ -1,29 +1,27 @@
 """Repository-scoped credentials for sandbox GitHub traffic."""
 
 import logging
-from collections import OrderedDict
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from typing import Annotated
 
 from githubkit.auth import TokenAuthStrategy
-from pydantic import BaseModel, PositiveInt
+from pydantic import AwareDatetime, BaseModel, Field, PositiveInt
 
 from agent.github import app
 from agent.github.app import (
-    PermissionKey,
     PermissionMap,
     get_github_app_installation_token_with_expiry,
-    normalize_permissions,
 )
 from agent.github.sdk import GITHUB_API_VERSION, github_sdk
+from agent.store import TypedStore, put_value
 from agent.workspaces.store import DEFAULT_WORKSPACE_SLUG, WORKSPACES
 
 logger = logging.getLogger(__name__)
 
-_REFRESH_MARGIN = timedelta(minutes=10)
-_MAX_CACHED_THREADS = 512
-type AccessScope = tuple[str, str, str, tuple[str, ...], PermissionKey]
+_REPOSITORY_SCOPE_TTL = timedelta(minutes=50)
+type RepositoryScope = tuple[str, str, str, tuple[str, ...]]
 
 
 class _InstallationRepository(BaseModel):
@@ -37,14 +35,13 @@ class SandboxGitHubAccess:
     expires_at: str | None = None
 
 
-@dataclass(frozen=True)
-class _ThreadAccess:
-    scope: AccessScope
-    access: SandboxGitHubAccess
-    expires_at: datetime
+class _ThreadRepositories(BaseModel):
+    scope: RepositoryScope
+    repository_ids: tuple[Annotated[int, Field(strict=True, gt=0)], ...]
+    expires_at: AwareDatetime
 
 
-_THREAD_ACCESS: OrderedDict[str, _ThreadAccess] = OrderedDict()
+_THREAD_REPOSITORIES = TypedStore(["sandbox_github_repositories", "v1"], _ThreadRepositories)
 
 
 async def repository_token(
@@ -59,6 +56,11 @@ async def repository_token(
     allowed = {repo.lower() for repo in repositories}
     if not allowed:
         return SandboxGitHubAccess()
+    repository_ids = await _discover_repository_ids(allowed)
+    return await _repository_ids_token(repository_ids, permissions=permissions)
+
+
+async def _discover_repository_ids(allowed: set[str]) -> tuple[int, ...]:
     discovery_token, _ = await get_github_app_installation_token_with_expiry()
     if not discovery_token:
         raise RuntimeError("GitHub App installation token is unavailable")
@@ -73,14 +75,50 @@ async def repository_token(
             repo = _InstallationRepository.model_validate(item)
             if repo.full_name.lower() in allowed:
                 repository_ids.append(repo.id)
+    return tuple(sorted(set(repository_ids)))
+
+
+async def _repository_ids_token(
+    repository_ids: Sequence[int], *, permissions: PermissionMap | None
+) -> SandboxGitHubAccess:
     if not repository_ids:
         return SandboxGitHubAccess()
     token, expires_at = await get_github_app_installation_token_with_expiry(
-        repository_ids=sorted(set(repository_ids)), permissions=permissions
+        repository_ids=repository_ids, permissions=permissions
     )
     if not token:
         raise RuntimeError("Workspace GitHub repository token is unavailable")
     return SandboxGitHubAccess(token, expires_at)
+
+
+async def _thread_repository_ids(
+    thread_id: str, scope: RepositoryScope, allowed: set[str]
+) -> tuple[int, ...]:
+    # Store failures are cache misses; only a successful GitHub lookup can replace them.
+    try:
+        cached = await _THREAD_REPOSITORIES.get(thread_id)
+    except Exception:
+        logger.warning("GitHub repository scope cache read failed", exc_info=True)
+        cached = None
+    if cached is not None and cached.scope == scope and cached.expires_at > datetime.now(UTC):
+        return cached.repository_ids
+
+    repository_ids = await _discover_repository_ids(allowed)
+    record = _ThreadRepositories(
+        scope=scope,
+        repository_ids=repository_ids,
+        expires_at=datetime.now(UTC) + _REPOSITORY_SCOPE_TTL,
+    )
+    try:
+        await put_value(
+            _THREAD_REPOSITORIES.namespace,
+            thread_id,
+            record.model_dump(mode="json"),
+            ttl=60,
+        )
+    except Exception:
+        logger.warning("GitHub repository scope cache write failed", exc_info=True)
+    return repository_ids
 
 
 async def workspace_token(
@@ -100,34 +138,15 @@ async def workspace_token(
     allowed = {repo.lower() for repo in workspace.repos}
     if repositories is not None:
         allowed.intersection_update(repo.lower() for repo in repositories)
-    scope: AccessScope = (
+    if not allowed:
+        return SandboxGitHubAccess()
+    if not thread_id:
+        return await repository_token(sorted(allowed), permissions=permissions)
+    scope: RepositoryScope = (
         app.GITHUB_APP_ID,
         app.GITHUB_APP_INSTALLATION_ID,
         slug,
         tuple(sorted(allowed)),
-        normalize_permissions(permissions),
     )
-    if thread_id:
-        cached = _THREAD_ACCESS.pop(thread_id, None)
-        if (
-            cached is not None
-            and cached.scope == scope
-            and cached.expires_at > datetime.now(UTC) + _REFRESH_MARGIN
-        ):
-            _THREAD_ACCESS[thread_id] = cached
-            return cached.access
-
-    access = await repository_token(sorted(allowed), permissions=permissions)
-    if thread_id and access.token and access.expires_at:
-        try:
-            expires_at = datetime.fromisoformat(access.expires_at)
-        except ValueError:
-            logger.warning("Cannot cache GitHub access with invalid expiry", exc_info=True)
-            return access
-        if expires_at.tzinfo is None:
-            expires_at = expires_at.replace(tzinfo=UTC)
-        if expires_at > datetime.now(UTC) + _REFRESH_MARGIN:
-            _THREAD_ACCESS[thread_id] = _ThreadAccess(scope, access, expires_at)
-            while len(_THREAD_ACCESS) > _MAX_CACHED_THREADS:
-                _THREAD_ACCESS.popitem(last=False)
-    return access
+    repository_ids = await _thread_repository_ids(thread_id, scope, allowed)
+    return await _repository_ids_token(repository_ids, permissions=permissions)
