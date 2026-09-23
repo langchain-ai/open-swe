@@ -519,7 +519,9 @@ async def test_slack_reply_passes_model_reported_usage(
         captured.update(kwargs)
         return "2.0", None
 
-    monkeypatch.setattr(slack_reply_tool, "get_config", _config)
+    config = _config()
+    config["configurable"]["resolved_agent_effort"] = "high"
+    monkeypatch.setattr(slack_reply_tool, "get_config", lambda: config)
     monkeypatch.setattr(slack_reply_tool, "_post_and_store_mapping", fake_post_and_store_mapping)
     state = {
         "messages": [
@@ -537,6 +539,7 @@ async def test_slack_reply_passes_model_reported_usage(
     assert result == {"success": True}
     usage = captured["usage"]
     assert usage.models == ("model-a",)
+    assert usage.reasoning_effort == "high"
     assert usage.total_tokens == 110
 
 

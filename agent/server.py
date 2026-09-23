@@ -1297,6 +1297,7 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
     source = cfg.source or "dashboard"
     configurable["source"] = source
     configurable["resolved_agent_model_id"] = model_id
+    configurable["resolved_agent_effort"] = profile_effort
     user_email = cfg.user_email or ""
 
     async with aphase(thread_id, "factory.admin_thread"):

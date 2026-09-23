@@ -590,8 +590,21 @@ def test_slack_reference_precedes_attribution_footer(monkeypatch: pytest.MonkeyP
     )
 
 
-def test_footer_names_the_model_that_opened_the_pr(monkeypatch: pytest.MonkeyPatch) -> None:
-    _set_config(monkeypatch, {"source": "dashboard", "thread_id": "thread-1"})
+@pytest.mark.parametrize(
+    "thread_metadata", [{}, {"model": "openai:gpt-5.6-luna", "effort": "xhigh"}]
+)
+def test_footer_names_the_model_that_opened_the_pr(
+    monkeypatch: pytest.MonkeyPatch, thread_metadata: dict[str, str]
+) -> None:
+    _set_config(
+        monkeypatch,
+        {
+            "source": "dashboard",
+            "thread_id": "thread-1",
+            "resolved_agent_model_id": "openai:gpt-5.6-luna",
+            "resolved_agent_effort": "xhigh",
+        },
+    )
     monkeypatch.setattr(opr, "private_credential_login", AsyncMock(return_value="test-owner"))
     monkeypatch.setattr(opr, "_resolve_pr_author_token", lambda *_a, **_k: _coro(("tok", "user")))
     client = _RoutingClient(
@@ -602,11 +615,7 @@ def test_footer_names_the_model_that_opened_the_pr(monkeypatch: pytest.MonkeyPat
         opr,
         "get_client",
         lambda: SimpleNamespace(
-            threads=SimpleNamespace(
-                get=AsyncMock(
-                    return_value={"metadata": {"model": "openai:gpt-5.6-luna", "effort": "xhigh"}}
-                )
-            )
+            threads=SimpleNamespace(get=AsyncMock(return_value={"metadata": thread_metadata}))
         ),
     )
 
