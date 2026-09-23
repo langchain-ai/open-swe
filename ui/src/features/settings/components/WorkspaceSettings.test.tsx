@@ -216,7 +216,7 @@ describe("WorkspaceSettingsPanel", () => {
   })
 
   it.each(["success", "failed"] as const)(
-    "follows a repository rebuild through stale polls to %s",
+    "follows a repository rebuild from the saved refresh marker through stale polls to %s",
     async (outcome) => {
       const initial = {
         ...RECORD,
@@ -227,7 +227,11 @@ describe("WorkspaceSettingsPanel", () => {
         installations: [],
         repositories: [],
       })
-      const saved = { ...initial, repos: [] }
+      const saved = {
+        ...initial,
+        repos: [],
+        refresh_finished_at: "2026-01-01T00:00:30Z",
+      }
       vi.spyOn(api, "updateWorkspace").mockResolvedValue(saved)
       renderPage()
 

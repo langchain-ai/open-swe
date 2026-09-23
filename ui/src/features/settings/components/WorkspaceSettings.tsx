@@ -197,7 +197,7 @@ export function WorkspaceSettingsPanel({
     ) {
       setRepositoryRebuild({
         slug,
-        finishedAt: record.data.refresh_finished_at,
+        finishedAt: saved.refresh_finished_at,
       })
     }
     qc.setQueryData(workspaceRecordKey(slug), saved)
