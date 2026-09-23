@@ -742,14 +742,14 @@ function PRMergeRateSection({
               bound even when every eligible PR merged.
             </p>
             <p>
-              <strong>Avg time to merge</strong> is the arithmetic mean of time
-              from PR opened to merged across merged PRs opened in the selected
+              <strong>Time to merge</strong> is the arithmetic mean of time from
+              PR opened to merged across merged PRs opened in the selected
               period. Unmerged PRs are excluded, and it shows — when a group has
               no merges.
             </p>
             <p>
-              <strong>Avg time to PR</strong> is the arithmetic mean of time
-              from opening-run start to PR creation across all PRs opened in the
+              <strong>Time to PR</strong> is the arithmetic mean of time from
+              opening-run start to PR creation across all PRs opened in the
               selected period. PRs without a valid opening-run start time are
               excluded, and it shows — when a group has none.
             </p>
@@ -803,7 +803,7 @@ function AvgTimeToPR({
       <span
         className="cursor-help rounded-sm underline decoration-dotted underline-offset-2 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
         title="Metric unavailable from this backend"
-        aria-label="Avg time to PR: metric unavailable from this backend"
+        aria-label="Time to PR: metric unavailable from this backend"
         tabIndex={0}
       >
         —
@@ -813,17 +813,7 @@ function AvgTimeToPR({
   if (cohort.avg_delivery_seconds == null) {
     return <span title="No PRs with valid timing in this group">—</span>
   }
-  return (
-    <Tooltip>
-      <TooltipTrigger className="cursor-help rounded-sm underline decoration-dotted underline-offset-2 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring">
-        {formatAvgDuration(cohort.avg_delivery_seconds)}
-      </TooltipTrigger>
-      <TooltipPopup className="max-w-xs">
-        Based on PRs whose opening run has a valid start time, regardless of
-        outcome; PRs with missing or invalid timing are excluded.
-      </TooltipPopup>
-    </Tooltip>
-  )
+  return <span>{formatAvgDuration(cohort.avg_delivery_seconds)}</span>
 }
 
 type OutcomeGroup = Pick<
@@ -960,12 +950,6 @@ function prOutcomeColumns(
     { key: "prs_opened", label: "PRs opened (base)", align: "right" },
     { key: "merged", label: "Merged", align: "right" },
     {
-      key: "closed_without_merge",
-      label: "Closed without merge",
-      align: "right",
-    },
-    { key: "open", label: "Open", align: "right" },
-    {
       key: "merge_rate",
       label: view === "observed" ? "Mature merge rate" : "95% lower bound",
       align: "right",
@@ -974,6 +958,12 @@ function prOutcomeColumns(
           ? `Includes merged and closed PRs, plus PRs open for at least ${maturityDays} days. Newer open PRs are excluded.`
           : "Wilson 95% lower bound on the observed merge rate. This is a conservative comparison score, not the observed rate.",
     },
+    {
+      key: "closed_without_merge",
+      label: "Closed without merge",
+      align: "right",
+    },
+    { key: "open", label: "Open", align: "right" },
     {
       key: "median_distance",
       label: "Median distance",
@@ -988,12 +978,19 @@ function prOutcomeColumns(
       tooltip:
         "Mean post-open line edit distance across measurable merged PRs. Unusually rewritten PRs affect it more than the median; PRs are not weighted by size.",
     },
-    { key: "avg_delivery_seconds", label: "Avg time to PR", align: "right" },
+    {
+      key: "avg_delivery_seconds",
+      label: "Time to PR",
+      align: "right",
+      tooltip:
+        "Average time from opening-run start to PR creation, regardless of outcome. PRs with missing or invalid timing are excluded.",
+    },
     {
       key: "avg_merge_seconds",
-      label: "Avg time to merge",
+      label: "Time to merge",
       align: "right",
-      tooltip: "Unmerged PRs are excluded.",
+      tooltip:
+        "Average time from PR opened to merged. Unmerged PRs are excluded.",
     },
   ]
 }
@@ -1015,32 +1012,33 @@ function PROutcomeCells({
         <span className="text-muted-foreground">(100%)</span>
       </td>
       {(["merged", "closed_without_merge", "open"] as const).map((outcome) => (
-        <td
-          key={outcome}
-          className="px-2 py-3 text-right whitespace-nowrap tabular-nums"
-        >
-          <OutcomeCell
-            group={group}
-            outcome={outcome}
-            maturityDays={maturityDays}
-          />
-        </td>
+        <Fragment key={outcome}>
+          <td className="px-2 py-3 text-right whitespace-nowrap tabular-nums">
+            <OutcomeCell
+              group={group}
+              outcome={outcome}
+              maturityDays={maturityDays}
+            />
+          </td>
+          {outcome === "merged" && (
+            <td className="px-2 py-3 text-right whitespace-nowrap tabular-nums">
+              <span className="font-semibold">
+                {rate == null ? "—" : formatPercent(rate)}
+              </span>
+              {rate != null && (
+                <div className="text-xs text-muted-foreground">
+                  {group.merged}/{group.mature_denominator} eligible
+                </div>
+              )}
+              {rate != null && group.mature_denominator < 5 && (
+                <div className="text-xs text-amber-600 dark:text-amber-400">
+                  Small sample
+                </div>
+              )}
+            </td>
+          )}
+        </Fragment>
       ))}
-      <td className="px-2 py-3 text-right whitespace-nowrap tabular-nums">
-        <span className="font-semibold">
-          {rate == null ? "—" : formatPercent(rate)}
-        </span>
-        {rate != null && (
-          <div className="text-xs text-muted-foreground">
-            {group.merged}/{group.mature_denominator} eligible
-          </div>
-        )}
-        {rate != null && group.mature_denominator < 5 && (
-          <div className="text-xs text-amber-600 dark:text-amber-400">
-            Small sample
-          </div>
-        )}
-      </td>
       {(["median_distance", "mean_distance"] as const).map((metric) => {
         const value =
           metric === "median_distance"
@@ -1182,7 +1180,7 @@ function PRMergeRateTable({
               ))}
             </tr>
           </thead>
-          <tbody className="divide-y divide-border">
+          <tbody className="divide-y divide-border [&>tr:nth-child(even)]:bg-card [&>tr:nth-child(odd)]:bg-[color-mix(in_oklab,var(--foreground)_3%,var(--card))]">
             {rows.map((cohort) => {
               const key = `${cohort.model_id}-${cohort.model_attribution_quality}`
               const modelLabel =
@@ -1194,7 +1192,7 @@ function PRMergeRateTable({
                   <tr>
                     <th
                       scope="row"
-                      className="sticky left-0 z-10 bg-card px-4 py-3 text-left font-normal"
+                      className="sticky left-0 z-10 bg-inherit px-4 py-3 text-left font-normal"
                     >
                       <div className="flex items-center gap-2">
                         {hasMultipleEfforts ? (
@@ -1243,13 +1241,10 @@ function PRMergeRateTable({
                   </tr>
                   {isExpanded &&
                     cohort.efforts.map((effort) => (
-                      <tr
-                        key={`${key}-${effort.effort ?? "unknown"}`}
-                        className="bg-muted/35"
-                      >
+                      <tr key={`${key}-${effort.effort ?? "unknown"}`}>
                         <th
                           scope="row"
-                          className="sticky left-0 z-10 bg-[color-mix(in_oklab,var(--muted)_35%,var(--card))] py-3 pr-2 pl-11 text-left font-medium"
+                          className="sticky left-0 z-10 bg-inherit py-3 pr-2 pl-11 text-left font-medium"
                         >
                           {formatEffort(effort.effort)}
                         </th>
@@ -1454,9 +1449,10 @@ function UsageTable({
             {rows.map((row) => (
               <tr
                 key={`${row.rank}-${row.user.github_login ?? row.user.email ?? row.user.name}`}
+                className="bg-card odd:bg-[color-mix(in_oklab,var(--foreground)_3%,var(--card))]"
               >
                 <td className="px-4 py-3 text-muted-foreground">{row.rank}</td>
-                <td className="sticky left-0 z-10 bg-card px-2 py-3">
+                <td className="sticky left-0 z-10 bg-inherit px-2 py-3">
                   <UserCell
                     row={row}
                     isCurrentUser={row.rank === currentUserRank}
