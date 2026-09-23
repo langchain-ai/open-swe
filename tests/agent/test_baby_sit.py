@@ -363,6 +363,39 @@ async def test_terminal_notification_falls_back_to_originating_agent_thread(
     assert "/baby-sit --terminal" in dispatch.await_args.args[1]
 
 
+async def test_an_expedited_review_thread_gets_no_baby_sit_notices(
+    watch_client: _Client, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    await _start_watch(watch_client)
+    monkeypatch.setattr(baby_sit, "_has_expedited_card", AsyncMock(return_value=True))
+    monkeypatch.setattr(baby_sit, "get_github_app_installation_token", AsyncMock(return_value="t"))
+    monkeypatch.setattr(
+        baby_sit,
+        "fetch_pr",
+        AsyncMock(return_value={"state": "open", "head": {"sha": "head-1"}}),
+    )
+    monkeypatch.setattr(
+        baby_sit,
+        "list_check_runs",
+        AsyncMock(
+            return_value=[
+                {"id": 1, "name": "tests", "status": "completed", "conclusion": "cancelled"}
+            ]
+        ),
+    )
+    monkeypatch.setattr(baby_sit, "list_commit_statuses", AsyncMock(return_value=[]))
+    notify = AsyncMock(return_value=True)
+    monkeypatch.setattr(baby_sit, "post_slack_thread_reply", notify)
+    dispatch = AsyncMock(return_value={"run_id": "run-1"})
+    monkeypatch.setattr(baby_sit, "dispatch_agent_run", dispatch)
+
+    assert await baby_sit.evaluate_watch("acme/repo#7") == "stopped"
+    notify.assert_not_awaited()
+    dispatch.assert_awaited_once()
+    assert dispatch.await_args is not None
+    assert "needs owner triage" in dispatch.await_args.args[1]
+
+
 async def test_a_merged_pull_request_ends_the_watch_without_posting(
     watch_client: _Client, monkeypatch: pytest.MonkeyPatch
 ) -> None:

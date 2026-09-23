@@ -261,6 +261,16 @@ async def _watch_token(watch: BabySitWatch) -> str | None:
 
 
 async def _notify_watch(watch: BabySitWatch, message: str) -> bool:
+    """Post ``message`` where the watch was started, unless an expedited card owns that thread.
+
+    An expedited review's thread only ever carries its card; returning ``False``
+    hands terminal outcomes to the agent instead.
+    """
+    if await _has_expedited_card(watch):
+        logger.info(
+            "Suppressed baby-sit notice for an expedited review", extra={"watch_key": watch.key}
+        )
+        return False
     context = watch.source_context
     try:
         destination = context.slack_location
