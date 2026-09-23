@@ -36,7 +36,7 @@ The main agent is assembled in `agent/server.py` from the middleware in `agent/m
 - Keep model-facing prompts (system prompts, tool descriptions, agent wake-up prompts) in Markdown files under `agent/resources/prompts/` and load them with `load_prompt` or `render_prompt` (`$name` placeholders); never inline prompt text in Python. This applies to instructions sent to the model, not ordinary user-facing copy: UI labels, Slack button/modal text, and Slack or GitHub notifications may remain inline.
 - Keep comments minimal and only explain non-obvious reasons.
 - Use structured logging with a static message and values in `extra`; never interpolate values into log messages. Avoid standard `LogRecord` field names in `extra`.
-- Prefer making API write operations exposed through UI controls available as appropriately authorized agent tools, but treat this as a guideline, not a requirement. Direct UI controls may ship without a corresponding tool, especially for secret input until a secure tool-driven input flow exists.
+- Prefer making API write operations exposed through UI controls available as appropriately authorized agent tools, but treat this as a guideline, not a requirement. Direct UI controls may ship without a corresponding tool, especially for secret input until a secure tool-driven input flow exists. Do not add a tool when the agent can already do the same thing through a CLI in its sandbox, such as the authenticated `gh`.
 - Never discard an error. Every `except` either propagates (re-raise, or raise a more useful error) or logs what it swallowed — a bare `except ...: return None` / `pass` hides the failure from everyone debugging it later.
 
 ## Testing
