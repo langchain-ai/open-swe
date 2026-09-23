@@ -16,6 +16,7 @@ from agent.threads.plan_store import (
     list_plan_comments,
     make_plan_approver,
     plan_file_path_for_thread,
+    plan_is_dismissed,
     save_plan_content,
     write_plan_to_sandbox,
 )
@@ -96,8 +97,7 @@ async def get_plan(thread_id: str, session: dict[str, Any] = _SESSION_DEP) -> di
         "markdown": content.get("markdown", ""),
         "approvedBy": approved_by,
         "approvedAt": approved_at if isinstance(approved_at, str) else None,
-        "dismissed": bool(content.get("revision"))
-        and content.get("dismissed_revision") == content.get("revision"),
+        "dismissed": bool(content) and await plan_is_dismissed(thread_id, content.get("revision")),
         "user": {
             "id": login,
             "login": login,
@@ -119,7 +119,7 @@ async def update_plan(
     if body.dismissed:
         if not content:
             raise HTTPException(404, "plan not found")
-        await dismiss_plan(thread_id, content)
+        await dismiss_plan(thread_id, content.get("revision"))
         return {"dismissed": True}
     legacy_markdown = isinstance(content.get("markdown"), str) and not content.get("html")
     field = "markdown" if legacy_markdown else "html"
