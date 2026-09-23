@@ -250,3 +250,30 @@ async def delete_workspace(name: str) -> dict[str, Any]:
     if not deleted:
         return {"ok": False, "error": f"no workspace named {name!r}"}
     return {"ok": True, "deleted": True}
+
+
+async def configure_repository(
+    workspace: str,
+    repo: str,
+    may_start_threads: bool | None = None,
+) -> dict[str, Any]:
+    """Implement the `configure_repository` tool."""
+    if error := await _require_admin():
+        return {"ok": False, "error": error}
+    try:
+        slug = store.slugify(workspace)
+    except ValueError as exc:
+        return {"ok": False, "error": str(exc)}
+    try:
+        settings = await store.WORKSPACES.configure_repository(
+            slug, repo, may_start_threads=may_start_threads
+        )
+    except ValueError as exc:
+        return {"ok": False, "error": str(exc)}
+    except Exception as exc:
+        logger.exception(
+            "Failed to configure repository",
+            extra={"workspace": slug, "repository": repo},
+        )
+        return {"ok": False, "error": f"failed to configure repository: {exc}"}
+    return {"ok": True, "workspace": slug, "repository": settings.model_dump()}

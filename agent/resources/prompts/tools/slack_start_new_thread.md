@@ -1,3 +1,3 @@
 Start a Slack thread with a headline root and instructions as the first reply.
 
-Post nothing in the current thread before or after this call; on success, end the turn with `slack_no_reply_needed`.
+When called from a Slack thread, post nothing in that thread before or after this call; the tool links the two threads itself, so on success end the turn with `slack_no_reply_needed`. Otherwise share the returned `slack_url` and `dashboard_url` with the asker.

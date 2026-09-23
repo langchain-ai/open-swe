@@ -30,7 +30,14 @@ DASHBOARD_SOURCE = "dashboard"
 # Threads whose transcript is served from the append-only event log.
 TRANSCRIPT_VERSION = "v2"
 # Sources whose threads should surface in the Agents UI (besides "dashboard").
-_SURFACED_SOURCES: tuple[str, ...] = ("dashboard", "github", "slack", "linear", "schedule")
+_SURFACED_SOURCES: tuple[str, ...] = (
+    "dashboard",
+    "github",
+    "slack",
+    "linear",
+    "schedule",
+    "api",
+)
 # PR lifecycle states surfaced to the UI for a thread's associated pull request.
 _PR_STATES: frozenset[str] = frozenset({"draft", "open", "merged", "closed"})
 _SANDBOX_CREATING_SENTINEL = "__creating__"
@@ -163,7 +170,7 @@ def repo_config_from_metadata(metadata: Mapping[str, Any]) -> dict[str, str]:
     return {}
 
 
-def _run_status_to_agent_status(thread_status: str | None, run_status: str | None) -> str:
+def run_status_to_agent_status(thread_status: str | None, run_status: str | None) -> str:
     # "interrupted" wins over a still-``busy`` thread: cancellation is async, so a
     # just-cancelled thread reports busy for a moment and would otherwise look
     # like it is still running. Callers refresh the newest run's real status
@@ -353,7 +360,7 @@ async def _thread_summary(
     run_status = latest_run_status or (
         metadata_run_status if isinstance(metadata_run_status, str) else None
     )
-    status = _run_status_to_agent_status(thread_status, run_status)
+    status = run_status_to_agent_status(thread_status, run_status)
 
     pr_number = metadata.get("pr_number")
     pr_url = metadata.get("pr_url")
