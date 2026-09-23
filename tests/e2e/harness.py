@@ -817,6 +817,7 @@ async def mock_github_data() -> JSONResponse:
                 "body": p["body"],
                 "files": p["files"],
                 "reviews": p["reviews"],
+                "issue_comments": p["issue_comments"],
                 "created_at": p["created_at"],
                 "updated_at": p["updated_at"],
                 "url": _pr_html_url(p),
@@ -1074,6 +1075,19 @@ async def gh_submit_pull_review(
     if "_error" in review:
         return JSONResponse({"message": review["_error"]}, status_code=422)
     return JSONResponse(review, status_code=200)
+
+
+@app.post("/fake-gh/repos/{owner}/{repo}/issues/{number}/comments")
+async def gh_create_issue_comment(
+    owner: str, repo: str, number: int, request: Request
+) -> JSONResponse:
+    pr = fakes.find_pull(number, owner, repo)
+    if pr is None:
+        return JSONResponse({"message": "Not Found"}, status_code=404)
+    body = await request.json()
+    comment = {"id": len(pr["issue_comments"]) + 1, "body": str(body.get("body") or "")}
+    pr["issue_comments"].append(comment)
+    return JSONResponse(comment, status_code=201)
 
 
 @app.put("/fake-gh/repos/{owner}/{repo}/pulls/{number}/merge")

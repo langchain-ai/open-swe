@@ -113,6 +113,19 @@ def _vote_buttons(approval: ExpeditedApproval) -> tuple[ButtonElement, ButtonEle
     )
 
 
+def _approved(approval: ExpeditedApproval) -> bool:
+    return len(approval.approvals) >= REQUIRED_APPROVALS
+
+
+def _voting_diff(
+    approval: ExpeditedApproval, files: list[ChangedFile], diff_image_id: str | None
+) -> list[Block]:
+    """The diff voters read; an approved card no longer needs it."""
+    if _approved(approval):
+        return []
+    return [*_diff_sections(files, diff_image_id), divider()]
+
+
 def open_card(
     approval: ExpeditedApproval,
     *,
@@ -120,14 +133,13 @@ def open_card(
     files: list[ChangedFile],
     diff_image_id: str | None = None,
 ) -> tuple[str, list[Block]]:
-    """Text fallback and blocks for an open card; buttons go once it has enough approvals."""
+    """Text fallback and blocks for an open card; diff and buttons go once it is approved."""
     pr = approval.pull_request
-    approved = len(approval.approvals) >= REQUIRED_APPROVALS
+    approved = _approved(approval)
     blocks: list[Block] = [
         *_header(approval, title),
         divider(),
-        *_diff_sections(files, diff_image_id),
-        divider(),
+        *_voting_diff(approval, files, diff_image_id),
         section(
             f"*{escape(_vote_summary(approval))}* Merging once checks and reviews are clean."
             if approved
@@ -152,8 +164,7 @@ def closed_card(
     blocks: list[Block] = [
         *_header(approval, title),
         divider(),
-        *_diff_sections(files, diff_image_id),
-        divider(),
+        *_voting_diff(approval, files, diff_image_id),
         section(f"*{escape(outcome)}*"),
         context(_vote_summary(approval)),
     ]

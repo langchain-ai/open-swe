@@ -284,6 +284,7 @@ def create_pull(
         "statuses": [],
         "review_threads": [],
         "reviews": [],
+        "issue_comments": [],
         "review_decision": "REVIEW_REQUIRED",
         "author": author,
         "merge_method": None,

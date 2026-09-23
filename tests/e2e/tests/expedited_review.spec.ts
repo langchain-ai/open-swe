@@ -47,6 +47,7 @@ type PullRequest = {
   merged: boolean;
   head_sha: string;
   reviews: Array<{ author: string; state: string; commit_id: string }>;
+  issue_comments: Array<{ body: string }>;
 };
 
 /** POST a control endpoint, failing with the server's own words if it refuses. */
@@ -300,6 +301,14 @@ test.describe("Expedited Slack review", () => {
     for (const review of reviews) {
       expect(review.commit_id).toBe(fixed.head_sha);
     }
+
+    // The PR links back to the Slack card that approved it, once.
+    const links = merged.issue_comments.filter((c) =>
+      c.body.includes("expedited review"),
+    );
+    expect(links).toHaveLength(1);
+    expect(links[0]!.body).toMatch(/@alice and @bob|@bob and @alice/);
+    expect(links[0]!.body).toContain("/mock/slack");
 
     const final = (await approvals(request)).at(-1)!;
     expect(final.state).toBe("merged");

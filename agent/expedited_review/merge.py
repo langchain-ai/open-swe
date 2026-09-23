@@ -22,6 +22,7 @@ from agent.github.app import (
     get_github_app_installation_token,
 )
 from agent.github.http import GITHUB_API_BASE, github_client, github_request
+from agent.slack.client import get_slack_permalink
 
 logger = logging.getLogger(__name__)
 
@@ -89,6 +90,31 @@ async def _record_review(
                 vote.github_review_sha = head_sha
 
 
+async def _comment_card_link(approval: ExpeditedApproval, token: str) -> None:
+    """Leave the Slack card's link on the PR so the approval is traceable from GitHub."""
+    permalink = await get_slack_permalink(approval.slack_channel_id, approval.slack_message_ts)
+    if permalink is None:
+        logger.warning(
+            "No Slack permalink for the expedited review card",
+            extra={"approval_id": str(approval.id)},
+        )
+        return
+    pr = approval.pull_request
+    approvers = " and ".join(f"@{login}" for login in approval.approvers)
+    url = f"{GITHUB_API_BASE}/repos/{pr.owner}/{pr.repo}/issues/{pr.number}/comments"
+    body = f"Approved in Slack by {approvers} via [expedited review]({permalink})."
+    try:
+        async with github_client(token=token) as client:
+            response = await github_request(client, "POST", url, json={"body": body})
+            response.raise_for_status()
+    except httpx2.HTTPError:
+        logger.warning(
+            "Failed to comment the expedited review link on the pull request",
+            extra={"approval_id": str(approval.id)},
+            exc_info=True,
+        )
+
+
 async def _merge_token(owner: str, repo: str) -> str | None:
     installation_id = await get_github_app_installation_id_for_repo(owner, repo)
     if installation_id is None:
@@ -146,6 +172,7 @@ async def merge_approved(approval: ExpeditedApproval) -> MergeResult:
     if readiness.blockers:
         return MergeResult("not_ready", "Not ready to merge: " + "; ".join(readiness.blockers))
 
+    reviewed_now = False
     for vote in approvals:
         login = vote.github_login
         if is_author(approval, vote.voter_user_id, login):
@@ -156,6 +183,10 @@ async def merge_approved(approval: ExpeditedApproval) -> MergeResult:
         if isinstance(submitted, str):
             return MergeResult("error", submitted)
         await _record_review(approval, login, submitted, snapshot.head_sha)
+        reviewed_now = True
+    # A retry after GitHub refused the merge has already left the link.
+    if reviewed_now:
+        await _comment_card_link(approval, token)
 
     merge_token = await _merge_token(pr.owner, pr.repo) or token
     methods = snapshot.allowed_merge_methods or ["merge"]
