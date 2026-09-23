@@ -421,7 +421,7 @@ export interface UsageLeaderboardRow {
   is_top_feedback_contributor?: boolean
   additions: number
   deletions: number
-  total_tokens: number
+  total_tokens: number | null
   total_cost_usd: number
   invocations_without_cost?: number
   invocations_with_partial_cost?: number
