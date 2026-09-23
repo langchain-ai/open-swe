@@ -2,6 +2,8 @@ import { chmod, mkdir, readFile, rm, writeFile } from "node:fs/promises"
 import { homedir, platform } from "node:os"
 import { join } from "node:path"
 
+import { normalizeBackend } from "./api.ts"
+import { resolveCredential, type Credential } from "./credentials.ts"
 import { errorCode, isRecord, parseJson, stringAt } from "./json.ts"
 
 /** ``$HOME`` wins so a test, or a sandboxed run, can point at its own home. */
@@ -30,6 +32,11 @@ const DEVELOPMENT_BACKEND_URL = "http://localhost:2024"
 export interface CliConfig {
   backend: string
   session: string
+}
+
+export interface RunConfig {
+  backend: string
+  credential: Credential
 }
 
 /** Bridges this machine has already created, so a directory reopens its own. */
@@ -121,15 +128,14 @@ export async function readBackend(): Promise<string> {
 /**
  * Where the CLI is pointed and who it is.
  *
- * The session has no desktop fallback: the app keeps it in an encrypted cookie
+ * A session has no desktop fallback: the app keeps it in an encrypted cookie
  * store no other process can read, so it comes from `OPEN_SWE_SESSION` or from
  * `open-swe login`.
  */
-export async function readConfig(): Promise<CliConfig | null> {
-  const stored = await storedConfig()
-  const session = process.env["OPEN_SWE_SESSION"] || stored.session
-  if (!session) return null
-  return { backend: await readBackend(), session }
+export async function readConfig(): Promise<RunConfig | null> {
+  const backend = normalizeBackend(await readBackend())
+  const credential = resolveCredential(backend, (await storedConfig()).session)
+  return credential === null ? null : { backend, credential }
 }
 
 export async function writeConfig(config: CliConfig): Promise<string> {

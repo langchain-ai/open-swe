@@ -15,6 +15,7 @@ from agent.threads.access import (
     _authorized_thread_metadata,
     _readable_thread_metadata,
 )
+from agent.threads.machine_reads import machine_thread
 from agent.threads.principals import Principal
 from agent.threads.runs import (
     _ASSISTANT_ID,
@@ -72,11 +73,15 @@ async def proxy_dashboard_thread_stream_events(
     *,
     email: str | None = None,
     content_type: str = "application/json",
+    principal: Principal | None = None,
 ) -> AsyncIterator[bytes]:
     # Preflight here (not in the generator) so auth/content-type failures
     # surface as real HTTP errors before the SSE response starts streaming.
     require_json_content_type(content_type)
-    await _readable_thread_metadata(thread_id, login=login, email=email)
+    if principal is not None and principal.machine:
+        await machine_thread(thread_id, principal)
+    else:
+        await _readable_thread_metadata(thread_id, login=login, email=email)
     return stream_thread_events(thread_id, body, content_type)
 
 

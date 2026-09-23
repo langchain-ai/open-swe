@@ -19,7 +19,7 @@ OTHER = "someone-else"
 
 async def _open(owner: str = OWNER) -> Bridge:
     bridge = await BridgeStore.register(
-        owner_login=owner,
+        owner_id=owner,
         hostname="laptop.local",
         root_path="/Users/test/project",
         label=None,
@@ -93,7 +93,7 @@ async def test_reopening_requeues_what_the_last_connection_never_answered(
     ] == [request_id]
 
     reopened = await BridgeStore.register(
-        owner_login=OWNER,
+        owner_id=OWNER,
         hostname="laptop.local",
         root_path="/Users/test/other-project",
         label="after restart",
@@ -111,7 +111,7 @@ async def test_reopening_someone_elses_bridge_finds_nothing(registry_db: None) -
     bridge = await _open(OTHER)
 
     reopened = await BridgeStore.register(
-        owner_login=OWNER,
+        owner_id=OWNER,
         hostname="laptop.local",
         root_path="/Users/test/project",
         label=None,
@@ -119,8 +119,8 @@ async def test_reopening_someone_elses_bridge_finds_nothing(registry_db: None) -
     )
 
     assert reopened is None
-    assert await BridgeStore.load(bridge.bridge_id, owner_login=OWNER) is None
-    assert not await BridgeStore.heartbeat(bridge.bridge_id, owner_login=OWNER)
+    assert await BridgeStore.load(bridge.bridge_id, owner_id=OWNER) is None
+    assert not await BridgeStore.heartbeat(bridge.bridge_id, owner_id=OWNER)
 
 
 async def test_closing_fails_every_unanswered_request(registry_db: None) -> None:
@@ -129,15 +129,15 @@ async def test_closing_fails_every_unanswered_request(registry_db: None) -> None
     claimed_id = await _enqueue(bridge.bridge_id, "claimed")
     await BridgeStore.claim(bridge.bridge_id, limit=1)
 
-    assert await BridgeStore.close(bridge.bridge_id, owner_login=OWNER)
+    assert await BridgeStore.close(bridge.bridge_id, owner_id=OWNER)
 
     for request_id in (pending_id, claimed_id):
         outcome = await BridgeStore.outcome(bridge.bridge_id, request_id)
         assert outcome is not None
         assert outcome.status == "failed"
         assert outcome.error == "bridge closed"
-    assert not await BridgeStore.heartbeat(bridge.bridge_id, owner_login=OWNER)
-    assert await BridgeStore.close(bridge.bridge_id, owner_login=OWNER)
+    assert not await BridgeStore.heartbeat(bridge.bridge_id, owner_id=OWNER)
+    assert await BridgeStore.close(bridge.bridge_id, owner_id=OWNER)
 
 
 async def test_a_request_is_answered_at_most_once(registry_db: None) -> None:
@@ -172,6 +172,6 @@ async def test_pruning_closes_a_bridge_that_stopped_heartbeating(registry_db: No
     assert outcome is not None
     assert outcome.status == "failed"
     assert outcome.error == "bridge disconnected"
-    reloaded = await BridgeStore.load(live.bridge_id, owner_login=OWNER)
+    reloaded = await BridgeStore.load(live.bridge_id, owner_id=OWNER)
     assert reloaded is not None
     assert reloaded.is_alive

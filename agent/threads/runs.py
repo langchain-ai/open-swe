@@ -520,7 +520,7 @@ def _validate_command_images(content: Any, *, model_id: str | None) -> None:
 
 
 async def _resolve_sandbox_bridge(
-    requested: object, *, login: str, creating: bool
+    requested: object, *, owner_id: str, creating: bool
 ) -> Bridge | None:
     """The live bridge a new thread asked to run on, validated before it exists.
 
@@ -533,7 +533,7 @@ async def _resolve_sandbox_bridge(
         raise HTTPException(422, "sandbox_bridge_id must be a non-empty string")
     if not creating:
         raise HTTPException(409, "sandbox_bridge_id is only accepted when creating a thread")
-    return await BridgeStore.require_open(requested.strip(), owner_login=login)
+    return await BridgeStore.require_open(requested.strip(), owner_id=owner_id)
 
 
 async def _bind_thread_to_bridge(
@@ -693,7 +693,9 @@ async def _enrich_run_start_command(
             model_selection = "auto" if creating else metadata.get("model_selection")
     offloading = offload_requested(params)
     sandbox_bridge = await _resolve_sandbox_bridge(
-        client_configurable.get("sandbox_bridge_id"), login=login, creating=creating
+        client_configurable.get("sandbox_bridge_id"),
+        owner_id=Principal.of_login(login, email).sender_id,
+        creating=creating,
     )
     content = _command_message_content(params)
     if offloading and creating:
@@ -1366,6 +1368,11 @@ async def _enrich_system_run_start_command(
     if _dashboard_images_from_content(content):
         raise HTTPException(422, "machine principals cannot attach images")
 
+    sandbox_bridge = await _resolve_sandbox_bridge(
+        client_configurable.get("sandbox_bridge_id"),
+        owner_id=principal.sender_id,
+        creating=creating,
+    )
     repo_config = await _system_repo_config(client_configurable, principal)
     if creating:
         title = client_configurable.get("title")
@@ -1378,6 +1385,8 @@ async def _enrich_system_run_start_command(
                 repo_config=repo_config,
             )
         )
+        if sandbox_bridge is not None:
+            metadata = await _bind_thread_to_bridge(thread_id, sandbox_bridge, metadata)
     else:
         principal.assert_can_post(metadata)
 

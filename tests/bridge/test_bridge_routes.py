@@ -16,15 +16,16 @@ from agent.bridge.routes import (
     api_open_bridge,
 )
 from agent.bridge.store import BridgeStore
+from agent.threads.principals import Principal
 
-OWNER = {"sub": "test-user"}
-INTRUDER = {"sub": "someone-else"}
+OWNER = Principal.of_login("test-user")
+INTRUDER = Principal.of_login("someone-else")
 
 
 async def _open() -> str:
     opened = await api_open_bridge(
         BridgeOpenBody(root_path="/Users/test/project", hostname="laptop.local"),
-        session=OWNER,
+        principal=OWNER,
     )
     return opened.bridge_id
 
@@ -39,7 +40,7 @@ async def test_a_long_poll_returns_a_request_that_arrives_while_it_waits(
 ) -> None:
     bridge_id = await _open()
     poll = asyncio.create_task(
-        api_claim_bridge_requests(bridge_id, wait=10, limit=8, session=OWNER)
+        api_claim_bridge_requests(bridge_id, wait=10, limit=8, principal=OWNER)
     )
     await asyncio.sleep(0.05)
     request_id = await _enqueue(bridge_id, "echo hi")
@@ -53,7 +54,7 @@ async def test_a_long_poll_returns_a_request_that_arrives_while_it_waits(
 async def test_a_long_poll_with_nothing_queued_returns_empty(registry_db: None) -> None:
     bridge_id = await _open()
 
-    answered = await api_claim_bridge_requests(bridge_id, wait=0, limit=8, session=OWNER)
+    answered = await api_claim_bridge_requests(bridge_id, wait=0, limit=8, principal=OWNER)
 
     assert answered.requests == []
 
@@ -61,12 +62,12 @@ async def test_a_long_poll_with_nothing_queued_returns_empty(registry_db: None) 
 async def test_a_request_may_only_be_answered_once(registry_db: None) -> None:
     bridge_id = await _open()
     request_id = await _enqueue(bridge_id)
-    await api_claim_bridge_requests(bridge_id, wait=0, limit=8, session=OWNER)
+    await api_claim_bridge_requests(bridge_id, wait=0, limit=8, principal=OWNER)
     reply = BridgeReplyBody(result={"output": "", "exit_code": 0, "truncated": False})
 
-    first = await api_answer_bridge_request(bridge_id, request_id, reply, session=OWNER)
+    first = await api_answer_bridge_request(bridge_id, request_id, reply, principal=OWNER)
     with pytest.raises(HTTPException) as again:
-        await api_answer_bridge_request(bridge_id, request_id, reply, session=OWNER)
+        await api_answer_bridge_request(bridge_id, request_id, reply, principal=OWNER)
 
     assert first.status_code == 204
     assert again.value.status_code == 409
@@ -83,9 +84,9 @@ async def test_another_user_cannot_see_the_bridge_at_all(registry_db: None) -> N
     bridge_id = await _open()
 
     for call in (
-        api_bridge_heartbeat(bridge_id, session=INTRUDER),
-        api_claim_bridge_requests(bridge_id, wait=0, limit=8, session=INTRUDER),
-        api_close_bridge(bridge_id, session=INTRUDER),
+        api_bridge_heartbeat(bridge_id, principal=INTRUDER),
+        api_claim_bridge_requests(bridge_id, wait=0, limit=8, principal=INTRUDER),
+        api_close_bridge(bridge_id, principal=INTRUDER),
     ):
         with pytest.raises(HTTPException) as refused:
             await call
@@ -95,9 +96,9 @@ async def test_another_user_cannot_see_the_bridge_at_all(registry_db: None) -> N
 async def test_closing_a_bridge_stops_its_heartbeat_being_accepted(registry_db: None) -> None:
     bridge_id = await _open()
 
-    closed = await api_close_bridge(bridge_id, session=OWNER)
+    closed = await api_close_bridge(bridge_id, principal=OWNER)
     with pytest.raises(HTTPException) as refused:
-        await api_bridge_heartbeat(bridge_id, session=OWNER)
+        await api_bridge_heartbeat(bridge_id, principal=OWNER)
 
     assert closed.status_code == 204
     assert refused.value.status_code == 409
@@ -106,10 +107,10 @@ async def test_closing_a_bridge_stops_its_heartbeat_being_accepted(registry_db: 
         BridgeOpenBody(
             root_path="/Users/test/project", hostname="laptop.local", bridge_id=bridge_id
         ),
-        session=OWNER,
+        principal=OWNER,
     )
     assert reopened.bridge_id == bridge_id
-    assert (await api_bridge_heartbeat(bridge_id, session=OWNER)).status_code == 204
+    assert (await api_bridge_heartbeat(bridge_id, principal=OWNER)).status_code == 204
 
 
 async def test_reopening_a_bridge_nobody_owns_is_not_found(registry_db: None) -> None:
@@ -118,7 +119,7 @@ async def test_reopening_a_bridge_nobody_owns_is_not_found(registry_db: None) ->
             BridgeOpenBody(
                 root_path="/Users/test/project", hostname="laptop.local", bridge_id="nope"
             ),
-            session=OWNER,
+            principal=OWNER,
         )
 
     assert refused.value.status_code == 404

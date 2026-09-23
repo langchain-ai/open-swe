@@ -18,10 +18,10 @@ const REPLY_ATTEMPTS = 3
 /** Margin over the server's long-poll window before the request is abandoned. */
 const POLL_TIMEOUT_MS = (POLL_WAIT_SECONDS + 15) * 1_000
 
-export class SessionExpiredError extends Error {
-  constructor() {
-    super("your session expired — run `open-swe login` again")
-    this.name = "SessionExpiredError"
+export class CredentialRejectedError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = "CredentialRejectedError"
   }
 }
 
@@ -134,7 +134,7 @@ export class Bridge {
       process.stderr.write("open-swe: bridge reconnected\n")
     } catch (cause) {
       if (cause instanceof ApiError && cause.status === 401) {
-        this.fail(new SessionExpiredError())
+        this.fail(new CredentialRejectedError(this.api.credential.rejected))
         return
       }
       if (cause instanceof ApiError && cause.status === 404) {
@@ -153,7 +153,7 @@ export class Bridge {
       await this.api.heartbeat(this.session.bridgeId)
     } catch (cause) {
       if (cause instanceof ApiError && cause.status === 401) {
-        this.fail(new SessionExpiredError())
+        this.fail(new CredentialRejectedError(this.api.credential.rejected))
         return
       }
       if (cause instanceof ApiError && cause.status === 404) {
@@ -187,7 +187,7 @@ export class Bridge {
       } catch (cause) {
         if (!this.running) return
         if (cause instanceof ApiError && cause.status === 401) {
-          this.fail(new SessionExpiredError())
+          this.fail(new CredentialRejectedError(this.api.credential.rejected))
           return
         }
         if (cause instanceof ApiError && cause.status === 404) {
@@ -236,7 +236,7 @@ export class Bridge {
         return
       } catch (cause) {
         if (cause instanceof ApiError && cause.status === 401) {
-          this.fail(new SessionExpiredError())
+          this.fail(new CredentialRejectedError(this.api.credential.rejected))
           return
         }
         if (cause instanceof ApiError && cause.status === 404) return

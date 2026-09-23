@@ -49,7 +49,7 @@ CLOSED_ERROR = "bridge closed"
 DISCONNECTED_ERROR = "bridge disconnected"
 
 _BRIDGE_COLUMNS = (
-    "bridge_id, owner_login, hostname, root_path, label, created_at, last_heartbeat_at, closed_at"
+    "bridge_id, owner_id, hostname, root_path, label, created_at, last_heartbeat_at, closed_at"
 )
 
 
@@ -69,7 +69,7 @@ class Bridge(BaseModel):
     """One CLI's registration, as the ``sandbox_bridge`` row holds it."""
 
     bridge_id: str
-    owner_login: str
+    owner_id: str
     hostname: str
     root_path: str
     label: str | None = None
@@ -161,7 +161,7 @@ class BridgeStore:
     async def register(
         cls,
         *,
-        owner_login: str,
+        owner_id: str,
         hostname: str,
         root_path: str,
         label: str | None,
@@ -179,13 +179,13 @@ class BridgeStore:
                     conn,
                     f"""
                     INSERT INTO sandbox_bridge
-                        (bridge_id, owner_login, hostname, root_path, label)
-                    VALUES (:bridge_id, :owner_login, :hostname, :root_path, :label)
+                        (bridge_id, owner_id, hostname, root_path, label)
+                    VALUES (:bridge_id, :owner_id, :hostname, :root_path, :label)
                     RETURNING {_BRIDGE_COLUMNS}
                     """,
                     {
                         "bridge_id": uuid.uuid4().hex,
-                        "owner_login": owner_login,
+                        "owner_id": owner_id,
                         "hostname": hostname,
                         "root_path": root_path,
                         "label": label,
@@ -203,12 +203,12 @@ class BridgeStore:
                     label = :label,
                     last_heartbeat_at = clock_timestamp(),
                     closed_at = NULL
-                WHERE bridge_id = :bridge_id AND owner_login = :owner_login
+                WHERE bridge_id = :bridge_id AND owner_id = :owner_id
                 RETURNING {_BRIDGE_COLUMNS}
                 """,
                 {
                     "bridge_id": bridge_id,
-                    "owner_login": owner_login,
+                    "owner_id": owner_id,
                     "hostname": hostname,
                     "root_path": root_path,
                     "label": label,
@@ -237,7 +237,7 @@ class BridgeStore:
         return Bridge.of(rows[0])
 
     @classmethod
-    async def load(cls, bridge_id: str, *, owner_login: str | None = None) -> Bridge | None:
+    async def load(cls, bridge_id: str, *, owner_id: str | None = None) -> Bridge | None:
         """The bridge, optionally pinned to its owner.
 
         The graph side has no login to pin to — it reaches a bridge only through
@@ -249,18 +249,18 @@ class BridgeStore:
                 f"""
                 SELECT {_BRIDGE_COLUMNS} FROM sandbox_bridge
                 WHERE bridge_id = :bridge_id
-                  AND (CAST(:owner_login AS text) IS NULL OR owner_login = :owner_login)
+                  AND (CAST(:owner_id AS text) IS NULL OR owner_id = :owner_id)
                 """,
-                {"bridge_id": bridge_id, "owner_login": owner_login},
+                {"bridge_id": bridge_id, "owner_id": owner_id},
             )
         return Bridge.of(rows[0]) if rows else None
 
     @classmethod
-    async def require_open(cls, bridge_id: str, *, owner_login: str) -> Bridge:
+    async def require_open(cls, bridge_id: str, *, owner_id: str) -> Bridge:
         """The caller's open bridge, or an HTTP error that leaks no other user's ids."""
         if not postgres.configured():
             raise HTTPException(503, "sandbox bridges require PostgreSQL")
-        bridge = await cls.load(bridge_id, owner_login=owner_login)
+        bridge = await cls.load(bridge_id, owner_id=owner_id)
         if bridge is None:
             raise HTTPException(404, "sandbox bridge not found")
         if not bridge.is_alive:
@@ -268,18 +268,18 @@ class BridgeStore:
         return bridge
 
     @classmethod
-    async def heartbeat(cls, bridge_id: str, *, owner_login: str) -> bool:
+    async def heartbeat(cls, bridge_id: str, *, owner_id: str) -> bool:
         async with postgres.transaction() as conn:
             result = await conn.execute(
                 text(
                     """
                     UPDATE sandbox_bridge SET last_heartbeat_at = clock_timestamp()
                     WHERE bridge_id = :bridge_id
-                      AND owner_login = :owner_login
+                      AND owner_id = :owner_id
                       AND closed_at IS NULL
                     """
                 ),
-                {"bridge_id": bridge_id, "owner_login": owner_login},
+                {"bridge_id": bridge_id, "owner_id": owner_id},
             )
         return result.rowcount > 0
 
@@ -415,7 +415,7 @@ class BridgeStore:
         return BridgeRequestOutcome.model_validate(dict(rows[0])) if rows else None
 
     @classmethod
-    async def close(cls, bridge_id: str, *, owner_login: str) -> bool:
+    async def close(cls, bridge_id: str, *, owner_id: str) -> bool:
         """Close the caller's bridge and fail everything it left unanswered.
 
         Idempotent: closing an already-closed bridge still reports success, so a
@@ -426,9 +426,9 @@ class BridgeStore:
                 conn,
                 """
                 SELECT bridge_id FROM sandbox_bridge
-                WHERE bridge_id = :bridge_id AND owner_login = :owner_login
+                WHERE bridge_id = :bridge_id AND owner_id = :owner_id
                 """,
-                {"bridge_id": bridge_id, "owner_login": owner_login},
+                {"bridge_id": bridge_id, "owner_id": owner_id},
             )
             if not owned:
                 return False

@@ -23,6 +23,7 @@ from agent.threads.feedback import feedback_router
 from agent.threads.handlers import (
     admin_cancel_dashboard_thread,
     cancel_dashboard_thread,
+    cancel_machine_thread,
     continue_thread_privately,
     delete_dashboard_thread,
     get_dashboard_pull_request_checks,
@@ -378,9 +379,11 @@ async def api_cancel_thread_run(
 @router.post("/threads/{thread_id}/cancel")
 async def api_cancel_thread(
     thread_id: str,
-    session: dict[str, Any] = SESSION_DEP,
+    principal: PrincipalDep,
 ) -> dict[str, Any]:
-    return await cancel_dashboard_thread(thread_id, session["sub"], email=session.get("email"))
+    if principal.machine:
+        return await cancel_machine_thread(thread_id, principal)
+    return await cancel_dashboard_thread(thread_id, principal.person, email=principal.email)
 
 
 @router.post("/admin/threads/{thread_id}/cancel")
@@ -420,15 +423,16 @@ async def api_get_thread_state(
 async def api_thread_stream_events(
     thread_id: str,
     request: Request,
-    session: dict[str, Any] = SESSION_DEP,
+    principal: PrincipalDep,
 ) -> StreamingResponse:
     body = await request.body()
     stream = await proxy_dashboard_thread_stream_events(
         thread_id,
-        session["sub"],
+        principal.login or "",
         body,
-        email=session.get("email"),
+        email=principal.email,
         content_type=request.headers.get("content-type", "application/json"),
+        principal=principal,
     )
     return StreamingResponse(
         stream,

@@ -7,6 +7,7 @@ import {
   stringAt,
   type JsonObject,
 } from "./json.ts"
+import type { Credential } from "./credentials.ts"
 
 export class ApiError extends Error {
   constructor(
@@ -78,16 +79,13 @@ export function normalizeBackend(backend: string): string {
   return `${url.protocol}//${url.host}`
 }
 
-/** The cookie the dashboard's login mints, which the desktop app also stores. */
-const SESSION_COOKIE = "osw_session"
-
-/** Client for `<backend>/dashboard/api`, signed in as the dashboard is. */
+/** Client for `<backend>/dashboard/api`, authenticated by whichever credential it holds. */
 export class ApiClient {
   readonly backend: string
 
   constructor(
     backend: string,
-    private readonly session: string
+    readonly credential: Credential
   ) {
     this.backend = backend.replace(/\/+$/, "")
   }
@@ -100,16 +98,9 @@ export class ApiClient {
     return `${this.backend}/dashboard/api${path}`
   }
 
-  /**
-   * The session travels as the dashboard's own cookie, the way the desktop app
-   * sends it, so the backend needs no second way to authenticate. `Origin` is
-   * the backend's own, which its CSRF check allows: the cookie here is held
-   * deliberately, not ambient in a browser someone else can aim.
-   */
-  private headers(accept: string): Record<string, string> {
+  private async headers(accept: string): Promise<Record<string, string>> {
     return {
-      Cookie: `${SESSION_COOKIE}=${this.session}`,
-      Origin: this.backend,
+      ...(await this.credential.headers(this.backend)),
       "Content-Type": "application/json",
       Accept: accept,
     }
@@ -122,7 +113,7 @@ export class ApiClient {
   ): Promise<Response> {
     const response = await fetch(this.url(path), {
       method,
-      headers: this.headers(options.accept ?? "application/json"),
+      headers: await this.headers(options.accept ?? "application/json"),
       body:
         options.body === undefined ? undefined : JSON.stringify(options.body),
       signal: options.signal,

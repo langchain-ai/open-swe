@@ -35,6 +35,8 @@ Run options:
   --thread <id>    Continue an existing thread
   --model <id>     Agent model id (needs --effort to take effect)
   --effort <name>  Reasoning effort for --model
+  --visibility <v> workspace (default) or private; API keys and CI always
+                   start system threads
 
 A run reads its prompt from stdin when none is given. Stdout carries only the
 result the agent reports, and the exit code is the one it reports.
@@ -95,8 +97,16 @@ async function logoutCommand(): Promise<number> {
   return 0
 }
 
+const VISIBILITIES = ["workspace", "private"] as const
+type Visibility = (typeof VISIBILITIES)[number]
+
+function isVisibility(value: string): value is Visibility {
+  return (VISIBILITIES as readonly string[]).includes(value)
+}
+
 interface RunOptions {
   thread: string | undefined
+  visibility: string | undefined
   model: string | undefined
   effort: string | undefined
   prompt: string
@@ -110,11 +120,25 @@ async function runCommand(options: RunOptions): Promise<number> {
   }
   const config = await readConfig()
   if (config === null) {
-    fail("not signed in — run `open-swe login`")
+    fail("not signed in — run `open-swe login`, or set OPEN_SWE_API_KEY")
     return 1
   }
+  const { credential } = config
+  let visibility: Visibility = "workspace"
+  if (options.visibility !== undefined) {
+    if (!isVisibility(options.visibility)) {
+      fail("--visibility must be workspace or private")
+      return 2
+    }
+    if (credential.machine) {
+      fail("API keys and CI start system threads; --visibility does not apply")
+      return 2
+    }
+    visibility = options.visibility
+  }
+  const threadType = credential.machine ? "system" : visibility
   const root = process.cwd()
-  const api = new ApiClient(config.backend, config.session)
+  const api = new ApiClient(config.backend, credential)
 
   if (!(await isGitRepository(root))) {
     fail(
@@ -140,11 +164,18 @@ async function runCommand(options: RunOptions): Promise<number> {
     if (bound !== null) rememberedBridgeId = bound
   }
 
-  const bridge = await Bridge.open(api, {
-    rootPath: root,
-    label: basename(root),
-    rememberedBridgeId,
-  })
+  let bridge: Bridge
+  try {
+    bridge = await Bridge.open(api, {
+      rootPath: root,
+      label: basename(root),
+      rememberedBridgeId,
+    })
+  } catch (cause) {
+    if (!(cause instanceof ApiError && cause.status === 401)) throw cause
+    fail(credential.rejected)
+    return 1
+  }
   note(
     `Bridge ${bridge.session.bridgeId}${bridge.reopened ? " (reopened)" : ""} serving ${root}`
   )
@@ -192,6 +223,7 @@ async function runCommand(options: RunOptions): Promise<number> {
   // is created; the server rejects them on any later run.
   if (creating) {
     configurable["sandbox_bridge_id"] = bridge.session.bridgeId
+    configurable["thread_type"] = threadType
     if (repo !== null) configurable["repo"] = repoFullName(repo)
     else configurable["repo_explicitly_none"] = true
   }
@@ -215,7 +247,7 @@ async function runCommand(options: RunOptions): Promise<number> {
   } catch (cause) {
     fail(
       cause instanceof ApiError && cause.status === 401
-        ? "your session expired — run `open-swe login` again"
+        ? credential.rejected
         : errorMessage(cause)
     )
     exitCode = 1
@@ -245,6 +277,7 @@ async function runCommand(options: RunOptions): Promise<number> {
 const CLI_OPTIONS = {
   backend: { type: "string" },
   thread: { type: "string" },
+  visibility: { type: "string" },
   model: { type: "string" },
   effort: { type: "string" },
   help: { type: "boolean", short: "h" },
@@ -292,6 +325,7 @@ export async function main(argv: readonly string[]): Promise<number> {
     case "run":
       return await runCommand({
         thread: values.thread,
+        visibility: values.visibility,
         model: values.model,
         effort: values.effort,
         prompt: positionals.slice(1).join(" "),

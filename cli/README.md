@@ -24,7 +24,23 @@ anywhere on your `PATH`:
 cp cli/dist/open-swe /usr/local/bin/
 ```
 
-## Sign in
+## Authenticate
+
+The CLI uses the first credential it finds:
+
+1. **`OPEN_SWE_API_KEY`** — a workspace API key (`osk_…`) an admin minted.
+2. **GitHub Actions** — inside a job with `permissions: id-token: write`, the
+   job's own OIDC token, requested with the backend URL as its audience
+   (override with `OPEN_SWE_OIDC_AUDIENCE`). An admin must first let the
+   repository start threads in its workspace's settings.
+3. **A person's session** — `OPEN_SWE_SESSION`, or the one `open-swe login`
+   stored.
+
+An API key and a workflow are machines: their threads are always `system`
+threads. A person's threads are `workspace` threads unless `--visibility
+private` is passed.
+
+### Sign in as a person
 
 ```sh
 open-swe login --backend https://dev.open-swe.langchain.dev
@@ -33,20 +49,30 @@ open-swe login --backend https://dev.open-swe.langchain.dev
 This is the desktop app's sign-in: your browser opens the GitHub login the
 dashboard uses, a loopback port catches the handoff, and PKCE S256 exchanges it
 for the same session the desktop app stores. Requests then carry it as the
-dashboard's own `osw_session` cookie, so the backend authenticates the CLI
-exactly as it authenticates the app. The session and backend URL live in
+dashboard's own `osw_session` cookie. The session and backend URL live in
 `~/.open-swe/config.json` (mode 0600), and `open-swe logout` deletes the file.
 
-The environment wins over all of it, under the variable names the desktop app
-already reads, so you can point a build at a backend without signing in again:
+### Run in GitHub Actions
+
+```yaml
+permissions:
+  contents: read
+  id-token: write
+steps:
+  - uses: actions/checkout@v4
+  - run: open-swe run "is the test suite green?"
+    env:
+      OPEN_SWE_BACKEND_URL: https://open-swe.example.com
+```
+
+### Backend
 
 | Variable | Effect |
 |---|---|
 | `OPEN_SWE_BACKEND_URL` | the backend to call |
 | `OPEN_SWE_DESKTOP_URL` | the same, checked second |
-| `OPEN_SWE_SESSION` | the session JWT, instead of a stored login |
 
-With none of them set, the backend comes from `~/.open-swe/config.json`, then
+With neither set, the backend comes from `~/.open-swe/config.json`, then
 from the backend the desktop app was last pointed at
 (`desktop-config.json` in its application-support directory), then
 `http://localhost:2024` — the desktop app's own development default.
@@ -96,6 +122,7 @@ Options:
 | `--thread <id>` | Continue an existing thread instead of creating one. Must be a thread this directory's bridge is bound to. |
 | `--model <id>` | Agent model id. The backend only honors it together with `--effort`. |
 | `--effort <name>` | Reasoning effort for `--model`. |
+| `--visibility private` | Start a private thread instead of a workspace one. People only. |
 
 With no prompt arguments, the prompt is read from stdin.
 

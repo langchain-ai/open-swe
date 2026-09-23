@@ -20,7 +20,7 @@ def upgrade() -> None:
         """
         CREATE TABLE sandbox_bridge (
             bridge_id text PRIMARY KEY,
-            owner_login text NOT NULL,
+            owner_id text NOT NULL,
             hostname text NOT NULL,
             root_path text NOT NULL,
             label text,
@@ -31,7 +31,7 @@ def upgrade() -> None:
         """
     )
 
-    op.execute("CREATE INDEX sandbox_bridge_owner_idx ON sandbox_bridge (owner_login)")
+    op.execute("CREATE INDEX sandbox_bridge_owner_idx ON sandbox_bridge (owner_id)")
 
     # The prune sweep scans open bridges by how long they have been quiet.
     op.execute(

@@ -1,13 +1,13 @@
 """The CLI's side of the bridge: open, heartbeat, long-poll, reply, close.
 
-Every route is scoped to ``session["sub"]`` and answers 404 for a bridge the
-caller does not own, so an id belonging to someone else is indistinguishable
-from one that never existed.
+Every route is scoped to the caller's ``Principal.sender_id`` (a person, an API
+key or a CI workflow) and answers 404 for a bridge the caller does not own, so
+an id belonging to someone else is indistinguishable from one that never existed.
 """
 
 import asyncio
 import logging
-from typing import Any, Self
+from typing import Self
 
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import Response
@@ -25,8 +25,8 @@ from agent.bridge.constants import (
 )
 from agent.bridge.protocol import JsonObject
 from agent.bridge.store import BridgeStore, ClaimedRequest
-from agent.dashboard.deps import SESSION_DEP
 from agent.database import postgres
+from agent.threads.principals import PrincipalDep
 
 logger = logging.getLogger(__name__)
 
@@ -68,11 +68,11 @@ def _require_postgres() -> None:
         raise HTTPException(503, "sandbox bridges require PostgreSQL")
 
 
-async def _touch(bridge_id: str, login: str) -> None:
+async def _touch(bridge_id: str, owner_id: str) -> None:
     """Refresh the bridge's heartbeat, or say why the caller may not use it."""
-    if await BridgeStore.heartbeat(bridge_id, owner_login=login):
+    if await BridgeStore.heartbeat(bridge_id, owner_id=owner_id):
         return
-    bridge = await BridgeStore.load(bridge_id, owner_login=login)
+    bridge = await BridgeStore.load(bridge_id, owner_id=owner_id)
     if bridge is None:
         raise HTTPException(404, "sandbox bridge not found")
     raise HTTPException(409, "sandbox bridge is closed; reopen it")
@@ -81,11 +81,11 @@ async def _touch(bridge_id: str, login: str) -> None:
 @router.post("/bridges")
 async def api_open_bridge(
     body: BridgeOpenBody,
-    session: dict[str, Any] = SESSION_DEP,
+    principal: PrincipalDep,
 ) -> BridgeOpenResponse:
     _require_postgres()
     bridge = await BridgeStore.register(
-        owner_login=session["sub"],
+        owner_id=principal.sender_id,
         hostname=body.hostname,
         root_path=body.root_path,
         label=body.label,
@@ -97,7 +97,7 @@ async def api_open_bridge(
         "Opened a sandbox bridge",
         extra={
             "bridge_id": bridge.bridge_id,
-            "bridge_owner": bridge.owner_login,
+            "bridge_owner": bridge.owner_id,
             "bridge_reopened": body.bridge_id is not None,
         },
     )
@@ -111,22 +111,22 @@ async def api_open_bridge(
 @router.post("/bridges/{bridge_id}/heartbeat")
 async def api_bridge_heartbeat(
     bridge_id: str,
-    session: dict[str, Any] = SESSION_DEP,
+    principal: PrincipalDep,
 ) -> Response:
     _require_postgres()
-    await _touch(bridge_id, session["sub"])
+    await _touch(bridge_id, principal.sender_id)
     return Response(status_code=204)
 
 
 @router.get("/bridges/{bridge_id}/requests")
 async def api_claim_bridge_requests(
     bridge_id: str,
+    principal: PrincipalDep,
     wait: int = Query(DEFAULT_POLL_WAIT_SECONDS, ge=0, le=MAX_POLL_WAIT_SECONDS),
     limit: int = Query(DEFAULT_CLAIM_LIMIT, ge=1, le=MAX_CLAIM_LIMIT),
-    session: dict[str, Any] = SESSION_DEP,
 ) -> BridgeRequestsResponse:
     _require_postgres()
-    await _touch(bridge_id, session["sub"])
+    await _touch(bridge_id, principal.sender_id)
     # Subscribing before the first claim is what closes the window in which a
     # request enqueued between the claim and the wait would go unnoticed.
     async with listener.subscribe(bridge_id) as events:
@@ -151,10 +151,10 @@ async def api_answer_bridge_request(
     bridge_id: str,
     request_id: str,
     body: BridgeReplyBody,
-    session: dict[str, Any] = SESSION_DEP,
+    principal: PrincipalDep,
 ) -> Response:
     _require_postgres()
-    await _touch(bridge_id, session["sub"])
+    await _touch(bridge_id, principal.sender_id)
     outcome = await BridgeStore.complete(
         bridge_id, request_id, result=body.result, error=body.error
     )
@@ -168,10 +168,10 @@ async def api_answer_bridge_request(
 @router.delete("/bridges/{bridge_id}")
 async def api_close_bridge(
     bridge_id: str,
-    session: dict[str, Any] = SESSION_DEP,
+    principal: PrincipalDep,
 ) -> Response:
     _require_postgres()
-    if not await BridgeStore.close(bridge_id, owner_login=session["sub"]):
+    if not await BridgeStore.close(bridge_id, owner_id=principal.sender_id):
         raise HTTPException(404, "sandbox bridge not found")
     logger.info("Closed a sandbox bridge", extra={"bridge_id": bridge_id})
     return Response(status_code=204)

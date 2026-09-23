@@ -25,7 +25,7 @@ Reply = Callable[[ClaimedRequest], JsonObject]
 
 async def _open() -> Bridge:
     bridge = await BridgeStore.register(
-        owner_login=OWNER,
+        owner_id=OWNER,
         hostname="laptop.local",
         root_path="/Users/test/project",
         label=None,
@@ -146,7 +146,7 @@ async def test_closing_the_bridge_ends_a_waiting_request(registry_db: None) -> N
     async def close_once_claimed() -> None:
         for _ in range(500):
             if await BridgeStore.claim(bridge.bridge_id, limit=8):
-                await BridgeStore.close(bridge.bridge_id, owner_login=OWNER)
+                await BridgeStore.close(bridge.bridge_id, owner_id=OWNER)
                 return
             await asyncio.sleep(0.01)
         raise AssertionError("no bridge request arrived")

@@ -4,6 +4,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 
 import { ApiClient } from "../src/api.ts"
+import { SessionCredential } from "../src/credentials.ts"
 import { Bridge } from "../src/bridge.ts"
 import { isRecord } from "../src/json.ts"
 
@@ -88,7 +89,10 @@ function fakeBackend(
   })
 
   return {
-    api: new ApiClient(`http://127.0.0.1:${server.port}`, "jwt-token"),
+    api: new ApiClient(
+      `http://127.0.0.1:${server.port}`,
+      new SessionCredential("jwt-token")
+    ),
     firstReply,
     opened: () => opens,
     deleted: () => deletes,
