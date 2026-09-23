@@ -21,7 +21,15 @@ import {
 } from "@/lib/profile"
 import { useSession } from "@/lib/session"
 
-/** Pick a default model, then optionally connect Slack. */
+/**
+ * First-run onboarding modal: pick a default agent model, then connect Slack.
+ *
+ * The model step shows until the user has saved a default model; the Slack step
+ * shows (where Sign in with Slack is enabled) until their Slack account is
+ * linked. Both steps live in the same dialog so a new user is walked through
+ * picking a model and connecting Slack in one place. The Slack prompt can be
+ * permanently dismissed on the user's profile.
+ */
 export function OnboardingDialog() {
   const session = useSession()
   const profile = useProfile()
@@ -67,9 +75,7 @@ export function OnboardingDialog() {
   const needsSlack =
     slackEnabled &&
     !slackConnected &&
-    profile.data !== undefined &&
-    !profile.isLoading &&
-    !profile.isError &&
+    profile.isSuccess &&
     !profile.data.slack_onboarding_dismissed &&
     !session.isLoading &&
     !session.isError
