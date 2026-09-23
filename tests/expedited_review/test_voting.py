@@ -16,9 +16,11 @@ class _Harness:
     def __init__(self) -> None:
         self.agent_prompts: list[str] = []
         self.marked_ready: list[str] = []
+        self.wake_succeeds = True
 
-    async def notify_agent(self, approval: ExpeditedApproval, prompt: str) -> None:
+    async def notify_agent(self, approval: ExpeditedApproval, prompt: str) -> bool:
         self.agent_prompts.append(prompt)
+        return self.wake_succeeds
 
     async def mark_ready(self, owner: str, repo: str, number: int, action: object, token: str):
         self.marked_ready.append(token)
@@ -106,6 +108,31 @@ async def test_a_draft_waits_for_its_author_to_mark_it_ready(
     assert harness.marked_ready == ["token-ada"]
     assert not stored.awaiting_ready
     assert stored.approvers == ["grace"]
+
+
+async def test_a_fork_author_without_write_access_can_mark_their_draft_ready(
+    harness: _Harness, open_approval: OpenApproval, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    approval = await open_approval(awaiting_ready=True)
+    monkeypatch.setattr(voting, "has_repo_write_permission", AsyncMock(return_value=False))
+
+    outcome = await _click(approval, "U_ADA", decision="ready")
+
+    assert "Marked ready" in outcome.message
+    assert harness.marked_ready == ["token-ada"]
+
+
+async def test_an_approval_whose_wake_up_fails_tells_the_voter(
+    harness: _Harness, open_approval: OpenApproval
+) -> None:
+    approval = await open_approval()
+    harness.wake_succeeds = False
+
+    outcome = await _click(approval, "U_GRACE")
+
+    assert "Approval recorded" in outcome.message
+    assert "tag it in the thread" in outcome.message
+    assert (await _stored(approval)).approved
 
 
 async def test_github_refusing_to_undraft_keeps_the_card_waiting(

@@ -19,7 +19,7 @@ import httpx2
 from agent.baby_sit import aggregate_check_state
 from agent.github.ci import (
     fetch_pr,
-    fetch_required_check_names,
+    fetch_required_checks,
     list_check_runs,
     list_commit_statuses,
     unreported_required_checks,
@@ -189,7 +189,7 @@ async def assess_readiness(
     statuses = await list_commit_statuses(owner=owner, repo=repo, ref=head_sha, token=token)
     if check_runs is None or statuses is None:
         return None
-    required = await fetch_required_check_names(
+    required = await fetch_required_checks(
         owner=owner, repo=repo, branch=PullRequestPayload.model_validate(pr).base_ref, token=token
     )
     if required is None:

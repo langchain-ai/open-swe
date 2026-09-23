@@ -96,7 +96,13 @@ class ExpeditedApproval(Base):
 
     @property
     def approvals(self) -> list[ApprovalVote]:
-        return [vote for vote in self.votes if vote.decision == "approve"]
+        """Approvals from anyone but the author; older cards may still hold an author's vote."""
+        return [
+            vote
+            for vote in self.votes
+            if vote.decision == "approve"
+            and not self.is_author(vote.voter_user_id, vote.github_login)
+        ]
 
     @property
     def approved(self) -> bool:

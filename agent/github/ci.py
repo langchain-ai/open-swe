@@ -10,6 +10,7 @@ webhook handling.
 """
 
 import logging
+from dataclasses import dataclass
 from typing import Any
 
 import httpx2
@@ -110,17 +111,44 @@ async def list_commit_statuses(
     return latest
 
 
-class _RequiredCheck(BaseModel):
+@dataclass(frozen=True, slots=True)
+class RequiredCheck:
+    """A check a branch requires; ``app_id`` pins the GitHub App that must report it."""
+
+    name: str
+    app_id: int | None = None
+
+    def reported_by(self, check_runs: list[dict[str, Any]], statuses: list[dict[str, Any]]) -> bool:
+        for run in check_runs:
+            if run.get("name") != self.name:
+                continue
+            app = run.get("app")
+            if self.app_id is None or (isinstance(app, dict) and app.get("id") == self.app_id):
+                return True
+        return self.app_id is None and any(
+            status.get("context") == self.name for status in statuses
+        )
+
+
+class _ProtectionCheck(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
     context: str
+    app_id: int | None = None
+
+
+class _RulesetCheck(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    context: str
+    integration_id: int | None = None
 
 
 class _RequiredStatusChecks(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
     contexts: list[str] = Field(default_factory=list)
-    checks: list[_RequiredCheck] = Field(default_factory=list)
+    checks: list[_ProtectionCheck] = Field(default_factory=list)
 
 
 class _BranchProtection(BaseModel):
@@ -138,7 +166,7 @@ class _Branch(BaseModel):
 class _RuleParameters(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
-    required_status_checks: list[_RequiredCheck] = Field(default_factory=list)
+    required_status_checks: list[_RulesetCheck] = Field(default_factory=list)
 
 
 class _BranchRule(BaseModel):
@@ -151,21 +179,36 @@ class _BranchRule(BaseModel):
 _BRANCH_RULES = TypeAdapter(list[_BranchRule])
 
 
-async def fetch_required_check_names(
+def _any_app(app_id: int | None) -> int | None:
+    """GitHub stores "any app" as a missing id or -1."""
+    return app_id if app_id is not None and app_id > 0 else None
+
+
+async def fetch_required_checks(
     *, owner: str, repo: str, branch: str, token: str
-) -> set[str] | None:
-    """Check names ``branch`` requires, from branch protection and rulesets; read access suffices."""
+) -> set[RequiredCheck] | None:
+    """Checks ``branch`` requires, from branch protection and rulesets; read access suffices."""
     base = f"{_GITHUB_API_BASE}/repos/{owner}/{repo}"
+    rules: list[_BranchRule] = []
     try:
         async with github_client(token=token) as client:
             branch_response = await github_request(client, "GET", f"{base}/branches/{branch}")
             branch_response.raise_for_status()
-            rules_response = await github_request(
-                client, "GET", f"{base}/rules/branches/{branch}", params={"per_page": "100"}
-            )
-            rules_response.raise_for_status()
-        protection = _Branch.model_validate(branch_response.json()).protection
-        rules = _BRANCH_RULES.validate_python(rules_response.json())
+            protection = _Branch.model_validate(branch_response.json()).protection
+            page = 1
+            while True:
+                rules_response = await github_request(
+                    client,
+                    "GET",
+                    f"{base}/rules/branches/{branch}",
+                    params={"per_page": "100", "page": str(page)},
+                )
+                rules_response.raise_for_status()
+                page_rules = _BRANCH_RULES.validate_python(rules_response.json())
+                rules.extend(page_rules)
+                if len(page_rules) < 100:
+                    break
+                page += 1
     except httpx2.HTTPError, ValueError, ValidationError:
         logger.warning(
             "Failed to read required checks",
@@ -173,25 +216,27 @@ async def fetch_required_check_names(
             exc_info=True,
         )
         return None
-    required: set[str] = set()
+    required: set[RequiredCheck] = set()
     classic = protection.required_status_checks if protection else None
     if classic is not None:
-        required.update(classic.contexts)
-        required.update(check.context for check in classic.checks)
+        required.update(RequiredCheck(context) for context in classic.contexts)
+        required.update(
+            RequiredCheck(check.context, _any_app(check.app_id)) for check in classic.checks
+        )
     for rule in rules:
         if rule.type == "required_status_checks" and rule.parameters is not None:
-            required.update(check.context for check in rule.parameters.required_status_checks)
-    return required - _OPEN_SWE_CHECK_NAMES
+            required.update(
+                RequiredCheck(check.context, _any_app(check.integration_id))
+                for check in rule.parameters.required_status_checks
+            )
+    return {check for check in required if check.name not in _OPEN_SWE_CHECK_NAMES}
 
 
 def unreported_required_checks(
-    required: set[str], check_runs: list[dict[str, Any]], statuses: list[dict[str, Any]]
+    required: set[RequiredCheck], check_runs: list[dict[str, Any]], statuses: list[dict[str, Any]]
 ) -> list[str]:
-    """Required check names with neither a check run nor a commit status on the head yet."""
-    reported = {run.get("name") for run in check_runs} | {
-        status.get("context") for status in statuses
-    }
-    return sorted(required - reported)
+    """Required check names with no matching check run or commit status on the head yet."""
+    return sorted({check.name for check in required if not check.reported_by(check_runs, statuses)})
 
 
 async def list_failing_check_runs(

@@ -46,6 +46,8 @@ class _GitHub:
         monkeypatch.setattr(merge, "_merge_token", AsyncMock(return_value="merge-token"))
         monkeypatch.setattr(merge, "assess_readiness", self._assess)
         monkeypatch.setattr(merge, "fetch_changed_files", self._files)
+        monkeypatch.setattr(merge, "fetch_pr", self._pr)
+        self.current_head: str | None = None
         monkeypatch.setattr(merge, "_submit_github_approval", self._review)
         monkeypatch.setattr(merge, "github_request", self._request)
         monkeypatch.setattr(
@@ -59,6 +61,9 @@ class _GitHub:
 
     async def _files(self, **_: object) -> list[ChangedFile]:
         return self.files
+
+    async def _pr(self, **_: object) -> dict[str, Any]:
+        return {"head": {"sha": self.current_head or self.readiness.snapshot.head_sha}}
 
     async def _review(self, approval: ExpeditedApproval, login: str, head_sha: str) -> int:
         self.reviews.append((login, head_sha))
@@ -198,3 +203,41 @@ async def test_a_refused_merge_keeps_the_card_open_and_does_not_resubmit_reviews
     assert github.reviews == [("grace", "abc123"), ("linus", "abc123")]
     assert len(github.comments) == 1
     assert len(github.merges) == 2
+
+
+async def test_an_authors_own_vote_is_not_an_approval(
+    github: _GitHub, open_approval: OpenApproval
+) -> None:
+    approval = await _approved(open_approval, "U_ADA")
+
+    result = await merge.merge_approved(approval)
+
+    assert result.status == "needs_approvals"
+    assert github.reviews == [] and github.merges == []
+
+
+async def test_a_card_closed_before_the_lock_is_taken_writes_nothing(
+    github: _GitHub, open_approval: OpenApproval
+) -> None:
+    approval = await _approved(open_approval, "U_GRACE")
+    async with ExpeditedApproval.locked(approval.id) as (_, row):
+        assert row is not None
+        row.state = "rejected"
+
+    result = await merge.merge_approved(approval)
+
+    assert result.status == "closed"
+    assert github.reviews == [] and github.merges == [] and github.comments == []
+
+
+async def test_a_head_that_moves_after_the_checks_writes_nothing(
+    github: _GitHub, open_approval: OpenApproval
+) -> None:
+    approval = await _approved(open_approval, "U_GRACE")
+    github.current_head = "def456"
+
+    result = await merge.merge_approved(approval)
+
+    assert result.status == "not_ready"
+    assert (await _reload(approval)).state == "open"
+    assert github.reviews == [] and github.merges == []

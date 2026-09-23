@@ -176,10 +176,10 @@ async def refresh_card(approval: ExpeditedApproval, *, outcome: str | None = Non
         )
 
 
-async def notify_agent(approval: ExpeditedApproval, prompt: str) -> None:
-    """Wake the agent thread that posted the card once with ``prompt``."""
+async def notify_agent(approval: ExpeditedApproval, prompt: str) -> bool:
+    """Wake the agent thread that posted the card once with ``prompt``; whether it was queued."""
     if not approval.thread_id:
-        return
+        return False
     pr = approval.pull_request
     configurable = dict(approval.run_config)
     configurable.update(
@@ -204,6 +204,8 @@ async def notify_agent(approval: ExpeditedApproval, prompt: str) -> None:
             extra={"approval_id": str(approval.id)},
             exc_info=True,
         )
+        return False
+    return True
 
 
 async def retire(

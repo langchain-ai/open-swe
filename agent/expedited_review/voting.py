@@ -60,11 +60,18 @@ class Voter:
     github_login: str
 
 
-async def _resolve_voter(approval: ExpeditedApproval, user: User | None) -> Voter | VoteOutcome:
-    """The authorized voter behind a click, or why they are not one."""
-    login = user.login_for("github") if user is not None else ""
+def _linked(user: User | None) -> Voter | VoteOutcome:
     if user is None or not any(identity.provider == "github" for identity in user.identities):
         return VoteOutcome(f"Your Slack account is not linked to GitHub. {_slack_link_hint()}")
+    return Voter(user=user, github_login=user.login_for("github"))
+
+
+async def _resolve_voter(approval: ExpeditedApproval, user: User | None) -> Voter | VoteOutcome:
+    """The authorized voter behind a click, or why they are not one."""
+    linked = _linked(user)
+    if isinstance(linked, VoteOutcome):
+        return linked
+    login = linked.github_login
     pr = approval.pull_request
     token = await repo_token(pr.owner, pr.repo)
     if token is None:
@@ -73,7 +80,7 @@ async def _resolve_voter(approval: ExpeditedApproval, user: User | None) -> Vote
         owner=pr.owner, repo=pr.repo, username=login, token=token
     ):
         return VoteOutcome(f"@{login} does not have write access to {pr.owner}/{pr.repo}.")
-    return Voter(user=user, github_login=login)
+    return linked
 
 
 async def handle_vote(
@@ -85,15 +92,19 @@ async def handle_vote(
     """Record one click. Slow work runs unlocked; the row lock covers only the write."""
     if approval.state != "open":
         return VoteOutcome("This expedited review is no longer accepting votes.")
+    if decision == "ready":
+        # The author's own token decides; a fork's author has no write access upstream.
+        author = _linked(user)
+        if isinstance(author, VoteOutcome):
+            return author
+        if not approval.is_author(author.user.id, author.github_login):
+            return VoteOutcome("Only the pull request's author can mark it ready for review.")
+        return await _mark_ready(approval, voter=author)
     voter = await _resolve_voter(approval, user)
     if isinstance(voter, VoteOutcome):
         return voter
     authored = approval.is_author(voter.user.id, voter.github_login)
 
-    if decision == "ready":
-        if not authored:
-            return VoteOutcome("Only the pull request's author can mark it ready for review.")
-        return await _mark_ready(approval, voter=voter)
     if decision == "reject":
         return await _reject(approval, voter=voter)
 
@@ -119,17 +130,20 @@ async def handle_vote(
     if current is None:
         return VoteOutcome("This expedited review vanished.")
     await refresh_card(current)
-    if first_approval:
-        pr = current.pull_request
-        await notify_agent(
-            current,
-            render_prompt(
-                "runs/expedited-review-approved.md",
-                pr_url=pr.url,
-                approvers=", ".join(f"@{login}" for login in current.approvers),
-            ),
+    recorded = f"Approval recorded as @{voter.github_login}."
+    if first_approval and not await notify_agent(
+        current,
+        render_prompt(
+            "runs/expedited-review-approved.md",
+            pr_url=current.pull_request.url,
+            approvers=", ".join(f"@{login}" for login in current.approvers),
+        ),
+    ):
+        return VoteOutcome(
+            f"{recorded} Open SWE could not be woken to merge it; tag it in the thread to "
+            "try again."
         )
-    return VoteOutcome(f"Approval recorded as @{voter.github_login}.")
+    return VoteOutcome(recorded)
 
 
 async def _mark_ready(approval: ExpeditedApproval, *, voter: Voter) -> VoteOutcome:

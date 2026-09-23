@@ -102,9 +102,7 @@ class Ineligible:
     reason: str
 
 
-def diff_fingerprint(files: list[ChangedFile]) -> str:
-    """A hash of what the card draws, so a commit touching only unshown tests keeps the votes."""
-    shown, _ = ChangedFile.rendered(files)
+def _digest(shown: list[ChangedFile]) -> str:
     digest = hashlib.sha256()
     for file in sorted(shown, key=lambda f: f.filename):
         digest.update(file.filename.encode())
@@ -112,6 +110,22 @@ def diff_fingerprint(files: list[ChangedFile]) -> str:
         digest.update((file.patch or "").encode())
         digest.update(b"\0")
     return digest.hexdigest()
+
+
+def diff_fingerprint(files: list[ChangedFile]) -> str:
+    """A hash of what the card draws, so a commit touching only unshown tests keeps the votes."""
+    return _digest(ChangedFile.rendered(files)[0])
+
+
+def fingerprint_matches(files: list[ChangedFile], fingerprint: str) -> bool:
+    """Whether ``files`` still hold what a card drew, whichever way the test/source ratio now tips.
+
+    A card draws either the source alone or the source plus the tests, so a
+    commit that only moves that ratio must not discard votes on its own.
+    """
+    reviewed, tests = ChangedFile.split(files)
+    with_tests = [*reviewed, *(file for file in tests if file.patch is not None)]
+    return fingerprint in {_digest(reviewed), _digest(with_tests)}
 
 
 def assess_eligibility(files: list[ChangedFile]) -> EligibleDiff | Ineligible:

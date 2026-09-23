@@ -13,6 +13,7 @@ from agent.expedited_review.eligibility import (
     Ineligible,
     assess_eligibility,
     fetch_changed_files,
+    fingerprint_matches,
 )
 from agent.expedited_review.lifecycle import post_card, remove_superseded_cards, retire
 from agent.github.ci import fetch_pr
@@ -174,7 +175,7 @@ async def expedite_pr_approval(
     active = await ExpeditedApproval.active_for(pr_ref.owner, pr_ref.repo, pr_ref.number)
     if active is not None and active.thread_id and active.thread_id != thread_id:
         return _failure("This pull request's expedited review belongs to another agent thread")
-    if active is not None and active.diff_fingerprint == verdict.fingerprint:
+    if active is not None and fingerprint_matches(files, active.diff_fingerprint):
         return {
             "success": True,
             "approval_id": str(active.id),

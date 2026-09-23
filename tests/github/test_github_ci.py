@@ -67,47 +67,61 @@ def test_sha_from_status_event() -> None:
     assert github_ci.branch_from_check_payload(payload, "status") == "b1"
 
 
-async def test_required_checks_merge_branch_protection_and_rulesets(
+async def test_required_checks_merge_branch_protection_and_every_ruleset_page(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    responses = {
-        "branches/main": {
-            "protection": {
-                "required_status_checks": {
-                    "contexts": ["lint"],
-                    "checks": [{"context": "unit tests", "app_id": 1}],
-                }
+    branch = {
+        "protection": {
+            "required_status_checks": {
+                "contexts": ["lint"],
+                "checks": [{"context": "unit tests", "app_id": 1}],
             }
-        },
-        "rules/branches/main": [
-            {"type": "pull_request", "parameters": {}},
+        }
+    }
+    filler = [{"type": "pull_request", "parameters": {}}] * 99
+    rules_pages = {
+        "1": [
+            *filler,
             {
                 "type": "required_status_checks",
                 "parameters": {
                     "required_status_checks": [
-                        {"context": "e2e"},
+                        {"context": "e2e", "integration_id": -1},
                         {"context": github_ci.REVIEW_CHECK_RUN_NAME},
                     ]
                 },
             },
         ],
+        "2": [
+            {
+                "type": "required_status_checks",
+                "parameters": {"required_status_checks": [{"context": "deploy"}]},
+            }
+        ],
     }
 
-    async def request(_client: object, _method: str, url: str, **_: object) -> _FakeResponse:
-        return _FakeResponse(
-            responses["rules/branches/main" if "/rules/" in url else "branches/main"]
-        )
+    async def request(
+        _client: object, _method: str, url: str, params: dict[str, str] | None = None, **_: object
+    ) -> _FakeResponse:
+        if "/rules/" in url:
+            return _FakeResponse(rules_pages[(params or {})["page"]])
+        return _FakeResponse(branch)
 
     monkeypatch.setattr(github_ci, "github_request", request)
 
-    required = await github_ci.fetch_required_check_names(
-        owner="o", repo="r", branch="main", token="t"
-    )
+    required = await github_ci.fetch_required_checks(owner="o", repo="r", branch="main", token="t")
 
-    assert required == {"lint", "unit tests", "e2e"}
+    assert required == {
+        github_ci.RequiredCheck("lint"),
+        github_ci.RequiredCheck("unit tests", 1),
+        github_ci.RequiredCheck("e2e"),
+        github_ci.RequiredCheck("deploy"),
+    }
     assert github_ci.unreported_required_checks(
-        required, [{"name": "unit tests"}], [{"context": "lint"}]
-    ) == ["e2e"]
+        required,
+        [{"name": "unit tests", "app": {"id": 2}}, {"name": "e2e", "app": {"id": 9}}],
+        [{"context": "lint"}, {"context": "unit tests"}],
+    ) == ["deploy", "unit tests"]
 
 
 async def test_required_checks_unavailable_is_none(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -117,8 +131,7 @@ async def test_required_checks_unavailable_is_none(monkeypatch: pytest.MonkeyPat
     monkeypatch.setattr(github_ci, "github_request", request)
 
     assert (
-        await github_ci.fetch_required_check_names(owner="o", repo="r", branch="main", token="t")
-        is None
+        await github_ci.fetch_required_checks(owner="o", repo="r", branch="main", token="t") is None
     )
 
 

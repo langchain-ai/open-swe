@@ -18,7 +18,7 @@ from agent.github.ci import (
     FAILING_CONCLUSIONS,
     branch_from_check_payload,
     fetch_pr,
-    fetch_required_check_names,
+    fetch_required_checks,
     head_sha_from_check_payload,
     is_completed_ci_payload,
     list_check_runs,
@@ -491,7 +491,7 @@ async def _evaluate_watch(key: str, *, token: str | None = None) -> str:
         base_ref = PullRequestPayload.model_validate(pr).base_ref
         if not base_ref:
             return await _record_evaluation_error(watch, "base branch unavailable")
-        required = await fetch_required_check_names(
+        required = await fetch_required_checks(
             owner=watch.owner, repo=watch.repo, branch=base_ref, token=token
         )
         if required is None:
