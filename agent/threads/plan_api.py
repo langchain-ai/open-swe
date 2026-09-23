@@ -11,10 +11,12 @@ from agent.threads.plan_store import (
     PLAN_STATUS_SHARED,
     add_plan_comment,
     delete_plan_comment,
+    dismiss_plan,
     get_plan_content,
     list_plan_comments,
     make_plan_approver,
     plan_file_path_for_thread,
+    plan_is_dismissed,
     save_plan_content,
     write_plan_to_sandbox,
 )
@@ -55,6 +57,7 @@ class CommentBody(BaseModel):
 class PlanUpdate(BaseModel):
     html: str | None = None
     markdown: str | None = None
+    dismissed: bool = False
 
 
 async def fetch_thread_metadata(thread_id: str) -> dict[str, Any]:
@@ -94,6 +97,7 @@ async def get_plan(thread_id: str, session: dict[str, Any] = _SESSION_DEP) -> di
         "markdown": content.get("markdown", ""),
         "approvedBy": approved_by,
         "approvedAt": approved_at if isinstance(approved_at, str) else None,
+        "dismissed": bool(content) and await plan_is_dismissed(thread_id, content.get("revision")),
         "user": {
             "id": login,
             "login": login,
@@ -112,6 +116,11 @@ async def update_plan(
     if not thread_is_promptable(metadata, session["sub"]):
         raise HTTPException(404, "thread not found")
     content = await get_plan_content(thread_id) or {}
+    if body.dismissed:
+        if not content:
+            raise HTTPException(404, "plan not found")
+        await dismiss_plan(thread_id, content.get("revision"))
+        return {"dismissed": True}
     legacy_markdown = isinstance(content.get("markdown"), str) and not content.get("html")
     field = "markdown" if legacy_markdown else "html"
     value = getattr(body, field)
