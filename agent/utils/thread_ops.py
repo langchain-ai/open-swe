@@ -12,7 +12,7 @@ from typing import Any
 
 from langgraph_sdk import get_client
 
-from agent.config import ENV
+from agent.config import deployment_api_url
 
 logger = logging.getLogger(__name__)
 
@@ -20,7 +20,7 @@ MAX_QUEUED_MESSAGES = 100
 
 
 def langgraph_url() -> str:
-    return ENV.LANGGRAPH_URL.get()
+    return deployment_api_url()
 
 
 def langgraph_client():

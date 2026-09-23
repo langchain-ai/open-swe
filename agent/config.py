@@ -157,6 +157,10 @@ ENV.var(
     default="https://api.smith.langchain.com",
 )
 ENV.var(
+    "LANGSMITH_AUTH_ENDPOINT",
+    "LangSmith authentication endpoint; LangGraph Platform injects the regional endpoint.",
+)
+ENV.var(
     "LANGSMITH_TENANT_ID",
     "LangSmith workspace id used in trace links; discovered from the workspace when unset.",
 )
@@ -169,8 +173,9 @@ ENV.var(
 )
 ENV.var(
     "LANGSMITH_HOST_API_URL",
-    "LangGraph Platform control-plane API, used by the legacy LangSmith-brokered GitHub auth.",
-    default="https://api.host.langchain.com",
+    "The deployment's own public API URL; LangGraph Platform injects it per deployment. "
+    "Set it to the public ingress URL for standalone deployments.",
+    default="http://localhost:2024",
 )
 ENV.var(
     "LANGSMITH_GATEWAY_API_KEY",
@@ -198,11 +203,6 @@ ENV.var(
     default="openswe-reviewer-outcomes",
 )
 ENV.var("EVAL_LANGSMITH_PROJECT", "LangSmith project reviewer evals trace into.")
-ENV.var(
-    "LANGGRAPH_URL",
-    "URL of the LangGraph server the FastAPI side calls to create and stream runs.",
-    default="http://localhost:2024",
-)
 ENV.var(
     "LANGCHAIN_REVISION_ID", "Revision id LangGraph Platform injects; attached to run metadata."
 )
@@ -286,12 +286,13 @@ ENV.var("LINEAR_WEBHOOK_SECRET", "HMAC secret for Linear webhook deliveries.", s
 # --- Dashboard ------------------------------------------------------------------------------
 ENV.var(
     "DASHBOARD_BASE_URL",
-    "Public URL of the dashboard frontend; defaults to LANGGRAPH_URL when the backend serves "
-    "the dashboard (bundled build or DASHBOARD_DEV_SERVER_URL).",
+    "Public URL of the dashboard frontend; defaults to LANGSMITH_HOST_API_URL when the backend "
+    "serves the dashboard.",
 )
 ENV.var(
     "DASHBOARD_API_BASE_URL",
-    "Public URL browsers use for /dashboard/api/* and OAuth callbacks; defaults to LANGGRAPH_URL.",
+    "Public URL browsers use for /dashboard/api/* and OAuth callbacks; defaults to "
+    "LANGSMITH_HOST_API_URL.",
 )
 ENV.var(
     "DASHBOARD_STATIC_DIR",
@@ -459,3 +460,8 @@ ENV.var(
 ENV.var("BG_JOB_ISOLATED_LOOPS", "LangGraph background-job event-loop isolation flag.")
 ENV.var("DEBUG_TRACEMALLOC", "Start tracemalloc to attribute unclosed-session warnings.")
 ENV.var("DEBUG_TRACEMALLOC_FRAMES", "Frames tracemalloc records per allocation.", default="25")
+
+
+def deployment_api_url() -> str:
+    """Public API URL for this deployment."""
+    return ENV.LANGSMITH_HOST_API_URL.get()

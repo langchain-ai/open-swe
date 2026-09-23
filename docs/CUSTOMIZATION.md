@@ -562,7 +562,7 @@ async def my_trigger_webhook(request: Request, background_tasks: BackgroundTasks
 ```python
 async def process_my_trigger(task_description: str, repo_config: dict):
     thread_id = generate_deterministic_id(task_description)
-    langgraph_client = get_client(url=LANGGRAPH_URL)
+    langgraph_client = get_client(url=LANGSMITH_HOST_API_URL)
 
     await langgraph_client.runs.create(
         thread_id,

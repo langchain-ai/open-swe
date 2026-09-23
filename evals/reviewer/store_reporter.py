@@ -28,7 +28,7 @@ logger = logging.getLogger(__name__)
 def is_enabled() -> bool:
     """True when the eval should publish progress to the store (set by the Action)."""
     return bool(os.environ.get("REVIEWER_EVAL_REPORT_STORE")) and bool(
-        os.environ.get("LANGGRAPH_URL")
+        os.environ.get("LANGSMITH_HOST_API_URL")
     )
 
 
@@ -70,7 +70,7 @@ class StoreReporter:
         self._worker_id = os.environ.get("GITHUB_RUN_ID")
         self._started_at = _now_iso()
         # get_client auto-loads the api key from LANGGRAPH/LANGSMITH/LANGCHAIN env.
-        self._client = get_client(url=os.environ["LANGGRAPH_URL"])
+        self._client = get_client(url=os.environ["LANGSMITH_HOST_API_URL"])
 
     def _record(self, *, status: str, **overrides: Any) -> dict[str, Any]:
         record: dict[str, Any] = {

@@ -8,8 +8,8 @@ Usage:
     uv run python scripts/purge_wakeup_crons.py --dry-run
     uv run python scripts/purge_wakeup_crons.py
 
-Resolves the deployment URL from ``--url`` or ``LANGGRAPH_URL``, and the API key
-from ``LANGGRAPH_API_KEY`` / ``LANGSMITH_API_KEY``.
+Resolves the deployment URL from ``--url`` or ``LANGSMITH_HOST_API_URL``, and the
+API key from ``LANGGRAPH_API_KEY`` / ``LANGSMITH_API_KEY``.
 """
 
 import argparse
@@ -38,9 +38,9 @@ def _load_dotenv_if_available() -> None:
 
 
 def _resolve_url(arg_url: str | None) -> str:
-    url = arg_url or ENV.LANGGRAPH_URL.optional()
+    url = arg_url or ENV.LANGSMITH_HOST_API_URL.optional()
     if not url:
-        raise RuntimeError("Set --url or LANGGRAPH_URL")
+        raise RuntimeError("Set --url or LANGSMITH_HOST_API_URL")
     return url
 
 

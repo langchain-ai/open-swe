@@ -2,7 +2,7 @@
 
 from urllib.parse import quote, unquote, urlsplit
 
-from agent.config import ENV
+from agent.config import ENV, deployment_api_url
 from agent.utils.dashboard_ui import is_single_origin
 
 
@@ -11,20 +11,20 @@ def dashboard_base_url() -> str:
 
     An explicit ``DASHBOARD_BASE_URL`` wins. Otherwise the dashboard lives on the
     backend's own origin when the backend serves it (a bundled build, or the Vite
-    dev server behind ``DASHBOARD_DEV_SERVER_URL``), so ``LANGGRAPH_URL`` is the
-    base; with neither there is no dashboard to link to.
+    dev server behind ``DASHBOARD_DEV_SERVER_URL``). That origin comes from
+    ``LANGSMITH_HOST_API_URL``.
     """
     explicit = ENV.DASHBOARD_BASE_URL.optional()
     if explicit:
         return explicit.rstrip("/")
     if is_single_origin():
-        return ENV.LANGGRAPH_URL.get().rstrip("/")
+        return deployment_api_url().rstrip("/")
     return ""
 
 
 def dashboard_api_base_url() -> str:
     """Public URL browsers use for ``/dashboard/api/*``; the backend's own unless overridden."""
-    return (ENV.DASHBOARD_API_BASE_URL.optional() or ENV.LANGGRAPH_URL.get()).rstrip("/")
+    return (ENV.DASHBOARD_API_BASE_URL.optional() or deployment_api_url()).rstrip("/")
 
 
 def _origin(url: str) -> str | None:

@@ -12,7 +12,7 @@ import logging
 from datetime import UTC, datetime
 from typing import Any, Literal, TypedDict
 
-from agent.config import ENV
+from agent.config import ENV, deployment_api_url
 from agent.review.eval_store import (
     DEFAULT_EVAL_PROJECT,
     EVALS_NAMESPACE,
@@ -58,8 +58,8 @@ DEFAULT_REVIEWER_EVAL_CONFIG: ReviewerEvalConfig = {
 }
 
 
-def _resolve_langgraph_url() -> str | None:
-    return ENV.LANGGRAPH_URL.optional()
+def _resolve_langgraph_url() -> str:
+    return deployment_api_url()
 
 
 def _eval_project() -> str:

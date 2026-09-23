@@ -76,7 +76,7 @@ Required repository config:
 
 - secrets: `LANGSMITH_API_KEY`, `ANTHROPIC_API_KEY` (the judge runs in-process;
   reviewer-model keys are **not** needed — the reviewer runs in the deployment).
-- secret or var: `LANGGRAPH_URL` — the deployment URL the eval drives and reports to.
+- secret or var: `LANGSMITH_HOST_API_URL` — the deployment URL the eval drives and reports to.
 
 ### Tracing project
 
@@ -87,7 +87,7 @@ the same project via the `LANGSMITH_PROJECT` env var; override the default with
 `EVAL_LANGSMITH_PROJECT`.
 
 The runner reads benchmark settings from `evals/reviewer/config.toml`. Set the
-deployment URL there (or leave it blank to use `LANGGRAPH_URL` / local dev).
+deployment URL there (or leave it blank to use `LANGSMITH_HOST_API_URL` / local dev).
 The target sets `reviewer_eval` for every run, so `publish_review` does not post
 to GitHub.
 

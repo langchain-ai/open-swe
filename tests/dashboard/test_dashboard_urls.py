@@ -17,7 +17,7 @@ def bundled(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
 def test_explicit_dashboard_base_url_wins(monkeypatch: pytest.MonkeyPatch, bundled: Path) -> None:
     monkeypatch.setenv("DASHBOARD_BASE_URL", "https://dashboard.example/")
-    monkeypatch.setenv("LANGGRAPH_URL", "https://backend.example")
+    monkeypatch.setenv("LANGSMITH_HOST_API_URL", "https://backend.example")
 
     assert dashboard_links.dashboard_base_url() == "https://dashboard.example"
 
@@ -26,10 +26,30 @@ def test_bundled_dashboard_lives_on_the_backend_origin(
     monkeypatch: pytest.MonkeyPatch, bundled: Path
 ) -> None:
     monkeypatch.delenv("DASHBOARD_BASE_URL", raising=False)
-    monkeypatch.setenv("LANGGRAPH_URL", "https://backend.example/")
+    monkeypatch.setenv("LANGSMITH_HOST_API_URL", "https://backend.example/")
 
     assert dashboard_links.dashboard_base_url() == "https://backend.example"
     assert dashboard_links.dashboard_thread_url("t1") == "https://backend.example/agents/t1"
+
+
+def test_platform_deployment_url_ignores_legacy_langgraph_url(
+    monkeypatch: pytest.MonkeyPatch, bundled: Path
+) -> None:
+    monkeypatch.delenv("DASHBOARD_BASE_URL", raising=False)
+    monkeypatch.delenv("DASHBOARD_API_BASE_URL", raising=False)
+    monkeypatch.setenv(
+        "LANGSMITH_HOST_API_URL",
+        "https://open-swe-preview-abc.us.langgraph.app/",
+    )
+    monkeypatch.setenv(
+        "LANGGRAPH_URL",
+        "https://open-swe-parent.us.langgraph.app",
+    )
+
+    assert dashboard_links.dashboard_base_url() == "https://open-swe-preview-abc.us.langgraph.app"
+    assert (
+        dashboard_links.dashboard_api_base_url() == "https://open-swe-preview-abc.us.langgraph.app"
+    )
 
 
 def test_deployed_dashboard_app_serves_the_api_on_its_own_origin(
@@ -40,7 +60,7 @@ def test_deployed_dashboard_app_serves_the_api_on_its_own_origin(
     monkeypatch.delenv("DASHBOARD_DEV_SERVER_URL", raising=False)
     monkeypatch.setenv("DASHBOARD_BASE_URL", "https://dev.open-swe.langchain.dev")
     monkeypatch.setenv("DASHBOARD_API_BASE_URL", "https://dev.open-swe.langchain.dev")
-    monkeypatch.setenv("LANGGRAPH_URL", "https://open-swe-preview-abc.us.langgraph.app")
+    monkeypatch.setenv("LANGSMITH_HOST_API_URL", "https://open-swe-preview-abc.us.langgraph.app")
 
     assert dashboard_links.dashboard_is_same_origin() is True
 
@@ -52,7 +72,7 @@ def test_dev_proxied_dashboard_lives_on_the_backend_origin(
     monkeypatch.delenv("DASHBOARD_BASE_URL", raising=False)
     monkeypatch.setenv("DASHBOARD_STATIC_DIR", str(tmp_path / "no-build"))
     monkeypatch.setenv("DASHBOARD_DEV_SERVER_URL", "http://localhost:3000")
-    monkeypatch.setenv("LANGGRAPH_URL", "http://localhost:2024")
+    monkeypatch.setenv("LANGSMITH_HOST_API_URL", "http://localhost:2024")
 
     assert dashboard_links.dashboard_base_url() == "http://localhost:2024"
     assert dashboard_links.dashboard_is_same_origin() is True
@@ -70,7 +90,7 @@ def test_no_dashboard_means_no_links(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_api_base_url_defaults_to_the_backend(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("DASHBOARD_API_BASE_URL", raising=False)
-    monkeypatch.setenv("LANGGRAPH_URL", "https://backend.example/")
+    monkeypatch.setenv("LANGSMITH_HOST_API_URL", "https://backend.example/")
 
     assert dashboard_links.dashboard_api_base_url() == "https://backend.example"
 
@@ -83,7 +103,7 @@ def test_same_origin_https_session_cookie_is_lax(
 ) -> None:
     monkeypatch.delenv("DASHBOARD_BASE_URL", raising=False)
     monkeypatch.delenv("DASHBOARD_API_BASE_URL", raising=False)
-    monkeypatch.setenv("LANGGRAPH_URL", "https://backend.example")
+    monkeypatch.setenv("LANGSMITH_HOST_API_URL", "https://backend.example")
 
     assert dashboard_links.dashboard_is_same_origin() is True
     assert dashboard_oauth.cookie_security() == (True, "lax")
@@ -107,10 +127,15 @@ def test_local_http_session_cookie_is_lax_and_not_secure(monkeypatch: pytest.Mon
 def test_local_dev_model_check_needs_an_explicit_localhost_dashboard(
     monkeypatch: pytest.MonkeyPatch, bundled: Path
 ) -> None:
-    """A fresh platform deployment has the bundled UI and no LANGGRAPH_URL yet; it must boot."""
+    """A fresh local deployment uses the localhost URL default."""
     from agent.utils import model
 
-    for name in ("DASHBOARD_BASE_URL", "LANGGRAPH_URL", "OPENAI_API_KEY", "LLM_MODEL_ID"):
+    for name in (
+        "DASHBOARD_BASE_URL",
+        "LANGSMITH_HOST_API_URL",
+        "OPENAI_API_KEY",
+        "LLM_MODEL_ID",
+    ):
         monkeypatch.delenv(name, raising=False)
     monkeypatch.setattr(model, "desktop_openai_oauth_available", lambda: False)
 

@@ -22,7 +22,7 @@ from agent.github.thread_token import (
 from agent.linear.notifications import post_linear_notification
 from agent.run_config import RunConfig
 from agent.slack.client import (
-    LANGGRAPH_URL,
+    DEPLOYMENT_API_URL,
     get_active_slack_thread,
     post_slack_thread_reply,
 )
@@ -51,17 +51,17 @@ class GitHubUserAuthRequired(RuntimeError):
 
 LANGSMITH_API_KEY = ENV.LANGSMITH_API_KEY.get()
 LANGSMITH_API_URL = ENV.LANGSMITH_ENDPOINT.get()
-LANGSMITH_HOST_API_URL = ENV.LANGSMITH_HOST_API_URL.get()
+LANGSMITH_AUTH_ENDPOINT = ENV.LANGSMITH_AUTH_ENDPOINT.get(LANGSMITH_API_URL)
 GITHUB_OAUTH_PROVIDER_ID = ENV.GITHUB_OAUTH_PROVIDER_ID.get()
 X_SERVICE_AUTH_JWT_SECRET = ENV.X_SERVICE_AUTH_JWT_SECRET.get()
 USER_ID_API_KEY_MAP = ENV.USER_ID_API_KEY_MAP.get()
 
 logger.debug(
     "Auth env snapshot: LANGSMITH_API_KEY=%s LANGSMITH_ENDPOINT=%s "
-    "LANGSMITH_HOST_API_URL=%s GITHUB_OAUTH_PROVIDER_ID=%s",
+    "LANGSMITH_AUTH_ENDPOINT=%s GITHUB_OAUTH_PROVIDER_ID=%s",
     "set" if LANGSMITH_API_KEY else "missing",
     "set" if LANGSMITH_API_URL else "missing",
-    "set" if LANGSMITH_HOST_API_URL else "missing",
+    "set" if LANGSMITH_AUTH_ENDPOINT else "missing",
     "set" if GITHUB_OAUTH_PROVIDER_ID else "missing",
 )
 
@@ -186,7 +186,7 @@ async def get_github_token_for_user(ls_user_id: str, tenant_id: str) -> dict[str
 
         async with httpx2.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as client:
             response = await client.post(
-                f"{LANGSMITH_HOST_API_URL}/v2/auth/authenticate",
+                f"{LANGSMITH_AUTH_ENDPOINT.rstrip('/')}/v2/auth/authenticate",
                 json=payload,
                 headers=headers,
             )
@@ -261,7 +261,7 @@ async def leave_failure_comment(
         return
     if source == "slack":
         active = await get_active_slack_thread(
-            get_client(url=LANGGRAPH_URL),
+            get_client(url=DEPLOYMENT_API_URL),
             cfg.thread_id,
             cfg.slack_thread.dump() if cfg.slack_thread else None,
         )

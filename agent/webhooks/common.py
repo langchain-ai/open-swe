@@ -17,7 +17,7 @@ from langgraph_sdk import get_client
 from langgraph_sdk.client import LangGraphClient
 
 from agent.analytics.usage import update_agent_pr_usage_from_webhook
-from agent.config import ENV
+from agent.config import ENV, deployment_api_url
 from agent.dashboard.agent_overrides import (
     get_profile_default_repo,
     resolve_agent_model_id,  # noqa: F401
@@ -161,7 +161,7 @@ __all__ = [
     "FEEDBACK_REACTIONS",
     "GITHUB_WEBHOOK_SECRET",
     "HTTPException",
-    "LANGGRAPH_URL",
+    "DEPLOYMENT_API_URL",
     "LINEAR_WEBHOOK_SECRET",
     "OPEN_SWE_TAGS",
     "REVIEWER_THREAD_KIND",
@@ -315,7 +315,7 @@ DEFAULT_REPO_NAME = ENV.DEFAULT_REPO_NAME.get()
 SLACK_REPO_OWNER = ENV.SLACK_REPO_OWNER.get() or DEFAULT_REPO_OWNER
 SLACK_REPO_NAME = ENV.SLACK_REPO_NAME.get() or DEFAULT_REPO_NAME
 
-LANGGRAPH_URL = ENV.LANGGRAPH_URL.get()
+DEPLOYMENT_API_URL = deployment_api_url()
 
 AGENT_VERSION_METADATA: dict[str, str] = (
     {"LANGSMITH_AGENT_VERSION": ENV.LANGCHAIN_REVISION_ID.require()}
@@ -561,7 +561,7 @@ async def upsert_agent_thread_metadata(
     if unlisted:
         metadata["unlisted"] = True
 
-    langgraph_client = get_client(url=LANGGRAPH_URL)
+    langgraph_client = get_client(url=DEPLOYMENT_API_URL)
     try:
         existing = await langgraph_client.threads.get(thread_id)
     except Exception as exc:  # noqa: BLE001
@@ -716,7 +716,7 @@ async def get_slack_repo_config(
     """
     default_owner = SLACK_REPO_OWNER.strip() or DEFAULT_REPO_OWNER
     default_name = SLACK_REPO_NAME.strip() or DEFAULT_REPO_NAME
-    langgraph_client = get_client(url=LANGGRAPH_URL)
+    langgraph_client = get_client(url=DEPLOYMENT_API_URL)
 
     repo_config: dict[str, str] | None = None
     explicit = False
@@ -796,7 +796,7 @@ async def get_slack_repo_config(
 
 async def thread_exists(thread_id: str) -> bool:
     """Return whether a LangGraph thread already exists."""
-    langgraph_client = get_client(url=LANGGRAPH_URL)
+    langgraph_client = get_client(url=DEPLOYMENT_API_URL)
     try:
         await langgraph_client.threads.get(thread_id)
         return True
@@ -820,7 +820,7 @@ async def ensure_thread_exists_for_metadata(
 
 async def get_thread_model_choice(thread_id: str) -> tuple[str, str] | None:
     """Return the explicit model choice persisted for a thread, if any."""
-    langgraph_client = get_client(url=LANGGRAPH_URL)
+    langgraph_client = get_client(url=DEPLOYMENT_API_URL)
     try:
         thread = await langgraph_client.threads.get(thread_id)
     except Exception as exc:  # noqa: BLE001
@@ -836,7 +836,7 @@ async def get_thread_model_choice(thread_id: str) -> tuple[str, str] | None:
 
 async def get_thread_workspace(thread_id: str) -> str | None:
     """The workspace a thread was created in; ``environment`` is the pre-workspace key."""
-    langgraph_client = get_client(url=LANGGRAPH_URL)
+    langgraph_client = get_client(url=DEPLOYMENT_API_URL)
     try:
         thread = await langgraph_client.threads.get(thread_id)
     except Exception as exc:  # noqa: BLE001
@@ -1020,7 +1020,7 @@ def build_github_issue_comments_text(
 async def authorize_github_thread(thread_id: str, github_login: str) -> dict[str, Any]:
     """Reject private-thread follow-ups before reading credentials or dispatching."""
     try:
-        thread = await get_client(url=LANGGRAPH_URL).threads.get(thread_id)
+        thread = await get_client(url=DEPLOYMENT_API_URL).threads.get(thread_id)
     except Exception as exc:
         if is_not_found_error(exc):
             return {}
@@ -1281,7 +1281,7 @@ async def is_pr_diff_unchanged_since_last_review(
 
 async def get_thread_metadata_safe(thread_id: str) -> dict[str, Any] | None:
     """Fetch a thread's metadata; return ``None`` if the thread doesn't exist."""
-    langgraph_client = get_client(url=LANGGRAPH_URL)
+    langgraph_client = get_client(url=DEPLOYMENT_API_URL)
     try:
         thread = await langgraph_client.threads.get(thread_id)
     except Exception as exc:  # noqa: BLE001
@@ -1346,7 +1346,7 @@ async def update_agent_thread_pr_state(payload: dict[str, Any]) -> None:
     pr_url = pull_request.url
     new_state = pull_request.state
 
-    langgraph_client = get_client(url=LANGGRAPH_URL)
+    langgraph_client = get_client(url=DEPLOYMENT_API_URL)
     try:
         saved = await pull_request.save(repository_private=event.repo_private)
         thread_ids = await saved.linked_threads()

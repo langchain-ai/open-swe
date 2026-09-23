@@ -364,7 +364,7 @@ async def control_queued(thread_id: str = "") -> JSONResponse:
 
     value: Any = None
     try:
-        client = get_client(url=os.environ["LANGGRAPH_URL"])
+        client = get_client(url=os.environ["LANGSMITH_HOST_API_URL"])
         item = await client.store.get_item(("queue", thread_id), key="pending_messages")
         value = item.get("value") if item else None
     except Exception:  # noqa: BLE001
@@ -459,7 +459,7 @@ async def _slack_send_result(payload: dict[str, Any], resp: httpx2.Response) -> 
     channel = str(event["channel"])
     thread_ts = "0" if channel in fakes.CODE_CHANNELS else str(event["thread_ts"])
     thread_id = await lookup_slack_thread_id(
-        get_client(url=os.environ["LANGGRAPH_URL"]), channel, thread_ts
+        get_client(url=os.environ["LANGSMITH_HOST_API_URL"]), channel, thread_ts
     )
     return JSONResponse(
         {

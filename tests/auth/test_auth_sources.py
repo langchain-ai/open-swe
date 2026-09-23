@@ -4,10 +4,47 @@ from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock
 
+import httpx2
 import langgraph_sdk
 import pytest
 
 from agent.github import token as auth
+
+
+def test_legacy_github_auth_uses_langsmith_auth_endpoint(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    requested_urls: list[str] = []
+
+    async def handle(request: httpx2.Request) -> httpx2.Response:
+        requested_urls.append(str(request.url))
+        return httpx2.Response(200, json={"token": "github-token"})
+
+    async_client = httpx2.AsyncClient
+    monkeypatch.setattr(
+        auth.httpx2,
+        "AsyncClient",
+        lambda **kwargs: async_client(
+            **kwargs,
+            transport=httpx2.MockTransport(handle),
+        ),
+    )
+    monkeypatch.setattr(
+        auth,
+        "LANGSMITH_AUTH_ENDPOINT",
+        "https://api.smith.example",
+    )
+    monkeypatch.setattr(auth, "GITHUB_OAUTH_PROVIDER_ID", "github-provider")
+    monkeypatch.setattr(
+        auth,
+        "X_SERVICE_AUTH_JWT_SECRET",
+        "test-service-secret-at-least-32-bytes",
+    )
+
+    result = asyncio.run(auth.get_github_token_for_user("user-1", "tenant-1"))
+
+    assert result == {"token": "github-token"}
+    assert requested_urls == ["https://api.smith.example/v2/auth/authenticate"]
 
 
 def test_leave_failure_comment_posts_generic_token_free_slack_notice(

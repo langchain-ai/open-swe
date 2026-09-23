@@ -25,7 +25,7 @@ from agent.review.findings import (
 logger = logging.getLogger(__name__)
 
 DEFAULT_REVIEWER_ASSISTANT_ID = "reviewer"
-DEFAULT_LANGGRAPH_URL = "http://localhost:2024"
+DEFAULT_DEPLOYMENT_API_URL = "http://localhost:2024"
 ScoreMode = Literal["all_findings", "surfaced_findings"]
 _VALID_SCORE_MODES: set[ScoreMode] = {"all_findings", "surfaced_findings"}
 _VALID_SEVERITIES: set[Severity] = {"low", "medium", "high", "critical"}
@@ -71,7 +71,7 @@ def drain_thread_ids() -> set[str]:
 
 
 def get_langgraph_url() -> str:
-    return os.getenv("LANGGRAPH_URL", DEFAULT_LANGGRAPH_URL)
+    return os.getenv("LANGSMITH_HOST_API_URL", DEFAULT_DEPLOYMENT_API_URL)
 
 
 def get_reviewer_assistant_id() -> str:

@@ -7,7 +7,7 @@ from typing import Any
 from langgraph_sdk import get_client
 from langgraph_sdk.client import LangGraphClient
 
-from agent.config import ENV
+from agent.config import deployment_api_url
 from agent.slack.client import lookup_slack_run_mapping
 from agent.utils.langsmith import create_langsmith_feedback, delete_langsmith_feedback
 from agent.utils.reviewer_outcomes import outcome_from_score as _outcome_from_score
@@ -15,7 +15,7 @@ from agent.utils.reviewer_outcomes import upsert_run_outcome
 
 logger = logging.getLogger(__name__)
 
-LANGGRAPH_URL = ENV.LANGGRAPH_URL.get()
+DEPLOYMENT_API_URL = deployment_api_url()
 
 FEEDBACK_REACTIONS: dict[str, float] = {
     "+1": 1.0,
@@ -141,7 +141,7 @@ async def process_slack_reaction(
     ):
         return
 
-    langgraph_client = get_client(url=LANGGRAPH_URL)
+    langgraph_client = get_client(url=DEPLOYMENT_API_URL)
     if await _event_was_processed(langgraph_client, channel_id, event_id):
         return
 

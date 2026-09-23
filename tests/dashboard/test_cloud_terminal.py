@@ -36,7 +36,7 @@ def test_terminal_ticket_rejects_expired_tokens(monkeypatch) -> None:
 
 
 def test_cloud_terminal_url_uses_direct_langgraph_origin(monkeypatch) -> None:
-    monkeypatch.setenv("LANGGRAPH_URL", "https://agent.example/base")
+    monkeypatch.setenv("LANGSMITH_HOST_API_URL", "https://agent.example/base")
 
     assert terminal._cloud_terminal_websocket_url("thread/1") == (
         "wss://agent.example/base/dashboard/api/threads/thread%2F1/terminal"
@@ -45,7 +45,7 @@ def test_cloud_terminal_url_uses_direct_langgraph_origin(monkeypatch) -> None:
 
 async def test_terminal_connection_requires_owner_before_issuing_ticket(monkeypatch) -> None:
     monkeypatch.setenv("DASHBOARD_JWT_SECRET", "test-secret-with-at-least-32-bytes")
-    monkeypatch.setenv("LANGGRAPH_URL", "https://agent.example")
+    monkeypatch.setenv("LANGSMITH_HOST_API_URL", "https://agent.example")
     get_sandbox = AsyncMock(return_value=("sandbox-1", "repo"))
     monkeypatch.setattr(terminal, "get_dashboard_terminal_sandbox", get_sandbox)
     response = Response()
