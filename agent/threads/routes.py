@@ -44,6 +44,8 @@ from agent.threads.listing import (
     pin_dashboard_thread,
     unpin_dashboard_thread,
 )
+from agent.threads.machine_reads import machine_thread, machine_threads
+from agent.threads.principals import PrincipalDep
 from agent.threads.proxy import (
     proxy_dashboard_thread_commands,
     proxy_dashboard_thread_history,
@@ -76,12 +78,15 @@ async def api_get_local_trace_url(
 
 @router.get("/threads")
 async def api_list_threads(
+    principal: PrincipalDep,
     all: bool = False,
-    session: dict[str, Any] = SESSION_DEP,
+    limit: int = 25,
 ) -> list[dict[str, Any]]:
-    if all and not session_is_admin(session):
+    if principal.machine:
+        return await machine_threads(principal, limit=limit)
+    if all and not principal.admin:
         raise HTTPException(403, "admin only")
-    return await list_dashboard_threads(session["sub"], email=session.get("email"), include_all=all)
+    return await list_dashboard_threads(principal.person, email=principal.email, include_all=all)
 
 
 @router.post("/threads/resolve-all")
@@ -231,15 +236,17 @@ async def api_get_thread_pull_request_context(
 @router.get("/threads/{thread_id}")
 async def api_get_thread(
     thread_id: str,
+    principal: PrincipalDep,
     mark_viewed: bool = True,
-    session: dict[str, Any] = SESSION_DEP,
 ) -> Response:
+    if principal.machine:
+        return JSONResponse(await machine_thread(thread_id, principal))
     timings: dict[str, float] = {}
     started = perf_counter()
     payload = await get_dashboard_thread(
         thread_id,
-        session["sub"],
-        email=session.get("email"),
+        principal.person,
+        email=principal.email,
         mark_viewed=mark_viewed,
         timings=timings,
     )
@@ -434,15 +441,21 @@ async def api_thread_stream_events(
 async def api_thread_commands(
     thread_id: str,
     request: Request,
-    session: dict[str, Any] = SESSION_DEP,
+    principal: PrincipalDep,
 ) -> Response:
+    """Every way a thread is started or continued, whoever is asking.
+
+    The dashboard, an API key and a federated workflow all post the same command
+    here; what differs is the thread the first one stamps.
+    """
     body = await request.body()
     status_code, content, media_type = await proxy_dashboard_thread_commands(
         thread_id,
-        session["sub"],
+        principal.login or "",
         body,
-        email=session.get("email"),
+        email=principal.email,
         content_type=request.headers.get("content-type", "application/json"),
+        principal=principal,
     )
     return Response(content=content, status_code=status_code, media_type=media_type)
 
