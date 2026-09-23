@@ -55,8 +55,9 @@ are already in the Slack thread.
 ### Slack card
 
 PR link, revision, author, the diff as the card draws it, the vote tally, and two
-buttons: **Approve** and **Reject and give feedback**. It is posted in the thread only,
-never broadcast to the channel. Reactions are never votes.
+buttons: **Approve** and **Reject and give feedback**. It is posted in the thread and
+also sent to the channel, so approvers outside the thread see it. Reactions are never
+votes.
 
 ### Voting
 
