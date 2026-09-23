@@ -263,6 +263,7 @@ class _DetailClient:
                 }
             ),
         )
+
         async def _list_runs(*args: object, **kwargs: object) -> list[dict[str, object]]:
             if kwargs.get("status") == "pending":
                 return []
@@ -276,9 +277,7 @@ class _DetailClient:
                 }
             ]
 
-        self.runs = SimpleNamespace(
-            list=AsyncMock(side_effect=_list_runs)
-        )
+        self.runs = SimpleNamespace(list=AsyncMock(side_effect=_list_runs))
         self.store = SimpleNamespace(
             get_item=AsyncMock(return_value={"value": {"messages": [{"content": "queued"}]}})
         )
@@ -423,16 +422,10 @@ async def test_get_thread_counts_pending_run_outside_history_window(
         ),
     )
     monkeypatch.setattr(threads_tool, "langgraph_client", lambda: client)
-    monkeypatch.setattr(
-        threads_tool, "get_plan_content", AsyncMock(return_value={})
-    )
+    monkeypatch.setattr(threads_tool, "get_plan_content", AsyncMock(return_value={}))
     monkeypatch.setattr(threads_tool, "list_plan_comments", AsyncMock(return_value=[]))
-    monkeypatch.setattr(
-        threads_tool, "get_workflow_push_approvals", AsyncMock(return_value={})
-    )
-    monkeypatch.setattr(
-        threads_tool, "get_langsmith_thread_cost", AsyncMock(return_value=None)
-    )
+    monkeypatch.setattr(threads_tool, "get_workflow_push_approvals", AsyncMock(return_value={}))
+    monkeypatch.setattr(threads_tool, "get_langsmith_thread_cost", AsyncMock(return_value=None))
 
     result = await threads_tool.get_thread("thread-1")
 

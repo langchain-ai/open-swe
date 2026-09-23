@@ -745,7 +745,9 @@ async def get_thread(
             # Fetched separately from `runs_task` (bounded to the recent-history
             # window): a pending run enqueued long ago can fall outside that
             # window while a busy thread accumulates newer completed runs.
-            pending_runs_task = tasks.create_task(client.runs.list(thread_id, status="pending", limit=1000))
+            pending_runs_task = tasks.create_task(
+                client.runs.list(thread_id, status="pending", limit=1000)
+            )
         thread = thread_task.result()
         thread_state = state_task.result()
         runs = runs_task.result()
