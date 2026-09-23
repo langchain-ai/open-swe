@@ -57,6 +57,7 @@ from agent.review.styles import (
     ReviewStylePromptUpdate,
     normalize_repo_full_name,
 )
+from agent.review.walkthrough import Walkthrough
 
 router = APIRouter(tags=["review"])
 
@@ -253,6 +254,22 @@ async def api_run_review_scout(
 ) -> ReviewScoutTrigger:
     await require_repo_access_for_user(session["sub"], f"{owner}/{repo}")
     return await trigger_review_scout(owner, repo, pr_number)
+
+
+class WalkthroughDismissed(BaseModel):
+    dismissed: bool
+
+
+@router.delete("/reviews/{owner}/{repo}/{pr_number}/walkthrough")
+async def api_dismiss_walkthrough(
+    owner: str,
+    repo: str,
+    pr_number: int,
+    session: dict[str, Any] = SESSION_DEP,
+) -> WalkthroughDismissed:
+    """Drop the stored walkthrough so the next scout run rebuilds it."""
+    await require_repo_access_for_user(session["sub"], f"{owner}/{repo}")
+    return WalkthroughDismissed(dismissed=await Walkthrough.dismiss(owner, repo, pr_number))
 
 
 class ReviewCommentCreate(BaseModel):

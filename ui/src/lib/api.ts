@@ -963,7 +963,23 @@ export interface ReviewDetail extends Omit<
   /** Why the latest scout run on this head failed, when it did. */
   walkthrough_error: string | null
   walkthrough_scout_thread_id: string | null
+  /** What the running scout has done so far; set only while `walkthrough_running`. */
+  walkthrough_progress: ScoutProgress | null
+  /** Why the latest reviewer run failed, when `status` is `"error"`. */
+  review_error: string | null
   guidance: Array<GuidancePoint>
+}
+
+export interface ScoutAction {
+  tool: string
+  target: string | null
+}
+
+export interface ScoutProgress {
+  steps: number
+  /** The latest action is still executing. */
+  running: boolean
+  recent: Array<ScoutAction>
 }
 
 export interface PublishedReviewAssessment {

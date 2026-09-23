@@ -38,10 +38,10 @@ from agent.review.findings import (
     findings_by_thread,
     is_thread_resolved,
 )
-from agent.review_scout.launch import ReviewScoutTarget
+from agent.review_scout.launch import ReviewScoutTarget, ScoutProgress
 from agent.thread_ids import reviewer_thread_id
 from agent.utils.json_types import ThreadLike, as_json_object, thread_metadata
-from agent.utils.thread_ops import langgraph_client
+from agent.utils.thread_ops import langgraph_client, thread_run_error
 from agent.workspaces.store import WORKSPACES
 
 logger = logging.getLogger(__name__)
@@ -668,6 +668,15 @@ async def get_review(owner: str, repo: str, pr_number: int) -> dict[str, Any]:
         if walkthrough is None and target is not None and not walkthrough_running
         else None
     )
+    walkthrough_progress = (
+        await _scout_progress(target) if walkthrough_running and target is not None else None
+    )
+    thread_id = thread.get("thread_id") if thread else None
+    review_error = (
+        await _reviewer_failure(thread_id)
+        if summary.get("status") == "error" and isinstance(thread_id, str)
+        else None
+    )
     assessment_id = metadata.get("review_assessment_id")
     assessment = (
         await ASSESSMENTS.get(str(assessment_id)) if isinstance(assessment_id, int) else None
@@ -681,6 +690,10 @@ async def get_review(owner: str, repo: str, pr_number: int) -> dict[str, Any]:
         "walkthrough": walkthrough.model_dump(mode="json") if walkthrough else None,
         "walkthrough_running": walkthrough_running,
         "walkthrough_error": walkthrough_error,
+        "walkthrough_progress": (
+            walkthrough_progress.model_dump(mode="json") if walkthrough_progress else None
+        ),
+        "review_error": review_error,
         "walkthrough_scout_thread_id": target.thread_id if target else None,
         "assessment": assessment.model_dump() if assessment else None,
         "guidance": [
@@ -1071,6 +1084,28 @@ async def _scout_failure(target: ReviewScoutTarget) -> str | None:
         return await target.last_failure()
     except Exception:
         logger.warning("Could not read review scout failure", exc_info=True, extra=target.log_extra)
+        return None
+
+
+async def _scout_progress(target: ReviewScoutTarget) -> ScoutProgress | None:
+    try:
+        return await target.progress()
+    except Exception:
+        logger.warning(
+            "Could not read review scout progress", exc_info=True, extra=target.log_extra
+        )
+        return None
+
+
+async def _reviewer_failure(thread_id: str) -> str | None:
+    try:
+        return await thread_run_error(thread_id)
+    except Exception:
+        logger.warning(
+            "Could not read reviewer failure",
+            exc_info=True,
+            extra={"reviewer_thread_id": thread_id},
+        )
         return None
 
 

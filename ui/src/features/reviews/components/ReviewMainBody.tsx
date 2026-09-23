@@ -65,6 +65,7 @@ import type {
   ReviewDiffFile,
   ReviewFinding,
   ReviewUserRef,
+  ScoutProgress,
 } from "@/lib/api"
 import type {
   ReviewSidebarGroup,
@@ -1561,6 +1562,45 @@ function ReviewBodyInner({
   )
 }
 
+function ScoutProgressPreview({ progress }: { progress: ScoutProgress }) {
+  const { recent } = progress
+  return (
+    <div className="mt-2 text-xs text-muted-foreground">
+      <p>
+        {progress.steps} step{progress.steps === 1 ? "" : "s"} committed
+      </p>
+      {recent.length > 0 && (
+        <ol className="mt-1 space-y-0.5 font-mono text-[11px]">
+          {recent.map((action, index) => {
+            const current = progress.running && index === recent.length - 1
+            return (
+              <li
+                key={index}
+                className={cn(
+                  "flex min-w-0 gap-2",
+                  current && "text-foreground"
+                )}
+              >
+                <span className="shrink-0">
+                  {current ? (
+                    <CircleNotchIcon className="inline size-3 animate-spin" />
+                  ) : (
+                    "·"
+                  )}
+                </span>
+                <span className="shrink-0">{action.tool}</span>
+                {action.target && (
+                  <span className="min-w-0 truncate">{action.target}</span>
+                )}
+              </li>
+            )
+          })}
+        </ol>
+      )}
+    </div>
+  )
+}
+
 /** Runs the review scout alone, so the walkthrough exists without a full review. */
 function WalkthroughCallout({ detail }: { detail: ReviewDetail }) {
   const qc = useQueryClient()
@@ -1620,6 +1660,9 @@ function WalkthroughCallout({ detail }: { detail: ReviewDetail }) {
             ? "The review scout is ordering the changes into narrated steps. This takes a few minutes; the page updates on its own."
             : "The review scout orders the changes into narrated steps and moves mechanical edits to the end."}
         </p>
+        {running && detail.walkthrough_progress && (
+          <ScoutProgressPreview progress={detail.walkthrough_progress} />
+        )}
         {failureSummary && (
           <p className="mt-1.5 text-xs break-words text-destructive">
             Last attempt failed: {failureSummary}
@@ -2971,6 +3014,11 @@ function SidePanel({
                   {detail.head_sha.slice(0, 7) || "—"}
                 </div>
                 {detail.watch && <div>Watching for new pushes</div>}
+                {detail.status === "error" && detail.review_error && (
+                  <div className="break-words text-destructive">
+                    {detail.review_error}
+                  </div>
+                )}
                 {reReview.error && (
                   <div className="text-destructive">
                     {reReview.error.message}

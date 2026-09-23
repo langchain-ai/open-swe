@@ -265,6 +265,17 @@ function LoadingState() {
   )
 }
 
+function describeStreamError(error: unknown): string | null {
+  if (error === undefined || error === null) return null
+  if (error instanceof Error) return error.message || error.name
+  if (typeof error === "string") return error
+  if (typeof error === "object" && "message" in error) {
+    const { message } = error
+    if (typeof message === "string" && message) return message
+  }
+  return JSON.stringify(error)
+}
+
 function toolMessageLike(message: BaseMessage): ToolMessageLike {
   const raw = message as unknown as { name?: string; tool_call_id?: string }
   return {
@@ -298,6 +309,14 @@ function ChatBody({
   // True during the one-time getState hydration when switching to / loading an
   // existing thread, before its messages have arrived.
   const hydrating = stream.isThreadLoading
+  const streamError = describeStreamError(stream.error)
+  useEffect(() => {
+    if (stream.error === undefined || stream.error === null) return
+    console.error("Review chat run failed", {
+      pr: `${owner}/${repo}#${number}`,
+      error: stream.error,
+    })
+  }, [stream.error, owner, repo, number])
 
   // Receive "add to chat" attachments from the diff column as composer pills.
   useEffect(() => {
@@ -503,6 +522,11 @@ function ChatBody({
                 Thinking…
               </div>
             </div>
+          )}
+          {!busy && streamError && (
+            <p className="rounded-md border border-destructive/40 px-3 py-2 text-xs break-words text-destructive">
+              The chat run failed: {streamError}
+            </p>
           )}
         </div>
       )}
