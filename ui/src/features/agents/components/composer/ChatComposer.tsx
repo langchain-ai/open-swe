@@ -730,7 +730,7 @@ export const ChatComposer = memo(function ChatComposer({
 
       <div
         className={cn(
-          "relative z-10 flex flex-col rounded-2xl border border-foreground/20 bg-card px-3 py-2.5 shadow-sm transition-colors focus-within:border-ring focus-within:ring-2 focus-within:ring-ring/20 dark:bg-[#222] dark:shadow-none",
+          "relative z-10 flex flex-col rounded-2xl border border-foreground/10 bg-card px-3 py-2.5 shadow-md transition-[border-color,box-shadow] duration-300 focus-within:border-primary/70 focus-within:ring-2 focus-within:ring-primary/20 hover:border-primary/50 hover:shadow-lg dark:bg-[#222]",
           compact ? "min-h-[88px]" : "min-h-[106px]",
           dragKind && "border border-primary"
         )}
