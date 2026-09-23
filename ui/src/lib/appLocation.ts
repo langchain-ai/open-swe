@@ -1,3 +1,5 @@
+import { useRouter } from "@tanstack/react-router"
+
 const STORAGE_KEY = "open-swe:last-app-location"
 const SECTION_STORAGE_PREFIX = "open-swe:last-section-location:"
 const FALLBACK_LOCATION = "/agents"
@@ -51,4 +53,21 @@ export function getLastSectionLocation(section: SectionRoot): string {
     `${SECTION_STORAGE_PREFIX}${section}`
   )
   return href && sectionOf(pathnameOf(href) ?? "") === section ? href : section
+}
+
+/** Link `to` is a pathname only, so a saved href must be split into its parts. */
+export function useHrefLinkOptions(): (href: string) => {
+  to: string
+  search: Record<string, unknown>
+  hash: string | undefined
+} {
+  const router = useRouter()
+  return (href) => {
+    const url = new URL(href, "http://localhost")
+    return {
+      to: url.pathname,
+      search: router.options.parseSearch(url.search),
+      hash: url.hash.slice(1) || undefined,
+    }
+  }
 }

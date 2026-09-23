@@ -712,6 +712,12 @@ export interface WorkspaceRecord {
   refresh_error?: string | null
 }
 
+/** How one repository is configured inside a workspace. */
+export interface RepositorySettings {
+  repo: string
+  may_start_threads: boolean
+}
+
 /** What `POST /workspaces/{slug}/refresh` answers. */
 export interface WorkspaceRefreshStart {
   started: boolean
@@ -1296,6 +1302,22 @@ export const api = {
     request<void>(`/workspaces/${encodeURIComponent(slug)}`, {
       method: "DELETE",
     }),
+  listWorkspaceRepositories: (slug: string) =>
+    request<RepositorySettings[]>(
+      `/workspaces/${encodeURIComponent(slug)}/repositories`
+    ),
+  configureWorkspaceRepository: (
+    slug: string,
+    repo: string,
+    settings: { may_start_threads?: boolean }
+  ) =>
+    request<RepositorySettings>(
+      `/workspaces/${encodeURIComponent(slug)}/repositories/${repo
+        .split("/")
+        .map(encodeURIComponent)
+        .join("/")}`,
+      { method: "PUT", body: JSON.stringify(settings) }
+    ),
   /** The instance record every workspace inherits. */
   getInstanceSettings: () => request<WorkspaceSettings>("/settings"),
   getWorkspaceSettings: (slug: string) =>

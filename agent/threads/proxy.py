@@ -15,10 +15,12 @@ from agent.threads.access import (
     _authorized_thread_metadata,
     _readable_thread_metadata,
 )
+from agent.threads.principals import Principal
 from agent.threads.runs import (
     _ASSISTANT_ID,
     QUEUED_BY_KEY,
     _enrich_run_start_command,
+    _enrich_system_run_start_command,
     _extract_run_id_from_command_response,
     _notify_slack_web_handoff,
     offload_requested,
@@ -29,7 +31,6 @@ from agent.threads.summary import (
     _assert_thread_postable,
     _now_ms,
     _thread_is_busy,
-    assert_thread_readable,
 )
 from agent.utils.json_types import thread_metadata
 from agent.utils.streaming import TERMINAL_LIFECYCLE_EVENTS, root_lifecycle
@@ -149,8 +150,15 @@ async def proxy_dashboard_thread_commands(
     *,
     email: str | None = None,
     content_type: str = "application/json",
+    principal: Principal | None = None,
 ) -> tuple[int, bytes, str | None]:
+    """Forward one command, enriched for whoever sent it.
+
+    ``principal`` is how a machine gets in. Without one the sender is the person
+    named by ``login``, which is what the dashboard and the agent's own tools pass.
+    """
     received_at_ms = _now_ms()
+    principal = principal or Principal.of_login(login, email)
     require_json_content_type(content_type)
     try:
         parsed = json.loads(body)
@@ -184,11 +192,11 @@ async def proxy_dashboard_thread_commands(
         metadata = thread_metadata(thread)
         post_command = method in _THREAD_POST_COMMAND_METHODS
         if post_command:
-            _assert_thread_postable(metadata, login, email)
+            principal.assert_can_post(metadata)
         else:
-            assert_thread_readable(metadata, login, email)
+            principal.assert_can_read(metadata)
         if method != "run.start" and not (post_command and metadata.get("admin_thread") is True):
-            assert_thread_readable(metadata, login, email)
+            principal.assert_can_read(metadata)
         metadata_run_status = metadata.get("latest_run_status")
         thread_busy = _thread_is_busy(thread) or metadata_run_status in {"pending", "running"}
 
@@ -199,6 +207,10 @@ async def proxy_dashboard_thread_commands(
     if method == "run.start" and thread_busy:
         if offload_requested(start_params):
             raise HTTPException(409, "offloading requires an idle conversation")
+        # Queueing and steering both attribute the message to a person, which a
+        # machine has none of; it retries instead.
+        if principal.machine:
+            raise HTTPException(409, "thread is already running")
         # A follow-up while a run is live either waits for that run as a queued
         # run of its own, or joins it. Either reply keeps the protocol's shape
         # so the client cannot tell them from a plain start.
@@ -212,14 +224,23 @@ async def proxy_dashboard_thread_commands(
     url = f"{langgraph_url().rstrip('/')}/threads/{thread_id}/commands"
     headers = langgraph_proxy_headers(content_type=content_type)
 
-    enriched = await _enrich_run_start_command(
-        thread_id,
-        login,
-        parsed,
-        metadata=metadata,
-        creating=creating,
-        email=email,
-    )
+    if principal.machine:
+        enriched = await _enrich_system_run_start_command(
+            thread_id,
+            principal,
+            parsed,
+            metadata=metadata,
+            creating=creating,
+        )
+    else:
+        enriched = await _enrich_run_start_command(
+            thread_id,
+            login,
+            parsed,
+            metadata=metadata,
+            creating=creating,
+            email=email,
+        )
     outgoing = json.dumps(enriched).encode()
 
     if method == "run.start":
