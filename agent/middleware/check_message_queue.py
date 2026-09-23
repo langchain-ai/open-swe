@@ -9,7 +9,7 @@ import logging
 from typing import Any, cast
 
 import httpx2
-from langchain.agents.middleware import AgentState, before_model
+from langchain.agents.middleware import before_model
 from langgraph.config import get_config, get_store
 from langgraph.runtime import Runtime
 from langgraph.store.base import BaseStore
@@ -22,8 +22,16 @@ from agent.input_messages import (
     build_input_messages,
     visible_dynamic_context_hashes,
 )
+from agent.middleware.require_user_reply import (
+    SLACK_REPLY_SURFACE,
+    WEB_REPLY_SURFACE,
+    ReplySurface,
+    ReplySurfaceState,
+    current_reply_surface,
+)
 from agent.middleware.trace import scrub_middleware_inputs
 from agent.prompts import load_prompt
+from agent.users import User
 from agent.utils.dashboard_handoff import DASHBOARD_HANDOFF_BODY
 from agent.utils.http import DEFAULT_HTTP_TIMEOUT
 from agent.utils.multimodal import fetch_image_block, vision_not_supported_warning
@@ -31,7 +39,7 @@ from agent.utils.multimodal import fetch_image_block, vision_not_supported_warni
 logger = logging.getLogger(__name__)
 
 
-class LinearNotifyState(AgentState):
+class LinearNotifyState(ReplySurfaceState):
     """Extended agent state for tracking Linear notifications."""
 
     linear_messages_sent_count: int
@@ -135,15 +143,35 @@ def _flush_blocks(
 def _message_update(
     queued: list[dict[str, Any]],
     thread_id: str,
+    surface: ReplySurface | None = None,
 ) -> dict[str, Any] | None:
+    surface_update = {"reply_surface": surface} if surface is not None else {}
     if not queued:
-        return None
+        return surface_update or None
     logger.info(
         "Injected %d queued message(s) into state for thread %s",
         len(queued),
         thread_id,
     )
-    return {"messages": queued}
+    return {"messages": queued, **surface_update}
+
+
+async def _consume_queued_messages(
+    store: BaseStore, namespace: tuple[str, ...], consumed: list[dict[str, Any]]
+) -> None:
+    """Remove ``consumed`` from the queue, keeping follow-ups appended since.
+
+    Building the injected messages awaits (model lookup, image fetches), and a
+    follow-up queued during that time is not in the snapshot; deleting the
+    whole entry would drop it without ever delivering it.
+    """
+    current_item = await store.aget(namespace, "pending_messages")
+    current = current_item.value.get("messages", []) if current_item is not None else []
+    remaining = [message for message in current if message not in consumed]
+    if remaining:
+        await store.aput(namespace, "pending_messages", {"messages": remaining})
+    else:
+        await store.adelete(namespace, "pending_messages")
 
 
 async def _consume_pending_autofix_event(store: BaseStore, thread_id: str) -> str | None:
@@ -176,7 +204,7 @@ async def _consume_pending_autofix_event(store: BaseStore, thread_id: str) -> st
 @scrub_middleware_inputs
 @before_model(state_schema=LinearNotifyState)
 async def check_message_queue_before_model(  # noqa: PLR0911
-    state: LinearNotifyState,  # noqa: ARG001
+    state: LinearNotifyState,
     runtime: Runtime,  # noqa: ARG001
 ) -> dict[str, Any] | None:
     """Middleware that checks for queued messages before each model call.
@@ -226,12 +254,11 @@ async def check_message_queue_before_model(  # noqa: PLR0911
             return _message_update(queued_updates, thread_id)
 
         queued_value = queued_item.value
-        queued_messages = queued_value.get("messages", [])
-
-        # Delete early to prevent duplicate processing if middleware runs again
-        await store.adelete(namespace, "pending_messages")
+        # A snapshot: what this call consumes, whatever is appended meanwhile.
+        queued_messages = list(queued_value.get("messages", []))
 
         if not queued_messages:
+            await store.adelete(namespace, "pending_messages")
             _flush_blocks(queued_updates, content_blocks, injected)
             return _message_update(queued_updates, thread_id)
 
@@ -248,29 +275,49 @@ async def check_message_queue_before_model(  # noqa: PLR0911
         )
         resolved_model_id: str | None = None
         if has_images:
-            resolved_model_id = await _resolve_thread_model_id(thread_id)
+            # This run's own model first: thread metadata already names the
+            # model of any follow-up queued behind it.
+            run_model = configurable.get("resolved_agent_model_id") or configurable.get(
+                "agent_model_id"
+            )
+            resolved_model_id = (
+                run_model
+                if isinstance(run_model, str) and run_model
+                else await _resolve_thread_model_id(thread_id)
+            )
 
+        surface = current_reply_surface(state)
+        moved_surface: ReplySurface | None = None
         for msg in queued_messages:
             content = msg.get("content")
             if _is_dashboard_queued_message(content):
-                handoff = build_input_messages(
-                    DASHBOARD_HANDOFF_BODY,
-                    {
-                        "sender_id": "system:dashboard-handoff",
-                        "surface": "automation",
-                        "kind": "system",
-                    },
-                    systems=[
-                        {
-                            "id": "system:dashboard-handoff",
-                            "display_name": "Dashboard handoff",
-                            "platform": "open-swe",
-                        }
-                    ],
-                    injected_dynamic_context_hashes=injected,
-                )
                 _flush_blocks(queued_updates, content_blocks, injected)
-                queued_updates.extend(cast(list[dict[str, Any]], handoff))
+                # Only the move itself is worth announcing. Re-announcing it on
+                # every later web follow-up stacks identical handoff notices in
+                # the dashboard stream.
+                if surface == SLACK_REPLY_SURFACE:
+                    queued_updates.extend(
+                        cast(
+                            list[dict[str, Any]],
+                            build_input_messages(
+                                DASHBOARD_HANDOFF_BODY,
+                                {
+                                    "sender_id": "system:dashboard-handoff",
+                                    "surface": "automation",
+                                    "kind": "system",
+                                },
+                                systems=[
+                                    {
+                                        "id": "system:dashboard-handoff",
+                                        "display_name": "Dashboard handoff",
+                                        "platform": "open-swe",
+                                    }
+                                ],
+                                injected_dynamic_context_hashes=injected,
+                            ),
+                        )
+                    )
+                surface = moved_surface = WEB_REPLY_SURFACE
             if isinstance(content, dict) and (
                 "text" in content or "image_urls" in content or "images" in content
             ):
@@ -279,21 +326,14 @@ async def check_message_queue_before_model(  # noqa: PLR0911
                 sender = content.get("sender")
                 if isinstance(sender, dict) and isinstance(sender.get("id"), str):
                     person: PersonIdentity = {"id": sender["id"]}
-                    for key in (
-                        "display_name",
-                        "handle",
-                        "platform",
-                        "github_login",
-                        "email",
-                        "timezone",
-                    ):
+                    for key in ("github_login", "email"):
                         value = sender.get(key)
                         if isinstance(value, str):
                             cast(dict[str, str], person)[key] = value
+                    person = await User.canonical_person(person)
                     structured = build_input_messages(
                         blocks,
                         {"sender_id": person["id"], "surface": "web", "kind": "human"},
-                        people=[person],
                         injected_dynamic_context_hashes=injected,
                     )
                     _flush_blocks(queued_updates, content_blocks, injected)
@@ -313,7 +353,10 @@ async def check_message_queue_before_model(  # noqa: PLR0911
                 content_blocks.append({"type": "text", "text": content})
 
         _flush_blocks(queued_updates, content_blocks, injected)
-        return _message_update(queued_updates, thread_id)  # noqa: TRY300
+        # Cleared only once every message is built: a failure above leaves
+        # them for the next model call instead of losing them.
+        await _consume_queued_messages(store, namespace, queued_messages)
+        return _message_update(queued_updates, thread_id, moved_surface)  # noqa: TRY300
     except Exception:
         logger.exception("Error in check_message_queue_before_model")
     return None

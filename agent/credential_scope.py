@@ -1,13 +1,25 @@
-"""Resolve personal integration access and PR authorship from saved thread ownership."""
+"""Resolve personal integration access and PR authorship within saved thread scope."""
 
 from collections.abc import Mapping
 from typing import Any
 
 import langgraph_sdk
 
-from agent.dashboard.profiles import resolve_oauth_login
 from agent.run_config import RunConfig
 from agent.utils.json_types import thread_metadata
+from agent.utils.thread_participants import PARTICIPANT_LOGINS_KEY, participant_logins
+
+
+class PrAuthorNotAParticipant(RuntimeError):
+    """A requested PR author has not posted in this thread."""
+
+    def __init__(self, login: str, participants: list[str]) -> None:
+        self.login = login
+        self.participants = participants
+        super().__init__(
+            f"{login} has not participated in this thread; "
+            f"its participants are {', '.join(participants) or 'none'}"
+        )
 
 
 async def _thread_scope(
@@ -28,6 +40,16 @@ async def _thread_scope(
     if owner_type == "system" and visibility != "public":
         raise RuntimeError("System threads cannot use private credentials")
     return cfg, metadata
+
+
+def _requested_participant(requested: str | None, metadata: Mapping[str, Any]) -> str | None:
+    if not isinstance(requested, str) or not requested.strip():
+        return None
+    login = requested.strip()
+    participants = participant_logins(metadata.get(PARTICIPANT_LOGINS_KEY))
+    if login.lower() not in participants:
+        raise PrAuthorNotAParticipant(login, participants)
+    return login
 
 
 def _private_owner_login(cfg: RunConfig, metadata: Mapping[str, Any]) -> str:
@@ -51,19 +73,40 @@ async def private_credential_login(
     return _private_owner_login(cfg, metadata)
 
 
-async def pr_author_login() -> str | None:
-    """User-owned PRs belong to the initiator, including in public conversations."""
+async def pr_author_login(requested: str | None = None) -> str | None:
+    """The account a PR is opened as: the run requester, or a named participant.
+
+    ``requested`` only reaches here from a shared, user-owned thread, and only a
+    login that has posted in it is honored — someone who could have opened the
+    same PR by triggering their own run. Private threads stay pinned to their
+    owner and system threads to the App, so neither can borrow an account.
+    """
     cfg, metadata = await _thread_scope()
+    owner = metadata.get("owner_login")
+    has_owner = isinstance(owner, str) and bool(owner.strip())
+    if (
+        cfg.background_task_completion
+        and metadata.get("owner_type") != "system"
+        and (
+            metadata.get("visibility") == "private"
+            or metadata.get("owner_type") == "user"
+            or has_owner
+        )
+    ):
+        raise RuntimeError(
+            "Background completion cannot identify the PR requester; start a direct user run to publish"
+        )
     if metadata.get("visibility", "public") == "private":
         return _private_owner_login(cfg, metadata)
     if metadata.get("owner_type") == "system":
         return None
-    owner = metadata.get("owner_login")
-    if isinstance(owner, str) and owner.strip():
-        owner = owner.strip()
-        if metadata.get("owner_type") == "user":
-            return owner
-        return await resolve_oauth_login(owner) or owner
+    if has_owner:
+        login = (cfg.github_login or "").strip()
+        if not login:
+            raise RuntimeError(
+                "User-owned thread requires an authenticated requester for PR creation"
+            )
+        return _requested_participant(requested, metadata) or login
     if metadata.get("owner_type") == "user":
         raise RuntimeError("User-owned thread has no GitHub owner for PR creation")
     return None

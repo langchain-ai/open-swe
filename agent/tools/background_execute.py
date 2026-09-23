@@ -10,6 +10,8 @@ from typing import Any
 
 from agent.run_config import RunConfig
 from agent.sandboxes.state import SANDBOX_BACKENDS
+from agent.utils.background_task_state import update_background_task_state
+from agent.utils.thread_ops import langgraph_client
 
 logger = logging.getLogger(__name__)
 
@@ -309,6 +311,12 @@ async def background_execute(
             raise RuntimeError("background-task monitor is busy")
         task_id = f"{TASK_PREFIX}-{uuid.uuid4()}"
         state = await execute(backend, _launch_command(task_id, command, timeout))
+        try:
+            await update_background_task_state(langgraph_client(), thread_id, running=[task_id])
+        except Exception:
+            logger.warning(
+                "Could not track background command", extra={"task_id": task_id}, exc_info=True
+            )
         wait = await backend.aexecute(wait_for_monitor, timeout=15)
         if getattr(wait, "exit_code", None) != 0:
             return {
@@ -338,7 +346,7 @@ def owns_task(task_id: str) -> bool:
     before task kinds existed, and such a task can still be running in a
     sandbox that predates this code.
     """
-    from agent.dashboard.environment_refresh import owns_task as refresh_owns_task
+    from agent.workspaces.refresh import owns_task as refresh_owns_task
 
     return not refresh_owns_task(task_id)
 

@@ -1,0 +1,182 @@
+"""Persistence for the plan-review feature.
+
+The plan lives in two places:
+  - the agent's sandbox, as a self-contained HTML file the agent creates and edits, and
+  - the LangGraph store, as the published snapshot the dashboard renders.
+
+Reviewers leave whole-document comments, stored one item per comment under
+``["plan", "comments", thread_id]`` so listing and deletion are simple plain
+store operations (no CRDT/WebSocket).
+"""
+
+import logging
+import re
+import uuid
+from datetime import UTC, datetime
+from typing import Any
+
+from langgraph_sdk import get_client
+
+from agent.store import delete_value, get_value, now_iso, put_value, search_values
+
+logger = logging.getLogger(__name__)
+
+PLAN_CONTENT_NAMESPACE = ["plan", "content"]
+PLAN_COMMENTS_NAMESPACE = ["plan", "comments"]
+
+# Plans are mirrored into the sandbox outside cloned repositories.
+PLAN_FILE_DIRECTORY = "/workspace/plans"
+
+PLAN_STATUS_SHARED = "shared"
+
+
+def make_plan_approver(*, actor_id: str, name: str, source: str) -> dict[str, str]:
+    actor_id = actor_id.strip()
+    name = name.strip()
+    source = source.strip()
+    return {
+        "id": actor_id or name or "unknown",
+        "name": name or actor_id or "Unknown user",
+        "source": source or "unknown",
+    }
+
+
+def plan_file_path_for_thread(thread_id: str) -> str:
+    date = datetime.now(UTC).strftime("%Y-%m-%d")
+    slug = re.sub(r"[^a-zA-Z0-9-]+", "-", thread_id).strip("-").lower()[:48]
+    return f"{PLAN_FILE_DIRECTORY}/{date}-{slug or 'plan'}.html"
+
+
+async def _stored_plan_file_path(thread_id: str) -> str | None:
+    value = await get_plan_content(thread_id) or {}
+    path = value.get("plan_file_path")
+    return path if isinstance(path, str) and path else None
+
+
+async def save_plan_content(
+    thread_id: str,
+    *,
+    html: str | None = None,
+    markdown: str | None = None,
+    status: str = PLAN_STATUS_SHARED,
+    clear_comments: bool = True,
+    plan_file_path: str | None = None,
+) -> None:
+    """Publish an artifact, clearing old comments unless this is a manual edit."""
+    if plan_file_path is None:
+        plan_file_path = await _stored_plan_file_path(thread_id)
+    record: dict[str, Any] = {"status": status, "revision": str(uuid.uuid4())}
+    if html is not None:
+        record["html"] = html
+    if markdown is not None:
+        record["markdown"] = markdown
+    if plan_file_path:
+        record["plan_file_path"] = plan_file_path
+    await put_value(PLAN_CONTENT_NAMESPACE, thread_id, record)
+    if clear_comments:
+        try:
+            await clear_plan_comments(thread_id)
+        except Exception:
+            logger.warning(
+                "Could not clear artifact comments",
+                extra={"agent_thread_id": thread_id},
+                exc_info=True,
+            )
+    metadata = {"plan_status": status, "plan_approved_by": None, "plan_approved_at": None}
+    await _merge_thread_metadata(thread_id, metadata)
+
+
+async def write_plan_to_sandbox(
+    thread_id: str, content: str, *, plan_file_path: str | None = None
+) -> str:
+    """Mirror the dashboard plan edit into the thread's sandbox.
+
+    Best-effort: a missing sandbox must not block publishing the plan to the
+    review page.
+    """
+    path = plan_file_path or plan_file_path_for_thread(thread_id)
+    try:
+        from agent.sandboxes.state import get_sandbox_backend
+
+        backend = await get_sandbox_backend(thread_id)
+        await backend.awrite(path, content)
+        return path
+    except Exception:
+        logger.warning("Could not write plan file to sandbox for %s", thread_id, exc_info=True)
+        return path
+
+
+async def get_plan_content(
+    thread_id: str, *, raise_on_error: bool = False
+) -> dict[str, Any] | None:
+    """Read the published artifact, optionally propagating store failures."""
+    try:
+        return await get_value(PLAN_CONTENT_NAMESPACE, thread_id)
+    except Exception:
+        if raise_on_error:
+            raise
+        logger.warning("plan content lookup failed for %s", thread_id, exc_info=True)
+        return None
+
+
+def _comments_namespace(thread_id: str) -> list[str]:
+    return [*PLAN_COMMENTS_NAMESPACE, thread_id]
+
+
+async def list_plan_comments(
+    thread_id: str, *, raise_on_error: bool = False
+) -> list[dict[str, Any]]:
+    """Read comments oldest first, optionally propagating store failures."""
+    try:
+        comments = await search_values(_comments_namespace(thread_id), limit=1000)
+    except Exception:
+        if raise_on_error:
+            raise
+        logger.warning("plan comment lookup failed for %s", thread_id, exc_info=True)
+        return []
+    comments.sort(key=lambda c: str(c.get("created_at", "")))
+    return comments
+
+
+async def clear_plan_comments(thread_id: str) -> None:
+    """Delete every comment on a thread (called when a revised plan is published)."""
+    for comment in await list_plan_comments(thread_id):
+        comment_id = comment.get("id")
+        if isinstance(comment_id, str) and comment_id:
+            await delete_plan_comment(thread_id, comment_id)
+
+
+async def add_plan_comment(
+    thread_id: str,
+    *,
+    author: str,
+    author_login: str,
+    body: str,
+    anchor: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """Append an anchored comment; returns the stored comment."""
+    comment = {
+        "id": uuid.uuid4().hex,
+        "author": author,
+        "author_login": author_login,
+        "body": body,
+        "anchor": anchor,
+        "created_at": now_iso(),
+    }
+    await put_value(_comments_namespace(thread_id), comment["id"], comment)
+    return comment
+
+
+async def delete_plan_comment(thread_id: str, comment_id: str) -> None:
+    await delete_value(_comments_namespace(thread_id), comment_id)
+
+
+async def _merge_thread_metadata(thread_id: str, metadata: dict[str, Any]) -> None:
+    try:
+        await get_client().threads.update(thread_id=thread_id, metadata=metadata)
+    except Exception:
+        logger.warning(
+            "Could not update artifact metadata",
+            extra={"agent_thread_id": thread_id},
+            exc_info=True,
+        )

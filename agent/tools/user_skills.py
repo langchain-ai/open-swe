@@ -5,7 +5,7 @@ from typing import Any
 from langgraph.config import get_config
 
 from agent.dashboard.agent_overrides import resolve_github_login
-from agent.dashboard.skills import (
+from agent.skill_store.store import (
     SkillCreate,
     SkillUpdate,
     create_skill,
@@ -16,13 +16,13 @@ from agent.dashboard.skills import (
 from agent.utils.json_types import as_json_object
 
 
-def _login() -> str | None:
-    return resolve_github_login(as_json_object(get_config()))
+async def _login() -> str | None:
+    return await resolve_github_login(as_json_object(get_config()))
 
 
 async def save_user_skill(name: str, description: str, instructions: str = "") -> dict[str, Any]:
     """Implement the `save_user_skill` tool."""
-    login = _login()
+    login = await _login()
     if not login:
         return {"ok": False, "error": "Could not resolve the triggering user's GitHub login"}
 
@@ -40,7 +40,7 @@ async def save_user_skill(name: str, description: str, instructions: str = "") -
 
 async def delete_user_skill(name: str) -> dict[str, Any]:
     """Implement the `delete_user_skill` tool."""
-    login = _login()
+    login = await _login()
     if not login:
         return {"ok": False, "error": "Could not resolve the triggering user's GitHub login"}
 

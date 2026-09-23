@@ -21,6 +21,7 @@ import type { ApprovalCallbacks } from "../types"
 import type { Message, ToolExecutionChunk } from "@/features/agents/lib/types"
 import { OutputIframe } from "@/features/agents/components/chat/OutputIframe"
 import { ReplyCard } from "@/features/agents/components/chat/ReplyCard"
+import { SqlResultTable } from "@/features/agents/components/chat/SqlResultTable"
 import { SubagentGroup } from "@/features/agents/components/subagents"
 import { formatElapsed } from "@/lib/utils"
 
@@ -38,15 +39,15 @@ const MAX_VISIBLE_WORK_LOG_ENTRIES = 1
  */
 function EditWorkEntry({
   chunk,
-  projectPath,
+  repoPath,
 }: {
   chunk: ToolExecutionChunk
-  projectPath?: string
+  repoPath?: string
 }) {
   const diff = latestDiff(chunk)
   return (
     <WorkEntryRow
-      entry={describeWorkEntry(chunk, projectPath)}
+      entry={describeWorkEntry(chunk, repoPath)}
       timestamp={chunk.timestamp}
       body={diff ? <DiffView diffData={diff} snippet /> : undefined}
       defaultExpanded={chunk.status === "pending"}
@@ -60,12 +61,12 @@ function EditWorkEntry({
  */
 function WorkGroup({
   chunks,
-  projectPath,
+  repoPath,
   expanded,
   onToggle,
 }: {
   chunks: Array<ToolExecutionChunk>
-  projectPath?: string
+  repoPath?: string
   expanded: boolean
   onToggle: () => void
 }) {
@@ -86,7 +87,7 @@ function WorkGroup({
       {visible.map((chunk, index) => (
         <WorkEntryRow
           key={chunk.toolCallId || `work-${index}`}
-          entry={describeWorkEntry(chunk, projectPath)}
+          entry={describeWorkEntry(chunk, repoPath)}
           timestamp={chunk.timestamp}
         />
       ))}
@@ -98,14 +99,14 @@ export function AgentTurn({
   message,
   isStreaming,
   isMarkdownLive,
-  projectPath,
+  repoPath,
   activityLabel,
   ...callbacks
 }: {
   message: Message
   isStreaming?: boolean
   isMarkdownLive?: boolean
-  projectPath?: string
+  repoPath?: string
   activityLabel?: string
 } & ApprovalCallbacks) {
   const renderItems = useMemo(
@@ -206,7 +207,7 @@ export function AgentTurn({
           <WorkGroup
             key={item.key}
             chunks={item.chunks}
-            projectPath={projectPath}
+            repoPath={repoPath}
             expanded={expandedGroups[item.id] ?? false}
             onToggle={() => toggleGroup(item.id)}
           />
@@ -220,7 +221,7 @@ export function AgentTurn({
           <EditWorkEntry
             key={item.key}
             chunk={item.chunk}
-            projectPath={projectPath}
+            repoPath={repoPath}
           />
         )
 
@@ -228,9 +229,15 @@ export function AgentTurn({
         return (
           <WorkEntryRow
             key={item.key}
-            entry={describeWorkEntry(item.chunk, projectPath)}
+            entry={describeWorkEntry(item.chunk, repoPath)}
             timestamp={item.chunk.timestamp}
-            body={<ShellEntryBody chunk={item.chunk} />}
+            body={({ loadedText, loadError }) => (
+              <ShellEntryBody
+                chunk={item.chunk}
+                loadedText={loadedText}
+                loadError={loadError}
+              />
+            )}
             defaultExpanded={item.chunk.status === "pending"}
           />
         )
@@ -243,11 +250,14 @@ export function AgentTurn({
           <OutputIframe key={item.key} display={item.chunk.display} />
         ) : null
 
+      case "sql-item":
+        return <SqlResultItem key={item.key} chunk={item.chunk} />
+
       case "tool-item":
         return (
           <WorkEntryRow
             key={item.key}
-            entry={describeWorkEntry(item.chunk, projectPath)}
+            entry={describeWorkEntry(item.chunk, repoPath)}
             timestamp={item.chunk.timestamp}
           />
         )
@@ -259,7 +269,7 @@ export function AgentTurn({
           <div key={item.key} className="min-w-0 px-1 py-0.5">
             <ChunkRenderer
               chunk={item.chunk}
-              projectPath={projectPath}
+              repoPath={repoPath}
               isMarkdownLive={isMarkdownLive}
               {...callbacks}
             />
@@ -330,5 +340,40 @@ export function AgentTurn({
         )}
       </div>
     </div>
+  )
+}
+
+/**
+ * A SQL result table parses the whole output, so a chunk that carries only the
+ * transcript's preview has to fetch the rest before it can show anything
+ * faithful.
+ */
+function SqlResultItem({ chunk }: { chunk: ToolExecutionChunk }) {
+  const { loadOutput, output } = chunk
+  const [loaded, setLoaded] = useState<{
+    load: typeof loadOutput
+    text: string
+  } | null>(null)
+
+  useEffect(() => {
+    if (!loadOutput) return
+    let active = true
+    void loadOutput().then(
+      (text) => {
+        if (active) setLoaded({ load: loadOutput, text })
+      },
+      () => {
+        // The preview stays up; the row's expand path reports load failures.
+      }
+    )
+    return () => {
+      active = false
+    }
+  }, [loadOutput])
+
+  return (
+    <SqlResultTable
+      output={loaded && loaded.load === loadOutput ? loaded.text : output}
+    />
   )
 }

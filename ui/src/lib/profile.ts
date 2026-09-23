@@ -1,7 +1,6 @@
-import { useEffect } from "react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 
-import { ApiError, api } from "./api"
+import { ApiError, api, DEFAULT_WORKSPACE_SLUG } from "./api"
 import {
   REPOS_CACHE_MAX_AGE_MS,
   readCachedRepos,
@@ -10,19 +9,29 @@ import {
 import { useSession } from "./session"
 import type { Profile, ProfileUpdate, ReposPayload } from "./api"
 
+const profileQueryKey = (login: string | undefined) => [
+  "profile",
+  login ?? null,
+]
+
 export function useProfile() {
   const session = useSession()
   return useQuery({
-    queryKey: ["profile"],
+    queryKey: profileQueryKey(session.data?.login),
     queryFn: api.profile,
     enabled: !!session.data,
   })
 }
 
-export function useOptions() {
+/**
+ * Selectable models and defaults for the workspace a run will land in; model
+ * defaults and the Fable flag are per workspace, so the key carries the slug.
+ */
+export function useOptions(workspace?: string | null) {
+  const slug = workspace ?? DEFAULT_WORKSPACE_SLUG
   return useQuery({
-    queryKey: ["options"],
-    queryFn: api.options,
+    queryKey: ["options", slug],
+    queryFn: () => api.options(slug),
   })
 }
 
@@ -39,18 +48,7 @@ export const REPOS_STALE_TIME_MS = 10 * 60 * 1000
 export function useRepos() {
   const session = useSession()
   const login = session.data?.login ?? null
-  const qc = useQueryClient()
-
-  useEffect(() => {
-    if (!login) return
-    const key = reposQueryKey(login)
-    if (qc.getQueryData<ReposPayload>(key)) return
-    const cached = readCachedRepos(login)
-    if (!cached) return
-    qc.setQueryData<ReposPayload>(key, cached.payload, {
-      updatedAt: cached.updatedAt,
-    })
-  }, [login, qc])
+  const cached = login ? readCachedRepos(login) : null
 
   return useQuery({
     queryKey: reposQueryKey(login),
@@ -66,6 +64,8 @@ export function useRepos() {
       }
     },
     enabled: !!session.data,
+    initialData: cached?.payload,
+    initialDataUpdatedAt: cached?.updatedAt,
     staleTime: REPOS_STALE_TIME_MS,
     gcTime: REPOS_CACHE_MAX_AGE_MS,
   })
@@ -87,10 +87,12 @@ export function useRefreshRepos() {
 
 export function useSaveProfile() {
   const qc = useQueryClient()
+  const session = useSession()
+  const key = profileQueryKey(session.data?.login)
   return useMutation({
     mutationFn: (body: ProfileUpdate) => api.saveProfile(body),
     onSuccess: (saved) => {
-      qc.setQueryData(["profile"], saved)
+      qc.setQueryData(key, saved)
     },
   })
 }
@@ -109,21 +111,30 @@ export function buildProfileUpdate(
   return {
     default_model: current?.default_model ?? fallbackModel,
     reasoning_effort: current?.reasoning_effort ?? fallbackEffort,
-    default_subagent_model:
-      current?.default_subagent_model ??
-      current?.default_model ??
-      fallbackModel,
+    default_subagent_model: current?.default_subagent_model ?? null,
     subagent_reasoning_effort:
-      current?.subagent_reasoning_effort ??
-      current?.reasoning_effort ??
-      fallbackEffort,
+      current?.default_subagent_model == null
+        ? null
+        : (current.subagent_reasoning_effort ?? fallbackEffort),
     default_repo: current?.default_repo ?? null,
     base_branch: current?.base_branch ?? null,
     branch_prefix: current?.branch_prefix ?? null,
     auto_fix_ci: current?.auto_fix_ci ?? true,
     model_routing_enabled: current?.model_routing_enabled ?? null,
+    recent_thread_context_enabled:
+      current?.recent_thread_context_enabled ?? false,
+    dm_session_enabled: current?.dm_session_enabled ?? false,
     draft_prs: current?.draft_prs ?? true,
     review_draft_prs: current?.review_draft_prs ?? null,
+    experimental_assistant_ui: current?.experimental_assistant_ui ?? null,
     ...patch,
   }
+}
+
+export function useExperimentalAssistantUi(): boolean {
+  const profile = useProfile()
+  return (
+    profile.data?.experimental_assistant_ui ??
+    import.meta.env.VITE_EXPERIMENTAL_ASSISTANT_UI === "true"
+  )
 }

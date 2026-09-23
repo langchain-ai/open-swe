@@ -5,9 +5,9 @@ import httpx2
 import pytest
 from fastapi import HTTPException
 
-from agent.dashboard.threads import access as thread_access
-from agent.dashboard.threads import api as thread_api
 from agent.github import pull_request_status
+from agent.threads import access as thread_access
+from agent.threads import handlers
 from tests.conftest import patch_thread_module
 
 
@@ -112,6 +112,7 @@ async def test_get_statuses_normalizes_live_state_and_paginates_review_threads(
                                     "reviewThreads": {
                                         "nodes": [
                                             {
+                                                "id": "PRRT_1",
                                                 "isResolved": False,
                                                 "path": "a.py",
                                                 "line": 4,
@@ -144,6 +145,7 @@ async def test_get_statuses_normalizes_live_state_and_paginates_review_threads(
                                 "reviewThreads": {
                                     "nodes": [
                                         {
+                                            "id": "PRRT_2",
                                             "isResolved": False,
                                             "path": "b.py",
                                             "line": None,
@@ -227,6 +229,7 @@ async def test_get_statuses_normalizes_live_state_and_paginates_review_threads(
             "unresolvedReviewThreadCount": 2,
             "unresolvedReviewThreads": [
                 {
+                    "thread_id": "PRRT_1",
                     "author": "alice",
                     "body": "fix this",
                     "path": "a.py",
@@ -234,6 +237,7 @@ async def test_get_statuses_normalizes_live_state_and_paginates_review_threads(
                     "url": "https://github.com/o/r/pull/7#discussion_r1",
                 },
                 {
+                    "thread_id": "PRRT_2",
                     "author": "bob",
                     "body": "question",
                     "path": "b.py",
@@ -356,7 +360,7 @@ async def test_thread_status_authorizes_read_access_before_token_or_metadata_use
     patch_thread_module(monkeypatch, "_github_token_for_login", token)
     patch_thread_module(monkeypatch, "get_pull_request_statuses", statuses)
 
-    result = await thread_api.get_dashboard_thread_pull_request_status(
+    result = await handlers.get_dashboard_thread_pull_request_status(
         "thread-1", "teammate", email="teammate@example.com"
     )
 
@@ -389,7 +393,7 @@ async def test_thread_status_read_denial_does_not_resolve_oauth_token(
     patch_thread_module(monkeypatch, "_github_token_for_login", token)
 
     with pytest.raises(HTTPException) as exc_info:
-        await thread_api.get_dashboard_thread_pull_request_status("thread-1", "intruder")
+        await handlers.get_dashboard_thread_pull_request_status("thread-1", "intruder")
 
     assert exc_info.value.status_code == 403
     token.assert_not_awaited()

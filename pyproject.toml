@@ -6,30 +6,27 @@ readme = "README.md"
 requires-python = ">=3.14"
 license = { text = "MIT" }
 dependencies = [
-    "deepagents==0.7.13",
+    "deepagents==0.7.17",
     "fastapi>=0.141.1",
     "uvicorn>=0.52.4",
     "httpx2>=2.12.0,<3.0.0",
     "PyJWT>=2.13.0",
     "cryptography>=50.0.0",
-    "langgraph-sdk>=0.4.3",
-    "langchain>=1.3.16",
-    "langgraph>=1.2.11",
+    "langgraph-sdk>=0.4.5",
+    "langchain>=1.4.2",
+    "langgraph>=1.2.12",
     "markdownify>=1.2.3",
-    "langchain-anthropic>=1.6.1",
+    "markdown-it-py==4.2.0",
+    "langchain-anthropic>=1.7.2",
     "langgraph-cli[inmem]>=0.4.31",
-    "langsmith>=0.12.0",
-    "langchain-openai>=1.6.1,<2.0.0",
+    "langsmith>=0.14.0",
+    "langchain-openai>=1.6.3,<2.0.0",
     "openai>=3.10.0,<4.0.0",
-    "langchain-fireworks>=1.6.0",
+    "langchain-fireworks>=1.6.2",
     # langchain-fireworks 1.4.2 pins a pre-release fireworks-ai; opt in explicitly so uv resolves it.
     "fireworks-ai>=1.2.9",
-    "langchain-daytona>=0.0.8",
-    "langchain-modal>=0.0.6",
-    "langchain-runloop>=0.0.7",
-    "langchain-e2b==0.0.6",
     "exa-py>=2.18.1",
-    "langchain-google-genai>=4.3.5",
+    "langchain-google-genai>=4.4.0",
     "langchain-mcp-adapters>=0.3.2",
     "websockets>=16.1.1",
     "slack-sdk>=3.44.1,<4.0.0",
@@ -37,6 +34,11 @@ dependencies = [
     "alembic==1.20.0",
     "sqlalchemy[asyncio]==2.0.52",
     "asyncpg==0.31.0",
+    "langgraph-checkpoint-sqlite>=3.1.1",
+    "pillow>=12.1.0",
+    "Pygments>=2.21.0",
+    "githubkit[auth-app]==0.16.1",
+    "githubkit-schemas[2022-11-28]==26.9.13",
 ]
 
 [project.optional-dependencies]
@@ -45,21 +47,35 @@ dev = [
     "pytest>=9.1.1",
     "pytest-asyncio>=1.4.0",
     "ruff>=0.16.4",
-    "Pygments>=2.21.0",
+]
+# Third-party sandbox providers. The registry imports each provider lazily, so
+# these are only needed when SANDBOX_TYPE selects one; `uv sync` alone gives you
+# the langsmith (default) and local providers.
+sandbox-daytona = ["langchain-daytona>=0.0.8"]
+sandbox-modal = ["langchain-modal>=0.0.6"]
+sandbox-runloop = ["langchain-runloop>=0.0.7"]
+# langchain-e2b is pinned: it still declares `deepagents<0.7.0` and caps
+# `wcmatch<11.0`, overridden below until it publishes compatible metadata.
+sandbox-e2b = ["langchain-e2b==0.0.6"]
+sandbox-providers = [
+    "langchain-daytona>=0.0.8",
+    "langchain-modal>=0.0.6",
+    "langchain-runloop>=0.0.7",
+    "langchain-e2b==0.0.6",
 ]
 
 [tool.uv]
 # The externally maintained langchain-e2b integration still declares
-# `deepagents<0.7.0`, but 0.7.13 keeps the sandbox API backward compatible. Its e2b
+# `deepagents<0.7.0`, but 0.7.17 keeps the sandbox API backward compatible. Its e2b
 # dependency also caps wcmatch<11.0 while deepagents requires wcmatch>=11.0, so
 # override both transitive bounds until langchain-e2b publishes compatible metadata.
-override-dependencies = ["deepagents==0.7.13", "wcmatch>=11.0"]
-# Each langgraph-api release pins its langgraph-runtime-inmem peer to a single
-# minor window expressed in `.dev0` bounds (`>=0.32.0.dev0,<0.33.0.dev0`), which
-# uv's default pre-release policy shies away from, so a plain resolve lands on the
-# end-of-life 0.10.3. Hold the local dev server at the version `langgraph.json`
-# declares for the deployment, so tests run against the runtime that serves prod.
-constraint-dependencies = ["langgraph-api>=0.13.3,<0.14"]
+# Override-dependencies only apply when langchain-e2b is installed (the sandbox-e2b
+# or sandbox-providers extra).
+override-dependencies = ["deepagents==0.7.17", "wcmatch>=11.0"]
+constraint-dependencies = [
+    "langgraph-api>=0.15.0rc1,<0.16",
+    "langgraph-runtime-inmem>=0.35.0rc1,<0.36",
+]
 
 [build-system]
 requires = ["hatchling"]
@@ -100,7 +116,7 @@ ignore = [
 # Siblings of one package sharing package-internal helpers. PLC2701 cannot tell
 # an intra-package import from a cross-package one; names these modules expose
 # to the rest of the codebase are public.
-"agent/dashboard/threads/*" = ["PLC2701"]
+"agent/threads/*" = ["PLC2701"]
 
 [tool.ruff.lint.flake8-tidy-imports.banned-api]
 "__future__.annotations".msg = "Do not use postponed annotation evaluation."
@@ -113,7 +129,18 @@ testpaths = ["tests"]
 include = ["agent", "tests"]
 
 [tool.ty.analysis]
-allowed-unresolved-imports = ["ddtrace", "ddtrace.trace"]
+allowed-unresolved-imports = [
+    "daytona",
+    "ddtrace",
+    "ddtrace.trace",
+    "e2b",
+    "langchain_daytona",
+    "langchain_e2b",
+    "langchain_modal",
+    "langchain_runloop",
+    "modal",
+    "runloop_api_client",
+]
 
 [tool.ty.terminal]
 error-on-warning = false

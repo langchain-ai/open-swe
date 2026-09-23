@@ -1,0 +1,2 @@
+*Expedited review requested* for <$pr_url|$label> $title
+The diff is in this thread. One approval from someone other than the author lets the agent merge it once checks and reviews are clean.

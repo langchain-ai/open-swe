@@ -5,8 +5,10 @@
   "scripts": {
     "dev": "turbo run dev --filter=open-swe-dashboard",
     "dev:desktop": "pnpm --dir desktop run dev",
+    "dev:desktop:experimental": "VITE_EXPERIMENTAL_ASSISTANT_UI=true pnpm run dev:desktop",
     "dev:mock": "bash tests/e2e/dev-mock.sh",
     "dev:prod": "node scripts/dev-prod.mjs",
+    "dev:chatgpt": "pnpm --dir desktop run build && node scripts/dev-chatgpt.cjs",
     "build": "turbo run build",
     "check": "turbo run check",
     "format:check": "oxfmt --check",
@@ -19,7 +21,7 @@
     "format": "oxfmt"
   },
   "devDependencies": {
-    "@tanstack/eslint-plugin-query": "^5.102.3",
+    "@tanstack/eslint-plugin-query": "^5.102.8",
     "@tanstack/eslint-plugin-router": "^1.162.0",
     "oxfmt": "^0.65.0",
     "oxlint": "^1.80.0",

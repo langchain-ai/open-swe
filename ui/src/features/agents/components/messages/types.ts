@@ -1,6 +1,6 @@
 import type {
   Message,
-  Project,
+  LocalRepo,
   QueuedThreadMessage,
 } from "@/features/agents/lib/types"
 
@@ -12,6 +12,11 @@ export interface ApprovalCallbacks {
   onOpenFile?: (filePath: string) => void
 }
 
+export interface LoadEarlier {
+  loading: boolean
+  onLoadEarlier: () => void
+}
+
 export type MessagesScrollControl = {
   scrollToBottom: () => void
 }
@@ -20,6 +25,7 @@ export interface MessagesProps extends ApprovalCallbacks {
   messages: Array<Message>
   /** Cloud threads only; enables the git-sourced changed-files card per turn. */
   threadId?: string
+  showUserNames?: boolean
   /** Identity for remembering the scroll position across navigation. */
   scrollKey?: string
   showPlanArtifact?: boolean
@@ -27,6 +33,10 @@ export interface MessagesProps extends ApprovalCallbacks {
   footer?: React.ReactNode
   pollWorkflowApprovalsWhileActive?: boolean
   queuedMessages?: Array<QueuedThreadMessage>
+  /** Send a queued message now instead of waiting for the run to end. */
+  onSteerQueuedMessage?: (id: string) => void
+  /** Drop a queued message and hand it back to the composer. */
+  onRemoveQueuedMessage?: (id: string) => void
   isStreaming: boolean
   /** Live run signal from `useStream().isLoading` — drives Streamdown token animation. */
   streamIsLoading?: boolean
@@ -34,7 +44,9 @@ export interface MessagesProps extends ApprovalCallbacks {
   isThinking?: boolean
   settingUpSandbox?: boolean
   isOffloading?: boolean
-  project?: Project | null
+  /** Takes over the activity line while the event stream is reconnecting. */
+  reconnectLabel?: string | null
+  localRepo?: LocalRepo | null
   contentWidthClass?: string
   /** Horizontal padding on centered content (scroll track stays edge-to-edge). */
   contentPaddingClass?: string
@@ -42,6 +54,8 @@ export interface MessagesProps extends ApprovalCallbacks {
   bottomInset?: number
   /** When "external", parent renders the scroll button (e.g. above a floating prompt). */
   scrollButtonSlot?: "internal" | "external"
+  /** Set when turns older than the loaded window remain on the server. */
+  loadEarlier?: LoadEarlier | null
   onShowScrollToBottomChange?: (show: boolean) => void
   scrollControlRef?: React.MutableRefObject<MessagesScrollControl | null>
 }

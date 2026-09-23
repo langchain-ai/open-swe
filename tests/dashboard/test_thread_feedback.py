@@ -7,8 +7,9 @@ import pytest
 from fastapi import FastAPI
 
 from agent import thread_feedback
-from agent.dashboard import feedback, routes
 from agent.dashboard.oauth import require_session
+from agent.threads import feedback
+from agent.threads.routes import router as threads_router
 
 
 @pytest.fixture
@@ -28,16 +29,20 @@ async def api(monkeypatch, fake_store):
 
     monkeypatch.setattr(feedback, "agent_thread_pr_state_lock", unlocked)
     monkeypatch.setattr(feedback, "langgraph_client", lambda: None)
+    analytics = AsyncMock()
+    monkeypatch.setattr(feedback, "record_feedback_submission", analytics)
     await thread_feedback.feedback_store().put("t1", thread_feedback.Feedback(status="ready"))
     app = FastAPI()
-    app.include_router(routes.router)
+    app.include_router(threads_router, prefix="/dashboard/api")
     app.dependency_overrides[require_session] = lambda: session
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=app),
         base_url="http://testserver",
         headers={"origin": "http://testserver"},
     ) as client:
-        yield SimpleNamespace(client=client, metadata=metadata, session=session, quiet=quiet)
+        yield SimpleNamespace(
+            client=client, metadata=metadata, session=session, quiet=quiet, analytics=analytics
+        )
 
 
 @pytest.mark.parametrize("rating", ["bad", "good"])
@@ -52,6 +57,14 @@ async def test_submit_saves_rating_and_comment_and_keeps_first_response(api, rat
     reloaded = await api.client.get("/dashboard/api/threads/t1/feedback")
     assert response.json() == duplicate.json() == reloaded.json()
     assert await thread_feedback.feedback_prompt_status("t1") == "completed"
+    api.analytics.assert_awaited_once_with(
+        feedback_key="thread:t1",
+        rating=5 if rating == "good" else 1,
+        source="dashboard",
+        run_key=None,
+        github_login="owner",
+        user_email=None,
+    )
 
 
 async def test_dismiss_prevents_later_submission(api):
@@ -77,7 +90,7 @@ async def test_only_verified_initiator_gets_feedback(api, monkeypatch, identity,
         api.metadata["participant_logins"] = {"owner": True}
         if identity == "slack_initiator":
             api.metadata["source_context"] = {"slack_thread": {"triggering_user_id": "U1"}}
-            monkeypatch.setattr(feedback, "login_for_slack_id", AsyncMock(return_value="owner"))
+            monkeypatch.setattr(feedback.User, "login_for_slack", AsyncMock(return_value="owner"))
     visible = await api.client.get("/dashboard/api/threads/t1/feedback")
     submitted = await api.client.post("/dashboard/api/threads/t1/feedback", json=payload)
     assert visible.json() == {

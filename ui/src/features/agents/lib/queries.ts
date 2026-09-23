@@ -25,14 +25,13 @@ import { useSidebarPrefsHydrated } from "./sidebarPrefs"
 import type { ChatSort } from "./sidebarPrefs"
 import type { Skill, SkillInput } from "@/lib/api"
 import { api } from "@/lib/api"
+import { chatRoutes } from "@/lib/chatRoutes"
 
 export const agentThreadKeys = {
   lists: ["agent-threads", "lists"] as const,
   pinned: ["agent-threads", "lists", "pinned"] as const,
-  projects: (params: {
-    includeResolved: boolean
-    includeAutomations: boolean
-  }) => ["agent-threads", "lists", "projects", params] as const,
+  repos: (params: { includeResolved: boolean; includeAutomations: boolean }) =>
+    ["agent-threads", "lists", "repos", params] as const,
   sidebarActive: (threadId: string) =>
     ["agent-threads", "lists", "sidebar-active", threadId] as const,
   detail: (threadId: string) => ["agent-threads", threadId] as const,
@@ -285,15 +284,15 @@ const BUNDLED_SKILLS: Array<Skill> = [
   },
 ]
 
-export const environmentOptionKeys = {
-  all: ["environment-options"] as const,
+export const workspaceOptionKeys = {
+  all: ["workspace-options"] as const,
 }
 
-/** Environments a new thread can boot from. Empty when none are configured. */
-export function useEnvironmentOptions(enabled = true) {
+/** Workspaces a new thread can boot from. Empty when none are configured. */
+export function useWorkspaceOptions(enabled = true) {
   return useQuery({
-    queryKey: environmentOptionKeys.all,
-    queryFn: api.listEnvironmentOptions,
+    queryKey: workspaceOptionKeys.all,
+    queryFn: api.listWorkspaceOptions,
     staleTime: 60_000,
     enabled,
   })
@@ -467,7 +466,7 @@ export function useSidebarPinnedThreads({ enabled = true } = {}) {
   })
 }
 
-export function useSidebarProjects({
+export function useSidebarRepos({
   includeAutomations = false,
   includeResolved = false,
   enabled = true,
@@ -479,8 +478,8 @@ export function useSidebarProjects({
   const params = { includeAutomations, includeResolved }
   const hydrated = useSidebarPrefsHydrated()
   return useQuery({
-    queryKey: agentThreadKeys.projects(params),
-    queryFn: () => agentsApi.listThreadProjects(params),
+    queryKey: agentThreadKeys.repos(params),
+    queryFn: () => agentsApi.listThreadRepos(params),
     enabled: enabled && hydrated,
     placeholderData: (previous) => previous,
     refetchOnMount: "always",
@@ -538,31 +537,31 @@ function useSidebarThreadPages(
 
 /** Exported so the head-script warmup can be tested against the real request. */
 export function sidebarRecentsParams({
-  projectMode,
+  repoMode,
   includeAutomations = false,
   includeResolved = false,
   sort = "created",
 }: {
-  projectMode: boolean
+  repoMode: boolean
   includeAutomations?: boolean
   includeResolved?: boolean
   sort?: ChatSort
 }): Omit<ThreadsPageParams, "offset"> {
   return {
     ...sidebarPageParams({ includeAutomations, includeResolved }),
-    ...(projectMode ? { ownerless: true } : {}),
+    ...(repoMode ? { ownerless: true } : {}),
     sortBy: sort === "created" ? "created_at" : "updated_at",
   }
 }
 
 export function useSidebarRecents({
-  projectMode,
+  repoMode,
   includeAutomations = false,
   includeResolved = false,
   sort = "created",
   enabled = true,
 }: {
-  projectMode: boolean
+  repoMode: boolean
   includeAutomations?: boolean
   includeResolved?: boolean
   sort?: ChatSort
@@ -570,7 +569,7 @@ export function useSidebarRecents({
 }) {
   return useSidebarThreadPages(
     sidebarRecentsParams({
-      projectMode,
+      repoMode,
       includeAutomations,
       includeResolved,
       sort,
@@ -579,7 +578,7 @@ export function useSidebarRecents({
   )
 }
 
-export function useSidebarProjectThreads({
+export function useSidebarRepoThreads({
   repoFullName,
   includeAutomations = false,
   includeResolved = false,
@@ -611,16 +610,9 @@ export function useAgentThread(threadId: string) {
     queryFn: async ({ queryKey: key }) => {
       const thread = await agentsApi.getThread(threadId)
       const cached = queryClient.getQueryData<AgentThread>(key)
-      const queuedMessages = cached?.queuedMessages
       const pendingMessages = cached?.pendingMessages
-      if (!queuedMessages?.length && !pendingMessages?.length) return thread
-      return {
-        ...thread,
-        ...(thread.status === "running" && queuedMessages?.length
-          ? { queuedMessages }
-          : {}),
-        ...(pendingMessages?.length ? { pendingMessages } : {}),
-      }
+      if (!pendingMessages?.length) return thread
+      return { ...thread, pendingMessages }
     },
     // Server truth heartbeat while a run is live. The SDK's SSE transport does
     // not reconnect once a custom `fetch` is supplied (it needs the dashboard
@@ -630,7 +622,7 @@ export function useAgentThread(threadId: string) {
       query.state.data?.status === "running" ? 3000 : false,
     // Lets the optimistic detail seeded by `AgentsHome` survive until the
     // proxied run.start stamps the server-side thread; an immediate refetch
-    // would 404 and bounce the route back to /agents.
+    // would 404 and replace the seeded view with a load error.
     staleTime: 30_000,
   })
 }
@@ -791,6 +783,8 @@ export interface CreateAgentThreadVariables {
   visibility?: "public" | "private"
   prompt: string
   images?: Array<ImageChunk>
+  /** Id the run was started with, shared with the graph's HumanMessage. */
+  client_message_id?: string
   repo?: string | null
   repo_explicitly_none?: boolean
   model_id?: string | null
@@ -807,7 +801,15 @@ export interface CreateAgentThreadVariables {
  */
 export function optimisticThread(
   threadId: string,
-  vars: CreateAgentThreadVariables
+  vars: CreateAgentThreadVariables,
+  options: {
+    /**
+     * Whether the server records new threads into the transcript log. The seed
+     * has to carry the same `transcript` stamp the server writes, or the thread
+     * page picks the SDK stream first and swaps sources on the next refetch.
+     */
+    recorded?: boolean
+  } = {}
 ): AgentThread {
   const now = Date.now()
   const text = vars.prompt.trim()
@@ -817,7 +819,7 @@ export function optimisticThread(
     ...(text ? [{ kind: "text", text } satisfies Chunk] : []),
   ]
   const message: Message = {
-    id: `optimistic-user-${threadId}`,
+    id: vars.client_message_id ?? `optimistic-user-${threadId}`,
     author: "user",
     timestamp: new Date(now).toISOString(),
     chunks,
@@ -825,6 +827,7 @@ export function optimisticThread(
   return {
     id: threadId,
     visibility: vars.visibility ?? "public",
+    ...(options.recorded ? { transcript: "v2" as const } : {}),
     title: text.slice(0, 80) || "New agent",
     repo: repoFullName.split("/")[1] ?? "",
     repoFullName,
@@ -839,7 +842,23 @@ export function optimisticThread(
     updatedAt: now,
     traceUrl: null,
     sandboxId: null,
-    messages: message.chunks.length > 0 ? [message] : [],
+    messages: chunks.length > 0 ? [message] : [],
+    // The thread page reads the transcript from its own source, which starts
+    // empty while it hydrates. Carrying the prompt as a pending message keeps
+    // it on screen across the handoff; the source drops it again as soon as it
+    // has the message under the same id.
+    pendingMessages:
+      chunks.length > 0
+        ? [
+            {
+              id: message.id,
+              content: text,
+              images: vars.images,
+              createdAt: now,
+              status: "sending",
+            },
+          ]
+        : [],
   }
 }
 
@@ -848,8 +867,9 @@ export interface SendAgentMessageVariables {
   images?: Array<ImageChunk>
   model_id?: string | null
   effort?: string | null
-  plan_mode?: boolean
   client_message_id?: string
+  /** Queue behind the live run instead of steering it. */
+  enqueue?: boolean
 }
 
 export function useCancelAgentThread(threadId: string) {
@@ -886,8 +906,9 @@ export function useDeleteAgentThread() {
       queryClient.removeQueries({ queryKey: agentThreadKeys.detail(threadId) })
       invalidateAgentThreadLists(queryClient)
       const path = window.location.pathname
-      if (path.includes(`/agents/${threadId}`)) {
-        navigate({ to: "/agents" })
+      const chat = chatRoutes(path)
+      if (path === `${chat.home}/${threadId}`) {
+        navigate({ to: chat.home })
       }
     },
   })

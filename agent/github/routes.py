@@ -1,16 +1,28 @@
 """Github webhook HTTP routes."""
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Response
 
 from agent.github import webhook as service
+from agent.schedules import store as schedules
 from agent.webhooks import common
+from agent.workspaces.routing import WorkspaceLookupError, repo_is_routable
 
 router = APIRouter()
 
 
+async def _launch_issue_automations(payload: dict[str, object], delivery_id: str) -> None:
+    try:
+        await schedules.launch_github_issue_automations(payload, delivery_id)
+    except Exception:
+        common.logger.exception(
+            "Failed to launch GitHub issue automations",
+            extra={"github_delivery": delivery_id},
+        )
+
+
 @router.post("/webhooks/github")
 async def github_webhook(
-    request: common.Request, background_tasks: common.BackgroundTasks
+    request: common.Request, response: Response, background_tasks: common.BackgroundTasks
 ) -> dict[str, str]:
     """Handle GitHub webhooks for issue and PR events that tag @open-swe."""
     body = await request.body()
@@ -47,6 +59,29 @@ async def github_webhook(
         "name": webhook_repo.get("name", ""),
     }
 
+    if webhook_repo_config["owner"] and webhook_repo_config["name"]:
+        repository = f"{webhook_repo_config['owner']}/{webhook_repo_config['name']}"
+        try:
+            routable = await repo_is_routable(
+                webhook_repo_config["owner"], webhook_repo_config["name"]
+            )
+        except WorkspaceLookupError:
+            # Ownership is unknown, so dropping the delivery may drop real work.
+            # GitHub retries a 5xx and nothing else, so answer 503 and let it.
+            common.logger.error(
+                "Workspace lookup failed for a GitHub delivery; asking GitHub to retry",
+                extra={"repository": repository, "github_delivery": delivery_id},
+                exc_info=True,
+            )
+            response.status_code = 503
+            return {"status": "error", "reason": "workspace ownership is temporarily unreadable"}
+        if not routable:
+            common.logger.info(
+                "Ignoring GitHub event for a repository no workspace owns",
+                extra={"repository": repository},
+            )
+            return {"status": "ignored", "reason": "repository is not assigned to a workspace"}
+
     issue = payload.get("issue", {})
     is_pull_request_comment = bool(event_type == "issue_comment" and issue.get("pull_request"))
     is_issue_comment = bool(event_type == "issue_comment" and not issue.get("pull_request"))
@@ -63,8 +98,9 @@ async def github_webhook(
             }
         if action in common.GH_PR_AGENT_STATE_ACTIONS:
             background_tasks.add_task(common.update_agent_thread_pr_state, payload)
+        if action == "opened" or action in common.GH_PR_AGENT_STATE_ACTIONS:
             try:
-                await common.update_agent_pr_usage_from_webhook(payload)
+                await common.update_agent_pr_usage_from_webhook(payload, delivery_id=delivery_id)
             except Exception:  # noqa: BLE001
                 common.logger.debug("Failed to update Agent PR usage", exc_info=True)
         if action in common.GH_PR_WATCH_TOGGLE_ACTIONS:
@@ -124,6 +160,8 @@ async def github_webhook(
             if not any(field in changes for field in ("body", "title")):
                 common.logger.info("Ignoring GitHub issue edit without title/body changes")
                 return {"status": "ignored", "reason": "Issue edit did not change title or body"}
+        if action == "opened":
+            background_tasks.add_task(_launch_issue_automations, payload, delivery_id)
 
         issue_text = f"{issue.get('title', '')}\n\n{issue.get('body', '')}"
         if not common.mentions_open_swe(issue_text):

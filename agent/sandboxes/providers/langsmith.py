@@ -6,7 +6,7 @@ import json
 import logging
 import shlex
 from abc import ABC, abstractmethod
-from typing import Any
+from typing import Any, Literal, NotRequired, TypedDict
 
 import httpx2
 from deepagents.backends import LangSmithSandbox
@@ -18,6 +18,7 @@ from langsmith.sandbox import (
     SandboxConnectionError,
     SandboxServerReloadError,
 )
+from pydantic import BaseModel
 
 from agent.config import ENV
 from agent.sandboxes.providers.registry import SandboxGoneError
@@ -48,6 +49,7 @@ PROXY_CONFIG_NOT_READY_STATUS = 400
 PROXY_CONFIG_ERROR_BODY_CHARS = 500
 SANDBOX_START_TIMEOUT_SECONDS = 120
 PROXY_GH_TOKEN_PLACEHOLDER = "proxy-injected"
+SERVICE_URL_TIMEOUT_SECONDS = 15.0
 
 
 def _get_langsmith_api_key() -> str | None:
@@ -74,6 +76,18 @@ def _get_sandbox_api_endpoint() -> str:
     return root if root.endswith(suffix) else f"{root}{suffix}"
 
 
+def service_identity_jwks_url() -> str:
+    """Where an app in a sandbox verifies the identity token LangSmith forwards to it.
+
+    The keys are served by the API host, not by the app origin the token names as
+    its issuer.
+    """
+    root = _get_sandbox_endpoint().rstrip("/")
+    suffix = "/v2/sandboxes"
+    api_root = root[: -len(suffix)] if root.endswith(suffix) else root
+    return f"{api_root}/.well-known/jwks.json"
+
+
 def _parse_optional_int(name: str, default: int) -> int:
     raw = ENV[name].optional()
     if not raw:
@@ -92,9 +106,8 @@ def _execute_client_grace_seconds() -> int:
     return _parse_optional_int("SANDBOX_EXECUTE_CLIENT_GRACE_SECONDS", 30)
 
 
-def _get_sandbox_snapshot_config() -> tuple[str | None, int, int, int, int, int]:
+def _get_sandbox_snapshot_config() -> tuple[int, int, int, int, int]:
     """Get sandbox snapshot configuration from environment."""
-    snapshot_id = ENV.DEFAULT_SANDBOX_SNAPSHOT_ID.optional()
     fs_capacity_bytes = _parse_optional_int(
         "DEFAULT_SANDBOX_SNAPSHOT_FS_CAPACITY_BYTES", DEFAULT_SNAPSHOT_FS_CAPACITY_BYTES
     )
@@ -108,7 +121,6 @@ def _get_sandbox_snapshot_config() -> tuple[str | None, int, int, int, int, int]
         DEFAULT_SANDBOX_DELETE_AFTER_STOP_SECONDS,
     )
     return (
-        snapshot_id,
         fs_capacity_bytes,
         vcpus,
         mem_bytes,
@@ -163,8 +175,24 @@ def _install_create_extra_fields(client: AsyncSandboxClient, extra: dict[str, An
     client._http.post = post_with_extra  # noqa: SLF001 # ty: ignore[invalid-assignment]
 
 
-def _github_proxy_rules(github_token: str) -> list[dict[str, Any]]:
+class GitHubProxyHeader(TypedDict):
+    name: str
+    type: Literal["opaque", "plaintext"]
+    value: str
+
+
+class GitHubProxyRule(TypedDict):
+    name: str
+    match_hosts: list[str]
+    headers: list[GitHubProxyHeader]
+    env_vars: NotRequired[dict[str, str]]
+
+
+def _github_proxy_rules(github_token: str | None) -> list[GitHubProxyRule]:
+    if not github_token:
+        return []
     basic_auth = base64.b64encode(f"x-access-token:{github_token}".encode()).decode()
+    # GitHub enforces repository IDs on the token, including for mixed-case URLs.
     return [
         {
             "name": "github-api",
@@ -356,26 +384,17 @@ async def _start_sandbox_best_effort(sandbox_name: str) -> None:
         await client.aclose()
 
 
-async def configure_github_proxy(
+async def configure_sandbox_proxy(
     sandbox_name: str,
-    github_token: str,
+    github_token: str | None,
     *,
     base_proxy_config: dict[str, Any] | None = None,
+    thread_id: str | None = None,
 ) -> None:
-    """Configure sandbox proxy to inject managed credentials for outbound traffic.
-
-    Uses the LangSmith proxy-config API to set up header injection so that
-    git operations (clone, pull, push) authenticate via the proxy rather than
-    writing credentials to disk in the sandbox.
-
-    Args:
-        sandbox_name: The sandbox name/ID returned by the LangSmith API.
-        github_token: GitHub token to inject as Authorization header.
-        base_proxy_config: Additional persisted proxy settings to preserve.
-    """
+    """Inject GitHub and thread-tool credentials while preserving custom proxy settings."""
     api_key = _get_langsmith_api_key()
     if not api_key:
-        logger.warning("No LangSmith API key found, skipping GitHub proxy configuration")
+        logger.warning("No LangSmith API key found, skipping sandbox proxy configuration")
         return
     langsmith_endpoint = _get_sandbox_endpoint()
     url = f"{langsmith_endpoint}/v2/sandboxes/boxes/{sandbox_name}"
@@ -386,11 +405,21 @@ async def configure_github_proxy(
         rule
         for rule in (custom_rules if isinstance(custom_rules, list) else [])
         if not isinstance(rule, dict)
-        or rule.get("name") not in {"open-swe-langsmith", "stagehand-model"}
+        or rule.get("name")
+        not in {"github", "github-api", "github-public", "open-swe-langsmith", "stagehand-model"}
     ]
+    from agent.sandboxes.tool_access import TOOLS_RULE, tool_proxy_rule
+
+    preserved_rules = [
+        rule
+        for rule in preserved_rules
+        if not isinstance(rule, dict) or rule.get("name") != TOOLS_RULE
+    ]
+    tools_rule = await tool_proxy_rule(thread_id, sandbox_name) if thread_id else None
     proxy_config["rules"] = [
-        *preserved_rules,
         *_github_proxy_rules(github_token),
+        *([tools_rule] if tools_rule else []),
+        *preserved_rules,
     ]
     payload = {"proxy_config": proxy_config}
     async with httpx2.AsyncClient(timeout=PROXY_CONFIG_TIMEOUT_SECONDS) as client:
@@ -406,7 +435,44 @@ async def configure_github_proxy(
             )
             await _start_sandbox_best_effort(sandbox_name)
             await _patch_proxy_config(client, url, payload, api_key, sandbox_name)
-    logger.info("Configured GitHub proxy for sandbox %s", sandbox_name)
+    logger.info("Configured sandbox proxy", extra={"sandbox_id": sandbox_name})
+
+
+class WorkspaceServiceURL(BaseModel):
+    """LangSmith's reply to sharing a sandbox port with the workspace."""
+
+    service_url: str
+    access: Literal["workspace"]
+
+
+async def create_workspace_service_url(sandbox_id: str, port: int) -> str:
+    """Share ``port`` of a sandbox with the workspace and return its URL.
+
+    The URL carries no token and never expires, so the same link keeps working
+    for as long as the sandbox does; its viewers authenticate with their own
+    LangSmith session. LangSmith refuses it while an unexpired service token
+    exists for the same port, and while the tenant's
+    ``sandbox_service_url_langsmith_login`` flag is off.
+    """
+    api_key = _get_langsmith_api_key()
+    if not api_key:
+        msg = "LANGSMITH_API_KEY not set"
+        raise ValueError(msg)
+    url = f"{_get_sandbox_api_endpoint()}/boxes/{sandbox_id}/service-url"
+    async with httpx2.AsyncClient(timeout=SERVICE_URL_TIMEOUT_SECONDS) as client:
+        response = await client.post(
+            url,
+            json={"port": port, "access": "workspace"},
+            headers={"X-API-Key": api_key},
+        )
+        try:
+            response.raise_for_status()
+        except httpx2.HTTPStatusError as exc:
+            enriched = _with_response_body(exc)
+            if enriched is not None:
+                raise enriched from exc
+            raise
+    return WorkspaceServiceURL.model_validate(response.json()).service_url
 
 
 def get_async_sandbox_client() -> AsyncSandboxClient:
@@ -459,42 +525,6 @@ async def connect_async_langsmith_sandbox(sandbox_id: str) -> tuple[AsyncSandbox
         raise
 
 
-async def create_langsmith_sandbox_from_params(
-    create_params: dict[str, Any],
-) -> SandboxBackendProtocol:
-    """Create a ready LangSmith sandbox from an unfiltered create-body object."""
-    params = _merge_sandbox_create_extra_fields(create_params)
-    sdk_keys = {
-        "snapshot_id",
-        "snapshot_name",
-        "name",
-        "timeout",
-        "wait_for_ready",
-        "idle_ttl_seconds",
-        "delete_after_stop_seconds",
-        "vcpus",
-        "mem_bytes",
-        "fs_capacity_bytes",
-        "mount_config",
-        "proxy_config",
-    }
-    sdk_params = {key: value for key, value in params.items() if key in sdk_keys}
-    extra_params = {key: value for key, value in params.items() if key not in sdk_keys}
-    wait_for_ready = sdk_params.get("wait_for_ready", True)
-    timeout = sdk_params.get("timeout", 180)
-    if not isinstance(timeout, int):
-        raise ValueError("timeout must be an integer")
-
-    async with AsyncSandboxClient(
-        api_key=_get_langsmith_api_key(), api_endpoint=_get_sandbox_api_endpoint()
-    ) as client:
-        _install_create_extra_fields(client, extra_params)
-        sandbox = await client.create_sandbox(**sdk_params)
-        if wait_for_ready is False:
-            sandbox = await client.wait_for_sandbox(sandbox.name, timeout=timeout)
-        return TimeoutLangSmithSandbox(sandbox.to_sync())
-
-
 async def create_langsmith_sandbox(
     sandbox_id: str | None = None,
     github_token: str | None = None,
@@ -517,7 +547,7 @@ async def create_langsmith_sandbox(
         github_token: Optional GitHub token. Used to configure proxy auth on
                       new sandboxes. Ignored when connecting to an existing sandbox.
         snapshot_id: Optional repo-scoped snapshot to boot from. When omitted,
-            uses DEFAULT_SANDBOX_SNAPSHOT_ID or the API's root snapshot.
+            uses the API's root snapshot.
         mem_bytes: Optional memory capacity override for a newly-created sandbox.
         vcpus: Optional virtual CPU count override for a newly-created sandbox.
         fs_capacity_bytes: Optional filesystem capacity override for a newly-created sandbox.
@@ -528,7 +558,6 @@ async def create_langsmith_sandbox(
     """
     api_key = _get_langsmith_api_key()
     (
-        default_snapshot_id,
         default_fs_capacity_bytes,
         default_vcpus,
         default_mem_bytes,
@@ -536,7 +565,7 @@ async def create_langsmith_sandbox(
         delete_after_stop_seconds,
     ) = _get_sandbox_snapshot_config()
 
-    effective_snapshot_id = snapshot_id or default_snapshot_id or ""
+    effective_snapshot_id = snapshot_id or ""
     if mem_bytes is None and vcpus is None:
         effective_mem_bytes = default_mem_bytes
         effective_vcpus = default_vcpus
@@ -561,13 +590,13 @@ async def create_langsmith_sandbox(
     if sandbox_id is None and github_token:
         proxy_config = get_sandbox_proxy_config(create_params)
         if proxy_config is not None:
-            await configure_github_proxy(
+            await configure_sandbox_proxy(
                 backend.id,
                 github_token,
                 base_proxy_config=proxy_config,
             )
         else:
-            await configure_github_proxy(backend.id, github_token)
+            await configure_sandbox_proxy(backend.id, github_token)
 
     return backend
 

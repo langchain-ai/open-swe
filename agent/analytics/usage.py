@@ -1,5 +1,6 @@
 """Product usage capture backed only by PostgreSQL analytics events."""
 
+import logging
 import math
 from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
@@ -9,7 +10,8 @@ from uuid import UUID
 
 from sqlalchemy import text
 
-from agent.analytics import directory, emitter
+from agent import database
+from agent.analytics import directory, emitter, revisions
 from agent.analytics.capture import fail_soft
 from agent.analytics.events import (
     EventName,
@@ -19,11 +21,13 @@ from agent.analytics.events import (
     RunFailedPayload,
     StrictPayload,
 )
-from agent.analytics.identity import opaque_id
-from agent.database import analytics as database
+from agent.analytics.identity import DisplayNameSource, opaque_id
+from agent.database import analytics as analytics_db
 from agent.review.findings import coerce_finding, is_surfaced
 from agent.utils.json_types import as_json_object
 from agent.utils.run_usage import RunUsageSummary
+
+logger = logging.getLogger(__name__)
 
 
 def _timestamp(value: object) -> datetime | None:
@@ -74,7 +78,7 @@ async def _run_status(run_id: UUID) -> dict[str, bool]:
                             AND run_id = :run) AS scheduled
                 """
             ),
-            {"workspace": database.workspace_id(), "run": run_id, "run_text": str(run_id)},
+            {"workspace": analytics_db.workspace_id(), "run": run_id, "run_text": str(run_id)},
         )
         return dict(result.mappings().one())
 
@@ -90,17 +94,24 @@ async def record_agent_invocation_usage(
     effort: str | None,
     source: str | None,
     github_user_id: str | int | None = None,
+    display_name: str | None = None,
+    display_name_source: DisplayNameSource | None = None,
     repository: str | None = None,
 ) -> None:
     if not invocation_id or not thread_id:
         return
     person = await directory.resolve_person(
-        immutable_person_key=github_user_id, github_login=github_login, email=user_email
+        immutable_person_key=github_user_id,
+        github_login=github_login,
+        email=user_email,
+        display_name=display_name,
+        display_name_source=display_name_source,
     )
     await emitter.run_started(
         run_key=invocation_id,
         thread_key=thread_id,
         model=model_id,
+        effort=effort,
         source=source,
         immutable_person_key=github_user_id or github_login,
         repository_key=repository,
@@ -187,7 +198,7 @@ async def mark_agent_invocation_cost_refresh_scheduled(*, invocation_id: str) ->
                 "INSERT INTO run_cost_refresh (workspace_id, run_id, scheduled_at) "
                 "VALUES (:workspace, :run, clock_timestamp()) ON CONFLICT DO NOTHING"
             ),
-            {"workspace": database.workspace_id(), "run": run_id},
+            {"workspace": analytics_db.workspace_id(), "run": run_id},
         )
 
 
@@ -240,21 +251,23 @@ async def record_agent_pr_usage(
     model_id: str | None = None,
     source: str | None = None,
     repository_private: bool | None = None,
+    record_opening: bool = True,
 ) -> None:
     if not owner or not repo or not pr_number:
         return
     now = datetime.now(UTC)
     person = await directory.resolve_person(github_login=github_login, email=user_email)
-    await emitter.pr_opened(
-        owner=owner,
-        repo=repo,
-        number=pr_number,
-        run_key=invocation_id,
-        model=model_id,
-        source=source,
-        repository_private=repository_private,
-        occurred_at=_timestamp(created_at) or now,
-    )
+    if record_opening:
+        await emitter.pr_opened(
+            owner=owner,
+            repo=repo,
+            number=pr_number,
+            run_key=invocation_id,
+            model=model_id,
+            source=source,
+            repository_private=repository_private,
+            occurred_at=_timestamp(created_at) or now,
+        )
     await emitter.pr_observed(
         owner=owner,
         repo=repo,
@@ -278,7 +291,9 @@ async def record_agent_pr_usage(
 
 
 @fail_soft
-async def update_agent_pr_usage_from_webhook(payload: dict[str, Any]) -> None:
+async def update_agent_pr_usage_from_webhook(
+    payload: dict[str, Any], *, delivery_id: str | None = None
+) -> None:
     pr = as_json_object(payload.get("pull_request"))
     repository = as_json_object(payload.get("repository"))
     owner = as_json_object(repository.get("owner")).get("login")
@@ -298,8 +313,30 @@ async def update_agent_pr_usage_from_webhook(payload: dict[str, Any]) -> None:
         changed_files=_count(pr.get("changed_files")),
     )
     action = payload.get("action")
+    base_data = as_json_object(pr.get("base"))
+    head_data = as_json_object(pr.get("head"))
+    if action == "opened":
+        opened_at = _timestamp(pr.get("created_at")) or observed_at
+        await revisions.capture_pr_revision(
+            owner=owner,
+            repo=repo,
+            number=number,
+            endpoint_kind="opening",
+            base_sha=str(base_data.get("sha") or ""),
+            head_sha=str(head_data.get("sha") or ""),
+            endpoint_at=opened_at,
+            source_kind="webhook",
+            source_id=delivery_id,
+        )
     if action in {"closed", "reopened"}:
         merged = pr.get("merged") is True
+        outcome_at = (
+            _timestamp(pr.get("merged_at"))
+            if merged
+            else _timestamp(pr.get("closed_at"))
+            if action == "closed"
+            else None
+        ) or observed_at
         await emitter.pr_state(
             owner=owner,
             repo=repo,
@@ -307,15 +344,28 @@ async def update_agent_pr_usage_from_webhook(payload: dict[str, Any]) -> None:
             action=action,
             merged=merged,
             source_version=None,
-            occurred_at=(
-                _timestamp(pr.get("merged_at"))
-                if merged
-                else _timestamp(pr.get("closed_at"))
-                if action == "closed"
-                else None
-            )
-            or observed_at,
+            occurred_at=outcome_at,
         )
+        if merged:
+            await revisions.capture_pr_revision(
+                owner=owner,
+                repo=repo,
+                number=number,
+                endpoint_kind="final",
+                base_sha=str(base_data.get("sha") or ""),
+                head_sha=str(head_data.get("sha") or ""),
+                endpoint_at=outcome_at,
+                source_kind="webhook",
+                source_id=delivery_id,
+            )
+            try:
+                await revisions.retry_pr_distance(owner=owner, repo=repo, number=number)
+            except Exception:
+                logger.warning(
+                    "Failed to measure merged pull request distance",
+                    extra={"repository": f"{owner}/{repo}", "pr_number": number},
+                    exc_info=True,
+                )
 
 
 def _surfaced(finding: Mapping[str, Any]) -> bool:

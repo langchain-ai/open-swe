@@ -161,6 +161,11 @@ class DynamicToolMiddleware(OpenSWEMiddleware[DynamicToolState]):
     def has_groups(self) -> bool:
         return bool(self._groups)
 
+    async def catalog_tools(self) -> list[BaseTool]:
+        """Resolve the connected tools for authenticated sandbox discovery."""
+        await self._build(list(self._group_of))
+        return [tool for name in self._group_of if (tool := self._tool(name)) is not None]
+
     async def _resolve(self, group: str) -> dict[str, BaseTool]:
         resolved = self._resolved.setdefault(group, _Resolved())
         if resolved.done:
@@ -191,6 +196,8 @@ class DynamicToolMiddleware(OpenSWEMiddleware[DynamicToolState]):
         return self._resolved.get(group, _Resolved()).tools.get(name)
 
     async def abefore_agent(self, state: DynamicToolState, runtime: Runtime) -> dict[str, Any]:  # noqa: ARG002
+        if state.get("_deepagents_forked_context"):
+            return {}
         return {"loaded_integration_tools": Overwrite([])}
 
     async def awrap_model_call(

@@ -9,6 +9,7 @@ import {
   FolderIcon,
   GitMergeIcon,
   GitPullRequestIcon,
+  LockIcon,
   PushPinIcon,
   PushPinSlashIcon,
   WarningCircleIcon,
@@ -36,6 +37,7 @@ import {
 } from "@/features/agents/lib/queries"
 import { useQueryClient } from "@tanstack/react-query"
 import { cn } from "@/lib/utils"
+import { useChatRoutes } from "@/lib/chatRoutes"
 
 type Icon = ComponentType<SVGProps<SVGSVGElement>>
 
@@ -184,7 +186,7 @@ export function SidebarThreadRow({
   archived: boolean
   live?: PullRequestSnapshot
   compact?: boolean
-  /** Nested under a project: indent the content, not the highlight box. */
+  /** Nested under a repository: indent the content, not the highlight box. */
   indent?: boolean
   onNavigate?: () => void
   onDeleteLocal: (threadId?: string) => void
@@ -192,6 +194,7 @@ export function SidebarThreadRow({
   onToggleArchived: () => void
 }) {
   const navigate = useNavigate()
+  const chat = useChatRoutes()
   const queryClient = useQueryClient()
   const markLocalViewed = useMarkLocalThreadViewed()
   const deleteThread = useDeleteAgentThread()
@@ -376,19 +379,13 @@ export function SidebarThreadRow({
     archived && "opacity-55",
     compact ? "h-7 gap-1.5" : "h-8",
     "text-foreground",
-    isActive
-      ? thread?.adminThread
-        ? "bg-destructive/10"
-        : "bg-accent"
-      : thread?.adminThread
-        ? "bg-destructive/5 group-hover/row:bg-destructive/10"
-        : "group-hover/row:bg-sidebar-row-hover"
+    isActive ? "bg-accent" : "group-hover/row:bg-sidebar-row-hover"
   )
 
   const link =
     item.location === "cloud" ? (
       <Link
-        to="/agents/$threadId"
+        to={chat.thread}
         params={{ threadId: item.id }}
         onClick={handleNavigate}
         onKeyDown={openContextMenuFromKeyboard}
@@ -433,6 +430,9 @@ export function SidebarThreadRow({
             <ContextMenu.Popup className="min-w-[10rem] overflow-hidden rounded-md border border-border bg-popover p-1 text-popover-foreground shadow-md outline-none data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95">
               <ThreadMenuItems
                 thread={thread}
+                localThread={
+                  item.location === "local" ? item.thread : undefined
+                }
                 pinned={pinned}
                 archived={archived}
                 isDeleting={isDeleting}
@@ -458,7 +458,7 @@ export function SidebarThreadRow({
             ? undefined
             : item.thread.ownedWorktrees?.length
               ? "This deletes the worktree Open SWE created for it, including any uncommitted changes in it. Its branch and commits are kept."
-              : "This removes its history but does not revert changes made to your project."
+              : "This removes its history but does not revert changes made to your repository."
         }
         error={deleteError}
       />
@@ -473,9 +473,9 @@ function ThreadHoverCard({
   item: SidebarThreadItem
   live?: PullRequestSnapshot
 }) {
-  const EnvironmentIcon =
+  const LocationIcon =
     item.location === "local" ? IoLaptopOutline : IoCloudOutline
-  const environmentLabel = item.location === "local" ? "This Mac" : "Cloud"
+  const locationLabel = item.location === "local" ? "This Mac" : "Cloud"
 
   return (
     <div className="flex min-w-0 flex-col gap-2">
@@ -483,20 +483,24 @@ function ThreadHoverCard({
         <span className="min-w-0 flex-1 text-[13px] font-medium text-foreground">
           {item.title}
         </span>
-        <EnvironmentIcon
+        {item.location === "cloud" && item.thread.visibility === "private" && (
+          <LockIcon
+            className="mt-0.5 size-3.5 shrink-0 text-muted-foreground"
+            aria-label="Private thread"
+          />
+        )}
+        <LocationIcon
           className="mt-0.5 size-3.5 shrink-0 text-muted-foreground"
-          aria-label={environmentLabel}
+          aria-label={locationLabel}
         />
         <span className="mt-px shrink-0 text-[11px] text-muted-foreground">
           {compactAge(item.updatedAt)}
         </span>
       </div>
-      {item.projectLabel && (
+      {item.repoLabel && (
         <div className="flex min-w-0 items-center gap-1.5 text-muted-foreground">
           <FolderIcon className="size-3.5 shrink-0" />
-          <span className="min-w-0 truncate text-[12px]">
-            {item.projectLabel}
-          </span>
+          <span className="min-w-0 truncate text-[12px]">{item.repoLabel}</span>
         </div>
       )}
       {item.pr && (

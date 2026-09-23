@@ -3,9 +3,9 @@ import type {
   AgentPullRequestStatusResponse,
   AgentSchedule,
   AgentThread,
-  ImageChunk,
   Message,
   SlackNotificationMode,
+  AutomationTrigger,
   WorkflowPushApprovalsResponse,
 } from "./types"
 import { dashboardApiBase } from "@/lib/api-base"
@@ -13,6 +13,7 @@ import {
   dashboardApiUrl,
   dashboardForwardedHeaders,
 } from "@/lib/dashboard-fetch"
+import { withRequestTiming } from "@/lib/perf/fetchTiming"
 
 export type { AgentSchedule, AgentThread, Message, SlackNotificationMode }
 
@@ -26,18 +27,10 @@ export class AgentsApiError extends Error {
   }
 }
 
-export interface ThreadMessageRequest {
-  content: string
-  images?: Array<ImageChunk>
-  model_id?: string | null
-  effort?: string | null
-  plan_mode?: boolean
-  client_message_id?: string
-}
-
 export interface ScheduleCreateRequest {
   prompt: string
-  schedule: string
+  schedule?: string | null
+  trigger?: AutomationTrigger
   name?: string | null
   repo?: string | null
   slack_channel_id?: string | null
@@ -50,6 +43,7 @@ export interface ScheduleCreateRequest {
 export interface ScheduleUpdateRequest {
   prompt?: string | null
   schedule?: string | null
+  trigger?: AutomationTrigger
   name?: string | null
   repo?: string | null
   slack_channel_id?: string | null
@@ -139,21 +133,25 @@ export interface ThreadsPage {
   hasMore?: boolean
 }
 
-export interface SidebarProject {
+export interface SidebarRepo {
   repoFullName: string
   name: string
   updatedAt: number
+  /** Slug of the workspace that owns this repository; `"default"` when unassigned. */
+  workspace: string
 }
 
 const API_BASE = dashboardApiBase()
 
 export const agentsLangGraphApiUrl = `${API_BASE}/dashboard/api`
 
-async function agentsRequest<T>(
+const timedFetch = withRequestTiming((input, init) => fetch(input, init))
+
+export async function agentsRequest<T>(
   path: string,
   init: RequestInit = {}
 ): Promise<T> {
-  const res = await fetch(dashboardApiUrl(path), {
+  const res = await timedFetch(dashboardApiUrl(path), {
     ...init,
     credentials: "include",
     headers: {
@@ -177,8 +175,9 @@ async function agentsRequest<T>(
     }
     throw new AgentsApiError(res.status, message)
   }
-  if (res.status === 204) return undefined as T
-  return (await res.json()) as T
+  // A proxied cancel comes back 202 with no body; only parse what is there.
+  const text = await res.text()
+  return (text ? JSON.parse(text) : undefined) as T
 }
 
 function filenameFromContentDisposition(value: string | null): string | null {
@@ -234,7 +233,7 @@ function buildThreadsPageQuery(params: ThreadsPageParams): string {
   return query ? `?${query}` : ""
 }
 
-function buildProjectsQuery(params: {
+function buildReposQuery(params: {
   includeResolved?: boolean
   includeAutomations?: boolean
 }): string {
@@ -289,14 +288,14 @@ export const agentsApi = {
         body: JSON.stringify(body),
       }
     ),
-  listThreadProjects: (
+  listThreadRepos: (
     params: {
       includeResolved?: boolean
       includeAutomations?: boolean
     } = {}
   ) =>
-    agentsRequest<Array<SidebarProject>>(
-      `/threads/projects${buildProjectsQuery(params)}`
+    agentsRequest<Array<SidebarRepo>>(
+      `/threads/repos${buildReposQuery(params)}`
     ),
   listPinnedThreads: () => agentsRequest<Array<AgentThread>>("/threads/pinned"),
   listThreadsPage: (params: ThreadsPageParams = {}) =>
@@ -394,13 +393,10 @@ export const agentsApi = {
       `/workflow-approval/${encodeURIComponent(threadId)}/${encodeURIComponent(fingerprint)}/reject`,
       { method: "POST" }
     ),
-  queueMessage: (threadId: string, body: ThreadMessageRequest) =>
-    agentsRequest<AgentThread>(
-      `/threads/${encodeURIComponent(threadId)}/messages`,
-      {
-        method: "POST",
-        body: JSON.stringify(body),
-      }
+  cancelRun: (threadId: string, runId: string) =>
+    agentsRequest<unknown>(
+      `/threads/${encodeURIComponent(threadId)}/runs/${encodeURIComponent(runId)}/cancel`,
+      { method: "POST" }
     ),
   cancelThread: (threadId: string) =>
     agentsRequest<AgentThread>(

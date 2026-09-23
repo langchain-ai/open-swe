@@ -1,13 +1,12 @@
 import pytest
 from fastapi import HTTPException
 
-from agent.dashboard import review_api
-from agent.dashboard.review_api import (
+from agent.review import reviews as review_api
+from agent.review.reviews import (
     _ALLOWED_IMAGE_CONTENT_TYPES,
     _finding_counts,
     _is_allowed_image_url,
     _require_image_in_pr,
-    _serialize_diff_groups,
     _serialize_finding,
     _thread_review_summary,
     classify_finding,
@@ -61,10 +60,10 @@ def test_thread_review_summary():
             "head_sha": "abc",
             "watch": True,
             "latest_run_status": "success",
-            "findings": [{"id": "f_1", "severity": "high", "confidence": "high", "status": "open"}],
         },
     }
-    summary = _thread_review_summary(thread)
+    findings = [{"id": "f_1", "severity": "high", "confidence": "high", "status": "open"}]
+    summary = _thread_review_summary(thread, findings)
     assert summary is not None
     assert summary["owner"] == "acme"
     assert summary["number"] == 7
@@ -74,7 +73,7 @@ def test_thread_review_summary():
 
 
 def test_thread_review_summary_requires_pr_meta():
-    assert _thread_review_summary({"metadata": {"kind": "reviewer"}}) is None
+    assert _thread_review_summary({"metadata": {"kind": "reviewer"}}, []) is None
 
 
 def test_is_allowed_image_url_accepts_github_hosts():
@@ -133,7 +132,7 @@ async def test_require_image_in_pr_rejects_unreferenced_url(monkeypatch):
     async def fake_github_get(path, token, **kwargs):
         return {"body": "see ![diagram](https://x.githubusercontent.com/a.png)"}
 
-    monkeypatch.setattr("agent.dashboard.review_api._github_get", fake_github_get)
+    monkeypatch.setattr("agent.review.reviews._github_get", fake_github_get)
 
     # A URL not present in the PR body (cross-repo IDOR attempt) is rejected.
     with pytest.raises(HTTPException) as exc:
@@ -148,40 +147,3 @@ async def test_require_image_in_pr_rejects_unreferenced_url(monkeypatch):
 
 def test_review_api_uses_canonical_reviewer_thread_id():
     assert review_api.reviewer_thread_id is reviewer_thread_id
-
-
-def test_serialize_diff_groups_assigns_index_and_drops_invalid():
-    metadata = {
-        "diff_groups": {
-            "head_sha": "abc",
-            "groups": [
-                {"title": "Feature", "summary": "Adds it", "files": ["a.py", "b.py"]},
-                {"title": "   ", "summary": "x", "files": ["c.py"]},
-                {"title": "Empty", "summary": "", "files": []},
-                {"title": "Tests", "summary": "Covers it", "files": ["t.py", 5]},
-            ],
-        }
-    }
-    groups, stale = _serialize_diff_groups(metadata, "abc")
-    assert stale is False
-    assert groups == [
-        {"index": 1, "title": "Feature", "summary": "Adds it", "files": ["a.py", "b.py"]},
-        {"index": 2, "title": "Tests", "summary": "Covers it", "files": ["t.py"]},
-    ]
-
-
-def test_serialize_diff_groups_marks_stale_on_head_mismatch():
-    metadata = {
-        "diff_groups": {
-            "head_sha": "old",
-            "groups": [{"title": "T", "summary": "", "files": ["a.py"]}],
-        }
-    }
-    groups, stale = _serialize_diff_groups(metadata, "new")
-    assert stale is True
-    assert groups[0]["index"] == 1
-
-
-def test_serialize_diff_groups_handles_missing():
-    assert _serialize_diff_groups({}, "abc") == ([], False)
-    assert _serialize_diff_groups({"diff_groups": {"groups": "nope"}}, "abc") == ([], False)

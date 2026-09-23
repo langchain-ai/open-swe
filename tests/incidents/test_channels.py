@@ -9,6 +9,7 @@ from fastapi import BackgroundTasks, HTTPException
 
 from agent.incidents import channels, service, turns
 from agent.incidents.models import Incident, IncidentPolicy, IncidentReport, IncidentReportRecord
+from agent.slack.channels import SlackChannel
 
 CHANNEL = {
     "id": "C1",
@@ -30,22 +31,22 @@ async def configured(fake_store, monkeypatch):
     )
     monkeypatch.setenv("SLACK_BOT_USER_ID", "UBOT")
     monkeypatch.setenv("SLACK_BOT_TOKEN", "xoxb-test")
-    monkeypatch.setattr(channels, "login_for_slack_id", AsyncMock(return_value="sre"))
+    monkeypatch.setattr(channels.User, "login_for_slack", AsyncMock(return_value="sre"))
     monkeypatch.setattr(channels, "post_account_link_prompt", AsyncMock())
     joined = AsyncMock()
 
     @asynccontextmanager
-    async def slack(token: str):
+    async def slack():
         yield SimpleNamespace(conversations_join=joined)
 
-    monkeypatch.setattr(channels, "slack_client", slack)
+    monkeypatch.setattr(channels.SlackClient, "bot", slack)
     monkeypatch.setattr(channels, "claim_slack_event", AsyncMock(return_value=True))
     monkeypatch.setattr(
         channels,
         "dashboard_incident_url",
         lambda incident_id: f"https://dash/incidents/{incident_id}",
     )
-    monkeypatch.setattr(channels, "get_slack_channel_info", AsyncMock(return_value=dict(CHANNEL)))
+    monkeypatch.setattr(SlackChannel, "fetch", AsyncMock(return_value=dict(CHANNEL)))
     monkeypatch.setattr(
         channels,
         "get_slack_user_info",
@@ -171,7 +172,7 @@ async def test_empty_new_channel_enrolls_without_a_first_turn(configured):
 
 
 async def test_ineligible_channel_records_a_setup_failure(configured):
-    channels.get_slack_channel_info.return_value = {**CHANNEL, "is_private": True}
+    SlackChannel.fetch.return_value = {**CHANNEL, "is_private": True}
     await handle({"type": "channel_created", "channel": {"id": "C1", "name": "inc-api"}})
 
     record = await service.INCIDENTS.get(service.incident_id("T1", "C1"))
@@ -262,7 +263,7 @@ async def test_paused_channels_keep_context_without_scheduling(enrolled):
 
 
 async def test_anyone_in_the_channel_can_pause_but_questions_need_a_connected_account(enrolled):
-    channels.login_for_slack_id.return_value = None
+    channels.User.login_for_slack.return_value = None
     paused, _ = await handle(
         {"type": "app_mention", "channel": "C1", "user": "U9", "text": "<@UBOT> pause", "ts": "3.0"}
     )
@@ -389,3 +390,13 @@ async def test_excluded_channels_are_ignored_after_enrollment(enrolled):
     assert response == mention == {"status": "ignored"}
     turns.queue_context.assert_not_awaited()
     turns.dispatch_turn.assert_not_awaited()
+
+
+async def test_complete_records_the_run_that_completed_it(enrolled):
+    """Reopening is only refused for the run that completed the incident, so record it."""
+    await channels.apply_control(enrolled, "complete", {"id": "agent:incidents"}, keep_run_id="r9")
+    completed = await service.INCIDENTS.get(enrolled.id)
+    assert completed.completed_run_id == "r9"
+
+    await channels.apply_control(completed, "reopen", {"id": "slack:U1"})
+    assert (await service.INCIDENTS.get(enrolled.id)).completed_run_id == ""

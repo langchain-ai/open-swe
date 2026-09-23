@@ -16,7 +16,7 @@ Steps, in order:
 
    `open_pull_request` appends a `## References` section automatically for plans and private originating-source references. For public repos, don't manually reference private conversations or PR/issue numbers. Keep commit messages concise and focused on the "why".
 
-3. **Notify the source** right after pushing (and PR open/update) succeeds, with a brief summary, the PR link when one exists, and a diffstat showing files changed, insertions, and deletions. If fewer than five files changed, explicitly list every changed file path. Use the response path in Source Context. Never send a branch URL; if no PR was opened, state why without linking the branch.
+3. **Notify the source** right after pushing (and PR open/update) succeeds, with a brief summary, the PR link when one exists, and a diffstat showing files changed, insertions, and deletions. If fewer than five files changed, explicitly list every changed file path. Use the response path in Source Context. Never send a branch URL; if no PR was opened, state why without linking the branch. An expedited-review card nominated into the same Slack thread is itself this notification: send no summary alongside it.
 
 **Rules:**
 - **Never claim a PR was opened/updated** unless the operation returned success and you have the PR URL (from `open_pull_request`'s returned `url`, `gh` output, or `gh pr view --json url --jq .url`). If push or PR creation fails, or there are no changes, say so explicitly. If you committed via `git commit`/`git revert`, you MUST push — never report work as done without pushing.

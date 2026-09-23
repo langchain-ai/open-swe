@@ -100,10 +100,12 @@ class RunConfig(BaseModel):
     run_id: str | None = None
     invocation_id: str | None = None
     prepare_run_id: str | None = None
+    invocation_started_at: str | None = None
     offload_conversation: bool = False
     source: str | None = None
     task: str | None = None
     environment: str | None = None
+    workspace: str | None = None
     local_project_path: str | None = None
 
     # Actor
@@ -126,6 +128,7 @@ class RunConfig(BaseModel):
     # Pull request under review
     pr_number: Int | None = None
     pr_url: str | None = None
+    pr_title: str | None = None
     head_sha: str | None = None
     base_sha: str | None = None
     last_reviewed_sha: str | None = None
@@ -143,20 +146,21 @@ class RunConfig(BaseModel):
 
     # Model selection
     agent_model_id: str | None = None
+    resolved_agent_model_id: str | None = None
     agent_effort: str | None = None
     model_selection: str | None = None
     reviewer_model_id: str | None = None
     reviewer_reasoning_effort: str | None = None
     reviewer_subagent_model_id: str | None = None
     reviewer_subagent_reasoning_effort: str | None = None
-    grouping_model_id: str | None = None
-    grouping_reasoning_effort: str | None = None
 
     # Behavior toggles
-    plan_mode: bool | None = None
     draft_prs: bool | None = None
     admin_thread: bool | None = None
     stop_summary: bool | None = None
+    slack_ask: bool | None = None
+    # Slash command callback the `/oswe` acknowledgement is replaced through.
+    slack_ask_response_url: str | None = None
     # Set on a private thread whose transcript was copied from a collaborative one.
     continued_from_thread_id: str | None = None
 
@@ -267,3 +271,10 @@ class RunConfig(BaseModel):
     @property
     def is_eval(self) -> bool:
         return self.eval is True or self.reviewer_eval is True
+
+    @property
+    def workspace_slug(self) -> str | None:
+        for value in (self.workspace, self.environment):
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+        return None

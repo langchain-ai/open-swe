@@ -7,23 +7,23 @@ from typing import Any
 from fastapi import BackgroundTasks, HTTPException
 
 from agent.config import ENV
-from agent.dashboard.user_mappings import login_for_slack_id
 from agent.incidents import service, turns
 from agent.incidents.models import Incident, IncidentPolicy
 from agent.incidents.presentation import report_message
 from agent.input_messages import PersonIdentity
+from agent.slack.channels import SlackChannel
 from agent.slack.client import (
     fetch_slack_thread_messages,
-    get_slack_channel_info,
     get_slack_user_info,
     post_slack_thread_reply_with_ts,
     resolve_slack_thread_id,
     slack_message_bot_id,
 )
 from agent.slack.events import claim_slack_event
-from agent.slack.http import slack_client
+from agent.slack.http import SlackClient
 from agent.source_context import SlackThreadRef, SourceContext
 from agent.store import store_client
+from agent.users import User
 from agent.utils.dashboard_links import dashboard_incident_url
 from agent.webhooks.common import post_account_link_prompt, upsert_agent_thread_metadata
 
@@ -72,7 +72,7 @@ async def slack_person(user_id: str) -> PersonIdentity:
     """Identity for any human in the channel. Turning an incident off needs nothing more."""
     user = await get_slack_user_info(user_id)
     profile = (user or {}).get("profile")
-    person: PersonIdentity = {"id": f"slack:{user_id}", "platform": "slack"}
+    person: PersonIdentity = {"id": f"slack:{user_id}"}
     name = (
         (profile.get("display_name") or profile.get("real_name"))
         if isinstance(profile, dict)
@@ -92,7 +92,7 @@ async def linked_slack_user(user_id: str) -> PersonIdentity | None:
     A question unlocks the agent's tools, so it needs the same connected account as
     mentioning Open SWE anywhere else.
     """
-    login = await login_for_slack_id(user_id)
+    login = await User.login_for_slack(user_id)
     if not login:
         return None
     person = await slack_person(user_id)
@@ -162,9 +162,9 @@ async def enroll_channel(
         title=channel_name,
     )
     try:
-        async with slack_client(token=ENV.SLACK_BOT_TOKEN.get()) as slack:
+        async with SlackClient.bot() as slack:
             await slack.conversations_join(channel=channel_id)
-        info = await get_slack_channel_info(channel_id, use_cache=False)
+        info = await SlackChannel.fetch(channel_id, use_cache=False)
         if not info or not service.channel_allowed(info, policy, require_prefix=not manual):
             record.status, record.reason = "needs_attention", "setup_failed"
             service.note(record, "error", "Channel is not an eligible public internal channel.")
@@ -232,6 +232,8 @@ async def apply_control(
         await turns.cancel_active_runs(record.thread_id, keep_run_id=keep_run_id)
         record.status = "completed" if action == "complete" else "paused"
         record.reason = str(actor.get("reason") or f"responder_{action}")
+        # Remember which run closed this, so that same run cannot reopen it moments later.
+        record.completed_run_id = keep_run_id if action == "complete" else ""
         text = (
             "Incident complete."
             if action == "complete"
@@ -247,7 +249,7 @@ async def apply_control(
                     reason="completion",
                 )
     elif action in {"resume", "reopen"}:
-        record.status, record.reason = "watching", ""
+        record.status, record.reason, record.completed_run_id = "watching", "", ""
         text = "Incident watching resumed."
     else:
         raise ValueError(f"unknown incident control {action!r}")

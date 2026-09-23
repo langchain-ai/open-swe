@@ -135,7 +135,7 @@ def make_model(model_id: str, *, use_gateway: bool | None = None, **kwargs: Unpa
     """Build a chat model, optionally routed through the LangSmith LLM Gateway.
 
     ``use_gateway`` resolves the deployment default (``LANGSMITH_GATEWAY_ENABLED``)
-    when ``None``; async callers pass the team-settings-resolved value. When on,
+    when ``None``; async callers pass the workspace-settings-resolved value. When on,
     gateway ``base_url``/``api_key``/``use_responses_api`` override the direct
     provider defaults below (see :mod:`agent.utils.gateway`).
     """
@@ -221,9 +221,9 @@ def fallback_model_id_for(primary_model_id: str) -> str | None:
     local, or self-hosted providers we don't want to silently route off-host).
     """
     if primary_model_id.startswith("anthropic:"):
-        return "openai:gpt-5.6-sol"
+        return "openai:gpt-6-sol"
     if primary_model_id.startswith("openai:"):
-        return "anthropic:claude-opus-5"
+        return "anthropic:claude-opus-5-5"
     return None
 
 
@@ -352,7 +352,7 @@ def validate_local_dev_llm_config() -> None:
     This check only runs in localhost development environments and is
     intended to catch missing credentials for the default model specified
     via LLM_MODEL_ID/DEFAULT_MODEL_ID. Runtime model selection may come
-    from team, profile, or thread configuration and is not validated here.
+    from workspace, profile, or thread configuration and is not validated here.
 
     Only an explicitly configured localhost dashboard URL counts: the derived
     default follows LANGGRAPH_URL, which is unset (so localhost) on a fresh

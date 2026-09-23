@@ -13,13 +13,15 @@ from langchain_core.messages import BaseMessage
 from langgraph.config import get_config
 from langgraph.prebuilt import InjectedState
 
-from agent.dashboard import plan_api, workflow_approval_api
 from agent.dashboard.admin import is_admin
-from agent.dashboard.agent_overrides import resolve_login_from_email_async
 from agent.dashboard.oauth import enforce_github_login_gate
 from agent.dashboard.options import SUPPORTED_MODEL_IDS, canonical_model_pair, model_supports_effort
-from agent.dashboard.plan_store import get_plan_content, list_plan_comments
-from agent.dashboard.threads.api import (
+from agent.input_messages import input_message_text, message_sender_id
+from agent.invocation import resolve_invocation_id
+from agent.slack.client import lookup_slack_thread_id, parse_github_pr_url, parse_slack_thread_url
+from agent.slack.code_channels import CODE_CHANNEL_SESSION_TS
+from agent.threads import plan_api, workflow_approval_api
+from agent.threads.handlers import (
     admin_cancel_dashboard_thread,
     cancel_dashboard_thread,
     delete_dashboard_thread,
@@ -27,19 +29,17 @@ from agent.dashboard.threads.api import (
     resolve_dashboard_thread,
     send_dashboard_message,
 )
-from agent.dashboard.threads.listing import list_dashboard_threads_page
-from agent.dashboard.threads.proxy import proxy_dashboard_thread_commands
-from agent.dashboard.threads.runs import ThreadMessageBody
-from agent.dashboard.threads.summary import thread_is_owner
-from agent.dashboard.workflow_approval import (
+from agent.threads.listing import list_dashboard_threads_page
+from agent.threads.plan_store import get_plan_content, list_plan_comments
+from agent.threads.proxy import proxy_dashboard_thread_commands
+from agent.threads.runs import ThreadMessageBody
+from agent.threads.summary import thread_is_owner
+from agent.threads.workflow_approval import (
     WORKFLOW_APPROVAL_PENDING,
     get_workflow_push_approvals,
     workflow_push_approval_responses,
 )
-from agent.input_messages import input_message_text, message_sender_id
-from agent.invocation import resolve_invocation_id
-from agent.slack.client import lookup_slack_thread_id, parse_github_pr_url, parse_slack_thread_url
-from agent.slack.code_channels import CODE_CHANNEL_SESSION_TS
+from agent.users import User
 from agent.utils.dashboard_links import (
     dashboard_plan_url,
     dashboard_thread_id,
@@ -68,8 +68,6 @@ ThreadAction = Literal[
     "add_plan_comment",
     "delete_plan_comment",
     "update_plan",
-    "approve_plan",
-    "request_plan_changes",
     "approve_workflow_push",
     "reject_workflow_push",
 ]
@@ -116,7 +114,7 @@ async def _actor(state: Mapping[str, Any] | None = None) -> _Actor | None:
     login_value = configurable.get("github_login")
     login = login_value.strip() if isinstance(login_value, str) and login_value.strip() else None
     if not login:
-        login = await resolve_login_from_email_async(email)
+        login = await User.login_for_email(email)
     if not login:
         return None
     current_login = _latest_state_github_login(state)
@@ -512,8 +510,16 @@ async def _thread_cost(thread_id: str, run: Any) -> dict[str, Any]:
     invocation_id = _run_invocation_id(run)
     if not invocation_id:
         return {"status": "unavailable", "total_usd": None}
+    metadata = _value(run, "metadata")
+    lookup_start = (
+        metadata.get("invocation_started_at") if isinstance(metadata, Mapping) else None
+    ) or _value(run, "created_at")
     try:
-        snapshot = await get_langsmith_thread_cost(thread_id, invocation_id)
+        snapshot = await get_langsmith_thread_cost(
+            thread_id,
+            invocation_id,
+            **({"lookup_start": str(lookup_start)} if lookup_start else {}),
+        )
     except LangSmithCostUnavailable:
         return {"status": "unavailable", "total_usd": None}
     except Exception:
@@ -697,16 +703,14 @@ def _available_actions(
 ) -> list[str]:
     actions = [] if admin_thread and not admin else ["send_message"]
     plan_status = plan.get("status")
-    if plan_status and plan_status not in {"approved", "cancelled", "shared"}:
+    if plan_status:
         actions.append("add_plan_comment")
-    if plan_status == "ready":
-        actions.extend(["approve_plan", "request_plan_changes"])
     if can_delete_plan_comment:
         actions.append("delete_plan_comment")
     actions.extend(["unresolve" if resolved else "resolve", "delete"])
     if running:
         actions.append("cancel")
-    if plan_status and plan_status not in {"approved", "cancelled", "shared"}:
+    if plan_status:
         actions.append("update_plan")
     if any(record.get("status") == WORKFLOW_APPROVAL_PENDING for record in approvals.values()):
         actions.extend(["approve_workflow_push", "reject_workflow_push"])
@@ -827,18 +831,14 @@ async def _send_message(
     thread_id: str,
     actor: _Actor,
     message: str,
-    summary: Mapping[str, Any],
     *,
     model_id: str | None,
     effort: str | None,
-    plan_mode: bool | None,
 ) -> dict[str, Any]:
-    resolved_plan_mode = summary.get("planMode") is True if plan_mode is None else plan_mode
     body = ThreadMessageBody(
         content=message,
         model_id=model_id,
         effort=effort,
-        plan_mode=resolved_plan_mode,
     )
     try:
         queued_summary = await send_dashboard_message(
@@ -849,7 +849,7 @@ async def _send_message(
         if exc.status_code != 409:
             raise
 
-    configurable: dict[str, Any] = {"plan_mode": resolved_plan_mode}
+    configurable: dict[str, Any] = {}
     if model_id and effort:
         configurable.update(agent_model_id=model_id, agent_effort=effort)
     command = {
@@ -902,10 +902,9 @@ def _unexpected_action_arguments(
     confirm: bool,
     model_id: str | None,
     effort: str | None,
-    plan_mode: bool | None,
 ) -> list[str]:
     allowed = {
-        "send_message": {"message", "model_id", "effort", "plan_mode"},
+        "send_message": {"message", "model_id", "effort"},
         "cancel": set(),
         "admin_cancel": set(),
         "resolve": set(),
@@ -914,8 +913,6 @@ def _unexpected_action_arguments(
         "add_plan_comment": {"comment"},
         "delete_plan_comment": {"comment_id"},
         "update_plan": {"content", "content_format"},
-        "approve_plan": set(),
-        "request_plan_changes": {"comment"},
         "approve_workflow_push": {"fingerprint"},
         "reject_workflow_push": {"fingerprint"},
     }.get(action, set())
@@ -934,8 +931,6 @@ def _unexpected_action_arguments(
     }
     if confirm:
         provided.add("confirm")
-    if plan_mode is not None:
-        provided.add("plan_mode")
     if content_format != "html":
         provided.add("content_format")
     return sorted(provided - allowed)
@@ -953,7 +948,6 @@ async def manage_thread(
     confirm: bool = False,
     model_id: str | None = None,
     effort: str | None = None,
-    plan_mode: bool | None = None,
     state: Annotated[dict[str, Any] | None, InjectedState] = None,
 ) -> dict[str, Any]:
     """Implement the `manage_thread` tool."""
@@ -974,7 +968,6 @@ async def manage_thread(
         confirm=confirm,
         model_id=model_id,
         effort=effort,
-        plan_mode=plan_mode,
     )
     if unexpected:
         return _failure(f"Unexpected arguments for {action}: {', '.join(unexpected)}")
@@ -1001,10 +994,8 @@ async def manage_thread(
                 thread_id,
                 actor,
                 message or "",
-                summary,
                 model_id=model_id,
                 effort=effort,
-                plan_mode=plan_mode,
             )
         if action == "cancel":
             thread = await cancel_dashboard_thread(thread_id, actor.login, email=actor.email)
@@ -1070,20 +1061,6 @@ async def manage_thread(
                 "content_length": len(content or ""),
                 "plan_url": dashboard_plan_url(thread_id),
             }
-        if action == "approve_plan":
-            result = await plan_api.approve_plan(thread_id, session=actor.session)
-            return {"success": True, **result}
-        if action == "request_plan_changes":
-            if len(comment or "") > _MAX_COMMENT_CHARS:
-                return _failure(f"comment must be at most {_MAX_COMMENT_CHARS} characters")
-            if comment and comment.strip():
-                await plan_api.post_plan_comment(
-                    thread_id,
-                    plan_api.CommentBody(body=comment),
-                    session=actor.session,
-                )
-            result = await plan_api.reject_plan(thread_id, session=actor.session)
-            return {"success": True, **result}
         if action in {"approve_workflow_push", "reject_workflow_push"}:
             if error := _required(fingerprint, "fingerprint", action):
                 return error

@@ -21,8 +21,9 @@ import {
 } from "@/lib/notifications"
 import { agentsApi } from "@/features/agents/lib/api"
 import { api } from "@/lib/api"
-import type { ThreadVisibility } from "@/lib/api"
+import type { FollowUpBehavior, ThreadVisibility } from "@/lib/api"
 import { useTheme } from "@/lib/theme"
+import { AssistantUiPreference } from "./AssistantUiPreference"
 
 const THEMES: Array<{ value: Theme; label: string }> = [
   { value: "system", label: "System" },
@@ -35,6 +36,15 @@ const VISIBILITIES: Array<{ value: ThreadVisibility; label: string }> = [
   { value: "public", label: "Workspace" },
 ]
 
+const FOLLOW_UP_BEHAVIORS: Array<{ value: FollowUpBehavior; label: string }> = [
+  { value: "queue", label: "Queue" },
+  { value: "steer", label: "Steer" },
+]
+
+// Radix's Select rejects an empty-string item value, so "no default" needs a
+// sentinel that is translated back to null on save.
+const NO_DEFAULT_WORKSPACE = "__no_default_workspace__"
+
 export function PreferencesSection() {
   const { theme, setTheme } = useTheme()
   const qc = useQueryClient()
@@ -44,8 +54,22 @@ export function PreferencesSection() {
   })
   const savePreferences = useMutation({
     mutationFn: api.saveMyPreferences,
-    onSuccess: (data) => qc.setQueryData(["myPreferences"], data),
+    onSuccess: (data) => {
+      qc.setQueryData(["myPreferences"], data)
+    },
   })
+  const workspaceOptions = useQuery({
+    queryKey: ["workspace-options"],
+    queryFn: api.listWorkspaceOptions,
+    staleTime: 60_000,
+  })
+  const workspaceItems = [
+    { value: NO_DEFAULT_WORKSPACE, label: "Workspace default" },
+    ...(workspaceOptions.data?.workspaces ?? []).map((workspace) => ({
+      value: workspace.slug,
+      label: workspace.name,
+    })),
+  ]
   const archiveThreads = useMutation({
     mutationFn: agentsApi.resolveAllThreads,
     onSuccess: () => qc.invalidateQueries({ queryKey: ["agent-threads"] }),
@@ -73,11 +97,16 @@ export function PreferencesSection() {
 
   return (
     <SettingsSection title="Preferences">
+      <AssistantUiPreference />
       <SettingsRow
         label="Appearance"
         description="Theme used across the dashboard."
         control={
-          <Select value={theme} onValueChange={(v) => v && setTheme(v)}>
+          <Select
+            items={THEMES}
+            value={theme}
+            onValueChange={(v) => v && setTheme(v)}
+          >
             <SelectTrigger className="w-40">
               <SelectValue />
             </SelectTrigger>
@@ -100,6 +129,7 @@ export function PreferencesSection() {
         }
         control={
           <Select
+            items={VISIBILITIES}
             value={preferences.data?.default_visibility ?? "private"}
             onValueChange={(v) =>
               v &&
@@ -117,6 +147,76 @@ export function PreferencesSection() {
               {VISIBILITIES.map((v) => (
                 <SelectItem key={v.value} value={v.value}>
                   {v.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        }
+      />
+      <SettingsRow
+        label="Default workspace"
+        description={
+          savePreferences.error
+            ? `Could not save: ${savePreferences.error.message}`
+            : "Preselected in the composer's workspace picker when the chosen repository does not belong to another workspace."
+        }
+        control={
+          <Select
+            items={workspaceItems}
+            value={preferences.data?.default_workspace ?? NO_DEFAULT_WORKSPACE}
+            onValueChange={(v) =>
+              v &&
+              savePreferences.mutate({
+                ...preferences.data!,
+                default_workspace: v === NO_DEFAULT_WORKSPACE ? null : v,
+              })
+            }
+            disabled={
+              preferences.isLoading ||
+              savePreferences.isPending ||
+              workspaceOptions.isLoading
+            }
+          >
+            <SelectTrigger className="w-48">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {workspaceItems.map((workspace) => (
+                <SelectItem key={workspace.value} value={workspace.value}>
+                  {workspace.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        }
+      />
+      <SettingsRow
+        label="Follow-up behavior"
+        description={
+          savePreferences.error
+            ? `Could not save: ${savePreferences.error.message}`
+            : "Queue follow-ups until the run ends, or steer the current run with them. ⌘↵ does the opposite for one message; Enter on an empty composer sends the next queued message now."
+        }
+        control={
+          <Select
+            items={FOLLOW_UP_BEHAVIORS}
+            value={preferences.data?.follow_up_behavior ?? "queue"}
+            onValueChange={(v) =>
+              v &&
+              savePreferences.mutate({
+                ...preferences.data!,
+                follow_up_behavior: v,
+              })
+            }
+            disabled={preferences.isLoading || savePreferences.isPending}
+          >
+            <SelectTrigger className="w-40">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {FOLLOW_UP_BEHAVIORS.map((behavior) => (
+                <SelectItem key={behavior.value} value={behavior.value}>
+                  {behavior.label}
                 </SelectItem>
               ))}
             </SelectContent>

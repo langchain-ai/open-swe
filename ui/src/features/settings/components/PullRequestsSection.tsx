@@ -10,7 +10,7 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { Switch } from "@/components/ui/switch"
-import { api } from "@/lib/api"
+import { api, DEFAULT_WORKSPACE_SLUG } from "@/lib/api"
 import {
   buildProfileUpdate,
   useOptions,
@@ -36,9 +36,18 @@ export function PullRequestsSection() {
   const profile = useProfile()
   const options = useOptions()
   const save = useSaveProfile()
-  const teamSettings = useQuery({
-    queryKey: ["teamSettings"],
-    queryFn: api.getTeamSettings,
+  // Which team default applies depends on the workspace a pull request's
+  // repository belongs to; the user's own workspace is the one answer this
+  // page can give, and it is where their new threads run.
+  const preferences = useQuery({
+    queryKey: ["myPreferences"],
+    queryFn: api.getMyPreferences,
+  })
+  const workspace =
+    preferences.data?.default_workspace ?? DEFAULT_WORKSPACE_SLUG
+  const workspaceSettings = useQuery({
+    queryKey: ["workspaceSettings", workspace],
+    queryFn: () => api.getWorkspaceSettings(workspace),
   })
   const [error, setError] = useState<string | null>(null)
 
@@ -60,7 +69,10 @@ export function PullRequestsSection() {
   }
 
   const disabled = profile.isLoading || save.isPending
-  const teamDefaultOn = teamSettings.data?.review_draft_prs ?? false
+  const teamDefaultOn =
+    workspaceSettings.data?.effective.review_draft_prs ?? false
+  const expeditedOn =
+    workspaceSettings.data?.effective.expedited_review_enabled ?? false
 
   return (
     <SettingsSection
@@ -69,7 +81,11 @@ export function PullRequestsSection() {
     >
       <SettingsRow
         label="Create PRs as draft"
-        description="New pull requests are created as drafts. Existing pull requests keep their current draft status."
+        description={
+          expeditedOn
+            ? "New pull requests are created as drafts, except ones the agent nominates for expedited Slack review, which it marks ready. Existing pull requests keep their current draft status."
+            : "New pull requests are created as drafts. Existing pull requests keep their current draft status."
+        }
         control={
           <Switch
             checked={profile.data?.draft_prs ?? true}
@@ -94,7 +110,9 @@ export function PullRequestsSection() {
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="team_default">
-                {`Use team default (currently: ${teamDefaultOn ? "On" : "Off"})`}
+                {`Use workspace default (currently: ${
+                  teamDefaultOn ? "On" : "Off"
+                })`}
               </SelectItem>
               <SelectItem value="always_on">Always review my drafts</SelectItem>
               <SelectItem value="always_off">Never review my drafts</SelectItem>

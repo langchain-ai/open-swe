@@ -10,8 +10,9 @@ from pydantic import BaseModel, Field
 
 from agent.input_messages import dynamic_context_hash, human_input, input_message_text
 from agent.prompts import load_prompt
-from agent.slack.code_channels import CODE_CHANNEL_SESSION_TS, rename_session
+from agent.slack.code_channels import CODE_CHANNEL_SESSION_TS, is_code_channel, rename_session
 from agent.source_context import SourceContext
+from agent.transcript.mirror import mirror_thread_metadata
 
 logger = logging.getLogger(__name__)
 
@@ -114,11 +115,17 @@ async def generate_and_store_thread_title(
         thread_id=thread_id,
         metadata={"title": title, "title_seed": None},
     )
+    await mirror_thread_metadata(thread_id, {"title": title})
     # Re-read after the update: the pre-update snapshot can be stale if the
     # thread was promoted to a code channel between the check and the update.
     latest = await client.threads.get(thread_id=thread_id)
     context = SourceContext.from_metadata(_thread_metadata(latest))
-    if context.slack_location and context.slack_location[1] == CODE_CHANNEL_SESSION_TS:
+    # DMs share the session timestamp but have no session name to set.
+    if (
+        context.slack_location
+        and context.slack_location[1] == CODE_CHANNEL_SESSION_TS
+        and await is_code_channel(context.slack_location[0])
+    ):
         await rename_session(context.slack_location[0], title)
 
 

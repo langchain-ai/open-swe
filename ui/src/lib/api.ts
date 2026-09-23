@@ -91,14 +91,89 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   return (await res.json()) as T
 }
 
+let activePrDetails = 0
+const pendingPrDetails: Array<() => void> = []
+
+async function loadPrDetails(
+  repo: string,
+  number: number
+): Promise<OpenPullRequest | null> {
+  await new Promise<void>((resolve) => {
+    const start = () => {
+      activePrDetails++
+      resolve()
+    }
+    if (activePrDetails < 4) start()
+    else pendingPrDetails.push(start)
+  })
+  try {
+    return await request<OpenPullRequest | null>(
+      `/repos/${repo.split("/").map(encodeURIComponent).join("/")}/pulls/${number}`
+    )
+  } finally {
+    activePrDetails--
+    pendingPrDetails.shift()?.()
+  }
+}
+
 export interface SessionUser {
   login: string
   email: string | null
   avatar_url: string | null
+  user_id?: string | null
+  slack_user_id?: string | null
   is_admin: boolean
+  /** Mirrors the user's preference: what Enter does while a run is live. */
+  follow_up_behavior?: FollowUpBehavior
+  /** Whether the server records new threads into the transcript log. */
+  transcript_recording?: boolean
   slack_oauth_enabled?: boolean
+  build_info?: BuildInfo
   api_base_url?: string
   slack_base_url?: string
+}
+
+/** Identifiers an artifact discovered about itself; `null` means unavailable, never assumed. */
+export interface BuildInfo {
+  backend: {
+    /** LangGraph Platform revision id — opaque, never a git SHA. */
+    revision_id: string | null
+    commit: string | null
+    built_at: string | null
+    package_version: string | null
+  }
+  dashboard: {
+    commit: string | null
+    built_at: string | null
+    served: boolean
+  }
+}
+
+/** Normalizes session build identifiers, including older backends with no field. */
+export function normalizeBuildInfo(raw: unknown): BuildInfo | null {
+  if (typeof raw !== "object" || raw === null) return null
+  const backend = (raw as { backend?: unknown }).backend
+  if (typeof backend !== "object" || backend === null) return null
+  const b = backend as Partial<BuildInfo["backend"]>
+  const dashboard = (raw as { dashboard?: unknown }).dashboard
+  const d =
+    typeof dashboard === "object" && dashboard !== null
+      ? (dashboard as Partial<BuildInfo["dashboard"]>)
+      : undefined
+  return {
+    backend: {
+      revision_id: typeof b.revision_id === "string" ? b.revision_id : null,
+      commit: typeof b.commit === "string" ? b.commit : null,
+      built_at: typeof b.built_at === "string" ? b.built_at : null,
+      package_version:
+        typeof b.package_version === "string" ? b.package_version : null,
+    },
+    dashboard: {
+      commit: d && typeof d.commit === "string" ? d.commit : null,
+      built_at: d && typeof d.built_at === "string" ? d.built_at : null,
+      served: typeof d?.served === "boolean" ? d.served : false,
+    },
+  }
 }
 
 export interface ModelOption {
@@ -120,6 +195,7 @@ export interface OptionsPayload {
 }
 
 export interface Profile {
+  experimental_assistant_ui?: boolean | null
   login?: string
   email?: string
   default_model?: string
@@ -131,12 +207,15 @@ export interface Profile {
   branch_prefix?: string | null
   auto_fix_ci?: boolean
   model_routing_enabled?: boolean
+  recent_thread_context_enabled?: boolean
+  dm_session_enabled?: boolean
   draft_prs?: boolean
   review_draft_prs?: boolean | null
   updated_at?: string
 }
 
 export interface ProfileUpdate {
+  experimental_assistant_ui?: boolean | null
   default_model: string
   reasoning_effort: string
   default_subagent_model?: string | null
@@ -146,6 +225,8 @@ export interface ProfileUpdate {
   branch_prefix?: string | null
   auto_fix_ci?: boolean
   model_routing_enabled?: boolean | null
+  recent_thread_context_enabled?: boolean
+  dm_session_enabled?: boolean
   draft_prs?: boolean
   review_draft_prs?: boolean | null
 }
@@ -169,7 +250,8 @@ export interface AllowedSlackBot {
   image_url: string
 }
 
-export interface TeamSettings {
+/** The settings record at either tier: the instance, or what a workspace's runs see. */
+export interface WorkspaceSettings {
   review_draft_prs: boolean
   pr_summaries: boolean
   review_trace_links: boolean
@@ -178,16 +260,17 @@ export interface TeamSettings {
   /** Tri-state LLM Gateway toggle; null inherits the LANGSMITH_GATEWAY_ENABLED default. */
   gateway_enabled?: boolean | null
   fable_enabled?: boolean
+  /** Experimental: approve and merge tiny PRs from their Slack thread. Off by default. */
+  expedited_review_enabled?: boolean
   org_guidelines?: string | null
+  review_auto_approve?: boolean
+  approval_policy?: string | null
   default_agent_model?: string | null
   default_agent_reasoning_effort?: string | null
   default_agent_subagent_model?: string | null
   default_agent_subagent_reasoning_effort?: string | null
   default_agent_routing_fast_model?: string | null
   default_agent_routing_fast_reasoning_effort?: string | null
-  default_agent_routing_fast_alt_model?: string | null
-  default_agent_routing_fast_alt_reasoning_effort?: string | null
-  default_agent_routing_fast_alt_probability?: number | null
   default_agent_routing_balanced_model?: string | null
   default_agent_routing_balanced_reasoning_effort?: string | null
   default_agent_routing_performance_model?: string | null
@@ -197,13 +280,20 @@ export interface TeamSettings {
   default_reviewer_reasoning_effort?: string | null
   default_reviewer_subagent_model?: string | null
   default_reviewer_subagent_reasoning_effort?: string | null
-  default_grouping_model?: string | null
-  default_grouping_reasoning_effort?: string | null
   default_chat_model?: string | null
   default_chat_reasoning_effort?: string | null
   default_thread_title_model?: string | null
   default_thread_title_reasoning_effort?: string | null
   updated_at?: string | null
+}
+
+/** The fields of a workspace's own settings record; anything absent inherits the instance value. */
+export type WorkspaceSettingsOverrides = Partial<WorkspaceSettings>
+
+/** One workspace's settings: what its runs see, and which of those values it set itself. */
+export interface WorkspaceSettingsView {
+  effective: WorkspaceSettings
+  overrides: WorkspaceSettingsOverrides
 }
 
 export interface MCPOAuth {
@@ -246,24 +336,55 @@ export interface NotionCredentialStatus {
   updated_at?: string | null
 }
 
-export interface UserMapping {
+export interface AdminUser {
+  user_id: string
   github_login: string
-  work_email: string
-  slack_user_id?: string | null
-  source?: string
-  status?: string
-  created_at?: string
-  updated_at?: string
+  email: string
+  slack_user_id: string | null
+  display_name: string
+  is_admin: boolean
 }
 
-export interface UserMappingsPage {
-  items: Array<UserMapping>
+export interface AdminUsersPage {
+  items: Array<AdminUser>
   total: number
   page: number
   page_size: number
 }
 
-export type UsageLeaderboardPeriod = "7d" | "30d" | "all"
+export type UsageLeaderboardPeriod = "24h" | "7d" | "30d" | "all"
+
+/** Origin + mount path only, so diagnostics can name the API without tokens or query data. */
+export function describeApiBase(apiBaseUrl: string | undefined): {
+  origin: string | null
+  path: string
+} {
+  const path = `${dashboardApiBase()}/dashboard/api`
+  if (!apiBaseUrl) return { origin: null, path }
+  try {
+    return { origin: new URL(apiBaseUrl).origin, path }
+  } catch {
+    return { origin: null, path }
+  }
+}
+
+export type UsageLeaderboardSort =
+  | "rank"
+  | "user"
+  | "favorite_model"
+  | "invocations"
+  | "threads"
+  | "avg_invocations_per_thread"
+  | "total_tokens"
+  | "total_cost_usd"
+  | "avg_invocation_seconds"
+  | "avg_thread_seconds"
+  | "prs_opened"
+  | "merged_prs"
+  | "merged_prs_per_thread"
+  | "agent_loc"
+  | "feedback_given"
+export type SortDirection = "asc" | "desc"
 
 export interface AnalyticsMetadata {
   reporting_cutover_at: string
@@ -274,6 +395,8 @@ export interface AnalyticsMetadata {
   has_pending_events: boolean
   has_failed_events: boolean
   as_of: string
+  /** Absent on backends that predate build reporting. */
+  build_info?: BuildInfo
 }
 
 export interface UsageLeaderboardRow {
@@ -282,14 +405,20 @@ export interface UsageLeaderboardRow {
     name: string
     github_login: string | null
     email: string | null
+    avatar_url?: string | null
   }
   favorite_model: string
+  favorite_model_effort?: string | null
   invocations: number
+  threads?: number
   /** @deprecated Rolling compatibility with older clients. */
   agent_runs?: number
   prs_opened: number
   merged_prs: number
+  merged_prs_per_thread?: number
   agent_loc: number
+  feedback_given: number
+  is_top_feedback_contributor?: boolean
   additions: number
   deletions: number
   total_tokens: number
@@ -297,6 +426,7 @@ export interface UsageLeaderboardRow {
   invocations_without_cost?: number
   invocations_with_partial_cost?: number
   avg_invocation_seconds: number
+  avg_thread_seconds?: number
   /** @deprecated Rolling compatibility with older clients. */
   avg_run_seconds?: number
 }
@@ -327,9 +457,23 @@ export interface UsageLeaderboardPayload extends AnalyticsMetadata {
   period: UsageLeaderboardPeriod
   rows: Array<UsageLeaderboardRow>
   total_members: number
+  next_cursor?: string | null
   current_user_rank: number | null
   generated_at_ms: number | null
   reviewer_stats: ReviewerStatsPayload
+}
+
+export interface PRMergeRateEffort {
+  effort: string | null
+  merged: number
+  closed_without_merge: number
+  mature_pending: number
+  waiting: number
+  cohort_size: number
+  decided_denominator: number
+  decided_merge_rate: number | null
+  mature_denominator: number
+  mature_cohort_merge_share: number | null
 }
 
 export interface PRMergeRateCohort {
@@ -344,6 +488,16 @@ export interface PRMergeRateCohort {
   decided_merge_rate: number | null
   mature_denominator: number
   mature_cohort_merge_share: number | null
+  avg_merge_seconds: number | null
+  /**
+   * Present-but-null means every PR in the group lacked valid timing; a missing
+   * key (older backend) means the metric itself is unsupported. Zero is a real
+   * measurement, distinct from both.
+   */
+  avg_delivery_seconds?: number | null
+  efforts: PRMergeRateEffort[]
+  median_distance_basis_points?: number | null
+  distance_sample_size?: number
 }
 
 export interface PRMergeRatePayload extends AnalyticsMetadata {
@@ -354,6 +508,13 @@ export interface PRMergeRatePayload extends AnalyticsMetadata {
   period: UsageLeaderboardPeriod
   suppression_threshold: number
   cohorts: PRMergeRateCohort[]
+  unavailable_thread_ids: string[]
+}
+
+/** The PR report plus when this browser last received it, kept apart from the server's `as_of`. */
+export interface PRMergeRateResponse {
+  payload: PRMergeRatePayload
+  fetchedAt: string
 }
 
 export interface Repository {
@@ -380,6 +541,7 @@ export interface ReviewStyle {
   name?: string
   status: ReviewStyleStatus
   custom_prompt: string | null
+  approval_policy?: string | null
   analysis_summary: string | null
   top_reviewers: Array<string>
   prs_sampled: number
@@ -411,11 +573,15 @@ export interface UserInstructions {
 }
 
 export type ThreadVisibility = "public" | "private"
+/** Queue holds a follow-up until the run ends; steer delivers it into the live run. */
+export type FollowUpBehavior = "queue" | "steer"
 
 export interface UserPreferences {
   default_visibility: ThreadVisibility
   local_tracing_project: string | null
   default_local_tracing_project: string
+  default_workspace: string | null
+  follow_up_behavior: FollowUpBehavior
 }
 
 export interface Skill {
@@ -441,24 +607,15 @@ export interface OrganizationSkillsPage {
   next_cursor: string | null
 }
 
-export interface SandboxSettings {
-  base_snapshot_id: string | null
-  env_base_snapshot_id: string | null
-  effective_base_snapshot_id: string | null
-  base_snapshot_source: "admin" | "env" | "unset"
-  updated_at: string | null
-  updated_by: string | null
-}
-
-/** What a non-admin needs to pick an environment for a new thread. */
-export type EnvironmentRefreshStatus =
+/** What a non-admin needs to pick a workspace for a new thread. */
+export type WorkspaceRefreshStatus =
   | "never"
   | "refreshing"
   | "success"
   | "failed"
 
 /** One stage of a rebuild: booting the builder, a script, the capture. */
-export interface EnvironmentRefreshStep {
+export interface WorkspaceRefreshStep {
   label: string
   status: "running" | "success" | "failed"
   started_at?: string
@@ -467,21 +624,104 @@ export interface EnvironmentRefreshStep {
   log_path?: string | null
 }
 
-export interface EnvironmentOption {
+/** Slug of the workspace every deployment ships with; matches the backend's `DEFAULT_WORKSPACE_SLUG`. */
+export const DEFAULT_WORKSPACE_SLUG = "default"
+
+export interface WorkspaceOption {
   slug: string
   name: string
+  repos: Array<string>
+  /** Effective default repository, withheld when another workspace owns it. */
+  default_repo: string | null
+  slack_channel_ids: Array<string>
+  is_default: boolean
   has_snapshot: boolean
-  refresh_status?: EnvironmentRefreshStatus
+  refresh_status?: WorkspaceRefreshStatus
   refresh_kind?: "full" | "update" | null
   refresh_finished_at?: string | null
   refresh_error?: string | null
   refresh_log_excerpt?: string | null
-  refresh_steps?: Array<EnvironmentRefreshStep>
+  refresh_steps?: Array<WorkspaceRefreshStep>
 }
 
-export interface EnvironmentOptionList {
-  environments: Array<EnvironmentOption>
+/** A channel the Slack bot can see, offered when binding channels to a workspace. */
+export interface SlackChannelOption {
+  id: string
+  name: string
+  is_private: boolean
+  is_member: boolean
+  is_ext_shared: boolean
+  num_members: number | null
+}
+
+/** The channel directory; partial when Slack rate limited the walk over public channels. */
+export interface SlackChannelDirectory {
+  channels: Array<SlackChannelOption>
+  partial: boolean
+}
+
+export interface WorkspaceOptionList {
+  workspaces: Array<WorkspaceOption>
   default_slug: string
+}
+
+/** Body for `POST /workspaces`; `name` is the only required field. */
+export interface WorkspaceCreate {
+  name: string
+  prompt?: string
+  repos?: Array<string>
+  slack_channel_ids?: Array<string>
+}
+
+/** Body for `PUT /workspaces/{slug}`. Only the fields present are changed. */
+export interface WorkspaceUpdate {
+  name?: string
+  prompt?: string
+  repos?: Array<string>
+  slack_channel_ids?: Array<string>
+  setup_script?: string
+  update_script?: string
+}
+
+export type WorkspaceSnapshotStatus = "none" | "capturing" | "ready" | "failed"
+
+/**
+ * A workspace as `GET /workspaces/{slug}` returns it. The first five fields
+ * are what `createWorkspace`/`updateWorkspace` guarantee; the rest describe
+ * the sandbox image and its last rebuild.
+ */
+export interface WorkspaceRecord {
+  slug: string
+  name: string
+  prompt: string
+  repos: Array<string>
+  slack_channel_ids: Array<string>
+  setup_script?: string
+  update_script?: string
+  base_snapshot_id?: string | null
+  snapshot_id?: string | null
+  snapshot_name?: string | null
+  snapshot_status?: WorkspaceSnapshotStatus
+  status_message?: string | null
+  mem_bytes?: number | null
+  vcpus?: number | null
+  fs_capacity_bytes?: number | null
+  refresh_status?: WorkspaceRefreshStatus
+  refresh_kind?: "full" | "update" | null
+  refresh_finished_at?: string | null
+  refresh_error?: string | null
+}
+
+/** How one repository is configured inside a workspace. */
+export interface RepositorySettings {
+  repo: string
+  may_start_threads: boolean
+}
+
+/** What `POST /workspaces/{slug}/refresh` answers. */
+export interface WorkspaceRefreshStart {
+  started: boolean
+  run_id: string
 }
 
 export type FindingSeverity = "low" | "medium" | "high" | "critical"
@@ -584,6 +824,75 @@ export interface ReviewListPayload {
   has_more: boolean
 }
 
+export interface OpenPullRequest {
+  detailsLoading?: boolean
+  detailsError?: boolean
+  repo: string
+  number: number
+  title: string
+  draft: boolean | null
+  additions: number | null
+  deletions: number | null
+  mergeable: boolean | null
+  mergeState: string
+  headSha: string | null
+  headRef: string | null
+  reviewDecision: "approved" | "changes_requested" | "none" | null
+  // Branch protection still wants an approval this PR does not have.
+  reviewRequired: boolean
+  statusAvailable: boolean
+  createdAt: string | null
+  updatedAt: string | null
+  ci: "passing" | "failing" | "pending" | "unknown" | "none"
+  failingChecks: string[]
+  pendingChecks: string[]
+  // null when the review threads could not be read, which is not the same
+  // answer as none being unresolved.
+  unresolvedThreads: number | null
+}
+
+export type MergeMethod = "squash" | "merge" | "rebase"
+
+export type PullRequestActionName =
+  | "merge"
+  | "close"
+  | "mark-ready"
+  | "update-branch"
+
+export type PullRequestActionRequest =
+  | { action: "merge"; sha: string | null; merge_method: MergeMethod }
+  | { action: "close"; reason?: string }
+  | { action: "mark-ready" }
+  | { action: "update-branch"; sha: string | null }
+
+export interface PullRequestActionResult {
+  action: PullRequestActionName
+  done: boolean
+}
+
+export type PullRequestThreadIntent =
+  | { intent: "open"; title: string }
+  | { intent: "fix"; context: OpenPullRequest | null }
+  | { intent: "address-comments" }
+  | { intent: "address-comment"; comment_url: string; instructions: string }
+
+export interface ResolveReviewThreadsResult {
+  resolved: Array<string>
+  failed: Array<string>
+}
+
+export interface PullRequestThreadResult {
+  thread_id: string
+  already_running: boolean
+}
+
+export interface OpenPullRequestsPayload {
+  pullRequests: OpenPullRequest[]
+  nextPage: number | null
+  incomplete: boolean
+  updatedAt: string
+}
+
 export interface ReviewUserRef {
   login: string
   avatar_url?: string | null
@@ -613,19 +922,75 @@ export interface ReviewPrDetails {
   labels: Array<{ name: string; color: string | null }>
 }
 
-export interface ReviewDiffGroup {
+/** Inclusive `[start, end]` line numbers. */
+export type ReviewLineRange = [number, number]
+
+/** Added lines are head line numbers; deleted lines are merge-base line numbers. */
+export interface ReviewWalkthroughFile {
+  path: string
+  added: Array<ReviewLineRange>
+  deleted: Array<ReviewLineRange>
+}
+
+export interface ReviewWalkthroughStep {
   index: number
   title: string
   summary: string
-  files: Array<string>
+  other: boolean
+  files: Array<ReviewWalkthroughFile>
 }
 
-export interface ReviewDetail extends ReviewSummary {
+/** The review scout's reading order for the PR's current head. */
+export interface ReviewWalkthrough {
+  head_sha: string
+  steps: Array<ReviewWalkthroughStep>
+}
+
+/** `status: "none"` is a PR the reviewer graph has never run on. */
+export interface ReviewDetail extends Omit<
+  ReviewSummary,
+  "thread_id" | "status"
+> {
+  thread_id: string | null
+  status: ReviewSummary["status"] | "none"
+  assessment?: PublishedReviewAssessment | null
   pr: ReviewPrDetails
   checks: Array<ReviewCheckRun>
   findings: Array<ReviewFinding>
-  diff_groups: Array<ReviewDiffGroup>
-  diff_groups_stale: boolean
+  walkthrough: ReviewWalkthrough | null
+  /** A review scout is working on this head, so `walkthrough` is on its way. */
+  walkthrough_running: boolean
+  guidance: Array<GuidancePoint>
+}
+
+export interface PublishedReviewAssessment {
+  approved?: boolean
+  review_id: number
+  head_sha: string
+  risk_score: number
+  decision: "would_approve" | "needs_human_review"
+  explanation: string
+}
+
+/**
+ * One place the author redirected Open SWE that the reviewer could see in the
+ * final change. Recorded during a review, so it is absent until one has run.
+ */
+export interface GuidancePoint {
+  summary: string
+  quote: string
+  /** Empty when the quote matched no stored message. */
+  author: string
+}
+
+export interface ReviewAssessmentFeedbackInput {
+  rating: "helpful" | "unhelpful"
+  comment: string
+}
+
+export interface ReviewAssessmentFeedback extends ReviewAssessmentFeedbackInput {
+  login: string
+  updated_at: string
 }
 
 export interface ReviewDiffFile {
@@ -639,6 +1004,59 @@ export interface ReviewDiffFile {
   unrenderable?: boolean
 }
 
+export type PreviewFileStatus =
+  | "added"
+  | "removed"
+  | "modified"
+  | "renamed"
+  | "copied"
+  | "changed"
+  | "unchanged"
+
+export interface PreviewFile {
+  path: string
+  status: PreviewFileStatus
+  additions: number
+  deletions: number
+}
+
+export interface PreviewThread {
+  thread_id: string | null
+  author: string | null
+  body: string
+  path: string
+  line: number | null
+  url: string | null
+}
+
+export interface PreviewCheck {
+  name: string
+  status: string
+  conclusion: string | null
+  url: string | null
+}
+
+export interface PullRequestPreview {
+  title: string
+  body: string
+  author: string | null
+  author_avatar_url: string | null
+  state: string
+  draft: boolean
+  head_ref: string
+  base_ref: string
+  commits: number
+  additions: number
+  deletions: number
+  changed_files: number
+  files: Array<PreviewFile>
+  // null when GitHub could not answer, which is not the same as none unresolved
+  // or no checks configured.
+  unresolved: Array<PreviewThread> | null
+  checks: Array<PreviewCheck> | null
+  guidance: Array<GuidancePoint>
+}
+
 export interface ReviewDiffPayload {
   files: Array<ReviewDiffFile>
   total_additions: number
@@ -649,12 +1067,7 @@ export interface ReviewDiffPayload {
 export interface ReviewChatMeta {
   available: boolean
   assistant_id: string
-}
-
-export interface ReviewChatThread {
   thread_id: string
-  title: string
-  updated_at?: string | null
 }
 
 /**
@@ -718,9 +1131,39 @@ export interface ReviewerEvalStatus {
   updated_at: string
 }
 
+async function pullRequestAction(
+  pr: OpenPullRequest,
+  body: PullRequestActionRequest
+): Promise<PullRequestActionResult> {
+  const result = await request<PullRequestActionResult>(
+    `/repos/${pr.repo.split("/").map(encodeURIComponent).join("/")}/pulls/${pr.number}/action`,
+    { method: "POST", body: JSON.stringify(body) }
+  )
+  if (!result.done)
+    throw new Error(
+      "GitHub did not confirm the change. Refresh to check the PR."
+    )
+  return result
+}
+
+function pullRequestThread(
+  repo: string,
+  number: number,
+  body: PullRequestThreadIntent
+): Promise<PullRequestThreadResult> {
+  return request<PullRequestThreadResult>(
+    `/repos/${repo.split("/").map(encodeURIComponent).join("/")}/pulls/${number}/thread`,
+    { method: "POST", body: JSON.stringify(body) }
+  )
+}
+
 export const api = {
   me: () => request<SessionUser>("/me"),
-  options: () => request<OptionsPayload>("/options"),
+  /** Model list and defaults for one workspace; model defaults are per workspace. */
+  options: (workspace: string = DEFAULT_WORKSPACE_SLUG) =>
+    request<OptionsPayload>(
+      `/options?workspace=${encodeURIComponent(workspace)}`
+    ),
   profile: () => request<Profile>("/profile"),
   saveProfile: (body: ProfileUpdate) =>
     request<Profile>("/profile", { method: "PUT", body: JSON.stringify(body) }),
@@ -738,6 +1181,14 @@ export const api = {
     request<ReviewStyle>(`/review-styles/${encodeURIComponent(full_name)}`, {
       method: "PUT",
       body: JSON.stringify({ custom_prompt }),
+    }),
+  saveReviewApprovalPolicy: (
+    full_name: string,
+    approval_policy: string | null
+  ) =>
+    request<ReviewStyle>(`/review-styles/${encodeURIComponent(full_name)}`, {
+      method: "PUT",
+      body: JSON.stringify({ approval_policy }),
     }),
   analyzeReviewStyle: (full_name: string) =>
     request<ReviewStyle>(
@@ -828,16 +1279,62 @@ export const api = {
     request<void>(`/agent-instructions/${encodeURIComponent(full_name)}`, {
       method: "DELETE",
     }),
-  getSandboxSettings: () => request<SandboxSettings>("/sandbox-settings"),
-  saveSandboxSettings: (base_snapshot_id: string | null) =>
-    request<SandboxSettings>("/sandbox-settings", {
-      method: "PUT",
-      body: JSON.stringify({ base_snapshot_id }),
+  listWorkspaceOptions: () =>
+    request<WorkspaceOptionList>("/workspaces/options"),
+  getWorkspace: (slug: string) =>
+    request<WorkspaceRecord>(`/workspaces/${encodeURIComponent(slug)}`),
+  createWorkspace: (body: WorkspaceCreate) =>
+    request<WorkspaceRecord>("/workspaces", {
+      method: "POST",
+      body: JSON.stringify(body),
     }),
-  listEnvironmentOptions: () =>
-    request<EnvironmentOptionList>("/environments/options"),
-  getTeamSettings: () => request<TeamSettings>("/team-settings"),
+  refreshWorkspace: (slug: string) =>
+    request<WorkspaceRefreshStart>(
+      `/workspaces/${encodeURIComponent(slug)}/refresh`,
+      { method: "POST" }
+    ),
+  updateWorkspace: (slug: string, body: WorkspaceUpdate) =>
+    request<WorkspaceRecord>(`/workspaces/${encodeURIComponent(slug)}`, {
+      method: "PUT",
+      body: JSON.stringify(body),
+    }),
+  deleteWorkspace: (slug: string) =>
+    request<void>(`/workspaces/${encodeURIComponent(slug)}`, {
+      method: "DELETE",
+    }),
+  listWorkspaceRepositories: (slug: string) =>
+    request<RepositorySettings[]>(
+      `/workspaces/${encodeURIComponent(slug)}/repositories`
+    ),
+  configureWorkspaceRepository: (
+    slug: string,
+    repo: string,
+    settings: { may_start_threads?: boolean }
+  ) =>
+    request<RepositorySettings>(
+      `/workspaces/${encodeURIComponent(slug)}/repositories/${repo
+        .split("/")
+        .map(encodeURIComponent)
+        .join("/")}`,
+      { method: "PUT", body: JSON.stringify(settings) }
+    ),
+  /** The instance record every workspace inherits. */
+  getInstanceSettings: () => request<WorkspaceSettings>("/settings"),
+  getWorkspaceSettings: (slug: string) =>
+    request<WorkspaceSettingsView>(
+      `/workspaces/${encodeURIComponent(slug)}/settings`
+    ),
+  /** Replaces the workspace's overrides; a field left out inherits the instance value. */
+  saveWorkspaceSettings: (
+    slug: string,
+    overrides: WorkspaceSettingsOverrides
+  ) =>
+    request<WorkspaceSettingsView>(
+      `/workspaces/${encodeURIComponent(slug)}/settings`,
+      { method: "PUT", body: JSON.stringify(overrides) }
+    ),
   listSlackBots: () => request<SlackBotOption[]>("/slack/bots"),
+  listSlackChannels: () => request<SlackChannelDirectory>("/slack/channels"),
   listAllowedSlackBots: () => request<AllowedSlackBot[]>("/slack/allowed-bots"),
   allowSlackBot: (body: { bot_id: string }) =>
     request<AllowedSlackBot>("/slack/allowed-bots", {
@@ -849,29 +1346,54 @@ export const api = {
       `/slack/allowed-bots/${encodeURIComponent(teamId)}/${encodeURIComponent(botId)}`,
       { method: "DELETE" }
     ),
-  saveTeamSettings: (body: TeamSettings) =>
-    request<TeamSettings>("/team-settings", {
+  saveInstanceSettings: (body: WorkspaceSettings) =>
+    request<WorkspaceSettings>("/settings", {
       method: "PUT",
       body: JSON.stringify(body),
     }),
-  getWorkspaceMCPs: () => request<MCPConnection[]>("/workspace-mcps"),
-  revealWorkspaceMCPHeaders: (name: string) =>
+  getInstanceMCPs: () => request<MCPConnection[]>("/mcps"),
+  revealInstanceMCPHeaders: (name: string) =>
     request<Record<string, string>>(
-      `/workspace-mcps/${encodeURIComponent(name)}/headers/reveal`,
+      `/mcps/${encodeURIComponent(name)}/headers/reveal`,
       { method: "POST", cache: "no-store" }
     ),
-  saveWorkspaceMCP: (body: MCPConnectionUpdate) =>
-    request<MCPConnection>(`/workspace-mcps/${encodeURIComponent(body.name)}`, {
+  saveInstanceMCP: (body: MCPConnectionUpdate) =>
+    request<MCPConnection>(`/mcps/${encodeURIComponent(body.name)}`, {
       method: "PUT",
       body: JSON.stringify(body),
     }),
-  deleteWorkspaceMCP: (name: string) =>
-    request<void>(`/workspace-mcps/${encodeURIComponent(name)}`, {
-      method: "DELETE",
-    }),
-  discoverWorkspaceMCP: (body: MCPConnectionUpdate) =>
+  deleteInstanceMCP: (name: string) =>
+    request<void>(`/mcps/${encodeURIComponent(name)}`, { method: "DELETE" }),
+  discoverInstanceMCP: (body: MCPConnectionUpdate) =>
     request<{ name: string; description: string }[]>(
-      `/workspace-mcps/${encodeURIComponent(body.name)}/discover`,
+      `/mcps/${encodeURIComponent(body.name)}/discover`,
+      { method: "POST", body: JSON.stringify(body) }
+    ),
+  getWorkspaceMCPs: (workspace: string) =>
+    request<MCPConnection[]>(
+      `/workspaces/${encodeURIComponent(workspace)}/mcps`
+    ),
+  revealWorkspaceMCPHeaders: (workspace: string, name: string) =>
+    request<Record<string, string>>(
+      `/workspaces/${encodeURIComponent(workspace)}/mcps/${encodeURIComponent(name)}/headers/reveal`,
+      { method: "POST", cache: "no-store" }
+    ),
+  saveWorkspaceMCP: (workspace: string, body: MCPConnectionUpdate) =>
+    request<MCPConnection>(
+      `/workspaces/${encodeURIComponent(workspace)}/mcps/${encodeURIComponent(body.name)}`,
+      {
+        method: "PUT",
+        body: JSON.stringify(body),
+      }
+    ),
+  deleteWorkspaceMCP: (workspace: string, name: string) =>
+    request<void>(
+      `/workspaces/${encodeURIComponent(workspace)}/mcps/${encodeURIComponent(name)}`,
+      { method: "DELETE" }
+    ),
+  discoverWorkspaceMCP: (workspace: string, body: MCPConnectionUpdate) =>
+    request<{ name: string; description: string }[]>(
+      `/workspaces/${encodeURIComponent(workspace)}/mcps/${encodeURIComponent(body.name)}/discover`,
       { method: "POST", body: JSON.stringify(body) }
     ),
   getMyMCPs: () => request<MCPConnection[]>("/my-mcps"),
@@ -907,9 +1429,15 @@ export const api = {
       method: "PUT",
       body: JSON.stringify({ full_name, enabled: runAutomatically }),
     }),
-  usageLeaderboard: (period: UsageLeaderboardPeriod = "30d", limit = 10) =>
+  usageLeaderboard: (
+    period: UsageLeaderboardPeriod = "7d",
+    limit = 10,
+    cursor?: string,
+    sort: UsageLeaderboardSort = "rank",
+    direction: SortDirection = "asc"
+  ) =>
     request<UsageLeaderboardPayload>(
-      `/agent-usage-leaderboard?period=${encodeURIComponent(period)}&limit=${limit}`
+      `/agent-usage-leaderboard?period=${encodeURIComponent(period)}&limit=${limit}&sort=${sort}&direction=${direction}${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`
     ).then((payload) => ({
       ...payload,
       rows: payload.rows.map((row) => ({
@@ -920,27 +1448,118 @@ export const api = {
       })),
     })),
   prMergeRateByModel: (
-    period: UsageLeaderboardPeriod = "30d",
+    period: UsageLeaderboardPeriod = "7d",
     maturityDays?: number
   ) =>
     request<PRMergeRatePayload>(
       `/analytics/pr-merge-rate-by-model?period=${encodeURIComponent(period)}${maturityDays == null ? "" : `&maturity_days=${maturityDays}`}`
-    ),
-  myMapping: () => request<Partial<UserMapping>>("/my-mapping"),
-  adminListUserMappings: (page = 1, pageSize = 20) =>
-    request<UserMappingsPage>(
-      `/admin/user-mappings?page=${page}&page_size=${pageSize}`
-    ),
-  adminDeleteUserMapping: (github_login: string) =>
-    request<{ deleted: boolean }>(
-      `/admin/user-mappings/${encodeURIComponent(github_login)}`,
-      { method: "DELETE" }
-    ),
+    ).then((payload) => ({ payload, fetchedAt: new Date().toISOString() })),
+  adminListUsers: (page = 1, pageSize = 20) =>
+    request<AdminUsersPage>(`/admin/users?page=${page}&page_size=${pageSize}`),
   listReviews: (page: number, mine: boolean) =>
     request<ReviewListPayload>(`/reviews?page=${page}&mine=${mine}`),
+  myPullRequests: (
+    repo: string,
+    sort: "createdAt" | "updatedAt" = "updatedAt",
+    direction: "asc" | "desc" = "desc",
+    page = 1
+  ) =>
+    request<OpenPullRequestsPayload>(
+      `/pull-requests?repo=${encodeURIComponent(repo)}&lightweight=true&sort=${sort === "createdAt" ? "created" : "updated"}&direction=${direction}&page=${page}&scope=mine`
+    ),
+  myPullRequestDetails: (repo: string, number: number) =>
+    loadPrDetails(repo, number),
+  fixPullRequest: (pr: OpenPullRequest) =>
+    pullRequestThread(pr.repo, pr.number, { intent: "fix", context: pr }),
+  addressPullRequestComments: (pr: OpenPullRequest) =>
+    pullRequestThread(pr.repo, pr.number, { intent: "address-comments" }),
+  addressPullRequestComment: (
+    repo: string,
+    number: number,
+    commentUrl: string,
+    instructions: string
+  ) =>
+    pullRequestThread(repo, number, {
+      intent: "address-comment",
+      comment_url: commentUrl,
+      instructions,
+    }),
+  resolveReviewThreads: (
+    repo: string,
+    number: number,
+    threadIds: Array<string>
+  ) =>
+    request<ResolveReviewThreadsResult>(
+      `/repos/${repo.split("/").map(encodeURIComponent).join("/")}/pulls/${number}/review-threads/resolve`,
+      { method: "POST", body: JSON.stringify({ thread_ids: threadIds }) }
+    ),
+  pullRequestThreadStatus: (repo: string, number: number) =>
+    request<{ running: boolean }>(
+      `/repos/${repo.split("/").map(encodeURIComponent).join("/")}/pulls/${number}/thread`
+    ),
+  openPullRequestThread: (repo: string, number: number, title: string) =>
+    pullRequestThread(repo, number, { intent: "open", title }),
+  mergePullRequest: (
+    pr: OpenPullRequest,
+    method: MergeMethod
+  ): Promise<PullRequestActionResult> =>
+    pullRequestAction(pr, {
+      action: "merge",
+      sha: pr.headSha,
+      merge_method: method,
+    }),
+  closePullRequest: (
+    pr: OpenPullRequest,
+    reason?: string
+  ): Promise<PullRequestActionResult> =>
+    pullRequestAction(
+      pr,
+      reason ? { action: "close", reason } : { action: "close" }
+    ),
+  updatePullRequestBranch: (
+    pr: OpenPullRequest
+  ): Promise<PullRequestActionResult> =>
+    pullRequestAction(pr, { action: "update-branch", sha: pr.headSha }),
+  markPullRequestReady: (
+    pr: OpenPullRequest
+  ): Promise<PullRequestActionResult> =>
+    pullRequestAction(pr, { action: "mark-ready" }),
+  repoMergeMethods: (repo: string) =>
+    request<{ mergeMethods: MergeMethod[] }>(
+      `/repos/${repo.split("/").map(encodeURIComponent).join("/")}/merge-methods`
+    ),
+  reviewSummaries: (pullRequests: Array<{ repo: string; number: number }>) =>
+    request<Record<string, ReviewSummary | null>>("/reviews/summaries", {
+      method: "POST",
+      body: JSON.stringify({ pullRequests }),
+    }),
   getReview: (owner: string, repo: string, number: number) =>
     request<ReviewDetail>(
       `/reviews/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}`
+    ),
+  getAssessmentFeedback: (
+    owner: string,
+    repo: string,
+    number: number,
+    reviewId: number
+  ) =>
+    request<ReviewAssessmentFeedback | null>(
+      `/reviews/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}/feedback/${reviewId}`
+    ),
+  saveAssessmentFeedback: (
+    owner: string,
+    repo: string,
+    number: number,
+    reviewId: number,
+    feedback: ReviewAssessmentFeedbackInput
+  ) =>
+    request<ReviewAssessmentFeedback>(
+      `/reviews/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}/feedback/${reviewId}`,
+      { method: "PUT", body: JSON.stringify(feedback) }
+    ),
+  getPullRequestPreview: (owner: string, repo: string, number: number) =>
+    request<PullRequestPreview>(
+      `/reviews/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}/preview`
     ),
   getReviewDiff: (owner: string, repo: string, number: number) =>
     request<ReviewDiffPayload>(
@@ -950,19 +1569,10 @@ export const api = {
     request<ReviewChatMeta>(
       `/reviews/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}/chat`
     ),
-  listReviewChatThreads: (owner: string, repo: string, number: number) =>
-    request<{ threads: Array<ReviewChatThread> }>(
-      `/reviews/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}/chat/threads`
-    ),
-  deleteReviewChatThread: (
-    owner: string,
-    repo: string,
-    number: number,
-    threadId: string
-  ) =>
-    request<void>(
-      `/reviews/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}/chat/threads/${encodeURIComponent(threadId)}`,
-      { method: "DELETE" }
+  runReviewScout: (owner: string, repo: string, number: number) =>
+    request<{ started: boolean; run_id: string | null }>(
+      `/reviews/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}/scout`,
+      { method: "POST" }
     ),
   reReview: (owner: string, repo: string, number: number) =>
     request<{

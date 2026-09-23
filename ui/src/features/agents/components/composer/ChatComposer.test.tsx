@@ -15,16 +15,30 @@ import { ComposerPrimaryActions } from "./ComposerPrimaryActions"
 import { replaceTextRange } from "./composerTrigger"
 import type { ChatComposerProps } from "./ChatComposer"
 import { AgentThreadStreamBoundary } from "@/features/agents/lib/provider/useIsInAgentThreadStream"
+import { ThreadSourceProvider } from "@/features/agents/lib/threadSource/ThreadSourceProvider"
 
 const stream = {
   isLoading: false,
   threadId: "thread-1",
-  stop: vi.fn(),
+  messages: [],
+  toolCalls: [],
+  isThreadLoading: false,
+  hydrationPromise: Promise.resolve(),
+  error: null,
+  submit: vi.fn(),
   disconnect: vi.fn(),
+  getThread: () => null,
 }
 
-vi.mock("@/features/agents/lib/stream/AgentStreamProvider", () => ({
-  useAgentStream: () => stream,
+vi.mock("@langchain/react", () => ({
+  useStream: () => stream,
+  useChannelEffect: () => {},
+}))
+
+vi.mock("@/lib/langgraph-client", () => ({
+  createDashboardClient: () => ({}),
+  createLocalGraphClient: () => ({}),
+  dashboardFetch: fetch,
 }))
 
 const cancelThread = vi.fn((threadId: string) =>
@@ -44,7 +58,6 @@ afterEach(() => cleanup())
 
 beforeEach(() => {
   stream.isLoading = false
-  stream.stop.mockClear()
   stream.disconnect.mockClear()
   cancelThread.mockClear()
 })
@@ -59,10 +72,12 @@ function renderComposer(
   render(
     <QueryClientProvider client={client}>
       <AgentThreadStreamBoundary>
-        <ChatComposer
-          activeRun={{ threadId: "thread-1", running }}
-          {...props}
-        />
+        <ThreadSourceProvider threadId="thread-1" transcript={false}>
+          <ChatComposer
+            activeRun={{ threadId: "thread-1", running }}
+            {...props}
+          />
+        </ThreadSourceProvider>
       </AgentThreadStreamBoundary>
     </QueryClientProvider>
   )
@@ -131,14 +146,14 @@ describe("ChatComposer stop button", () => {
     renderComposer(true)
 
     expect(screen.getByRole("button", { name: "Stop run" })).toBeTruthy()
-    expect(screen.queryByRole("button", { name: "Steer agent" })).toBeNull()
+    expect(screen.queryByRole("button", { name: "Queue message" })).toBeNull()
   })
 
   it("shows the send button when no run is live", () => {
     renderComposer(false)
 
     expect(screen.getByRole("button", { name: "Send message" })).toBeTruthy()
-    expect(screen.queryByRole("button", { name: "Steer agent" })).toBeNull()
+    expect(screen.queryByRole("button", { name: "Queue message" })).toBeNull()
     expect(screen.queryByRole("button", { name: "Stop run" })).toBeNull()
   })
 
@@ -167,10 +182,25 @@ describe("ChatComposer stop button", () => {
       />
     )
 
-    expect(screen.getByRole("button", { name: "Steer agent" })).toBeTruthy()
+    expect(screen.getByRole("button", { name: "Queue message" })).toBeTruthy()
     fireEvent.keyDown(document.body, { key: "Escape" })
 
     expect(onStop).toHaveBeenCalledOnce()
+  })
+})
+
+describe("ChatComposer options", () => {
+  it("offers attachments without a plan-mode toggle", async () => {
+    renderComposer(false)
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "More composer options" })
+    )
+
+    expect(
+      await screen.findByRole("menuitem", { name: "Attach images" })
+    ).toBeTruthy()
+    expect(screen.queryByRole("menuitem", { name: /plan mode/i })).toBeNull()
   })
 })
 
@@ -234,27 +264,27 @@ describe("ChatComposer skill autocomplete", () => {
   it("prefers a colliding skill and preserves surrounding prompt text", () => {
     const trigger = {
       kind: "slash-command" as const,
-      query: "plan",
+      query: "model",
       rangeStart: 7,
-      rangeEnd: 12,
+      rangeEnd: 13,
     }
     const items = buildCommandItems(
       trigger,
       [],
       [
         {
-          name: "plan",
-          description: "Create an implementation plan",
+          name: "model",
+          description: "Inspect a model",
           instructions: "",
         },
       ]
     )
 
     expect(items).toEqual([
-      expect.objectContaining({ type: "skill", name: "plan" }),
+      expect.objectContaining({ type: "skill", name: "model" }),
     ])
-    expect(replaceTextRange("Please /plan this", 7, 12, "/plan ").text).toBe(
-      "Please /plan  this"
+    expect(replaceTextRange("Please /model this", 7, 13, "/model ").text).toBe(
+      "Please /model  this"
     )
   })
 })

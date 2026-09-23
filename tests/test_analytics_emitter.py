@@ -32,3 +32,28 @@ async def test_pr_opened_without_invocation_preserves_action(monkeypatch) -> Non
     assert opened.event_name == emitter.EventName.PR_OPENED
     assert opened.payload.opening_run_id is None
     assert opened.payload.model_attribution_quality == "unavailable"
+
+
+@pytest.mark.asyncio
+async def test_feedback_submission_uses_stable_feedback_identity(monkeypatch) -> None:
+    monkeypatch.setenv("POSTGRES_URI", "postgresql://localhost/analytics_test")
+    monkeypatch.setattr(database, "_WORKSPACE_ID", uuid4())
+    enqueue = AsyncMock()
+    monkeypatch.setattr(emitter, "enqueue", enqueue)
+    person_id = uuid4()
+
+    await emitter.feedback_submitted(
+        feedback_key="thread:thread-1",
+        rating=5,
+        source="dashboard",
+        run_key="run-1",
+        user_id=person_id,
+    )
+
+    event = enqueue.await_args.args[0]
+    assert event.event_name == emitter.EventName.FEEDBACK_SUBMITTED
+    assert event.producer_event_id == "feedback:thread:thread-1"
+    assert event.payload.rating == 5
+    assert event.payload.sentiment == "positive"
+    assert event.user_id == person_id
+    assert event.entry_point == emitter.EntryPoint.DASHBOARD

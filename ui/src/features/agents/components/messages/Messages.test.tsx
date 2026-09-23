@@ -5,6 +5,14 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 
 import { Messages } from "./Messages"
 
+vi.stubGlobal(
+  "ResizeObserver",
+  class {
+    observe() {}
+    disconnect() {}
+  }
+)
+
 vi.mock("@/features/agents/components/WorkflowApprovalCard", () => ({
   WorkflowApprovalCard: ({ threadId }: { threadId: string }) => (
     <div data-testid="workflow-approval-card">Approval for {threadId}</div>
@@ -18,6 +26,20 @@ describe("Messages", () => {
     render(<Messages messages={[]} isStreaming />)
 
     expect(screen.getByRole("status").textContent).toBe("Working…")
+  })
+
+  it("shows reconnect activity in the existing status line", () => {
+    render(
+      <Messages
+        messages={[]}
+        isStreaming
+        reconnectLabel="Reconnecting… 3/12 (retrying in 4s)"
+      />
+    )
+
+    expect(screen.getByRole("status").textContent).toBe(
+      "Reconnecting… 3/12 (retrying in 4s)"
+    )
   })
 
   it("renders a sent Slack reply before the work that follows it", () => {
@@ -102,6 +124,28 @@ describe("Messages", () => {
       fold.compareDocumentPosition(groupedWork) &
         Node.DOCUMENT_POSITION_FOLLOWING
     ).toBeTruthy()
+  })
+
+  it("hides user names when disabled", () => {
+    render(
+      <Messages
+        messages={[
+          {
+            id: "user-turn",
+            author: "user",
+            timestamp: "2026-09-03T10:30:00.000Z",
+            structuredSenderName: "Mason Daugherty",
+            structuredSenderKind: "person",
+            chunks: [{ kind: "text", text: "Ship it" }],
+          },
+        ]}
+        isStreaming={false}
+        showUserNames={false}
+      />
+    )
+
+    expect(screen.queryByText("Mason Daugherty")).toBeNull()
+    expect(screen.getByText("Ship it")).toBeTruthy()
   })
 
   it("keeps workflow approval available alongside an empty-state error", () => {

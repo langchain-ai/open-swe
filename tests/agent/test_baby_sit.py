@@ -1,5 +1,4 @@
 import asyncio
-from datetime import UTC, datetime, timedelta
 from typing import Any
 from unittest.mock import AsyncMock
 
@@ -9,6 +8,7 @@ from langgraph_sdk.errors import ConflictError
 
 from agent import baby_sit, scheduler
 from agent import store as agent_store
+from agent.github.ci import RequiredCheck
 from agent.slack.client import GitHubPrRef
 from agent.source_context import SourceContext
 
@@ -256,7 +256,7 @@ async def test_concurrent_failure_evaluations_dispatch_once(
     assert await baby_sit.evaluate_watch("acme/repo#7") == "duplicate"
 
 
-async def test_success_waits_for_stable_check_set_before_notifying(
+async def test_green_webhook_wakes_the_agent_and_stops_the_watch(
     watch_client: _Client, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     await _start_watch(watch_client)
@@ -264,8 +264,12 @@ async def test_success_waits_for_stable_check_set_before_notifying(
     monkeypatch.setattr(
         baby_sit,
         "fetch_pr",
-        AsyncMock(return_value={"state": "open", "head": {"sha": "head-1"}}),
+        AsyncMock(
+            return_value={"state": "open", "head": {"sha": "head-1"}, "base": {"ref": "main"}}
+        ),
     )
+    required = AsyncMock(return_value={RequiredCheck("tests"), RequiredCheck("e2e")})
+    monkeypatch.setattr(baby_sit, "fetch_required_checks", required)
     monkeypatch.setattr(
         baby_sit,
         "list_check_runs",
@@ -278,21 +282,26 @@ async def test_success_waits_for_stable_check_set_before_notifying(
     monkeypatch.setattr(baby_sit, "list_commit_statuses", AsyncMock(return_value=[]))
     notify = AsyncMock(return_value=True)
     monkeypatch.setattr(baby_sit, "post_slack_thread_reply", notify)
+    dispatch = AsyncMock(return_value={"run_id": "run-1"})
+    monkeypatch.setattr(baby_sit, "dispatch_agent_run", dispatch)
+    payload = {
+        "installation": {"id": 99},
+        "repository": {"owner": {"login": "acme"}, "name": "repo"},
+        "check_run": {"status": "completed", "conclusion": "success", "head_sha": "head-1"},
+    }
 
-    now = datetime(2026, 1, 1, tzinfo=UTC)
-    monkeypatch.setattr(baby_sit, "_now", lambda: now)
-    assert await baby_sit.evaluate_watch("acme/repo#7") == "settling"
+    assert await baby_sit.evaluate_watch("acme/repo#7") == "pending"
+    dispatch.assert_not_awaited()
+
+    required.return_value = {RequiredCheck("tests")}
+    assert await baby_sit.handle_ci_webhook(payload, "check_run") == {
+        "matched": 1,
+        "dispatched": 0,
+    }
+    dispatch.assert_awaited_once()
+    assert dispatch.await_args is not None
+    assert "checks are green" in dispatch.await_args.args[1]
     notify.assert_not_awaited()
-
-    monkeypatch.setattr(
-        baby_sit,
-        "_now",
-        lambda: now + timedelta(minutes=baby_sit.CHECK_SET_SETTLE_MINUTES),
-    )
-    assert await baby_sit.evaluate_watch("acme/repo#7") == "stopped"
-    notify.assert_awaited_once()
-    assert notify.await_args is not None
-    assert notify.await_args.args[:2] == ("C1", "1.2")
     assert watch_client.store.values == {}
 
 
@@ -333,8 +342,18 @@ async def test_terminal_notification_falls_back_to_originating_agent_thread(
     monkeypatch.setattr(
         baby_sit,
         "fetch_pr",
-        AsyncMock(return_value={"state": "closed", "head": {"sha": "head-1"}}),
+        AsyncMock(return_value={"state": "open", "head": {"sha": "head-1"}}),
     )
+    monkeypatch.setattr(
+        baby_sit,
+        "list_check_runs",
+        AsyncMock(
+            return_value=[
+                {"id": 1, "name": "tests", "status": "completed", "conclusion": "cancelled"}
+            ]
+        ),
+    )
+    monkeypatch.setattr(baby_sit, "list_commit_statuses", AsyncMock(return_value=[]))
     dispatch = AsyncMock(return_value={"run_id": "run-1"})
     monkeypatch.setattr(baby_sit, "dispatch_agent_run", dispatch)
 
@@ -343,6 +362,60 @@ async def test_terminal_notification_falls_back_to_originating_agent_thread(
     assert dispatch.await_args is not None
     assert dispatch.await_args.args[0] == "thread-1"
     assert "/baby-sit --terminal" in dispatch.await_args.args[1]
+
+
+async def test_an_expedited_review_thread_gets_no_baby_sit_notices(
+    watch_client: _Client, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    await _start_watch(watch_client)
+    monkeypatch.setattr(baby_sit, "_has_expedited_card", AsyncMock(return_value=True))
+    monkeypatch.setattr(baby_sit, "get_github_app_installation_token", AsyncMock(return_value="t"))
+    monkeypatch.setattr(
+        baby_sit,
+        "fetch_pr",
+        AsyncMock(return_value={"state": "open", "head": {"sha": "head-1"}}),
+    )
+    monkeypatch.setattr(
+        baby_sit,
+        "list_check_runs",
+        AsyncMock(
+            return_value=[
+                {"id": 1, "name": "tests", "status": "completed", "conclusion": "cancelled"}
+            ]
+        ),
+    )
+    monkeypatch.setattr(baby_sit, "list_commit_statuses", AsyncMock(return_value=[]))
+    notify = AsyncMock(return_value=True)
+    monkeypatch.setattr(baby_sit, "post_slack_thread_reply", notify)
+    dispatch = AsyncMock(return_value={"run_id": "run-1"})
+    monkeypatch.setattr(baby_sit, "dispatch_agent_run", dispatch)
+
+    assert await baby_sit.evaluate_watch("acme/repo#7") == "stopped"
+    notify.assert_not_awaited()
+    dispatch.assert_awaited_once()
+    assert dispatch.await_args is not None
+    assert "needs owner triage" in dispatch.await_args.args[1]
+
+
+async def test_a_merged_pull_request_ends_the_watch_without_posting(
+    watch_client: _Client, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    await _start_watch(watch_client)
+    monkeypatch.setattr(baby_sit, "get_github_app_installation_token", AsyncMock(return_value="t"))
+    monkeypatch.setattr(
+        baby_sit,
+        "fetch_pr",
+        AsyncMock(return_value={"state": "closed", "merged_at": "2026-09-23T12:00:00Z"}),
+    )
+    notify = AsyncMock(return_value=True)
+    monkeypatch.setattr(baby_sit, "post_slack_thread_reply", notify)
+    dispatch = AsyncMock(return_value={"run_id": "run-1"})
+    monkeypatch.setattr(baby_sit, "dispatch_agent_run", dispatch)
+
+    assert await baby_sit.evaluate_watch("acme/repo#7") == "stopped"
+    notify.assert_not_awaited()
+    dispatch.assert_not_awaited()
+    assert watch_client.store.values == {}
 
 
 async def test_record_retry_caps_attempts_and_deduplicates_flake_alert(

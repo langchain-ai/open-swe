@@ -4,8 +4,13 @@ Each record holds a user-authored instruction prompt (edited in the dashboard)
 that is appended to the main agent's system prompt for runs targeting that repo.
 """
 
+from typing import Any
+
+from fastapi import APIRouter, HTTPException, Response
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from agent.dashboard.deps import SESSION_DEP, filter_repo_models_for_user
+from agent.dashboard.repo_access import require_repo_access_for_user
 from agent.review.styles import normalize_repo_full_name
 from agent.store import TypedStore, now_iso
 
@@ -79,3 +84,60 @@ async def get_repo_agent_instructions(owner: str, repo: str) -> str | None:
     """Return the custom agent instructions for a repo, if configured."""
     record = await AGENT_INSTRUCTIONS.get(f"{owner}/{repo}")
     return record.instructions.strip() or None if record else None
+
+
+router = APIRouter(tags=["agent-instructions"])
+
+
+@router.get("/agent-instructions")
+async def api_list_agent_instructions(
+    session: dict[str, Any] = SESSION_DEP,
+) -> list[AgentInstructions]:
+    return await filter_repo_models_for_user(session["sub"], await AGENT_INSTRUCTIONS.list_all())
+
+
+@router.post("/agent-instructions")
+async def api_create_agent_instructions(
+    body: AgentInstructionsCreate,
+    session: dict[str, Any] = SESSION_DEP,
+) -> AgentInstructions:
+    await require_repo_access_for_user(session["sub"], body.full_name)
+    return await AGENT_INSTRUCTIONS.create(body.full_name, session["sub"])
+
+
+@router.get("/agent-instructions/{full_name:path}")
+async def api_get_agent_instructions(
+    full_name: str,
+    session: dict[str, Any] = SESSION_DEP,
+) -> AgentInstructions:
+    full_name = normalize_repo_full_name(full_name)
+    await require_repo_access_for_user(session["sub"], full_name)
+    record = await AGENT_INSTRUCTIONS.get(full_name)
+    if not record:
+        raise HTTPException(404, "agent instructions not found")
+    return record
+
+
+@router.put("/agent-instructions/{full_name:path}")
+async def api_update_agent_instructions(
+    full_name: str,
+    body: AgentInstructionsUpdate,
+    session: dict[str, Any] = SESSION_DEP,
+) -> AgentInstructions:
+    full_name = normalize_repo_full_name(full_name)
+    await require_repo_access_for_user(session["sub"], full_name)
+    return await AGENT_INSTRUCTIONS.set_instructions(full_name, body.instructions)
+
+
+@router.delete("/agent-instructions/{full_name:path}")
+async def api_delete_agent_instructions(
+    full_name: str,
+    session: dict[str, Any] = SESSION_DEP,
+) -> Response:
+    full_name = normalize_repo_full_name(full_name)
+    await require_repo_access_for_user(session["sub"], full_name)
+    record = await AGENT_INSTRUCTIONS.get(full_name)
+    if not record:
+        raise HTTPException(404, "agent instructions not found")
+    await AGENT_INSTRUCTIONS.delete(full_name)
+    return Response(status_code=204)

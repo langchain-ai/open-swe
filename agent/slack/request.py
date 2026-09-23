@@ -2,8 +2,8 @@
 
 from pydantic import BaseModel, Field
 
-from agent.slack.client import SlackChannelContext
 from agent.slack.failures import SlackRequestTarget
+from agent.slack.payloads import SlackChannelContext
 from agent.utils.json_types import JsonObject
 
 
@@ -25,9 +25,9 @@ class SlackRequest(BaseModel):
     team_id: str = ""
     reply_thread_ts: str = ""
     treat_all_messages_as_mentions: bool = False
-    untagged_reply: bool = False
     message_update: bool = False
     code_channel: bool = False
+    dm_session: bool = False
     explicit_request: bool = False
 
     @property

@@ -4,27 +4,48 @@ import { describe, expect, it } from "vitest"
 import { streamMessagesToUi } from "./streamMessagesToUi"
 
 describe("streamMessagesToUi", () => {
+  it("keeps platform turn metadata out of the transcript", () => {
+    const messages = streamMessagesToUi([
+      new HumanMessage({
+        id: "person-block",
+        content:
+          '<dynamic-context kind="person" id="github:alice">\ndisplay_name: Alice\ncommit_name: Alice\ncommit_email: alice@users.noreply.github.com\n</dynamic-context>',
+      }),
+      new HumanMessage({
+        id: "person-message",
+        content:
+          '<input-message sender="github:alice" surface="web" kind="human">\nShip it\n</input-message>',
+      }),
+    ])
+
+    expect(messages).toHaveLength(1)
+    expect(messages[0]).toMatchObject({
+      author: "user",
+      chunks: [{ kind: "text", text: "Ship it" }],
+    })
+  })
+
   it("hides entity introductions and renders structured senders distinctly", () => {
     const messages = streamMessagesToUi([
       new HumanMessage({
         id: "person-entity",
         content:
-          '<dynamic-context kind="person" id="github:alice"><display_name>Alice</display_name></dynamic-context>',
+          '<dynamic-context kind="person" id="github:alice">\ndisplay_name: Alice\n</dynamic-context>',
       }),
       new HumanMessage({
         id: "system-entity",
         content:
-          '<dynamic-context kind="system" id="system:scheduler"><display_name>Scheduler</display_name></dynamic-context>',
+          '<dynamic-context kind="system" id="system:scheduler">\ndisplay_name: Scheduler\n</dynamic-context>',
       }),
       new HumanMessage({
         id: "person-message",
         content:
-          '<input-message sender="github:alice" surface="web" kind="human"><content>Hello &lt;b&gt;world&lt;/b&gt;</content></input-message>',
+          '<input-message sender="github:alice" surface="web" kind="human">\nHello &lt;b&gt;world&lt;/b&gt;\n</input-message>',
       }),
       new HumanMessage({
         id: "system-message",
         content:
-          '<input-message sender="system:scheduler" surface="automation"><content>Check CI</content></input-message>',
+          '<input-message sender="system:scheduler" surface="automation">\nCheck CI\n</input-message>',
       }),
       new HumanMessage({ id: "legacy", content: "Legacy message" }),
     ])
@@ -56,12 +77,12 @@ describe("streamMessagesToUi", () => {
       new HumanMessage({
         id: "self-entity",
         content:
-          '<dynamic-context kind="system" id="system:open-swe"><display_name>Open SWE</display_name><sender_type>self</sender_type></dynamic-context>',
+          '<dynamic-context kind="system" id="system:open-swe">\ndisplay_name: Open SWE\nsender_type: self\n</dynamic-context>',
       }),
       new HumanMessage({
         id: "self-message",
         content:
-          '<input-message sender="system:open-swe" surface="slack" kind="system"><content>on it</content></input-message>',
+          '<input-message sender="system:open-swe" surface="slack" kind="system">\non it\n</input-message>',
       }),
       new HumanMessage({ id: "legacy", content: "Legacy message" }),
     ])
@@ -107,11 +128,19 @@ describe("streamMessagesToUi", () => {
       new HumanMessage({
         id: "structured",
         content:
+          '<input-message sender="github:alice" surface="web" kind="human">\n  indented\n\n</input-message>',
+      }),
+      new HumanMessage({
+        id: "stored",
+        content:
           '<input-message sender="github:alice" surface="web" kind="human"><content>  indented\n</content></input-message>',
       }),
     ])
 
     expect(messages[0]?.chunks).toEqual([
+      { kind: "text", text: "  indented\n" },
+    ])
+    expect(messages[1]?.chunks).toEqual([
       { kind: "text", text: "  indented\n" },
     ])
   })
@@ -150,6 +179,28 @@ describe("streamMessagesToUi", () => {
     expect(messages[0]?.chunks[0]).toMatchObject({
       kind: "tool-execution",
       toolKind: "task",
+    })
+  })
+
+  it("identifies read-only SQL calls for table rendering", () => {
+    const messages = streamMessagesToUi([
+      new AIMessage({
+        id: "ai-1",
+        content: "",
+        tool_calls: [
+          {
+            id: "call-1",
+            name: "read_only_sql",
+            args: { query: "SELECT 1" },
+            type: "tool_call",
+          },
+        ],
+      }),
+    ])
+
+    expect(messages[0]?.chunks[0]).toMatchObject({
+      kind: "tool-execution",
+      toolKind: "sql",
     })
   })
 

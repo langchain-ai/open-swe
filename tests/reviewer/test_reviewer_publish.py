@@ -1,13 +1,16 @@
 """Unit tests for the publish_review rendering and orchestration helpers."""
 
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from agent.dashboard.workspace_settings import WorkspaceSettings
+from agent.review.assessment_feedback import ASSESSMENTS
 from agent.review.findings import Finding, new_finding
 from agent.review.publish import (
+    ReviewAssessment,
     clear_review_started_comment,
     fetch_pr_review_threads,
     open_swe_review_exists,
@@ -24,6 +27,152 @@ from agent.review.publish import (
     review_summary_marker,
     status_comment_marker,
 )
+from tests.conftest import FakeStore
+
+
+def _assessment(head_sha: str = "a" * 40) -> ReviewAssessment:
+    return ReviewAssessment(
+        head_sha=head_sha,
+        risk_score=1,
+        decision="would_approve",
+        explanation="Documentation only; satisfies the repository approval instructions.",
+    )
+
+
+def test_assessment_is_compact_with_native_feedback() -> None:
+    assessment = _assessment().model_copy(update={"explanation": "Check </details> text."})
+    body = render_review_body(pr_number=7, surfaced_count=0, assessment=assessment)
+    assert "Risk: 1/5" in body
+    assert "Would approve" in body
+    assert "advisory" in body
+    assert body.count("</details>") == 1
+    assert "Check &lt;/details&gt; text." in body
+    assert "👍" in body and "👎" in body
+    assert assessment.head_sha in body
+
+
+@pytest.mark.parametrize("open_finding", [False, True])
+@pytest.mark.parametrize("auto_approve", [False, True])
+@pytest.mark.parametrize("storage_fails", [False, True])
+async def test_assessment_on_empty_re_review_respects_existing_findings(
+    open_finding: bool,
+    auto_approve: bool,
+    storage_fails: bool,
+    fake_store: FakeStore,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    from langchain_core.tools import StructuredTool
+
+    from agent.prompts import apply_tool_descriptions
+    from agent.tools.publish_review import publish_review
+
+    findings = [_f(severity="low", github_review_comment_id=123)] if open_finding else []
+    tool = StructuredTool.from_function(coroutine=apply_tool_descriptions([publish_review])[0])
+    with (
+        patch(
+            "agent.tools.publish_review.get_config",
+            return_value={
+                "configurable": {
+                    "repo": {"owner": "o", "name": "r"},
+                    "pr_number": 7,
+                    "head_sha": "a" * 40,
+                    "re_review": True,
+                }
+            },
+        ),
+        patch(
+            "agent.tools.publish_review.get_workspace_settings",
+            AsyncMock(
+                return_value=WorkspaceSettings(
+                    {"approval_policy": "Docs only", "review_auto_approve": auto_approve}
+                )
+            ),
+        ),
+        patch("agent.tools.publish_review.approval_allowed_for_head", AsyncMock(return_value=True)),
+        patch("agent.tools.publish_review.get_github_token", return_value="t"),
+        patch("agent.tools.publish_review.get_thread_id_from_runtime", return_value="tid"),
+        patch("agent.tools.publish_review.list_findings_async", AsyncMock(return_value=findings)),
+        patch(
+            "agent.tools.publish_review.post_pull_request_review",
+            AsyncMock(return_value={"id": 555}),
+        ) as post,
+        patch("agent.tools.publish_review._resolve_review_trace_url", AsyncMock(return_value=None)),
+        patch(
+            "agent.tools.publish_review._resolve_threads_for_resolved_findings",
+            AsyncMock(return_value=0),
+        ),
+        patch("agent.tools.publish_review.set_reviewer_thread_metadata", AsyncMock()),
+        patch("agent.tools.publish_review._record_reviewer_usage", AsyncMock()),
+        patch("agent.tools.publish_review.settle_review_check_run", AsyncMock()),
+    ):
+        if storage_fails:
+            with patch.object(
+                ASSESSMENTS, "put", AsyncMock(side_effect=RuntimeError("Storage unavailable"))
+            ):
+                result = await tool.ainvoke(
+                    {
+                        "ranking": [],
+                        "assessment": _assessment().model_dump(),
+                        "state": {"review_approval_policy": "Docs only"},
+                    }
+                )
+        else:
+            result = await tool.ainvoke(
+                {
+                    "ranking": [],
+                    "assessment": _assessment().model_dump(),
+                    "state": {"review_approval_policy": "Docs only"},
+                }
+            )
+    saved = await ASSESSMENTS.get("555")
+    if storage_fails:
+        assert saved is None
+        assert "Failed to save published assessment" in caplog.text
+    else:
+        assert saved is not None
+        assert saved.decision == ("needs_human_review" if open_finding else "would_approve")
+    assert result["review_id"] == 555
+    assert post.await_args is not None
+    assert post.await_args.kwargs["head_sha"] == "a" * 40
+    assert post.await_args.kwargs["event"] == (
+        "APPROVE" if auto_approve and not open_finding else "COMMENT"
+    )
+    body = post.await_args.kwargs["body"]
+    assert "Risk: 1/5" in body
+    if open_finding:
+        assert "Would approve" not in body
+        assert "Needs human review" in body
+        assert "Unresolved findings remain" in body
+    else:
+        assert ("Approved" if auto_approve else "Would approve") in body
+
+
+async def test_stale_assessment_does_not_publish_or_advance_reviewed_commit() -> None:
+    from agent.tools.publish_review import _publish_review_async
+
+    with (
+        patch("agent.tools.publish_review.get_thread_id_from_runtime", return_value="tid"),
+        patch(
+            "agent.tools.publish_review.resolve_review_head_sha", AsyncMock(return_value="b" * 40)
+        ),
+        patch("agent.tools.publish_review.post_pull_request_review", AsyncMock()) as post,
+        patch("agent.tools.publish_review.set_reviewer_thread_metadata", AsyncMock()) as metadata,
+    ):
+        result = await _publish_review_async(
+            owner="o",
+            repo="r",
+            pr_number=7,
+            head_sha="a" * 40,
+            token="t",
+            severity_threshold="medium",
+            cap=None,
+            is_re_review=False,
+            assessment=_assessment(),
+        )
+    assert result["success"] is False
+    assert "commit" in result["error"]
+    post.assert_not_awaited()
+    metadata.assert_not_awaited()
 
 
 def _f(**overrides: Any) -> Finding:
@@ -68,8 +217,12 @@ def _f(**overrides: Any) -> Finding:
 
 
 @pytest.fixture(autouse=True)
-def _isolate_publish_review_pr_state() -> Iterator[None]:
+def _isolate_publish_review_pr_state(fake_store: FakeStore) -> Iterator[None]:
     with (
+        patch(
+            "agent.tools.publish_review.get_workspace_settings",
+            AsyncMock(return_value=WorkspaceSettings({"approval_policy": "Docs only"})),
+        ),
         patch("agent.tools.publish_review.fetch_pr_review_threads", AsyncMock(return_value=[])),
         patch("agent.tools.publish_review.replace_findings", AsyncMock()),
         patch("agent.tools.publish_review.open_swe_review_exists", AsyncMock(return_value=False)),
@@ -433,10 +586,11 @@ async def test_publish_review_eval_mode_does_not_call_github() -> None:
         patch("agent.tools.publish_review.get_thread_id_from_runtime", return_value="tid"),
         patch("agent.tools.publish_review.list_findings_async", AsyncMock(return_value=findings)),
         patch("agent.tools.publish_review.set_reviewer_thread_metadata", AsyncMock()) as set_meta,
+        patch("agent.tools.publish_review.mutate_findings", AsyncMock()),
         patch("agent.tools.publish_review.get_github_token") as get_token,
         patch("agent.tools.publish_review.post_pull_request_review", AsyncMock()) as post_review,
     ):
-        result = await publish_review()
+        result = await publish_review(ranking=["f_high", "f_low"], assessment=_assessment())
 
     assert result["success"] is True
     assert result["dry_run"] is True
@@ -483,14 +637,95 @@ async def test_publish_review_eval_mode_uses_configured_cap() -> None:
         patch("agent.tools.publish_review.get_thread_id_from_runtime", return_value="tid"),
         patch("agent.tools.publish_review.list_findings_async", AsyncMock(return_value=findings)),
         patch("agent.tools.publish_review.set_reviewer_thread_metadata", AsyncMock()) as set_meta,
+        patch("agent.tools.publish_review.mutate_findings", AsyncMock()),
     ):
-        result = await publish_review()
+        result = await publish_review(ranking=["f_first", "f_second"])
 
     assert result["surfaced_count"] == 1
     assert set_meta.await_args is not None
     publication = set_meta.await_args.kwargs["extra"]["reviewer_eval_publication"]
     assert publication["cap"] == 1
     assert publication["finding_ids"] == ["f_first"]
+
+
+def _eval_config(**configurable: object) -> dict[str, object]:
+    return {
+        "configurable": {
+            "thread_id": "tid",
+            "repo": {"owner": "o", "name": "r"},
+            "pr_number": 7,
+            "head_sha": "sha",
+            "reviewer_eval": True,
+            **configurable,
+        },
+        "metadata": {},
+    }
+
+
+async def test_publish_review_surfaces_findings_in_the_reviewers_ranked_order() -> None:
+    from agent.tools.publish_review import publish_review
+
+    findings = [
+        _f(id="f_critical", severity="critical", file="a.py", start_line=1, end_line=1),
+        _f(id="f_medium", severity="medium", file="b.py", start_line=2, end_line=2),
+    ]
+
+    async def mutate(_thread_id: str, mutator: Callable[[list[Finding]], bool]) -> list[Finding]:
+        mutator(findings)
+        return findings
+
+    with (
+        patch(
+            "agent.tools.publish_review.get_config", return_value=_eval_config(reviewer_eval_cap=1)
+        ),
+        patch("agent.tools.publish_review.get_thread_id_from_runtime", return_value="tid"),
+        patch("agent.tools.publish_review.list_findings_async", AsyncMock(return_value=findings)),
+        patch("agent.tools.publish_review.mutate_findings", mutate),
+        patch("agent.tools.publish_review.set_reviewer_thread_metadata", AsyncMock()) as set_meta,
+    ):
+        result = await publish_review(ranking=["f_medium", "f_critical"])
+
+    assert result["surfaced_count"] == 1
+    assert set_meta.await_args is not None
+    publication = set_meta.await_args.kwargs["extra"]["reviewer_eval_publication"]
+    assert publication["finding_ids"] == ["f_medium"]
+
+
+@pytest.mark.parametrize(
+    ("ranking", "missing", "unknown", "duplicates"),
+    [
+        (["f_one"], ["f_two"], [], []),
+        (["f_one", "f_two", "f_nope"], [], ["f_nope"], []),
+        (["f_one", "f_two", "f_one"], [], [], ["f_one"]),
+    ],
+)
+async def test_publish_review_rejects_a_ranking_that_is_not_a_total_order(
+    ranking: list[str], missing: list[str], unknown: list[str], duplicates: list[str]
+) -> None:
+    from agent.tools.publish_review import publish_review
+
+    findings = [
+        _f(id="f_one", severity="high", file="a.py", start_line=1, end_line=1),
+        _f(id="f_two", severity="low", file="b.py", start_line=2, end_line=2),
+    ]
+    with (
+        patch("agent.tools.publish_review.get_config", return_value=_eval_config()),
+        patch("agent.tools.publish_review.get_thread_id_from_runtime", return_value="tid"),
+        patch("agent.tools.publish_review.list_findings_async", AsyncMock(return_value=findings)),
+        patch("agent.tools.publish_review.mutate_findings", AsyncMock()) as mutate,
+        patch("agent.tools.publish_review.set_reviewer_thread_metadata", AsyncMock()) as set_meta,
+    ):
+        result = await publish_review(ranking=ranking)
+
+    assert result["success"] is False
+    assert result["expected_finding_ids"] == ["f_one", "f_two"]
+    assert (result["missing"], result["unknown"], result["duplicates"]) == (
+        missing,
+        unknown,
+        duplicates,
+    )
+    mutate.assert_not_awaited()
+    set_meta.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -559,8 +794,9 @@ async def test_publish_review_forwards_trace_link_config_override() -> None:
         ),
         patch("agent.tools.publish_review.get_github_token", return_value="token"),
         patch("agent.tools.publish_review._publish_review_async", publish_async),
+        patch("agent.tools.publish_review._record_ranking", AsyncMock(return_value=None)),
     ):
-        result = await publish_review()
+        result = await publish_review(ranking=[])
 
     assert result == {"success": True}
     assert publish_async.call_args is not None
@@ -573,8 +809,8 @@ async def test_resolve_review_trace_url_enabled_by_team_setting() -> None:
 
     with (
         patch(
-            "agent.tools.publish_review.get_team_review_trace_links_enabled",
-            AsyncMock(return_value=True),
+            "agent.tools.publish_review.get_workspace_settings",
+            AsyncMock(return_value=WorkspaceSettings({"review_trace_links": True})),
         ),
         patch(
             "agent.tools.publish_review.get_langsmith_trace_url",
@@ -593,8 +829,8 @@ async def test_resolve_review_trace_url_disabled_by_team_setting() -> None:
     trace_url = MagicMock(return_value="https://smith/t")
     with (
         patch(
-            "agent.tools.publish_review.get_team_review_trace_links_enabled",
-            AsyncMock(return_value=False),
+            "agent.tools.publish_review.get_workspace_settings",
+            AsyncMock(return_value=WorkspaceSettings({"review_trace_links": False})),
         ),
         patch("agent.tools.publish_review.get_langsmith_trace_url", trace_url),
     ):
@@ -608,16 +844,16 @@ async def test_resolve_review_trace_url_disabled_by_team_setting() -> None:
 async def test_resolve_review_trace_url_config_override_skips_team_lookup() -> None:
     from agent.tools.publish_review import _resolve_review_trace_url
 
-    team_lookup = AsyncMock(return_value=True)
+    settings_lookup = AsyncMock(return_value=WorkspaceSettings({"review_trace_links": True}))
     trace_url = MagicMock(return_value="https://smith/t")
     with (
-        patch("agent.tools.publish_review.get_team_review_trace_links_enabled", team_lookup),
+        patch("agent.tools.publish_review.get_workspace_settings", settings_lookup),
         patch("agent.tools.publish_review.get_langsmith_trace_url", trace_url),
     ):
         url = await _resolve_review_trace_url("reviewer-thread-id", False)
 
     assert url is None
-    team_lookup.assert_not_called()
+    settings_lookup.assert_not_called()
     trace_url.assert_not_called()
 
 
@@ -1989,7 +2225,9 @@ async def test_post_pull_request_review_does_not_tag_unrelated_422() -> None:
 
 
 @pytest.mark.asyncio
-async def test_publish_review_drops_unresolvable_findings_and_retries_once() -> None:
+async def test_publish_review_drops_unresolvable_findings_and_retries_once(
+    fake_store: FakeStore,
+) -> None:
     """When GitHub rejects the batch with an ``unresolved_anchor`` 422, the
     tool must filter the bad findings against the PR diff_line_set, re-POST
     with only the valid ones, return ``success=True``, and report the dropped
@@ -2051,19 +2289,23 @@ async def test_publish_review_drops_unresolvable_findings_and_retries_once() -> 
             owner="o",
             repo="r",
             pr_number=7,
-            head_sha="sha",
+            head_sha="a" * 40,
             token="t",
             severity_threshold="medium",
             cap=15,
             is_re_review=False,
+            assessment=_assessment(),
         )
 
     assert post_review.await_count == 2
+    assert "Risk: 1/5" in post_review.await_args_list[0].kwargs["body"]
+    assert "Risk:" not in post_review.await_args_list[1].kwargs["body"]
     # Retry must contain only the in-diff finding.
     retry_inline = post_review.await_args_list[1].kwargs["inline_comments"]
     assert {c["path"] for c in retry_inline} == {"in_diff.py"}
     assert result["success"] is True
     assert result["review_id"] == 7777
+    assert await ASSESSMENTS.get("7777") is None
     assert result["surfaced_count"] == 1
     assert result["unresolvable_findings"] == ["f_bad"]
     assert "update_finding" in result["hint"]
@@ -2294,10 +2536,211 @@ async def test_publish_review_tool_returns_structured_error_when_thread_missing(
         ),
         patch("agent.tools.publish_review.get_github_token", return_value="token"),
         patch("agent.tools.publish_review._publish_review_async", publish_async),
+        patch("agent.tools.publish_review._record_ranking", AsyncMock(return_value=None)),
     ):
-        result = await publish_review()
+        result = await publish_review(ranking=[])
 
     assert result["success"] is False
     assert result["error"] == "thread_not_found"
     assert result["thread_id"] == "tid"
     assert "Do not retry" in result["note"]
+
+
+@pytest.mark.parametrize(
+    "policy,prepared_policy,auto_approve,current_head,expected_event,has_assessment",
+    [
+        (None, None, False, True, "COMMENT", False),
+        (None, "Docs only", True, True, "COMMENT", False),
+        ("Docs only", "Docs only", False, True, "COMMENT", True),
+        ("Docs only", "Docs only", True, False, "COMMENT", True),
+        ("Docs only", "Docs only", True, True, "APPROVE", True),
+        ("Changed policy", "Docs only", True, True, None, False),
+    ],
+)
+async def test_publication_respects_current_policy_and_opt_in(
+    policy: str | None,
+    prepared_policy: str | None,
+    auto_approve: bool,
+    current_head: bool,
+    expected_event: str | None,
+    has_assessment: bool,
+) -> None:
+    from agent.tools.publish_review import _publish_review_async
+
+    with (
+        patch("agent.tools.publish_review.get_thread_id_from_runtime", return_value="tid"),
+        patch(
+            "agent.tools.publish_review.get_workspace_settings",
+            AsyncMock(
+                return_value=WorkspaceSettings(
+                    {"approval_policy": policy, "review_auto_approve": auto_approve}
+                )
+            ),
+        ),
+        patch(
+            "agent.tools.publish_review.approval_allowed_for_head",
+            AsyncMock(return_value=current_head),
+        ),
+        patch("agent.tools.publish_review.list_findings_async", AsyncMock(return_value=[])),
+        patch(
+            "agent.tools.publish_review.post_pull_request_review",
+            AsyncMock(return_value={"id": 77}),
+        ) as post,
+        patch("agent.tools.publish_review._resolve_review_trace_url", AsyncMock(return_value=None)),
+        patch(
+            "agent.tools.publish_review._resolve_threads_for_resolved_findings",
+            AsyncMock(return_value=0),
+        ),
+        patch("agent.tools.publish_review.set_reviewer_thread_metadata", AsyncMock()),
+        patch("agent.tools.publish_review._record_reviewer_usage", AsyncMock()),
+        patch("agent.tools.publish_review.settle_review_check_run", AsyncMock()),
+    ):
+        result = await _publish_review_async(
+            owner="o",
+            repo="r",
+            pr_number=7,
+            head_sha="a" * 40,
+            token="t",
+            severity_threshold="medium",
+            cap=None,
+            is_re_review=False,
+            assessment=_assessment(),
+            state={"review_approval_policy": prepared_policy},
+        )
+    if expected_event is None:
+        assert result["success"] is False
+        assert "policy changed" in result["error"]
+        post.assert_not_awaited()
+    else:
+        assert result["success"] is True
+        assert post.await_args is not None
+        assert post.await_args.kwargs["event"] == expected_event
+        assert ("Risk:" in post.await_args.kwargs["body"]) is has_assessment
+        assert (await ASSESSMENTS.get("77") is not None) is has_assessment
+
+
+@pytest.mark.parametrize(
+    "pr",
+    [
+        {"state": "open", "draft": False, "head": {"sha": "b" * 40}},
+        {"state": "open", "draft": True, "head": {"sha": "a" * 40}},
+        {"state": "closed", "draft": False, "head": {"sha": "a" * 40}},
+        {},
+    ],
+)
+async def test_approval_rechecks_github_head_and_pr_state(pr: dict[str, object]) -> None:
+    from agent.review.publish import approval_allowed_for_head
+
+    response = MagicMock()
+    response.json.return_value = pr
+    with patch("agent.review.publish.github_request", AsyncMock(return_value=response)):
+        assert not await approval_allowed_for_head(
+            owner="o", repo="r", pr_number=7, head_sha="a" * 40, token="t"
+        )
+
+
+async def test_approved_review_posts_approve_event_for_reviewed_commit() -> None:
+    response = MagicMock()
+    response.status_code = 200
+    response.json.return_value = {"id": 77, "state": "APPROVED"}
+    with patch("agent.review.publish.github_request", AsyncMock(return_value=response)) as request:
+        await post_pull_request_review(
+            owner="o",
+            repo="r",
+            pr_number=7,
+            head_sha="a" * 40,
+            token="t",
+            body="Approved",
+            inline_comments=[],
+            event="APPROVE",
+        )
+    assert request.await_args is not None
+    payload = request.await_args.kwargs["json"]
+    assert payload["event"] == "APPROVE"
+    assert payload["commit_id"] == "a" * 40
+
+
+@pytest.mark.parametrize(
+    "status,error_body,retry,succeeds",
+    [
+        (422, {"errors": ["Can not approve your own pull request"]}, True, True),
+        (422, {"message": "Can not approve your own pull request"}, True, True),
+        (422, {"errors": [{"message": "Can not approve your own pull request"}]}, True, True),
+        (422, {"errors": ["Review body is too long"]}, False, False),
+        (500, {"message": "Can not approve your own pull request"}, False, False),
+        (422, {"errors": ["Can not approve your own pull request"]}, True, False),
+    ],
+)
+async def test_approval_publication_handles_github_rejections(
+    status: int, error_body: dict[str, object], retry: bool, succeeds: bool
+) -> None:
+    import httpx2
+
+    from agent.tools.publish_review import _publish_review_async
+
+    request = httpx2.Request("POST", "https://api.github.com/repos/o/r/pulls/7/reviews")
+    responses = [httpx2.Response(status, json=error_body, request=request)]
+    if retry:
+        responses.append(
+            httpx2.Response(
+                200 if succeeds else 422,
+                json={"id": 77} if succeeds else error_body,
+                request=request,
+            )
+        )
+    with (
+        patch("agent.tools.publish_review.get_thread_id_from_runtime", return_value="tid"),
+        patch(
+            "agent.tools.publish_review.get_workspace_settings",
+            AsyncMock(
+                return_value=WorkspaceSettings(
+                    {"approval_policy": "Docs only", "review_auto_approve": True}
+                )
+            ),
+        ),
+        patch("agent.tools.publish_review.approval_allowed_for_head", AsyncMock(return_value=True)),
+        patch("agent.tools.publish_review.list_findings_async", AsyncMock(return_value=[])),
+        patch("agent.review.publish.github_request", AsyncMock(side_effect=responses)) as post,
+        patch("agent.tools.publish_review._resolve_review_trace_url", AsyncMock(return_value=None)),
+        patch(
+            "agent.tools.publish_review._resolve_threads_for_resolved_findings",
+            AsyncMock(return_value=0),
+        ),
+        patch("agent.tools.publish_review.set_reviewer_thread_metadata", AsyncMock()) as metadata,
+        patch("agent.tools.publish_review._record_reviewer_usage", AsyncMock()),
+        patch("agent.tools.publish_review.settle_review_check_run", AsyncMock()) as settle_check,
+    ):
+        result = await _publish_review_async(
+            owner="o",
+            repo="r",
+            pr_number=7,
+            head_sha="a" * 40,
+            token="t",
+            severity_threshold="medium",
+            cap=None,
+            is_re_review=False,
+            assessment=_assessment(),
+            state={"review_approval_policy": "Docs only"},
+        )
+    assert result["success"] is succeeds
+    payloads = [call.kwargs["json"] for call in post.await_args_list]
+    assert [payload["event"] for payload in payloads] == (
+        ["APPROVE", "COMMENT"] if retry else ["APPROVE"]
+    )
+    if retry:
+        assert payloads[1]["commit_id"] == "a" * 40
+        assert "Would approve" in payloads[1]["body"]
+        assert "Approved" not in payloads[1]["body"]
+    saved = await ASSESSMENTS.get("77")
+    if succeeds:
+        assert saved is not None
+        assert saved.approved is False
+        assert saved.decision == "would_approve"
+        assert saved.head_sha == "a" * 40
+        metadata.assert_any_await("tid", last_reviewed_sha="a" * 40)
+        settle_check.assert_awaited_once()
+    else:
+        assert saved is None
+        assert "Failed to POST PR review" in result["error"]
+        metadata.assert_not_awaited()
+        settle_check.assert_not_awaited()

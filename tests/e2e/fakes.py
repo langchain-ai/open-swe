@@ -25,25 +25,24 @@ from e2e_env import (
 # --- Slack -----------------------------------------------------------------
 # (channel, thread_ts) -> list of {user, text, ts, blocks, is_bot}
 SLACK_MESSAGES: dict[tuple[str, str], list[dict[str, Any]]] = {}
+EPHEMERALS: list[dict[str, Any]] = []
 CODE_CHANNELS: dict[str, dict[str, Any]] = {}
 _slack_seq = [1]
+_slack_epoch = int(time.time())
 _code_channel_seq = [0]
 
 
 def next_slack_ts() -> str:
+    """A globally-unique Slack timestamp, for a message or a thread.
+
+    Slack event dedupe keys a delivery on ``channel:ts`` in the LangGraph store,
+    and thread ids are derived from the thread's ts — both outlive the process,
+    so a counter restarting at the same value would make a rerun's messages look
+    like redeliveries and its threads carry the previous run's state. Seeding
+    the second from the clock keeps every process in its own range, and reset()
+    leaves the counter alone so back-to-back tests never collide either."""
     _slack_seq[0] += 1
-    return f"1700000000.{_slack_seq[0]:06d}"
-
-
-_thread_seq = [0]
-
-
-def new_thread_ts() -> str:
-    """A globally-unique thread ts so every send maps to a fresh LangGraph thread
-    (the in-mem store persists across restarts, so reused ids would carry state).
-    Not reset by reset(), so back-to-back tests never collide."""
-    _thread_seq[0] += 1
-    return f"{int(time.time())}.{_thread_seq[0]:06d}"
+    return f"{_slack_epoch}.{_slack_seq[0]:06d}"
 
 
 def add_slack_message(
@@ -61,6 +60,14 @@ def add_slack_message(
             "is_bot": is_bot,
         }
     )
+    return ts
+
+
+def add_ephemeral(channel: str, user: str, text: str) -> str:
+    """Record an ephemeral reply. Open SWE tells a single clicker things this way
+    (why a vote was refused, for one), so a test has to be able to read them."""
+    ts = next_slack_ts()
+    EPHEMERALS.append({"channel": channel, "user": user, "text": text, "ts": ts})
     return ts
 
 
@@ -132,6 +139,8 @@ def update_code_channel(channel_id: str, **values: Any) -> dict[str, Any] | None
 # --- GitHub ----------------------------------------------------------------
 PULLS: list[dict[str, Any]] = []
 REPO_PRIVATE = [False]
+MERGE_METHOD_FLAGS = ("allow_squash_merge", "allow_merge_commit", "allow_rebase_merge")
+REPO_MERGE_METHODS: dict[tuple[str, str], dict[str, bool]] = {}
 _pr_seq = [0]
 _REMOTES = {
     (OWNER, REPO): BARE_REMOTE,
@@ -204,25 +213,85 @@ def _diff_files(owner: str, repo: str, base: str, head: str) -> list[dict[str, A
                     "filename": name,
                     "additions": int(adds) if adds.isdigit() else 0,
                     "deletions": int(dels) if dels.isdigit() else 0,
+                    "patch": _file_patch(remote, base, head, name),
                 }
             )
     return files
 
 
-def branch_exists(owner: str, repo: str, branch: str) -> bool:
-    """Check whether a branch exists in the bare remote (the fake GitHub)."""
+def _file_patch(remote: Path, base: str, head: str, filename: str) -> str | None:
+    """One file's unified diff, hunks only, as GitHub's ``patch`` field carries it.
+
+    ``None`` for a blob git produced no textual hunks for (a binary file), which
+    is how the real API reports one — and what callers key "no readable diff" on.
+    """
+    try:
+        out = _git("--git-dir", str(remote), "diff", base, head, "--", filename)
+    except subprocess.CalledProcessError:
+        return None
+    lines = out.splitlines()
+    start = next((index for index, line in enumerate(lines) if line.startswith("@@")), None)
+    return "\n".join(lines[start:]) if start is not None else None
+
+
+def _branch_tip(owner: str, repo: str, branch: str) -> str:
     remote = _REMOTES.get((owner, repo))
     if remote is None:
-        return False
+        return ""
     try:
-        _git("--git-dir", str(remote), "rev-parse", "--verify", f"refs/heads/{branch}")
-        return True
+        return _git(
+            "--git-dir", str(remote), "rev-parse", "--verify", f"refs/heads/{branch}"
+        ).strip()
     except subprocess.CalledProcessError:
-        return False
+        return ""
+
+
+def branch_exists(owner: str, repo: str, branch: str) -> bool:
+    """Check whether a branch exists in the bare remote (the fake GitHub)."""
+    return bool(_branch_tip(owner, repo, branch))
+
+
+def pulls() -> list[dict[str, Any]]:
+    """Every pull request, with any open one whose branch was pushed moved to the new head.
+
+    GitHub re-points a PR at each push and the new head starts with no checks.
+    """
+    for pull in PULLS:
+        if pull["state"] != "open" or pull["merged"]:
+            continue
+        tip = _branch_tip(pull["owner"], pull["repo"], pull["head"])
+        if not tip or tip == pull["branch_tip"]:
+            continue
+        files = _diff_files(pull["owner"], pull["repo"], pull["base"], pull["head"])
+        pull.update(
+            branch_tip=tip,
+            head_sha=tip,
+            files=files,
+            additions=sum(f["additions"] for f in files),
+            deletions=sum(f["deletions"] for f in files),
+            check_runs=[],
+            statuses=[],
+            updated_at=github_timestamp(),
+        )
+    return PULLS
+
+
+def github_timestamp(offset_seconds: float = 0.0) -> str:
+    return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(time.time() + offset_seconds))
 
 
 def create_pull(
-    owner: str, repo: str, *, head: str, base: str, title: str, body: str, draft: bool
+    owner: str,
+    repo: str,
+    *,
+    head: str,
+    base: str,
+    title: str,
+    body: str,
+    draft: bool,
+    author: str = "open-swe[bot]",
+    created_at: str | None = None,
+    updated_at: str | None = None,
 ) -> dict[str, Any]:
     _pr_seq[0] += 1
     number = _pr_seq[0]
@@ -233,6 +302,7 @@ def create_pull(
         "repo": repo,
         "head": head,
         "head_sha": f"{number:040x}",
+        "branch_tip": _branch_tip(owner, repo, head),
         "base": base,
         "title": title,
         "body": body,
@@ -245,11 +315,12 @@ def create_pull(
         "statuses": [],
         "review_threads": [],
         "reviews": [],
+        "issue_comments": [],
         "review_decision": "REVIEW_REQUIRED",
-        "author": "open-swe[bot]",
-        "created_at": time.strftime(
-            "%Y-%m-%dT%H:%M:%SZ", time.gmtime(time.time() - 5 * 24 * 60 * 60)
-        ),
+        "author": author,
+        "merge_method": None,
+        "created_at": created_at or github_timestamp(-5 * 24 * 60 * 60),
+        "updated_at": updated_at or github_timestamp(),
         "files": files,
         "additions": sum(f["additions"] for f in files),
         "deletions": sum(f["deletions"] for f in files),
@@ -264,7 +335,7 @@ def find_pull(
     return next(
         (
             pull
-            for pull in PULLS
+            for pull in pulls()
             if pull["number"] == number
             and (owner is None or pull["owner"] == owner)
             and (repo is None or pull["repo"] == repo)
@@ -277,11 +348,24 @@ def find_pull_by_sha(owner: str, repo: str, sha: str) -> dict[str, Any] | None:
     return next(
         (
             pull
-            for pull in PULLS
+            for pull in pulls()
             if pull["owner"] == owner and pull["repo"] == repo and pull["head_sha"] == sha
         ),
         None,
     )
+
+
+def pull_node_id(pull: dict[str, Any]) -> str:
+    return f"PR_node_{pull['owner']}_{pull['repo']}_{pull['number']}"
+
+
+def mark_pull_ready(node_id: str) -> dict[str, Any] | None:
+    pull = next((pull for pull in pulls() if pull_node_id(pull) == node_id), None)
+    if pull is None:
+        return None
+    pull["draft"] = False
+    pull["updated_at"] = github_timestamp()
+    return pull
 
 
 def update_pull_health(number: int, values: dict[str, Any]) -> dict[str, Any] | None:
@@ -335,6 +419,16 @@ def review_thread_graphql(thread: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def review_thread_count_graphql(threads: list[dict[str, Any]]) -> dict[str, Any]:
+    """``reviewThreads`` as the unresolved-count query selects it."""
+    return {
+        "nodes": [
+            {"isResolved": review_thread_graphql(thread)["isResolved"]} for thread in threads
+        ],
+        "pageInfo": {"hasNextPage": False, "endCursor": None},
+    }
+
+
 def check_graphql(check: dict[str, Any]) -> dict[str, Any]:
     return {
         "__typename": "CheckRun",
@@ -376,6 +470,35 @@ def pull_health_json(pull: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def review_rest_json(review: dict[str, Any], index: int) -> dict[str, Any]:
+    """A review as the REST ``/pulls/{n}/reviews`` list returns it.
+
+    The GraphQL fix path stores reviews as ``{author, state, body, url}``; accept
+    that shape as well as GitHub's own ``{id, user: {login}, state}``."""
+    user = review.get("user")
+    login = user.get("login") if isinstance(user, dict) else review.get("author")
+    review_id = review.get("id")
+    return {
+        "id": review_id
+        if isinstance(review_id, int) and not isinstance(review_id, bool)
+        else index + 1,
+        "user": {"login": login if isinstance(login, str) else ""},
+        "state": review.get("state", ""),
+        "body": review.get("body", ""),
+        "html_url": review.get("url"),
+    }
+
+
+def set_repo_merge_methods(owner: str, repo: str, flags: dict[str, bool]) -> dict[str, bool]:
+    resolved = {flag: bool(flags.get(flag, True)) for flag in MERGE_METHOD_FLAGS}
+    REPO_MERGE_METHODS[(owner, repo)] = resolved
+    return resolved
+
+
+def repo_merge_methods(owner: str, repo: str) -> dict[str, bool]:
+    return REPO_MERGE_METHODS.get((owner, repo)) or dict.fromkeys(MERGE_METHOD_FLAGS, True)
+
+
 def set_repo_private(value: bool) -> None:
     REPO_PRIVATE[0] = value
 
@@ -385,7 +508,7 @@ def repo_private() -> bool:
 
 
 # --- LangSmith snapshots ---------------------------------------------------
-# Captures the environment tools asked for: {"snapshot_id", "name", "sandbox_id"}.
+# Captures the workspace tools asked for: {"snapshot_id", "name", "sandbox_id"}.
 # The E2E sandbox is the local provider, so there is no real snapshot service —
 # this store stands in for it and is what the specs assert on.
 SNAPSHOTS: list[dict[str, Any]] = []
@@ -406,12 +529,100 @@ def record_snapshot_delete(snapshot_id: str) -> None:
     DELETED_SNAPSHOTS.append(snapshot_id)
 
 
+_review_seq = [0]
+
+# Repository permission per GitHub login, as ``/collaborators/{u}/permission``
+# reports it. Anyone absent reads as "read", which is what fails the vote gate.
+COLLABORATOR_PERMISSIONS: dict[str, str] = {}
+
+
+def collaborator_permission(login: str) -> str:
+    return COLLABORATOR_PERMISSIONS.get(login.lower(), "read")
+
+
+def set_collaborator_permission(login: str, permission: str) -> None:
+    COLLABORATOR_PERMISSIONS[login.lower()] = permission
+
+
+def submit_review(
+    number: int,
+    owner: str,
+    repo: str,
+    *,
+    author: str,
+    state: str,
+    commit_id: str,
+    body: str = "",
+) -> dict[str, Any] | None:
+    """Record a submitted PR review, as ``POST /pulls/{n}/reviews`` would.
+
+    GitHub rejects a self-approval, so an author approving their own pull
+    request is refused here too — that is exactly the case the expedited flow
+    has to survive without counting a GitHub review.
+    """
+    pull = find_pull(number, owner, repo)
+    if pull is None:
+        return None
+    if state == "APPROVE" and author == pull["author"]:
+        return {"_error": "Can not approve your own pull request"}
+    _review_seq[0] += 1
+    review = {
+        "id": _review_seq[0],
+        "author": author,
+        "user": {"login": author},
+        "state": "APPROVED" if state == "APPROVE" else state,
+        "body": body,
+        "commit_id": commit_id,
+        "url": f"https://github.com/{owner}/{repo}/pull/{number}#pullrequestreview-{_review_seq[0]}",
+        "submitted_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+    }
+    pull["reviews"].append(review)
+    if any(item["state"] == "APPROVED" for item in pull["reviews"]):
+        pull["review_decision"] = "APPROVED"
+    return review
+
+
+def merge_pull(
+    number: int, owner: str, repo: str, *, sha: str, merge_method: str
+) -> tuple[int, dict[str, Any]]:
+    """Merge a pull request the way the REST endpoint does: ``(status, body)``.
+
+    ``sha`` is the caller's claim about the head it reviewed. GitHub answers 409
+    when that no longer matches, which is the guarantee the expedited merge
+    leans on, so the fake enforces it rather than merging whatever is current.
+    """
+    pull = find_pull(number, owner, repo)
+    if pull is None:
+        return 404, {"message": "Not Found"}
+    if pull["state"] != "open" or pull["merged"]:
+        return 405, {"message": "Pull request is not mergeable"}
+    if pull["draft"]:
+        return 405, {"message": "Draft pull requests cannot be merged"}
+    if sha and sha != pull["head_sha"]:
+        return 409, {"message": "Head branch was modified. Review and try the merge again."}
+    if not pull["mergeable"]:
+        return 405, {"message": "Pull request is not mergeable"}
+    pull["merged"] = True
+    pull["state"] = "closed"
+    pull["merged_at"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    pull["merge_method"] = merge_method
+    return 200, {
+        "sha": pull["head_sha"],
+        "merged": True,
+        "message": "Pull Request successfully merged",
+    }
+
+
 def reset() -> None:
     SLACK_MESSAGES.clear()
+    EPHEMERALS.clear()
     CODE_CHANNELS.clear()
     PULLS.clear()
+    REPO_MERGE_METHODS.clear()
     SNAPSHOTS.clear()
     DELETED_SNAPSHOTS.clear()
+    COLLABORATOR_PERMISSIONS.clear()
     REPO_PRIVATE[0] = False
     _pr_seq[0] = 0
+    _review_seq[0] = 0
     seed_bare_remotes()

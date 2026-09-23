@@ -1,12 +1,11 @@
 /** @vitest-environment jsdom */
 
-import { cleanup, render } from "@testing-library/react"
+import { cleanup, render, screen } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
 import { AgentThreadPage } from "./AgentThreadPage"
 import { useAgentThread } from "@/features/agents/lib/queries"
 
-vi.mock("@tanstack/react-router", () => ({ Navigate: () => null }))
 vi.mock("@/features/agents/components/AgentThreadView", () => ({
   AgentThreadView: () => null,
 }))
@@ -16,6 +15,10 @@ vi.mock("@/features/agents/lib/provider/useIsInAgentThreadStream", () => ({
 }))
 vi.mock("@/features/agents/lib/queries", () => ({
   useAgentThread: vi.fn(),
+}))
+vi.mock("@/features/agents/lib/threadSource/ThreadSourceProvider", () => ({
+  ThreadSourceProvider: ({ children }: { children: React.ReactNode }) =>
+    children,
 }))
 
 const threadQuery = {
@@ -30,6 +33,23 @@ afterEach(() => {
 })
 
 describe("AgentThreadPage", () => {
+  it("keeps failed loads visible with thread diagnostics and recovery", () => {
+    vi.mocked(useAgentThread).mockReturnValue({
+      ...threadQuery,
+      data: undefined,
+      isError: true,
+      error: new Error("Request failed (503)"),
+    } as never)
+
+    render(<AgentThreadPage threadId="thread-1" />)
+
+    expect(screen.getByRole("alert").textContent).toContain("thread-1")
+    expect(screen.getByRole("alert").textContent).toContain(
+      "Request failed (503)"
+    )
+    expect(screen.getByRole("button", { name: "Try again" })).toBeTruthy()
+  })
+
   it("uses the active thread title as the document title", () => {
     vi.mocked(useAgentThread).mockReturnValue(threadQuery as never)
 

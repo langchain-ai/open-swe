@@ -23,7 +23,6 @@ from tests.analytics.helpers import DAY
 @pytest.fixture(autouse=True)
 async def usage_storage(analytics_db, monkeypatch):
     _, transaction = analytics_db
-    monkeypatch.setenv("POSTGRES_URI", "postgresql://localhost/analytics_test")
     for module in (directory, ingestion, outbox):
         monkeypatch.setattr(module, "transaction", transaction)
     monkeypatch.setattr(queries, "connection", transaction)
@@ -51,8 +50,9 @@ async def _start(invocation_id="run"):
         github_login="octo",
         user_email="octo@example.com",
         github_user_id=123,
+        display_name="Octo Cat",
         model_id="model",
-        effort=None,
+        effort="high",
         source="dashboard",
     )
 
@@ -95,8 +95,11 @@ async def test_queued_completion_and_cost_are_accounted_before_delivery(
         assert await conn.scalar(text("SELECT count(*) FROM run_projection")) == 0
     await _deliver(transaction, reverse=True)
     await _deliver(transaction)
+    async with transaction() as conn:
+        assert await conn.scalar(text("SELECT configured_effort FROM run_projection")) == "high"
     report = await _report()
     row = report["rows"][0]
+    assert row["user"]["name"] == "Octo Cat"
     assert row["invocations"] == 1
     assert row["total_tokens"] == 150
     assert row["total_cost_usd"] == 1.25

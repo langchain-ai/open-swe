@@ -57,18 +57,23 @@ const stub = vi.hoisted(() => {
 vi.mock("@tanstack/react-router", () => ({
   Link: ({ children }: { children?: React.ReactNode }) => <a>{children}</a>,
   useNavigate: () => stub.noop,
+  useRouterState: () => undefined,
+  useRouter: () => ({ options: { parseSearch: () => ({}) } }),
 }))
 
 vi.mock("@/lib/session", () => ({ useSession: () => stub.session }))
 vi.mock("@/lib/theme", () => ({ useTheme: () => stub.theme }))
+vi.mock("@/lib/chatRoutes", () => ({
+  useChatRoutes: () => ({ home: "/agents", thread: "/agents/$threadId" }),
+}))
 
 vi.mock("@/features/agents/lib/queries", async (actual) => ({
   ...((await actual()) as object),
   useSidebarActiveThread: () => stub.activeThread,
   useSidebarPinnedThreads: () => stub.pinned,
   useSidebarRecents: () => stub.emptyList,
-  useSidebarProjects: () => stub.emptyList,
-  useSidebarProjectThreads: () => stub.emptyList,
+  useSidebarRepos: () => stub.emptyList,
+  useSidebarRepoThreads: () => stub.emptyList,
   useInfiniteThreadsPages: () => stub.pages,
   useSeedAgentThreadDetails: () => stub.noop,
   // Faithful to TanStack Query: a fresh wrapper object every render, with a

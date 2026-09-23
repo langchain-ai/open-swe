@@ -20,8 +20,8 @@ from agent.incidents.models import (
     IncidentReportRecord,
 )
 from agent.input_messages import PersonIdentity
-from agent.slack.client import get_slack_channel_info
-from agent.slack.http import slack_client
+from agent.slack.channels import SlackChannel
+from agent.slack.http import SlackClient
 from agent.store import TypedStore, now_iso
 from agent.utils.langsmith import get_langsmith_trace_url
 
@@ -151,7 +151,7 @@ async def readable(
         or record.channel_id in policy.excluded_channel_ids
     ):
         return False
-    info = await get_slack_channel_info(record.channel_id, use_cache=False)
+    info = await SlackChannel.fetch(record.channel_id, use_cache=False)
     if info is None:
         if raise_on_unavailable:
             raise HTTPException(
@@ -162,7 +162,7 @@ async def readable(
 
 
 async def _auth_test() -> tuple[dict[str, Any], list[str] | None]:
-    async with slack_client(token=ENV.SLACK_BOT_TOKEN.get()) as client:
+    async with SlackClient.bot() as client:
         response = await client.auth_test()
     data = response.data if isinstance(response.data, dict) else {}
     header = response.headers.get("x-oauth-scopes") if response.headers else None
@@ -389,7 +389,7 @@ async def get_incident(id: str, *, include_setup: bool = False) -> dict[str, Any
 
 def requester_identity(actor: dict[str, Any]) -> PersonIdentity:
     login = str(actor.get("github_login") or actor.get("id") or "responder").replace(" ", "-")
-    person: PersonIdentity = {"id": f"github:{login}", "platform": "github", "github_login": login}
+    person: PersonIdentity = {"id": f"github:{login}", "github_login": login}
     person["display_name"] = login
     email = actor.get("email")
     if isinstance(email, str) and email:

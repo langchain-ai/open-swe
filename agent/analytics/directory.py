@@ -5,9 +5,32 @@ from uuid import UUID, uuid4
 from sqlalchemy import text
 
 from agent.analytics.capture import fail_soft
-from agent.analytics.identity import opaque_id, opaque_person
+from agent.analytics.identity import DisplayNameSource, opaque_id, opaque_person
 from agent.config import ENV
-from agent.database.analytics import configured, transaction, workspace_id
+from agent.database import configured, transaction
+from agent.database.analytics import workspace_id
+
+_GITHUB_PRECEDES = (
+    "((identity_directory.display_name_source IS NULL AND identity_directory.display_name IS NULL) "
+    "OR EXCLUDED.display_name_source = 'github')"
+)
+
+
+def _record_name(
+    terms: list[tuple[str | None, DisplayNameSource | None]],
+) -> tuple[str | None, DisplayNameSource | None]:
+    def _priority(term: tuple[str | None, DisplayNameSource | None]) -> int:
+        value, source = term
+        if source == "github":
+            return 0
+        if value is not None and value.strip() and source is None:
+            return 1
+        return 2
+
+    for value, source in sorted(terms, key=_priority):
+        if value is not None and value.strip():
+            return value, source
+    return None, None
 
 
 @fail_soft
@@ -17,6 +40,7 @@ async def upsert_person(
     immutable_person_key: str | int | None,
     github_login: str | None = None,
     display_name: str | None = None,
+    display_name_source: DisplayNameSource | None = None,
     email: str | None = None,
     team_key: str | None = None,
 ) -> None:
@@ -25,6 +49,7 @@ async def upsert_person(
             immutable_person_key=immutable_person_key,
             github_login=github_login,
             display_name=display_name,
+            display_name_source=display_name_source or "github",
             email=email,
             team_key=team_key,
         )
@@ -35,16 +60,28 @@ async def upsert_person(
     async with transaction() as conn:
         await conn.execute(
             text(
-                """
+                f"""
                 INSERT INTO identity_directory (
-                    workspace_id, person_id, github_login, display_name, email, team_id,
-                    anonymize_after
+                    workspace_id, person_id, github_login, display_name, display_name_source,
+                    email, team_id, anonymize_after
                 ) VALUES (
-                    :workspace_id, :person_id, :github_login, :display_name, :email, :team_id,
+                    :workspace_id, :person_id, :github_login, :display_name, :display_name_source,
+                    :email, :team_id,
                     clock_timestamp() + (:months * interval '1 month')
                 ) ON CONFLICT (workspace_id, person_id) DO UPDATE SET
                     github_login = COALESCE(EXCLUDED.github_login, identity_directory.github_login),
-                    display_name = COALESCE(EXCLUDED.display_name, identity_directory.display_name),
+                    display_name = CASE
+                        WHEN NULLIF(BTRIM(EXCLUDED.display_name), '') IS NULL
+                            THEN identity_directory.display_name
+                        WHEN {_GITHUB_PRECEDES} THEN EXCLUDED.display_name
+                        ELSE identity_directory.display_name
+                    END,
+                    display_name_source = CASE
+                        WHEN NULLIF(BTRIM(EXCLUDED.display_name), '') IS NULL
+                            THEN identity_directory.display_name_source
+                        WHEN {_GITHUB_PRECEDES} THEN EXCLUDED.display_name_source
+                        ELSE identity_directory.display_name_source
+                    END,
                     email = COALESCE(EXCLUDED.email, identity_directory.email),
                     team_id = COALESCE(EXCLUDED.team_id, identity_directory.team_id),
                     anonymize_after = EXCLUDED.anonymize_after,
@@ -56,6 +93,7 @@ async def upsert_person(
                 "person_id": person_id,
                 "github_login": github_login,
                 "display_name": display_name,
+                "display_name_source": display_name_source,
                 "email": email,
                 "team_id": opaque_id("team", team_key),
                 "months": ENV.ANALYTICS_PERSON_MONTHS.get_int(13),
@@ -112,6 +150,7 @@ async def resolve_person(
     github_login: str | None = None,
     email: str | None = None,
     display_name: str | None = None,
+    display_name_source: DisplayNameSource | None = None,
     team_key: str | None = None,
 ) -> UUID | None:
     """Resolve verified product identity, upgrading earlier login/email-only captures."""
@@ -135,12 +174,12 @@ async def resolve_person(
             (
                 await conn.execute(
                     text("""
-                    SELECT d.* FROM identity_directory d
-                    WHERE d.workspace_id = :workspace_id AND (
-                        d.person_id = :immutable_id
-                        OR lower(d.github_login) = :login OR lower(d.email) = :email)
-                    ORDER BY d.updated_at DESC, d.person_id
-                """),
+                      SELECT d.* FROM identity_directory d
+                      WHERE d.workspace_id = :workspace_id AND (
+                          d.person_id = :immutable_id
+                          OR lower(d.github_login) = :login OR lower(d.email) = :email)
+                      ORDER BY d.updated_at DESC, d.person_id
+                  """),
                     {
                         "workspace_id": workspace_id(),
                         "immutable_id": immutable_id,
@@ -178,21 +217,33 @@ async def resolve_person(
         ]
         old_ids = [row["person_id"] for row in merged if row["person_id"] != person_id]
         team_id = opaque_id("team", team_key)
+        name_terms: list[tuple[str | None, DisplayNameSource | None]] = [
+            (display_name, display_name_source)
+        ]
         for row in sorted(merged, key=lambda row: row["person_id"] != person_id):
             login = login or row["github_login"]
             email = email or row["email"]
-            display_name = display_name or row["display_name"]
+            name_terms.append((row["display_name"], row["display_name_source"]))
             team_id = team_id or row["team_id"]
+        # Rows naming a durable ID the merge just cleared keep their name for that owner.
+        display_name, display_name_source = _record_name(name_terms)
+        if display_name is None:
+            for row in rows:
+                if row["person_id"] == person_id or row["identity_kind"] == "provisional":
+                    if row["display_name"] is not None and str(row["display_name"]).strip():
+                        display_name = row["display_name"]
+                        display_name_source = row["display_name_source"]
+                        break
         # Mutable handles can change owners without transferring the previous owner's history.
         await conn.execute(
             text("""
-                UPDATE identity_directory SET
-                    github_login = CASE WHEN lower(github_login) = :login THEN NULL ELSE github_login END,
-                    email = CASE WHEN lower(email) = :email THEN NULL ELSE email END
-                WHERE workspace_id = :workspace_id AND person_id <> :person_id
-                    AND identity_kind = 'immutable'
-                    AND (lower(github_login) = :login OR lower(email) = :email)
-            """),
+                  UPDATE identity_directory SET
+                      github_login = CASE WHEN lower(github_login) = :login THEN NULL ELSE github_login END,
+                      email = CASE WHEN lower(email) = :email THEN NULL ELSE email END
+                  WHERE workspace_id = :workspace_id AND person_id <> :person_id
+                      AND identity_kind = 'immutable'
+                      AND (lower(github_login) = :login OR lower(email) = :email)
+              """),
             {
                 "workspace_id": workspace_id(),
                 "person_id": person_id,
@@ -216,26 +267,40 @@ async def resolve_person(
                 {"workspace_id": workspace_id(), "old_ids": old_ids},
             )
         await conn.execute(
-            text("""
-                INSERT INTO identity_directory (
-                    workspace_id, person_id, identity_kind, github_login, display_name, email, team_id, anonymize_after
-                ) VALUES (
-                    :workspace_id, :person_id, :identity_kind, :login, :display_name, :email, :team_id,
-                    clock_timestamp() + (:months * interval '1 month')
-                ) ON CONFLICT (workspace_id, person_id) DO UPDATE SET
-                    github_login = COALESCE(EXCLUDED.github_login, identity_directory.github_login),
-                    display_name = COALESCE(EXCLUDED.display_name, identity_directory.display_name),
-                    email = COALESCE(EXCLUDED.email, identity_directory.email),
-                    team_id = COALESCE(EXCLUDED.team_id, identity_directory.team_id),
-                    anonymize_after = EXCLUDED.anonymize_after, updated_at = clock_timestamp(),
-                    identity_kind = EXCLUDED.identity_kind
-            """),
+            text(f"""
+                  INSERT INTO identity_directory (
+                      workspace_id, person_id, identity_kind, github_login, display_name,
+                      display_name_source, email, team_id, anonymize_after
+                  ) VALUES (
+                      :workspace_id, :person_id, :identity_kind, :login, :display_name,
+                      :display_name_source, :email, :team_id,
+                      clock_timestamp() + (:months * interval '1 month')
+                  ) ON CONFLICT (workspace_id, person_id) DO UPDATE SET
+                      github_login = COALESCE(EXCLUDED.github_login, identity_directory.github_login),
+                      display_name = CASE
+                          WHEN NULLIF(BTRIM(EXCLUDED.display_name), '') IS NULL
+                              THEN identity_directory.display_name
+                          WHEN {_GITHUB_PRECEDES} THEN EXCLUDED.display_name
+                          ELSE identity_directory.display_name
+                      END,
+                      display_name_source = CASE
+                          WHEN NULLIF(BTRIM(EXCLUDED.display_name), '') IS NULL
+                              THEN identity_directory.display_name_source
+                          WHEN {_GITHUB_PRECEDES} THEN EXCLUDED.display_name_source
+                          ELSE identity_directory.display_name_source
+                      END,
+                      email = COALESCE(EXCLUDED.email, identity_directory.email),
+                      team_id = COALESCE(EXCLUDED.team_id, identity_directory.team_id),
+                      anonymize_after = EXCLUDED.anonymize_after, updated_at = clock_timestamp(),
+                      identity_kind = EXCLUDED.identity_kind
+              """),
             {
                 "workspace_id": workspace_id(),
                 "person_id": person_id,
                 "login": login,
                 "identity_kind": identity_kind,
                 "display_name": display_name,
+                "display_name_source": display_name_source,
                 "email": email,
                 "team_id": team_id,
                 "months": ENV.ANALYTICS_PERSON_MONTHS.get_int(13),

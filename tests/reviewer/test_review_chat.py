@@ -8,7 +8,7 @@ import pytest
 from deepagents.middleware.filesystem import FilesystemMiddleware
 from fastapi import HTTPException
 
-from agent.dashboard import review_chat_api
+from agent.review import chat as review_chat_api
 
 # `agent.tools.__init__` rebinds these names to the tool *functions*, shadowing
 # the submodules. Import the real modules so we can monkeypatch their globals.
@@ -40,7 +40,7 @@ def _fake_async_client(handler):
     return _FakeClient
 
 
-# --- chat thread list / delete / title ---------------------------------------
+# --- chat thread title -------------------------------------------------------
 
 
 def test_derive_title_from_first_user_message() -> None:
@@ -57,84 +57,6 @@ def test_derive_title_defaults_when_no_message() -> None:
 def test_derive_title_truncates() -> None:
     params = {"input": {"messages": [{"type": "human", "content": "x" * 200}]}}
     assert len(review_chat_api._derive_title(params)) == review_chat_api._TITLE_MAX_CHARS
-
-
-@pytest.mark.asyncio
-async def test_list_review_chat_threads_scopes_and_maps(monkeypatch) -> None:
-    captured: dict[str, Any] = {}
-
-    async def search(**kwargs: Any) -> list[dict[str, Any]]:
-        captured["metadata"] = kwargs.get("metadata")
-        return [
-            {
-                "thread_id": "c1",
-                "updated_at": "2026-06-15T00:00:00Z",
-                "metadata": {"title": "Why structs?"},
-            },
-            {"thread_id": "c2", "metadata": {}},  # untitled -> default label
-        ]
-
-    client = SimpleNamespace(threads=SimpleNamespace(search=search))
-    monkeypatch.setattr(review_chat_api, "langgraph_client", lambda: client)
-
-    threads = await review_chat_api.list_review_chat_threads("acme", "repo", 7, "octocat")
-    assert captured["metadata"] == {
-        "kind": "review_chat",
-        "github_login": "octocat",
-        "repo_owner": "acme",
-        "repo_name": "repo",
-        "pr_number": 7,
-    }
-    assert threads[0] == {
-        "thread_id": "c1",
-        "title": "Why structs?",
-        "updated_at": "2026-06-15T00:00:00Z",
-    }
-    assert threads[1]["title"] == "New chat"
-
-
-@pytest.mark.asyncio
-async def test_delete_review_chat_thread_checks_ownership(monkeypatch) -> None:
-    deleted: list[str] = []
-
-    async def get(thread_id: str) -> dict[str, Any]:
-        return {
-            "thread_id": thread_id,
-            "metadata": {
-                "kind": "review_chat",
-                "github_login": "octocat",
-                "repo_owner": "acme",
-                "repo_name": "repo",
-                "pr_number": 7,
-            },
-        }
-
-    async def delete(thread_id: str) -> None:
-        deleted.append(thread_id)
-
-    client = SimpleNamespace(threads=SimpleNamespace(get=get, delete=delete))
-    monkeypatch.setattr(review_chat_api, "langgraph_client", lambda: client)
-
-    await review_chat_api.delete_review_chat_thread("acme", "repo", 7, "octocat", "c1")
-    assert deleted == ["c1"]
-
-
-@pytest.mark.asyncio
-async def test_delete_review_chat_thread_rejects_other_user(monkeypatch) -> None:
-    async def get(thread_id: str) -> dict[str, Any]:
-        return {
-            "thread_id": thread_id,
-            "metadata": {"kind": "review_chat", "github_login": "hubot"},
-        }
-
-    async def delete(thread_id: str) -> None:
-        raise AssertionError("should not delete another user's chat")
-
-    client = SimpleNamespace(threads=SimpleNamespace(get=get, delete=delete))
-    monkeypatch.setattr(review_chat_api, "langgraph_client", lambda: client)
-
-    with pytest.raises(Exception):  # noqa: B017,PT011 - HTTPException(404)
-        await review_chat_api.delete_review_chat_thread("acme", "repo", 7, "octocat", "c1")
 
 
 def _patch_thread_metadata(monkeypatch, metadata: dict[str, Any] | None) -> None:
@@ -411,7 +333,11 @@ def _client_for_enrich(existing_metadata: dict[str, Any] | None) -> tuple[Any, d
 
 
 def _patch_enrich_deps(
-    monkeypatch, *, metadata: dict[str, Any] | None, current_head: str = "abc123def456"
+    monkeypatch,
+    *,
+    metadata: dict[str, Any] | None,
+    current_head: str = "abc123def456",
+    last_reviewed: str = "",
 ) -> dict[str, Any]:
     client, captured = _client_for_enrich(metadata)
     monkeypatch.setattr(review_chat_api, "langgraph_client", lambda: client)
@@ -433,6 +359,11 @@ def _patch_enrich_deps(
     monkeypatch.setattr(review_chat_api, "fetch_pr_diff", fake_diff)
     monkeypatch.setattr(review_chat_api, "get_github_app_installation_token", fake_token)
     monkeypatch.setattr(review_chat_api, "get_pr_head_sha", fake_head)
+
+    async def fake_last_reviewed(owner, repo, pr_number):
+        return last_reviewed
+
+    monkeypatch.setattr(review_chat_api, "_last_reviewed_sha", fake_last_reviewed)
     return captured
 
 
@@ -495,7 +426,30 @@ async def test_enrich_chat_command_reseeds_on_head_change(monkeypatch) -> None:
     files = params["input"]["files"]
     assert set(files) == {"/pr/overview.md", "/pr/diff.patch", "/pr/findings.md"}
     assert params["config"]["configurable"]["chat_head_sha"] == "abc123def456"
-    assert {"chat_head_sha": "abc123def456"} in captured["updated"]
+    assert {"chat_head_sha": "abc123def456", "chat_review_sha": ""} in captured["updated"]
+
+
+@pytest.mark.asyncio
+async def test_enrich_chat_command_reseeds_when_a_review_publishes_on_the_same_head(
+    monkeypatch,
+) -> None:
+    # The chat started before any review; a review of the same head has since
+    # published, so its findings must replace the seeded "no findings" file.
+    captured = _patch_enrich_deps(
+        monkeypatch,
+        metadata={"kind": "review_chat", "chat_head_sha": "abc123def456"},
+        last_reviewed="abc123def456",
+    )
+    command = {"method": "run.start", "params": {"input": {"messages": []}}}
+
+    enriched = await review_chat_api._enrich_chat_command(
+        command, owner="acme", repo="repo", pr_number=7, login="octocat", thread_id="ct-1"
+    )
+
+    assert "/pr/findings.md" in enriched["params"]["input"]["files"]
+    assert {"chat_head_sha": "abc123def456", "chat_review_sha": "abc123def456"} in captured[
+        "updated"
+    ]
 
 
 @pytest.mark.asyncio

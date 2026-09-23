@@ -7,6 +7,9 @@ from langgraph.graph.state import RunnableConfig
 from langgraph.runtime import Runtime
 
 from agent import reviewer
+from agent.dashboard.workspace_settings import WorkspaceSettings
+
+pytestmark = pytest.mark.usefixtures("fake_store")
 
 
 def test_reviewer_system_prompt_org_guidelines_precede_repo_style() -> None:
@@ -109,7 +112,7 @@ async def test_reviewer_resolves_app_installation_token_at_run_start() -> None:
 
 
 @pytest.mark.asyncio
-async def test_reviewer_reuses_app_token_for_sandbox_proxy() -> None:
+async def test_reviewer_limits_sandbox_to_reviewed_repository_in_workspace() -> None:
     config: RunnableConfig = {
         "configurable": {
             "__is_for_execution__": True,
@@ -118,6 +121,7 @@ async def test_reviewer_reuses_app_token_for_sandbox_proxy() -> None:
             "source": "github",
             "pr_number": 42,
             "base_sha": "base",
+            "workspace": "oss",
         },
         "metadata": {},
     }
@@ -155,8 +159,8 @@ async def test_reviewer_reuses_app_token_for_sandbox_proxy() -> None:
 
     mock_sandbox.assert_awaited_once_with(
         "reviewer-thread-id",
-        github_proxy_token="app-token",
-        github_proxy_repositories=["repo"],
+        workspace_slug="oss",
+        github_proxy_repositories=["acme/repo"],
         allow_replacement=True,
     )
 
@@ -206,7 +210,7 @@ async def test_reviewer_applies_eval_model_and_effort_overrides() -> None:
             "pr_url": "https://github.com/acme/repo/pull/1",
             "base_sha": "base",
             "head_sha": "head",
-            "reviewer_model_id": "anthropic:claude-opus-5",
+            "reviewer_model_id": "anthropic:claude-opus-5-5",
             "reviewer_reasoning_effort": "high",
             "reviewer_subagent_model_id": "openai:gpt-5.6-sol",
             "reviewer_subagent_reasoning_effort": "low",
@@ -237,7 +241,7 @@ async def test_reviewer_applies_eval_model_and_effort_overrides() -> None:
         await reviewer.get_reviewer_agent(config)
 
     main_model_call = make_model.call_args_list[0]
-    assert main_model_call.args == ("anthropic:claude-opus-5",)
+    assert main_model_call.args == ("anthropic:claude-opus-5-5",)
     assert main_model_call.kwargs["thinking"] == {"type": "adaptive", "display": "summarized"}
     assert main_model_call.kwargs["effort"] == "high"
     subagent_model_call = make_model.call_args_list[1]
@@ -256,7 +260,7 @@ async def test_reviewer_subagent_inherits_eval_model_without_explicit_override()
             "pr_url": "https://github.com/acme/repo/pull/1",
             "base_sha": "base",
             "head_sha": "head",
-            "reviewer_model_id": "anthropic:claude-opus-5",
+            "reviewer_model_id": "anthropic:claude-opus-5-5",
             "reviewer_reasoning_effort": "high",
         },
         "metadata": {},
@@ -285,11 +289,11 @@ async def test_reviewer_subagent_inherits_eval_model_without_explicit_override()
         await reviewer.get_reviewer_agent(config)
 
     main_model_call = make_model.call_args_list[0]
-    assert main_model_call.args == ("anthropic:claude-opus-5",)
+    assert main_model_call.args == ("anthropic:claude-opus-5-5",)
     assert main_model_call.kwargs["thinking"] == {"type": "adaptive", "display": "summarized"}
     assert main_model_call.kwargs["effort"] == "high"
     subagent_model_call = make_model.call_args_list[1]
-    assert subagent_model_call.args == ("anthropic:claude-opus-5",)
+    assert subagent_model_call.args == ("anthropic:claude-opus-5-5",)
     assert subagent_model_call.kwargs["thinking"] == {"type": "adaptive", "display": "summarized"}
     assert subagent_model_call.kwargs["effort"] == "high"
 
@@ -402,9 +406,11 @@ async def test_reviewer_inlines_org_guidelines_into_system_prompt() -> None:
             return_value="/workspace",
         ),
         patch(
-            "agent.reviewer.get_org_review_guidelines",
+            "agent.reviewer.cached_workspace_settings",
             new_callable=AsyncMock,
-            return_value="Never approve a PR that disables a CI gate.",
+            return_value=WorkspaceSettings(
+                {"org_guidelines": "Never approve a PR that disables a CI gate."}
+            ),
         ),
         patch(
             "agent.review.styles.get_repo_custom_prompt",

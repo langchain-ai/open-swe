@@ -20,7 +20,18 @@ from agent.input_messages import (
 from agent.prompts import render_prompt
 from agent.source_context import SourceContext
 from agent.thread_ids import linear_issue_thread_id
+from agent.users import User
 from agent.webhooks import common
+
+
+def _linear_person(author: dict[str, Any]) -> PersonIdentity:
+    key = author.get("id") or author.get("email") or author.get("name") or "unknown"
+    person: PersonIdentity = {"id": f"linear:{str(key).replace(' ', '-')}"}
+    if author.get("name"):
+        person["display_name"] = str(author["name"])
+    if author.get("email"):
+        person["email"] = str(author["email"])
+    return person
 
 
 async def process_linear_issue(  # noqa: PLR0912, PLR0915
@@ -172,15 +183,17 @@ async def process_linear_issue(  # noqa: PLR0912, PLR0915
     description_blocks: list[dict[str, Any]] = [cast(dict[str, Any], create_text_block(prompt))]
     image_blocks_by_url: dict[str, dict[str, Any]] = {}
 
-    # Resolve the GitHub login from the Linear email via the same user-mapping
-    # store Slack uses, so PRs open *as the triggering user* and the thread is
-    # tagged for the dashboard.
-    mapped_login = await common.resolve_login_from_email_async(user_email) if user_email else None
+    # Resolve the GitHub login from the Linear email the same way Slack does, so
+    # PRs open *as the triggering user* and the thread is tagged for the dashboard.
+    mapped_login = await User.login_for_email(user_email) if user_email else None
+    # The repository's workspace is the one this run lands in, so its
+    # default model and Fable flag are the ones the vision fallback checks.
+    workspace = await common.workspace_for_repo_config(repo_config)
 
     image_model_override: tuple[str, str] | None = None
     if image_urls:
         image_urls = common.dedupe_urls(image_urls)
-        resolved_model_id = await common.resolve_agent_model_id(mapped_login)
+        resolved_model_id = await common.resolve_agent_model_id(mapped_login, workspace=workspace)
         if not common.model_supports_images(resolved_model_id):
             fallback_model_id, fallback_effort = common.default_vision_model_pair()
             common.logger.info(
@@ -234,6 +247,9 @@ async def process_linear_issue(  # noqa: PLR0912, PLR0915
         configurable["agent_model_id"] = image_model_override[0]
         configurable["agent_effort"] = image_model_override[1]
 
+    configurable["workspace"] = workspace
+    configurable["environment"] = workspace
+
     await common.upsert_agent_thread_metadata(
         thread_id,
         source="linear",
@@ -242,6 +258,7 @@ async def process_linear_issue(  # noqa: PLR0912, PLR0915
         user_email=user_email or "",
         title=title or identifier or "Linear issue",
         source_context=SourceContext.parse({"linear_issue": configurable["linear_issue"]}),
+        workspace=workspace,
     )
 
     run_messages = [
@@ -266,16 +283,13 @@ async def process_linear_issue(  # noqa: PLR0912, PLR0915
             },
         ),
     ]
-    introduced: set[str] = set()
+    # The last comment triggers the run, and the run describes its author itself.
+    introduced: set[str] = {
+        _linear_person(comment.get("user") or {})["id"] for comment in included_comments[-1:]
+    }
     for comment in included_comments:
-        author = comment.get("user") or {}
-        author_key = author.get("id") or author.get("email") or author.get("name") or "unknown"
-        sender_id = f"linear:{str(author_key).replace(' ', '-')}"
-        person: PersonIdentity = {"id": sender_id, "platform": "linear"}
-        if author.get("name"):
-            person["display_name"] = str(author["name"])
-        if author.get("email"):
-            person["email"] = str(author["email"])
+        person = _linear_person(comment.get("user") or {})
+        sender_id = person["id"]
         if sender_id not in introduced:
             run_messages.append(person_introduction(person))
             introduced.add(sender_id)

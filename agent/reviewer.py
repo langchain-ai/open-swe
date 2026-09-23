@@ -40,13 +40,7 @@ from langchain.agents.middleware.types import AgentMiddleware
 from langchain_core.language_models.chat_models import BaseChatModel
 
 from agent.dashboard.options import gate_fable_model
-from agent.dashboard.team_settings import (
-    get_effective_gateway_enabled,
-    get_org_review_guidelines,
-    get_team_default_grouping_model,
-    get_team_default_model_pair,
-    get_team_fable_enabled,
-)
+from agent.dashboard.workspace_settings_cache import cached_workspace_settings
 from agent.github.app import get_github_app_installation_token_with_expiry
 from agent.github.thread_token import cache_github_token_for_thread
 from agent.middleware import (
@@ -68,6 +62,7 @@ from agent.middleware import (
 from agent.middleware.prepare_run import PrepareRunState
 from agent.middleware.sandbox_circuit_breaker import post_sandbox_unreachable_notification
 from agent.prompts import apply_tool_descriptions, load_prompt, render_prompt
+from agent.review.author_guidance import GuidanceView
 from agent.review.diff import (
     changed_files,
     compute_diff_line_set,
@@ -80,9 +75,11 @@ from agent.review.findings import Finding
 from agent.review.findings import (
     list_findings as list_findings_async,
 )
-from agent.review.groups import maybe_generate_and_store_diff_groups
 from agent.review.publish import fetch_pr_review_threads
 from agent.review.reconcile import reconcile_findings_with_review_threads
+from agent.review.styles import get_approval_policy
+from agent.review.walkthrough import WalkthroughView
+from agent.review_scout.launch import ReviewScoutTarget
 from agent.run_config import RunConfig
 from agent.runtime import (
     DEFAULT_LLM_MAX_TOKENS,
@@ -175,6 +172,7 @@ def _reviewer_system_prompt(
     head_sha: str = "",
     reviewer_eval: bool = False,
     org_guidelines: str | None = None,
+    approval_policy: str | None = None,
     repo_style_prompt: str | None = None,
     agents_md_content: str | None = None,
     scoped_agents_md: dict[str, str] | None = None,
@@ -187,6 +185,11 @@ def _reviewer_system_prompt(
         repo_name=repo_name or "<repo>",
         pr_number=pr_number if pr_number != "" else "<pr_number>",
         historical_review_guidance="" if reviewer_eval else HISTORICAL_REVIEW_GUIDANCE,
+        approval_assessment=(
+            render_prompt("reviewer/approval-assessment.md", approval_policy=approval_policy)
+            if approval_policy and not reviewer_eval
+            else ""
+        ),
         repo_checkout_note=_repo_checkout_note(
             repo_ready=repo_ready,
             working_dir=working_dir,
@@ -291,6 +294,50 @@ def _format_pr_overview(pr_title: str, pr_body: str) -> str:
     safe_title = _escape_for_data_block(title)
     safe_body = _escape_for_data_block(body) if body else "_(no description provided)_"
     return render_prompt("reviewer/pr-overview.md", title=safe_title, body=safe_body)
+
+
+def _format_author_guidance(points: list[GuidanceView]) -> str:
+    """Render the steering points the review scout recorded, or ``""`` without any."""
+    if not points:
+        return ""
+    lines: list[str] = []
+    for point in points:
+        author = f" ({point.author})" if point.author else ""
+        quote = "\n".join(f"  > {line}" for line in point.quote.splitlines())
+        lines.append(f"- {point.summary}{author}\n{quote}")
+    return render_prompt("reviewer/author-guidance.md", points="\n".join(lines))
+
+
+def _format_line_ranges(prefix: str, ranges: list[tuple[int, int]]) -> list[str]:
+    return [
+        f"{prefix}{start}" if start == end else f"{prefix}{start}-{end}" for start, end in ranges
+    ]
+
+
+def _format_walkthrough(walkthrough: WalkthroughView | None) -> str:
+    """Render the scout's steps as an untrusted-data block, or ``""`` without one."""
+    if walkthrough is None or not walkthrough.steps:
+        return ""
+    steps: list[str] = []
+    for step in walkthrough.steps:
+        files = "\n".join(
+            " ".join(
+                [
+                    _escape_for_data_block(file.path),
+                    *_format_line_ranges("+", file.added),
+                    *_format_line_ranges("-", file.deleted),
+                ]
+            )
+            for file in step.files
+        )
+        steps.append(
+            f'<step index="{step.index}">\n'
+            f"<title>{_escape_for_data_block(step.title)}</title>\n"
+            f"<summary>{_escape_for_data_block(step.summary)}</summary>\n"
+            f"<files>\n{files}\n</files>\n"
+            "</step>"
+        )
+    return render_prompt("reviewer/walkthrough.md", steps="\n".join(steps))
 
 
 def _build_first_review_context(
@@ -428,6 +475,10 @@ _DATA_BLOCK_WRAPPER_TAGS = (
     "body",
     "pr_overview",
     "title",
+    "review_walkthrough",
+    "step",
+    "summary",
+    "files",
 )
 _CLOSING_TAG_RE = re.compile(
     r"</\s*(" + "|".join(_DATA_BLOCK_WRAPPER_TAGS) + r")\s*>",
@@ -549,11 +600,6 @@ def _format_existing_findings(findings: list[Finding]) -> str:
     return "\n".join(lines) if lines else "_(no open findings)_"
 
 
-# Strong references to fire-and-forget background tasks (e.g. the AI-sorted
-# diff grouping pass) so the event loop doesn't garbage-collect them mid-flight.
-_BACKGROUND_TASKS: set[asyncio.Task[None]] = set()
-
-
 def _make_model_or_defer(
     model_id: str,
     *,
@@ -567,63 +613,6 @@ def _make_model_or_defer(
         return make_deferred_error_model(e, model_id=model_id)
 
 
-def _on_background_task_done(task: asyncio.Task[None]) -> None:
-    _BACKGROUND_TASKS.discard(task)
-    if task.cancelled():
-        return
-    exc = task.exception()
-    if exc is not None:
-        logger.warning("Background reviewer task failed: %s", exc)
-
-
-async def _resolve_grouping_model(cfg: RunConfig, *, use_gateway: bool) -> BaseChatModel:
-    """Resolve the model for the diff-grouping pass.
-
-    Per-run override (``grouping_model_id``/``grouping_reasoning_effort``) wins;
-    otherwise the team default, which itself inherits the reviewer subagent
-    model when no grouping-specific model is configured.
-    """
-    if cfg.grouping_model_id:
-        model_id = cfg.grouping_model_id
-        effort = cfg.grouping_reasoning_effort
-    else:
-        model_id, effort = await get_team_default_grouping_model()
-    model_id, effort = gate_fable_model(
-        model_id, effort, fable_enabled=await get_team_fable_enabled()
-    )
-    model_kwargs = provider_model_kwargs(
-        model_id,
-        effort,
-        max_tokens=DEFAULT_LLM_MAX_TOKENS,
-        openai_reasoning_default=DEFAULT_LLM_REASONING,
-    )
-    return _make_model_or_defer(model_id, use_gateway=use_gateway, **model_kwargs)
-
-
-async def _cached_reviewer_team_defaults():
-    return await ttl_cache.cached(
-        "team-default-model-pair:reviewer",
-        60,
-        lambda: get_team_default_model_pair("reviewer"),
-    )
-
-
-async def _cached_gateway_enabled() -> bool:
-    return await ttl_cache.cached(
-        "team:gateway-enabled",
-        60,
-        get_effective_gateway_enabled,
-    )
-
-
-async def _cached_org_review_guidelines() -> str | None:
-    return await ttl_cache.cached(
-        "reviewer:org-guidelines",
-        300,
-        get_org_review_guidelines,
-    )
-
-
 async def _cached_api_standards_skill() -> str | None:
     return await ttl_cache.cached(
         "reviewer:api-standards-skill",
@@ -635,6 +624,15 @@ async def _cached_api_standards_skill() -> str | None:
 class PrepareReviewerRunState(PrepareRunState):
     diff_text: NotRequired[str]
     diff_line_set: NotRequired[dict[str, dict[str, set[int]]] | None]
+    review_approval_policy: NotRequired[str | None]
+
+
+async def _cached_org_guidelines(workspace: str | None) -> str | None:
+    return (await cached_workspace_settings(workspace)).org_review_guidelines
+
+
+async def _review_approval_policy(owner: str, repo: str, workspace: str | None) -> str | None:
+    return await get_approval_policy(owner, repo, await cached_workspace_settings(workspace))
 
 
 async def _ensure_reviewer_sandbox_for_thread(
@@ -658,8 +656,8 @@ async def _ensure_reviewer_sandbox_for_thread(
     return (
         await ensure_sandbox_for_thread(
             thread_id,
-            github_proxy_token=github_token,
-            github_proxy_repositories=[repo_name] if repo_name else None,
+            workspace_slug=cfg.workspace_slug,
+            github_proxy_repositories=[cfg.repo.full_name] if cfg.repo else [],
             # A reviewer sandbox holds nothing but a checkout `prepare_review_repo`
             # re-derives every run, and reviewer threads outlive their sandbox: one
             # thread per PR, re-triggered on every push. Refusing to replace an
@@ -827,6 +825,45 @@ class PrepareReviewerRunMiddleware(BasePrepareRunMiddleware):
                 )
                 return ""
 
+        async def _await_walkthrough() -> WalkthroughView | None:
+            if reviewer_event == "finding_reply" or reviewer_eval or not isinstance(pr_number, int):
+                return None
+            pr_title, _ = await pr_overview_task
+            target = ReviewScoutTarget(
+                owner=repo_owner,
+                repo=repo_name,
+                pr_number=pr_number,
+                pr_title=pr_title,
+                base_sha=base_sha,
+                head_sha=head_sha,
+                workspace_slug=cfg.workspace_slug,
+            )
+            try:
+                return await target.await_walkthrough()
+            except Exception:
+                logger.warning(
+                    "Reviewing without a walkthrough", exc_info=True, extra=target.log_extra
+                )
+                return None
+
+        async def _fetch_author_guidance_block() -> str:
+            if reviewer_eval or not repo_owner or not repo_name or not isinstance(pr_number, int):
+                return ""
+            # The scout records the steering points; wait for it like the walkthrough.
+            await walkthrough_task
+            try:
+                points = await GuidanceView.for_head(repo_owner, repo_name, pr_number, head_sha)
+            except Exception:
+                logger.exception(
+                    "Failed to load author guidance; continuing without it",
+                    extra={
+                        "pr_repo_full_name": f"{repo_owner}/{repo_name}",
+                        "pr_number": pr_number,
+                    },
+                )
+                return ""
+            return _format_author_guidance(points)
+
         async def _fetch_repo_style_prompt() -> str | None:
             if not repo_owner or not repo_name:
                 return None
@@ -850,10 +887,17 @@ class PrepareReviewerRunMiddleware(BasePrepareRunMiddleware):
 
         diff_context_task = asyncio.create_task(_fetch_diff_context())
         pr_overview_task = asyncio.create_task(_fetch_pr_overview())
+        walkthrough_task = asyncio.create_task(_await_walkthrough())
         existing_threads_task = asyncio.create_task(_fetch_existing_threads_block())
+        author_guidance_task = asyncio.create_task(_fetch_author_guidance_block())
         repo_style_task = asyncio.create_task(_fetch_repo_style_prompt())
         agents_md_task = asyncio.create_task(_fetch_agents_md_context())
-        org_guidelines_task = asyncio.create_task(_cached_org_review_guidelines())
+        org_guidelines_task = asyncio.create_task(_cached_org_guidelines(cfg.workspace_slug))
+        approval_policy = (
+            None
+            if reviewer_eval
+            else await _review_approval_policy(repo_owner, repo_name, cfg.workspace_slug)
+        )
         api_standards_task = asyncio.create_task(_cached_api_standards_skill())
         diff_context = await diff_context_task
         pr_diff_text, pr_diff_line_set = diff_context
@@ -868,6 +912,7 @@ class PrepareReviewerRunMiddleware(BasePrepareRunMiddleware):
         )
         pr_overview = await pr_overview_task
         existing_threads_block = await existing_threads_task
+        author_guidance_block = await author_guidance_task
         repo_style_prompt = await repo_style_task
         agents_md_content = await agents_md_task
         scoped_agents_md = await scoped_agents_md_task
@@ -929,6 +974,7 @@ class PrepareReviewerRunMiddleware(BasePrepareRunMiddleware):
             head_sha=head_sha,
             reviewer_eval=reviewer_eval,
             org_guidelines=org_guidelines,
+            approval_policy=approval_policy,
             repo_style_prompt=repo_style_prompt,
             agents_md_content=agents_md_content,
             scoped_agents_md=scoped_agents_md,
@@ -936,6 +982,11 @@ class PrepareReviewerRunMiddleware(BasePrepareRunMiddleware):
         )
         if review_context:
             system_prompt = f"{system_prompt}\n\n{review_context}"
+        walkthrough_block = _format_walkthrough(await walkthrough_task)
+        if walkthrough_block:
+            system_prompt = f"{system_prompt}\n\n{walkthrough_block}"
+        if author_guidance_block:
+            system_prompt = f"{system_prompt}\n\n{author_guidance_block}"
         if skill_sources:
             skill_middleware = SkillsMiddleware(backend=sandbox_backend, sources=skill_sources)
             skill_update = (
@@ -968,22 +1019,10 @@ class PrepareReviewerRunMiddleware(BasePrepareRunMiddleware):
                     )
                 )
 
-        if reviewer_event != "finding_reply" and pr_diff_text and self._thread_id:
-            grouping_model = await _resolve_grouping_model(cfg, use_gateway=self._use_gateway)
-            grouping_task = asyncio.create_task(
-                maybe_generate_and_store_diff_groups(
-                    thread_id=self._thread_id,
-                    head_sha=head_sha,
-                    diff_text=pr_diff_text,
-                    model=grouping_model,
-                )
-            )
-            _BACKGROUND_TASKS.add(grouping_task)
-            grouping_task.add_done_callback(_on_background_task_done)
-
         return {
             "work_dir": work_dir,
             "rendered_system_prompt": system_prompt,
+            "review_approval_policy": approval_policy,
             "diff_text": pr_diff_text,
             "diff_line_set": pr_diff_line_set,
         }
@@ -1011,21 +1050,22 @@ async def get_reviewer_agent(config: RunnableConfig) -> Pregel:
         (
             (model_id, reasoning_effort),
             (subagent_model_id, subagent_effort),
-        ) = await _cached_reviewer_team_defaults()
+        ) = (await cached_workspace_settings(cfg.workspace_slug)).default_model_pair("reviewer")
         logger.info(
-            "Using team default reviewer model: model=%s effort=%s",
+            "Using workspace default reviewer model: model=%s effort=%s",
             model_id,
             reasoning_effort,
         )
         logger.info(
-            "Using team default reviewer subagent model: model=%s effort=%s",
+            "Using workspace default reviewer subagent model: model=%s effort=%s",
             subagent_model_id,
             subagent_effort,
         )
     if cfg.reviewer_subagent_model_id:
         subagent_model_id = cfg.reviewer_subagent_model_id
         subagent_effort = cfg.reviewer_subagent_reasoning_effort
-    fable_enabled = await get_team_fable_enabled()
+    settings = await cached_workspace_settings(cfg.workspace_slug)
+    fable_enabled = settings.fable_enabled
     model_id, reasoning_effort = gate_fable_model(
         model_id, reasoning_effort, fable_enabled=fable_enabled
     )
@@ -1045,7 +1085,7 @@ async def get_reviewer_agent(config: RunnableConfig) -> Pregel:
         openai_reasoning_default=DEFAULT_LLM_REASONING,
     )
 
-    use_gateway = await _cached_gateway_enabled()
+    use_gateway = settings.effective_gateway_enabled
     reviewer_model = _make_model_or_defer(model_id, use_gateway=use_gateway, **model_kwargs)
     reviewer_subagent_model = _make_model_or_defer(
         subagent_model_id, use_gateway=use_gateway, **subagent_model_kwargs

@@ -66,7 +66,7 @@ export function formatToolDisplayParts(
   title: string,
   toolKind: AcpToolKind,
   input: Record<string, unknown> | undefined,
-  _projectPath?: string
+  _repoPath?: string
 ): ToolDisplayParts {
   const toolName = normalizedToolName(title)
   const path = firstStringArg(input, ["path", "file_path", "target_file"])
@@ -106,6 +106,11 @@ export function formatToolDisplayParts(
         return { heading: "Shell", preview: truncateMiddle(command, 60) }
       return plain(humanizeToolTitle(title))
     }
+    case "sql":
+      return {
+        heading: "SQL query",
+        preview: query ? truncateMiddle(query, 60) : null,
+      }
     case "edit":
       if (path) return formatPathDisplayParts("Edit", path)
       return plain(humanizeToolTitle(title))
@@ -130,13 +135,13 @@ export function formatToolDisplay(
   title: string,
   toolKind: AcpToolKind,
   input: Record<string, unknown> | undefined,
-  projectPath?: string
+  repoPath?: string
 ): string {
   const { heading, preview } = formatToolDisplayParts(
     title,
     toolKind,
     input,
-    projectPath
+    repoPath
   )
   return preview ? `${heading} ${preview}` : heading
 }

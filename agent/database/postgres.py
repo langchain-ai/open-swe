@@ -1,4 +1,5 @@
 import asyncio
+import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from operator import attrgetter
@@ -8,9 +9,16 @@ from alembic.operations import Operations
 from alembic.runtime.migration import MigrationContext
 from alembic.script import ScriptDirectory
 from sqlalchemy import Connection, make_url, text
-from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine, create_async_engine
+from sqlalchemy.ext.asyncio import (
+    AsyncConnection,
+    AsyncEngine,
+    AsyncSession,
+    create_async_engine,
+)
 
 from agent.config import ENV
+
+logger = logging.getLogger(__name__)
 
 _ENGINE: AsyncEngine | None = None
 _ENGINE_URI: str | None = None
@@ -22,6 +30,8 @@ MIGRATION_LOCK = 557314367248862439
 
 def uri() -> str | None:
     value = ENV.POSTGRES_URI.optional()
+    if value is None and ENV.LANGSMITH_LANGGRAPH_API_VARIANT.get() == "local_dev":
+        value = "postgresql://postgres:postgres@127.0.0.1:5433/postgres"
     if value is None:
         return None
     if value.startswith("postgres://"):
@@ -43,6 +53,13 @@ def uri() -> str | None:
 
 def configured() -> bool:
     return uri() is not None
+
+
+def require_configured() -> None:
+    if not configured():
+        raise RuntimeError(
+            "POSTGRES_URI is required: pull request and repository records are stored in PostgreSQL"
+        )
 
 
 def engine() -> AsyncEngine:
@@ -77,12 +94,65 @@ async def transaction() -> AsyncIterator[AsyncConnection]:
         yield conn
 
 
+@asynccontextmanager
+async def read_only_transaction() -> AsyncIterator[AsyncConnection]:
+    async with engine().connect() as conn:
+        transaction = await conn.begin()
+        try:
+            await conn.execute(text("SET TRANSACTION READ ONLY"))
+            await conn.execute(text(f"SET LOCAL search_path TO {SCHEMA}, public"))
+            yield conn
+        finally:
+            if transaction.is_active:
+                await transaction.rollback()
+            await conn.invalidate()
+
+
+@asynccontextmanager
+async def snapshot_transaction() -> AsyncIterator[AsyncConnection]:
+    """A read-only transaction whose every statement sees one database snapshot.
+
+    ``read_only_transaction`` runs at READ COMMITTED, where each statement takes
+    its own snapshot: a multi-statement read can observe rows written after the
+    head version it already read, which is exactly the inconsistency a client
+    reducing a snapshot plus a live event stream would double-apply.
+    """
+    async with engine().connect() as conn:
+        transaction = await conn.begin()
+        try:
+            await conn.execute(text("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY"))
+            await conn.execute(text(f"SET LOCAL search_path TO {SCHEMA}, public"))
+            yield conn
+        finally:
+            # Both settings are transaction-scoped, so the rollback is what
+            # resets them and the connection goes back to the pool.
+            if transaction.is_active:
+                await transaction.rollback()
+
+
+@asynccontextmanager
+async def session() -> AsyncIterator[AsyncSession]:
+    """An ORM session joined to one ``transaction()``, flushed before it commits."""
+    async with transaction() as conn:
+        async with AsyncSession(bind=conn, expire_on_commit=False) as orm:
+            yield orm
+            await orm.flush()
+
+
 async def migrate() -> None:
+    logger.info(
+        "Initializing database",
+        extra={"database_setting": "POSTGRES_URI", "database_schema": SCHEMA},
+    )
     migrations = await asyncio.to_thread(load_migrations)
     async with engine().begin() as conn:
         await conn.execute(text("SELECT pg_advisory_xact_lock(:key)"), {"key": MIGRATION_LOCK})
         await conn.execute(text(f"CREATE SCHEMA IF NOT EXISTS {SCHEMA}"))
         await conn.run_sync(upgrade, migrations)
+    logger.info(
+        "Database initialized",
+        extra={"database_setting": "POSTGRES_URI", "database_schema": SCHEMA},
+    )
 
 
 def load_migrations() -> ScriptDirectory:

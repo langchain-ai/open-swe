@@ -1,4 +1,5 @@
 import asyncio
+from contextlib import nullcontext
 from typing import Any, cast
 from unittest.mock import MagicMock
 
@@ -49,8 +50,35 @@ async def _flush_in_traced_node(thread_id: str) -> _FakeClient:
 
 @pytest.fixture(autouse=True)
 def _clean_phases() -> Any:
+    startup_trace._PHASES.clear()
     yield
     startup_trace._PHASES.clear()
+
+
+async def test_phase_emits_apm_span(monkeypatch: pytest.MonkeyPatch) -> None:
+    span = MagicMock()
+    context = MagicMock()
+    context.__enter__.return_value = span
+    context.__exit__.return_value = None
+    apm_span = MagicMock(return_value=context)
+    monkeypatch.setattr(startup_trace, "_apm_span", apm_span)
+
+    async with aphase("thread-apm", "factory.graph_assembly", model="openai:gpt-5"):
+        pass
+
+    apm_span.assert_called_once_with(
+        "agent.startup.factory.graph_assembly",
+        {"thread_id": "thread-apm", "model": "openai:gpt-5"},
+    )
+
+
+async def test_phase_works_without_apm(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(startup_trace, "_apm_span", lambda name, metadata: nullcontext())
+
+    async with aphase("thread-no-apm", "factory.total"):
+        pass
+
+    assert startup_trace._PHASES["thread-no-apm"][0].elapsed_ms is not None
 
 
 async def test_phases_replay_as_child_spans_of_the_current_run() -> None:

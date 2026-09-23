@@ -29,15 +29,24 @@ def render_prompt(name: str, values: Mapping[str, object] | None = None, **kwarg
     return Template(load_prompt(name)).substitute(substitutions)
 
 
-def apply_tool_descriptions(tools: Sequence[Any]) -> list[Any]:
+def apply_tool_descriptions(
+    tools: Sequence[Any],
+    values: Mapping[str, Mapping[str, object]] | None = None,
+) -> list[Any]:
+    """Describe each tool from ``tools/<name>.md``, rendering the ones with ``values``."""
     described: list[Any] = []
     for value in tools:
         name = getattr(value, "name", None) or getattr(value, "__name__", None)
         if not isinstance(name, str) or not name:
             described.append(value)
             continue
+        substitutions = (values or {}).get(name)
         try:
-            description = load_prompt(f"tools/{name}.md")
+            description = (
+                render_prompt(f"tools/{name}.md", substitutions)
+                if substitutions is not None
+                else load_prompt(f"tools/{name}.md")
+            )
         except FileNotFoundError:
             described.append(value)
             continue
