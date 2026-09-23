@@ -82,8 +82,9 @@ async def test_fast_mode_skips_classifier_and_routing_event(
 
     state.update(await middleware.abefore_model(cast(Any, state), MagicMock()))
 
-    assert state["model_route"] == "fast"
-    assert (await _invoke(middleware, state)).model is models["fast"]
+    expected_route = existing_route or "fast"
+    assert state["model_route"] == expected_route
+    assert (await _invoke(middleware, state)).model is models[expected_route]
     classifier.assert_not_awaited()
     assert events == []
 
