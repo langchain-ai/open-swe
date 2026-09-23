@@ -497,6 +497,7 @@ export interface PRMergeRateCohort {
   avg_delivery_seconds?: number | null
   efforts: PRMergeRateEffort[]
   median_distance_basis_points?: number | null
+  mean_distance_basis_points?: number | null
   distance_sample_size?: number
 }
 

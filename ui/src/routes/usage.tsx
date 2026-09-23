@@ -76,6 +76,7 @@ type PROutcomesSort =
   | "closed_without_merge"
   | "open"
   | "median_distance"
+  | "mean_distance"
   | "merge_rate"
   | "avg_delivery_seconds"
   | "avg_merge_seconds"
@@ -719,7 +720,11 @@ function PRMergeRateSection({
               <strong>Median distance</strong> is the median normalized line
               edit distance between each merged PR’s opening diff and final
               diff. It is calculated only for merged PRs with complete text
-              patches; higher means more post-open editing.
+              patches; higher means more post-open editing.{" "}
+              <strong>Mean distance</strong> is the arithmetic mean of those
+              same per-PR percentages; unusually rewritten PRs affect it more.
+              Neither metric weights PRs by size. The measured/merged count
+              shows how many merged PRs had complete patches.
             </p>
             <p>
               <strong>Merge rate</strong> includes only PRs old enough to have a
@@ -862,6 +867,13 @@ const PR_OUTCOME_COLUMNS: Array<SortableColumn<PROutcomesSort>> = [
       "Median post-open line edit distance across merged PRs. Higher means the final diff changed more after the PR opened.",
   },
   {
+    key: "mean_distance",
+    label: "Mean distance",
+    align: "right",
+    tooltip:
+      "Mean post-open line edit distance across measurable merged PRs. Unusually rewritten PRs affect it more than the median.",
+  },
+  {
     key: "merge_rate",
     label: "Merge rate",
     align: "right",
@@ -889,6 +901,8 @@ function prOutcomeSortValue(cohort: PRMergeRateCohort, sort: PROutcomesSort) {
       return cohort.waiting + cohort.mature_pending
     case "median_distance":
       return cohort.median_distance_basis_points ?? null
+    case "mean_distance":
+      return cohort.mean_distance_basis_points ?? null
     case "merge_rate":
       return cohort.mature_cohort_merge_share
     case "avg_delivery_seconds":
@@ -1201,6 +1215,7 @@ function PRMergeRateCells({
     | "waiting"
     | "mature_cohort_merge_share"
     | "median_distance_basis_points"
+    | "mean_distance_basis_points"
     | "distance_sample_size"
   >
   maturityDays: number
@@ -1217,25 +1232,35 @@ function PRMergeRateCells({
       <td className="px-2 py-3 text-right tabular-nums">
         <OpenPRCount cohort={cohort} maturityDays={maturityDays} />
       </td>
-      <td className="px-2 py-3 text-right tabular-nums">
-        <Tooltip>
-          <TooltipTrigger className="cursor-help rounded-sm underline decoration-dotted underline-offset-2 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring">
-            {cohort.median_distance_basis_points == null
-              ? "—"
-              : `${(cohort.median_distance_basis_points / 100).toFixed(1)}%`}
-          </TooltipTrigger>
-          <TooltipPopup>
-            {cohort.distance_sample_size ?? 0} merged PR
-            {cohort.distance_sample_size === 1 ? "" : "s"} measured
-          </TooltipPopup>
-        </Tooltip>
-        {(cohort.distance_sample_size ?? 0) > 0 &&
-          (cohort.distance_sample_size ?? 0) < 5 && (
-            <div className="text-xs text-amber-600 dark:text-amber-400">
-              Small sample
+      {(
+        ["median_distance_basis_points", "mean_distance_basis_points"] as const
+      ).map((metric) => (
+        <td key={metric} className="px-2 py-3 text-right tabular-nums">
+          <Tooltip>
+            <TooltipTrigger className="cursor-help rounded-sm underline decoration-dotted underline-offset-2 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring">
+              {cohort[metric] == null
+                ? "—"
+                : `${(cohort[metric] / 100).toFixed(1)}%`}
+            </TooltipTrigger>
+            <TooltipPopup>
+              {cohort.distance_sample_size === undefined
+                ? "Distance shown at the model level"
+                : `${cohort.distance_sample_size}/${cohort.merged} merged PRs measured`}
+            </TooltipPopup>
+          </Tooltip>
+          {cohort.distance_sample_size !== undefined && (
+            <div className="text-xs text-muted-foreground">
+              {cohort.distance_sample_size}/{cohort.merged} measured
             </div>
           )}
-      </td>
+          {(cohort.distance_sample_size ?? 0) > 0 &&
+            (cohort.distance_sample_size ?? 0) < 5 && (
+              <div className="text-xs text-amber-600 dark:text-amber-400">
+                Small sample
+              </div>
+            )}
+        </td>
+      ))}
       <td className="px-4 py-3 text-right text-sm font-semibold tabular-nums">
         {cohort.mature_cohort_merge_share == null
           ? "—"

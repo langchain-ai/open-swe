@@ -191,7 +191,7 @@ it("shows delivery lag separately from suppression, then refreshes to a populate
 })
 
 it.each([0, 1, 4, 5])(
-  "flags only small nonempty distance samples without inline counts (%i measured)",
+  "shows median, mean, coverage and flags small nonempty distance samples (%i measured)",
   async (samples) => {
     vi.spyOn(api, "prMergeRateByModel").mockResolvedValue(
       report({
@@ -212,6 +212,7 @@ it.each([0, 1, 4, 5])(
             mature_cohort_merge_share: 1,
             efforts: [],
             median_distance_basis_points: samples ? 1750 : null,
+            mean_distance_basis_points: samples ? 2500 : null,
             distance_sample_size: samples,
             avg_merge_seconds: null,
             avg_delivery_seconds: null,
@@ -222,11 +223,16 @@ it.each([0, 1, 4, 5])(
     const client = mountReport()
     const row = (await screen.findByText("sample-model")).closest("tr")!
     expect(
-      within(row).getByRole("button", { name: samples ? "17.5%" : "—" })
-    ).toBeTruthy()
-    expect(within(row).queryByText(/measured \/ .* merged/)).toBeNull()
-    expect(within(row).queryByText("Small sample") !== null).toBe(
-      samples > 0 && samples < 5
+      within(row).getAllByRole("button", { name: samples ? "17.5%" : "—" })
+        .length
+    ).toBeGreaterThan(0)
+    expect(
+      within(row).getAllByRole("button", { name: samples ? "25.0%" : "—" })
+        .length
+    ).toBeGreaterThan(0)
+    expect(within(row).getAllByText(`${samples}/8 measured`)).toHaveLength(2)
+    expect(within(row).queryAllByText("Small sample")).toHaveLength(
+      samples > 0 && samples < 5 ? 2 : 0
     )
     client.clear()
   }
@@ -344,7 +350,8 @@ it.each([
       "3",
       "1",
       "3",
-      "17.5%Small sample",
+      "17.5%3/3 measuredSmall sample",
+      "—3/3 measuredSmall sample",
       "60%",
       "2h",
       "1d",
@@ -362,6 +369,7 @@ it.each([
       "Closed without merge",
       "Open",
       "Median distance",
+      "Mean distance",
       "Merge rate",
       "Avg time to PR",
       "Avg time to merge",

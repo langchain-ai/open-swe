@@ -130,6 +130,13 @@ async def pr_merge_rate_by_model(
                        AND d.model_attribution_quality = p.model_attribution_quality
                        AND d.opened_at >= :start AND d.opened_at <= :as_of
                        AND d.current_state = 'merged') AS median_distance_basis_points,
+                    (SELECT avg(distance_basis_points)
+                     FROM pr_projection d
+                     WHERE d.workspace_id = :workspace_id
+                       AND d.originating_model_id IS NOT DISTINCT FROM p.originating_model_id
+                       AND d.model_attribution_quality = p.model_attribution_quality
+                       AND d.opened_at >= :start AND d.opened_at <= :as_of
+                       AND d.current_state = 'merged') AS mean_distance_basis_points,
                     (SELECT count(distance_basis_points)
                      FROM pr_projection d
                      WHERE d.workspace_id = :workspace_id
@@ -180,6 +187,11 @@ async def pr_merge_rate_by_model(
                     "median_distance_basis_points": (
                         int(row["median_distance_basis_points"])
                         if row["median_distance_basis_points"] is not None
+                        else None
+                    ),
+                    "mean_distance_basis_points": (
+                        float(row["mean_distance_basis_points"])
+                        if row["mean_distance_basis_points"] is not None
                         else None
                     ),
                     "distance_sample_size": int(row["distance_sample_size"] or 0),
