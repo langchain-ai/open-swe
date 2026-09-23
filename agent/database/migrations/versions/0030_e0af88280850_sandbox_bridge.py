@@ -10,7 +10,7 @@ gone for good.
 from alembic import op
 
 revision = "e0af88280850"
-down_revision = "b88822514d4f"
+down_revision = "4f14a5ad381a"
 branch_labels = None
 depends_on = None
 
