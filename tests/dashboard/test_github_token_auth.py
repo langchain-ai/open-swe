@@ -33,11 +33,15 @@ def _request(
 
 
 def test_bearer_token_parsing() -> None:
-    assert github_token_auth.bearer_token(_request(authorization="Bearer gh-tok")) == "gh-tok"
-    assert github_token_auth.bearer_token(_request(authorization="bearer gh-tok")) == "gh-tok"
-    assert github_token_auth.bearer_token(_request(authorization="Basic gh-tok")) is None
-    assert github_token_auth.bearer_token(_request(authorization="Bearer  ")) is None
-    assert github_token_auth.bearer_token(_request()) is None
+    assert (
+        github_token_auth.bearer_github_token(_request(authorization="Bearer gh-tok")) == "gh-tok"
+    )
+    assert (
+        github_token_auth.bearer_github_token(_request(authorization="bearer gh-tok")) == "gh-tok"
+    )
+    assert github_token_auth.bearer_github_token(_request(authorization="Basic gh-tok")) is None
+    assert github_token_auth.bearer_github_token(_request(authorization="Bearer  ")) is None
+    assert github_token_auth.bearer_github_token(_request()) is None
 
 
 def test_bearer_mutation_skips_csrf(monkeypatch: pytest.MonkeyPatch) -> None:

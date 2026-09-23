@@ -10,9 +10,9 @@ import { isRecord } from "../src/json.ts"
 interface Reply {
   requestId: string
   body: Record<string, unknown>
-  authorization: string | null
-  hasCookie: boolean
-  hasOrigin: boolean
+  cookie: string | null
+  origin: string | null
+  hasAuthorization: boolean
 }
 
 interface Fake {
@@ -73,9 +73,9 @@ function fakeBackend(
         settleReply({
           requestId: path.split("/requests/")[1] ?? "",
           body: isRecord(body) ? body : {},
-          authorization: request.headers.get("authorization"),
-          hasCookie: request.headers.has("cookie"),
-          hasOrigin: request.headers.has("origin"),
+          cookie: request.headers.get("cookie"),
+          origin: request.headers.get("origin"),
+          hasAuthorization: request.headers.has("authorization"),
         })
         return new Response(null, { status: 204 })
       }
@@ -117,9 +117,9 @@ describe("Bridge", () => {
     try {
       const reply = await fake.firstReply
       expect(reply.requestId).toBe("req-1")
-      expect(reply.authorization).toBe("Bearer jwt-token")
-      expect(reply.hasCookie).toBe(false)
-      expect(reply.hasOrigin).toBe(false)
+      expect(reply.cookie).toBe("osw_session=jwt-token")
+      expect(reply.origin).toBe(fake.api.backend)
+      expect(reply.hasAuthorization).toBe(false)
       const result = reply.body["result"]
       expect(isRecord(result)).toBe(true)
       if (!isRecord(result)) throw new Error("expected a result object")

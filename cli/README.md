@@ -30,10 +30,13 @@ cp cli/dist/open-swe /usr/local/bin/
 open-swe login --backend https://dev.open-swe.langchain.dev
 ```
 
-This opens your browser for the GitHub login the dashboard uses, catches the
-handoff on a loopback port, and exchanges it (PKCE S256) for a session. The
-session and backend URL are stored in `~/.open-swe/config.json` (mode 0600).
-`--backend` is optional once one is stored. `open-swe logout` deletes the file.
+This is the desktop app's sign-in: your browser opens the GitHub login the
+dashboard uses, a loopback port catches the handoff, and PKCE S256 exchanges it
+for the same session the desktop app stores. Requests then carry it as the
+dashboard's own `osw_session` cookie, so the backend authenticates the CLI
+exactly as it authenticates the app. The session and backend URL live in
+`~/.open-swe/config.json` (mode 0600). `--backend` is optional once one is
+stored, and `open-swe logout` deletes the file.
 
 ## Run
 

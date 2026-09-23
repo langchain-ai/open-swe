@@ -78,10 +78,10 @@ export function normalizeBackend(backend: string): string {
   return `${url.protocol}//${url.host}`
 }
 
-/**
- * Bearer-authenticated client for `<backend>/dashboard/api`. No cookies and no
- * Origin header ride along: the session travels in the header alone.
- */
+/** The cookie the dashboard's login mints, which the desktop app also stores. */
+const SESSION_COOKIE = "osw_session"
+
+/** Client for `<backend>/dashboard/api`, signed in as the dashboard is. */
 export class ApiClient {
   readonly backend: string
 
@@ -100,9 +100,16 @@ export class ApiClient {
     return `${this.backend}/dashboard/api${path}`
   }
 
+  /**
+   * The session travels as the dashboard's own cookie, the way the desktop app
+   * sends it, so the backend needs no second way to authenticate. `Origin` is
+   * the backend's own, which its CSRF check allows: the cookie here is held
+   * deliberately, not ambient in a browser someone else can aim.
+   */
   private headers(accept: string): Record<string, string> {
     return {
-      Authorization: `Bearer ${this.session}`,
+      Cookie: `${SESSION_COOKIE}=${this.session}`,
+      Origin: this.backend,
       "Content-Type": "application/json",
       Accept: accept,
     }

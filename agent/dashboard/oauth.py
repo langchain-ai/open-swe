@@ -20,7 +20,7 @@ from pydantic import BaseModel
 from starlette.requests import HTTPConnection
 
 from agent.config import ENV
-from agent.github.token_auth import bearer_token
+from agent.github.token_auth import bearer_github_token
 from agent.users.authorization import (
     allowed_logins,
     allowed_orgs,
@@ -399,12 +399,7 @@ def build_settings_url() -> str | None:
 def require_session(
     request: HTTPConnection, _cookie: str | None = Depends(SESSION_COOKIE)
 ) -> dict[str, Any]:
-    """The caller's session, from the login cookie or an explicit bearer header.
-
-    Non-browser clients — the CLI that dials a sandbox bridge in — hold the same
-    session JWT the desktop handoff mints and have nowhere to put a cookie.
-    """
-    token = request.cookies.get(COOKIE_NAME) or bearer_token(request)
+    token = request.cookies.get(COOKIE_NAME)
     if not token:
         raise HTTPException(401, "not authenticated")
     return decode_session(token)
@@ -460,7 +455,7 @@ def require_same_origin_for_mutations(request: HTTPConnection) -> None:
     # so it has nothing to defend.
     if not isinstance(request, Request):
         raise HTTPException(400, "invalid request")
-    if bearer_token(request) and not request.cookies.get(COOKIE_NAME):
+    if bearer_github_token(request) and not request.cookies.get(COOKIE_NAME):
         return
     require_same_origin(request)
 
