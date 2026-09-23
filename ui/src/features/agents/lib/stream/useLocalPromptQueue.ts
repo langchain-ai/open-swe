@@ -64,7 +64,13 @@ export function useLocalPromptQueue({
       .then(async (pending) => {
         if (!pending) return
         await clearLocalPromptQueue(client, sessionId)
-        if (!(await submit(pending.text, pending.images)))
+        const accepted = await submit(pending.text, pending.images).catch(
+          (cause: unknown) => {
+            setError(cause)
+            return false
+          }
+        )
+        if (!accepted)
           await enqueueLocalPrompt(client, sessionId, pending, login)
       })
       .catch(setError)
