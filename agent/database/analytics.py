@@ -41,8 +41,10 @@ async def activate_reporting() -> None:
     async with postgres.transaction() as conn:
         await conn.execute(
             text(
-                "UPDATE deployment_metadata SET reporting_cutover_at = clock_timestamp() "
-                "WHERE reporting_cutover_at IS NULL"
+                "UPDATE deployment_metadata SET "
+                "reporting_cutover_at = COALESCE(reporting_cutover_at, clock_timestamp()), "
+                "reviewer_cost_cutover_at = COALESCE(reviewer_cost_cutover_at, clock_timestamp()) "
+                "WHERE reporting_cutover_at IS NULL OR reviewer_cost_cutover_at IS NULL"
             )
         )
 
@@ -51,6 +53,7 @@ async def reporting_metadata(conn: AsyncConnection) -> dict[str, Any]:
     result = await conn.execute(
         text(
             "SELECT collection_started_at, last_processed_at, reporting_cutover_at, "
+            "reviewer_cost_cutover_at, "
             "EXISTS (SELECT 1 FROM outbox WHERE workspace_id = d.workspace_id "
             "AND state IN ('pending', 'delivering')) AS has_pending_events, "
             "EXISTS (SELECT 1 FROM outbox WHERE workspace_id = d.workspace_id "
@@ -62,6 +65,9 @@ async def reporting_metadata(conn: AsyncConnection) -> dict[str, Any]:
     return {
         "reporting_cutover_at": row["reporting_cutover_at"].isoformat()
         if row["reporting_cutover_at"]
+        else None,
+        "reviewer_cost_cutover_at": row["reviewer_cost_cutover_at"].isoformat()
+        if row["reviewer_cost_cutover_at"]
         else None,
         "collection_started_at": row["collection_started_at"].isoformat()
         if row["collection_started_at"]

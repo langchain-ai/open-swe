@@ -390,6 +390,7 @@ export type SortDirection = "asc" | "desc"
 
 export interface AnalyticsMetadata {
   reporting_cutover_at: string
+  reviewer_cost_cutover_at?: string | null
   collection_started_at: string | null
   last_processed_at: string | null
   data_source: "event_projections"

@@ -403,7 +403,10 @@ function UsageAnalyticsPeriod({
             Reviewer stats are unavailable. Retry usage analytics above.
           </p>
         ) : leaderboard.data?.reviewer_stats ? (
-          <ReviewerStats stats={leaderboard.data.reviewer_stats} />
+          <ReviewerStats
+            stats={leaderboard.data.reviewer_stats}
+            costCutoverAt={leaderboard.data.reviewer_cost_cutover_at}
+          />
         ) : (
           <div className="p-6 text-center text-xs text-muted-foreground">
             No reviewer stats have been recorded for{" "}
@@ -554,6 +557,19 @@ function AnalyticsCoverage({
               {new Date(latest.reporting_cutover_at).toLocaleString()}
             </time>
             .
+          </p>
+          <p>
+            {latest.reviewer_cost_cutover_at ? (
+              <>
+                PR review cost reporting since{" "}
+                <time dateTime={latest.reviewer_cost_cutover_at}>
+                  {new Date(latest.reviewer_cost_cutover_at).toLocaleString()}
+                </time>
+                .
+              </>
+            ) : (
+              "PR review cost reporting start date unavailable."
+            )}
           </p>
           <p>
             {latest.last_processed_at
@@ -1446,7 +1462,13 @@ function TablePagination({
   )
 }
 
-function ReviewerStats({ stats }: { stats: ReviewerStatsPayload }) {
+function ReviewerStats({
+  stats,
+  costCutoverAt,
+}: {
+  stats: ReviewerStatsPayload
+  costCutoverAt?: string | null
+}) {
   const missing = stats.invocations_without_cost
   const partial = stats.invocations_with_partial_cost
   const cards = [
@@ -1524,9 +1546,19 @@ function ReviewerStats({ stats }: { stats: ReviewerStatsPayload }) {
       </div>
       <p className="text-xs text-muted-foreground">
         LangSmith model costs for review runs started in this period. Excludes
-        sandbox and infrastructure costs. Tracking starts at rollout; older
-        reviews are not backfilled. Missing costs may still be processing or
-        unavailable.
+        sandbox and infrastructure costs.{" "}
+        {costCutoverAt ? (
+          <>
+            Review costs are tracked from{" "}
+            <time dateTime={costCutoverAt}>
+              {new Date(costCutoverAt).toLocaleString()}
+            </time>
+            ; earlier reviews are not backfilled.
+          </>
+        ) : (
+          "Review cost tracking start date unavailable; earlier reviews are not backfilled."
+        )}{" "}
+        Missing costs may still be processing or unavailable.
       </p>
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
         {cards.map((card) => (

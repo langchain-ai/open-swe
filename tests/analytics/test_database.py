@@ -84,6 +84,7 @@ async def test_replicas_and_restarts_preserve_identity_without_starting_collecti
     assert status["ready"]
     assert status["collection_started_at"] is None
     assert status["reporting_cutover_at"] is None
+    assert status["reviewer_cost_cutover_at"] is None
 
 
 @pytest.mark.parametrize("retained_only", [False, True])
@@ -185,6 +186,7 @@ async def test_reporting_activation_is_shared_and_preserved_across_restarts(depl
         after = await conn.scalar(text("SELECT clock_timestamp()"))
     cutover = datetime.fromisoformat(metadata["reporting_cutover_at"])
     assert before <= cutover <= after
+    assert before <= datetime.fromisoformat(metadata["reviewer_cost_cutover_at"]) <= after
     assert metadata["collection_started_at"] is None
     assert metadata["completeness"] == "not_started"
 
@@ -194,4 +196,29 @@ async def test_reporting_activation_is_shared_and_preserved_across_restarts(depl
     async with postgres.connection() as conn:
         restarted = await database.reporting_metadata(conn)
     assert restarted["reporting_cutover_at"] == metadata["reporting_cutover_at"]
+    assert restarted["reviewer_cost_cutover_at"] == metadata["reviewer_cost_cutover_at"]
     assert restarted["collection_started_at"] is None
+
+
+async def test_reviewer_cost_rollout_preserves_earlier_reporting_cutover(deployment_db):
+    migrations = postgres.load_migrations()
+    original_cutover = datetime(2026, 9, 1, tzinfo=UTC)
+    async with postgres.engine().begin() as conn:
+        await conn.execute(text("CREATE SCHEMA open_swe"))
+        await conn.run_sync(postgres.upgrade, migrations, "open_swe", "d742a3ec9c1b")
+        await conn.execute(
+            text("UPDATE deployment_metadata SET reporting_cutover_at = :cutover"),
+            {"cutover": original_cutover},
+        )
+    await initialize_database()
+    async with postgres.connection() as conn:
+        metadata = await database.reporting_metadata(conn)
+        assert metadata["reviewer_cost_cutover_at"] is None
+        before = await conn.scalar(text("SELECT clock_timestamp()"))
+    await asyncio.gather(*(database.activate_reporting() for _ in range(4)))
+    async with postgres.connection() as conn:
+        metadata = await database.reporting_metadata(conn)
+        after = await conn.scalar(text("SELECT clock_timestamp()"))
+    assert metadata["reporting_cutover_at"] == original_cutover.isoformat()
+    assert before <= datetime.fromisoformat(metadata["reviewer_cost_cutover_at"]) <= after
+    assert metadata["collection_started_at"] is None

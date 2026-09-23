@@ -125,6 +125,52 @@ it("labels the shared date range and changes it independently of usage scope", a
   expect(onPeriodChange).toHaveBeenCalledTimes(1)
 })
 
+it.each(["2026-09-22T20:00:00Z", null, undefined])(
+  "shows the independent review cost cutoff, including absent rollout metadata (%s)",
+  async (cutover) => {
+    vi.spyOn(api, "prMergeRateByModel").mockResolvedValue(
+      report({ ...captured, reviewer_cost_cutover_at: cutover })
+    )
+    vi.mocked(api.usageLeaderboard).mockResolvedValue({
+      ...emptyUsage,
+      reviewer_cost_cutover_at: cutover,
+    })
+    const client = mountReport()
+    await screen.findByText("Review runs tracked")
+    fireEvent.click(screen.getByText("Details"))
+    const coverage = within(screen.getByLabelText("Analytics coverage"))
+    expect(
+      coverage
+        .getByText(new Date(captured.reporting_cutover_at).toLocaleString())
+        .getAttribute("datetime")
+    ).toBe(captured.reporting_cutover_at)
+    expect(
+      coverage.getByText(
+        cutover
+          ? /PR review cost reporting since/
+          : "PR review cost reporting start date unavailable."
+      )
+    ).toBeTruthy()
+    expect(
+      screen.getByText(
+        cutover
+          ? /Review costs are tracked from/
+          : /Review cost tracking start date unavailable/
+      )
+    ).toBeTruthy()
+    expect(screen.getByText(/earlier reviews are not backfilled/)).toBeTruthy()
+    const dates = Array.from(document.querySelectorAll("time")).filter(
+      (date) => date.getAttribute("datetime") === cutover
+    )
+    expect(dates).toHaveLength(cutover ? 2 : 0)
+    expect(dates.map((date) => date.textContent)).toEqual(
+      cutover ? Array(2).fill(new Date(cutover).toLocaleString()) : []
+    )
+    expect(screen.queryByText(/Invalid Date/)).toBeNull()
+    client.clear()
+  }
+)
+
 it("shows delivery lag separately from suppression, then refreshes to a populated report", async () => {
   const query = vi
     .spyOn(api, "prMergeRateByModel")
@@ -1066,7 +1112,6 @@ it.each([
           : "Recorded model cost"
       )
     ).toBeTruthy()
-    expect(screen.getByText(/older reviews are not backfilled/)).toBeTruthy()
     client.clear()
   }
 )
