@@ -28,8 +28,9 @@ turn's progress is checkpointed, so the user can retrigger to continue.
 import asyncio
 import logging
 import random
+import time
 from collections.abc import Awaitable, Callable, Sequence
-from typing import Any
+from typing import Any, cast
 
 import anthropic
 import httpx2
@@ -42,6 +43,7 @@ from langsmith import trace
 
 from agent.middleware.trace import OpenSWEMiddleware
 from agent.utils.errors import classify_exception, error_tracking_fields, exception_fields
+from agent.utils.model import evict_cached_model, is_dead_client_error
 
 logger = logging.getLogger(__name__)
 
@@ -77,6 +79,9 @@ MODEL_OUTAGE_MESSAGE = (
     "problem with your task. My progress so far has been saved — please retrigger "
     "the run in a few minutes to continue."
 )
+
+_BAD_MODEL_STATE_KEY = "_model_fallback_bad_models"
+_BAD_MODEL_TTL_SECONDS = 120.0
 
 
 def _is_legacy_httpx_transport_error(exc: BaseException) -> bool:
@@ -174,6 +179,17 @@ class ModelFallbackMiddleware(OpenSWEMiddleware):
             or "fallback"
         )
 
+    def _bad_model_marks(self, request: ModelRequest) -> dict[int, float] | None:
+        raw_state = request.state
+        if not isinstance(raw_state, dict):
+            return None
+        state = cast(dict[str, object], raw_state)
+        marks = state.get(_BAD_MODEL_STATE_KEY)
+        if not isinstance(marks, dict):
+            marks = {}
+            state[_BAD_MODEL_STATE_KEY] = marks
+        return cast(dict[int, float], marks)
+
     async def awrap_model_call(
         self,
         request: ModelRequest,
@@ -182,17 +198,29 @@ class ModelFallbackMiddleware(OpenSWEMiddleware):
         total_attempts = len(self._backoff_schedule) + 1
         last_exc: BaseException | None = None
         delay = 0.0
+        bad_model_marks = self._bad_model_marks(request)
+        now = time.monotonic()
+        primary_key = id(request.model)
+        initial_fallback = False
+        if bad_model_marks is not None:
+            expired = [key for key, expires_at in bad_model_marks.items() if expires_at <= now]
+            for key in expired:
+                del bad_model_marks[key]
+            initial_fallback = primary_key in bad_model_marks
 
         for attempt in range(total_attempts):
             # Alternate: primary on even attempts, fallback on odd. If one
             # provider recovers first (or only one is down), we find it.
-            use_fallback = attempt % 2 == 1
+            use_fallback = (attempt + (1 if initial_fallback else 0)) % 2 == 1
             attempt_request = (
                 request.override(model=self._fallback_model) if use_fallback else request
             )
             try:
                 if last_exc is None:
-                    return await handler(attempt_request)
+                    response = await handler(attempt_request)
+                    if not use_fallback and bad_model_marks is not None:
+                        bad_model_marks.pop(primary_key, None)
+                    return response
                 failed_model = request.model if use_fallback else self._fallback_model
                 metadata: dict[str, str | int | float | None] = {
                     "attempt": attempt + 1,
@@ -223,6 +251,8 @@ class ModelFallbackMiddleware(OpenSWEMiddleware):
                         retry_error = exc
                     else:
                         retry_span.end(outputs={"outcome": "success"})
+                        if not use_fallback and bad_model_marks is not None:
+                            bad_model_marks.pop(primary_key, None)
                         return response
                 if retry_error is not None:
                     raise retry_error
@@ -237,11 +267,16 @@ class ModelFallbackMiddleware(OpenSWEMiddleware):
                     return AIMessage(content=access_error_message)
                 if not _should_fallback(exc):
                     raise
+                dead_client_failure = not use_fallback and is_dead_client_error(exc)
+                if dead_client_failure:
+                    if bad_model_marks is not None:
+                        bad_model_marks[primary_key] = time.monotonic() + _BAD_MODEL_TTL_SECONDS
+                    await evict_cached_model(attempt_request.model)
                 last_exc = exc
                 if attempt + 1 >= total_attempts:
                     break
-                delay = self._backoff_schedule[attempt]
-                if delay > 0:
+                delay = 0.0 if dead_client_failure else self._backoff_schedule[attempt]
+                if delay > 0 and not dead_client_failure:
                     delay += random.uniform(0, delay * 0.25)
                 failed_on = "fallback" if use_fallback else "primary"
                 retry_with = "primary" if use_fallback else "fallback"
