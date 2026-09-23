@@ -263,8 +263,12 @@ async def test_green_webhook_wakes_the_agent_and_stops_the_watch(
     monkeypatch.setattr(
         baby_sit,
         "fetch_pr",
-        AsyncMock(return_value={"state": "open", "head": {"sha": "head-1"}}),
+        AsyncMock(
+            return_value={"state": "open", "head": {"sha": "head-1"}, "base": {"ref": "main"}}
+        ),
     )
+    required = AsyncMock(return_value={"tests", "e2e"})
+    monkeypatch.setattr(baby_sit, "fetch_required_check_names", required)
     monkeypatch.setattr(
         baby_sit,
         "list_check_runs",
@@ -285,6 +289,10 @@ async def test_green_webhook_wakes_the_agent_and_stops_the_watch(
         "check_run": {"status": "completed", "conclusion": "success", "head_sha": "head-1"},
     }
 
+    assert await baby_sit.evaluate_watch("acme/repo#7") == "pending"
+    dispatch.assert_not_awaited()
+
+    required.return_value = {"tests"}
     assert await baby_sit.handle_ci_webhook(payload, "check_run") == {
         "matched": 1,
         "dispatched": 0,

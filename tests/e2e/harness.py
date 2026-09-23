@@ -992,6 +992,11 @@ async def gh_get_branch(owner: str, repo: str, branch: str) -> JSONResponse:  # 
     return JSONResponse({"name": branch, "commit": {"sha": "deadbeef"}})
 
 
+@app.get("/fake-gh/repos/{owner}/{repo}/rules/branches/{branch:path}")
+async def gh_get_branch_rules(owner: str, repo: str, branch: str) -> JSONResponse:  # noqa: ARG001
+    return JSONResponse([])
+
+
 @app.get("/fake-gh/repos/{owner}/{repo}/pulls")
 async def gh_list_pulls(owner: str, repo: str) -> JSONResponse:  # noqa: ARG001
     return JSONResponse([])

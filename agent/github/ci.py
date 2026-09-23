@@ -13,6 +13,7 @@ import logging
 from typing import Any
 
 import httpx2
+from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, ValidationError
 
 from agent.github.checks import REVIEW_CHECK_RUN_NAME
 from agent.github.http import GITHUB_API_BASE, github_client, github_request
@@ -107,6 +108,90 @@ async def list_commit_statuses(
         seen_contexts.add(key)
         latest.append(status)
     return latest
+
+
+class _RequiredCheck(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    context: str
+
+
+class _RequiredStatusChecks(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    contexts: list[str] = Field(default_factory=list)
+    checks: list[_RequiredCheck] = Field(default_factory=list)
+
+
+class _BranchProtection(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    required_status_checks: _RequiredStatusChecks | None = None
+
+
+class _Branch(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    protection: _BranchProtection | None = None
+
+
+class _RuleParameters(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    required_status_checks: list[_RequiredCheck] = Field(default_factory=list)
+
+
+class _BranchRule(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    type: str
+    parameters: _RuleParameters | None = None
+
+
+_BRANCH_RULES = TypeAdapter(list[_BranchRule])
+
+
+async def fetch_required_check_names(
+    *, owner: str, repo: str, branch: str, token: str
+) -> set[str] | None:
+    """Check names ``branch`` requires, from branch protection and rulesets; read access suffices."""
+    base = f"{_GITHUB_API_BASE}/repos/{owner}/{repo}"
+    try:
+        async with github_client(token=token) as client:
+            branch_response = await github_request(client, "GET", f"{base}/branches/{branch}")
+            branch_response.raise_for_status()
+            rules_response = await github_request(
+                client, "GET", f"{base}/rules/branches/{branch}", params={"per_page": "100"}
+            )
+            rules_response.raise_for_status()
+        protection = _Branch.model_validate(branch_response.json()).protection
+        rules = _BRANCH_RULES.validate_python(rules_response.json())
+    except httpx2.HTTPError, ValueError, ValidationError:
+        logger.warning(
+            "Failed to read required checks",
+            extra={"repo_full_name": f"{owner}/{repo}", "branch": branch},
+            exc_info=True,
+        )
+        return None
+    required: set[str] = set()
+    classic = protection.required_status_checks if protection else None
+    if classic is not None:
+        required.update(classic.contexts)
+        required.update(check.context for check in classic.checks)
+    for rule in rules:
+        if rule.type == "required_status_checks" and rule.parameters is not None:
+            required.update(check.context for check in rule.parameters.required_status_checks)
+    return required - _OPEN_SWE_CHECK_NAMES
+
+
+def unreported_required_checks(
+    required: set[str], check_runs: list[dict[str, Any]], statuses: list[dict[str, Any]]
+) -> list[str]:
+    """Required check names with neither a check run nor a commit status on the head yet."""
+    reported = {run.get("name") for run in check_runs} | {
+        status.get("context") for status in statuses
+    }
+    return sorted(required - reported)
 
 
 async def list_failing_check_runs(

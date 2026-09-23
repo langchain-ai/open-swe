@@ -67,6 +67,59 @@ def test_sha_from_status_event() -> None:
     assert github_ci.branch_from_check_payload(payload, "status") == "b1"
 
 
+async def test_required_checks_merge_branch_protection_and_rulesets(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    responses = {
+        "branches/main": {
+            "protection": {
+                "required_status_checks": {
+                    "contexts": ["lint"],
+                    "checks": [{"context": "unit tests", "app_id": 1}],
+                }
+            }
+        },
+        "rules/branches/main": [
+            {"type": "pull_request", "parameters": {}},
+            {
+                "type": "required_status_checks",
+                "parameters": {
+                    "required_status_checks": [
+                        {"context": "e2e"},
+                        {"context": github_ci.REVIEW_CHECK_RUN_NAME},
+                    ]
+                },
+            },
+        ],
+    }
+
+    async def request(_client: object, _method: str, url: str, **_: object) -> _FakeResponse:
+        return _FakeResponse(next(body for path, body in responses.items() if url.endswith(path)))
+
+    monkeypatch.setattr(github_ci, "github_request", request)
+
+    required = await github_ci.fetch_required_check_names(
+        owner="o", repo="r", branch="main", token="t"
+    )
+
+    assert required == {"lint", "unit tests", "e2e"}
+    assert github_ci.unreported_required_checks(
+        required, [{"name": "unit tests"}], [{"context": "lint"}]
+    ) == ["e2e"]
+
+
+async def test_required_checks_unavailable_is_none(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def request(*_: object, **__: object) -> _FakeResponse:
+        return _FakeResponse(error=True)
+
+    monkeypatch.setattr(github_ci, "github_request", request)
+
+    assert (
+        await github_ci.fetch_required_check_names(owner="o", repo="r", branch="main", token="t")
+        is None
+    )
+
+
 def test_is_completed_ci_payload() -> None:
     for conclusion in ("failure", "success"):
         assert github_ci.is_completed_ci_payload(

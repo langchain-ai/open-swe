@@ -1,12 +1,12 @@
-"""When a pull request revision is ready to be voted on.
+"""When a pull request revision is ready to merge on its expedited approvals.
 
 Ready means: open, not a draft, no merge conflict, no check still running, no
-required check failing, no unresolved review thread, no standing request for
-changes, and — where Open SWE reviews the repository — an Open SWE review
-published for this exact head SHA. Silence from a reviewer is not completion.
+required check failing or yet to report, no unresolved review thread, no
+standing request for changes, and — where Open SWE reviews the repository — an
+Open SWE review published for this exact head SHA. Silence from a reviewer is
+not completion.
 
-A failing check that GitHub does not require does not block the vote; it is
-named on the card so the voters approve with their eyes open.
+A failing check that GitHub does not require does not block the merge.
 """
 
 import logging
@@ -17,14 +17,20 @@ from typing import Any
 import httpx2
 
 from agent.baby_sit import aggregate_check_state
-from agent.github.ci import fetch_pr, list_check_runs, list_commit_statuses
+from agent.github.ci import (
+    fetch_pr,
+    fetch_required_check_names,
+    list_check_runs,
+    list_commit_statuses,
+    unreported_required_checks,
+)
 from agent.github.http import GITHUB_API_BASE, github_client, github_request
 from agent.github.pull_request_status import (
     Mergeability,
     fetch_mergeability,
     fetch_unresolved_review_threads,
 )
-from agent.github.pull_requests import PullRequest
+from agent.github.pull_requests import PullRequest, PullRequestPayload
 from agent.review.enabled_repos import is_review_repo_enabled
 
 logger = logging.getLogger(__name__)
@@ -45,6 +51,7 @@ class PullRequestSnapshot:
     check_state: str
     unresolved_threads: int
     failing_checks: list[str] = field(default_factory=list)
+    unreported_required_checks: list[str] = field(default_factory=list)
     failures_are_required: bool = True
     changes_requested_by: list[str] = field(default_factory=list)
     open_swe_review_required: bool = False
@@ -85,6 +92,9 @@ def readiness_blockers(snapshot: PullRequestSnapshot) -> list[str]:
         blockers.append("checks are still running")
     elif snapshot.check_state in {"failure", "blocked"} and snapshot.failures_are_required:
         blockers.append(_failed_check_blocker(snapshot))
+    if snapshot.unreported_required_checks:
+        names = ", ".join(snapshot.unreported_required_checks)
+        blockers.append(f"required checks have not reported yet: {names}")
     if snapshot.unresolved_threads:
         noun = "thread" if snapshot.unresolved_threads == 1 else "threads"
         blockers.append(f"{snapshot.unresolved_threads} unresolved review {noun}")
@@ -179,6 +189,11 @@ async def assess_readiness(
     statuses = await list_commit_statuses(owner=owner, repo=repo, ref=head_sha, token=token)
     if check_runs is None or statuses is None:
         return None
+    required = await fetch_required_check_names(
+        owner=owner, repo=repo, branch=PullRequestPayload.model_validate(pr).base_ref, token=token
+    )
+    if required is None:
+        return None
     async with github_client(token=token) as client:
         threads = await fetch_unresolved_review_threads(client, owner, repo, pr_number)
         reviews = await _fetch_reviews(client, owner, repo, pr_number)
@@ -217,6 +232,7 @@ async def assess_readiness(
         check_state=check_state,
         unresolved_threads=len(threads),
         failing_checks=sorted({str(failure["name"]) for failure in failures}),
+        unreported_required_checks=unreported_required_checks(required, check_runs, statuses),
         # GitHub says "unstable" when the pull request is mergeable and only
         # checks it does not require are unhappy, and "blocked" when a required
         # one is. Trusting it keeps us from having to read branch protection,

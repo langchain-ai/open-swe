@@ -18,12 +18,15 @@ from agent.github.ci import (
     FAILING_CONCLUSIONS,
     branch_from_check_payload,
     fetch_pr,
+    fetch_required_check_names,
     head_sha_from_check_payload,
     is_completed_ci_payload,
     list_check_runs,
     list_commit_statuses,
+    unreported_required_checks,
 )
 from agent.github.comments import post_github_comment
+from agent.github.pull_requests import PullRequestPayload
 from agent.prompts import render_prompt
 from agent.slack.client import GitHubPrRef, post_slack_thread_reply
 from agent.source_context import SourceContext
@@ -477,6 +480,17 @@ async def _evaluate_watch(key: str, *, token: str | None = None) -> str:
         await WATCHES.save(watch)
         return state
     if state == "success":
+        base_ref = PullRequestPayload.model_validate(pr).base_ref
+        if not base_ref:
+            return await _record_evaluation_error(watch, "base branch unavailable")
+        required = await fetch_required_check_names(
+            owner=watch.owner, repo=watch.repo, branch=base_ref, token=token
+        )
+        if required is None:
+            return await _record_evaluation_error(watch, "required checks unavailable")
+        if unreported_required_checks(required, check_runs, statuses):
+            await WATCHES.save(watch)
+            return "pending"
         return await _finish_ready(watch)
     if state == "blocked":
         return await _finish_watch(

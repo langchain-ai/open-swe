@@ -30,6 +30,12 @@ def test_branch_protection_waiting_on_approvals_is_not_a_blocker() -> None:
     assert readiness_blockers(_snapshot(mergeable_state="blocked")) == []
 
 
+def test_a_required_check_that_has_not_reported_blocks_even_when_the_rest_is_green() -> None:
+    blockers = readiness_blockers(_snapshot(unreported_required_checks=["e2e"]))
+
+    assert blockers == ["required checks have not reported yet: e2e"]
+
+
 def test_a_failing_check_github_does_not_require_is_named_but_does_not_block() -> None:
     advisory = _snapshot(
         check_state="failure",
