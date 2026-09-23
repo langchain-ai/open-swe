@@ -1,1 +1,1 @@
-Move the current Open SWE thread to a new Slack thread.
+Move or break out the current conversation into a new Slack thread, preserving its history and detaching the original thread so Open SWE stops listening there. Omit `channel_id` to create the breakout in the current channel. Use a concise, non-sensitive `message` for the new root; subsequent replies go to the destination. Use this for a breakout of the current conversation, not `slack_start_new_thread`, which starts independent work and leaves the original thread active.
