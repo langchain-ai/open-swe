@@ -61,7 +61,7 @@ async def _root_text(request: SlackRequest, heading: str) -> str:
         await source_thread_line(request.channel_id, request.thread_ts),
         await _participant_mentions(request),
     )
-    return "\n".join(line for line in lines if line)
+    return " · ".join(line for line in lines if line)
 
 
 async def _link_back(request: SlackRequest, new_ts: str) -> None:

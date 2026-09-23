@@ -185,9 +185,7 @@ async def test_slack_start_new_thread_success(
         "dashboard_thread_url",
         lambda thread_id: f"https://dashboard.example/agents/{thread_id}",
     )
-    source_line = AsyncMock(
-        return_value=":arrow_right_hook: Broken out from <https://p/src|this thread>"
-    )
+    source_line = AsyncMock(return_value="<https://p/src|from this thread>")
     link_back = AsyncMock()
     monkeypatch.setattr(slack_breakout_tool, "source_thread_line", source_line)
     monkeypatch.setattr(slack_breakout_tool, "post_breakout_link", link_back)
@@ -210,8 +208,7 @@ async def test_slack_start_new_thread_success(
     get_permalink.assert_awaited_once_with("C1", new_ts)
     assert captured["top_level_post"]["channel_id"] == "C1"
     assert captured["top_level_post"]["text"] == (
-        "*Breakout thread:* Investigate follow-up\n"
-        ":arrow_right_hook: Broken out from <https://p/src|this thread>"
+        "*Breakout thread:* Investigate follow-up · <https://p/src|from this thread>"
     )
     source_thread_ts = _config()["configurable"]["slack_thread"]["thread_ts"]
     source_line.assert_awaited_once_with("C1", source_thread_ts)

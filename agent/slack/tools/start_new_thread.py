@@ -266,7 +266,7 @@ async def slack_start_new_thread(
     )
     message_ts, slack_error = await post_slack_top_level_message_with_ts(
         clean_channel_id,
-        "\n".join(line for line in (_visible_message(clean_title), source_line) if line),
+        " · ".join(part for part in (_visible_message(clean_title), source_line) if part),
         unfurl_links=False,
         unfurl_media=False,
     )
