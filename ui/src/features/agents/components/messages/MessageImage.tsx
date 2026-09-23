@@ -64,7 +64,7 @@ export function MessageImage({
       <div
         className={cn(
           className,
-          "h-32 min-w-32 bg-muted",
+          "h-32 min-w-48 bg-muted",
           !failed && "animate-pulse"
         )}
         data-testid={failed ? "message-image-error" : "message-image-loading"}
