@@ -933,11 +933,11 @@ function buildHumanMessage(
             entity?.displayName ??
             (entity?.handle ? `@${entity.handle}` : undefined),
           structuredSenderNote:
-            entity?.senderType === "bot"
-              ? "bot"
-              : entity?.openSweAccount === "unlinked"
-                ? "not an Open SWE user"
-                : undefined,
+            entity?.senderType !== "bot" &&
+            entity?.openSweAccount === "unlinked"
+              ? "not an Open SWE user"
+              : undefined,
+          structuredSenderIsBot: entity?.senderType === "bot",
         }
       : {}),
   }
