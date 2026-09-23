@@ -897,9 +897,11 @@ async def _stamp_attribution_footer(body: str) -> str:
             metadata = thread.get("metadata") if isinstance(thread, dict) else None
             if isinstance(metadata, dict):
                 model = metadata.get("model")
-                model_id = model if isinstance(model, str) and model else model_id
                 value = metadata.get("effort")
-                effort = value if isinstance(value, str) and value else effort
+                if model_id is None and isinstance(model, str) and model:
+                    model_id = model
+                if effort is None and isinstance(value, str) and value:
+                    effort = value
         except Exception:
             logger.debug("Could not read the thread's model for the PR footer", exc_info=True)
     return add_pr_collaboration_note(

@@ -626,6 +626,39 @@ def test_footer_names_the_model_that_opened_the_pr(
     assert sent_body.endswith(" · openai:gpt-5.6-luna (xhigh)")
 
 
+def test_footer_uses_selected_route_when_thread_metadata_is_missing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _set_config(
+        monkeypatch,
+        {
+            "source": "dashboard",
+            "thread_id": "thread-1",
+            "resolved_agent_model_id": "openai:balanced",
+            "resolved_agent_effort": "high",
+        },
+    )
+    monkeypatch.setattr(opr, "private_credential_login", AsyncMock(return_value="test-owner"))
+    monkeypatch.setattr(opr, "_resolve_pr_author_token", lambda *_a, **_k: _coro(("tok", "user")))
+    client = _RoutingClient(
+        post=_FakeResponse(201, {"html_url": "u", "number": 1, "user": {}}), get_routes={}
+    )
+    _install_client(monkeypatch, client)
+    monkeypatch.setattr(
+        opr,
+        "get_client",
+        lambda: SimpleNamespace(
+            threads=SimpleNamespace(
+                get=AsyncMock(return_value={"metadata": {}}),
+            )
+        ),
+    )
+
+    _open_with_body("body")
+
+    assert client.post_calls[0]["json"]["body"].endswith(" · openai:balanced (high)")
+
+
 def test_uses_stored_slack_permalink_reference(monkeypatch: pytest.MonkeyPatch) -> None:
     _set_config(
         monkeypatch,

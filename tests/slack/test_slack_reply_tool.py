@@ -543,6 +543,34 @@ async def test_slack_reply_passes_model_reported_usage(
     assert usage.total_tokens == 110
 
 
+async def test_slack_reply_uses_selected_route_effort(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, Any] = {}
+
+    async def post(*_args: Any, **kwargs: Any) -> tuple[str, None]:
+        captured.update(kwargs)
+        return "2.0", None
+
+    config = _config()
+    config["configurable"].update(
+        resolved_agent_model_id="model-balanced",
+        resolved_agent_effort="high",
+    )
+    monkeypatch.setattr(slack_reply_tool, "get_config", lambda: config)
+    monkeypatch.setattr(slack_reply_tool, "_post_and_store_mapping", post)
+    state = {
+        "model_route": "balanced",
+        "messages": [
+            HumanMessage(content="request"),
+            AIMessage(content="answer", response_metadata={"model_name": "model-balanced"}),
+        ],
+    }
+
+    assert await slack_reply_tool.slack_reply("Done", "final", state=state) == {"success": True}
+    assert captured["usage"].reasoning_effort == "high"
+
+
 async def test_reply_moves_the_thread_to_the_dashboard_when_its_slack_thread_is_gone(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

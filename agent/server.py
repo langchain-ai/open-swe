@@ -953,6 +953,8 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
                     cast(ModelSelectionState, state)
                 )
                 attribution_model_id, attribution_effort = self._routing_defaults[attribution_route]
+            configurable["resolved_agent_model_id"] = attribution_model_id
+            configurable["resolved_agent_effort"] = attribution_effort
             bot_id = (
                 cfg.slack_thread.triggering_bot_id
                 if self._source == "slack" and cfg.slack_thread
