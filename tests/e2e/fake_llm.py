@@ -1236,7 +1236,10 @@ SCRIPT_RULES: tuple[ScriptRule, ...] = (
         "expedite_merge",
         lambda ctx: (
             EXPEDITE_MARKER in ctx.first_text
-            and ("/baby-sit --ready" in ctx.last_text or "now has two approvals" in ctx.last_text)
+            and (
+                "finished without a failure" in ctx.last_text
+                or "now has two approvals" in ctx.last_text
+            )
         ),
     ),
     ScriptRule("expedite", lambda ctx: EXPEDITE_MARKER in ctx.first_text),

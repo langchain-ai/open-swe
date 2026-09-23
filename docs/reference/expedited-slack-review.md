@@ -81,7 +81,7 @@ A Slack rejection is a veto of the vote, not a GitHub `REQUEST_CHANGES`.
 ### Merge
 
 The agent calls `merge_expedited_pr` once it believes the PR is ready, typically when
-a `/baby-sit` watch wakes it with `/baby-sit --ready` or when the card reaches two
+a `/baby-sit` watch wakes it because checks went green, or when the card reaches two
 approvals. The tool:
 
 1. Re-reads the PR. Merged → card marked merged. Closed → card closed.

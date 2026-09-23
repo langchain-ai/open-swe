@@ -291,7 +291,7 @@ async def test_green_webhook_wakes_the_agent_and_stops_the_watch(
     }
     dispatch.assert_awaited_once()
     assert dispatch.await_args is not None
-    assert "/baby-sit --ready" in dispatch.await_args.args[1]
+    assert "checks are green" in dispatch.await_args.args[1]
     notify.assert_not_awaited()
     assert watch_client.store.values == {}
 
