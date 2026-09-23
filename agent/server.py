@@ -656,7 +656,15 @@ async def _bridged_thread(thread_id: str | None) -> bool:
     """Whether this thread's sandbox is a CLI bridge on the user's machine."""
     if not thread_id:
         return False
-    thread = await client.threads.get(thread_id=thread_id)
+    try:
+        thread = await client.threads.get(thread_id=thread_id)
+    except Exception:
+        logger.warning(
+            "Could not read the thread's sandbox; omitting cli_result",
+            extra={"agent_thread_id": thread_id},
+            exc_info=True,
+        )
+        return False
     sandbox_id = thread_metadata(thread).get("sandbox_id")
     return isinstance(sandbox_id, str) and Bridge.bridge_id_of(sandbox_id) is not None
 
