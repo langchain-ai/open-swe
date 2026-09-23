@@ -345,7 +345,7 @@ it.each([
       "1",
       "3",
       "17.5%Small sample",
-      "60%",
+      "60%3/5 eligible",
       "2h",
       "1d",
     ])
@@ -414,6 +414,56 @@ it.each([
     client.clear()
   }
 )
+
+it("compares merge rates using eligible samples when confidence-adjusted", async () => {
+  const makeCohort = (model: string, merged: number) => ({
+    model_id: model,
+    model_attribution_quality: "configured" as const,
+    merged,
+    closed_without_merge: 0,
+    mature_pending: 0,
+    waiting: 0,
+    cohort_size: merged,
+    decided_denominator: merged,
+    decided_merge_rate: 1,
+    mature_denominator: merged,
+    mature_cohort_merge_share: 1,
+    avg_merge_seconds: null,
+    efforts: [],
+  })
+  vi.spyOn(api, "prMergeRateByModel").mockResolvedValue(
+    report({
+      ...captured,
+      status: "ready",
+      cohorts: [makeCohort("small-model", 3), makeCohort("large-model", 30)],
+    })
+  )
+  const client = mountReport()
+  const table = (await screen.findByText("small-model")).closest("table")!
+  const rows = () => within(table).getAllByRole("row").slice(1)
+  fireEvent.click(
+    within(table).getByRole("columnheader", { name: "Merge rate" })
+  )
+  expect(rows().map((row) => row.textContent)).toEqual(
+    expect.arrayContaining([
+      expect.stringContaining("100%3/3 eligibleSmall sample"),
+      expect.stringContaining("100%30/30 eligible"),
+    ])
+  )
+  fireEvent.click(screen.getByRole("button", { name: "Confidence-adjusted" }))
+  expect(
+    screen.getByRole("columnheader", { name: "95% lower bound" })
+  ).toBeTruthy()
+  expect(rows().map((row) => row.querySelector("td")?.textContent)).toEqual([
+    expect.stringContaining("large-model"),
+    expect.stringContaining("small-model"),
+  ])
+  expect(rows().map((row) => row.textContent)).toEqual([
+    expect.stringContaining("89%30/30 eligible"),
+    expect.stringContaining("44%3/3 eligibleSmall sample"),
+  ])
+  client.clear()
+})
 
 it("shows unavailable attribution thread IDs for admin triage", async () => {
   const threadId = "73b0906a-ff36-59c7-9cc5-ad622fff673e"

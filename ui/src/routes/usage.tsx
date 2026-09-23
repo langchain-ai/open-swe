@@ -69,6 +69,7 @@ interface SortableColumn<Key extends string> {
 }
 
 type UsageScope = "invocations" | "threads"
+type MergeRateView = "observed" | "lower_bound"
 type PROutcomesSort =
   | "model"
   | "prs_opened"
@@ -729,6 +730,12 @@ function PRMergeRateSection({
               they have had enough time to merge.
             </p>
             <p>
+              <strong>Confidence-adjusted</strong> shows the 95% Wilson lower
+              bound for the same eligible PRs. It is a conservative comparison
+              score, not the observed merge rate. A small sample lowers the
+              bound even when every eligible PR merged.
+            </p>
+            <p>
               <strong>Avg time to merge</strong> is the arithmetic mean of time
               from PR opened to merged across merged PRs opened in the selected
               period. Unmerged PRs are excluded, and it shows — when a group has
@@ -875,7 +882,24 @@ const PR_OUTCOME_COLUMNS: Array<SortableColumn<PROutcomesSort>> = [
   },
 ]
 
-function prOutcomeSortValue(cohort: PRMergeRateCohort, sort: PROutcomesSort) {
+function wilsonLowerBound(merged: number, eligible: number): number | null {
+  if (eligible === 0) return null
+  const z = 1.96
+  const rate = merged / eligible
+  const z2 = z * z
+  return (
+    (rate +
+      z2 / (2 * eligible) -
+      z * Math.sqrt((rate * (1 - rate) + z2 / (4 * eligible)) / eligible)) /
+    (1 + z2 / eligible)
+  )
+}
+
+function prOutcomeSortValue(
+  cohort: PRMergeRateCohort,
+  sort: PROutcomesSort,
+  mergeRateView: MergeRateView
+) {
   switch (sort) {
     case "model":
       return safeModelLabel(cohort.model_id ?? "") || "Unavailable"
@@ -890,7 +914,9 @@ function prOutcomeSortValue(cohort: PRMergeRateCohort, sort: PROutcomesSort) {
     case "median_distance":
       return cohort.median_distance_basis_points ?? null
     case "merge_rate":
-      return cohort.mature_cohort_merge_share
+      return mergeRateView === "observed"
+        ? cohort.mature_cohort_merge_share
+        : wilsonLowerBound(cohort.merged, cohort.mature_denominator)
     case "avg_delivery_seconds":
       return cohort.avg_delivery_seconds
     case "avg_merge_seconds":
@@ -908,11 +934,12 @@ function PRMergeRateTable({
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(10)
   const [sort, setSort] = useState<PROutcomesSort>("prs_opened")
+  const [mergeRateView, setMergeRateView] = useState<MergeRateView>("observed")
   const [direction, setDirection] = useState<SortDirection>("desc")
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set())
   const sortedCohorts = [...cohorts].sort((a, b) => {
-    const aValue = prOutcomeSortValue(a, sort)
-    const bValue = prOutcomeSortValue(b, sort)
+    const aValue = prOutcomeSortValue(a, sort, mergeRateView)
+    const bValue = prOutcomeSortValue(b, sort, mergeRateView)
     if (aValue == null) return bValue == null ? 0 : 1
     if (bValue == null) return -1
     const comparison =
@@ -930,6 +957,26 @@ function PRMergeRateTable({
 
   return (
     <div>
+      <div className="flex flex-wrap items-center justify-end gap-3 border-b border-border px-4 py-3 text-xs">
+        <span className="text-muted-foreground">Merge rate view</span>
+        <div
+          role="group"
+          aria-label="Merge rate view"
+          className="flex rounded-md border border-border p-0.5"
+        >
+          {(["observed", "lower_bound"] as const).map((view) => (
+            <button
+              key={view}
+              type="button"
+              aria-pressed={mergeRateView === view}
+              className={`rounded-sm px-3 py-1.5 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring ${mergeRateView === view ? "bg-muted font-semibold text-foreground" : "text-muted-foreground"}`}
+              onClick={() => setMergeRateView(view)}
+            >
+              {view === "observed" ? "Observed" : "Confidence-adjusted"}
+            </button>
+          ))}
+        </div>
+      </div>
       <div className="overflow-x-auto">
         <table className="w-full min-w-[860px] text-xs">
           <thead className="border-b border-border text-muted-foreground">
@@ -941,7 +988,14 @@ function PRMergeRateTable({
                     column.key === "merge_rate"
                       ? {
                           ...column,
-                          tooltip: `Includes merged and closed PRs, plus PRs open for at least ${maturityDays} days. Newer open PRs are excluded.`,
+                          label:
+                            mergeRateView === "observed"
+                              ? "Merge rate"
+                              : "95% lower bound",
+                          tooltip:
+                            mergeRateView === "observed"
+                              ? `Includes merged and closed PRs, plus PRs open for at least ${maturityDays} days. Newer open PRs are excluded.`
+                              : "Wilson 95% lower bound on the observed merge rate. This is a conservative comparison score, not the observed rate.",
                         }
                       : column
                   }
@@ -1016,6 +1070,7 @@ function PRMergeRateTable({
                     <PRMergeRateCells
                       cohort={cohort}
                       maturityDays={maturityDays}
+                      mergeRateView={mergeRateView}
                     />
                     <td className="px-4 py-3 text-right tabular-nums">
                       <AvgTimeToPR cohort={cohort} />
@@ -1036,6 +1091,7 @@ function PRMergeRateTable({
                           <PRMergeRateCells
                             cohort={effort}
                             maturityDays={maturityDays}
+                            mergeRateView={mergeRateView}
                           />
                           <td className="px-4 py-3 text-right tabular-nums">
                             <span title="Average shown at the model level">
@@ -1191,6 +1247,7 @@ function formatEffort(effort: string | null | undefined) {
 function PRMergeRateCells({
   cohort,
   maturityDays,
+  mergeRateView,
 }: {
   cohort: Pick<
     PRMergeRateCohort,
@@ -1200,11 +1257,17 @@ function PRMergeRateCells({
     | "mature_pending"
     | "waiting"
     | "mature_cohort_merge_share"
+    | "mature_denominator"
     | "median_distance_basis_points"
     | "distance_sample_size"
   >
   maturityDays: number
+  mergeRateView: MergeRateView
 }) {
+  const rate =
+    mergeRateView === "observed"
+      ? cohort.mature_cohort_merge_share
+      : wilsonLowerBound(cohort.merged, cohort.mature_denominator)
   return (
     <>
       <td className="px-2 py-3 text-right tabular-nums">
@@ -1237,9 +1300,17 @@ function PRMergeRateCells({
           )}
       </td>
       <td className="px-4 py-3 text-right text-sm font-semibold tabular-nums">
-        {cohort.mature_cohort_merge_share == null
-          ? "—"
-          : formatPercent(cohort.mature_cohort_merge_share)}
+        {rate == null ? "—" : formatPercent(rate)}
+        {rate != null && (
+          <div className="text-xs font-normal text-muted-foreground">
+            {cohort.merged}/{cohort.mature_denominator} eligible
+          </div>
+        )}
+        {rate != null && cohort.mature_denominator < 5 && (
+          <div className="text-xs font-normal text-amber-600 dark:text-amber-400">
+            Small sample
+          </div>
+        )}
       </td>
     </>
   )
