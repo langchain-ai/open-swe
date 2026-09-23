@@ -41,27 +41,15 @@ def _request() -> SlackRequest:
 
 def _patch_slack(monkeypatch) -> SimpleNamespace:
     posted = SimpleNamespace(
-        replies=AsyncMock(),
+        reactions=AsyncMock(),
         ephemeral=AsyncMock(),
-    )
-    monkeypatch.setattr(
-        breakout,
-        "fetch_slack_thread_messages",
-        AsyncMock(
-            return_value=[
-                {"ts": "100.0", "user": "U_ALICE", "text": "flaky test"},
-                {"ts": "101.0", "user": "U0BOT", "bot_id": "B1", "text": "on it"},
-                {"ts": "102.0", "user": "U_BOB", "text": "same here"},
-                {"ts": "105.0", "user": "U_ALICE", "text": "<@U0BOT> /breakout fix it"},
-            ]
-        ),
     )
     monkeypatch.setattr(
         breakout,
         "source_thread_line",
         AsyncMock(return_value="<https://slack/p100|from this thread>"),
     )
-    monkeypatch.setattr(breakout, "post_breakout_link", posted.replies)
+    monkeypatch.setattr(breakout, "mark_broken_out", posted.reactions)
     monkeypatch.setattr(breakout, "post_slack_ephemeral_reply", posted.ephemeral)
     return posted
 
@@ -81,9 +69,9 @@ async def test_breakout_with_text_starts_new_thread_with_old_transcript(monkeypa
     await breakout.process_slack_breakout(_request(), "fix it", None)
 
     assert root.await_args.args[1] == (
-        "*Breakout thread:* fix it · <https://slack/p100|from this thread> · <@U_ALICE> <@U_BOB>"
+        "*Breakout thread:* fix it · <https://slack/p100|from this thread> · <@U_ALICE>"
     )
-    posted.replies.assert_awaited_once_with("C1", "100.0", "200.0")
+    posted.reactions.assert_awaited_once_with("C1", "105.0")
     sent = mention.await_args.args[0]
     assert (sent.thread_ts, sent.thread_id, sent.text, sent.context_thread_ts) == (
         "200.0",
@@ -116,11 +104,11 @@ async def test_bare_breakout_moves_the_existing_thread(monkeypatch):
 
     _, thread_id, _, channel, message = move.await_args.args
     assert (thread_id, channel) == ("old-thread", "C1")
-    assert message == (
-        "*Breakout thread:* Flaky test · <https://slack/p100|from this thread> · "
-        "<@U_ALICE> <@U_BOB>"
+    assert (
+        message
+        == "*Breakout thread:* Flaky test · <https://slack/p100|from this thread> · <@U_ALICE>"
     )
-    posted.replies.assert_awaited_once_with("C1", "100.0", "200.0")
+    posted.reactions.assert_awaited_once_with("C1", "105.0")
     mention.assert_not_awaited()
 
 
@@ -142,5 +130,5 @@ async def test_bare_breakout_refuses_private_threads(monkeypatch):
     await breakout.process_slack_breakout(_request(), "", None)
 
     move.assert_not_awaited()
-    posted.replies.assert_not_awaited()
+    posted.reactions.assert_not_awaited()
     posted.ephemeral.assert_awaited_once()

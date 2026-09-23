@@ -4,16 +4,14 @@ import logging
 import re
 
 from agent.slack import webhook as service
-from agent.slack.breakout_links import post_breakout_link, source_thread_line
+from agent.slack.breakout_links import mark_broken_out, source_thread_line
 from agent.slack.client import (
-    fetch_slack_thread_messages,
     get_active_slack_thread,
     post_slack_ephemeral_reply,
     post_slack_top_level_message_with_ts,
     strip_bot_mention,
 )
 from agent.slack.move import move_slack_thread
-from agent.slack.payloads import SlackMessage
 from agent.slack.request import SlackRequest
 from agent.utils.json_types import thread_metadata
 from agent.utils.thread_ops import langgraph_client
@@ -41,31 +39,17 @@ def _title(instruction: str) -> str:
     return f"{first_line[: _TITLE_MAX_CHARS - 1].rstrip()}…"
 
 
-async def _participant_mentions(request: SlackRequest) -> str:
-    messages = [
-        message
-        for raw in await fetch_slack_thread_messages(request.channel_id, request.thread_ts)
-        if (message := SlackMessage.parse(raw)) is not None
-    ]
-    user_ids = dict.fromkeys(
-        message.user
-        for message in messages
-        if message.user and not message.is_from_bot and message.user != request.bot_user_id
-    )
-    return " ".join(f"<@{user_id}>" for user_id in user_ids)
-
-
 async def _root_text(request: SlackRequest, heading: str) -> str:
-    lines = (
+    parts = (
         heading,
         await source_thread_line(request.channel_id, request.thread_ts),
-        await _participant_mentions(request),
+        f"<@{request.user_id}>" if request.user_id else "",
     )
-    return " · ".join(line for line in lines if line)
+    return " · ".join(part for part in parts if part)
 
 
-async def _link_back(request: SlackRequest, new_ts: str) -> None:
-    await post_breakout_link(request.channel_id, request.thread_ts, new_ts)
+async def _mark_done(request: SlackRequest) -> None:
+    await mark_broken_out(request.channel_id, request.original_message_ts or request.event_ts)
 
 
 async def _tell_sender(request: SlackRequest, text: str) -> None:
@@ -108,7 +92,7 @@ async def _move(request: SlackRequest) -> None:
         )
         await _tell_sender(request, "Could not move this thread; try again.")
         return
-    await _link_back(request, new_ts)
+    await _mark_done(request)
 
 
 async def _start(
@@ -125,7 +109,7 @@ async def _start(
         logger.warning("Slack breakout root post failed", extra={"slack_error": slack_error})
         await _tell_sender(request, "Could not start a breakout thread; try again.")
         return
-    await _link_back(request, new_ts)
+    await _mark_done(request)
     thread_id = await common.resolve_slack_thread_id(langgraph_client(), request.channel_id, new_ts)
     await service.process_slack_mention(
         request.model_copy(

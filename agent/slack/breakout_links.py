@@ -1,6 +1,8 @@
 """Cross-links between a Slack thread and the breakout thread started from it."""
 
-from agent.slack.client import get_slack_permalink, post_slack_thread_reply
+from agent.slack.client import add_slack_reaction, get_slack_permalink
+
+BREAKOUT_REACTION = "leftwards_arrow_with_hook"
 
 
 async def source_thread_line(channel_id: str, source_ts: str) -> str:
@@ -10,11 +12,5 @@ async def source_thread_line(channel_id: str, source_ts: str) -> str:
     return f"<{permalink}|from this thread>"
 
 
-async def post_breakout_link(channel_id: str, source_ts: str, breakout_ts: str) -> None:
-    permalink = (
-        await get_slack_permalink(channel_id, breakout_ts)
-        or f"https://slack.com/archives/{channel_id}/p{breakout_ts.replace('.', '')}"
-    )
-    await post_slack_thread_reply(
-        channel_id, source_ts, f"<{permalink}|:leftwards_arrow_with_hook:>"
-    )
+async def mark_broken_out(channel_id: str, request_ts: str) -> None:
+    await add_slack_reaction(channel_id, request_ts, BREAKOUT_REACTION)

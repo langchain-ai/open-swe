@@ -186,9 +186,9 @@ async def test_slack_start_new_thread_success(
         lambda thread_id: f"https://dashboard.example/agents/{thread_id}",
     )
     source_line = AsyncMock(return_value="<https://p/src|from this thread>")
-    link_back = AsyncMock()
+    react = AsyncMock()
     monkeypatch.setattr(slack_breakout_tool, "source_thread_line", source_line)
-    monkeypatch.setattr(slack_breakout_tool, "post_breakout_link", link_back)
+    monkeypatch.setattr(slack_breakout_tool, "mark_broken_out", react)
 
     result = await slack_breakout_tool.slack_start_new_thread(
         "Investigate follow-up",
@@ -208,11 +208,11 @@ async def test_slack_start_new_thread_success(
     get_permalink.assert_awaited_once_with("C1", new_ts)
     assert captured["top_level_post"]["channel_id"] == "C1"
     assert captured["top_level_post"]["text"] == (
-        "*Breakout thread:* Investigate follow-up · <https://p/src|from this thread>"
+        "*Breakout thread:* Investigate follow-up · <https://p/src|from this thread> · <@U1>"
     )
     source_thread_ts = _config()["configurable"]["slack_thread"]["thread_ts"]
     source_line.assert_awaited_once_with("C1", source_thread_ts)
-    link_back.assert_awaited_once_with("C1", source_thread_ts, new_ts)
+    react.assert_awaited_once_with("C1", "1700000000.000002")
     assert captured["top_level_post"]["unfurl_links"] is False
     assert captured["thread_reply"] == {
         "channel_id": "C1",
