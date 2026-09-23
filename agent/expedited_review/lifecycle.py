@@ -219,7 +219,7 @@ async def retire(
 
 
 async def mark_merged(approval: ExpeditedApproval) -> None:
-    updated = await retire(approval, "merged", "Merged.")
+    updated = await retire(approval, "merged", "merged")
     if updated is None:
         return
     location = updated.slack_location

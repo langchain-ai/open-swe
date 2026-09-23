@@ -141,7 +141,7 @@ async def merge_approved(approval: ExpeditedApproval) -> MergeResult:
         await mark_merged(approval)
         return MergeResult("merged", f"{pr.url} is already merged.")
     if snapshot.state != "open":
-        await retire(approval, "cancelled", "The pull request was closed.")
+        await retire(approval, "cancelled", "the pull request was closed")
         return MergeResult("closed", "The pull request is closed; the expedited review ended.")
 
     files = await fetch_changed_files(

@@ -117,7 +117,7 @@ async def expedite_pr_approval(
             return {"success": True, "cancelled": False}
         if approval.thread_id and approval.thread_id != thread_id:
             return _failure("This expedited review belongs to another agent thread")
-        await retire(approval, "cancelled", "Cancelled by the agent.")
+        await retire(approval, "cancelled", "cancelled by the agent")
         return {"success": True, "cancelled": True}
 
     own_channel, own_thread = await _context_location(cfg, thread_id)

@@ -30,6 +30,8 @@ async def handle_button(
         decision = "reject"
     elif button.action == "ready":
         decision = "ready"
+    elif button.action == "dismiss":
+        decision = "dismiss"
     else:
         return ignored("Unknown expedited review action")
 

@@ -83,7 +83,7 @@ def _test_note(tests: list[ChangedFile]) -> list[Block]:
     ]
 
 
-def _vote_buttons(approval: ExpeditedApproval) -> tuple[ButtonElement, ButtonElement]:
+def _vote_buttons(approval: ExpeditedApproval) -> tuple[ButtonElement, ...]:
     return (
         button(
             "Approve",
@@ -97,6 +97,7 @@ def _vote_buttons(approval: ExpeditedApproval) -> tuple[ButtonElement, ButtonEle
             value=_button_value("reject", approval),
             style="danger",
         ),
+        _dismiss_button(approval),
     )
 
 
@@ -106,6 +107,14 @@ def _ready_button(approval: ExpeditedApproval) -> ButtonElement:
         action_id="open_swe_option_select_ready",
         value=_button_value("ready", approval),
         style="primary",
+    )
+
+
+def _dismiss_button(approval: ExpeditedApproval) -> ButtonElement:
+    return button(
+        "Dismiss",
+        action_id="open_swe_option_select_dismiss",
+        value=_button_value("dismiss", approval),
     )
 
 
@@ -122,7 +131,7 @@ def _status(approval: ExpeditedApproval, author: str) -> list[Block]:
     if approval.awaiting_ready:
         return [
             section(f"*Draft.* {author}, mark it ready for review so someone else can approve it."),
-            actions(_ready_button(approval)),
+            actions(_ready_button(approval), _dismiss_button(approval)),
         ]
     if approval.approved:
         return [
@@ -165,12 +174,15 @@ def closed_card(
     outcome: str,
     diff_image_id: str | None = None,
 ) -> tuple[str, list[Block]]:
-    """Text fallback and blocks for a card whose vote is over; ``outcome`` is our own mrkdwn."""
+    """Text fallback and blocks for a card whose vote is over; ``outcome`` is our own mrkdwn.
+
+    A merged or cancelled card collapses to one line, since nothing is left to read or click.
+    """
     pr = approval.pull_request
-    if approval.state == "merged":
+    if approval.state in {"merged", "cancelled"}:
         label = f"{pr.owner}/{pr.repo}#{pr.number}"
-        return f"Expedited review: merged — {pr.url}", [
-            section(f"*Expedited review: merged*\n<{pr.url}|{label}> {escape(title)}")
+        return f"Expedited review: {outcome} — {pr.url}", [
+            section(f"*Expedited review: {outcome}*\n<{pr.url}|{label}> {escape(title)}")
         ]
     blocks: list[Block] = [
         *_header(approval, title, author),

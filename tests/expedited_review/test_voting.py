@@ -166,6 +166,22 @@ async def test_rejection_closes_the_card_without_waking_the_agent(
     assert harness.agent_prompts == []
 
 
+async def test_anyone_can_dismiss_the_card_without_waking_the_agent(
+    harness: _Harness, open_approval: OpenApproval
+) -> None:
+    approval = await open_approval(awaiting_ready=True)
+
+    first = await voting.dismiss(await _stored(approval), "U_NOBODY")
+    again = await voting.dismiss(await _stored(approval), "U_GRACE")
+
+    stored = await _stored(approval)
+    assert first.message == "Dismissed."
+    assert "already closed" in again.message
+    assert stored.state == "cancelled"
+    assert stored.detail == "dismissed by <@U_NOBODY>"
+    assert harness.agent_prompts == []
+
+
 async def test_only_one_open_approval_per_pull_request(open_approval: OpenApproval) -> None:
     approval = await open_approval()
 

@@ -57,10 +57,12 @@ are already in the Slack thread.
 
 ### Slack card
 
-PR link, author, the diff as the card draws it, and its status. A draft's
-card has one button, **Mark ready for review**; otherwise it has **Approve** and
-**Reject**. Once approved, the diff and buttons go and the card
-says who approved. Once merged, the whole card becomes *Expedited review: merged* and
+PR link, author, the diff as the card draws it, and its status. A draft's card offers
+**Mark ready for review** and **Dismiss**; otherwise it has **Approve**, **Reject**
+and **Dismiss**. Anyone in Slack may dismiss, with no GitHub link or write access
+needed; it cancels the card and wakes nobody. Once approved, the diff and buttons go and
+the card says who approved. Once merged or cancelled, the whole card becomes one line,
+such as *Expedited review: merged* or *Expedited review: dismissed by @someone*, and
 the PR link. It is posted in the thread only, never broadcast to the channel.
 Reactions are never votes.
 

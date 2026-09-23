@@ -27,7 +27,8 @@ from agent.utils.thread_ops import langgraph_client
 
 logger = logging.getLogger(__name__)
 
-CardAction = Literal["approve", "reject", "ready"]
+VoteAction = Literal["approve", "reject", "ready"]
+CardAction = VoteAction | Literal["dismiss"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -78,7 +79,7 @@ async def _resolve_voter(approval: ExpeditedApproval, user: User | None) -> Vote
 async def handle_vote(
     approval: ExpeditedApproval,
     *,
-    decision: CardAction,
+    decision: VoteAction,
     user: User | None,
 ) -> VoteOutcome:
     """Record one click. Slow work runs unlocked; the row lock covers only the write."""
@@ -171,6 +172,13 @@ async def _reject(approval: ExpeditedApproval, *, voter: Voter) -> VoteOutcome:
     return VoteOutcome("Rejected. Tag the agent in the thread to tell it what to change.")
 
 
+async def dismiss(approval: ExpeditedApproval, slack_user_id: str) -> VoteOutcome:
+    """Anyone in the thread may take the card down; it needs no GitHub link or access."""
+    if await retire(approval, "cancelled", f"dismissed by <@{slack_user_id}>") is None:
+        return VoteOutcome("This expedited review is already closed.")
+    return VoteOutcome("Dismissed.")
+
+
 async def process_vote(
     approval_id: str,
     *,
@@ -194,10 +202,12 @@ async def process_vote(
         async with slack_thread_mutation_lock(
             langgraph_client(), channel_id, thread_ts, purpose=f"expedited:{approval_id}"
         ):
-            outcome = await handle_vote(
-                approval,
-                decision=decision,
-                user=await User.for_person(person),
+            outcome = (
+                await dismiss(approval, slack_user_id)
+                if decision == "dismiss"
+                else await handle_vote(
+                    approval, decision=decision, user=await User.for_person(person)
+                )
             )
     except Exception:
         logger.exception("Expedited review vote failed", extra={"approval_id": approval_id})
