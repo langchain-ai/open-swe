@@ -528,7 +528,7 @@ WITH runs AS (
         CASE WHEN :direction = 'asc' THEN text_key END ASC,
         CASE WHEN :direction = 'desc' THEN text_key END DESC,
         CASE WHEN :direction = 'asc' THEN numeric_key END ASC,
-        CASE WHEN :direction = 'desc' THEN numeric_key END DESC,
+        CASE WHEN :direction = 'desc' THEN numeric_key END DESC NULLS LAST,
         rank
     ) AS position FROM keyed
 ), selected AS (

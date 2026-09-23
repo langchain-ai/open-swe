@@ -275,6 +275,8 @@ async def test_usage_sorting_happens_before_pagination(usage_db):
     await run(alice, tokens=10)
     await run(bob, tokens=30)
     await run(carol, tokens=20)
+    unknown = await person("unknown")
+    await run(unknown)
 
     first = await report(limit=2, sort="total_tokens", direction="desc")
     assert [row["user"]["name"] for row in first["rows"]] == ["bob", "Carol"]
@@ -284,7 +286,8 @@ async def test_usage_sorting_happens_before_pagination(usage_db):
         sort="total_tokens",
         direction="desc",
     )
-    assert [row["user"]["name"] for row in second["rows"]] == ["Alice"]
+    assert [row["user"]["name"] for row in second["rows"]] == ["Alice", "unknown"]
+    assert second["rows"][1]["total_tokens"] is None
     with pytest.raises(ValueError, match="invalid usage leaderboard cursor"):
         await report(
             limit=2,
