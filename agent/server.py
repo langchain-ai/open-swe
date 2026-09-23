@@ -750,7 +750,7 @@ def _slack_dm_run(cfg: RunConfig) -> bool:
 def _model_routing_mode(thread_id: str) -> RoutingMode:
     digest = hashlib.sha256(thread_id.encode()).hexdigest()
     bucket = int(digest[:8], 16) / float(0xFFFF_FFFF)
-    return "auto" if bucket < _MODEL_ROUTING_SPLIT else "performance"
+    return "auto" if bucket < _MODEL_ROUTING_SPLIT else "fast"
 
 
 def _make_model_or_defer(
