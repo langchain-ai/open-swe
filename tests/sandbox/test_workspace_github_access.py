@@ -1,5 +1,6 @@
 """Exercise the credential boundary from workspace lookup to the sandbox proxy."""
 
+import asyncio
 import base64
 import json
 from collections.abc import Iterator
@@ -10,10 +11,12 @@ from unittest.mock import AsyncMock, MagicMock
 import httpx
 import httpx2
 import pytest
+from githubkit.exception import RequestFailed
 
 from agent.github import app, proxy, sandbox_access
 from agent.sandboxes import lifecycle
 from agent.sandboxes.providers.langsmith import LangSmithProvider
+from agent.utils import ttl_cache
 from agent.workspaces.refresh import _create_builder_sandbox
 from agent.workspaces.store import WORKSPACES, Workspace
 from tests.support.github_sdk import mock_github_sdk
@@ -401,3 +404,161 @@ async def test_repository_access_uses_later_installation_pages(
         assert requests[-1] == {"repository_ids": [101]}
     finally:
         app.clear_app_token_cache()
+
+
+class Installation:
+    """The App installation as GitHub reports it, changeable between runs.
+
+    GitHub refuses a token outright when any requested id has left the
+    installation, which is what makes a stale listing matter. A listing reports
+    the repositories as of its request, even while ``listing_gate`` holds it.
+    """
+
+    def __init__(self) -> None:
+        self.repositories = {"acme/api": 11, "acme/internal": 22}
+        self.listings = 0
+        self.listing_status = 200
+        self.listing_gate: asyncio.Event | None = None
+
+    async def handle(self, request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/access_tokens"):
+            ids = json.loads(request.content or b"{}").get("repository_ids")
+            if ids is not None and not set(ids) <= set(self.repositories.values()):
+                return httpx.Response(422, json={"message": "Repository not accessible"})
+            token = "installation" if ids is None else "repos:" + ",".join(map(str, ids))
+            expires_at = (datetime.now(UTC) + timedelta(hours=1)).isoformat()
+            return httpx.Response(201, json={"token": token, "expires_at": expires_at})
+        if request.url.path == "/installation/repositories":
+            self.listings += 1
+            status = self.listing_status
+            repositories = [{"id": i, "full_name": name} for name, i in self.repositories.items()]
+            if self.listing_gate is not None:
+                await self.listing_gate.wait()
+            return httpx.Response(status, json={"repositories": repositories})
+        raise AssertionError(f"Unexpected request: {request.method} {request.url}")
+
+
+@pytest.fixture
+def installation(monkeypatch: pytest.MonkeyPatch) -> Iterator[Installation]:
+    fake = Installation()
+    mock_github_sdk(monkeypatch, fake.handle)
+    monkeypatch.setattr(app, "GITHUB_APP_ID", "1")
+    monkeypatch.setattr(app, "GITHUB_APP_INSTALLATION_ID", "2")
+    monkeypatch.setattr(app, "GITHUB_APP_PRIVATE_KEY", "test-key")
+    app.clear_app_token_cache()
+    yield fake
+    app.clear_app_token_cache()
+
+
+async def test_runs_share_one_installation_listing(installation: Installation) -> None:
+    first = await sandbox_access.repository_token(["acme/api"])
+    second = await sandbox_access.repository_token(["acme/internal"])
+
+    assert (first.token, second.token) == ("repos:11", "repos:22")
+    assert installation.listings == 1
+
+
+async def test_repository_new_to_the_installation_is_relisted(installation: Installation) -> None:
+    before = await sandbox_access.repository_token(["acme/api", "acme/new"])
+    assert (before.token, installation.listings) == ("repos:11", 1)
+    installation.repositories["acme/new"] = 33
+
+    access = await sandbox_access.repository_token(["acme/api", "acme/new"])
+
+    assert access.token == "repos:11,33"
+    assert installation.listings == 2
+
+
+async def test_repositories_under_other_owners_do_not_relist(installation: Installation) -> None:
+    await sandbox_access.repository_token(["acme/api"])
+
+    access = await sandbox_access.repository_token(["acme/api", "other/public"])
+
+    assert access.token == "repos:11"
+    assert installation.listings == 1
+
+
+async def test_ids_github_refuses_are_relisted(installation: Installation) -> None:
+    await sandbox_access.repository_token(["acme/api", "acme/internal"])
+    del installation.repositories["acme/internal"]
+    # Another replica, or this one once the token minted above has expired.
+    app.clear_app_token_cache()
+
+    access = await sandbox_access.repository_token(["acme/api", "acme/internal"])
+
+    assert access.token == "repos:11"
+    assert installation.listings == 2
+
+
+async def test_run_that_waited_on_an_older_listing_retries_ids_github_refuses(
+    installation: Installation,
+) -> None:
+    installation.listing_gate = asyncio.Event()
+    first = asyncio.create_task(sandbox_access.repository_token(["acme/api"]))
+    while installation.listings == 0:
+        await asyncio.sleep(0)
+    second = asyncio.create_task(sandbox_access.repository_token(["acme/api", "acme/internal"]))
+    await asyncio.sleep(0)
+    del installation.repositories["acme/internal"]
+    installation.listing_gate.set()
+
+    assert (await first).token == "repos:11"
+    assert (await second).token == "repos:11"
+
+
+async def test_expired_index_is_relisted_without_delaying_the_run(
+    installation: Installation, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    clock = {"now": 1000.0}
+    monkeypatch.setattr(ttl_cache, "_now", lambda: clock["now"])
+    await sandbox_access.repository_token(["acme/api"])
+    clock["now"] += sandbox_access._INDEX_TTL_SECONDS + 1
+    installation.listing_gate = asyncio.Event()
+
+    access = await asyncio.wait_for(sandbox_access.repository_token(["acme/api"]), timeout=1)
+
+    assert access.token == "repos:11"
+    installation.listing_gate.set()
+    await asyncio.gather(*ttl_cache._REFRESH_TASKS.values())
+    assert installation.listings == 2
+
+
+async def test_listing_outage_only_fails_runs_that_need_a_fresh_listing(
+    installation: Installation,
+) -> None:
+    await sandbox_access.repository_token(["acme/api"])
+    installation.listing_status = 502
+
+    with pytest.raises(RequestFailed):
+        await sandbox_access.repository_token(["acme/new"])
+    access = await sandbox_access.repository_token(["acme/api"])
+
+    assert access.token == "repos:11"
+
+
+async def test_index_past_its_maximum_age_is_relisted_before_minting(
+    installation: Installation, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    clock = {"now": 1000.0}
+    monkeypatch.setattr(sandbox_access, "monotonic", lambda: clock["now"])
+    await sandbox_access.repository_token(["acme/api"])
+    # Renamed away and replaced: GitHub still mints the old id.
+    installation.repositories = {"acme/api-legacy": 11, "acme/api": 99}
+    clock["now"] += sandbox_access._INDEX_MAX_AGE_SECONDS + 1
+
+    access = await sandbox_access.repository_token(["acme/api"])
+
+    assert access.token == "repos:99"
+
+
+async def test_index_past_its_maximum_age_fails_closed_when_github_cannot_list(
+    installation: Installation, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    clock = {"now": 1000.0}
+    monkeypatch.setattr(sandbox_access, "monotonic", lambda: clock["now"])
+    await sandbox_access.repository_token(["acme/api"])
+    installation.listing_status = 502
+    clock["now"] += sandbox_access._INDEX_MAX_AGE_SECONDS + 1
+
+    with pytest.raises(RequestFailed):
+        await sandbox_access.repository_token(["acme/api"])
