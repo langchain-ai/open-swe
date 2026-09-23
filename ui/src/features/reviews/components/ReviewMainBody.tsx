@@ -100,13 +100,18 @@ import {
   warmDiffHighlighter,
 } from "@/features/agents/utils/diffUtils"
 import { Button, IconButton } from "@/components/ui/button"
+import { Sheet, SheetPopup } from "@/components/ui/sheet"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Textarea } from "@/components/ui/textarea"
 import { api, reviewImageProxyUrl } from "@/lib/api"
 import { useSession } from "@/lib/session"
+import { useMediaQuery } from "@/lib/useIsMobile"
 import { cn } from "@/lib/utils"
 
 type SideTab = "info" | "chat"
+type SidePanelLayout = "inline" | "sheet"
+// Tailwind's `xl` breakpoint: below it the side panel opens as a sheet.
+const WIDE_MEDIA_QUERY = "(min-width: 1280px)"
 
 // Metadata carried by a Pierre diff line annotation. Findings render as the
 // read-only InlineFinding card; a draftComment renders the inline composer; a
@@ -659,6 +664,7 @@ function ReviewBodyInner({
   )
   const [sideTab, setSideTab] = useState<SideTab>("info")
   const [sidePanelOpen, setSidePanelOpen] = useState(false)
+  const wide = useMediaQuery(WIDE_MEDIA_QUERY)
   const [selectedFile, setSelectedFile] = useState<string | null>(null)
   const fileRefs = useRef<Record<string, HTMLDivElement | null>>({})
   // Per path, one instance per rendered slice: a file split across walkthrough
@@ -1299,6 +1305,19 @@ function ReviewBodyInner({
     [expandedId, detail.url, toggleInline, registerAnnotation]
   )
 
+  const sidePanel = (layout: SidePanelLayout) => (
+    <SidePanel
+      layout={layout}
+      detail={detail}
+      tab={sideTab}
+      onTabChange={setSideTab}
+      read={read}
+      expandedId={expandedId}
+      onMarkAllRead={markAllRead}
+      onFindingClick={openFromPanel}
+    />
+  )
+
   return (
     <ExpandedFindingContext.Provider value={expandedFindingCtx}>
       <div className="flex min-h-0 flex-1 overflow-hidden">
@@ -1440,29 +1459,26 @@ function ReviewBodyInner({
           </div>
         </main>
 
-        {!embedded && !sidePanelOpen && (
-          <Button
-            variant="outline"
-            className="fixed right-4 bottom-4 z-30 shadow-md xl:hidden"
-            onClick={() => setSidePanelOpen(true)}
-          >
-            <ChatCircleIcon />
-            Info &amp; chat
-          </Button>
-        )}
-        {!embedded && (
-          <SidePanel
-            detail={detail}
-            tab={sideTab}
-            onTabChange={setSideTab}
-            open={sidePanelOpen}
-            onClose={() => setSidePanelOpen(false)}
-            read={read}
-            expandedId={expandedId}
-            onMarkAllRead={markAllRead}
-            onFindingClick={openFromPanel}
-          />
-        )}
+        {!embedded &&
+          (wide ? (
+            sidePanel("inline")
+          ) : (
+            <Sheet open={sidePanelOpen} onOpenChange={setSidePanelOpen}>
+              {!sidePanelOpen && (
+                <Button
+                  variant="outline"
+                  className="fixed right-4 bottom-4 z-30 shadow-md"
+                  onClick={() => setSidePanelOpen(true)}
+                >
+                  <ChatCircleIcon />
+                  Info &amp; chat
+                </Button>
+              )}
+              <SheetPopup side="right" keepMounted>
+                {sidePanel("sheet")}
+              </SheetPopup>
+            </Sheet>
+          ))}
       </div>
     </ExpandedFindingContext.Provider>
   )
@@ -2746,21 +2762,18 @@ function ReviewPanelResizeHandle({
 
 function SidePanel({
   detail,
+  layout,
   tab,
   onTabChange,
-  open,
-  onClose,
   read,
   expandedId,
   onMarkAllRead,
   onFindingClick,
 }: {
   detail: ReviewDetail
+  layout: SidePanelLayout
   tab: SideTab
   onTabChange: (tab: SideTab) => void
-  /** Below the xl breakpoint the panel is a drawer, shown only while open. */
-  open: boolean
-  onClose: () => void
   read: Set<string>
   expandedId: string | null
   onMarkAllRead: () => void
@@ -2805,27 +2818,22 @@ function SidePanel({
   return (
     <div
       ref={panelRef}
-      style={{ width }}
+      style={layout === "inline" ? { width } : undefined}
       className={cn(
-        "h-full shrink-0 xl:relative xl:flex xl:max-w-none xl:shadow-none",
-        open
-          ? "fixed inset-y-0 right-0 z-40 flex max-w-[90vw] bg-background shadow-xl"
-          : "relative hidden"
+        "flex h-full min-h-0",
+        layout === "inline" ? "relative shrink-0" : "w-full"
       )}
     >
-      <ReviewPanelResizeHandle width={width} onResize={setWidth} />
-      <aside className="flex h-full w-full flex-col overflow-y-auto border-l border-border">
+      {layout === "inline" && (
+        <ReviewPanelResizeHandle width={width} onResize={setWidth} />
+      )}
+      <aside
+        className={cn(
+          "flex h-full w-full flex-col overflow-y-auto",
+          layout === "inline" && "border-l border-border"
+        )}
+      >
         <div className="flex items-center gap-1 border-b border-border px-3 py-2">
-          <IconButton
-            type="button"
-            variant="ghost"
-            size="icon-sm"
-            aria-label="Close panel"
-            className="order-last ml-auto xl:hidden"
-            onClick={onClose}
-          >
-            <XIcon />
-          </IconButton>
           {(
             [
               ["info", "Info"],
