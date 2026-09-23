@@ -120,15 +120,20 @@ def open_card(
     files: list[ChangedFile],
     diff_image_id: str | None = None,
 ) -> tuple[str, list[Block]]:
-    """Text fallback and blocks for a card that is accepting votes."""
+    """Text fallback and blocks for an open card; buttons go once it has enough approvals."""
     pr = approval.pull_request
+    approved = len(approval.approvals) >= REQUIRED_APPROVALS
     blocks: list[Block] = [
         *_header(approval, title),
         divider(),
         *_diff_sections(files, diff_image_id),
         divider(),
-        section(_vote_summary(approval)),
-        actions(*_vote_buttons(approval)),
+        section(
+            f"*{escape(_vote_summary(approval))}* Merging once checks and reviews are clean."
+            if approved
+            else _vote_summary(approval)
+        ),
+        *([] if approved else [actions(*_vote_buttons(approval))]),
     ]
     text = f"Expedited review requested for {pr.url} ({approval.head_sha[:12]})"
     return text, blocks
