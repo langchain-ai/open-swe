@@ -78,6 +78,7 @@ import type {
 } from "@/features/reviews/lib/chatDiffActions"
 import { useChatDrafts } from "@/features/reviews/lib/chatDrafts"
 import { ProposedCommentCard } from "@/features/reviews/components/ProposedCommentCard"
+import { ReviewPageActions } from "@/features/reviews/components/ReviewPageActions"
 import type { DiffStyle } from "@/features/agents/utils/diffUtils"
 import { Markdown } from "@/features/agents/components/chat/Markdown"
 import { DiffWrapToggle } from "@/features/agents/components/DiffWrapToggle"
@@ -948,6 +949,12 @@ function ReviewBodyInner({
     })
   }, [])
 
+  const scrollToTop = useCallback(() => {
+    scrollHoldStopRef.current?.()
+    const scroller = diffScrollElRef.current
+    if (scroller) scrollHoldStopRef.current = jumpAndHold(scroller, () => 0)
+  }, [])
+
   useEffect(() => () => scrollHoldStopRef.current?.(), [])
 
   // Scroll-spy: track which block's header is currently pinned at the top of the
@@ -1245,7 +1252,7 @@ function ReviewBodyInner({
         console.warn("Chat asked to show a file that is not in this diff", {
           target,
         })
-        toast.error(`${target.file} is not part of this diff`)
+        toast.error(`${target.file} isn't in the diff loaded on this page`)
         return
       }
       if (!wide) setSidePanelOpen(false)
@@ -1372,8 +1379,10 @@ function ReviewBodyInner({
       onViewChange: setView,
       onSelectGroup: scrollToGroup,
       activeGroup,
+      onSelectOverview: scrollToTop,
     }),
     [
+      scrollToTop,
       detail.number,
       diffFiles,
       selectedFile,
@@ -1471,6 +1480,15 @@ function ReviewBodyInner({
                     deletions: detail.pr.deletions,
                   }}
                 />
+                {!embedded &&
+                  (detail.pr.state === "open" ||
+                    detail.pr.state === "draft") && (
+                    <ReviewPageActions
+                      owner={detail.owner}
+                      repo={detail.repo}
+                      number={detail.number}
+                    />
+                  )}
                 {!detail.walkthrough && detail.pr.changed_files > 0 && (
                   <WalkthroughCallout detail={detail} />
                 )}
@@ -1524,6 +1542,20 @@ function ReviewBodyInner({
                       )}
                     </div>
                   </div>
+                  {diffFiles && diffFiles.length < detail.pr.changed_files && (
+                    <p className="mb-2 text-xs text-muted-foreground">
+                      Showing {diffFiles.length} of {detail.pr.changed_files}{" "}
+                      changed files.{" "}
+                      <a
+                        href={`${detail.url}/files`}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="underline underline-offset-2 hover:text-foreground"
+                      >
+                        See every file on GitHub
+                      </a>
+                    </p>
+                  )}
                   {!diffFiles ? (
                     <Skeleton className="h-64 w-full" />
                   ) : diffFiles.length === 0 ? (
