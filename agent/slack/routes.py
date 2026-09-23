@@ -220,6 +220,46 @@ async def _lookup_delivered_message_update(
     return None, None
 
 
+async def _is_mapped_agent_thread_follow_up(
+    channel_id: str, thread_ts: str, message_ts: str, user_id: str, bot_user_id: str
+) -> bool:
+    try:
+        thread_id = await common.lookup_slack_thread_id(
+            get_langgraph_client(), channel_id, thread_ts
+        )
+    except common.SlackThreadMappingError:
+        common.logger.warning(
+            "Unable to inspect Slack thread mapping for untagged message",
+            extra={"channel_id": channel_id, "thread_ts": thread_ts},
+            exc_info=True,
+        )
+        return False
+    if not thread_id:
+        return False
+
+    messages = await common.fetch_slack_thread_messages(channel_id, thread_ts)
+    current_ts = common.parse_slack_ts(message_ts)
+    prior_messages = [
+        message for message in messages if common.parse_slack_ts(message.get("ts")) < current_ts
+    ]
+    agent_reply_ts = max(
+        (
+            common.parse_slack_ts(message.get("ts"))
+            for message in prior_messages
+            if message.get("user") == bot_user_id
+        ),
+        default=0.0,
+    )
+    return not any(
+        common.parse_slack_ts(message.get("ts")) > agent_reply_ts
+        and isinstance(message.get("user"), str)
+        and message.get("user") != user_id
+        and not message.get("bot_id")
+        and message.get("subtype") != "bot_message"
+        for message in prior_messages
+    )
+
+
 async def _process_slack_message_update(request: SlackRequest) -> None:
     await run_slack_task(request.target, _process_slack_message_update_impl(request))
 
@@ -456,7 +496,21 @@ async def slack_webhook(
             common.SLACK_BOT_USERNAME and f"@{common.SLACK_BOT_USERNAME}" in text
         )
         has_id_mention = bool(bot_user_id and f"<@{bot_user_id}>" in text)
-        if not (has_username_mention or has_id_mention or is_direct_message):
+        is_mapped_follow_up = await _is_mapped_agent_thread_follow_up(
+            channel_id, thread_ts, original_message_ts, user_id, bot_user_id
+        )
+        if (
+            not (has_username_mention or has_id_mention or is_direct_message)
+            and not is_mapped_follow_up
+        ):
+            common.logger.info(
+                "Ignoring Slack message without app mention or DM",
+                extra={
+                    "channel_id": channel_id,
+                    "thread_ts": thread_ts,
+                    "reason": "Not an app mention or DM",
+                },
+            )
             return ignored("Not an app mention or DM")
 
     if {event.subtype, updated_message.subtype} & _MEMBERSHIP_SUBTYPES:
