@@ -119,12 +119,16 @@ async def _diff_image_id(approval: ExpeditedApproval, files: list[ChangedFile]) 
 async def post_card(
     approval: ExpeditedApproval, *, title: str, files: list[ChangedFile]
 ) -> tuple[str | None, str | None]:
-    """Post the card into the approval's thread: ``(message_ts, slack_error)``."""
+    """Post the card into the approval's thread: ``(message_ts, slack_error)``.
+
+    Sets ``slack_diff_file_id`` on ``approval``; the caller saves it with the message ts.
+    """
     location = approval.slack_location
     if location is None:
         return None, "no Slack thread"
+    approval.slack_diff_file_id = await _diff_image_id(approval, files) or ""
     text, blocks = card.open_card(
-        approval, title=title, files=files, diff_image_id=await _diff_image_id(approval, files)
+        approval, title=title, files=files, diff_image_id=approval.slack_diff_file_id or None
     )
     return await post_slack_thread_reply_with_ts(
         location[0],
@@ -143,7 +147,7 @@ async def refresh_card(approval: ExpeditedApproval, *, outcome: str | None = Non
     pr = approval.pull_request
     token = await repo_token(pr.owner, pr.repo)
     files = await _files_for(approval, token) if token else []
-    diff_image_id = await _diff_image_id(approval, files)
+    diff_image_id = approval.slack_diff_file_id or None
     if outcome is None:
         text, blocks = card.open_card(
             approval, title=pr.title, files=files, diff_image_id=diff_image_id

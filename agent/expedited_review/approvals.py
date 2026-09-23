@@ -69,6 +69,8 @@ class ExpeditedApproval(Base):
     slack_channel_id: Mapped[str] = mapped_column(server_default="", default="")
     slack_thread_ts: Mapped[str] = mapped_column(server_default="", default="")
     slack_message_ts: Mapped[str] = mapped_column(server_default="", default="")
+    # Slack only renders a file cited when the message is first posted, so updates reuse it.
+    slack_diff_file_id: Mapped[str] = mapped_column(server_default="", default="")
     run_config: Mapped[JsonObject] = mapped_column(JSONB, default_factory=dict)
     votes: Mapped[list[ApprovalVote]] = relationship(
         default_factory=list, cascade="all, delete-orphan", order_by=lambda: ApprovalVote.voted_at
