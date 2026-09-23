@@ -9,19 +9,22 @@ import {
 // external SaaS boundaries faked:
 //
 //   a user asks for a one-line change in mock Slack ->
-//   the agent implements it, opens the PR, starts a durable CI watch, and posts
-//   the approval card right away, before any check has reported ->
-//   Alice approves: the vote is recorded, nothing reaches GitHub ->
+//   the agent implements it, opens a draft PR as that user, starts a durable CI
+//   watch, and posts the card right away. The draft's card offers only "Mark
+//   ready for review", to the PR's author ->
+//   the author marks it ready; the card switches to Approve / Reject ->
 //   GitHub reports a FAILING check -> the watch wakes the agent, which pushes a
-//   test-only fix the card never drew, so Alice's vote still counts ->
-//   Bob approves: the card has two approvals and wakes the agent, which tries to
-//   merge and is told checks are still running ->
+//   test-only fix the card never drew ->
+//   the other person approves: the card collapses to who approved, and the agent
+//   is woken, tries to merge, and is told the new head's checks are failing ->
 //   GitHub reports the check GREEN -> the watch wakes the agent, which merges:
-//   each non-author approval becomes a GitHub APPROVE review on the new head,
-//   and the merge is pinned to that head.
+//   the approval becomes a GitHub APPROVE review on the new head, the PR gets a
+//   comment linking the card, and the card becomes "Expedited review: merged".
 
-const ALICE = { login: "alice", slack_id: "U_ALICE" };
-const BOB = { login: "bob", slack_id: "U_BOB" };
+const PEOPLE = [
+  { login: "alice", slack_id: "U_ALICE" },
+  { login: "bob", slack_id: "U_BOB" },
+];
 const PR_NUMBER = 1;
 const REPO = { owner: "fakeorg", repo: "demo" };
 
@@ -31,6 +34,7 @@ type Approval = {
   detail: string;
   head_sha: string;
   pr_number: number;
+  awaiting_ready: boolean;
   approvers: Array<string>;
   votes: Array<{
     github_login: string;
@@ -45,6 +49,7 @@ type PullRequest = {
   state: string;
   draft: boolean;
   merged: boolean;
+  author: string;
   head_sha: string;
   reviews: Array<{ author: string; state: string; commit_id: string }>;
   issue_comments: Array<{ body: string }>;
@@ -70,6 +75,12 @@ async function approvals(request: APIRequestContext): Promise<Array<Approval>> {
     );
   }
   return (await res.json()) as Array<Approval>;
+}
+
+async function latest(request: APIRequestContext): Promise<Approval> {
+  const found = (await approvals(request)).at(-1);
+  expect(found, "the agent should have posted a card").toBeTruthy();
+  return found!;
 }
 
 async function pull(request: APIRequestContext): Promise<PullRequest> {
@@ -136,20 +147,25 @@ async function reportCheck(
   });
 }
 
-async function shootCard(page: Page, name: string, matcher: RegExp) {
-  const card = page.locator(".msg.bot").filter({ hasText: matcher }).last();
-  await expect(card).toBeVisible({ timeout: 30_000 });
-  await card.screenshot({ path: `test-results/expedited-review-${name}.png` });
+function card(page: Page) {
+  return page
+    .locator(".msg.bot")
+    .filter({ hasText: /Expedited review/i })
+    .last();
 }
 
-async function clickApprove(page: Page, slackUserId: string) {
+async function shootCard(page: Page, name: string) {
+  await expect(card(page)).toBeVisible({ timeout: 30_000 });
+  await card(page).screenshot({
+    path: `test-results/expedited-review-${name}.png`,
+  });
+}
+
+async function clickAs(page: Page, slackUserId: string, button: string) {
   await page.goto("/mock/slack");
   await page.locator("#user").selectOption(slackUserId);
-  const card = page
-    .locator(".msg.bot")
-    .filter({ hasText: /Expedited review requested/i });
-  await expect(card).toBeVisible({ timeout: 30_000 });
-  await card.getByRole("button", { name: "Approve" }).click();
+  await expect(card(page)).toBeVisible({ timeout: 30_000 });
+  await card(page).getByRole("button", { name: button }).click();
 }
 
 async function threadRuns(
@@ -167,19 +183,19 @@ function approvedReviews(pr: PullRequest) {
 }
 
 test.describe("Expedited Slack review", () => {
-  test("card first, votes recorded, test-only fix, merge on green", async ({
+  test("draft marked ready by its author, one other approval, merge on green", async ({
     page,
     request,
   }) => {
     test.setTimeout(300_000);
 
-    // 0. An admin turns the experimental feature on, and both reviewers have
-    //    write access on the repository.
+    // 0. An admin turns the experimental feature on, and both people have write
+    //    access on the repository.
     await request.post("/control/reset");
     await control(request, "/control/team-settings", {
       expedited_review_enabled: true,
     });
-    for (const person of [ALICE, BOB]) {
+    for (const person of PEOPLE) {
       await control(request, "/control/collaborator-permission", {
         login: person.login,
         permission: "write",
@@ -198,8 +214,9 @@ test.describe("Expedited Slack review", () => {
     };
     expect(threadId).toBeTruthy();
 
-    // 2. The agent opens the PR, starts watching its checks, and posts the
-    //    card in the same turn, before any check has reported.
+    // 2. The agent opens a draft PR as the requester, starts watching its
+    //    checks, and posts the card in the same turn. Nobody undrafts it for
+    //    them: the card waits for the author.
     await expect
       .poll(async () => await botMessages(request, threadId), {
         timeout: 120_000,
@@ -207,47 +224,50 @@ test.describe("Expedited Slack review", () => {
       .toMatch(/watching its checks/i);
     const opened = await pull(request);
     expect(opened.state).toBe("open");
-    expect(opened.merged).toBe(false);
-    // Posting the card is what marks the draft ready for review.
-    expect(opened.draft).toBe(false);
+    expect(opened.draft).toBe(true);
+    const author = PEOPLE.find((person) => person.login === opened.author);
+    expect(author, `the PR author ${opened.author} should be a test user`).toBeTruthy();
+    const reviewer = PEOPLE.find((person) => person !== author)!;
 
-    const posted = (await approvals(request)).at(-1);
-    expect(posted?.state).toBe("open");
-    expect(posted?.head_sha).toBe(opened.head_sha);
-    expect(await botMessages(request, threadId)).toMatch(
-      /Expedited review requested/i,
-    );
+    const posted = await latest(request);
+    expect(posted.state).toBe("open");
+    expect(posted.awaiting_ready).toBe(true);
+    expect(posted.head_sha).toBe(opened.head_sha);
 
-    // The card carries the whole diff, which is the premise of voting from
-    // Slack rather than from GitHub. Production renders it to a PNG and shows
-    // that; the text fallback only appears when rendering or upload failed, so
-    // asserting the image is what keeps this test on the real path.
+    // The card carries the whole diff as a rendered PNG. The text fallback only
+    // appears when rendering or upload failed, so asserting the image keeps this
+    // test on the real path.
     await page.goto("/mock/slack");
-    const card = page
-      .locator(".msg.bot")
-      .filter({ hasText: /Expedited review requested/i })
-      .last();
-    const diff = card.locator("img.block-image");
+    await expect(card(page)).toContainText(/Draft\./);
+    await expect(
+      card(page).getByRole("button", { name: "Approve" }),
+    ).toHaveCount(0);
+    const diff = card(page).locator("img.block-image");
     await expect(diff).toBeVisible();
     await expect(diff).toHaveAttribute("alt", /greet\.py/);
     expect(
       await diff.evaluate((img: HTMLImageElement) => img.naturalWidth),
       "the diff PNG should have rendered, uploaded and decoded",
     ).toBeGreaterThan(0);
-    await shootCard(page, "open", /Expedited review requested/i);
+    await shootCard(page, "draft");
 
-    // 3. Alice approves. The vote is recorded and nothing reaches GitHub.
-    await clickApprove(page, ALICE.slack_id);
+    // 3. Only the author can mark it ready. Their click undrafts the PR and
+    //    opens the card for approval; it is not an approval.
+    await clickAs(page, author!.slack_id, "Mark ready for review");
     await expect
-      .poll(async () => (await approvals(request)).at(-1)?.approvers ?? [], {
+      .poll(async () => (await latest(request)).awaiting_ready, {
         timeout: 60_000,
       })
-      .toEqual(["alice"]);
-    expect(approvedReviews(await pull(request))).toHaveLength(0);
+      .toBe(false);
+    expect((await pull(request)).draft).toBe(false);
+    expect((await latest(request)).approvers).toEqual([]);
+    await page.goto("/mock/slack");
+    await expect(
+      card(page).getByRole("button", { name: "Approve" }),
+    ).toBeVisible();
 
     // 4. GitHub reports the check FAILED. The watch wakes the agent, which
-    //    pushes a test-only fix. The card never drew that file, so the card
-    //    stays open and Alice's vote still stands.
+    //    pushes a test-only fix the card never drew, so the card stays open.
     await reportCheck(request, opened.head_sha, "failure");
     await expect
       .poll(async () => (await pull(request)).head_sha, { timeout: 150_000 })
@@ -258,37 +278,41 @@ test.describe("Expedited Slack review", () => {
         timeout: 60_000,
       })
       .toMatch(/Fixed the failing check/i);
-    expect((await approvals(request)).at(-1)?.state).toBe("open");
+    expect((await latest(request)).state).toBe("open");
 
-    // 5. Bob approves. Two approvals wake the agent, which tries to merge and
-    //    is told the new head's checks have not reported: still no GitHub write.
+    // 5. The other person approves. That one approval completes the card: the
+    //    diff and buttons go, and the agent is woken, tries to merge, and is
+    //    told the new head's checks are not green. Nothing reaches GitHub.
     await expect
       .poll(async () => (await threadRuns(request, threadId)).idle, {
         timeout: 60_000,
       })
       .toBe(true);
-    const runsBeforeQuorum = (await threadRuns(request, threadId)).runs;
-    await clickApprove(page, BOB.slack_id);
+    const runsBeforeApproval = (await threadRuns(request, threadId)).runs;
+    await clickAs(page, reviewer.slack_id, "Approve");
     await expect
-      .poll(async () => (await approvals(request)).at(-1)?.approvers ?? [], {
-        timeout: 60_000,
-      })
-      .toEqual(["alice", "bob"]);
+      .poll(async () => (await latest(request)).approvers, { timeout: 60_000 })
+      .toEqual([reviewer.login]);
+    await page.goto("/mock/slack");
+    await expect(card(page)).toContainText(`Approved by @${reviewer.login}`);
+    await expect(card(page).getByRole("button")).toHaveCount(0);
+    await expect(card(page).locator("img.block-image")).toHaveCount(0);
+    await shootCard(page, "approved");
     await expect
       .poll(
         async () => {
           const { runs, idle } = await threadRuns(request, threadId);
-          return runs > runsBeforeQuorum && idle;
+          return runs > runsBeforeApproval && idle;
         },
         { timeout: 90_000 },
       )
       .toBe(true);
     expect((await pull(request)).merged).toBe(false);
     expect(approvedReviews(await pull(request))).toHaveLength(0);
-    expect((await approvals(request)).at(-1)?.state).toBe("open");
+    expect((await latest(request)).state).toBe("open");
 
     // 6. GitHub reports the new head GREEN. That webhook wakes the agent at
-    //    once, which merges on the recorded approvals.
+    //    once, which merges on the recorded approval.
     await reportCheck(request, fixed.head_sha, "success");
     await expect
       .poll(async () => (await pull(request)).merged, { timeout: 120_000 })
@@ -297,33 +321,27 @@ test.describe("Expedited Slack review", () => {
     const merged = await pull(request);
     expect(merged.state).toBe("closed");
     const reviews = approvedReviews(merged);
-    expect(reviews.map((r) => r.author).toSorted()).toEqual(["alice", "bob"]);
-    for (const review of reviews) {
-      expect(review.commit_id).toBe(fixed.head_sha);
-    }
+    expect(reviews.map((r) => r.author)).toEqual([reviewer.login]);
+    expect(reviews[0]!.commit_id).toBe(fixed.head_sha);
 
     // The PR links back to the Slack card that approved it, once.
     const links = merged.issue_comments.filter((c) =>
       c.body.includes("expedited review"),
     );
     expect(links).toHaveLength(1);
-    expect(links[0]!.body).toMatch(/@alice and @bob|@bob and @alice/);
+    expect(links[0]!.body).toContain(`@${reviewer.login}`);
     expect(links[0]!.body).toContain("/mock/slack");
 
-    const final = (await approvals(request)).at(-1)!;
+    const final = await latest(request);
     expect(final.state).toBe("merged");
-    // Every vote is attributed to a person and carries the review it produced.
-    expect(final.votes.map((v) => v.decision)).toEqual(["approve", "approve"]);
-    for (const vote of final.votes) {
-      expect(vote.github_review_id).not.toBeNull();
-      expect(vote.github_review_sha).toBe(fixed.head_sha);
-    }
+    expect(final.votes.map((v) => v.decision)).toEqual(["approve"]);
+    expect(final.votes[0]!.github_review_id).not.toBeNull();
+    expect(final.votes[0]!.github_review_sha).toBe(fixed.head_sha);
 
-    // 7. The card closes out as merged.
+    // 7. The card is reduced to the outcome and the PR.
     await page.goto("/mock/slack");
-    await expect(
-      page.locator(".msg.bot").filter({ hasText: /Merged\./i }),
-    ).toBeVisible({ timeout: 30_000 });
-    await shootCard(page, "merged", /Merged\./i);
+    await expect(card(page)).toContainText("Expedited review: merged");
+    await expect(card(page)).not.toContainText("Approved by");
+    await shootCard(page, "merged");
   });
 });

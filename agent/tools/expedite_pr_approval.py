@@ -3,7 +3,6 @@
 from collections.abc import Mapping
 from typing import Any, Literal
 
-from fastapi import HTTPException
 from langgraph.config import get_config
 from langgraph_sdk import get_client
 
@@ -17,7 +16,6 @@ from agent.expedited_review.eligibility import (
 )
 from agent.expedited_review.lifecycle import post_card, retire
 from agent.github.ci import fetch_pr
-from agent.github.pull_request_actions import MarkReadyAction, act_on_pull_request
 from agent.github.pull_requests import PullRequest, PullRequestPayload
 from agent.github.token import resolve_github_token
 from agent.prompts import render_prompt
@@ -52,7 +50,7 @@ def _next_step(*, reused: bool, elsewhere: bool, in_thread: bool) -> str:
     posted += (
         " Clicks only record votes. Call `merge_expedited_pr` once checks and reviews are "
         "clean; keep a `/baby-sit` watch on the PR so you are woken when they are. You are "
-        "also woken when the card reaches two approvals or is rejected. Do not poll."
+        "also woken when someone approves the card or rejects it. Do not poll."
     )
     if reused or not in_thread:
         return posted
@@ -153,17 +151,6 @@ async def expedite_pr_approval(
         return _failure("Pull request is unavailable")
     if pr.get("state") != "open":
         return _failure("Pull request is not open")
-    if pr.get("draft") is True:
-        try:
-            await act_on_pull_request(
-                pr_ref.owner,
-                pr_ref.repo,
-                pr_ref.number,
-                MarkReadyAction(action="mark-ready"),
-                token,
-            )
-        except HTTPException as exc:
-            return _failure(f"Pull request is a draft and could not be marked ready: {exc.detail}")
     head = pr.get("head") if isinstance(pr.get("head"), Mapping) else {}
     head_sha = head.get("sha") if isinstance(head, Mapping) else None
     if not isinstance(head_sha, str) or not head_sha:
@@ -228,6 +215,7 @@ async def expedite_pr_approval(
         thread_id=thread_id,
         head_sha=head_sha,
         diff_fingerprint=verdict.fingerprint,
+        awaiting_ready=payload.draft,
         slack_channel_id=channel_id,
         slack_thread_ts=thread_ts,
         run_config=dispatch_run_config(cfg, thread_id, None),

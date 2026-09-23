@@ -354,6 +354,7 @@ async def control_expedited_approvals(owner: str = OWNER, repo: str = REPO) -> J
                 "detail": approval.detail,
                 "head_sha": approval.head_sha,
                 "pr_number": approval.pull_request.number,
+                "awaiting_ready": approval.awaiting_ready,
                 "approvers": approval.approvers,
                 "votes": [
                     {
@@ -1005,6 +1006,7 @@ async def gh_list_pulls(owner: str, repo: str) -> JSONResponse:  # noqa: ARG001
 
 @app.post("/fake-gh/repos/{owner}/{repo}/pulls")
 async def gh_create_pull(owner: str, repo: str, request: Request) -> JSONResponse:
+    """Open a pull request authored by the person whose token opened it, as GitHub does."""
     body = await request.json()
     pr = fakes.create_pull(
         owner,
@@ -1014,6 +1016,7 @@ async def gh_create_pull(owner: str, repo: str, request: Request) -> JSONRespons
         title=body.get("title", ""),
         body=body.get("body", ""),
         draft=bool(body.get("draft", True)),
+        author=_token_login(request) or "open-swe[bot]",
     )
     return JSONResponse(_gh_pr_json(pr), status_code=201)
 

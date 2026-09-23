@@ -445,12 +445,10 @@ async def _evaluate_watch(key: str, *, token: str | None = None) -> str:
     )
     if not pr:
         return await _record_evaluation_error(watch, "pull request unavailable")
+    # A merged or closed PR already says so where people look; the watch just ends.
     if pr.get("state") != "open":
-        outcome = "merged" if pr.get("merged_at") else "closed"
-        return await _finish_watch(
-            watch,
-            f"*`/baby-sit` stopped:* {watch.pr_url} was {outcome}.",
-        )
+        await stop_watch(key)
+        return "stopped"
 
     head = pr.get("head") if isinstance(pr.get("head"), dict) else {}
     head_sha = head.get("sha") if isinstance(head, dict) else None

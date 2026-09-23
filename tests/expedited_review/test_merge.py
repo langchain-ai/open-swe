@@ -38,6 +38,7 @@ class _GitHub:
     def __init__(self, monkeypatch: pytest.MonkeyPatch) -> None:
         self.reviews: list[tuple[str, str]] = []
         self.merges: list[dict[str, Any]] = []
+        self.comments: list[str] = []
         self.merge_status = 200
         self.files = [_SOURCE, _TEST]
         self.readiness = _readiness()
@@ -47,6 +48,9 @@ class _GitHub:
         monkeypatch.setattr(merge, "fetch_changed_files", self._files)
         monkeypatch.setattr(merge, "_submit_github_approval", self._review)
         monkeypatch.setattr(merge, "github_request", self._request)
+        monkeypatch.setattr(
+            merge, "get_slack_permalink", AsyncMock(return_value="https://slack.test/card")
+        )
         monkeypatch.setattr(lifecycle, "refresh_card", AsyncMock())
         monkeypatch.setattr(lifecycle, "add_slack_reaction", AsyncMock(return_value=True))
 
@@ -63,6 +67,9 @@ class _GitHub:
     async def _request(
         self, client: object, method: str, url: str, **kwargs: Any
     ) -> httpx2.Response:
+        if url.endswith("/comments"):
+            self.comments.append(kwargs["json"]["body"])
+            return httpx2.Response(201, json={}, request=httpx2.Request(method, url))
         self.merges.append(kwargs["json"])
         return httpx2.Response(
             self.merge_status,
@@ -97,10 +104,10 @@ async def _approved(open_approval: OpenApproval, *slack_ids: str) -> ExpeditedAp
     return await _approve(approval, *slack_ids)
 
 
-async def test_merge_submits_non_author_reviews_on_the_head_and_merges_pinned_to_it(
+async def test_merge_submits_the_review_links_the_card_and_merges_pinned_to_the_head(
     github: _GitHub, open_approval: OpenApproval
 ) -> None:
-    approval = await _approved(open_approval, "U_ADA", "U_GRACE")
+    approval = await _approved(open_approval, "U_GRACE")
 
     result = await merge.merge_approved(approval)
 
@@ -109,9 +116,25 @@ async def test_merge_submits_non_author_reviews_on_the_head_and_merges_pinned_to
     assert result.status == "merged"
     assert stored.state == "merged"
     assert github.reviews == [("grace", "abc123")]
+    assert github.comments == [
+        "Approved in Slack by @grace via [expedited review](https://slack.test/card)."
+    ]
     assert github.merges == [{"sha": "abc123", "merge_method": "squash"}]
     grace = next(vote for vote in stored.votes if vote.github_login == "grace")
     assert (grace.github_review_id, grace.github_review_sha) == (101, "abc123")
+
+
+async def test_a_draft_waiting_for_its_author_does_not_merge(
+    github: _GitHub, open_approval: OpenApproval
+) -> None:
+    approval = await open_approval(
+        fingerprint=diff_fingerprint([_SOURCE, _TEST]), awaiting_ready=True
+    )
+
+    result = await merge.merge_approved(approval)
+
+    assert result.status == "needs_approvals"
+    assert github.reviews == [] and github.merges == []
 
 
 async def test_a_commit_touching_only_unshown_tests_keeps_the_votes(
@@ -144,14 +167,14 @@ async def test_a_commit_changing_the_shown_diff_discards_the_votes(
     assert github.reviews == [] and github.merges == []
 
 
-async def test_nothing_reaches_github_without_quorum_or_while_blocked(
+async def test_nothing_reaches_github_without_an_approval_or_while_blocked(
     github: _GitHub, open_approval: OpenApproval
 ) -> None:
-    approval = await _approved(open_approval, "U_GRACE")
+    approval = await _approved(open_approval)
     short = await merge.merge_approved(approval)
 
     github.readiness = _readiness(blockers=["checks are still running"])
-    blocked = await merge.merge_approved(await _approve(approval, "U_LINUS"))
+    blocked = await merge.merge_approved(await _approve(approval, "U_GRACE"))
 
     stored = await _reload(approval)
     assert short.status == "needs_approvals"
@@ -173,4 +196,5 @@ async def test_a_refused_merge_keeps_the_card_open_and_does_not_resubmit_reviews
     assert refused.status == "refused" and "Required status check" in refused.message
     assert retried.status == "merged"
     assert github.reviews == [("grace", "abc123"), ("linus", "abc123")]
+    assert len(github.comments) == 1
     assert len(github.merges) == 2

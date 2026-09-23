@@ -1,23 +1,23 @@
-"""Approve and Reject clicks on an expedited review card.
+"""Mark ready, Approve and Reject clicks on an expedited review card.
 
 A voter is a person (``users`` row) reached through their Slack identity whose
-GitHub identity has write access to the repository. A click only records the
-vote; the agent turns approvals into GitHub reviews when it merges.
+GitHub identity has write access to the repository. Only the author may mark a
+draft ready, and only someone else may approve. An approval is only recorded;
+the agent turns it into a GitHub review when it merges.
 """
 
 import logging
 from dataclasses import dataclass
+from typing import Literal
 from uuid import UUID
 
+from fastapi import HTTPException
+
 from agent.dashboard.profiles import get_valid_access_token
-from agent.expedited_review.approvals import (
-    REQUIRED_APPROVALS,
-    ApprovalVote,
-    ExpeditedApproval,
-    VoteDecision,
-)
+from agent.expedited_review.approvals import ApprovalVote, ExpeditedApproval
 from agent.expedited_review.lifecycle import notify_agent, refresh_card, repo_token, retire
 from agent.github.ci import has_repo_write_permission
+from agent.github.pull_request_actions import MarkReadyAction, act_on_pull_request
 from agent.input_messages import PersonIdentity, split_person_id
 from agent.prompts import render_prompt
 from agent.slack.client import post_slack_ephemeral_message, slack_thread_mutation_lock
@@ -26,6 +26,8 @@ from agent.utils.dashboard_links import dashboard_base_url
 from agent.utils.thread_ops import langgraph_client
 
 logger = logging.getLogger(__name__)
+
+CardAction = Literal["approve", "reject", "ready"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -73,17 +75,10 @@ async def _resolve_voter(approval: ExpeditedApproval, user: User | None) -> Vote
     return Voter(user=user, github_login=login)
 
 
-def is_author(approval: ExpeditedApproval, user_id: UUID, login: str) -> bool:
-    pr = approval.pull_request
-    if pr.author_user_id is not None:
-        return pr.author_user_id == user_id
-    return bool(pr.author) and pr.author.lower() == login.lower()
-
-
 async def handle_vote(
     approval: ExpeditedApproval,
     *,
-    decision: VoteDecision,
+    decision: CardAction,
     user: User | None,
     feedback: str = "",
 ) -> VoteOutcome:
@@ -93,15 +88,22 @@ async def handle_vote(
     voter = await _resolve_voter(approval, user)
     if isinstance(voter, VoteOutcome):
         return voter
+    authored = approval.is_author(voter.user.id, voter.github_login)
 
+    if decision == "ready":
+        if not authored:
+            return VoteOutcome("Only the pull request's author can mark it ready for review.")
+        return await _mark_ready(approval, voter=voter)
     if decision == "reject":
         return await _reject(approval, voter=voter, feedback=feedback)
 
+    if approval.awaiting_ready:
+        return VoteOutcome("The author has to mark this draft ready for review first.")
+    if authored:
+        return VoteOutcome("You authored this pull request; someone else has to approve it.")
     if approval.vote_by(voter.user.id) is not None:
         return VoteOutcome("You already approved this revision.")
-    if not is_author(approval, voter.user.id, voter.github_login) and not (
-        await get_valid_access_token(voter.github_login)
-    ):
+    if not await get_valid_access_token(voter.github_login):
         return VoteOutcome(
             f"Open SWE has no GitHub token for @{voter.github_login}, so it could not submit "
             f"your review at merge time. {github_token_hint()}"
@@ -110,14 +112,14 @@ async def handle_vote(
     async with ExpeditedApproval.locked(approval.id) as (_, row):
         if row is None or row.state != "open":
             return VoteOutcome("This expedited review closed before your vote was recorded.")
+        first_approval = not row.approved
         if row.vote_by(voter.user.id) is None:
             row.votes.append(ApprovalVote(voter_user_id=voter.user.id, decision="approve"))
-        reached_quorum = len(row.approvals) == REQUIRED_APPROVALS
     current = await ExpeditedApproval.get(approval.id)
     if current is None:
         return VoteOutcome("This expedited review vanished.")
     await refresh_card(current)
-    if reached_quorum:
+    if first_approval:
         pr = current.pull_request
         await notify_agent(
             current,
@@ -128,6 +130,33 @@ async def handle_vote(
             ),
         )
     return VoteOutcome(f"Approval recorded as @{voter.github_login}.")
+
+
+async def _mark_ready(approval: ExpeditedApproval, *, voter: Voter) -> VoteOutcome:
+    """Undraft the PR as its author, then open the card for approval."""
+    if not approval.awaiting_ready:
+        return VoteOutcome("This pull request is already ready for review.")
+    token = await get_valid_access_token(voter.github_login)
+    if not token:
+        return VoteOutcome(
+            f"Open SWE has no GitHub token for @{voter.github_login}, so it cannot mark the "
+            f"pull request ready. {github_token_hint()}"
+        )
+    pr = approval.pull_request
+    try:
+        await act_on_pull_request(
+            pr.owner, pr.repo, pr.number, MarkReadyAction(action="mark-ready"), token
+        )
+    except HTTPException as exc:
+        return VoteOutcome(f"GitHub did not mark the pull request ready: {exc.detail}")
+    async with ExpeditedApproval.locked(approval.id) as (_, row):
+        if row is None or row.state != "open":
+            return VoteOutcome("This expedited review closed before it was marked ready.")
+        row.awaiting_ready = False
+    current = await ExpeditedApproval.get(approval.id)
+    if current is not None:
+        await refresh_card(current)
+    return VoteOutcome("Marked ready for review. Someone else can approve it now.")
 
 
 async def _reject(approval: ExpeditedApproval, *, voter: Voter, feedback: str) -> VoteOutcome:
@@ -159,7 +188,7 @@ async def _reject(approval: ExpeditedApproval, *, voter: Voter, feedback: str) -
 async def process_vote(
     approval_id: str,
     *,
-    decision: VoteDecision,
+    decision: CardAction,
     person: PersonIdentity,
     channel_id: str,
     thread_ts: str,

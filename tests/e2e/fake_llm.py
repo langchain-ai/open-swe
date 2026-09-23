@@ -1015,7 +1015,7 @@ SCRIPT_LIBRARY: dict[str, tuple[StepSpec, ...]] = {
         ),
         _dynamic_step(_expedite_fixed_reply_step),
     ),
-    # The card reached two approvals, or the watch reported checks green.
+    # Someone approved the card, or the watch reported checks green.
     "expedite_merge": (_dynamic_step(_expedite_merge_step),),
     "multi_pr": (
         _tool_step(
@@ -1237,8 +1237,7 @@ SCRIPT_RULES: tuple[ScriptRule, ...] = (
         lambda ctx: (
             EXPEDITE_MARKER in ctx.first_text
             and (
-                "finished without a failure" in ctx.last_text
-                or "now has two approvals" in ctx.last_text
+                "finished without a failure" in ctx.last_text or "review card for" in ctx.last_text
             )
         ),
     ),

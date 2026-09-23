@@ -1,11 +1,12 @@
 """Expedited approvals: a Slack vote on what one card showed of a small pull request.
 
 An approval pins the head SHA the card was posted for and a fingerprint of the
-diff the card drew. Votes are only recorded here; nothing reaches GitHub until
-the agent merges, and a later commit keeps them only if the fingerprint still
-matches. One approval per pull request may be ``open`` at a time; a partial
-unique index enforces that. A vote names its voter by ``users.id``, never by a
-GitHub or Slack handle, so one person cannot vote twice under two identities.
+diff the card drew. One approval from someone other than the author completes
+it. Votes are only recorded here; nothing reaches GitHub until the agent
+merges, and a later commit keeps them only if the fingerprint still matches.
+One approval per pull request may be ``open`` at a time; a partial unique index
+enforces that. A vote names its voter by ``users.id``, never by a GitHub or
+Slack handle.
 """
 
 import logging
@@ -31,8 +32,6 @@ logger = logging.getLogger(__name__)
 
 ApprovalState = Literal["open", "merged", "rejected", "superseded", "cancelled"]
 VoteDecision = Literal["approve", "reject"]
-
-REQUIRED_APPROVALS = 2
 
 
 class ApprovalVote(Base):
@@ -71,6 +70,8 @@ class ExpeditedApproval(Base):
     slack_message_ts: Mapped[str] = mapped_column(server_default="", default="")
     # Slack only renders a file cited when the message is first posted, so updates reuse it.
     slack_diff_file_id: Mapped[str] = mapped_column(server_default="", default="")
+    # A draft PR's card offers only "Mark ready", to its author, until they click it.
+    awaiting_ready: Mapped[bool] = mapped_column(server_default="false", default=False)
     run_config: Mapped[JsonObject] = mapped_column(JSONB, default_factory=dict)
     votes: Mapped[list[ApprovalVote]] = relationship(
         default_factory=list, cascade="all, delete-orphan", order_by=lambda: ApprovalVote.voted_at
@@ -86,6 +87,17 @@ class ExpeditedApproval(Base):
     @property
     def approvals(self) -> list[ApprovalVote]:
         return [vote for vote in self.votes if vote.decision == "approve"]
+
+    @property
+    def approved(self) -> bool:
+        """One approval from someone other than the author is enough."""
+        return bool(self.approvals)
+
+    def is_author(self, user_id: UUID, login: str) -> bool:
+        pr = self.pull_request
+        if pr.author_user_id is not None:
+            return pr.author_user_id == user_id
+        return bool(pr.author) and pr.author.lower() == login.lower()
 
     @property
     def approvers(self) -> list[str]:

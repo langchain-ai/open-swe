@@ -8,7 +8,7 @@ from fastapi import BackgroundTasks
 
 from agent.expedited_review import card
 from agent.expedited_review.approvals import ExpeditedApproval
-from agent.expedited_review.voting import process_vote
+from agent.expedited_review.voting import CardAction, process_vote
 from agent.input_messages import PersonIdentity
 from agent.slack.blocks import view_payload
 from agent.slack.client import open_slack_modal, post_slack_ephemeral_message
@@ -37,7 +37,14 @@ async def handle_button(
     user_id = interaction.user.id
     if not channel_id or not thread_ts or not button.fingerprint or not user_id:
         return ignored("Missing expedited review context")
-    if button.action not in {"approve", "reject"}:
+    decision: CardAction
+    if button.action == "approve":
+        decision = "approve"
+    elif button.action == "reject":
+        decision = "reject"
+    elif button.action == "ready":
+        decision = "ready"
+    else:
         return ignored("Unknown expedited review action")
 
     if button.action == "reject" and interaction.trigger_id:
@@ -64,7 +71,7 @@ async def handle_button(
     background_tasks.add_task(
         process_vote,
         button.fingerprint,
-        decision="approve" if button.action == "approve" else "reject",
+        decision=decision,
         person=slack_person(user_id),
         channel_id=channel_id,
         thread_ts=thread_ts,

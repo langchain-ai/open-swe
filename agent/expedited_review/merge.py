@@ -12,11 +12,11 @@ from typing import Any, Literal
 import httpx2
 
 from agent.dashboard.profiles import get_valid_access_token
-from agent.expedited_review.approvals import REQUIRED_APPROVALS, ExpeditedApproval
+from agent.expedited_review.approvals import ExpeditedApproval
 from agent.expedited_review.eligibility import diff_fingerprint, fetch_changed_files
 from agent.expedited_review.lifecycle import mark_merged, repo_token, retire
 from agent.expedited_review.readiness import assess_readiness
-from agent.expedited_review.voting import github_token_hint, is_author
+from agent.expedited_review.voting import github_token_hint
 from agent.github.app import (
     get_github_app_installation_id_for_repo,
     get_github_app_installation_token,
@@ -161,13 +161,17 @@ async def merge_approved(approval: ExpeditedApproval) -> MergeResult:
             "no longer count. Call `expedite_pr_approval` again for a fresh card.",
         )
 
-    approvals = approval.approvals
-    if len(approvals) < REQUIRED_APPROVALS:
-        remaining = REQUIRED_APPROVALS - len(approvals)
+    if approval.awaiting_ready:
         return MergeResult(
             "needs_approvals",
-            f"{remaining} more approval{'s' if remaining != 1 else ''} needed on the Slack "
-            "card. You will be woken when the card has enough.",
+            "The author has not marked the draft ready on the Slack card yet. You will be "
+            "woken once someone approves it.",
+        )
+    approvals = approval.approvals
+    if not approvals:
+        return MergeResult(
+            "needs_approvals",
+            "Nobody has approved the Slack card yet. You will be woken when someone does.",
         )
     if readiness.blockers:
         return MergeResult("not_ready", "Not ready to merge: " + "; ".join(readiness.blockers))
@@ -175,7 +179,7 @@ async def merge_approved(approval: ExpeditedApproval) -> MergeResult:
     reviewed_now = False
     for vote in approvals:
         login = vote.github_login
-        if is_author(approval, vote.voter_user_id, login):
+        if approval.is_author(vote.voter_user_id, login):
             continue
         if vote.github_review_id is not None and vote.github_review_sha == snapshot.head_sha:
             continue
