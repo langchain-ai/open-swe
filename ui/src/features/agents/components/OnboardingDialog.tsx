@@ -21,8 +21,6 @@ import {
 } from "@/lib/profile"
 import { useSession } from "@/lib/session"
 
-const SLACK_ONBOARDING_DISMISSED_KEY = "open-swe.slack-onboarding-dismissed"
-
 /**
  * First-run onboarding modal: pick a default agent model, then connect Slack.
  *
@@ -79,7 +77,6 @@ export function OnboardingDialog() {
     !slackConnected &&
     profile.isSuccess &&
     !profile.data.slack_onboarding_dismissed &&
-    window.localStorage.getItem(SLACK_ONBOARDING_DISMISSED_KEY) !== "true" &&
     !session.isLoading &&
     !session.isError
   const open = !dismissed && (needsModel || needsSlack)
