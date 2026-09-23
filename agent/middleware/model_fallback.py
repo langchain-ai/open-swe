@@ -236,6 +236,21 @@ class ModelFallbackMiddleware(OpenSWEMiddleware):
                     )
                     return AIMessage(content=access_error_message)
                 if not _should_fallback(exc):
+                    if use_fallback:
+                        last_exc = exc
+                        logger.warning(
+                            "Fallback model call failed with non-retryable error; retrying primary",
+                            extra={
+                                **error_tracking_fields(exc),
+                                "model_call_fallback": fields,
+                            },
+                        )
+                        if attempt + 1 >= total_attempts:
+                            break
+                        delay = self._backoff_schedule[attempt]
+                        if delay > 0:
+                            delay += random.uniform(0, delay * 0.25)
+                        continue
                     raise
                 last_exc = exc
                 if attempt + 1 >= total_attempts:

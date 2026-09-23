@@ -4,7 +4,7 @@ from unittest.mock import MagicMock
 import pytest
 from langchain.agents.middleware.types import ModelRequest, ModelResponse
 from langchain_anthropic import ChatAnthropic
-from langchain_core.messages import AIMessage, HumanMessage
+from langchain_core.messages import AIMessage, HumanMessage, ToolCall
 
 from agent.middleware.sanitize_thinking_blocks import SanitizeThinkingBlocksMiddleware
 
@@ -33,24 +33,27 @@ class TestSanitizeThinkingBlocksMiddleware:
         response = MagicMock()
 
         async def handler(req: ModelRequest[None]) -> ModelResponse[Any]:
-            assert req is request
+            assert req is request.override.return_value
             return cast(ModelResponse[Any], response)
 
         result = await SanitizeThinkingBlocksMiddleware().awrap_model_call(request, handler)
 
         assert result is response
         assert message.content == [{"type": "text", "text": "ok"}]
+        request.override.assert_called_once_with(messages=[])
 
     @pytest.mark.asyncio
     async def test_preserves_non_empty_thinking_block_for_anthropic(self) -> None:
         thinking_block = {"type": "thinking", "signature": "abc", "thinking": "reasoning"}
         text_block = {"type": "text", "text": "ok"}
         message = AIMessage(content=[thinking_block, text_block])
-        request = _make_request([message])
+        trailing_message = HumanMessage(content="hi")
+        request = _make_request([message, trailing_message])
 
         await SanitizeThinkingBlocksMiddleware().awrap_model_call(request, _noop_handler)
 
         assert message.content == [thinking_block, text_block]
+        request.override.assert_called_once_with(messages=[message, trailing_message])
 
     @pytest.mark.asyncio
     async def test_async_drops_missing_thinking_block_for_anthropic(self) -> None:
@@ -64,13 +67,40 @@ class TestSanitizeThinkingBlocksMiddleware:
         response = MagicMock()
 
         async def handler(req: ModelRequest[None]) -> ModelResponse[Any]:
-            assert req is request
+            assert req is request.override.return_value
             return cast(ModelResponse[Any], response)
 
         result = await SanitizeThinkingBlocksMiddleware().awrap_model_call(request, handler)
 
         assert result is response
         assert message.content == [{"type": "text", "text": "ok"}]
+        request.override.assert_called_once_with(messages=[HumanMessage(content="hi")])
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "content",
+        [
+            [{"type": "thinking", "thinking": "", "signature": "abc"}],
+            "assistant prefill",
+        ],
+    )
+    async def test_drops_trailing_assistant_prefill_for_anthropic(self, content: object) -> None:
+        trailing_message = AIMessage(content=content)
+        request = _make_request([HumanMessage(content="hi"), trailing_message])
+
+        await SanitizeThinkingBlocksMiddleware().awrap_model_call(request, _noop_handler)
+
+        request.override.assert_called_once_with(messages=[HumanMessage(content="hi")])
+
+    @pytest.mark.asyncio
+    async def test_preserves_trailing_assistant_message_with_tool_calls(self) -> None:
+        tool_call = ToolCall(name="search", args={"query": "test"}, id="call_1")
+        message = AIMessage(content="", tool_calls=[tool_call])
+        request = _make_request([HumanMessage(content="hi"), message])
+
+        await SanitizeThinkingBlocksMiddleware().awrap_model_call(request, _noop_handler)
+
+        request.override.assert_called_once_with(messages=[HumanMessage(content="hi"), message])
 
     @pytest.mark.asyncio
     async def test_ignores_non_anthropic_models(self) -> None:

@@ -44,6 +44,11 @@ def _sanitize_messages(messages: list[Any]) -> None:
             message.content = content
 
 
+def _remove_trailing_assistant_prefills(messages: list[Any]) -> None:
+    while messages and isinstance(messages[-1], AIMessage) and not messages[-1].tool_calls:
+        messages.pop()
+
+
 class SanitizeThinkingBlocksMiddleware(OpenSWEMiddleware):
     """Drop empty Anthropic thinking blocks before provider validation."""
 
@@ -53,5 +58,8 @@ class SanitizeThinkingBlocksMiddleware(OpenSWEMiddleware):
         handler: Callable[[ModelRequest], Awaitable[ModelResponse]],
     ) -> Any:
         if _is_chat_anthropic(request.model):
-            _sanitize_messages(request.messages)
+            messages = list(request.messages)
+            _sanitize_messages(messages)
+            _remove_trailing_assistant_prefills(messages)
+            request = request.override(messages=messages)
         return await handler(request)
