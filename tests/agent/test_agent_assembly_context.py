@@ -8,6 +8,7 @@ is what makes deepagents auto-wire `FilesystemMiddleware` tool-result eviction a
 """
 
 import asyncio
+import json
 from types import SimpleNamespace
 from typing import cast
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -109,6 +110,7 @@ async def _capture_create_deep_agent_kwargs(
     *,
     profile: dict[str, object] | None = None,
     thread_settings: dict[str, object] | None = None,
+    workspace_settings: WorkspaceSettings | None = None,
     private_thread: bool = False,
 ) -> dict[str, object]:
     captured: dict[str, object] = {}
@@ -145,7 +147,8 @@ async def _capture_create_deep_agent_kwargs(
         patch(
             "agent.server.cached_workspace_settings",
             new_callable=AsyncMock,
-            return_value=WorkspaceSettings(
+            return_value=workspace_settings
+            or WorkspaceSettings(
                 {
                     **_MODEL_DEFAULTS,
                     "default_agent_routing_fast_model": "google_genai:gemini-3.8-flash",
@@ -315,6 +318,56 @@ async def test_model_routing_is_applied_when_enabled() -> None:
         "openai:gpt-6-sol",
         "anthropic:claude-opus-5-5",
     ]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("legacy_thread", [False, True])
+async def test_admin_model_changes_only_affect_new_threads(legacy_thread: bool) -> None:
+    initial_settings = (
+        {"model_id": "openai:gpt-6-sol", "effort": "medium", "model_routing_enabled": True}
+        if legacy_thread
+        else {}
+    )
+    with patch("agent.server.store_thread_settings", new_callable=AsyncMock) as store:
+        original = await _capture_create_deep_agent_kwargs(
+            profile={"model_routing_enabled": True}, thread_settings=initial_settings
+        )
+    snapshot = json.loads(json.dumps(store.call_args.args[2]))
+    changed_defaults = WorkspaceSettings(
+        {
+            "default_agent_model": "google_genai:gemini-3.8-flash",
+            "default_agent_reasoning_effort": "high",
+            "default_agent_subagent_model": "google_genai:gemini-3.8-flash",
+            "default_agent_subagent_reasoning_effort": "high",
+            "default_thread_title_model": "google_genai:gemini-3.8-flash",
+            "default_thread_title_reasoning_effort": "high",
+            "model_routing_enabled": True,
+            **{
+                f"default_agent_routing_{tier}_{field}": value
+                for tier in ("fast", "balanced", "performance")
+                for field, value in (
+                    ("model", "google_genai:gemini-3.8-flash"),
+                    ("reasoning_effort", "high"),
+                )
+            },
+        }
+    )
+    existing = await _capture_create_deep_agent_kwargs(
+        thread_settings=snapshot, workspace_settings=changed_defaults
+    )
+    fresh_config = _base_config()
+    fresh_config["configurable"]["thread_id"] = "new-thread"
+    fresh = await _capture_create_deep_agent_kwargs(
+        fresh_config, workspace_settings=changed_defaults
+    )
+
+    original_calls = cast(list[tuple[str, dict[str, object]]], original["make_model_calls"])
+    existing_calls = cast(list[tuple[str, dict[str, object]]], existing["make_model_calls"])
+    fresh_calls = cast(list[tuple[str, dict[str, object]]], fresh["make_model_calls"])
+    assert existing_calls[:-1] == original_calls[:-1]
+    assert existing_calls[-1] == fresh_calls[-1] != original_calls[-1]
+    assert fresh_calls != original_calls
+    assert {model for model, _ in fresh_calls} == {"google_genai:gemini-3.8-flash"}
 
 
 @pytest.mark.asyncio

@@ -1120,6 +1120,7 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
     # Workspace/profile settings are accepted stale for a short TTL so graph factories
     # stay off the critical path during worker load and retry storms.
     settings: WorkspaceSettings | None = None
+    routing_defaults: dict[str, tuple[str, str | None]]
     if local_run:
         from agent.dashboard.options import default_model_pair
 
@@ -1140,7 +1141,7 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
                 _cached_profile(None if thread_settings.get("model_id") else profile_login),
             )
             model_defaults = settings.default_model_pair("agent")
-            routing_defaults = settings.agent_routing_models
+            routing_defaults = dict(settings.agent_routing_models)
             title_defaults = settings.default_thread_title_model
             use_gateway = settings.effective_gateway_enabled
             fable_enabled = settings.fable_enabled
@@ -1151,6 +1152,9 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
     linear_issue_number = linear_issue.get("linear_issue_number", "")
 
     (model_id, profile_effort), (subagent_model_id, subagent_effort) = model_defaults
+    for route, stored_route in thread_settings.get("routing_models", {}).items():
+        if route in routing_defaults:
+            routing_defaults[route] = (stored_route["model_id"], stored_route["effort"])
     title_model_id, title_effort = title_defaults
     logger.info("Using workspace default agent model: model=%s effort=%s", model_id, profile_effort)
 
@@ -1239,6 +1243,10 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
         "subagent_model_id": subagent_model_id,
         "subagent_effort": subagent_effort,
         "model_routing_enabled": adaptive_model_routing,
+        "routing_models": {
+            route: {"model_id": routed_model_id, "effort": effort}
+            for route, (routed_model_id, effort) in routing_defaults.items()
+        },
         "repo_instructions": repo_instructions,
     }
     if not local_run and (
