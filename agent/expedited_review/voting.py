@@ -14,7 +14,7 @@ from uuid import UUID
 from fastapi import HTTPException
 
 from agent.dashboard.profiles import get_valid_access_token
-from agent.expedited_review.approvals import ApprovalVote, ExpeditedApproval
+from agent.expedited_review.approvals import ApprovalVote, ExpeditedApproval, slack_mention
 from agent.expedited_review.lifecycle import notify_agent, refresh_card, repo_token, retire
 from agent.github.ci import has_repo_write_permission
 from agent.github.pull_request_actions import MarkReadyAction, act_on_pull_request
@@ -165,7 +165,9 @@ async def _reject(approval: ExpeditedApproval, *, voter: Voter) -> VoteOutcome:
             return VoteOutcome("This expedited review is no longer accepting votes.")
         row.votes = [vote for vote in row.votes if vote.voter_user_id != voter.user.id]
         row.votes.append(ApprovalVote(voter_user_id=voter.user.id, decision="reject"))
-    await retire(approval, "rejected", f"Rejected by @{voter.github_login}.")
+    await retire(
+        approval, "rejected", f"Rejected by {slack_mention(voter.user, voter.github_login)}."
+    )
     return VoteOutcome("Rejected. Tag the agent in the thread to tell it what to change.")
 
 

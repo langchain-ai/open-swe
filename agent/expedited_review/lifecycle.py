@@ -128,7 +128,11 @@ async def post_card(
         return None, "no Slack thread"
     approval.slack_diff_file_id = await _diff_image_id(approval, files) or ""
     text, blocks = card.open_card(
-        approval, title=title, files=files, diff_image_id=approval.slack_diff_file_id or None
+        approval,
+        title=title,
+        author=await approval.author_mention(),
+        files=files,
+        diff_image_id=approval.slack_diff_file_id or None,
     )
     return await post_slack_thread_reply_with_ts(
         location[0],
@@ -148,13 +152,19 @@ async def refresh_card(approval: ExpeditedApproval, *, outcome: str | None = Non
     token = await repo_token(pr.owner, pr.repo)
     files = await _files_for(approval, token) if token else []
     diff_image_id = approval.slack_diff_file_id or None
+    author = await approval.author_mention()
     if outcome is None:
         text, blocks = card.open_card(
-            approval, title=pr.title, files=files, diff_image_id=diff_image_id
+            approval, title=pr.title, author=author, files=files, diff_image_id=diff_image_id
         )
     else:
         text, blocks = card.closed_card(
-            approval, title=pr.title, files=files, outcome=outcome, diff_image_id=diff_image_id
+            approval,
+            title=pr.title,
+            author=author,
+            files=files,
+            outcome=outcome,
+            diff_image_id=diff_image_id,
         )
     ok, error = await update_slack_message(
         approval.slack_channel_id, approval.slack_message_ts, text, blocks=block_payload(blocks)

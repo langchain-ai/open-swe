@@ -53,6 +53,17 @@ class ApprovalVote(Base):
     def github_login(self) -> str:
         return self.voter.login_for("github")
 
+    @property
+    def slack_mention(self) -> str:
+        return slack_mention(self.voter, self.github_login)
+
+
+def slack_mention(user: User | None, fallback_login: str) -> str:
+    """A Slack mention for ``user``, or their GitHub handle when Slack is not linked."""
+    if user is not None and user.slack_user_id:
+        return f"<@{user.slack_user_id}>"
+    return f"@{fallback_login}"
+
 
 class ExpeditedApproval(Base):
     __tablename__ = "expedited_approval"
@@ -91,6 +102,11 @@ class ExpeditedApproval(Base):
     def approved(self) -> bool:
         """One approval from someone other than the author is enough."""
         return bool(self.approvals)
+
+    async def author_mention(self) -> str:
+        pr = self.pull_request
+        author = await User.get(pr.author_user_id) if pr.author_user_id else None
+        return slack_mention(author, pr.author or "the author")
 
     def is_author(self, user_id: UUID, login: str) -> bool:
         pr = self.pull_request

@@ -29,22 +29,19 @@ def _button_value(action: str, approval: ExpeditedApproval) -> str:
     return json.dumps({"type": BUTTON_TYPE, "action": action, "fingerprint": str(approval.id)})
 
 
-def _author(approval: ExpeditedApproval) -> str:
-    return f"@{escape(approval.pull_request.author or 'the author')}"
+def _vote_summary(approval: ExpeditedApproval, author: str) -> str:
+    """``author`` and the approvers are Slack mentions, so none of this is escaped."""
+    if not approval.approvals:
+        return f"Needs one approval from someone other than {author}."
+    return f"Approved by {', '.join(vote.slack_mention for vote in approval.approvals)}."
 
 
-def _vote_summary(approval: ExpeditedApproval) -> str:
-    if not approval.approvers:
-        return f"Needs one approval from someone other than {_author(approval)}."
-    return f"Approved by {', '.join(f'@{login}' for login in approval.approvers)}."
-
-
-def _header(approval: ExpeditedApproval, title: str) -> list[Block]:
+def _header(approval: ExpeditedApproval, title: str, author: str) -> list[Block]:
     pr = approval.pull_request
     label = f"{pr.owner}/{pr.repo}#{pr.number}"
     return [
         section(f"*Expedited review requested*\n<{pr.url}|{label}> {escape(title)}"),
-        context(f"Revision `{approval.head_sha[:12]}` · author @{escape(pr.author or 'unknown')}"),
+        context(f"Revision `{approval.head_sha[:12]}` · author {author}"),
     ]
 
 
@@ -121,38 +118,39 @@ def _voting_diff(
     return [*_diff_sections(files, diff_image_id), divider()]
 
 
-def _status(approval: ExpeditedApproval) -> list[Block]:
+def _status(approval: ExpeditedApproval, author: str) -> list[Block]:
     if approval.awaiting_ready:
         return [
-            section(
-                f"*Draft.* {_author(approval)}, mark it ready for review so someone else "
-                "can approve it."
-            ),
+            section(f"*Draft.* {author}, mark it ready for review so someone else can approve it."),
             actions(_ready_button(approval)),
         ]
     if approval.approved:
         return [
             section(
-                f"*{escape(_vote_summary(approval))}* Merging once checks and reviews are clean."
+                f"*{_vote_summary(approval, author)}* Merging once checks and reviews are clean."
             )
         ]
-    return [section(_vote_summary(approval)), actions(*_vote_buttons(approval))]
+    return [section(_vote_summary(approval, author)), actions(*_vote_buttons(approval))]
 
 
 def open_card(
     approval: ExpeditedApproval,
     *,
     title: str,
+    author: str,
     files: list[ChangedFile],
     diff_image_id: str | None = None,
 ) -> tuple[str, list[Block]]:
-    """Text fallback and blocks for an open card; diff and buttons go once it is approved."""
+    """Text fallback and blocks for an open card; diff and buttons go once it is approved.
+
+    ``author`` is the PR author's Slack mention, from :meth:`ExpeditedApproval.author_mention`.
+    """
     pr = approval.pull_request
     blocks: list[Block] = [
-        *_header(approval, title),
+        *_header(approval, title, author),
         divider(),
         *_voting_diff(approval, files, diff_image_id),
-        *_status(approval),
+        *_status(approval, author),
     ]
     text = f"Expedited review requested for {pr.url} ({approval.head_sha[:12]})"
     return text, blocks
@@ -162,11 +160,12 @@ def closed_card(
     approval: ExpeditedApproval,
     *,
     title: str,
+    author: str,
     files: list[ChangedFile],
     outcome: str,
     diff_image_id: str | None = None,
 ) -> tuple[str, list[Block]]:
-    """Text fallback and blocks for a card whose vote is over."""
+    """Text fallback and blocks for a card whose vote is over; ``outcome`` is our own mrkdwn."""
     pr = approval.pull_request
     if approval.state == "merged":
         label = f"{pr.owner}/{pr.repo}#{pr.number}"
@@ -174,10 +173,10 @@ def closed_card(
             section(f"*Expedited review: merged*\n<{pr.url}|{label}> {escape(title)}")
         ]
     blocks: list[Block] = [
-        *_header(approval, title),
+        *_header(approval, title, author),
         divider(),
         *_voting_diff(approval, files, diff_image_id),
-        section(f"*{escape(outcome)}*"),
-        context(_vote_summary(approval)),
+        section(f"*{outcome}*"),
+        context(_vote_summary(approval, author)),
     ]
     return f"{outcome} — {pr.url}", blocks

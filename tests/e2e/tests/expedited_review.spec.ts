@@ -294,7 +294,10 @@ test.describe("Expedited Slack review", () => {
       .poll(async () => (await latest(request)).approvers, { timeout: 60_000 })
       .toEqual([reviewer.login]);
     await page.goto("/mock/slack");
-    await expect(card(page)).toContainText(`Approved by @${reviewer.login}`);
+    // A voter who clicked from Slack is mentioned by their Slack identity.
+    await expect(card(page)).toContainText(
+      new RegExp(`Approved by (<@${reviewer.slack_id}>|@${reviewer.slack_id})`),
+    );
     await expect(card(page).getByRole("button")).toHaveCount(0);
     await expect(card(page).locator("img.block-image")).toHaveCount(0);
     await shootCard(page, "approved");
