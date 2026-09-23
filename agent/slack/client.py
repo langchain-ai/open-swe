@@ -22,6 +22,7 @@ from slack_sdk.web.async_slack_response import AsyncSlackResponse
 
 from agent.config import ENV
 from agent.slack.http import SLACK_REQUEST_ERRORS, SlackClient, slack_error, slack_retry_after
+from agent.slack.latency import PendingSlackFirstResponse
 from agent.source_context import SlackThreadRef, SourceContext
 from agent.thread_ids import slack_thread_id
 from agent.utils.dashboard_links import dashboard_thread_url
@@ -464,6 +465,7 @@ async def _post_slack_message_with_ts(
                     extra={"slack_channel": channel_id, "slack_thread_ts": reply_ts},
                 )
                 return None, "thread_not_found"
+            await PendingSlackFirstResponse.resolve(channel_id, thread_ts, message_ts)
             _log_automated_warning_sent_to_slack(channel_id, thread_ts, text)
             return message_ts, None
         return None, None
@@ -843,6 +845,7 @@ async def start_slack_stream(
     message_ts = data.get("ts")
     if not isinstance(message_ts, str) or not message_ts:
         raise SlackStreamError("missing_message_ts")
+    await PendingSlackFirstResponse.resolve(channel_id, thread_ts, message_ts)
     return message_ts
 
 

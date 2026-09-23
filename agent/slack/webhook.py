@@ -37,6 +37,7 @@ from agent.slack import client as slack_utils
 from agent.slack.allowed_bots import AllowedSlackBot, resolve_allowed_slack_bot
 from agent.slack.dm import dm_thread_title, is_dm_channel, is_dm_session
 from agent.slack.failures import report_slack_failure
+from agent.slack.latency import PendingSlackFirstResponse
 from agent.slack.payloads import SlackChannelContext
 from agent.slack.request import SlackRequest
 from agent.slack.thinking import (
@@ -1173,6 +1174,17 @@ async def _process_slack_mention_impl(
         thread_id,
     )
     run_id = run.get("run_id")
+    if isinstance(run_id, str) and run_id:
+        await PendingSlackFirstResponse(
+            trigger_ts=event_ts,
+            run_id=run_id,
+            agent_thread_id=thread_id,
+            code_channel=code_channel,
+            dm_session=dm_session,
+            reply_thread_timestamps=list(
+                dict.fromkeys(ts for ts in (thread_ts, reply_thread_ts, original_message_ts) if ts)
+            ),
+        ).register(langgraph_client, channel_id)
     if code_channel and isinstance(run_id, str) and run_id:
         stream_thread_ts = reply_thread_ts or thread_ts
         await stream_slack_thinking_steps(
