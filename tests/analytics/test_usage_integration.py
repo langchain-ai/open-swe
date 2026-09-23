@@ -374,4 +374,4 @@ async def test_auth_failure_is_terminal_and_cost_coverage_uses_trace_evidence(
     assert row["invocations"] == 1
     assert row["invocations_without_cost"] == int(trace_cost is None)
     assert row["total_cost_usd"] == (trace_cost or 0.0)
-    assert row["total_tokens"] == prior_tokens
+    assert row["total_tokens"] == (prior_tokens or None)

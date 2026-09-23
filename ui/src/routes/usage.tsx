@@ -1329,7 +1329,9 @@ function UsageTable({
                     : "—"}
                 </td>
                 <td className="px-2 py-3 text-right tabular-nums">
-                  {formatNumber(row.total_tokens)}
+                  {row.total_tokens === null
+                    ? "—"
+                    : formatNumber(row.total_tokens)}
                 </td>
                 <td className="px-2 py-3 text-right tabular-nums">
                   <UsageCost row={row} />
