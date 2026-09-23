@@ -27,14 +27,16 @@ recognises stops being shown without anything having to delete it.
 """
 
 import hashlib
+import html
 import logging
+import re
 from collections.abc import Mapping
 from datetime import datetime
 from typing import Any, Self
 from uuid import UUID, uuid7
 
 from pydantic import BaseModel, ConfigDict
-from sqlalchemy import ForeignKey, delete, func, select
+from sqlalchemy import ForeignKey, delete, func, select, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -55,6 +57,8 @@ MAX_MESSAGE_CHARS = 4_000
 # Long enough that one reviewer run reads each thread's state once, short enough
 # that a later run in the same process sees turns added since.
 _STEERING_CACHE_SECONDS = 300
+# Keeps a message's own text from closing the block it is quoted in.
+_CLOSING_MESSAGE_TAG_RE = re.compile(r"</\s*(author_messages|message)\s*>", re.IGNORECASE)
 
 
 class _StateMessage(BaseModel):
@@ -162,7 +166,10 @@ class SteeringHistory(BaseModel):
     def messages_block(self) -> str:
         """The follow-up messages as ``<message author="...">`` entries, oldest first."""
         return "\n".join(
-            f'<message author="{turn.author}">\n{turn.text}\n</message>' for turn in self.follow_ups
+            f'<message author="{html.escape(turn.author)}">\n'
+            f"{_CLOSING_MESSAGE_TAG_RE.sub(lambda m: f'</{m.group(1)}_>', turn.text)}\n"
+            "</message>"
+            for turn in self.follow_ups
         )
 
     def source_of(self, quote: str) -> HumanTurn | None:
@@ -183,6 +190,23 @@ class GuidanceReview(Base):
     )
     head_sha: Mapped[str]
     completed_at: Mapped[datetime | None] = mapped_column(server_default=NOW, init=False)
+
+    @classmethod
+    async def carry_forward(
+        cls, owner: str, repo: str, pr_number: int, *, from_sha: str, to_sha: str
+    ) -> None:
+        """Re-pin the points and the card to a new head whose diff is identical to the old one."""
+        pull_request = await PullRequest.get(owner, repo, pr_number)
+        if pull_request is None or pull_request.id is None:
+            return
+        async with postgres.session() as session:
+            for table in (cls, GuidancePoint):
+                await session.execute(
+                    update(table)
+                    .where(table.pull_request_id == pull_request.id, table.head_sha == from_sha)
+                    .values(head_sha=to_sha)
+                )
+            await session.commit()
 
     @classmethod
     async def complete(cls, owner: str, repo: str, pr_number: int, head_sha: str) -> None:
@@ -272,7 +296,7 @@ class GuidancePoint(Base):
 
     @classmethod
     async def for_head(cls, owner: str, repo: str, pr_number: int, head_sha: str) -> list[Self]:
-        """Points recorded against ``head_sha``, oldest steering first."""
+        """Points recorded against ``head_sha`` that trace to a stored message, oldest first."""
         async with postgres.session() as session:
             rows = await session.scalars(
                 select(cls)
@@ -282,6 +306,7 @@ class GuidancePoint(Base):
                     Repository.key == f"{owner}/{repo}".lower(),
                     PullRequest.number == pr_number,
                     cls.head_sha == head_sha,
+                    cls.turn_index.is_not(None),
                 )
                 .order_by(cls.turn_index, cls.id)
             )
