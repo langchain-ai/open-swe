@@ -333,12 +333,17 @@ function ChatBody({
     setAttachments((prev) => prev.filter((a) => a.id !== id))
   }, [])
 
+  const seenShowIdsRef = useRef<Set<string> | null>(null)
+  const latestShowIdsRef = useRef("")
   const send = useCallback(
     (text: string, atts: Array<ChatAttachment>) => {
       const trimmed = text.trim()
       const first = atts[0]
       if ((!trimmed && !first) || busy) return
       const content = serializeMessage(trimmed, atts)
+      seenShowIdsRef.current = new Set(
+        latestShowIdsRef.current.split(",").filter(Boolean)
+      )
       void stream.submit({ messages: [{ type: "human", content }] })
     },
     [busy, stream]
@@ -374,20 +379,16 @@ function ChatBody({
     return [{ message, content: parsed.content, structured: parsed }]
   })
 
-  // Only show calls that arrive while this chat is open; ones already in the
-  // thread when it hydrates are history and must not move the page.
-  const seenShowIdsRef = useRef<Set<string> | null>(null)
+  // Only replies to a message sent from this mount may move the page; history
+  // can arrive at any point during hydration, so it is never replayed.
   const showIds = diffActions
     .filter((action) => action.kind === "show")
     .map((action) => action.id)
     .join(",")
+  latestShowIdsRef.current = showIds
   useEffect(() => {
-    if (hydrating) return
+    if (seenShowIdsRef.current === null) return
     const shows = diffActions.filter((action) => action.kind === "show")
-    if (seenShowIdsRef.current === null) {
-      seenShowIdsRef.current = new Set(shows.map((action) => action.id))
-      return
-    }
     for (const action of shows) {
       if (seenShowIdsRef.current.has(action.id)) continue
       seenShowIdsRef.current.add(action.id)
@@ -395,7 +396,7 @@ function ChatBody({
     }
     // diffActions is rebuilt every render; showIds is its stable identity.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [showIds, hydrating, composer])
+  }, [showIds, composer])
 
   const submitComposer = () => {
     send(value, attachments)
