@@ -73,7 +73,7 @@ install:
 	uv sync --extra dev
 
 # Single-file `open-swe` binary. Bun compiles its own runtime into the output,
-# so the result runs on a laptop without Node or Bun installed.
+# so the result runs on any machine without Node or Bun installed.
 cli:
 	@command -v bun >/dev/null 2>&1 || { echo 'bun is required: https://bun.com/docs/installation' >&2; exit 1; }
 	pnpm install --frozen-lockfile --filter open-swe-cli --filter open-swe

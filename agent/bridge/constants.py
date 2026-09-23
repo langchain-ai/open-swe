@@ -8,7 +8,7 @@ RESULT_EVENT = "result"
 CLOSED_EVENT = "closed"
 
 SANDBOX_ID_PREFIX = "bridge:"
-"""What a thread's ``sandbox_id`` starts with when its sandbox is someone's laptop."""
+"""What a thread's ``sandbox_id`` starts with when its sandbox is the machine running the CLI."""
 
 HEARTBEAT_INTERVAL_SECONDS = 20
 ALIVE_THRESHOLD_SECONDS = 75

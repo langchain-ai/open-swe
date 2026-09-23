@@ -1,4 +1,4 @@
-"""A sandbox backend whose filesystem is the user's own laptop.
+"""A sandbox backend whose filesystem is the machine running the CLI.
 
 ``BaseSandbox`` derives ls/read/write/edit/grep/glob/delete from execute plus
 the two file transfers, so only those three round trips are implemented here.
@@ -9,7 +9,7 @@ A waiter subscribes before it enqueues, so the wake-up it is waiting for cannot
 land in the gap between the two, and it re-reads the row on every liveness tick
 anyway — a notification that never arrives costs latency only. The liveness tick
 is also what keeps a run from waiting out a five-minute command timeout on a
-laptop that was closed.
+machine that went away.
 """
 
 import asyncio

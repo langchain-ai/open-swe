@@ -11,7 +11,7 @@ when it wakes or times out, and a waiting request re-reads its row on every
 liveness tick, so neither depends on a notification arriving.
 
 The same task prunes bridges whose heartbeat has stopped, which is what turns a
-laptop that was closed mid-run into a failed request rather than a waiter that
+machine that went away mid-run into a failed request rather than a waiter that
 never returns.
 """
 

@@ -1,10 +1,10 @@
 # open-swe CLI
 
 `open-swe` starts a normal cloud Open SWE agent on a remote deployment and makes
-the current directory on your laptop that agent's sandbox. The remote agent's
+the current directory on the machine running it that agent's sandbox. The remote agent's
 shell commands, file uploads and file downloads all execute here.
 
-The deployment cannot dial your laptop, so the CLI long-polls the backend for
+The deployment cannot dial that machine, so the CLI long-polls the backend for
 sandbox requests, runs them locally, and posts the results back.
 
 > The agent runs commands **unsandboxed**, as you, in whatever directory you

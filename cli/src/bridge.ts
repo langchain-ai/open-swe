@@ -43,7 +43,7 @@ function sleep(ms: number): Promise<void> {
 }
 
 /**
- * The laptop half of a sandbox bridge: long-polls the backend for the remote
+ * The CLI half of a sandbox bridge: long-polls the backend for the remote
  * agent's requests, runs them in the local checkout, and posts the results.
  */
 export class Bridge {
@@ -124,7 +124,7 @@ export class Bridge {
     this.onFatal?.(error)
   }
 
-  /** The server closes a bridge whose heartbeats stopped (laptop asleep); reopen it in place. */
+  /** The server closes a bridge whose heartbeats stopped (the machine slept); reopen it in place. */
   private async reopen(): Promise<void> {
     try {
       await this.api.createBridge({

@@ -1,4 +1,4 @@
-"""What the agent sees when its sandbox is someone's laptop.
+"""What the agent sees when its sandbox is the machine running the CLI.
 
 The "CLI" here is a coroutine doing exactly what the real one does over HTTP:
 claim the request, run it, post the answer back.

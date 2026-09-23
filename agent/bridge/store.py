@@ -1,4 +1,4 @@
-"""The queue a laptop answers a cloud run's sandbox requests through.
+"""The queue a CLI answers a cloud run's sandbox requests through.
 
 The graph worker and the HTTP handler holding the CLI's long poll are usually
 different processes, so everything they agree on is in Postgres: a request moves
@@ -11,7 +11,7 @@ Every transition notifies inside its own transaction, and also publishes in
 process: that is an optimisation for the common single-replica case and is
 deliberately the same code path, so a missing publish only ever costs latency.
 
-A bridge is alive while its heartbeat is recent. A laptop that is closed
+A bridge is alive while its heartbeat is recent. A machine that goes away
 mid-run simply stops heartbeating, and the prune sweep turns that into a closed
 bridge with failed requests rather than waiters that never return.
 """
@@ -56,7 +56,7 @@ _BRIDGE_COLUMNS = (
 class BridgeUnavailableError(RuntimeError):
     """The bridge a run is bound to is closed, stale, or gone.
 
-    Raised on the graph side, where it means the user's laptop is not answering
+    Raised on the graph side, where it means the machine running the CLI is not answering
     this run — never that the bridge should be replaced by anything else.
     """
 
@@ -66,7 +66,7 @@ class BridgeUnavailableError(RuntimeError):
 
 
 class Bridge(BaseModel):
-    """One laptop's registration, as the ``sandbox_bridge`` row holds it."""
+    """One CLI's registration, as the ``sandbox_bridge`` row holds it."""
 
     bridge_id: str
     owner_login: str

@@ -1,4 +1,4 @@
-"""The relay a laptop's CLI answers sandbox requests through.
+"""The relay a CLI answers sandbox requests through.
 
 A graph worker and the HTTP handler holding the CLI's long poll run on
 different replicas, so the queue between them is these two tables. A request is
