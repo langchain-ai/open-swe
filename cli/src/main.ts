@@ -1,5 +1,4 @@
 import { basename } from "node:path"
-import { createInterface } from "node:readline/promises"
 import { parseArgs } from "node:util"
 import { randomUUID } from "node:crypto"
 
@@ -17,7 +16,12 @@ import {
 import { isGitRepository, originRepo, repoFullName } from "./git.ts"
 import { errorMessage, type JsonObject } from "./json.ts"
 import { login } from "./login.ts"
-import { renderRunEvents, type RunOutcome } from "./stream.ts"
+import {
+  collectRun,
+  RESULT_TOOL,
+  type CliResult,
+  type RunOutcome,
+} from "./stream.ts"
 
 const USAGE = `open-swe — run a cloud Open SWE agent against this directory
 
@@ -32,34 +36,41 @@ Run options:
   --model <id>     Agent model id (needs --effort to take effect)
   --effort <name>  Reasoning effort for --model
 
+A run reads its prompt from stdin when none is given. Stdout carries only the
+result the agent reports, and the exit code is the one it reports.
+
 The agent runs shell commands and reads and writes files in the current
 directory, on this machine, without a sandbox.
 `
 
-const EVENT_CHANNELS = ["lifecycle", "messages", "tools"] as const
+const EVENT_CHANNELS = ["lifecycle", "tools"] as const
 const EVENT_DEPTH = 5
 
 function out(text: string): void {
   process.stdout.write(`${text}\n`)
 }
 
+/** Stdout carries only the agent's result, so everything the CLI says goes here. */
+function note(text: string): void {
+  process.stderr.write(`${text}\n`)
+}
+
 function fail(text: string): void {
   process.stderr.write(`open-swe: ${text}\n`)
 }
 
-async function ask(question: string): Promise<string | null> {
-  const rl = createInterface({ input: process.stdin, output: process.stdout })
-  rl.on("SIGINT", () => {
-    rl.close()
-    process.emit("SIGINT", "SIGINT")
-  })
-  try {
-    return await rl.question(question)
-  } catch {
-    return null
-  } finally {
-    rl.close()
-  }
+async function readStdin(): Promise<string> {
+  if (process.stdin.isTTY === true) return ""
+  const chunks: Buffer[] = []
+  for await (const chunk of process.stdin) chunks.push(Buffer.from(chunk))
+  return Buffer.concat(chunks).toString("utf8")
+}
+
+function printResult(result: CliResult): void {
+  const { stdout } = result
+  process.stdout.write(
+    stdout === "" || stdout.endsWith("\n") ? stdout : `${stdout}\n`
+  )
 }
 
 async function resolveBackend(explicit: string | undefined): Promise<string> {
@@ -92,6 +103,11 @@ interface RunOptions {
 }
 
 async function runCommand(options: RunOptions): Promise<number> {
+  const prompt = options.prompt.trim() || (await readStdin()).trim()
+  if (!prompt) {
+    fail("a prompt is required, as arguments or on stdin")
+    return 2
+  }
   const config = await readConfig()
   if (config === null) {
     fail("not signed in — run `open-swe login`")
@@ -105,7 +121,7 @@ async function runCommand(options: RunOptions): Promise<number> {
       `${root} is not a git checkout — the agent will have no repository context`
     )
   }
-  out(
+  note(
     `! The remote agent will run commands and edit files in ${root} on this machine, unsandboxed.`
   )
 
@@ -129,14 +145,14 @@ async function runCommand(options: RunOptions): Promise<number> {
     label: basename(root),
     rememberedBridgeId,
   })
-  out(
+  note(
     `Bridge ${bridge.session.bridgeId}${bridge.reopened ? " (reopened)" : ""} serving ${root}`
   )
 
   const creating = options.thread === undefined
   const threadId = options.thread ?? randomUUID()
   await rememberBridge({ root, bridgeId: bridge.session.bridgeId, threadId })
-  out(`Thread ${api.dashboardUrl(`/agents/${encodeURIComponent(threadId)}`)}`)
+  note(`Thread ${api.dashboardUrl(`/agents/${encodeURIComponent(threadId)}`)}`)
 
   let exitCode = 0
   let closing = false
@@ -160,7 +176,7 @@ async function runCommand(options: RunOptions): Promise<number> {
   process.on("SIGINT", () => {
     interrupts += 1
     if (interrupts > 1) process.exit(130)
-    out("\nStopping — press Ctrl-C again to exit immediately.")
+    note("\nStopping — press Ctrl-C again to exit immediately.")
     void shutdown()
   })
 
@@ -171,56 +187,52 @@ async function runCommand(options: RunOptions): Promise<number> {
   })
 
   const repo = await originRepo(root)
-  let prompt = options.prompt
-  let first = true
+  const configurable: JsonObject = {}
+  // The bridge, and the repo it belongs to, are stamped on the thread when it
+  // is created; the server rejects them on any later run.
+  if (creating) {
+    configurable["sandbox_bridge_id"] = bridge.session.bridgeId
+    if (repo !== null) configurable["repo"] = repoFullName(repo)
+    else configurable["repo_explicitly_none"] = true
+  }
+  if (options.model !== undefined) {
+    configurable["agent_model_id"] = options.model
+    if (options.effort !== undefined)
+      configurable["agent_effort"] = options.effort
+  }
 
-  while (!closing) {
-    if (!prompt.trim()) {
-      const next = await ask("> ")
-      if (next === null || !next.trim()) break
-      prompt = next
-      continue
-    }
-    const configurable: JsonObject = {}
-    // The bridge, and the repo it belongs to, are stamped on the thread when it
-    // is created; the server rejects them on any later run.
-    if (creating && first) {
-      configurable["sandbox_bridge_id"] = bridge.session.bridgeId
-      if (repo !== null) configurable["repo"] = repoFullName(repo)
-      else configurable["repo_explicitly_none"] = true
-    }
-    if (options.model !== undefined) {
-      configurable["agent_model_id"] = options.model
-      if (options.effort !== undefined)
-        configurable["agent_effort"] = options.effort
-    }
+  let outcome: RunOutcome | null = null
+  try {
+    activeRun = true
+    const runId = await api.startRun(threadId, configurable, prompt)
+    const response = await api.openEventStream(threadId, {
+      channels: EVENT_CHANNELS,
+      namespaces: [[]],
+      depth: EVENT_DEPTH,
+      since: 0,
+    })
+    outcome = await collectRun(response, runId)
+  } catch (cause) {
+    fail(
+      cause instanceof ApiError && cause.status === 401
+        ? "your session expired — run `open-swe login` again"
+        : errorMessage(cause)
+    )
+    exitCode = 1
+  } finally {
+    activeRun = false
+  }
 
-    let outcome: RunOutcome
-    try {
-      activeRun = true
-      const runId = await api.startRun(threadId, configurable, prompt)
-      const response = await api.openEventStream(threadId, {
-        channels: EVENT_CHANNELS,
-        namespaces: [[]],
-        depth: EVENT_DEPTH,
-        since: 0,
-      })
-      outcome = await renderRunEvents(response, runId)
-    } catch (cause) {
-      if (cause instanceof ApiError && cause.status === 401) {
-        fail("your session expired — run `open-swe login` again")
-        exitCode = 1
-        break
-      }
-      fail(errorMessage(cause))
-      exitCode = 1
-      break
-    } finally {
-      activeRun = false
-    }
-    if (outcome.status === "failed" && outcome.error !== null) exitCode = 1
-    first = false
-    prompt = ""
+  if (outcome?.result) {
+    printResult(outcome.result)
+    exitCode = outcome.result.exitCode
+  } else if (outcome !== null) {
+    fail(
+      outcome.status === "completed"
+        ? `the agent finished without calling ${RESULT_TOOL}`
+        : `run ${outcome.status}${outcome.error ? `: ${outcome.error}` : ""}`
+    )
+    exitCode = 1
   }
 
   if (!closing) {

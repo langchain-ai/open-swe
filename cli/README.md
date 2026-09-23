@@ -68,11 +68,23 @@ What happens:
    the remote agent's requests. Bridge ids are remembered per directory in
    `~/.open-swe/bridges.json` and reused on the next run.
 2. A thread is created on the deployment, with `origin` repo detected from
-   `git remote get-url origin`, and its dashboard URL is printed.
-3. Assistant text streams to the terminal; each tool call prints one dim line
-   (`$ <command>` for shell tools).
-4. When the run finishes, type a follow-up at the `>` prompt. The bridge keeps
-   serving the whole time.
+   `git remote get-url origin`, and its dashboard URL is printed to stderr.
+3. The agent works. Nothing it says or runs is printed; follow it on the
+   dashboard.
+4. The agent ends the run by calling `cli_result` with `stdout` and an
+   `exit_code`. The CLI prints that `stdout` verbatim as its only output on
+   stdout, releases the bridge, and exits with that code.
+
+So a run composes like any other command:
+
+```sh
+open-swe run "is the test suite green?" && echo passing
+git diff | open-swe run > review.txt
+```
+
+A run that fails, or ends without calling `cli_result`, prints the reason to
+stderr and exits 1. The server re-prompts the agent twice before giving up on a
+missing result.
 
 Ctrl-C once cancels the run, releases the bridge and exits. Ctrl-C twice exits
 immediately.
@@ -85,7 +97,7 @@ Options:
 | `--model <id>` | Agent model id. The backend only honors it together with `--effort`. |
 | `--effort <name>` | Reasoning effort for `--model`. |
 
-The prompt can also come from stdin: `open-swe run` alone reads one line.
+With no prompt arguments, the prompt is read from stdin.
 
 ## Environment the agent gets
 

@@ -60,6 +60,7 @@ class _DisableInheritedMiddleware(AgentMiddleware):
 
 
 from agent.analytics.usage import record_agent_invocation_usage
+from agent.bridge.cli_result import cli_result
 from agent.bridge.store import Bridge
 from agent.credential_scope import private_credential_login
 from agent.dashboard.agent_overrides import (
@@ -123,6 +124,7 @@ from agent.middleware import (
 from agent.middleware.conversation_offloading import ConversationOffloadingMiddleware
 from agent.middleware.model_selection import ModelSelectionState, RoutingMode
 from agent.middleware.prepare_run import PrepareRunState
+from agent.middleware.require_cli_result import RequireCliResultMiddleware
 from agent.middleware.require_user_reply import (
     SLACK_REPLY_SURFACE,
     WEB_REPLY_SURFACE,
@@ -648,6 +650,15 @@ async def _private_thread(thread_id: str | None) -> bool:
         logger.debug("Could not read visibility for thread %s", thread_id, exc_info=True)
         return False
     return thread_is_private(thread_metadata(thread))
+
+
+async def _bridged_thread(thread_id: str | None) -> bool:
+    """Whether this thread's sandbox is a CLI bridge on the user's machine."""
+    if not thread_id:
+        return False
+    thread = await client.threads.get(thread_id=thread_id)
+    sandbox_id = thread_metadata(thread).get("sandbox_id")
+    return isinstance(sandbox_id, str) and Bridge.bridge_id_of(sandbox_id) is not None
 
 
 async def _cached_tool_loader(key: str, ttl_seconds: float, loader: Any) -> list[Any]:
@@ -1317,6 +1328,10 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
         private_thread = await _private_thread(thread_id)
 
     stop_summary_mode = cfg.stop_summary is True
+    async with aphase(thread_id, "factory.bridged_thread"):
+        cli_result_required = (
+            not local_run and not stop_summary_mode and await _bridged_thread(thread_id)
+        )
     sandbox_file_downloads = _sandbox_file_downloads_enabled(cfg)
     mcp_tools: list[Any] = []
     notion_tools: list[Any] = []
@@ -1391,6 +1406,7 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
         submit_thread_feedback,
         submit_review_assessment_feedback,
         *(ADMIN_TOOLS if admin_thread else ()),
+        *((cli_result,) if cli_result_required else ()),
         *((read_only_sql, manage_review_approval_policy) if private_admin_surface else ()),
     ]
     if credential_login is None:
@@ -1616,6 +1632,11 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
                         initial_surface=(
                             _initial_reply_surface(cfg) if reply_tool_offered else WEB_REPLY_SURFACE
                         ),
+                    ),
+                    *(
+                        [RequireCliResultMiddleware(_registered_tool_name(cli_result))]
+                        if cli_result_required
+                        else []
                     ),
                     notify_step_limit_reached,
                     record_run_usage,

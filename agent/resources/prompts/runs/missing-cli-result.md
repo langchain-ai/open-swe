@@ -1,0 +1,1 @@
+Your run is ending without a result. The person who started this thread is waiting in a terminal that prints only what you pass to `$result_tool` and exits with its `exit_code`. Call `$result_tool` now, with the answer you just wrote as `stdout` and 0 if the task succeeded or a nonzero exit code if it did not.

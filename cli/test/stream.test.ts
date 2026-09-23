@@ -1,12 +1,11 @@
 import { describe, expect, test } from "bun:test"
 
 import {
-  EventRenderer,
   lifecycleRunId,
+  parseCliResult,
+  RunCollector,
   SseParser,
-  toolLine,
   type SseFrame,
-  type Writer,
 } from "../src/stream.ts"
 
 function collect(chunks: readonly string[]): SseFrame[] {
@@ -65,24 +64,19 @@ describe("lifecycleRunId", () => {
   })
 })
 
-describe("toolLine", () => {
-  test("renders shell tools as a shell prompt", () => {
-    expect(toolLine("execute", { command: "pytest -q\nmore" })).toBe(
-      "$ pytest -q more"
-    )
-    expect(toolLine("background_execute", { command: "npm run dev" })).toBe(
-      "$ npm run dev"
-    )
+describe("parseCliResult", () => {
+  test("reads stdout and the exit code", () => {
+    expect(parseCliResult({ stdout: "ok\n", exit_code: 3 })).toEqual({
+      stdout: "ok\n",
+      exitCode: 3,
+    })
   })
 
-  test("renders other tools with their primary argument", () => {
-    expect(toolLine("read_file", { path: "agent/server.py" })).toBe(
-      "read_file agent/server.py"
-    )
-    expect(toolLine("download_files", { paths: ["a.txt", "b.txt"] })).toBe(
-      "download_files a.txt b.txt"
-    )
-    expect(toolLine("save_plan", {})).toBe("save_plan")
+  test("rejects an exit code a process cannot return", () => {
+    expect(parseCliResult({ stdout: "", exit_code: 256 })).toBeNull()
+    expect(parseCliResult({ stdout: "", exit_code: -1 })).toBeNull()
+    expect(parseCliResult({ stdout: "", exit_code: 1.5 })).toBeNull()
+    expect(parseCliResult({ exit_code: 0 })).toBeNull()
   })
 })
 
@@ -90,107 +84,60 @@ function frame(payload: unknown): SseFrame {
   return { event: null, id: null, data: JSON.stringify(payload) }
 }
 
-function recorder(): { writer: Writer; text: () => string } {
-  const parts: string[] = []
-  return {
-    writer: {
-      write(text: string) {
-        parts.push(text)
-      },
-      colors: false,
-    },
-    text: () => parts.join(""),
-  }
+function lifecycle(runId: string, event: string): SseFrame {
+  return frame({
+    method: "lifecycle",
+    event_id: `synth:${runId}:lc|1`,
+    params: { namespace: [], data: { event } },
+  })
 }
 
-describe("EventRenderer", () => {
-  test("skips replayed events until its own run starts", () => {
-    const { writer, text } = recorder()
-    const renderer = new EventRenderer("run-2", writer)
-    renderer.handle(
-      frame({
-        method: "messages",
-        params: {
-          namespace: [],
-          data: {
-            event: "content-block-delta",
-            delta: { type: "text-delta", text: "old" },
-          },
-        },
-      })
-    )
-    expect(text()).toBe("")
-    renderer.handle(
-      frame({
-        method: "lifecycle",
-        event_id: "synth:run-2:lc|1",
-        params: { namespace: [], data: { event: "running" } },
-      })
-    )
-    renderer.handle(
-      frame({
-        method: "messages",
-        params: {
-          namespace: [],
-          data: {
-            event: "content-block-delta",
-            delta: { type: "text-delta", text: "new" },
-          },
-        },
-      })
-    )
-    expect(text()).toBe("new")
+function resultCall(
+  input: Record<string, unknown>,
+  namespace: string[] = []
+): SseFrame {
+  return frame({
+    method: "tools",
+    params: {
+      namespace,
+      data: { event: "tool-started", tool_name: "cli_result", input },
+    },
+  })
+}
+
+describe("RunCollector", () => {
+  test("ignores results replayed from before its own run", () => {
+    const collector = new RunCollector("run-2")
+    collector.handle(resultCall({ stdout: "old", exit_code: 0 }))
+    collector.handle(lifecycle("run-2", "running"))
+    expect(collector.handle(lifecycle("run-2", "completed"))).toEqual({
+      status: "completed",
+      error: null,
+      result: null,
+    })
   })
 
-  test("renders tool lines and returns the terminal outcome", () => {
-    const { writer, text } = recorder()
-    const renderer = new EventRenderer(null, writer)
-    renderer.handle(
-      frame({
-        method: "tools",
-        params: {
-          namespace: [],
-          data: {
-            event: "tool-started",
-            tool_name: "execute",
-            input: { command: "ls" },
-          },
-        },
-      })
-    )
-    renderer.handle(
-      frame({
-        method: "tools",
-        params: {
-          namespace: ["sub"],
-          data: {
-            event: "tool-started",
-            tool_name: "execute",
-            input: { command: "pwd" },
-          },
-        },
-      })
-    )
-    const outcome = renderer.handle(
-      frame({
-        method: "lifecycle",
-        event_id: "synth:run-9:lc|1",
-        params: { namespace: [], data: { event: "completed" } },
-      })
-    )
-    expect(outcome).toEqual({ status: "completed", error: null })
-    expect(text()).toBe("$ ls\n  $ pwd\nrun finished\n")
+  test("keeps the top-level agent's last result, not a subagent's", () => {
+    const collector = new RunCollector("run-1")
+    collector.handle(lifecycle("run-1", "running"))
+    collector.handle(resultCall({ stdout: "first", exit_code: 1 }))
+    collector.handle(resultCall({ stdout: "second", exit_code: 0 }))
+    collector.handle(resultCall({ stdout: "sub", exit_code: 9 }, ["task:1"]))
+    expect(collector.handle(lifecycle("run-1", "completed"))).toEqual({
+      status: "completed",
+      error: null,
+      result: { stdout: "second", exitCode: 0 },
+    })
   })
 
   test("surfaces a proxy error frame", () => {
-    const { writer, text } = recorder()
-    const renderer = new EventRenderer(null, writer)
-    const outcome = renderer.handle({
-      event: "error",
-      id: null,
-      data: JSON.stringify({ status: 500, detail: "boom" }),
-    })
-    expect(outcome).toEqual({ status: "failed", error: "boom" })
-    expect(text()).toBe("stream error: boom\n")
+    const collector = new RunCollector(null)
+    expect(
+      collector.handle({
+        event: "error",
+        id: null,
+        data: JSON.stringify({ status: 500, detail: "boom" }),
+      })
+    ).toEqual({ status: "failed", error: "boom", result: null })
   })
 })

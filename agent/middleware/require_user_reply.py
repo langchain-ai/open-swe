@@ -42,7 +42,7 @@ def current_reply_surface(state: Mapping[str, Any]) -> ReplySurface:
     )
 
 
-def _turn_tail(messages: Sequence[BaseMessage]) -> list[BaseMessage]:
+def turn_tail(messages: Sequence[BaseMessage]) -> list[BaseMessage]:
     """Messages produced since the last thing a person said."""
     for index in range(len(messages) - 1, -1, -1):
         if isinstance(messages[index], HumanMessage):
@@ -50,7 +50,7 @@ def _turn_tail(messages: Sequence[BaseMessage]) -> list[BaseMessage]:
     return list(messages)
 
 
-def _reported_failure(message: ToolMessage) -> bool:
+def reported_failure(message: ToolMessage) -> bool:
     if message.status == "error":
         return True
     try:
@@ -60,7 +60,7 @@ def _reported_failure(message: ToolMessage) -> bool:
     return isinstance(payload, dict) and payload.get("success") is False
 
 
-def _nudged_content(message: BaseMessage | None, instruction: str) -> str | list[Any]:
+def nudged_content(message: BaseMessage | None, instruction: str) -> str | list[Any]:
     if message is None:
         return instruction
     content = message.content
@@ -119,7 +119,7 @@ class RequireUserReplyMiddleware(OpenSWEMiddleware):
         )
 
     def _satisfied(self, messages: Sequence[BaseMessage]) -> bool:
-        tail = _turn_tail(messages)
+        tail = turn_tail(messages)
         call_ids = {
             call.get("id")
             for message in tail
@@ -132,7 +132,7 @@ class RequireUserReplyMiddleware(OpenSWEMiddleware):
         return any(
             isinstance(message, ToolMessage)
             and message.tool_call_id in call_ids
-            and not _reported_failure(message)
+            and not reported_failure(message)
             for message in tail
         )
 
@@ -160,7 +160,7 @@ class RequireUserReplyMiddleware(OpenSWEMiddleware):
             "runs/missing-user-reply.md",
             {"reply_tool": self._tool_name, "no_reply_tool": self._no_reply_tool_name},
         )
-        content = _nudged_content(request.system_message, instruction)
+        content = nudged_content(request.system_message, instruction)
         return await handler(request.override(system_message=SystemMessage(content=content)))
 
     @hook_config(can_jump_to=["model"])
