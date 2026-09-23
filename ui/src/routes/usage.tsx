@@ -964,7 +964,7 @@ function PRMergeRateTable({
             </tr>
           </thead>
           <tbody className="divide-y divide-border">
-            {rows.map((cohort) => {
+            {rows.map((cohort, index) => {
               const key = `${cohort.model_id}-${cohort.model_attribution_quality}`
               const hasMultipleEfforts = cohort.efforts.length > 1
               const isExpanded = hasMultipleEfforts && expanded.has(key)
@@ -973,8 +973,8 @@ function PRMergeRateTable({
                 : "Unavailable"
               return (
                 <Fragment key={key}>
-                  <tr>
-                    <td className="sticky left-0 z-10 bg-card px-4 py-3">
+                  <tr className={index % 2 === 0 ? "bg-muted/30" : undefined}>
+                    <td className="sticky left-0 z-10 bg-inherit px-4 py-3">
                       <div className="flex items-center gap-2">
                         {hasMultipleEfforts ? (
                           <button
@@ -1301,9 +1301,10 @@ function UsageTable({
             {rows.map((row) => (
               <tr
                 key={`${row.rank}-${row.user.github_login ?? row.user.email ?? row.user.name}`}
+                className="odd:bg-muted/30"
               >
                 <td className="px-4 py-3 text-muted-foreground">{row.rank}</td>
-                <td className="sticky left-0 z-10 bg-card px-2 py-3">
+                <td className="sticky left-0 z-10 bg-inherit px-2 py-3">
                   <UserCell
                     row={row}
                     isCurrentUser={row.rank === currentUserRank}
