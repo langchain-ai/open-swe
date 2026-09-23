@@ -113,7 +113,10 @@ export function FilesPanel({
   const showExplorer = explorerOpen || relativePath === null
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col overflow-hidden bg-background">
+    <div
+      className="flex min-h-0 flex-1 flex-col overflow-hidden bg-background"
+      style={{ "--panel-diff-bg": "var(--background)" } as React.CSSProperties}
+    >
       {relativePath ? (
         <div className="flex h-9 shrink-0 items-center gap-1 border-b border-border px-3">
           <span

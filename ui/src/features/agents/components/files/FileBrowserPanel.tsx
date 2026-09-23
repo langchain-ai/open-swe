@@ -231,7 +231,13 @@ export function FileBrowserPanel({
         model={model}
         aria-label="Workspace files"
         className="min-h-0 flex-1 overflow-hidden"
-        style={{ height: "100%", ...treeThemeStyle() }}
+        style={
+          {
+            height: "100%",
+            ...treeThemeStyle(),
+            "--trees-theme-sidebar-bg": "var(--background)",
+          } as React.CSSProperties
+        }
       />
     </div>
   )
