@@ -246,7 +246,9 @@ declare global {
         localSessionId: string
         relativePath: string
       }) => Promise<WorkspacePath>
-      listWorkspaceFiles: (localSessionId: string) => Promise<WorkspaceFileIndex>
+      listWorkspaceFiles: (
+        localSessionId: string
+      ) => Promise<WorkspaceFileIndex>
       terminal: DesktopTerminalBridge
     }
   }
