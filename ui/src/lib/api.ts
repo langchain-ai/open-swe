@@ -851,7 +851,7 @@ export type PullRequestActionName = "merge" | "close" | "mark-ready"
 
 export type PullRequestActionRequest =
   | { action: "merge"; sha: string | null; merge_method: MergeMethod }
-  | { action: "close" }
+  | { action: "close"; reason?: string }
   | { action: "mark-ready" }
 
 export interface PullRequestActionResult {
@@ -1481,8 +1481,14 @@ export const api = {
       sha: pr.headSha,
       merge_method: method,
     }),
-  closePullRequest: (pr: OpenPullRequest): Promise<PullRequestActionResult> =>
-    pullRequestAction(pr, { action: "close" }),
+  closePullRequest: (
+    pr: OpenPullRequest,
+    reason?: string
+  ): Promise<PullRequestActionResult> =>
+    pullRequestAction(
+      pr,
+      reason ? { action: "close", reason } : { action: "close" }
+    ),
   markPullRequestReady: (
     pr: OpenPullRequest
   ): Promise<PullRequestActionResult> =>

@@ -136,6 +136,7 @@ class MergeAction(_PullRequestActionBase):
 
 class CloseAction(_PullRequestActionBase):
     action: Literal["close"]
+    reason: str = Field(default="", max_length=65_536)
 
     transport_failure: ClassVar[str] = (
         "Could not confirm close. Refresh to check the PR before retrying."
@@ -146,6 +147,16 @@ class CloseAction(_PullRequestActionBase):
     unconfirmed: ClassVar[str] = "GitHub did not confirm the close."
 
     async def perform(self, client: httpx2.AsyncClient, owner: str, repo: str, number: int) -> None:
+        reason = self.reason.strip()
+        if reason:
+            response, payload = await self._request(
+                client,
+                "POST",
+                f"{GITHUB_API_BASE}/repos/{owner}/{repo}/issues/{number}/comments",
+                {"body": reason},
+            )
+            if not response.is_success:
+                raise self._refusal(response, payload)
         await self._confirm(
             client,
             "PATCH",

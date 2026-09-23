@@ -71,6 +71,34 @@ async def test_close_requires_github_confirmation(github, status, state):
     assert request.await_args.kwargs == {"json": {"state": "closed"}, "max_retries": 0}
 
 
+async def test_a_close_reason_is_posted_as_a_comment_before_closing(github):
+    request = github(
+        AsyncMock(side_effect=[response({"id": 1}, 201), response({"state": "closed"})])
+    )
+    action = actions.CloseAction(action="close", reason="  Superseded by #8  ")
+
+    await actions.act_on_pull_request("acme", "app", 7, action, "user-token")
+
+    calls = [(call.args[1:], call.kwargs["json"]) for call in request.await_args_list]
+    assert calls == [
+        (
+            ("POST", "https://api.github.com/repos/acme/app/issues/7/comments"),
+            {"body": "Superseded by #8"},
+        ),
+        (("PATCH", "https://api.github.com/repos/acme/app/pulls/7"), {"state": "closed"}),
+    ]
+
+
+async def test_a_refused_reason_comment_leaves_the_pull_request_open(github):
+    request = github(AsyncMock(return_value=response({"message": "Locked"}, 403)))
+    action = actions.CloseAction(action="close", reason="Stale")
+
+    with pytest.raises(HTTPException, match="Locked"):
+        await actions.act_on_pull_request("acme", "app", 7, action, "user-token")
+
+    assert request.await_count == 1
+
+
 async def test_a_network_failure_is_a_bad_gateway(github):
     github(AsyncMock(side_effect=httpx2.ConnectError("boom")))
     with pytest.raises(HTTPException, match="Could not confirm close") as error:

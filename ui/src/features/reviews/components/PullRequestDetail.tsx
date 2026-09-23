@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { Link } from "@tanstack/react-router"
 import { XIcon } from "@phosphor-icons/react"
 import { useCallback, useState, type ReactNode } from "react"
+import { IoLogoGithub } from "react-icons/io5"
 import { toast } from "sonner"
 
 import type {
@@ -15,7 +15,8 @@ import { Markdown } from "@/features/agents/components/chat/Markdown"
 import { GuidancePointList } from "./AuthorGuidanceCard"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
-import { Textarea } from "@/components/ui/textarea"
+import { navLink } from "../PullRequestLinks"
+import { TextPopover } from "./TextPopover"
 import { api } from "@/lib/api"
 import { cn } from "@/lib/utils"
 import {
@@ -245,16 +246,13 @@ function useResolveThreads(target: PullRequestRef) {
 function SendToAgent({
   target,
   commentUrl,
-  onDone,
 }: {
   target: PullRequestRef
   commentUrl: string
-  onDone: () => void
 }) {
   const queryClient = useQueryClient()
-  const [instructions, setInstructions] = useState("")
   const send = useMutation({
-    mutationFn: () =>
+    mutationFn: (instructions: string) =>
       api.addressPullRequestComment(
         target.repo,
         target.number,
@@ -268,44 +266,28 @@ function SendToAgent({
           : `Sent comment to agent for ${target.repo}#${target.number}`
       )
       void queryClient.invalidateQueries({ queryKey: ["pr-thread-status"] })
-      onDone()
     },
     onError: (error) =>
       toast.error("Could not send comment to agent", {
         description: error.message,
       }),
   })
-  const submit = () => {
-    if (!send.isPending) send.mutate()
-  }
   return (
-    <div className="mt-2 max-w-[72ch]">
-      <Textarea
-        value={instructions}
-        onChange={(event) => setInstructions(event.target.value)}
-        onKeyDown={(event) => {
-          if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
-            event.preventDefault()
-            submit()
-          } else if (event.key === "Escape") {
-            event.preventDefault()
-            onDone()
-          }
-        }}
-        placeholder="Optional instructions for the agent"
-        rows={2}
-        className="resize-y text-xs"
-        autoFocus
-      />
-      <div className="mt-1.5 flex items-center justify-end gap-2">
-        <Button size="xs" variant="outline" onClick={onDone}>
-          Cancel
+    <TextPopover
+      trigger={
+        <Button size="sm" variant="outline" disabled={send.isPending}>
+          {send.isPending ? "Sending…" : "Send to agent"}
         </Button>
-        <Button size="xs" disabled={send.isPending} onClick={submit}>
-          {send.isPending ? "Sending…" : "Send"}
-        </Button>
-      </div>
-    </div>
+      }
+      title="Send this comment to the agent"
+      description="The agent addresses it on the PR branch and replies on the thread."
+      placeholder="Instructions (optional)"
+      submitLabel="Send"
+      pending={send.isPending}
+      onSubmit={(instructions, done) =>
+        send.mutate(instructions, { onSuccess: done })
+      }
+    />
   )
 }
 
@@ -319,7 +301,6 @@ function Conversation({
   resolve: ReturnType<typeof useResolveThreads>
 }) {
   const [open, setOpen] = useState(false)
-  const [sending, setSending] = useState(false)
   const [clamped, setClamped] = useState(false)
   const resolving =
     resolve.isPending &&
@@ -332,7 +313,7 @@ function Conversation({
 
   return (
     <li className="border-l-2 border-amber-600/40 pl-3">
-      <div className="flex items-baseline gap-2 text-xs text-muted-foreground">
+      <div className="flex items-center gap-2 text-xs text-muted-foreground">
         <span className="font-medium text-foreground">
           {thread.author ?? "Someone"}
         </span>
@@ -340,33 +321,28 @@ function Conversation({
           {thread.path}
           {thread.line !== null && `:${thread.line}`}
         </span>
-        <div className="ml-auto flex shrink-0 items-baseline gap-3">
+        <div className="ml-auto flex shrink-0 items-center gap-2 text-foreground">
           {thread.url && (
-            <button
-              type="button"
-              onClick={() => setSending(!sending)}
-              className="hover:text-foreground hover:underline"
-            >
-              Send to agent
-            </button>
+            <SendToAgent target={target} commentUrl={thread.url} />
           )}
           {thread.thread_id && (
-            <button
-              type="button"
+            <Button
+              size="sm"
+              variant="outline"
               disabled={resolve.isPending}
               onClick={() => resolve.mutate([thread.thread_id!])}
-              className="hover:text-foreground hover:underline disabled:opacity-50"
             >
               {resolving ? "Resolving…" : "Resolve"}
-            </button>
+            </Button>
           )}
           {thread.url && (
             <a
-              className="hover:text-foreground hover:underline"
+              className={navLink}
               href={thread.url}
               target="_blank"
               rel="noreferrer"
             >
+              <IoLogoGithub className="size-3.5" />
               Reply
             </a>
           )}
@@ -392,13 +368,6 @@ function Conversation({
         >
           {open ? "Show less" : "Show more"}
         </button>
-      )}
-      {sending && thread.url && (
-        <SendToAgent
-          target={target}
-          commentUrl={thread.url}
-          onDone={() => setSending(false)}
-        />
       )}
     </li>
   )
@@ -508,19 +477,6 @@ export function PullRequestDetail({
               <span className="font-mono">{data.head_ref}</span>
             </p>
           )}
-          <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
-            <Link
-              className="text-muted-foreground hover:text-foreground hover:underline"
-              to="/agents/reviews/$owner/$repo/$number"
-              params={{
-                owner: owner!,
-                repo: name!,
-                number: String(pr.number),
-              }}
-            >
-              Open full review
-            </Link>
-          </div>
         </div>
         <button
           type="button"
@@ -587,17 +543,17 @@ export function PullRequestDetail({
               }
               action={
                 resolvableIds.length > 1 && (
-                  <button
-                    type="button"
+                  <Button
+                    size="sm"
+                    variant="outline"
                     disabled={resolve.isPending}
                     onClick={() => resolve.mutate(resolvableIds)}
-                    className="text-xs text-muted-foreground hover:text-foreground hover:underline disabled:opacity-50"
                   >
                     {resolve.isPending &&
                     resolve.variables.length === resolvableIds.length
                       ? "Resolving…"
                       : "Resolve all"}
-                  </button>
+                  </Button>
                 )
               }
             >

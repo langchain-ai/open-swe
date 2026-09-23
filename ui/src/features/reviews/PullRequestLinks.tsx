@@ -1,11 +1,15 @@
 import { Link, useNavigate } from "@tanstack/react-router"
 import { useMutation } from "@tanstack/react-query"
+import { IoLogoGithub } from "react-icons/io5"
 
 import { buttonVariants } from "@/components/ui/button"
 import { api } from "@/lib/api"
 import { cn } from "@/lib/utils"
 
-const link = cn(buttonVariants({ variant: "ghost", size: "sm" }), "px-1.5")
+export const navLink = cn(
+  buttonVariants({ variant: "ghost", size: "sm" }),
+  "px-1.5 text-muted-foreground"
+)
 
 export function PullRequestLinks({
   repo,
@@ -29,7 +33,7 @@ export function PullRequestLinks({
       <span className="flex flex-wrap items-center gap-0.5">
         <button
           type="button"
-          className={link}
+          className={navLink}
           disabled={thread.isPending || thread.isSuccess}
           aria-live="polite"
           onClick={() => thread.mutate()}
@@ -37,19 +41,21 @@ export function PullRequestLinks({
           {thread.isPending ? "Opening thread…" : "Agent"}
         </button>
         <Link
-          className={link}
+          className={navLink}
           to="/agents/reviews/$owner/$repo/$number"
           params={{ owner: owner!, repo: name!, number: String(number) }}
         >
           Reviewer
         </Link>
         <a
-          className={link}
+          className={navLink}
           href={`https://github.com/${repo}/pull/${number}`}
           target="_blank"
           rel="noreferrer"
+          aria-label="GitHub"
+          title="Open on GitHub"
         >
-          GitHub
+          <IoLogoGithub className="size-3.5" />
         </a>
       </span>
       {thread.error && (

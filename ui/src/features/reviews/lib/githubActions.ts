@@ -18,7 +18,11 @@ export interface GithubAction {
   /** Past tense, applied to one PR reference or to a counted phrase. */
   succeeded: (subject: string) => string
   failed: (subject: string) => string
-  run: (pr: OpenPullRequest, method?: MergeMethod) => Promise<void>
+  run: (
+    pr: OpenPullRequest,
+    method?: MergeMethod,
+    reason?: string
+  ) => Promise<void>
 }
 
 export const githubActions: Record<PullRequestActionName, GithubAction> = {
@@ -45,8 +49,8 @@ export const githubActions: Record<PullRequestActionName, GithubAction> = {
     },
     succeeded: (subject) => `Closed ${subject}`,
     failed: (subject) => `Could not close ${subject}`,
-    run: async (pr) => {
-      await api.closePullRequest(pr)
+    run: async (pr, _method, reason) => {
+      await api.closePullRequest(pr, reason)
     },
   },
   "mark-ready": {
