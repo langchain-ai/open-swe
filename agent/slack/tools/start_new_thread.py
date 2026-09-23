@@ -240,6 +240,8 @@ async def slack_start_new_thread(
     if owner_type == "system":
         if visibility != "public":
             return {"success": False, "error": "System threads cannot be private"}
+        if owner_login and not cfg.background_task_completion:
+            owner_type = "user"
     else:
         if cfg.background_task_completion or not owner_login:
             return {

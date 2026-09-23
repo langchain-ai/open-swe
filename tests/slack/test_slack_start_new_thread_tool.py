@@ -254,6 +254,8 @@ async def test_slack_start_new_thread_success(monkeypatch: pytest.MonkeyPatch) -
         ("private", "user", "alice", False, True),
         ("private", "user", "bob", False, False),
         ("public", "system", "bob", False, True),
+        ("public", "system", "", False, True),
+        ("public", "system", "bob", True, True),
         ("public", "user", "alice", True, False),
         ("private", "user", "alice", True, False),
         ("public", "user", "", False, False),
@@ -322,9 +324,11 @@ async def test_breakout_preserves_requester_and_credential_scope(
     get_thread.return_value = {"metadata": child_metadata}
     monkeypatch.setattr("langgraph_sdk.get_client", lambda: client)
     monkeypatch.setattr("agent.run_config.get_config", lambda: {"configurable": child_config})
-    assert await pr_author_login() == (None if owner_type == "system" else actor)
+    user_owned = owner_type == "user" or bool(actor and not background)
+    assert child_metadata["owner_type"] == ("user" if user_owned else "system")
+    assert await pr_author_login() == (actor if user_owned else None)
     assert await private_credential_login() == (actor if visibility == "private" else None)
-    if owner_type == "user":
+    if user_owned:
         assert child_metadata["owner_login"] == actor
         assert await pr_author_login(actor) == actor
         if visibility == "public":
