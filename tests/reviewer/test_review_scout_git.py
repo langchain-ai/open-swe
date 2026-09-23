@@ -133,3 +133,31 @@ async def test_owned_lines_are_exactly_the_pr_diffs_changed_lines(tmp_path: Path
     )
     assert owned == [4, 5]
     assert all(not file.deleted for step in steps for file in step.files)
+
+
+async def test_paths_with_spaces_keep_their_lines(tmp_path: Path) -> None:
+    repo = tmp_path / "spaces"
+    repo.mkdir()
+    _git(repo, "init", "-q", "-b", "main")
+    _git(repo, "config", "user.name", "t")
+    _git(repo, "config", "user.email", "t@example.com")
+    target = repo / "foo bar.txt"
+    target.write_text("a\nb\n")
+    _git(repo, "add", ".")
+    _git(repo, "commit", "-qm", "base")
+    base = _git(repo, "rev-parse", "HEAD")
+    target.write_text("a\nB\n")
+    _git(repo, "commit", "-qam", "head")
+    head = _git(repo, "rev-parse", "HEAD")
+    shell = _LocalShell()
+    merge_base = await setup_working_tree(shell, str(repo), base_sha=base, head_sha=head)
+    _git(repo, "add", "--", "foo bar.txt")
+    assert await commit_staged(shell, str(repo), title="Edit", summary="", other=False)
+
+    steps = await finalize(shell, str(repo), merge_base=merge_base, head_sha=head)
+
+    assert steps == [
+        StepDraft(
+            title="Edit", files=[FileLines(path="foo bar.txt", added=[(2, 2)], deleted=[(2, 2)])]
+        )
+    ]

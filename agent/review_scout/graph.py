@@ -7,6 +7,7 @@ PR; the reviewer starts it and waits for both before reviewing.
 """
 
 import logging
+import re
 from typing import Any, NotRequired, cast
 
 from deepagents import create_deep_agent
@@ -60,6 +61,7 @@ from agent.utils.model import DEFAULT_LLM_REASONING, make_model, provider_model_
 logger = logging.getLogger(__name__)
 
 SCOUT_MODEL_CALL_LIMIT = 150
+_CLOSING_TITLE_TAG_RE = re.compile(r"</\s*pr_title\s*>", re.IGNORECASE)
 MAX_STEPS = 8
 
 
@@ -131,7 +133,7 @@ class PrepareReviewScoutRunMiddleware(BasePrepareRunMiddleware):
             "review-scout/main.md",
             pr_number=cfg.pr_number,
             repo_full_name=cfg.repo.full_name,
-            pr_title=cfg.pr_title or "",
+            pr_title=_CLOSING_TITLE_TAG_RE.sub("</pr_title_>", cfg.pr_title or ""),
             repo_dir=repo_dir,
             merge_base=merge_base,
             patch_dir=f"{work_dir}/.scout-patches",
@@ -169,9 +171,6 @@ class StoreWalkthroughMiddleware(OpenSWEMiddleware[ReviewScoutState]):
             "pr_number": cfg.pr_number,
             "scout_head_sha": cfg.head_sha,
         }
-        # Settles which head the guidance card describes, including when this
-        # run recorded nothing.
-        await GuidanceReview.complete(cfg.repo.owner, cfg.repo.name, cfg.pr_number, cfg.head_sha)
         backend = get_cached_sandbox_backend(self._thread_id)
         repo_dir = await scout_repo_dir(backend, cfg)
         if repo_dir is None:
@@ -200,6 +199,9 @@ class StoreWalkthroughMiddleware(OpenSWEMiddleware[ReviewScoutState]):
             steps=steps,
         )
         logger.info("Stored review walkthrough", extra={**extra, "scout_steps": len(steps)})
+        # Only a scout that got as far as its walkthrough is trusted to have
+        # judged the steering too, including when it recorded nothing.
+        await GuidanceReview.complete(cfg.repo.owner, cfg.repo.name, cfg.pr_number, cfg.head_sha)
 
 
 def _make_model_or_defer(model_id: str, *, use_gateway: bool, **kwargs: Any) -> BaseChatModel:

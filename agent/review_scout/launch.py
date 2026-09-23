@@ -18,12 +18,15 @@ ASSISTANT_ID = "review-scout"
 # The reviewer waits this long for the walkthrough before reviewing without it;
 # the scout keeps running and still stores its result for the review page.
 SCOUT_WAIT_SECONDS = 600
+_POLL_SECONDS = 5
+_ACTIVE_STATUSES = frozenset({"pending", "running"})
 _SENDER_ID = "system:review-scout"
 _HEAD_METADATA_KEY = "scout_head_sha"
 
 
 class _ScoutRun(BaseModel):
     run_id: str
+    status: str = ""
     metadata: dict[str, object] = {}
 
 
@@ -114,13 +117,14 @@ class ReviewScoutTarget(BaseModel):
         if existing is not None:
             return existing
         run_id = await self.start()
-        try:
-            await asyncio.wait_for(
-                dispatch_client().runs.join(self.thread_id, run_id), SCOUT_WAIT_SECONDS
-            )
-        except TimeoutError:
-            logger.warning(
-                "Review scout did not finish in time for the reviewer", extra=self.log_extra
-            )
-            return None
-        return await self.walkthrough()
+        # Polled rather than joined: one join request idles for the whole run
+        # and would hit the client's 300s read timeout first.
+        client = dispatch_client()
+        deadline = asyncio.get_running_loop().time() + SCOUT_WAIT_SECONDS
+        while asyncio.get_running_loop().time() < deadline:
+            run = _ScoutRun.model_validate(await client.runs.get(self.thread_id, run_id))
+            if run.status not in _ACTIVE_STATUSES:
+                return await self.walkthrough()
+            await asyncio.sleep(_POLL_SECONDS)
+        logger.warning("Review scout did not finish in time for the reviewer", extra=self.log_extra)
+        return None

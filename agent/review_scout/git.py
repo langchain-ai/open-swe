@@ -128,7 +128,7 @@ async def finalize(
         return []
     files = await _changed_files(backend, repo_dir, mb)
     claimed_added, claimed_deleted = await _blame(backend, repo_dir, mb, commits, files)
-    pr_added, pr_deleted = await _pr_changed_lines(backend, repo_dir, mb)
+    pr_added, pr_deleted = await _pr_changed_lines(backend, repo_dir, mb, files)
     return _steps(
         commits,
         files,
@@ -258,35 +258,39 @@ async def _blame(
 
 
 async def _pr_changed_lines(
-    backend: SandboxBackendProtocol, repo_dir: str, mb: str
+    backend: SandboxBackendProtocol, repo_dir: str, mb: str, files: list[_ChangedFile]
 ) -> tuple[dict[str, set[int]], dict[str, set[int]]]:
-    """The PR diff's own changed lines: added head lines by new path, deleted merge-base lines by old path."""
-    raw = await _run(
-        backend,
-        repo_dir,
-        f"git -c core.quotePath=false diff -U0 --no-color --no-ext-diff -M {mb} HEAD",
-    )
+    """The PR diff's own changed lines: added head lines by new path, deleted merge-base lines by old path.
+
+    Diffed one file at a time with the paths from ``--name-status -z``, so a
+    path git would quote or tab-terminate in a patch header is never parsed.
+    """
+    lines: list[str] = []
+    for index, file in enumerate(files):
+        paths = " ".join(shlex.quote(p) for p in {file.old_path, file.new_path} if p)
+        lines.append(f'printf "{_RECORD}{index}\\n"')
+        lines.append(f"git diff -U0 --no-color --no-ext-diff -M {mb} HEAD -- {paths}")
+    raw = await _run(backend, repo_dir, "\n".join(lines)) if lines else ""
     added: dict[str, set[int]] = {}
     deleted: dict[str, set[int]] = {}
-    old_path: str | None = None
-    new_path: str | None = None
-    in_header = False
-    for line in raw.splitlines():
-        if line.startswith("diff --git "):
-            in_header, old_path, new_path = True, None, None
-        elif in_header and line.startswith("--- "):
-            old_path = line[6:] if line.startswith("--- a/") else None
-        elif in_header and line.startswith("+++ "):
-            new_path = line[6:] if line.startswith("+++ b/") else None
-        elif match := _HUNK_RE.match(line):
-            in_header = False
+    for record in raw.split(_RECORD)[1:]:
+        header, _, body = record.partition("\n")
+        file = files[int(header)]
+        for line in body.splitlines():
+            match = _HUNK_RE.match(line)
+            if match is None:
+                continue
             old_start, old_count, new_start, new_count = (
                 int(group) if group is not None else 1 for group in match.groups()
             )
-            if old_path is not None:
-                deleted.setdefault(old_path, set()).update(range(old_start, old_start + old_count))
-            if new_path is not None:
-                added.setdefault(new_path, set()).update(range(new_start, new_start + new_count))
+            if file.old_path is not None:
+                deleted.setdefault(file.old_path, set()).update(
+                    range(old_start, old_start + old_count)
+                )
+            if file.new_path is not None:
+                added.setdefault(file.new_path, set()).update(
+                    range(new_start, new_start + new_count)
+                )
     return added, deleted
 
 

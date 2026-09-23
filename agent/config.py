@@ -207,6 +207,10 @@ ENV.var(
     "LANGCHAIN_REVISION_ID", "Revision id LangGraph Platform injects; attached to run metadata."
 )
 ENV.var(
+    "LANGSMITH_LANGGRAPH_GIT_REF_SHA",
+    "Resolved source commit injected by LangSmith for Git-backed deployments.",
+)
+ENV.var(
     "OPEN_SWE_BUILD_INFO_DIR",
     "Directory of the backend's build-identity sidecar; image builds stamp /opt/open-swe-backend.",
 )

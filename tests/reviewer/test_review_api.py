@@ -60,10 +60,10 @@ def test_thread_review_summary():
             "head_sha": "abc",
             "watch": True,
             "latest_run_status": "success",
-            "findings": [{"id": "f_1", "severity": "high", "confidence": "high", "status": "open"}],
         },
     }
-    summary = _thread_review_summary(thread)
+    findings = [{"id": "f_1", "severity": "high", "confidence": "high", "status": "open"}]
+    summary = _thread_review_summary(thread, findings)
     assert summary is not None
     assert summary["owner"] == "acme"
     assert summary["number"] == 7
@@ -73,7 +73,7 @@ def test_thread_review_summary():
 
 
 def test_thread_review_summary_requires_pr_meta():
-    assert _thread_review_summary({"metadata": {"kind": "reviewer"}}) is None
+    assert _thread_review_summary({"metadata": {"kind": "reviewer"}}, []) is None
 
 
 def test_is_allowed_image_url_accepts_github_hosts():

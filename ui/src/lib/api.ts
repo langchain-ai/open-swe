@@ -847,12 +847,17 @@ export interface OpenPullRequest {
 
 export type MergeMethod = "squash" | "merge" | "rebase"
 
-export type PullRequestActionName = "merge" | "close" | "mark-ready"
+export type PullRequestActionName =
+  | "merge"
+  | "close"
+  | "mark-ready"
+  | "update-branch"
 
 export type PullRequestActionRequest =
   | { action: "merge"; sha: string | null; merge_method: MergeMethod }
-  | { action: "close" }
+  | { action: "close"; reason?: string }
   | { action: "mark-ready" }
+  | { action: "update-branch"; sha: string | null }
 
 export interface PullRequestActionResult {
   action: PullRequestActionName
@@ -863,6 +868,12 @@ export type PullRequestThreadIntent =
   | { intent: "open"; title: string }
   | { intent: "fix"; context: OpenPullRequest | null }
   | { intent: "address-comments" }
+  | { intent: "address-comment"; comment_url: string; instructions: string }
+
+export interface ResolveReviewThreadsResult {
+  resolved: Array<string>
+  failed: Array<string>
+}
 
 export interface PullRequestThreadResult {
   thread_id: string
@@ -1004,6 +1015,7 @@ export interface PreviewFile {
 }
 
 export interface PreviewThread {
+  thread_id: string | null
   author: string | null
   body: string
   path: string
@@ -1439,6 +1451,26 @@ export const api = {
     pullRequestThread(pr.repo, pr.number, { intent: "fix", context: pr }),
   addressPullRequestComments: (pr: OpenPullRequest) =>
     pullRequestThread(pr.repo, pr.number, { intent: "address-comments" }),
+  addressPullRequestComment: (
+    repo: string,
+    number: number,
+    commentUrl: string,
+    instructions: string
+  ) =>
+    pullRequestThread(repo, number, {
+      intent: "address-comment",
+      comment_url: commentUrl,
+      instructions,
+    }),
+  resolveReviewThreads: (
+    repo: string,
+    number: number,
+    threadIds: Array<string>
+  ) =>
+    request<ResolveReviewThreadsResult>(
+      `/repos/${repo.split("/").map(encodeURIComponent).join("/")}/pulls/${number}/review-threads/resolve`,
+      { method: "POST", body: JSON.stringify({ thread_ids: threadIds }) }
+    ),
   pullRequestThreadStatus: (repo: string, number: number) =>
     request<{ running: boolean }>(
       `/repos/${repo.split("/").map(encodeURIComponent).join("/")}/pulls/${number}/thread`
@@ -1454,8 +1486,18 @@ export const api = {
       sha: pr.headSha,
       merge_method: method,
     }),
-  closePullRequest: (pr: OpenPullRequest): Promise<PullRequestActionResult> =>
-    pullRequestAction(pr, { action: "close" }),
+  closePullRequest: (
+    pr: OpenPullRequest,
+    reason?: string
+  ): Promise<PullRequestActionResult> =>
+    pullRequestAction(
+      pr,
+      reason ? { action: "close", reason } : { action: "close" }
+    ),
+  updatePullRequestBranch: (
+    pr: OpenPullRequest
+  ): Promise<PullRequestActionResult> =>
+    pullRequestAction(pr, { action: "update-branch", sha: pr.headSha }),
   markPullRequestReady: (
     pr: OpenPullRequest
   ): Promise<PullRequestActionResult> =>

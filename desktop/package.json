@@ -89,6 +89,9 @@
         "zip"
       ]
     },
+    "dmg": {
+      "size": "2g"
+    },
     "win": {
       "target": [
         "nsis"
