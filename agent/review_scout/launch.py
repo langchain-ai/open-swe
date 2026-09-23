@@ -30,12 +30,13 @@ class _ScoutRun(BaseModel):
     metadata: dict[str, object] = {}
 
 
-class _ScoutTask(BaseModel):
-    error: str | None = None
+class _ScoutRunError(BaseModel):
+    error: str = ""
+    message: str = ""
 
 
-class _ScoutState(BaseModel):
-    tasks: list[_ScoutTask] = []
+class _ScoutThread(BaseModel):
+    error: _ScoutRunError | None = None
 
 
 class ReviewScoutTarget(BaseModel):
@@ -90,9 +91,10 @@ class ReviewScoutTarget(BaseModel):
         run = _ScoutRun.model_validate(runs[0])
         if run.status != "error" or run.metadata.get(_HEAD_METADATA_KEY) != self.head_sha:
             return None
-        state = _ScoutState.model_validate(await client.threads.get_state(self.thread_id))
-        errors = [task.error for task in state.tasks if task.error]
-        return "\n".join(errors) or "The review scout run ended with an error."
+        failure = _ScoutThread.model_validate(await client.threads.get(self.thread_id)).error
+        if failure is None or not (failure.error or failure.message):
+            return "The review scout run ended with an error."
+        return ": ".join(part for part in (failure.error, failure.message) if part)
 
     async def start(self) -> str:
         """The scout run for this head, started when none is already running.
