@@ -1,4 +1,4 @@
-import { useState } from "react"
+import { useState, type ReactNode } from "react"
 import { CircleNotchIcon } from "@phosphor-icons/react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 
@@ -51,11 +51,13 @@ function GeneralSection({
   workspaces,
   channelLabel,
   onSaved,
+  rebuildStatus,
 }: {
   record: WorkspaceRecord
   workspaces: Array<WorkspaceOption>
   channelLabel: (id: string) => string
   onSaved: (saved: WorkspaceRecord) => void
+  rebuildStatus: ReactNode
 }) {
   const [draft, setDraft] = useState<WorkspaceDraft>(() =>
     draftFromWorkspace(record)
@@ -98,6 +100,7 @@ function GeneralSection({
         channelLabel={channelLabel}
       />
       <div className="flex flex-wrap items-center gap-2 border-t border-border px-4 py-3.5">
+        {rebuildStatus}
         {error && (
           <p role="alert" className="text-xs text-destructive">
             {error}
@@ -224,32 +227,36 @@ export function WorkspaceSettingsPanel({
         workspaces={options.data?.workspaces ?? []}
         channelLabel={channelLabel}
         onSaved={onSaved}
+        rebuildStatus={
+          awaitingRepositoryRebuild(record.data) ||
+          record.data.refresh_status === "refreshing" ? (
+            <p
+              role="status"
+              className="flex min-w-48 flex-1 items-center gap-2 text-xs text-muted-foreground"
+            >
+              <CircleNotchIcon
+                aria-hidden="true"
+                className="size-4 shrink-0 animate-spin motion-reduce:animate-none"
+              />
+              {record.data.refresh_status === "refreshing"
+                ? "Rebuilding sandbox image…"
+                : "Repositories saved. Sandbox image rebuild queued…"}{" "}
+              Existing runs keep their current image.
+            </p>
+          ) : repositoryRebuild?.slug === slug ? (
+            <p
+              role={
+                record.data.refresh_status === "failed" ? "alert" : "status"
+              }
+              className="min-w-48 flex-1 text-xs text-muted-foreground"
+            >
+              {record.data.refresh_status === "failed"
+                ? `Image rebuild failed. ${record.data.refresh_error ?? "The previous image is still in use."}`
+                : "Sandbox image rebuilt with the saved repositories."}
+            </p>
+          ) : null
+        }
       />
-      {awaitingRepositoryRebuild(record.data) ||
-      record.data.refresh_status === "refreshing" ? (
-        <p
-          role="status"
-          className="flex items-center gap-2 text-sm text-muted-foreground"
-        >
-          <CircleNotchIcon
-            aria-hidden="true"
-            className="size-4 animate-spin motion-reduce:animate-none"
-          />
-          {record.data.refresh_status === "refreshing"
-            ? "Rebuilding sandbox image…"
-            : "Repositories saved. Sandbox image rebuild queued…"}{" "}
-          Existing runs keep their current image.
-        </p>
-      ) : repositoryRebuild?.slug === slug ? (
-        <p
-          role={record.data.refresh_status === "failed" ? "alert" : "status"}
-          className="text-sm text-muted-foreground"
-        >
-          {record.data.refresh_status === "failed"
-            ? `Image rebuild failed. ${record.data.refresh_error ?? "The previous image is still in use."}`
-            : "Sandbox image rebuilt with the saved repositories."}
-        </p>
-      ) : null}
       <WorkspaceSandboxSection
         key={`sandbox:${record.data.setup_script ?? ""}:${record.data.update_script ?? ""}`}
         record={record.data}

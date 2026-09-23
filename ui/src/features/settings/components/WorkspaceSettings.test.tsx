@@ -252,7 +252,11 @@ describe("WorkspaceSettingsPanel", () => {
           fireEvent.click(screen.getByRole("button", { name: "Save" }))
           await vi.advanceTimersByTimeAsync(1)
         })
-        expect(screen.getByRole("status").textContent).toContain(
+        const general = screen
+          .getByRole("button", { name: "Save" })
+          .closest("section")
+        if (!general) throw new Error("no General section")
+        expect(within(general).getByRole("status").textContent).toContain(
           "rebuild queued"
         )
 
@@ -275,7 +279,7 @@ describe("WorkspaceSettingsPanel", () => {
         await act(async () => {
           await vi.advanceTimersByTimeAsync(5001)
         })
-        expect(screen.getByRole("status").textContent).toContain(
+        expect(within(general).getByRole("status").textContent).toContain(
           "Rebuilding sandbox image"
         )
 
@@ -289,7 +293,7 @@ describe("WorkspaceSettingsPanel", () => {
           await vi.advanceTimersByTimeAsync(5001)
         })
         expect(
-          screen.getByRole(outcome === "failed" ? "alert" : "status")
+          within(general).getByRole(outcome === "failed" ? "alert" : "status")
             .textContent
         ).toContain(
           outcome === "failed"
