@@ -658,6 +658,7 @@ function ReviewBodyInner({
     [detail.owner, detail.repo, detail.number]
   )
   const [sideTab, setSideTab] = useState<SideTab>("info")
+  const [sidePanelOpen, setSidePanelOpen] = useState(false)
   const [selectedFile, setSelectedFile] = useState<string | null>(null)
   const fileRefs = useRef<Record<string, HTMLDivElement | null>>({})
   // Per path, one instance per rendered slice: a file split across walkthrough
@@ -1026,6 +1027,7 @@ function ReviewBodyInner({
         composer?.addAttachment(attachment)
       }
       setSideTab("chat")
+      setSidePanelOpen(true)
       setUserSelection(null)
     },
     [composer]
@@ -1438,11 +1440,23 @@ function ReviewBodyInner({
           </div>
         </main>
 
+        {!embedded && !sidePanelOpen && (
+          <Button
+            variant="outline"
+            className="fixed right-4 bottom-4 z-30 shadow-md xl:hidden"
+            onClick={() => setSidePanelOpen(true)}
+          >
+            <ChatCircleIcon />
+            Info &amp; chat
+          </Button>
+        )}
         {!embedded && (
           <SidePanel
             detail={detail}
             tab={sideTab}
             onTabChange={setSideTab}
+            open={sidePanelOpen}
+            onClose={() => setSidePanelOpen(false)}
             read={read}
             expandedId={expandedId}
             onMarkAllRead={markAllRead}
@@ -2734,6 +2748,8 @@ function SidePanel({
   detail,
   tab,
   onTabChange,
+  open,
+  onClose,
   read,
   expandedId,
   onMarkAllRead,
@@ -2742,6 +2758,9 @@ function SidePanel({
   detail: ReviewDetail
   tab: SideTab
   onTabChange: (tab: SideTab) => void
+  /** Below the xl breakpoint the panel is a drawer, shown only while open. */
+  open: boolean
+  onClose: () => void
   read: Set<string>
   expandedId: string | null
   onMarkAllRead: () => void
@@ -2787,11 +2806,26 @@ function SidePanel({
     <div
       ref={panelRef}
       style={{ width }}
-      className="relative hidden h-full shrink-0 xl:flex"
+      className={cn(
+        "h-full shrink-0 xl:relative xl:flex xl:max-w-none xl:shadow-none",
+        open
+          ? "fixed inset-y-0 right-0 z-40 flex max-w-[90vw] bg-background shadow-xl"
+          : "relative hidden"
+      )}
     >
       <ReviewPanelResizeHandle width={width} onResize={setWidth} />
       <aside className="flex h-full w-full flex-col overflow-y-auto border-l border-border">
         <div className="flex items-center gap-1 border-b border-border px-3 py-2">
+          <IconButton
+            type="button"
+            variant="ghost"
+            size="icon-sm"
+            aria-label="Close panel"
+            className="order-last ml-auto xl:hidden"
+            onClick={onClose}
+          >
+            <XIcon />
+          </IconButton>
           {(
             [
               ["info", "Info"],
@@ -2819,6 +2853,7 @@ function SidePanel({
             owner={detail.owner}
             repo={detail.repo}
             number={detail.number}
+            reviewed={detail.status === "idle"}
           />
         ) : (
           <div className="divide-y divide-border">

@@ -165,9 +165,10 @@ function AttachmentPill({
   )
 }
 
+const FINDINGS_PROMPT = "Walk me through the review findings"
 const SUGGESTED_PROMPTS = [
   "Summarize the changes in this PR",
-  "Walk me through the review findings",
+  FINDINGS_PROMPT,
   "What are the riskiest parts of this change?",
 ]
 
@@ -198,18 +199,28 @@ function messageText(content: BaseMessage["content"]): string {
 
 // --- View --------------------------------------------------------------------
 
-function EmptyState({ onPick }: { onPick: (prompt: string) => void }) {
+function EmptyState({
+  reviewed,
+  onPick,
+}: {
+  reviewed: boolean
+  onPick: (prompt: string) => void
+}) {
+  const prompts = reviewed
+    ? SUGGESTED_PROMPTS
+    : SUGGESTED_PROMPTS.filter((prompt) => prompt !== FINDINGS_PROMPT)
   return (
     <div className="flex flex-1 flex-col gap-4 p-4">
       <p className="text-[13px] text-foreground">
-        I've reviewed this PR. Ask me about the diff, the findings, or the
-        surrounding code — I have read-only access to the repository.
+        {reviewed
+          ? "I've reviewed this PR. Ask me about the diff, the findings, or the surrounding code — I have read-only access to the repository."
+          : "This PR hasn't been reviewed yet. Ask me about the diff or the surrounding code — I have read-only access to the repository."}
       </p>
       <div className="flex flex-col gap-1.5">
         <span className="text-xs font-medium text-muted-foreground">
           Suggested prompts
         </span>
-        {SUGGESTED_PROMPTS.map((prompt) => (
+        {prompts.map((prompt) => (
           <button
             key={prompt}
             type="button"
@@ -239,7 +250,7 @@ function LoadingState() {
   )
 }
 
-function ChatBody() {
+function ChatBody({ reviewed }: { reviewed: boolean }) {
   const composer = useReviewChatComposer()
   const stream = useStreamContext()
   const [value, setValue] = useState("")
@@ -342,6 +353,7 @@ function ChatBody() {
         <LoadingState />
       ) : showEmpty ? (
         <EmptyState
+          reviewed={reviewed}
           onPick={(prompt) => {
             send(prompt, attachments)
             setAttachments([])
@@ -463,12 +475,14 @@ function ChatPanel({
   number,
   assistantId,
   threadId,
+  reviewed,
 }: {
   owner: string
   repo: string
   number: number
   assistantId: string
   threadId: string
+  reviewed: boolean
 }) {
   const client = useMemo(
     () => createDashboardClient(reviewChatApiBase(owner, repo, number)),
@@ -483,7 +497,7 @@ function ChatPanel({
         fetch={dashboardFetch}
         threadId={threadId}
       >
-        <ChatBody />
+        <ChatBody reviewed={reviewed} />
       </StreamProvider>
     </div>
   )
@@ -493,10 +507,13 @@ export function ReviewChat({
   owner,
   repo,
   number,
+  reviewed,
 }: {
   owner: string
   repo: string
   number: number
+  /** A review has finished on this PR, so the chat can talk about its findings. */
+  reviewed: boolean
 }) {
   const meta = useQuery({
     queryKey: ["review-chat", owner, repo, number],
@@ -528,6 +545,7 @@ export function ReviewChat({
       number={number}
       assistantId={meta.data.assistant_id}
       threadId={meta.data.thread_id}
+      reviewed={reviewed}
     />
   )
 }
