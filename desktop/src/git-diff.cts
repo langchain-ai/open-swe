@@ -622,6 +622,7 @@ module.exports = {
   addWorktree,
   git,
   gitStdin,
+  ok,
   captureCheckpoint,
   readBranchDiff,
   checkoutBranch,

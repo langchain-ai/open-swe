@@ -1,4 +1,4 @@
-const { git, gitStdin } = require("./git-diff.cjs");
+const { git, gitStdin, ok } = require("./git-diff.cjs");
 const fs = require("node:fs/promises");
 const path = require("node:path");
 
@@ -77,17 +77,46 @@ async function readWorkspacePath(root: string, relativePath: unknown) {
   return readFile(target, stat.size);
 }
 
-/** Every non-ignored file under `root`, for search. */
+async function gitPaths(root: string, flags: string[]) {
+  const output = await git(root, ["ls-files", "-z", ...flags]);
+  return output.toString().split("\0").filter(Boolean);
+}
+
+async function walkFiles(root: string) {
+  const paths: string[] = [];
+  const directories = [""];
+  for (
+    let index = 0;
+    index < directories.length && paths.length < MAX_INDEX_PATHS;
+    index++
+  ) {
+    const relative = directories[index];
+    const children = await fs.readdir(path.join(root, relative), {
+      withFileTypes: true,
+    });
+    for (const child of children) {
+      if (child.name === ".git") continue;
+      const childPath = relative ? `${relative}/${child.name}` : child.name;
+      if (child.isDirectory()) directories.push(childPath);
+      else if (child.isFile()) paths.push(childPath);
+    }
+  }
+  return paths;
+}
+
+/** Every non-ignored file under `root`, for search; non-Git folders are walked. */
 async function listWorkspaceFiles(root: string) {
-  const output = await git(root, [
-    "ls-files",
-    "-z",
-    "--cached",
-    "--others",
-    "--exclude-standard",
+  if (!(await ok(git(root, ["rev-parse", "--is-inside-work-tree"]))))
+    return { paths: (await walkFiles(root)).slice(0, MAX_INDEX_PATHS) };
+  // `--cached` keeps tracked files deleted from the working tree until the deletion is staged.
+  const [paths, deleted] = await Promise.all([
+    gitPaths(root, ["--cached", "--others", "--exclude-standard"]),
+    gitPaths(root, ["--deleted"]),
   ]);
-  const paths = output.toString().split("\0").filter(Boolean);
-  return { paths: paths.slice(0, MAX_INDEX_PATHS) };
+  const removed = new Set(deleted);
+  return {
+    paths: paths.filter((p) => !removed.has(p)).slice(0, MAX_INDEX_PATHS),
+  };
 }
 
 module.exports = { listWorkspaceFiles, readWorkspacePath };

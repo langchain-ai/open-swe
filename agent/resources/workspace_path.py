@@ -52,15 +52,34 @@ def read_file(target):
     }
 
 
-def file_index(root):
+def git_paths(root, *flags):
     result = subprocess.run(
-        ["git", "-C", root, "ls-files", "-z", "--cached", "--others", "--exclude-standard"],
-        capture_output=True,
+        ["git", "-C", root, "ls-files", "-z", *flags], capture_output=True, check=True
     )
-    if result.returncode != 0:
-        return {"error": result.stderr.decode(errors="replace").strip() or "Not a git repository."}
-    paths = [path for path in result.stdout.decode(errors="replace").split("\0") if path]
-    return {"paths": paths[:MAX_INDEX_PATHS]}
+    return [path for path in result.stdout.decode(errors="replace").split("\0") if path]
+
+
+def walk_files(root):
+    paths = []
+    for directory, dirnames, filenames in os.walk(root):
+        dirnames[:] = [name for name in dirnames if name != ".git"]
+        relative = os.path.relpath(directory, root)
+        paths.extend(os.path.normpath(os.path.join(relative, name)) for name in filenames)
+        if len(paths) >= MAX_INDEX_PATHS:
+            break
+    return paths
+
+
+def file_index(root):
+    inside_repo = subprocess.run(
+        ["git", "-C", root, "rev-parse", "--is-inside-work-tree"], capture_output=True
+    )
+    if inside_repo.returncode != 0:
+        return {"paths": walk_files(root)[:MAX_INDEX_PATHS]}
+    # `--cached` keeps tracked files deleted from the working tree until the deletion is staged.
+    deleted = set(git_paths(root, "--deleted"))
+    paths = git_paths(root, "--cached", "--others", "--exclude-standard")
+    return {"paths": [path for path in paths if path not in deleted][:MAX_INDEX_PATHS]}
 
 
 def main():
@@ -85,3 +104,5 @@ try:
     print(json.dumps(main()))
 except OSError as error:
     print(json.dumps({"error": error.strerror or str(error)}))
+except subprocess.CalledProcessError as error:
+    print(json.dumps({"error": error.stderr.decode(errors="replace").strip() or str(error)}))
