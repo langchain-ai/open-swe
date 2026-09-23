@@ -49,10 +49,12 @@ export function AgentInstructionsPanel() {
     enabled: !!selected,
   })
 
+  const loadedRepo = detail.data?.full_name
+  const loadedInstructions = detail.data?.instructions
   useEffect(() => {
     // oxlint-disable-next-line react/set-state-in-effect
-    if (detail.data) setDraft(detail.data.instructions)
-  }, [detail.data?.instructions, detail.data?.full_name])
+    if (loadedInstructions !== undefined) setDraft(loadedInstructions)
+  }, [loadedInstructions, loadedRepo])
 
   const create = useMutation({
     mutationFn: (full_name: string) => api.createAgentInstructions(full_name),

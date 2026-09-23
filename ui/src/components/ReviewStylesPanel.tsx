@@ -69,14 +69,13 @@ export function ReviewStylesPanel() {
     refetchInterval: (q) => (q.state.data?.status === "running" ? 4000 : false),
   })
 
+  const loadedRepo = detail.data?.full_name
+  const loadedPrompt = detail.data?.custom_prompt
   useEffect(() => {
-    if (detail.data?.custom_prompt != null) {
-      // oxlint-disable-next-line react/set-state-in-effect
-      setDraftPrompt(detail.data.custom_prompt)
-    } else if (detail.data) {
-      setDraftPrompt("")
-    }
-  }, [detail.data?.custom_prompt, detail.data?.full_name])
+    if (loadedRepo === undefined) return
+    // oxlint-disable-next-line react/set-state-in-effect
+    setDraftPrompt(loadedPrompt ?? "")
+  }, [loadedPrompt, loadedRepo])
 
   useEffect(() => {
     // oxlint-disable-next-line react/set-state-in-effect
