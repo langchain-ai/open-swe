@@ -53,6 +53,10 @@ export function useAgentStreamSource(threadId: string): StreamThreadSource {
       const config = Object.keys(configurable).length
         ? { configurable }
         : undefined
+      // `submit()` never rejects on its own; it only routes failures to
+      // `onError`. Capture and rethrow so this promise keeps the rejection
+      // contract `startRun` callers rely on.
+      let submitError: unknown
       await stream.submit(
         message
           ? {
@@ -67,8 +71,12 @@ export function useAgentStreamSource(threadId: string): StreamThreadSource {
         {
           config,
           ...(enqueue ? { multitaskStrategy: "enqueue" as const } : {}),
+          onError: (error: unknown) => {
+            submitError = error
+          },
         }
       )
+      if (submitError) throw submitError
     },
     [stream]
   )

@@ -333,6 +333,9 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
       }
       try {
         await rememberSelection(activeSelection)
+        // `submit()` never rejects on its own; it only routes failures to
+        // `onError`. Capture and rethrow so the catch below still sees it.
+        let submitError: unknown
         await stream.submit(
           {
             messages: [
@@ -349,8 +352,12 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
               },
             },
             ...(enqueue ? { multitaskStrategy: "enqueue" as const } : {}),
+            onError: (cause: unknown) => {
+              submitError = cause
+            },
           }
         )
+        if (submitError) throw submitError
         return true
       } catch (cause) {
         setError(errorMessage(cause))
