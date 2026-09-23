@@ -849,6 +849,11 @@ const PR_OUTCOME_COLUMNS: Array<SortableColumn<PROutcomesSort>> = [
   { key: "prs_opened", label: "PRs opened", align: "right" },
   { key: "merged", label: "Merged", align: "right" },
   {
+    key: "merge_rate",
+    label: "Merge rate",
+    align: "right",
+  },
+  {
     key: "closed_without_merge",
     label: "Closed without merge",
     align: "right",
@@ -860,11 +865,6 @@ const PR_OUTCOME_COLUMNS: Array<SortableColumn<PROutcomesSort>> = [
     align: "right",
     tooltip:
       "Median post-open line edit distance across merged PRs. Higher means the final diff changed more after the PR opened.",
-  },
-  {
-    key: "merge_rate",
-    label: "Merge rate",
-    align: "right",
   },
   { key: "avg_delivery_seconds", label: "Avg time to PR", align: "right" },
   {
@@ -1211,6 +1211,11 @@ function PRMergeRateCells({
         {cohort.cohort_size}
       </td>
       <td className="px-2 py-3 text-right tabular-nums">{cohort.merged}</td>
+      <td className="px-4 py-3 text-right text-sm font-semibold tabular-nums">
+        {cohort.mature_cohort_merge_share == null
+          ? "—"
+          : formatPercent(cohort.mature_cohort_merge_share)}
+      </td>
       <td className="px-2 py-3 text-right tabular-nums">
         {cohort.closed_without_merge}
       </td>
@@ -1235,11 +1240,6 @@ function PRMergeRateCells({
               Small sample
             </div>
           )}
-      </td>
-      <td className="px-4 py-3 text-right text-sm font-semibold tabular-nums">
-        {cohort.mature_cohort_merge_share == null
-          ? "—"
-          : formatPercent(cohort.mature_cohort_merge_share)}
       </td>
     </>
   )

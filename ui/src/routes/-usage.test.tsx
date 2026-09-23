@@ -342,10 +342,10 @@ it.each([
       "example-modelHigh · configured attribution",
       "7",
       "3",
+      "60%",
       "1",
       "3",
       "17.5%Small sample",
-      "60%",
       "2h",
       "1d",
     ])
@@ -359,10 +359,10 @@ it.each([
       "Opening model",
       "PRs opened",
       "Merged",
+      "Merge rate",
       "Closed without merge",
       "Open",
       "Median distance",
-      "Merge rate",
       "Avg time to PR",
       "Avg time to merge",
     ])
