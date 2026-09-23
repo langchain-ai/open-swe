@@ -221,12 +221,13 @@ async def _project(conn: AsyncConnection, event: EventEnvelope) -> None:
                 INSERT INTO run_projection (
                     workspace_id, run_id, preparation_run_id, thread_id, task_id, user_id,
                     team_id, repository_id, configured_model_id, configured_effort,
-                    effective_model_id, model_attribution_quality, entry_point, started_at
+                    effective_model_id, model_attribution_quality, entry_point, started_at, run_kind
                 ) VALUES (
                     :workspace_id, :run_id, :preparation_run_id, :thread_id, :task_id, :user_id,
                     :team_id, :repository_id, :configured_model_id, :configured_effort,
-                    :effective_model_id, :quality, :entry_point, :occurred_at
+                    :effective_model_id, :quality, :entry_point, :occurred_at, :run_kind
                 ) ON CONFLICT (workspace_id, run_id) DO UPDATE SET
+                    run_kind = EXCLUDED.run_kind,
                     started_at = LEAST(run_projection.started_at, EXCLUDED.started_at),
                     configured_model_id = COALESCE(EXCLUDED.configured_model_id, run_projection.configured_model_id),
                     configured_effort = COALESCE(EXCLUDED.configured_effort, run_projection.configured_effort),
@@ -247,6 +248,7 @@ async def _project(conn: AsyncConnection, event: EventEnvelope) -> None:
             ),
             {
                 **_identity_params(event),
+                "run_kind": payload["run_kind"],
                 "configured_model_id": payload.get("configured_model_id"),
                 "configured_effort": payload.get("configured_effort"),
                 "effective_model_id": payload.get("effective_model_id"),

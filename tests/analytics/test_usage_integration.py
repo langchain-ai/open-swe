@@ -14,6 +14,7 @@ from sqlalchemy import text
 from agent import agent_cost
 from agent.analytics import directory, emitter, ingestion, outbox, queries, usage
 from agent.analytics.events import EventEnvelope
+from agent.analytics.identity import opaque_id
 from agent.middleware.record_run_usage import record_run_usage
 from agent.utils.langsmith import LangSmithThreadCost
 from agent.utils.run_usage import RunUsageSummary
@@ -108,6 +109,65 @@ async def test_queued_completion_and_cost_are_accounted_before_delivery(
         cost = (await conn.execute(text("SELECT * FROM latest_cost_projection"))).mappings().one()
         assert cost["observation_revision"] > 2**31
         assert cost["cost_usd"] == Decimal("1.25")
+
+
+async def test_review_costs_are_separate_idempotent_and_report_missing_coverage(
+    analytics_db, usage_storage, monkeypatch
+):
+    _, transaction = analytics_db
+    await _start()
+    await usage.record_agent_invocation_cost(invocation_id="run", cost_usd=9)
+    for run, day in [("complete", 0), ("partial", 0), ("missing", 0), ("old", -40)]:
+        await emitter.run_started(
+            run_key=run,
+            thread_key="review-thread",
+            model="review-model",
+            source="github",
+            immutable_person_key=123,
+            repository_key="org/repo",
+            run_kind="reviewer",
+            occurred_at=DAY + timedelta(days=day),
+        )
+    usage_storage[0] = DAY + timedelta(seconds=10)
+    monkeypatch.setattr(agent_cost, "schedule_agent_cost_refresh", AsyncMock(return_value=True))
+    await agent_cost.finalize_agent_invocation_usage(
+        invocation_id="complete", thread_id="review-thread", state=None, status="error"
+    )
+    monkeypatch.setattr(
+        agent_cost,
+        "get_langsmith_thread_cost",
+        AsyncMock(return_value=LangSmithThreadCost(2.5, DAY, DAY)),
+    )
+    assert await agent_cost.run_agent_cost_refresh(
+        {"thread_id": "review-thread", "invocation_id": "complete", "attempt": 0},
+        client=MagicMock(),
+    ) == {"status": "updated"}
+    await emitter.run_cost(run_key="partial", cost_usd=0.75, status="partial")
+    await usage.record_agent_invocation_cost(invocation_id="old", cost_usd=100)
+    await _deliver(transaction, reverse=True)
+    await _deliver(transaction)
+    report = await _report()
+    assert report["rows"][0]["invocations"] == 1
+    assert report["rows"][0]["total_cost_usd"] == 9
+    stats = report["reviewer_stats"]
+    assert stats["invocations"] == 3
+    assert stats["total_cost_usd"] == Decimal("3.25")
+    assert stats["avg_invocation_cost_usd"] == Decimal("2.5")
+    assert stats["invocations_without_cost"] == 1
+    assert stats["invocations_with_partial_cost"] == 1
+    async with transaction() as conn:
+        assert (
+            await conn.scalar(
+                text("SELECT technical_status FROM run_projection WHERE run_id = :run"),
+                {"run": opaque_id("run", "complete")},
+            )
+            == "failed"
+        )
+        await conn.execute(
+            text("UPDATE run_projection SET workspace_id = :other WHERE run_kind = 'reviewer'"),
+            {"other": opaque_id("workspace", "other")},
+        )
+    assert (await _report())["reviewer_stats"]["invocations"] == 0
 
 
 async def test_concurrent_duplicate_completion_and_cost_schedule(analytics_db):

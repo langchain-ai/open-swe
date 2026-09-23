@@ -111,6 +111,42 @@ async def test_reviewer_resolves_app_installation_token_at_run_start() -> None:
     assert "SanitizeOpenAIResponsesMiddleware" in middleware_names
 
 
+@pytest.mark.parametrize("is_eval", [False, True])
+@pytest.mark.asyncio
+async def test_reviewer_tracks_production_invocations_only(is_eval: bool) -> None:
+    config: RunnableConfig = {
+        "configurable": {
+            "__is_for_execution__": True,
+            "thread_id": "review-thread",
+            "invocation_id": "review-run",
+            "repo": {"owner": "acme", "name": "repo"},
+            "source": "github",
+            "reviewer_model_id": "anthropic:claude-sonnet-4-5",
+            "reviewer_reasoning_effort": "high",
+            "reviewer_eval": is_eval,
+        },
+    }
+    with (
+        patch("agent.reviewer.run_started", new_callable=AsyncMock) as started,
+        patch("agent.reviewer.make_model", return_value=MagicMock()),
+        patch("agent.reviewer.create_deep_agent", return_value=_DummyAgent()),
+    ):
+        await reviewer.get_reviewer_agent(config)
+    if is_eval:
+        started.assert_not_awaited()
+    else:
+        started.assert_awaited_once_with(
+            run_key="review-run",
+            thread_key="review-thread",
+            model="anthropic:claude-sonnet-4-5",
+            effort="high",
+            source="github",
+            immutable_person_key=None,
+            repository_key="acme/repo",
+            run_kind="reviewer",
+        )
+
+
 @pytest.mark.asyncio
 async def test_reviewer_limits_sandbox_to_reviewed_repository_in_workspace() -> None:
     config: RunnableConfig = {

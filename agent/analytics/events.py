@@ -70,6 +70,7 @@ class StrictPayload(BaseModel):
 
 
 class RunStartedPayload(StrictPayload):
+    run_kind: Literal["agent", "reviewer"] = "agent"
     configured_model_id: UUID | None = None
     configured_effort: str | None = Field(default=None, max_length=100)
     effective_model_id: UUID | None = None

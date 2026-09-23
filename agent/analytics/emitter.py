@@ -114,6 +114,7 @@ async def run_started(
     repository_key: str | None,
     user_id: UUID | None = None,
     occurred_at: datetime | None = None,
+    run_kind: Literal["agent", "reviewer"] = "agent",
 ) -> None:
     model_id = opaque_id("model", model)
     await upsert_model(model)
@@ -121,6 +122,7 @@ async def run_started(
         EventName.RUN_STARTED,
         f"run:{run_key}:started",
         RunStartedPayload(
+            run_kind=run_kind,
             configured_model_id=model_id,
             configured_effort=effort,
             # Configuration alone is not an observation; routing, fallback, and

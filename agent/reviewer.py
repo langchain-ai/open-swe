@@ -39,6 +39,7 @@ from langchain.agents.middleware import ModelCallLimitMiddleware
 from langchain.agents.middleware.types import AgentMiddleware
 from langchain_core.language_models.chat_models import BaseChatModel
 
+from agent.analytics.emitter import run_started
 from agent.dashboard.options import gate_fable_model
 from agent.dashboard.workspace_settings_cache import cached_workspace_settings
 from agent.github.app import get_github_app_installation_token_with_expiry
@@ -56,6 +57,7 @@ from agent.middleware import (
     TimeoutWrapupMiddleware,
     ToolErrorMiddleware,
     check_message_queue_before_model,
+    record_run_usage,
     refresh_github_proxy_before_model,
     settle_review_check_on_exit,
 )
@@ -1085,6 +1087,18 @@ async def get_reviewer_agent(config: RunnableConfig) -> Pregel:
         openai_reasoning_default=DEFAULT_LLM_REASONING,
     )
 
+    if cfg.invocation_id and not cfg.is_eval:
+        await run_started(
+            run_key=cfg.invocation_id,
+            thread_key=thread_id,
+            model=model_id,
+            effort=reasoning_effort,
+            source=cfg.source,
+            immutable_person_key=None,
+            repository_key=cfg.repo.full_name if cfg.repo else None,
+            run_kind="reviewer",
+        )
+
     use_gateway = settings.effective_gateway_enabled
     reviewer_model = _make_model_or_defer(model_id, use_gateway=use_gateway, **model_kwargs)
     reviewer_subagent_model = _make_model_or_defer(
@@ -1130,6 +1144,7 @@ async def get_reviewer_agent(config: RunnableConfig) -> Pregel:
                 SanitizeToolInputsMiddleware(),
                 ModelCallLimitMiddleware(run_limit=MODEL_CALL_RECURSION_LIMIT, exit_behavior="end"),
                 ToolErrorMiddleware(),
+                record_run_usage,
                 refresh_github_proxy_before_model,
                 check_message_queue_before_model,
                 TimeoutWrapupMiddleware(),

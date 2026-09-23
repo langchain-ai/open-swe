@@ -60,6 +60,11 @@ const emptyUsage: UsageLeaderboardPayload = {
   generated_at_ms: null,
   reviewer_stats: {
     period: "30d",
+    invocations: 0,
+    total_cost_usd: 0,
+    avg_invocation_cost_usd: null,
+    invocations_without_cost: 0,
+    invocations_with_partial_cost: 0,
     reviewed_prs: 0,
     prs_with_findings: 0,
     findings_recorded: 0,
@@ -1002,6 +1007,69 @@ it("shows usage metrics but removes stale results when a refresh becomes unavail
   expect(screen.queryByText("7 human replies tracked")).toBeNull()
   client.clear()
 })
+
+it.each([
+  {
+    runs: 3,
+    missing: 1,
+    partial: 1,
+    cost: 2.75,
+    average: 2,
+    total: "$2.75",
+    mean: "$2.00",
+  },
+  {
+    runs: 1,
+    missing: 1,
+    partial: 0,
+    cost: 0,
+    average: null,
+    total: "—",
+    mean: "—",
+  },
+  {
+    runs: 1,
+    missing: 0,
+    partial: 0,
+    cost: 0,
+    average: 0,
+    total: "$0.00",
+    mean: "$0.00",
+  },
+])(
+  "reports review cost coverage without treating missing costs as free: $missing missing",
+  async ({ runs, missing, partial, cost, average, total, mean }) => {
+    vi.spyOn(api, "prMergeRateByModel").mockResolvedValue(report(captured))
+    vi.mocked(api.usageLeaderboard).mockResolvedValue({
+      ...emptyUsage,
+      reviewer_stats: {
+        ...emptyUsage.reviewer_stats,
+        invocations: runs,
+        total_cost_usd: cost,
+        avg_invocation_cost_usd: average,
+        invocations_without_cost: missing,
+        invocations_with_partial_cost: partial,
+      },
+    })
+    const client = mountReport()
+    const totalCard = (await screen.findByText("Review LLM cost"))
+      .parentElement!
+    expect(within(totalCard).getByText(total)).toBeTruthy()
+    const averageCard = screen.getByText(
+      "Average per review run"
+    ).parentElement!
+    expect(within(averageCard).getByText(mean)).toBeTruthy()
+    expect(
+      screen.getByText(
+        missing || partial
+          ? `${missing} missing · ${partial} partial`
+          : "Recorded model cost"
+      )
+    ).toBeTruthy()
+    expect(screen.getByText(/older reviews are not backfilled/)).toBeTruthy()
+    client.clear()
+  }
+)
 
 it("hides a GitHub login when it duplicates the user name", async () => {
   vi.spyOn(api, "prMergeRateByModel").mockResolvedValue(report(captured))

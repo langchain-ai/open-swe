@@ -440,6 +440,11 @@ export interface ReviewerStatsCounterRow {
 
 export interface ReviewerStatsPayload {
   period: UsageLeaderboardPeriod
+  invocations: number
+  total_cost_usd: number
+  avg_invocation_cost_usd: number | null
+  invocations_without_cost: number
+  invocations_with_partial_cost: number
   reviewed_prs: number
   prs_with_findings: number
   findings_recorded: number

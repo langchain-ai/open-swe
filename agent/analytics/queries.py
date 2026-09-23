@@ -377,7 +377,7 @@ WITH runs AS (
       ON a.workspace_id = r.workspace_id AND a.alias_person_id = r.user_id
     LEFT JOIN latest_cost_projection c
       ON c.workspace_id = r.workspace_id AND c.run_id = r.run_id
-    WHERE r.workspace_id = :workspace_id AND r.user_id IS NOT NULL
+    WHERE r.workspace_id = :workspace_id AND r.user_id IS NOT NULL AND r.run_kind = 'agent'
       AND r.started_at >= :start AND r.started_at <= :as_of
 ), thread_durations AS (
     SELECT person_id, thread_id, sum(duration) AS duration
@@ -568,7 +568,14 @@ FROM ranked
 """
 
 _REVIEWER_SQL = """
-WITH reviews AS (
+WITH review_runs AS (
+    SELECT c.cost_usd, c.status
+    FROM run_projection r
+    LEFT JOIN latest_cost_projection c
+      ON c.workspace_id = r.workspace_id AND c.run_id = r.run_id
+    WHERE r.workspace_id = :workspace_id AND r.run_kind = 'reviewer'
+      AND r.started_at >= :start AND r.started_at <= :as_of
+), reviews AS (
     SELECT pr_id, finding_count FROM review_projection
     WHERE workspace_id = :workspace_id AND published_at >= :start AND published_at <= :as_of
 ), recorded AS (
@@ -586,7 +593,15 @@ WITH reviews AS (
     WHERE NULLIF(category, '') IS NOT NULL GROUP BY category
     ORDER BY count(*) DESC, category LIMIT 5
 )
-SELECT (SELECT count(DISTINCT pr_id) FROM reviews) AS reviewed_prs,
+SELECT (SELECT count(*) FROM review_runs) AS invocations,
+    (SELECT COALESCE(sum(cost_usd) FILTER (WHERE status IN ('complete', 'partial')), 0)
+        FROM review_runs) AS total_cost_usd,
+    (SELECT avg(cost_usd) FILTER (WHERE status = 'complete') FROM review_runs)
+        AS avg_invocation_cost_usd,
+    (SELECT count(*) FROM review_runs WHERE cost_usd IS NULL OR status = 'unavailable')
+        AS invocations_without_cost,
+    (SELECT count(*) FROM review_runs WHERE status = 'partial') AS invocations_with_partial_cost,
+    (SELECT count(DISTINCT pr_id) FROM reviews) AS reviewed_prs,
     (SELECT count(DISTINCT pr_id) FROM reviews WHERE finding_count > 0) AS prs_with_findings,
     (SELECT count(*) FROM recorded) AS findings_recorded,
     count(*) AS surfaced_findings,

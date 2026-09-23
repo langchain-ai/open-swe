@@ -1445,6 +1445,8 @@ function TablePagination({
 }
 
 function ReviewerStats({ stats }: { stats: ReviewerStatsPayload }) {
+  const missing = stats.invocations_without_cost
+  const partial = stats.invocations_with_partial_cost
   const cards = [
     {
       label: "Reviewed PRs",
@@ -1480,6 +1482,50 @@ function ReviewerStats({ stats }: { stats: ReviewerStatsPayload }) {
 
   return (
     <div className="space-y-4 p-4">
+      <div className="grid gap-3 sm:grid-cols-3">
+        {[
+          {
+            label: "Review LLM cost",
+            value:
+              stats.invocations > missing
+                ? formatCurrency(stats.total_cost_usd)
+                : "—",
+            helper:
+              missing || partial
+                ? `${formatNumber(missing)} missing · ${formatNumber(partial)} partial`
+                : "Recorded model cost",
+          },
+          {
+            label: "Average per review run",
+            value:
+              stats.avg_invocation_cost_usd != null
+                ? formatCurrency(stats.avg_invocation_cost_usd)
+                : "—",
+            helper: "Runs with complete cost only",
+          },
+          {
+            label: "Review runs tracked",
+            value: formatNumber(stats.invocations),
+            helper: "Includes re-reviews, replies and failed runs",
+          },
+        ].map((card) => (
+          <div key={card.label} className="rounded-md border border-border p-3">
+            <div className="text-xs text-muted-foreground">{card.label}</div>
+            <div className="mt-1 text-lg font-medium tabular-nums">
+              {card.value}
+            </div>
+            <div className="mt-1 text-xs text-muted-foreground">
+              {card.helper}
+            </div>
+          </div>
+        ))}
+      </div>
+      <p className="text-xs text-muted-foreground">
+        LangSmith model costs for review runs started in this period. Excludes
+        sandbox and infrastructure costs. Tracking starts at rollout; older
+        reviews are not backfilled. Missing costs may still be processing or
+        unavailable.
+      </p>
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
         {cards.map((card) => (
           <div key={card.label} className="rounded-md border border-border p-3">
