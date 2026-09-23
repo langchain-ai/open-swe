@@ -510,18 +510,32 @@ async def test_replace_findings_keeps_records_added_since_the_snapshot() -> None
 
 
 @pytest.mark.usefixtures("registry_db")
-async def test_findings_by_thread_reads_unmigrated_threads_from_metadata_without_copying() -> None:
+async def test_findings_by_thread_copies_uncopied_threads_from_the_metadata_given() -> None:
     with patch("agent.review.findings.get_client", return_value=_metadata_client()):
         await append_finding("stored", _f(id="f_stored"))
 
-    unmigrated = {"findings": [_f(id="f_meta")]}
-    result = await findings_by_thread({"stored": {"findings": []}, "legacy": unmigrated})
+    legacy = {
+        "pr": {"owner": "acme", "name": "app", "number": 2},
+        "findings": [_f(id="f_meta")],
+    }
+    client = AsyncMock()
+    with patch("agent.review.findings.get_client", return_value=client):
+        result = await findings_by_thread({"stored": {"findings": []}, "legacy": legacy})
+        later = await list_findings("legacy")
 
     assert [f["id"] for f in result["stored"]] == ["f_stored"]
     assert [f["id"] for f in result["legacy"]] == ["f_meta"]
-    client = _metadata_client({"findings": [_f(id="f_later")]}, number=2)
-    with patch("agent.review.findings.get_client", return_value=client):
-        assert [f["id"] for f in await list_findings("legacy")] == ["f_later"]
+    assert [f["id"] for f in later] == ["f_meta"]
+    client.threads.get.assert_not_awaited()
+
+
+@pytest.mark.usefixtures("registry_db")
+async def test_findings_by_thread_reads_metadata_when_a_copy_fails() -> None:
+    unlinked = {"findings": [_f(id="f_meta")]}
+
+    result = await findings_by_thread({"unlinked": unlinked})
+
+    assert [f["id"] for f in result["unlinked"]] == ["f_meta"]
 
 
 async def test_set_reviewer_thread_metadata_includes_kind() -> None:

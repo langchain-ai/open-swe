@@ -674,14 +674,18 @@ async def _stored_pull_request_id(session: AsyncSession, thread_id: str) -> UUID
     )
 
 
-async def _ensure_finding_state(thread_id: str) -> UUID:
-    """The pull request a thread's findings are stored under, copying its metadata findings the first time."""
+async def _ensure_finding_state(thread_id: str, metadata: Mapping[str, Any] | None = None) -> UUID:
+    """The pull request a thread's findings are stored under, copying its metadata findings the first time.
+
+    ``metadata`` is the thread's metadata when the caller already holds it.
+    """
     from agent.github.pull_requests import PullRequest
 
     async with postgres.session() as session:
         if (pull_request_id := await _stored_pull_request_id(session, thread_id)) is not None:
             return pull_request_id
-    metadata = await _get_thread_metadata_strict(thread_id)
+    if metadata is None:
+        metadata = await _get_thread_metadata_strict(thread_id)
     try:
         ref = _PullRequestRef.model_validate(metadata.get("pr"))
     except ValidationError as exc:
@@ -773,14 +777,44 @@ async def list_findings(thread_id: str) -> list[Finding]:
 async def findings_by_thread(
     metadata_by_thread: Mapping[str, dict[str, Any]],
 ) -> dict[str, list[Finding]]:
-    """Findings for many reviewer threads at once, without copying any of them.
+    """Findings for many reviewer threads at once.
 
-    A thread not yet copied to PostgreSQL is read from the metadata passed in.
+    Threads not yet copied to PostgreSQL are copied from the metadata passed in.
+    A thread whose copy fails is logged and read from that metadata instead.
     """
     thread_ids = list(metadata_by_thread)
     if not thread_ids:
         return {}
-    out: dict[str, list[Finding]] = {}
+    out = await _stored_findings(thread_ids)
+    uncopied = [thread_id for thread_id in thread_ids if thread_id not in out]
+    if uncopied:
+        semaphore = asyncio.Semaphore(4)
+
+        async def copy(thread_id: str) -> str | None:
+            async with semaphore:
+                try:
+                    await _ensure_finding_state(thread_id, metadata_by_thread[thread_id])
+                except Exception:  # noqa: BLE001
+                    logger.exception(
+                        "Failed to copy reviewer findings from thread metadata",
+                        extra={"reviewer_thread_id": thread_id},
+                    )
+                    return None
+                return thread_id
+
+        copied = [
+            thread_id for thread_id in await asyncio.gather(*map(copy, uncopied)) if thread_id
+        ]
+        if copied:
+            out.update(await _stored_findings(copied))
+    for thread_id in thread_ids:
+        if thread_id not in out:
+            out[thread_id] = coerce_findings(metadata_by_thread[thread_id].get("findings"))
+    return out
+
+
+async def _stored_findings(thread_ids: list[str]) -> dict[str, list[Finding]]:
+    """Findings of the threads among ``thread_ids`` whose findings live in PostgreSQL."""
     async with postgres.session() as session:
         states = await session.execute(
             select(FindingState.pull_request_id, FindingState.reviewer_thread_id).where(
@@ -788,14 +822,12 @@ async def findings_by_thread(
             )
         )
         thread_by_pull_request = dict(states.tuples())
-        for thread_id in thread_by_pull_request.values():
-            out[thread_id] = []
+        out: dict[str, list[Finding]] = {
+            thread_id: [] for thread_id in thread_by_pull_request.values()
+        }
         if thread_by_pull_request:
             for row in await session.scalars(_rows_query(*thread_by_pull_request)):
                 out[thread_by_pull_request[row.pull_request_id]].append(row.to_finding())
-    for thread_id, metadata in metadata_by_thread.items():
-        if thread_id not in out:
-            out[thread_id] = coerce_findings(metadata.get("findings"))
     return out
 
 
