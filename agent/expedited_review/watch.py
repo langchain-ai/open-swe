@@ -39,7 +39,6 @@ from agent.prompts import render_prompt
 from agent.slack.blocks import block_payload
 from agent.slack.client import (
     add_slack_reaction,
-    post_slack_thread_reply,
     post_slack_thread_reply_with_ts,
     update_slack_message,
     upload_slack_thread_file,
@@ -257,10 +256,6 @@ async def retire(
     await _delete_cron(updated.cron_id)
     if updated.slack_message_ts:
         await refresh_card(updated, outcome=outcome)
-    elif (location := updated.slack_location) is not None:
-        await post_slack_thread_reply(
-            location[0], location[1], f"*Expedited review:* {outcome} {updated.pull_request.url}"
-        )
     if agent_prompt:
         await notify_agent(updated, agent_prompt)
     return updated

@@ -85,7 +85,6 @@ def harness(monkeypatch: pytest.MonkeyPatch) -> _Harness:
     monkeypatch.setattr(watch, "notify_agent", h.notify_agent)
     monkeypatch.setattr(watch, "_delete_cron", AsyncMock())
     monkeypatch.setattr(watch, "add_slack_reaction", AsyncMock(return_value=True))
-    monkeypatch.setattr(watch, "post_slack_thread_reply", AsyncMock(return_value=True))
     return h
 
 
