@@ -361,9 +361,12 @@ async def test_admin_model_changes_only_affect_new_threads(legacy_thread: bool) 
         fresh_config, workspace_settings=changed_defaults
     )
 
-    assert existing["make_model_calls"] == original["make_model_calls"]
+    original_calls = cast(list[tuple[str, dict[str, object]]], original["make_model_calls"])
+    existing_calls = cast(list[tuple[str, dict[str, object]]], existing["make_model_calls"])
     fresh_calls = cast(list[tuple[str, dict[str, object]]], fresh["make_model_calls"])
-    assert fresh_calls != original["make_model_calls"]
+    assert existing_calls[:-1] == original_calls[:-1]
+    assert existing_calls[-1] == fresh_calls[-1] != original_calls[-1]
+    assert fresh_calls != original_calls
     assert {model for model, _ in fresh_calls} == {"google_genai:gemini-3.8-flash"}
 
 

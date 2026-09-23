@@ -1155,10 +1155,7 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
     for route, stored_route in thread_settings.get("routing_models", {}).items():
         if route in routing_defaults:
             routing_defaults[route] = (stored_route["model_id"], stored_route["effort"])
-    stored_title = thread_settings.get("title_model")
-    title_model_id, title_effort = (
-        (stored_title["model_id"], stored_title["effort"]) if stored_title else title_defaults
-    )
+    title_model_id, title_effort = title_defaults
     logger.info("Using workspace default agent model: model=%s effort=%s", model_id, profile_effort)
 
     if profile_login and profile:
@@ -1250,7 +1247,6 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
             route: {"model_id": routed_model_id, "effort": effort}
             for route, (routed_model_id, effort) in routing_defaults.items()
         },
-        "title_model": {"model_id": title_model_id, "effort": title_effort},
         "repo_instructions": repo_instructions,
     }
     if not local_run and (

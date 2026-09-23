@@ -36,7 +36,6 @@ class ThreadSettings(TypedDict, total=False):
     subagent_effort: str | None
     model_routing_enabled: bool
     routing_models: dict[str, ThreadModel]
-    title_model: ThreadModel
     repo_instructions: str | None
 
 
