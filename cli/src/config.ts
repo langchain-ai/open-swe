@@ -1,15 +1,31 @@
 import { chmod, mkdir, readFile, rm, writeFile } from "node:fs/promises"
-import { homedir } from "node:os"
+import { homedir, platform } from "node:os"
 import { join } from "node:path"
 
 import { errorCode, isRecord, parseJson, stringAt } from "./json.ts"
 
-const CONFIG_DIR = join(homedir(), ".open-swe")
-const CONFIG_FILE = join(CONFIG_DIR, "config.json")
-const BRIDGES_FILE = join(CONFIG_DIR, "bridges.json")
+/** ``$HOME`` wins so a test, or a sandboxed run, can point at its own home. */
+function home(): string {
+  return process.env["HOME"] || homedir()
+}
+
+function configDir(): string {
+  return join(home(), ".open-swe")
+}
+
+function configFile(): string {
+  return join(configDir(), "config.json")
+}
+
+function bridgesFile(): string {
+  return join(configDir(), "bridges.json")
+}
 
 const DIR_MODE = 0o700
 const FILE_MODE = 0o600
+
+/** The backend the desktop app falls back to when nothing names one. */
+const DEVELOPMENT_BACKEND_URL = "http://localhost:2024"
 
 export interface CliConfig {
   backend: string
@@ -32,8 +48,8 @@ async function readFileOrNull(path: string): Promise<string | null> {
 }
 
 async function writePrivate(path: string, value: unknown): Promise<void> {
-  await mkdir(CONFIG_DIR, { recursive: true, mode: DIR_MODE })
-  await chmod(CONFIG_DIR, DIR_MODE)
+  await mkdir(configDir(), { recursive: true, mode: DIR_MODE })
+  await chmod(configDir(), DIR_MODE)
   await writeFile(path, `${JSON.stringify(value, null, 2)}\n`, {
     mode: FILE_MODE,
   })
@@ -49,25 +65,81 @@ function stringMap(value: unknown): Record<string, string> {
   return out
 }
 
-export async function readConfig(): Promise<CliConfig | null> {
-  const text = await readFileOrNull(CONFIG_FILE)
-  if (text === null) return null
+/** Where the desktop app keeps the backend URL it was pointed at. */
+function desktopConfigPaths(): string[] {
+  const base = home()
+  const names = ["Open SWE", "Open SWE Development"]
+  const roots =
+    platform() === "darwin"
+      ? [join(base, "Library", "Application Support")]
+      : platform() === "win32"
+        ? [join(base, "AppData", "Roaming")]
+        : [process.env["XDG_CONFIG_HOME"] || join(base, ".config")]
+  return roots.flatMap((root) =>
+    names.map((name) => join(root, name, "desktop-config.json"))
+  )
+}
+
+async function desktopBackend(): Promise<string | null> {
+  for (const path of desktopConfigPaths()) {
+    const text = await readFileOrNull(path)
+    if (text === null) continue
+    const parsed = parseJson(text)
+    const url = isRecord(parsed) ? stringAt(parsed, "backendUrl") : null
+    if (url) return url
+  }
+  return null
+}
+
+async function storedConfig(): Promise<Partial<CliConfig>> {
+  const text = await readFileOrNull(configFile())
+  if (text === null) return {}
   const parsed = parseJson(text)
-  if (!isRecord(parsed)) return null
-  const backend = stringAt(parsed, "backend")
-  const session = stringAt(parsed, "session")
-  if (!backend || !session) return null
-  return { backend, session }
+  if (!isRecord(parsed)) return {}
+  return {
+    backend: stringAt(parsed, "backend") ?? undefined,
+    session: stringAt(parsed, "session") ?? undefined,
+  }
+}
+
+/**
+ * The backend to talk to, resolved the way the desktop app resolves its own:
+ * the environment first, under the same variable names, then what was stored,
+ * then the development default.
+ */
+export async function readBackend(): Promise<string> {
+  const env = process.env
+  return (
+    env["OPEN_SWE_BACKEND_URL"] ||
+    env["OPEN_SWE_DESKTOP_URL"] ||
+    (await storedConfig()).backend ||
+    (await desktopBackend()) ||
+    DEVELOPMENT_BACKEND_URL
+  )
+}
+
+/**
+ * Where the CLI is pointed and who it is.
+ *
+ * The session has no desktop fallback: the app keeps it in an encrypted cookie
+ * store no other process can read, so it comes from `OPEN_SWE_SESSION` or from
+ * `open-swe login`.
+ */
+export async function readConfig(): Promise<CliConfig | null> {
+  const stored = await storedConfig()
+  const session = process.env["OPEN_SWE_SESSION"] || stored.session
+  if (!session) return null
+  return { backend: await readBackend(), session }
 }
 
 export async function writeConfig(config: CliConfig): Promise<string> {
-  await writePrivate(CONFIG_FILE, config)
-  return CONFIG_FILE
+  await writePrivate(configFile(), config)
+  return configFile()
 }
 
 export async function clearConfig(): Promise<boolean> {
   try {
-    await rm(CONFIG_FILE)
+    await rm(configFile())
     return true
   } catch (cause) {
     if (errorCode(cause) === "ENOENT") return false
@@ -76,7 +148,7 @@ export async function clearConfig(): Promise<boolean> {
 }
 
 export async function readBridgeMemory(): Promise<BridgeMemory> {
-  const text = await readFileOrNull(BRIDGES_FILE)
+  const text = await readFileOrNull(bridgesFile())
   const parsed = text === null ? null : parseJson(text)
   if (!isRecord(parsed)) return { roots: {}, threads: {} }
   return {
@@ -86,7 +158,7 @@ export async function readBridgeMemory(): Promise<BridgeMemory> {
 }
 
 export async function writeBridgeMemory(memory: BridgeMemory): Promise<void> {
-  await writePrivate(BRIDGES_FILE, memory)
+  await writePrivate(bridgesFile(), memory)
 }
 
 export async function rememberBridge(options: {
@@ -99,6 +171,3 @@ export async function rememberBridge(options: {
   if (options.threadId) memory.threads[options.threadId] = options.bridgeId
   await writeBridgeMemory(memory)
 }
-
-export const configPath = CONFIG_FILE
-export const bridgesPath = BRIDGES_FILE

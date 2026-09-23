@@ -35,8 +35,25 @@ dashboard uses, a loopback port catches the handoff, and PKCE S256 exchanges it
 for the same session the desktop app stores. Requests then carry it as the
 dashboard's own `osw_session` cookie, so the backend authenticates the CLI
 exactly as it authenticates the app. The session and backend URL live in
-`~/.open-swe/config.json` (mode 0600). `--backend` is optional once one is
-stored, and `open-swe logout` deletes the file.
+`~/.open-swe/config.json` (mode 0600), and `open-swe logout` deletes the file.
+
+The environment wins over all of it, under the variable names the desktop app
+already reads, so you can point a build at a backend without signing in again:
+
+| Variable | Effect |
+|---|---|
+| `OPEN_SWE_BACKEND_URL` | the backend to call |
+| `OPEN_SWE_DESKTOP_URL` | the same, checked second |
+| `OPEN_SWE_SESSION` | the session JWT, instead of a stored login |
+
+With none of them set, the backend comes from `~/.open-swe/config.json`, then
+from the backend the desktop app was last pointed at
+(`desktop-config.json` in its application-support directory), then
+`http://localhost:2024` — the desktop app's own development default.
+
+The binary never reads a `.env`. It is compiled with
+`--no-compile-autoload-dotenv`, because it runs inside your repository and a
+`.env` there would otherwise enter both its environment and the agent's shell.
 
 ## Run
 

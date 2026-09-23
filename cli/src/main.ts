@@ -9,6 +9,7 @@ import { Bridge } from "./bridge.ts"
 import {
   clearConfig,
   readBridgeMemory,
+  readBackend,
   readConfig,
   rememberBridge,
   writeConfig,
@@ -62,9 +63,7 @@ async function ask(question: string): Promise<string | null> {
 }
 
 async function resolveBackend(explicit: string | undefined): Promise<string> {
-  const stored = await readConfig()
-  const candidate =
-    explicit ?? stored?.backend ?? (await ask("Open SWE backend URL: "))
+  const candidate = explicit ?? (await readBackend())
   if (!candidate || !candidate.trim())
     throw new Error("a backend URL is required")
   return normalizeBackend(candidate)
