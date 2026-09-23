@@ -823,7 +823,7 @@ async def mock_github_data() -> JSONResponse:
                 "updated_at": p["updated_at"],
                 "url": _pr_html_url(p),
             }
-            for p in fakes.PULLS
+            for p in fakes.pulls()
         ]
     )
 
@@ -969,7 +969,7 @@ async def gh_search_issues(
     open_only = "is:open" in terms
     matches = [
         pull
-        for pull in fakes.PULLS
+        for pull in fakes.pulls()
         if (not author or pull["author"].lower() == author.lower())
         and (not repositories or f"{pull['owner']}/{pull['repo']}".lower() in repositories)
         and (not open_only or (pull["state"] == "open" and not pull["merged"]))
