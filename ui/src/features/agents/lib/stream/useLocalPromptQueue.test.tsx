@@ -33,7 +33,11 @@ function fakeClient() {
 
 function setup(isRunning: boolean, accepted = true) {
   const { client, items } = fakeClient()
-  const submit = vi.fn(async () => accepted)
+  const storeSizesAtSubmit: Array<number> = []
+  const submit = vi.fn(async () => {
+    storeSizesAtSubmit.push(items.size)
+    return accepted
+  })
   const hook = renderHook(
     (props: { isRunning: boolean }) =>
       useLocalPromptQueue({
@@ -45,12 +49,12 @@ function setup(isRunning: boolean, accepted = true) {
       }),
     { initialProps: { isRunning } }
   )
-  return { ...hook, items, submit }
+  return { ...hook, items, submit, storeSizesAtSubmit }
 }
 
 describe("useLocalPromptQueue", () => {
   it("sends what the user queued once the run they stopped is gone", async () => {
-    const { result, rerender, submit, items } = setup(true)
+    const { result, rerender, submit, items, storeSizesAtSubmit } = setup(true)
 
     await act(() => result.current.enqueue("pick this up next", []))
     expect(result.current.queued.map((item) => item.content)).toEqual([
@@ -64,6 +68,7 @@ describe("useLocalPromptQueue", () => {
       expect(submit).toHaveBeenCalledWith("pick this up next", [])
     )
     expect(result.current.queued).toEqual([])
+    expect(storeSizesAtSubmit).toEqual([0])
     await waitFor(() => expect(items.size).toBe(0))
   })
 

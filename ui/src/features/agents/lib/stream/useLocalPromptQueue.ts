@@ -58,19 +58,20 @@ export function useLocalPromptQueue({
     handoffRef.current = true
     // oxlint-disable-next-line react/set-state-in-effect
     setState({ sessionId, items: [] })
-    // The store copy is cleared only once the run is accepted, so a failed
-    // handoff leaves the follow-up for the next run instead of losing it.
+    // Cleared before submitting, or the new run's first model call drains the
+    // store copy too and the follow-up lands twice. Restored if not accepted.
     void readLocalPromptQueue(client, sessionId)
       .then(async (pending) => {
-        if (pending && (await submit(pending.text, pending.images))) {
-          await clearLocalPromptQueue(client, sessionId)
-        }
+        if (!pending) return
+        await clearLocalPromptQueue(client, sessionId)
+        if (!(await submit(pending.text, pending.images)))
+          await enqueueLocalPrompt(client, sessionId, pending, login)
       })
       .catch(setError)
       .finally(() => {
         handoffRef.current = false
       })
-  }, [client, isRunning, queued.length, sessionId, submit])
+  }, [client, isRunning, login, queued.length, sessionId, submit])
 
   return { queued, enqueue, error }
 }
