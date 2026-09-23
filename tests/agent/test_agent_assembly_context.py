@@ -318,7 +318,7 @@ async def test_model_routing_is_applied_when_enabled() -> None:
 
 
 @pytest.mark.asyncio
-async def test_model_routing_control_uses_performance_model() -> None:
+async def test_model_routing_control_uses_fast_model() -> None:
     config = _base_config()
     agent = await _capture_create_deep_agent_kwargs(config, profile={"model_routing_enabled": True})
 
@@ -332,7 +332,7 @@ async def test_model_routing_control_uses_performance_model() -> None:
     subagent_middleware = {item.name for item in general_purpose["middleware"]}
     assert "ModelSelectionMiddleware" in subagent_middleware
     assert "model_routing_mode" not in config["configurable"]
-    assert config["metadata"]["model_routing_mode"] == "performance"
+    assert config["metadata"]["model_routing_mode"] == "fast"
     assert config["metadata"]["model_routing_applied"] is True
     calls = cast(list[tuple[str, dict[str, object]]], agent["make_model_calls"])
     assert [model for model, _ in calls[1:4]] == [
