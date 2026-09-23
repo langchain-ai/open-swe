@@ -176,6 +176,9 @@ async def test_later_measurement_does_not_override_lifecycle_and_zero_is_a_sampl
         cohort = report["cohorts"][0]
         assert cohort["distance_sample_size"] == samples
         assert cohort["median_distance_basis_points"] == median
+        assert cohort["mean_distance_basis_points"] == median
+        assert cohort["efforts"][0]["distance_sample_size"] == samples
+        assert cohort["efforts"][0]["median_distance_basis_points"] == median
         assert cohort["merged"] == 1
         assert cohort["cohort_size"] == 1
         assert cohort["decided_denominator"] == 1
@@ -202,6 +205,33 @@ async def test_later_measurement_does_not_override_lifecycle_and_zero_is_a_sampl
         assert report["cohorts"][0]["distance_sample_size"] == 0
     await ingestion.ingest(revise(merged, producer_event_id="new-merge", source_version=12))
     assert (await projection())["distance_basis_points"] == 0
+
+
+async def test_distance_mean_and_median_include_only_measured_merges(
+    analytics_db: Database,
+) -> None:
+    workspace, transaction = analytics_db
+    for number, value in ((1, 0), (2, 0), (3, 9000)):
+        opened, merged, measured = events(workspace, number=number)
+        for item in (
+            opened,
+            merged,
+            revise(measured, payload=measurement(pr_number=number, distance_basis_points=value)),
+        ):
+            await ingestion.ingest(item)
+    opened, merged, _ = events(workspace, number=4)
+    await ingestion.ingest(opened)
+    await ingestion.ingest(merged)
+    async with transaction() as conn:
+        await conn.execute(
+            text("UPDATE deployment_metadata SET reporting_cutover_at = :start"),
+            {"start": NOW - timedelta(days=1)},
+        )
+    cohort = (await queries.pr_merge_rate_by_model(period="all", admin=True))["cohorts"][0]
+    assert cohort["merged"] == 4
+    assert cohort["distance_sample_size"] == 3
+    assert cohort["median_distance_basis_points"] == 0
+    assert cohort["mean_distance_basis_points"] == 3000
 
 
 @pytest.mark.parametrize(

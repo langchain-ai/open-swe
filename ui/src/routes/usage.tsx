@@ -19,6 +19,7 @@ import { useState } from "react"
 import type {
   AnalyticsMetadata,
   PRMergeRateCohort,
+  PRMergeRateEffort,
   PRMergeRatePayload,
   PRMergeRateResponse,
   ReviewerStatsPayload,
@@ -69,6 +70,17 @@ interface SortableColumn<Key extends string> {
 }
 
 type UsageScope = "invocations" | "threads"
+type MergeRateView = "observed" | "lower_bound"
+type PROutcomesSort =
+  | "prs_opened"
+  | "merged"
+  | "closed_without_merge"
+  | "open"
+  | "median_distance"
+  | "mean_distance"
+  | "merge_rate"
+  | "avg_delivery_seconds"
+  | "avg_merge_seconds"
 const PERIOD_LABELS: Record<UsageLeaderboardPeriod, string> = {
   "24h": "Last 24h",
   "7d": "Last 7 days",
@@ -707,7 +719,11 @@ function PRMergeRateSection({
               <strong>Median distance</strong> is the median normalized line
               edit distance between each merged PR’s opening diff and final
               diff. It is calculated only for merged PRs with complete text
-              patches; higher means more post-open editing.
+              patches; higher means more post-open editing.{" "}
+              <strong>Mean distance</strong> is the arithmetic mean of those
+              same per-PR percentages; unusually rewritten PRs affect it more.
+              Neither metric weights PRs by size. The measured/merged count
+              shows how many merged PRs had complete patches.
             </p>
             <p>
               <strong>Merge rate</strong> includes only PRs old enough to have a
@@ -715,6 +731,12 @@ function PRMergeRateSection({
               still-open PRs that are at least {data.maturity_days} days old.
               Newer open PRs are excluded so they do not lower the rate before
               they have had enough time to merge.
+            </p>
+            <p>
+              <strong>Confidence-adjusted</strong> shows the 95% Wilson lower
+              bound for the same eligible PRs. It is a conservative comparison
+              score, not the observed merge rate. A small sample lowers the
+              bound even when every eligible PR merged.
             </p>
             <p>
               <strong>Avg time to merge</strong> is the arithmetic mean of time
@@ -753,7 +775,11 @@ function PRMergeRateSection({
   )
 }
 
-function AvgTimeToMerge({ cohort }: { cohort: PRMergeRateCohort }) {
+function AvgTimeToMerge({
+  cohort,
+}: {
+  cohort: PRMergeRateCohort | PRMergeRateEffort
+}) {
   return (
     <span>
       {cohort.avg_merge_seconds == null
@@ -763,7 +789,11 @@ function AvgTimeToMerge({ cohort }: { cohort: PRMergeRateCohort }) {
   )
 }
 
-function AvgTimeToPR({ cohort }: { cohort: PRMergeRateCohort }) {
+function AvgTimeToPR({
+  cohort,
+}: {
+  cohort: PRMergeRateCohort | PRMergeRateEffort
+}) {
   if (!("avg_delivery_seconds" in cohort)) {
     // A backend that predates the metric has no key for it at all.
     return (
@@ -862,6 +892,55 @@ function OutcomeCell({
   )
 }
 
+function wilsonLowerBound(merged: number, eligible: number): number | null {
+  if (eligible === 0) return null
+  const z = 1.96
+  const rate = merged / eligible
+  const z2 = z * z
+  return (
+    (rate +
+      z2 / (2 * eligible) -
+      z * Math.sqrt((rate * (1 - rate) + z2 / (4 * eligible)) / eligible)) /
+    (1 + z2 / eligible)
+  )
+}
+
+function mergeRate(
+  group: PRMergeRateCohort | PRMergeRateEffort,
+  view: MergeRateView
+) {
+  return view === "observed"
+    ? group.mature_cohort_merge_share
+    : wilsonLowerBound(group.merged, group.mature_denominator)
+}
+
+function prOutcomeSortValue(
+  cohort: PRMergeRateCohort,
+  sort: PROutcomesSort,
+  view: MergeRateView
+) {
+  switch (sort) {
+    case "prs_opened":
+      return cohort.cohort_size
+    case "merged":
+      return cohort.merged
+    case "closed_without_merge":
+      return cohort.closed_without_merge
+    case "open":
+      return cohort.waiting + cohort.mature_pending
+    case "median_distance":
+      return cohort.median_distance_basis_points ?? null
+    case "mean_distance":
+      return cohort.mean_distance_basis_points ?? null
+    case "merge_rate":
+      return mergeRate(cohort, view)
+    case "avg_delivery_seconds":
+      return cohort.avg_delivery_seconds ?? null
+    case "avg_merge_seconds":
+      return cohort.avg_merge_seconds ?? null
+  }
+}
+
 function PRMergeRateTable({
   cohorts,
   maturityDays,
@@ -872,12 +951,44 @@ function PRMergeRateTable({
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(10)
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set())
-  const sortedCohorts = [...cohorts].sort(
-    (a, b) =>
-      b.cohort_size - a.cohort_size ||
+  const [sort, setSort] = useState<PROutcomesSort>("prs_opened")
+  const [direction, setDirection] = useState<SortDirection>("desc")
+  const [mergeRateView, setMergeRateView] = useState<MergeRateView>("observed")
+  const sortedCohorts = [...cohorts].sort((a, b) => {
+    const aValue = prOutcomeSortValue(a, sort, mergeRateView)
+    const bValue = prOutcomeSortValue(b, sort, mergeRateView)
+    if (aValue == null) return bValue == null ? 0 : 1
+    if (bValue == null) return -1
+    return (
+      (direction === "asc" ? aValue - bValue : bValue - aValue) ||
       (safeModelLabel(a.model_id ?? "") || "Unavailable").localeCompare(
         safeModelLabel(b.model_id ?? "") || "Unavailable"
       )
+    )
+  })
+  const metricHeader = (
+    key: PROutcomesSort,
+    label: string,
+    tooltip?: string
+  ) => (
+    <SortableHeader
+      scope="row"
+      column={{ key, label, tooltip, align: "left" }}
+      sortKey={sort}
+      sortDirection={direction}
+      onSort={(nextSort, defaultDirection) => {
+        setDirection(
+          nextSort === sort
+            ? direction === "asc"
+              ? "desc"
+              : "asc"
+            : defaultDirection
+        )
+        setSort(nextSort)
+        setPage(1)
+      }}
+      className="sticky left-0 z-10 bg-card px-4 text-left"
+    />
   )
   const pageCount = Math.max(1, Math.ceil(sortedCohorts.length / pageSize))
   const currentPage = Math.min(page, pageCount)
@@ -901,11 +1012,32 @@ function PRMergeRateTable({
   })
   return (
     <div>
+      <div className="flex flex-wrap items-center justify-end gap-3 border-b border-border px-4 py-3 text-xs">
+        <span className="text-muted-foreground">Merge rate view</span>
+        <div
+          role="group"
+          aria-label="Merge rate view"
+          className="flex rounded-md border border-border p-0.5"
+        >
+          {(["observed", "lower_bound"] as const).map((view) => (
+            <button
+              key={view}
+              type="button"
+              aria-pressed={mergeRateView === view}
+              className={`rounded-sm px-3 py-1.5 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring ${mergeRateView === view ? "bg-muted font-semibold text-foreground" : "text-muted-foreground"}`}
+              onClick={() => setMergeRateView(view)}
+            >
+              {view === "observed" ? "Observed" : "Confidence-adjusted"}
+            </button>
+          ))}
+        </div>
+      </div>
       <div className="overflow-x-auto">
         <table className="w-full text-xs">
           <caption className="px-4 py-3 text-left text-muted-foreground">
             Outcome shares are calculated down each opening-model column from
-            PRs opened (100%). Models are sorted by PRs opened, highest first.
+            PRs opened (100%). Select a metric to sort model columns; reasoning
+            efforts stay grouped under their model.
           </caption>
           <thead className="border-b border-border text-muted-foreground">
             <tr>
@@ -985,12 +1117,7 @@ function PRMergeRateTable({
           </thead>
           <tbody className="divide-y divide-border">
             <tr className="font-medium">
-              <th
-                scope="row"
-                className="sticky left-0 z-10 bg-card px-4 py-3 text-left"
-              >
-                PRs opened (base)
-              </th>
+              {metricHeader("prs_opened", "PRs opened (base)")}
               {groups.map(({ key, group }) => (
                 <td key={key} className="px-4 py-3 text-right tabular-nums">
                   {group.cohort_size}{" "}
@@ -1001,18 +1128,14 @@ function PRMergeRateTable({
             {(["merged", "closed_without_merge", "open"] as const).map(
               (outcome) => (
                 <tr key={outcome}>
-                  <th
-                    scope="row"
-                    className="sticky left-0 z-10 bg-card px-4 py-3 text-left font-normal"
-                  >
+                  {metricHeader(
+                    outcome,
                     {
-                      {
-                        merged: "Merged",
-                        closed_without_merge: "Closed without merge",
-                        open: "Open",
-                      }[outcome]
-                    }
-                  </th>
+                      merged: "Merged",
+                      closed_without_merge: "Closed without merge",
+                      open: "Open",
+                    }[outcome]
+                  )}
                   {groups.map(({ key, group }) => (
                     <td key={key} className="px-4 py-3 text-right tabular-nums">
                       <OutcomeCell
@@ -1026,84 +1149,98 @@ function PRMergeRateTable({
               )
             )}
             <tr className="border-t-2 border-border">
-              <th
-                scope="row"
-                className="sticky left-0 z-10 bg-card px-4 py-3 text-left font-normal"
-              >
-                Mature merge rate
-              </th>
-              {groups.map(({ key, group }) => (
-                <td key={key} className="px-4 py-3 text-right tabular-nums">
-                  {group.mature_cohort_merge_share == null
-                    ? "—"
-                    : formatPercent(group.mature_cohort_merge_share)}
-                </td>
-              ))}
-            </tr>
-            <tr>
-              <th
-                scope="row"
-                className="sticky left-0 z-10 bg-card px-4 py-3 text-left font-normal"
-              >
-                Median distance
-              </th>
-              {groups.map(({ key, group }) => (
-                <td key={key} className="px-4 py-3 text-right tabular-nums">
-                  <Tooltip>
-                    <TooltipTrigger className="cursor-help rounded-sm underline decoration-dotted underline-offset-2 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring">
-                      {"median_distance_basis_points" in group &&
-                      group.median_distance_basis_points != null
-                        ? `${(group.median_distance_basis_points / 100).toFixed(1)}%`
-                        : "—"}
-                    </TooltipTrigger>
-                    <TooltipPopup>
-                      {"distance_sample_size" in group
-                        ? (group.distance_sample_size ?? 0)
-                        : 0}{" "}
-                      merged PRs measured
-                    </TooltipPopup>
-                  </Tooltip>
-                  {"distance_sample_size" in group &&
-                    (group.distance_sample_size ?? 0) > 0 &&
-                    (group.distance_sample_size ?? 0) < 5 && (
+              {metricHeader(
+                "merge_rate",
+                mergeRateView === "observed"
+                  ? "Mature merge rate"
+                  : "95% lower bound",
+                mergeRateView === "observed"
+                  ? `Includes merged and closed PRs, plus PRs open for at least ${maturityDays} days. Newer open PRs are excluded.`
+                  : "Wilson 95% lower bound on the observed merge rate. This is a conservative comparison score, not the observed rate."
+              )}
+              {groups.map(({ key, group }) => {
+                const rate = mergeRate(group, mergeRateView)
+                return (
+                  <td key={key} className="px-4 py-3 text-right tabular-nums">
+                    {rate == null ? "—" : formatPercent(rate)}
+                    {rate != null && (
+                      <div className="text-xs text-muted-foreground">
+                        {group.merged}/{group.mature_denominator} eligible
+                      </div>
+                    )}
+                    {rate != null && group.mature_denominator < 5 && (
                       <div className="text-xs text-amber-600 dark:text-amber-400">
                         Small sample
                       </div>
                     )}
+                  </td>
+                )
+              })}
+            </tr>
+            {(["median_distance", "mean_distance"] as const).map((metric) => (
+              <tr key={metric}>
+                {metricHeader(
+                  metric,
+                  metric === "median_distance"
+                    ? "Median distance"
+                    : "Mean distance",
+                  metric === "median_distance"
+                    ? "Median post-open line edit distance across measurable merged PRs."
+                    : "Mean post-open line edit distance across measurable merged PRs. Unusually rewritten PRs affect it more than the median; PRs are not weighted by size."
+                )}
+                {groups.map(({ key, group }) => {
+                  const value =
+                    metric === "median_distance"
+                      ? group.median_distance_basis_points
+                      : "mean_distance_basis_points" in group
+                        ? group.mean_distance_basis_points
+                        : undefined
+                  const supported =
+                    metric === "median_distance" ||
+                    "mean_distance_basis_points" in group
+                  return (
+                    <td key={key} className="px-4 py-3 text-right tabular-nums">
+                      <Tooltip>
+                        <TooltipTrigger className="cursor-help rounded-sm underline decoration-dotted underline-offset-2 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring">
+                          {value == null ? "—" : `${(value / 100).toFixed(1)}%`}
+                        </TooltipTrigger>
+                        <TooltipPopup>
+                          {supported
+                            ? `${group.distance_sample_size ?? 0}/${group.merged} merged PRs measured`
+                            : "Mean distance unavailable for this group"}
+                        </TooltipPopup>
+                      </Tooltip>
+                      {supported &&
+                        group.distance_sample_size !== undefined && (
+                          <div className="text-xs text-muted-foreground">
+                            {group.distance_sample_size}/{group.merged} measured
+                          </div>
+                        )}
+                      {supported &&
+                        (group.distance_sample_size ?? 0) > 0 &&
+                        (group.distance_sample_size ?? 0) < 5 && (
+                          <div className="text-xs text-amber-600 dark:text-amber-400">
+                            Small sample
+                          </div>
+                        )}
+                    </td>
+                  )
+                })}
+              </tr>
+            ))}
+            <tr>
+              {metricHeader("avg_delivery_seconds", "Avg time to PR")}
+              {groups.map(({ key, group }) => (
+                <td key={key} className="px-4 py-3 text-right tabular-nums">
+                  <AvgTimeToPR cohort={group} />
                 </td>
               ))}
             </tr>
             <tr>
-              <th
-                scope="row"
-                className="sticky left-0 z-10 bg-card px-4 py-3 text-left font-normal"
-              >
-                Avg time to PR
-              </th>
+              {metricHeader("avg_merge_seconds", "Avg time to merge")}
               {groups.map(({ key, group }) => (
                 <td key={key} className="px-4 py-3 text-right tabular-nums">
-                  {"avg_merge_seconds" in group ? (
-                    <AvgTimeToPR cohort={group} />
-                  ) : (
-                    "—"
-                  )}
-                </td>
-              ))}
-            </tr>
-            <tr>
-              <th
-                scope="row"
-                className="sticky left-0 z-10 bg-card px-4 py-3 text-left font-normal"
-              >
-                Avg time to merge
-              </th>
-              {groups.map(({ key, group }) => (
-                <td key={key} className="px-4 py-3 text-right tabular-nums">
-                  {"avg_merge_seconds" in group ? (
-                    <AvgTimeToMerge cohort={group} />
-                  ) : (
-                    "—"
-                  )}
+                  <AvgTimeToMerge cohort={group} />
                 </td>
               ))}
             </tr>
@@ -1179,7 +1316,9 @@ function SortableHeader<Key extends string>({
   sortDirection,
   onSort,
   className,
+  scope = "col",
 }: {
+  scope?: "col" | "row"
   column: SortableColumn<Key>
   sortKey: Key
   sortDirection: SortDirection
@@ -1220,7 +1359,7 @@ function SortableHeader<Key extends string>({
 
   return (
     <th
-      scope="col"
+      scope={scope}
       aria-sort={ariaSort}
       className={`${className} p-0 font-normal`}
     >
