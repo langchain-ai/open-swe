@@ -28,6 +28,13 @@ import {
   collectStructuredEntities,
   parseStructuredInput,
 } from "@/features/agents/lib/structuredInputMessages"
+import {
+  chatDiffAction,
+  type ChatDiffAction,
+  type DiffRange,
+  type ToolMessageLike,
+} from "@/features/reviews/lib/chatDiffActions"
+import { ProposedCommentCard } from "@/features/reviews/components/ProposedCommentCard"
 
 // --- Composer bridge ---------------------------------------------------------
 //
@@ -49,6 +56,9 @@ export interface ChatAttachment {
 interface ReviewChatComposer {
   addAttachment: (attachment: ChatAttachment) => void
   registerSink: (fn: ((attachment: ChatAttachment) => void) | null) => void
+  /** Scrolls the diff column to `range` and pulses it. */
+  showInDiff: (range: DiffRange) => void
+  registerShowHandler: (fn: ((range: DiffRange) => void) | null) => void
 }
 
 const ReviewChatComposerContext = createContext<ReviewChatComposer | null>(null)
@@ -60,8 +70,13 @@ export function ReviewChatComposerProvider({
 }) {
   const sinkRef = useRef<((attachment: ChatAttachment) => void) | null>(null)
   const pendingRef = useRef<Array<ChatAttachment>>([])
+  const showRef = useRef<((range: DiffRange) => void) | null>(null)
   const value = useMemo<ReviewChatComposer>(
     () => ({
+      showInDiff: (range) => showRef.current?.(range),
+      registerShowHandler: (fn) => {
+        showRef.current = fn
+      },
       addAttachment: (attachment) => {
         if (sinkRef.current) sinkRef.current(attachment)
         else pendingRef.current.push(attachment)
@@ -250,7 +265,27 @@ function LoadingState() {
   )
 }
 
-function ChatBody({ reviewed }: { reviewed: boolean }) {
+function toolMessageLike(message: BaseMessage): ToolMessageLike {
+  const raw = message as unknown as { name?: string; tool_call_id?: string }
+  return {
+    type: messageType(message),
+    name: raw.name,
+    tool_call_id: raw.tool_call_id,
+    content: message.content,
+  }
+}
+
+function ChatBody({
+  owner,
+  repo,
+  number,
+  reviewed,
+}: {
+  owner: string
+  repo: string
+  number: number
+  reviewed: boolean
+}) {
   const composer = useReviewChatComposer()
   const stream = useStreamContext()
   const [value, setValue] = useState("")
@@ -295,12 +330,23 @@ function ChatBody({ reviewed }: { reviewed: boolean }) {
       .filter((message) => messageType(message) === "human")
       .map((message) => messageText(message.content))
   )
+  const diffActions = messages.flatMap((message) => {
+    const action = chatDiffAction(toolMessageLike(message))
+    return action ? [action] : []
+  })
   const visible: Array<{
     message: BaseMessage
     content: string
     structured?: ReturnType<typeof parseStructuredInput>
+    action?: ChatDiffAction
   }> = messages.flatMap((message) => {
     const type = messageType(message)
+    if (type === "tool") {
+      const action = chatDiffAction(toolMessageLike(message))
+      return action?.kind === "comment"
+        ? [{ message, content: "", action }]
+        : []
+    }
     if (type !== "human" && type !== "ai") return []
     const content = messageText(message.content)
     if (type === "ai") return content.trim() ? [{ message, content }] : []
@@ -308,6 +354,29 @@ function ChatBody({ reviewed }: { reviewed: boolean }) {
     if (parsed.type === "entity" || !parsed.content.trim()) return []
     return [{ message, content: parsed.content, structured: parsed }]
   })
+
+  // Only show calls that arrive while this chat is open; ones already in the
+  // thread when it hydrates are history and must not move the page.
+  const seenShowIdsRef = useRef<Set<string> | null>(null)
+  const showIds = diffActions
+    .filter((action) => action.kind === "show")
+    .map((action) => action.id)
+    .join(",")
+  useEffect(() => {
+    if (hydrating) return
+    const shows = diffActions.filter((action) => action.kind === "show")
+    if (seenShowIdsRef.current === null) {
+      seenShowIdsRef.current = new Set(shows.map((action) => action.id))
+      return
+    }
+    for (const action of shows) {
+      if (seenShowIdsRef.current.has(action.id)) continue
+      seenShowIdsRef.current.add(action.id)
+      composer?.showInDiff(action.range)
+    }
+    // diffActions is rebuilt every render; showIds is its stable identity.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showIds, hydrating, composer])
 
   const submitComposer = () => {
     send(value, attachments)
@@ -364,7 +433,19 @@ function ChatBody({ reviewed }: { reviewed: boolean }) {
           ref={scrollRef}
           className="flex flex-1 flex-col gap-4 overflow-y-auto p-4"
         >
-          {visible.map(({ message, content, structured }, index) => {
+          {visible.map(({ message, content, structured, action }, index) => {
+            if (action?.kind === "comment") {
+              return (
+                <ProposedCommentCard
+                  key={action.id}
+                  owner={owner}
+                  repo={repo}
+                  number={number}
+                  proposal={action}
+                  onShow={() => composer?.showInDiff(action.range)}
+                />
+              )
+            }
             const isUser = messageType(message) === "human"
             if (!isUser) {
               return (
@@ -497,7 +578,12 @@ function ChatPanel({
         fetch={dashboardFetch}
         threadId={threadId}
       >
-        <ChatBody reviewed={reviewed} />
+        <ChatBody
+          owner={owner}
+          repo={repo}
+          number={number}
+          reviewed={reviewed}
+        />
       </StreamProvider>
     </div>
   )

@@ -71,6 +71,7 @@ import type {
   ReviewSidebarView,
 } from "@/features/reviews/components/ReviewSidebar"
 import type { ChatAttachment } from "@/features/reviews/components/ReviewChat"
+import type { DiffRange } from "@/features/reviews/lib/chatDiffActions"
 import type { DiffStyle } from "@/features/agents/utils/diffUtils"
 import { Markdown } from "@/features/agents/components/chat/Markdown"
 import { DiffWrapToggle } from "@/features/agents/components/DiffWrapToggle"
@@ -1209,6 +1210,79 @@ function ReviewBodyInner({
     requestAnimationFrame(snap)
   }, [openComment])
 
+  const [shownRange, setShownRange] = useState<{
+    file: string
+    range: SelectedLineRange
+  } | null>(null)
+  const pulseTimersRef = useRef<Array<number>>([])
+  useEffect(
+    () => () => pulseTimersRef.current.forEach((t) => window.clearTimeout(t)),
+    []
+  )
+  const showRange = useCallback(
+    (target: DiffRange) => {
+      if (!filesByPathRef.current.has(target.file)) {
+        console.warn("Chat asked to show a file that is not in this diff", {
+          target,
+        })
+        toast.error(`${target.file} is not part of this diff`)
+        return
+      }
+      if (!wide) setSidePanelOpen(false)
+      const side: SelectionSide =
+        target.side === "LEFT" ? "deletions" : "additions"
+      const range: SelectedLineRange = {
+        start: target.startLine,
+        end: target.endLine,
+        side,
+        endSide: side,
+      }
+      setUserSelection(null)
+      setExpandedId(null)
+      setSelectedFile(target.file)
+      setExpandedFiles((prev) => ({ ...prev, [target.file]: true }))
+      scrollHoldStopRef.current?.()
+      const requestId = ++findingScrollRequestRef.current
+      let frames = 0
+      const snap = () => {
+        if (requestId !== findingScrollRequestRef.current) return
+        const scroller = diffScrollElRef.current
+        if (!scroller) return
+        const slices = diffInstanceRefs.current[target.file]
+        const done =
+          !!slices &&
+          scrollSlicesLineToCenter(slices, target.startLine, side, scroller)
+        if (!done) {
+          const fileNode = fileRefs.current[target.file]
+          if (fileNode && frames === 0)
+            scrollElementToCenter(fileNode, scroller)
+          if (frames++ < FINDING_SCROLL_MAX_FRAMES) requestAnimationFrame(snap)
+        }
+      }
+      requestAnimationFrame(snap)
+
+      pulseTimersRef.current.forEach((t) => window.clearTimeout(t))
+      const shown = { file: target.file, range }
+      const steps: Array<[number, typeof shown | null]> = [
+        [0, shown],
+        [450, null],
+        [700, shown],
+        [1150, null],
+        [1400, shown],
+        [3400, null],
+      ]
+      pulseTimersRef.current = steps.map(([delay, value]) =>
+        window.setTimeout(() => setShownRange(value), delay)
+      )
+    },
+    [wide]
+  )
+  useEffect(() => {
+    if (!composer) return
+    composer.registerShowHandler(showRange)
+    return () => composer.registerShowHandler(null)
+  }, [composer, showRange])
+
   const renderFileCard = (
     file: ReviewDiffFile,
     step?: { index: number; entry: ResolvedGroupFile }
@@ -1217,13 +1291,15 @@ function ReviewBodyInner({
     // Keep the range highlighted while its comment composer is open, so the
     // user can see exactly which lines they're commenting on.
     const selectedLines =
-      expandedFinding?.file === file.path && isAnchored(expandedFinding)
-        ? findingSelectedRange(expandedFinding)
-        : commentDraft?.file === file.path
-          ? commentDraft.range
-          : userSelection?.file === file.path
-            ? userSelection.range
-            : null
+      shownRange?.file === file.path
+        ? shownRange.range
+        : expandedFinding?.file === file.path && isAnchored(expandedFinding)
+          ? findingSelectedRange(expandedFinding)
+          : commentDraft?.file === file.path
+            ? commentDraft.range
+            : userSelection?.file === file.path
+              ? userSelection.range
+              : null
     return (
       <FileDiffCard
         key={step ? `${step.index}:${file.path}` : file.path}
@@ -1359,6 +1435,7 @@ function ReviewBodyInner({
                 <PrHeader
                   url={detail.url}
                   title={detail.pr.title}
+                  number={detail.number}
                   state={detail.pr.state}
                   headRef={detail.pr.head_ref}
                   baseRef={detail.pr.base_ref}
@@ -1381,7 +1458,6 @@ function ReviewBodyInner({
                     headSha={detail.pr.head_sha}
                   />
                 )}
-                <AuthorGuidanceCard points={detail.guidance} className="mt-4" />
                 <div
                   className={cn(
                     "mt-4 rounded-lg border border-border p-4",
@@ -1399,6 +1475,7 @@ function ReviewBodyInner({
                     </p>
                   )}
                 </div>
+                <AuthorGuidanceCard points={detail.guidance} className="mt-4" />
 
                 <div className="mt-6">
                   <div className="mb-2 flex items-center justify-between gap-3">
