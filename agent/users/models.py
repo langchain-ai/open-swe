@@ -14,8 +14,19 @@ from datetime import datetime
 from typing import Literal, Self
 from uuid import UUID, uuid7
 
-from sqlalchemy import ForeignKey, Select, Text, delete, func, or_, select, update
-from sqlalchemy.dialects.postgresql import insert
+from sqlalchemy import (
+    ForeignKey,
+    Select,
+    Text,
+    bindparam,
+    delete,
+    func,
+    or_,
+    select,
+    text,
+    update,
+)
+from sqlalchemy.dialects.postgresql import JSONB, insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Mapped, mapped_column, relationship, selectinload
 
@@ -23,6 +34,8 @@ from agent.database import postgres
 from agent.database.orm import NOW, Base
 from agent.input_messages import PersonIdentity, split_person_id
 from agent.users.authorization import UnauthorizedUser, is_authorized_github_login
+from agent.users.preferences import UserPreferences, UserPreferencesPatch
+from agent.utils.json_types import JsonObject
 
 logger = logging.getLogger(__name__)
 
@@ -49,6 +62,9 @@ class User(Base):
     display_name: Mapped[str] = mapped_column(server_default="", default="")
     avatar_url: Mapped[str] = mapped_column(server_default="", default="")
     is_admin: Mapped[bool] = mapped_column(default=False)
+    preferences: Mapped[JsonObject] = mapped_column(
+        JSONB, server_default=text("'{}'::jsonb"), default_factory=dict
+    )
     identities: Mapped[list[UserIdentity]] = relationship(
         default_factory=list,
         cascade="all, delete-orphan",
@@ -197,6 +213,47 @@ class User(Base):
             return None
         user = await cls.for_login("github", login.strip())
         return (user.email or None) if user is not None else None
+
+    @property
+    def typed_preferences(self) -> UserPreferences:
+        return UserPreferences.model_validate(self.preferences)
+
+    @classmethod
+    async def preferences_for_login(cls, login: str) -> UserPreferences:
+        user = await cls.for_login("github", login) if login else None
+        return user.typed_preferences if user is not None else UserPreferences()
+
+    @classmethod
+    async def concierge_mode_for_slack(cls, slack_user_id: str) -> bool:
+        """Whether the person behind this Slack member keeps their bot DM as one conversation."""
+        if not slack_user_id:
+            return False
+        user = await cls.for_identity("slack", slack_user_id)
+        return user is not None and user.typed_preferences.concierge_mode
+
+    @classmethod
+    async def update_preferences(
+        cls, login: str, patch: UserPreferencesPatch
+    ) -> UserPreferences | None:
+        """Merge ``patch`` into the preferences of ``login``; ``None`` when nobody has that login."""
+        user = await cls.for_login("github", login) if login else None
+        if user is None:
+            return None
+        changes = patch.model_dump(exclude_none=True)
+        if not changes:
+            return user.typed_preferences
+        async with postgres.session() as session:
+            stored = await session.scalar(
+                update(cls)
+                .where(cls.id == user.id)
+                .values(
+                    preferences=cls.preferences.op("||")(
+                        bindparam("preferences_patch", changes, type_=JSONB)
+                    )
+                )
+                .returning(cls.preferences)
+            )
+        return UserPreferences.model_validate(stored or {})
 
     @classmethod
     async def known_logins(cls, logins: Iterable[str]) -> frozenset[str]:

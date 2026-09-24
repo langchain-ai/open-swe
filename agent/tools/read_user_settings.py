@@ -13,6 +13,7 @@ from agent.dashboard.profiles import get_profile, normalize_profile_for_response
 from agent.dashboard.user_credentials import get_notion_status
 from agent.dashboard.user_instructions import get_user_instructions
 from agent.dashboard.user_preferences import get_user_preferences
+from agent.users import User
 from agent.utils.thread_participants import resolve_thread_participant_logins
 
 logger = logging.getLogger(__name__)
@@ -23,7 +24,6 @@ _PROFILE_SETTING_KEYS = (
     "default_subagent_model",
     "subagent_reasoning_effort",
     "auto_fix_ci",
-    "dm_session_enabled",
     "draft_prs",
     "review_draft_prs",
     "recent_thread_context_enabled",
@@ -41,15 +41,19 @@ def _safe_profile_settings(
 
 
 async def _settings_for_login(login: str, *, own_settings: bool = False) -> dict[str, Any]:
-    profile, instruction_record, notion = await asyncio.gather(
+    profile, instruction_record, notion, preferences = await asyncio.gather(
         get_profile(login),
         get_user_instructions(login),
         get_notion_status(login),
+        User.preferences_for_login(login),
     )
     instructions = instruction_record.get("instructions") if instruction_record else ""
     return {
         "login": login,
-        "profile": _safe_profile_settings(profile, own_settings=own_settings),
+        "profile": {
+            **_safe_profile_settings(profile, own_settings=own_settings),
+            "concierge_mode": preferences.concierge_mode,
+        },
         "instructions": instructions if isinstance(instructions, str) else "",
         "connections": {
             "notion": notion.get("notion", {"connected": False}),

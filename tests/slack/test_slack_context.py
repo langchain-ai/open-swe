@@ -1480,13 +1480,13 @@ def test_process_slack_mention_creates_thread_first_run_without_trace_reply(
 
 
 @pytest.mark.parametrize(
-    ("thread_ts", "dm_session"),
+    ("thread_ts", "concierge_mode"),
     [("1700000000.000100", False), ("0", True)],
 )
 def test_process_slack_mention_treats_direct_message_as_implicit_mention(
     monkeypatch: pytest.MonkeyPatch,
     thread_ts: str,
-    dm_session: bool,
+    concierge_mode: bool,
 ) -> None:
     captured: dict[str, object] = {}
     _setup_slack_mention_fakes(monkeypatch, captured)
@@ -1524,7 +1524,7 @@ def test_process_slack_mention_treats_direct_message_as_implicit_mention(
                     "text": "continue on the branch",
                     "bot_user_id": "UBOT",
                     "treat_all_messages_as_mentions": True,
-                    "dm_session": dm_session,
+                    "concierge_mode": concierge_mode,
                 }
             ),
             webhook_common.SlackRepoResolution(
@@ -1545,7 +1545,7 @@ def test_process_slack_mention_treats_direct_message_as_implicit_mention(
     # Guidance that holds for the whole DM rides a context block, deduped by
     # content, instead of framing every turn.
     assert not any('sender="system:slack-context"' in text for text in serialized)
-    assert dm_session == any(
+    assert concierge_mode == any(
         '<dynamic-context kind="system" id="system:slack-context"' in text for text in serialized
     )
     # The model wrote its own reply; replaying it would show it twice.
