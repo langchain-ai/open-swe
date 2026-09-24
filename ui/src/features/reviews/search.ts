@@ -33,6 +33,21 @@ export function parsePullRequestSelection(
   return { owner: owner!, repo: repo!, number: Number(rawNumber) }
 }
 
+const pullRequestUrlPattern =
+  /github\.com\/([\w.-]+)\/([\w.-]+)\/pulls?\/(\d+)/i
+const pullRequestRefPattern = /([\w.-]+)\/([\w.-]+)#(\d+)/
+
+/** The pull request a pasted GitHub URL or `owner/repo#number` names, ignoring surrounding text. */
+export function parsePullRequestReference(
+  text: string
+): { owner: string; repo: string; number: number } | null {
+  const match =
+    pullRequestUrlPattern.exec(text) ?? pullRequestRefPattern.exec(text)
+  if (!match) return null
+  const [, owner, repo, rawNumber] = match
+  return { owner: owner!, repo: repo!, number: Number(rawNumber) }
+}
+
 export function validateReviewsSearch(
   search: Record<string, unknown>
 ): ReviewsSearch {

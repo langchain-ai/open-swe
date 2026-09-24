@@ -1,3 +1,5 @@
+import { IoLogoGithub } from "react-icons/io5"
+
 import { DiffStat } from "@/components/DiffStat"
 import { PrStateBadge, toPrState } from "@/components/PrState"
 import { cn } from "@/lib/utils"
@@ -35,13 +37,13 @@ export function PrHeader({
 }: PrHeaderProps) {
   return (
     <div className={className}>
-      <div className={cn(compact && "flex min-w-0 items-center gap-2")}>
+      <div className="flex min-w-0 items-center gap-2">
         <PrStateBadge icon state={toPrState(state)} />
         <h1
           className={cn(
             compact
               ? "min-w-0 flex-1 truncate text-sm font-medium"
-              : "mt-2 text-base font-medium",
+              : "min-w-0 text-base font-medium",
             titleClassName
           )}
         >
@@ -51,6 +53,10 @@ export function PrHeader({
             rel="noreferrer"
             className={cn("hover:underline", compact && "block truncate")}
           >
+            <IoLogoGithub
+              aria-label="GitHub"
+              className="mr-1.5 inline size-4 align-[-2px] text-muted-foreground"
+            />
             {title}
             {number != null && (
               <span className="text-muted-foreground"> #{number}</span>
@@ -93,12 +99,11 @@ export function PrHeader({
             <span className="shrink-0">
               {stats.changedFiles} file{stats.changedFiles === 1 ? "" : "s"}
             </span>
-            <span className="shrink-0">
-              <DiffStat
-                additions={stats.additions}
-                deletions={stats.deletions}
-              />
-            </span>
+            <DiffStat
+              additions={stats.additions}
+              className="shrink-0"
+              deletions={stats.deletions}
+            />
           </>
         )}
       </div>

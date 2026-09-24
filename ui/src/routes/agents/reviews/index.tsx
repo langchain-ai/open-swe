@@ -17,6 +17,8 @@ import { api } from "@/lib/api"
 import { useSession } from "@/lib/session"
 import { cn } from "@/lib/utils"
 import { MyPullRequests } from "@/features/reviews/MyPullRequests"
+import { OpenPullRequestInput } from "@/features/reviews/OpenPullRequestInput"
+import { ReviewBookmarklet } from "@/features/reviews/ReviewBookmarklet"
 import { PullRequestLinks } from "@/features/reviews/PullRequestLinks"
 import { ReviewCounts } from "@/features/reviews/components/ReviewCounts"
 import {
@@ -134,6 +136,11 @@ function ReviewsPage() {
                     ))}
                   </TabsList>
                 </Tabs>
+                <OpenPullRequestInput />
+                <ReviewBookmarklet />
+                <span className="hidden text-xs text-muted-foreground lg:inline">
+                  Drag to your bookmarks bar
+                </span>
                 {!mine && (
                   <Button
                     size="sm"

@@ -49,6 +49,32 @@ export interface ReviewSidebarData {
   // The block currently pinned at the top of the diff (scroll-spy), highlighted
   // in the agenda. null when no block is active or the AI view isn't shown.
   activeGroup: number | null
+  /** Scrolls back to the PR description at the top of the page. */
+  onSelectOverview: () => void
+}
+
+function OverviewRow({
+  active,
+  onSelect,
+}: {
+  active: boolean
+  onSelect: () => void
+}) {
+  return (
+    <button
+      type="button"
+      aria-current={active ? "true" : undefined}
+      onClick={onSelect}
+      className={cn(
+        "flex w-full items-start gap-2 border-l-2 px-3 py-1.5 text-left text-xs leading-5 transition-colors",
+        active
+          ? "border-primary bg-sidebar-row-hover font-medium text-foreground"
+          : "border-transparent text-muted-foreground hover:bg-sidebar-row-hover"
+      )}
+    >
+      Overview
+    </button>
+  )
 }
 
 export function ReviewSidebarPanel({ data }: { data: ReviewSidebarData }) {
@@ -65,6 +91,10 @@ export function ReviewSidebarPanel({ data }: { data: ReviewSidebarData }) {
           <ReviewViewToggle view={data.view} onChange={data.onViewChange} />
         )}
       </div>
+      <OverviewRow
+        active={showAi && data.activeGroup === null}
+        onSelect={data.onSelectOverview}
+      />
       {showAi ? (
         <ReviewGroupList
           groups={data.groups ?? []}
