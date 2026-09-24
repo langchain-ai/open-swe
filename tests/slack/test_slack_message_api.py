@@ -3,11 +3,24 @@
 import json
 import logging
 from unittest.mock import patch
+from urllib.parse import urlparse
 
 import httpx2
 import pytest
 
 from agent.slack import client as slack_utils
+from agent.slack.responses import ephemeral
+from agent.utils import url_safety
+from tests.support.slack_api import SlackAPI
+
+
+@pytest.fixture
+def upload_dns(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        url_safety,
+        "resolve_and_validate",
+        lambda url: (True, "", urlparse(url).hostname, [(None, None, None, None, ("1.1.1.1", 0))]),
+    )
 
 
 def test_parse_slack_thread_url_uses_root_thread_timestamp() -> None:
@@ -176,6 +189,50 @@ async def test_thinking_steps_stream_api_payloads(slack_api):
     ]
 
 
+async def test_message_transports_attach_footer_and_log_delivery(
+    slack_api: SlackAPI, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    monkeypatch.setenv("DASHBOARD_BASE_URL", "https://dashboard.example")
+    caplog.set_level(logging.INFO, logger="agent.slack.client")
+    await slack_utils.post_slack_ephemeral_message("C1", "U1", "Saved")
+    await slack_utils.update_slack_message("C1", "1.0", "Updated", blocks=[])
+    await slack_utils.start_slack_stream("C1", "1.0", [], agent_thread_id="origin")
+    await slack_utils.append_slack_stream("C1", "1.0", [])
+    await slack_utils.stop_slack_stream("C1", "1.0")
+    for _, payload in slack_api.calls[:2]:
+        assert payload["text"].count("|Open in Web>") == 1
+        assert (
+            payload["blocks"][-1]["elements"][0]["text"]
+            == "<https://dashboard.example/agents|Open in Web>"
+        )
+    assert slack_api.calls[2][1]["chunks"][0]["blocks"][0]["elements"][0]["text"] == (
+        "<https://dashboard.example/agents/origin|Open in Web>"
+    )
+    requests: list[httpx2.Request] = []
+
+    def respond(request: httpx2.Request) -> httpx2.Response:
+        requests.append(request)
+        return httpx2.Response(200, text="ok")
+
+    with patch.object(
+        slack_utils.httpx2, "AsyncHTTPTransport", return_value=httpx2.MockTransport(respond)
+    ):
+        assert await slack_utils.replace_slack_command_message(
+            "https://hooks.slack.com/commands/T1/B1/private-token", "Done", agent_thread_id="origin"
+        )
+    payload = json.loads(requests[0].content)
+    assert payload["replace_original"] is True
+    assert payload["text"].count("/agents/origin|Open in Web>") == 1
+    assert (
+        payload["blocks"][-1]["elements"][0]["text"]
+        == "<https://dashboard.example/agents/origin|Open in Web>"
+    )
+    assert ephemeral("Invalid command")["text"].endswith("/agents|Open in Web>")
+    records = [r for r in caplog.records if r.message == "Slack message delivered"]
+    assert len(records) == 7
+    assert "private-token" not in str([r.__dict__ for r in records])
+
+
 async def test_code_channel_stream_is_top_level(slack_api):
     await slack_utils.start_slack_stream("C1", "0", [])
     assert "thread_ts" not in slack_api.calls[0][1]
@@ -266,7 +323,12 @@ async def test_bool_reply_reports_failure(slack_api):
     assert await slack_utils.post_slack_thread_reply("C1", "1.0", "hello") is False
 
 
-async def test_upload_completes_external_upload_without_sending_token(slack_api, monkeypatch):
+@pytest.mark.usefixtures("upload_dns")
+async def test_upload_completes_external_upload_without_sending_token(
+    slack_api, monkeypatch, caplog
+):
+    monkeypatch.setenv("DASHBOARD_BASE_URL", "https://dashboard.example")
+    caplog.set_level(logging.INFO, logger="agent.slack.client")
     slack_api.respond(
         {"ok": True, "upload_url": "https://files.slack.com/upload/v1/test", "file_id": "F1"}
     )
@@ -293,12 +355,20 @@ async def test_upload_completes_external_upload_without_sending_token(slack_api,
     assert slack_api.calls[1][0] == "files.completeUploadExternal"
     completion = slack_api.calls[1][1]
     assert json.loads(completion.pop("files")) == [{"id": "F1", "title": "Plan"}]
-    assert completion == {"channel_id": "C1", "thread_ts": "1.0", "initial_comment": "Preview"}
+    assert completion == {
+        "channel_id": "C1",
+        "thread_ts": "1.0",
+        "initial_comment": "Preview <https://dashboard.example/agents|Open in Web>",
+    }
+    assert any(
+        getattr(r, "slack_method", None) == "files.completeUploadExternal" for r in caplog.records
+    )
     assert len(uploads) == 1
     assert uploads[0].content == b"<html />"
     assert "authorization" not in uploads[0].headers
 
 
+@pytest.mark.usefixtures("upload_dns")
 @pytest.mark.parametrize("redirect", [False, True])
 async def test_upload_blocks_unsafe_urls_and_redirects(slack_api, redirect):
     slack_api.respond(

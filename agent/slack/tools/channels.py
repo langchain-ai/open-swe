@@ -1,14 +1,19 @@
 import logging
 import re
-from typing import Literal, TypedDict
+from dataclasses import replace
+from typing import Annotated, Literal, TypedDict
 
 from fastapi import HTTPException
+from langchain_core.runnables.config import var_child_runnable_config
+from langgraph.prebuilt import InjectedState
 
+from agent.run_config import RunConfig
 from agent.slack.client import (
     convert_mentions_to_slack_format,
     post_slack_top_level_message_with_ts,
 )
 from agent.slack.http import SLACK_REQUEST_ERRORS, SlackClient, slack_error
+from agent.utils.run_usage import summarize_run_usage
 
 logger = logging.getLogger(__name__)
 
@@ -85,7 +90,9 @@ async def slack_list_channels(cursor: str | None = None) -> SlackChannelList | S
 
 
 async def slack_post_message(
-    channel_id: str, message: str
+    channel_id: str,
+    message: str,
+    state: Annotated[dict[str, object] | None, InjectedState] = None,
 ) -> SlackMessageReceipt | SlackChannelError:
     """Post a standalone message to a channel the Open SWE bot belongs to."""
     channel_id = channel_id.strip()
@@ -112,8 +119,17 @@ async def slack_post_message(
             return {"success": False, "error": "invalid_slack_response"}
         seen_cursors.add(cursor)
 
+    cfg = RunConfig.from_config(var_child_runnable_config.get())
+    usage = summarize_run_usage(state)
+    if usage is not None:
+        usage = replace(usage, reasoning_effort=cfg.resolved_agent_effort)
     message_ts, error = await post_slack_top_level_message_with_ts(
-        channel_id, message, unfurl_links=False, unfurl_media=False
+        channel_id,
+        message,
+        unfurl_links=False,
+        unfurl_media=False,
+        agent_thread_id=cfg.thread_id,
+        usage=usage,
     )
     if not message_ts:
         return {"success": False, "error": error or "post_failed"}

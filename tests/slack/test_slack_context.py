@@ -580,8 +580,8 @@ def test_post_slack_thread_reply_adds_web_context_block(monkeypatch: pytest.Monk
             agent_thread_id="mapped-thread",
         )
     )
-    assert captured["text"] == "Done"
-    assert captured["blocks"] is None
+    assert captured["text"] == f"Done {expected_footer}"
+    assert captured["blocks"][-1]["elements"][0]["text"] == expected_footer
 
 
 def test_post_slack_thread_reply_keeps_long_messages_text_only(

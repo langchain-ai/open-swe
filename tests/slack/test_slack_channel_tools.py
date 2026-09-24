@@ -1,4 +1,8 @@
+import logging
+
 import pytest
+from langchain_core.messages import AIMessage
+from langchain_core.runnables.config import var_child_runnable_config
 
 from agent import tools
 from tests.support.slack_api import SlackAPI
@@ -68,6 +72,48 @@ async def test_post_channel_message_preserves_text_and_returns_receipt(
             "unfurl_media": False,
         },
     )
+
+
+async def test_channel_post_has_origin_and_actual_model_without_logging_body(
+    slack_api: SlackAPI, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    monkeypatch.setenv("DASHBOARD_BASE_URL", "https://dashboard.example")
+    slack_api.respond(
+        {"ok": True, "channels": [{"id": "C123", "name": "target", "is_private": False}]}
+    )
+    token = var_child_runnable_config.set(
+        {
+            "configurable": {
+                "thread_id": "origin-thread",
+                "run_id": "run-1",
+                "resolved_agent_model_id": "default-model",
+            }
+        }
+    )
+    caplog.set_level(logging.INFO, logger="agent.slack.client")
+    try:
+        result = await tools.slack_post_message(
+            "C123",
+            "private message body",
+            state={
+                "messages": [
+                    AIMessage(content="", response_metadata={"model_name": "actual-model"})
+                ],
+            },
+        )
+    finally:
+        var_child_runnable_config.reset(token)
+    assert result["success"]
+    payload = slack_api.calls[-1][1]
+    footer = "<https://dashboard.example/agents/origin-thread|Open in Web> • actual-model"
+    assert payload["text"] == f"private message body {footer}"
+    assert payload["blocks"][-1]["elements"][0]["text"] == footer
+    assert "thread_ts" not in payload
+    records = [r for r in caplog.records if r.message == "Slack message delivered"]
+    assert len(records) == 1
+    assert records[0].slack_message_ts == "1.0"
+    assert records[0].agent_thread_id == "origin-thread"
+    assert "private message body" not in str(records[0].__dict__)
 
 
 @pytest.mark.parametrize(
