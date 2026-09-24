@@ -4,6 +4,7 @@ import pytest
 
 from agent.slack import move as slack_move
 from agent.slack import thinking as slack_thinking
+from agent.slack.client import lookup_slack_thread_id
 from agent.source_context import SlackThreadRef
 
 StatusCall = tuple[str, str, str]
@@ -45,11 +46,19 @@ class _Threads:
     def __init__(self, metadata: dict[str, object]) -> None:
         self.metadata = metadata
         self.locks: set[str] = set()
+        self.updates = 0
+        self.reads_fail_after_first_update = False
+        self.max_updates: int | None = None
 
     async def get(self, thread_id: str) -> dict[str, object]:  # noqa: ARG002
+        if self.reads_fail_after_first_update and self.updates:
+            raise RuntimeError("read timed out")
         return {"metadata": dict(self.metadata)}
 
     async def update(self, *, thread_id: str, metadata: dict[str, object]) -> None:  # noqa: ARG002
+        if self.max_updates is not None and self.updates >= self.max_updates:
+            raise RuntimeError("update timed out")
+        self.updates += 1
         self.metadata.update(metadata)
 
     async def create(self, *, thread_id: str, if_exists: str, ttl: int) -> None:  # noqa: ARG002
@@ -178,3 +187,46 @@ async def test_moving_out_of_a_code_channel_releases_it_and_stops_its_steps(
     assert ("C2", "2.0", "Thinking...") in statuses
     assert step.status == "complete"
     assert step.output == "Continued in the new thread"
+
+
+async def test_unverifiable_rebind_reverts_before_releasing_the_destination(
+    statuses: list[StatusCall],  # noqa: ARG001
+) -> None:
+    client = _LangGraph({"channel_id": "C1", "thread_ts": "1.0"})
+    await slack_move.bind_slack_thread_id(client, "C1", "1.0", "thread-1")
+    client.threads.reads_fail_after_first_update = True
+
+    with pytest.raises(slack_move.SlackRebindError) as failure:
+        await slack_move.rebind_slack_thread(
+            client,
+            "thread-1",
+            SlackThreadRef(channel_id="C1", thread_ts="1.0"),
+            SlackThreadRef(channel_id="C0", thread_ts="0"),
+        )
+
+    assert failure.value.moved is False
+    assert client.threads.metadata["source_context"] == {
+        "slack_thread": {"channel_id": "C1", "thread_ts": "1.0"}
+    }
+    assert await lookup_slack_thread_id(client, "C1", "1.0") == "thread-1"
+    assert await lookup_slack_thread_id(client, "C0", "0") is None
+
+
+async def test_unrevertable_rebind_keeps_the_destination(
+    statuses: list[StatusCall],  # noqa: ARG001
+) -> None:
+    client = _LangGraph({"channel_id": "C1", "thread_ts": "1.0"})
+    await slack_move.bind_slack_thread_id(client, "C1", "1.0", "thread-1")
+    client.threads.reads_fail_after_first_update = True
+    client.threads.max_updates = 1
+
+    with pytest.raises(slack_move.SlackRebindError) as failure:
+        await slack_move.rebind_slack_thread(
+            client,
+            "thread-1",
+            SlackThreadRef(channel_id="C1", thread_ts="1.0"),
+            SlackThreadRef(channel_id="C0", thread_ts="0"),
+        )
+
+    assert failure.value.moved is True
+    assert await lookup_slack_thread_id(client, "C0", "0") == "thread-1"

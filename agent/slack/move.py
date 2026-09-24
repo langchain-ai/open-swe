@@ -20,8 +20,11 @@ from agent.slack.code_channels import is_code_channel_session
 from agent.slack.thinking import release_slack_location_status, sync_slack_background_status
 from agent.source_context import SlackThreadRef, SourceContext
 from agent.utils.dashboard_links import dashboard_thread_url
+from agent.utils.json_types import JsonObject, thread_metadata
 
 logger = logging.getLogger(__name__)
+
+_BINDING_KEYS = ("source", "source_context")
 
 
 class SlackRebindError(Exception):
@@ -65,6 +68,19 @@ async def _current_location(client: LangGraphClient, thread_id: str) -> tuple[st
     return SlackThreadRef.model_validate(active).location if active else None
 
 
+async def _restore_binding(client: LangGraphClient, thread_id: str, previous: JsonObject) -> bool:
+    try:
+        await client.threads.update(thread_id=thread_id, metadata=previous)
+    except Exception:
+        logger.warning(
+            "Could not restore the thread's Slack binding after a failed rebind",
+            extra={"agent_thread_id": thread_id},
+            exc_info=True,
+        )
+        return False
+    return True
+
+
 async def _carry_run_mapping(
     client: LangGraphClient, source: SlackThreadRef, destination: SlackThreadRef
 ) -> None:
@@ -104,6 +120,7 @@ async def rebind_slack_thread(
     source_location = (source.channel_id, source.thread_ts)
     target_location = (destination.channel_id, destination.thread_ts)
     bound_here = False
+    previous: JsonObject | None = None
     try:
         async with slack_thread_mutation_lock(
             client, *source_location, thread_id=thread_id
@@ -114,8 +131,10 @@ async def rebind_slack_thread(
             if current == target_location:
                 await bind_slack_thread_id(client, *target_location, thread_id)
             elif current == source_location:
+                metadata = thread_metadata(await client.threads.get(thread_id))
                 await bind_slack_thread_id(client, *target_location, thread_id)
                 bound_here = True
+                previous = {key: metadata[key] for key in _BINDING_KEYS if key in metadata}
                 await client.threads.update(
                     thread_id=thread_id,
                     metadata={
@@ -128,6 +147,9 @@ async def rebind_slack_thread(
             else:
                 raise RuntimeError("Slack thread moved concurrently; retry")
     except Exception as exc:
+        # Revert a possibly-landed write first, or callers discard a location still in use.
+        if previous is not None and not await _restore_binding(client, thread_id, previous):
+            raise SlackRebindError(str(exc), moved=True) from exc
         if bound_here:
             try:
                 await delete_slack_thread_associations(
