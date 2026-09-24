@@ -176,6 +176,7 @@ function CommentBox({ owner, repo, number }: ReviewConversationProps) {
   const mutation = useMutation({
     mutationFn: (body: string) =>
       postReviewConversationComment(owner, repo, number, body),
+    meta: { errorTitle: "Couldn't post the comment", silent: true },
     onSuccess: async () => {
       setDraft("")
       await queryClient.invalidateQueries({

@@ -118,6 +118,7 @@ export function IncidentDetail({ incidentId }: { incidentId: string }) {
         text
       )
     },
+    meta: { errorTitle: "Couldn't send incident request" },
     onSuccess: (_result, variables) => {
       setNotice(variables.action)
       requestIdentity.current = null
@@ -217,14 +218,6 @@ export function IncidentDetail({ incidentId }: { incidentId: string }) {
         <p role="alert" className="mb-5 text-sm text-warning-foreground">
           {detail.error.message}
         </p>
-      )}
-      {command.error && (
-        <div
-          role="alert"
-          className="mb-5 rounded-lg border border-destructive/20 bg-destructive/5 p-3 text-sm text-destructive-foreground"
-        >
-          {command.error.message}
-        </div>
       )}
       {notice && (
         <div

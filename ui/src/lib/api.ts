@@ -6,7 +6,14 @@
  */
 
 import { dashboardApiBase } from "./api-base"
-import { dashboardApiUrl, dashboardForwardedHeaders } from "./dashboard-fetch"
+import {
+  DashboardRequestError,
+  REQUEST_ID_HEADER,
+  dashboardApiUrl,
+  dashboardForwardedHeaders,
+  networkError,
+  newRequestId,
+} from "./dashboard-fetch"
 
 const API_BASE = dashboardApiBase()
 
@@ -47,12 +54,18 @@ export function reviewImageProxyUrl(
   return `${API_BASE}/dashboard/api${path}?url=${encodeURIComponent(src)}`
 }
 
-export class ApiError extends Error {
-  constructor(
-    public readonly status: number,
-    message: string
-  ) {
-    super(message)
+export interface ClientErrorReport {
+  error_id: string
+  title: string
+  error_message: string
+  status: number | null
+  mutation: string | null
+  path: string
+}
+
+export class ApiError extends DashboardRequestError {
+  constructor(status: number, message: string, requestId?: string) {
+    super(status, message, requestId)
     this.name = "ApiError"
   }
 }
@@ -64,14 +77,18 @@ export function isGithubReauthError(error: unknown): boolean {
 }
 
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
+  const requestId = newRequestId()
   const res = await fetch(dashboardApiUrl(path), {
     ...init,
     credentials: "include",
     headers: {
       "Content-Type": "application/json",
+      [REQUEST_ID_HEADER]: requestId,
       ...dashboardForwardedHeaders(),
       ...init.headers,
     },
+  }).catch((cause: unknown) => {
+    throw networkError(cause, requestId)
   })
   if (!res.ok) {
     let message = res.statusText
@@ -85,7 +102,7 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
     } catch {
       /* ignore */
     }
-    throw new ApiError(res.status, message)
+    throw new ApiError(res.status, message, requestId)
   }
   if (res.status === 204) return undefined as T
   return (await res.json()) as T
@@ -1245,6 +1262,12 @@ export const api = {
   deleteReviewStyle: (full_name: string) =>
     request<void>(`/review-styles/${encodeURIComponent(full_name)}`, {
       method: "DELETE",
+    }),
+  reportClientError: (report: ClientErrorReport) =>
+    request<void>("/client-errors", {
+      method: "POST",
+      body: JSON.stringify(report),
+      keepalive: true,
     }),
   getMyInstructions: () => request<UserInstructions>("/me/instructions"),
   saveMyInstructions: (instructions: string) =>

@@ -70,6 +70,7 @@ import type {
 } from "@/features/agents/lib/sidebarPrefs"
 import { useSidebarPrefs } from "@/features/agents/lib/sidebarPrefs"
 import {
+  agentMutationKeys,
   agentThreadKeys,
   usePinAgentThread,
   useResolveAgentThread,
@@ -115,6 +116,8 @@ import {
   sectionOf,
   useHrefLinkOptions,
 } from "@/lib/appLocation"
+import { reportError } from "@/lib/errorReporting"
+import { usePendingVariables } from "@/lib/optimistic"
 
 interface AgentsSidebarProps {
   user: SessionUser | null
@@ -293,6 +296,12 @@ export function AgentsSidebar({
   const refreshLocalThreads = useRefreshLocalThreads()
   const pinThread = usePinAgentThread()
   const resolveThread = useResolveAgentThread()
+  const pendingPins = usePendingVariables<{ threadId: string }>(
+    agentMutationKeys.pin
+  )
+  const pendingResolves = usePendingVariables<{ threadId: string }>(
+    agentMutationKeys.resolve
+  )
   const {
     projects: localRepos,
     addProject: addLocalRepo,
@@ -482,9 +491,12 @@ export function AgentsSidebar({
       void window.openSweDesktop
         ?.updateLocalThread({ threadId: item.id, archived: !isArchived(item) })
         .then(() => refreshLocalThreads(item.id))
+        .catch((error: unknown) =>
+          reportError({ title: "Couldn't archive or restore thread", error })
+        )
       return
     }
-    if (!resolveThread.isPending) {
+    if (!pendingResolves.some((vars) => vars.threadId === item.id)) {
       resolveThread.mutate({
         threadId: item.id,
         resolved: !isArchived(item),
@@ -496,7 +508,7 @@ export function AgentsSidebar({
       toggleLocalPin(item.id)
       return
     }
-    if (!pinThread.isPending) {
+    if (!pendingPins.some((vars) => vars.threadId === item.id)) {
       pinThread.mutate({
         threadId: item.id,
         pinned: !cloudPinnedIds.has(item.id),

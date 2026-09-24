@@ -7,12 +7,14 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 import { agentsApi } from "./api"
 import {
   SIDEBAR_PAGE_SIZE,
+  agentScheduleKeys,
   agentThreadKeys,
   markAgentThreadViewed,
   optimisticThread,
   setAgentThreadStatus,
   useAgentThreadWorkingTreeDiff,
   usePinAgentThread,
+  useRenameAgentThread,
   useResolveAgentThread,
   useSidebarActiveThread,
   useSidebarPinnedThreads,
@@ -20,10 +22,17 @@ import {
   useSidebarRecents,
   useThreadChanges,
   useThreadsPage,
+  useUpdateAgentSchedule,
+  useWorkflowApprovalDecision,
 } from "./queries"
 import type { InfiniteData } from "@tanstack/react-query"
 import type { ThreadTurnDiff, ThreadsPage, ThreadsPageParams } from "./api"
-import type { AgentThread } from "./types"
+import type {
+  AgentSchedule,
+  AgentThread,
+  WorkflowPushApproval,
+  WorkflowPushApprovalsResponse,
+} from "./types"
 
 const params: ThreadsPageParams = {
   limit: 100,
@@ -261,8 +270,14 @@ describe("setAgentThreadStatus", () => {
       pageParams: [0],
     })
     client.setQueryData(agentThreadKeys.sidebarActive(thread.id), thread)
+    const pageKey = agentThreadKeys.page(params)
+    client.setQueryData(pageKey, { ...page, items: [thread] })
 
     setAgentThreadStatus(client, thread.id, "running")
+
+    expect(client.getQueryData<ThreadsPage>(pageKey)?.items[0]).toMatchObject({
+      status: "running",
+    })
 
     expect(
       client.getQueryData<InfiniteData<ThreadsPage>>(key)?.pages[0]?.items[0]
@@ -527,6 +542,158 @@ describe("useResolveAgentThread", () => {
     expect(
       client.getQueryData<AgentThread>(agentThreadKeys.detail(unrelated.id))
     ).toMatchObject({ title: "After" })
+  })
+})
+
+function deferred<T>() {
+  let resolve!: (value: T) => void
+  let reject!: (error: Error) => void
+  const promise = new Promise<T>((done, fail) => {
+    resolve = done
+    reject = fail
+  })
+  return { promise, resolve, reject }
+}
+
+function wrapperFor(client: QueryClient) {
+  return ({ children }: { children: React.ReactNode }) => (
+    <QueryClientProvider client={client}>{children}</QueryClientProvider>
+  )
+}
+
+describe("optimistic thread mutations", () => {
+  const thread = {
+    id: "thread-1",
+    title: "Before",
+    status: "idle",
+    resolved: false,
+  } as AgentThread
+  const pageKey = agentThreadKeys.page({ resolved: false })
+  const pageOf = (items: Array<AgentThread>): ThreadsPage => ({
+    items,
+    limit: 25,
+    offset: 0,
+    hasMore: false,
+  })
+
+  it("renames across detail, pinned, and page caches and rolls back on failure", async () => {
+    const request = deferred<AgentThread>()
+    vi.spyOn(agentsApi, "renameThread").mockReturnValue(request.promise)
+    const client = testClient()
+    client.setQueryData(agentThreadKeys.detail(thread.id), thread)
+    client.setQueryData(agentThreadKeys.pinned, [thread])
+    client.setQueryData(pageKey, pageOf([thread]))
+    const { result } = renderHook(() => useRenameAgentThread(), {
+      wrapper: wrapperFor(client),
+    })
+    const titles = () => [
+      client.getQueryData<AgentThread>(agentThreadKeys.detail(thread.id))
+        ?.title,
+      client.getQueryData<Array<AgentThread>>(agentThreadKeys.pinned)?.[0]
+        ?.title,
+      client.getQueryData<ThreadsPage>(pageKey)?.items[0]?.title,
+    ]
+
+    act(() => result.current.mutate({ threadId: thread.id, title: "After" }))
+    await waitFor(() => expect(titles()).toEqual(["After", "After", "After"]))
+
+    act(() => request.reject(new Error("request failed")))
+    await waitFor(() =>
+      expect(titles()).toEqual(["Before", "Before", "Before"])
+    )
+  })
+
+  it("keeps an optimistic resolution when a pinned fetch was already in flight", async () => {
+    const stalePins = deferred<Array<AgentThread>>()
+    vi.spyOn(agentsApi, "resolveThread").mockReturnValue(
+      new Promise<AgentThread>(() => {})
+    )
+    const client = testClient()
+    client.setQueryData(agentThreadKeys.pinned, [thread])
+    void client.prefetchQuery({
+      queryKey: agentThreadKeys.pinned,
+      queryFn: () => stalePins.promise,
+    })
+    const { result } = renderHook(() => useResolveAgentThread(), {
+      wrapper: wrapperFor(client),
+    })
+
+    act(() => result.current.mutate({ threadId: thread.id, resolved: true }))
+    await waitFor(() =>
+      expect(
+        client.getQueryData<Array<AgentThread>>(agentThreadKeys.pinned)?.[0]
+      ).toMatchObject({ resolved: true })
+    )
+    await act(async () => stalePins.resolve([thread]))
+
+    expect(
+      client.getQueryData<Array<AgentThread>>(agentThreadKeys.pinned)?.[0]
+    ).toMatchObject({ resolved: true })
+  })
+})
+
+describe("useUpdateAgentSchedule", () => {
+  it("flips enabled before the request resolves and rolls back on failure", async () => {
+    const schedule = { id: "schedule-1", enabled: true } as AgentSchedule
+    const other = { id: "schedule-2", enabled: true } as AgentSchedule
+    const request = deferred<AgentSchedule>()
+    vi.spyOn(agentsApi, "updateSchedule").mockReturnValue(request.promise)
+    vi.spyOn(agentsApi, "listSchedules").mockResolvedValue([schedule, other])
+    const client = testClient()
+    client.setQueryData(agentScheduleKeys.all, [schedule, other])
+    const { result } = renderHook(() => useUpdateAgentSchedule(), {
+      wrapper: wrapperFor(client),
+    })
+    const enabled = () =>
+      client
+        .getQueryData<Array<AgentSchedule>>(agentScheduleKeys.all)
+        ?.map((entry) => entry.enabled)
+
+    act(() =>
+      result.current.mutate({
+        scheduleId: schedule.id,
+        body: { enabled: false },
+      })
+    )
+    await waitFor(() => expect(enabled()).toEqual([false, true]))
+
+    act(() => request.reject(new Error("request failed")))
+    await waitFor(() => expect(enabled()).toEqual([true, true]))
+  })
+})
+
+describe("useWorkflowApprovalDecision", () => {
+  it("marks the approval decided at once and restores it on failure", async () => {
+    const approval = {
+      fingerprint: "fingerprint-1",
+      status: "pending",
+    } as WorkflowPushApproval
+    const request = deferred<{ status: string; fingerprint: string }>()
+    vi.spyOn(agentsApi, "approveWorkflowPush").mockReturnValue(request.promise)
+    const client = testClient()
+    const key = agentThreadKeys.workflowApprovals("thread-1")
+    client.setQueryData<WorkflowPushApprovalsResponse>(key, {
+      threadId: "thread-1",
+      approvals: [approval],
+    })
+    const { result } = renderHook(
+      () => useWorkflowApprovalDecision("thread-1"),
+      { wrapper: wrapperFor(client) }
+    )
+    const status = () =>
+      client.getQueryData<WorkflowPushApprovalsResponse>(key)?.approvals[0]
+        ?.status
+
+    act(() =>
+      result.current.mutate({
+        fingerprint: approval.fingerprint,
+        decision: "approve",
+      })
+    )
+    await waitFor(() => expect(status()).toBe("approved"))
+
+    act(() => request.reject(new Error("request failed")))
+    await waitFor(() => expect(status()).toBe("pending"))
   })
 })
 
