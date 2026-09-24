@@ -285,11 +285,13 @@ async def test_a_tool_loaded_as_a_follow_up_arrives_is_added_after_the_follow_up
     thread = _Thread(_notion(), _opus())
 
     await thread.tool_turn(["notion-search"])
+    # The message queue injects a follow-up sent while the tools ran.
     thread.messages.append(HumanMessage("Check the archive too."))
-    await thread.model_call()
+    first = await thread.model_call()
     await thread.tool_turn("notion-search")
     request = await thread.model_call()
 
+    assert _shape(first.messages) == ["human", "ai", "tool", "human", "+notion-search"]
     assert _shape(request.messages) == [
         "human",
         "ai",
