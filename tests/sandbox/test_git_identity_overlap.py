@@ -390,3 +390,35 @@ async def test_stale_image_records_no_identity_wait_once_the_write_has_finished(
     names = [phase.name for phase in startup_trace._PHASES[THREAD_ID]]
     assert "sandbox.update_script" in names
     assert "sandbox.await_git_identity" not in names
+
+
+async def test_command_held_by_the_identity_write_is_timed_in_apm_only(
+    sandbox: _Sandbox, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    events: list[str] = []
+
+    @contextmanager
+    def apm_span(name: str, _metadata: dict[str, object]) -> Iterator[None]:
+        events.append(f"open {name}")
+        yield
+        events.append(f"close {name}")
+
+    monkeypatch.setattr(startup_trace, "_PHASES", {})
+    monkeypatch.setattr(startup_trace, "_apm_span", apm_span)
+    proxy = await asyncio.wait_for(ensure_sandbox_for_thread(THREAD_ID), timeout=_HANG_TIMEOUT)
+    await asyncio.wait_for(sandbox.identity_started.wait(), timeout=_HANG_TIMEOUT)
+    flush_phases(THREAD_ID)  # the run's prepare is done; commands come after it
+    events.clear()
+
+    command = asyncio.create_task(proxy.aexecute("git status"))
+    await asyncio.sleep(0)  # the command reaches the hold
+    sandbox.release_identity.set()
+    await asyncio.wait_for(command, timeout=_HANG_TIMEOUT)
+    await asyncio.wait_for(proxy.aexecute("git log"), timeout=_HANG_TIMEOUT)
+
+    write = "agent.startup.sandbox.git_identity"
+    hold = "agent.startup.sandbox.await_git_identity_command"
+    # Opened while the write was pending and closed once it finished; the second
+    # command had nothing to wait for.
+    assert events == [f"open {hold}", f"close {write}", f"close {hold}"]
+    assert THREAD_ID not in startup_trace._PHASES

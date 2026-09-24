@@ -25,6 +25,7 @@ from langgraph.config import get_config
 from langgraph_sdk import get_client
 
 from agent.sandboxes.providers.registry import create_sandbox
+from agent.utils.startup_trace import aphase
 
 logger = logging.getLogger(__name__)
 
@@ -102,7 +103,10 @@ class SandboxBackendProxy(BaseSandbox):
         self._reconnect = reconnect
 
     def hold_commands_until(self, sandbox_id: str, setup: asyncio.Task[None]) -> None:
-        """Hold commands on ``sandbox_id`` until ``setup`` finishes; file operations don't wait."""
+        """Hold commands on ``sandbox_id`` until ``setup`` (the git identity write) finishes.
+
+        File operations don't wait.
+        """
         self._pending_setup[setup] = sandbox_id
         setup.add_done_callback(lambda done: self._pending_setup.pop(done, None))
 
@@ -197,7 +201,8 @@ class SandboxBackendProxy(BaseSandbox):
         # Resolved first: the startup it may await is what hands over the setup.
         backend = await self._aget_backend()
         while pending := [task for task, box in self._pending_setup.items() if box == backend.id]:
-            await asyncio.wait(pending)
+            async with aphase(self._thread_id, "sandbox.await_git_identity_command", replay=False):
+                await asyncio.wait(pending)
             # The thread can be rebound to another box while a command is held.
             backend = await self._aget_backend()
         return backend
