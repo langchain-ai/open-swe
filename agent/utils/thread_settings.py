@@ -33,6 +33,7 @@ class ThreadSettings(TypedDict, total=False):
     subagent_effort: str | None
     model_routing_enabled: bool
     model_route: ModelRoute
+    requested_model: str
     repo_instructions: str | None
 
 
@@ -80,7 +81,25 @@ async def store_thread_settings(client: Any, thread_id: str, settings: ThreadSet
     ttl_cache.set_cached(_cache_key(thread_id), settings, _CACHE_TTL_SECONDS)
 
 
-async def store_thread_model_route(client: Any, thread_id: str, model_route: ModelRoute) -> None:
+async def store_thread_model_route(
+    client: Any,
+    thread_id: str,
+    model_route: ModelRoute,
+    *,
+    requested_model: str | None = None,
+) -> None:
     """Freeze the thread's routing decision into its stored settings."""
-    settings = await load_thread_settings(client, thread_id)
-    await store_thread_settings(client, thread_id, {**settings, "model_route": model_route})
+    from agent.dashboard.options import SUPPORTED_MODELS
+
+    settings: ThreadSettings = {
+        **await load_thread_settings(client, thread_id),
+        "model_route": model_route,
+    }
+    if requested_model is not None:
+        model = next(model for model in SUPPORTED_MODELS if model["id"] == requested_model)
+        settings.update(
+            requested_model=requested_model,
+            model_id=requested_model,
+            effort=model["default_effort"],
+        )
+    await store_thread_settings(client, thread_id, settings)

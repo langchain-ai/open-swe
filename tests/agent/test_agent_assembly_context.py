@@ -9,15 +9,17 @@ is what makes deepagents auto-wire `FilesystemMiddleware` tool-result eviction a
 
 import asyncio
 from types import SimpleNamespace
-from typing import cast
+from typing import Any, cast
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import langgraph_sdk
 import pytest
 from deepagents.backends.composite import CompositeBackend
 from deepagents.backends.state import StateBackend
+from langchain.agents.middleware.types import ModelRequest
 from langgraph.graph.state import RunnableConfig
 
+from agent.middleware.model_selection import ModelSelectionMiddleware
 from agent.sandboxes.read_only_backend import ReadOnlyBackend
 from agent.sandboxes.state import SANDBOX_BACKENDS, SandboxBackendProxy
 from agent.server import DesktopAgentState, _registered_tool_name, get_agent
@@ -266,19 +268,94 @@ async def test_dashboard_auto_selection_does_not_enable_routing_when_toggles_are
 
 
 @pytest.mark.asyncio
-async def test_dashboard_explicit_model_disables_routing_even_when_enabled() -> None:
+@pytest.mark.parametrize("source", ["dashboard", "slack"])
+async def test_explicit_model_wins_over_persisted_requested_model(source: str) -> None:
     config = _base_config()
     configurable = config.get("configurable")
     assert isinstance(configurable, dict)
-    configurable.update(source="dashboard", model_selection="explicit")
+    configurable.update(
+        source=source,
+        model_selection="explicit",
+        agent_model_id="openai:gpt-5.6-sol",
+        agent_effort="low",
+    )
 
-    agent = await _capture_create_deep_agent_kwargs(config, profile={"model_routing_enabled": True})
+    with patch("agent.server.store_thread_settings", new_callable=AsyncMock) as store_settings:
+        agent = await _capture_create_deep_agent_kwargs(
+            config,
+            profile={"model_routing_enabled": True},
+            thread_settings={
+                "model_id": "anthropic:claude-haiku-4-5",
+                "effort": "none",
+                "model_route": "performance",
+                "requested_model": "anthropic:claude-haiku-4-5",
+                "model_routing_enabled": True,
+            },
+        )
 
     middleware_names = [
         type(middleware).__name__ for middleware in cast(list[object], agent["middleware"])
     ]
     assert "ModelSelectionMiddleware" not in middleware_names
     assert config["metadata"]["model_routing_applied"] is False
+    calls = cast(list[tuple[str, dict[str, object]]], agent["make_model_calls"])
+    assert calls[0][0] == "openai:gpt-5.6-sol"
+    reasoning = calls[0][1]["reasoning"]
+    assert isinstance(reasoning, dict)
+    assert reasoning["effort"] == "low"
+    stored_settings = store_settings.call_args.args[2]
+    assert stored_settings["model_id"] == "openai:gpt-5.6-sol"
+    assert stored_settings["effort"] == "low"
+    assert stored_settings["model_routing_enabled"] is False
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "requested_model",
+    ["anthropic:claude-haiku-4-5", "unknown:model", "anthropic:claude-fable-5-1"],
+)
+async def test_requested_model_is_restored_with_default_effort_or_eligible_route_fallback(
+    requested_model: str,
+) -> None:
+    with patch("agent.server._cached_fable_enabled", new_callable=AsyncMock, return_value=False):
+        agent = await _capture_create_deep_agent_kwargs(
+            thread_settings={
+                "model_id": "openai:gpt-5.6-sol",
+                "effort": "high",
+                "model_route": "performance",
+                "requested_model": requested_model,
+                "model_routing_enabled": True,
+            },
+        )
+    middleware = next(
+        item
+        for item in cast(list[object], agent["middleware"])
+        if isinstance(item, ModelSelectionMiddleware)
+    )
+    state = await middleware.abefore_agent(cast(Any, {"messages": []}), MagicMock())
+    assert state["pre_routed"] is False
+    request = ModelRequest(
+        model=cast(Any, agent["model"]),
+        messages=[],
+        tools=[],
+        state=cast(Any, state),
+    )
+    handler = AsyncMock()
+    selected_model = MagicMock()
+    with patch("agent.server.make_model", return_value=selected_model) as make_model:
+        await middleware.awrap_model_call(request, handler)
+        if requested_model == "anthropic:claude-haiku-4-5":
+            assert handler.call_args.args[0].model is selected_model
+            assert make_model.call_args.args[0] == requested_model
+            assert "effort" not in make_model.call_args.kwargs
+            assert "thinking" not in make_model.call_args.kwargs
+        else:
+            make_model.assert_not_called()
+            route_handler = AsyncMock()
+            await middleware.awrap_model_call(
+                request.override(state=cast(Any, {"model_route": "performance"})), route_handler
+            )
+            assert handler.call_args.args[0].model is route_handler.call_args.args[0].model
 
 
 @pytest.mark.asyncio

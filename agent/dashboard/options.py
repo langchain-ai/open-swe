@@ -125,6 +125,16 @@ NON_DEFAULT_MODEL_IDS: frozenset[str] = frozenset(
     m["id"] for m in SUPPORTED_MODELS if not m.get("can_be_default", True)
 )
 
+
+def available_requested_models(*, fable_enabled: bool) -> dict[str, ModelOption]:
+    """The canonical models eligible for an explicit request in this workspace."""
+    return {
+        model["id"]: model
+        for model in SUPPORTED_MODELS
+        if fable_enabled or model["id"] not in FABLE_MODEL_IDS
+    }
+
+
 DEPRECATED_MODEL_IDS: frozenset[str] = frozenset(
     {
         "anthropic:claude-opus-4-8",

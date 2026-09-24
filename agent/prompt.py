@@ -5,6 +5,7 @@ from importlib import resources
 from pathlib import Path
 
 from agent.config import ENV
+from agent.dashboard.options import available_requested_models
 from agent.github.comments import UNTRUSTED_GITHUB_COMMENT_OPEN_TAG
 from agent.prompts import load_prompt, render_prompt
 from agent.utils.authorship import (
@@ -193,6 +194,7 @@ def construct_system_prompt(
     plan_mode: bool = False,
     plan_url: str | None = None,
     pre_routed_mode: bool = False,
+    fable_enabled: bool = False,
     repo_custom_instructions: str | None = None,
     environment_name: str | None = None,
     environment_instructions: str | None = None,
@@ -246,7 +248,15 @@ def construct_system_prompt(
             else ""
         ),
         pre_routed_mode_section=(
-            load_prompt("system/pre-routed-mode.md") if pre_routed_mode else ""
+            render_prompt(
+                "system/pre-routed-mode.md",
+                available_models="\n".join(
+                    f"- {model['label']}: `{model['id']}`"
+                    for model in available_requested_models(fable_enabled=fable_enabled).values()
+                ),
+            )
+            if pre_routed_mode
+            else ""
         ),
         self_awareness_section=load_prompt("system/self-awareness.md"),
         default_prompt_section=default_prompt_section,
