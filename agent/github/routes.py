@@ -2,7 +2,6 @@
 
 from fastapi import APIRouter, Response
 
-from agent.expedited_review.watch import WATCHED_GITHUB_EVENTS as EXPEDITED_REVIEW_EVENTS
 from agent.github import webhook as service
 from agent.schedules import store as schedules
 from agent.webhooks import common
@@ -82,12 +81,6 @@ async def github_webhook(
                 extra={"repository": repository},
             )
             return {"status": "ignored", "reason": "repository is not assigned to a workspace"}
-
-    # Ahead of the per-event branches below, several of which return early, but
-    # behind both gates they answer to: the repository must belong to a
-    # workspace and be allowlisted.
-    if event_type in EXPEDITED_REVIEW_EVENTS and common.is_repo_allowed(webhook_repo_config):
-        background_tasks.add_task(service.process_expedited_review_event, payload, event_type)
 
     issue = payload.get("issue", {})
     is_pull_request_comment = bool(event_type == "issue_comment" and issue.get("pull_request"))

@@ -26,6 +26,7 @@ export interface PlanData {
   status: string
   html: string
   markdown: string
+  dismissed: boolean
   user: PlanUser
 }
 
@@ -88,6 +89,13 @@ async function req<T>(path: string, init: RequestInit = {}): Promise<T> {
 
 export function getPlan(threadId: string): Promise<PlanData> {
   return req<PlanData>(`/plan/${encodeURIComponent(threadId)}`)
+}
+
+export function dismissPlan(threadId: string): Promise<{ dismissed: boolean }> {
+  return req(`/plan/${encodeURIComponent(threadId)}`, {
+    method: "PUT",
+    body: JSON.stringify({ dismissed: true }),
+  })
 }
 
 export async function getPlanComments(

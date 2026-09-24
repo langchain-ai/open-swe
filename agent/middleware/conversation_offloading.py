@@ -24,8 +24,12 @@ from langgraph.runtime import Runtime
 _manual = ContextVar("manual_offloading", default=False)
 
 
+def _take_latest[T](left: T | None, right: T | None) -> T | None:
+    return right if right is not None else left
+
+
 class OffloadingState(SummarizationState):
-    conversation_offloading: NotRequired[Annotated[dict[str, object], OmitFromOutput]]
+    conversation_offloading: NotRequired[Annotated[dict[str, object], OmitFromOutput, _take_latest]]
 
 
 class ConversationOffloadingMiddleware(SummarizationMiddleware):

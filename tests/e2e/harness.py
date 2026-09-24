@@ -288,6 +288,18 @@ async def control_github_event(request: Request) -> JSONResponse:
     )
 
 
+@app.get("/control/thread-idle")
+async def control_thread_idle(thread_id: str) -> JSONResponse:
+    """How many runs an agent thread has had and whether none is queued or running."""
+    runs = await get_client(url=BASE_URL).runs.list(thread_id, limit=100)
+    return JSONResponse(
+        {
+            "runs": len(runs),
+            "idle": all(run["status"] not in {"pending", "running"} for run in runs),
+        }
+    )
+
+
 @app.post("/control/collaborator-permission")
 async def control_collaborator_permission(request: Request) -> JSONResponse:
     body = await request.json()
@@ -342,12 +354,14 @@ async def control_expedited_approvals(owner: str = OWNER, repo: str = REPO) -> J
                 "detail": approval.detail,
                 "head_sha": approval.head_sha,
                 "pr_number": approval.pull_request.number,
+                "awaiting_ready": approval.awaiting_ready,
                 "approvers": approval.approvers,
                 "votes": [
                     {
                         "github_login": vote.github_login,
                         "decision": vote.decision,
                         "github_review_id": vote.github_review_id,
+                        "github_review_sha": vote.github_review_sha,
                     }
                     for vote in approval.votes
                 ],
@@ -804,11 +818,12 @@ async def mock_github_data() -> JSONResponse:
                 "body": p["body"],
                 "files": p["files"],
                 "reviews": p["reviews"],
+                "issue_comments": p["issue_comments"],
                 "created_at": p["created_at"],
                 "updated_at": p["updated_at"],
                 "url": _pr_html_url(p),
             }
-            for p in fakes.PULLS
+            for p in fakes.pulls()
         ]
     )
 
@@ -954,7 +969,7 @@ async def gh_search_issues(
     open_only = "is:open" in terms
     matches = [
         pull
-        for pull in fakes.PULLS
+        for pull in fakes.pulls()
         if (not author or pull["author"].lower() == author.lower())
         and (not repositories or f"{pull['owner']}/{pull['repo']}".lower() in repositories)
         and (not open_only or (pull["state"] == "open" and not pull["merged"]))
@@ -979,6 +994,11 @@ async def gh_get_branch(owner: str, repo: str, branch: str) -> JSONResponse:  # 
     return JSONResponse({"name": branch, "commit": {"sha": "deadbeef"}})
 
 
+@app.get("/fake-gh/repos/{owner}/{repo}/rules/branches/{branch:path}")
+async def gh_get_branch_rules(owner: str, repo: str, branch: str) -> JSONResponse:  # noqa: ARG001
+    return JSONResponse([])
+
+
 @app.get("/fake-gh/repos/{owner}/{repo}/pulls")
 async def gh_list_pulls(owner: str, repo: str) -> JSONResponse:  # noqa: ARG001
     return JSONResponse([])
@@ -986,6 +1006,7 @@ async def gh_list_pulls(owner: str, repo: str) -> JSONResponse:  # noqa: ARG001
 
 @app.post("/fake-gh/repos/{owner}/{repo}/pulls")
 async def gh_create_pull(owner: str, repo: str, request: Request) -> JSONResponse:
+    """Open a pull request authored by the person whose token opened it, as GitHub does."""
     body = await request.json()
     pr = fakes.create_pull(
         owner,
@@ -995,6 +1016,7 @@ async def gh_create_pull(owner: str, repo: str, request: Request) -> JSONRespons
         title=body.get("title", ""),
         body=body.get("body", ""),
         draft=bool(body.get("draft", True)),
+        author=_token_login(request) or "open-swe[bot]",
     )
     return JSONResponse(_gh_pr_json(pr), status_code=201)
 
@@ -1056,6 +1078,19 @@ async def gh_submit_pull_review(
     if "_error" in review:
         return JSONResponse({"message": review["_error"]}, status_code=422)
     return JSONResponse(review, status_code=200)
+
+
+@app.post("/fake-gh/repos/{owner}/{repo}/issues/{number}/comments")
+async def gh_create_issue_comment(
+    owner: str, repo: str, number: int, request: Request
+) -> JSONResponse:
+    pr = fakes.find_pull(number, owner, repo)
+    if pr is None:
+        return JSONResponse({"message": "Not Found"}, status_code=404)
+    body = await request.json()
+    comment = {"id": len(pr["issue_comments"]) + 1, "body": str(body.get("body") or "")}
+    pr["issue_comments"].append(comment)
+    return JSONResponse(comment, status_code=201)
 
 
 @app.put("/fake-gh/repos/{owner}/{repo}/pulls/{number}/merge")
@@ -1396,6 +1431,7 @@ async def slack_get_permalink(channel: str = "", message_ts: str = "") -> JSONRe
 # diff image silently fails to upload and the card degrades to its text
 # fallback, so the suite would test a rendering nobody sees.
 SLACK_FILES: dict[str, bytes] = {}
+SLACK_FILES_COMPLETED: set[str] = set()
 
 
 @app.api_route("/fake-slack/files.getUploadURLExternal", methods=["GET", "POST"])
@@ -1413,16 +1449,29 @@ async def slack_upload_bytes(file_id: str, request: Request) -> JSONResponse:
 
 @app.post("/fake-slack/files.completeUploadExternal")
 async def slack_complete_upload(request: Request) -> JSONResponse:
-    # The SDK form-encodes this one, with ``files`` as a JSON string.
-    try:
-        body: object = await request.json()
-    except ValueError:
-        body = dict(await request.form())
-    raw: object = body.get("files") if isinstance(body, dict) else None
+    # The SDK sends this one as query parameters, with ``files`` as a JSON string.
+    raw: object = request.query_params.get("files")
+    if raw is None:
+        try:
+            body: object = await request.json()
+        except ValueError:
+            body = dict(await request.form())
+        raw = body.get("files") if isinstance(body, dict) else None
     if isinstance(raw, str):
         raw = json.loads(raw)
     items = [item for item in raw if isinstance(item, dict)] if isinstance(raw, list) else []
+    SLACK_FILES_COMPLETED.update(str(item.get("id")) for item in items)
     return _ok({"files": [{"id": item.get("id"), "title": item.get("title")} for item in items]})
+
+
+@app.api_route("/fake-slack/files.info", methods=["GET", "POST"])
+async def slack_file_info(request: Request) -> JSONResponse:
+    """Report a completed upload as processed, which is when Slack lets a block cite it."""
+    file_id = request.query_params.get("file") or str((await request.form()).get("file") or "")
+    if file_id not in SLACK_FILES:
+        return JSONResponse({"ok": False, "error": "file_not_found"})
+    ready = file_id in SLACK_FILES_COMPLETED and bool(SLACK_FILES[file_id])
+    return _ok({"file": {"id": file_id, "mimetype": "image/png" if ready else ""}})
 
 
 @app.get("/control/slack-files")

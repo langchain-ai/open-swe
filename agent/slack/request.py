@@ -24,6 +24,8 @@ class SlackRequest(BaseModel):
     channel_context: SlackChannelContext | None = None
     team_id: str = ""
     reply_thread_ts: str = ""
+    # Another Slack thread whose whole transcript becomes this run's context.
+    context_thread_ts: str = ""
     treat_all_messages_as_mentions: bool = False
     message_update: bool = False
     code_channel: bool = False

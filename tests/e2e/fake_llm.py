@@ -69,7 +69,6 @@ EOF
 # The expedited-review flow needs a change small enough to qualify, so it
 # touches one line of one file.
 EXPEDITE_MARKER = "E2E_EXPEDITE"
-EXPEDITE_NOW_MARKER = "E2E_EXPEDITE_NOW"
 EXPEDITE_PR_TITLE = "Fix the greeting punctuation"
 
 # The seeded remote holds only a README, so the first turn writes the file. Two
@@ -92,15 +91,18 @@ git push origin {FEATURE_BRANCH}
 echo PUSHED_OK
 """.strip()
 
+# Only a test file changes, and it stays smaller than the source change so the
+# card never drew it: the votes cast on the first revision still count.
 _EXPEDITE_FIX_SCRIPT = f"""
 set -e
 cd repo
-cat > {FEATURE_FILE} <<'EOF'
-def greet(name):
-    return "Hello!"
+mkdir -p tests
+cat > tests/test_greet.py <<'EOF'
+from greet import greet
+assert greet("x") == "Hello!!"
 EOF
 git add -A
-git commit -m "Restore the expected greeting"
+git commit -m "Cover the greeting"
 git push origin {FEATURE_BRANCH}
 echo FIXED_OK
 """.strip()
@@ -426,11 +428,27 @@ def _expedite_request_step(messages: list[BaseMessage]) -> AIMessage:
     )
 
 
+def _expedite_merge_step(messages: list[BaseMessage]) -> AIMessage:
+    """Try to merge on the card's recorded approvals."""
+    url = _pr_url_from_messages(messages) or ""
+    return AIMessage(
+        content="Merging on the expedited review approvals.",
+        tool_calls=[
+            {
+                "name": "merge_expedited_pr",
+                "args": {"pr_url": url},
+                "id": f"call-expedite-merge-{len(messages)}",
+            }
+        ],
+        response_metadata={"model_name": "fake-scripted-model"},
+    )
+
+
 def _expedite_opened_reply_step(messages: list[BaseMessage]) -> AIMessage:
     url = _pr_url_from_messages(messages) or "(PR url unavailable)"
     text = (
         f"Opened <{url}|{EXPEDITE_PR_TITLE}> and I'm watching its checks. "
-        "I'll ask for an expedited review once they are green."
+        "I'll merge on the approvals once they are green."
     )
     return AIMessage(
         content="Reporting the pull request in the Slack thread.",
@@ -445,30 +463,11 @@ def _expedite_opened_reply_step(messages: list[BaseMessage]) -> AIMessage:
     )
 
 
-def _expedite_reply_step(messages: list[BaseMessage]) -> AIMessage:
-    url = _pr_url_from_messages(messages) or "(PR url unavailable)"
-    text = (
-        f"Asked for an expedited review of <{url}|{EXPEDITE_PR_TITLE}>. "
-        "Two approvals in this thread will merge it."
-    )
-    return AIMessage(
-        content="Replying in the Slack thread.",
-        tool_calls=[
-            {
-                "name": "slack_reply",
-                "args": {"response_type": "final", "message": text},
-                "id": f"call-expedite-reply-{len(messages)}",
-            }
-        ],
-        response_metadata={"model_name": "fake-scripted-model"},
-    )
-
-
 def _expedite_fixed_reply_step(messages: list[BaseMessage]) -> AIMessage:
     url = _pr_url_from_messages(messages) or "(PR url unavailable)"
     text = (
-        f"Fixed the failing check on <{url}|{EXPEDITE_PR_TITLE}> and pushed. "
-        "Waiting for CI to go green before asking for approvals again."
+        f"Fixed the failing check on <{url}|{EXPEDITE_PR_TITLE}> with a test-only commit "
+        "and pushed. The approvals still apply."
     )
     return AIMessage(
         content="Reporting the fix in the Slack thread.",
@@ -972,9 +971,8 @@ SCRIPT_LIBRARY: dict[str, tuple[StepSpec, ...]] = {
         ),
         _dynamic_step(_reply_step),
     ),
-    # Expedited review, turn 1: implement a one-line change, open a ready PR,
-    # start the durable CI watch, and nominate it for approval in Slack. The
-    # card cannot appear yet — checks have not reported.
+    # Expedited review, turn 1: implement a one-line change, open the PR, start
+    # the durable CI watch, and post the approval card before checks report.
     "expedite": (
         _tool_step(
             "Acknowledging the request.",
@@ -1004,10 +1002,10 @@ SCRIPT_LIBRARY: dict[str, tuple[StepSpec, ...]] = {
             "call-expedite-pr",
         ),
         _dynamic_step(_expedite_watch_step),
+        _dynamic_step(_expedite_request_step),
         _dynamic_step(_expedite_opened_reply_step),
     ),
-    # Turn 2: a failing check woke the watch. Fix the code and push; the next
-    # green webhook is what lets the pending approval post its card.
+    # A failing check woke the watch: push a test-only fix.
     "expedite_fix": (
         _tool_step(
             "Fixing the failing check and pushing.",
@@ -1015,17 +1013,10 @@ SCRIPT_LIBRARY: dict[str, tuple[StepSpec, ...]] = {
             {"command": _EXPEDITE_FIX_SCRIPT},
             "call-expedite-fix",
         ),
-        # Ask in the same turn. The check is still red, so the request has to
-        # park until CI reports green rather than posting a card now.
-        _dynamic_step(_expedite_request_step),
         _dynamic_step(_expedite_fixed_reply_step),
     ),
-    # Turn 3: checks are green (or an earlier round was withdrawn). Ask for the
-    # expedited review now that the pull request is clean.
-    "expedite_retry": (
-        _dynamic_step(_expedite_request_step),
-        _dynamic_step(_expedite_reply_step),
-    ),
+    # Someone approved the card, or the watch reported checks green.
+    "expedite_merge": (_dynamic_step(_expedite_merge_step),),
     "multi_pr": (
         _tool_step(
             "Acknowledging the cross-repository request before starting work.",
@@ -1109,10 +1100,10 @@ SCRIPT_LIBRARY: dict[str, tuple[StepSpec, ...]] = {
             "call-breakout",
         ),
         _tool_step(
-            "Confirming the breakout thread was started.",
-            "slack_reply",
-            {"message": "I started a separate Open SWE thread for that aspect."},
-            "call-breakout-reply",
+            "The breakout thread is the reply.",
+            "slack_no_reply_needed",
+            {"reason": "Breakout thread started; nothing to post in the original thread."},
+            "call-breakout-no-reply",
         ),
     ),
     "move": (
@@ -1242,12 +1233,11 @@ SCRIPT_RULES: tuple[ScriptRule, ...] = (
         lambda ctx: EXPEDITE_MARKER in ctx.first_text and "/baby-sit --continue" in ctx.last_text,
     ),
     ScriptRule(
-        "expedite_retry",
+        "expedite_merge",
         lambda ctx: (
             EXPEDITE_MARKER in ctx.first_text
             and (
-                EXPEDITE_NOW_MARKER in ctx.last_text
-                or "was withdrawn before it could merge" in ctx.last_text
+                "finished without a failure" in ctx.last_text or "review card for" in ctx.last_text
             )
         ),
     ),

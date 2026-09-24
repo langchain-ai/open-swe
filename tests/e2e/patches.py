@@ -86,7 +86,7 @@ def apply() -> None:
     # import time. Resolving an installation would reach api.github.com, and
     # without it a durable watch has no token and silently does nothing.
     from agent import baby_sit
-    from agent.expedited_review import voting, watch
+    from agent.expedited_review import lifecycle, merge, voting
 
     # Same shadowing caveat as ``opr`` above: the tools package re-exports the
     # functions, so reach the modules by name.
@@ -94,7 +94,7 @@ def apply() -> None:
     expedite_tool = importlib.import_module("agent.tools.expedite_pr_approval")
     thread_tools = importlib.import_module("agent.tools.threads")
 
-    for module in (watch, voting, manage_baby_sit, baby_sit):
+    for module in (lifecycle, merge, voting, manage_baby_sit, baby_sit):
         for name, stub in (
             ("get_github_app_installation_id_for_repo", _dummy_install_id),
             ("get_github_app_installation_token", _dummy_install_token),
@@ -112,6 +112,7 @@ def apply() -> None:
     # rather than weakening the host check that production relies on.
     from agent.slack import client as slack_client
     from agent.slack.client import GitHubPrRef
+    from agent.slack.tools import request_pr_review
 
     _real_parse = slack_client.parse_github_pr_url
     _mock_pr_path = re.compile(r"^/mock/github/([^/]+)/([^/]+)/pull/(\d+)/?$")
@@ -163,7 +164,15 @@ def apply() -> None:
     url_safety.resolve_and_validate = _resolve_and_validate
 
     slack_client.parse_github_pr_url = _parse_pr_url
-    for module in (manage_baby_sit, expedite_tool, thread_tools, opr):
+    merge_tool = importlib.import_module("agent.tools.merge_expedited_pr")
+    for module in (
+        manage_baby_sit,
+        expedite_tool,
+        merge_tool,
+        thread_tools,
+        opr,
+        request_pr_review,
+    ):
         if "parse_github_pr_url" in module.__dict__:
             module.__dict__["parse_github_pr_url"] = _parse_pr_url
 
@@ -202,6 +211,7 @@ def apply() -> None:
         thread_access,
         webhook_common,
         voting,
+        merge,
         repo_access,
         github_repos,
         review_routes,
@@ -224,14 +234,14 @@ def apply() -> None:
 
     # Every other module that captured the REST base at import time: PR and
     # check reads (``ci``), the check-run writes, and the expedited-review
-    # eligibility, readiness and voting calls.
+    # eligibility, readiness and merge calls.
     from agent.expedited_review import eligibility, readiness
     from agent.github import checks as github_checks
     from agent.github import ci as github_ci
 
     github_ci.__dict__["_GITHUB_API_BASE"] = FAKE_GITHUB_API
     github_checks.__dict__["_GITHUB_API_BASE"] = FAKE_GITHUB_API
-    for module in (eligibility, readiness, voting):
+    for module in (eligibility, readiness, merge):
         module.__dict__["GITHUB_API_BASE"] = FAKE_GITHUB_API
 
     # Snapshot service: another external boundary. The E2E runs the local sandbox

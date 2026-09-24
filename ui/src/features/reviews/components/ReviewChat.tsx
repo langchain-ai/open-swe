@@ -515,7 +515,7 @@ export function ReviewChat({
   if (meta.isError || !meta.data.available) {
     return (
       <div className="flex flex-1 items-center justify-center p-6 text-center text-xs text-muted-foreground">
-        Chat becomes available once the review has finished running.
+        Chat is unavailable right now. Reload the page to try again.
       </div>
     )
   }

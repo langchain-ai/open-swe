@@ -16,11 +16,15 @@ from agent.middleware.trace import OpenSWEMiddleware
 from agent.utils.startup_trace import aphase, flush_phases
 
 
+def _take_latest[T](left: T | None, right: T | None) -> T | None:
+    return right if right is not None else left
+
+
 class PrepareRunState(AgentState):
-    run_prepared: NotRequired[Annotated[bool, OmitFromOutput]]
-    run_prepared_for: NotRequired[Annotated[str, OmitFromOutput]]
-    work_dir: NotRequired[Annotated[str | None, OmitFromOutput]]
-    rendered_system_prompt: NotRequired[Annotated[str | None, OmitFromOutput]]
+    run_prepared: NotRequired[Annotated[bool, OmitFromOutput, _take_latest]]
+    run_prepared_for: NotRequired[Annotated[str, OmitFromOutput, _take_latest]]
+    work_dir: NotRequired[Annotated[str | None, OmitFromOutput, _take_latest]]
+    rendered_system_prompt: NotRequired[Annotated[str | None, OmitFromOutput, _take_latest]]
 
 
 def _latest_message_fingerprint(state: Mapping[str, Any]) -> str | None:

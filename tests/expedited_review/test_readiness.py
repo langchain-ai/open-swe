@@ -30,6 +30,12 @@ def test_branch_protection_waiting_on_approvals_is_not_a_blocker() -> None:
     assert readiness_blockers(_snapshot(mergeable_state="blocked")) == []
 
 
+def test_a_required_check_that_has_not_reported_blocks_even_when_the_rest_is_green() -> None:
+    blockers = readiness_blockers(_snapshot(unreported_required_checks=["e2e"]))
+
+    assert blockers == ["required checks have not reported yet: e2e"]
+
+
 def test_a_failing_check_github_does_not_require_is_named_but_does_not_block() -> None:
     advisory = _snapshot(
         check_state="failure",
@@ -85,14 +91,9 @@ def test_open_swe_review_only_required_where_enabled() -> None:
     )
 
 
-def test_closed_or_conflicting_pull_requests_are_terminal() -> None:
-    closed = _snapshot(state="closed")
-    conflicting = _snapshot(mergeable=False, mergeable_state="dirty")
+def test_mergeability_still_computing_is_not_ready() -> None:
     computing = _snapshot(mergeable=None, mergeable_state="unknown")
 
-    assert Readiness(closed, readiness_blockers(closed)).terminal
-    assert Readiness(conflicting, readiness_blockers(conflicting)).terminal
-    assert not Readiness(computing, readiness_blockers(computing)).terminal
     assert not Readiness(computing, readiness_blockers(computing)).ready
 
 
