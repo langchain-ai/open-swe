@@ -537,7 +537,7 @@ async def slack_webhook(
             )
             breakout_instruction = (
                 None
-                if in_code_channel or in_dm or allowed_bot is not None
+                if in_code_channel or in_dm_channel or allowed_bot is not None
                 else parse_breakout_command(text, bot_user_id)
             )
             if breakout_instruction is not None:
