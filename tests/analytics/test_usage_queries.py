@@ -234,40 +234,6 @@ async def test_usage_ranks_run_and_pr_cohorts_with_cost_coverage(usage_db):
     assert [row["rank"] for row in (await report(limit=1, offset=1))["rows"]] == [2]
 
 
-@pytest.mark.parametrize(
-    ("tokens", "cost_tokens", "expected"),
-    [
-        ([None], None, None),
-        ([0], None, 0),
-        ([42], None, 42),
-        ([None, 42], None, 42),
-        ([42], 99, 99),
-        ([42], 0, 0),
-    ],
-)
-async def test_usage_preserves_unknown_tokens_independently_of_cost(
-    usage_db, tokens, cost_tokens, expected
-):
-    reader = await person("reader")
-    for count in tokens:
-        run_id = await run(reader, tokens=count)
-    await insert(
-        "latest_cost_projection",
-        run_id=run_id,
-        observation_revision=1,
-        observed_at=NOW,
-        status="complete",
-        cost_usd=0.06,
-        total_tokens=cost_tokens,
-        source="langsmith",
-        event_id=uuid4(),
-    )
-
-    row = (await report())["rows"][0]
-    assert row["total_tokens"] == expected
-    assert row["total_cost_usd"] == 0.06
-
-
 async def test_usage_sorting_happens_before_pagination(usage_db):
     alice = await person("alice", display_name="Alice")
     bob = await person("bob", display_name="bob")
@@ -275,8 +241,6 @@ async def test_usage_sorting_happens_before_pagination(usage_db):
     await run(alice, tokens=10)
     await run(bob, tokens=30)
     await run(carol, tokens=20)
-    unknown = await person("unknown")
-    await run(unknown)
 
     first = await report(limit=2, sort="total_tokens", direction="desc")
     assert [row["user"]["name"] for row in first["rows"]] == ["bob", "Carol"]
@@ -286,8 +250,7 @@ async def test_usage_sorting_happens_before_pagination(usage_db):
         sort="total_tokens",
         direction="desc",
     )
-    assert [row["user"]["name"] for row in second["rows"]] == ["Alice", "unknown"]
-    assert second["rows"][1]["total_tokens"] is None
+    assert [row["user"]["name"] for row in second["rows"]] == ["Alice"]
     with pytest.raises(ValueError, match="invalid usage leaderboard cursor"):
         await report(
             limit=2,

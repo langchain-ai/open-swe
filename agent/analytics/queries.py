@@ -368,7 +368,7 @@ _USAGE_SQL = """
 WITH runs AS (
     SELECT COALESCE(a.person_id, r.user_id) AS person_id, r.configured_model_id,
         r.configured_effort, r.thread_id,
-        COALESCE(c.total_tokens, r.total_tokens) AS total_tokens,
+        COALESCE(c.total_tokens, r.total_tokens, 0) AS total_tokens,
         c.cost_usd, c.status AS cost_status,
         CASE WHEN r.terminal_at >= r.started_at
             THEN EXTRACT(EPOCH FROM r.terminal_at - r.started_at) END AS duration
@@ -451,7 +451,7 @@ WITH runs AS (
         CASE WHEN COALESCE(r.threads, 0) > 0
             THEN r.invocations::numeric / r.threads ELSE 0 END
             AS avg_invocations_per_thread,
-        r.total_tokens,
+        COALESCE(r.total_tokens, 0) AS total_tokens,
         COALESCE(r.total_cost_usd, 0) AS total_cost_usd,
         COALESCE(r.invocations_without_cost, 0) AS invocations_without_cost,
         COALESCE(r.invocations_with_partial_cost, 0) AS invocations_with_partial_cost,
@@ -528,7 +528,7 @@ WITH runs AS (
         CASE WHEN :direction = 'asc' THEN text_key END ASC,
         CASE WHEN :direction = 'desc' THEN text_key END DESC,
         CASE WHEN :direction = 'asc' THEN numeric_key END ASC,
-        CASE WHEN :direction = 'desc' THEN numeric_key END DESC NULLS LAST,
+        CASE WHEN :direction = 'desc' THEN numeric_key END DESC,
         rank
     ) AS position FROM keyed
 ), selected AS (

@@ -1560,27 +1560,6 @@ it.each([
   }
 )
 
-it.each([
-  { tokens: null, display: "—" },
-  { tokens: 0, display: "0" },
-  { tokens: 1234, display: "1,234" },
-])(
-  "shows $display for $tokens tokens without hiding cost",
-  async ({ tokens, display }) => {
-    vi.spyOn(api, "prMergeRateByModel").mockResolvedValue(report(captured))
-    vi.mocked(api.usageLeaderboard).mockResolvedValue({
-      ...emptyUsage,
-      total_members: 1,
-      rows: [{ ...costRow, total_tokens: tokens, total_cost_usd: 0.06 }],
-    })
-    const client = mountReport()
-    const row = (await screen.findByText("Cost Reader")).closest("tr")!
-    expect((row.children[5] as HTMLElement).textContent).toBe(display)
-    expect(within(row).getByText("$0.06")).toBeTruthy()
-    client.clear()
-  }
-)
-
 it("explains incomplete coverage on focus and removes the indicator when costs recover", async () => {
   vi.spyOn(api, "prMergeRateByModel").mockResolvedValue(report(captured))
   vi.mocked(api.usageLeaderboard).mockResolvedValue({

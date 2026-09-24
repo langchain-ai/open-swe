@@ -111,8 +111,9 @@ async def test_queued_completion_and_cost_are_accounted_before_delivery(
         assert cost["cost_usd"] == Decimal("1.25")
 
 
+@pytest.mark.parametrize("immutable_person_key", [None, 123])
 async def test_review_costs_are_separate_idempotent_and_report_missing_coverage(
-    analytics_db, usage_storage, monkeypatch
+    analytics_db, usage_storage, monkeypatch, immutable_person_key: int | None
 ):
     _, transaction = analytics_db
     await _start()
@@ -123,7 +124,7 @@ async def test_review_costs_are_separate_idempotent_and_report_missing_coverage(
             thread_key="review-thread",
             model="review-model",
             source="github",
-            immutable_person_key=123,
+            immutable_person_key=immutable_person_key,
             repository_key="org/repo",
             run_kind="reviewer",
             occurred_at=DAY + timedelta(days=day),
@@ -374,4 +375,4 @@ async def test_auth_failure_is_terminal_and_cost_coverage_uses_trace_evidence(
     assert row["invocations"] == 1
     assert row["invocations_without_cost"] == int(trace_cost is None)
     assert row["total_cost_usd"] == (trace_cost or 0.0)
-    assert row["total_tokens"] == (prior_tokens or None)
+    assert row["total_tokens"] == prior_tokens

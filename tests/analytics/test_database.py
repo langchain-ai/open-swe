@@ -200,20 +200,44 @@ async def test_reporting_activation_is_shared_and_preserved_across_restarts(depl
     assert restarted["collection_started_at"] is None
 
 
-async def test_reviewer_cost_rollout_preserves_earlier_reporting_cutover(deployment_db):
+async def test_reviewer_cost_rollout_preserves_existing_agent_usage(deployment_db: None) -> None:
     migrations = postgres.load_migrations()
     original_cutover = datetime(2026, 9, 1, tzinfo=UTC)
+    run_id = uuid4()
     async with postgres.engine().begin() as conn:
         await conn.execute(text("CREATE SCHEMA open_swe"))
-        await conn.run_sync(postgres.upgrade, migrations, "open_swe", "d742a3ec9c1b")
+        await conn.run_sync(postgres.upgrade, migrations, "open_swe", "aec1985f873e")
+        workspace = await conn.scalar(text("SELECT workspace_id FROM deployment_metadata"))
         await conn.execute(
             text("UPDATE deployment_metadata SET reporting_cutover_at = :cutover"),
             {"cutover": original_cutover},
         )
+        await conn.execute(
+            text(
+                "INSERT INTO run_projection (workspace_id, run_id, total_tokens) "
+                "VALUES (:workspace, :run, 150)"
+            ),
+            {"workspace": workspace, "run": run_id},
+        )
+        await conn.execute(
+            text(
+                "INSERT INTO latest_cost_projection "
+                "(workspace_id, run_id, observation_revision, observed_at, status, cost_usd, "
+                "source, event_id) "
+                "VALUES (:workspace, :run, 1, :observed, 'complete', 1.25, 'langsmith', :event)"
+            ),
+            {"workspace": workspace, "run": run_id, "observed": original_cutover, "event": uuid4()},
+        )
     await initialize_database()
+    assert database.workspace_id() == workspace
     async with postgres.connection() as conn:
         metadata = await database.reporting_metadata(conn)
         assert metadata["reviewer_cost_cutover_at"] is None
+        run = (await conn.execute(text("SELECT * FROM run_projection"))).mappings().one()
+        assert run["run_id"] == run_id
+        assert run["run_kind"] == "agent"
+        assert run["total_tokens"] == 150
+        assert await conn.scalar(text("SELECT cost_usd FROM latest_cost_projection")) == 1.25
         before = await conn.scalar(text("SELECT clock_timestamp()"))
     await asyncio.gather(*(database.activate_reporting() for _ in range(4)))
     async with postgres.connection() as conn:
