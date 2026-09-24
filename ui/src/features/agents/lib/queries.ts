@@ -390,6 +390,15 @@ export const agentScheduleKeys = {
   all: ["agent-schedules"] as const,
 }
 
+export const agentMutationKeys = {
+  pin: ["agent-threads", "pin"] as const,
+  resolve: ["agent-threads", "resolve"] as const,
+  updateSchedule: ["agent-schedules", "update"] as const,
+  workflowDecision: (threadId: string) =>
+    ["workflow-approvals", threadId, "decision"] as const,
+}
+const pinMutationKey = agentMutationKeys.pin
+
 export const agentSkillKeys = {
   personal: ["agent-skills", "personal"] as const,
   organization: ["agent-skills", "organization"] as const,
@@ -829,6 +838,7 @@ export function useWorkflowApprovals(
 export function useWorkflowApprovalDecision(threadId: string) {
   const queryClient = useQueryClient()
   return useMutation({
+    mutationKey: agentMutationKeys.workflowDecision(threadId),
     mutationFn: (vars: {
       fingerprint: string
       decision: "approve" | "reject"
@@ -891,6 +901,7 @@ export function useUpdateAgentSchedule() {
   const queryClient = useQueryClient()
 
   return useMutation({
+    mutationKey: agentMutationKeys.updateSchedule,
     mutationFn: (vars: { scheduleId: string; body: ScheduleUpdateRequest }) =>
       agentsApi.updateSchedule(vars.scheduleId, vars.body),
     meta: { errorTitle: "Couldn't update automation" },
@@ -1104,8 +1115,6 @@ export function storeAgentThread(
   queryClient.setQueryData(agentThreadKeys.sidebarActive(thread.id), thread)
 }
 
-const pinMutationKey = ["agent-threads", "pin"] as const
-
 export function usePinAgentThread() {
   const queryClient = useQueryClient()
 
@@ -1153,6 +1162,7 @@ export function useResolveAgentThread() {
   const queryClient = useQueryClient()
 
   return useMutation({
+    mutationKey: agentMutationKeys.resolve,
     mutationFn: (vars: { threadId: string; resolved: boolean }) =>
       agentsApi.resolveThread(vars.threadId, vars.resolved),
     meta: { errorTitle: "Couldn't archive or restore thread" },

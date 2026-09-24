@@ -4,7 +4,7 @@ import { SettingsSection } from "@/components/AppShell"
 import { Switch } from "@/components/ui/switch"
 import { api } from "@/lib/api"
 import type { RepositorySettings } from "@/lib/api"
-import { optimisticUpdate } from "@/lib/optimistic"
+import { optimisticUpdate, usePendingVariables } from "@/lib/optimistic"
 
 export function WorkspaceRepositoriesSection({
   slug,
@@ -19,7 +19,10 @@ export function WorkspaceRepositoriesSection({
     queryKey,
     queryFn: () => api.listWorkspaceRepositories(slug),
   })
+  const configureKey = ["workspaceRepositories", slug, "configure"]
+  const pendingRepos = usePendingVariables<{ repo: string }>(configureKey)
   const configure = useMutation({
+    mutationKey: configureKey,
     mutationFn: ({
       repo,
       mayStartThreads,
@@ -85,19 +88,13 @@ export function WorkspaceRepositoriesSection({
                   }
                   disabled={
                     !canEdit ||
-                    (configure.isPending &&
-                      configure.variables.repo === row.repo)
+                    pendingRepos.some((vars) => vars.repo === row.repo)
                   }
                 />
               </label>
             </li>
           ))}
         </ul>
-      )}
-      {configure.isError && (
-        <p className="px-4 pb-3.5 text-xs text-destructive">
-          Could not save. Try again.
-        </p>
       )}
     </SettingsSection>
   )

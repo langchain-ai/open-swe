@@ -1,4 +1,4 @@
-import { useId, useState } from "react"
+import { useId, useRef, useState } from "react"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { EyeIcon, EyeSlashIcon } from "@phosphor-icons/react"
 
@@ -101,6 +101,7 @@ export function MCPConnectionsSection({
   const [pendingRows, setPendingRows] = useState<ReadonlySet<string>>(
     () => new Set()
   )
+  const rowWritesInFlight = useRef(0)
   const [error, setError] = useState<string | null>(null)
   const [toolsExpanded, setToolsExpanded] = useState(true)
   const [importing, setImporting] = useState(false)
@@ -214,6 +215,7 @@ export function MCPConnectionsSection({
     action: () => Promise<void>
   ) => {
     setPendingRows((rows) => new Set(rows).add(name))
+    rowWritesInFlight.current++
     await qc.cancelQueries({ queryKey })
     qc.setQueryData<MCPConnection[]>(
       queryKey,
@@ -233,8 +235,11 @@ export function MCPConnectionsSection({
         next.delete(name)
         return next
       })
+      rowWritesInFlight.current--
     }
-    await qc.invalidateQueries({ queryKey })
+    // A refetch while another row's write is pending would revert that row.
+    if (rowWritesInFlight.current === 0)
+      await qc.invalidateQueries({ queryKey })
   }
 
   const save = async (discover: boolean) => {

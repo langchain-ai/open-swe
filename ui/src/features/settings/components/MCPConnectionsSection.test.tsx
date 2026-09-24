@@ -726,6 +726,56 @@ it("reviews imported connections one at a time without writing on import or skip
   client.clear()
 })
 
+it("keeps a row's pending flip when another row's save finishes first", async () => {
+  const connection = (name: string): MCPConnection => ({
+    name,
+    url: `https://mcp.${name}.app/mcp`,
+    transport: "streamable_http",
+    enabled: true,
+    allowed_tools: [],
+    header_names: [],
+    revision: "v1",
+    updated_at: "now",
+  })
+  const finish = new Map<string, () => void>()
+  vi.spyOn(api, "getMyMCPs").mockResolvedValue([
+    connection("linear"),
+    connection("github"),
+  ])
+  vi.spyOn(api, "saveMyMCP").mockImplementation(
+    (update) =>
+      new Promise<MCPConnection>((resolve) =>
+        finish.set(update.name, () =>
+          resolve({ ...connection(update.name), enabled: false })
+        )
+      )
+  )
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  })
+  render(
+    <QueryClientProvider client={client}>
+      <MCPConnectionsSection scope="user" />
+    </QueryClientProvider>
+  )
+
+  fireEvent.click(await screen.findByRole("button", { name: "Disable linear" }))
+  fireEvent.click(screen.getByRole("button", { name: "Disable github" }))
+  await waitFor(() => expect(finish.size).toBe(2))
+
+  finish.get("linear")!()
+  await waitFor(() =>
+    expect(
+      screen
+        .getByRole("button", { name: "Enable linear" })
+        .hasAttribute("disabled")
+    ).toBe(false)
+  )
+  expect(screen.getByRole("button", { name: "Enable github" })).toBeTruthy()
+  expect(api.getMyMCPs).toHaveBeenCalledTimes(1)
+  client.clear()
+})
+
 it("flips a connection at once and flips it back when the save fails", async () => {
   const saved: MCPConnection = {
     name: "linear",

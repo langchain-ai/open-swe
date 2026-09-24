@@ -16,10 +16,12 @@ import { buttonVariants } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import { describeCron } from "@/features/automations/lib/cron"
 import {
+  agentMutationKeys,
   useAgentSchedules,
   useTriggerAgentSchedule,
   useUpdateAgentSchedule,
 } from "@/features/agents/lib/queries"
+import { usePendingVariables } from "@/lib/optimistic"
 import { useSession } from "@/lib/session"
 import { cn } from "@/lib/utils"
 
@@ -204,9 +206,9 @@ function AutomationRow({
   const navigate = useNavigate()
   const updateSchedule = useUpdateAgentSchedule()
   const triggerSchedule = useTriggerAgentSchedule()
-  const isToggling =
-    updateSchedule.isPending &&
-    updateSchedule.variables.scheduleId === schedule.id
+  const isToggling = usePendingVariables<{ scheduleId: string }>(
+    agentMutationKeys.updateSchedule
+  ).some((vars) => vars.scheduleId === schedule.id)
   const isTesting =
     triggerSchedule.isPending && triggerSchedule.variables === schedule.id
 

@@ -3,10 +3,12 @@ import { GitMerge, ShieldCheck, TriangleAlert } from "lucide-react"
 
 import type { WorkflowPushApproval } from "@/features/agents/lib/types"
 import {
+  agentMutationKeys,
   useWorkflowApprovalDecision,
   useWorkflowApprovals,
 } from "@/features/agents/lib/queries"
 import { Button } from "@/components/ui/button"
+import { usePendingVariables } from "@/lib/optimistic"
 import { cn } from "@/lib/utils"
 
 function shortSha(value: string): string {
@@ -32,6 +34,9 @@ export function WorkflowApprovalCard({
 }) {
   const query = useWorkflowApprovals(threadId, { pollWhileActive })
   const decision = useWorkflowApprovalDecision(threadId)
+  const pendingDecisions = usePendingVariables<{ fingerprint: string }>(
+    agentMutationKeys.workflowDecision(threadId)
+  )
   const approvals = useMemo(
     () => pendingApprovals(query.data?.approvals),
     [query.data?.approvals]
@@ -48,9 +53,9 @@ export function WorkflowApprovalCard({
       className="mt-4 flex w-full flex-col gap-3"
     >
       {approvals.map((approval) => {
-        const busy =
-          decision.isPending &&
-          decision.variables.fingerprint === approval.fingerprint
+        const busy = pendingDecisions.some(
+          (vars) => vars.fingerprint === approval.fingerprint
+        )
         const inherited = approval.inheritedFrom
         return (
           <section

@@ -1,4 +1,19 @@
-import type { QueryClient, QueryKey } from "@tanstack/react-query"
+import { useMutationState } from "@tanstack/react-query"
+import type { MutationKey, QueryClient, QueryKey } from "@tanstack/react-query"
+
+/**
+ * Variables of every pending mutation under `mutationKey`. A mutation's own
+ * `variables` holds only its latest call, so a per-row lock built on it
+ * unlocks earlier rows that are still saving.
+ */
+export function usePendingVariables<TVariables>(
+  mutationKey: MutationKey
+): Array<TVariables> {
+  return useMutationState({
+    filters: { mutationKey, status: "pending" },
+    select: (mutation) => mutation.state.variables as TVariables,
+  })
+}
 
 /**
  * Applies `update` to the cached data at `queryKey` and returns its undo.
