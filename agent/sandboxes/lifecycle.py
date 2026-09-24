@@ -88,7 +88,7 @@ class SandboxCreateConfig:
         sandbox_backend: SandboxBackendProtocol,
         thread_id: str | None,
         *,
-        identity: asyncio.Task[None] | None = None,
+        identity_write: asyncio.Task[None] | None = None,
     ) -> None:
         """Freshen this box's checkouts when the snapshot it booted from has aged out.
 
@@ -98,15 +98,16 @@ class SandboxCreateConfig:
         after a quiet spell would otherwise work against a checkout as old as
         the last nightly rebuild. Bounded by a short timeout, and never fatal:
         the image is already usable, so a failed pull costs freshness, not the
-        run. A script that runs waits for ``identity``, the bot's pending git
-        identity write, since a `git pull` that merges or a `git stash` needs one.
+        run. A script that runs waits for ``identity_write``, the bot's pending
+        git identity write, since a `git pull` that merges or a `git stash`
+        needs one.
         """
         workspace = self.workspace
         if workspace is None or not is_snapshot_stale(workspace):
             return
-        if identity is not None:
+        if identity_write is not None and not identity_write.done():
             async with aphase(thread_id, "sandbox.await_git_identity"):
-                await asyncio.wait((identity,))
+                await asyncio.wait((identity_write,))
         try:
             async with aphase(thread_id, "sandbox.update_script"):
                 result = await sandbox_backend.aexecute(
@@ -160,7 +161,7 @@ async def _create_sandbox_with_proxy(
     async with aphase(thread_id, "sandbox.boot", snapshot_id=config.snapshot_id):
         sandbox_backend = await config.boot()
 
-    async with git_identity(thread_id, sandbox_backend) as identity:
+    async with git_identity(thread_id, sandbox_backend) as identity_write:
         if ENV.SANDBOX_TYPE.get() == "langsmith":
             async with aphase(thread_id, "sandbox.proxy_token"):
                 access = await workspace_token(
@@ -184,7 +185,7 @@ async def _create_sandbox_with_proxy(
 
     # This run gets fresh checkouts now; the background capture makes the *next*
     # creation skip the step entirely.
-    await config.run_update_script(sandbox_backend, thread_id, identity=identity)
+    await config.run_update_script(sandbox_backend, thread_id, identity_write=identity_write)
     _fire_and_forget(maybe_start_update(config.workspace), "workspace update trigger")
     return sandbox_backend
 

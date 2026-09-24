@@ -50,6 +50,7 @@ class _Sandbox(SandboxBackendProtocol):
         self.file_ops: list[str] = []
         self.identity_started = asyncio.Event()
         self.release_identity = asyncio.Event()
+        self.identity_written = asyncio.Event()
         self.identity_error: Exception | None = None
         self.identity_exit_code = 0
         self.identity_stalls = False
@@ -87,6 +88,7 @@ class _Sandbox(SandboxBackendProtocol):
             if self.identity_error is not None:
                 raise self.identity_error
             self.ran.append("identity")
+            self.identity_written.set()
             return ExecuteResponse(output="", exit_code=self.identity_exit_code)
         self.ran.append(command)
         return ExecuteResponse(output="", exit_code=0)
@@ -369,3 +371,22 @@ async def test_file_operations_do_not_wait_on_a_pending_identity_write(sandbox: 
     assert written.path == "/repo/NOTES.md"
     assert sandbox.file_ops == ["read /repo/README.md", "ls /repo", "write /repo/NOTES.md"]
     assert sandbox.ran == []
+
+
+async def test_stale_image_records_no_identity_wait_once_the_write_has_finished(
+    sandbox: _Sandbox, stale_image: Workspace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async def configure(*_args: object, **_kwargs: object) -> None:
+        await sandbox.identity_written.wait()  # the write lands while the proxy is configured
+
+    monkeypatch.setattr(lifecycle, "configure_sandbox_proxy", configure)
+    monkeypatch.setattr(startup_trace, "_PHASES", {})
+    sandbox.release_identity.set()
+
+    await asyncio.wait_for(
+        ensure_sandbox_for_thread(THREAD_ID, workspace_slug="base"), timeout=_HANG_TIMEOUT
+    )
+
+    names = [phase.name for phase in startup_trace._PHASES[THREAD_ID]]
+    assert "sandbox.update_script" in names
+    assert "sandbox.await_git_identity" not in names
