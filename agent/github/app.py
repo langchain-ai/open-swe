@@ -1,5 +1,7 @@
 """GitHub App installation token generation."""
 
+import hashlib
+import json
 import logging
 from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime, timedelta
@@ -10,10 +12,12 @@ from githubkit_schemas.v2022_11_28.types import (
     AppInstallationsInstallationIdAccessTokensPostBodyType,
     AppPermissionsType,
 )
-from pydantic import TypeAdapter
+from pydantic import AwareDatetime, BaseModel, TypeAdapter
 
 from agent.config import ENV
+from agent.encryption import decrypt_token, encrypt_token
 from agent.github.sdk import GITHUB_API_VERSION, github_sdk
+from agent.store import get_value, put_value
 
 logger = logging.getLogger(__name__)
 
@@ -31,8 +35,20 @@ PermissionMap = Mapping[str, str]
 PermissionKey = tuple[tuple[str, str], ...]
 ScopeKey = tuple[str, tuple[int, ...], tuple[str, ...], PermissionKey]
 
-# scope key -> (token, expires_at, good_until). In-process only; never persisted.
+# scope key -> (token, expires_at, good_until), per process. When
+# TOKEN_ENCRYPTION_KEY is set, repository-scoped tokens are also shared across
+# workers through the Store, encrypted; the installation-wide token never
+# leaves the process.
 _TOKEN_CACHE: dict[ScopeKey, tuple[str, str | None, datetime]] = {}
+_SHARED_TOKEN_NAMESPACE = ("github_app_tokens", "v1")
+
+
+class _SharedToken(BaseModel):
+    """A repository-scoped token as workers share it through the Store."""
+
+    encrypted_token: str
+    expires_at: str | None
+    good_until: AwareDatetime
 
 
 def normalize_permissions(permissions: PermissionMap | None) -> PermissionKey:
@@ -81,8 +97,65 @@ def _cached_token(key: ScopeKey, *, now: datetime) -> tuple[str, str | None] | N
     return None
 
 
+def _is_shared(key: ScopeKey) -> bool:
+    """Only repository-scoped tokens are shared, and only when they can be encrypted."""
+    _, repository_ids, repositories, _ = key
+    return bool(repository_ids or repositories) and ENV.TOKEN_ENCRYPTION_KEY.is_set()
+
+
+def _shared_token_key(key: ScopeKey) -> str:
+    """A digest of the scope, so Store keys stay short and never list repositories."""
+    return hashlib.sha256(json.dumps(key).encode()).hexdigest()
+
+
+async def _read_shared_token(key: ScopeKey, *, now: datetime) -> tuple[str, str | None] | None:
+    store_key = _shared_token_key(key)
+    log_extra = {"installation_id": key[0], "store_key": store_key}
+    try:
+        value = await get_value(_SHARED_TOKEN_NAMESPACE, store_key)
+        if value is None:
+            return None
+        shared = _SharedToken.model_validate(value)
+        if now >= shared.good_until:
+            return None
+        token = decrypt_token(shared.encrypted_token)
+    except Exception:
+        # On the critical path: a Store outage or an unreadable item falls back
+        # to minting, and the mint's write-through replaces the item.
+        logger.warning("Shared GitHub App token read failed", extra=log_extra, exc_info=True)
+        return None
+    if not token:
+        logger.warning("Shared GitHub App token could not be decrypted", extra=log_extra)
+        return None
+    _TOKEN_CACHE[key] = (token, shared.expires_at, shared.good_until)
+    return token, shared.expires_at
+
+
+async def _write_shared_token(
+    key: ScopeKey, token: str, expires_at: str | None, good_until: datetime
+) -> None:
+    store_key = _shared_token_key(key)
+    try:
+        shared = _SharedToken(
+            encrypted_token=encrypt_token(token), expires_at=expires_at, good_until=good_until
+        )
+        await put_value(_SHARED_TOKEN_NAMESPACE, store_key, shared.model_dump(mode="json"))
+    except Exception:
+        # On the critical path: the caller still gets the token it just minted,
+        # and other workers mint their own.
+        logger.warning(
+            "Shared GitHub App token write failed",
+            extra={"installation_id": key[0], "store_key": store_key},
+            exc_info=True,
+        )
+
+
 def clear_app_token_cache() -> None:
-    """Drop all cached installation tokens (test/maintenance hook)."""
+    """Drop this process's cached installation tokens (test/maintenance hook).
+
+    Tokens shared through the Store are kept, so the next lookup behaves like a
+    fresh worker's.
+    """
     _TOKEN_CACHE.clear()
 
 
@@ -183,6 +256,11 @@ async def get_github_app_installation_token_with_expiry(
     cached = _cached_token(key, now=now)
     if cached is not None:
         return cached
+    shared = _is_shared(key)
+    if shared:
+        stored = await _read_shared_token(key, now=now)
+        if stored is not None:
+            return stored
 
     body: AppInstallationsInstallationIdAccessTokensPostBodyType = {}
     if repository_ids:
@@ -199,15 +277,18 @@ async def get_github_app_installation_token_with_expiry(
             response = await client.rest(
                 GITHUB_API_VERSION
             ).apps.async_create_installation_access_token(int(resolved_installation_id), data=body)
-            data = response.json()
-            token, expires_at = data.get("token"), data.get("expires_at")
-            parsed = _parse_expiry(expires_at)
-            if isinstance(token, str) and token and parsed is not None:
-                _TOKEN_CACHE[key] = (token, expires_at, parsed - _TOKEN_CACHE_MARGIN)
-            return token, expires_at
+        data = response.json()
+        token, expires_at = data.get("token"), data.get("expires_at")
+        parsed = _parse_expiry(expires_at)
     except Exception:
         if log_errors:
             logger.exception("Failed to get GitHub App installation token")
         else:
             logger.debug("Failed to get GitHub App installation token", exc_info=True)
         return None, None
+    if isinstance(token, str) and token and parsed is not None:
+        good_until = parsed - _TOKEN_CACHE_MARGIN
+        _TOKEN_CACHE[key] = (token, expires_at, good_until)
+        if shared:
+            await _write_shared_token(key, token, expires_at, good_until)
+    return token, expires_at
