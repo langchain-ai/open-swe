@@ -153,6 +153,8 @@ function readStoredDiffStyle(): DiffStyle {
 
 // One attachment for a single-side line range. Deletions resolve against the
 // original file, additions against the modified file.
+const SELECTION_CONTEXT_LINES = 2
+
 function makeSideAttachment(
   file: ReviewDiffFile,
   side: "deletions" | "additions",
@@ -163,8 +165,18 @@ function makeSideAttachment(
     side === "deletions" ? file.originalContent : file.modifiedContent
   const lines = source.split("\n")
   const start = Math.max(1, Math.min(fromLine, toLine))
-  const end = Math.max(fromLine, toLine)
-  const snippet = lines.slice(start - 1, end).join("\n")
+  const end = Math.min(lines.length, Math.max(fromLine, toLine))
+  const first = Math.max(1, start - SELECTION_CONTEXT_LINES)
+  const last = Math.min(lines.length, end + SELECTION_CONTEXT_LINES)
+  const width = String(last).length
+  const snippet = lines
+    .slice(first - 1, last)
+    .map((text, i) => {
+      const n = first + i
+      const marker = n >= start && n <= end ? ">" : " "
+      return `${marker} ${String(n).padStart(width)} | ${text}`
+    })
+    .join("\n")
   const sideLabel = side === "deletions" ? "L" : "R"
   const lineLabel =
     start === end ? `${sideLabel}${start}` : `${sideLabel}${start}-${end}`
