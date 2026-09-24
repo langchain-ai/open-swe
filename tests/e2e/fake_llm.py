@@ -1100,10 +1100,10 @@ SCRIPT_LIBRARY: dict[str, tuple[StepSpec, ...]] = {
             "call-breakout",
         ),
         _tool_step(
-            "Confirming the breakout thread was started.",
-            "slack_reply",
-            {"message": "I started a separate Open SWE thread for that aspect."},
-            "call-breakout-reply",
+            "The breakout thread is the reply.",
+            "slack_no_reply_needed",
+            {"reason": "Breakout thread started; nothing to post in the original thread."},
+            "call-breakout-no-reply",
         ),
     ),
     "move": (
