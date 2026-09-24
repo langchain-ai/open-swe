@@ -20,11 +20,13 @@ _TOOL_MODULES = {
     "list_workspaces": ".workspaces",
     "list_findings": ".list_findings",
     "list_review_findings": ".list_review_findings",
+    "link_pull_request": ".open_pull_request",
     "list_threads": ".threads",
     "manage_baby_sit": ".manage_baby_sit",
     "manage_code_channel": "agent.slack.tools.manage_code_channel",
     "manage_incident": "agent.incidents.tools",
     "manage_thread": ".threads",
+    "merge_expedited_pr": ".merge_expedited_pr",
     "notify_automation_channel": ".notify_automation_channel",
     "open_pull_request": ".open_pull_request",
     "output_iframe": ".output_iframe",
@@ -37,6 +39,7 @@ _TOOL_MODULES = {
     "refresh_workspace_start": ".workspaces",
     "configure_repository": ".workspaces",
     "report_platform_issue": ".report_platform_issue",
+    "request_pr_review": "agent.slack.tools.request_pr_review",
     "reply_to_finding_thread": ".reply_to_finding_thread",
     "resolve_finding_thread": ".resolve_finding_thread",
     "delete_organization_skill": ".organization_skills",
@@ -84,11 +87,13 @@ __all__ = [
     "list_workspaces",
     "list_findings",
     "list_review_findings",
+    "link_pull_request",
     "list_threads",
     "manage_baby_sit",
     "manage_code_channel",
     "manage_incident",
     "manage_thread",
+    "merge_expedited_pr",
     "notify_automation_channel",
     "open_pull_request",
     "output_iframe",
@@ -101,6 +106,7 @@ __all__ = [
     "refresh_workspace_start",
     "configure_repository",
     "report_platform_issue",
+    "request_pr_review",
     "reply_to_finding_thread",
     "resolve_finding_thread",
     "publish_workspace",
@@ -143,6 +149,7 @@ if TYPE_CHECKING:
     from agent.slack.tools.read_channel_messages import slack_read_channel_messages
     from agent.slack.tools.read_thread_messages import slack_read_thread_messages
     from agent.slack.tools.reply import slack_reply
+    from agent.slack.tools.request_pr_review import request_pr_review
     from agent.slack.tools.start_new_thread import slack_start_new_thread
     from agent.tools.add_finding import add_finding
     from agent.tools.automations import (
@@ -163,8 +170,9 @@ if TYPE_CHECKING:
     from agent.tools.list_findings import list_findings
     from agent.tools.list_review_findings import list_review_findings
     from agent.tools.manage_baby_sit import manage_baby_sit
+    from agent.tools.merge_expedited_pr import merge_expedited_pr
     from agent.tools.notify_automation_channel import notify_automation_channel
-    from agent.tools.open_pull_request import open_pull_request
+    from agent.tools.open_pull_request import link_pull_request, open_pull_request
     from agent.tools.organization_skills import delete_organization_skill, save_organization_skill
     from agent.tools.output_iframe import output_iframe
     from agent.tools.publish_review import publish_review

@@ -49,9 +49,8 @@ ORG_GUIDELINES_MAX_CHARS = 10_000
 DEFAULT_THREAD_TITLE_MODEL = "openai:gpt-6-luna"
 DEFAULT_THREAD_TITLE_REASONING_EFFORT = "low"
 REVIEW_SCOUT_FALLBACK_MODEL = ("openai:gpt-6-luna", "high")
-ANTHROPIC_THREAD_TITLE_MODEL = "anthropic:claude-haiku-4-5"
-# Titles are a one-shot classification; no extended thinking needed.
-ANTHROPIC_THREAD_TITLE_REASONING_EFFORT = "none"
+ANTHROPIC_THREAD_TITLE_MODEL = "anthropic:claude-opus-5-5"
+ANTHROPIC_THREAD_TITLE_REASONING_EFFORT = "low"
 
 
 class WorkspaceSettingsUpdate(BaseModel):
@@ -494,12 +493,7 @@ async def delete_workspace_settings(slug: str) -> None:
 
 
 def _gate_openai_title_model(pair: tuple[str, str], *, gateway_enabled: bool) -> tuple[str, str]:
-    """Swap an OpenAI title model for Haiku on Anthropic-only deployments.
-
-    Title generation is the one model choice users rarely revisit, so an
-    Anthropic-only install would otherwise fail every title with a missing
-    OPENAI_API_KEY.
-    """
+    """Use Opus for titles on Anthropic-only deployments."""
     if not pair[0].startswith("openai:"):
         return pair
     # The toggle alone isn't enough: without a LangSmith key the gateway is
