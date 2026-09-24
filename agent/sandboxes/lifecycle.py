@@ -536,7 +536,8 @@ def _seed_work_dir(
     if not isinstance(stored, dict) or stored.get("sandbox_id") != sandbox_backend.id:
         return
     path = stored.get("path")
-    if isinstance(path, str) and posixpath.isabs(path):
+    # Only a value a probe could have produced: absolute and already normalized.
+    if isinstance(path, str) and posixpath.isabs(path) and path == posixpath.normpath(path.strip()):
         remember_sandbox_work_dir(sandbox_backend, path)
 
 

@@ -166,3 +166,27 @@ async def test_failed_metadata_write_does_not_fail_the_run(
         assert await resolve_thread_work_dir(_THREAD_ID, backend) == "/workspace"
 
     assert [getattr(record, "sandbox_id", None) for record in caplog.records] == ["sb-1"]
+
+
+@pytest.mark.parametrize(
+    "stored_path",
+    ["/workspace\n", "/workspace/", "/home/../workspace", "workspace"],
+    ids=["trailing-newline", "trailing-slash", "dot-segments", "relative"],
+)
+async def test_stored_work_dir_a_probe_could_not_produce_is_ignored(
+    monkeypatch: pytest.MonkeyPatch, threads: _Threads, stored_path: str
+) -> None:
+    threads.metadata = {
+        "sandbox_id": "sb-1",
+        "sandbox_work_dir": {"sandbox_id": "sb-1", "path": stored_path},
+    }
+    sandbox = _Sandbox("sb-1")
+    backend = await _attach_on_new_worker(monkeypatch, sandbox)
+    commands_after_attach = list(sandbox.commands)
+
+    assert await resolve_thread_work_dir(_THREAD_ID, backend) == "/workspace"
+    assert sandbox.commands != commands_after_attach
+    assert threads.metadata.get("sandbox_work_dir") == {
+        "sandbox_id": "sb-1",
+        "path": "/workspace",
+    }
