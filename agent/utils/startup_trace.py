@@ -82,12 +82,19 @@ def _close(phase: _Phase | None, error: BaseException | None) -> None:
 
 
 @asynccontextmanager
-async def aphase(thread_id: str | None, name: str, **metadata: Any) -> AsyncIterator[None]:
-    """Time a startup step for later replay into the trace."""
+async def aphase(
+    thread_id: str | None, name: str, *, replay: bool = True, **metadata: Any
+) -> AsyncIterator[None]:
+    """Time a startup step for later replay into the trace.
+
+    ``replay=False`` is for a step that can outlive the startup it overlaps: it
+    is timed in APM only, since a replay would attach it to whichever run
+    flushes the thread next.
+    """
     if not thread_id:
         yield
         return
-    phase = _open(thread_id, name, metadata)
+    phase = _open(thread_id, name, metadata) if replay else None
     try:
         with _apm_span(f"agent.startup.{name}", {"thread_id": thread_id, **metadata}):
             yield

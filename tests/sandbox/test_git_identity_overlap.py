@@ -8,7 +8,8 @@ command until the write has finished, so no agent command runs without it.
 
 import asyncio
 import logging
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Iterator
+from contextlib import contextmanager
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -22,6 +23,8 @@ from agent.sandboxes.lifecycle import (
     recreate_sandbox_for_thread,
 )
 from agent.sandboxes.state import SandboxBackendProxy, set_sandbox_backend
+from agent.utils import startup_trace
+from agent.utils.startup_trace import flush_phases
 from agent.workspaces.store import Workspace, script_command
 
 THREAD_ID = "thread-git-identity"
@@ -287,3 +290,26 @@ async def test_stalled_identity_write_does_not_hold_commands_indefinitely(
 
     assert result.exit_code == 0
     assert sandbox.ran == ["git status"]
+
+
+async def test_identity_write_is_timed_in_apm_without_joining_a_later_startup_trace(
+    sandbox: _Sandbox, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    closed_after_release: dict[str, bool] = {}
+
+    @contextmanager
+    def apm_span(name: str, _metadata: dict[str, object]) -> Iterator[None]:
+        yield
+        closed_after_release[name] = sandbox.release_identity.is_set()
+
+    monkeypatch.setattr(startup_trace, "_PHASES", {})
+    monkeypatch.setattr(startup_trace, "_apm_span", apm_span)
+
+    proxy = await asyncio.wait_for(ensure_sandbox_for_thread(THREAD_ID), timeout=_HANG_TIMEOUT)
+    await asyncio.wait_for(sandbox.identity_started.wait(), timeout=_HANG_TIMEOUT)
+    flush_phases(THREAD_ID)  # the run's prepare flushes while the write is still going
+    sandbox.release_identity.set()
+    await asyncio.wait_for(proxy.aexecute("git status"), timeout=_HANG_TIMEOUT)
+
+    assert closed_after_release["agent.startup.sandbox.git_identity"]
+    assert THREAD_ID not in startup_trace._PHASES

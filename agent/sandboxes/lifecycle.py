@@ -308,7 +308,7 @@ async def git_identity(
     async def run() -> None:
         extra = {"thread_id": thread_id, "sandbox_id": sandbox_backend.id}
         try:
-            async with aphase(thread_id, "sandbox.git_identity"):
+            async with aphase(thread_id, "sandbox.git_identity", replay=False):
                 result = await configure_git_identity(sandbox_backend)
         except Exception:
             logger.warning("Failed to write the bot git identity", exc_info=True, extra=extra)
