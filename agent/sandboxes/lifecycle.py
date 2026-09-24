@@ -11,13 +11,19 @@ from contextlib import asynccontextmanager, suppress
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
+import httpx2
 from deepagents.backends.protocol import SandboxBackendProtocol
 from langgraph_sdk import get_client
+from langsmith.sandbox import SandboxRetryableConnectionError
 
 from agent.config import ENV
 from agent.github.proxy import get_recorded_proxy_base_config, record_proxy_token_expiry
 from agent.github.sandbox_access import SandboxGitHubAccess, workspace_token
-from agent.sandboxes.providers.langsmith import configure_sandbox_proxy, get_sandbox_proxy_config
+from agent.sandboxes.providers.langsmith import (
+    PROXY_CONFIG_RETRYABLE_STATUS_CODES,
+    configure_sandbox_proxy,
+    get_sandbox_proxy_config,
+)
 from agent.sandboxes.providers.registry import SandboxGoneError, create_sandbox
 from agent.sandboxes.state import (
     SANDBOX_BACKENDS,
@@ -49,6 +55,20 @@ _SANDBOX_PROXY_CONFIG_METADATA_KEY = "sandbox_base_proxy_config"
 
 
 SandboxSource = Literal["workspace", "base"]
+
+
+def _has_retryable_proxy_status(exc: BaseException) -> bool:
+    seen: set[int] = set()
+    current: BaseException | None = exc
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        if (
+            isinstance(current, httpx2.HTTPStatusError)
+            and current.response.status_code in PROXY_CONFIG_RETRYABLE_STATUS_CODES
+        ):
+            return True
+        current = current.__cause__ or current.__context__
+    return False
 
 
 @dataclass(frozen=True, slots=True)
@@ -266,6 +286,8 @@ async def _refresh_github_proxy_or_fail(
             thread_id,
             exc_info=True,
         )
+        if _has_retryable_proxy_status(exc):
+            raise SandboxRetryableConnectionError(str(exc)) from exc
         raise SandboxUnreachableError(thread_id, sandbox_backend.id, str(exc)) from exc
     return sandbox_backend
 
