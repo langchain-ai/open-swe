@@ -84,7 +84,11 @@ class SandboxCreateConfig:
         return get_sandbox_proxy_config(self.create_params)
 
     async def run_update_script(
-        self, sandbox_backend: SandboxBackendProtocol, thread_id: str | None
+        self,
+        sandbox_backend: SandboxBackendProtocol,
+        thread_id: str | None,
+        *,
+        identity: asyncio.Task[None] | None = None,
     ) -> None:
         """Freshen this box's checkouts when the snapshot it booted from has aged out.
 
@@ -94,11 +98,14 @@ class SandboxCreateConfig:
         after a quiet spell would otherwise work against a checkout as old as
         the last nightly rebuild. Bounded by a short timeout, and never fatal:
         the image is already usable, so a failed pull costs freshness, not the
-        run.
+        run. A script that runs waits for ``identity``, the bot's pending git
+        identity write, since a `git pull` that merges or a `git stash` needs one.
         """
         workspace = self.workspace
         if workspace is None or not is_snapshot_stale(workspace):
             return
+        if identity is not None:
+            await asyncio.wait((identity,))
         try:
             async with aphase(thread_id, "sandbox.update_script"):
                 result = await sandbox_backend.aexecute(
@@ -152,7 +159,7 @@ async def _create_sandbox_with_proxy(
     async with aphase(thread_id, "sandbox.boot", snapshot_id=config.snapshot_id):
         sandbox_backend = await config.boot()
 
-    async with git_identity(thread_id, sandbox_backend):
+    async with git_identity(thread_id, sandbox_backend) as identity:
         if ENV.SANDBOX_TYPE.get() == "langsmith":
             async with aphase(thread_id, "sandbox.proxy_token"):
                 access = await workspace_token(
@@ -176,7 +183,7 @@ async def _create_sandbox_with_proxy(
 
     # This run gets fresh checkouts now; the background capture makes the *next*
     # creation skip the step entirely.
-    await config.run_update_script(sandbox_backend, thread_id)
+    await config.run_update_script(sandbox_backend, thread_id, identity=identity)
     _fire_and_forget(maybe_start_update(config.workspace), "workspace update trigger")
     return sandbox_backend
 
@@ -280,7 +287,7 @@ async def configure_git_identity(sandbox_backend: SandboxBackendProtocol) -> Non
 @asynccontextmanager
 async def git_identity(
     thread_id: str | None, sandbox_backend: SandboxBackendProtocol
-) -> AsyncIterator[None]:
+) -> AsyncIterator[asyncio.Task[None]]:
     """Write the bot identity alongside the body, off the critical path.
 
     The identity needs the box, not the proxy, and the cost is the round trip
@@ -290,6 +297,7 @@ async def git_identity(
     failed write is logged and the command runs regardless. Without a thread
     there is no proxy to hand it to, so it is joined here. A body that raises
     has lost the sandbox, so the write is cancelled rather than handed over.
+    Yields the pending write, for setup that must run after it.
     """
 
     async def run() -> None:
@@ -305,7 +313,7 @@ async def git_identity(
 
     task = asyncio.create_task(run())
     try:
-        yield
+        yield task
     except BaseException:
         task.cancel()
         with suppress(asyncio.CancelledError):

@@ -22,6 +22,7 @@ from agent.sandboxes.lifecycle import (
     recreate_sandbox_for_thread,
 )
 from agent.sandboxes.state import SandboxBackendProxy, set_sandbox_backend
+from agent.workspaces.store import Workspace, script_command
 
 THREAD_ID = "thread-git-identity"
 # Bounds waits that must finish, so a regression fails instead of hanging.
@@ -140,9 +141,9 @@ async def test_failed_identity_write_is_logged_and_commands_still_run(
     sandbox.release_identity.set()
     caplog.set_level(logging.WARNING)
 
-    proxy = await ensure_sandbox_for_thread(THREAD_ID)
-    first = await proxy.aexecute("git status")
-    second = await proxy.aexecute("git log")
+    proxy = await asyncio.wait_for(ensure_sandbox_for_thread(THREAD_ID), timeout=_HANG_TIMEOUT)
+    first = await asyncio.wait_for(proxy.aexecute("git status"), timeout=_HANG_TIMEOUT)
+    second = await asyncio.wait_for(proxy.aexecute("git log"), timeout=_HANG_TIMEOUT)
 
     assert (first.exit_code, second.exit_code) == (0, 0)
     assert sandbox.ran == ["git status", "git log"]
@@ -191,7 +192,7 @@ async def test_lost_sandbox_cancels_its_identity_write_and_nothing_waits_on_it(
 async def test_rebound_thread_does_not_wait_on_the_previous_boxs_identity_write(
     sandbox: _Sandbox,
 ) -> None:
-    await ensure_sandbox_for_thread(THREAD_ID)
+    await asyncio.wait_for(ensure_sandbox_for_thread(THREAD_ID), timeout=_HANG_TIMEOUT)
     await asyncio.wait_for(sandbox.identity_started.wait(), timeout=_HANG_TIMEOUT)
     replacement = _Sandbox("sandbox-replacement")
     proxy = set_sandbox_backend(THREAD_ID, replacement)
@@ -203,7 +204,7 @@ async def test_rebound_thread_does_not_wait_on_the_previous_boxs_identity_write(
 
 
 async def test_command_held_through_a_rebind_runs_on_the_new_box(sandbox: _Sandbox) -> None:
-    proxy = await ensure_sandbox_for_thread(THREAD_ID)
+    proxy = await asyncio.wait_for(ensure_sandbox_for_thread(THREAD_ID), timeout=_HANG_TIMEOUT)
     await asyncio.wait_for(sandbox.identity_started.wait(), timeout=_HANG_TIMEOUT)
     command = asyncio.create_task(proxy.aexecute("git status"))
     await asyncio.sleep(0)  # the command resolves this box and waits on its write
@@ -231,3 +232,20 @@ async def test_recreate_binds_the_new_box_without_writing_its_identity_twice(
     assert rebound == (old.id, sandbox.id)
     assert result.exit_code == 0
     assert sandbox.ran == ["identity", "git status"]
+
+
+async def test_new_sandbox_writes_its_identity_before_a_stale_images_update_script(
+    sandbox: _Sandbox, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    stale = Workspace(
+        slug="base", update_script="git pull", snapshot_status="ready", snapshot_id="snap-1"
+    )
+    monkeypatch.setattr(lifecycle, "load_workspace", AsyncMock(return_value=stale))
+    monkeypatch.setattr(lifecycle, "maybe_start_update", AsyncMock())
+
+    startup = asyncio.create_task(ensure_sandbox_for_thread(THREAD_ID, workspace_slug="base"))
+    await asyncio.wait_for(sandbox.identity_started.wait(), timeout=_HANG_TIMEOUT)
+    sandbox.release_identity.set()
+    await asyncio.wait_for(startup, timeout=_HANG_TIMEOUT)
+
+    assert sandbox.ran == ["identity", script_command("git pull", "update", stale.repos)]
