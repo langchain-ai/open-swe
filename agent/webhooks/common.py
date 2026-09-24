@@ -1372,8 +1372,6 @@ async def update_agent_thread_pr_state(payload: dict[str, Any]) -> None:
                 if not isinstance(metadata, dict) or metadata.get("kind") == REVIEWER_THREAD_KIND:
                     continue
                 metadata_update: dict[str, Any] = {}
-                # Fresh line counts ride along when the event carries them, so
-                # the thread's PR cards do not keep opening-day numbers.
                 if diff_stats is not None:
                     metadata_update["diff_stats"] = diff_stats
                 pull_requests = metadata.get("pull_requests")
@@ -1389,11 +1387,11 @@ async def update_agent_thread_pr_state(payload: dict[str, Any]) -> None:
                         None,
                     )
                     updated_pull_requests = [
-                        (
-                            {**record, "state": new_state}
-                            if diff_stats is None
-                            else {**record, "state": new_state, "diff_stats": diff_stats}
-                        )
+                        {
+                            **record,
+                            "state": new_state,
+                            **({"diff_stats": diff_stats} if diff_stats else {}),
+                        }
                         if record.get("url") == pr_url
                         else record
                         for record in pull_requests

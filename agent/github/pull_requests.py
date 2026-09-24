@@ -477,18 +477,13 @@ class PullRequestEvent(BaseModel):
     @property
     def diff_stats(self) -> dict[str, int] | None:
         """``{files, additions, deletions}`` when the event payload counts them."""
-        counts = (
-            self.pull_request.additions,
-            self.pull_request.deletions,
-            self.pull_request.changed_files,
-        )
-        if any(count is None for count in counts):
+        pr = self.pull_request
+        if pr.additions is None or pr.deletions is None or pr.changed_files is None:
             return None
-        additions, deletions, changed_files = counts
         return {
-            "additions": max(0, additions),
-            "deletions": max(0, deletions),
-            "files": max(0, changed_files),
+            "additions": max(0, pr.additions),
+            "deletions": max(0, pr.deletions),
+            "files": max(0, pr.changed_files),
         }
 
     def to_pull_request(self) -> PullRequest | None:
