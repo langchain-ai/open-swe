@@ -1,6 +1,7 @@
 import json
 import logging
 from collections.abc import Mapping
+from dataclasses import replace
 from typing import Annotated, Any, Literal
 
 from langgraph.config import get_config
@@ -93,6 +94,8 @@ async def slack_reply(
             message = markdown_to_mrkdwn(message)
             slack_blocks = None
         usage = summarize_run_usage(state)
+        if usage is not None:
+            usage = replace(usage, reasoning_effort=cfg.resolved_agent_effort)
         message_ts, slack_error = await _post_and_store_mapping(
             channel_id,
             thread_ts,
@@ -162,6 +165,8 @@ async def _ephemeral_reply(
         else:
             message = markdown_to_mrkdwn(message)
     usage = summarize_run_usage(state)
+    if usage is not None:
+        usage = replace(usage, reasoning_effort=cfg.resolved_agent_effort)
     response_url = cfg.slack_ask_response_url or ""
     if response_url and await claim_slack_event(f"slack-ask-answer:{cfg.thread_id}"):
         if await replace_slack_command_message(
