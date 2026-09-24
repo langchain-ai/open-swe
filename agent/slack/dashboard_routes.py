@@ -1,4 +1,4 @@
-"""Dashboard API for Slack account linking and the bot allowlist."""
+"""Dashboard API for Slack account linking, the bot allowlist, and channel configs."""
 
 from typing import Any
 
@@ -12,6 +12,11 @@ from agent.slack.allowed_bots import (
     SlackBotOption,
     allow_slack_bot,
     list_slack_bots,
+)
+from agent.slack.channel_config import (
+    SlackChannelConfig,
+    SlackChannelConfigUpdate,
+    SlackChannelConfigView,
 )
 from agent.slack.channel_options import SlackChannelDirectory, list_slack_channels
 from agent.slack.connect import router as connect_router
@@ -57,4 +62,30 @@ async def api_remove_allowed_slack_bot(
     _admin: dict[str, Any] = ADMIN_DEP,
 ) -> dict[str, bool]:
     await ALLOWED_SLACK_BOTS.delete(f"{team_id}:{bot_id}")
+    return {"ok": True}
+
+
+@router.get("/slack/channel-configs")
+async def api_list_slack_channel_configs(
+    _admin: dict[str, Any] = ADMIN_DEP,
+) -> list[SlackChannelConfigView]:
+    return [SlackChannelConfigView.model_validate(row) for row in await SlackChannelConfig.all()]
+
+
+@router.put("/slack/channel-configs/{channel_id}")
+async def api_save_slack_channel_config(
+    channel_id: str,
+    body: SlackChannelConfigUpdate,
+    admin: dict[str, Any] = ADMIN_DEP,
+) -> SlackChannelConfigView:
+    saved = await SlackChannelConfig.save(channel_id, body, admin["sub"])
+    return SlackChannelConfigView.model_validate(saved)
+
+
+@router.delete("/slack/channel-configs/{channel_id}")
+async def api_remove_slack_channel_config(
+    channel_id: str,
+    _admin: dict[str, Any] = ADMIN_DEP,
+) -> dict[str, bool]:
+    await SlackChannelConfig.remove(channel_id)
     return {"ok": True}

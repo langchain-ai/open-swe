@@ -45,6 +45,7 @@ from agent.input_messages import (
 )
 from agent.invocation import new_invocation_id, resolve_invocation_id, with_invocation_id
 from agent.run_config import RunConfig
+from agent.slack.channel_config import SlackChannelConfig
 from agent.source_context import SourceContext
 from agent.users import User
 
@@ -111,7 +112,22 @@ async def _dispatch_input(
                     channel["purpose"] = purpose
             if slack_thread.thread_ts:
                 channel["thread_id"] = slack_thread.thread_ts
+            if instructions := await SlackChannelConfig.instructions_for(slack_thread.channel_id):
+                channel["standing_instructions"] = instructions
             channels.append(channel)
+    notification = cfg.automation_slack_notification
+    if (
+        notification is not None
+        and notification.channel_id
+        and (instructions := await SlackChannelConfig.instructions_for(notification.channel_id))
+    ):
+        channels.append(
+            {
+                "id": f"slack:{notification.channel_id}",
+                "platform": "slack",
+                "standing_instructions": instructions,
+            }
+        )
     if not sender_id and login:
         sender_id = f"github:{login}"
         sender = {"id": sender_id, "github_login": login}

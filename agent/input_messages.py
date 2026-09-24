@@ -57,6 +57,7 @@ class ChannelIdentity(TypedDict):
     default_repo: NotRequired[str]
     web_url: NotRequired[str]
     trace_url: NotRequired[str]
+    standing_instructions: NotRequired[str]
 
 
 class SystemIdentity(TypedDict):
@@ -112,6 +113,7 @@ _ENTITY_FIELDS: dict[EntityKind, tuple[str, ...]] = {
         "default_repo",
         "web_url",
         "trace_url",
+        "standing_instructions",
     ),
     "system": ("display_name", "platform", "sender_type", "content"),
 }

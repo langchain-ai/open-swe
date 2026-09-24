@@ -4,6 +4,7 @@ from fastapi import APIRouter, Response
 
 from agent.github import webhook as service
 from agent.schedules import store as schedules
+from agent.slack.pull_request_watch import WatchedPullRequest
 from agent.webhooks import common
 from agent.workspaces.routing import WorkspaceLookupError, repo_is_routable
 
@@ -52,6 +53,10 @@ async def github_webhook(
     except common.json.JSONDecodeError:
         common.logger.exception("Failed to parse GitHub webhook JSON")
         return {"status": "error", "message": "Invalid JSON"}
+
+    # Slack channel watches are independent of which workspace owns the repository.
+    if event_type == "pull_request" and payload.get("action") == "closed":
+        background_tasks.add_task(WatchedPullRequest.react_to_close, payload)
 
     webhook_repo = payload.get("repository", {})
     webhook_repo_config = {

@@ -1,9 +1,10 @@
 import logging
 import re
-from typing import Literal, TypedDict
+from typing import Literal, NotRequired, TypedDict
 
 from fastapi import HTTPException
 
+from agent.slack.channel_config import SlackChannelConfig
 from agent.slack.client import (
     convert_mentions_to_slack_format,
     post_slack_top_level_message_with_ts,
@@ -36,6 +37,7 @@ class SlackMessageReceipt(TypedDict):
     success: Literal[True]
     channel_id: str
     message_ts: str
+    channel_instructions: NotRequired[str]
 
 
 async def slack_list_channels(cursor: str | None = None) -> SlackChannelList | SlackChannelError:
@@ -117,4 +119,11 @@ async def slack_post_message(
     )
     if not message_ts:
         return {"success": False, "error": error or "post_failed"}
-    return {"success": True, "channel_id": channel_id, "message_ts": message_ts}
+    receipt: SlackMessageReceipt = {
+        "success": True,
+        "channel_id": channel_id,
+        "message_ts": message_ts,
+    }
+    if instructions := await SlackChannelConfig.instructions_for(channel_id):
+        receipt["channel_instructions"] = instructions
+    return receipt

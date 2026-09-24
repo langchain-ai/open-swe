@@ -252,6 +252,18 @@ export interface AllowedSlackBot {
   image_url: string
 }
 
+export interface SlackChannelConfigUpdate {
+  watch_pull_requests: boolean
+  instructions: string
+}
+
+/** Admin-set behaviour for one Slack channel. */
+export interface SlackChannelConfig extends SlackChannelConfigUpdate {
+  channel_id: string
+  updated_by: string
+  updated_at: string | null
+}
+
 /** The settings record at either tier: the instance, or what a workspace's runs see. */
 export interface WorkspaceSettings {
   review_draft_prs: boolean
@@ -1391,6 +1403,18 @@ export const api = {
   removeAllowedSlackBot: (teamId: string, botId: string) =>
     request<{ ok: boolean }>(
       `/slack/allowed-bots/${encodeURIComponent(teamId)}/${encodeURIComponent(botId)}`,
+      { method: "DELETE" }
+    ),
+  listSlackChannelConfigs: () =>
+    request<SlackChannelConfig[]>("/slack/channel-configs"),
+  saveSlackChannelConfig: (channelId: string, body: SlackChannelConfigUpdate) =>
+    request<SlackChannelConfig>(
+      `/slack/channel-configs/${encodeURIComponent(channelId)}`,
+      { method: "PUT", body: JSON.stringify(body) }
+    ),
+  removeSlackChannelConfig: (channelId: string) =>
+    request<{ ok: boolean }>(
+      `/slack/channel-configs/${encodeURIComponent(channelId)}`,
       { method: "DELETE" }
     ),
   saveInstanceSettings: (body: WorkspaceSettings) =>

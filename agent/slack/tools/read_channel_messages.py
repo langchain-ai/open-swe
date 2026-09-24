@@ -1,5 +1,6 @@
 from typing import Any
 
+from agent.slack.channel_config import SlackChannelConfig
 from agent.slack.channels import SlackChannel
 from agent.slack.client import (
     format_slack_messages_for_prompt,
@@ -34,10 +35,13 @@ async def slack_read_channel_messages(channel_id: str, limit: int = 30) -> dict[
 
     user_ids = [message.user for message in messages if message.user]
     user_names = await get_slack_user_names(user_ids) if user_ids else {}
-    return {
+    result: dict[str, Any] = {
         "success": True,
         "formatted": format_slack_messages_for_prompt(
             [message.dump() for message in messages], user_names, include_thread_replies=True
         ),
         "count": len(messages),
     }
+    if instructions := await SlackChannelConfig.instructions_for(channel.id):
+        result["channel_instructions"] = instructions
+    return result

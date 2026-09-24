@@ -35,6 +35,7 @@ from agent.slack.payloads import (
     SlackInteractionMessage,
     parse_json_object,
 )
+from agent.slack.pull_request_watch import WatchedPullRequest
 from agent.slack.request import SlackRequest
 from agent.slack.responses import (
     BlockSuggestionResponse,
@@ -351,7 +352,10 @@ async def slack_webhook(
         )
 
     if event.type == "reaction_added":
-        if event.reaction == "x":
+        # The bot's own :x: marks a closed pull request, not a stop request.
+        if event.reaction == "x" and event.resolve_user_id() != envelope.bot_user_id(
+            common.SLACK_BOT_USER_ID
+        ):
             background_tasks.add_task(common.process_slack_stop_reaction, raw_event, event_id)
             return accepted("Stop reaction queued")
         if event.reaction in common.FEEDBACK_REACTIONS:
@@ -389,6 +393,23 @@ async def slack_webhook(
     user_id = updated_message.user if isinstance(updated_message.user, str) else ""
     text = updated_message.text
     attachments = updated_message.attachments
+    if (
+        channel_id
+        and original_message_ts
+        and text
+        and not is_message_update
+        and not reply_thread_ts
+        and event.type == "message"
+        and event.subtype in {"", "bot_message", "file_share"}
+        and user_id != bot_user_id
+        and not (event.app_id and event.app_id == envelope.api_app_id)
+        and (
+            watches := WatchedPullRequest.linked_in(
+                text, channel_id=channel_id, message_ts=original_message_ts
+            )
+        )
+    ):
+        background_tasks.add_task(WatchedPullRequest.record, watches)
     allowed_bot = None
     if event.is_from_bot or updated_message.is_from_bot:
         if (

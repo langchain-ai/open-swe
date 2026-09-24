@@ -35,6 +35,7 @@ from agent.prompts import load_prompt
 from agent.run_config import Repo
 from agent.slack import client as slack_utils
 from agent.slack.allowed_bots import AllowedSlackBot, resolve_allowed_slack_bot
+from agent.slack.channel_config import SlackChannelConfig
 from agent.slack.dm import dm_thread_title, is_dm_channel, is_dm_session
 from agent.slack.failures import report_slack_failure
 from agent.slack.payloads import SlackChannelContext
@@ -150,6 +151,8 @@ async def _slack_channel_identity(
     trace_url = await get_langsmith_trace_url(thread_id)
     if trace_url:
         channel["trace_url"] = trace_url
+    if instructions := await SlackChannelConfig.instructions_for(channel_id):
+        channel["standing_instructions"] = instructions
     return channel
 
 
