@@ -570,6 +570,9 @@ it.each([
     report({ ...captured, status: "ready", cohorts: [cohort] })
   )
   const client = mountReport()
+  fireEvent.click(
+    await screen.findByRole("switch", { name: "Show small samples" })
+  )
   const row = (await screen.findByText("example-model")).closest("tr")!
   const deliveryCell = within(row).getAllByRole("cell").at(-2)!
   expect(deliveryCell.textContent).toBe("\u2014")
@@ -603,6 +606,9 @@ it("renders a zero avg time to PR as a real duration, not an empty marker", asyn
     })
   )
   const client = mountReport()
+  fireEvent.click(
+    await screen.findByRole("switch", { name: "Show small samples" })
+  )
   const row = (await screen.findByText("example-model")).closest("tr")!
   const deliveryCell = within(row).getAllByRole("cell").at(-2)!
   expect(deliveryCell.textContent).not.toBe("\u2014")
@@ -727,31 +733,33 @@ function modelCohort(
 }
 
 it("hides small model groups by default and reveals them with the toggle", async () => {
-  vi.spyOn(api, "prMergeRateByModel").mockResolvedValue(report({
-    ...captured,
-    status: "ready",
-    has_pending_events: false,
-    cohorts: [
-      modelCohort("large-model", 7, [
-        effortGroup({
-          effort: "high",
-          cohort_size: 7,
-          merged: 7,
-          decided_denominator: 7,
-          mature_denominator: 7,
-        }),
-      ]),
-      modelCohort("small-model", 2, [
-        effortGroup({
-          effort: "low",
-          cohort_size: 2,
-          merged: 2,
-          decided_denominator: 2,
-          mature_denominator: 2,
-        }),
-      ]),
-    ],
-  }))
+  vi.spyOn(api, "prMergeRateByModel").mockResolvedValue(
+    report({
+      ...captured,
+      status: "ready",
+      has_pending_events: false,
+      cohorts: [
+        modelCohort("large-model", 7, [
+          effortGroup({
+            effort: "high",
+            cohort_size: 7,
+            merged: 7,
+            decided_denominator: 7,
+            mature_denominator: 7,
+          }),
+        ]),
+        modelCohort("small-model", 2, [
+          effortGroup({
+            effort: "low",
+            cohort_size: 2,
+            merged: 2,
+            decided_denominator: 2,
+            mature_denominator: 2,
+          }),
+        ]),
+      ],
+    })
+  )
   const client = mountReport()
   // The large group shows with its totals unchanged; the small group is hidden.
   const row = (await screen.findByText("large-model")).closest("tr")!
@@ -775,29 +783,31 @@ it("hides small model groups by default and reveals them with the toggle", async
 })
 
 it("hides only the small effort groups of a kept model until the toggle", async () => {
-  vi.spyOn(api, "prMergeRateByModel").mockResolvedValue(report({
-    ...captured,
-    status: "ready",
-    has_pending_events: false,
-    cohorts: [
-      modelCohort("mixed-model", 8, [
-        effortGroup({
-          effort: "high",
-          cohort_size: 6,
-          merged: 6,
-          decided_denominator: 6,
-          mature_denominator: 6,
-        }),
-        effortGroup({
-          effort: "low",
-          cohort_size: 2,
-          merged: 2,
-          decided_denominator: 2,
-          mature_denominator: 2,
-        }),
-      ]),
-    ],
-  }))
+  vi.spyOn(api, "prMergeRateByModel").mockResolvedValue(
+    report({
+      ...captured,
+      status: "ready",
+      has_pending_events: false,
+      cohorts: [
+        modelCohort("mixed-model", 8, [
+          effortGroup({
+            effort: "high",
+            cohort_size: 6,
+            merged: 6,
+            decided_denominator: 6,
+            mature_denominator: 6,
+          }),
+          effortGroup({
+            effort: "low",
+            cohort_size: 2,
+            merged: 2,
+            decided_denominator: 2,
+            mature_denominator: 2,
+          }),
+        ]),
+      ],
+    })
+  )
   const client = mountReport()
   const row = (await screen.findByText("mixed-model")).closest("tr")!
   // The model's own group is large, so its totals stay; only the small
@@ -824,22 +834,24 @@ it("hides only the small effort groups of a kept model until the toggle", async 
 })
 
 it("distinguishes filtered-only small samples from no data and offers to reveal them", async () => {
-  vi.spyOn(api, "prMergeRateByModel").mockResolvedValue(report({
-    ...captured,
-    status: "ready",
-    has_pending_events: false,
-    cohorts: [
-      modelCohort("tiny-model", 3, [
-        effortGroup({
-          effort: "high",
-          cohort_size: 3,
-          merged: 3,
-          decided_denominator: 3,
-          mature_denominator: 3,
-        }),
-      ]),
-    ],
-  }))
+  vi.spyOn(api, "prMergeRateByModel").mockResolvedValue(
+    report({
+      ...captured,
+      status: "ready",
+      has_pending_events: false,
+      cohorts: [
+        modelCohort("tiny-model", 3, [
+          effortGroup({
+            effort: "high",
+            cohort_size: 3,
+            merged: 3,
+            decided_denominator: 3,
+            mature_denominator: 3,
+          }),
+        ]),
+      ],
+    })
+  )
   const client = mountReport()
   expect(
     await screen.findByText(/Only PR groups with fewer than 5 PRs/)
@@ -854,22 +866,24 @@ it("distinguishes filtered-only small samples from no data and offers to reveal 
 })
 
 it("keeps the small-sample choice across period changes", async () => {
-  vi.spyOn(api, "prMergeRateByModel").mockResolvedValue(report({
-    ...captured,
-    status: "ready",
-    has_pending_events: false,
-    cohorts: [
-      modelCohort("small-model", 2, [
-        effortGroup({
-          effort: "low",
-          cohort_size: 2,
-          merged: 2,
-          decided_denominator: 2,
-          mature_denominator: 2,
-        }),
-      ]),
-    ],
-  }))
+  vi.spyOn(api, "prMergeRateByModel").mockResolvedValue(
+    report({
+      ...captured,
+      status: "ready",
+      has_pending_events: false,
+      cohorts: [
+        modelCohort("small-model", 2, [
+          effortGroup({
+            effort: "low",
+            cohort_size: 2,
+            merged: 2,
+            decided_denominator: 2,
+            mature_denominator: 2,
+          }),
+        ]),
+      ],
+    })
+  )
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false, gcTime: 0 } },
   })
@@ -903,12 +917,14 @@ it("keeps the small-sample choice across period changes", async () => {
 })
 
 it("explains that small-sample percentages are unstable", async () => {
-  vi.spyOn(api, "prMergeRateByModel").mockResolvedValue(report({
-    ...captured,
-    status: "ready",
-    has_pending_events: false,
-    cohorts: [modelCohort("some-model", 12, [])],
-  }))
+  vi.spyOn(api, "prMergeRateByModel").mockResolvedValue(
+    report({
+      ...captured,
+      status: "ready",
+      has_pending_events: false,
+      cohorts: [modelCohort("some-model", 12, [])],
+    })
+  )
   const client = mountReport()
   await screen.findByText("some-model")
   fireEvent.click(screen.getByText("How these numbers work"))
