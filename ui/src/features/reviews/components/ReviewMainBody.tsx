@@ -64,13 +64,25 @@ import type {
   ReviewDetail,
   ReviewDiffFile,
   ReviewFinding,
+  PendingReviewComment,
   ReviewUserRef,
+  ScoutProgress,
 } from "@/lib/api"
 import type {
   ReviewSidebarGroup,
   ReviewSidebarView,
 } from "@/features/reviews/components/ReviewSidebar"
 import type { ChatAttachment } from "@/features/reviews/components/ReviewChat"
+import type {
+  DiffRange,
+  ProposedComment,
+} from "@/features/reviews/lib/chatDiffActions"
+import { useChatDrafts } from "@/features/reviews/lib/chatDrafts"
+import { ProposedCommentCard } from "@/features/reviews/components/ProposedCommentCard"
+import { ReviewPageActions } from "@/features/reviews/components/ReviewPageActions"
+import { PendingReviewCommentCard } from "@/features/reviews/components/PendingReviewCommentCard"
+import { ReviewConversation } from "@/features/reviews/components/ReviewConversation"
+import { usePendingReview } from "@/features/reviews/lib/usePendingReview"
 import type { DiffStyle } from "@/features/agents/utils/diffUtils"
 import { Markdown } from "@/features/agents/components/chat/Markdown"
 import { DiffWrapToggle } from "@/features/agents/components/DiffWrapToggle"
@@ -101,13 +113,18 @@ import {
   warmDiffHighlighter,
 } from "@/features/agents/utils/diffUtils"
 import { Button, IconButton } from "@/components/ui/button"
+import { Sheet, SheetPopup } from "@/components/ui/sheet"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Textarea } from "@/components/ui/textarea"
 import { api, reviewImageProxyUrl } from "@/lib/api"
 import { useSession } from "@/lib/session"
+import { useMediaQuery } from "@/lib/useIsMobile"
 import { cn } from "@/lib/utils"
 
 type SideTab = "info" | "chat"
+type SidePanelLayout = "inline" | "sheet"
+// Tailwind's `xl` breakpoint: below it the side panel opens as a sheet.
+const WIDE_MEDIA_QUERY = "(min-width: 1280px)"
 
 // Metadata carried by a Pierre diff line annotation. Findings render as the
 // read-only InlineFinding card; a draftComment renders the inline composer; a
@@ -116,6 +133,8 @@ type ReviewAnnotation =
   | { kind: "finding"; finding: ReviewFinding }
   | { kind: "draftComment"; path: string; range: SelectedLineRange }
   | { kind: "comment"; comment: PrReviewComment }
+  | { kind: "chatDraft"; draft: ProposedComment }
+  | { kind: "pending"; comment: PendingReviewComment }
 
 const REVIEW_VIEW_STORAGE_KEY = "open-swe.review.view"
 const REVIEW_DIFF_STYLE_STORAGE_KEY = "open-swe.review.diffStyle"
@@ -563,6 +582,8 @@ function useExpandedFinding(): ExpandedFindingContextValue {
 }
 
 const NO_FINDINGS: Array<ReviewFinding> = []
+const NO_CHAT_DRAFTS: ReadonlyArray<ProposedComment> = []
+const NO_PENDING_COMMENTS: ReadonlyArray<PendingReviewComment> = []
 const ignoreSection = (_path: string, _node: HTMLDivElement | null) => {}
 
 /** Scroll to a line in whichever registered slice of the file renders it. */
@@ -659,6 +680,8 @@ function ReviewBodyInner({
     [detail.owner, detail.repo, detail.number]
   )
   const [sideTab, setSideTab] = useState<SideTab>("info")
+  const [sidePanelOpen, setSidePanelOpen] = useState(false)
+  const wide = useMediaQuery(WIDE_MEDIA_QUERY)
   const [selectedFile, setSelectedFile] = useState<string | null>(null)
   const fileRefs = useRef<Record<string, HTMLDivElement | null>>({})
   // Per path, one instance per rendered slice: a file split across walkthrough
@@ -784,6 +807,33 @@ function ReviewBodyInner({
     setRead(next)
     persistRead(next)
   }, [detail.findings, persistRead])
+
+  const pendingReview = usePendingReview(
+    detail.owner,
+    detail.repo,
+    detail.number
+  )
+  const pendingByFile = useMemo(() => {
+    const byFile = new Map<string, Array<PendingReviewComment>>()
+    for (const comment of pendingReview.comments) {
+      if (comment.line === null) continue
+      const list = byFile.get(comment.path) ?? []
+      list.push(comment)
+      byFile.set(comment.path, list)
+    }
+    return byFile
+  }, [pendingReview.comments])
+  const chatDraftStore = useChatDrafts()
+  const chatDraftsByFile = useMemo(() => {
+    const byFile = new Map<string, Array<ProposedComment>>()
+    for (const draft of chatDraftStore?.comments ?? []) {
+      if (draft.outcome) continue
+      const list = byFile.get(draft.proposal.range.file) ?? []
+      list.push(draft.proposal)
+      byFile.set(draft.proposal.range.file, list)
+    }
+    return byFile
+  }, [chatDraftStore?.comments])
 
   const findingsByFile = useMemo(() => {
     const byFile = new Map<string, Array<ReviewFinding>>()
@@ -921,6 +971,12 @@ function ReviewBodyInner({
     })
   }, [])
 
+  const scrollToTop = useCallback(() => {
+    scrollHoldStopRef.current?.()
+    const scroller = diffScrollElRef.current
+    if (scroller) scrollHoldStopRef.current = jumpAndHold(scroller, () => 0)
+  }, [])
+
   useEffect(() => () => scrollHoldStopRef.current?.(), [])
 
   // Scroll-spy: track which block's header is currently pinned at the top of the
@@ -1027,6 +1083,7 @@ function ReviewBodyInner({
         composer?.addAttachment(attachment)
       }
       setSideTab("chat")
+      setSidePanelOpen(true)
       setUserSelection(null)
     },
     [composer]
@@ -1202,6 +1259,79 @@ function ReviewBodyInner({
     requestAnimationFrame(snap)
   }, [openComment])
 
+  const [shownRange, setShownRange] = useState<{
+    file: string
+    range: SelectedLineRange
+  } | null>(null)
+  const pulseTimersRef = useRef<Array<number>>([])
+  useEffect(
+    () => () => pulseTimersRef.current.forEach((t) => window.clearTimeout(t)),
+    []
+  )
+  const showRange = useCallback(
+    (target: DiffRange) => {
+      if (!filesByPathRef.current.has(target.file)) {
+        console.warn("Chat asked to show a file that is not in this diff", {
+          target,
+        })
+        toast.error(`${target.file} isn't in the diff loaded on this page`)
+        return
+      }
+      if (!wide) setSidePanelOpen(false)
+      const side: SelectionSide =
+        target.side === "LEFT" ? "deletions" : "additions"
+      const range: SelectedLineRange = {
+        start: target.startLine,
+        end: target.endLine,
+        side,
+        endSide: side,
+      }
+      setUserSelection(null)
+      setExpandedId(null)
+      setSelectedFile(target.file)
+      setExpandedFiles((prev) => ({ ...prev, [target.file]: true }))
+      scrollHoldStopRef.current?.()
+      const requestId = ++findingScrollRequestRef.current
+      let frames = 0
+      const snap = () => {
+        if (requestId !== findingScrollRequestRef.current) return
+        const scroller = diffScrollElRef.current
+        if (!scroller) return
+        const slices = diffInstanceRefs.current[target.file]
+        const done =
+          !!slices &&
+          scrollSlicesLineToCenter(slices, target.startLine, side, scroller)
+        if (!done) {
+          const fileNode = fileRefs.current[target.file]
+          if (fileNode && frames === 0)
+            scrollElementToCenter(fileNode, scroller)
+          if (frames++ < FINDING_SCROLL_MAX_FRAMES) requestAnimationFrame(snap)
+        }
+      }
+      requestAnimationFrame(snap)
+
+      pulseTimersRef.current.forEach((t) => window.clearTimeout(t))
+      const shown = { file: target.file, range }
+      const steps: Array<[number, typeof shown | null]> = [
+        [0, shown],
+        [450, null],
+        [700, shown],
+        [1150, null],
+        [1400, shown],
+        [3400, null],
+      ]
+      pulseTimersRef.current = steps.map(([delay, value]) =>
+        window.setTimeout(() => setShownRange(value), delay)
+      )
+    },
+    [wide]
+  )
+  useEffect(() => {
+    if (!composer) return
+    composer.registerShowHandler(showRange)
+    return () => composer.registerShowHandler(null)
+  }, [composer, showRange])
+
   const renderFileCard = (
     file: ReviewDiffFile,
     step?: { index: number; entry: ResolvedGroupFile }
@@ -1210,13 +1340,15 @@ function ReviewBodyInner({
     // Keep the range highlighted while its comment composer is open, so the
     // user can see exactly which lines they're commenting on.
     const selectedLines =
-      expandedFinding?.file === file.path && isAnchored(expandedFinding)
-        ? findingSelectedRange(expandedFinding)
-        : commentDraft?.file === file.path
-          ? commentDraft.range
-          : userSelection?.file === file.path
-            ? userSelection.range
-            : null
+      shownRange?.file === file.path
+        ? shownRange.range
+        : expandedFinding?.file === file.path && isAnchored(expandedFinding)
+          ? findingSelectedRange(expandedFinding)
+          : commentDraft?.file === file.path
+            ? commentDraft.range
+            : userSelection?.file === file.path
+              ? userSelection.range
+              : null
     return (
       <FileDiffCard
         key={step ? `${step.index}:${file.path}` : file.path}
@@ -1225,6 +1357,16 @@ function ReviewBodyInner({
         additions={step?.entry.additions ?? file.additions}
         deletions={step?.entry.deletions ?? file.deletions}
         findings={findingsByFile.get(file.path) ?? NO_FINDINGS}
+        chatDrafts={
+          embedded
+            ? NO_CHAT_DRAFTS
+            : (chatDraftsByFile.get(file.path) ?? NO_CHAT_DRAFTS)
+        }
+        pendingComments={
+          embedded
+            ? NO_PENDING_COMMENTS
+            : (pendingByFile.get(file.path) ?? NO_PENDING_COMMENTS)
+        }
         selectedLines={selectedLines}
         viewed={viewed.has(file.path)}
         onToggleViewed={toggleViewed}
@@ -1264,8 +1406,10 @@ function ReviewBodyInner({
       onViewChange: setView,
       onSelectGroup: scrollToGroup,
       activeGroup,
+      onSelectOverview: scrollToTop,
     }),
     [
+      scrollToTop,
       detail.number,
       diffFiles,
       selectedFile,
@@ -1296,6 +1440,19 @@ function ReviewBodyInner({
       registerAnnotation,
     }),
     [expandedId, detail.url, toggleInline, registerAnnotation]
+  )
+
+  const sidePanel = (layout: SidePanelLayout) => (
+    <SidePanel
+      layout={layout}
+      detail={detail}
+      tab={sideTab}
+      onTabChange={setSideTab}
+      read={read}
+      expandedId={expandedId}
+      onMarkAllRead={markAllRead}
+      onFindingClick={openFromPanel}
+    />
   )
 
   return (
@@ -1339,6 +1496,7 @@ function ReviewBodyInner({
                 <PrHeader
                   url={detail.url}
                   title={detail.pr.title}
+                  number={detail.number}
                   state={detail.pr.state}
                   headRef={detail.pr.head_ref}
                   baseRef={detail.pr.base_ref}
@@ -1349,6 +1507,15 @@ function ReviewBodyInner({
                     deletions: detail.pr.deletions,
                   }}
                 />
+                {!embedded &&
+                  (detail.pr.state === "open" ||
+                    detail.pr.state === "draft") && (
+                    <ReviewPageActions
+                      owner={detail.owner}
+                      repo={detail.repo}
+                      number={detail.number}
+                    />
+                  )}
                 {!detail.walkthrough && detail.pr.changed_files > 0 && (
                   <WalkthroughCallout detail={detail} />
                 )}
@@ -1361,7 +1528,6 @@ function ReviewBodyInner({
                     headSha={detail.pr.head_sha}
                   />
                 )}
-                <AuthorGuidanceCard points={detail.guidance} className="mt-4" />
                 <div
                   className={cn(
                     "mt-4 rounded-lg border border-border p-4",
@@ -1379,6 +1545,17 @@ function ReviewBodyInner({
                     </p>
                   )}
                 </div>
+                <AuthorGuidanceCard points={detail.guidance} className="mt-4" />
+                {!embedded && (
+                  <section className="mt-6" aria-label="Conversation">
+                    <h2 className="mb-2 text-sm font-medium">Conversation</h2>
+                    <ReviewConversation
+                      owner={detail.owner}
+                      repo={detail.repo}
+                      number={detail.number}
+                    />
+                  </section>
+                )}
 
                 <div className="mt-6">
                   <div className="mb-2 flex items-center justify-between gap-3">
@@ -1402,6 +1579,20 @@ function ReviewBodyInner({
                       )}
                     </div>
                   </div>
+                  {diffFiles && diffFiles.length < detail.pr.changed_files && (
+                    <p className="mb-2 text-xs text-muted-foreground">
+                      Showing {diffFiles.length} of {detail.pr.changed_files}{" "}
+                      changed files.{" "}
+                      <a
+                        href={`${detail.url}/files`}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="underline underline-offset-2 hover:text-foreground"
+                      >
+                        See every file on GitHub
+                      </a>
+                    </p>
+                  )}
                   {!diffFiles ? (
                     <Skeleton className="h-64 w-full" />
                   ) : diffFiles.length === 0 ? (
@@ -1439,19 +1630,67 @@ function ReviewBodyInner({
           </div>
         </main>
 
-        {!embedded && (
-          <SidePanel
-            detail={detail}
-            tab={sideTab}
-            onTabChange={setSideTab}
-            read={read}
-            expandedId={expandedId}
-            onMarkAllRead={markAllRead}
-            onFindingClick={openFromPanel}
-          />
-        )}
+        {!embedded &&
+          (wide ? (
+            sidePanel("inline")
+          ) : (
+            <Sheet open={sidePanelOpen} onOpenChange={setSidePanelOpen}>
+              {!sidePanelOpen && (
+                <Button
+                  variant="outline"
+                  className="fixed right-4 bottom-4 z-30 shadow-md"
+                  onClick={() => setSidePanelOpen(true)}
+                >
+                  <ChatCircleIcon />
+                  Info &amp; chat
+                </Button>
+              )}
+              <SheetPopup side="right" keepMounted>
+                {sidePanel("sheet")}
+              </SheetPopup>
+            </Sheet>
+          ))}
       </div>
     </ExpandedFindingContext.Provider>
+  )
+}
+
+function ScoutProgressPreview({ progress }: { progress: ScoutProgress }) {
+  const { recent } = progress
+  return (
+    <div className="mt-2 text-xs text-muted-foreground">
+      <p>
+        {progress.steps} step{progress.steps === 1 ? "" : "s"} committed
+      </p>
+      {recent.length > 0 && (
+        <ol className="mt-1 space-y-0.5 font-mono text-[11px]">
+          {recent.map((action, index) => {
+            const current = progress.running && index === recent.length - 1
+            return (
+              <li
+                key={index}
+                className={cn(
+                  "flex min-w-0 gap-2",
+                  current && "text-foreground"
+                )}
+              >
+                <span className="shrink-0">
+                  {current ? (
+                    <CircleNotchIcon className="inline size-3 animate-spin" />
+                  ) : (
+                    "·"
+                  )}
+                </span>
+                <span className="shrink-0">{action.tool}</span>
+                {action.target && (
+                  <span className="min-w-0 truncate">{action.target}</span>
+                )}
+              </li>
+            )
+          })}
+        </ol>
+      )}
+    </div>
   )
 }
 
@@ -1462,10 +1701,10 @@ function WalkthroughCallout({ detail }: { detail: ReviewDetail }) {
     mutationFn: () =>
       api.runReviewScout(detail.owner, detail.repo, detail.number),
     onSuccess: () => {
-      void qc.invalidateQueries({
+      void qc.invalidateQueries({ queryKey: agentThreadKeys.lists })
+      return qc.invalidateQueries({
         queryKey: ["review", detail.owner, detail.repo, detail.number],
       })
-      void qc.invalidateQueries({ queryKey: agentThreadKeys.lists })
     },
     onError: (error) =>
       toast.error("Couldn't start the walkthrough", {
@@ -1475,16 +1714,35 @@ function WalkthroughCallout({ detail }: { detail: ReviewDetail }) {
   const running = detail.walkthrough_running || scout.isPending
   // This card only renders while there is no walkthrough, so a scout that
   // stops running while it is still mounted ended without one.
+  const failure = running ? null : detail.walkthrough_error
+  const failureSummary = failure?.split("\n", 1)[0]?.slice(0, 300)
   const wasRunning = useRef(detail.walkthrough_running)
   useEffect(() => {
     if (wasRunning.current && !detail.walkthrough_running) {
       toast.error("The walkthrough failed to build", {
-        description:
-          "The review scout finished without producing steps. Try again, or check its review-scout run in LangSmith.",
+        description: failureSummary
+          ? `The review scout crashed: ${failureSummary}`
+          : "The review scout finished without producing steps. Try again, or check its review-scout run in LangSmith.",
       })
     }
     wasRunning.current = detail.walkthrough_running
-  }, [detail.walkthrough_running])
+  }, [detail.walkthrough_running, failureSummary])
+  useEffect(() => {
+    if (!failure) return
+    console.error("Review scout failed", {
+      pr: `${detail.owner}/${detail.repo}#${detail.number}`,
+      headSha: detail.head_sha,
+      scoutThreadId: detail.walkthrough_scout_thread_id,
+      error: failure,
+    })
+  }, [
+    failure,
+    detail.owner,
+    detail.repo,
+    detail.number,
+    detail.head_sha,
+    detail.walkthrough_scout_thread_id,
+  ])
   return (
     <div className="mt-4 flex items-center gap-4 rounded-lg border border-primary/40 bg-primary/5 p-4">
       <ListNumbersIcon className="size-6 shrink-0 text-primary" />
@@ -1497,6 +1755,16 @@ function WalkthroughCallout({ detail }: { detail: ReviewDetail }) {
             ? "The review scout is ordering the changes into narrated steps. This takes a few minutes; the page updates on its own."
             : "The review scout orders the changes into narrated steps and moves mechanical edits to the end."}
         </p>
+        {running && detail.walkthrough_progress && (
+          <ScoutProgressPreview progress={detail.walkthrough_progress} />
+        )}
+        {failureSummary && (
+          <p className="mt-1.5 text-xs break-words text-destructive">
+            Last attempt failed: {failureSummary}
+            {detail.walkthrough_scout_thread_id &&
+              ` (scout thread ${detail.walkthrough_scout_thread_id})`}
+          </p>
+        )}
       </div>
       <Button size="lg" onClick={() => scout.mutate()} disabled={running}>
         {running ? (
@@ -1642,6 +1910,8 @@ const FileDiffCard = memo(function FileDiffCard({
   openComment,
   onUpdateOpenComment,
   onCloseOpenComment,
+  chatDrafts,
+  pendingComments,
 }: {
   file: ReviewDiffFile
   /** A walkthrough step's slice of the file; `null` renders the whole diff. */
@@ -1676,6 +1946,10 @@ const FileDiffCard = memo(function FileDiffCard({
   openComment: PrReviewComment | null
   onUpdateOpenComment?: (comment: PrReviewComment) => void
   onCloseOpenComment?: () => void
+  /** Chat-drafted comments on this file still awaiting the user's decision. */
+  chatDrafts: ReadonlyArray<ProposedComment>
+  /** This file's comments in the viewer's pending GitHub review. */
+  pendingComments: ReadonlyArray<PendingReviewComment>
 }) {
   // No chat means no line-selection → "Add to Chat" affordance (embedded view).
   const selectable = Boolean(onAddToChat)
@@ -1730,10 +2004,32 @@ const FileDiffCard = memo(function FileDiffCard({
         metadata: { kind: "comment", comment: openComment },
       })
     }
+    for (const draft of chatDrafts) {
+      extra.push({
+        side: draft.range.side === "LEFT" ? "deletions" : "additions",
+        lineNumber: draft.range.endLine,
+        metadata: { kind: "chatDraft", draft },
+      })
+    }
+    for (const comment of pendingComments) {
+      if (comment.line === null) continue
+      extra.push({
+        side: comment.side === "LEFT" ? "deletions" : "additions",
+        lineNumber: comment.line,
+        metadata: { kind: "pending", comment },
+      })
+    }
     return extra.length > 0
       ? [...findingAnnotations, ...extra]
       : findingAnnotations
-  }, [findingAnnotations, commentDraftRange, openComment, file.path])
+  }, [
+    findingAnnotations,
+    commentDraftRange,
+    openComment,
+    chatDrafts,
+    pendingComments,
+    file.path,
+  ])
 
   // The gutter "+" drives comments: a click comments on one line, and a drag down
   // the gutter comments across a range (Pierre's gutter selection, which needs
@@ -1833,6 +2129,26 @@ const FileDiffCard = memo(function FileDiffCard({
       const meta = annotation.metadata
       if (meta.kind === "finding")
         return <InlineFinding finding={meta.finding} />
+      if (meta.kind === "pending")
+        return (
+          <PendingReviewCommentCard
+            owner={owner}
+            repo={repo}
+            number={prNumber}
+            comment={meta.comment}
+          />
+        )
+      if (meta.kind === "chatDraft")
+        return (
+          <div className="p-2 font-sans">
+            <ProposedCommentCard
+              owner={owner}
+              repo={repo}
+              number={prNumber}
+              id={meta.draft.id}
+            />
+          </div>
+        )
       if (meta.kind === "comment")
         return (
           <InlineComment
@@ -2010,7 +2326,7 @@ function AddToChatPopup({
       <button
         type="button"
         onClick={onAdd}
-        className="inline-flex items-center gap-1.5 rounded-md border border-border bg-popover px-2 py-1 text-[11px] font-medium text-popover-foreground shadow-md hover:bg-muted"
+        className="inline-flex items-center gap-1.5 rounded-md border border-border bg-popover px-2 py-1 text-[11px] font-medium text-popover-foreground shadow-md hover:bg-[linear-gradient(var(--muted),var(--muted)),linear-gradient(var(--popover),var(--popover))]"
       >
         Add to Chat
         <kbd className="rounded border border-border px-1 text-[10px] text-muted-foreground">
@@ -2152,27 +2468,17 @@ function CommentComposer({
   const [value, setValue] = useState("")
   const [mode, setMode] = useState<"write" | "preview">("write")
   const textareaRef = useRef<HTMLTextAreaElement | null>(null)
-  const queryClient = useQueryClient()
+  const pending = usePendingReview(owner, repo, prNumber)
+  const mutation = pending.add
   useEffect(() => {
     textareaRef.current?.focus()
   }, [])
-  const mutation = useMutation({
-    mutationFn: (body: string) =>
-      api.createReviewComment(
-        owner,
-        repo,
-        prNumber,
-        buildCommentPayload(path, range, body)
-      ),
-    onSuccess: () =>
-      queryClient.invalidateQueries({
-        queryKey: ["reviewComments", owner, repo, prNumber],
-      }),
-  })
   const submit = () => {
     const body = value.trim()
     if (!body || mutation.isPending) return
-    mutation.mutate(body)
+    mutation.mutate(buildCommentPayload(path, range, body), {
+      onSuccess: onClose,
+    })
   }
   // Apply a toolbar action to the live textarea selection, then restore the
   // caret/selection on the next frame (after the controlled value re-renders).
@@ -2189,7 +2495,6 @@ function CommentComposer({
       textarea.setSelectionRange(next.start, next.end)
     })
   }
-  const posted = mutation.data
   const tabClass = (active: boolean) =>
     cn(
       "rounded px-2 py-0.5 text-[11px]",
@@ -2216,21 +2521,7 @@ function CommentComposer({
             <XIcon />
           </IconButton>
         </div>
-        {posted ? (
-          <div className="flex items-center gap-2 px-3 py-2.5 text-[11px] text-muted-foreground">
-            <CheckCircleIcon className="size-3.5 text-emerald-500" />
-            Comment posted
-            <a
-              href={posted.html_url}
-              target="_blank"
-              rel="noreferrer"
-              className="inline-flex items-center gap-1 text-foreground hover:underline"
-            >
-              <IoLogoGithub className="size-3" />
-              View on GitHub
-            </a>
-          </div>
-        ) : (
+        {
           <>
             <div className="flex items-center gap-1 border-b border-border px-1.5 py-1">
               <button
@@ -2312,7 +2603,7 @@ function CommentComposer({
                 <p className="mt-1.5 text-[11px] text-destructive">
                   {mutation.error instanceof Error
                     ? mutation.error.message
-                    : "Failed to post comment"}
+                    : "Failed to add the comment"}
                 </p>
               )}
               <div className="mt-2 flex items-center justify-end gap-2">
@@ -2329,12 +2620,12 @@ function CommentComposer({
                   disabled={!value.trim() || mutation.isPending}
                   className="rounded bg-foreground px-2 py-1 text-[11px] font-medium text-background disabled:opacity-50"
                 >
-                  {mutation.isPending ? "Posting…" : "Comment"}
+                  {mutation.isPending ? "Adding…" : "Add review comment"}
                 </button>
               </div>
             </div>
           </>
-        )}
+        }
       </div>
     </div>
   )
@@ -2709,6 +3000,7 @@ function ReviewPanelResizeHandle({
 
 function SidePanel({
   detail,
+  layout,
   tab,
   onTabChange,
   read,
@@ -2717,6 +3009,7 @@ function SidePanel({
   onFindingClick,
 }: {
   detail: ReviewDetail
+  layout: SidePanelLayout
   tab: SideTab
   onTabChange: (tab: SideTab) => void
   read: Set<string>
@@ -2763,11 +3056,21 @@ function SidePanel({
   return (
     <div
       ref={panelRef}
-      style={{ width }}
-      className="relative hidden h-full shrink-0 xl:flex"
+      style={layout === "inline" ? { width } : undefined}
+      className={cn(
+        "flex h-full min-h-0",
+        layout === "inline" ? "relative shrink-0" : "w-full"
+      )}
     >
-      <ReviewPanelResizeHandle width={width} onResize={setWidth} />
-      <aside className="flex h-full w-full flex-col overflow-y-auto border-l border-border">
+      {layout === "inline" && (
+        <ReviewPanelResizeHandle width={width} onResize={setWidth} />
+      )}
+      <aside
+        className={cn(
+          "flex h-full w-full flex-col overflow-y-auto",
+          layout === "inline" && "border-l border-border"
+        )}
+      >
         <div className="flex items-center gap-1 border-b border-border px-3 py-2">
           {(
             [
@@ -2796,6 +3099,7 @@ function SidePanel({
             owner={detail.owner}
             repo={detail.repo}
             number={detail.number}
+            reviewed={detail.status === "idle"}
           />
         ) : (
           <div className="divide-y divide-border">
@@ -2828,6 +3132,11 @@ function SidePanel({
                   {detail.head_sha.slice(0, 7) || "—"}
                 </div>
                 {detail.watch && <div>Watching for new pushes</div>}
+                {detail.status === "error" && detail.review_error && (
+                  <div className="break-words text-destructive">
+                    {detail.review_error}
+                  </div>
+                )}
                 {reReview.error && (
                   <div className="text-destructive">
                     {reReview.error.message}

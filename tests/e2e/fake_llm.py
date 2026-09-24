@@ -300,7 +300,13 @@ def _text(content: Any) -> str:
     return str(content)
 
 
-_FRAMING_SENDER_IDS = ("system:slack-context", "system:dashboard-handoff")
+_REPLY_GUARD_SENDER_ID = "system:reply-guard"
+_FRAMING_SENDER_IDS = ("system:slack-context", "system:dashboard-handoff", _REPLY_GUARD_SENDER_ID)
+
+
+def _is_reply_nudge(message: BaseMessage) -> bool:
+    """A reply-guard nudge or its introduction: a retry of the same turn, not a new one."""
+    return isinstance(message, HumanMessage) and _REPLY_GUARD_SENDER_ID in _text(message.content)
 
 
 def _is_framing_block(header: str) -> bool:
@@ -774,7 +780,43 @@ def _resolve_thread_step(messages: list[BaseMessage]) -> AIMessage:
     )
 
 
+# The review page's chat drafts comments and reviews through two tools. Each marker
+# selects one scripted reply; the file and lines match what review_page_chat.spec.ts seeds.
+REVIEW_CHAT_COMMENTS_MARKER = "E2E_REVIEW_CHAT_COMMENTS"
+REVIEW_CHAT_REVIEW_MARKER = "E2E_REVIEW_CHAT_REVIEW"
+REVIEW_CHAT_PLAIN_MARKER = "E2E_REVIEW_CHAT_PLAIN"
+REVIEW_CHAT_FILE = "zeta.py"
+
 SCRIPT_LIBRARY: dict[str, tuple[StepSpec, ...]] = {
+    "review_chat_comments": (
+        _tool_step(
+            "Drafting the first comment.",
+            "propose_review_comment",
+            {
+                "file": REVIEW_CHAT_FILE,
+                "line": 5,
+                "body": "Rename ZETA_5 to something descriptive.",
+            },
+            "call-review-chat-comment-post",
+        ),
+        _tool_step(
+            "Drafting the second comment.",
+            "propose_review_comment",
+            {"file": REVIEW_CHAT_FILE, "line": 12, "body": "This constant looks unused."},
+            "call-review-chat-comment-discard",
+        ),
+        StepSpec(content="Two drafts are ready for you to post or discard."),
+    ),
+    "review_chat_review": (
+        _tool_step(
+            "Drafting a review.",
+            "propose_pr_review",
+            {"event": "COMMENT", "body": "Looks reasonable overall."},
+            "call-review-chat-review",
+        ),
+        StepSpec(content="The review draft is ready."),
+    ),
+    "review_chat_plain": (StepSpec(content="The pull request adds two constant modules."),),
     # Parent turn: delegate to two general-purpose subagents in one step so the
     # transcript renders a subagent card grid. The subagents run this same fake
     # model; their task description carries the marker that selects the
@@ -1201,6 +1243,9 @@ def _is_pull_request_fix(text: str) -> bool:
 
 
 SCRIPT_RULES: tuple[ScriptRule, ...] = (
+    ScriptRule("review_chat_comments", lambda ctx: REVIEW_CHAT_COMMENTS_MARKER in ctx.last_text),
+    ScriptRule("review_chat_review", lambda ctx: REVIEW_CHAT_REVIEW_MARKER in ctx.last_text),
+    ScriptRule("review_chat_plain", lambda ctx: REVIEW_CHAT_PLAIN_MARKER in ctx.last_text),
     ScriptRule("subagent_task", lambda ctx: SUBAGENT_TASK_MARKER in ctx.last_text),
     ScriptRule("delegate", lambda ctx: ctx.human_count <= 1 and DELEGATE_MARKER in ctx.first_text),
     ScriptRule(
@@ -1313,7 +1358,12 @@ class FakeScriptedChatModel(BaseChatModel):
         script = _script_for(context)
 
         last_human = max(
-            (i for i, m in enumerate(messages) if isinstance(m, HumanMessage)), default=-1
+            (
+                i
+                for i, m in enumerate(messages)
+                if isinstance(m, HumanMessage) and not _is_reply_nudge(m)
+            ),
+            default=-1,
         )
         step_index = sum(1 for m in messages[last_human + 1 :] if isinstance(m, AIMessage))
 

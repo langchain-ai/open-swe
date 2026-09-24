@@ -99,6 +99,7 @@ def _message_update_payload(*, bot_message: bool = False) -> dict[str, Any]:
 @pytest.fixture(autouse=True)
 def _patch(monkeypatch: pytest.MonkeyPatch) -> None:
     slack_events.reset_slack_event_claims()
+    monkeypatch.setattr(slack_routes, "allow_solo_thread_followup", AsyncMock(return_value=False))
     monkeypatch.setattr("agent.incidents.channels.handle_slack_event", AsyncMock(return_value=None))
 
     async def channel_context(_channel_id: str, *, use_cache: bool = True) -> SlackChannelContext:

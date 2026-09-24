@@ -170,6 +170,21 @@ class Walkthrough(Base):
         return found is not None
 
     @classmethod
+    async def dismiss(cls, owner: str, repo: str, number: int) -> bool:
+        """Delete the PR's walkthrough so the scout can build it again; ``False`` when none existed."""
+        pull_request = await PullRequest.get(owner, repo, number)
+        if pull_request is None:
+            return False
+        async with postgres.session() as session:
+            deleted = await session.scalar(
+                delete(cls)
+                .where(cls.pull_request_id == pull_request.id)
+                .returning(cls.pull_request_id)
+            )
+            await session.commit()
+        return deleted is not None
+
+    @classmethod
     async def carry_forward(
         cls, owner: str, repo: str, number: int, *, from_sha: str, to_sha: str
     ) -> None:
