@@ -39,17 +39,21 @@ def _title(instruction: str) -> str:
     return f"{first_line[: _TITLE_MAX_CHARS - 1].rstrip()}…"
 
 
+def _command_ts(request: SlackRequest) -> str:
+    return request.original_message_ts or request.event_ts
+
+
 async def _root_text(request: SlackRequest, heading: str) -> str:
     parts = (
         heading,
-        await source_thread_line(request.channel_id, request.thread_ts),
+        await source_thread_line(request.channel_id, _command_ts(request) or request.thread_ts),
         f"<@{request.user_id}>" if request.user_id else "",
     )
     return " · ".join(part for part in parts if part)
 
 
 async def _mark_done(request: SlackRequest) -> None:
-    await mark_broken_out(request.channel_id, request.original_message_ts or request.event_ts)
+    await mark_broken_out(request.channel_id, _command_ts(request))
 
 
 async def _tell_sender(request: SlackRequest, text: str) -> None:
