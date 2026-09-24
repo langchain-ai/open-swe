@@ -43,12 +43,9 @@ def _patch_slack(monkeypatch) -> SimpleNamespace:
     posted = SimpleNamespace(
         reactions=AsyncMock(),
         ephemeral=AsyncMock(),
+        source_line=AsyncMock(return_value="<https://slack/p105|from this thread>"),
     )
-    monkeypatch.setattr(
-        breakout,
-        "source_thread_line",
-        AsyncMock(return_value="<https://slack/p100|from this thread>"),
-    )
+    monkeypatch.setattr(breakout, "source_thread_line", posted.source_line)
     monkeypatch.setattr(breakout, "mark_broken_out", posted.reactions)
     monkeypatch.setattr(breakout, "post_slack_ephemeral_reply", posted.ephemeral)
     return posted
@@ -69,8 +66,9 @@ async def test_breakout_with_text_starts_new_thread_with_old_transcript(monkeypa
     await breakout.process_slack_breakout(_request(), "fix it", None)
 
     assert root.await_args.args[1] == (
-        "*Breakout thread:* fix it · <https://slack/p100|from this thread> · <@U_ALICE>"
+        "*Breakout thread:* fix it · <https://slack/p105|from this thread> · <@U_ALICE>"
     )
+    posted.source_line.assert_awaited_once_with("C1", "105.0")
     posted.reactions.assert_awaited_once_with("C1", "105.0")
     sent = mention.await_args.args[0]
     assert (sent.thread_ts, sent.thread_id, sent.text, sent.context_thread_ts) == (
@@ -106,8 +104,9 @@ async def test_bare_breakout_moves_the_existing_thread(monkeypatch):
     assert (thread_id, channel) == ("old-thread", "C1")
     assert (
         message
-        == "*Breakout thread:* Flaky test · <https://slack/p100|from this thread> · <@U_ALICE>"
+        == "*Breakout thread:* Flaky test · <https://slack/p105|from this thread> · <@U_ALICE>"
     )
+    posted.source_line.assert_awaited_once_with("C1", "105.0")
     posted.reactions.assert_awaited_once_with("C1", "105.0")
     mention.assert_not_awaited()
 

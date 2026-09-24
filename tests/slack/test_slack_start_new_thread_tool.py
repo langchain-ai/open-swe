@@ -210,8 +210,7 @@ async def test_slack_start_new_thread_success(
     assert captured["top_level_post"]["text"] == (
         "*Breakout thread:* Investigate follow-up · <https://p/src|from this thread> · <@U1>"
     )
-    source_thread_ts = _config()["configurable"]["slack_thread"]["thread_ts"]
-    source_line.assert_awaited_once_with("C1", source_thread_ts)
+    source_line.assert_awaited_once_with("C1", "1700000000.000002")
     react.assert_awaited_once_with("C1", "1700000000.000002")
     assert captured["top_level_post"]["unfurl_links"] is False
     assert captured["thread_reply"] == {
