@@ -21,6 +21,8 @@ def app_config(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
     monkeypatch.setattr(github_app, "GITHUB_APP_ID", "1")
     monkeypatch.setattr(github_app, "GITHUB_APP_PRIVATE_KEY", "test-key")
     monkeypatch.setattr(github_app, "GITHUB_APP_INSTALLATION_ID", "2")
+    # A key exported in the developer's shell would send scoped tokens to the real Store.
+    monkeypatch.delenv("TOKEN_ENCRYPTION_KEY", raising=False)
     github_app.clear_app_token_cache()
     yield
     github_app.clear_app_token_cache()
@@ -223,6 +225,43 @@ async def test_second_worker_reuses_the_token_minted_for_each_scope(
     assert len({token for token, _ in first}) == len(mints) == 5
 
 
+async def _unavailable(*_args: object) -> NoReturn:
+    raise RuntimeError("store unavailable")
+
+
+async def test_store_hit_is_kept_in_process(
+    shared_store: FakeStore, mints: list[dict[str, object]], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    minted = await github_app.get_github_app_installation_token(repository_ids=[11])
+    github_app.clear_app_token_cache()  # a second worker, with an empty in-process cache
+    assert await github_app.get_github_app_installation_token(repository_ids=[11]) == minted
+
+    monkeypatch.setattr(shared_store, "get_item", _unavailable)
+
+    assert await github_app.get_github_app_installation_token(repository_ids=[11]) == minted
+    assert len(mints) == 1
+
+
+async def test_token_failure_never_returns_shared_broader_access(
+    shared_store: FakeStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def handle(request: httpx.Request) -> httpx.Response:
+        if json.loads(request.content).get("repository_ids") == [11]:
+            return httpx.Response(403, json={"message": "unavailable"})
+        return httpx.Response(
+            201, json={"token": "broad-token", "expires_at": "2099-01-01T00:00:00Z"}
+        )
+
+    mock_github_sdk(monkeypatch, handle)
+    assert await github_app.get_github_app_installation_token(repository_ids=[11, 22]) == (
+        "broad-token"
+    )
+    assert len(shared_store.values(_SHARED_TOKENS)) == 1
+    github_app.clear_app_token_cache()  # a second worker, with an empty in-process cache
+
+    assert await github_app.get_github_app_installation_token(repository_ids=[11]) is None
+
+
 async def test_store_holds_only_an_encrypted_token_under_an_opaque_key(
     shared_store: FakeStore, mints: list[dict[str, object]]
 ) -> None:
@@ -307,9 +346,7 @@ async def test_without_encryption_key_scoped_tokens_are_never_shared(
     monkeypatch: pytest.MonkeyPatch,
     encryption_key: str | None,
 ) -> None:
-    if encryption_key is None:
-        monkeypatch.delenv("TOKEN_ENCRYPTION_KEY", raising=False)
-    else:
+    if encryption_key is not None:
         monkeypatch.setenv("TOKEN_ENCRYPTION_KEY", encryption_key)
     reads = AsyncMock(wraps=fake_store.get_item)
     monkeypatch.setattr(fake_store, "get_item", reads)
@@ -329,11 +366,8 @@ async def test_store_outage_falls_back_to_minting_without_logging_the_token(
     monkeypatch: pytest.MonkeyPatch,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    async def unavailable(*_args: object) -> NoReturn:
-        raise RuntimeError("store unavailable")
-
-    monkeypatch.setattr(shared_store, "get_item", unavailable)
-    monkeypatch.setattr(shared_store, "put_item", unavailable)
+    monkeypatch.setattr(shared_store, "get_item", _unavailable)
+    monkeypatch.setattr(shared_store, "put_item", _unavailable)
 
     with caplog.at_level(logging.WARNING):
         first = await github_app.get_github_app_installation_token(repository_ids=[11])
