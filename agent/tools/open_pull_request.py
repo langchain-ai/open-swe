@@ -514,7 +514,7 @@ def _upsert_pull_request(records: object, record: dict[str, Any]) -> list[dict[s
     ] + [record]
 
 
-async def _thread_pull_requests(thread_id: str) -> list[dict[str, Any]]:
+async def thread_pull_requests(thread_id: str) -> list[dict[str, Any]]:
     try:
         thread = await get_client().threads.get(thread_id)
     except Exception:
@@ -556,6 +556,9 @@ async def _thread_pull_requests(thread_id: str) -> list[dict[str, Any]]:
             ),
         }
     ]
+
+
+_thread_pull_requests = thread_pull_requests
 
 
 PR_OPENED_FEEDBACK_KEY = "pr_opened"
@@ -723,7 +726,7 @@ async def _record_pr_telemetry(
                     "run_id": str(run_id),
                     "channel_id": cfg.slack_thread.channel_id,
                 }
-            pull_requests = _upsert_pull_request(await _thread_pull_requests(thread_id), record)
+            pull_requests = _upsert_pull_request(await thread_pull_requests(thread_id), record)
             metadata: dict[str, Any] = {
                 "agent_kind": "agent",
                 "pr_url": pr_url if isinstance(pr_url, str) else "",

@@ -13,6 +13,7 @@ from agent.slack.client import (
     post_slack_top_level_message_with_ts,
 )
 from agent.store import TypedStore, now_iso
+from agent.tools.pr_link_guard import pr_link_error, unverified_pr_links
 from agent.utils.dashboard_links import dashboard_thread_url
 
 logger = logging.getLogger(__name__)
@@ -126,6 +127,14 @@ async def notify_automation_channel(content: str, summary: str = "") -> dict[str
             "success": False,
             "error": f"Summary must be at most {_MAX_MESSAGE_CHARS} characters",
         }
+
+    unverified: list[str] = []
+    for message in (clean_content, clean_summary):
+        for url in await unverified_pr_links(thread_id, message):
+            if url not in unverified:
+                unverified.append(url)
+    if unverified:
+        return pr_link_error(unverified)
 
     store = _notification_store()
     async with _notification_lock(thread_id):
