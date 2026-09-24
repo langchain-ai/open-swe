@@ -24,6 +24,7 @@ from agent.threads.summary import (
     _thread_updated_ms,
     _ThreadSortBy,
     assert_thread_readable,
+    metadata_title,
     thread_is_readable,
     thread_is_unlisted,
     thread_source,
@@ -145,7 +146,7 @@ def _metadata_matches_filters(
         pull_requests = pull_requests if isinstance(pull_requests, list) else []
         if not _search_matches(
             [
-                metadata.get("title", "Untitled agent"),
+                metadata_title(metadata),
                 *_metadata_repo(metadata),
                 metadata.get("branch_name"),
                 metadata.get("base_branch"),

@@ -11,6 +11,12 @@ from fastapi import HTTPException
 from agent.dashboard.admin import is_admin
 from agent.dashboard.options import SUPPORTED_MODEL_IDS, canonical_model_pair
 from agent.github.pull_requests import PullRequest
+from agent.review.findings import (
+    REVIEWER_THREAD_KIND,
+    REVIEWER_UNTITLED,
+    get_thread_pr_meta,
+    reviewer_thread_title,
+)
 from agent.slack.client import parse_github_pr_url
 from agent.slack.code_channels import CODE_CHANNEL_SESSION_TS
 from agent.slack.oauth import SLACK_TEAM_ID
@@ -245,6 +251,24 @@ def _metadata_string(metadata: Mapping[str, Any], key: str) -> str | None:
     return value.strip() if isinstance(value, str) and value.strip() else None
 
 
+def metadata_title(metadata: Mapping[str, Any]) -> str:
+    """The thread's sidebar title, naming reviewer threads that were never titled.
+
+    A reviewer thread's PR identity lives in ``pr`` metadata, which
+    ``set_reviewer_thread_metadata`` mirrors into ``title``; older threads
+    predate that mirror and get ``Review: #nn <PR title>`` derived here.
+    """
+    raw_title = metadata.get("title")
+    if isinstance(raw_title, str) and raw_title.strip():
+        return raw_title
+    if metadata.get("kind") == REVIEWER_THREAD_KIND:
+        pr = get_thread_pr_meta(as_thread_dict({"metadata": dict(metadata)}))
+        if pr is not None:
+            return reviewer_thread_title(pr)
+        return REVIEWER_UNTITLED
+    return "Untitled agent"
+
+
 def _is_automation_thread(metadata: Mapping[str, Any]) -> bool:
     return (
         _metadata_string(metadata, "thread_category") == "automation"
@@ -365,7 +389,9 @@ async def _thread_summary(
     if not isinstance(updated_at, (int, float)):
         updated_at = _thread_timestamp_ms(thread, "updated_at")
     raw_title = metadata.get("title")
-    title: str = raw_title if isinstance(raw_title, str) else "Untitled agent"
+    title: str = (
+        raw_title if isinstance(raw_title, str) and raw_title.strip() else metadata_title(metadata)
+    )
     model = metadata.get("model") if isinstance(metadata.get("model"), str) else "Default"
     effort = metadata.get("effort") if isinstance(metadata.get("effort"), str) else None
     thread_status = thread.get("status") if isinstance(thread.get("status"), str) else "idle"

@@ -1000,6 +1000,7 @@ def test_process_github_pr_ready_creates_reviewer_run(monkeypatch) -> None:
     assert captured["thread_create_kwargs"] == {
         "thread_id": captured["thread_id"],
         "if_exists": "do_nothing",
+        "metadata": {"kind": "reviewer", "title": "Review: pending"},
     }
     assert "https://github.com/langchain-ai/open-swe/pull/1244" in prompt
     assert "<base_sha>base-sha</base_sha>" in prompt
@@ -1108,6 +1109,7 @@ def test_trigger_pr_review_from_ref_creates_reviewer_run(monkeypatch) -> None:
     assert captured["thread_create_kwargs"] == {
         "thread_id": captured["thread_id"],
         "if_exists": "do_nothing",
+        "metadata": {"kind": "reviewer", "title": "Review: pending"},
     }
     assert captured["metadata_token"] == "app-token"
     assert "<base_sha>base-sha</base_sha>" in prompt
