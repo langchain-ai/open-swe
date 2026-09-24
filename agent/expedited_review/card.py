@@ -20,8 +20,7 @@ from agent.slack.blocks import (
 BUTTON_TYPE = "expedited_review"
 
 _MAX_FILE_SECTIONS = 20
-# Slack refuses a section over 3000 characters, and refusing means no card at
-# all. Only a shown test diff ever reaches this; source diffs cap out at 20 lines.
+# Slack refuses a section over 3000 characters, and refusing means no card at all.
 _MAX_PATCH_LINES = 60
 
 
@@ -46,8 +45,8 @@ def _header(approval: ExpeditedApproval, title: str, author: str) -> list[Block]
 
 
 def _diff_sections(files: list[ChangedFile], diff_image_id: str | None) -> list[Block]:
-    shown, named = ChangedFile.rendered(files)
-    trailer = [*_overflow_note(shown), *_test_note(named)]
+    shown, tests = ChangedFile.split(files)
+    trailer = [*_overflow_note(shown), *_test_diffstat(tests)]
     if diff_image_id:
         names = ", ".join(escape(file.filename) for file in shown[:_MAX_FILE_SECTIONS])
         return [image(diff_image_id, f"Diff of {names}"), *trailer]
@@ -73,14 +72,17 @@ def _overflow_note(files: list[ChangedFile]) -> list[Block]:
     return [context(f"{len(files) - _MAX_FILE_SECTIONS} more files on GitHub.")]
 
 
-def _test_note(tests: list[ChangedFile]) -> list[Block]:
-    """Names the test files the card is not drawing."""
+def _test_diffstat(tests: list[ChangedFile]) -> list[Block]:
+    """Test files are never drawn; the card lists them with their line counts instead."""
     if not tests:
         return []
-    noun = "test file" if len(tests) == 1 else "test files"
-    return [
-        context(f"{ChangedFile.total_lines(tests)} more lines in {len(tests)} {noun}, on GitHub.")
+    lines = [
+        f"`{escape(file.filename)}`  +{file.additions} −{file.deletions}"
+        for file in tests[:_MAX_FILE_SECTIONS]
     ]
+    if len(tests) > _MAX_FILE_SECTIONS:
+        lines.append(f"{len(tests) - _MAX_FILE_SECTIONS} more test files on GitHub.")
+    return [context("*Tests (not shown)*\n" + "\n".join(lines))]
 
 
 def _vote_buttons(approval: ExpeditedApproval) -> tuple[ButtonElement, ...]:
