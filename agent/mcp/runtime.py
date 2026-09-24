@@ -20,15 +20,19 @@ from langchain_mcp_adapters.sessions import (
     create_session,
 )
 from langchain_mcp_adapters.tools import convert_mcp_tool_to_langchain_tool
+from pydantic import TypeAdapter
 
 from agent.mcp.models import MCPConnection
 from agent.mcp.oauth import MCPOAuthError, connection_auth
 from agent.mcp.transport import mcp_http_client
-from agent.utils import ttl_cache
+from agent.utils import shared_cache
 from mcp.types import PaginatedRequestParams, Tool
 
 logger = logging.getLogger(__name__)
 _TIMEOUT_SECONDS = 30
+_CATALOG_NAMESPACE = ("mcp_tool_catalogs", "v1")
+_CATALOG_TTL_SECONDS = 600
+_CATALOG = TypeAdapter(list[Tool])
 
 
 @dataclass(frozen=True)
@@ -190,14 +194,23 @@ def _wrap_tool(
     )
 
 
+def _dump_catalog(definitions: list[Tool]) -> object:
+    # By alias: `Tool.meta` loads only from `_meta`, and would otherwise come
+    # back as an unknown extra field.
+    return _CATALOG.dump_python(definitions, mode="json", by_alias=True)
+
+
 async def _load_tools(
     source: MCPSource, record: MCPConnection, sources: tuple[MCPSource, ...]
 ) -> list[BaseTool]:
     try:
-        definitions = await ttl_cache.cached(
-            "mcp:" + json.dumps((source.namespace, record.name, record.revision)),
-            600,
+        definitions = await shared_cache.cached(
+            _CATALOG_NAMESPACE,
+            json.dumps((source.namespace, record.name, record.revision)),
+            _CATALOG_TTL_SECONDS,
             partial(discover_tools, record, source.namespace),
+            dump=_dump_catalog,
+            load=_CATALOG.validate_python,
         )
         return [
             _wrap_tool(

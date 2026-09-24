@@ -90,8 +90,14 @@ async def get_value(namespace: Namespace, key: str) -> dict[str, Any] | None:
     return _unwrap(item)
 
 
-async def put_value(namespace: Namespace, key: str, value: Mapping[str, Any]) -> None:
-    await store_client().store.put_item(list(namespace), key, value)
+async def put_value(
+    namespace: Namespace, key: str, value: Mapping[str, Any], *, ttl_minutes: int | None = None
+) -> None:
+    """Write an item; with ``ttl_minutes`` the Store deletes it that long after this write."""
+    if ttl_minutes is None:
+        await store_client().store.put_item(list(namespace), key, value)
+    else:
+        await store_client().store.put_item(list(namespace), key, value, ttl=ttl_minutes)
 
 
 async def delete_value(namespace: Namespace, key: str) -> None:
@@ -191,8 +197,10 @@ class TypedStore[RecordT: BaseModel]:
         value = await get_value(self.namespace, key)
         return None if value is None else self.model.model_validate(value)
 
-    async def put(self, key: str, record: RecordT) -> RecordT:
-        await put_value(self.namespace, key, record.model_dump(mode="json"))
+    async def put(self, key: str, record: RecordT, *, ttl_minutes: int | None = None) -> RecordT:
+        await put_value(
+            self.namespace, key, record.model_dump(mode="json"), ttl_minutes=ttl_minutes
+        )
         return record
 
     async def delete(self, key: str) -> None:

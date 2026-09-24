@@ -20,7 +20,7 @@ from agent import store as agent_store
 from agent.database import postgres
 from agent.sandboxes.state import SANDBOX_BACKENDS, SANDBOX_CONNECTIONS
 from agent.threads import access, diffs, handlers, listing, proxy, runs, summary
-from agent.utils import ttl_cache
+from agent.utils import shared_cache, ttl_cache
 from agent.webhooks import common as webhook_common
 from agent.workspaces.store import WORKSPACES
 
@@ -61,6 +61,7 @@ class FakeStore:
 
     def __init__(self) -> None:
         self.items: dict[tuple[str, ...], dict[str, dict[str, Any]]] = {}
+        self.ttls: dict[tuple[tuple[str, ...], str], int | None] = {}
 
     def seed(self, namespace: Sequence[str], key: str, value: dict[str, Any]) -> None:
         self.items.setdefault(tuple(namespace), {})[key] = dict(value)
@@ -74,8 +75,15 @@ class FakeStore:
             raise _FakeStoreNotFoundError
         return {"value": dict(value)}
 
-    async def put_item(self, namespace: Sequence[str], key: str, value: dict[str, Any]) -> None:
+    async def put_item(
+        self, namespace: Sequence[str], key: str, value: dict[str, Any], ttl: int | None = None
+    ) -> None:
         self.seed(namespace, key, value)
+        self.ttls[(tuple(namespace), key)] = ttl
+
+    def ttl_minutes(self, namespace: Sequence[str], key: str) -> int | None:
+        """How long after its last write the Store deletes the item; ``None`` keeps it forever."""
+        return self.ttls.get((tuple(namespace), key))
 
     async def delete_item(self, namespace: Sequence[str], key: str) -> None:
         self.values(namespace).pop(key, None)
@@ -239,10 +247,13 @@ def _no_bundled_dashboard(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> No
 
 @pytest.fixture(autouse=True)
 def _reset_ttl_cache() -> Iterator[None]:
-    """Keep the process-global TTL cache from leaking workspace settings between tests."""
+    """Keep the process-global TTL cache from leaking workspace settings between tests,
+    and one test's pending shared-cache refresh from writing into the next."""
     ttl_cache.clear()
+    shared_cache.clear()
     yield
     ttl_cache.clear()
+    shared_cache.clear()
 
 
 @pytest.fixture(autouse=True)

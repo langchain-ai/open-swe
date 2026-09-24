@@ -1,3 +1,5 @@
+import time
+
 import pytest
 from cryptography.fernet import Fernet
 
@@ -137,3 +139,17 @@ class TestRotationRoundtrip:
         _set_key(monkeypatch, new_key)
         assert decrypt_token(re_encrypted) == token
         assert decrypt_token(old_ciphertext) == ""
+
+
+class TestTtl:
+    def test_old_ciphertext_is_rejected_only_when_a_ttl_is_given(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        key = Fernet.generate_key()
+        _set_key(monkeypatch, key.decode())
+        two_hours_ago = int(time.time()) - 2 * 3600
+        old_ciphertext = Fernet(key).encrypt_at_time(b"ghp_old", two_hours_ago).decode()
+
+        assert decrypt_token(old_ciphertext) == "ghp_old"
+        assert decrypt_token(old_ciphertext, ttl_seconds=3 * 3600) == "ghp_old"
+        assert decrypt_token(old_ciphertext, ttl_seconds=3600) == ""

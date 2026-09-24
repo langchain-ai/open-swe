@@ -15,8 +15,9 @@ from langgraph.runtime import Runtime
 import agent.server as server
 from agent.middleware.prepare_run import PrepareRunState
 from agent.utils import ttl_cache
+from tests.conftest import FakeStore
 
-_INSTALLATION_TOKEN = "installation-token"
+_INSTALLATION_TOKEN = "ghs_installation-token"
 
 
 class _FakeResponse:
@@ -86,7 +87,7 @@ def _middleware(config: dict[str, Any], *, credential_login: str | None = None) 
 
 
 @pytest.fixture
-def prepare_harness(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
+def prepare_harness(monkeypatch: pytest.MonkeyPatch, fake_store: FakeStore) -> dict[str, Any]:
     # Public threads resolve the bot installation token; private threads resolve
     # the verified owner's OAuth token.
     harness: dict[str, Any] = {"recorded": None, "github_token": _INSTALLATION_TOKEN}
@@ -106,10 +107,10 @@ def prepare_harness(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
         server, "get_or_create_sandbox_backend_proxy", lambda thread_id: _ReadyProxy()
     )
 
-    async def fake_work_dir(backend: Any) -> str:
+    async def fake_work_dir(thread_id: str, backend: Any) -> str:
         return "/workspace"
 
-    monkeypatch.setattr(server, "resolve_sandbox_work_dir", fake_work_dir)
+    monkeypatch.setattr(server, "resolve_thread_work_dir", fake_work_dir)
     monkeypatch.setattr(server, "load_workspace", _async_none)
     monkeypatch.setattr(server, "_resolve_prompt_default_repo", _async_none)
     monkeypatch.setattr(server, "_resolve_user_custom_instructions", _async_none)
@@ -212,20 +213,14 @@ async def test_public_scope_resolves_profile_via_installation_token(
         return _INSTALLATION_TOKEN
 
     monkeypatch.setattr("agent.github.app.get_github_app_installation_token", fake_token)
-    github_client._responses.extend(
-        [
-            _FakeResponse(401, {"message": "Bad credentials"}),
-            _FakeResponse(200, {"id": 99, "login": "mason-gh", "name": "Mason Example"}),
-        ]
+    github_client._responses.append(
+        _FakeResponse(200, {"id": 99, "login": "mason-gh", "name": "Mason Example"})
     )
 
     middleware = _middleware(_slack_config())
     await _prepare(middleware)
 
-    assert github_client.requests == [
-        "https://api.github.com/user",
-        "https://api.github.com/users/mason-gh",
-    ]
+    assert github_client.requests == ["https://api.github.com/users/mason-gh"]
     recorded = prepare_harness["recorded"]
     assert recorded["github_user_id"] == 99
     assert recorded["display_name"] == "Mason Example"
@@ -234,13 +229,8 @@ async def test_public_scope_resolves_profile_via_installation_token(
     # A second run on another thread reuses the cached profile lookup.
     middleware = _middleware(_slack_config(thread_id="thread-2", invocation_id="inv-2"))
     middleware._thread_id = "thread-2"
-    github_client._responses.append(_FakeResponse(401, {"message": "Bad credentials"}))
     await _prepare(middleware)
-    assert github_client.requests == [
-        "https://api.github.com/user",
-        "https://api.github.com/users/mason-gh",
-        "https://api.github.com/user",
-    ]
+    assert github_client.requests == ["https://api.github.com/users/mason-gh"]
     assert prepare_harness["recorded"]["github_user_id"] == 99
 
 
@@ -268,11 +258,8 @@ async def test_public_scope_name_fallback(
         return _INSTALLATION_TOKEN
 
     monkeypatch.setattr("agent.github.app.get_github_app_installation_token", fake_token)
-    github_client._responses.extend(
-        [
-            _FakeResponse(401),
-            _FakeResponse(status, {"id": expected_id, "login": "mason-gh", "name": None}),
-        ]
+    github_client._responses.append(
+        _FakeResponse(status, {"id": expected_id, "login": "mason-gh", "name": None})
     )
     config = _slack_config(github_user_id=4321)
     config["configurable"]["slack_thread"]["triggering_user_name"] = slack_name

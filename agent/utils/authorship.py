@@ -1,15 +1,17 @@
 """Helpers for collaborative commit and PR attribution."""
 
+import hashlib
 import logging
 from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Any
 
 import httpx2
+from pydantic import TypeAdapter
 
 from agent.analytics.identity import DisplayNameSource
 from agent.input_messages import PersonIdentity
-from agent.utils import ttl_cache
+from agent.utils import shared_cache, ttl_cache
 from agent.utils.http import DEFAULT_HTTP_TIMEOUT
 
 logger = logging.getLogger(__name__)
@@ -19,6 +21,10 @@ _GITHUB_API_HEADERS = {
     "X-GitHub-Api-Version": "2022-11-28",
 }
 _PUBLIC_PROFILE_CACHE_TTL_SECONDS = 3600.0
+_GITHUB_IDENTITY_NAMESPACE = ("github_user_identities", "v1")
+_GITHUB_IDENTITY_TTL_SECONDS = 3600.0
+# GitHub's prefix for App installation access tokens, which have no user behind them.
+_INSTALLATION_TOKEN_PREFIX = "ghs_"
 _GITHUB_LOGIN_MAX_CHARS = 39
 _GITHUB_LOGIN_ALLOWED = frozenset("abcdefghijklmnopqrstuvwxyz0123456789-")
 
@@ -132,10 +138,44 @@ def _github_noreply_email(login: str, user_id: Any = None) -> str:
     return f"{normalized_login}@users.noreply.github.com"
 
 
+_TOKEN_IDENTITY = TypeAdapter(CollaboratorIdentity)
+
+
+class _NoTokenIdentity(Exception):
+    """The token resolved to no identity; raised so neither cache layer keeps the miss."""
+
+
+def _dump_token_identity(identity: CollaboratorIdentity) -> object:
+    return _TOKEN_IDENTITY.dump_python(identity, mode="json")
+
+
 async def _identity_from_github_token(github_token: str | None) -> CollaboratorIdentity | None:
-    if not github_token:
+    if not github_token or github_token.startswith(_INSTALLATION_TOKEN_PREFIX):
         return None
 
+    async def fetch() -> CollaboratorIdentity:
+        identity = await _fetch_identity_from_github_token(github_token)
+        if identity is None:
+            raise _NoTokenIdentity
+        return identity
+
+    try:
+        return await shared_cache.cached(
+            _GITHUB_IDENTITY_NAMESPACE,
+            # The shared cache logs its keys, so it never sees the token itself.
+            hashlib.sha256(github_token.encode()).hexdigest(),
+            _GITHUB_IDENTITY_TTL_SECONDS,
+            fetch,
+            dump=_dump_token_identity,
+            load=_TOKEN_IDENTITY.validate_python,
+            # A revoked token must not keep its owner's identity past the ttl.
+            serve_stale=False,
+        )
+    except _NoTokenIdentity:
+        return None
+
+
+async def _fetch_identity_from_github_token(github_token: str) -> CollaboratorIdentity | None:
     try:
         async with httpx2.AsyncClient(timeout=5.0) as client:
             response = await client.get(

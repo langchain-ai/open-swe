@@ -23,10 +23,21 @@ async def resolve_repo_dir(sandbox_backend: SandboxBackendProtocol, repo_name: s
     return posixpath.join(work_dir, repo_name)
 
 
+def cached_sandbox_work_dir(sandbox_backend: SandboxBackendProtocol) -> str | None:
+    """The work dir already resolved for this backend object, if any."""
+    cached_work_dir = getattr(sandbox_backend, _WORK_DIR_CACHE_ATTR, None)
+    return cached_work_dir if isinstance(cached_work_dir, str) and cached_work_dir else None
+
+
+def remember_sandbox_work_dir(sandbox_backend: SandboxBackendProtocol, work_dir: str) -> None:
+    """Record a work dir resolved elsewhere so resolving it here needs no exec."""
+    _cache_work_dir(sandbox_backend, work_dir)
+
+
 async def resolve_sandbox_work_dir(sandbox_backend: SandboxBackendProtocol) -> str:
     """Resolve a writable base directory for repository operations."""
-    cached_work_dir = getattr(sandbox_backend, _WORK_DIR_CACHE_ATTR, None)
-    if isinstance(cached_work_dir, str) and cached_work_dir:
+    cached_work_dir = cached_sandbox_work_dir(sandbox_backend)
+    if cached_work_dir is not None:
         return cached_work_dir
 
     checked_candidates: list[str] = []

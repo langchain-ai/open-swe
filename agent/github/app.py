@@ -1,5 +1,8 @@
 """GitHub App installation token generation."""
 
+import asyncio
+import hashlib
+import json
 import logging
 from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime, timedelta
@@ -10,10 +13,12 @@ from githubkit_schemas.v2022_11_28.types import (
     AppInstallationsInstallationIdAccessTokensPostBodyType,
     AppPermissionsType,
 )
-from pydantic import TypeAdapter
+from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, TypeAdapter
 
 from agent.config import ENV
+from agent.encryption import decrypt_token, encrypt_token
 from agent.github.sdk import GITHUB_API_VERSION, github_sdk
+from agent.store import TypedStore
 
 logger = logging.getLogger(__name__)
 
@@ -31,8 +36,46 @@ PermissionMap = Mapping[str, str]
 PermissionKey = tuple[tuple[str, str], ...]
 ScopeKey = tuple[str, tuple[int, ...], tuple[str, ...], PermissionKey]
 
-# scope key -> (token, expires_at, good_until). In-process only; never persisted.
+# scope key -> (token, expires_at, good_until), per process. When
+# TOKEN_ENCRYPTION_KEY is set, repository-scoped tokens are also shared across
+# workers through the Store, encrypted; the installation-wide token never
+# leaves the process.
 _TOKEN_CACHE: dict[ScopeKey, tuple[str, str | None, datetime]] = {}
+# Shared-token Store round trips sit on the critical path; past this long a slow
+# Store is treated like a failing one.
+_STORE_TIMEOUT_SECONDS = 2.0
+# Other features encrypt caller-chosen values under the same key, so a payload is
+# honoured only this long after it was encrypted: a record planted from one of
+# those ciphertexts then expires instead of being served forever.
+_SHARED_TOKEN_TTL_SECONDS = 3600
+
+
+class _SharedTokenPayload(BaseModel):
+    """What a shared record decrypts to: the token, bound to its Store slot and expiry."""
+
+    # Validation errors would otherwise echo the decrypted token into logs.
+    model_config = ConfigDict(hide_input_in_errors=True)
+
+    token: str = Field(min_length=1, repr=False)
+    store_key: str
+    expires_at: str | None
+    good_until: AwareDatetime
+
+
+class _SharedToken(BaseModel):
+    """A repository-scoped token as workers share it through the Store.
+
+    Anyone who can write the Store can edit a record or copy it into another
+    slot, so reads trust only the encrypted payload. The plaintext expiry is
+    kept for inspection and to skip stale records unread.
+    """
+
+    encrypted_payload: str = Field(min_length=1)
+    expires_at: str | None
+    good_until: AwareDatetime
+
+
+_SHARED_TOKENS = TypedStore(("github_app_tokens", "v1"), _SharedToken)
 
 
 def normalize_permissions(permissions: PermissionMap | None) -> PermissionKey:
@@ -70,6 +113,10 @@ def _parse_expiry(expires_at: object) -> datetime | None:
     return parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)
 
 
+def _now() -> datetime:
+    return datetime.now(UTC)
+
+
 def _cached_token(key: ScopeKey, *, now: datetime) -> tuple[str, str | None] | None:
     cached = _TOKEN_CACHE.get(key)
     if cached is None:
@@ -81,8 +128,81 @@ def _cached_token(key: ScopeKey, *, now: datetime) -> tuple[str, str | None] | N
     return None
 
 
+def _is_shared(key: ScopeKey) -> bool:
+    """Only repository-scoped tokens are shared, and only when they can be encrypted."""
+    _, repository_ids, repositories, _ = key
+    return bool(repository_ids or repositories) and ENV.TOKEN_ENCRYPTION_KEY.is_set()
+
+
+def _shared_token_key(key: ScopeKey) -> str:
+    """A digest of the scope, so Store keys stay short and never list repositories."""
+    return hashlib.sha256(json.dumps(key).encode()).hexdigest()
+
+
+async def _read_shared_token(key: ScopeKey, *, now: datetime) -> _SharedTokenPayload | None:
+    """The token a worker shared for ``key``, if it is bound to that scope and still good."""
+    store_key = _shared_token_key(key)
+    log_extra = {"installation_id": key[0], "store_key": store_key}
+    try:
+        async with asyncio.timeout(_STORE_TIMEOUT_SECONDS):
+            record = await _SHARED_TOKENS.get(store_key)
+        # A passed plaintext cutoff can only make a read miss sooner, never extend
+        # it; skipping such stale records keeps them from tripping the payload TTL.
+        if record is None or now >= record.good_until:
+            return None
+        decrypted = decrypt_token(record.encrypted_payload, ttl_seconds=_SHARED_TOKEN_TTL_SECONDS)
+        if not decrypted:
+            # decrypt_token has warned, but without saying which record it was.
+            logger.info("Shared GitHub App token could not be decrypted", extra=log_extra)
+            return None
+        payload = _SharedTokenPayload.model_validate_json(decrypted)
+    except Exception:
+        # On the critical path: a slow or failing Store, or an unreadable record,
+        # falls back to minting, and the mint's write-through replaces the record.
+        logger.warning("Shared GitHub App token read failed", extra=log_extra, exc_info=True)
+        return None
+    if payload.store_key != store_key:
+        logger.warning("Shared GitHub App token belongs to another scope", extra=log_extra)
+        return None
+    if now >= payload.good_until:
+        # Both cutoffs are written equal, so a record the plaintext one let
+        # through but the encrypted one refuses has been edited.
+        logger.warning("Shared GitHub App token has an edited expiry", extra=log_extra)
+        return None
+    return payload
+
+
+async def _write_shared_token(
+    key: ScopeKey, token: str, expires_at: str | None, good_until: datetime
+) -> None:
+    store_key = _shared_token_key(key)
+    try:
+        payload = _SharedTokenPayload(
+            token=token, store_key=store_key, expires_at=expires_at, good_until=good_until
+        )
+        record = _SharedToken(
+            encrypted_payload=encrypt_token(payload.model_dump_json()),
+            expires_at=expires_at,
+            good_until=good_until,
+        )
+        async with asyncio.timeout(_STORE_TIMEOUT_SECONDS):
+            await _SHARED_TOKENS.put(store_key, record, ttl_minutes=_SHARED_TOKEN_TTL_SECONDS // 60)
+    except Exception:
+        # On the critical path: after a slow or failing write the caller still
+        # gets the token it just minted, and other workers mint their own.
+        logger.warning(
+            "Shared GitHub App token write failed",
+            extra={"installation_id": key[0], "store_key": store_key},
+            exc_info=True,
+        )
+
+
 def clear_app_token_cache() -> None:
-    """Drop all cached installation tokens (test/maintenance hook)."""
+    """Drop this process's cached installation tokens (test/maintenance hook).
+
+    Tokens shared through the Store are kept, so the next lookup behaves like a
+    fresh worker's.
+    """
     _TOKEN_CACHE.clear()
 
 
@@ -179,10 +299,16 @@ async def get_github_app_installation_token_with_expiry(
         return None, None
 
     key = _scope_key(resolved_installation_id, repository_ids, repositories, permissions)
-    now = datetime.now(UTC)
+    now = _now()
     cached = _cached_token(key, now=now)
     if cached is not None:
         return cached
+    shared = _is_shared(key)
+    if shared:
+        stored = await _read_shared_token(key, now=now)
+        if stored is not None:
+            _TOKEN_CACHE[key] = (stored.token, stored.expires_at, stored.good_until)
+            return stored.token, stored.expires_at
 
     body: AppInstallationsInstallationIdAccessTokensPostBodyType = {}
     if repository_ids:
@@ -199,15 +325,18 @@ async def get_github_app_installation_token_with_expiry(
             response = await client.rest(
                 GITHUB_API_VERSION
             ).apps.async_create_installation_access_token(int(resolved_installation_id), data=body)
-            data = response.json()
-            token, expires_at = data.get("token"), data.get("expires_at")
-            parsed = _parse_expiry(expires_at)
-            if isinstance(token, str) and token and parsed is not None:
-                _TOKEN_CACHE[key] = (token, expires_at, parsed - _TOKEN_CACHE_MARGIN)
-            return token, expires_at
+        data = response.json()
+        token, expires_at = data.get("token"), data.get("expires_at")
+        parsed = _parse_expiry(expires_at)
     except Exception:
         if log_errors:
             logger.exception("Failed to get GitHub App installation token")
         else:
             logger.debug("Failed to get GitHub App installation token", exc_info=True)
         return None, None
+    if isinstance(token, str) and token and parsed is not None:
+        good_until = parsed - _TOKEN_CACHE_MARGIN
+        _TOKEN_CACHE[key] = (token, expires_at, good_until)
+        if shared:
+            await _write_shared_token(key, token, expires_at, good_until)
+    return token, expires_at
