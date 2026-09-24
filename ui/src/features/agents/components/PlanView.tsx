@@ -19,12 +19,14 @@ const DEFAULT_TITLE = pageTitle("Artifact")
 function artifactTitle(html: string, markdown: string): string | null {
   const source = html.trim() ? html : markdown
   const found = /<title\b[^>]*>([\s\S]*?)<\/title\s*>/i.exec(source)
-  const text = found
-    ?.at(1)
-    ?.replace(/<[^>]*>/g, " ")
-    .replace(/\s+/g, " ")
+  const raw = found?.at(1)?.replace(/<[^>]*>/g, " ").trim()
+  if (!raw) return null
+  // The server escapes the title, so decode entities ("a &amp; b" → "a & b").
+  const decoded = new DOMParser()
+    .parseFromString(raw, "text/html")
+    .body.textContent?.replace(/\s+/g, " ")
     .trim()
-  return text || null
+  return decoded || null
 }
 
 function usePlanDocumentTitle(threadId: string) {
