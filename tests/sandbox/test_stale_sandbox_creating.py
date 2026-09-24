@@ -49,11 +49,6 @@ async def test_ensure_sandbox_creates_new_when_no_metadata() -> None:
             return_value=sandbox_backend,
         ) as create_sandbox,
         patch(
-            "agent.sandboxes.lifecycle.configure_git_identity",
-            new_callable=AsyncMock,
-            return_value=_COMMAND_OK,
-        ),
-        patch(
             "agent.sandboxes.lifecycle.client.threads.update", new_callable=AsyncMock
         ) as update_thread,
     ):
