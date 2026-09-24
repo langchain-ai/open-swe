@@ -6,10 +6,12 @@ with a cold in-process cache reuse a value another worker already computed.
 Values are opaque to the Store, so callers round-trip them through their own
 ``dump``/``load``.
 
-An item older than ``ttl_seconds`` is still served while one background
-refresh replaces it in both the Store and this worker's front cache; one older
-than ``max_stale_seconds`` is a miss, so the caller waits for the loader, and
-the Store deletes it.
+With ``serve_stale``, an item older than ``ttl_seconds`` is still served while
+one background refresh replaces it in both the Store and this worker's front
+cache; one older than ``max_stale_seconds`` is a miss, so the caller waits for
+the loader, and the Store deletes it. Without it, a stale item is a miss and a
+failing loader raises instead of serving the old value, for values that must
+not outlive the check that produced them.
 
 This sits on the agent's critical path. A Store read that fails or stalls, or
 returns an item ``load`` cannot decode, falls back to the loader; a Store write
@@ -64,10 +66,13 @@ async def cached[T](
     dump: Callable[[T], object],
     load: Callable[[object], T],
     max_stale_seconds: float = 86400.0,
+    serve_stale: bool = True,
 ) -> T:
     item_key = hashlib.sha256(key.encode()).hexdigest()
     front_key = _front_key(namespace, key)
     log_extra = {"namespace": list(namespace), "key": key}
+    usable_seconds = max_stale_seconds if serve_stale else ttl_seconds
+    fresh_for: float | None = None
 
     async def _write(value: T) -> None:
         try:
@@ -76,7 +81,7 @@ async def cached[T](
                     namespace,
                     item_key,
                     {"stored_at": _now(), "value": dump(value)},
-                    ttl_minutes=math.ceil(max_stale_seconds / 60),
+                    ttl_minutes=math.ceil(usable_seconds / 60),
                 )
         except Exception:
             # On the critical path: a Store outage must not fail a call that
@@ -104,6 +109,7 @@ async def cached[T](
         task.add_done_callback(lambda _task: _REFRESH_TASKS.pop(task_key, None))
 
     async def _resolve() -> T:
+        nonlocal fresh_for
         try:
             async with asyncio.timeout(_STORE_TIMEOUT_SECONDS):
                 item = await get_value(namespace, item_key)
@@ -127,8 +133,9 @@ async def cached[T](
                 )
             else:
                 if age < ttl_seconds:
+                    fresh_for = ttl_seconds - age
                     return value
-                if age < max_stale_seconds:
+                if age < usable_seconds:
                     _schedule_refresh()
                     return value
                 # Too old to serve even while refreshing: treat it as a miss.
@@ -137,4 +144,10 @@ async def cached[T](
         await _write(value)
         return value
 
-    return await ttl_cache.cached(front_key, ttl_seconds, _resolve)
+    value = await ttl_cache.cached(
+        front_key, ttl_seconds, _resolve, serve_stale_on_error=serve_stale
+    )
+    if fresh_for is not None:
+        # A Store hit is only as fresh as the item it came from.
+        ttl_cache.set_cached(front_key, value, fresh_for)
+    return value

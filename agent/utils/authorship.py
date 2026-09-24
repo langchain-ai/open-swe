@@ -168,6 +168,8 @@ async def _identity_from_github_token(github_token: str | None) -> CollaboratorI
             fetch,
             dump=_dump_token_identity,
             load=_TOKEN_IDENTITY.validate_python,
+            # A revoked token must not keep its owner's identity past the ttl.
+            serve_stale=False,
         )
     except _NoTokenIdentity:
         return None

@@ -9,7 +9,7 @@ import pytest
 import agent.utils.authorship as authorship
 from agent.github import app as github_app
 from agent.users import User
-from agent.utils import ttl_cache
+from agent.utils import shared_cache, ttl_cache
 from agent.utils.authorship import (
     OPEN_SWE_BOT_EMAIL,
     OPEN_SWE_BOT_NAME,
@@ -298,6 +298,38 @@ async def test_token_lookup_without_identity_is_not_cached(
     assert not fallback.github_profile  # the config's identity
     assert retried is not None
     assert retried.github_profile  # GitHub was asked again, not a cached miss
+
+
+@pytest.mark.parametrize("worker", ["same", "new"])
+async def test_revoked_token_falls_back_to_the_config_identity_once_its_cache_is_stale(
+    fake_store: FakeStore,
+    github_client: _FakeAsyncClient,
+    installation_token: None,
+    monkeypatch: pytest.MonkeyPatch,
+    worker: str,
+) -> None:
+    clock = {"now": 1_000.0}
+    monkeypatch.setattr(shared_cache, "_now", lambda: clock["now"])
+    monkeypatch.setattr(ttl_cache, "_now", lambda: clock["now"])
+    github_client._responses.extend(
+        [
+            _FakeResponse(200, _GITHUB_USER),
+            _FakeResponse(401, {"message": "Bad credentials"}),
+            _FakeResponse(404, {"message": "Not Found"}),
+        ]
+    )
+    config = {"configurable": {"github_login": "mason-gh", "github_user_id": 7}}
+    cached = await resolve_triggering_user_identity(config, _USER_TOKEN)
+    assert cached is not None
+    assert cached.github_profile
+
+    clock["now"] += authorship._GITHUB_IDENTITY_TTL_SECONDS
+    if worker == "new":
+        ttl_cache.clear()
+    identity = await resolve_triggering_user_identity(config, _USER_TOKEN)
+
+    assert identity is not None
+    assert not identity.github_profile  # the config's identity, not the revoked token's
 
 
 async def test_installation_token_skips_the_github_user_lookup(

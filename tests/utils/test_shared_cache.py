@@ -261,6 +261,93 @@ async def test_failed_refresh_is_logged_and_the_stale_value_kept(
     assert _stored(fake_store) == {"n": 1}
 
 
+async def _unstale(
+    loader: Callable[[], Awaitable[dict[str, int]]], ttl_seconds: float = 60.0
+) -> dict[str, int]:
+    return await shared_cache.cached(
+        _NAMESPACE,
+        _KEY,
+        ttl_seconds,
+        loader,
+        dump=lambda v: v,
+        load=lambda v: v,
+        serve_stale=False,
+    )
+
+
+def _shared_clock(monkeypatch: pytest.MonkeyPatch) -> dict[str, float]:
+    """One clock for both the Store items' ages and the in-process cache's expiry."""
+    clock = {"now": 1_000.0}
+    monkeypatch.setattr(shared_cache, "_now", lambda: clock["now"])
+    monkeypatch.setattr(ttl_cache, "_now", lambda: clock["now"])
+    return clock
+
+
+async def test_without_serve_stale_the_caller_waits_for_a_stale_item(
+    fake_store: FakeStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _seed_stale_item(fake_store, monkeypatch)
+
+    async def loader() -> dict[str, int]:
+        return {"n": 2}
+
+    assert await _unstale(loader) == {"n": 2}
+    assert _stored(fake_store) == {"n": 2}
+
+
+@pytest.mark.parametrize("worker", ["same", "new"])
+async def test_without_serve_stale_a_failing_loader_never_serves_the_old_value(
+    fake_store: FakeStore, monkeypatch: pytest.MonkeyPatch, worker: str
+) -> None:
+    clock = _shared_clock(monkeypatch)
+
+    async def loader() -> dict[str, int]:
+        return {"n": 1}
+
+    assert await _unstale(loader) == {"n": 1}
+    clock["now"] += 60.0  # stale both in this worker's cache and in the Store
+    if worker == "new":
+        ttl_cache.clear()
+    failure = RuntimeError("upstream rejected the credentials")
+
+    async def failing_loader() -> dict[str, int]:
+        raise failure
+
+    with pytest.raises(RuntimeError) as raised:
+        await _unstale(failing_loader)
+    assert raised.value is failure
+
+
+async def test_without_serve_stale_the_store_deletes_an_item_once_stale(
+    fake_store: FakeStore,
+) -> None:
+    async def loader() -> dict[str, int]:
+        return {"n": 1}
+
+    await _unstale(loader, ttl_seconds=600.0)
+
+    assert fake_store.ttl_minutes(_NAMESPACE, _ITEM_KEY) == 10
+
+
+async def test_store_hit_is_kept_in_process_only_until_it_goes_stale(
+    fake_store: FakeStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    clock = _shared_clock(monkeypatch)
+    fake_store.seed(_NAMESPACE, _ITEM_KEY, {"stored_at": 1_000.0, "value": {"n": 1}})
+    clock["now"] = 1_050.0  # fresh for another 10s of its 60s ttl
+
+    async def unexpected_loader() -> dict[str, int]:
+        raise AssertionError("a fresh Store item must be served")
+
+    assert await _unstale(unexpected_loader) == {"n": 1}
+    clock["now"] = 1_061.0
+
+    async def loader() -> dict[str, int]:
+        return {"n": 2}
+
+    assert await _unstale(loader) == {"n": 2}
+
+
 async def test_undecodable_item_falls_back_to_the_loader_without_logging_its_contents(
     fake_store: FakeStore, caplog: pytest.LogCaptureFixture
 ) -> None:
