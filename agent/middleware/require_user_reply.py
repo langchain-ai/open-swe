@@ -19,6 +19,7 @@ from langgraph.runtime import Runtime
 from agent.input_messages import (
     SystemIdentity,
     build_input_messages,
+    dynamic_context_hash,
     message_sender_id,
     visible_dynamic_context_hashes,
 )
@@ -57,7 +58,7 @@ def current_reply_surface(state: Mapping[str, Any]) -> ReplySurface:
 def _starts_turn(message: BaseMessage) -> bool:
     if not isinstance(message, HumanMessage):
         return False
-    if "<dynamic-context" in content_to_text(message.content):
+    if dynamic_context_hash(message.content) is not None:
         return False
     return message_sender_id(message.content, kind="system") != REPLY_GUARD["id"]
 

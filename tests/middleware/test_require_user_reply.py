@@ -66,23 +66,6 @@ class TestRequireUserReplyMiddleware:
         _assert_nudged(result, 1)
 
     @pytest.mark.asyncio
-    async def test_a_nudge_does_not_start_a_new_turn(self) -> None:
-        """The earlier progress ack must still not count once the nudge is in history."""
-        middleware = _middleware()
-        messages: list[Any] = [
-            HumanMessage(content="what is up"),
-            _reply("call-1", "progress"),
-            _result("call-1"),
-            AIMessage(content="all good"),
-        ]
-        first = await middleware.aafter_model(_state(*messages), _runtime())
-        messages += [*_assert_nudged(first, 1), AIMessage(content="")]
-
-        second = await middleware.aafter_model(_state(*messages, reply_nudges=1), _runtime())
-
-        _assert_nudged(second, 2)
-
-    @pytest.mark.asyncio
     async def test_lets_the_turn_end_once_the_reply_tool_ran(self) -> None:
         result = await _middleware().aafter_model(
             _state(

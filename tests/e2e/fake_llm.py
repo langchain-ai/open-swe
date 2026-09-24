@@ -300,7 +300,13 @@ def _text(content: Any) -> str:
     return str(content)
 
 
-_FRAMING_SENDER_IDS = ("system:slack-context", "system:dashboard-handoff")
+_REPLY_GUARD_SENDER_ID = "system:reply-guard"
+_FRAMING_SENDER_IDS = ("system:slack-context", "system:dashboard-handoff", _REPLY_GUARD_SENDER_ID)
+
+
+def _is_reply_nudge(message: BaseMessage) -> bool:
+    """A reply-guard nudge or its introduction: a retry of the same turn, not a new one."""
+    return isinstance(message, HumanMessage) and _REPLY_GUARD_SENDER_ID in _text(message.content)
 
 
 def _is_framing_block(header: str) -> bool:
@@ -1313,7 +1319,12 @@ class FakeScriptedChatModel(BaseChatModel):
         script = _script_for(context)
 
         last_human = max(
-            (i for i, m in enumerate(messages) if isinstance(m, HumanMessage)), default=-1
+            (
+                i
+                for i, m in enumerate(messages)
+                if isinstance(m, HumanMessage) and not _is_reply_nudge(m)
+            ),
+            default=-1,
         )
         step_index = sum(1 for m in messages[last_human + 1 :] if isinstance(m, AIMessage))
 
