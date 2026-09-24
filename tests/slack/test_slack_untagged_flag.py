@@ -64,11 +64,13 @@ def _message_payload(text: str, event_id: str) -> dict[str, Any]:
     }
 
 
-def _message_update_payload(*, bot_message: bool = False) -> dict[str, Any]:
+def _message_update_payload(
+    *, bot_message: bool = False, text: str = "new corrected text"
+) -> dict[str, Any]:
     updated_message: dict[str, Any] = {
         "type": "message",
         "user": "BOT" if bot_message else "U1",
-        "text": "new corrected text",
+        "text": text,
         "ts": "1786573369.551099",
         "thread_ts": "1786573300.000000",
     }
@@ -241,7 +243,7 @@ async def test_message_update_background_task_requires_delivered_message(
     background_tasks = _FakeBackgroundTasks()
 
     response = await slack_routes.slack_webhook(
-        cast(Request, _FakeRequest(_message_update_payload())),
+        cast(Request, _FakeRequest(_message_update_payload(text="<@BOT> new corrected text"))),
         cast(BackgroundTasks, background_tasks),
     )
     await _run_message_update_task(background_tasks)
@@ -300,7 +302,7 @@ async def test_message_update_retries_until_delivery_mapping_exists(
     background_tasks = _FakeBackgroundTasks()
 
     response = await slack_routes.slack_webhook(
-        cast(Request, _FakeRequest(_message_update_payload())),
+        cast(Request, _FakeRequest(_message_update_payload(text="<@BOT> new corrected text"))),
         cast(BackgroundTasks, background_tasks),
     )
     assert response["status"] == "accepted"
@@ -310,6 +312,21 @@ async def test_message_update_retries_until_delivery_mapping_exists(
 
     sleep.assert_awaited_once_with(0.1)
     process.assert_awaited_once()
+
+
+async def test_undelivered_untagged_message_update_is_ignored(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(webhook_common, "lookup_slack_run_mapping", AsyncMock(return_value=None))
+    background_tasks = _FakeBackgroundTasks()
+
+    response = await slack_routes.slack_webhook(
+        cast(Request, _FakeRequest(_message_update_payload())),
+        cast(BackgroundTasks, background_tasks),
+    )
+
+    assert response == {"status": "ignored", "reason": "Not an app mention or DM"}
+    assert background_tasks.tasks == []
 
 
 async def test_message_update_rejects_changed_sender_identity() -> None:

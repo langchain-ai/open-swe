@@ -479,9 +479,17 @@ async def slack_webhook(
             user_id=user_id,
             explicit_mention=explicit_mention,
         )
+    addressed_update = is_message_update and bool(
+        explicit_mention
+        or in_code_channel
+        or in_dm_channel
+        or await common.lookup_slack_run_mapping(
+            get_langgraph_client(), channel_id, original_message_ts
+        )
+    )
     if not (
         explicit_mention
-        or is_message_update
+        or addressed_update
         or in_code_channel
         or allowed_bot is not None
         or is_direct_message
