@@ -50,6 +50,7 @@ PROXY_CONFIG_ERROR_BODY_CHARS = 500
 SANDBOX_START_TIMEOUT_SECONDS = 120
 PROXY_GH_TOKEN_PLACEHOLDER = "proxy-injected"
 SERVICE_URL_TIMEOUT_SECONDS = 15.0
+_KILL_TIMEOUT_SECONDS = 5.0
 
 
 def _get_langsmith_api_key() -> str | None:
@@ -601,6 +602,11 @@ async def create_langsmith_sandbox(
     return backend
 
 
+def _log_abandoned_result(task: asyncio.Future[Any]) -> None:
+    if not task.cancelled() and (exc := task.exception()) is not None:
+        logger.debug("Killed sandbox command ended with an error", exc_info=exc)
+
+
 class TimeoutLangSmithSandbox(LangSmithSandbox):
     """LangSmith backend that enforces a client-side execution deadline.
 
@@ -654,6 +660,15 @@ class TimeoutLangSmithSandbox(LangSmithSandbox):
         except Exception:  # noqa: BLE001 - best-effort cleanup of a wedged command
             logger.warning("Failed to kill timed-out sandbox command", exc_info=True)
 
+    async def _akill_and_drain(self, handle: Any, result_task: asyncio.Future[Any]) -> None:
+        """Kill the command, then release its stream, each within a bounded wait."""
+        kill = asyncio.ensure_future(self._asafe_kill(handle))
+        await asyncio.wait({kill}, timeout=_KILL_TIMEOUT_SECONDS)
+        kill.cancel()
+        result_task.add_done_callback(_log_abandoned_result)
+        result_task.cancel()
+        await asyncio.wait({result_task}, timeout=_KILL_TIMEOUT_SECONDS)
+
     async def _abase_execute(self, command: str, timeout: int | None) -> ExecuteResponse:
         return await LangSmithSandbox.aexecute(self, command, timeout=timeout)
 
@@ -699,11 +714,20 @@ class TimeoutLangSmithSandbox(LangSmithSandbox):
         except (*self._WS_FALLBACK_ERRORS, *SANDBOX_NOT_READY_ERRORS, TimeoutError):
             return await self._abase_execute(command, timeout)
         deadline = self._deadline(effective)
+        # The kill frame travels over the command's own stream, so the kill has
+        # to go out before that stream is torn down: waiting on a separate task
+        # keeps it open through a timeout or a cancelled run.
+        result_task = asyncio.ensure_future(handle.result)
         try:
-            result = await asyncio.wait_for(handle.result, timeout=deadline)
-        except TimeoutError:
-            await self._asafe_kill(handle)
+            await asyncio.wait({result_task}, timeout=deadline)
+        except asyncio.CancelledError:
+            await self._akill_and_drain(handle, result_task)
+            raise
+        if not result_task.done():
+            await self._akill_and_drain(handle, result_task)
             return self._timeout_response(deadline, server_side=False)
+        try:
+            result = result_task.result()
         except CommandTimeoutError:
             return self._timeout_response(effective, server_side=True)
         except (*self._WS_FALLBACK_ERRORS, *SANDBOX_NOT_READY_ERRORS):

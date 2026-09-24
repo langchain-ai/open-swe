@@ -73,7 +73,7 @@ from agent.transcript.turns import open_turn_id, recorded_turn_id
 from agent.users import User
 from agent.utils.dashboard_handoff import DASHBOARD_HANDOFF_BODY
 from agent.utils.json_types import JsonObject, as_thread_dict, thread_metadata
-from agent.utils.thread_ops import langgraph_client, queue_message_for_thread
+from agent.utils.thread_ops import STEER_FLAG, langgraph_client, queue_message_for_thread
 from agent.utils.thread_participants import (
     PARTICIPANT_EMAILS_KEY,
     PARTICIPANT_LOGINS_KEY,
@@ -983,6 +983,7 @@ async def steer_running_thread(
         "queue_id": message_id,
         "surface": "web",
         "created_at_ms": _now_ms(),
+        STEER_FLAG: True,
     }
     if metadata.get("source") == "slack":
         payload["source"] = DASHBOARD_SOURCE

@@ -128,6 +128,7 @@ from agent.middleware.require_user_reply import (
     ReplySurface,
 )
 from agent.middleware.sandbox_circuit_breaker import post_sandbox_unreachable_notification
+from agent.middleware.steer_interrupt import SteerInterruptMiddleware
 from agent.middleware.transcript import TranscriptMiddleware
 from agent.prompt import construct_system_prompt
 from agent.prompts import apply_tool_descriptions, load_prompt
@@ -1624,6 +1625,9 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
                     ),
                     *([] if local_run else [PullRequestCreationGuardMiddleware()]),
                     WorkflowPushGuardMiddleware(),
+                    # Innermost tool wrapper, so interrupting a command cancels
+                    # only the tool call and every outer wrapper sees a result.
+                    SteerInterruptMiddleware(),
                     refresh_github_proxy_before_model,
                     *([] if stop_summary_mode else [check_message_queue_before_model]),
                     TimeoutWrapupMiddleware(),
