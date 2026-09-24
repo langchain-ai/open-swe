@@ -14,6 +14,7 @@ class ModelOption(TypedDict):
     efforts: list[str]
     default_effort: str
     supports_images: bool
+    max_image_blocks: NotRequired[int]
     can_be_default: NotRequired[bool]
     context_window: NotRequired[int | None]
 
@@ -69,6 +70,7 @@ SUPPORTED_MODELS: list[ModelOption] = [
         "efforts": ["low", "high", "max"],
         "default_effort": "high",
         "supports_images": False,
+        "max_image_blocks": 60,
     },
     {
         "id": "fireworks:accounts/fireworks/models/glm-5p3-flash",
@@ -76,6 +78,7 @@ SUPPORTED_MODELS: list[ModelOption] = [
         "efforts": ["low", "high", "max"],
         "default_effort": "high",
         "supports_images": True,
+        "max_image_blocks": 60,
     },
 ]
 
@@ -238,6 +241,13 @@ def model_supports_images(model_id: str) -> bool:
         if m["id"] == model_id:
             return m["supports_images"]
     return False
+
+
+def model_image_budget(model_id: str) -> int | None:
+    for model in SUPPORTED_MODELS:
+        if model["id"] == model_id:
+            return model.get("max_image_blocks")
+    return 60 if model_id.startswith("fireworks:") else None
 
 
 def _provider_of(model_id: str) -> str | None:

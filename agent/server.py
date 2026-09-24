@@ -1629,7 +1629,7 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
                     *([workspace_skills] if workspace_skills else []),
                     *([dynamic_tool_middleware] if dynamic_tool_middleware else []),
                     SanitizeToolInputsMiddleware(),
-                    ValidateImageReadsMiddleware(),
+                    ValidateImageReadsMiddleware(model_id=model_id),
                     ModelCallLimitMiddleware(
                         run_limit=incident_session.policy.max_model_calls
                         if incident_session is not None
