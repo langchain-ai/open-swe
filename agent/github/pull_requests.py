@@ -480,11 +480,7 @@ class PullRequestEvent(BaseModel):
         pr = self.pull_request
         if pr.additions is None or pr.deletions is None or pr.changed_files is None:
             return None
-        return {
-            "additions": max(0, pr.additions),
-            "deletions": max(0, pr.deletions),
-            "files": max(0, pr.changed_files),
-        }
+        return {"additions": pr.additions, "deletions": pr.deletions, "files": pr.changed_files}
 
     def to_pull_request(self) -> PullRequest | None:
         """An unsaved record carrying what this event says about the PR."""

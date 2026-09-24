@@ -60,7 +60,7 @@ from agent.github.comments import (
     verify_github_signature,
 )
 from agent.github.org_membership import INTERNAL_BOT_LOGINS, is_user_active_org_member
-from agent.github.pull_requests import PullRequestEvent, PullRequestPayload
+from agent.github.pull_requests import PullRequestEvent
 from agent.github.thread_token import (
     cache_github_token_for_thread,
     invalidate_cached_github_token,
@@ -1306,14 +1306,11 @@ async def _pr_diff_stats(event: PullRequestEvent) -> dict[str, int] | None:
     owner, _, repo = event.repo_full_name.partition("/")
     number = event.pull_request.number
     token = await repo_token(owner, repo)
-    if not token or not repo or number is None:
+    if not token or number is None:
         return None
-    pr_ref = GitHubPrRef(owner=owner, repo=repo, number=number, url="")
-    data = await fetch_github_pr_metadata(pr_ref, token=token)
-    if data is None:
-        return None
-    fetched = PullRequestPayload.model_validate(data)
-    return event.model_copy(update={"pull_request": fetched}).diff_stats
+    data = await fetch_github_pr_metadata(GitHubPrRef(owner, repo, number, ""), token=token)
+    fetched = PullRequestEvent.parse({"pull_request": data})
+    return fetched.diff_stats if fetched is not None else None
 
 
 async def _record_pr_merge_feedback(thread_id: str, *, pr_url: str) -> None:
