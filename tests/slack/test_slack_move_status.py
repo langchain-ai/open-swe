@@ -48,9 +48,13 @@ class _Threads:
         self.locks: set[str] = set()
         self.updates = 0
         self.reads_fail_after_first_update = False
+        self.failing_reads = 0
         self.max_updates: int | None = None
 
     async def get(self, thread_id: str) -> dict[str, object]:  # noqa: ARG002
+        if self.failing_reads:
+            self.failing_reads -= 1
+            raise RuntimeError("read timed out")
         if self.reads_fail_after_first_update and self.updates:
             raise RuntimeError("read timed out")
         return {"metadata": dict(self.metadata)}
@@ -230,3 +234,38 @@ async def test_unrevertable_rebind_keeps_the_destination(
 
     assert failure.value.moved is True
     assert await lookup_slack_thread_id(client, "C0", "0") == "thread-1"
+
+
+async def test_unreadable_binding_after_a_breakout_leaves_the_old_thread_alone(
+    monkeypatch: pytest.MonkeyPatch, statuses: list[StatusCall]
+) -> None:
+    async def post_root(*_args: object, **_kwargs: object) -> tuple[str, None]:
+        return "2.0", None
+
+    monkeypatch.setattr(slack_move, "post_slack_top_level_message_with_ts", post_root)
+    client = _LangGraph({"channel_id": "C1", "thread_ts": "1.0"})
+    await slack_move.bind_slack_thread_id(client, "C1", "1.0", "thread-1")
+
+    async with asyncio.timeout(2):
+        watcher = asyncio.create_task(
+            slack_thinking.show_slack_thinking_status(
+                client=client,
+                thread_id="thread-1",
+                run_id="run-1",
+                channel_id="C1",
+                thread_ts="1.0",
+            )
+        )
+        await _ticks()
+        await slack_move.move_slack_thread(
+            client, "thread-1", {"channel_id": "C1", "thread_ts": "1.0"}, "C2", "Breakout"
+        )
+        moved_at = len(statuses)
+        client.threads.failing_reads = 5
+        await _ticks()
+        client.threads.failing_reads = 2
+        client.runs.finished.set()
+        await watcher
+
+    assert ("C1", "1.0", "Thinking...") not in statuses[moved_at:]
+    assert statuses[-1] == ("C2", "2.0", "")

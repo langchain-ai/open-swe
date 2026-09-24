@@ -156,7 +156,8 @@ class SlackThinkingStream:
             return False
         self.next_location_check = now + _LOCATION_CHECK_SECONDS
         home = (self.channel_id, self.mapping_thread_ts)
-        return await _moved_location(self.client, self.thread_id, home) is not None
+        location = await _current_slack_location(self.client, self.thread_id, unbound=home)
+        return location is not None and location != home
 
     async def start(self) -> bool:
         initial = Step(
@@ -416,18 +417,23 @@ async def show_slack_thinking_status(
         return
 
     home = (channel_id, session_ts or thread_ts)
+    last_known = home
 
     async def refresh() -> None:
+        nonlocal last_known
         while True:
             await asyncio.sleep(_STATUS_REFRESH_SECONDS)
-            moved_to = await _moved_location(client, thread_id, home)
-            if moved_to is None:
+            location = await _current_slack_location(client, thread_id, unbound=home)
+            if location is None:
+                continue
+            last_known = location
+            if last_known == home:
                 if session_ts:
                     await restore_slack_session_status(client, channel_id, session_ts)
                 else:
                     await restore_slack_thinking_status(channel_id, thread_ts)
-            elif not is_code_channel_session(moved_to[1]):
-                await restore_slack_thinking_status(*moved_to)
+            elif not is_code_channel_session(last_known[1]):
+                await restore_slack_thinking_status(*last_known)
 
     refresher = asyncio.create_task(refresh())
     try:
@@ -462,14 +468,14 @@ async def show_slack_thinking_status(
                 )
         finally:
             await asyncio.shield(
-                _settle_after_run(client, thread_id, channel_id, thread_ts, session_ts)
+                _settle_after_run(client, thread_id, channel_id, thread_ts, session_ts, last_known)
             )
 
 
-async def _moved_location(
-    client: LangGraphClient, thread_id: str, home: tuple[str, str]
+async def _current_slack_location(
+    client: LangGraphClient, thread_id: str, *, unbound: tuple[str, str]
 ) -> tuple[str, str] | None:
-    """Where the thread now lives in Slack, when a move took it away from `home`."""
+    """The thread's Slack binding now, `unbound` when it has none, or None when unreadable."""
     try:
         metadata = thread_metadata(await client.threads.get(thread_id))
     except Exception:
@@ -479,20 +485,32 @@ async def _moved_location(
             exc_info=True,
         )
         return None
-    location = SourceContext.from_metadata(metadata).slack_location
-    return location if location and location != home else None
+    return SourceContext.from_metadata(metadata).slack_location or unbound
 
 
 async def _settle_after_run(
-    client: LangGraphClient, thread_id: str, channel_id: str, thread_ts: str, session_ts: str
+    client: LangGraphClient,
+    thread_id: str,
+    channel_id: str,
+    thread_ts: str,
+    session_ts: str,
+    last_known: tuple[str, str],
 ) -> None:
-    moved_to = await _moved_location(client, thread_id, (channel_id, session_ts or thread_ts))
-    if moved_to is None:
+    home = (channel_id, session_ts or thread_ts)
+    location = None
+    for attempt, delay in enumerate((0.0, *_STATUS_RETRY_DELAYS)):
+        if attempt:
+            await asyncio.sleep(delay)
+        location = await _current_slack_location(client, thread_id, unbound=home)
+        if location is not None:
+            break
+    location = location or last_known
+    if location == home:
         await clear_slack_thinking_status_if_idle(
             client, thread_id, channel_id, thread_ts, session_ts=session_ts
         )
-    elif not is_code_channel_session(moved_to[1]):
-        await clear_slack_thinking_status_if_idle(client, thread_id, *moved_to)
+    elif not is_code_channel_session(location[1]):
+        await clear_slack_thinking_status_if_idle(client, thread_id, *location)
 
 
 async def release_slack_location_status(
