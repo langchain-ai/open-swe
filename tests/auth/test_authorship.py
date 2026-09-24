@@ -1,4 +1,5 @@
 import json
+import logging
 from typing import Any
 
 import httpx2
@@ -17,6 +18,7 @@ from agent.utils.authorship import (
     resolve_public_github_profile,
     resolve_triggering_user_identity,
 )
+from tests.conftest import FakeStore
 
 _BOT_TRAILER = f"Co-authored-by: {OPEN_SWE_BOT_NAME} <{OPEN_SWE_BOT_EMAIL}>"
 
@@ -221,3 +223,77 @@ async def test_config_identity_without_trusted_slack_name_stays_blank(
     assert identity.analytics_display_name == ""
     assert identity.display_name_source is None
     assert identity.commit_name == "Linear Mason"
+
+
+_USER_TOKEN = "user-oauth-token"
+_GITHUB_USER = {"id": 7, "login": "mason-gh", "name": "Mason", "email": "m@example.com"}
+
+
+async def test_second_worker_resolves_token_identity_without_calling_github(
+    fake_store: FakeStore, github_client: _FakeAsyncClient
+) -> None:
+    github_client._responses.extend(
+        [_FakeResponse(200, _GITHUB_USER), _FakeResponse(200, _GITHUB_USER)]
+    )
+    first = await resolve_triggering_user_identity({"configurable": {}}, _USER_TOKEN)
+
+    ttl_cache.clear()  # a second worker starts with an empty in-process cache
+    second = await resolve_triggering_user_identity({"configurable": {}}, _USER_TOKEN)
+
+    assert first is not None
+    assert first.github_login == "mason-gh"
+    assert second == first
+    assert [url for url, _headers in github_client.requests] == ["https://api.github.com/user"]
+
+
+async def test_token_never_reaches_the_store_or_logs(
+    fake_store: FakeStore,
+    github_client: _FakeAsyncClient,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    github_client._responses.extend(
+        [_FakeResponse(200, _GITHUB_USER), _FakeResponse(200, _GITHUB_USER)]
+    )
+    await resolve_triggering_user_identity({"configurable": {}}, _USER_TOKEN)
+    assert fake_store.items
+    assert _USER_TOKEN not in repr(fake_store.items)
+
+    async def unavailable(*_args: object) -> dict[str, object]:
+        raise RuntimeError("store unavailable")
+
+    monkeypatch.setattr(fake_store, "get_item", unavailable)
+    ttl_cache.clear()
+    with caplog.at_level(logging.DEBUG):
+        assert await resolve_triggering_user_identity({"configurable": {}}, _USER_TOKEN)
+
+    assert caplog.records
+    assert all(_USER_TOKEN not in repr(vars(record)) for record in caplog.records)
+
+
+@pytest.mark.parametrize(
+    "miss",
+    [
+        _FakeResponse(401, {"message": "Bad credentials"}),
+        httpx2.ConnectError("GitHub unreachable"),
+    ],
+)
+async def test_token_lookup_without_identity_is_not_cached(
+    fake_store: FakeStore,
+    github_client: _FakeAsyncClient,
+    installation_token: None,
+    miss: _FakeResponse | Exception,
+) -> None:
+    github_client._responses.extend(
+        [miss, _FakeResponse(404, {"message": "Not Found"}), _FakeResponse(200, _GITHUB_USER)]
+    )
+    config = {"configurable": {"github_login": "mason-gh", "github_user_id": 7}}
+
+    fallback = await resolve_triggering_user_identity(config, _USER_TOKEN)
+    assert fake_store.items == {}
+    retried = await resolve_triggering_user_identity(config, _USER_TOKEN)
+
+    assert fallback is not None
+    assert not fallback.github_profile  # the config's identity
+    assert retried is not None
+    assert retried.github_profile  # GitHub was asked again, not a cached miss

@@ -1,9 +1,11 @@
 from contextlib import asynccontextmanager
+from unittest.mock import AsyncMock
 
 import pytest
-from mcp.types import CallToolResult, TextContent, Tool
+from mcp.types import CallToolResult, TextContent, Tool, ToolAnnotations
 
 from agent.mcp import MCPConnection, runtime
+from agent.utils import ttl_cache
 
 
 def record(name="linear", **fields):
@@ -30,7 +32,7 @@ def source(namespace, records):
 
 
 @pytest.fixture
-def remote(monkeypatch):
+def remote(monkeypatch, fake_store):
     async def discover(record, namespace):
         return [
             Tool(name=name, description=record.url, inputSchema={"type": "object"})
@@ -151,3 +153,47 @@ async def test_failed_lookup_blocks_loaded_tool_without_falling_back(remote, cap
     tool = (await runtime.load_mcp_tools(workspace, user))[0]
     assert "MCP call failed" in await tool.ainvoke({})
     assert "private store details" not in caplog.text
+
+
+async def test_second_worker_loads_catalog_without_contacting_the_mcp_server(
+    remote, fake_store, monkeypatch
+):
+    definition = Tool(
+        name="search",
+        title="Search issues",
+        description="Search the tracker",
+        inputSchema={
+            "type": "object",
+            "properties": {"query": {"type": "string"}, "limit": {"type": "integer"}},
+            "required": ["query"],
+        },
+        outputSchema={"type": "object", "properties": {"ids": {"type": "array"}}},
+        annotations=ToolAnnotations(readOnlyHint=True),
+        _meta={"vendor": {"cost": 1}},
+    )
+    monkeypatch.setattr(runtime, "_discover_tools", AsyncMock(return_value=[definition]))
+    workspace = source(("workspace_mcps",), {"linear": record()})
+    first_worker = await runtime.load_mcp_tools(workspace)
+
+    ttl_cache.clear()  # a second worker starts with an empty in-process cache
+    monkeypatch.setattr(
+        runtime,
+        "_discover_tools",
+        AsyncMock(side_effect=AssertionError("contacted the MCP server")),
+    )
+    adapted = []
+    adapt = runtime.convert_mcp_tool_to_langchain_tool
+
+    def recording_adapt(session, tool, **kwargs):
+        adapted.append(tool)
+        return adapt(session, tool, **kwargs)
+
+    monkeypatch.setattr(runtime, "convert_mcp_tool_to_langchain_tool", recording_adapt)
+    second_worker = await runtime.load_mcp_tools(workspace)
+
+    assert [(tool.name, tool.description, tool.args_schema) for tool in second_worker] == [
+        (tool.name, tool.description, tool.args_schema) for tool in first_worker
+    ]
+    result = await second_worker[0].ainvoke({"query": "incident"})
+    assert result[0]["text"] == "https://linear.example/mcp"
+    assert adapted == [definition]

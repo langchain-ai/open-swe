@@ -15,6 +15,7 @@ from langgraph.runtime import Runtime
 import agent.server as server
 from agent.middleware.prepare_run import PrepareRunState
 from agent.utils import ttl_cache
+from tests.conftest import FakeStore
 
 _INSTALLATION_TOKEN = "installation-token"
 
@@ -86,7 +87,7 @@ def _middleware(config: dict[str, Any], *, credential_login: str | None = None) 
 
 
 @pytest.fixture
-def prepare_harness(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
+def prepare_harness(monkeypatch: pytest.MonkeyPatch, fake_store: FakeStore) -> dict[str, Any]:
     # Public threads resolve the bot installation token; private threads resolve
     # the verified owner's OAuth token.
     harness: dict[str, Any] = {"recorded": None, "github_token": _INSTALLATION_TOKEN}
