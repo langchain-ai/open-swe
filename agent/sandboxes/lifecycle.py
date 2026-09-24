@@ -16,7 +16,11 @@ from langgraph_sdk import get_client
 
 from agent.config import ENV
 from agent.github.proxy import get_recorded_proxy_base_config, record_proxy_token_expiry
-from agent.github.sandbox_access import SandboxGitHubAccess, workspace_token
+from agent.github.sandbox_access import (
+    SandboxGitHubAccess,
+    restricted_workspace_token,
+    workspace_token,
+)
 from agent.sandboxes.providers.langsmith import configure_sandbox_proxy, get_sandbox_proxy_config
 from agent.sandboxes.providers.registry import SandboxGoneError, create_sandbox
 from agent.sandboxes.state import (
@@ -155,8 +159,10 @@ async def _create_sandbox_with_proxy(
     async with git_identity(thread_id, sandbox_backend):
         if ENV.SANDBOX_TYPE.get() == "langsmith":
             async with aphase(thread_id, "sandbox.proxy_token"):
-                access = await workspace_token(
-                    workspace_slug, repositories=github_proxy_repositories
+                access = (
+                    await workspace_token(workspace_slug)
+                    if github_proxy_repositories is None
+                    else await restricted_workspace_token(workspace_slug, github_proxy_repositories)
                 )
             proxy_config = config.proxy_config
             async with aphase(thread_id, "sandbox.proxy_configure"):
@@ -224,7 +230,11 @@ async def _refresh_github_proxy(
         return
 
     async with aphase(thread_id, "sandbox.proxy_token"):
-        access = await workspace_token(workspace_slug, repositories=github_proxy_repositories)
+        access = (
+            await workspace_token(workspace_slug)
+            if github_proxy_repositories is None
+            else await restricted_workspace_token(workspace_slug, github_proxy_repositories)
+        )
 
     current_backend = unwrap_sandbox_backend(sandbox_backend)
     async with aphase(thread_id, "sandbox.proxy_refresh"):

@@ -1,33 +1,23 @@
 """Repository-scoped credentials for sandbox GitHub traffic."""
 
-import asyncio
 import logging
 from collections.abc import Sequence
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
 from typing import Annotated
-from uuid import uuid4
 
 from githubkit.auth import TokenAuthStrategy
-from pydantic import AwareDatetime, BaseModel, Field, PositiveInt
+from pydantic import BaseModel, Field, PositiveInt
 
 from agent.github import app
-from agent.github.app import (
-    PermissionMap,
-    get_github_app_installation_token_with_expiry,
-)
+from agent.github.app import PermissionMap, get_github_app_installation_token_with_expiry
 from agent.github.sdk import GITHUB_API_VERSION, github_sdk
 from agent.store import TypedStore
 from agent.workspaces.store import DEFAULT_WORKSPACE_SLUG, WORKSPACES
 
 logger = logging.getLogger(__name__)
 
-# Reconcile missed webhooks independently of the one-hour token lifetime.
-_REPOSITORY_RECONCILE_INTERVAL = timedelta(days=1)
-_MISSING_REPOSITORY_RETRY_INTERVAL = timedelta(minutes=5)
 type RepositoryScope = tuple[str, str, tuple[str, ...]]
 type RepositoryId = Annotated[int, Field(strict=True, gt=0)]
-REPOSITORY_DISCOVERY_EVENTS = frozenset({"installation", "installation_repositories", "repository"})
 
 
 class _InstallationRepository(BaseModel):
@@ -44,50 +34,17 @@ class SandboxGitHubAccess:
 class _WorkspaceRepositories(BaseModel):
     scope: RepositoryScope
     repositories: dict[str, RepositoryId]
-    generation: str
-    refresh_after: AwareDatetime
-
-
-class _RepositoryGeneration(BaseModel):
-    generation: str
 
 
 _WORKSPACE_REPOSITORIES = TypedStore(
     ["workspace_github_repositories", "v1"], _WorkspaceRepositories
 )
-_REPOSITORY_GENERATIONS = TypedStore(["github_repository_generations", "v1"], _RepositoryGeneration)
-
-
-def _generation_key() -> str:
-    return f"{app.GITHUB_APP_ID}:{app.GITHUB_APP_INSTALLATION_ID}"
-
-
-async def invalidate_repository_discovery(event_type: str, payload: dict[str, object]) -> None:
-    """Invalidate workspace mappings after a signature-verified GitHub event."""
-    installation = payload.get("installation")
-    if not isinstance(installation, dict):
-        return
-    if str(installation.get("id")) != app.GITHUB_APP_INSTALLATION_ID:
-        return
-    if event_type == "repository" and payload.get("action") not in {
-        "created",
-        "deleted",
-        "renamed",
-        "transferred",
-        "privatized",
-        "publicized",
-    }:
-        return
-    # A generation prevents a discovery already in flight from undoing invalidation.
-    await _REPOSITORY_GENERATIONS.put(
-        _generation_key(), _RepositoryGeneration(generation=str(uuid4()))
-    )
 
 
 async def repository_token(
     repositories: Sequence[str], *, permissions: PermissionMap | None = None
 ) -> SandboxGitHubAccess:
-    """Mint access only to full repository names available to the installation.
+    """Resolve current installation access for an explicit repository restriction.
 
     A missing match grants no credentials, so public repositories outside the
     installation remain readable anonymously. The installation-wide discovery
@@ -131,86 +88,61 @@ async def _repository_ids_token(
     return SandboxGitHubAccess(token, expires_at)
 
 
-async def _read_workspace_repositories(slug: str) -> _WorkspaceRepositories | None:
-    try:
-        return await _WORKSPACE_REPOSITORIES.get(slug)
-    except Exception:
-        logger.warning("Workspace GitHub repository mapping read failed", exc_info=True)
-        return None
-
-
-async def _workspace_repositories(
-    slug: str, allowed: set[str], *, refresh: bool = False
-) -> tuple[dict[str, int], bool]:
+async def _workspace_repositories(slug: str, allowed: set[str]) -> dict[str, int]:
     scope: RepositoryScope = (
         app.GITHUB_APP_ID,
         app.GITHUB_APP_INSTALLATION_ID,
         tuple(sorted(allowed)),
     )
-    # Store failures are cache misses; only a successful GitHub lookup can replace them.
+    # Repository IDs belong to the workspace; token expiry does not invalidate them.
     try:
-        cached, revision = await asyncio.gather(
-            _read_workspace_repositories(slug), _REPOSITORY_GENERATIONS.get(_generation_key())
-        )
+        cached = await _WORKSPACE_REPOSITORIES.get(slug)
     except Exception:
+        # Store outages must not prevent freshly resolved, scoped credentials.
         logger.warning("Workspace GitHub repository mapping read failed", exc_info=True)
-        return await _discover_repositories(allowed), False
-    generation = revision.generation if revision is not None else ""
-    if (
-        not refresh
-        and cached is not None
-        and cached.scope == scope
-        and cached.generation == generation
-        and cached.refresh_after > datetime.now(UTC)
-    ):
-        return cached.repositories, True
+        cached = None
+    if cached is not None and cached.scope == scope:
+        return cached.repositories
 
     repositories = await _discover_repositories(allowed)
-    interval = (
-        _REPOSITORY_RECONCILE_INTERVAL
-        if repositories.keys() == allowed
-        else _MISSING_REPOSITORY_RETRY_INTERVAL
-    )
-    record = _WorkspaceRepositories(
-        scope=scope,
-        repositories=repositories,
-        generation=generation,
-        refresh_after=datetime.now(UTC) + interval,
-    )
     try:
-        await _WORKSPACE_REPOSITORIES.put(slug, record)
+        await _WORKSPACE_REPOSITORIES.put(
+            slug, _WorkspaceRepositories(scope=scope, repositories=repositories)
+        )
     except Exception:
         logger.warning("Workspace GitHub repository mapping write failed", exc_info=True)
-    return repositories, False
+    return repositories
 
 
-async def workspace_token(
-    workspace_slug: str | None,
-    *,
-    repositories: Sequence[str] | None = None,
-    permissions: PermissionMap | None = None,
-) -> SandboxGitHubAccess:
-    """Resolve permissions strictly; snapshot fallback must never broaden access."""
-    slug = workspace_slug or DEFAULT_WORKSPACE_SLUG
+async def _workspace_repo_names(slug: str) -> set[str]:
     workspace = await WORKSPACES.get(slug)
     if workspace is None:
         if slug != DEFAULT_WORKSPACE_SLUG:
             raise ValueError(f"Workspace {slug!r} does not exist")
-        return SandboxGitHubAccess()
-    workspace_repos = {repo.lower() for repo in workspace.repos}
-    allowed = workspace_repos.copy()
-    if repositories is not None:
-        allowed.intersection_update(repo.lower() for repo in repositories)
+        return set()
+    return {repo.lower() for repo in workspace.repos}
+
+
+async def workspace_token(
+    workspace_slug: str | None, *, permissions: PermissionMap | None = None
+) -> SandboxGitHubAccess:
+    """Reuse regular coding access until the workspace repository configuration changes."""
+    slug = workspace_slug or DEFAULT_WORKSPACE_SLUG
+    allowed = await _workspace_repo_names(slug)
     if not allowed:
         return SandboxGitHubAccess()
-    mapping, reused = await _workspace_repositories(slug, workspace_repos)
-    repository_ids = sorted({repo_id for name, repo_id in mapping.items() if name in allowed})
-    try:
-        return await _repository_ids_token(repository_ids, permissions=permissions)
-    except RuntimeError:
-        if not reused:
-            raise
-        logger.warning("Cached workspace repository token failed; refreshing repository mapping")
-    mapping, _ = await _workspace_repositories(slug, workspace_repos, refresh=True)
+    mapping = await _workspace_repositories(slug, allowed)
     repository_ids = sorted({repo_id for name, repo_id in mapping.items() if name in allowed})
     return await _repository_ids_token(repository_ids, permissions=permissions)
+
+
+async def restricted_workspace_token(
+    workspace_slug: str | None,
+    repositories: Sequence[str],
+    *,
+    permissions: PermissionMap | None = None,
+) -> SandboxGitHubAccess:
+    """Resolve review/analyzer access separately, limited to current workspace membership."""
+    allowed = await _workspace_repo_names(workspace_slug or DEFAULT_WORKSPACE_SLUG)
+    allowed.intersection_update(repo.lower() for repo in repositories)
+    return await repository_token(sorted(allowed), permissions=permissions)

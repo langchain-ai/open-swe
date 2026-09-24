@@ -18,7 +18,7 @@ from agent.github.app import (
     PermissionMap,
     normalize_permissions,
 )
-from agent.github.sandbox_access import workspace_token
+from agent.github.sandbox_access import restricted_workspace_token, workspace_token
 from agent.sandboxes.state import SANDBOX_BACKENDS, unwrap_sandbox_backend
 from agent.workspaces.store import DEFAULT_WORKSPACE_SLUG
 
@@ -160,10 +160,13 @@ async def refresh_proxy_token(
         )
     permission_key = normalize_permissions(permissions) or recorded_permissions
     workspace_slug = _PROXY_WORKSPACES.get(thread_id, DEFAULT_WORKSPACE_SLUG)
-    access = await workspace_token(
-        workspace_slug,
-        repositories=effective_repositories,
-        permissions=dict(permission_key) if permission_key else None,
+    effective_permissions = dict(permission_key) if permission_key else None
+    access = (
+        await workspace_token(workspace_slug, permissions=effective_permissions)
+        if effective_repositories is None
+        else await restricted_workspace_token(
+            workspace_slug, effective_repositories, permissions=effective_permissions
+        )
     )
 
     from agent.sandboxes.providers.langsmith import configure_sandbox_proxy

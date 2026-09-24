@@ -83,11 +83,11 @@ Go to **GitHub Settings → Developer settings → [GitHub Apps](https://github.
   - Workflows: Read & write — lets Open SWE push branches containing explicitly requested GitHub Actions workflow changes.
   - Metadata: Read-only
 - **Organization permissions**: Members: Read-only — verifies org membership for dashboard login and LangSmith trace-tool access when `ALLOWED_GITHUB_ORGS` is set. Without it that check fails closed.
-- **Subscribe to events**: Repository (invalidates cached workspace repository IDs when repositories are renamed, transferred, deleted, or change visibility), Issue comment, Pull request review, Pull request review comment, Check run, Check suite, Workflow run (the last three give `/baby-sit` immediate failure detection), and Status (optional; legacy commit-status integrations).
+- **Subscribe to events**: Issue comment, Pull request review, Pull request review comment, Check run, Check suite, Workflow run (the last three give `/baby-sit` immediate failure detection), and Status (optional; legacy commit-status integrations).
 
-Existing GitHub Apps must also enable the **Repository** event under **Permissions & events**. Open SWE handles installation changes and repository events at the same signed webhook endpoint. These events invalidate the shared workspace repository mapping; the next credential request resolves it again.
+Regular coding tasks share each workspace's repository name-to-ID mapping through the LangGraph Store. The mapping is resolved on first use and reused across tasks and workers until the workspace repository list or configured GitHub App installation changes. Tokens stay in memory and renew independently using the stored IDs; elapsed time and repository renames do not trigger discovery. An unavailable repository remains unavailable until the workspace repository configuration changes. Store failures fall back to GitHub discovery.
 
-Coding and review tasks share each workspace's repository name-to-ID mapping through the LangGraph Store. Tokens remain in memory and renew independently. Workspace repository edits invalidate the mapping immediately on the next lookup; a complete mapping is also reconciled on its first use after 24 hours to recover from missed events. If some workspace repositories are unavailable to the installation, discovery is retried after five minutes. Store failures fall back to GitHub discovery.
+Reviewers and review-style analyzers use a separate credential path: resolve the requested repositories against current workspace membership and installation access, then mint a restricted token. This does not update the regular coding mapping.
 
 Click **Create GitHub App**, then collect from its settings page:
 
