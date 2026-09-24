@@ -20,6 +20,7 @@ import { Kbd } from "@/components/ui/kbd"
 import { Spinner } from "@/components/ui/spinner"
 import { useInfiniteThreadsPages } from "@/features/agents/lib/queries"
 import { useDesktopLocalThreads } from "@/features/agents/lib/desktopLocal"
+import { reviewPageRoute } from "@/features/reviews/lib/reviewEntry"
 import { useShortcutLabel } from "@/lib/hotkeys"
 import { useChatRoutes } from "@/lib/chatRoutes"
 
@@ -192,6 +193,8 @@ export function AppCommandPalette({
     onOpenChange(false)
     if (result.kind === "command") {
       void result.command.run?.()
+    } else if (result.kind === "cloud-thread" && result.thread.reviewPage) {
+      void navigate(reviewPageRoute(result.thread.reviewPage))
     } else if (result.kind === "cloud-thread") {
       void navigate({
         to: chat.thread,

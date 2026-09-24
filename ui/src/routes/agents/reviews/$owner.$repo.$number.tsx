@@ -8,6 +8,11 @@ import { ReviewCommentsMenu } from "@/features/reviews/components/ReviewComments
 import { ReviewMainBody } from "@/features/reviews/components/ReviewMainBody"
 import { SubmitReviewPopover } from "@/features/reviews/components/SubmitReviewPopover"
 import { useSidebarControls } from "@/components/sidebar-layout"
+import {
+  markReviewViewed,
+  reviewChatQuery,
+} from "@/features/agents/lib/queries"
+import { reviewOpenedFromSidebar } from "@/features/reviews/lib/reviewEntry"
 import { Skeleton } from "@/components/ui/skeleton"
 import { api } from "@/lib/api"
 import { pageTitle } from "@/lib/pageTitle"
@@ -50,12 +55,15 @@ function ReviewDetailPage() {
   // Collapse the global nav by default while viewing a review (roomy diff),
   // restoring the prior preference on leave. Runs once for the page's lifetime.
   const sidebarRef = useRef(sidebar)
+  const openedFromSidebar = useRef(
+    reviewOpenedFromSidebar({ owner, repo, number: prNumber })
+  )
   useEffect(() => {
     sidebarRef.current = sidebar
   }, [sidebar])
   useEffect(() => {
     const controls = sidebarRef.current
-    if (!controls || controls.collapsed) return
+    if (!controls || controls.collapsed || openedFromSidebar.current) return
     controls.setCollapsed(true)
     return () => controls.setCollapsed(false)
   }, [])
@@ -91,6 +99,21 @@ function ReviewDetailPage() {
     }
     if (headSha) seenShaRef.current = headSha
   }, [headSha, queryClient, owner, repo, prNumber])
+
+  const reviewChatThreadId = useQuery({
+    ...reviewChatQuery({ owner, repo, number: prNumber }),
+    enabled: !!session.data && Number.isFinite(prNumber),
+  }).data?.thread_id
+  // Re-marked when a walkthrough lands, since its arrival is what made the row unread.
+  const walkthroughSha = detail.data?.walkthrough?.head_sha
+  useEffect(() => {
+    if (!reviewChatThreadId) return
+    markReviewViewed(
+      queryClient,
+      { owner, repo, number: prNumber },
+      reviewChatThreadId
+    )
+  }, [queryClient, owner, repo, prNumber, reviewChatThreadId, walkthroughSha])
 
   if (session.isLoading) {
     return (

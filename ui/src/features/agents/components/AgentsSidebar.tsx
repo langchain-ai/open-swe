@@ -17,6 +17,7 @@ import {
   StackIcon,
 } from "@phosphor-icons/react"
 import { Radar } from "lucide-react"
+import { useQueryClient } from "@tanstack/react-query"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 
 import type { DesktopUpdateState } from "@/desktop"
@@ -68,6 +69,7 @@ import type {
 } from "@/features/agents/lib/sidebarPrefs"
 import { useSidebarPrefs } from "@/features/agents/lib/sidebarPrefs"
 import {
+  agentThreadKeys,
   usePinAgentThread,
   useResolveAgentThread,
   useSeedAgentThreadDetails,
@@ -79,6 +81,7 @@ import {
   useWorkspaceOptions,
 } from "@/features/agents/lib/queries"
 import { useSidebarPullRequests } from "@/features/agents/lib/prChecks"
+import { reviewPageRoute } from "@/features/reviews/lib/reviewEntry"
 import { useRunCompletionNotifier } from "@/features/agents/lib/useRunCompletionNotifier"
 import {
   useDesktopLocalThreads,
@@ -207,11 +210,16 @@ export function AgentsSidebar({
     measure: measureScrollEdges,
   } = useScrollEdges()
   const { openPalette } = useAppCommandControls()
+  const queryClient = useQueryClient()
   const openThread = useCallback(
     (threadId: string) => {
-      void navigate({ to: chat.thread, params: { threadId } })
+      const review = queryClient.getQueryData<AgentThread>(
+        agentThreadKeys.detail(threadId)
+      )?.reviewPage
+      if (review) void navigate(reviewPageRoute(review))
+      else void navigate({ to: chat.thread, params: { threadId } })
     },
-    [navigate, chat.thread]
+    [navigate, chat.thread, queryClient]
   )
   const {
     prefs,
