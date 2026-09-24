@@ -1,6 +1,7 @@
 """Tool: ``record_guidance``. Records one author steering point the review scout found in the diff."""
 
 import logging
+import re
 from typing import Any
 
 from agent.github.pull_requests import PullRequest
@@ -9,8 +10,9 @@ from agent.run_config import RunConfig
 
 logger = logging.getLogger(__name__)
 
-MAX_SUMMARY_CHARS = 200
+MAX_SUMMARY_CHARS = 100
 MAX_QUOTE_CHARS = 600
+_IDENTIFIER_RE = re.compile(r"https?://|\b[a-z]?\d{6,}\b|\b(?=[0-9a-f]*\d)[0-9a-f]{7,40}\b", re.I)
 
 
 async def record_guidance(summary: str, quote: str) -> dict[str, Any]:
@@ -19,6 +21,17 @@ async def record_guidance(summary: str, quote: str) -> dict[str, Any]:
     trimmed_quote = quote.strip()
     if not trimmed_summary:
         return {"success": False, "error": "summary must describe what the author changed"}
+    if len(trimmed_summary) > MAX_SUMMARY_CHARS:
+        return {
+            "success": False,
+            "error": f"summary is {len(trimmed_summary)} characters; shorten it to "
+            f"{MAX_SUMMARY_CHARS} or fewer",
+        }
+    if _IDENTIFIER_RE.search(trimmed_summary):
+        return {
+            "success": False,
+            "error": "summary must not contain URLs, IDs, or SHAs; describe the change in plain words",
+        }
     if not trimmed_quote:
         return {
             "success": False,
@@ -44,7 +57,7 @@ async def record_guidance(summary: str, quote: str) -> dict[str, Any]:
     pull_request = await PullRequest(owner=owner, repo=repo, number=number).ensure()
     recorded = await GuidancePoint.record(
         pull_request,
-        summary=trimmed_summary[:MAX_SUMMARY_CHARS],
+        summary=trimmed_summary,
         quote=trimmed_quote[:MAX_QUOTE_CHARS],
         author=source.author,
         turn_index=source.index,
