@@ -36,7 +36,12 @@ from agent.threads.summary import (
 )
 from agent.utils.json_types import JsonObject, ThreadLike, as_thread_dict
 from agent.utils.thread_ops import langgraph_client
-from agent.utils.thread_participants import participant_search_filters
+from agent.utils.thread_participants import (
+    PARTICIPANT_EMAILS_KEY,
+    PARTICIPANT_LOGINS_KEY,
+    participant_logins,
+    participant_search_filters,
+)
 from agent.workspaces.routing import workspace_for_repo
 from agent.workspaces.store import DEFAULT_WORKSPACE_SLUG
 
@@ -73,6 +78,22 @@ def _participant_search_filters(
     if email and email.strip():
         filters.append({"triggering_user_email": email.strip().lower()})
     return filters
+
+
+def thread_has_participant(
+    metadata: Mapping[str, Any], login: str, *, email: str | None = None
+) -> bool:
+    """Whether ``_participant_search_filters`` matches this thread for the viewer."""
+    normalized_login = login.strip().lower()
+    if normalized_login in participant_logins(metadata.get(PARTICIPANT_LOGINS_KEY)):
+        return True
+    if metadata.get("github_login") == login:
+        return True
+    normalized_email = email.strip().lower() if email and email.strip() else None
+    return normalized_email is not None and (
+        normalized_email in participant_logins(metadata.get(PARTICIPANT_EMAILS_KEY))
+        or metadata.get("triggering_user_email") == normalized_email
+    )
 
 
 def _search_metadata_filter(

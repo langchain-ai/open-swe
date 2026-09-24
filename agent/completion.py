@@ -34,6 +34,7 @@ from agent.slack.code_channels import is_code_channel_session, set_session_statu
 from agent.slack.thinking import sync_slack_background_status
 from agent.source_context import SourceContext
 from agent.thread_feedback import schedule_answer_feedback
+from agent.threads.changes import publish_thread_changed
 from agent.transcript.turns import TurnOutcome, settle_run_turn
 from agent.utils.errors import LAST_MODEL_ERROR_KEY, code_for_error_type
 from agent.utils.json_types import thread_metadata
@@ -469,6 +470,7 @@ async def handle_run_completion(payload: dict[str, Any]) -> dict[str, str]:
     run_id = raw_run_id if isinstance(raw_run_id, str) and raw_run_id else None
     if not isinstance(thread_id, str) or not thread_id:
         return {"status": "ignored", "reason": "missing thread_id"}
+    await publish_thread_changed(thread_id)
     await _finalize_agent_usage_telemetry(thread_id, status, payload)
     await _settle_transcript_turn(thread_id, run_id, status)
     payload_metadata = payload.get("metadata")

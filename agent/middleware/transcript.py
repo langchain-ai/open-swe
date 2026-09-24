@@ -46,6 +46,7 @@ from agent.input_messages import (
     message_sender_id,
 )
 from agent.middleware.trace import OpenSWEMiddleware
+from agent.threads.changes import publish_thread_changed
 from agent.transcript.attachments import PendingAttachment, UnsupportedAttachment
 from agent.transcript.engine import Command, append
 from agent.transcript.events import (
@@ -78,6 +79,9 @@ _WRITER_BATCH = 32
 # conversation offloading) are tagged out of the user-facing stream. Their
 # tokens must not become transcript fragments.
 _HIDDEN_TAGS = frozenset({"nostream", "langsmith:hidden"})
+_RUN_SETTLE_POLL_SECONDS = (0.25, 0.5, 1.0, 2.0, 4.0, 8.0, 15.0)
+_RUN_LIVE_STATUSES = frozenset({"pending", "running"})
+_run_end_announcers: set[asyncio.Task[None]] = set()
 
 _FENCE = re.compile(r"^ {0,3}(`{3,}|~{3,})")
 _LIST_ITEM = re.compile(r"^ {0,3}(?:[-*+]|\d{1,9}[.)])\s")
@@ -630,6 +634,38 @@ async def _stamp_transcript(thread_id: str) -> None:
     await get_client().threads.update(thread_id, metadata={"transcript": "v2"})
 
 
+def _announce_run_end(thread_id: str, run_id: str) -> None:
+    """Tell live sidebars about the thread once LangGraph reports this run over.
+
+    The turn settles here before the platform records the run's outcome, so a
+    sidebar that re-read the thread straight away would still see it running.
+    This is the end-of-run signal for deployments without the completion
+    webhook, and it runs whether or not the thread keeps a transcript.
+    """
+    if not thread_id or not run_id:
+        return
+    task = asyncio.create_task(_publish_when_run_settles(thread_id, run_id))
+    _run_end_announcers.add(task)
+    task.add_done_callback(_run_end_announcers.discard)
+
+
+async def _publish_when_run_settles(thread_id: str, run_id: str) -> None:
+    for delay in _RUN_SETTLE_POLL_SECONDS:
+        await asyncio.sleep(delay)
+        try:
+            run = await get_client().runs.get(thread_id, run_id)
+        except Exception:  # noqa: BLE001
+            logger.warning(
+                "Could not read the status of a settling run",
+                exc_info=True,
+                extra={"thread_id": thread_id, "run_id": run_id},
+            )
+            break
+        if run.get("status") not in _RUN_LIVE_STATUSES:
+            break
+    await publish_thread_changed(thread_id)
+
+
 class TranscriptMiddleware(OpenSWEMiddleware):
     """Append the run's activity to the thread's transcript event log."""
 
@@ -986,6 +1022,7 @@ class TranscriptMiddleware(OpenSWEMiddleware):
         if state.terminal:
             return
         state.terminal = True
+        _announce_run_end(state.thread_id, state.run_id)
         try:
             state.enqueue(
                 Command(
@@ -1006,6 +1043,7 @@ class TranscriptMiddleware(OpenSWEMiddleware):
         if state.terminal:
             return
         state.terminal = True
+        _announce_run_end(state.thread_id, state.run_id)
         try:
             state.enqueue(
                 Command(
@@ -1030,6 +1068,7 @@ class TranscriptMiddleware(OpenSWEMiddleware):
         run_state = _lookup_state()
         if _namespace.get():
             return None
+        _announce_run_end(run_state.thread_id, run_state.run_id)
         if not run_state.enabled:
             # An untranscribed thread still leaves a registry entry behind to
             # keep the rest of the run from re-checking; drop it here.

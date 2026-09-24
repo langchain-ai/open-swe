@@ -23,6 +23,13 @@ import type {
   ReviewPageRef,
 } from "./types"
 import { useSidebarPrefsHydrated } from "./sidebarPrefs"
+import { connectThreadChanges, useThreadChangesLive } from "./threadChanges"
+import {
+  mergeThreadSummary,
+  replaceThreadInList,
+  replaceThreadInPage,
+  replaceThreadInPages,
+} from "./threadChangesReducer"
 import type { ChatSort } from "./sidebarPrefs"
 import type { Skill, SkillInput } from "@/lib/api"
 import { api } from "@/lib/api"
@@ -281,6 +288,69 @@ function setAgentThreadResolved(
   }
 }
 
+/**
+ * Lay a pushed summary over every cached copy of the thread. A thread no list
+ * holds yet is most likely one that just started, so the lists refetch.
+ */
+export function applyAgentThreadUpdate(
+  queryClient: QueryClient,
+  thread: AgentThread
+): void {
+  let found = false
+  queryClient.setQueriesData<InfiniteData<ThreadsPage>>(
+    { queryKey: ["agent-threads", "lists", "infinite-pages"] },
+    (prev) => {
+      if (!prev) return prev
+      const replaced = replaceThreadInPages(prev, thread)
+      found ||= replaced.found
+      return replaced.value
+    }
+  )
+  queryClient.setQueriesData<ThreadsPage>(
+    { queryKey: ["agent-threads", "lists", "page"] },
+    (prev) => {
+      if (!prev) return prev
+      const replaced = replaceThreadInPage(prev, thread)
+      found ||= replaced.found
+      return replaced.value
+    }
+  )
+  queryClient.setQueryData<Array<AgentThread>>(
+    agentThreadKeys.pinned,
+    (prev) => {
+      if (!prev) return prev
+      const replaced = replaceThreadInList(prev, thread)
+      found ||= replaced.found
+      return replaced.value
+    }
+  )
+  queryClient.setQueryData<AgentThread>(
+    agentThreadKeys.sidebarActive(thread.id),
+    (prev) => (prev ? thread : prev)
+  )
+  // Keeps the detail's age: a pushed summary must not hold off the detail
+  // GET that its `staleTime` would otherwise allow.
+  const detailKey = agentThreadKeys.detail(thread.id)
+  queryClient.setQueryData<AgentThread>(
+    detailKey,
+    (prev) => (prev ? mergeThreadSummary(prev, thread) : prev),
+    { updatedAt: queryClient.getQueryState(detailKey)?.dataUpdatedAt }
+  )
+  if (!found) invalidateAgentThreadLists(queryClient)
+}
+
+/** Apply pushed run starts and ends to the sidebar caches. Mount once. */
+export function useThreadChanges(enabled: boolean): void {
+  const queryClient = useQueryClient()
+  useEffect(() => {
+    if (!enabled) return
+    return connectThreadChanges({
+      onThreadUpdated: (thread) => applyAgentThreadUpdate(queryClient, thread),
+      onResync: () => invalidateAgentThreadLists(queryClient),
+    })
+  }, [enabled, queryClient])
+}
+
 export function seedAgentThreadLists(
   queryClient: QueryClient,
   thread: AgentThread
@@ -475,6 +545,7 @@ function sidebarPageParams({
 }
 
 export function useSidebarPinnedThreads({ enabled = true } = {}) {
+  const pushed = useThreadChangesLive()
   return useQuery({
     queryKey: agentThreadKeys.pinned,
     queryFn: agentsApi.listPinnedThreads,
@@ -482,7 +553,7 @@ export function useSidebarPinnedThreads({ enabled = true } = {}) {
     refetchOnMount: "always",
     refetchOnWindowFocus: "always",
     refetchInterval: (query) =>
-      query.state.data?.some((thread) => thread.status === "running")
+      !pushed && query.state.data?.some((thread) => thread.status === "running")
         ? 2000
         : false,
   })
@@ -521,6 +592,7 @@ export function useSidebarActiveThread({
   enabled?: boolean
 }): AgentThread | undefined {
   const loaded = loadedThreads.some((thread) => thread.id === activeThreadId)
+  const pushed = useThreadChangesLive()
   const query = useQuery({
     queryKey: agentThreadKeys.sidebarActive(activeThreadId ?? ""),
     queryFn: () => agentsApi.getThread(activeThreadId!, { markViewed: false }),
@@ -528,7 +600,7 @@ export function useSidebarActiveThread({
     refetchOnMount: "always",
     refetchOnWindowFocus: "always",
     refetchInterval: (current) =>
-      current.state.data?.status === "running" ? 2000 : false,
+      !pushed && current.state.data?.status === "running" ? 2000 : false,
     retry: false,
   })
   return !loaded && (!query.data?.resolved || includeResolved)
@@ -1040,6 +1112,7 @@ export function useInfiniteThreadsPages(
   } = {}
 ) {
   const queryClient = useQueryClient()
+  const pushed = useThreadChangesLive()
   const queryKey = agentThreadKeys.infinitePages(params)
   const pagesQuery = useInfiniteQuery({
     queryKey,
@@ -1110,9 +1183,12 @@ export function useInfiniteThreadsPages(
       )
       return refreshed
     },
+    // Pushed changes replace the poll outright: even without an interval, a
+    // key that changes with each run start would still fetch once.
     enabled: Boolean(
       options.enabled !== false &&
       options.pollWhileRunning &&
+      !pushed &&
       pollOffsets.length > 0
     ),
     refetchInterval: 2000,

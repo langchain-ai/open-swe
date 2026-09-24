@@ -21,6 +21,7 @@ from agent.threads.access import (
     _github_token_for_login,
     _readable_thread_metadata,
 )
+from agent.threads.changes import publish_thread_changed
 from agent.threads.listing import list_unresolved_dashboard_threads, settle_review_walkthrough
 from agent.threads.runs import (
     _ASSISTANT_ID,
@@ -380,6 +381,7 @@ async def cancel_dashboard_thread(
     if run_id is not None:
         metadata_update.update(latest_run_status="pending", latest_run_id=run_id)
         await client.threads.update(thread_id=thread_id, metadata=metadata_update)
+    await publish_thread_changed(thread_id)
     thread = await client.threads.get(thread_id)
     return await _thread_summary(thread)
 
@@ -410,6 +412,7 @@ async def admin_cancel_dashboard_thread(
         thread_id=thread_id,
         metadata={"latest_run_status": "interrupted", "updated_at_ms": _now_ms()},
     )
+    await publish_thread_changed(thread_id)
     updated_thread = await client.threads.get(thread_id)
     return await _thread_summary(updated_thread)
 
