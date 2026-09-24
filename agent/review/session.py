@@ -88,6 +88,7 @@ class ReviewSession(BaseModel):
         walkthrough_ready: bool,
     ) -> None:
         """List this review in the user's sidebar, building its walkthrough unless ready."""
+        # TODO: reviewer assignment should call this for each assigned reviewer too.
         now_ms = _now_ms()
         client = langgraph_client()
         await client.threads.create(
