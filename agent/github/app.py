@@ -13,7 +13,7 @@ from githubkit_schemas.v2022_11_28.types import (
     AppInstallationsInstallationIdAccessTokensPostBodyType,
     AppPermissionsType,
 )
-from pydantic import AwareDatetime, BaseModel, ConfigDict, TypeAdapter
+from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, TypeAdapter
 
 from agent.config import ENV
 from agent.encryption import decrypt_token, encrypt_token
@@ -56,7 +56,7 @@ class _SharedTokenPayload(BaseModel):
     # Validation errors would otherwise echo the decrypted token into logs.
     model_config = ConfigDict(hide_input_in_errors=True)
 
-    token: str
+    token: str = Field(min_length=1, repr=False)
     store_key: str
     expires_at: str | None
     good_until: AwareDatetime
@@ -70,7 +70,7 @@ class _SharedToken(BaseModel):
     kept for inspection and to skip stale records unread.
     """
 
-    encrypted_payload: str
+    encrypted_payload: str = Field(min_length=1)
     expires_at: str | None
     good_until: AwareDatetime
 
@@ -152,7 +152,9 @@ async def _read_shared_token(key: ScopeKey, *, now: datetime) -> _SharedTokenPay
             return None
         decrypted = decrypt_token(record.encrypted_payload, ttl_seconds=_SHARED_TOKEN_TTL_SECONDS)
         if not decrypted:
-            return None  # decrypt_token has logged why
+            # decrypt_token has warned, but without saying which record it was.
+            logger.info("Shared GitHub App token could not be decrypted", extra=log_extra)
+            return None
         payload = _SharedTokenPayload.model_validate_json(decrypted)
     except Exception:
         # On the critical path: a slow or failing Store, or an unreadable record,

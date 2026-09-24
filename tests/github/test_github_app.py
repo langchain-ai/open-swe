@@ -322,10 +322,14 @@ def _malformed(item: dict[str, object], monkeypatch: pytest.MonkeyPatch) -> dict
     return item | {"good_until": "not-a-timestamp"}
 
 
+def _emptied(item: dict[str, object], monkeypatch: pytest.MonkeyPatch) -> dict[str, object]:
+    return item | {"encrypted_payload": ""}
+
+
 @pytest.mark.parametrize(
     ("spoil", "warnings"),
-    [(_expired, 0), (_stale, 0), (_under_another_key, 1), (_malformed, 1)],
-    ids=["expired", "stale", "undecryptable", "malformed"],
+    [(_expired, 0), (_stale, 0), (_under_another_key, 1), (_malformed, 1), (_emptied, 1)],
+    ids=["expired", "stale", "undecryptable", "malformed", "empty-payload"],
 )
 async def test_unusable_stored_token_is_replaced_by_a_fresh_one(
     shared_store: FakeStore,
@@ -431,6 +435,50 @@ async def test_payload_encrypted_over_an_hour_ago_is_not_served(
     assert await github_app.get_github_app_installation_token(repository_ids=[11]) == "ghs_minted-2"
     github_app.clear_app_token_cache()
     assert await github_app.get_github_app_installation_token(repository_ids=[11]) == "ghs_minted-2"
+
+
+async def test_forged_empty_token_is_not_served(
+    shared_store: FakeStore, mints: list[dict[str, object]]
+) -> None:
+    await github_app.get_github_app_installation_token(repository_ids=[11])
+    [(store_key, item)] = shared_store.values(_SHARED_TOKENS).items()
+    forged = json.loads(_decrypted_payload(item)) | {"token": ""}
+    shared_store.seed(
+        _SHARED_TOKENS, store_key, item | {"encrypted_payload": encrypt_token(json.dumps(forged))}
+    )
+    github_app.clear_app_token_cache()  # a second worker, with an empty in-process cache
+
+    assert await github_app.get_github_app_installation_token(repository_ids=[11]) == "ghs_minted-2"
+
+
+def test_shared_token_payload_never_prints_its_token() -> None:
+    payload = github_app._SharedTokenPayload(
+        token="ghs_secret", store_key="slot", expires_at=None, good_until=datetime.now(UTC)
+    )
+
+    assert "ghs_secret" not in repr(payload)
+    assert "ghs_secret" not in str(payload)
+
+
+async def test_decryption_miss_is_logged_with_its_record(
+    shared_store: FakeStore,
+    mints: list[dict[str, object]],
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    await github_app.get_github_app_installation_token(repository_ids=[11])
+    [store_key] = shared_store.values(_SHARED_TOKENS)
+    monkeypatch.setenv("TOKEN_ENCRYPTION_KEY", Fernet.generate_key().decode())
+    github_app.clear_app_token_cache()  # a second worker, with an empty in-process cache
+
+    with caplog.at_level(logging.INFO, logger=github_app.__name__):
+        await github_app.get_github_app_installation_token(repository_ids=[11])
+
+    assert [
+        (vars(record).get("installation_id"), vars(record).get("store_key"))
+        for record in caplog.records
+        if record.name == github_app.__name__
+    ] == [("2", store_key)]
 
 
 async def test_unreadable_payload_falls_back_without_logging_the_token(
