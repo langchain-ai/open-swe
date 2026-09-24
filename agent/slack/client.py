@@ -508,6 +508,8 @@ def format_slack_run_usage(usage: RunUsageSummary | None) -> str:
     model_text = " + ".join(labels[:3])
     if len(labels) > 3:
         model_text = f"{model_text} +{len(labels) - 3}"
+    if model_text and usage.reasoning_effort:
+        model_text = f"{model_text} ({_safe_model_label(usage.reasoning_effort)})"
     parts = [model_text] if model_text else []
     if usage.session_cost_usd is not None:
         parts.append(format_slack_session_cost(usage.session_cost_usd))

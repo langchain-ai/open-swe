@@ -10,9 +10,9 @@ import json
 import logging
 import uuid
 from collections.abc import Mapping, Sequence
-from typing import Any, Literal, NotRequired
+from typing import Annotated, Any, Literal, NotRequired
 
-from langchain.agents.middleware.types import AgentState, hook_config
+from langchain.agents.middleware.types import AgentState, OmitFromOutput, hook_config
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, ToolMessage
 from langgraph.runtime import Runtime
 
@@ -42,8 +42,8 @@ REPLY_GUARD: SystemIdentity = {
 
 
 class ReplySurfaceState(AgentState):
-    reply_surface: NotRequired[ReplySurface]
-    reply_nudges: NotRequired[int]
+    reply_surface: NotRequired[Annotated[ReplySurface, OmitFromOutput]]
+    reply_nudges: NotRequired[Annotated[int, OmitFromOutput]]
 
 
 def current_reply_surface(state: Mapping[str, Any]) -> ReplySurface:

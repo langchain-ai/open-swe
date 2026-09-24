@@ -985,6 +985,8 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
                     cast(ModelSelectionState, state)
                 )
                 attribution_model_id, attribution_effort = self._routing_defaults[attribution_route]
+            configurable["resolved_agent_model_id"] = attribution_model_id
+            configurable["resolved_agent_effort"] = attribution_effort
             bot_id = (
                 cfg.slack_thread.triggering_bot_id
                 if self._source == "slack" and cfg.slack_thread
@@ -1337,6 +1339,7 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
     source = cfg.source or "dashboard"
     configurable["source"] = source
     configurable["resolved_agent_model_id"] = model_id
+    configurable["resolved_agent_effort"] = profile_effort
     user_email = cfg.user_email or ""
 
     async with aphase(thread_id, "factory.admin_thread"):
