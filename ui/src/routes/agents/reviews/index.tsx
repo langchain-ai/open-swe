@@ -7,6 +7,7 @@ import {
 import { GitPullRequestIcon } from "@phosphor-icons/react"
 
 import type { ReviewSummary } from "@/lib/api"
+import { pageTitle } from "@/lib/pageTitle"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import { api } from "@/lib/api"
@@ -23,7 +24,7 @@ import {
 
 export const Route = createFileRoute("/agents/reviews/")({
   validateSearch: validateReviewsSearch,
-  head: () => ({ meta: [{ title: "Pull Requests - Open SWE" }] }),
+  head: () => ({ meta: [{ title: pageTitle("Pull Requests") }] }),
   component: ReviewsPage,
 })
 

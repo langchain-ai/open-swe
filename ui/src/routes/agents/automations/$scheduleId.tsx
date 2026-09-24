@@ -3,10 +3,11 @@ import { Link, createFileRoute } from "@tanstack/react-router"
 import { AutomationEditor } from "@/features/automations/components/AutomationEditor"
 import { Skeleton } from "@/components/ui/skeleton"
 import { useAgentSchedules } from "@/features/agents/lib/queries"
+import { pageTitle } from "@/lib/pageTitle"
 
 export const Route = createFileRoute("/agents/automations/$scheduleId")({
   component: EditAutomationPage,
-  head: () => ({ meta: [{ title: "Edit automation - Open SWE" }] }),
+  head: () => ({ meta: [{ title: pageTitle("Edit automation") }] }),
 })
 
 function EditAutomationPage() {

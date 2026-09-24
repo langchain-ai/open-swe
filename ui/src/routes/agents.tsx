@@ -15,10 +15,11 @@ import { useSession } from "@/lib/session"
 import { isDesktopLocalModeEnabled } from "@/lib/desktop-local-mode"
 import { rememberAppLocation } from "@/lib/appLocation"
 import { useDesktopThreadSource } from "@/features/agents/lib/desktopThreadSource"
+import { pageTitle } from "@/lib/pageTitle"
 
 export const Route = createFileRoute("/agents")({
   component: AgentsLayout,
-  head: () => ({ meta: [{ title: "Agents - Open SWE" }] }),
+  head: () => ({ meta: [{ title: pageTitle("Agents") }] }),
 })
 
 /**

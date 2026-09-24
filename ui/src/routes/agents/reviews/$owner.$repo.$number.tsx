@@ -9,6 +9,7 @@ import { ReviewMainBody } from "@/features/reviews/components/ReviewMainBody"
 import { useSidebarControls } from "@/components/sidebar-layout"
 import { Skeleton } from "@/components/ui/skeleton"
 import { api } from "@/lib/api"
+import { pageTitle } from "@/lib/pageTitle"
 import { RequireLogin } from "@/lib/auth-redirect"
 import { useSession } from "@/lib/session"
 import { cn } from "@/lib/utils"
@@ -21,7 +22,7 @@ export const Route = createFileRoute("/agents/reviews/$owner/$repo/$number")({
     params: { owner: string; repo: string; number: string }
   }) => ({
     meta: [
-      { title: `${params.owner}/${params.repo} #${params.number} - Open SWE` },
+      { title: pageTitle(`${params.owner}/${params.repo} #${params.number}`) },
     ],
   }),
 })
@@ -77,9 +78,7 @@ function ReviewDetailPage() {
   const headSha = detail.data?.head_sha
   const seenShaRef = useRef(headSha)
   const prTitle = detail.data?.pr.title
-  const documentTitle = prTitle
-    ? `${prTitle} - Open SWE`
-    : `${owner}/${repo} #${prNumber} - Open SWE`
+  const documentTitle = pageTitle(prTitle ?? `${owner}/${repo} #${prNumber}`)
   useEffect(() => {
     document.title = documentTitle
   }, [documentTitle])

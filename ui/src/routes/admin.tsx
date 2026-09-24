@@ -40,9 +40,10 @@ import {
 import { INSTANCE_SCOPE } from "@/features/settings/lib/settingsScope"
 import { useOptions, useRepos } from "@/lib/profile"
 import { IncidentSettings } from "@/features/incidents/IncidentSettings"
+import { pageTitle } from "@/lib/pageTitle"
 
 export const Route = createFileRoute("/admin")({
-  head: () => ({ meta: [{ title: "Admin - Open SWE" }] }),
+  head: () => ({ meta: [{ title: pageTitle("Admin") }] }),
   component: AdminPage,
 })
 

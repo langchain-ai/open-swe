@@ -28,11 +28,12 @@ import {
   useSaveProfile,
 } from "@/lib/profile"
 import { RequireLogin } from "@/lib/auth-redirect"
+import { pageTitle } from "@/lib/pageTitle"
 import { useSession } from "@/lib/session"
 
 export const Route = createFileRoute("/cloud-agents")({
   component: CloudAgentsPage,
-  head: () => ({ meta: [{ title: "Open SWE Agent - Open SWE" }] }),
+  head: () => ({ meta: [{ title: pageTitle("Open SWE Agent") }] }),
 })
 
 function CloudAgentsPage() {

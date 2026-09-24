@@ -22,6 +22,7 @@ import type { ReactNode } from "react"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
 import { cn } from "@/lib/utils"
+import { pageTitle } from "@/lib/pageTitle"
 import { incidentsApi } from "./api"
 import { IncidentDocuments } from "./IncidentDocuments"
 import type { IncidentAction } from "./api"
@@ -95,9 +96,7 @@ export function IncidentDetail({ incidentId }: { incidentId: string }) {
     retry: false,
   })
   const incidentTitle = detail.data?.incident.title
-  const documentTitle = incidentTitle
-    ? `${incidentTitle} - Open SWE`
-    : "Incident - Open SWE"
+  const documentTitle = pageTitle(incidentTitle ?? "Incident")
   useEffect(() => {
     document.title = documentTitle
   }, [documentTitle])

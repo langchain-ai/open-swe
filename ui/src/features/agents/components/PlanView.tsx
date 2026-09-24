@@ -10,9 +10,10 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { loginUrl } from "@/lib/api"
 import { currentAuthRedirectPath } from "@/lib/auth-redirect"
 import { PlanApiError, getPlan } from "@/lib/plan"
+import { pageTitle } from "@/lib/pageTitle"
 import { cn } from "@/lib/utils"
 
-const DEFAULT_TITLE = "Artifact - Open SWE"
+const DEFAULT_TITLE = pageTitle("Artifact")
 
 /** Publishes the artifact's own `<title>` as the document title. */
 function artifactTitle(html: string, markdown: string): string | null {
@@ -44,7 +45,7 @@ function usePlanDocumentTitle(threadId: string) {
 
   useEffect(() => {
     if (!title) return
-    const documentTitle = `${title} - Open SWE`
+    const documentTitle = pageTitle(title)
     document.title = documentTitle
     return () => {
       if (document.title === documentTitle) document.title = DEFAULT_TITLE

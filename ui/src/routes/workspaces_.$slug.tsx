@@ -5,12 +5,13 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { useWorkspaceOptions } from "@/features/agents/lib/queries"
 import { WorkspaceSettingsPanel } from "@/features/settings/components/WorkspaceSettings"
 import { RequireLogin } from "@/lib/auth-redirect"
+import { pageTitle } from "@/lib/pageTitle"
 import { useSession } from "@/lib/session"
 
 export const Route = createFileRoute("/workspaces_/$slug")({
   component: WorkspaceSettingsPage,
   head: ({ params }: { params: { slug: string } }) => ({
-    meta: [{ title: `${params.slug} - Open SWE` }],
+    meta: [{ title: pageTitle(params.slug) }],
   }),
 })
 

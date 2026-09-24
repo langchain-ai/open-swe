@@ -1,8 +1,9 @@
 import { createFileRoute } from "@tanstack/react-router"
 
 import { SkillsPage } from "@/features/agents/components/SkillsPage"
+import { pageTitle } from "@/lib/pageTitle"
 
 export const Route = createFileRoute("/agents/skills")({
   component: SkillsPage,
-  head: () => ({ meta: [{ title: "Skills - Open SWE" }] }),
+  head: () => ({ meta: [{ title: pageTitle("Skills") }] }),
 })

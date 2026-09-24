@@ -1,6 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router"
 import { IncidentList } from "@/features/incidents/IncidentList"
 import type { IncidentView } from "@/features/incidents/api"
+import { pageTitle } from "@/lib/pageTitle"
 
 export const Route = createFileRoute("/incidents/")({
   validateSearch: (
@@ -14,7 +15,7 @@ export const Route = createFileRoute("/incidents/")({
         : undefined,
     }
   },
-  head: () => ({ meta: [{ title: "Incidents - Open SWE" }] }),
+  head: () => ({ meta: [{ title: pageTitle("Incidents") }] }),
   component: IncidentsPage,
 })
 

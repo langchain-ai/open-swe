@@ -9,6 +9,7 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { Switch } from "@/components/ui/switch"
 import { api } from "@/lib/api"
 import { RequireLogin } from "@/lib/auth-redirect"
+import { pageTitle } from "@/lib/pageTitle"
 import { useRepos } from "@/lib/profile"
 import { useSession } from "@/lib/session"
 
@@ -17,7 +18,7 @@ const PAGE_SIZE = 20
 export const Route = createFileRoute("/review_/repositories/$owner")({
   component: RepositoriesOwnerPage,
   head: ({ params }: { params: { owner: string } }) => ({
-    meta: [{ title: `${params.owner} repositories - Open SWE` }],
+    meta: [{ title: pageTitle(`${params.owner} repositories`) }],
   }),
 })
 

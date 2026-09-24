@@ -1,10 +1,11 @@
 import { createFileRoute } from "@tanstack/react-router"
 
 import { PlanView } from "@/features/agents/components/PlanView"
+import { pageTitle } from "@/lib/pageTitle"
 
 export const Route = createFileRoute("/agents/$threadId_/plan")({
   component: PlanPage,
-  head: () => ({ meta: [{ title: "Artifact - Open SWE" }] }),
+  head: () => ({ meta: [{ title: pageTitle("Artifact") }] }),
 })
 
 function PlanPage() {

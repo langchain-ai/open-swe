@@ -10,6 +10,7 @@ import { ThreadFeedbackCard } from "@/features/agents/components/ThreadFeedbackC
 import { useAgentThreadPullRequestStatus } from "@/features/agents/lib/queries"
 import { agentsApi } from "@/features/agents/lib/api"
 import { useSession } from "@/lib/session"
+import { pageTitle } from "@/lib/pageTitle"
 import { AssistantMessage } from "./Message"
 import { Composer } from "./Composer"
 import { useThreadMetadata } from "./AssistantProvider"
@@ -40,11 +41,11 @@ export function Conversation({ initialRepo }: { initialRepo?: string | null }) {
 
   useEffect(() => {
     if (!title) return
-    const documentTitle = `${title} - Open SWE`
+    const documentTitle = pageTitle(title)
     document.title = documentTitle
     return () => {
       if (document.title === documentTitle)
-        document.title = "Assistant - Open SWE"
+        document.title = pageTitle("Assistant")
     }
   }, [title])
 

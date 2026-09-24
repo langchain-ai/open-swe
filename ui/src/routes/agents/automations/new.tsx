@@ -3,6 +3,7 @@ import { Navigate, createFileRoute } from "@tanstack/react-router"
 import { AutomationEditor } from "@/features/automations/components/AutomationEditor"
 import { useSession } from "@/lib/session"
 import { automationTemplateById } from "@/features/automations/lib/automation-templates"
+import { pageTitle } from "@/lib/pageTitle"
 
 interface NewAutomationSearch {
   template?: string
@@ -13,7 +14,7 @@ export const Route = createFileRoute("/agents/automations/new")({
     template: typeof search.template === "string" ? search.template : undefined,
   }),
   component: NewAutomationPage,
-  head: () => ({ meta: [{ title: "New automation - Open SWE" }] }),
+  head: () => ({ meta: [{ title: pageTitle("New automation") }] }),
 })
 
 function NewAutomationPage() {
