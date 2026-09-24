@@ -1,5 +1,5 @@
 import { BookmarkSimpleIcon } from "@phosphor-icons/react"
-import { useEffect, useRef } from "react"
+import { useCallback } from "react"
 import { toast } from "sonner"
 
 import { buttonVariants } from "@/components/ui/button"
@@ -13,17 +13,13 @@ export function reviewBookmarkletUrl(origin: string): string {
 
 /** A link meant to be dragged to the bookmarks bar, not clicked here. */
 export function ReviewBookmarklet() {
-  const linkRef = useRef<HTMLAnchorElement>(null)
-  useEffect(() => {
-    // React refuses `javascript:` hrefs in JSX, so the URL is set directly.
-    linkRef.current?.setAttribute(
-      "href",
-      reviewBookmarkletUrl(window.location.origin)
-    )
+  // React refuses `javascript:` hrefs in JSX, so the URL is set on the node itself.
+  const setBookmarkletHref = useCallback((node: HTMLAnchorElement | null) => {
+    node?.setAttribute("href", reviewBookmarkletUrl(window.location.origin))
   }, [])
   return (
     <a
-      ref={linkRef}
+      ref={setBookmarkletHref}
       draggable
       title="Drag to your bookmarks bar, then click it on any GitHub pull request"
       onClick={(event) => {
