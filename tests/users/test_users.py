@@ -197,3 +197,17 @@ async def test_preferences_for_an_unknown_login_are_defaults_and_cannot_be_saved
     assert await User.preferences_for_login("carol") == UserPreferences()
     assert await User.update_preferences("carol", UserPreferencesPatch(concierge_mode=True)) is None
     assert await User.concierge_mode_for_slack("U404") is False
+
+
+async def test_always_allowing_pr_attribution_accumulates_requesters() -> None:
+    await User.sign_in("github", "9", login="ada")
+    await User.update_preferences("ada", UserPreferencesPatch(concierge_mode=True))
+
+    await User.always_allow_pr_attribution("ada", "Bob")
+    await User.always_allow_pr_attribution("ada", "carol")
+    saved = await User.always_allow_pr_attribution("ada", "bob")
+
+    assert saved == UserPreferences(concierge_mode=True, pr_attribution_requesters=["bob", "carol"])
+    assert saved.allows_pr_attribution_from("BOB")
+    assert not saved.allows_pr_attribution_from("dave")
+    assert await User.always_allow_pr_attribution("nobody", "bob") is None

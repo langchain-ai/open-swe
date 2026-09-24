@@ -35,10 +35,8 @@ from agent.slack.code_channels import (
 )
 from agent.threads.plan_store import get_plan_content
 from agent.threads.pr_approval import (
-    ALWAYS_ALLOW_ALL,
     PR_APPROVAL_APPROVED,
     PR_APPROVAL_REJECTED,
-    always_allow_for,
     ensure_pr_approval_pending,
     get_pr_approvals,
     mark_pr_approval_notified,
@@ -191,26 +189,6 @@ def _pr_approval_pending_payload(
     }
 
 
-async def _pr_author_needs_approval(
-    cfg: RunConfig,
-) -> tuple[str | None, str, str | None]:
-    """The attributed author for this run when they must approve the PR themselves.
-
-    Returns ``(author_login, requester_login, decision)`` — the author is the
-    person the PR will open as, the requester the person who triggered the run,
-    and ``decision`` one of the pre-authorization scopes when an approval is
-    unnecessary. Any element may be ``None`` when the run has no such person.
-    """
-    author_login = await pr_author_login()
-    if not author_login:
-        return None, "", None
-    requester_login = (cfg.github_login or "").strip()
-    if not requester_login or requester_login.lower() == author_login.lower():
-        return None, requester_login, None
-    decision = await always_allow_for(author_login, requester_login)
-    return author_login, requester_login, decision
-
-
 async def _pr_approval(
     cfg: RunConfig,
     token: str,
@@ -221,6 +199,7 @@ async def _pr_approval(
     head: str,
     base: str,
     title: str,
+    author: str | None,
 ) -> dict[str, Any] | None:
     """The pending-approval payload when a shared thread needs the author's sign-off.
 
@@ -232,23 +211,21 @@ async def _pr_approval(
     """
     if kind != "user" or not cfg.thread_id:
         return None
-    author_login = await pr_author_login()
+    author_login = await pr_author_login(author)
     if not author_login:
         return None
     requester_login = (cfg.github_login or "").strip()
     if not requester_login or requester_login.lower() == author_login.lower():
         return None
-    preauthorized = await always_allow_for(author_login, requester_login)
-    if preauthorized in (ALWAYS_ALLOW_ALL, "requester"):
-        return None
-
     from agent.slack.client import post_slack_top_level_message_with_ts
     from agent.slack.tools.reply import build_pr_approval_blocks
     from agent.users import User
 
-    fingerprint = pr_approval_fingerprint(thread_id=cfg.thread_id, author_login=author_login)
-    from agent.utils.dashboard_links import dashboard_thread_url
+    author = await User.for_login("github", author_login)
+    if author is not None and author.typed_preferences.allows_pr_attribution_from(requester_login):
+        return None
 
+    fingerprint = pr_approval_fingerprint(thread_id=cfg.thread_id, author_login=author_login)
     existing = await get_pr_approvals(cfg.thread_id)
     if existing.get(fingerprint, {}).get("status") == PR_APPROVAL_REJECTED:
         return _pr_approval_pending_payload(
@@ -263,7 +240,6 @@ async def _pr_approval(
             decided="denied this attribution",
         )
 
-    author = await User.for_login("github", author_login)
     author_slack_id = author.slack_user_id if author is not None else ""
     if not author_slack_id:
         # No DM to send: the attribution stays unresolved rather than silently
@@ -1217,6 +1193,7 @@ async def _open_pull_request(
             head=head,
             base=base,
             title=title,
+            author=author,
         ):
             return pending
         preflight_failure = await _preflight_pr_access(

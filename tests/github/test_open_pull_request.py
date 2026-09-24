@@ -610,6 +610,7 @@ def test_footer_names_the_model_that_opened_the_pr(
     )
     monkeypatch.setattr(opr, "private_credential_login", AsyncMock(return_value="test-owner"))
     monkeypatch.setattr(opr, "_resolve_pr_author_token", lambda *_a, **_k: _coro(("tok", "user")))
+    monkeypatch.setattr(opr, "_pr_approval", AsyncMock(return_value=None))
     client = _RoutingClient(
         post=_FakeResponse(201, {"html_url": "u", "number": 1, "user": {}}), get_routes={}
     )

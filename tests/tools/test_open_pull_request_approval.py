@@ -12,7 +12,7 @@ import agent.tools.open_pull_request  # noqa: F401  (resolves the lazy tools mod
 from agent.run_config import RunConfig
 from agent.slack import client as slack_client
 from agent.threads import pr_approval
-from agent.users import User
+from agent.users import User, UserPreferences
 
 opr = sys.modules["agent.tools.open_pull_request"]
 _CFG = RunConfig.parse({"thread_id": "thread-1", "source": "slack", "github_login": "bob"})
@@ -20,8 +20,12 @@ _CFG = RunConfig.parse({"thread_id": "thread-1", "source": "slack", "github_logi
 
 @pytest.fixture
 def gate(monkeypatch, fake_store):
-    """Bob's run attributes the PR to Alice; thread metadata lives in memory."""
-    monkeypatch.setattr(opr, "pr_author_login", AsyncMock(return_value="alice"))
+    """Bob's run names Alice as the PR author; thread metadata lives in memory."""
+
+    async def author_login(requested: str | None = None) -> str:
+        return requested or "bob"
+
+    monkeypatch.setattr(opr, "pr_author_login", author_login)
     metadata: dict[str, object] = {}
 
     async def update(**kwargs: object) -> None:
@@ -40,15 +44,24 @@ def gate(monkeypatch, fake_store):
     return SimpleNamespace(dm=dm, metadata=metadata)
 
 
-def _alice(monkeypatch, slack_id: str) -> None:
-    user = SimpleNamespace(slack_user_id=slack_id)
+def _alice(monkeypatch, slack_id: str, *, allowed: list[str] | None = None) -> None:
+    preferences = UserPreferences(pr_attribution_requesters=allowed or [])
+    user = SimpleNamespace(slack_user_id=slack_id, typed_preferences=preferences)
     monkeypatch.setattr(User, "for_login", AsyncMock(return_value=user))
 
 
-async def _open() -> dict[str, object] | None:
+async def _open(author: str | None = "alice") -> dict[str, object] | None:
     return await opr._pr_approval(
-        _CFG, "token", "user", owner="o", repo="r", head="h", base="b", title="t"
+        _CFG, "token", "user", owner="o", repo="r", head="h", base="b", title="t", author=author
     )
+
+
+@pytest.mark.asyncio
+async def test_opening_as_the_requester_never_asks(gate, monkeypatch):
+    _alice(monkeypatch, "U-ALICE")
+
+    assert await _open(author=None) is None
+    gate.dm.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -94,8 +107,7 @@ async def test_author_without_slack_is_never_published_as(gate, monkeypatch):
 
 @pytest.mark.asyncio
 async def test_always_allow_skips_the_dm(gate, monkeypatch):
-    _alice(monkeypatch, "U-ALICE")
-    await pr_approval.set_always_allow("alice", allow=True, requester="bob")
+    _alice(monkeypatch, "U-ALICE", allowed=["bob"])
 
     assert await _open() is None
     gate.dm.assert_not_awaited()

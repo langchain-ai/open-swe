@@ -11,12 +11,13 @@ participant never asks.
 
 import hashlib
 import logging
-from typing import Any, Literal
+from typing import Any
 from uuid import uuid4
 
 from langgraph_sdk import get_client
 
-from agent.store import get_value, now_iso, put_value
+from agent.store import now_iso
+from agent.users import User
 
 logger = logging.getLogger(__name__)
 
@@ -27,84 +28,11 @@ PR_APPROVAL_REJECTED = "rejected"
 _TERMINAL_STATUSES = {PR_APPROVAL_APPROVED, PR_APPROVAL_REJECTED}
 _MAX_APPROVAL_RECORDS = 20
 
-PR_APPROVALS_NAMESPACE: list[str] = ["pr_authorization", "user_preferences"]
-
-ALWAYS_ALLOW_ALL = "all"
-ALWAYS_ALLOW_NONE = "none"
-
 
 def pr_approval_fingerprint(*, thread_id: str, author_login: str) -> str:
     """One decision per thread and author; every PR opened as them in the thread shares it."""
     raw = f"{thread_id}|{author_login.lower()}"
     return hashlib.sha256(raw.encode()).hexdigest()[:16]
-
-
-class AlwaysAllowPreference:
-    """A stored per-user decision to skip the approval prompt."""
-
-    def __init__(self, scope: str, requester: str | None = None) -> None:
-        self.scope = scope
-        self.requester = requester
-
-
-async def get_always_allow(login: str) -> AlwaysAllowPreference | None:
-    value = await get_value(PR_APPROVALS_NAMESPACE, f"always_allow:{login.lower()}")
-    if not isinstance(value, dict):
-        return None
-    scope = value.get("scope")
-    requester = value.get("requester")
-    requester_login = requester if isinstance(requester, str) and requester.strip() else None
-    if scope == ALWAYS_ALLOW_ALL:
-        return AlwaysAllowPreference(ALWAYS_ALLOW_ALL)
-    if scope == "requester" and requester_login:
-        return AlwaysAllowPreference("requester", requester_login)
-    return None
-
-
-async def set_always_allow(
-    login: str,
-    *,
-    allow: bool,
-    requester: str | None = None,
-) -> AlwaysAllowPreference | None:
-    """Store (or clear) the preference; callers persist no record when clearing."""
-    key = f"always_allow:{login.lower()}"
-    if not allow:
-        await put_value(
-            PR_APPROVALS_NAMESPACE,
-            key,
-            {"scope": ALWAYS_ALLOW_NONE, "login": login, "updated_at": now_iso()},
-        )
-        return None
-    preference = AlwaysAllowPreference(
-        "requester" if requester else ALWAYS_ALLOW_ALL,
-        requester.strip().lower() if requester else None,
-    )
-    await put_value(
-        PR_APPROVALS_NAMESPACE,
-        key,
-        {
-            "scope": preference.scope,
-            "requester": preference.requester,
-            "login": login,
-            "updated_at": now_iso(),
-        },
-    )
-    return preference
-
-
-async def always_allow_for(
-    author_login: str, requester_login: str
-) -> Literal["all", "requester", "none"]:
-    """Whether ``author_login`` already allows ``requester_login`` to publish as them."""
-    preference = await get_always_allow(author_login)
-    if preference is None:
-        return "none"
-    if preference.scope == ALWAYS_ALLOW_ALL:
-        return "all"
-    if preference.scope == "requester" and preference.requester == requester_login.lower():
-        return "requester"
-    return "none"
 
 
 async def get_pr_approvals(thread_id: str) -> dict[str, dict[str, Any]]:
@@ -203,13 +131,14 @@ async def decide_pr_approval(
     record["status"] = PR_APPROVAL_APPROVED if approved else PR_APPROVAL_REJECTED
     record["decided_at"] = now_iso()
     record["decided_by"] = actor
-    if always_allow:
-        requester = record.get("requester_login")
-        await set_always_allow(
-            str(record.get("author_login") or actor),
-            allow=True,
-            requester=requester if isinstance(requester, str) else None,
-        )
+    requester = record.get("requester_login")
+    if always_allow and isinstance(requester, str) and requester:
+        author = str(record.get("author_login") or actor)
+        if await User.always_allow_pr_attribution(author, requester) is None:
+            logger.warning(
+                "No user row to store the PR attribution preference on",
+                extra={"author_login": author, "requester_login": requester},
+            )
     approvals[fingerprint] = record
     await _save_approvals(thread_id, approvals)
     return record
