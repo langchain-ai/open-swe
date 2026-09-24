@@ -19,16 +19,11 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { Textarea } from "@/components/ui/textarea"
 import { useConfirm } from "@/components/ConfirmDialog"
 import { api, isGithubReauthError, loginUrl } from "@/lib/api"
+import { optimisticUpdate } from "@/lib/optimistic"
 import { useRepos } from "@/lib/profile"
 import { normalizeRepoFullName } from "@/lib/repo"
 import { useSession } from "@/lib/session"
 import { cn } from "@/lib/utils"
-
-function formatMutationError(e: Error): string {
-  return isGithubReauthError(e)
-    ? "GitHub token expired — sign in again using the link above."
-    : e.message
-}
 
 function statusVariant(status: ReviewStyle["status"]) {
   switch (status) {
@@ -47,7 +42,6 @@ export function ReviewStylesPanel() {
   const session = useSession()
   const qc = useQueryClient()
   const confirm = useConfirm()
-  const [error, setError] = useState<string | null>(null)
   const [addRepo, setAddRepo] = useState("")
   const [selected, setSelected] = useState<string | null>(null)
   const [draftPrompt, setDraftPrompt] = useState("")
@@ -73,14 +67,13 @@ export function ReviewStylesPanel() {
     refetchInterval: (q) => (q.state.data?.status === "running" ? 4000 : false),
   })
 
+  const loadedRepo = detail.data?.full_name
+  const loadedPrompt = detail.data?.custom_prompt
   useEffect(() => {
-    if (detail.data?.custom_prompt != null) {
-      // oxlint-disable-next-line react/set-state-in-effect
-      setDraftPrompt(detail.data.custom_prompt)
-    } else if (detail.data) {
-      setDraftPrompt("")
-    }
-  }, [detail.data?.custom_prompt, detail.data?.full_name])
+    if (loadedRepo === undefined) return
+    // oxlint-disable-next-line react/set-state-in-effect
+    setDraftPrompt(loadedPrompt ?? "")
+  }, [loadedPrompt, loadedRepo])
 
   useEffect(() => {
     // oxlint-disable-next-line react/set-state-in-effect
@@ -90,32 +83,57 @@ export function ReviewStylesPanel() {
   const savePolicy = useMutation({
     mutationFn: ({ repo, policy }: { repo: string; policy: string | null }) =>
       api.saveReviewApprovalPolicy(repo, policy),
+    meta: { errorTitle: "Couldn't save approval policy" },
     onSuccess: (record) => {
       qc.setQueryData(["reviewStyle", record.full_name], record)
       void qc.invalidateQueries({ queryKey: ["reviewStyles"] })
-      setError(null)
     },
-    onError: (e: Error) => setError(formatMutationError(e)),
   })
 
   const createStyle = useMutation({
     mutationFn: (full_name: string) => api.createReviewStyle(full_name),
+    meta: { errorTitle: "Couldn't add repository" },
     onSuccess: (record) => {
       void qc.invalidateQueries({ queryKey: ["reviewStyles"] })
       setSelected(record.full_name)
-      setError(null)
     },
-    onError: (e: Error) => setError(formatMutationError(e)),
   })
 
   const analyze = useMutation({
     mutationFn: (full_name: string) => api.analyzeReviewStyle(full_name),
-    onSuccess: () => {
-      void qc.invalidateQueries({ queryKey: ["reviewStyles"] })
-      void qc.invalidateQueries({ queryKey: ["reviewStyle", selected] })
-      setError(null)
+    meta: { errorTitle: "Couldn't start analysis" },
+    onMutate: async (full_name) => {
+      await Promise.all([
+        qc.cancelQueries({ queryKey: ["reviewStyles"] }),
+        qc.cancelQueries({ queryKey: ["reviewStyle", full_name] }),
+      ])
+      const snapshot = {
+        list: qc.getQueryData<Array<ReviewStyle>>(["reviewStyles"]),
+        detail: qc.getQueryData<ReviewStyle>(["reviewStyle", full_name]),
+      }
+      const running = (style: ReviewStyle): ReviewStyle =>
+        style.full_name === full_name
+          ? { ...style, status: "running", error: null }
+          : style
+      qc.setQueryData<Array<ReviewStyle>>(["reviewStyles"], (old) =>
+        old?.map(running)
+      )
+      qc.setQueryData<ReviewStyle>(["reviewStyle", full_name], (old) =>
+        old ? running(old) : old
+      )
+      return snapshot
     },
-    onError: (e: Error) => setError(formatMutationError(e)),
+    onSuccess: (record) => {
+      qc.setQueryData(["reviewStyle", record.full_name], record)
+    },
+    onError: (_e, full_name, snapshot) => {
+      qc.setQueryData(["reviewStyles"], snapshot?.list)
+      qc.setQueryData(["reviewStyle", full_name], snapshot?.detail)
+    },
+    onSettled: (_record, _error, full_name) => {
+      void qc.invalidateQueries({ queryKey: ["reviewStyles"] })
+      void qc.invalidateQueries({ queryKey: ["reviewStyle", full_name] })
+    },
   })
 
   const savePrompt = useMutation({
@@ -126,35 +144,42 @@ export function ReviewStylesPanel() {
       full_name: string
       custom_prompt: string
     }) => api.saveReviewStylePrompt(full_name, custom_prompt),
-    onSuccess: () => {
+    meta: { errorTitle: "Couldn't save prompt" },
+    onSuccess: (record) => {
+      qc.setQueryData(["reviewStyle", record.full_name], record)
       void qc.invalidateQueries({ queryKey: ["reviewStyles"] })
-      void qc.invalidateQueries({ queryKey: ["reviewStyle", selected] })
-      setError(null)
     },
-    onError: (e: Error) => setError(formatMutationError(e)),
   })
 
   const cancelAnalysis = useMutation({
     mutationFn: (full_name: string) => api.cancelReviewStyle(full_name),
-    onSuccess: () => {
+    meta: { errorTitle: "Couldn't cancel analysis" },
+    onSuccess: (record) => {
+      qc.setQueryData(["reviewStyle", record.full_name], record)
       void qc.invalidateQueries({ queryKey: ["reviewStyles"] })
-      void qc.invalidateQueries({ queryKey: ["reviewStyle", selected] })
-      setError(null)
     },
-    onError: (e: Error) => setError(formatMutationError(e)),
   })
 
   const removeStyle = useMutation({
     mutationFn: (full_name: string) => api.deleteReviewStyle(full_name),
+    meta: { errorTitle: "Couldn't remove repository" },
+    onMutate: async (full_name) => ({
+      undo: await optimisticUpdate<Array<ReviewStyle>>(
+        qc,
+        ["reviewStyles"],
+        (old) => old.filter((style) => style.full_name !== full_name)
+      ),
+    }),
     onSuccess: (_data, full_name) => {
-      void qc.invalidateQueries({ queryKey: ["reviewStyles"] })
       if (selected === full_name) {
         setSelected(null)
         setDraftPrompt("")
       }
-      setError(null)
     },
-    onError: (e: Error) => setError(formatMutationError(e)),
+    onError: (_e, _full_name, ctx) => ctx?.undo(),
+    onSettled: () => {
+      void qc.invalidateQueries({ queryKey: ["reviewStyles"] })
+    },
   })
 
   if (styles.isLoading) {
@@ -181,7 +206,9 @@ export function ReviewStylesPanel() {
 
   const githubReauth =
     (repos.isError && isGithubReauthError(repos.error)) ||
-    (error !== null && /github token|re-login required/i.test(error))
+    [savePolicy, createStyle, analyze, savePrompt, cancelAnalysis, removeStyle]
+      .map((m) => m.error)
+      .some(isGithubReauthError)
 
   return (
     <div className="flex flex-col gap-6 p-4">
@@ -343,9 +370,7 @@ export function ReviewStylesPanel() {
                   size="sm"
                   variant="outline"
                   disabled={cancelAnalysis.isPending}
-                  onClick={() =>
-                    void cancelAnalysis.mutateAsync(active.full_name)
-                  }
+                  onClick={() => cancelAnalysis.mutate(active.full_name)}
                 >
                   Cancel
                 </Button>
@@ -354,7 +379,7 @@ export function ReviewStylesPanel() {
                 size="sm"
                 disabled={!draftPrompt.trim() || savePrompt.isPending}
                 onClick={() =>
-                  void savePrompt.mutateAsync({
+                  savePrompt.mutate({
                     full_name: active.full_name,
                     custom_prompt: draftPrompt,
                   })
@@ -380,7 +405,7 @@ export function ReviewStylesPanel() {
                   ) {
                     return
                   }
-                  void removeStyle.mutateAsync(active.full_name)
+                  removeStyle.mutate(active.full_name)
                 }}
               >
                 Remove
@@ -435,7 +460,6 @@ export function ReviewStylesPanel() {
             )}
           </>
         )}
-        {error && <p className="text-xs text-destructive">{error}</p>}
       </section>
     </div>
   )

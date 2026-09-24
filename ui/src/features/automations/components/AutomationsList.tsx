@@ -27,10 +27,12 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { TooltipIconButton } from "@/components/ui/tooltip-icon-button"
 import { describeCron } from "@/features/automations/lib/cron"
 import {
+  agentMutationKeys,
   useAgentSchedules,
   useTriggerAgentSchedule,
   useUpdateAgentSchedule,
 } from "@/features/agents/lib/queries"
+import { usePendingVariables } from "@/lib/optimistic"
 import { useSession } from "@/lib/session"
 import { cn } from "@/lib/utils"
 
@@ -220,15 +222,11 @@ function AutomationRow({
   const navigate = useNavigate()
   const updateSchedule = useUpdateAgentSchedule()
   const triggerSchedule = useTriggerAgentSchedule()
-  const isToggling =
-    updateSchedule.isPending &&
-    updateSchedule.variables.scheduleId === schedule.id
+  const isToggling = usePendingVariables<{ scheduleId: string }>(
+    agentMutationKeys.updateSchedule
+  ).some((vars) => vars.scheduleId === schedule.id)
   const isTesting =
     triggerSchedule.isPending && triggerSchedule.variables === schedule.id
-  const testError =
-    triggerSchedule.isError && triggerSchedule.variables === schedule.id
-      ? triggerSchedule.error.message
-      : null
 
   const onTest = (e: React.MouseEvent) => {
     e.preventDefault()
@@ -294,9 +292,6 @@ function AutomationRow({
             {schedule.slackChannelId && <span>{schedule.slackChannelId}</span>}
             <span>Last run: {formatDate(schedule.lastTriggeredAt)}</span>
           </div>
-          {testError && (
-            <p className="mt-1 text-xs text-destructive">{testError}</p>
-          )}
         </div>
       </Link>
       {schedule.lastThreadId && (

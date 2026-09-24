@@ -53,6 +53,7 @@ import {
 import { useQueryClient } from "@tanstack/react-query"
 import { cn } from "@/lib/utils"
 import { useChatRoutes } from "@/lib/chatRoutes"
+import { reportError } from "@/lib/errorReporting"
 
 type Icon = ComponentType<SVGProps<SVGSVGElement>>
 
@@ -179,7 +180,6 @@ export function SidebarThreadRow({
   const deleteThread = useDeleteAgentThread()
   const [deleteOpen, setDeleteOpen] = useState(false)
   const [deletingLocal, setDeletingLocal] = useState(false)
-  const [deleteError, setDeleteError] = useState<string | null>(null)
   const [contextMenuOpen, setContextMenuOpen] = useState(false)
   const marquee = useTitleMarquee()
 
@@ -219,24 +219,18 @@ export function SidebarThreadRow({
       return
     }
     setDeletingLocal(true)
-    setDeleteError(null)
     try {
       const deleted =
         (await window.openSweDesktop?.deleteLocalThread(item.id)) ?? false
-      if (deleted) {
-        onDeleteLocal(item.id)
-        setDeleteOpen(false)
-        if (isActive) {
-          onNavigate?.()
-          void navigate({ to: "/agents" })
-        }
-      } else {
-        setDeleteError("Local Open SWE thread not found")
+      if (!deleted) throw new Error("Local Open SWE thread not found")
+      onDeleteLocal(item.id)
+      setDeleteOpen(false)
+      if (isActive) {
+        onNavigate?.()
+        void navigate({ to: "/agents" })
       }
     } catch (error) {
-      setDeleteError(
-        error instanceof Error ? error.message : "Could not delete local thread"
-      )
+      reportError({ title: "Couldn't delete thread", error })
     }
     setDeletingLocal(false)
   }
@@ -439,10 +433,7 @@ export function SidebarThreadRow({
       </ContextMenu>
       <DeleteThreadDialog
         open={deleteOpen}
-        onOpenChange={(open) => {
-          setDeleteOpen(open)
-          if (!open) setDeleteError(null)
-        }}
+        onOpenChange={setDeleteOpen}
         threadTitle={item.title}
         isDeleting={isDeleting}
         onConfirm={() => void onConfirmDelete()}
@@ -453,7 +444,6 @@ export function SidebarThreadRow({
               ? "This deletes the worktree Open SWE created for it, including any uncommitted changes in it. Its branch and commits are kept."
               : "This removes its history but does not revert changes made to your repository."
         }
-        error={deleteError}
       />
     </>
   )

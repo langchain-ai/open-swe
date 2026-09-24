@@ -76,6 +76,7 @@ function AssessmentCard({
         assessment.review_id,
         input
       ),
+    meta: { errorTitle: "Couldn't save feedback" },
     onSuccess: async (saved) => {
       await queryClient.cancelQueries({ queryKey })
       queryClient.setQueryData(queryKey, saved)
@@ -225,12 +226,6 @@ function AssessmentCard({
               </Button>
             </div>
           </fieldset>
-          {save.isError && (
-            <p role="alert" className="text-xs text-destructive">
-              Could not save feedback. Your draft is still here; please try
-              again.
-            </p>
-          )}
         </form>
       )}
     </section>

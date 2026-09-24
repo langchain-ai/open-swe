@@ -6,7 +6,7 @@ import { useConfirm } from "@/components/ConfirmDialog"
 import { Button } from "@/components/ui/button"
 import { InstructionsEditor } from "@/components/InstructionsEditor"
 import { Skeleton } from "@/components/ui/skeleton"
-import { api } from "@/lib/api"
+import { api, type UserInstructions } from "@/lib/api"
 
 export function PersonalInstructionsSection() {
   const qc = useQueryClient()
@@ -22,22 +22,26 @@ export function PersonalInstructionsSection() {
   const value = draft ?? saved
   const dirty = draft !== null && draft !== saved
 
-  const onSuccess = () => {
+  const onSuccess = (text: string) => {
+    qc.setQueryData<UserInstructions>(["myInstructions"], (current) => ({
+      ...current,
+      instructions: text,
+    }))
     void qc.invalidateQueries({ queryKey: ["myInstructions"] })
     setDraft(null)
     setError(null)
   }
-  const onError = (e: Error) => setError(e.message)
 
   const save = useMutation({
+    meta: { silent: true },
     mutationFn: (next: string) => api.saveMyInstructions(next),
-    onSuccess,
-    onError,
+    onSuccess: (record) => onSuccess(record.instructions),
+    onError: (e: Error) => setError(e.message),
   })
   const clear = useMutation({
+    meta: { errorTitle: "Couldn't clear instructions" },
     mutationFn: () => api.deleteMyInstructions(),
-    onSuccess,
-    onError,
+    onSuccess: () => onSuccess(""),
   })
   const mutating = save.isPending || clear.isPending
 
@@ -52,7 +56,7 @@ export function PersonalInstructionsSection() {
     ) {
       return
     }
-    void clear.mutateAsync()
+    clear.mutate()
   }
 
   return (
@@ -92,7 +96,7 @@ export function PersonalInstructionsSection() {
               <Button
                 size="sm"
                 disabled={!dirty || mutating}
-                onClick={() => void save.mutateAsync(value)}
+                onClick={() => save.mutate(value)}
               >
                 Save instructions
               </Button>

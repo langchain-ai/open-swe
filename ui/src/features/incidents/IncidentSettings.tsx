@@ -123,6 +123,7 @@ function PolicyForm({
   const [validation, setValidation] = useState<string | null>(null)
   const save = useMutation({
     mutationFn: incidentsApi.saveSettings,
+    meta: { silent: true },
     onSuccess: () => {
       void queryClient.invalidateQueries({
         queryKey: ["incidents", "settings"],

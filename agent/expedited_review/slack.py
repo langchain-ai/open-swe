@@ -28,6 +28,8 @@ async def handle_button(
         decision = "approve"
     elif button.action == "ready":
         decision = "ready"
+    elif button.action == "broadcast":
+        decision = "broadcast"
     elif button.action in {"dismiss", "reject"}:
         # Cards already posted in Slack still carry a Reject button.
         decision = "dismiss"
@@ -41,5 +43,7 @@ async def handle_button(
         person=slack_person(user_id),
         channel_id=channel_id,
         thread_ts=thread_ts,
+        broadcast_requested=card.BROADCAST_OPTION
+        in interaction.state.selected(card.BROADCAST_CHECKBOX_ACTION_ID),
     )
     return accepted("Expedited review vote queued")

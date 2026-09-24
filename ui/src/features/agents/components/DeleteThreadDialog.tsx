@@ -16,7 +16,6 @@ export function DeleteThreadDialog({
   isDeleting,
   onConfirm,
   detail = "This cannot be undone.",
-  error,
 }: {
   open: boolean
   onOpenChange: (open: boolean) => void
@@ -24,7 +23,6 @@ export function DeleteThreadDialog({
   isDeleting: boolean
   onConfirm: () => void
   detail?: string
-  error?: string | null
 }) {
   return (
     <AlertDialog open={open} onOpenChange={onOpenChange}>
@@ -35,7 +33,6 @@ export function DeleteThreadDialog({
             Delete "{threadTitle}"? {detail}
           </AlertDialogDescription>
         </AlertDialogHeader>
-        {error && <p className="text-xs text-destructive">{error}</p>}
         <AlertDialogFooter>
           <AlertDialogCancel size="sm" disabled={isDeleting}>
             Cancel

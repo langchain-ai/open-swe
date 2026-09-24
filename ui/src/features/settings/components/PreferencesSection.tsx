@@ -1,4 +1,9 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import {
+  useMutation,
+  useMutationState,
+  useQuery,
+  useQueryClient,
+} from "@tanstack/react-query"
 import { useState } from "react"
 
 import type { Theme } from "@/lib/theme"
@@ -22,7 +27,11 @@ import {
 } from "@/lib/notifications"
 import { agentsApi } from "@/features/agents/lib/api"
 import { api } from "@/lib/api"
-import type { FollowUpBehavior, ThreadVisibility } from "@/lib/api"
+import type {
+  FollowUpBehavior,
+  ThreadVisibility,
+  UserPreferences,
+} from "@/lib/api"
 import { useTheme } from "@/lib/theme"
 import { AssistantUiPreference } from "./AssistantUiPreference"
 
@@ -46,19 +55,47 @@ const FOLLOW_UP_BEHAVIORS: Array<{ value: FollowUpBehavior; label: string }> = [
 // sentinel that is translated back to null on save.
 const NO_DEFAULT_WORKSPACE = "__no_default_workspace__"
 
+const PREFERENCES_KEY = ["myPreferences"]
+const SAVE_PREFERENCES_KEY = ["saveMyPreferences"]
+
 export function PreferencesSection() {
   const { theme, setTheme } = useTheme()
   const confirm = useConfirm()
   const qc = useQueryClient()
+  const pendingPreferences = useMutationState({
+    filters: {
+      mutationKey: SAVE_PREFERENCES_KEY,
+      exact: true,
+      status: "pending",
+    },
+    select: (m) => m.state.variables as Partial<UserPreferences>,
+  })
   const preferences = useQuery({
-    queryKey: ["myPreferences"],
+    queryKey: PREFERENCES_KEY,
     queryFn: api.getMyPreferences,
+    select: (saved) =>
+      pendingPreferences.reduce<UserPreferences>(
+        (merged, patch) => ({ ...merged, ...patch }),
+        saved
+      ),
   })
   const savePreferences = useMutation({
-    mutationFn: api.saveMyPreferences,
-    onSuccess: (data) => {
-      qc.setQueryData(["myPreferences"], data)
+    mutationKey: SAVE_PREFERENCES_KEY,
+    scope: { id: SAVE_PREFERENCES_KEY.join(":") },
+    meta: { errorTitle: "Couldn't save preferences" },
+    mutationFn: (patch: Partial<UserPreferences>) => {
+      const saved = qc.getQueryData<UserPreferences>(PREFERENCES_KEY)
+      if (!saved) throw new Error("Preferences are not loaded.")
+      return api.saveMyPreferences({ ...saved, ...patch })
     },
+    onMutate: () => qc.cancelQueries({ queryKey: PREFERENCES_KEY }),
+    onSuccess: (data) => {
+      qc.setQueryData(PREFERENCES_KEY, data)
+    },
+    onSettled: () =>
+      qc.isMutating({ mutationKey: SAVE_PREFERENCES_KEY }) > 1
+        ? undefined
+        : qc.invalidateQueries({ queryKey: PREFERENCES_KEY }),
   })
   const workspaceOptions = useQuery({
     queryKey: ["workspace-options"],
@@ -73,6 +110,7 @@ export function PreferencesSection() {
     })),
   ]
   const archiveThreads = useMutation({
+    meta: { errorTitle: "Couldn't archive threads" },
     mutationFn: agentsApi.resolveAllThreads,
     onSuccess: () => qc.invalidateQueries({ queryKey: ["agent-threads"] }),
   })
@@ -124,11 +162,7 @@ export function PreferencesSection() {
       />
       <SettingsRow
         label="Default thread visibility"
-        description={
-          savePreferences.error
-            ? `Could not save: ${savePreferences.error.message}`
-            : "Preselected when you start a cloud thread. Private threads can use your personal integrations and only you can prompt them; workspace threads are open to everyone and run without personal credentials. Visibility cannot change after a thread is created."
-        }
+        description="Preselected when you start a cloud thread. Private threads can use your personal integrations and only you can prompt them; workspace threads are open to everyone and run without personal credentials. Visibility cannot change after a thread is created."
         control={
           <Select
             items={VISIBILITIES}
@@ -136,11 +170,10 @@ export function PreferencesSection() {
             onValueChange={(v) =>
               v &&
               savePreferences.mutate({
-                ...preferences.data!,
                 default_visibility: v,
               })
             }
-            disabled={preferences.isLoading || savePreferences.isPending}
+            disabled={preferences.isLoading}
           >
             <SelectTrigger className="w-40">
               <SelectValue />
@@ -157,11 +190,7 @@ export function PreferencesSection() {
       />
       <SettingsRow
         label="Default workspace"
-        description={
-          savePreferences.error
-            ? `Could not save: ${savePreferences.error.message}`
-            : "Preselected in the composer's workspace picker when the chosen repository does not belong to another workspace."
-        }
+        description="Preselected in the composer's workspace picker when the chosen repository does not belong to another workspace."
         control={
           <Select
             items={workspaceItems}
@@ -169,15 +198,10 @@ export function PreferencesSection() {
             onValueChange={(v) =>
               v &&
               savePreferences.mutate({
-                ...preferences.data!,
                 default_workspace: v === NO_DEFAULT_WORKSPACE ? null : v,
               })
             }
-            disabled={
-              preferences.isLoading ||
-              savePreferences.isPending ||
-              workspaceOptions.isLoading
-            }
+            disabled={preferences.isLoading || workspaceOptions.isLoading}
           >
             <SelectTrigger className="w-48">
               <SelectValue />
@@ -194,11 +218,7 @@ export function PreferencesSection() {
       />
       <SettingsRow
         label="Follow-up behavior"
-        description={
-          savePreferences.error
-            ? `Could not save: ${savePreferences.error.message}`
-            : "Queue follow-ups until the run ends, or steer the current run with them. ⌘↵ does the opposite for one message; Enter on an empty composer sends the next queued message now."
-        }
+        description="Queue follow-ups until the run ends, or steer the current run with them. ⌘↵ does the opposite for one message; Enter on an empty composer sends the next queued message now."
         control={
           <Select
             items={FOLLOW_UP_BEHAVIORS}
@@ -206,11 +226,10 @@ export function PreferencesSection() {
             onValueChange={(v) =>
               v &&
               savePreferences.mutate({
-                ...preferences.data!,
                 follow_up_behavior: v,
               })
             }
-            disabled={preferences.isLoading || savePreferences.isPending}
+            disabled={preferences.isLoading}
           >
             <SelectTrigger className="w-40">
               <SelectValue />
@@ -236,10 +255,9 @@ export function PreferencesSection() {
               "Shared cloud project"
             }
             defaultValue={preferences.data?.local_tracing_project ?? ""}
-            disabled={preferences.isLoading || savePreferences.isPending}
+            disabled={preferences.isLoading}
             onBlur={(event) =>
               savePreferences.mutate({
-                ...preferences.data!,
                 local_tracing_project: event.target.value.trim() || null,
               })
             }
@@ -249,11 +267,9 @@ export function PreferencesSection() {
       <SettingsRow
         label="Archive all threads"
         description={
-          archiveThreads.error
-            ? `Could not archive threads: ${archiveThreads.error.message}`
-            : archiveThreads.isSuccess
-              ? `${archiveThreads.data.resolved} threads archived.`
-              : "Resolve all threads you have participated in for a clean slate. You can still find them in the resolved view."
+          archiveThreads.isSuccess
+            ? `${archiveThreads.data.resolved} threads archived.`
+            : "Resolve all threads you have participated in for a clean slate. You can still find them in the resolved view."
         }
         control={
           <Button

@@ -1,6 +1,5 @@
 import { useEffect, useState } from "react"
 import { IoLogoSlack } from "react-icons/io5"
-import { toast } from "sonner"
 
 import type { ModelOption } from "@/lib/api"
 import { Button } from "@/components/ui/button"
@@ -18,12 +17,7 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { connectService } from "@/lib/api"
-import {
-  buildProfileUpdate,
-  useOptions,
-  useProfile,
-  useSaveProfile,
-} from "@/lib/profile"
+import { useOptions, usePatchProfile, useProfile } from "@/lib/profile"
 import { useSession } from "@/lib/session"
 
 /**
@@ -39,9 +33,8 @@ export function OnboardingDialog() {
   const session = useSession()
   const profile = useProfile()
   const options = useOptions()
-  const save = useSaveProfile()
+  const save = usePatchProfile()
   const [dismissed, setDismissed] = useState(false)
-  const [error, setError] = useState<string | null>(null)
 
   const defaultModels = options.data?.models.filter(
     (model) => model.can_be_default !== false
@@ -90,35 +83,20 @@ export function OnboardingDialog() {
   const dismiss = () => {
     setDismissed(true)
     if (step !== "slack") return
-    save
-      .mutateAsync(
-        buildProfileUpdate(
-          profile.data,
-          { slack_onboarding_dismissed: true },
-          defaultModel,
-          defaultEffort
-        )
-      )
-      .catch(() =>
-        toast.error(
-          "Couldn't save your Slack prompt preference. It may appear again."
-        )
-      )
+    save.patch(
+      { slack_onboarding_dismissed: true },
+      defaultModel,
+      defaultEffort
+    )
   }
 
   const handleSaveModel = () => {
     if (!modelId) return
-    setError(null)
-    save
-      .mutateAsync(
-        buildProfileUpdate(
-          profile.data,
-          { default_model: modelId, reasoning_effort: effort },
-          defaultModel,
-          defaultEffort
-        )
-      )
-      .catch((e: Error) => setError(e.message))
+    save.patch(
+      { default_model: modelId, reasoning_effort: effort },
+      defaultModel,
+      defaultEffort
+    )
   }
 
   return (
@@ -171,7 +149,6 @@ export function OnboardingDialog() {
                 </Select>
               </div>
             </div>
-            {error && <p className="text-xs text-destructive">{error}</p>}
             <div className="mt-2 flex justify-end gap-2">
               <Button
                 variant="outline"

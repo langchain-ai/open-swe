@@ -63,7 +63,6 @@ export function MergePullRequest({
       label={actionLabel(githubActions.merge.labels, merge)}
       disabled={!method || !pr.headSha || merge.isPending || merge.isSuccess}
       onClick={() => merge.mutate()}
-      errors={[merge.error]}
     >
       <Select<MergeMethod>
         items={mergeMethodLabels}

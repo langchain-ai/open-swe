@@ -215,14 +215,30 @@ export function SlackIntegrationSection({
   )
 }
 
-function RunningAgentsSection() {
+export function RunningAgentsSection() {
   const threads = useThreadsPage({
     all: true,
     status: "running",
     limit: 50,
   })
   const cancel = useAdminCancelAgentThread()
+  const [killed, setKilled] = useState<ReadonlySet<string>>(new Set())
   const [message, setMessage] = useState<string | null>(null)
+  const running = threads.data?.items.filter((t) => !killed.has(t.id)) ?? []
+
+  const kill = (thread: { id: string; title: string }) => {
+    setMessage(null)
+    setKilled((prev) => new Set(prev).add(thread.id))
+    void cancel.mutateAsync(thread.id).then(
+      () => setMessage(`Interruption requested for ${thread.title}.`),
+      () =>
+        setKilled((prev) => {
+          const next = new Set(prev)
+          next.delete(thread.id)
+          return next
+        })
+    )
+  }
 
   return (
     <SettingsSection
@@ -232,7 +248,7 @@ function RunningAgentsSection() {
       <div className="flex flex-col gap-3 p-4">
         <div className="flex items-center justify-between">
           <span className="text-xs text-muted-foreground">
-            {threads.data?.items.length ?? 0} running
+            {running.length} running
           </span>
           <Button
             size="sm"
@@ -246,48 +262,34 @@ function RunningAgentsSection() {
 
         {threads.isLoading ? (
           <Skeleton className="h-20" />
-        ) : threads.data?.items.length ? (
+        ) : running.length ? (
           <div className="flex flex-col">
-            {threads.data.items.map((thread) => {
-              const isCancelling =
-                cancel.isPending && cancel.variables === thread.id
-              return (
-                <div
-                  key={thread.id}
-                  className="flex items-center justify-between gap-3 border-b border-border py-2 last:border-b-0"
+            {running.map((thread) => (
+              <div
+                key={thread.id}
+                className="flex items-center justify-between gap-3 border-b border-border py-2 last:border-b-0"
+              >
+                <Link
+                  to="/agents/$threadId"
+                  params={{ threadId: thread.id }}
+                  className="min-w-0 flex-1 hover:underline"
                 >
-                  <Link
-                    to="/agents/$threadId"
-                    params={{ threadId: thread.id }}
-                    className="min-w-0 flex-1 hover:underline"
-                  >
-                    <p className="truncate text-xs font-medium text-foreground">
-                      {thread.title}
-                    </p>
-                    <p className="truncate font-mono text-[11px] text-muted-foreground">
-                      {thread.repoFullName || "no repo"} · {thread.id}
-                    </p>
-                  </Link>
-                  <Button
-                    size="sm"
-                    variant="destructive"
-                    disabled={cancel.isPending}
-                    onClick={() => {
-                      setMessage(null)
-                      cancel.mutate(thread.id, {
-                        onSuccess: () =>
-                          setMessage(
-                            `Interruption requested for ${thread.title}.`
-                          ),
-                        onError: (error: Error) => setMessage(error.message),
-                      })
-                    }}
-                  >
-                    {isCancelling ? "Killing…" : "Kill"}
-                  </Button>
-                </div>
-              )
-            })}
+                  <p className="truncate text-xs font-medium text-foreground">
+                    {thread.title}
+                  </p>
+                  <p className="truncate font-mono text-[11px] text-muted-foreground">
+                    {thread.repoFullName || "no repo"} · {thread.id}
+                  </p>
+                </Link>
+                <Button
+                  size="sm"
+                  variant="destructive"
+                  onClick={() => kill(thread)}
+                >
+                  Kill
+                </Button>
+              </div>
+            ))}
           </div>
         ) : (
           <Empty className="p-4">
@@ -298,13 +300,7 @@ function RunningAgentsSection() {
         {threads.error && (
           <p className="text-xs text-destructive">{threads.error.message}</p>
         )}
-        {message && (
-          <p
-            className={`text-xs ${cancel.isError ? "text-destructive" : "text-muted-foreground"}`}
-          >
-            {message}
-          </p>
-        )}
+        {message && <p className="text-xs text-muted-foreground">{message}</p>}
       </div>
     </SettingsSection>
   )
@@ -330,6 +326,7 @@ function TriggerReviewSection() {
       if (!parsed) throw new Error("invalid PR URL")
       return api.reReview(parsed.owner, parsed.repo, parsed.number)
     },
+    meta: { silent: true },
     onSuccess: (result) => {
       setError(null)
       setMessage(

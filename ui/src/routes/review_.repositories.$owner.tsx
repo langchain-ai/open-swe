@@ -14,6 +14,9 @@ import { useRepos } from "@/lib/profile"
 import { useSession } from "@/lib/session"
 
 const PAGE_SIZE = 20
+const autoReviewMutationKey = ["setAutoReviewRepo"]
+
+type AutoReviewRepos = Awaited<ReturnType<typeof api.listAutoReviewRepos>>
 
 export const Route = createFileRoute("/review_/repositories/$owner")({
   component: RepositoriesOwnerPage,
@@ -35,11 +38,35 @@ function RepositoriesOwnerPage() {
     enabled: !!session.data,
   })
 
+  const [toggling, setToggling] = useState<ReadonlySet<string>>(new Set())
+  const setRepoAutoReview = (full_name: string, on: boolean) =>
+    qc.setQueryData<AutoReviewRepos>(["autoReviewRepos"], (old) => {
+      const rest = (old?.repos ?? []).filter((name) => name !== full_name)
+      return { repos: on ? [...rest, full_name] : rest }
+    })
   const toggleAutoReview = useMutation({
+    mutationKey: autoReviewMutationKey,
     mutationFn: ({ full_name, on }: { full_name: string; on: boolean }) =>
       api.setAutoReviewRepo(full_name, on),
+    meta: { errorTitle: "Couldn't update auto-review" },
+    onMutate: async ({ full_name, on }) => {
+      setToggling((prev) => new Set(prev).add(full_name))
+      await qc.cancelQueries({ queryKey: ["autoReviewRepos"] })
+      setRepoAutoReview(full_name, on)
+    },
     onSuccess: (data) => {
-      qc.setQueryData(["autoReviewRepos"], data)
+      if (qc.isMutating({ mutationKey: autoReviewMutationKey }) === 1)
+        qc.setQueryData(["autoReviewRepos"], data)
+    },
+    onError: (_error, { full_name, on }) => setRepoAutoReview(full_name, !on),
+    onSettled: (_data, _error, { full_name }) => {
+      setToggling((prev) => {
+        const next = new Set(prev)
+        next.delete(full_name)
+        return next
+      })
+      if (qc.isMutating({ mutationKey: autoReviewMutationKey }) === 1)
+        void qc.invalidateQueries({ queryKey: ["autoReviewRepos"] })
     },
   })
 
@@ -162,7 +189,7 @@ function RepositoriesOwnerPage() {
                           <Switch
                             aria-label={`Run reviews automatically for ${r.full_name}`}
                             checked={runsAutomatically}
-                            disabled={!canEdit || toggleAutoReview.isPending}
+                            disabled={!canEdit || toggling.has(r.full_name)}
                             onCheckedChange={(v) =>
                               toggleAutoReview.mutate({
                                 full_name: r.full_name,
