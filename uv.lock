@@ -1588,7 +1588,7 @@ wheels = [
 
 [[package]]
 name = "langchain-openai"
-version = "1.6.3"
+version = "1.6.6"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "certifi" },
@@ -1596,9 +1596,9 @@ dependencies = [
     { name = "openai" },
     { name = "tiktoken" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/fa/d1/4547d7fdf52a1c08d5b9aa7c088e728baa5eb2855181e6f9a39b12fdf51d/langchain_openai-1.6.3.tar.gz", hash = "sha256:906953395f50a896159b7bac83a5de7ef627160056b69946b22b8cad8f39bbfc", size = 3301342, upload-time = "2026-09-21T18:32:22.629Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/30/14/6d9c4d07b43c1eaf8a112be3524b951247c44bb195d6224cab8ffb68b3e8/langchain_openai-1.6.6.tar.gz", hash = "sha256:7b3848f42825aca40165463aa37757051165eb292ba7f24658a2f58f9bb221f9", size = 3306663, upload-time = "2026-09-24T11:31:13.55Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/1d/3f/c8cfaf52bbfde3aea0db3ce8aba2f45258bafbe150ee89ee8074e643f4f4/langchain_openai-1.6.3-py3-none-any.whl", hash = "sha256:c4529e694512e8058219998574b58aa8307d8cd3a13f4b1fc682dd31883f63ef", size = 125883, upload-time = "2026-09-21T18:32:21.036Z" },
+    { url = "https://files.pythonhosted.org/packages/77/c6/0f6b0c9faa7d00eef702c133fd3534cb52cbdf56df9f3524666012ec90e0/langchain_openai-1.6.6-py3-none-any.whl", hash = "sha256:60dcaa443ddfdf1559feaf1d25916f394c7dda809aebe22a769fc39f02705be7", size = 127401, upload-time = "2026-09-24T11:31:11.691Z" },
 ]
 
 [[package]]
@@ -2198,7 +2198,7 @@ requires-dist = [
     { name = "langchain-mcp-adapters", specifier = ">=0.3.2" },
     { name = "langchain-modal", marker = "extra == 'sandbox-modal'", specifier = ">=0.0.6" },
     { name = "langchain-modal", marker = "extra == 'sandbox-providers'", specifier = ">=0.0.6" },
-    { name = "langchain-openai", specifier = ">=1.6.3,<2.0.0" },
+    { name = "langchain-openai", specifier = ">=1.6.5,<2.0.0" },
     { name = "langchain-runloop", marker = "extra == 'sandbox-providers'", specifier = ">=0.0.7" },
     { name = "langchain-runloop", marker = "extra == 'sandbox-runloop'", specifier = ">=0.0.7" },
     { name = "langgraph", specifier = ">=1.2.12" },

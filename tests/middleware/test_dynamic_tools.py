@@ -12,6 +12,9 @@ from langchain_core.language_models.fake_chat_models import GenericFakeChatModel
 from langchain_core.messages import AIMessage, AnyMessage, HumanMessage, SystemMessage, ToolMessage
 from langchain_core.runnables import RunnableBinding
 from langchain_core.tools import BaseTool, StructuredTool
+from langchain_openai import ChatOpenAI
+from langchain_openai.chat_models.codex import _ChatOpenAICodex  # noqa: PLC2701
+from langchain_openai.chatgpt_oauth import _ChatGPTToken  # noqa: PLC2701
 from langgraph.runtime import Runtime
 from langgraph.types import Command, Overwrite
 from pydantic import SecretStr
@@ -41,6 +44,39 @@ class _Request:
 
 def _opus() -> ChatAnthropic:
     return ChatAnthropic(model_name="claude-opus-5-5", api_key=SecretStr("test"))
+
+
+def _gpt(*, use_responses_api: bool = True) -> ChatOpenAI:
+    return ChatOpenAI(
+        model="gpt-6-sol",
+        api_key=SecretStr("test"),
+        use_responses_api=use_responses_api,
+        store=False,
+        output_version="responses/v1",
+    )
+
+
+class _TokenProvider:
+    def get_token(self) -> _ChatGPTToken:
+        raise NotImplementedError
+
+    async def aget_token(self) -> _ChatGPTToken:
+        raise NotImplementedError
+
+    def get_access_token(self) -> str:
+        return "test"
+
+    async def aget_access_token(self) -> str:
+        return "test"
+
+
+def _codex() -> ChatOpenAI:
+    """The desktop ChatGPT OAuth model, as ``build_desktop_openai_oauth_model`` builds it."""
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        return _ChatOpenAICodex(
+            model="gpt-6-sol", token_provider=_TokenProvider(), originator="test"
+        )
 
 
 def _notion() -> DynamicToolMiddleware:
@@ -118,7 +154,7 @@ _SYSTEM_PROMPT = "You are Open SWE."
 
 def _payload(request: _Request) -> dict[str, Any]:
     """Build the request the provider would be sent, failing on any warning it raises."""
-    model = cast(ChatAnthropic, request.model)
+    model = cast(ChatAnthropic | ChatOpenAI, request.model)
     binding = model.bind_tools(request.tools)
     assert isinstance(binding, RunnableBinding)
     with warnings.catch_warnings():
@@ -138,11 +174,29 @@ def _anthropic_turns(payload: dict[str, Any]) -> list[str]:
     ]
 
 
+def _openai_items(payload: dict[str, Any]) -> list[str]:
+    """Each input item's role or type, with the tools an ``additional_tools`` item adds."""
+    return [
+        " ".join(["additional_tools", *(tool["name"] for tool in item["tools"])])
+        if item.get("type") == "additional_tools"
+        else item.get("role") or item["type"]
+        for item in payload["input"]
+    ]
+
+
 def _added(request: _Request) -> list[dict[str, Any]]:
     """The tool definitions the provider request adds mid-conversation, in order."""
+    payload = _payload(request)
+    if isinstance(request.model, ChatOpenAI):
+        return [
+            tool
+            for item in payload["input"]
+            if item.get("type") == "additional_tools"
+            for tool in item["tools"]
+        ]
     return [
         block["tool"]["definition"]
-        for turn in _payload(request)["messages"]
+        for turn in payload["messages"]
         if turn["role"] == "system"
         for block in turn["content"]
     ]
@@ -171,7 +225,9 @@ def _shape(messages: list[AnyMessage]) -> list[str]:
     return shape
 
 
-@pytest.mark.parametrize("model", [pytest.param(_opus(), id="anthropic")])
+@pytest.mark.parametrize(
+    "model", [pytest.param(_opus(), id="anthropic"), pytest.param(_gpt(), id="openai")]
+)
 async def test_loading_a_tool_only_appends_to_the_request_on_a_supported_model(
     model: object,
 ) -> None:
@@ -195,7 +251,9 @@ async def test_loading_a_tool_only_appends_to_the_request_on_a_supported_model(
     assert _offered(thread.requests[-1]) == ["execute", "notion-search", "notion-fetch"]
 
 
-@pytest.mark.parametrize("model", [pytest.param(_opus(), id="anthropic")])
+@pytest.mark.parametrize(
+    "model", [pytest.param(_opus(), id="anthropic"), pytest.param(_gpt(), id="openai")]
+)
 async def test_an_added_tool_is_defined_as_it_would_be_in_tools(model: object) -> None:
     added = _Thread(_notion(), model)
     await added.tool_turn(["notion-search"])
@@ -296,6 +354,8 @@ async def test_a_tool_loaded_again_in_a_later_run_is_added_at_the_new_load() -> 
             id="claude-sonnet-5",
         ),
         pytest.param(GenericFakeChatModel(messages=iter([])), id="other-provider"),
+        pytest.param(_gpt(use_responses_api=False), id="openai-chat-completions"),
+        pytest.param(_codex(), id="openai-codex-oauth"),
     ],
 )
 async def test_unsupported_models_receive_loaded_tools_in_tools(model: object) -> None:
@@ -385,6 +445,31 @@ async def test_anthropic_sends_additions_in_place() -> None:
     ]
     assert [tool["name"] for tool in payload["tools"]] == ["execute"]
     assert "inline-tools-2026-09-15" in payload["betas"]
+
+
+async def test_openai_sends_additions_in_place() -> None:
+    payload = _payload(await _load_twice(_gpt()))
+
+    assert "instructions" not in payload
+    assert _openai_items(payload) == [
+        "system",
+        "user",
+        "function_call",
+        "function_call",
+        "function_call_output",
+        "function_call_output",
+        "user",
+        "additional_tools notion-search",
+        "function_call",
+        "function_call",
+        "function_call_output",
+        "function_call_output",
+        "additional_tools notion-fetch",
+    ]
+    # Sent verbatim, so only the API would reject an item without its required role.
+    additions = [item for item in payload["input"] if item.get("type") == "additional_tools"]
+    assert {item["role"] for item in additions} == {"developer"}
+    assert [tool["name"] for tool in payload["tools"]] == ["execute"]
 
 
 async def test_dynamic_tools_load_only_selected_schemas_and_route_calls() -> None:

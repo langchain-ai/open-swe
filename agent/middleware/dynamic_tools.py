@@ -16,6 +16,8 @@ from langchain.agents.middleware.types import (
 from langchain_anthropic import ChatAnthropic, convert_to_anthropic_tool
 from langchain_core.messages import AIMessage, AnyMessage, HumanMessage, SystemMessage, ToolMessage
 from langchain_core.tools import BaseTool, InjectedToolCallId, StructuredTool
+from langchain_core.utils.function_calling import convert_to_openai_tool
+from langchain_openai import ChatOpenAI
 from langgraph.prebuilt import InjectedState
 from langgraph.runtime import Runtime
 from langgraph.types import Command, Overwrite
@@ -35,6 +37,8 @@ _ANTHROPIC_TOOL_ADDITION_MODELS = (
     "claude-opus-4-8",
     "claude-mythos-5",
 )
+# Responses API only: Chat Completions rejects ``additional_tools``.
+_OPENAI_TOOL_ADDITION_MODELS = ("gpt-6-astra", "gpt-6-sol", "gpt-6-luna")
 
 ToolAddition = dict[str, object]
 """A provider-native content block that adds one tool from its position onward."""
@@ -311,6 +315,14 @@ def _tool_addition_builder(
         _ANTHROPIC_TOOL_ADDITION_MODELS
     ):
         return _anthropic_tool_addition
+    # Not subclasses: the desktop Codex model lifts every system message into
+    # ``instructions`` and raises on a non-text block.
+    if (
+        type(chat_model) is ChatOpenAI
+        and chat_model.use_responses_api is True
+        and chat_model.model_name.startswith(_OPENAI_TOOL_ADDITION_MODELS)
+    ):
+        return _openai_tool_addition
     return None
 
 
@@ -323,6 +335,12 @@ def _anthropic_tool_addition(tool: BaseTool) -> ToolAddition | None:
     ):
         return None
     return {"type": "tool_addition", "tool": {"type": "tool_definition", "definition": definition}}
+
+
+def _openai_tool_addition(tool: BaseTool) -> ToolAddition:
+    # The Responses shape of the function tool ``bind_tools`` would send in ``tools``.
+    function = {"type": "function", **convert_to_openai_tool(tool)["function"]}
+    return {"type": "additional_tools", "role": "developer", "tools": [function]}
 
 
 def _newly_loaded(artifact: object) -> list[str]:
