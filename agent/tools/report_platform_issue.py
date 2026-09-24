@@ -9,6 +9,7 @@ from langgraph.config import get_config
 
 from agent.run_config import RunConfig
 from agent.runtime.execution import bindable_config
+from agent.utils.langsmith import create_langsmith_thread_feedback
 from agent.utils.thread_ops import langgraph_client
 
 logger = logging.getLogger(__name__)
@@ -59,15 +60,35 @@ async def report_platform_issue(
     keywords: list[str],
 ) -> dict[str, str]:
     """Implement the `report_platform_issue` tool."""
+    description = problem_description.strip()
+    if not description:
+        raise ValueError("Describe the platform issue in problem_description.")
     report_id = _uuid7()
     thread_details = await _collect_thread_details()
     logger.warning(
         "Platform issue reported",
         extra={
             "platform_issue_report_id": report_id,
-            "platform_issue_description": problem_description,
+            "platform_issue_description": description,
             "platform_issue_keywords": keywords,
             "platform_issue_thread_details": _redact_sensitive(thread_details),
         },
     )
-    return {"report_id": report_id}
+    exported = False
+    thread_id = thread_details.get("configurable", {}).get("thread_id") or ""
+    if thread_id:
+        try:
+            exported = await create_langsmith_thread_feedback(
+                thread_id,
+                "platform_issue",
+                score=0.0,
+                comment=description,
+                source_info={
+                    "source": "report_platform_issue_tool",
+                    "report_id": report_id,
+                    "keywords": keywords,
+                },
+            )
+        except Exception:
+            logger.exception("Could not export platform issue report %s", report_id)
+    return {"report_id": report_id, "export_status": "exported" if exported else "logged_only"}
