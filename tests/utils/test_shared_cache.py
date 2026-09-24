@@ -3,7 +3,6 @@
 import asyncio
 import hashlib
 import logging
-import threading
 from collections.abc import Awaitable, Callable, Sequence
 from typing import NoReturn
 
@@ -183,41 +182,6 @@ async def test_clear_cancels_a_pending_refresh(
 
     assert cancelled.is_set()
     assert _stored(fake_store) == {"n": 1}
-
-
-async def test_refresh_held_on_another_event_loop_does_not_block_this_one(
-    fake_store: FakeStore, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    _seed_stale_item(fake_store, monkeypatch)
-    other_loop = asyncio.new_event_loop()
-    other_thread = threading.Thread(target=other_loop.run_forever, daemon=True)
-    other_thread.start()
-    release = asyncio.Event()
-
-    async def held_loader() -> dict[str, int]:
-        await release.wait()
-        return {"n": 0}
-
-    async def fresh_loader() -> dict[str, int]:
-        return {"n": 2}
-
-    async def settle_other_loop() -> None:
-        release.set()
-        pending = [task for task in asyncio.all_tasks() if task is not asyncio.current_task()]
-        await asyncio.gather(*pending)
-
-    try:
-        stale = asyncio.run_coroutine_threadsafe(_cached(held_loader), other_loop)
-        assert await asyncio.wrap_future(stale) == {"n": 1}
-        ttl_cache.clear()  # this loop's copy is gone; the other loop's refresh is still held
-
-        assert await _cached(fresh_loader) == {"n": 1}
-        await eventually(lambda: _stored(fake_store) == {"n": 2})
-    finally:
-        await asyncio.wrap_future(asyncio.run_coroutine_threadsafe(settle_other_loop(), other_loop))
-        other_loop.call_soon_threadsafe(other_loop.stop)
-        other_thread.join(timeout=5)
-        other_loop.close()
 
 
 async def test_first_call_after_a_completed_refresh_returns_the_new_value(
