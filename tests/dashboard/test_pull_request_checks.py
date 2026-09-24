@@ -45,7 +45,6 @@ def _patch_github(monkeypatch, payload, calls: list[dict[str, object]]):
 
 
 async def test_maps_pull_request_state_and_skips_invalid_records(monkeypatch):
-    checks_module._cache.clear()
     calls: list[dict[str, object]] = []
     _patch_github(
         monkeypatch,
@@ -89,7 +88,6 @@ async def test_maps_pull_request_state_and_skips_invalid_records(monkeypatch):
 
 
 async def test_caches_per_login(monkeypatch):
-    checks_module._cache.clear()
     calls: list[dict[str, object]] = []
     _patch_github(monkeypatch, {"data": {"p0": _rollup("FAILURE")}}, calls)
     record = [{"repoFullName": "acme/alpha", "number": 1}]
@@ -104,7 +102,6 @@ async def test_caches_per_login(monkeypatch):
 
 
 async def test_returns_unknown_when_github_fails(monkeypatch):
-    checks_module._cache.clear()
     calls: list[dict[str, object]] = []
     _patch_github(monkeypatch, {"errors": [{"message": "nope"}]}, calls)
 
@@ -113,4 +110,31 @@ async def test_returns_unknown_when_github_fails(monkeypatch):
     )
 
     assert result == {"acme/alpha#1": {"checks": "unknown", "state": None}}
-    assert not checks_module._cache
+    await get_pull_request_check_states(
+        [{"repoFullName": "acme/alpha", "number": 1}], "octocat", "token"
+    )
+    assert len(calls) == 2
+
+
+async def test_cache_expires_without_stale_results_and_preserves_batching(monkeypatch):
+    from agent.utils import shared_cache
+
+    clock = [100.0]
+    monkeypatch.setattr(shared_cache.time, "time", lambda: clock[0])
+    calls: list[dict[str, object]] = []
+    _patch_github(
+        monkeypatch, {"data": {"p0": _rollup("FAILURE"), "p1": _rollup("PENDING")}}, calls
+    )
+    records = [{"repoFullName": "acme/alpha", "number": n} for n in (1, 2)]
+    await get_pull_request_check_states(records, "alice", "token")
+    await get_pull_request_check_states(records, "alice", "token")
+    assert len(calls) == 1
+    clock[0] = 161
+    _patch_github(
+        monkeypatch, {"data": {"p0": _rollup("SUCCESS"), "p1": _rollup("SUCCESS")}}, calls
+    )
+    states = await get_pull_request_check_states(records, "alice", "token")
+    assert len(calls) == 2
+    assert all(value["checks"] == "passing" for value in states.values())
+    await get_pull_request_check_states(records, "alice", "rotated-token")
+    assert len(calls) == 3

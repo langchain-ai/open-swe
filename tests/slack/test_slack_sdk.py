@@ -1,9 +1,91 @@
+import asyncio
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+from types import SimpleNamespace
+
 import pytest
 from fastapi import HTTPException
 from slack_sdk.errors import SlackApiError
 
-from agent.slack import http
+from agent.slack import allowed_bots, http
 from tests.support.slack_api import slack_api_server
+
+
+@pytest.mark.parametrize("directory", [False, True], ids=["identity", "bot-directory"])
+async def test_cached_slack_loader_survives_request_cancellation(monkeypatch, directory):
+    started, release = asyncio.Event(), asyncio.Event()
+    source_tokens: list[str] = []
+
+    class Client:
+        def __init__(self, token: str) -> None:
+            self.token = token
+            self.closed = False
+
+        async def auth_test(self) -> SimpleNamespace:
+            if not directory:
+                await self.wait_for_response()
+            return SimpleNamespace(data={"team_id": "T123"})
+
+        async def users_list(self, **kwargs: object) -> dict[str, object]:
+            await self.wait_for_response()
+            return {
+                "members": [
+                    {
+                        "id": "U123",
+                        "team_id": "T123",
+                        "is_bot": True,
+                        "profile": {"bot_id": "B123", "display_name": "Release bot"},
+                    }
+                ]
+            }
+
+        async def wait_for_response(self) -> None:
+            source_tokens.append(self.token)
+            started.set()
+            await release.wait()
+            assert not self.closed, "the request closed the loader's session"
+
+    clients: list[Client] = []
+
+    @asynccontextmanager
+    async def bot(*, token: str | None = None) -> AsyncIterator[Client]:
+        client = Client(token or "original")
+        clients.append(client)
+        try:
+            yield client
+        finally:
+            client.closed = True
+
+    monkeypatch.setattr(http.SlackClient, "bot", bot)
+
+    async def request() -> object:
+        if directory:
+            return await allowed_bots.list_slack_bots()
+        async with http.SlackClient.bot() as client:
+            return await http.slack_identity(client)
+
+    first = asyncio.create_task(request())
+    async with asyncio.timeout(1):
+        await started.wait()
+    first.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await first
+    assert clients[0].closed
+    second = asyncio.create_task(request())
+    release.set()
+    async with asyncio.timeout(1):
+        result = await second
+    assert result == (
+        [
+            allowed_bots.SlackBotOption(
+                team_id="T123", bot_id="B123", user_id="U123", name="Release bot"
+            )
+        ]
+        if directory
+        else {"team_id": "T123"}
+    )
+    assert source_tokens == ["original"]
+    assert all(client.closed for client in clients)
 
 
 async def test_sdk_session_sends_messages_and_closes_on_rate_limit(monkeypatch):

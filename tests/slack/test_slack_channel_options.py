@@ -10,7 +10,7 @@ from fastapi import HTTPException
 from slack_sdk.errors import SlackApiError
 
 from agent.slack import channel_options
-from agent.utils import ttl_cache
+from agent.utils import shared_cache
 
 
 def _rate_limited(retry_after: str) -> SlackApiError:
@@ -160,7 +160,7 @@ async def test_a_partial_directory_is_retried_on_schedule_however_often_it_is_re
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     clock = {"now": 1000.0}
-    monkeypatch.setattr(ttl_cache, "_now", lambda: clock["now"])
+    monkeypatch.setattr(shared_cache.time, "time", lambda: clock["now"])
     client = _FakeClient(
         [_MEMBER_PAGE, _MEMBER_PAGE],
         [
@@ -184,7 +184,7 @@ async def test_a_partial_directory_is_retried_on_schedule_however_often_it_is_re
     # refresh runs in the background; the next read has the full list.
     clock["now"] += 40
     assert (await channel_options.list_slack_channels()).partial is True
-    await asyncio.gather(*ttl_cache._REFRESH_TASKS.values())
+    await asyncio.gather(*shared_cache._REFRESHES.values())
     assert len(client.calls["conversations_list"]) == 2
     directory = await channel_options.list_slack_channels()
 

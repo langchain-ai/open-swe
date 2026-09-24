@@ -376,8 +376,7 @@ async def control_collaborator_permission(request: Request) -> JSONResponse:
 
 @app.post("/control/team-settings")
 async def control_team_settings(request: Request) -> JSONResponse:
-    """Patch workspace settings, then drop the factory's TTL cache so the next
-    run sees them instead of a stale snapshot.
+    """Patch the canonical settings read by every worker.
 
     A patch, not a replace: the settings record is one store item shared by
     every spec and it outlives the dev server, so writing a bare update would
@@ -389,7 +388,6 @@ async def control_team_settings(request: Request) -> JSONResponse:
         get_instance_settings,
         upsert_instance_settings,
     )
-    from agent.utils import ttl_cache
 
     body = await request.json()
     current = await get_instance_settings()
@@ -399,7 +397,6 @@ async def control_team_settings(request: Request) -> JSONResponse:
         if key in body or key in current
     }
     settings = await upsert_instance_settings(WorkspaceSettingsUpdate.model_validate(patched))
-    ttl_cache.clear()
     return JSONResponse({"ok": True, "settings": settings})
 
 

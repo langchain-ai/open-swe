@@ -10,7 +10,7 @@ from agent.mcp import MCPConnectionUpdate, runtime
 from agent.mcp import workspace as settings
 from agent.middleware.dynamic_tools import DynamicToolMiddleware
 from agent.tool_loaders import workspace_mcp as loader
-from agent.utils import ttl_cache
+from agent.utils import shared_cache
 
 
 @pytest.fixture(autouse=True)
@@ -176,7 +176,7 @@ async def test_expired_catalog_failure_does_not_log_upstream_details(
 ):
     await save(allowed_tools=["search"])
     now = 0
-    monkeypatch.setattr(ttl_cache, "_now", lambda: now)
+    monkeypatch.setattr(shared_cache.time, "time", lambda: now)
     monkeypatch.setattr(
         runtime,
         "_discover_tools",

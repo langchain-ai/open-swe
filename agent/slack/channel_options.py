@@ -10,7 +10,7 @@ from collections.abc import Awaitable, Callable
 from typing import Any
 
 from fastapi import HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, TypeAdapter
 from slack_sdk.errors import SlackApiError
 
 from agent.slack.http import (
@@ -20,7 +20,7 @@ from agent.slack.http import (
     slack_http_errors,
     slack_retry_after,
 )
-from agent.utils import ttl_cache
+from agent.utils import shared_cache
 
 logger = logging.getLogger(__name__)
 
@@ -128,49 +128,52 @@ async def list_slack_channels() -> SlackChannelDirectory:
     """
     async with slack_http_errors(), SlackClient.bot() as client:
         key = f"{slack_cache_key(client)}:channel-directory"
+        token = client.token
 
         async def load() -> SlackChannelDirectory:
-            options: dict[str, SlackChannelOption] = {}
-            for channel in await _collect(
-                lambda cursor: client.users_conversations(
-                    types=_CHANNEL_TYPES, exclude_archived=True, limit=_PAGE_SIZE, cursor=cursor
-                )
-            ):
-                option = _channel_option(channel, member=True)
-                if option is not None:
-                    options[option.id] = option
-            partial = False
-            try:
+            async with SlackClient.bot(token=token) as client:
+                options: dict[str, SlackChannelOption] = {}
                 for channel in await _collect(
-                    lambda cursor: client.conversations_list(
-                        types=_CHANNEL_TYPES,
-                        exclude_archived=True,
-                        limit=_PAGE_SIZE,
-                        cursor=cursor,
+                    lambda cursor: client.users_conversations(
+                        types=_CHANNEL_TYPES, exclude_archived=True, limit=_PAGE_SIZE, cursor=cursor
                     )
                 ):
-                    option = _channel_option(channel)
-                    if option is not None and option.id not in options:
+                    option = _channel_option(channel, member=True)
+                    if option is not None:
                         options[option.id] = option
-            except SlackApiError as exc:
-                if not slack_error(exc).startswith("rate_limited"):
-                    raise
-                partial = True
-                logger.warning(
-                    "Slack rate limited the channel directory; listing only the bot's channels",
-                    extra={"slack_error": slack_error(exc)},
+                partial = False
+                try:
+                    for channel in await _collect(
+                        lambda cursor: client.conversations_list(
+                            types=_CHANNEL_TYPES,
+                            exclude_archived=True,
+                            limit=_PAGE_SIZE,
+                            cursor=cursor,
+                        )
+                    ):
+                        option = _channel_option(channel)
+                        if option is not None and option.id not in options:
+                            options[option.id] = option
+                except SlackApiError as exc:
+                    if not slack_error(exc).startswith("rate_limited"):
+                        raise
+                    partial = True
+                    logger.warning(
+                        "Slack rate limited the channel directory; listing only the bot's channels",
+                        extra={"slack_error": slack_error(exc)},
+                    )
+                directory = SlackChannelDirectory(
+                    channels=sorted(options.values(), key=_by_name), partial=partial
                 )
-            directory = SlackChannelDirectory(
-                channels=sorted(options.values(), key=_by_name), partial=partial
-            )
-            if partial:
-                # The cache stores what a loader returns for the full TTL right
-                # after it returns, so the shorter expiry has to land on the next
-                # loop iteration. Doing it here, rather than after every read,
-                # keeps a cache hit from pushing the retry out again and again.
-                asyncio.get_running_loop().call_soon(
-                    ttl_cache.set_cached, key, directory, PARTIAL_DIRECTORY_TTL_SECONDS
-                )
-            return directory
+                return directory
 
-        return await ttl_cache.cached_stale_while_revalidate(key, DIRECTORY_TTL_SECONDS, load)
+        return await shared_cache.cached(
+            key,
+            DIRECTORY_TTL_SECONDS,
+            load,
+            adapter=TypeAdapter(SlackChannelDirectory),
+            max_age=3600,
+            freshness=lambda directory: (
+                PARTIAL_DIRECTORY_TTL_SECONDS if directory.partial else DIRECTORY_TTL_SECONDS
+            ),
+        )

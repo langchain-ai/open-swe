@@ -60,6 +60,8 @@ class _DisableInheritedMiddleware(AgentMiddleware):
         return self._name
 
 
+from langchain_core.tools import BaseTool
+
 from agent.analytics.usage import record_agent_invocation_usage
 from agent.credential_scope import private_credential_login
 from agent.dashboard.agent_overrides import (
@@ -227,7 +229,6 @@ from agent.tools.manage_review_approval_policy import manage_review_approval_pol
 from agent.tools.save_user_settings import personal_settings_run_allowed
 from agent.tools.submit_review_assessment_feedback import submit_review_assessment_feedback
 from agent.users import User
-from agent.utils import ttl_cache
 from agent.utils.authorship import (
     OPEN_SWE_BOT_EMAIL,
     OPEN_SWE_BOT_NAME,
@@ -658,28 +659,16 @@ async def _private_thread(thread_id: str | None) -> bool:
     return thread_is_private(thread_metadata(thread))
 
 
-async def _cached_tool_loader(key: str, ttl_seconds: float, loader: Any) -> list[Any]:
-    async def load_with_timeout() -> list[Any]:
-        return await asyncio.wait_for(loader(), timeout=_tool_loader_timeout_seconds())
-
-    try:
-        return await ttl_cache.cached_stale_while_revalidate(key, ttl_seconds, load_with_timeout)
-    except TimeoutError:
-        logger.warning("Timed out loading cached tools for %s", key, exc_info=True)
-        return []
-    except Exception:
-        logger.warning("Failed to load cached tools for %s", key, exc_info=True)
-        return []
-
-
-async def _notion_tools_for(profile_login: str | None) -> list[Any]:
+async def _notion_tools_for(profile_login: str | None) -> list[BaseTool]:
     if not profile_login:
         return []
-    return await _cached_tool_loader(
-        f"tools:notion:{profile_login}",
-        300,
-        lambda: load_notion_tools(profile_login),
-    )
+    try:
+        return await asyncio.wait_for(
+            load_notion_tools(profile_login), timeout=_tool_loader_timeout_seconds()
+        )
+    except Exception:
+        logger.warning("Failed to load Notion tools", exc_info=True)
+        return []
 
 
 async def _mcp_tools_for(credential_login: str | None, workspace: str) -> list[Any]:
@@ -701,9 +690,7 @@ async def _phase_result(thread_id: str | None, name: str, loader: Any) -> Any:
 async def _cached_profile(profile_login: str | None):
     if not profile_login:
         return None
-    return await ttl_cache.cached(
-        f"profile:{profile_login}", 30, lambda: load_profile(profile_login)
-    )
+    return await load_profile(profile_login)
 
 
 def _sandbox_file_downloads_enabled(cfg: RunConfig) -> bool:

@@ -12,14 +12,17 @@ TTL cache is keyed by login for the same reason — a cached verdict for a
 private PR is never served to an account that lacks access.
 """
 
+import asyncio
+import logging
 import re
-import time
 from collections.abc import Mapping, Sequence
 from typing import Any, Literal, TypedDict
 
 import httpx2
+from pydantic import TypeAdapter
 
 from agent.github.http import GITHUB_GRAPHQL, github_client, github_request
+from agent.utils import shared_cache
 
 CheckState = Literal["failing", "passing", "pending", "unknown"]
 PrState = Literal["open", "draft", "merged", "closed"]
@@ -36,7 +39,7 @@ _OWNER_PATTERN = re.compile(r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?")
 _REPO_PATTERN = re.compile(r"[A-Za-z0-9._-]{1,100}")
 _MAX_PULL_REQUESTS = 50
 _CACHE_TTL_SECONDS = 60.0
-_CACHE_MAX_ENTRIES = 2000
+logger = logging.getLogger(__name__)
 
 _ROLLUP_STATES: dict[str, CheckState] = {
     "SUCCESS": "passing",
@@ -46,7 +49,7 @@ _ROLLUP_STATES: dict[str, CheckState] = {
     "ERROR": "failing",
 }
 
-_cache: dict[tuple[str, str, int], tuple[float, PullRequestState]] = {}
+_STATE_ADAPTER = TypeAdapter(PullRequestState)
 
 
 def pull_request_key(repo_full_name: str, number: int) -> str:
@@ -70,13 +73,6 @@ def _identity(record: object) -> tuple[str, str, int] | None:
     if not isinstance(number, int) or isinstance(number, bool) or number < 1:
         return None
     return owner, repo, number
-
-
-def _evict_expired(now: float) -> None:
-    for key in [key for key, (expires, _) in _cache.items() if expires <= now]:
-        _cache.pop(key, None)
-    while len(_cache) > _CACHE_MAX_ENTRIES:
-        _cache.pop(next(iter(_cache)), None)
 
 
 def _checks_state(commit: object, rollup: object) -> CheckState:
@@ -134,20 +130,32 @@ async def get_pull_request_check_states(
     records: Sequence[object], login: str, token: str
 ) -> dict[str, PullRequestState]:
     """Return live state per requested pull request, keyed ``repo#number``."""
-    now = time.monotonic()
-    _evict_expired(now)
+    identities = list(
+        dict.fromkeys(
+            identity
+            for record in records[:_MAX_PULL_REQUESTS]
+            if (identity := _identity(record)) is not None
+        )
+    )
 
+    def cache_key(identity: tuple[str, str, int]) -> str:
+        owner, repo, number = identity
+        return shared_cache.scoped_key(
+            "pr-state", login.lower(), token, owner.lower(), repo.lower(), str(number)
+        )
+
+    cached_states = await asyncio.gather(
+        *(
+            shared_cache.get_cached(cache_key(identity), adapter=_STATE_ADAPTER)
+            for identity in identities
+        )
+    )
     results: dict[str, PullRequestState] = {}
     pending: list[tuple[str, str, int]] = []
-    for record in records[:_MAX_PULL_REQUESTS]:
-        identity = _identity(record)
-        if identity is None:
-            continue
+    for identity, cached in zip(identities, cached_states, strict=True):
         owner, repo, number = identity
-        full_name = f"{owner}/{repo}"
-        cached = _cache.get((login, full_name, number))
-        if cached and cached[0] > now:
-            results[pull_request_key(full_name, number)] = cached[1]
+        if cached is not None:
+            results[pull_request_key(f"{owner}/{repo}", number)] = cached
         else:
             pending.append(identity)
 
@@ -163,11 +171,12 @@ async def get_pull_request_check_states(
             )
             response.raise_for_status()
             payload = response.json()
-    except httpx2.HTTPError, ValueError:
+    except (httpx2.HTTPError, ValueError) as exc:
+        logger.warning("PR state lookup failed", extra={"lookup_error": type(exc).__name__})
         payload = None
 
     data = payload.get("data") if isinstance(payload, Mapping) else None
-    expires = time.monotonic() + _CACHE_TTL_SECONDS
+    writes = []
     for index, (owner, repo, number) in enumerate(pending):
         full_name = f"{owner}/{repo}"
         resolved: PullRequestState = (
@@ -177,5 +186,13 @@ async def get_pull_request_check_states(
         )
         results[pull_request_key(full_name, number)] = resolved
         if resolved["state"] is not None:
-            _cache[(login, full_name, number)] = (expires, resolved)
+            writes.append(
+                shared_cache.set_cached(
+                    cache_key((owner, repo, number)),
+                    resolved,
+                    _CACHE_TTL_SECONDS,
+                    adapter=_STATE_ADAPTER,
+                )
+            )
+    await asyncio.gather(*writes)
     return results

@@ -12,28 +12,28 @@ from urllib.parse import unquote, urlsplit
 from langsmith import AsyncClient as AsyncLangSmithClient
 from langsmith import Client as LangSmithClient
 from langsmith.utils import LangSmithNotFoundError, get_host_url
+from pydantic import TypeAdapter
 
 from agent.config import ENV
+from agent.utils import shared_cache
 from agent.utils.tracing import tracing_project
 
 logger = logging.getLogger(__name__)
 
-# Both caches are keyed by the credentials that produced the ids, so a rotated
-# key or another endpoint (a different workspace) starts over instead of
-# building links with the previous workspace's tenant and project ids.
-_PROJECT_ID_CACHE: dict[tuple[tuple[str, str], str], str] = {}
-_PROJECT_START_CACHE: dict[tuple[tuple[str, str], str], datetime] = {}
-_TENANT_ID_CACHE: dict[tuple[str, str], str] = {}
+
+def _metadata_key(kind: str, identifier: str = "") -> str:
+    return shared_cache.scoped_key(f"langsmith:{kind}", *_workspace_key(), identifier)
 
 
-def _project_cache_key(project_id: str) -> tuple[tuple[str, str], str]:
-    return (_workspace_key(), project_id)
-
-
-def _remember_project_start(project_id: str, value: Any) -> datetime | None:
+async def _remember_project_start(project_id: str, value: object) -> datetime | None:
     start = _parse_langsmith_time(value)
     if start is not None:
-        _PROJECT_START_CACHE[_project_cache_key(project_id)] = start
+        await shared_cache.set_cached(
+            _metadata_key("project-start", project_id),
+            start,
+            86400,
+            adapter=TypeAdapter(datetime),
+        )
     return start
 
 
@@ -98,9 +98,14 @@ def _workspace_key() -> tuple[str, str]:
     return (ENV.LANGSMITH_API_KEY.optional() or "", ENV.LANGSMITH_ENDPOINT.get())
 
 
-def _remember_tenant_id(value: Any) -> None:
+async def _remember_tenant_id(value: object) -> None:
     if value:
-        _TENANT_ID_CACHE.setdefault(_workspace_key(), str(value))
+        await shared_cache.set_cached(
+            _metadata_key("tenant"),
+            str(value),
+            3600,
+            adapter=TypeAdapter(str | None),
+        )
 
 
 def _discover_tenant_id() -> str | None:
@@ -121,56 +126,71 @@ async def resolve_tenant_id() -> str | None:
     explicit = ENV.LANGSMITH_TENANT_ID.optional()
     if explicit:
         return explicit
-    workspace = _workspace_key()
-    cached = _TENANT_ID_CACHE.get(workspace)
-    if cached:
-        return cached
+
+    async def load() -> str | None:
+        return await asyncio.to_thread(_discover_tenant_id)
+
     try:
-        discovered = await asyncio.to_thread(_discover_tenant_id)
-    except Exception:  # noqa: BLE001
+        return await shared_cache.cached(
+            _metadata_key("tenant"),
+            300,
+            load,
+            adapter=TypeAdapter(str | None),
+            max_age=3600,
+        )
+    except Exception:
         logger.debug("Could not discover the LangSmith tenant id", exc_info=True)
         return None
-    _remember_tenant_id(discovered)
-    return _TENANT_ID_CACHE.get(workspace)
 
 
 async def _resolve_project_id_by_name(project_name: str) -> str | None:
-    """Resolve a LangSmith project id from its name, caching definitive results."""
-    cache_key = (_workspace_key(), project_name)
-    if cache_key in _PROJECT_ID_CACHE:
-        return _PROJECT_ID_CACHE[cache_key] or None
     client = _build_langsmith_client()
     if client is None:
         return None
+
+    async def load() -> str | None:
+        try:
+            project = await client.read_project(project_name=project_name)
+        except LangSmithNotFoundError:
+            logger.debug("LangSmith project not found")
+            return None
+        project_id = getattr(project, "id", None)
+        resolved = str(project_id) if project_id else None
+        await _remember_tenant_id(getattr(project, "tenant_id", None))
+        if resolved:
+            await _remember_project_start(resolved, getattr(project, "start_time", None))
+        return resolved
+
     try:
-        project = await client.read_project(project_name=project_name)
-    except LangSmithNotFoundError:
-        _PROJECT_ID_CACHE[cache_key] = ""
+        return await shared_cache.cached(
+            _metadata_key("project-id", project_name),
+            300,
+            load,
+            adapter=TypeAdapter(str | None),
+            max_age=3600,
+        )
+    except Exception:
+        logger.debug("Could not resolve LangSmith project id", exc_info=True)
         return None
-    except Exception:  # noqa: BLE001
-        logger.debug("Could not resolve LangSmith project id for %s", project_name, exc_info=True)
-        return None
-    project_id = getattr(project, "id", None)
-    resolved = str(project_id) if project_id else ""
-    _PROJECT_ID_CACHE[cache_key] = resolved
-    _remember_tenant_id(getattr(project, "tenant_id", None))
-    if resolved:
-        _remember_project_start(resolved, getattr(project, "start_time", None))
-    return resolved or None
 
 
 async def _project_lookup_start(project_id: str) -> datetime:
-    cached = _PROJECT_START_CACHE.get(_project_cache_key(project_id))
-    if cached is not None:
-        return cached
-    client = _build_langsmith_client()
-    if client is None:
-        raise LangSmithCostUnavailable("LangSmith credentials are not configured")
-    project = await client.read_project(project_id=project_id)
-    start = _remember_project_start(project_id, getattr(project, "start_time", None))
-    if start is None:
-        raise LangSmithCostUnavailable("LangSmith tracing project start is unavailable")
-    return start
+    async def load() -> datetime:
+        client = _build_langsmith_client()
+        if client is None:
+            raise LangSmithCostUnavailable("LangSmith credentials are not configured")
+        project = await client.read_project(project_id=project_id)
+        start = _parse_langsmith_time(getattr(project, "start_time", None))
+        if start is None:
+            raise LangSmithCostUnavailable("LangSmith tracing project start is unavailable")
+        return start
+
+    return await shared_cache.cached(
+        _metadata_key("project-start", project_id),
+        86400,
+        load,
+        adapter=TypeAdapter(datetime),
+    )
 
 
 async def _compose_langsmith_project_url(project_name: str | None = None) -> str | None:

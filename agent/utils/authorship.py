@@ -6,10 +6,11 @@ from dataclasses import dataclass
 from typing import Any
 
 import httpx2
+from pydantic import TypeAdapter
 
 from agent.analytics.identity import DisplayNameSource
 from agent.input_messages import PersonIdentity
-from agent.utils import ttl_cache
+from agent.utils import shared_cache
 from agent.utils.http import DEFAULT_HTTP_TIMEOUT
 
 logger = logging.getLogger(__name__)
@@ -246,10 +247,12 @@ async def resolve_public_github_profile(login: str) -> GitHubPublicProfile | Non
         return await _fetch_public_github_profile(normalized)
 
     try:
-        return await ttl_cache.cached(
+        return await shared_cache.cached(
             f"github-public-profile:{normalized.lower()}",
             _PUBLIC_PROFILE_CACHE_TTL_SECONDS,
             _load,
+            adapter=TypeAdapter(GitHubPublicProfile | None),
+            max_age=86400,
         )
     except Exception:
         logger.debug("Failed to resolve GitHub public profile for %s", normalized, exc_info=True)

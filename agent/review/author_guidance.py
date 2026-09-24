@@ -35,7 +35,7 @@ from datetime import datetime
 from typing import Any, Self
 from uuid import UUID, uuid7
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, TypeAdapter
 from sqlalchemy import ForeignKey, delete, func, select, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -46,7 +46,7 @@ from agent.database.orm import NOW, Base
 from agent.github.pull_requests import PullRequest
 from agent.github.repositories import Repository
 from agent.input_messages import input_message_text, message_sender_id
-from agent.utils import ttl_cache
+from agent.utils import shared_cache
 from agent.utils.thread_ops import langgraph_client
 
 logger = logging.getLogger(__name__)
@@ -98,10 +98,11 @@ class SteeringHistory(BaseModel):
         Cached briefly: a reviewer run reads this once to build its prompt and
         again for every point it records, and each read is a whole thread state.
         """
-        return await ttl_cache.cached(
+        return await shared_cache.cached(
             f"guidance:steering:{owner}/{repo}#{pr_number}".lower(),
             _STEERING_CACHE_SECONDS,
             lambda: cls._load(owner, repo, pr_number),
+            adapter=TypeAdapter(cls | None),
         )
 
     @classmethod
