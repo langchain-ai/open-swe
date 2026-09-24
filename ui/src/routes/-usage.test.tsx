@@ -95,6 +95,17 @@ function mountReport(onPeriodChange = (_period: string) => {}) {
   return client
 }
 
+function metricCell(row: HTMLTableRowElement, label: string) {
+  const table = row.closest("table")!
+  const header = within(table).getByRole("columnheader", { name: label })
+  const index = within(table).getAllByRole("columnheader").indexOf(header)
+  return row.cells[index]!
+}
+
+function modelRows(table: HTMLTableElement) {
+  return Array.from(table.tBodies[0]!.rows)
+}
+
 afterEach(() => {
   cleanup()
   vi.restoreAllMocks()
@@ -221,26 +232,18 @@ it.each([0, 1, 4, 5])(
       })
     )
     const client = mountReport()
-    const table = (await screen.findByText("sample-model")).closest("table")!
-    const row = within(table)
-      .getByRole("rowheader", { name: "Median distance" })
-      .closest("tr")!
+    const row = (await screen.findByText("sample-model")).closest("tr")!
+    const medianCell = metricCell(row, "Median distance")
+    const meanCell = metricCell(row, "Mean distance")
     expect(
-      within(row).getAllByRole("button", { name: samples ? "17.5%" : "—" })
-        .length
-    ).toBeGreaterThan(0)
-    const meanRow = within(table)
-      .getByRole("rowheader", { name: "Mean distance" })
-      .closest("tr")!
+      within(medianCell).getByRole("button", { name: samples ? "17.5%" : "—" })
+    ).toBeTruthy()
     expect(
-      within(meanRow).getAllByRole("button", { name: samples ? "25.0%" : "—" })
-        .length
-    ).toBeGreaterThan(0)
-    for (const metricRow of [row, meanRow]) {
-      expect(
-        within(metricRow).getAllByText(`${samples}/8 measured`)
-      ).toHaveLength(1)
-      expect(within(metricRow).queryAllByText("Small sample")).toHaveLength(
+      within(meanCell).getByRole("button", { name: samples ? "25.0%" : "—" })
+    ).toBeTruthy()
+    for (const cell of [medianCell, meanCell]) {
+      expect(within(cell).getByText(`${samples}/8 measured`)).toBeTruthy()
+      expect(within(cell).queryAllByText("Small sample")).toHaveLength(
         samples > 0 && samples < 5 ? 1 : 0
       )
     }
@@ -248,7 +251,7 @@ it.each([0, 1, 4, 5])(
   }
 )
 
-it("orders opening models by sample size and calculates outcome shares down each column", async () => {
+it("orders opening model rows by sample size and calculates shares within each row", async () => {
   const cohort = (
     model: string,
     size: number,
@@ -278,37 +281,20 @@ it("orders opening models by sample size and calculates outcome shares down each
   )
   mountReport()
   const table = (await screen.findByText("large-model")).closest("table")!
-  expect(
-    within(table)
-      .getAllByRole("columnheader")
-      .map((header) => header.textContent)
-  ).toEqual([
-    "PR outcome",
-    "large-modelconfigured attribution",
-    "small-modelconfigured attribution",
+  const rows = modelRows(table)
+  expect(rows.map((row) => row.cells[0]!.textContent)).toEqual([
+    "large-modelUnknown / legacy · configured attribution",
+    "small-modelUnknown / legacy · configured attribution",
   ])
   const values = (label: string) =>
-    within(table)
-      .getByRole("rowheader", { name: label })
-      .closest("tr")!
-      .querySelectorAll("td")
-  expect(
-    Array.from(values("PRs opened (base)"), (cell) => cell.textContent)
-  ).toEqual(["10 (100%)", "4 (100%)"])
-  expect(Array.from(values("Merged"), (cell) => cell.textContent)).toEqual([
-    "6 (60%)",
-    "1 (25%)",
-  ])
-  expect(
-    Array.from(values("Closed without merge"), (cell) => cell.textContent)
-  ).toEqual(["3 (30%)", "2 (50%)"])
-  expect(Array.from(values("Open"), (cell) => cell.textContent)).toEqual([
-    "1 (10%)",
-    "1 (25%)",
-  ])
+    rows.map((row) => metricCell(row, label).textContent)
+  expect(values("PRs opened (base)")).toEqual(["10 (100%)", "4 (100%)"])
+  expect(values("Merged")).toEqual(["6 (60%)", "1 (25%)"])
+  expect(values("Closed without merge")).toEqual(["3 (30%)", "2 (50%)"])
+  expect(values("Open")).toEqual(["1 (10%)", "1 (25%)"])
 })
 
-it("keeps displayed column percentages at 100 with repeating fractions", async () => {
+it("keeps displayed outcome percentages at 100 with repeating fractions", async () => {
   vi.spyOn(api, "prMergeRateByModel").mockResolvedValue(
     report({
       ...captured,
@@ -334,14 +320,10 @@ it("keeps displayed column percentages at 100 with repeating fractions", async (
     })
   )
   mountReport()
-  const table = (await screen.findByText("thirds-model")).closest("table")!
+  const row = (await screen.findByText("thirds-model")).closest("tr")!
   expect(
     ["Merged", "Closed without merge", "Open"].map(
-      (label) =>
-        within(table)
-          .getByRole("rowheader", { name: label })
-          .closest("tr")!
-          .querySelector("td")!.textContent
+      (label) => metricCell(row, label).textContent
     )
   ).toEqual(["1 (34%)", "1 (33%)", "1 (33%)"])
 })
@@ -394,22 +376,17 @@ it.each([
       })
     )
     const client = mountReport()
-    const table = (await screen.findByText("example-model")).closest("table")!
+    const row = (await screen.findByText("example-model")).closest("tr")!
+    expect(row.cells[0]!.textContent).toContain(
+      `example-model${effortLabel} · configured attribution`
+    )
     expect(
-      within(table).getAllByRole("columnheader")[1]!.textContent
-    ).toContain(`example-model${effortLabel} · configured attribution`)
-    expect(
-      within(table).queryByRole("button", { name: /reasoning efforts/ })
+      within(row).queryByRole("button", { name: /reasoning efforts/ })
     ).toBeNull()
-    const cell = (label: string) =>
-      within(table)
-        .getByRole("rowheader", { name: label })
-        .closest("tr")!
-        .querySelector("td")!
+    const cell = (label: string) => metricCell(row, label)
     expect(cell("PRs opened (base)").textContent).toBe("7 (100%)")
     expect(cell("Merged").textContent).toBe("3 (43%)")
     expect(cell("Open").textContent).toBe("3 (43%)")
-    const row = cell("Open").parentElement!
 
     const openCount = within(row).getByRole("button", { name: "3 (43%)" })
     if (interaction === "hover") {
@@ -470,7 +447,7 @@ it("shows unavailable attribution thread IDs for admin triage", async () => {
   client.clear()
 })
 
-it("expands model totals into reasoning effort columns", async () => {
+it("keeps reasoning effort subrows under their model when sorting and collapsing", async () => {
   vi.spyOn(api, "prMergeRateByModel").mockResolvedValue(
     report({
       ...captured,
@@ -525,33 +502,42 @@ it("expands model totals into reasoning effort columns", async () => {
             },
           ],
         },
+        {
+          model_id: "another-model",
+          model_attribution_quality: "configured",
+          merged: 1,
+          closed_without_merge: 0,
+          mature_pending: 0,
+          waiting: 0,
+          cohort_size: 1,
+          decided_denominator: 1,
+          decided_merge_rate: 1,
+          mature_denominator: 1,
+          mature_cohort_merge_share: 1,
+          avg_merge_seconds: 60,
+          efforts: [],
+        },
       ],
     })
   )
   const client = mountReport()
-  expect(screen.queryByText("All efforts")).toBeNull()
   expect(await screen.findByText("example-model")).toBeTruthy()
   expect(screen.queryByText("Low")).toBeNull()
   fireEvent.click(
     screen.getByRole("button", { name: /Expand.*reasoning efforts/ })
   )
   const table = screen.getByText("example-model").closest("table")!
-  const merged = within(table)
-    .getByRole("rowheader", { name: "Merged" })
-    .closest("tr")!
-  expect(
-    Array.from(merged.querySelectorAll("td"), (cell) => cell.textContent)
-  ).toEqual(["3 (75%)", "1 (50%)", "2 (100%)"])
-  expect(screen.getByText("Low")).toBeTruthy()
-  expect(screen.getByText("High")).toBeTruthy()
+  expect(modelRows(table).map((row) => row.cells[0]!.textContent)).toEqual([
+    "example-modelAll efforts · configured attribution",
+    "Low",
+    "High",
+    "another-modelUnknown / legacy · configured attribution",
+  ])
   const values = (label: string) =>
-    Array.from(
-      within(table)
-        .getByRole("rowheader", { name: label })
-        .closest("tr")!
-        .querySelectorAll("td"),
-      (cell) => cell.textContent
-    )
+    modelRows(table)
+      .slice(0, 3)
+      .map((row) => metricCell(row, label).textContent)
+  expect(values("Merged")).toEqual(["3 (75%)", "1 (50%)", "2 (100%)"])
   expect(values("Median distance")).toEqual([
     "—",
     "—0/1 measured",
@@ -560,6 +546,43 @@ it("expands model totals into reasoning effort columns", async () => {
   expect(values("Mean distance")).toEqual(["—", "—", "—"])
   expect(values("Avg time to PR")).toEqual(["2h", "—", "30m"])
   expect(values("Avg time to merge")).toEqual(["2d", "—", "1h"])
+  const names = () => modelRows(table).map((row) => row.cells[0]!.textContent)
+  const header = within(table).getByRole("columnheader", {
+    name: "Opening model",
+  })
+  fireEvent.click(within(header).getByRole("button"))
+  expect(header.getAttribute("aria-sort")).toBe("ascending")
+  expect(names()).toEqual([
+    "another-modelUnknown / legacy · configured attribution",
+    "example-modelAll efforts · configured attribution",
+    "Low",
+    "High",
+  ])
+  fireEvent.click(within(header).getByRole("button"))
+  expect(header.getAttribute("aria-sort")).toBe("descending")
+  expect(names()).toEqual([
+    "example-modelAll efforts · configured attribution",
+    "Low",
+    "High",
+    "another-modelUnknown / legacy · configured attribution",
+  ])
+  fireEvent.click(within(table).getByRole("button", { name: "Merged" }))
+  fireEvent.click(within(table).getByRole("button", { name: "Merged" }))
+  expect(names()).toEqual([
+    "another-modelUnknown / legacy · configured attribution",
+    "example-modelAll efforts · configured attribution",
+    "Low",
+    "High",
+  ])
+  fireEvent.click(
+    within(table).getByRole("button", { name: /Collapse.*reasoning efforts/ })
+  )
+  expect(names()).toEqual([
+    "another-modelUnknown / legacy · configured attribution",
+    "example-modelAll efforts · configured attribution",
+  ])
+  expect(within(table).queryByText("Low")).toBeNull()
+  expect(within(table).queryByText("High")).toBeNull()
   client.clear()
 })
 
@@ -589,12 +612,10 @@ it("shows an em dash for avg time to merge when a group has no merges", async ()
     })
   )
   const client = mountReport()
-  const table = (await screen.findByText("example-model")).closest("table")!
-  const row = within(table)
-    .getByRole("rowheader", { name: "Avg time to merge" })
-    .closest("tr")!
-  expect(within(row).getByRole("cell").textContent).toBe("\u2014")
-  expect(row.textContent).not.toContain("Based on")
+  const row = (await screen.findByText("example-model")).closest("tr")!
+  const cell = metricCell(row, "Avg time to merge")
+  expect(cell.textContent).toBe("\u2014")
+  expect(cell.textContent).not.toContain("Based on")
   client.clear()
 })
 
@@ -630,11 +651,8 @@ it.each([
     report({ ...captured, status: "ready", cohorts: [cohort] })
   )
   const client = mountReport()
-  const table = (await screen.findByText("example-model")).closest("table")!
-  const row = within(table)
-    .getByRole("rowheader", { name: "Avg time to PR" })
-    .closest("tr")!
-  const deliveryCell = within(row).getByRole("cell")
+  const row = (await screen.findByText("example-model")).closest("tr")!
+  const deliveryCell = metricCell(row, "Avg time to PR")
   expect(deliveryCell.textContent).toBe("\u2014")
   expect(within(deliveryCell).getByTitle(expected)).toBeTruthy()
   client.clear()
@@ -666,11 +684,8 @@ it("renders a zero avg time to PR as a real duration, not an empty marker", asyn
     })
   )
   const client = mountReport()
-  const table = (await screen.findByText("example-model")).closest("table")!
-  const row = within(table)
-    .getByRole("rowheader", { name: "Avg time to PR" })
-    .closest("tr")!
-  const deliveryCell = within(row).getByRole("cell")
+  const row = (await screen.findByText("example-model")).closest("tr")!
+  const deliveryCell = metricCell(row, "Avg time to PR")
   expect(deliveryCell.textContent).not.toBe("\u2014")
   expect(deliveryCell.textContent).toContain("0")
   expect(
@@ -1752,7 +1767,7 @@ it("renders feedback counts and resets pagination when sorting feedback in eithe
   client.clear()
 })
 
-it("sorts model columns by mean distance and the selected merge-rate view", async () => {
+it("sorts model rows by mean distance and the selected merge-rate view", async () => {
   const makeCohort = (
     model: string,
     merged: number,
@@ -1786,24 +1801,14 @@ it("sorts model columns by mean distance and the selected merge-rate view", asyn
   )
   const client = mountReport()
   const table = (await screen.findByText("a-small-model")).closest("table")!
-  const models = () =>
-    within(table)
-      .getAllByRole("columnheader")
-      .slice(1)
-      .map((header) => header.textContent)
+  const models = () => modelRows(table).map((row) => row.cells[0]!.textContent)
   const values = (label: string) =>
-    Array.from(
-      within(table)
-        .getByRole("rowheader", { name: label })
-        .closest("tr")!
-        .querySelectorAll("td"),
-      (cell) => cell.textContent
-    )
+    modelRows(table).map((row) => metricCell(row, label).textContent)
   fireEvent.click(within(table).getByRole("button", { name: "Mean distance" }))
   expect(models()).toEqual([
-    "a-small-modelconfigured attribution",
-    "z-large-modelconfigured attribution",
-    "no-eligible-modelconfigured attribution",
+    "a-small-modelUnknown / legacy · configured attribution",
+    "z-large-modelUnknown / legacy · configured attribution",
+    "no-eligible-modelUnknown / legacy · configured attribution",
   ])
   fireEvent.click(within(table).getByRole("button", { name: "Mean distance" }))
   expect(models()[0]).toContain("z-large-model")
