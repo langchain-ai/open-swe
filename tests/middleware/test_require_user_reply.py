@@ -1,9 +1,17 @@
+from collections.abc import Awaitable, Callable
+from itertools import pairwise
 from typing import Any, cast
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-from langchain.agents.middleware.types import AgentState
-from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
+from langchain.agents import create_agent
+from langchain.agents.middleware import wrap_model_call
+from langchain.agents.middleware.types import AgentState, ModelRequest, ModelResponse
+from langchain_core.language_models.fake_chat_models import FakeListChatModel
+from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage, ToolMessage
+from langchain_core.runnables import RunnableConfig
+from langgraph.checkpoint.memory import InMemorySaver
+from langgraph.types import StateSnapshot
 
 from agent.input_messages import message_sender_id
 from agent.middleware.require_user_reply import (
@@ -202,6 +210,73 @@ class TestRequireUserReplyMiddleware:
         )
 
         posted.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "system",
+        [
+            None,
+            SystemMessage(content="base prompt"),
+            SystemMessage(content=[{"type": "text", "text": "base prompt"}]),
+        ],
+    )
+    async def test_retries_preserve_prefix_and_checkpoint_nudges(
+        self, monkeypatch: pytest.MonkeyPatch, system: SystemMessage | None
+    ) -> None:
+        import agent.slack.tools.reply as reply_tool
+
+        posted = AsyncMock(return_value={"success": True})
+        monkeypatch.setattr(reply_tool, "slack_reply", posted)
+        seen: list[ModelRequest] = []
+
+        @wrap_model_call
+        async def capture(
+            request: ModelRequest,
+            handler: Callable[[ModelRequest], Awaitable[ModelResponse]],
+        ) -> ModelResponse:
+            seen.append(request)
+            return await handler(request)
+
+        graph = create_agent(
+            model=FakeListChatModel(responses=["all good", "", ""]),
+            system_prompt=system,
+            middleware=[_middleware(), capture],
+            checkpointer=InMemorySaver(),
+        )
+        config: RunnableConfig = {"configurable": {"thread_id": "reply-retries"}}
+        result = await graph.ainvoke({"messages": [HumanMessage(content="what is up")]}, config)
+        checkpoint = await graph.aget_state(config)
+        history: list[StateSnapshot] = [
+            snapshot async for snapshot in graph.aget_state_history(config)
+        ]
+
+        assert len(seen) == 3
+        assert len(seen[0].messages) == 1
+        for request in seen:
+            assert request.system_message == system
+            assert request.tools == seen[0].tools
+        for attempt, (previous, request) in enumerate(pairwise(seen), start=1):
+            prefix = previous.messages
+            assert request.messages[: len(prefix)] == prefix
+            assert isinstance(request.messages[len(prefix)], AIMessage)
+            nudge = request.messages[-1]
+            assert isinstance(nudge, HumanMessage)
+            assert message_sender_id(nudge.content, kind="system") == REPLY_GUARD["id"]
+            assert TOOL in nudge.content and NO_REPLY_TOOL in nudge.content
+            assert (
+                sum(
+                    message_sender_id(message.content, kind="system") == REPLY_GUARD["id"]
+                    for message in request.messages
+                )
+                == attempt
+            )
+            assert any(snapshot.values.get("messages") == request.messages for snapshot in history)
+        final_messages: list[BaseMessage] = result["messages"]
+        assert final_messages[:-1] == seen[-1].messages
+        assert checkpoint.values["messages"] == final_messages
+        posted.assert_awaited_once()
+        assert posted.await_args is not None
+        assert posted.await_args.args[:2] == ("all good", "final")
 
     def test_each_run_resolves_its_own_surface(self) -> None:
         middleware = RequireUserReplyMiddleware(
