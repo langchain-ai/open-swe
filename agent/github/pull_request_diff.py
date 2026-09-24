@@ -18,9 +18,11 @@ from pydantic import BaseModel, ValidationError
 
 _GITHUB_API = "https://api.github.com"
 
-PR_DIFF_MAX_FILES = 50
+# GitHub lists at most this many files for a pull request or comparison.
+GITHUB_MAX_LISTED_FILES = 3000
 PR_DIFF_MAX_FILE_BYTES = 1_000_000
-PR_DIFF_FETCH_CONCURRENCY = 5
+PR_DIFF_FETCH_CONCURRENCY = 10
+_FILES_PAGE_SIZE = 100
 
 
 async def _fetch_file_at_ref(
@@ -70,15 +72,22 @@ async def build_pr_diff_files(
     if not isinstance(base_sha, str) or not isinstance(head_sha, str):
         raise HTTPException(502, "github API returned an unexpected pull request payload")
 
-    files_response = await client.get(
-        f"{_GITHUB_API}/repos/{full_name}/pulls/{pr_number}/files",
-        params={"per_page": 100},
-    )
-    if files_response.status_code != 200:
-        raise HTTPException(502, f"github API error ({files_response.status_code})")
-    raw_files = files_response.json()
-    if not isinstance(raw_files, list):
-        raise HTTPException(502, "github API returned an unexpected files payload")
+    raw_files: list[Any] = []
+    page = 1
+    while True:
+        files_response = await client.get(
+            f"{_GITHUB_API}/repos/{full_name}/pulls/{pr_number}/files",
+            params={"per_page": _FILES_PAGE_SIZE, "page": page},
+        )
+        if files_response.status_code != 200:
+            raise HTTPException(502, f"github API error ({files_response.status_code})")
+        batch = files_response.json()
+        if not isinstance(batch, list):
+            raise HTTPException(502, "github API returned an unexpected files payload")
+        raw_files.extend(batch)
+        if len(batch) < _FILES_PAGE_SIZE or len(raw_files) >= GITHUB_MAX_LISTED_FILES:
+            break
+        page += 1
 
     # The PR's files and patches are relative to the merge base, not the base
     # branch tip; reading "before" at the tip would show the base branch's own
@@ -159,8 +168,7 @@ async def _build_diff_files(
     head_ref: str,
 ) -> dict[str, Any]:
     """Build file entries by reading each blob at ``base_ref`` and ``head_ref``."""
-    truncated = len(raw_files) > PR_DIFF_MAX_FILES
-    raw_files = raw_files[:PR_DIFF_MAX_FILES]
+    truncated = len(raw_files) >= GITHUB_MAX_LISTED_FILES
 
     semaphore = asyncio.Semaphore(PR_DIFF_FETCH_CONCURRENCY)
 

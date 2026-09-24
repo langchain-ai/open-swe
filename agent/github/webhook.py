@@ -11,7 +11,6 @@ from pydantic import BaseModel, ValidationError
 
 from agent.baby_sit import handle_ci_webhook
 from agent.database import postgres
-from agent.expedited_review.watch import handle_github_event as handle_expedited_review_event
 from agent.github.comments import GitHubAuthError
 from agent.github.pull_requests import PullRequest
 from agent.input_messages import (
@@ -831,11 +830,6 @@ async def process_github_ci_event(
 ) -> None:
     """Evaluate active baby-sit watches for a signed GitHub CI event."""
     await handle_ci_webhook(payload, event_type, delivery_id=delivery_id)
-
-
-async def process_expedited_review_event(payload: dict[str, Any], event_type: str) -> None:
-    """Re-evaluate expedited approvals a signed GitHub event may have unblocked or voided."""
-    await handle_expedited_review_event(payload, event_type)
 
 
 _UNTAGGED_PR_TRIGGER_EVENTS = frozenset(["issue_comment", "pull_request_review"])

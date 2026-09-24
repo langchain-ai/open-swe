@@ -12,6 +12,7 @@ import {
   threadDetailFailed,
   threadDetailResolved,
 } from "@/lib/perf/threadLoad"
+import { pageTitle } from "@/lib/pageTitle"
 
 export function AgentThreadPage(props: { threadId: string; active?: boolean }) {
   return (
@@ -59,10 +60,10 @@ function AgentThreadContent({
 
   useEffect(() => {
     if (!active || !title) return
-    const documentTitle = `${title} - Open SWE`
+    const documentTitle = pageTitle(title)
     document.title = documentTitle
     return () => {
-      if (document.title === documentTitle) document.title = "Open SWE"
+      if (document.title === documentTitle) document.title = pageTitle("Agents")
     }
   }, [active, title])
 

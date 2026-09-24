@@ -177,7 +177,10 @@ async def test_cancel_interrupts_pending_and_running_runs(record, platform):
         thread_id="thread-1", run_ids=["a"], action="interrupt"
     )
     assert await turns.has_active_run("thread-1") is True
-    assert await turns.queued_context_count("thread-1") == 0
+    # The stubbed `runs.list` always reports "a" as pending (it doesn't model
+    # cancellation taking effect); queued_context_count counts real pending
+    # runs alongside the legacy KV queue (empty here) — so 1, not 0.
+    assert await turns.queued_context_count("thread-1") == 1
 
 
 async def test_platform_rejection_means_a_turn_is_already_scheduled(record, policy, platform):

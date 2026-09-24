@@ -28,6 +28,18 @@ import {
   collectStructuredEntities,
   parseStructuredInput,
 } from "@/features/agents/lib/structuredInputMessages"
+import {
+  chatDiffAction,
+  type ChatDiffAction,
+  type DiffRange,
+  type ToolMessageLike,
+} from "@/features/reviews/lib/chatDiffActions"
+import { ProposedCommentCard } from "@/features/reviews/components/ProposedCommentCard"
+import { ProposedReviewCard } from "@/features/reviews/components/ProposedReviewCard"
+import {
+  ChatDraftsProvider,
+  useChatDrafts,
+} from "@/features/reviews/lib/chatDrafts"
 
 // --- Composer bridge ---------------------------------------------------------
 //
@@ -49,6 +61,9 @@ export interface ChatAttachment {
 interface ReviewChatComposer {
   addAttachment: (attachment: ChatAttachment) => void
   registerSink: (fn: ((attachment: ChatAttachment) => void) | null) => void
+  /** Scrolls the diff column to `range` and pulses it. */
+  showInDiff: (range: DiffRange) => void
+  registerShowHandler: (fn: ((range: DiffRange) => void) | null) => void
 }
 
 const ReviewChatComposerContext = createContext<ReviewChatComposer | null>(null)
@@ -60,8 +75,13 @@ export function ReviewChatComposerProvider({
 }) {
   const sinkRef = useRef<((attachment: ChatAttachment) => void) | null>(null)
   const pendingRef = useRef<Array<ChatAttachment>>([])
+  const showRef = useRef<((range: DiffRange) => void) | null>(null)
   const value = useMemo<ReviewChatComposer>(
     () => ({
+      showInDiff: (range) => showRef.current?.(range),
+      registerShowHandler: (fn) => {
+        showRef.current = fn
+      },
       addAttachment: (attachment) => {
         if (sinkRef.current) sinkRef.current(attachment)
         else pendingRef.current.push(attachment)
@@ -78,7 +98,7 @@ export function ReviewChatComposerProvider({
   )
   return (
     <ReviewChatComposerContext.Provider value={value}>
-      {children}
+      <ChatDraftsProvider>{children}</ChatDraftsProvider>
     </ReviewChatComposerContext.Provider>
   )
 }
@@ -165,9 +185,10 @@ function AttachmentPill({
   )
 }
 
+const FINDINGS_PROMPT = "Walk me through the review findings"
 const SUGGESTED_PROMPTS = [
   "Summarize the changes in this PR",
-  "Walk me through the review findings",
+  FINDINGS_PROMPT,
   "What are the riskiest parts of this change?",
 ]
 
@@ -198,18 +219,28 @@ function messageText(content: BaseMessage["content"]): string {
 
 // --- View --------------------------------------------------------------------
 
-function EmptyState({ onPick }: { onPick: (prompt: string) => void }) {
+function EmptyState({
+  reviewed,
+  onPick,
+}: {
+  reviewed: boolean
+  onPick: (prompt: string) => void
+}) {
+  const prompts = reviewed
+    ? SUGGESTED_PROMPTS
+    : SUGGESTED_PROMPTS.filter((prompt) => prompt !== FINDINGS_PROMPT)
   return (
     <div className="flex flex-1 flex-col gap-4 p-4">
       <p className="text-[13px] text-foreground">
-        I've reviewed this PR. Ask me about the diff, the findings, or the
-        surrounding code — I have read-only access to the repository.
+        {reviewed
+          ? "I've reviewed this PR. Ask me about the diff, the findings, or the surrounding code — I have read-only access to the repository."
+          : "This PR hasn't been reviewed yet. Ask me about the diff or the surrounding code — I have read-only access to the repository."}
       </p>
       <div className="flex flex-col gap-1.5">
         <span className="text-xs font-medium text-muted-foreground">
           Suggested prompts
         </span>
-        {SUGGESTED_PROMPTS.map((prompt) => (
+        {prompts.map((prompt) => (
           <button
             key={prompt}
             type="button"
@@ -239,7 +270,38 @@ function LoadingState() {
   )
 }
 
-function ChatBody() {
+function describeStreamError(error: unknown): string | null {
+  if (error === undefined || error === null) return null
+  if (error instanceof Error) return error.message || error.name
+  if (typeof error === "string") return error
+  if (typeof error === "object" && "message" in error) {
+    const { message } = error
+    if (typeof message === "string" && message) return message
+  }
+  return JSON.stringify(error)
+}
+
+function toolMessageLike(message: BaseMessage): ToolMessageLike {
+  const raw = message as unknown as { name?: string; tool_call_id?: string }
+  return {
+    type: messageType(message),
+    name: raw.name,
+    tool_call_id: raw.tool_call_id,
+    content: message.content,
+  }
+}
+
+function ChatBody({
+  owner,
+  repo,
+  number,
+  reviewed,
+}: {
+  owner: string
+  repo: string
+  number: number
+  reviewed: boolean
+}) {
   const composer = useReviewChatComposer()
   const stream = useStreamContext()
   const [value, setValue] = useState("")
@@ -252,6 +314,14 @@ function ChatBody() {
   // True during the one-time getState hydration when switching to / loading an
   // existing thread, before its messages have arrived.
   const hydrating = stream.isThreadLoading
+  const streamError = describeStreamError(stream.error)
+  useEffect(() => {
+    if (stream.error === undefined || stream.error === null) return
+    console.error("Review chat run failed", {
+      pr: `${owner}/${repo}#${number}`,
+      error: stream.error,
+    })
+  }, [stream.error, owner, repo, number])
 
   // Receive "add to chat" attachments from the diff column as composer pills.
   useEffect(() => {
@@ -284,12 +354,30 @@ function ChatBody() {
       .filter((message) => messageType(message) === "human")
       .map((message) => messageText(message.content))
   )
+  const diffActions = messages.flatMap((message) => {
+    const action = chatDiffAction(toolMessageLike(message))
+    return action ? [action] : []
+  })
+  const drafts = useChatDrafts()
+  const registerDraft = drafts?.register
+  const draftIds = diffActions.map((action) => action.id).join(",")
+  useEffect(() => {
+    if (!registerDraft) return
+    for (const action of diffActions) registerDraft(action)
+    // diffActions is rebuilt every render; draftIds is its stable identity.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [draftIds, registerDraft])
   const visible: Array<{
     message: BaseMessage
     content: string
     structured?: ReturnType<typeof parseStructuredInput>
+    action?: ChatDiffAction
   }> = messages.flatMap((message) => {
     const type = messageType(message)
+    if (type === "tool") {
+      const action = chatDiffAction(toolMessageLike(message))
+      return action ? [{ message, content: "", action }] : []
+    }
     if (type !== "human" && type !== "ai") return []
     const content = messageText(message.content)
     if (type === "ai") return content.trim() ? [{ message, content }] : []
@@ -342,6 +430,7 @@ function ChatBody() {
         <LoadingState />
       ) : showEmpty ? (
         <EmptyState
+          reviewed={reviewed}
           onPick={(prompt) => {
             send(prompt, attachments)
             setAttachments([])
@@ -352,7 +441,30 @@ function ChatBody() {
           ref={scrollRef}
           className="flex flex-1 flex-col gap-4 overflow-y-auto p-4"
         >
-          {visible.map(({ message, content, structured }, index) => {
+          {visible.map(({ message, content, structured, action }, index) => {
+            if (action?.kind === "comment") {
+              return (
+                <ProposedCommentCard
+                  key={action.id}
+                  owner={owner}
+                  repo={repo}
+                  number={number}
+                  id={action.id}
+                  onShow={() => composer?.showInDiff(action.range)}
+                />
+              )
+            }
+            if (action?.kind === "review") {
+              return (
+                <ProposedReviewCard
+                  key={action.id}
+                  owner={owner}
+                  repo={repo}
+                  number={number}
+                  id={action.id}
+                />
+              )
+            }
             const isUser = messageType(message) === "human"
             if (!isUser) {
               return (
@@ -411,6 +523,11 @@ function ChatBody() {
               </div>
             </div>
           )}
+          {!busy && streamError && (
+            <p className="rounded-md border border-destructive/40 px-3 py-2 text-xs break-words text-destructive">
+              The chat run failed: {streamError}
+            </p>
+          )}
         </div>
       )}
 
@@ -463,12 +580,14 @@ function ChatPanel({
   number,
   assistantId,
   threadId,
+  reviewed,
 }: {
   owner: string
   repo: string
   number: number
   assistantId: string
   threadId: string
+  reviewed: boolean
 }) {
   const client = useMemo(
     () => createDashboardClient(reviewChatApiBase(owner, repo, number)),
@@ -483,7 +602,12 @@ function ChatPanel({
         fetch={dashboardFetch}
         threadId={threadId}
       >
-        <ChatBody />
+        <ChatBody
+          owner={owner}
+          repo={repo}
+          number={number}
+          reviewed={reviewed}
+        />
       </StreamProvider>
     </div>
   )
@@ -493,10 +617,13 @@ export function ReviewChat({
   owner,
   repo,
   number,
+  reviewed,
 }: {
   owner: string
   repo: string
   number: number
+  /** A review has finished on this PR, so the chat can talk about its findings. */
+  reviewed: boolean
 }) {
   const meta = useQuery({
     queryKey: ["review-chat", owner, repo, number],
@@ -515,7 +642,7 @@ export function ReviewChat({
   if (meta.isError || !meta.data.available) {
     return (
       <div className="flex flex-1 items-center justify-center p-6 text-center text-xs text-muted-foreground">
-        Chat becomes available once the review has finished running.
+        Chat is unavailable right now. Reload the page to try again.
       </div>
     )
   }
@@ -528,6 +655,7 @@ export function ReviewChat({
       number={number}
       assistantId={meta.data.assistant_id}
       threadId={meta.data.thread_id}
+      reviewed={reviewed}
     />
   )
 }

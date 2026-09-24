@@ -4,25 +4,29 @@ import hashlib
 import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from langgraph_sdk import get_client
 from langgraph_sdk.errors import ConflictError
 from pydantic import BaseModel, ConfigDict, Field
 
+from agent.database import postgres
 from agent.dispatch import dispatch_agent_run
+from agent.expedited_review.approvals import ExpeditedApproval
 from agent.github.app import get_github_app_installation_token
 from agent.github.ci import (
     FAILING_CONCLUSIONS,
     branch_from_check_payload,
     fetch_pr,
+    fetch_required_checks,
     head_sha_from_check_payload,
-    is_failing_ci_payload,
+    is_completed_ci_payload,
     list_check_runs,
     list_commit_statuses,
+    unreported_required_checks,
 )
 from agent.github.comments import post_github_comment
+from agent.github.pull_requests import PullRequestPayload
 from agent.prompts import render_prompt
 from agent.slack.client import GitHubPrRef, post_slack_thread_reply
 from agent.source_context import SourceContext
@@ -39,7 +43,6 @@ MAX_DISPATCH_KEYS = 30
 MAX_DELIVERY_IDS = 50
 MAX_ALERT_KEYS = 30
 MAX_EVALUATION_ERRORS = 3
-CHECK_SET_SETTLE_MINUTES = 10
 WATCH_LOCK_TTL_MINUTES = 5
 
 
@@ -67,10 +70,6 @@ async def _watch_lock(key: str) -> AsyncIterator[bool]:
             logger.warning("Failed to release baby-sit lock for %s", key, exc_info=True)
 
 
-def _now() -> datetime:
-    return datetime.now(UTC)
-
-
 class BabySitWatch(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
@@ -87,8 +86,6 @@ class BabySitWatch(BaseModel):
     run_config: dict[str, Any] = Field(default_factory=dict)
     source_context: SourceContext = Field(default_factory=SourceContext)
     retry_count: int = 0
-    settled_check_key: str = ""
-    settled_check_at: str | None = None
     dispatch_keys: list[str] = Field(default_factory=list)
     delivery_ids: list[str] = Field(default_factory=list)
     alert_keys: list[str] = Field(default_factory=list)
@@ -96,22 +93,6 @@ class BabySitWatch(BaseModel):
     cron_id: str | None = None
     created_at: str = ""
     updated_at: str = ""
-
-    def check_set_settled(self, key: str) -> bool:
-        """Whether ``key`` has been the check set long enough to trust it as final."""
-        if self.settled_check_key != key:
-            self.settled_check_key = key
-            self.settled_check_at = _now().isoformat()
-            return False
-        if not self.settled_check_at:
-            self.settled_check_at = _now().isoformat()
-            return False
-        try:
-            first_seen = datetime.fromisoformat(self.settled_check_at.replace("Z", "+00:00"))
-        except ValueError:
-            self.settled_check_at = _now().isoformat()
-            return False
-        return _now() - first_seen >= timedelta(minutes=CHECK_SET_SETTLE_MINUTES)
 
     def dispatch_config(self) -> dict[str, Any]:
         configurable = dict(self.run_config)
@@ -234,8 +215,6 @@ async def start_watch(
         run_config=run_config,
         source_context=source_context,
         retry_count=carried.retry_count if carried else 0,
-        settled_check_key=carried.settled_check_key if carried else "",
-        settled_check_at=carried.settled_check_at if carried else None,
         dispatch_keys=list(carried.dispatch_keys) if carried else [],
         delivery_ids=list(carried.delivery_ids) if carried else [],
         alert_keys=list(carried.alert_keys) if carried else [],
@@ -282,6 +261,16 @@ async def _watch_token(watch: BabySitWatch) -> str | None:
 
 
 async def _notify_watch(watch: BabySitWatch, message: str) -> bool:
+    """Post ``message`` where the watch was started, unless an expedited card owns that thread.
+
+    An expedited review's thread only ever carries its card; returning ``False``
+    hands terminal outcomes to the agent instead.
+    """
+    if await _has_expedited_card(watch):
+        logger.info(
+            "Suppressed baby-sit notice for an expedited review", extra={"watch_key": watch.key}
+        )
+        return False
     context = watch.source_context
     try:
         destination = context.slack_location
@@ -335,6 +324,44 @@ async def _finish_watch(watch: BabySitWatch, message: str) -> str:
     return "stopped"
 
 
+async def _has_expedited_card(watch: BabySitWatch) -> bool:
+    if not postgres.configured():
+        return False
+    try:
+        approval = await ExpeditedApproval.active_for(watch.owner, watch.repo, watch.pr_number)
+    except Exception:
+        logger.warning("Expedited review lookup failed for %s", watch.key, exc_info=True)
+        return False
+    return approval is not None and approval.thread_id in {"", watch.thread_id}
+
+
+async def _finish_ready(watch: BabySitWatch) -> str:
+    """Hand a green PR back to its agent thread, which decides whether to merge or report."""
+    prompt = (
+        "runs/baby-sit-ready-expedited.md"
+        if await _has_expedited_card(watch)
+        else "runs/baby-sit-ready.md"
+    )
+    try:
+        configurable = watch.dispatch_config()
+        await dispatch_agent_run(
+            watch.thread_id,
+            render_prompt(prompt, pr_url=watch.pr_url, head_sha=watch.head_sha),
+            configurable,
+            source=str(configurable.get("source") or "github"),
+            metadata={},
+            multitask_strategy="enqueue",
+        )
+    except Exception:
+        logger.warning("Failed to dispatch baby-sit ready wakeup for %s", watch.key, exc_info=True)
+        return await _finish_watch(
+            watch,
+            f"*`/baby-sit` complete:* {watch.pr_url} has no pending or failing checks.",
+        )
+    await stop_watch(watch.key)
+    return "stopped"
+
+
 def _failure_signals(
     check_runs: list[dict[str, Any]], statuses: list[dict[str, Any]]
 ) -> list[dict[str, Any]]:
@@ -361,20 +388,6 @@ def _failure_signals(
 
 def _failure_key(head_sha: str, retry_count: int) -> str:
     return hashlib.sha256(f"{head_sha}|retry:{retry_count}".encode()).hexdigest()
-
-
-def _check_set_key(check_runs: list[dict[str, Any]], statuses: list[dict[str, Any]]) -> str:
-    checks = sorted(
-        f"check:{run.get('id')}:{run.get('name')}:{run.get('status')}:{run.get('conclusion')}"
-        for run in check_runs
-    )
-    checks.extend(
-        sorted(
-            f"status:{status.get('id')}:{status.get('context')}:{status.get('state')}"
-            for status in statuses
-        )
-    )
-    return hashlib.sha256("|".join(checks).encode()).hexdigest()
 
 
 def aggregate_check_state(
@@ -442,12 +455,10 @@ async def _evaluate_watch(key: str, *, token: str | None = None) -> str:
     )
     if not pr:
         return await _record_evaluation_error(watch, "pull request unavailable")
+    # A merged or closed PR already says so where people look; the watch just ends.
     if pr.get("state") != "open":
-        outcome = "merged" if pr.get("merged_at") else "closed"
-        return await _finish_watch(
-            watch,
-            f"*`/baby-sit` stopped:* {watch.pr_url} was {outcome}.",
-        )
+        await stop_watch(key)
+        return "stopped"
 
     head = pr.get("head") if isinstance(pr.get("head"), dict) else {}
     head_sha = head.get("sha") if isinstance(head, dict) else None
@@ -459,8 +470,6 @@ async def _evaluate_watch(key: str, *, token: str | None = None) -> str:
     if head_sha != watch.head_sha:
         watch.head_sha = head_sha
         watch.retry_count = 0
-        watch.settled_check_key = ""
-        watch.settled_check_at = None
         watch.dispatch_keys = []
         watch.alert_keys = []
 
@@ -476,18 +485,21 @@ async def _evaluate_watch(key: str, *, token: str | None = None) -> str:
     watch.evaluation_errors = 0
     state, failures = aggregate_check_state(check_runs, statuses)
     if state == "pending":
-        watch.settled_check_key = ""
-        watch.settled_check_at = None
         await WATCHES.save(watch)
         return state
     if state == "success":
-        if not watch.check_set_settled(_check_set_key(check_runs, statuses)):
-            await WATCHES.save(watch)
-            return "settling"
-        return await _finish_watch(
-            watch,
-            f"*`/baby-sit` complete:* {watch.pr_url} has no pending or failing checks.",
+        base_ref = PullRequestPayload.model_validate(pr).base_ref
+        if not base_ref:
+            return await _record_evaluation_error(watch, "base branch unavailable")
+        required = await fetch_required_checks(
+            owner=watch.owner, repo=watch.repo, branch=base_ref, token=token
         )
+        if required is None:
+            return await _record_evaluation_error(watch, "required checks unavailable")
+        if unreported_required_checks(required, check_runs, statuses):
+            await WATCHES.save(watch)
+            return "pending"
+        return await _finish_ready(watch)
     if state == "blocked":
         return await _finish_watch(
             watch,
@@ -530,7 +542,7 @@ async def _evaluate_watch(key: str, *, token: str | None = None) -> str:
 async def handle_ci_webhook(
     payload: dict[str, Any], event_type: str, *, delivery_id: str | None = None
 ) -> dict[str, int]:
-    if not is_failing_ci_payload(payload, event_type):
+    if not is_completed_ci_payload(payload, event_type):
         return {"matched": 0, "dispatched": 0}
     repository = payload.get("repository")
     owner_node = repository.get("owner") if isinstance(repository, dict) else None

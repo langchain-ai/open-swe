@@ -6,15 +6,26 @@ import { ArrowLeftIcon, GitPullRequestIcon } from "@phosphor-icons/react"
 import type { PrReviewComment } from "@/lib/api"
 import { ReviewCommentsMenu } from "@/features/reviews/components/ReviewCommentsMenu"
 import { ReviewMainBody } from "@/features/reviews/components/ReviewMainBody"
+import { SubmitReviewPopover } from "@/features/reviews/components/SubmitReviewPopover"
 import { useSidebarControls } from "@/components/sidebar-layout"
 import { Skeleton } from "@/components/ui/skeleton"
 import { api } from "@/lib/api"
+import { pageTitle } from "@/lib/pageTitle"
 import { RequireLogin } from "@/lib/auth-redirect"
 import { useSession } from "@/lib/session"
 import { cn } from "@/lib/utils"
 
 export const Route = createFileRoute("/agents/reviews/$owner/$repo/$number")({
   component: ReviewDetailPage,
+  head: ({
+    params,
+  }: {
+    params: { owner: string; repo: string; number: string }
+  }) => ({
+    meta: [
+      { title: pageTitle(`${params.owner}/${params.repo} #${params.number}`) },
+    ],
+  }),
 })
 
 function ReviewDetailPage() {
@@ -67,6 +78,11 @@ function ReviewDetailPage() {
   const queryClient = useQueryClient()
   const headSha = detail.data?.head_sha
   const seenShaRef = useRef(headSha)
+  const prTitle = detail.data?.pr.title
+  const documentTitle = pageTitle(prTitle ?? `${owner}/${repo} #${prNumber}`)
+  useEffect(() => {
+    document.title = documentTitle
+  }, [documentTitle])
   useEffect(() => {
     if (headSha && seenShaRef.current && headSha !== seenShaRef.current) {
       void queryClient.invalidateQueries({
@@ -113,13 +129,14 @@ function ReviewDetailPage() {
           </span>
         </span>
         {Number.isFinite(prNumber) && (
-          <div className="ml-auto shrink-0">
+          <div className="ml-auto flex shrink-0 items-center gap-2">
             <ReviewCommentsMenu
               owner={owner}
               repo={repo}
               number={prNumber}
               onSelect={setActiveComment}
             />
+            <SubmitReviewPopover owner={owner} repo={repo} number={prNumber} />
           </div>
         )}
       </header>
