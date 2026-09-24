@@ -5,7 +5,7 @@ from typing import Any
 
 from langgraph_sdk import get_client
 
-from agent.config import ENV
+from agent.config import deployment_api_url
 from agent.dispatch import create_durable_run
 from agent.input_messages import RunInput, build_run_input
 from agent.invocation import new_invocation_id, with_invocation_id
@@ -28,10 +28,7 @@ _ASSISTANT_ID = "analyzer"
 
 def langgraph_client():
     """LangGraph SDK client for the current deployment (same resolution as webapp)."""
-    url = ENV.LANGGRAPH_URL.optional()
-    if url:
-        return get_client(url=url)
-    return get_client()
+    return get_client(url=deployment_api_url())
 
 
 def build_continual_run_input(full_name: str) -> RunInput:

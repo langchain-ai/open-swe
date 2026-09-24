@@ -21,7 +21,7 @@ from pydantic import BaseModel, ConfigDict, ValidationError
 from slack_sdk.errors import SlackApiError
 from slack_sdk.web.async_slack_response import AsyncSlackResponse
 
-from agent.config import ENV
+from agent.config import ENV, deployment_api_url
 from agent.slack.http import (
     SLACK_REQUEST_ERRORS,
     SlackClient,
@@ -46,7 +46,7 @@ SLACK_FILE_UPLOAD_MAX_BYTES = 16 * 1024 * 1024
 
 SLACK_WEB_LINK_FOOTER_LABEL = "Open in Web"
 SLACK_SECTION_TEXT_MAX_CHARS = 3000
-LANGGRAPH_URL = ENV.LANGGRAPH_URL.get()
+DEPLOYMENT_API_URL = deployment_api_url()
 _SLACK_CHANNEL_ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,100}$")
 _SLACK_MESSAGE_TS_RE = re.compile(r"^[0-9]{1,20}(?:\.[0-9]{1,12})?$")
 SLACK_FORWARDED_ATTACHMENT_MAX_COUNT = 10

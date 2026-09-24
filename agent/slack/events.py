@@ -7,11 +7,11 @@ from collections import OrderedDict
 
 from langgraph_sdk import get_client
 
-from agent.config import ENV
+from agent.config import deployment_api_url
 
 logger = logging.getLogger(__name__)
 
-LANGGRAPH_URL = ENV.LANGGRAPH_URL.get()
+DEPLOYMENT_API_URL = deployment_api_url()
 
 _LOCAL_CLAIM_LIMIT = 2048
 _claimed_keys: OrderedDict[str, None] = OrderedDict()
@@ -30,7 +30,7 @@ def slack_message_claim_key(event_id: str, channel_id: str = "", event_ts: str =
 
 
 async def _claim_remotely(claim_key: str) -> bool | None:
-    client = get_client(url=LANGGRAPH_URL)
+    client = get_client(url=DEPLOYMENT_API_URL)
     claim_thread_id = _claim_thread_id(claim_key)
     try:
         await client.threads.create(thread_id=claim_thread_id, if_exists="raise", ttl=10)

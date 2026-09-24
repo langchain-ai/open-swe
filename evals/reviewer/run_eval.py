@@ -45,7 +45,7 @@ _ENV_MAPPING: dict[str, str] = {
     "dataset_name": "REVIEWER_EVAL_DATASET_NAME",
     "experiment_prefix": "REVIEWER_EVAL_EXPERIMENT_PREFIX",
     "max_concurrency": "REVIEWER_EVAL_MAX_CONCURRENCY",
-    "langgraph_url": "LANGGRAPH_URL",
+    "langgraph_url": "LANGSMITH_HOST_API_URL",
     "langsmith_project": "LANGSMITH_PROJECT",
     "assistant_id": "REVIEWER_ASSISTANT_ID",
     "model_id": "REVIEWER_EVAL_MODEL_ID",

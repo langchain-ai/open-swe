@@ -13,7 +13,7 @@ from agent.github.thread_token import get_github_token
 from agent.linear.notifications import post_linear_notification
 from agent.run_config import RunConfig
 from agent.slack.client import (
-    LANGGRAPH_URL,
+    DEPLOYMENT_API_URL,
     get_active_slack_thread,
     post_slack_thread_reply,
 )
@@ -70,7 +70,7 @@ def extract_sandbox_id(text: str) -> str | None:
 
 async def _get_slack_target(cfg: RunConfig) -> tuple[str, str] | None:
     active = await get_active_slack_thread(
-        get_client(url=LANGGRAPH_URL),
+        get_client(url=DEPLOYMENT_API_URL),
         cfg.thread_id,
         cfg.slack_thread.dump() if cfg.slack_thread else None,
     )

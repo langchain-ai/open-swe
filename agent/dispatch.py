@@ -33,7 +33,7 @@ from langgraph_sdk import get_client
 from langgraph_sdk.client import LangGraphClient
 from langgraph_sdk.schema import Run
 
-from agent.config import ENV
+from agent.config import ENV, deployment_api_url
 from agent.input_messages import (
     ChannelIdentity,
     InputMessageContext,
@@ -197,7 +197,7 @@ COMPLETION_WEBHOOK_URL: str | None = _resolve_completion_webhook_url(
 
 
 def _langgraph_url() -> str:
-    return ENV.LANGGRAPH_URL.get()
+    return deployment_api_url()
 
 
 def dispatch_client() -> LangGraphClient:

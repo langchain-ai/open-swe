@@ -308,10 +308,9 @@ def validate_local_dev_llm_config() -> None:
     via LLM_MODEL_ID/DEFAULT_MODEL_ID. Runtime model selection may come
     from workspace, profile, or thread configuration and is not validated here.
 
-    Only an explicitly configured localhost dashboard URL counts: the derived
-    default follows LANGGRAPH_URL, which is unset (so localhost) on a fresh
-    LangGraph Platform deployment until its URL exists, and failing startup
-    there would leave the deployment unable to ever get one.
+    Only an explicitly configured localhost dashboard URL counts. The deployment
+    API URL defaults to localhost for local development, but LangGraph Platform
+    replaces it with the deployment's public URL.
     """
     dashboard_url = ENV.DASHBOARD_BASE_URL.optional() or ""
     if not dashboard_url.startswith("http://localhost"):

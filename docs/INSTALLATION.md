@@ -15,7 +15,7 @@ What a deployment needs:
 | `TOKEN_ENCRYPTION_KEY`, `DASHBOARD_JWT_SECRET` | Two random secrets you generate (step 6) |
 | `ALLOWED_GITHUB_ORGS` or `ALLOWED_GITHUB_USERS` | The GitHub organizations or users allowed to log in (step 6) |
 | `CONFIGURED_ADMINS` | The GitHub logins or emails of your admins (step 6) |
-| `LANGGRAPH_URL` | The deployment's own public URL |
+| `LANGSMITH_HOST_API_URL` | The deployment's own public URL. LangGraph Platform injects it; standalone deployments must set it. |
 
 GitHub and Slack are the two surfaces every deployment has; Linear is an optional add-on. Every variable Open SWE reads is declared in `agent/config.py` with its description and default; that file is the complete reference.
 
@@ -23,7 +23,7 @@ GitHub and Slack are the two surfaces every deployment has; Linear is an optiona
 
 You need the deployment's public URL before the GitHub App can be created, so create the deployment first. Its initial revision may remain stopped until step 6, when you configure the GitHub and Slack variables plus a required login allowlist.
 
-**LangGraph Platform.** Connect the repository to a new deployment in LangSmith → Deployments. The image build bundles the dashboard (the `dockerfile_lines` in `langgraph.json`), so the deployment URL serves the UI at `/` and the API beneath it; a failed UI build is logged and the backend still deploys. The platform injects `LANGSMITH_API_KEY`, `LANGSMITH_TRACING`, and `LANGSMITH_PROJECT`. You will set the environment variables in step 6.
+**LangGraph Platform.** Connect the repository to a new deployment in LangSmith → Deployments. The image build bundles the dashboard (the `dockerfile_lines` in `langgraph.json`), so the deployment URL serves the UI at `/` and the API beneath it; a failed UI build is logged and the backend still deploys. The platform injects `LANGSMITH_API_KEY`, `LANGSMITH_TRACING`, `LANGSMITH_PROJECT`, and the deployment-specific `LANGSMITH_HOST_API_URL`. You will set the remaining environment variables in step 6.
 
 **Standalone Docker.** The root `Dockerfile` builds a production LangGraph API server image (not the sandbox image):
 
@@ -39,7 +39,7 @@ docker run \
   -e LANGGRAPH_AUTH_TYPE="langsmith" \
   -e LANGSMITH_AUTH_ENDPOINT="https://api.smith.langchain.com" \
   -e LANGSMITH_TENANT_ID="<your LangSmith workspace id>" \
-  -e LANGGRAPH_URL="https://<your-backend-url>" \
+  -e LANGSMITH_HOST_API_URL="https://<your-backend-url>" \
   open-swe
 ```
 
@@ -227,7 +227,7 @@ Slack verifies the events Request URL the first time it can reach it; if the bac
 ## 6. Set the environment variables
 
 ```bash
-LANGGRAPH_URL="<URL>"                 # the deployment's own URL
+LANGSMITH_HOST_API_URL="<URL>"        # Platform injects this; set it for standalone Docker
 LANGSMITH_API_KEY=""                  # step 2; injected by LangGraph Platform
 LANGSMITH_TRACING="true"              # injected by LangGraph Platform
 ANTHROPIC_API_KEY=""                  # step 4: any provider key, or LANGSMITH_GATEWAY_API_KEY
@@ -251,7 +251,7 @@ DASHBOARD_JWT_SECRET=""               # openssl rand -hex 32     (signs the sess
 CONFIGURED_ADMINS=""                  # GitHub logins or emails, comma-separated; admins see the Admin pages
 ```
 
-On LangGraph Platform, set them under the deployment's environment variables; saving rolls out a new revision. With Docker, put them in the file you pass as `--env-file`. `DASHBOARD_BASE_URL` and `DASHBOARD_API_BASE_URL` are not needed: they default to `LANGGRAPH_URL` because the dashboard is served from the same origin.
+On LangGraph Platform, set them under the deployment's environment variables; saving rolls out a new revision. The platform injects the URL for each deployment and preview through `LANGSMITH_HOST_API_URL`. With Docker, put the variables in the file you pass as `--env-file` and set `LANGSMITH_HOST_API_URL` to the public ingress URL. `DASHBOARD_BASE_URL` and `DASHBOARD_API_BASE_URL` are not needed because the dashboard is served from the same origin.
 
 ## 7. Verify it works
 
@@ -374,7 +374,7 @@ The bundled dashboard needs none of this. Read on only if the dashboard is deplo
 
 **A separate frontend deployment.** The `ui/` app also builds to a Nitro server (`ui/Dockerfile`) that renders on request. Set its `DASHBOARD_API_URL` to the backend URL; browser requests to `/dashboard/api/*` and webhook deliveries to `/webhooks/*` are proxied there, and server renders forward the `osw_session` cookie. Set `DASHBOARD_BASE_URL` and `DASHBOARD_API_BASE_URL` on the backend to the frontend origin and register `<frontend origin>/dashboard/api/auth/callback` on the GitHub App. To have the browser call the backend cross-origin instead, build the UI with `VITE_DASHBOARD_API_BASE_URL` set to the backend origin, keep `DASHBOARD_API_BASE_URL` on the backend origin, and add the frontend origin to `DASHBOARD_ALLOWED_ORIGINS`; the session is then resolved on the client after hydration.
 
-**Mount prefix.** If the server runs under a LangGraph `http.mount_prefix`, the Platform image builds the UI for that prefix automatically; locally pass it to the build (`DASHBOARD_BASE_PATH=/<prefix>/ make build-dashboard`) and keep `LANGGRAPH_URL` on the mounted URL.
+**Mount prefix.** If the server runs under a LangGraph `http.mount_prefix`, the Platform image builds the UI for that prefix automatically; locally pass it to the build (`DASHBOARD_BASE_PATH=/<prefix>/ make build-dashboard`) and keep `LANGSMITH_HOST_API_URL` on the mounted URL.
 
 **Datadog RUM.** Set `VITE_DATADOG_APPLICATION_ID` and `VITE_DATADOG_CLIENT_TOKEN` when building. Optional: `VITE_DATADOG_SITE` (default `us5.datadoghq.com`), `VITE_DATADOG_SERVICE` (default `open-swe-dashboard`), `VITE_DATADOG_ENV`, `VITE_DATADOG_VERSION`, `VITE_DATADOG_SESSION_SAMPLE_RATE` and `VITE_DATADOG_SESSION_REPLAY_SAMPLE_RATE` (default `100`). Session Replay masks all content and telemetry strips query strings and fragments. `VITE_` values are public in the bundle; use a client token, never an API or application key. The dashboard also reports two custom duration vitals, `thread_load` and `agent_run`, with their phase breakdown in the vital context (RUM Explorer: `@type:vital @vital.name:thread_load`); see [docs/DEVELOPMENT.md](DEVELOPMENT.md#profiling-thread-load-and-streaming) for what they measure.
 
@@ -474,8 +474,8 @@ User identity and membership checks still apply to public runs.
 
 - `500 GITHUB_APP_CLIENT_ID not configured` (or client secret): set `GITHUB_APP_CLIENT_ID`, `GITHUB_APP_CLIENT_SECRET`, and `DASHBOARD_JWT_SECRET`.
 - `redirect_uri is not associated with this application`: the App must list `<URL you opened the dashboard on>/dashboard/api/auth/callback`. Add it in the App's settings.
-- Login redirects but the session does not stick: use `https://` and open the dashboard on `LANGGRAPH_URL` itself.
-- `403 CSRF check failed` on saves: the request's `Origin` is neither `DASHBOARD_BASE_URL` (defaults to `LANGGRAPH_URL`) nor in `DASHBOARD_ALLOWED_ORIGINS`.
+- Login redirects but the session does not stick: use `https://` and open the dashboard on the deployment's own URL.
+- `403 CSRF check failed` on saves: the request's `Origin` is neither `DASHBOARD_BASE_URL` (defaults to `LANGSMITH_HOST_API_URL`) nor in `DASHBOARD_ALLOWED_ORIGINS`.
 - Startup fails with `ALLOWED_GITHUB_ORGS or ALLOWED_GITHUB_USERS must be configured`: set at least one nonempty login allowlist.
 - Login rejected with an authorization error: add the login to `ALLOWED_GITHUB_USERS`, or configure `ALLOWED_GITHUB_ORGS` and grant the App Organization → Members permission.
 - Admin pages 403: add your GitHub login or email to `CONFIGURED_ADMINS`.

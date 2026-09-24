@@ -6,7 +6,7 @@ from typing import Any
 from langgraph_sdk import get_client
 from langgraph_sdk.client import LangGraphClient
 
-from agent.config import ENV
+from agent.config import deployment_api_url
 from agent.review.findings import comment_ids_for_finding, list_findings
 from agent.thread_ids import reviewer_thread_id
 from agent.utils.langsmith import create_langsmith_feedback, delete_langsmith_feedback
@@ -14,7 +14,7 @@ from agent.utils.reviewer_outcomes import outcome_from_score, upsert_finding_out
 
 logger = logging.getLogger(__name__)
 
-LANGGRAPH_URL = ENV.LANGGRAPH_URL.get()
+DEPLOYMENT_API_URL = deployment_api_url()
 
 GITHUB_FEEDBACK_REACTIONS: dict[str, float] = {
     "+1": 1.0,
@@ -158,7 +158,7 @@ async def process_github_reaction(
     ):
         return
 
-    langgraph_client = get_client(url=LANGGRAPH_URL)
+    langgraph_client = get_client(url=DEPLOYMENT_API_URL)
     repo_key = f"{owner}/{repo_name}"
     if await _event_was_processed(langgraph_client, repo_key, delivery_id):
         return

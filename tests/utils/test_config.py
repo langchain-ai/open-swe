@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from agent.config import ENV, Registry
+from agent.config import ENV, Registry, deployment_api_url
 from agent.run_config import RunConfig
 
 
@@ -43,6 +43,25 @@ def test_get_returns_empty_string_without_any_default(monkeypatch: pytest.Monkey
     monkeypatch.delenv("SLACK_BOT_TOKEN", raising=False)
 
     assert ENV.SLACK_BOT_TOKEN.get() == ""
+
+
+def test_deployment_api_url_prefers_platform_injected_url(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("LANGSMITH_HOST_API_URL", "https://preview.example")
+    monkeypatch.setenv("LANGGRAPH_URL", "https://parent.example")
+
+    assert deployment_api_url() == "https://preview.example"
+
+
+def test_deployment_api_url_falls_back_to_legacy_langgraph_url(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Standalone installs configured before the rename set only LANGGRAPH_URL."""
+    monkeypatch.delenv("LANGSMITH_HOST_API_URL", raising=False)
+    monkeypatch.setenv("LANGGRAPH_URL", "https://legacy.example")
+
+    assert deployment_api_url() == "https://legacy.example"
 
 
 def test_require_raises_for_unset(monkeypatch: pytest.MonkeyPatch) -> None:

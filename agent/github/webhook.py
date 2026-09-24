@@ -289,7 +289,7 @@ async def trigger_pr_review_from_ref(
         return {"success": False, "error": "Pull request metadata is missing base/head SHA"}
 
     thread_id = reviewer_thread_id(pr_ref.owner, pr_ref.repo, pr_ref.number)
-    langgraph_client = common.get_client(url=common.LANGGRAPH_URL)
+    langgraph_client = common.get_client(url=common.DEPLOYMENT_API_URL)
     if not await common.ensure_thread_exists_for_metadata(thread_id, langgraph_client):
         return {"success": False, "error": "Could not create reviewer thread"}
 
@@ -430,7 +430,7 @@ async def _dispatch_first_review_from_pr_payload(payload: dict[str, Any], *, sou
         common.logger.warning("No GitHub App token available for reviewer dispatch")
         return
 
-    langgraph_client = common.get_client(url=common.LANGGRAPH_URL)
+    langgraph_client = common.get_client(url=common.DEPLOYMENT_API_URL)
     if not await common.ensure_thread_exists_for_metadata(thread_id, langgraph_client):
         return
 
@@ -737,7 +737,7 @@ async def process_github_push_event(payload: dict[str, Any]) -> None:
         )
         return
 
-    langgraph_client = common.get_client(url=common.LANGGRAPH_URL)
+    langgraph_client = common.get_client(url=common.DEPLOYMENT_API_URL)
     if not await common.ensure_thread_exists_for_metadata(thread_id, langgraph_client):
         return
     try:
@@ -873,7 +873,7 @@ async def process_github_pr_comment(payload: dict[str, Any], event_type: str) ->
         common.logger.info(
             "Generated thread_id %s for non-open-swe branch '%s'", thread_id, branch_name
         )
-        langgraph_client = common.get_client(url=common.LANGGRAPH_URL)
+        langgraph_client = common.get_client(url=common.DEPLOYMENT_API_URL)
         try:
             await langgraph_client.threads.update(thread_id, metadata={"branch_name": branch_name})
         except Exception as exc:  # noqa: BLE001
@@ -1132,7 +1132,7 @@ async def process_github_review_finding_reply(payload: dict[str, Any]) -> None:
         reply_body=reply_body,
         pr_number=pr_number,
     )
-    langgraph_client = common.get_client(url=common.LANGGRAPH_URL)
+    langgraph_client = common.get_client(url=common.DEPLOYMENT_API_URL)
     run = await common.dispatch_agent_run(
         thread_id,
         None,
@@ -1304,7 +1304,7 @@ async def process_github_issue(payload: dict[str, Any], event_type: str) -> None
     )
 
     common.logger.info("Dispatching LangGraph run for thread %s from GitHub issue", thread_id)
-    langgraph_client = common.get_client(url=common.LANGGRAPH_URL)
+    langgraph_client = common.get_client(url=common.DEPLOYMENT_API_URL)
     if existing_thread:
         sender_login = (
             comment.get("user", {}).get("login", github_login) or github_login

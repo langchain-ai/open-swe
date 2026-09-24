@@ -6,7 +6,7 @@
 # at /admin/evals. Required repository config:
 #   secrets: LANGSMITH_API_KEY, ANTHROPIC_API_KEY   (judge runs in-process; reviewer model keys
 #                                                     are NOT needed — the reviewer runs in the deployment)
-#   secret or var: LANGGRAPH_URL                     (the deployment URL the eval drives + reports to)
+#   secret or var: LANGSMITH_HOST_API_URL             (the deployment URL the eval drives + reports to)
 name: Reviewer eval
 
 on:
@@ -89,7 +89,7 @@ jobs:
         env:
           LANGSMITH_API_KEY: ${{ secrets.LANGSMITH_API_KEY }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-          LANGGRAPH_URL: ${{ secrets.LANGGRAPH_URL || vars.LANGGRAPH_URL }}
+          LANGSMITH_HOST_API_URL: ${{ secrets.LANGSMITH_HOST_API_URL || vars.LANGSMITH_HOST_API_URL }}
           REVIEWER_EVAL_REPORT_STORE: "1"
           INPUT_MODEL_ID: ${{ inputs.model_id }}
           INPUT_REASONING_EFFORT: ${{ inputs.reasoning_effort }}

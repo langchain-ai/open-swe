@@ -11,7 +11,7 @@ from agent.middleware.message_content import content_to_text
 from agent.middleware.trace import scrub_middleware_inputs
 from agent.run_config import RunConfig
 from agent.slack.client import (
-    LANGGRAPH_URL,
+    DEPLOYMENT_API_URL,
     get_active_slack_thread,
     post_slack_thread_reply,
 )
@@ -46,7 +46,7 @@ async def notify_step_limit_reached(
 
     cfg = RunConfig.from_runtime()
     active = await get_active_slack_thread(
-        get_client(url=LANGGRAPH_URL),
+        get_client(url=DEPLOYMENT_API_URL),
         cfg.thread_id,
         cfg.slack_thread.dump() if cfg.slack_thread else None,
     )

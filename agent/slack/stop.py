@@ -8,7 +8,7 @@ from typing import Any
 from langgraph_sdk import get_client
 from langgraph_sdk.client import LangGraphClient
 
-from agent.config import ENV
+from agent.config import ENV, deployment_api_url
 from agent.dispatch import dispatch_agent_run
 from agent.prompts import render_prompt
 from agent.slack.client import (
@@ -22,7 +22,7 @@ from agent.source_context import SourceContext
 
 logger = logging.getLogger(__name__)
 
-LANGGRAPH_URL = ENV.LANGGRAPH_URL.get()
+DEPLOYMENT_API_URL = deployment_api_url()
 _QUEUE_RECORDS = (
     (("queue",), "pending_messages"),
     (("autofix",), "pending_event"),
@@ -179,7 +179,7 @@ async def _process_slack_stop_reaction(event: dict[str, Any], event_id: str) -> 
         logger.warning("Ignoring Slack stop reaction without an event id")
         return
 
-    client = get_client(url=LANGGRAPH_URL)
+    client = get_client(url=DEPLOYMENT_API_URL)
     target = await _resolve_stop_target(client, channel_id, message_ts)
     if target is None:
         return
@@ -239,7 +239,7 @@ async def _process_agent_session_stopped(event: dict[str, Any], event_id: str) -
     channel_id = event.get("channel") or event.get("channel_id")
     if not isinstance(channel_id, str) or not channel_id:
         return
-    client = get_client(url=LANGGRAPH_URL)
+    client = get_client(url=DEPLOYMENT_API_URL)
     thread_id = await lookup_slack_thread_id(client, channel_id, CODE_CHANNEL_SESSION_TS)
     if not thread_id:
         return

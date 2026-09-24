@@ -20,7 +20,7 @@ from agent.middleware.trace import OpenSWEMiddleware
 from agent.run_config import RunConfig
 from agent.sandboxes.state import SANDBOX_BACKENDS
 from agent.slack.client import (
-    LANGGRAPH_URL,
+    DEPLOYMENT_API_URL,
     get_active_slack_thread,
     post_slack_thread_reply_with_ts,
 )
@@ -513,7 +513,7 @@ async def _post_slack_approval_if_needed(
         return
     cfg = _configurable(request)
     active = await get_active_slack_thread(
-        get_client(url=LANGGRAPH_URL),
+        get_client(url=DEPLOYMENT_API_URL),
         cfg.thread_id,
         cfg.slack_thread.dump() if cfg.slack_thread else None,
     )

@@ -50,7 +50,7 @@ async function main() {
     E2E_REAL_LLM: "1",
     E2E_PORT: apiPort,
     E2E_BASE: apiUrl,
-    LANGGRAPH_URL: apiUrl,
+    LANGSMITH_HOST_API_URL: apiUrl,
     LANGSMITH_GATEWAY_ENABLED: "false",
     OPENAI_API_KEY: "",
     DASHBOARD_BASE_URL: uiUrl,
