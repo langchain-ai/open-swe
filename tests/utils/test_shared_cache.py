@@ -77,6 +77,25 @@ async def test_second_worker_reads_store_value_without_calling_loader(
     assert second == {"n": 1}
 
 
+async def test_store_deletes_an_item_once_it_is_too_old_to_serve(fake_store: FakeStore) -> None:
+    """Past ``max_stale_seconds`` an item is a miss, so the Store need not keep it longer."""
+
+    async def loader() -> dict[str, int]:
+        return {"n": 1}
+
+    await shared_cache.cached(
+        _NAMESPACE,
+        _KEY,
+        60.0,
+        loader,
+        dump=lambda v: v,
+        load=lambda v: v,
+        max_stale_seconds=7200.0,
+    )
+
+    assert fake_store.ttl_minutes(_NAMESPACE, _ITEM_KEY) == 120
+
+
 async def test_stale_store_value_served_while_background_refresh_stores_new_one(
     fake_store: FakeStore, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -138,7 +157,7 @@ async def test_store_write_failure_does_not_fail_the_call(
     outage = RuntimeError("store unavailable")
 
     async def failing_put_item(
-        _namespace: Sequence[str], _key: str, _value: dict[str, object]
+        _namespace: Sequence[str], _key: str, _value: dict[str, object], **_kwargs: object
     ) -> None:
         raise outage
 
@@ -302,7 +321,7 @@ async def test_slow_store_falls_back_like_a_failing_one(
     caplog: pytest.LogCaptureFixture,
     operation: str,
 ) -> None:
-    async def hang(*_args: object) -> NoReturn:
+    async def hang(*_args: object, **_kwargs: object) -> NoReturn:
         await asyncio.Event().wait()
         raise AssertionError("unreachable")
 

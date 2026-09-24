@@ -239,8 +239,17 @@ async def test_second_worker_reuses_the_token_minted_for_each_scope(
     assert len({token for token, _ in first}) == len(mints) == 5
 
 
-async def _unavailable(*_args: object) -> NoReturn:
+async def _unavailable(*_args: object, **_kwargs: object) -> NoReturn:
     raise RuntimeError("store unavailable")
+
+
+async def test_store_deletes_a_shared_token_once_it_can_no_longer_be_decrypted(
+    shared_store: FakeStore, mints: list[dict[str, object]]
+) -> None:
+    await github_app.get_github_app_installation_token(repository_ids=[11])
+    [store_key] = shared_store.values(_SHARED_TOKENS)
+
+    assert shared_store.ttl_minutes(_SHARED_TOKENS, store_key) == 60
 
 
 async def test_store_hit_is_kept_in_process(
@@ -576,7 +585,7 @@ async def test_slow_store_falls_back_like_a_failing_one(
     caplog: pytest.LogCaptureFixture,
     operation: str,
 ) -> None:
-    async def hang(*_args: object) -> NoReturn:
+    async def hang(*_args: object, **_kwargs: object) -> NoReturn:
         await asyncio.Event().wait()
         raise AssertionError("unreachable")
 

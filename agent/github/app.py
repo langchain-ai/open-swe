@@ -186,7 +186,7 @@ async def _write_shared_token(
             good_until=good_until,
         )
         async with asyncio.timeout(_STORE_TIMEOUT_SECONDS):
-            await _SHARED_TOKENS.put(store_key, record)
+            await _SHARED_TOKENS.put(store_key, record, ttl_minutes=_SHARED_TOKEN_TTL_SECONDS // 60)
     except Exception:
         # On the critical path: after a slow or failing write the caller still
         # gets the token it just minted, and other workers mint their own.

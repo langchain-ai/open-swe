@@ -61,6 +61,7 @@ class FakeStore:
 
     def __init__(self) -> None:
         self.items: dict[tuple[str, ...], dict[str, dict[str, Any]]] = {}
+        self.ttls: dict[tuple[tuple[str, ...], str], int | None] = {}
 
     def seed(self, namespace: Sequence[str], key: str, value: dict[str, Any]) -> None:
         self.items.setdefault(tuple(namespace), {})[key] = dict(value)
@@ -74,8 +75,15 @@ class FakeStore:
             raise _FakeStoreNotFoundError
         return {"value": dict(value)}
 
-    async def put_item(self, namespace: Sequence[str], key: str, value: dict[str, Any]) -> None:
+    async def put_item(
+        self, namespace: Sequence[str], key: str, value: dict[str, Any], ttl: int | None = None
+    ) -> None:
         self.seed(namespace, key, value)
+        self.ttls[(tuple(namespace), key)] = ttl
+
+    def ttl_minutes(self, namespace: Sequence[str], key: str) -> int | None:
+        """How long after its last write the Store deletes the item; ``None`` keeps it forever."""
+        return self.ttls.get((tuple(namespace), key))
 
     async def delete_item(self, namespace: Sequence[str], key: str) -> None:
         self.values(namespace).pop(key, None)

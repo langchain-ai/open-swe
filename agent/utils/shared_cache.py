@@ -8,7 +8,8 @@ Values are opaque to the Store, so callers round-trip them through their own
 
 An item older than ``ttl_seconds`` is still served while one background
 refresh replaces it in both the Store and this worker's front cache; one older
-than ``max_stale_seconds`` is a miss, so the caller waits for the loader.
+than ``max_stale_seconds`` is a miss, so the caller waits for the loader, and
+the Store deletes it.
 
 This sits on the agent's critical path. A Store read that fails or stalls, or
 returns an item ``load`` cannot decode, falls back to the loader; a Store write
@@ -20,6 +21,7 @@ import asyncio
 import hashlib
 import json
 import logging
+import math
 import time
 from collections.abc import Awaitable, Callable, Sequence
 
@@ -70,7 +72,12 @@ async def cached[T](
     async def _write(value: T) -> None:
         try:
             async with asyncio.timeout(_STORE_TIMEOUT_SECONDS):
-                await put_value(namespace, item_key, {"stored_at": _now(), "value": dump(value)})
+                await put_value(
+                    namespace,
+                    item_key,
+                    {"stored_at": _now(), "value": dump(value)},
+                    ttl_minutes=math.ceil(max_stale_seconds / 60),
+                )
         except Exception:
             # On the critical path: a Store outage must not fail a call that
             # already has a value to return.
