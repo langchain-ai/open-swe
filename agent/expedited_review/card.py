@@ -5,6 +5,7 @@ import json
 from agent.expedited_review.approvals import ExpeditedApproval
 from agent.expedited_review.eligibility import ChangedFile
 from agent.slack.blocks import (
+    SECTION_TEXT_MAX_CHARS,
     Block,
     ButtonElement,
     actions,
@@ -22,6 +23,7 @@ BUTTON_TYPE = "expedited_review"
 _MAX_FILE_SECTIONS = 20
 # Slack refuses a section over 3000 characters, and refusing means no card at all.
 _MAX_PATCH_LINES = 60
+_OVERFLOW_NOTE_RESERVE = 64
 
 
 def _button_value(action: str, approval: ExpeditedApproval) -> str:
@@ -76,13 +78,18 @@ def _test_diffstat(tests: list[ChangedFile]) -> list[Block]:
     """Test files are never drawn; the card lists them with their line counts instead."""
     if not tests:
         return []
-    lines = [
-        f"`{escape(file.filename)}`  +{file.additions} −{file.deletions}"
-        for file in tests[:_MAX_FILE_SECTIONS]
-    ]
-    if len(tests) > _MAX_FILE_SECTIONS:
-        lines.append(f"{len(tests) - _MAX_FILE_SECTIONS} more test files on GitHub.")
-    return [context("*Tests (not shown)*\n" + "\n".join(lines))]
+    heading = "*Tests (not shown)*\n"
+    budget = SECTION_TEXT_MAX_CHARS - len(heading) - _OVERFLOW_NOTE_RESERVE
+    lines: list[str] = []
+    for file in tests[:_MAX_FILE_SECTIONS]:
+        line = f"`{escape(file.filename)}`  +{file.additions} −{file.deletions}"
+        budget -= len(line) + 1
+        if budget < 0:
+            break
+        lines.append(line)
+    if len(lines) < len(tests):
+        lines.append(f"{len(tests) - len(lines)} more test files on GitHub.")
+    return [context(heading + "\n".join(lines))]
 
 
 def _vote_buttons(approval: ExpeditedApproval) -> tuple[ButtonElement, ...]:
