@@ -1621,6 +1621,11 @@ export const api = {
       `/reviews/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}/scout`,
       { method: "POST" }
     ),
+  markReviewViewed: (owner: string, repo: string, number: number) =>
+    request<void>(
+      `/reviews/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}/viewed`,
+      { method: "POST" }
+    ),
   reReview: (owner: string, repo: string, number: number) =>
     request<{
       success: boolean
