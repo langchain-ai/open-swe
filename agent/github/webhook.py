@@ -1059,27 +1059,30 @@ async def process_github_pr_comment(
     ):
         return
 
+    fetch_comments = (
+        common.fetch_pr_comments_since_last_tag
+        if agent_thread_id is None
+        else common.fetch_pr_event_comments
+    )
     try:
-        comments = await common.fetch_pr_comments_since_last_tag(
+        comments = await fetch_comments(
             repo_config,
             pr_number,
             token=github_token,
             event_comment=event_comment,
             authorized_login=github_login if common.thread_is_private(thread_metadata) else None,
-            require_tag=agent_thread_id is None,
         )
     except GitHubAuthError:
         github_token = await common.refresh_thread_github_token_after_401(thread_id, email)
         if not github_token:
             common.logger.warning("Re-auth failed for thread %s after 401; skipping", thread_id)
             return
-        comments = await common.fetch_pr_comments_since_last_tag(
+        comments = await fetch_comments(
             repo_config,
             pr_number,
             token=github_token,
             event_comment=event_comment,
             authorized_login=github_login if common.thread_is_private(thread_metadata) else None,
-            require_tag=agent_thread_id is None,
         )
     if not comments:
         common.logger.info("No comments found since last @open-swe tag for PR %s", pr_number)

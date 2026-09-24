@@ -52,6 +52,7 @@ from agent.github.comments import (
     extract_pr_context,  # noqa: F401
     fetch_issue_comments,  # noqa: F401
     fetch_pr_comments_since_last_tag,  # noqa: F401
+    fetch_pr_event_comments,  # noqa: F401
     format_github_comment_body_for_prompt,
     mentions_open_swe,  # noqa: F401
     react_to_github_comment,  # noqa: F401
@@ -226,6 +227,7 @@ __all__ = [
     "fetch_image_block",
     "fetch_issue_comments",
     "fetch_pr_comments_since_last_tag",
+    "fetch_pr_event_comments",
     "fetch_pr_review_threads",
     "fetch_slack_thread_messages",
     "format_github_comment_body_for_prompt",

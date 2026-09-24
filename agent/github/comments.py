@@ -29,6 +29,7 @@ __all__ = [
     "fetch_issue_comments",
     "fetch_pr_branch",
     "fetch_pr_comments_since_last_tag",
+    "fetch_pr_event_comments",
     "format_github_comment_body_for_prompt",
     "mentions_open_swe",
     "post_github_comment",
@@ -356,13 +357,11 @@ async def fetch_pr_comments_since_last_tag(
     token: str,
     event_comment: dict[str, Any] | None = None,
     authorized_login: str | None = None,
-    require_tag: bool = True,
 ) -> list[dict[str, Any]]:
     """Fetch all PR comments/reviews since the last @open-swe tag.
 
     Fetches from all 3 GitHub comment sources, merges and sorts chronologically,
-    then returns every comment from the last @open-swe mention onwards. Without
-    ``require_tag``, returns only the event comment and a review's own inline comments.
+    then returns every comment from the last @open-swe mention onwards.
 
     For inline review comments the dict also includes:
     - 'path': file path commented on
@@ -377,6 +376,61 @@ async def fetch_pr_comments_since_last_tag(
     Returns:
         List of comment dicts ordered chronologically from last @open-swe tag.
     """
+    all_comments = await _fetch_pr_timeline(
+        repo_config,
+        pr_number,
+        token=token,
+        event_comment=event_comment,
+        authorized_login=authorized_login,
+    )
+    tag_indices = [
+        i for i, comment in enumerate(all_comments) if mentions_open_swe(comment.get("body"))
+    ]
+
+    if not tag_indices:
+        return []
+
+    # If this is the first @openswe invocation (only one tag), return ALL
+    # comments so the agent has full context — inline review comments are
+    # drafted before submission and appear earlier in the sorted list.
+    # For repeat invocations, return everything since the previous tag.
+    start = 0 if len(tag_indices) == 1 else tag_indices[-2] + 1
+    return all_comments[start:]
+
+
+async def fetch_pr_event_comments(
+    repo_config: dict[str, str],
+    pr_number: int,
+    *,
+    token: str,
+    event_comment: dict[str, Any],
+    authorized_login: str | None = None,
+) -> list[dict[str, Any]]:
+    """The comment a webhook delivered, plus a submitted review's own inline comments."""
+    all_comments = await _fetch_pr_timeline(
+        repo_config,
+        pr_number,
+        token=token,
+        event_comment=event_comment,
+        authorized_login=authorized_login,
+    )
+    return [
+        c
+        for c in all_comments
+        if c is event_comment
+        or (event_comment["type"] == "review" and c.get("review_id") == event_comment["comment_id"])
+    ]
+
+
+async def _fetch_pr_timeline(
+    repo_config: dict[str, str],
+    pr_number: int,
+    *,
+    token: str,
+    event_comment: dict[str, Any] | None,
+    authorized_login: str | None,
+) -> list[dict[str, Any]]:
+    """Every PR comment, inline comment, and review body up to the event, oldest first."""
     owner = repo_config.get("owner", "")
     repo = repo_config.get("name", "")
     headers = {
@@ -470,33 +524,7 @@ async def fetch_pr_comments_since_last_tag(
 
     # Sort all comments chronologically
     all_comments.sort(key=lambda c: c.get("event_at") or c.get("created_at", ""))
-
-    if not require_tag:
-        if event_comment is None:
-            return []
-        return [
-            c
-            for c in all_comments
-            if c is event_comment
-            or (
-                event_comment["type"] == "review"
-                and c.get("review_id") == event_comment["comment_id"]
-            )
-        ]
-
-    tag_indices = [
-        i for i, comment in enumerate(all_comments) if mentions_open_swe(comment.get("body"))
-    ]
-
-    if not tag_indices:
-        return []
-
-    # If this is the first @openswe invocation (only one tag), return ALL
-    # comments so the agent has full context — inline review comments are
-    # drafted before submission and appear earlier in the sorted list.
-    # For repeat invocations, return everything since the previous tag.
-    start = 0 if len(tag_indices) == 1 else tag_indices[-2] + 1
-    return all_comments[start:]
+    return all_comments
 
 
 async def fetch_pr_branch(
