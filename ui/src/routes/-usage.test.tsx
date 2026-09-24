@@ -1035,7 +1035,7 @@ it("hides a GitHub login when it duplicates the user name", async () => {
 })
 
 it("discloses the policy to a non-admin and re-keys the cache when it flips", async () => {
-  vi.spyOn(api, "prMergeRateByModel").mockResolvedValue(captured)
+  vi.spyOn(api, "prMergeRateByModel").mockResolvedValue(report(captured))
   const client = mountReport()
   expect(await screen.findByText(/other members are anonymous/)).toBeTruthy()
   const audienceOf = (query: { queryKey: readonly unknown[] }) =>
@@ -1071,7 +1071,7 @@ it("discloses the policy to a non-admin and re-keys the cache when it flips", as
 })
 
 it("does not retain identified rows as placeholders when the policy flips", async () => {
-  vi.spyOn(api, "prMergeRateByModel").mockResolvedValue(captured)
+  vi.spyOn(api, "prMergeRateByModel").mockResolvedValue(report(captured))
   vi.mocked(api.usageLeaderboard).mockResolvedValue({
     ...emptyUsage,
     usage_leaderboard_privacy_enabled: false,
@@ -1117,7 +1117,7 @@ it("does not retain identified rows as placeholders when the policy flips", asyn
 })
 
 it("discloses to an admin that other members stay identified for them", async () => {
-  vi.spyOn(api, "prMergeRateByModel").mockResolvedValue(captured)
+  vi.spyOn(api, "prMergeRateByModel").mockResolvedValue(report(captured))
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false, gcTime: 0 } },
   })
@@ -1135,7 +1135,7 @@ it("discloses to an admin that other members stay identified for them", async ()
 })
 
 it("shows no privacy disclosure until the policy is known", async () => {
-  vi.spyOn(api, "prMergeRateByModel").mockResolvedValue(captured)
+  vi.spyOn(api, "prMergeRateByModel").mockResolvedValue(report(captured))
   vi.mocked(api.usageLeaderboard).mockImplementation(
     () => new Promise<UsageLeaderboardPayload>(() => {})
   )

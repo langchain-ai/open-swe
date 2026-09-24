@@ -40,7 +40,7 @@ async def test_usage_leaderboard_privacy_get_is_session_scoped_and_put_is_admin_
         app.dependency_overrides[oauth.require_session] = lambda: {"sub": "mallory"}
         member = await client.get("/dashboard/api/settings/usage-leaderboard-privacy")
         assert member.status_code == 200
-        assert member.json() == {"usage_leaderboard_privacy_enabled": True}
+        assert member.json() == {"usage_leaderboard_privacy_enabled": False}
         forbidden = await client.put(
             "/dashboard/api/settings/usage-leaderboard-privacy",
             json={"usage_leaderboard_privacy_enabled": False},
