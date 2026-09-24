@@ -1102,7 +1102,10 @@ SCRIPT_LIBRARY: dict[str, tuple[StepSpec, ...]] = {
         _tool_step(
             "The breakout thread is the reply.",
             "slack_no_reply_needed",
-            {"reason": "Breakout thread started; nothing to post in the original thread."},
+            {
+                "reason": "Breakout thread started; nothing to post in the original thread.",
+                "confirmation": "The user cannot see anything I do not send to Slack.",
+            },
             "call-breakout-no-reply",
         ),
     ),
