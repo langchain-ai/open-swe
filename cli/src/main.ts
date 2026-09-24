@@ -14,6 +14,7 @@ import {
   writeConfig,
 } from "./config.ts"
 import { isGitRepository, originRepo, repoFullName } from "./git.ts"
+import { composePrompt, readPipedStdin } from "./input.ts"
 import { errorMessage, type JsonObject } from "./json.ts"
 import { login } from "./login.ts"
 import {
@@ -38,8 +39,9 @@ Run options:
   --visibility <v> workspace (default) or private; API keys and CI always
                    start system threads
 
-A run reads its prompt from stdin when none is given. Stdout carries only the
-result the agent reports, and the exit code is the one it reports.
+Piped input is attached below the prompt, or is the prompt when none is given.
+Stdout carries only the result the agent reports. The exit code is the one it
+reports: 0 done or yes, 1 failed or no, 2 could not tell.
 
 The agent runs shell commands and reads and writes files in the current
 directory, on this machine, without a sandbox.
@@ -59,13 +61,6 @@ function note(text: string): void {
 
 function fail(text: string): void {
   process.stderr.write(`oswe: ${text}\n`)
-}
-
-async function readStdin(): Promise<string> {
-  if (process.stdin.isTTY === true) return ""
-  const chunks: Buffer[] = []
-  for await (const chunk of process.stdin) chunks.push(Buffer.from(chunk))
-  return Buffer.concat(chunks).toString("utf8")
 }
 
 function printResult(result: CliResult): void {
@@ -113,7 +108,7 @@ interface RunOptions {
 }
 
 async function runCommand(options: RunOptions): Promise<number> {
-  const prompt = options.prompt.trim() || (await readStdin()).trim()
+  const prompt = composePrompt(options.prompt, await readPipedStdin())
   if (!prompt) {
     fail("a prompt is required, as arguments or on stdin")
     return 2

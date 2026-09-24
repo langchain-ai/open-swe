@@ -105,11 +105,13 @@ So a run composes like any other command:
 
 ```sh
 oswe run "is the test suite green?" && echo passing
-git diff | oswe run > review.txt
+git diff | oswe run "review this diff" > review.txt
 ```
 
-A run that fails, or ends without calling `cli_result`, prints the reason to
-stderr and exits 1. The server re-prompts the agent twice before giving up on a
+The agent reports exit codes the way `grep` and `test` do: 0 when the task was
+done or the answer is yes, 1 when it failed or the answer is no, 2 when it could
+not tell. A run that fails, or ends without calling `cli_result`, prints the
+reason to stderr and exits 1. The server re-prompts the agent twice before giving up on a
 missing result.
 
 Ctrl-C once cancels the run, releases the bridge and exits. Ctrl-C twice exits
@@ -124,7 +126,9 @@ Options:
 | `--effort <name>` | Reasoning effort for `--model`. |
 | `--visibility private` | Start a private thread instead of a workspace one. People only. |
 
-With no prompt arguments, the prompt is read from stdin.
+Piped input is attached below the prompt inside `<stdin>` tags, or is the whole
+prompt when no arguments are given. Stdin is only read when it is a pipe or a
+redirected file, so a CI runner's open stdin never blocks a run.
 
 ## Environment the agent gets
 
