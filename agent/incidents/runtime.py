@@ -85,6 +85,7 @@ class IncidentSession:
             destination["reply_thread_ts"] = reply_thread_ts
         self.slack_thread = SlackThreadRef.model_validate(destination)
         self.collector = EvidenceCollector()
+        self.report_recorded = False
         self.instructions = (
             "You are the incident's system-owned SRE agent. Use the normal workspace tools, "
             "sandbox, integrations, and skills to investigate, propose mitigation, and carry out "
@@ -157,6 +158,7 @@ class IncidentSession:
 
     async def _record_incident_report(self, **kwargs: Any) -> dict[str, Any]:
         await self.check()
+        self.report_recorded = True
         draft = ReportDraft.model_validate(kwargs)
         report = finalize_report(draft, self.collector)
         record = self.record

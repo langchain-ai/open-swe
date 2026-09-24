@@ -4,6 +4,7 @@ import logging
 from typing import Any
 
 from langchain.agents.middleware import AgentState, after_agent
+from langchain_core.messages import AIMessage
 from langgraph.runtime import Runtime
 from langgraph_sdk import get_client
 
@@ -20,6 +21,10 @@ from agent.utils.user_messages import warning
 logger = logging.getLogger(__name__)
 
 _LIMIT_MARKER = "Model call limits exceeded"
+_NO_SLACK_WARNING = (
+    "Open SWE stopped after reaching the model-call limit, and no Slack notification could be "
+    "delivered because no active Slack thread was available."
+)
 
 
 @scrub_middleware_inputs
@@ -51,8 +56,8 @@ async def notify_step_limit_reached(
         cfg.slack_thread.dump() if cfg.slack_thread else None,
     )
     if not active:
-        logger.info("No Slack thread config — cannot send step-limit notification")
-        return None
+        logger.warning("Model-call limit reached without an active Slack thread")
+        return {"messages": [AIMessage(content=warning(_NO_SLACK_WARNING))]}
 
     channel_id = active.get("channel_id")
     thread_ts = active.get("thread_ts")
@@ -63,8 +68,8 @@ async def notify_step_limit_reached(
         or not channel_id
         or not thread_ts
     ):
-        logger.info("No Slack thread config — cannot send step-limit notification")
-        return None
+        logger.warning("Model-call limit reached without a usable Slack channel or thread")
+        return {"messages": [AIMessage(content=warning(_NO_SLACK_WARNING))]}
 
     message = warning(
         "Open SWE reached its maximum step limit and had to stop. "

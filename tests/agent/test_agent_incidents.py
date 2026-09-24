@@ -32,6 +32,43 @@ CHANNEL = {
 }
 
 
+async def test_incident_limit_wrapup_records_inconclusive_report(monkeypatch):
+    from agent.server import _IncidentLimitWrapupMiddleware
+
+    session = MagicMock(report_recorded=False)
+    session._record_incident_report = AsyncMock()
+    middleware = _IncidentLimitWrapupMiddleware(session)
+
+    await middleware.aafter_agent(
+        {"messages": [AIMessage(content="Model call limits exceeded: run limit reached")]},
+        MagicMock(),
+    )
+
+    session._record_incident_report.assert_awaited_once_with(
+        summary=[],
+        impact=[],
+        next_steps=[],
+        hypotheses=[],
+        gaps=["Investigation was cut off by the model-call budget."],
+        questions=[],
+    )
+
+
+async def test_incident_limit_wrapup_does_not_double_record_report():
+    from agent.server import _IncidentLimitWrapupMiddleware
+
+    session = MagicMock(report_recorded=True)
+    session._record_incident_report = AsyncMock()
+    middleware = _IncidentLimitWrapupMiddleware(session)
+
+    await middleware.aafter_agent(
+        {"messages": [AIMessage(content="Model call limits exceeded: run limit reached")]},
+        MagicMock(),
+    )
+
+    session._record_incident_report.assert_not_awaited()
+
+
 class ScriptedModel(BaseChatModel):
     responses: list[AIMessage]
     bound_names: list[str] = []

@@ -17,8 +17,9 @@ def test_normalizes_prefix():
 def test_model_call_budget_is_bounded():
     with pytest.raises(ValidationError):
         IncidentPolicy(max_model_calls=0)
+    assert IncidentPolicy(max_model_calls=21).max_model_calls == 21
     with pytest.raises(ValidationError):
-        IncidentPolicy(max_model_calls=21)
+        IncidentPolicy(max_model_calls=201)
 
 
 def test_incident_starts_watching_before_its_thread_exists():
