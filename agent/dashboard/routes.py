@@ -18,6 +18,7 @@ from agent.github.pull_request_dashboard_routes import router as pull_requests_r
 from agent.incidents.document_routes import router as incident_documents_router
 from agent.incidents.routes import router as incidents_router
 from agent.mcp.routes import router as mcp_router
+from agent.review.conversation import router as review_conversation_router
 from agent.review.routes import router as review_router
 from agent.schedules.routes import router as schedules_router
 from agent.skill_store.routes import router as skills_router
@@ -48,6 +49,7 @@ router.include_router(workspaces_router)
 router.include_router(repos_router)
 router.include_router(pull_requests_router)
 router.include_router(review_router)
+router.include_router(review_conversation_router)
 router.include_router(agent_instructions_router)
 router.include_router(skills_router)
 router.include_router(analytics_router)

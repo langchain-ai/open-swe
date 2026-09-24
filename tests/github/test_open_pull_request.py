@@ -590,8 +590,54 @@ def test_slack_reference_precedes_attribution_footer(monkeypatch: pytest.MonkeyP
     )
 
 
-def test_footer_names_the_model_that_opened_the_pr(monkeypatch: pytest.MonkeyPatch) -> None:
-    _set_config(monkeypatch, {"source": "dashboard", "thread_id": "thread-1"})
+@pytest.mark.parametrize(
+    "thread_metadata", [{}, {"model": "openai:gpt-5.6-luna", "effort": "xhigh"}]
+)
+def test_footer_names_the_model_that_opened_the_pr(
+    monkeypatch: pytest.MonkeyPatch, thread_metadata: dict[str, str]
+) -> None:
+    _set_config(
+        monkeypatch,
+        {
+            "source": "dashboard",
+            "thread_id": "thread-1",
+            "resolved_agent_model_id": "openai:gpt-5.6-luna",
+            "resolved_agent_effort": "xhigh",
+        },
+    )
+    monkeypatch.setattr(opr, "private_credential_login", AsyncMock(return_value="test-owner"))
+    monkeypatch.setattr(opr, "_resolve_pr_author_token", lambda *_a, **_k: _coro(("tok", "user")))
+    client = _RoutingClient(
+        post=_FakeResponse(201, {"html_url": "u", "number": 1, "user": {}}), get_routes={}
+    )
+    _install_client(monkeypatch, client)
+    monkeypatch.setattr(
+        opr,
+        "get_client",
+        lambda: SimpleNamespace(
+            threads=SimpleNamespace(get=AsyncMock(return_value={"metadata": thread_metadata}))
+        ),
+    )
+
+    _open_with_body("body")
+
+    sent_body = client.post_calls[0]["json"]["body"]
+    assert sent_body.count("Made by [Open SWE]") == 1
+    assert sent_body.endswith(" · openai:gpt-5.6-luna (xhigh)")
+
+
+def test_footer_uses_selected_route_when_thread_metadata_is_missing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _set_config(
+        monkeypatch,
+        {
+            "source": "dashboard",
+            "thread_id": "thread-1",
+            "resolved_agent_model_id": "openai:balanced",
+            "resolved_agent_effort": "high",
+        },
+    )
     monkeypatch.setattr(opr, "private_credential_login", AsyncMock(return_value="test-owner"))
     monkeypatch.setattr(opr, "_resolve_pr_author_token", lambda *_a, **_k: _coro(("tok", "user")))
     client = _RoutingClient(
@@ -603,18 +649,14 @@ def test_footer_names_the_model_that_opened_the_pr(monkeypatch: pytest.MonkeyPat
         "get_client",
         lambda: SimpleNamespace(
             threads=SimpleNamespace(
-                get=AsyncMock(
-                    return_value={"metadata": {"model": "openai:gpt-5.6-luna", "effort": "xhigh"}}
-                )
+                get=AsyncMock(return_value={"metadata": {}}),
             )
         ),
     )
 
     _open_with_body("body")
 
-    sent_body = client.post_calls[0]["json"]["body"]
-    assert sent_body.count("Made by [Open SWE]") == 1
-    assert sent_body.endswith(" · openai:gpt-5.6-luna (xhigh)")
+    assert client.post_calls[0]["json"]["body"].endswith(" · openai:balanced (high)")
 
 
 def test_uses_stored_slack_permalink_reference(monkeypatch: pytest.MonkeyPatch) -> None:

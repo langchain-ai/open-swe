@@ -889,17 +889,19 @@ async def _is_private_repo(client: httpx2.AsyncClient, token: str, owner: str, r
 async def _stamp_attribution_footer(body: str) -> str:
     """Make the platform footer, naming this run's model, the body's last line."""
     cfg = _configurable()
-    model_id: str | None = None
-    effort: str | None = None
+    model_id: str | None = cfg.resolved_agent_model_id
+    effort: str | None = cfg.resolved_agent_effort
     if cfg.thread_id:
         try:
             thread = await get_client().threads.get(cfg.thread_id)
             metadata = thread.get("metadata") if isinstance(thread, dict) else None
             if isinstance(metadata, dict):
                 model = metadata.get("model")
-                model_id = model if isinstance(model, str) and model else None
                 value = metadata.get("effort")
-                effort = value if isinstance(value, str) and value else None
+                if model_id is None and isinstance(model, str) and model:
+                    model_id = model
+                if effort is None and isinstance(value, str) and value:
+                    effort = value
         except Exception:
             logger.debug("Could not read the thread's model for the PR footer", exc_info=True)
     return add_pr_collaboration_note(

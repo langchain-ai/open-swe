@@ -74,6 +74,12 @@ async def _context_location(cfg: RunConfig, thread_id: str) -> tuple[str, str]:
     return channel_id, thread_ts
 
 
+async def _discard(approval: ExpeditedApproval) -> None:
+    async with ExpeditedApproval.locked(approval.id) as (session, row):
+        if row is not None:
+            await session.delete(row)
+
+
 async def _post_root_message(
     channel: SlackChannel, pr_ref: GitHubPrRef, title: str
 ) -> tuple[str | None, str | None]:
@@ -175,7 +181,11 @@ async def expedite_pr_approval(
     active = await ExpeditedApproval.active_for(pr_ref.owner, pr_ref.repo, pr_ref.number)
     if active is not None and active.thread_id and active.thread_id != thread_id:
         return _failure("This pull request's expedited review belongs to another agent thread")
-    if active is not None and fingerprint_matches(files, active.diff_fingerprint):
+    if (
+        active is not None
+        and active.slack_message_ts
+        and fingerprint_matches(files, active.diff_fingerprint)
+    ):
         return {
             "success": True,
             "approval_id": str(active.id),
@@ -221,11 +231,13 @@ async def expedite_pr_approval(
         slack_thread_ts=thread_ts,
         run_config=dispatch_run_config(cfg, thread_id, None),
     ).save()
-    message_ts, error = await post_card(approval, title=payload.title, files=files)
+    try:
+        message_ts, error = await post_card(approval, title=payload.title, files=files)
+    except BaseException:
+        await _discard(approval)
+        raise
     if not message_ts:
-        async with ExpeditedApproval.locked(approval.id) as (session, row):
-            if row is not None:
-                await session.delete(row)
+        await _discard(approval)
         return _failure(f"Could not post the approval card in Slack: {error or 'unknown error'}")
     approval.slack_message_ts = message_ts
     approval = await approval.save()

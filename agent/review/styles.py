@@ -26,7 +26,7 @@ async def get_approval_policy(owner: str, repo: str, settings: Mapping[str, obje
 
 
 _TERMINAL_SUCCESS = frozenset({"success", "completed"})
-_TERMINAL_FAILURE = frozenset({"error", "failed", "timeout", "interrupted", "cancelled"})
+TERMINAL_RUN_FAILURES = frozenset({"error", "failed", "timeout", "interrupted", "cancelled"})
 
 
 def normalize_repo_full_name(raw: str) -> str:
@@ -223,6 +223,7 @@ async def reconcile_running_status(
     *,
     run_status: str | None,
     run_missing: bool = False,
+    run_error: str | None = None,
 ) -> ReviewStyle:
     """Clear stale ``running`` when the analyzer run is done or unreachable."""
     if record.status != "running":
@@ -236,10 +237,15 @@ async def reconcile_running_status(
             "Analysis finished without saving a prompt. Please retry.",
         )
 
-    if run_status in _TERMINAL_FAILURE:
+    if run_status in TERMINAL_RUN_FAILURES:
         if record.has_saved_prompt:
             return await REVIEW_STYLES.mark_completed(full_name)
-        return await REVIEW_STYLES.mark_failed(full_name, "Analysis run ended. Please retry.")
+        return await REVIEW_STYLES.mark_failed(
+            full_name,
+            f"Analysis run failed: {run_error}. Please retry."
+            if run_error
+            else "Analysis run ended. Please retry.",
+        )
 
     if run_missing:
         if record.has_saved_prompt:

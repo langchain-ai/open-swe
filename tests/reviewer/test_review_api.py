@@ -5,6 +5,7 @@ from agent.review import reviews as review_api
 from agent.review.reviews import (
     _ALLOWED_IMAGE_CONTENT_TYPES,
     _finding_counts,
+    _image_request_headers,
     _is_allowed_image_url,
     _require_image_in_pr,
     _serialize_finding,
@@ -93,6 +94,25 @@ def test_is_allowed_image_url_rejects_unsafe_urls():
     assert not _is_allowed_image_url("https://githubusercontent.com.evil.com/x.png")
     # Internal address.
     assert not _is_allowed_image_url("https://169.254.169.254/latest/meta-data")
+
+
+def test_is_allowed_image_url_accepts_only_githubs_asset_bucket():
+    assert _is_allowed_image_url(
+        "https://github-production-user-asset-6210df.s3.amazonaws.com/1/x.png?X-Amz-Signature=y"
+    )
+    assert not _is_allowed_image_url("https://attacker-bucket.s3.amazonaws.com/x.png")
+
+
+def test_image_token_only_reaches_githubusercontent():
+    assert "Authorization" in _image_request_headers(
+        "https://private-user-images.githubusercontent.com/1/x.png", "tok"
+    )
+    assert "Authorization" not in _image_request_headers(
+        "https://github.com/user-attachments/assets/abc", "tok"
+    )
+    assert "Authorization" not in _image_request_headers(
+        "https://github-production-user-asset-6210df.s3.amazonaws.com/1/x.png", "tok"
+    )
 
 
 def test_image_content_type_allowlist_excludes_svg():

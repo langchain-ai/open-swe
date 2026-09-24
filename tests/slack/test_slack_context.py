@@ -718,11 +718,13 @@ def test_format_slack_web_link_footer_omits_unavailable_cost() -> None:
 
 
 def test_format_slack_web_link_footer_prefers_session_cost() -> None:
-    usage = RunUsageSummary(models=("model-a",), total_tokens=12_345, session_cost_usd=0.42)
+    usage = RunUsageSummary(
+        models=("model-a",), total_tokens=12_345, session_cost_usd=0.42, reasoning_effort="high"
+    )
 
     footer = slack_utils.format_slack_web_link_footer("https://app.example/agents/t1", usage)
 
-    assert footer == "<https://app.example/agents/t1|Open in Web> • model-a • $0.42"
+    assert footer == "<https://app.example/agents/t1|Open in Web> • model-a (high) • $0.42"
 
 
 def test_format_slack_run_usage_shortens_model_paths() -> None:

@@ -7,6 +7,7 @@ from langchain.agents.middleware.types import (
     AgentState,
     ModelRequest,
     ModelResponse,
+    OmitFromOutput,
 )
 from langchain_core.messages import SystemMessage
 from langgraph.runtime import Runtime
@@ -20,10 +21,10 @@ def _take_latest[T](left: T | None, right: T | None) -> T | None:
 
 
 class PrepareRunState(AgentState):
-    run_prepared: NotRequired[Annotated[bool, _take_latest]]
-    run_prepared_for: NotRequired[Annotated[str, _take_latest]]
-    work_dir: NotRequired[Annotated[str | None, _take_latest]]
-    rendered_system_prompt: NotRequired[Annotated[str | None, _take_latest]]
+    run_prepared: NotRequired[Annotated[bool, OmitFromOutput, _take_latest]]
+    run_prepared_for: NotRequired[Annotated[str, OmitFromOutput, _take_latest]]
+    work_dir: NotRequired[Annotated[str | None, OmitFromOutput, _take_latest]]
+    rendered_system_prompt: NotRequired[Annotated[str | None, OmitFromOutput, _take_latest]]
 
 
 def _latest_message_fingerprint(state: Mapping[str, Any]) -> str | None:

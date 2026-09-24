@@ -83,6 +83,8 @@ async def test_repo_update_starts_snapshot_rebuild(admin_client: httpx.AsyncClie
         )
 
     assert response.status_code == 200
+    assert response.json()["refresh_status"] == "refreshing"
+    assert response.json()["refresh_run_id"] == "run-1"
     start.assert_awaited_once_with("oss")
 
 
