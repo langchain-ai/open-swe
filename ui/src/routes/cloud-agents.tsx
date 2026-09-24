@@ -26,9 +26,11 @@ import {
   useRepos,
   useSaveProfile,
 } from "@/lib/profile"
+import { pageTitle } from "@/lib/pageTitle"
 
 export const Route = createFileRoute("/cloud-agents")({
   component: CloudAgentsPage,
+  head: () => ({ meta: [{ title: pageTitle("Open SWE Agent") }] }),
 })
 
 function CloudAgentsPage() {

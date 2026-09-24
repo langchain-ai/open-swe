@@ -9,6 +9,7 @@ import { GitPullRequestIcon } from "@phosphor-icons/react"
 import type { ReviewSummary } from "@/lib/api"
 import { PageHeader } from "@/components/AppShell"
 import { Badge } from "@/components/ui/badge"
+import { pageTitle } from "@/lib/pageTitle"
 import { Button } from "@/components/ui/button"
 import { Empty, EmptyDescription } from "@/components/ui/empty"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -29,6 +30,7 @@ import {
 
 export const Route = createFileRoute("/agents/reviews/")({
   validateSearch: validateReviewsSearch,
+  head: () => ({ meta: [{ title: pageTitle("Pull Requests") }] }),
   component: ReviewsPage,
 })
 

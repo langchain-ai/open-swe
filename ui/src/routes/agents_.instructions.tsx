@@ -2,9 +2,11 @@ import { createFileRoute } from "@tanstack/react-router"
 
 import { AgentInstructionsPanel } from "@/components/AgentInstructionsPanel"
 import { AuthedAppShell } from "@/components/AppShell"
+import { pageTitle } from "@/lib/pageTitle"
 
 export const Route = createFileRoute("/agents_/instructions")({
   component: AgentInstructionsPage,
+  head: () => ({ meta: [{ title: pageTitle("Repository Instructions") }] }),
 })
 
 function AgentInstructionsPage() {

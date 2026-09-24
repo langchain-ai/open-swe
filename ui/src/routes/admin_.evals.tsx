@@ -7,11 +7,13 @@ import { AuthedAppShell, SettingsSection } from "@/components/AppShell"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import { api } from "@/lib/api"
+import { pageTitle } from "@/lib/pageTitle"
 import { useSession } from "@/lib/session"
 import { useCopyToClipboard } from "@/lib/useCopyToClipboard"
 
 export const Route = createFileRoute("/admin_/evals")({
   component: ReviewerEvalPage,
+  head: () => ({ meta: [{ title: pageTitle("Reviewer evals") }] }),
 })
 
 function ReviewerEvalPage() {

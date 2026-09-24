@@ -3,9 +3,11 @@ import { Link, createFileRoute } from "@tanstack/react-router"
 import { AuthedAppShell } from "@/components/AppShell"
 import { buttonVariants } from "@/components/ui/button"
 import { WorkspacesSection } from "@/features/settings/components/WorkspacesSection"
+import { pageTitle } from "@/lib/pageTitle"
 
 export const Route = createFileRoute("/workspaces")({
   component: WorkspacesPage,
+  head: () => ({ meta: [{ title: pageTitle("Workspaces") }] }),
 })
 
 function WorkspacesPage() {

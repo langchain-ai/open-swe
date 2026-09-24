@@ -60,6 +60,7 @@ import {
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { Tooltip, TooltipPopup, TooltipTrigger } from "@/components/ui/tooltip"
 import { api, ApiError } from "@/lib/api"
+import { pageTitle } from "@/lib/pageTitle"
 import { safeModelLabel } from "@/lib/modelLabel"
 import {
   buildUsageDiagnostics,
@@ -72,6 +73,7 @@ export const Route = createFileRoute("/usage")({
   validateSearch: (search: Record<string, unknown>) => ({
     period: typeof search.period === "string" ? search.period : undefined,
   }),
+  head: () => ({ meta: [{ title: pageTitle("Usage") }] }),
   component: UsagePage,
 })
 

@@ -8,9 +8,11 @@ import { MCPConnectionsSection } from "@/features/settings/components/MCPConnect
 import { PersonalInstructionsSection } from "@/features/settings/components/PersonalInstructionsSection"
 import { PreferencesSection } from "@/features/settings/components/PreferencesSection"
 import { PullRequestsSection } from "@/features/settings/components/PullRequestsSection"
+import { pageTitle } from "@/lib/pageTitle"
 
 export const Route = createFileRoute("/my-settings")({
   component: MySettingsPage,
+  head: () => ({ meta: [{ title: pageTitle("Profile") }] }),
 })
 
 function MySettingsPage() {

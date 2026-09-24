@@ -2,9 +2,11 @@ import { createFileRoute } from "@tanstack/react-router"
 
 import { AuthedAppShell } from "@/components/AppShell"
 import { ReviewStylesPanel } from "@/components/ReviewStylesPanel"
+import { pageTitle } from "@/lib/pageTitle"
 
 export const Route = createFileRoute("/review_/styles")({
   component: ReviewStylesPage,
+  head: () => ({ meta: [{ title: pageTitle("Review styles") }] }),
 })
 
 function ReviewStylesPage() {

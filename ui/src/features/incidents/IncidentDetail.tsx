@@ -15,7 +15,7 @@ import {
   RefreshCw,
   RotateCcw,
 } from "lucide-react"
-import { useRef, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import type { ReactNode } from "react"
 
 import { Badge } from "@/components/ui/badge"
@@ -34,6 +34,7 @@ import {
 } from "@/components/ui/empty"
 import { Spinner } from "@/components/ui/spinner"
 import { Textarea } from "@/components/ui/textarea"
+import { pageTitle } from "@/lib/pageTitle"
 import { incidentsApi } from "./api"
 import { IncidentDocuments } from "./IncidentDocuments"
 import type { IncidentAction } from "./api"
@@ -106,6 +107,11 @@ export function IncidentDetail({ incidentId }: { incidentId: string }) {
     refetchInterval: 5000,
     retry: false,
   })
+  const incidentTitle = detail.data?.incident.title
+  const documentTitle = pageTitle(incidentTitle ?? "Incident")
+  useEffect(() => {
+    document.title = documentTitle
+  }, [documentTitle])
   const command = useMutation({
     mutationFn: ({
       action,
