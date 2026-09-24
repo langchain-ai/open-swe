@@ -238,7 +238,6 @@ async def test_second_worker_resolves_token_identity_without_calling_github(
     )
     first = await resolve_triggering_user_identity({"configurable": {}}, _USER_TOKEN)
 
-    ttl_cache.clear()  # a second worker starts with an empty in-process cache
     second = await resolve_triggering_user_identity({"configurable": {}}, _USER_TOKEN)
 
     assert first is not None
@@ -264,7 +263,6 @@ async def test_token_never_reaches_the_store_or_logs(
         raise RuntimeError("store unavailable")
 
     monkeypatch.setattr(fake_store, "get_item", unavailable)
-    ttl_cache.clear()
     with caplog.at_level(logging.DEBUG):
         assert await resolve_triggering_user_identity({"configurable": {}}, _USER_TOKEN)
 
@@ -300,17 +298,14 @@ async def test_token_lookup_without_identity_is_not_cached(
     assert retried.github_profile  # GitHub was asked again, not a cached miss
 
 
-@pytest.mark.parametrize("worker", ["same", "new"])
 async def test_revoked_token_falls_back_to_the_config_identity_once_its_cache_is_stale(
     fake_store: FakeStore,
     github_client: _FakeAsyncClient,
     installation_token: None,
     monkeypatch: pytest.MonkeyPatch,
-    worker: str,
 ) -> None:
     clock = {"now": 1_000.0}
     monkeypatch.setattr(shared_cache, "_now", lambda: clock["now"])
-    monkeypatch.setattr(ttl_cache, "_now", lambda: clock["now"])
     github_client._responses.extend(
         [
             _FakeResponse(200, _GITHUB_USER),
@@ -324,8 +319,6 @@ async def test_revoked_token_falls_back_to_the_config_identity_once_its_cache_is
     assert cached.github_profile
 
     clock["now"] += authorship._GITHUB_IDENTITY_TTL_SECONDS
-    if worker == "new":
-        ttl_cache.clear()
     identity = await resolve_triggering_user_identity(config, _USER_TOKEN)
 
     assert identity is not None

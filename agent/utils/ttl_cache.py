@@ -26,13 +26,7 @@ def _lock_for(key: str) -> asyncio.Lock:
     return lock
 
 
-async def cached[T](
-    key: str,
-    ttl_seconds: float,
-    loader: Callable[[], Awaitable[T]],
-    *,
-    serve_stale_on_error: bool = True,
-) -> T:
+async def cached[T](key: str, ttl_seconds: float, loader: Callable[[], Awaitable[T]]) -> T:
     now = _now()
     entry = _CACHE.get(key)
     if entry is not None:
@@ -53,7 +47,7 @@ async def cached[T](
         try:
             value = await loader()
         except Exception:
-            if has_stale and serve_stale_on_error:
+            if has_stale:
                 logger.warning(
                     "TTL cache loader failed for %s; serving stale value", key, exc_info=True
                 )

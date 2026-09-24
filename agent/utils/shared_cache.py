@@ -1,16 +1,14 @@
 """Share cached values across queue workers through the LangGraph Store.
 
-:func:`agent.utils.ttl_cache.cached` sits in front so a worker that already
-computed a value skips the Store entirely; behind it, the Store lets a worker
-with a cold in-process cache reuse a value another worker already computed.
-Values are opaque to the Store, so callers round-trip them through their own
-``dump``/``load``.
+Turns rarely land on the same queue worker twice, so a per-worker cache is
+usually cold; every read goes to the Store instead, where any worker's value is
+visible. Values are opaque to the Store, so callers round-trip them through
+their own ``dump``/``load``.
 
 With ``serve_stale``, an item older than ``ttl_seconds`` is still served while
-one background refresh replaces it in both the Store and this worker's front
-cache; one older than ``max_stale_seconds`` is a miss, so the caller waits for
-the loader, and the Store deletes it. Without it, a stale item is a miss and a
-failing loader raises instead of serving the old value, for values that must
+one background refresh replaces it; one older than ``max_stale_seconds`` is a
+miss, so the caller waits for the loader, and the Store deletes it. Without it,
+a stale item is a miss and the Store deletes it once stale, for values that must
 not outlive the check that produced them.
 
 This sits on the agent's critical path. A Store read that fails or stalls, or
@@ -28,7 +26,6 @@ import time
 from collections.abc import Awaitable, Callable, Sequence
 
 from agent.store import get_value, put_value
-from agent.utils import ttl_cache
 
 logger = logging.getLogger(__name__)
 
@@ -53,10 +50,6 @@ def clear() -> None:
     _REFRESH_TASKS.clear()
 
 
-def _front_key(namespace: Sequence[str], key: str) -> str:
-    return "shared:" + json.dumps([*namespace, key])
-
-
 async def cached[T](
     namespace: Sequence[str],
     key: str,
@@ -69,10 +62,8 @@ async def cached[T](
     serve_stale: bool = True,
 ) -> T:
     item_key = hashlib.sha256(key.encode()).hexdigest()
-    front_key = _front_key(namespace, key)
     log_extra = {"namespace": list(namespace), "key": key}
     usable_seconds = max_stale_seconds if serve_stale else ttl_seconds
-    fresh_for: float | None = None
 
     async def _write(value: T) -> None:
         try:
@@ -94,13 +85,10 @@ async def cached[T](
         except Exception:
             logger.warning("Shared cache background refresh failed", exc_info=True, extra=log_extra)
             return
-        # The stale read that started this refresh left the old value in the
-        # front cache for a full ttl; replace it now that the new one is known.
-        ttl_cache.set_cached(front_key, value, ttl_seconds)
         await _write(value)
 
     def _schedule_refresh() -> None:
-        task_key = (front_key, id(asyncio.get_running_loop()))
+        task_key = (json.dumps([*namespace, key]), id(asyncio.get_running_loop()))
         existing = _REFRESH_TASKS.get(task_key)
         if existing is not None and not existing.done():
             return
@@ -108,46 +96,35 @@ async def cached[T](
         _REFRESH_TASKS[task_key] = task
         task.add_done_callback(lambda _task: _REFRESH_TASKS.pop(task_key, None))
 
-    async def _resolve() -> T:
-        nonlocal fresh_for
+    try:
+        async with asyncio.timeout(_STORE_TIMEOUT_SECONDS):
+            item = await get_value(namespace, item_key)
+    except Exception:
+        # On the critical path: a Store outage falls back to the loader.
+        logger.warning("Shared cache store read failed", exc_info=True, extra=log_extra)
+        item = None
+
+    if item is not None:
         try:
-            async with asyncio.timeout(_STORE_TIMEOUT_SECONDS):
-                item = await get_value(namespace, item_key)
-        except Exception:
-            # On the critical path: a Store outage falls back to the loader.
-            logger.warning("Shared cache store read failed", exc_info=True, extra=log_extra)
-            item = None
+            value = load(item["value"])
+            age = _now() - item["stored_at"]
+        except Exception as exc:
+            # On the critical path: an item this version cannot decode must not
+            # break callers; recompute and overwrite it instead. Only the error's
+            # type is logged: a validation error echoes the stored value, which
+            # can hold personal data such as an email.
+            logger.warning(
+                "Shared cache store item is not decodable",
+                extra={**log_extra, "error_type": type(exc).__name__},
+            )
+        else:
+            if age < ttl_seconds:
+                return value
+            if age < usable_seconds:
+                _schedule_refresh()
+                return value
+            # Too old to serve: treat it as a miss.
 
-        if item is not None:
-            try:
-                value = load(item["value"])
-                age = _now() - item["stored_at"]
-            except Exception as exc:
-                # On the critical path: an item this version cannot decode must
-                # not break callers; recompute and overwrite it instead. Only the
-                # error's type is logged: a validation error echoes the stored
-                # value, which can hold personal data such as an email.
-                logger.warning(
-                    "Shared cache store item is not decodable",
-                    extra={**log_extra, "error_type": type(exc).__name__},
-                )
-            else:
-                if age < ttl_seconds:
-                    fresh_for = ttl_seconds - age
-                    return value
-                if age < usable_seconds:
-                    _schedule_refresh()
-                    return value
-                # Too old to serve even while refreshing: treat it as a miss.
-
-        value = await loader()
-        await _write(value)
-        return value
-
-    value = await ttl_cache.cached(
-        front_key, ttl_seconds, _resolve, serve_stale_on_error=serve_stale
-    )
-    if fresh_for is not None:
-        # A Store hit is only as fresh as the item it came from.
-        ttl_cache.set_cached(front_key, value, fresh_for)
+    value = await loader()
+    await _write(value)
     return value

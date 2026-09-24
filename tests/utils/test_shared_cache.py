@@ -9,7 +9,7 @@ from typing import NoReturn
 import pytest
 from pydantic import TypeAdapter
 
-from agent.utils import shared_cache, ttl_cache
+from agent.utils import shared_cache
 from tests.conftest import FakeStore
 from tests.support.eventually import eventually
 
@@ -52,7 +52,7 @@ def _seed_stale_item(fake_store: FakeStore, monkeypatch: pytest.MonkeyPatch) -> 
 async def test_second_worker_reads_store_value_without_calling_loader(
     fake_store: FakeStore,
 ) -> None:
-    """A value one worker loads is visible to a worker with an empty in-process cache."""
+    """A value one worker loads is visible to every other worker."""
     calls = 0
 
     async def loader() -> dict[str, int]:
@@ -65,8 +65,6 @@ async def test_second_worker_reads_store_value_without_calling_loader(
     )
     assert first == {"n": 1}
     assert calls == 1
-
-    ttl_cache.clear()  # a second worker starts with its own, empty in-process cache
 
     async def unexpected_loader() -> dict[str, int]:
         raise AssertionError("loader must not run when the Store already has a fresh value")
@@ -215,7 +213,7 @@ async def test_first_call_after_a_completed_refresh_returns_the_new_value(
     await eventually(lambda: _stored(fake_store) == {"n": 2})
 
     async def unexpected_loader() -> dict[str, int]:
-        raise AssertionError("the refreshed value must already be on this worker")
+        raise AssertionError("the refreshed value must be read from the Store")
 
     assert await _cached(unexpected_loader) == {"n": 2}
 
@@ -275,14 +273,6 @@ async def _unstale(
     )
 
 
-def _shared_clock(monkeypatch: pytest.MonkeyPatch) -> dict[str, float]:
-    """One clock for both the Store items' ages and the in-process cache's expiry."""
-    clock = {"now": 1_000.0}
-    monkeypatch.setattr(shared_cache, "_now", lambda: clock["now"])
-    monkeypatch.setattr(ttl_cache, "_now", lambda: clock["now"])
-    return clock
-
-
 async def test_without_serve_stale_the_caller_waits_for_a_stale_item(
     fake_store: FakeStore, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -295,19 +285,17 @@ async def test_without_serve_stale_the_caller_waits_for_a_stale_item(
     assert _stored(fake_store) == {"n": 2}
 
 
-@pytest.mark.parametrize("worker", ["same", "new"])
 async def test_without_serve_stale_a_failing_loader_never_serves_the_old_value(
-    fake_store: FakeStore, monkeypatch: pytest.MonkeyPatch, worker: str
+    fake_store: FakeStore, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    clock = _shared_clock(monkeypatch)
+    clock = {"now": 1_000.0}
+    monkeypatch.setattr(shared_cache, "_now", lambda: clock["now"])
 
     async def loader() -> dict[str, int]:
         return {"n": 1}
 
     assert await _unstale(loader) == {"n": 1}
-    clock["now"] += 60.0  # stale both in this worker's cache and in the Store
-    if worker == "new":
-        ttl_cache.clear()
+    clock["now"] += 60.0
     failure = RuntimeError("upstream rejected the credentials")
 
     async def failing_loader() -> dict[str, int]:
@@ -327,25 +315,6 @@ async def test_without_serve_stale_the_store_deletes_an_item_once_stale(
     await _unstale(loader, ttl_seconds=600.0)
 
     assert fake_store.ttl_minutes(_NAMESPACE, _ITEM_KEY) == 10
-
-
-async def test_store_hit_is_kept_in_process_only_until_it_goes_stale(
-    fake_store: FakeStore, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    clock = _shared_clock(monkeypatch)
-    fake_store.seed(_NAMESPACE, _ITEM_KEY, {"stored_at": 1_000.0, "value": {"n": 1}})
-    clock["now"] = 1_050.0  # fresh for another 10s of its 60s ttl
-
-    async def unexpected_loader() -> dict[str, int]:
-        raise AssertionError("a fresh Store item must be served")
-
-    assert await _unstale(unexpected_loader) == {"n": 1}
-    clock["now"] = 1_061.0
-
-    async def loader() -> dict[str, int]:
-        return {"n": 2}
-
-    assert await _unstale(loader) == {"n": 2}
 
 
 async def test_undecodable_item_falls_back_to_the_loader_without_logging_its_contents(
@@ -390,7 +359,6 @@ async def test_stale_reads_share_one_background_refresh(
         return {"n": 2}
 
     assert await _cached(held_loader) == {"n": 1}
-    ttl_cache.clear()  # this worker's copy expires while that refresh is still running
     assert await _cached(held_loader) == {"n": 1}
     # Both reads finished before either refresh could start, so this sees every one.
     await eventually(lambda: calls > 0)

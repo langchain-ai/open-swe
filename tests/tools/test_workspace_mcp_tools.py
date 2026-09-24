@@ -10,7 +10,7 @@ from agent.mcp import MCPConnectionUpdate, runtime
 from agent.mcp import workspace as settings
 from agent.middleware.dynamic_tools import DynamicToolMiddleware
 from agent.tool_loaders import workspace_mcp as loader
-from agent.utils import shared_cache, ttl_cache
+from agent.utils import shared_cache
 from tests.support.eventually import eventually
 
 
@@ -177,8 +177,6 @@ async def test_expired_catalog_failure_does_not_log_upstream_details(
 ):
     await save(allowed_tools=["search"])
     now = 0
-    # Both the worker's copy and the Store's must age out for the refresh to run.
-    monkeypatch.setattr(ttl_cache, "_now", lambda: now)
     monkeypatch.setattr(shared_cache, "_now", lambda: now)
     discover = AsyncMock(
         side_effect=[
