@@ -1,6 +1,6 @@
-# open-swe CLI
+# oswe CLI
 
-`open-swe` starts a normal cloud Open SWE agent on a remote deployment and makes
+`oswe` starts a normal cloud Open SWE agent on a remote deployment and makes
 the current directory on the machine running it that agent's sandbox. The remote agent's
 shell commands, file uploads and file downloads all execute here.
 
@@ -13,7 +13,7 @@ sandbox requests, runs them locally, and posts the results back.
 ## Build
 
 ```sh
-make cli            # -> cli/dist/open-swe
+make cli            # -> cli/dist/oswe
 ```
 
 Requires [Bun](https://bun.com/docs/installation). The binary embeds its own
@@ -21,7 +21,7 @@ runtime, so the machine that runs it needs neither Bun nor Node. Copy it
 anywhere on your `PATH`:
 
 ```sh
-cp cli/dist/open-swe /usr/local/bin/
+cp cli/dist/oswe /usr/local/bin/
 ```
 
 ## Authenticate
@@ -33,7 +33,7 @@ The CLI uses the first credential it finds:
    job's own OIDC token, requested with the backend URL as its audience
    (override with `OPEN_SWE_OIDC_AUDIENCE`). An admin must first let the
    repository start threads in its workspace's settings.
-3. **A person's session** — `OPEN_SWE_SESSION`, or the one `open-swe login`
+3. **A person's session** — `OPEN_SWE_SESSION`, or the one `oswe login`
    stored.
 
 An API key and a workflow are machines: their threads are always `system`
@@ -43,14 +43,14 @@ private` is passed.
 ### Sign in as a person
 
 ```sh
-open-swe login --backend https://dev.open-swe.langchain.dev
+oswe login --backend https://dev.open-swe.langchain.dev
 ```
 
 This is the desktop app's sign-in: your browser opens the GitHub login the
 dashboard uses, a loopback port catches the handoff, and PKCE S256 exchanges it
 for the same session the desktop app stores. Requests then carry it as the
 dashboard's own `osw_session` cookie. The session and backend URL live in
-`~/.open-swe/config.json` (mode 0600), and `open-swe logout` deletes the file.
+`~/.open-swe/config.json` (mode 0600), and `oswe logout` deletes the file.
 
 ### Run in GitHub Actions
 
@@ -60,7 +60,7 @@ permissions:
   id-token: write
 steps:
   - uses: actions/checkout@v4
-  - run: open-swe run "is the test suite green?"
+  - run: oswe run "is the test suite green?"
     env:
       OPEN_SWE_BACKEND_URL: https://open-swe.example.com
 ```
@@ -85,7 +85,7 @@ The binary never reads a `.env`. It is compiled with
 
 ```sh
 cd ~/code/my-project
-open-swe run "add retries to the upload path"
+oswe run "add retries to the upload path"
 ```
 
 What happens:
@@ -104,8 +104,8 @@ What happens:
 So a run composes like any other command:
 
 ```sh
-open-swe run "is the test suite green?" && echo passing
-git diff | open-swe run > review.txt
+oswe run "is the test suite green?" && echo passing
+git diff | oswe run > review.txt
 ```
 
 A run that fails, or ends without calling `cli_result`, prints the reason to

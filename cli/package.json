@@ -5,7 +5,7 @@
   "description": "Open SWE command-line client: runs a cloud agent against a local checkout",
   "type": "module",
   "scripts": {
-    "build": "bun build --compile --minify --no-compile-autoload-dotenv src/main.ts --outfile dist/open-swe",
+    "build": "bun build --compile --minify --no-compile-autoload-dotenv src/main.ts --outfile dist/oswe",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "bun test",
     "check": "bun run typecheck && bun run test"

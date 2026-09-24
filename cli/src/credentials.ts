@@ -25,7 +25,7 @@ export interface Credential {
  */
 export class SessionCredential implements Credential {
   readonly machine = false
-  readonly rejected = "your session expired — run `open-swe login` again"
+  readonly rejected = "your session expired — run `oswe login` again"
 
   constructor(private readonly session: string) {}
 

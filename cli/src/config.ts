@@ -130,7 +130,7 @@ export async function readBackend(): Promise<string> {
  *
  * A session has no desktop fallback: the app keeps it in an encrypted cookie
  * store no other process can read, so it comes from `OPEN_SWE_SESSION` or from
- * `open-swe login`.
+ * `oswe login`.
  */
 export async function readConfig(): Promise<RunConfig | null> {
   const backend = normalizeBackend(await readBackend())

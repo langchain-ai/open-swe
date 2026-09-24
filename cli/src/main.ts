@@ -23,13 +23,13 @@ import {
   type RunOutcome,
 } from "./stream.ts"
 
-const USAGE = `open-swe — run a cloud Open SWE agent against this directory
+const USAGE = `oswe — run a cloud Open SWE agent against this directory
 
 Usage:
-  open-swe login [--backend <url>]      Sign in and store the session
-  open-swe logout                       Forget the stored session
-  open-swe run [options] [prompt...]    Start an agent bridged to this directory
-  open-swe --help | --version
+  oswe login [--backend <url>]      Sign in and store the session
+  oswe logout                       Forget the stored session
+  oswe run [options] [prompt...]    Start an agent bridged to this directory
+  oswe --help | --version
 
 Run options:
   --thread <id>    Continue an existing thread
@@ -58,7 +58,7 @@ function note(text: string): void {
 }
 
 function fail(text: string): void {
-  process.stderr.write(`open-swe: ${text}\n`)
+  process.stderr.write(`oswe: ${text}\n`)
 }
 
 async function readStdin(): Promise<string> {
@@ -120,7 +120,7 @@ async function runCommand(options: RunOptions): Promise<number> {
   }
   const config = await readConfig()
   if (config === null) {
-    fail("not signed in — run `open-swe login`, or set OPEN_SWE_API_KEY")
+    fail("not signed in — run `oswe login`, or set OPEN_SWE_API_KEY")
     return 1
   }
   const { credential } = config
@@ -157,7 +157,7 @@ async function runCommand(options: RunOptions): Promise<number> {
     if (bound !== null && remembered !== null && bound !== remembered) {
       fail(
         `thread ${options.thread} is bridged to ${bound}, but ${root} is bridged to ${remembered}. ` +
-          "Run open-swe from the directory that started that thread."
+          "Run oswe from the directory that started that thread."
       )
       return 1
     }

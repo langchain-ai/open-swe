@@ -75,7 +75,7 @@ export function truncateOutput(bytes: Uint8Array): {
     bytes.subarray(bytes.byteLength - OUTPUT_KEEP_BYTES)
   )
   return {
-    output: `${head}\n[open-swe: omitted ${omitted} bytes of output]\n${tail}`,
+    output: `${head}\n[oswe: omitted ${omitted} bytes of output]\n${tail}`,
     truncated: true,
   }
 }
@@ -205,7 +205,7 @@ export class LocalExecutor {
     const { output, truncated } = truncateOutput(concatChunks(chunks))
     if (timedOut) {
       return {
-        output: `${output}\n[open-swe: command timed out after ${seconds}s]`,
+        output: `${output}\n[oswe: command timed out after ${seconds}s]`,
         exit_code: TIMEOUT_EXIT_CODE,
         truncated,
       }

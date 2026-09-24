@@ -38,7 +38,7 @@ const SIGNED_IN_PAGE = page(
 )
 const FAILED_PAGE = page(
   "Sign-in failed",
-  "Open SWE did not receive a sign-in code. Try `open-swe login` again."
+  "Open SWE did not receive a sign-in code. Try `oswe login` again."
 )
 
 function openBrowser(url: string): void {
@@ -52,7 +52,7 @@ function openBrowser(url: string): void {
     Bun.spawn(command, { stdout: "ignore", stderr: "ignore" }).unref()
   } catch (cause) {
     process.stderr.write(
-      `open-swe: could not open a browser (${errorMessage(cause)}). Open the URL above manually.\n`
+      `oswe: could not open a browser (${errorMessage(cause)}). Open the URL above manually.\n`
     )
   }
 }

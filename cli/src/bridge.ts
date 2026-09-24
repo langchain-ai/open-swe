@@ -112,7 +112,7 @@ export class Bridge {
     } catch (cause) {
       if (!(cause instanceof ApiError) || cause.status !== 404) {
         process.stderr.write(
-          `open-swe: could not release the bridge: ${errorMessage(cause)}\n`
+          `oswe: could not release the bridge: ${errorMessage(cause)}\n`
         )
       }
     }
@@ -131,7 +131,7 @@ export class Bridge {
         ...this.input,
         bridgeId: this.session.bridgeId,
       })
-      process.stderr.write("open-swe: bridge reconnected\n")
+      process.stderr.write("oswe: bridge reconnected\n")
     } catch (cause) {
       if (cause instanceof ApiError && cause.status === 401) {
         this.fail(new CredentialRejectedError(this.api.credential.rejected))
@@ -142,7 +142,7 @@ export class Bridge {
         return
       }
       process.stderr.write(
-        `open-swe: could not reopen the bridge: ${errorMessage(cause)}\n`
+        `oswe: could not reopen the bridge: ${errorMessage(cause)}\n`
       )
     }
   }
@@ -164,9 +164,7 @@ export class Bridge {
         await this.reopen()
         return
       }
-      process.stderr.write(
-        `open-swe: heartbeat failed: ${errorMessage(cause)}\n`
-      )
+      process.stderr.write(`oswe: heartbeat failed: ${errorMessage(cause)}\n`)
     }
   }
 
@@ -242,7 +240,7 @@ export class Bridge {
         if (cause instanceof ApiError && cause.status === 404) return
         if (attempt === REPLY_ATTEMPTS || !this.running) {
           process.stderr.write(
-            `open-swe: dropped the result for ${request.method}: ${errorMessage(cause)}\n`
+            `oswe: dropped the result for ${request.method}: ${errorMessage(cause)}\n`
           )
           return
         }

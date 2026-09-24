@@ -72,13 +72,13 @@ install-checkout:
 install:
 	uv sync --extra dev
 
-# Single-file `open-swe` binary. Bun compiles its own runtime into the output,
+# Single-file `oswe` binary. Bun compiles its own runtime into the output,
 # so the result runs on any machine without Node or Bun installed.
 cli:
 	@command -v bun >/dev/null 2>&1 || { echo 'bun is required: https://bun.com/docs/installation' >&2; exit 1; }
 	pnpm install --frozen-lockfile --filter open-swe-cli --filter open-swe
 	pnpm --filter open-swe-cli run build
-	@echo "Built $(CURDIR)/cli/dist/open-swe"
+	@echo "Built $(CURDIR)/cli/dist/oswe"
 
 ######################
 # TESTING
@@ -138,7 +138,7 @@ help:
 	@echo 'install-desktop              - install or update Open SWE Desktop on macOS'
 	@echo 'install-checkout             - install the current checkout of Open SWE Desktop on macOS'
 	@echo 'install                      - install dependencies (incl. dev extras)'
-	@echo 'cli                          - build the open-swe CLI binary into cli/dist/open-swe'
+	@echo 'cli                          - build the oswe CLI binary into cli/dist/oswe'
 	@echo 'format                       - run code formatters'
 	@echo 'lint                         - run linters'
 	@echo 'typecheck                    - run ty on agent/ and tests/'
