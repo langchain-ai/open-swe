@@ -48,6 +48,7 @@ from langchain.agents.middleware.types import AgentMiddleware, ToolCallRequest
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import HumanMessage, ToolMessage
 from langgraph.types import Command
+from langsmith.sandbox import SandboxRetryableConnectionError
 
 
 class _DisableInheritedMiddleware(AgentMiddleware):
@@ -148,6 +149,7 @@ from agent.sandboxes.lifecycle import (
 from agent.sandboxes.paths import resolve_sandbox_work_dir
 from agent.sandboxes.providers.langsmith import service_identity_jwks_url
 from agent.sandboxes.read_only_backend import ReadOnlyBackend
+from agent.sandboxes.retry import SANDBOX_ATTACH_MAX_ELAPSED, retry_transient_sandbox_errors
 from agent.sandboxes.state import (
     SandboxUnreachableError,
     get_or_create_sandbox_backend_proxy,
@@ -899,7 +901,21 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
                     model=self._title_model,
                 )
             async with aphase(self._thread_id, "prepare.await_sandbox"):
-                sandbox_backend = await get_or_create_sandbox_backend_proxy(self._thread_id).ready()
+                try:
+                    sandbox_proxy = get_or_create_sandbox_backend_proxy(self._thread_id)
+                    sandbox_backend = await retry_transient_sandbox_errors(
+                        sandbox_proxy.ready,
+                        description="Sandbox attach",
+                        max_elapsed=SANDBOX_ATTACH_MAX_ELAPSED,
+                    )
+                except (SandboxUnreachableError, SandboxRetryableConnectionError) as exc:
+                    await post_sandbox_unreachable_notification(
+                        self._config or {},
+                        sandbox_id=exc.sandbox_id
+                        if isinstance(exc, SandboxUnreachableError)
+                        else None,
+                    )
+                    raise
             async with aphase(self._thread_id, "prepare.work_dir"):
                 work_dir = await resolve_sandbox_work_dir(sandbox_backend)
             return {
@@ -916,8 +932,13 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
         triggering_user_identity_task = asyncio.create_task(
             resolve_triggering_user_identity(as_json_object(self._config), github_token)
         )
+        sandbox_proxy = get_or_create_sandbox_backend_proxy(self._thread_id)
         sandbox_task = asyncio.create_task(
-            get_or_create_sandbox_backend_proxy(self._thread_id).ready()
+            retry_transient_sandbox_errors(
+                sandbox_proxy.ready,
+                description="Sandbox attach",
+                max_elapsed=SANDBOX_ATTACH_MAX_ELAPSED,
+            )
         )
         try:
             async with aphase(self._thread_id, "prepare.await_sandbox"):
@@ -925,11 +946,12 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
                     triggering_user_identity_task,
                     sandbox_task,
                 )
-        except SandboxUnreachableError as exc:
+        except (SandboxUnreachableError, SandboxRetryableConnectionError) as exc:
             # The run is about to die with no sandbox; make sure the user hears
             # why rather than getting silence.
             await post_sandbox_unreachable_notification(
-                self._config or {}, sandbox_id=exc.sandbox_id
+                self._config or {},
+                sandbox_id=exc.sandbox_id if isinstance(exc, SandboxUnreachableError) else None,
             )
             raise
         del github_token
