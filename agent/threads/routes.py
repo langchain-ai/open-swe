@@ -13,7 +13,7 @@ from agent.config import ENV
 from agent.dashboard.deps import ADMIN_DEP, SESSION_DEP, session_is_admin
 from agent.dashboard.user_preferences import get_user_preferences
 from agent.github.pull_request_checks import PullRequestState
-from agent.threads import terminal
+from agent.threads import editor, terminal
 from agent.threads.diffs import (
     get_dashboard_thread_branch_diff,
     get_dashboard_thread_recovery_patch,
@@ -257,6 +257,7 @@ async def api_get_thread(
 
 
 router.include_router(terminal.router)
+router.include_router(editor.router)
 
 
 @router.get("/threads/{thread_id}/recovery.patch")

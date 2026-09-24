@@ -106,6 +106,11 @@ export interface CloudTerminalConnection {
   ticket: string
 }
 
+export interface EditorConnection {
+  url: string
+  port: string
+}
+
 export type ThreadScope = "all" | "interactive" | "automation"
 export type ThreadSortBy = "created_at" | "updated_at"
 
@@ -431,6 +436,11 @@ export const agentsApi = {
   connectCloudTerminal: (threadId: string) =>
     agentsRequest<CloudTerminalConnection>(
       `/threads/${encodeURIComponent(threadId)}/terminal/connect`,
+      { method: "POST" }
+    ),
+  connectEditor: (threadId: string) =>
+    agentsRequest<EditorConnection>(
+      `/threads/${encodeURIComponent(threadId)}/editor/connect`,
       { method: "POST" }
     ),
 }

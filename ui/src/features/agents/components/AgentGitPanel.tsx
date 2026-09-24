@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react"
-import { DownloadIcon } from "lucide-react"
+import { CodeIcon, DownloadIcon } from "lucide-react"
 
 import type { AgentThread } from "@/features/agents/lib/types"
 import { agentsApi } from "@/features/agents/lib/api"
@@ -113,7 +113,23 @@ export function AgentGitPanel({
 
   const [recoveringPatch, setRecoveringPatch] = useState(false)
   const [recoveryError, setRecoveryError] = useState<string | null>(null)
+  const [openingEditor, setOpeningEditor] = useState(false)
+  const [editorError, setEditorError] = useState<string | null>(null)
   const canDownloadRecovery = thread.status !== "running"
+  const openEditor = useCallback(async () => {
+    setOpeningEditor(true)
+    setEditorError(null)
+    try {
+      const { url } = await agentsApi.connectEditor(thread.id)
+      window.open(url, "_blank", "noopener")
+    } catch (error) {
+      setEditorError(
+        error instanceof Error ? error.message : "Failed to open editor"
+      )
+    } finally {
+      setOpeningEditor(false)
+    }
+  }, [thread.id])
   const downloadRecoveryPatch = useCallback(async () => {
     setRecoveringPatch(true)
     setRecoveryError(null)
@@ -165,18 +181,32 @@ export function AgentGitPanel({
           branchScopeAvailable={branchScopeAvailable}
           onScopeChange={(next) => selectScope(threadRef, next)}
           extraActions={
-            canDownloadRecovery ? (
-              <button
-                type="button"
-                aria-label="Download recovery patch"
-                title={recoveryError ?? "Download recovery patch"}
-                disabled={recoveringPatch}
-                onClick={() => void downloadRecoveryPatch()}
-                className="flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-50"
-              >
-                <DownloadIcon className="size-3.5" />
-              </button>
-            ) : undefined
+            <div className="flex items-center">
+              {terminalAvailable ? (
+                <button
+                  type="button"
+                  aria-label="Open in VS Code"
+                  title={editorError ?? "Open in VS Code"}
+                  disabled={openingEditor}
+                  onClick={() => void openEditor()}
+                  className="flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-50"
+                >
+                  <CodeIcon className="size-3.5" />
+                </button>
+              ) : null}
+              {canDownloadRecovery ? (
+                <button
+                  type="button"
+                  aria-label="Download recovery patch"
+                  title={recoveryError ?? "Download recovery patch"}
+                  disabled={recoveringPatch}
+                  onClick={() => void downloadRecoveryPatch()}
+                  className="flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-50"
+                >
+                  <DownloadIcon className="size-3.5" />
+                </button>
+              ) : null}
+            </div>
           }
         />
       )}
