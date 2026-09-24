@@ -83,7 +83,7 @@ import type { DiffStyle } from "@/features/agents/utils/diffUtils"
 import { Markdown } from "@/features/agents/components/chat/Markdown"
 import { DiffWrapToggle } from "@/features/agents/components/DiffWrapToggle"
 import { agentThreadKeys } from "@/features/agents/lib/queries"
-import { AuthorGuidanceCard } from "@/features/reviews/components/AuthorGuidanceCard"
+import { HumanInputCard } from "@/features/reviews/components/HumanInputCard"
 import { PrHeader } from "@/features/reviews/components/PrHeader"
 import { ReviewAssessmentCard } from "@/features/reviews/components/ReviewAssessmentCard"
 import {
@@ -1556,7 +1556,10 @@ function ReviewBodyInner({
                     </p>
                   )}
                 </div>
-                <AuthorGuidanceCard points={detail.guidance} className="mt-4" />
+                <HumanInputCard
+                  summary={detail.walkthrough?.human_input ?? ""}
+                  className="mt-4"
+                />
                 {!embedded && (
                   <section className="mt-6" aria-label="Conversation">
                     <h2 className="mb-2 text-sm font-medium">Conversation</h2>

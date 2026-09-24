@@ -62,7 +62,6 @@ from agent.middleware import (
 from agent.middleware.prepare_run import PrepareRunState
 from agent.middleware.sandbox_circuit_breaker import post_sandbox_unreachable_notification
 from agent.prompts import apply_tool_descriptions, load_prompt, render_prompt
-from agent.review.author_guidance import GuidanceView
 from agent.review.diff import (
     changed_files,
     compute_diff_line_set,
@@ -296,16 +295,11 @@ def _format_pr_overview(pr_title: str, pr_body: str) -> str:
     return render_prompt("reviewer/pr-overview.md", title=safe_title, body=safe_body)
 
 
-def _format_author_guidance(points: list[GuidanceView]) -> str:
-    """Render the steering points the review scout recorded, or ``""`` without any."""
-    if not points:
+def _format_human_input(walkthrough: WalkthroughView | None) -> str:
+    """Render the scout's summary of what people asked for, or ``""`` without one."""
+    if walkthrough is None or not walkthrough.human_input:
         return ""
-    lines: list[str] = []
-    for point in points:
-        author = f" ({point.author})" if point.author else ""
-        quote = "\n".join(f"  > {line}" for line in point.quote.splitlines())
-        lines.append(f"- {point.summary}{author}\n{quote}")
-    return render_prompt("reviewer/author-guidance.md", points="\n".join(lines))
+    return render_prompt("reviewer/human-input.md", summary=walkthrough.human_input)
 
 
 def _format_line_ranges(prefix: str, ranges: list[tuple[int, int]]) -> list[str]:
@@ -846,24 +840,6 @@ class PrepareReviewerRunMiddleware(BasePrepareRunMiddleware):
                 )
                 return None
 
-        async def _fetch_author_guidance_block() -> str:
-            if reviewer_eval or not repo_owner or not repo_name or not isinstance(pr_number, int):
-                return ""
-            # The scout records the steering points; wait for it like the walkthrough.
-            await walkthrough_task
-            try:
-                points = await GuidanceView.for_head(repo_owner, repo_name, pr_number, head_sha)
-            except Exception:
-                logger.exception(
-                    "Failed to load author guidance; continuing without it",
-                    extra={
-                        "pr_repo_full_name": f"{repo_owner}/{repo_name}",
-                        "pr_number": pr_number,
-                    },
-                )
-                return ""
-            return _format_author_guidance(points)
-
         async def _fetch_repo_style_prompt() -> str | None:
             if not repo_owner or not repo_name:
                 return None
@@ -889,7 +865,6 @@ class PrepareReviewerRunMiddleware(BasePrepareRunMiddleware):
         pr_overview_task = asyncio.create_task(_fetch_pr_overview())
         walkthrough_task = asyncio.create_task(_await_walkthrough())
         existing_threads_task = asyncio.create_task(_fetch_existing_threads_block())
-        author_guidance_task = asyncio.create_task(_fetch_author_guidance_block())
         repo_style_task = asyncio.create_task(_fetch_repo_style_prompt())
         agents_md_task = asyncio.create_task(_fetch_agents_md_context())
         org_guidelines_task = asyncio.create_task(_cached_org_guidelines(cfg.workspace_slug))
@@ -912,7 +887,6 @@ class PrepareReviewerRunMiddleware(BasePrepareRunMiddleware):
         )
         pr_overview = await pr_overview_task
         existing_threads_block = await existing_threads_task
-        author_guidance_block = await author_guidance_task
         repo_style_prompt = await repo_style_task
         agents_md_content = await agents_md_task
         scoped_agents_md = await scoped_agents_md_task
@@ -982,11 +956,13 @@ class PrepareReviewerRunMiddleware(BasePrepareRunMiddleware):
         )
         if review_context:
             system_prompt = f"{system_prompt}\n\n{review_context}"
-        walkthrough_block = _format_walkthrough(await walkthrough_task)
+        walkthrough = await walkthrough_task
+        walkthrough_block = _format_walkthrough(walkthrough)
         if walkthrough_block:
             system_prompt = f"{system_prompt}\n\n{walkthrough_block}"
-        if author_guidance_block:
-            system_prompt = f"{system_prompt}\n\n{author_guidance_block}"
+        human_input_block = _format_human_input(walkthrough)
+        if human_input_block:
+            system_prompt = f"{system_prompt}\n\n{human_input_block}"
         if skill_sources:
             skill_middleware = SkillsMiddleware(backend=sandbox_backend, sources=skill_sources)
             skill_update = (

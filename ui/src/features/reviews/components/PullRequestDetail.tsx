@@ -21,7 +21,7 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { Tooltip, TooltipPopup, TooltipTrigger } from "@/components/ui/tooltip"
 import { TooltipIconButton } from "@/components/ui/tooltip-icon-button"
 import { Markdown } from "@/features/agents/components/chat/Markdown"
-import { GuidancePointList } from "./AuthorGuidanceCard"
+import { HumanInputText } from "./HumanInputCard"
 import { Button } from "@/components/ui/button"
 import { navLink } from "../PullRequestLinks"
 import { TextPopover } from "./TextPopover"
@@ -532,12 +532,9 @@ export function PullRequestDetail({
               )}
             </Section>
 
-            {data.guidance.length > 0 && (
-              <Section
-                heading="How the author steered this PR"
-                count={String(data.guidance.length)}
-              >
-                <GuidancePointList points={data.guidance} />
+            {data.human_input && (
+              <Section heading="Human input">
+                <HumanInputText summary={data.human_input} />
               </Section>
             )}
 

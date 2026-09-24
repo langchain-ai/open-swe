@@ -196,29 +196,25 @@ test.describe("review page", () => {
     expect(pillBox!.x + pillBox!.width).toBeLessThanOrEqual(titleBox!.x);
   });
 
-  test("renders author guidance between the description and the changes", async ({
+  test("renders human input between the description and the changes", async ({
     page,
   }) => {
-    const seeded = await page.request.post("/control/guidance", {
+    const seeded = await page.request.post("/control/walkthrough", {
       data: {
         repo: `${OWNER}/${REPO}`,
         number: pr.number,
-        points: [
-          {
-            summary: "Keep the constants in flat modules",
-            quote: "please don't nest these in a package",
-            author: "bob",
-          },
-        ],
+        human_input: "Asked to keep the constants in flat modules",
       },
     });
     expect(seeded.ok(), await seeded.text()).toBeTruthy();
 
     await openReview(page, pr);
     const guidance = page.getByRole("region", {
-      name: "How the author steered this PR",
+      name: "Human input",
     });
-    await expect(guidance).toContainText("Keep the constants in flat modules");
+    await expect(guidance).toContainText(
+      "Asked to keep the constants in flat modules",
+    );
 
     const description = await page.getByText(DESCRIPTION).boundingBox();
     const card = await guidance.boundingBox();
