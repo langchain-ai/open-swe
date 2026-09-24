@@ -1,3 +1,7 @@
+### Runtime reminder: missing Slack reply
+
+This is an automated reminder, not a new user request.
+
 Your last message went nowhere: a plain assistant message is invisible on this
 thread's surface, and `$reply_tool` is the only way your words reach the person
 who asked. An earlier progress reply does not count — they are still waiting on

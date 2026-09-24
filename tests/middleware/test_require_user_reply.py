@@ -1,14 +1,20 @@
+from collections.abc import Awaitable, Callable
 from typing import Any, cast
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from langchain.agents import create_agent
+from langchain.agents.middleware import wrap_model_call
 from langchain.agents.middleware.types import AgentState, ModelRequest, ModelResponse
+from langchain_core.language_models.fake_chat_models import FakeListChatModel
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
+from langgraph.checkpoint.memory import InMemorySaver
 
 from agent.middleware.require_user_reply import (
     SLACK_REPLY_SURFACE,
     WEB_REPLY_SURFACE,
     RequireUserReplyMiddleware,
+    _turn_tail,
 )
 
 TOOL = "slack_reply"
@@ -172,33 +178,98 @@ class TestRequireUserReplyMiddleware:
         posted.assert_not_awaited()
 
     @pytest.mark.asyncio
-    async def test_only_a_pending_retry_carries_the_nudge_into_the_prompt(self) -> None:
-        middleware = _middleware()
-        seen: list[str] = []
+    @pytest.mark.parametrize("pending", [False, True])
+    @pytest.mark.parametrize(
+        "system",
+        [
+            None,
+            SystemMessage(content="base prompt"),
+            SystemMessage(content=[{"type": "text", "text": "base prompt"}]),
+        ],
+    )
+    async def test_nudge_preserves_request_prefix_and_state(
+        self, pending: bool, system: SystemMessage | None
+    ) -> None:
+        state = _state(
+            HumanMessage(content="what is up"),
+            _reply("call-1", "progress"),
+            _result("call-1"),
+            AIMessage(content="all good"),
+            reply_nudge_pending=pending,
+        )
+        original = state["messages"].copy()
+        request = ModelRequest(
+            model=FakeListChatModel(responses=["unused"]),
+            messages=state["messages"],
+            system_message=system,
+            tools=[{"name": TOOL, "parameters": {"type": "object"}}],
+            state=state,
+        )
+        response = ModelResponse(result=[AIMessage(content="done")])
+        handler = AsyncMock(return_value=response)
 
-        async def handler(request: ModelRequest[None]) -> ModelResponse[Any]:
-            system = request.system_message
-            seen.append(str(system.content) if system else "")
-            return cast(ModelResponse[Any], MagicMock())
+        assert await _middleware().awrap_model_call(request, handler) is response
 
-        def request(*, pending: bool) -> ModelRequest[None]:
-            def override(**kwargs: Any) -> Any:
-                replaced = MagicMock()
-                replaced.system_message = kwargs["system_message"]
-                return replaced
+        outgoing = handler.await_args.args[0]
+        assert outgoing.system_message is system
+        assert outgoing.tools is request.tools
+        assert outgoing.messages[: len(original)] == original
+        assert request.messages == original
+        assert state["messages"] == original
+        assert _turn_tail(state["messages"]) == original[1:]
+        if pending:
+            assert len(outgoing.messages) == len(original) + 1
+            reminder = outgoing.messages[-1]
+            assert isinstance(reminder, HumanMessage)
+            assert TOOL in reminder.content
+            assert NO_REPLY_TOOL in reminder.content
+        else:
+            assert outgoing is request
 
-            built = MagicMock()
-            built.state = {"reply_nudge_pending": pending}
-            built.system_message = SystemMessage(content="base prompt")
-            built.override = override
-            return cast(ModelRequest[None], built)
+    @pytest.mark.asyncio
+    async def test_retries_do_not_persist_reminders_or_split_the_user_turn(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import agent.slack.tools.reply as reply_tool
 
-        await middleware.awrap_model_call(request(pending=False), handler)
-        await middleware.awrap_model_call(request(pending=True), handler)
+        posted = AsyncMock(return_value={"success": True})
+        monkeypatch.setattr(reply_tool, "slack_reply", posted)
+        seen: list[ModelRequest] = []
 
-        assert TOOL not in seen[0]
-        assert TOOL in seen[1]
-        assert NO_REPLY_TOOL in seen[1]
+        @wrap_model_call
+        async def capture(
+            request: ModelRequest,
+            handler: Callable[[ModelRequest], Awaitable[ModelResponse]],
+        ) -> ModelResponse:
+            seen.append(request)
+            return await handler(request)
+
+        graph = create_agent(
+            model=FakeListChatModel(responses=["first", "second", "third"]),
+            middleware=[_middleware(), capture],
+            checkpointer=InMemorySaver(),
+        )
+        config = {"configurable": {"thread_id": "reply-retries"}}
+        result = await graph.ainvoke({"messages": [HumanMessage(content="what is up")]}, config)
+
+        assert len(seen) == 3
+        assert len(seen[0].messages) == 1
+        for attempt, request in enumerate(seen[1:], start=1):
+            assert len(request.messages) == attempt + 2
+            assert isinstance(request.messages[-1], HumanMessage)
+            assert [m.content for m in request.messages[:-1]] == ["what is up", "first", "second"][
+                : attempt + 1
+            ]
+        assert [m.content for m in result["messages"]] == ["what is up", "first", "second", "third"]
+        assert [m.content for m in _turn_tail(result["messages"])] == ["first", "second", "third"]
+        async for snapshot in graph.aget_state_history(config):
+            assert [
+                m.content
+                for m in snapshot.values.get("messages", [])
+                if isinstance(m, HumanMessage)
+            ] in ([], ["what is up"])
+        posted.assert_awaited_once()
+        assert posted.await_args.args[:2] == ("third", "final")
 
     def test_each_run_resolves_its_own_surface(self) -> None:
         middleware = RequireUserReplyMiddleware(

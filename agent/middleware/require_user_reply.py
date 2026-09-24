@@ -12,7 +12,7 @@ from collections.abc import Awaitable, Callable, Mapping, Sequence
 from typing import Any, Literal, NotRequired
 
 from langchain.agents.middleware.types import AgentState, ModelRequest, ModelResponse, hook_config
-from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage, ToolMessage
+from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, ToolMessage
 from langgraph.runtime import Runtime
 
 from agent.middleware.message_content import content_to_text
@@ -58,19 +58,6 @@ def _reported_failure(message: ToolMessage) -> bool:
     except ValueError:
         return False
     return isinstance(payload, dict) and payload.get("success") is False
-
-
-def _nudged_content(message: BaseMessage | None, instruction: str) -> str | list[Any]:
-    if message is None:
-        return instruction
-    content = message.content
-    if isinstance(content, list):
-        if any(instruction in content_to_text(block) for block in content):
-            return content
-        return [*content, {"type": "text", "text": instruction}]
-    if instruction in content:
-        return content
-    return f"{content}\n\n{instruction}" if content else instruction
 
 
 class RequireUserReplyMiddleware(OpenSWEMiddleware):
@@ -160,8 +147,9 @@ class RequireUserReplyMiddleware(OpenSWEMiddleware):
             "runs/missing-user-reply.md",
             {"reply_tool": self._tool_name, "no_reply_tool": self._no_reply_tool_name},
         )
-        content = _nudged_content(request.system_message, instruction)
-        return await handler(request.override(system_message=SystemMessage(content=content)))
+        return await handler(
+            request.override(messages=[*request.messages, HumanMessage(content=instruction)])
+        )
 
     @hook_config(can_jump_to=["model"])
     async def aafter_model(self, state: AgentState, runtime: Runtime) -> dict[str, Any] | None:  # noqa: ARG002
