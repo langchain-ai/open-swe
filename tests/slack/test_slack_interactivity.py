@@ -64,8 +64,8 @@ def _model_payload() -> dict[str, Any]:
                 "action_ts": "3.0",
                 "type": "static_select",
                 "selected_option": {
-                    "text": {"type": "plain_text", "text": "Sonnet 5"},
-                    "value": "anthropic:claude-sonnet-5",
+                    "text": {"type": "plain_text", "text": "Opus 5.5"},
+                    "value": "anthropic:claude-opus-5-5",
                 },
             }
         ],
@@ -106,13 +106,13 @@ async def test_model_selection_persists_for_slack_thread(
     threads.update.assert_awaited_once_with(
         thread_id="thread-1",
         metadata={
-            "model": "anthropic:claude-sonnet-5",
+            "model": "anthropic:claude-opus-5-5",
             "effort": "high",
             "model_selection": "explicit",
         },
     )
     ephemeral.assert_awaited_once_with(
-        "C1", "U1", "This thread will use Sonnet 5 (high) on its next turn.", thread_ts="1.0"
+        "C1", "U1", "This thread will use Opus 5.5 (high) on its next turn.", thread_ts="1.0"
     )
 
 

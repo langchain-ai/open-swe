@@ -48,8 +48,8 @@ async def test_progress_reply_includes_thread_model_selector(
     config = _config()
     config["configurable"].update(
         {
-            "agent_model_id": "anthropic:claude-sonnet-5",
-            "resolved_agent_model_id": "anthropic:claude-sonnet-5",
+            "agent_model_id": "anthropic:claude-opus-5-5",
+            "resolved_agent_model_id": "anthropic:claude-opus-5-5",
         }
     )
     monkeypatch.setattr(slack_reply_tool, "get_config", lambda: config)
@@ -60,7 +60,7 @@ async def test_progress_reply_includes_thread_model_selector(
     selector = blocks[-1]["elements"][0]
     assert selector["type"] == "static_select"
     assert selector["action_id"] == "open_swe_model_select"
-    assert selector["initial_option"]["value"] == "anthropic:claude-sonnet-5"
+    assert selector["initial_option"]["value"] == "anthropic:claude-opus-5-5"
 
 
 @pytest.mark.parametrize(
