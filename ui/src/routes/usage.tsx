@@ -14,7 +14,7 @@ import {
   ChevronDown,
   ChevronRight,
 } from "lucide-react"
-import { useState } from "react"
+import { Fragment, useState } from "react"
 
 import type {
   AnalyticsMetadata,
@@ -72,6 +72,7 @@ interface SortableColumn<Key extends string> {
 type UsageScope = "invocations" | "threads"
 type MergeRateView = "observed" | "lower_bound"
 type PROutcomesSort =
+  | "model"
   | "prs_opened"
   | "merged"
   | "closed_without_merge"
@@ -920,6 +921,8 @@ function prOutcomeSortValue(
   view: MergeRateView
 ) {
   switch (sort) {
+    case "model":
+      return safeModelLabel(cohort.model_id ?? "") || "Unavailable"
     case "prs_opened":
       return cohort.cohort_size
     case "merged":
@@ -941,6 +944,150 @@ function prOutcomeSortValue(
   }
 }
 
+function prOutcomeColumns(
+  view: MergeRateView,
+  maturityDays: number
+): Array<SortableColumn<PROutcomesSort>> {
+  return [
+    {
+      key: "model",
+      label: "Opening model",
+      align: "left",
+      defaultDirection: "asc",
+    },
+    { key: "prs_opened", label: "PRs opened (base)", align: "right" },
+    { key: "merged", label: "Merged", align: "right" },
+    {
+      key: "closed_without_merge",
+      label: "Closed without merge",
+      align: "right",
+    },
+    { key: "open", label: "Open", align: "right" },
+    {
+      key: "merge_rate",
+      label: view === "observed" ? "Mature merge rate" : "95% lower bound",
+      align: "right",
+      tooltip:
+        view === "observed"
+          ? `Includes merged and closed PRs, plus PRs open for at least ${maturityDays} days. Newer open PRs are excluded.`
+          : "Wilson 95% lower bound on the observed merge rate. This is a conservative comparison score, not the observed rate.",
+    },
+    {
+      key: "median_distance",
+      label: "Median distance",
+      align: "right",
+      tooltip:
+        "Median post-open line edit distance across measurable merged PRs.",
+    },
+    {
+      key: "mean_distance",
+      label: "Mean distance",
+      align: "right",
+      tooltip:
+        "Mean post-open line edit distance across measurable merged PRs. Unusually rewritten PRs affect it more than the median; PRs are not weighted by size.",
+    },
+    { key: "avg_delivery_seconds", label: "Avg time to PR", align: "right" },
+    {
+      key: "avg_merge_seconds",
+      label: "Avg time to merge",
+      align: "right",
+      tooltip: "Unmerged PRs are excluded.",
+    },
+  ]
+}
+
+function PROutcomeCells({
+  group,
+  maturityDays,
+  mergeRateView,
+}: {
+  group: PRMergeRateCohort | PRMergeRateEffort
+  maturityDays: number
+  mergeRateView: MergeRateView
+}) {
+  const rate = mergeRate(group, mergeRateView)
+  return (
+    <>
+      <td className="px-2 py-3 text-right whitespace-nowrap tabular-nums">
+        {group.cohort_size}{" "}
+        <span className="text-muted-foreground">(100%)</span>
+      </td>
+      {(["merged", "closed_without_merge", "open"] as const).map((outcome) => (
+        <td
+          key={outcome}
+          className="px-2 py-3 text-right whitespace-nowrap tabular-nums"
+        >
+          <OutcomeCell
+            group={group}
+            outcome={outcome}
+            maturityDays={maturityDays}
+          />
+        </td>
+      ))}
+      <td className="px-2 py-3 text-right whitespace-nowrap tabular-nums">
+        <span className="font-semibold">
+          {rate == null ? "—" : formatPercent(rate)}
+        </span>
+        {rate != null && (
+          <div className="text-xs text-muted-foreground">
+            {group.merged}/{group.mature_denominator} eligible
+          </div>
+        )}
+        {rate != null && group.mature_denominator < 5 && (
+          <div className="text-xs text-amber-600 dark:text-amber-400">
+            Small sample
+          </div>
+        )}
+      </td>
+      {(["median_distance", "mean_distance"] as const).map((metric) => {
+        const value =
+          metric === "median_distance"
+            ? group.median_distance_basis_points
+            : "mean_distance_basis_points" in group
+              ? group.mean_distance_basis_points
+              : undefined
+        const supported =
+          metric === "median_distance" || "mean_distance_basis_points" in group
+        return (
+          <td
+            key={metric}
+            className="px-2 py-3 text-right whitespace-nowrap tabular-nums"
+          >
+            <Tooltip>
+              <TooltipTrigger className="cursor-help rounded-sm underline decoration-dotted underline-offset-2 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring">
+                {value == null ? "—" : `${(value / 100).toFixed(1)}%`}
+              </TooltipTrigger>
+              <TooltipPopup>
+                {supported
+                  ? `${group.distance_sample_size ?? 0}/${group.merged} merged PRs measured`
+                  : "Mean distance unavailable for this group"}
+              </TooltipPopup>
+            </Tooltip>
+            {supported && group.distance_sample_size !== undefined && (
+              <div className="text-xs text-muted-foreground">
+                {group.distance_sample_size}/{group.merged} measured
+              </div>
+            )}
+            {supported &&
+              (group.distance_sample_size ?? 0) > 0 &&
+              (group.distance_sample_size ?? 0) < 5 && (
+                <div className="text-xs text-amber-600 dark:text-amber-400">
+                  Small sample
+                </div>
+              )}
+          </td>
+        )
+      })}
+      <td className="px-2 py-3 text-right whitespace-nowrap tabular-nums">
+        <AvgTimeToPR cohort={group} />
+      </td>
+      <td className="px-2 py-3 text-right whitespace-nowrap tabular-nums">
+        <AvgTimeToMerge cohort={group} />
+      </td>
+    </>
+  )
+}
+
 function PRMergeRateTable({
   cohorts,
   maturityDays,
@@ -959,37 +1106,17 @@ function PRMergeRateTable({
     const bValue = prOutcomeSortValue(b, sort, mergeRateView)
     if (aValue == null) return bValue == null ? 0 : 1
     if (bValue == null) return -1
+    const comparison =
+      typeof aValue === "string" && typeof bValue === "string"
+        ? aValue.localeCompare(bValue, undefined, { sensitivity: "base" })
+        : Number(aValue) - Number(bValue)
     return (
-      (direction === "asc" ? aValue - bValue : bValue - aValue) ||
+      (direction === "asc" ? comparison : -comparison) ||
       (safeModelLabel(a.model_id ?? "") || "Unavailable").localeCompare(
         safeModelLabel(b.model_id ?? "") || "Unavailable"
       )
     )
   })
-  const metricHeader = (
-    key: PROutcomesSort,
-    label: string,
-    tooltip?: string
-  ) => (
-    <SortableHeader
-      scope="row"
-      column={{ key, label, tooltip, align: "left" }}
-      sortKey={sort}
-      sortDirection={direction}
-      onSort={(nextSort, defaultDirection) => {
-        setDirection(
-          nextSort === sort
-            ? direction === "asc"
-              ? "desc"
-              : "asc"
-            : defaultDirection
-        )
-        setSort(nextSort)
-        setPage(1)
-      }}
-      className="sticky left-0 z-10 bg-card px-4 text-left"
-    />
-  )
   const pageCount = Math.max(1, Math.ceil(sortedCohorts.length / pageSize))
   const currentPage = Math.min(page, pageCount)
   const rows = sortedCohorts.slice(
@@ -997,19 +1124,6 @@ function PRMergeRateTable({
     currentPage * pageSize
   )
 
-  const groups = rows.flatMap((cohort) => {
-    const key = `${cohort.model_id}-${cohort.model_attribution_quality}`
-    return [
-      { key, group: cohort, effort: null },
-      ...(expanded.has(key) && cohort.efforts.length > 1
-        ? cohort.efforts.map((effort) => ({
-            key: `${key}-${effort.effort ?? "unknown"}`,
-            group: effort,
-            effort: formatEffort(effort.effort),
-          }))
-        : []),
-    ]
-  })
   return (
     <div>
       <div className="flex flex-wrap items-center justify-end gap-3 border-b border-border px-4 py-3 text-xs">
@@ -1033,219 +1147,120 @@ function PRMergeRateTable({
         </div>
       </div>
       <div className="overflow-x-auto">
-        <table className="w-full text-xs">
+        <table className="w-full min-w-[1100px] text-xs">
           <caption className="px-4 py-3 text-left text-muted-foreground">
-            Outcome shares are calculated down each opening-model column from
-            PRs opened (100%). Select a metric to sort model columns; reasoning
-            efforts stay grouped under their model.
+            Outcome shares use PRs opened in each row as their base. Expand a
+            model to see its reasoning efforts.
           </caption>
           <thead className="border-b border-border text-muted-foreground">
             <tr>
-              <th
-                scope="col"
-                className="sticky left-0 z-10 min-w-44 bg-card px-4 py-3 text-left font-medium"
-              >
-                PR outcome
-              </th>
-              {rows.map((cohort) => {
-                const key = `${cohort.model_id}-${cohort.model_attribution_quality}`
-                const modelLabel =
-                  safeModelLabel(cohort.model_id ?? "") || "Unavailable"
-                const hasMultipleEfforts = cohort.efforts.length > 1
-                return (
-                  <th
-                    key={key}
-                    scope="col"
-                    colSpan={
-                      expanded.has(key) && hasMultipleEfforts
-                        ? cohort.efforts.length + 1
-                        : 1
-                    }
-                    className="min-w-40 px-4 py-3 text-right font-medium text-foreground"
-                  >
-                    <div className="flex items-center justify-end gap-2">
-                      {hasMultipleEfforts && (
-                        <button
-                          type="button"
-                          className="rounded-sm p-1 hover:bg-muted focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
-                          aria-expanded={expanded.has(key)}
-                          aria-label={`${expanded.has(key) ? "Collapse" : "Expand"} ${modelLabel} reasoning efforts`}
-                          onClick={() =>
-                            setExpanded((current) => {
-                              const next = new Set(current)
-                              if (next.has(key)) next.delete(key)
-                              else next.add(key)
-                              return next
-                            })
-                          }
-                        >
-                          {expanded.has(key) ? (
-                            <ChevronDown className="size-3.5" />
-                          ) : (
-                            <ChevronRight className="size-3.5" />
-                          )}
-                        </button>
-                      )}
-                      {modelLabel}
-                    </div>
-                    <div className="font-normal text-muted-foreground">
-                      {cohort.efforts.length === 1 &&
-                        `${formatEffort(cohort.efforts[0]?.effort)} · `}
-                      {cohort.model_attribution_quality} attribution
-                    </div>
-                  </th>
-                )
-              })}
+              {prOutcomeColumns(mergeRateView, maturityDays).map((column) => (
+                <SortableHeader
+                  key={column.key}
+                  column={column}
+                  sortKey={sort}
+                  sortDirection={direction}
+                  onSort={(nextSort, defaultDirection) => {
+                    setDirection(
+                      nextSort === sort
+                        ? direction === "asc"
+                          ? "desc"
+                          : "asc"
+                        : defaultDirection
+                    )
+                    setSort(nextSort)
+                    setPage(1)
+                  }}
+                  className={
+                    column.key === "model"
+                      ? "sticky left-0 z-10 bg-card pl-4 text-left"
+                      : "text-right"
+                  }
+                />
+              ))}
             </tr>
-            {groups.some(({ effort }) => effort !== null) && (
-              <tr>
-                <th
-                  scope="row"
-                  className="sticky left-0 z-10 bg-card px-4 py-2 text-left font-normal"
-                >
-                  Reasoning effort
-                </th>
-                {groups.map(({ key, effort }) => (
-                  <th
-                    key={key}
-                    scope="col"
-                    className="px-4 py-2 text-right font-normal"
-                  >
-                    {effort ?? "All efforts"}
-                  </th>
-                ))}
-              </tr>
-            )}
           </thead>
           <tbody className="divide-y divide-border">
-            <tr className="font-medium">
-              {metricHeader("prs_opened", "PRs opened (base)")}
-              {groups.map(({ key, group }) => (
-                <td key={key} className="px-4 py-3 text-right tabular-nums">
-                  {group.cohort_size}{" "}
-                  <span className="text-muted-foreground">(100%)</span>
-                </td>
-              ))}
-            </tr>
-            {(["merged", "closed_without_merge", "open"] as const).map(
-              (outcome) => (
-                <tr key={outcome}>
-                  {metricHeader(
-                    outcome,
-                    {
-                      merged: "Merged",
-                      closed_without_merge: "Closed without merge",
-                      open: "Open",
-                    }[outcome]
-                  )}
-                  {groups.map(({ key, group }) => (
-                    <td key={key} className="px-4 py-3 text-right tabular-nums">
-                      <OutcomeCell
-                        group={group}
-                        outcome={outcome}
-                        maturityDays={maturityDays}
-                      />
-                    </td>
-                  ))}
-                </tr>
+            {rows.map((cohort) => {
+              const key = `${cohort.model_id}-${cohort.model_attribution_quality}`
+              const modelLabel =
+                safeModelLabel(cohort.model_id ?? "") || "Unavailable"
+              const hasMultipleEfforts = cohort.efforts.length > 1
+              const isExpanded = hasMultipleEfforts && expanded.has(key)
+              return (
+                <Fragment key={key}>
+                  <tr>
+                    <th
+                      scope="row"
+                      className="sticky left-0 z-10 bg-card px-4 py-3 text-left font-normal"
+                    >
+                      <div className="flex items-center gap-2">
+                        {hasMultipleEfforts ? (
+                          <button
+                            type="button"
+                            className="-ml-1 size-5.5 shrink-0 rounded-sm p-1 text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+                            aria-expanded={isExpanded}
+                            aria-label={`${isExpanded ? "Collapse" : "Expand"} ${modelLabel} reasoning efforts`}
+                            onClick={() =>
+                              setExpanded((current) => {
+                                const next = new Set(current)
+                                if (next.has(key)) next.delete(key)
+                                else next.add(key)
+                                return next
+                              })
+                            }
+                          >
+                            {isExpanded ? (
+                              <ChevronDown className="size-3.5" />
+                            ) : (
+                              <ChevronRight className="size-3.5" />
+                            )}
+                          </button>
+                        ) : (
+                          <span
+                            aria-hidden="true"
+                            className="-ml-1 size-5.5 shrink-0"
+                          />
+                        )}
+                        <div>
+                          <div className="font-medium">{modelLabel}</div>
+                          <div className="text-muted-foreground">
+                            {hasMultipleEfforts
+                              ? "All efforts"
+                              : formatEffort(cohort.efforts[0]?.effort)}{" "}
+                            · {cohort.model_attribution_quality} attribution
+                          </div>
+                        </div>
+                      </div>
+                    </th>
+                    <PROutcomeCells
+                      group={cohort}
+                      maturityDays={maturityDays}
+                      mergeRateView={mergeRateView}
+                    />
+                  </tr>
+                  {isExpanded &&
+                    cohort.efforts.map((effort) => (
+                      <tr
+                        key={`${key}-${effort.effort ?? "unknown"}`}
+                        className="bg-muted/35"
+                      >
+                        <th
+                          scope="row"
+                          className="sticky left-0 z-10 bg-[color-mix(in_oklab,var(--muted)_35%,var(--card))] py-3 pr-2 pl-11 text-left font-medium"
+                        >
+                          {formatEffort(effort.effort)}
+                        </th>
+                        <PROutcomeCells
+                          group={effort}
+                          maturityDays={maturityDays}
+                          mergeRateView={mergeRateView}
+                        />
+                      </tr>
+                    ))}
+                </Fragment>
               )
-            )}
-            <tr className="border-t-2 border-border">
-              {metricHeader(
-                "merge_rate",
-                mergeRateView === "observed"
-                  ? "Mature merge rate"
-                  : "95% lower bound",
-                mergeRateView === "observed"
-                  ? `Includes merged and closed PRs, plus PRs open for at least ${maturityDays} days. Newer open PRs are excluded.`
-                  : "Wilson 95% lower bound on the observed merge rate. This is a conservative comparison score, not the observed rate."
-              )}
-              {groups.map(({ key, group }) => {
-                const rate = mergeRate(group, mergeRateView)
-                return (
-                  <td key={key} className="px-4 py-3 text-right tabular-nums">
-                    {rate == null ? "—" : formatPercent(rate)}
-                    {rate != null && (
-                      <div className="text-xs text-muted-foreground">
-                        {group.merged}/{group.mature_denominator} eligible
-                      </div>
-                    )}
-                    {rate != null && group.mature_denominator < 5 && (
-                      <div className="text-xs text-amber-600 dark:text-amber-400">
-                        Small sample
-                      </div>
-                    )}
-                  </td>
-                )
-              })}
-            </tr>
-            {(["median_distance", "mean_distance"] as const).map((metric) => (
-              <tr key={metric}>
-                {metricHeader(
-                  metric,
-                  metric === "median_distance"
-                    ? "Median distance"
-                    : "Mean distance",
-                  metric === "median_distance"
-                    ? "Median post-open line edit distance across measurable merged PRs."
-                    : "Mean post-open line edit distance across measurable merged PRs. Unusually rewritten PRs affect it more than the median; PRs are not weighted by size."
-                )}
-                {groups.map(({ key, group }) => {
-                  const value =
-                    metric === "median_distance"
-                      ? group.median_distance_basis_points
-                      : "mean_distance_basis_points" in group
-                        ? group.mean_distance_basis_points
-                        : undefined
-                  const supported =
-                    metric === "median_distance" ||
-                    "mean_distance_basis_points" in group
-                  return (
-                    <td key={key} className="px-4 py-3 text-right tabular-nums">
-                      <Tooltip>
-                        <TooltipTrigger className="cursor-help rounded-sm underline decoration-dotted underline-offset-2 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring">
-                          {value == null ? "—" : `${(value / 100).toFixed(1)}%`}
-                        </TooltipTrigger>
-                        <TooltipPopup>
-                          {supported
-                            ? `${group.distance_sample_size ?? 0}/${group.merged} merged PRs measured`
-                            : "Mean distance unavailable for this group"}
-                        </TooltipPopup>
-                      </Tooltip>
-                      {supported &&
-                        group.distance_sample_size !== undefined && (
-                          <div className="text-xs text-muted-foreground">
-                            {group.distance_sample_size}/{group.merged} measured
-                          </div>
-                        )}
-                      {supported &&
-                        (group.distance_sample_size ?? 0) > 0 &&
-                        (group.distance_sample_size ?? 0) < 5 && (
-                          <div className="text-xs text-amber-600 dark:text-amber-400">
-                            Small sample
-                          </div>
-                        )}
-                    </td>
-                  )
-                })}
-              </tr>
-            ))}
-            <tr>
-              {metricHeader("avg_delivery_seconds", "Avg time to PR")}
-              {groups.map(({ key, group }) => (
-                <td key={key} className="px-4 py-3 text-right tabular-nums">
-                  <AvgTimeToPR cohort={group} />
-                </td>
-              ))}
-            </tr>
-            <tr>
-              {metricHeader("avg_merge_seconds", "Avg time to merge")}
-              {groups.map(({ key, group }) => (
-                <td key={key} className="px-4 py-3 text-right tabular-nums">
-                  <AvgTimeToMerge cohort={group} />
-                </td>
-              ))}
-            </tr>
+            })}
           </tbody>
         </table>
       </div>
@@ -1318,9 +1333,7 @@ function SortableHeader<Key extends string>({
   sortDirection,
   onSort,
   className,
-  scope = "col",
 }: {
-  scope?: "col" | "row"
   column: SortableColumn<Key>
   sortKey: Key
   sortDirection: SortDirection
@@ -1361,7 +1374,7 @@ function SortableHeader<Key extends string>({
 
   return (
     <th
-      scope={scope}
+      scope="col"
       aria-sort={ariaSort}
       className={`${className} p-0 font-normal`}
     >
