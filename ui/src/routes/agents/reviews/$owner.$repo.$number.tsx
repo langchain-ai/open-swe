@@ -6,6 +6,7 @@ import { ArrowLeftIcon, GitPullRequestIcon } from "@phosphor-icons/react"
 import type { PrReviewComment } from "@/lib/api"
 import { ReviewCommentsMenu } from "@/features/reviews/components/ReviewCommentsMenu"
 import { ReviewMainBody } from "@/features/reviews/components/ReviewMainBody"
+import { SubmitReviewPopover } from "@/features/reviews/components/SubmitReviewPopover"
 import { useSidebarControls } from "@/components/sidebar-layout"
 import { Skeleton } from "@/components/ui/skeleton"
 import { api } from "@/lib/api"
@@ -113,13 +114,14 @@ function ReviewDetailPage() {
           </span>
         </span>
         {Number.isFinite(prNumber) && (
-          <div className="ml-auto shrink-0">
+          <div className="ml-auto flex shrink-0 items-center gap-2">
             <ReviewCommentsMenu
               owner={owner}
               repo={repo}
               number={prNumber}
               onSelect={setActiveComment}
             />
+            <SubmitReviewPopover owner={owner} repo={repo} number={prNumber} />
           </div>
         )}
       </header>
