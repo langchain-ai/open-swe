@@ -7,6 +7,10 @@ reload work with no base-path configuration.
 The link carries no credential and never expires: whoever opens it signs in with their own
 LangSmith session, and any member of this sandbox's LangSmith workspace gets through.
 
+You cannot open the URL yourself: it is behind the LangSmith login, so the bot has no session for
+it. Verify the service by browsing to the in-sandbox localhost with `agent-browser` instead, e.g.
+`http://localhost:$$port` from inside the sandbox — never through the shared service URL.
+
 Every request reaches the service with the viewer's identity in one header,
 `X-Langsmith-User-Token`: an EdDSA-signed JWT minted per request and good for ten minutes, with
 `sub` (the LangSmith user id), `email`, `name`, `iss` (the LangSmith app URL) and `aud` (the
