@@ -6,10 +6,11 @@ recreate rebind. The registry itself lives in ``state``.
 
 import asyncio
 import logging
-from collections.abc import AsyncIterator, Awaitable, Callable, Coroutine, Sequence
+import posixpath
+from collections.abc import AsyncIterator, Awaitable, Callable, Coroutine, Mapping, Sequence
 from contextlib import asynccontextmanager, suppress
 from dataclasses import dataclass, field
-from typing import Any, Literal
+from typing import Any, Literal, TypedDict
 
 from deepagents.backends.protocol import SandboxBackendProtocol
 from langgraph_sdk import get_client
@@ -17,6 +18,11 @@ from langgraph_sdk import get_client
 from agent.config import ENV
 from agent.github.proxy import get_recorded_proxy_base_config, record_proxy_token_expiry
 from agent.github.sandbox_access import SandboxGitHubAccess, workspace_token
+from agent.sandboxes.paths import (
+    cached_sandbox_work_dir,
+    remember_sandbox_work_dir,
+    resolve_sandbox_work_dir,
+)
 from agent.sandboxes.providers.langsmith import configure_sandbox_proxy, get_sandbox_proxy_config
 from agent.sandboxes.providers.registry import SandboxGoneError, create_sandbox
 from agent.sandboxes.state import (
@@ -46,6 +52,14 @@ logger = logging.getLogger(__name__)
 client = get_client()
 
 _SANDBOX_PROXY_CONFIG_METADATA_KEY = "sandbox_base_proxy_config"
+_WORK_DIR_METADATA_KEY = "sandbox_work_dir"
+
+
+class _StoredWorkDir(TypedDict):
+    """The work dir resolved in a sandbox, kept in its thread's metadata."""
+
+    sandbox_id: str
+    path: str
 
 
 SandboxSource = Literal["workspace", "base"]
@@ -443,6 +457,10 @@ async def ensure_sandbox_for_thread(
                 ) from create_exc
             logger.info("Replacement sandbox created: %s", sandbox_backend.id)
 
+    # A new or replacement sandbox has a different id, so this only ever reuses a
+    # work dir resolved in the sandbox now bound to the thread.
+    _seed_work_dir(sandbox_backend, sandbox_metadata)
+
     # Bind the thread only once the sandbox is created and initialized: a run
     # that dies earlier leaves no id to reconnect to, so the next run creates
     # rather than adopting a half-built box.
@@ -508,6 +526,43 @@ async def recreate_sandbox_for_thread(
         new_sandbox.id,
     )
     return old_sandbox_id, new_sandbox.id
+
+
+def _seed_work_dir(
+    sandbox_backend: SandboxBackendProtocol, sandbox_metadata: Mapping[str, object]
+) -> None:
+    """Reuse the work dir an earlier run resolved in this very sandbox."""
+    stored = sandbox_metadata.get(_WORK_DIR_METADATA_KEY)
+    if not isinstance(stored, dict) or stored.get("sandbox_id") != sandbox_backend.id:
+        return
+    path = stored.get("path")
+    if isinstance(path, str) and posixpath.isabs(path):
+        remember_sandbox_work_dir(sandbox_backend, path)
+
+
+async def resolve_thread_work_dir(thread_id: str, sandbox_backend: SandboxBackendProtocol) -> str:
+    """Resolve the sandbox work dir, recording it on the thread when it had to be probed.
+
+    A thread's next run rarely lands on the same worker, so it usually holds a
+    fresh backend object; ``ensure_sandbox_for_thread`` seeds that object from
+    this record instead of probing the sandbox again.
+    """
+    work_dir = cached_sandbox_work_dir(sandbox_backend)
+    if work_dir is not None:
+        return work_dir
+    work_dir = await resolve_sandbox_work_dir(sandbox_backend)
+    stored: _StoredWorkDir = {"sandbox_id": sandbox_backend.id, "path": work_dir}
+    try:
+        await client.threads.update(thread_id=thread_id, metadata={_WORK_DIR_METADATA_KEY: stored})
+    except Exception:
+        # This run already has its work dir; a lost record only costs a later
+        # run on another worker the probe.
+        logger.warning(
+            "Failed to record sandbox work dir on thread",
+            exc_info=True,
+            extra={"thread_id": thread_id, "sandbox_id": sandbox_backend.id},
+        )
+    return work_dir
 
 
 def get_cached_sandbox_backend(

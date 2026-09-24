@@ -106,10 +106,10 @@ def prepare_harness(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
         server, "get_or_create_sandbox_backend_proxy", lambda thread_id: _ReadyProxy()
     )
 
-    async def fake_work_dir(backend: Any) -> str:
+    async def fake_work_dir(thread_id: str, backend: Any) -> str:
         return "/workspace"
 
-    monkeypatch.setattr(server, "resolve_sandbox_work_dir", fake_work_dir)
+    monkeypatch.setattr(server, "resolve_thread_work_dir", fake_work_dir)
     monkeypatch.setattr(server, "load_workspace", _async_none)
     monkeypatch.setattr(server, "_resolve_prompt_default_repo", _async_none)
     monkeypatch.setattr(server, "_resolve_user_custom_instructions", _async_none)
