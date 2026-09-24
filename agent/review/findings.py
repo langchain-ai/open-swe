@@ -1093,7 +1093,7 @@ def get_thread_pr_meta(metadata: dict[str, Any]) -> ReviewerPRMeta | None:
     return cast(ReviewerPRMeta, pr)
 
 
-def reviewer_thread_title(pr: Mapping[str, Any]) -> str:
+def reviewer_thread_title(pr: ReviewerPRMeta) -> str:
     """Sidebar title for a reviewer thread: ``Review: #nn <PR title>``."""
     number = pr.get("number")
     title = pr.get("title")
