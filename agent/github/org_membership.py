@@ -18,6 +18,28 @@ INTERNAL_BOT_LOGINS: frozenset[str] = frozenset(
     | {login.strip() for login in ENV.EXTRA_INTERNAL_BOT_LOGINS.get().split(",") if login.strip()}
 )
 
+# Third-party bots seen commenting on langchainplus and open-swe PRs.
+ACCEPTED_PR_BOT_LOGINS: frozenset[str] = frozenset(
+    {
+        "Copilot",
+        "chatgpt-codex-connector[bot]",
+        "corridor-security[bot]",
+        "currents-bot[bot]",
+        "dependabot[bot]",
+        "devin-ai-integration[bot]",
+        "github-actions[bot]",
+        "github-advanced-security[bot]",
+        "hosted-langserve-dev[bot]",
+        "hosted-langserve[bot]",
+        "langsmith-fleet[bot]",
+        "langtions-bot[bot]",
+        "linear-code[bot]",
+        "linear[bot]",
+        "socket-security[bot]",
+        "vercel[bot]",
+    }
+)
+
 
 async def is_user_active_org_member(username: str, org: str) -> bool:
     """Return True if ``username`` is an *active* member of ``org``.

@@ -325,6 +325,7 @@ def test_process_github_pr_comment_invalidates_and_reauths_on_401(
         token: str,
         event_comment: dict[str, Any],
         authorized_login: str | None = None,
+        require_tag: bool = True,
     ) -> list[dict[str, Any]]:
         fetch_calls.append(token)
         return [
