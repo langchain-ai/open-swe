@@ -24,6 +24,7 @@ from agent.utils.json_types import (
     thread_metadata,
 )
 from agent.utils.langsmith import get_langsmith_trace_url
+from agent.utils.thread_ops import update_thread_metadata
 from agent.utils.timing import phase
 
 logger = logging.getLogger(__name__)
@@ -569,10 +570,11 @@ async def _refresh_latest_run_metadata(
     if metadata_update:
         with phase(record, "thread_update"):
             try:
-                await client.threads.update(
-                    thread_id=thread_id,
-                    metadata=metadata_update,
-                    **({"return_minimal": True} if return_minimal else {}),
+                await update_thread_metadata(
+                    thread_id,
+                    metadata_update,
+                    client=client,
+                    current=thread if return_minimal else None,
                 )
             except Exception:  # noqa: BLE001
                 logger.debug(

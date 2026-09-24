@@ -126,6 +126,7 @@ async def _replay(conn: AsyncConnection, thread_id: str) -> int:
                 event=TRANSCRIPT_EVENT_ADAPTER.validate_python(row["payload"]),
                 run_id=run_id,
                 occurred_at=occurred_at,
+                live=False,
             )
             after = version
         replayed += len(rows)

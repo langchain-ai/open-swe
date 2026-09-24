@@ -12,7 +12,7 @@ from agent.input_messages import dynamic_context_hash, human_input, input_messag
 from agent.prompts import load_prompt
 from agent.slack.code_channels import CODE_CHANNEL_SESSION_TS, is_code_channel, rename_session
 from agent.source_context import SourceContext
-from agent.transcript.mirror import mirror_thread_metadata
+from agent.utils.thread_ops import update_thread_metadata
 
 logger = logging.getLogger(__name__)
 
@@ -111,11 +111,7 @@ async def generate_and_store_thread_title(
         or latest_metadata.get("title_seed") != title_seed
     ):
         return
-    await client.threads.update(
-        thread_id=thread_id,
-        metadata={"title": title, "title_seed": None},
-    )
-    await mirror_thread_metadata(thread_id, {"title": title})
+    await update_thread_metadata(thread_id, {"title": title, "title_seed": None}, client=client)
     # Re-read after the update: the pre-update snapshot can be stale if the
     # thread was promoted to a code channel between the check and the update.
     latest = await client.threads.get(thread_id=thread_id)

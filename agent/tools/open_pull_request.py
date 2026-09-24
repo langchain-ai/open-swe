@@ -37,6 +37,7 @@ from agent.threads.plan_store import get_plan_content
 from agent.utils.authorship import PR_ATTRIBUTION_TEXT, add_pr_collaboration_note
 from agent.utils.dashboard_links import dashboard_plan_url, dashboard_thread_url
 from agent.utils.langsmith import create_langsmith_thread_feedback
+from agent.utils.thread_ops import update_thread_metadata
 
 logger = logging.getLogger(__name__)
 
@@ -742,7 +743,7 @@ async def _record_pr_telemetry(
             }
             if repo_private is not None:
                 metadata["repo_private"] = repo_private
-            await get_client().threads.update(thread_id=thread_id, metadata=metadata)
+            await update_thread_metadata(thread_id, metadata, client=get_client())
             try:
                 await PullRequest(
                     owner=owner,

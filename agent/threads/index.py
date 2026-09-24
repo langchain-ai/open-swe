@@ -6,6 +6,7 @@ The row is a projection: it can always be rebuilt from the LangGraph thread.
 """
 
 import json
+import logging
 from collections.abc import Mapping, Sequence
 from contextlib import AbstractAsyncContextManager, nullcontext
 from dataclasses import asdict, dataclass
@@ -40,7 +41,10 @@ from agent.utils.thread_participants import (
     participant_logins,
 )
 
+logger = logging.getLogger(__name__)
+
 type ThreadVisibility = Literal["public", "private"]
+type ThreadIndexStatus = Literal["idle", "running", "finished", "error", "interrupted"]
 
 _INCIDENTS_SOURCE = "incidents_agent"
 # Threads created before participants existed carry only these keys.
@@ -87,6 +91,24 @@ def _participants(metadata: Mapping[str, object], reader_login: str | None) -> l
     if reader_login:
         principals.add(reader_login)
     return sorted(principals)
+
+
+def is_index_candidate(thread: ThreadLike) -> bool:
+    """Whether the app ever stamped this thread as one a person could see.
+
+    Lock and claim threads, and the threads each cron tick runs on, carry none
+    of these keys; indexing them would only leave rows behind once they vanish.
+    """
+    metadata = thread_metadata(thread)
+    return any(
+        metadata.get(key)
+        for key in (
+            "source",
+            PARTICIPANT_LOGINS_KEY,
+            PARTICIPANT_EMAILS_KEY,
+            *_LEGACY_PARTICIPANT_KEYS,
+        )
+    )
 
 
 def _from_ms(value: int) -> datetime:
@@ -141,8 +163,7 @@ def derive_thread_index_row(thread: ThreadLike) -> ThreadIndexRow:
     )
 
 
-_UPSERT = text(
-    """
+_UPSERT_SQL = """
     INSERT INTO thread_index (
         thread_id, listed, participants, visibility, owner_login, reader_login, admin_thread,
         category, source, schedule_id, repo_full_name, workspace, status, latest_run_id,
@@ -178,6 +199,11 @@ _UPSERT = text(
         seq = nextval('thread_index_seq'),
         synced_at = clock_timestamp()
     """
+_UPSERT = text(_UPSERT_SQL).bindparams(bindparam("participants", type_=ARRAY(Text)))
+# The reconciler's variant: a row written after its LangGraph read began came
+# from a fresher source (write-through or a turn event) and is left alone.
+_UPSERT_WRITTEN_BEFORE = text(
+    _UPSERT_SQL + " WHERE thread_index.synced_at < :written_before"
 ).bindparams(bindparam("participants", type_=ARRAY(Text)))
 
 
@@ -192,22 +218,84 @@ def _params(row: ThreadIndexRow) -> dict[str, object]:
 
 
 async def upsert_thread_index_rows(
-    threads: Sequence[ThreadLike], *, conn: AsyncConnection | None = None
+    threads: Sequence[ThreadLike],
+    *,
+    conn: AsyncConnection | None = None,
+    written_before: datetime | None = None,
 ) -> int:
-    """Upsert the index rows for ``threads``; returns how many were written.
+    """Upsert the index rows for ``threads``; returns how many were offered.
 
+    Threads that are not :func:`is_index_candidate` are skipped. With
+    ``written_before``, an existing row synced at or after it is kept as is.
     A no-op when PostgreSQL is not configured.
     """
-    if not threads or (conn is None and not postgres.configured()):
+    if conn is None and not postgres.configured():
         return 0
-    params = [_params(derive_thread_index_row(thread)) for thread in threads]
+    params = [
+        _params(derive_thread_index_row(thread)) for thread in threads if is_index_candidate(thread)
+    ]
+    if not params:
+        return 0
+    statement = _UPSERT
+    if written_before is not None:
+        statement = _UPSERT_WRITTEN_BEFORE
+        params = [{**param, "written_before": written_before} for param in params]
     async with _transaction(conn) as tx:
-        await tx.execute(_UPSERT, params)
+        await tx.execute(statement, params)
     return len(params)
 
 
 async def upsert_thread_index(thread: ThreadLike, *, conn: AsyncConnection | None = None) -> None:
     await upsert_thread_index_rows([thread], conn=conn)
+
+
+async def try_upsert_thread_index(thread: ThreadLike) -> None:
+    """:func:`upsert_thread_index` for a caller whose LangGraph write already succeeded.
+
+    The reconciler repairs a row this fails to write within one tick, so the
+    failure is logged rather than failing the caller.
+    """
+    try:
+        await upsert_thread_index(thread)
+    except Exception:
+        logger.warning(
+            "Could not update the thread index",
+            exc_info=True,
+            extra={"thread_index": {"thread_id": _thread_id(thread)}},
+        )
+
+
+async def mark_thread_index_status(
+    conn: AsyncConnection,
+    thread_id: str,
+    *,
+    status: ThreadIndexStatus,
+    run_id: str | None,
+) -> None:
+    """Record a transcript turn's effect on the thread's row, inside the append transaction.
+
+    A run id the row has not seen makes the thread unread again. Review chats
+    are skipped: their status also follows the walkthrough, which only the
+    metadata carries, so the write-through and the reconciler own them.
+    """
+    await conn.execute(
+        text(
+            """
+            UPDATE thread_index SET
+                status = :status,
+                viewed = CASE
+                    WHEN CAST(:run_id AS text) IS NOT NULL
+                        AND latest_run_id IS DISTINCT FROM CAST(:run_id AS text)
+                    THEN false ELSE viewed END,
+                latest_run_id = COALESCE(CAST(:run_id AS text), latest_run_id),
+                updated_at = clock_timestamp(),
+                seq = nextval('thread_index_seq'),
+                synced_at = clock_timestamp()
+            WHERE thread_id = :thread_id AND reader_login IS NULL
+            """
+        ),
+        {"thread_id": thread_id, "status": status, "run_id": run_id},
+    )
 
 
 async def delete_thread_index(thread_id: str, *, conn: AsyncConnection | None = None) -> bool:

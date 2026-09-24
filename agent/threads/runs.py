@@ -47,6 +47,7 @@ from agent.threads.access import (
     agent_version_metadata,
     resolve_run_email,
 )
+from agent.threads.index import try_upsert_thread_index
 from agent.threads.principals import STARTED_BY_ID, STARTED_BY_NAME, Principal, ThreadType
 from agent.threads.summary import (
     DASHBOARD_SOURCE,
@@ -73,7 +74,11 @@ from agent.transcript.turns import open_turn_id, recorded_turn_id
 from agent.users import User
 from agent.utils.dashboard_handoff import DASHBOARD_HANDOFF_BODY
 from agent.utils.json_types import JsonObject, as_thread_dict, thread_metadata
-from agent.utils.thread_ops import langgraph_client, queue_message_for_thread
+from agent.utils.thread_ops import (
+    langgraph_client,
+    queue_message_for_thread,
+    update_thread_metadata,
+)
 from agent.utils.thread_participants import (
     PARTICIPANT_EMAILS_KEY,
     PARTICIPANT_LOGINS_KEY,
@@ -315,6 +320,7 @@ async def _create_dashboard_thread_record(
         if_exists="raise",
     )
     thread = await client.threads.get(thread_id)
+    await try_upsert_thread_index(thread)
     if not transcribed:
         return as_thread_dict(thread)
     await append(
@@ -785,7 +791,7 @@ async def _enrich_run_start_command(
             if metadata.get("attention_reason"):
                 metadata_update["attention_reason"] = None
             metadata = {**metadata, **metadata_update}
-            await client.threads.update(thread_id=thread_id, metadata=metadata_update)
+            await update_thread_metadata(thread_id, metadata_update, client=client)
     else:
         if _is_thread_resolved(metadata):
             metadata_update["resolved"] = False
@@ -793,7 +799,7 @@ async def _enrich_run_start_command(
         if metadata.get("attention_reason"):
             metadata_update["attention_reason"] = None
         metadata = {**metadata, **metadata_update}
-        await client.threads.update(thread_id=thread_id, metadata=metadata_update)
+        await update_thread_metadata(thread_id, metadata_update, client=client)
 
     # Offloading starts a run with no human message, so it has no turn to
     # request; the middleware's ``turn.started`` opens that turn instead.
@@ -1006,14 +1012,15 @@ async def steer_running_thread(
             live_run_id = dispatched or live_run_id
 
     now_ms = _now_ms()
-    await client.threads.update(
-        thread_id=thread_id,
-        metadata={
+    await update_thread_metadata(
+        thread_id,
+        {
             "updated_at_ms": now_ms,
             "feedback_last_activity_at_ms": now_ms,
             PARTICIPANT_LOGINS_KEY: merge_participants(metadata.get(PARTICIPANT_LOGINS_KEY), login),
             PARTICIPANT_EMAILS_KEY: merge_participants(metadata.get(PARTICIPANT_EMAILS_KEY), email),
         },
+        client=client,
     )
     try:
         await _notify_slack_web_handoff(thread_id, metadata, client)
@@ -1266,7 +1273,9 @@ async def _create_system_thread_record(
         metadata["repo_name"] = repo_config["name"]
     client = langgraph_client()
     await client.threads.create(thread_id=thread_id, metadata=metadata, if_exists="raise")
-    return as_thread_dict(await client.threads.get(thread_id))
+    thread = await client.threads.get(thread_id)
+    await try_upsert_thread_index(thread)
+    return as_thread_dict(thread)
 
 
 async def _system_repo_config(

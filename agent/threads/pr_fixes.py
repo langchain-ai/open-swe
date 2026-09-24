@@ -21,7 +21,7 @@ from agent.threads.runs import (
 )
 from agent.threads.summary import _assert_thread_postable
 from agent.utils.json_types import thread_metadata
-from agent.utils.thread_ops import langgraph_client
+from agent.utils.thread_ops import langgraph_client, update_thread_metadata
 from agent.utils.thread_pr_state import agent_thread_pr_state_lock
 
 logger = logging.getLogger(__name__)
@@ -222,9 +222,10 @@ async def _find_or_create_pr_thread(
         title=title,
     )
     thread_id = str(thread["thread_id"])
-    await client.threads.update(
-        thread_id=thread_id,
-        metadata={"pr_url": url, "pr_number": number, "source_context": {"pr_number": number}},
+    await update_thread_metadata(
+        thread_id,
+        {"pr_url": url, "pr_number": number, "source_context": {"pr_number": number}},
+        client=client,
     )
     await _link_pr_thread(owner, repo, number, thread_id)
     return thread_id
@@ -290,9 +291,10 @@ async def start_pull_request_thread(
         if current.get("status") == "busy":
             return PullRequestThreadRun(thread_id=thread_id, already_running=True)
         async with agent_thread_pr_state_lock(client, thread_id):
-            await client.threads.update(
-                thread_id=thread_id,
-                metadata={"resolved": False, "resolved_at_ms": None, "auto_resolved_by_prs": False},
+            await update_thread_metadata(
+                thread_id,
+                {"resolved": False, "resolved_at_ms": None, "auto_resolved_by_prs": False},
+                client=client,
             )
         current = await client.threads.get(thread_id)
         _assert_thread_postable(thread_metadata(current), login, email)

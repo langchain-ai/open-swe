@@ -8,13 +8,16 @@ run that's already in flight" path (``threads.api.send_dashboard_message``).
 """
 
 import logging
+from collections.abc import Mapping
 from typing import Any
 
 from langgraph_sdk import get_client
 from langgraph_sdk.client import LangGraphClient
+from langgraph_sdk.schema import Thread
 from pydantic import BaseModel
 
 from agent.config import ENV
+from agent.utils.json_types import ThreadLike, as_thread_dict, thread_metadata
 
 logger = logging.getLogger(__name__)
 
@@ -27,6 +30,49 @@ def langgraph_url() -> str:
 
 def langgraph_client():
     return get_client(url=langgraph_url())
+
+
+async def update_thread_metadata(
+    thread_id: str,
+    metadata: Mapping[str, object],
+    *,
+    client: LangGraphClient | None = None,
+    current: ThreadLike | None = None,
+) -> ThreadLike:
+    """Merge ``metadata`` into a LangGraph thread and keep its read models in step.
+
+    Returns the merged thread. LangGraph's response is authoritative, so the
+    index row is derived from it rather than from what the caller assumed.
+    Concurrent updates can still land out of order, but each one indexes the
+    thread as LangGraph merged it at that write, and the reconciler re-reads
+    LangGraph within a tick, so a stale row never outlives the next sweep.
+
+    With ``current``, the caller's copy of the thread, LangGraph is asked not to
+    send the thread back and the merge happens locally instead: cheaper on a hot
+    read path, at the cost of indexing from that copy.
+
+    The mirror and index writes never fail the caller: the LangGraph write that
+    matters has already succeeded, and both log what they swallow.
+    """
+    # Local imports: both modules import this one back through
+    # ``agent.threads.summary`` -> ``agent.review.session``.
+    from agent.threads.index import try_upsert_thread_index
+    from agent.transcript.mirror import mirror_thread_metadata
+
+    resolved = client or langgraph_client()
+    thread: ThreadLike
+    if current is None:
+        updated: Thread = await resolved.threads.update(thread_id=thread_id, metadata=metadata)
+        thread = updated
+    else:
+        await resolved.threads.update(thread_id=thread_id, metadata=metadata, return_minimal=True)
+        thread = {
+            **as_thread_dict(current),
+            "metadata": {**thread_metadata(current), **metadata},
+        }
+    await mirror_thread_metadata(thread_id, metadata)
+    await try_upsert_thread_index(thread)
+    return thread
 
 
 class ThreadRunError(BaseModel):

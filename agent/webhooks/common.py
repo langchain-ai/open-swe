@@ -127,9 +127,9 @@ from agent.slack.feedback import (
 from agent.slack.payloads import SlackChannelContext
 from agent.slack.stop import process_agent_session_stopped, process_slack_stop_reaction
 from agent.source_context import SourceContext
+from agent.threads.index import try_upsert_thread_index
 from agent.threads.summary import thread_is_private, thread_is_promptable
 from agent.threads.workflow_approval import decide_workflow_push_approval
-from agent.transcript.mirror import mirror_thread_metadata
 from agent.users import User
 from agent.utils.dashboard_links import dashboard_thread_url  # noqa: F401
 from agent.utils.http import DEFAULT_HTTP_TIMEOUT
@@ -142,7 +142,10 @@ from agent.utils.multimodal import (
     vision_not_supported_warning,  # noqa: F401
 )
 from agent.utils.repo import extract_repo_from_text
-from agent.utils.thread_ops import queue_message_for_thread  # noqa: F401
+from agent.utils.thread_ops import (
+    queue_message_for_thread,  # noqa: F401
+    update_thread_metadata,
+)
 from agent.utils.thread_participants import (
     PARTICIPANT_EMAILS_KEY,
     PARTICIPANT_LOGINS_KEY,
@@ -636,9 +639,10 @@ async def upsert_agent_thread_metadata(
 
     try:
         if existing is None:
-            await langgraph_client.threads.create(
+            created = await langgraph_client.threads.create(
                 thread_id=thread_id, if_exists="do_nothing", metadata=metadata
             )
+            await try_upsert_thread_index(created)
             if owner_type == "system":
                 saved = as_thread_dict(await langgraph_client.threads.get(thread_id))
                 saved_meta = saved.get("metadata") or {}
@@ -662,11 +666,9 @@ async def upsert_agent_thread_metadata(
                     current["metadata"] if isinstance(current.get("metadata"), dict) else {}
                 )
                 metadata.update(_pr_state_reset_for_user_activity(current_meta))
-                await langgraph_client.threads.update(thread_id=thread_id, metadata=metadata)
-                await mirror_thread_metadata(thread_id, metadata)
+                await update_thread_metadata(thread_id, metadata, client=langgraph_client)
         else:
-            await langgraph_client.threads.update(thread_id=thread_id, metadata=metadata)
-            await mirror_thread_metadata(thread_id, metadata)
+            await update_thread_metadata(thread_id, metadata, client=langgraph_client)
         return True
     except Exception:  # noqa: BLE001
         logger.exception("Failed to persist owner metadata for thread %s", thread_id)
@@ -1419,8 +1421,8 @@ async def update_agent_thread_pr_state(payload: dict[str, Any]) -> None:
                     if needs_attention:
                         metadata_update["attention_reason"] = None
                 if metadata_update:
-                    await langgraph_client.threads.update(
-                        thread_id=thread_id, metadata=metadata_update
+                    await update_thread_metadata(
+                        thread_id, metadata_update, client=langgraph_client
                     )
         except Exception:  # noqa: BLE001
             logger.debug("Failed to update pr_state for thread %s", thread_id, exc_info=True)

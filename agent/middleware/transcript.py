@@ -66,6 +66,7 @@ from agent.transcript.events import (
     TurnRequested,
     TurnStarted,
 )
+from agent.utils.thread_ops import update_thread_metadata
 
 logger = logging.getLogger(__name__)
 
@@ -626,8 +627,11 @@ async def _thread_metadata(thread_id: str) -> dict[str, object]:
 
 
 async def _stamp_transcript(thread_id: str) -> None:
-    """Point the UI at the transcript reader. Only ever after the row exists."""
-    await get_client().threads.update(thread_id, metadata={"transcript": "v2"})
+    """Point the UI at the transcript reader. Only ever after the row exists.
+
+    Also indexes a thread created outside the dashboard, which gets here first.
+    """
+    await update_thread_metadata(thread_id, {"transcript": "v2"}, client=get_client())
 
 
 class TranscriptMiddleware(OpenSWEMiddleware):

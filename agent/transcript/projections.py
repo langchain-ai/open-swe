@@ -21,6 +21,7 @@ from pydantic import BaseModel
 from sqlalchemy import ARRAY, Text, TextClause, bindparam, text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
+from agent.threads.index import ThreadIndexStatus, mark_thread_index_status
 from agent.transcript.events import (
     MessageAppended,
     MessageAttachment,
@@ -143,11 +144,16 @@ async def apply(
     event: TranscriptEvent,
     run_id: str | None,
     occurred_at: datetime,
+    live: bool = True,
 ) -> None:
     """Project ``event`` onto the read tables.
 
     ``thread.created`` is already applied by :func:`ensure_thread_row`, and
     ``run.notice`` has no projection — the snapshot reads notices from the log.
+
+    ``live`` is false on a rebuild, which leaves ``thread_index`` alone: it is
+    not a transcript read table, and replaying old turns onto it would stamp
+    their time as the thread's latest activity and mark the thread unread.
     """
     match event:
         case ThreadCreated():
@@ -155,13 +161,13 @@ async def apply(
         case ThreadMetaUpdated():
             await _meta_updated(conn, thread_id, event)
         case TurnRequested():
-            await _turn_requested(conn, thread_id, version, event, occurred_at)
+            await _turn_requested(conn, thread_id, version, event, occurred_at, live=live)
         case TurnStarted():
-            await _turn_started(conn, thread_id, event, occurred_at)
+            await _turn_started(conn, thread_id, event, occurred_at, live=live)
         case TurnQueued():
             await _turn_queued(conn, thread_id, event)
         case TurnCompleted() | TurnFailed() | TurnInterrupted():
-            await _turn_ended(conn, thread_id, version, event, run_id, occurred_at)
+            await _turn_ended(conn, thread_id, version, event, run_id, occurred_at, live=live)
         case TurnCheckpointCompleted():
             await _turn_checkpoint(conn, thread_id, event, occurred_at)
         case MessageAppended():
@@ -198,6 +204,8 @@ async def _turn_requested(
     version: int,
     event: TurnRequested,
     occurred_at: datetime,
+    *,
+    live: bool,
 ) -> None:
     await conn.execute(
         text(
@@ -212,6 +220,8 @@ async def _turn_requested(
     # The thread is busy from the moment a turn is asked for: the run that will
     # serve it does not exist yet, and a reader must not see the thread idle.
     await _set_thread_status(conn, thread_id, status="running")
+    if live:
+        await mark_thread_index_status(conn, thread_id, status="running", run_id=None)
     await conn.execute(
         _with_namespace(
             """
@@ -255,7 +265,12 @@ async def _turn_queued(conn: AsyncConnection, thread_id: str, event: TurnQueued)
 
 
 async def _turn_started(
-    conn: AsyncConnection, thread_id: str, event: TurnStarted, occurred_at: datetime
+    conn: AsyncConnection,
+    thread_id: str,
+    event: TurnStarted,
+    occurred_at: datetime,
+    *,
+    live: bool,
 ) -> None:
     # Upserted rather than updated: a run triggered outside the dashboard has no
     # ``turn.requested`` ahead of it, and its turn still has to exist. Only an
@@ -284,6 +299,8 @@ async def _turn_started(
     )
     if result.scalar_one_or_none() is not None:
         await _set_thread_status(conn, thread_id, status="running")
+        if live:
+            await mark_thread_index_status(conn, thread_id, status="running", run_id=event.run_id)
 
 
 async def _turn_checkpoint(
@@ -349,6 +366,8 @@ async def _turn_ended(
     event: TurnCompleted | TurnFailed | TurnInterrupted,
     run_id: str | None,
     occurred_at: datetime,
+    *,
+    live: bool,
 ) -> None:
     """Close a turn, and settle the thread's status if this closed it.
 
@@ -359,6 +378,7 @@ async def _turn_ended(
     """
     failed = isinstance(event, TurnFailed)
     completed = isinstance(event, TurnCompleted)
+    ended_run_id = event.run_id or run_id
     result = await conn.execute(
         text(
             """
@@ -376,14 +396,14 @@ async def _turn_ended(
             "thread_id": thread_id,
             "turn_id": event.turn_id,
             "state": "completed" if completed else "failed" if failed else "interrupted",
-            "run_id": event.run_id or run_id,
+            "run_id": ended_run_id,
             "completed_at": occurred_at,
             "error": event.error if failed else None,
         },
     )
     if result.scalar_one_or_none() is None:
         return
-    await conn.execute(
+    settled = await conn.execute(
         text(
             """
             UPDATE thread SET
@@ -393,9 +413,29 @@ async def _turn_ended(
                 ) THEN 'running' ELSE :settled END,
                 updated_at = clock_timestamp()
             WHERE thread_id = :thread_id
+            RETURNING status
             """
         ),
         {"thread_id": thread_id, "settled": "error" if failed else "idle"},
+    )
+    thread_status = settled.scalar_one_or_none()
+    if not live or thread_status is None:
+        return
+    index_status: ThreadIndexStatus = (
+        "running"
+        if thread_status == "running"
+        else "error"
+        if failed
+        else "finished"
+        if completed
+        else "interrupted"
+    )
+    # Another open turn's run is the thread's latest; this one must not replace it.
+    await mark_thread_index_status(
+        conn,
+        thread_id,
+        status=index_status,
+        run_id=None if index_status == "running" else ended_run_id,
     )
 
 

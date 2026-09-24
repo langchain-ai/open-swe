@@ -35,7 +35,7 @@ from agent.threads.summary import (
     thread_source,
 )
 from agent.utils.json_types import JsonObject, ThreadLike, as_thread_dict
-from agent.utils.thread_ops import langgraph_client
+from agent.utils.thread_ops import langgraph_client, update_thread_metadata
 from agent.utils.thread_participants import participant_search_filters
 from agent.workspaces.routing import workspace_for_repo
 from agent.workspaces.store import DEFAULT_WORKSPACE_SLUG
@@ -257,7 +257,7 @@ async def settle_review_walkthrough(client: Any, thread: ThreadLike) -> ThreadLi
             "walkthrough_ready_at_ms": now_ms if ready else None,
             "updated_at_ms": now_ms,
         }
-        await client.threads.update(thread_id=thread_id, metadata=update)
+        await update_thread_metadata(thread_id, update, client=client)
     except Exception:
         logger.warning(
             "Could not record the review walkthrough's outcome",

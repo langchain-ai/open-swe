@@ -21,6 +21,7 @@ from agent.threads.access import (
     _github_token_for_login,
     _readable_thread_metadata,
 )
+from agent.threads.index import delete_thread_index, try_upsert_thread_index
 from agent.threads.listing import list_unresolved_dashboard_threads, settle_review_walkthrough
 from agent.threads.runs import (
     _ASSISTANT_ID,
@@ -47,13 +48,13 @@ from agent.threads.summary import (
     thread_source,
 )
 from agent.transcript.engine import delete_transcript
-from agent.transcript.mirror import mirror_thread_metadata
 from agent.transcript.turns import settle_run_turn
 from agent.utils.json_types import as_json_object, as_thread_dict, thread_metadata
 from agent.utils.thread_ops import (
     get_thread_active_status,
     langgraph_client,
     queue_message_for_thread,
+    update_thread_metadata,
 )
 from agent.utils.thread_participants import (
     PARTICIPANT_EMAILS_KEY,
@@ -80,7 +81,7 @@ async def _mark_thread_viewed(
     if run_id:
         metadata_update["last_viewed_run_id"] = run_id
     try:
-        await client.threads.update(thread_id=thread_id, metadata=metadata_update)
+        await update_thread_metadata(thread_id, metadata_update, client=client)
     except Exception:  # noqa: BLE001
         logger.debug("Could not mark thread %s viewed", thread_id, exc_info=True)
         return metadata
@@ -238,15 +239,14 @@ async def send_dashboard_message(
                 metadata_update["auto_resolved_by_prs"] = False
             if metadata.get("attention_reason"):
                 metadata_update["attention_reason"] = None
-            await client.threads.update(thread_id=thread_id, metadata=metadata_update)
+            await update_thread_metadata(thread_id, metadata_update, client=client)
     else:
         if _is_thread_resolved(metadata):
             metadata_update["resolved"] = False
             metadata_update["resolved_at_ms"] = None
         if metadata.get("attention_reason"):
             metadata_update["attention_reason"] = None
-        await client.threads.update(thread_id=thread_id, metadata=metadata_update)
-    await mirror_thread_metadata(thread_id, metadata_update)
+        await update_thread_metadata(thread_id, metadata_update, client=client)
     queue_payload: dict[str, Any] = {
         "text": prompt,
         "source": DASHBOARD_SOURCE,
@@ -366,7 +366,7 @@ async def cancel_dashboard_thread(
         "latest_run_status": "interrupted",
         "updated_at_ms": _now_ms(),
     }
-    await client.threads.update(thread_id=thread_id, metadata=metadata_update)
+    await update_thread_metadata(thread_id, metadata_update, client=client)
     # A follow-up left queued picks the leftovers up with its first model call.
     try:
         run_id = (
@@ -379,7 +379,7 @@ async def cancel_dashboard_thread(
         raise HTTPException(502, "stopped run but failed to submit queued follow-up") from exc
     if run_id is not None:
         metadata_update.update(latest_run_status="pending", latest_run_id=run_id)
-        await client.threads.update(thread_id=thread_id, metadata=metadata_update)
+        await update_thread_metadata(thread_id, metadata_update, client=client)
     thread = await client.threads.get(thread_id)
     return await _thread_summary(thread)
 
@@ -406,9 +406,10 @@ async def admin_cancel_dashboard_thread(
         raise HTTPException(502, "failed to request thread cancellation") from exc
     await interrupt_transcript_turns(thread_id, cancelled_run_ids)
 
-    await client.threads.update(
-        thread_id=thread_id,
-        metadata={"latest_run_status": "interrupted", "updated_at_ms": _now_ms()},
+    await update_thread_metadata(
+        thread_id,
+        {"latest_run_status": "interrupted", "updated_at_ms": _now_ms()},
+        client=client,
     )
     updated_thread = await client.threads.get(thread_id)
     return await _thread_summary(updated_thread)
@@ -432,6 +433,15 @@ async def delete_dashboard_thread(thread_id: str, login: str, *, email: str | No
             logger.debug("Could not cancel run %s for thread %s", run_id, thread_id, exc_info=True)
 
     await client.threads.delete(thread_id)
+    try:
+        await delete_thread_index(thread_id)
+    except Exception:  # noqa: BLE001
+        # The reconciler drops the row once LangGraph reports the thread gone.
+        logger.warning(
+            "Could not delete the thread index row",
+            exc_info=True,
+            extra={"thread_index": {"thread_id": thread_id}},
+        )
     # The mirrored transcript outlives the LangGraph thread otherwise, and the
     # read path authorizes against the mirror rather than against LangGraph.
     try:
@@ -451,11 +461,10 @@ async def rename_dashboard_thread(
     thread = await _authorized_thread(thread_id, login, email=email)
     metadata_update = {"title": title, "title_seed": None}
     try:
-        await client.threads.update(thread_id=thread_id, metadata=metadata_update)
+        await update_thread_metadata(thread_id, metadata_update, client=client)
     except Exception as exc:  # noqa: BLE001
         logger.debug("Could not rename thread", extra={"thread_id": thread_id}, exc_info=True)
         raise HTTPException(502, "failed to update thread") from exc
-    await mirror_thread_metadata(thread_id, metadata_update)
     thread = {
         **as_thread_dict(thread),
         "metadata": {**thread_metadata(thread), **metadata_update},
@@ -543,7 +552,10 @@ async def continue_thread_privately(
         }
     )
     new_thread_id = str(uuid.uuid4())
-    await client.threads.create(thread_id=new_thread_id, metadata=new_metadata, if_exists="raise")
+    created = await client.threads.create(
+        thread_id=new_thread_id, metadata=new_metadata, if_exists="raise"
+    )
+    await try_upsert_thread_index(created)
     if copied:
         try:
             await client.threads.update_state(new_thread_id, values={"messages": copied})
@@ -555,6 +567,7 @@ async def continue_thread_privately(
             )
             try:
                 await client.threads.delete(new_thread_id)
+                await delete_thread_index(new_thread_id)
             finally:
                 raise HTTPException(502, "failed to copy the thread transcript") from exc
     return await _thread_summary(await client.threads.get(new_thread_id))
@@ -568,14 +581,15 @@ async def resolve_all_dashboard_threads(login: str, *, email: str | None = None)
 
     async def resolve(thread_id: str) -> None:
         async with agent_thread_pr_state_lock(client, thread_id):
-            await client.threads.update(
-                thread_id=thread_id,
-                metadata={
+            await update_thread_metadata(
+                thread_id,
+                {
                     "resolved": True,
                     "resolved_at_ms": now_ms,
                     "auto_resolved_by_prs": False,
                     "attention_reason": None,
                 },
+                client=client,
             )
 
     await asyncio.gather(*(resolve(thread["thread_id"]) for thread in threads))
@@ -598,7 +612,7 @@ async def resolve_dashboard_thread(
                 "auto_resolved_by_prs": False,
                 "attention_reason": None,
             }
-            await client.threads.update(thread_id=thread_id, metadata=metadata_update)
+            await update_thread_metadata(thread_id, metadata_update, client=client)
             if resolved:
                 from agent.analytics.emitter import task_accepted, task_marked_complete
 

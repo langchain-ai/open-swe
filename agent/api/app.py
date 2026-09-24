@@ -1,5 +1,6 @@
 """FastAPI application composition."""
 
+import asyncio
 import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -35,6 +36,7 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     from agent.dashboard.oauth import validate_github_login_allowlist
     from agent.database.analytics import activate_reporting, load_workspace
     from agent.sandboxes.providers.registry import validate_sandbox_startup_config
+    from agent.threads.index_sync import bootstrap_thread_index
     from agent.transcript import listener as transcript_listener
     from agent.users import User
     from agent.users.import_store import import_user_mappings
@@ -88,9 +90,13 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         # Transcript readers fall back to in-process notifications; a thread
         # driven from another process is what goes quiet until this recovers.
         logger.warning("Transcript listener startup failed", exc_info=True)
+    # In the background: a first backfill walks every LangGraph thread.
+    thread_index_bootstrap = asyncio.create_task(bootstrap_thread_index())
     try:
         yield
     finally:
+        thread_index_bootstrap.cancel()
+        await asyncio.gather(thread_index_bootstrap, return_exceptions=True)
         await transcript_listener.stop()
         await stop_worker()
         await database.close()

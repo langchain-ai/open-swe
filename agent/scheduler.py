@@ -23,6 +23,8 @@ from agent.sandboxes.retry import (
 from agent.schedules.store import launch_scheduled_agent_run
 from agent.session_cost import run_session_cost_refresh
 from agent.thread_feedback import run_feedback_prompt
+from agent.threads.index_sync import TASK as THREAD_INDEX_SYNC_TASK
+from agent.threads.index_sync import sync_thread_index
 from agent.workspaces.refresh import LEGACY_REFRESH_TASK, run_workspace_refresh_tick
 from agent.workspaces.refresh import REFRESH_TASK as WORKSPACE_REFRESH_TASK
 
@@ -58,6 +60,8 @@ async def _launch(state: SchedulerState, config: RunnableConfig) -> dict[str, An
         task = state.task or cfg.task
         if task == "reconcile":
             return {"result": await reconcile_stale_runs()}
+        if task == THREAD_INDEX_SYNC_TASK:
+            return {"result": (await sync_thread_index()).as_json()}
         if task == "baby_sit":
             key = state.watch_key or cfg.watch_key
             if not key:

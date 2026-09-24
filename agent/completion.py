@@ -38,7 +38,7 @@ from agent.transcript.turns import TurnOutcome, settle_run_turn
 from agent.utils.errors import LAST_MODEL_ERROR_KEY, code_for_error_type
 from agent.utils.json_types import thread_metadata
 from agent.utils.langsmith import get_langsmith_trace_url
-from agent.utils.thread_ops import langgraph_client
+from agent.utils.thread_ops import langgraph_client, update_thread_metadata
 from agent.utils.user_messages import warning
 
 logger = logging.getLogger(__name__)
@@ -391,9 +391,10 @@ async def _handle_successful_run(
     if not scheduled:
         return {"status": "error", "reason": "cost refresh scheduling failed"}
     try:
-        await client.threads.update(
-            thread_id=thread_id,
-            metadata=_cost_refresh_metadata(metadata, run_id),
+        await update_thread_metadata(
+            thread_id,
+            _cost_refresh_metadata(metadata, run_id),
+            client=client,
         )
     except Exception:  # noqa: BLE001
         logger.warning("run-complete: could not flag thread %s", thread_id, exc_info=True)
@@ -540,9 +541,10 @@ async def handle_run_completion(payload: dict[str, Any]) -> dict[str, str]:
         return {"status": "ignored", "reason": "no reply posted"}
 
     try:
-        await client.threads.update(
-            thread_id=thread_id,
-            metadata=_failure_reply_metadata(metadata, run_id),
+        await update_thread_metadata(
+            thread_id,
+            _failure_reply_metadata(metadata, run_id),
+            client=client,
         )
     except Exception:  # noqa: BLE001
         logger.warning("run-complete: could not flag thread %s", thread_id, exc_info=True)

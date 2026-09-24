@@ -35,7 +35,7 @@ from agent.source_context import SourceContext
 from agent.store import delete_value, get_value, now_iso, now_ms, put_value, search_all_values
 from agent.threads.access import agent_version_metadata, resolve_run_email
 from agent.utils.json_types import thread_metadata
-from agent.utils.thread_ops import langgraph_client
+from agent.utils.thread_ops import langgraph_client, update_thread_metadata
 from agent.webhooks.common import workspace_for_repo_config
 
 logger = logging.getLogger(__name__)
@@ -709,7 +709,8 @@ async def _launch_agent_schedule_record(
             "invocation_id": run_config["configurable"]["invocation_id"],
         }
     await client.threads.create(thread_id=thread_id, metadata=metadata, if_exists="do_nothing")
-    await client.threads.update(thread_id=thread_id, metadata=metadata)
+    # Also indexes the new thread: the update returns it with the metadata merged.
+    await update_thread_metadata(thread_id, metadata, client=client)
     input_context: InputMessageContext = {
         "sender_id": f"system:schedule:{schedule_id}",
         "surface": "automation",
@@ -758,13 +759,14 @@ async def _launch_agent_schedule_record(
                 "Failed to save dispatched automation Slack mapping", extra=log_context
             )
     try:
-        await client.threads.update(
-            thread_id=thread_id,
-            metadata={
+        await update_thread_metadata(
+            thread_id,
+            {
                 "latest_run_id": run_id,
                 "latest_run_status": "pending",
                 "updated_at_ms": now_ms(),
             },
+            client=client,
         )
     except Exception:
         logger.exception("Failed to save dispatched automation thread metadata", extra=log_context)
