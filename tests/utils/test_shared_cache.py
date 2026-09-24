@@ -198,3 +198,45 @@ async def test_refresh_held_on_another_event_loop_does_not_block_this_one(
         other_loop.call_soon_threadsafe(other_loop.stop)
         other_thread.join(timeout=5)
         other_loop.close()
+
+
+async def test_first_call_after_a_completed_refresh_returns_the_new_value(
+    fake_store: FakeStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _seed_stale_item(fake_store, monkeypatch)
+
+    async def loader() -> dict[str, int]:
+        return {"n": 2}
+
+    assert await _cached(loader) == {"n": 1}
+    await eventually(lambda: _stored(fake_store) == {"n": 2})
+
+    async def unexpected_loader() -> dict[str, int]:
+        raise AssertionError("the refreshed value must already be on this worker")
+
+    assert await _cached(unexpected_loader) == {"n": 2}
+
+
+async def test_item_older_than_max_stale_makes_the_caller_wait_for_the_loader(
+    fake_store: FakeStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    clock = {"now": 1_000.0}
+    monkeypatch.setattr(shared_cache, "_now", lambda: clock["now"])
+    fake_store.seed(_NAMESPACE, _ITEM_KEY, {"stored_at": 1_000.0, "value": {"n": 1}})
+    clock["now"] = 1_000.0 + 3_601.0  # past both the 60s ttl and the hour-long stale bound
+
+    async def loader() -> dict[str, int]:
+        return {"n": 2}
+
+    result = await shared_cache.cached(
+        _NAMESPACE,
+        _KEY,
+        60.0,
+        loader,
+        dump=lambda v: v,
+        load=lambda v: v,
+        max_stale_seconds=3_600.0,
+    )
+
+    assert result == {"n": 2}
+    assert _stored(fake_store) == {"n": 2}

@@ -6,6 +6,10 @@ with a cold in-process cache reuse a value another worker already computed.
 Values are opaque to the Store, so callers round-trip them through their own
 ``dump``/``load``.
 
+An item older than ``ttl_seconds`` is still served while one background
+refresh replaces it in both the Store and this worker's front cache; one older
+than ``max_stale_seconds`` is a miss, so the caller waits for the loader.
+
 This sits on the agent's critical path. A Store read that fails, or returns
 an item ``load`` cannot decode, falls back to the loader; a Store write that
 fails still returns the value already computed. Every such failure is
@@ -53,6 +57,7 @@ async def cached[T](
     *,
     dump: Callable[[T], object],
     load: Callable[[object], T],
+    max_stale_seconds: float = 86400.0,
 ) -> T:
     item_key = hashlib.sha256(key.encode()).hexdigest()
     front_key = _front_key(namespace, key)
@@ -72,6 +77,9 @@ async def cached[T](
         except Exception:
             logger.warning("Shared cache background refresh failed", extra=log_extra)
             return
+        # The stale read that started this refresh left the old value in the
+        # front cache for a full ttl; replace it now that the new one is known.
+        ttl_cache.set_cached(front_key, value, ttl_seconds)
         await _write(value)
 
     def _schedule_refresh() -> None:
@@ -102,8 +110,10 @@ async def cached[T](
             else:
                 if age < ttl_seconds:
                     return value
-                _schedule_refresh()
-                return value
+                if age < max_stale_seconds:
+                    _schedule_refresh()
+                    return value
+                # Too old to serve even while refreshing: treat it as a miss.
 
         value = await loader()
         await _write(value)
