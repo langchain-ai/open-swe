@@ -2,10 +2,12 @@ from typing import Any, cast
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-from langchain.agents.middleware.types import AgentState, ModelRequest, ModelResponse
-from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
+from langchain.agents.middleware.types import AgentState
+from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
+from agent.input_messages import message_sender_id
 from agent.middleware.require_user_reply import (
+    REPLY_GUARD,
     SLACK_REPLY_SURFACE,
     WEB_REPLY_SURFACE,
     RequireUserReplyMiddleware,
@@ -43,6 +45,16 @@ def _runtime() -> Any:
     return MagicMock()
 
 
+def _assert_nudged(result: dict[str, Any] | None, attempt: int) -> list[HumanMessage]:
+    assert result is not None
+    assert result["reply_nudges"] == attempt
+    assert result["jump_to"] == "model"
+    nudge = result["messages"][-1]
+    assert message_sender_id(nudge.content, kind="system") == REPLY_GUARD["id"]
+    assert TOOL in nudge.content and NO_REPLY_TOOL in nudge.content
+    return cast(list[HumanMessage], result["messages"])
+
+
 class TestRequireUserReplyMiddleware:
     @pytest.mark.asyncio
     async def test_reinvokes_when_the_turn_ends_with_undelivered_text(self) -> None:
@@ -51,7 +63,24 @@ class TestRequireUserReplyMiddleware:
             _runtime(),
         )
 
-        assert result == {"reply_nudges": 1, "reply_nudge_pending": True, "jump_to": "model"}
+        _assert_nudged(result, 1)
+
+    @pytest.mark.asyncio
+    async def test_a_nudge_does_not_start_a_new_turn(self) -> None:
+        """The earlier progress ack must still not count once the nudge is in history."""
+        middleware = _middleware()
+        messages: list[Any] = [
+            HumanMessage(content="what is up"),
+            _reply("call-1", "progress"),
+            _result("call-1"),
+            AIMessage(content="all good"),
+        ]
+        first = await middleware.aafter_model(_state(*messages), _runtime())
+        messages += [*_assert_nudged(first, 1), AIMessage(content="")]
+
+        second = await middleware.aafter_model(_state(*messages, reply_nudges=1), _runtime())
+
+        _assert_nudged(second, 2)
 
     @pytest.mark.asyncio
     async def test_lets_the_turn_end_once_the_reply_tool_ran(self) -> None:
@@ -65,7 +94,7 @@ class TestRequireUserReplyMiddleware:
             _runtime(),
         )
 
-        assert result == {"reply_nudge_pending": False, "reply_nudges": 0}
+        assert result == {"reply_nudges": 0}
 
     @pytest.mark.asyncio
     async def test_the_opening_acknowledgement_does_not_end_the_turn(self) -> None:
@@ -80,7 +109,7 @@ class TestRequireUserReplyMiddleware:
             _runtime(),
         )
 
-        assert result == {"reply_nudges": 1, "reply_nudge_pending": True, "jump_to": "model"}
+        _assert_nudged(result, 1)
 
     @pytest.mark.asyncio
     async def test_declining_to_reply_also_ends_the_turn(self) -> None:
@@ -94,7 +123,7 @@ class TestRequireUserReplyMiddleware:
             _runtime(),
         )
 
-        assert result == {"reply_nudge_pending": False, "reply_nudges": 0}
+        assert result == {"reply_nudges": 0}
 
     @pytest.mark.asyncio
     async def test_a_reply_slack_rejected_does_not_count(self) -> None:
@@ -108,7 +137,7 @@ class TestRequireUserReplyMiddleware:
             _runtime(),
         )
 
-        assert result == {"reply_nudges": 1, "reply_nudge_pending": True, "jump_to": "model"}
+        _assert_nudged(result, 1)
 
     @pytest.mark.asyncio
     async def test_leaves_a_web_turn_alone(self) -> None:
@@ -125,7 +154,7 @@ class TestRequireUserReplyMiddleware:
             _runtime(),
         )
 
-        assert result == {"reply_nudge_pending": False}
+        assert result is None
 
     @pytest.mark.asyncio
     async def test_leaves_a_turn_that_is_still_calling_tools_alone(self) -> None:
@@ -134,7 +163,7 @@ class TestRequireUserReplyMiddleware:
             _runtime(),
         )
 
-        assert result == {"reply_nudge_pending": False}
+        assert result is None
 
     @pytest.mark.asyncio
     async def test_posts_the_final_message_once_the_budget_is_spent(
@@ -152,7 +181,27 @@ class TestRequireUserReplyMiddleware:
 
         result = await _middleware(max_retries=2).aafter_model(state, _runtime())
 
-        assert result == {"reply_nudge_pending": False, "reply_nudges": 0}
+        assert result == {"reply_nudges": 0}
+        assert posted.await_args.args[0] == "all good"
+
+    @pytest.mark.asyncio
+    async def test_blank_replies_to_the_nudges_still_post_the_earlier_answer(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import agent.slack.tools.reply as reply_tool
+
+        posted = AsyncMock(return_value={"success": True})
+        monkeypatch.setattr(reply_tool, "slack_reply", posted)
+        middleware = _middleware(max_retries=2)
+        messages: list[Any] = [HumanMessage(content="what is up"), AIMessage(content="all good")]
+        for attempt in (1, 2):
+            result = await middleware.aafter_model(
+                _state(*messages, reply_nudges=attempt - 1), _runtime()
+            )
+            messages += [*_assert_nudged(result, attempt), AIMessage(content="")]
+
+        await middleware.aafter_model(_state(*messages, reply_nudges=2), _runtime())
+
         assert posted.await_args.args[0] == "all good"
 
     @pytest.mark.asyncio
@@ -171,35 +220,6 @@ class TestRequireUserReplyMiddleware:
 
         posted.assert_not_awaited()
 
-    @pytest.mark.asyncio
-    async def test_only_a_pending_retry_carries_the_nudge_into_the_prompt(self) -> None:
-        middleware = _middleware()
-        seen: list[str] = []
-
-        async def handler(request: ModelRequest[None]) -> ModelResponse[Any]:
-            system = request.system_message
-            seen.append(str(system.content) if system else "")
-            return cast(ModelResponse[Any], MagicMock())
-
-        def request(*, pending: bool) -> ModelRequest[None]:
-            def override(**kwargs: Any) -> Any:
-                replaced = MagicMock()
-                replaced.system_message = kwargs["system_message"]
-                return replaced
-
-            built = MagicMock()
-            built.state = {"reply_nudge_pending": pending}
-            built.system_message = SystemMessage(content="base prompt")
-            built.override = override
-            return cast(ModelRequest[None], built)
-
-        await middleware.awrap_model_call(request(pending=False), handler)
-        await middleware.awrap_model_call(request(pending=True), handler)
-
-        assert TOOL not in seen[0]
-        assert TOOL in seen[1]
-        assert NO_REPLY_TOOL in seen[1]
-
     def test_each_run_resolves_its_own_surface(self) -> None:
         middleware = RequireUserReplyMiddleware(
             TOOL, NO_REPLY_TOOL, initial_surface=WEB_REPLY_SURFACE
@@ -208,5 +228,4 @@ class TestRequireUserReplyMiddleware:
         assert middleware.before_agent(_state(), _runtime()) == {
             "reply_surface": WEB_REPLY_SURFACE,
             "reply_nudges": 0,
-            "reply_nudge_pending": False,
         }
