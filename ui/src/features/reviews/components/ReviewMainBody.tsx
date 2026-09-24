@@ -74,6 +74,7 @@ import type { ChatAttachment } from "@/features/reviews/components/ReviewChat"
 import type { DiffStyle } from "@/features/agents/utils/diffUtils"
 import { Markdown } from "@/features/agents/components/chat/Markdown"
 import { DiffWrapToggle } from "@/features/agents/components/DiffWrapToggle"
+import { agentThreadKeys } from "@/features/agents/lib/queries"
 import { AuthorGuidanceCard } from "@/features/reviews/components/AuthorGuidanceCard"
 import { PrHeader } from "@/features/reviews/components/PrHeader"
 import { ReviewAssessmentCard } from "@/features/reviews/components/ReviewAssessmentCard"
@@ -1464,6 +1465,7 @@ function WalkthroughCallout({ detail }: { detail: ReviewDetail }) {
       void qc.invalidateQueries({
         queryKey: ["review", detail.owner, detail.repo, detail.number],
       })
+      void qc.invalidateQueries({ queryKey: agentThreadKeys.lists })
     },
     onError: (error) =>
       toast.error("Couldn't start the walkthrough", {

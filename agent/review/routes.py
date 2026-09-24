@@ -45,6 +45,7 @@ from agent.review.reviews import (
     trigger_review_scout,
     update_review_comment,
 )
+from agent.review.session import ReviewSession
 from agent.review.style_jobs import (
     cancel_review_style_analysis,
     start_bootstrap_analysis,
@@ -57,6 +58,7 @@ from agent.review.styles import (
     ReviewStylePromptUpdate,
     normalize_repo_full_name,
 )
+from agent.threads.handlers import mark_review_session_viewed
 
 router = APIRouter(tags=["review"])
 
@@ -252,7 +254,20 @@ async def api_run_review_scout(
     session: dict[str, Any] = SESSION_DEP,
 ) -> ReviewScoutTrigger:
     await require_repo_access_for_user(session["sub"], f"{owner}/{repo}")
-    return await trigger_review_scout(owner, repo, pr_number)
+    return await trigger_review_scout(owner, repo, pr_number, session["sub"])
+
+
+@router.post("/reviews/{owner}/{repo}/{pr_number}/viewed", status_code=204)
+async def api_mark_review_viewed(
+    owner: str,
+    repo: str,
+    pr_number: int,
+    session: dict[str, Any] = SESSION_DEP,
+) -> Response:
+    await mark_review_session_viewed(
+        ReviewSession(owner=owner, repo=repo, pr_number=pr_number, login=session["sub"])
+    )
+    return Response(status_code=204)
 
 
 class ReviewCommentCreate(BaseModel):

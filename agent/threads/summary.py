@@ -10,6 +10,7 @@ from fastapi import HTTPException
 
 from agent.dashboard.admin import is_admin
 from agent.dashboard.options import SUPPORTED_MODEL_IDS, canonical_model_pair
+from agent.review.session import ReviewSessionMetadata
 from agent.slack.client import parse_github_pr_url
 from agent.slack.code_channels import CODE_CHANNEL_SESSION_TS
 from agent.slack.oauth import SLACK_TEAM_ID
@@ -112,7 +113,13 @@ def thread_is_unlisted(metadata: Mapping[str, Any]) -> bool:
 def thread_is_readable(
     metadata: Mapping[str, Any], login: str | None = None, email: str | None = None
 ) -> bool:
-    """Private threads are visible to their immutable owner and to workspace admins."""
+    """Private threads are visible to their immutable owner and to workspace admins.
+
+    A review chat is readable only by the user it belongs to, so its sidebar row
+    can be pinned, archived and marked read.
+    """
+    if (review := ReviewSessionMetadata.parse(metadata)) is not None:
+        return review.owned_by(login)
     return thread_source(metadata) in _SURFACED_SOURCES and (
         not thread_is_private(metadata)
         or thread_is_owner(metadata, login)
@@ -471,6 +478,19 @@ async def _thread_summary(
             key: latest_pr[key] for key in ("number", "title", "state", "headRef", "baseRef", "url")
         }
         summary["diffStats"] = latest_pr["diffStats"]
+    if (review := ReviewSessionMetadata.parse(metadata)) is not None:
+        summary["reviewPage"] = {
+            "owner": review.repo_owner,
+            "repo": review.repo_name,
+            "number": review.pr_number,
+        }
+        if review.walkthrough_state == "building":
+            summary["status"] = "running"
+        elif status == "idle" and review.walkthrough_state == "failed":
+            summary["status"] = "error"
+        elif status == "idle" and review.walkthrough_state == "ready":
+            summary["status"] = "finished"
+        summary["viewed"] = summary["viewed"] and not review.unseen_walkthrough
     # The transcript hydrates client-side from the SDK (`GET …/state` →
     # `stream.messages`); the summary only carries metadata.
     summary["messages"] = []

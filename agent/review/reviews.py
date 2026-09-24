@@ -38,6 +38,7 @@ from agent.review.findings import (
     findings_by_thread,
     is_thread_resolved,
 )
+from agent.review.session import PullRequestState, ReviewSession
 from agent.review_scout.launch import ReviewScoutTarget
 from agent.thread_ids import reviewer_thread_id
 from agent.utils.json_types import ThreadLike, as_json_object, thread_metadata
@@ -1027,8 +1028,20 @@ class _ScoutRef(BaseModel):
 
 class _ScoutPull(BaseModel):
     title: str = ""
+    html_url: str = ""
+    state: Literal["open", "closed"] = "open"
+    draft: bool = False
+    merged: bool = False
     base: _ScoutRef = _ScoutRef()
     head: _ScoutRef = _ScoutRef()
+
+    @property
+    def lifecycle(self) -> PullRequestState:
+        if self.merged:
+            return "merged"
+        if self.state == "closed":
+            return "closed"
+        return "draft" if self.draft else "open"
 
 
 async def _scout_target(
@@ -1064,16 +1077,36 @@ class ReviewScoutTrigger(BaseModel):
     run_id: str | None = None
 
 
-async def trigger_review_scout(owner: str, repo: str, pr_number: int) -> ReviewScoutTrigger:
-    """Start the review scout for the PR's current head, or join the one already running."""
+async def trigger_review_scout(
+    owner: str, repo: str, pr_number: int, login: str
+) -> ReviewScoutTrigger:
+    """Start the review scout for the PR's current head, or join the one already running.
+
+    Also lists the review in ``login``'s sidebar, where it shows the build's progress.
+    """
     token = await _require_app_token()
     pr_payload = await _github_get(f"/repos/{owner}/{repo}/pulls/{pr_number}", token)
     target = await _scout_target(owner, repo, pr_number, pr_payload)
     if target is None:
         raise HTTPException(503, "the review scout needs a database and a pull request head")
     if await target.walkthrough() is not None:
-        return ReviewScoutTrigger(started=False)
-    return ReviewScoutTrigger(started=True, run_id=await target.start())
+        trigger = ReviewScoutTrigger(started=False)
+    else:
+        trigger = ReviewScoutTrigger(started=True, run_id=await target.start())
+    pull = _ScoutPull.model_validate(pr_payload if isinstance(pr_payload, dict) else {})
+    try:
+        await ReviewSession(owner=owner, repo=repo, pr_number=pr_number, login=login).open(
+            title=pull.title,
+            url=pull.html_url,
+            state=pull.lifecycle,
+            workspace=target.workspace_slug,
+            walkthrough_ready=not trigger.started,
+        )
+    except Exception:
+        logger.warning(
+            "Could not list the review in the sidebar", exc_info=True, extra=target.log_extra
+        )
+    return trigger
 
 
 async def trigger_re_review(owner: str, repo: str, pr_number: int, login: str) -> dict[str, Any]:

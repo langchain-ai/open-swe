@@ -3,6 +3,7 @@ import { Link, useNavigate } from "@tanstack/react-router"
 import {
   ArchiveIcon,
   ArrowCounterClockwiseIcon,
+  BookOpenTextIcon,
   CalendarBlankIcon,
   ChatCircleIcon,
   CircleNotchIcon,
@@ -33,8 +34,13 @@ import { ThreadMenuItems } from "@/features/agents/components/ThreadMenuItems"
 import { useMarkLocalThreadViewed } from "@/features/agents/lib/desktopLocal"
 import {
   markAgentThreadViewed,
+  markReviewViewed,
   useDeleteAgentThread,
 } from "@/features/agents/lib/queries"
+import {
+  noteReviewOpenedFromSidebar,
+  reviewPageRoute,
+} from "@/features/reviews/lib/reviewEntry"
 import { useQueryClient } from "@tanstack/react-query"
 import { cn } from "@/lib/utils"
 import { useChatRoutes } from "@/lib/chatRoutes"
@@ -220,7 +226,9 @@ export function SidebarThreadRow({
       deleteThread.variables === item.id)
 
   const markViewed = () => {
-    if (item.location === "cloud") markAgentThreadViewed(queryClient, item.id)
+    if (item.reviewPage) markReviewViewed(queryClient, item.reviewPage, item.id)
+    else if (item.location === "cloud")
+      markAgentThreadViewed(queryClient, item.id)
     else markLocalViewed(item.id)
   }
 
@@ -320,13 +328,22 @@ export function SidebarThreadRow({
             aria-label="Action posted to Slack"
           />
         )}
-        {source && SourceIcon && !item.pr && (
-          <SourceIcon
+        {item.reviewPage ? (
+          <BookOpenTextIcon
             className="size-3.5 text-muted-foreground/70"
-            aria-label={source.label}
+            aria-label="Pull request review"
           />
+        ) : (
+          <>
+            {source && SourceIcon && !item.pr && (
+              <SourceIcon
+                className="size-3.5 text-muted-foreground/70"
+                aria-label={source.label}
+              />
+            )}
+            {item.pr && <PullRequestIcon state={item.pr.state} live={live} />}
+          </>
         )}
-        {item.pr && <PullRequestIcon state={item.pr.state} live={live} />}
         {item.status === "running" ? (
           <CircleNotchIcon
             className="size-3.5 animate-spin text-muted-foreground"
@@ -382,24 +399,34 @@ export function SidebarThreadRow({
     isActive ? "bg-accent" : "group-hover/row:bg-sidebar-row-hover"
   )
 
-  const link =
-    item.location === "cloud" ? (
-      <Link
-        to={chat.thread}
-        params={{ threadId: item.id }}
-        onClick={handleNavigate}
-        onKeyDown={openContextMenuFromKeyboard}
-        className={rowClassName}
-      />
-    ) : (
-      <Link
-        to="/agents/local/$sessionId"
-        params={{ sessionId: item.id }}
-        onClick={handleNavigate}
-        onKeyDown={openContextMenuFromKeyboard}
-        className={rowClassName}
-      />
-    )
+  const review = item.reviewPage
+  const link = review ? (
+    <Link
+      {...reviewPageRoute(review)}
+      onClick={(event) => {
+        noteReviewOpenedFromSidebar(review)
+        handleNavigate(event)
+      }}
+      onKeyDown={openContextMenuFromKeyboard}
+      className={rowClassName}
+    />
+  ) : item.location === "cloud" ? (
+    <Link
+      to={chat.thread}
+      params={{ threadId: item.id }}
+      onClick={handleNavigate}
+      onKeyDown={openContextMenuFromKeyboard}
+      className={rowClassName}
+    />
+  ) : (
+    <Link
+      to="/agents/local/$sessionId"
+      params={{ sessionId: item.id }}
+      onClick={handleNavigate}
+      onKeyDown={openContextMenuFromKeyboard}
+      className={rowClassName}
+    />
+  )
 
   return (
     <>

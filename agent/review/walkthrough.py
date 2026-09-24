@@ -152,6 +152,24 @@ class Walkthrough(Base):
             )
 
     @classmethod
+    async def generated_since(cls, owner: str, repo: str, number: int, since: datetime) -> bool:
+        """Whether the PR has a walkthrough, for any head, stored at or after ``since``."""
+        if not postgres.configured():
+            return False
+        async with postgres.session() as session:
+            found = await session.scalar(
+                select(cls.pull_request_id)
+                .join(PullRequest, PullRequest.id == cls.pull_request_id)
+                .join(PullRequest.repository)
+                .where(
+                    Repository.key == f"{owner}/{repo}".lower(),
+                    PullRequest.number == number,
+                    cls.generated_at >= since,
+                )
+            )
+        return found is not None
+
+    @classmethod
     async def carry_forward(
         cls, owner: str, repo: str, number: int, *, from_sha: str, to_sha: str
     ) -> None:
