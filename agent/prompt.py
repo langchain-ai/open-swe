@@ -107,6 +107,14 @@ def _render_collaboration_section() -> str:
     )
 
 
+def _working_environment_prompt(source: str, *, local_checkout: bool) -> str:
+    if source == "desktop":
+        return "system/working-environment-desktop.md"
+    if local_checkout:
+        return "system/working-environment-local.md"
+    return "system/working-environment.md"
+
+
 def construct_system_prompt(
     working_dir: str,
     dashboard_base_url: str = "",
@@ -123,8 +131,15 @@ def construct_system_prompt(
     slack_ask: bool = False,
     sandbox_file_downloads: bool = False,
     continued_from_collaborative: bool = False,
+    local_checkout: bool = False,
     recent_thread_context: str | None = None,
 ) -> str:
+    """Render the agent's system prompt.
+
+    ``local_checkout`` says the working directory already *is* the user's own
+    repository — a thread bridged to their machine — so the clone-or-sync and
+    git-identity steps a hosted sandbox needs would rewrite their checkout.
+    """
     del linear_project_id, linear_issue_number
     untrusted_section = EXTERNAL_UNTRUSTED_COMMENTS_SECTION
     if continued_from_collaborative:
@@ -142,9 +157,7 @@ def construct_system_prompt(
     return render_prompt(
         "system/main.md",
         working_environment_section=render_prompt(
-            "system/working-environment-desktop.md"
-            if source == "desktop"
-            else "system/working-environment.md",
+            _working_environment_prompt(source, local_checkout=local_checkout),
             working_dir=working_dir,
         ),
         dashboard_context_section=render_prompt(
@@ -162,7 +175,8 @@ def construct_system_prompt(
             _render_repository_scope_section() if source in {"dashboard", "slack"} else ""
         ),
         repository_setup_section=render_prompt(
-            "system/repository-setup.md", working_dir=working_dir
+            "system/repository-setup-local.md" if local_checkout else "system/repository-setup.md",
+            working_dir=working_dir,
         ),
         collaboration_section=_render_collaboration_section(),
         task_execution_section=load_prompt("system/task-execution.md"),

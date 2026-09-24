@@ -31,6 +31,7 @@ pin_single_event_loop()
 async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     from agent import database
     from agent.analytics.worker import start_worker, stop_worker
+    from agent.bridge import listener as bridge_listener
     from agent.dashboard.admin import configured_admins
     from agent.dashboard.oauth import validate_github_login_allowlist
     from agent.database.analytics import activate_reporting, load_workspace
@@ -89,8 +90,15 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         # driven from another process is what goes quiet until this recovers.
         logger.warning("Transcript listener startup failed", exc_info=True)
     try:
+        await bridge_listener.start()
+    except Exception:  # noqa: BLE001
+        # Bridge waiters fall back to in-process notifications and their own
+        # liveness ticks; what goes quiet is a bridge driven from another replica.
+        logger.warning("Sandbox bridge listener startup failed", exc_info=True)
+    try:
         yield
     finally:
+        await bridge_listener.stop()
         await transcript_listener.stop()
         await stop_worker()
         await database.close()
