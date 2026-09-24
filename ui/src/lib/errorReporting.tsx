@@ -12,6 +12,14 @@ export interface ErrorReport {
   showToast?: boolean
 }
 
+/** Field caps enforced by `ClientErrorReport` in agent/dashboard/client_errors.py. */
+const REPORT_LIMITS = {
+  title: 200,
+  error_message: 2000,
+  mutation: 500,
+  path: 500,
+} as const
+
 function errorId(error: unknown): string {
   if (error instanceof DashboardRequestError && error.requestId)
     return error.requestId
@@ -76,11 +84,14 @@ export function reportError({
   api
     .reportClientError({
       error_id: id,
-      title,
-      error_message: message,
+      title: title.slice(0, REPORT_LIMITS.title),
+      error_message: message.slice(0, REPORT_LIMITS.error_message),
       status,
-      mutation: mutation ?? null,
-      path: typeof window === "undefined" ? "" : window.location.pathname,
+      mutation: mutation?.slice(0, REPORT_LIMITS.mutation) ?? null,
+      path: (typeof window === "undefined"
+        ? ""
+        : window.location.pathname
+      ).slice(0, REPORT_LIMITS.path),
     })
     .catch((reportFailure: unknown) => {
       console.warn("Could not report client error", reportFailure)

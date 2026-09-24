@@ -98,6 +98,9 @@ export function MCPConnectionsSection({
   > | null>(null)
   const [catalog, setCatalog] = useState<Catalog>([])
   const [busy, setBusy] = useState(false)
+  const [pendingRows, setPendingRows] = useState<ReadonlySet<string>>(
+    () => new Set()
+  )
   const [error, setError] = useState<string | null>(null)
   const [toolsExpanded, setToolsExpanded] = useState(true)
   const [importing, setImporting] = useState(false)
@@ -204,11 +207,13 @@ export function MCPConnectionsSection({
   }
 
   const optimistic = async (
+    name: string,
     errorTitle: string,
     apply: (list: MCPConnection[]) => MCPConnection[],
     revert: (list: MCPConnection[]) => MCPConnection[],
     action: () => Promise<void>
   ) => {
+    setPendingRows((rows) => new Set(rows).add(name))
     await qc.cancelQueries({ queryKey })
     qc.setQueryData<MCPConnection[]>(
       queryKey,
@@ -222,6 +227,12 @@ export function MCPConnectionsSection({
         (current) => current && revert(current)
       )
       reportError({ title: errorTitle, error: e })
+    } finally {
+      setPendingRows((rows) => {
+        const next = new Set(rows)
+        next.delete(name)
+        return next
+      })
     }
     await qc.invalidateQueries({ queryKey })
   }
@@ -765,7 +776,7 @@ export function MCPConnectionsSection({
                   <Button
                     size="sm"
                     variant="outline"
-                    disabled={busy}
+                    disabled={busy || pendingRows.has(connection.name)}
                     onClick={() => {
                       const withEnabled =
                         (enabled: boolean) => (list: MCPConnection[]) =>
@@ -773,6 +784,7 @@ export function MCPConnectionsSection({
                             c.name === connection.name ? { ...c, enabled } : c
                           )
                       void optimistic(
+                        connection.name,
                         `Couldn't ${connection.enabled ? "disable" : "enable"} ${connection.name}`,
                         withEnabled(!connection.enabled),
                         withEnabled(connection.enabled),
@@ -795,9 +807,10 @@ export function MCPConnectionsSection({
                   <Button
                     size="sm"
                     variant="outline"
-                    disabled={busy}
+                    disabled={busy || pendingRows.has(connection.name)}
                     onClick={() =>
                       void optimistic(
+                        connection.name,
                         `Couldn't delete ${connection.name}`,
                         (list) =>
                           list.filter((c) => c.name !== connection.name),

@@ -752,16 +752,16 @@ it("flips a connection at once and flips it back when the save fails", async () 
   )
 
   fireEvent.click(await screen.findByRole("button", { name: "Disable linear" }))
-  expect(
-    await screen.findByRole("button", { name: "Enable linear" })
-  ).toBeTruthy()
+  const enable = await screen.findByRole("button", { name: "Enable linear" })
   expect(screen.getByText(/· Disabled ·/)).toBeTruthy()
   await waitFor(() => expect(api.saveMyMCP).toHaveBeenCalledTimes(1))
+  expect(enable.hasAttribute("disabled")).toBe(true)
+  fireEvent.click(enable)
+  expect(api.saveMyMCP).toHaveBeenCalledTimes(1)
 
   failSave(new Error("MCP server unreachable"))
-  expect(
-    await screen.findByRole("button", { name: "Disable linear" })
-  ).toBeTruthy()
+  const disable = await screen.findByRole("button", { name: "Disable linear" })
+  await waitFor(() => expect(disable.hasAttribute("disabled")).toBe(false))
   expect(reportError).toHaveBeenCalledWith({
     title: "Couldn't disable linear",
     error: new Error("MCP server unreachable"),

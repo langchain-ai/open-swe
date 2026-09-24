@@ -86,6 +86,18 @@ it("shows, traces, and logs a failed mutation under the ID its request carried",
   })
 })
 
+it("trims an oversized error so the server still logs it", async () => {
+  stubFetch(async () =>
+    Response.json({ detail: "x".repeat(5000) }, { status: 422 })
+  )
+
+  await runFailingMutation({ errorTitle: "Couldn't pin thread" })
+
+  await vi.waitFor(() => expect(reports()).toHaveLength(1))
+  const body = reports()[0]!.body as { error_message: string }
+  expect(body.error_message).toHaveLength(2000)
+})
+
 it("keeps the request ID when the server was never reached", async () => {
   stubFetch(() => Promise.reject(new TypeError("Failed to fetch")))
 
