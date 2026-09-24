@@ -369,7 +369,6 @@ async def test_parallel_forks_keep_prepared_context_without_overwriting_parent()
                         "rendered_system_prompt": task,
                         "reply_surface": "web",
                         "reply_nudges": 2,
-                        "reply_nudge_pending": True,
                         "conversation_offloading": {"status": task},
                     }
                 ),
@@ -428,5 +427,4 @@ async def test_parallel_forks_keep_prepared_context_without_overwriting_parent()
     assert state["rendered_system_prompt"] == "prepared prompt"
     assert state["reply_surface"] == "web"
     assert state["reply_nudges"] == 0
-    assert state["reply_nudge_pending"] is False
     assert state["conversation_offloading"] == {"status": "parent"}
