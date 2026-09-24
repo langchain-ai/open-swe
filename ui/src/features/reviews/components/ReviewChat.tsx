@@ -19,10 +19,11 @@ import {
 import type { BaseMessage } from "@langchain/core/messages"
 
 import { Markdown } from "@/features/agents/components/chat/Markdown"
+import { reviewChatQuery } from "@/features/agents/lib/queries"
 import { IconButton } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
 import { Skeleton } from "@/components/ui/skeleton"
-import { api, reviewChatApiBase } from "@/lib/api"
+import { reviewChatApiBase } from "@/lib/api"
 import { createDashboardClient, dashboardFetch } from "@/lib/langgraph-client"
 import {
   collectStructuredEntities,
@@ -625,10 +626,7 @@ export function ReviewChat({
   /** A review has finished on this PR, so the chat can talk about its findings. */
   reviewed: boolean
 }) {
-  const meta = useQuery({
-    queryKey: ["review-chat", owner, repo, number],
-    queryFn: () => api.getReviewChat(owner, repo, number),
-  })
+  const meta = useQuery(reviewChatQuery({ owner, repo, number }))
 
   if (meta.isPending) {
     return (

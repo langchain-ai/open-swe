@@ -8,18 +8,20 @@ from collections.abc import Mapping, Sequence
 from typing import Any
 
 from fastapi import HTTPException
+from langgraph_sdk.errors import NotFoundError
 
 from agent.dashboard.options import normalize_model_choice
 from agent.github.pull_request_checks import PullRequestState, get_pull_request_check_states
 from agent.github.pull_request_context import get_pull_request_context
 from agent.github.pull_request_status import get_pull_request_statuses
+from agent.review.session import ReviewSession, ReviewSessionMetadata
 from agent.slack.client import parse_github_pr_url
 from agent.threads.access import (
     _authorized_thread,
     _github_token_for_login,
     _readable_thread_metadata,
 )
-from agent.threads.listing import list_unresolved_dashboard_threads
+from agent.threads.listing import list_unresolved_dashboard_threads, settle_review_walkthrough
 from agent.threads.machine_reads import machine_thread
 from agent.threads.principals import Principal
 from agent.threads.runs import (
@@ -85,6 +87,25 @@ async def _mark_thread_viewed(
         logger.debug("Could not mark thread %s viewed", thread_id, exc_info=True)
         return metadata
     return {**metadata, **metadata_update}
+
+
+async def mark_review_session_viewed(review: ReviewSession) -> None:
+    """Clear the review's unread dot; a no-op when the user has not listed this review."""
+    client = langgraph_client()
+    try:
+        thread = await client.threads.get(review.thread_id)
+    except NotFoundError:
+        return
+    metadata = thread_metadata(thread)
+    session = ReviewSessionMetadata.parse(metadata)
+    if session is None or not session.owned_by(review.login):
+        return
+    # Settled first so a walkthrough the user is looking at is not recorded as newer than the view.
+    thread = await settle_review_walkthrough(client, thread)
+    thread, _, latest_run_id = await _refresh_latest_run_metadata(client, thread)
+    await _mark_thread_viewed(
+        client, review.thread_id, thread_metadata(thread), latest_run_id=latest_run_id
+    )
 
 
 async def get_dashboard_terminal_sandbox(
