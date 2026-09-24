@@ -44,7 +44,7 @@ async def test_workspace_tables_exist() -> None:
     assert set(found) == set(_TABLE_NAMES)
 
 
-async def test_a_repository_can_belong_to_only_one_workspace() -> None:
+async def test_repository_bindings_are_unique_per_workspace() -> None:
     repository_id = uuid7()
     workspace_a = uuid7()
     workspace_b = uuid7()
@@ -60,14 +60,18 @@ async def test_a_repository_can_belong_to_only_one_workspace() -> None:
             {"repository_id": repository_id, "workspace_id": workspace_a},
         )
 
+    async with postgres.transaction() as conn:
+        await conn.execute(
+            text("INSERT INTO workspace_repository (repository_id, workspace_id) VALUES (:r, :w)"),
+            {"r": repository_id, "w": workspace_b},
+        )
     with pytest.raises(IntegrityError):
         async with postgres.transaction() as conn:
             await conn.execute(
                 text(
-                    "INSERT INTO workspace_repository (repository_id, workspace_id) "
-                    "VALUES (:repository_id, :workspace_id)"
+                    "INSERT INTO workspace_repository (repository_id, workspace_id) VALUES (:r, :w)"
                 ),
-                {"repository_id": repository_id, "workspace_id": workspace_b},
+                {"r": repository_id, "w": workspace_b},
             )
 
 

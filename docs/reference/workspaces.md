@@ -4,8 +4,8 @@ This document records the architecture, routing, settings hierarchy, migration b
 
 ## Summary
 
-A **workspace** in Open SWE owns one or more repositories, and a repository
-belongs to exactly one workspace. The workspace absorbs the former environment (prompt, snapshot,
+A **workspace** in Open SWE may bind zero or more repositories, and a repository
+may belong to multiple workspaces. The workspace absorbs the former environment (prompt, snapshot,
 setup and update scripts, sandbox sizing, nightly refresh) and additionally owns the Slack
 channels that route to it, its MCP connections, and workspace-scoped settings.
 Inbound work is routed to a workspace by its thread, then its repository, then its Slack channel,
@@ -32,9 +32,12 @@ environment into it, since the two would otherwise map one to one.
 
 A workspace has an immutable slug and a display name, plus:
 
-- **Repositories.** One or more `owner/name` entries. A repository may appear in exactly one
-  workspace; saving a workspace that claims a repository another workspace owns fails. The
-  `default` workspace may list no repositories, because it also receives unassigned work.
+- **Repositories.** Zero or more explicit `owner/name` bindings, shared across workspaces.
+  Each binding has independent repository settings, including `may_start_threads`.
+- **All GitHub App repositories.** `all_repositories` defaults to false. Enabling it grants
+  sandbox and builder access to every repository reachable by this instance's GitHub App
+  installation, including future additions. Explicit bindings remain available for routing
+  and GitHub Actions trust configuration; enabling this flag does not create bindings.
 - **Environment fields**, moved from the environment record unchanged: prompt, base snapshot,
   setup and update scripts, sandbox resources, create parameters, captured snapshot state, and
   the refresh schedule. Snapshot names keep their current form so existing snapshots stay valid.
@@ -74,18 +77,17 @@ the tier before, which is how a workspace or a user swaps in different credentia
 server. The connections configured before workspaces existed are the instance tier: they
 keep applying to every workspace, as they always did.
 
-An inherited default repository is still subject to ownership: a workspace never uses a
-default repository that another workspace owns, even when it inherited it from the instance.
+An inherited default bound elsewhere is usable when also bound here or when this workspace
+allows all installation repositories. Existing GitHub user and installation access checks
+remain in place.
 
 ### Storage, run context, and API
 
 Workspaces, and the repository and Slack-channel bindings that route to them, live in PostgreSQL,
 not the LangGraph Store: a `workspace` table (one row per workspace, slug unique) plus
-`workspace_repository` and `workspace_slack_channel`, which key on the bound resource — the
-`workspace_repository` primary key is `repository_id`, referencing the `repository` table the
-pull-request work added — rather than on the workspace, so the database itself enforces that a
-repository or a Slack channel belongs to at most one workspace, instead of the application
-re-checking it on every save. Settings and MCP connections stay exactly where this design places
+`workspace_repository` and `workspace_slack_channel`. The repository binding primary key is
+`(repository_id, workspace_id)`, so sharing preserves each workspace's independent settings.
+Slack channels still have exactly one owner. Settings and MCP connections stay exactly where this design places
 them: in the LangGraph Store, keyed by workspace slug. `Workspace`, `WorkspaceCreate`, and
 `WorkspaceUpdate` remain the domain and API shape that the dashboard, the agent tools, and routing
 read and write; the tables are an implementation detail behind `WorkspaceStore`, swappable again
@@ -97,7 +99,10 @@ Every thread records its workspace at creation and never changes it. Resolution 
 order, and the first match wins:
 
 1. An existing thread's recorded workspace. Follow-ups on issues, PRs, and Slack threads land here.
-2. The repository named by the event or the message, through its owning workspace.
+2. The repository named by the event or message, through its explicit bindings: `default`
+   first if bound there, otherwise the lexicographically first workspace slug. This stable
+   choice handles an event once, not once per workspace. The same order applies among
+   bindings that explicitly enable `may_start_threads` for GitHub Actions federation.
 3. The Slack channel's bound workspace.
 4. The user's default workspace, a per-user preference.
 5. The `default` workspace.
@@ -106,6 +111,18 @@ A `workspace:<slug>` tag on a message that opens a thread overrides steps 2 thro
 `env:` tag does today, and `env:` keeps working as an alias. Instance policy decides what happens
 to a GitHub event for a repository no workspace owns: route it to `default`, which is the
 compatible upgrade behavior, or drop it, which a locked-down install should prefer.
+
+### Repository access is independent of image setup
+
+Changing repository bindings or `all_repositories` updates permissions without rebuilding the
+image. Edits during an active refresh return a conflict and must wait until it finishes. Setup
+scripts may install only tools, clone a selected subset, or preload no repositories at all. Runs can
+clone other permitted repositories on demand.
+`OPENSWE_WORKSPACE_REPOS` remains the explicit binding list for backward-compatible scripts;
+app-wide access never expands it. Scripts that loop over this variable still choose to clone those
+repositories on the next nightly/manual rebuild. Use **Rebuild image** when you want that, rather
+than treating a permission edit as a rebuild. Removing permission does not erase existing checkouts
+from snapshots: update the script and rebuild when filesystem isolation is required.
 
 ### Access
 
@@ -117,11 +134,11 @@ owner and admins, as today. Role-based access per workspace is explicitly deferr
 
 The Environments page becomes the Workspaces page, with repositories and Slack channels editable.
 The composer picks the workspace first and the repository second: the repository list is the
-workspace's own repositories (plus, for `default`, every unassigned one), and choosing a workspace
+workspace's explicit repositories, or all accessible repositories when app-wide access is on
+(plus, for `default`, every unassigned one), and choosing a workspace
 preselects its default repository. A repository named from outside — a link or the profile default —
 still selects the workspace that owns it. The dashboard has no separate "project" notion: the
-sidebar groups threads by repository, nested under the owning workspace, since every repository sits
-inside exactly one workspace. Admin
+sidebar groups repositories under their deterministic default workspace route. Admin
 settings and MCP connections gain a workspace selector.
 
 ### Migration
@@ -138,7 +155,7 @@ that has no PostgreSQL row yet, and deletes the Store record once it has been de
 runs exactly once per record, resurrects nothing an admin has since deleted, and a later release
 can drop the whole path. A Store outage at that moment is logged and simply retried on the next
 boot; nothing blocks startup on it. A record the import cannot bring over — one that no longer
-validates, or one claiming a repository another workspace owns — stays in the Store for the next
+validates, or one claiming a Slack channel another workspace owns — stays in the Store for the next
 boot, the import does not count as complete, and GitHub deliveries for the repositories it names
 are answered 503 so GitHub retries them rather than routing them to `default` or dropping them.
 
@@ -148,15 +165,16 @@ are answered 503 so GitHub retries them rather than routing them to `default` or
 - Per-workspace GitHub or Slack apps. One App and one Slack team per instance.
 - Routing individual Slack messages within a channel to different workspaces.
 - Per-workspace memory. The existing per-user memory stores are unchanged for now.
-- The controls a public workspace needs beyond partitioning: repository-scoped tokens, a per-workspace MCP allowlist for externally triggered runs, and public-safe prompts and outputs. Those are follow-up work that depends on this design.
+- A per-workspace MCP allowlist for externally triggered runs and public-safe prompts and outputs.
 
 ## Security and privacy
 
 Partitioning settings by workspace removes the accidental path from a public repository's runs to
 internal MCP connections, guidelines, and prompts, provided the public repositories live in a
-workspace that has none of them. It does not, by itself, scope the GitHub installation token or
-mark public content untrusted; see the last non-goal. Repository ownership is validated on save so
-routing is deterministic and a PR is never handled by two workspaces. Unassigned repositories are
+workspace that has none of them. Repository-scoped tokens remain the default; installation-wide
+sandbox access requires an explicit admin opt-in. Reviewer repository and permission restrictions
+still narrow that scope. GitHub user/app checks and per-binding Actions federation grants are
+unchanged. Leave app-wide access off for isolation-sensitive workspaces. Unassigned repositories are
 routed by an explicit instance policy rather than silently defaulting, so a locked-down install can
 drop them. No new credentials are introduced, and MCP connection secrets stay encrypted under the
 workspace they belong to.
@@ -165,10 +183,8 @@ workspace they belong to.
 
 - **Deploy a second instance for OSS.** Works today with no code, but doubles operations for a
   split that many teams will want, and gives no shared dashboard or identity.
-- **Multiple GitHub Apps, one per workspace.** Would let a repository appear in several
-  workspaces, but couples sign-in and webhook secrets to workspaces and makes admins manage app
-  credentials. One App with repository ownership is simpler and matches how Devin, CodeRabbit, and
-  Copilot partition repositories under a single installation.
+- **Multiple GitHub Apps, one per workspace.** Couples sign-in and webhook secrets to
+  workspaces and requires separate credentials. Shared bindings work with one installation.
 - **Workspaces bound to installations rather than repositories.** Simpler routing, but one
   GitHub organization then cannot host more than one workspace, which is the common case here.
 - **Keep environments separate from workspaces.** Two objects with a one-to-one mapping would only
@@ -179,8 +195,7 @@ workspace they belong to.
 - Should memory become per workspace, per user and workspace, or stay per user?
 - Confirm the follow-up scope for public workspaces listed under non-goals.
 
-Repository ownership itself is resolved: `workspace_repository` keys on `repository.id`, so a
-workspace owns a specific repository row rather than a name.
+Repository bindings reference `repository.id`, sharing a specific repository row rather than a name.
 
 ## Follow-ups
 
@@ -200,7 +215,7 @@ Known gaps this design leaves open, so they survive outside the pull requests th
 - **Concurrent edits to one workspace overwrite each other.** `apply_update` reads a record, applies
   the patch, and writes the whole row back, so the last save wins; two admins editing the same
   workspace need optimistic concurrency on `updated_at` to notice.
-- **The public-workspace lockdown.** Repository-scoped tokens, a per-workspace MCP allowlist for
+- **The public-workspace lockdown.** A per-workspace MCP allowlist for
   externally triggered runs, and public-safe prompts and outputs are what a genuinely public
   workspace needs beyond partitioning. That is the next proposal, and it depends on this one.
 - **The Linear default repository reads the default workspace.** A Linear issue with no repository

@@ -24,6 +24,7 @@ _SUMMARY_FIELDS = {
     "slug",
     "prompt",
     "repos",
+    "all_repositories",
     "mem_bytes",
     "vcpus",
     "fs_capacity_bytes",
@@ -103,6 +104,7 @@ async def publish_workspace(
     clear_base_snapshot_id: bool = False,
     snapshot_name: str | None = None,
     repos: list[str] | None = None,
+    all_repositories: bool | None = None,
     mem_bytes: int | None = None,
     vcpus: int | None = None,
     fs_capacity_bytes: int | None = None,
@@ -146,6 +148,7 @@ async def publish_workspace(
                 base_snapshot_id=base_snapshot_id,
                 snapshot_name=snapshot_name,
                 repos=repos or [],
+                all_repositories=all_repositories or False,
                 mem_bytes=mem_bytes,
                 vcpus=vcpus,
                 fs_capacity_bytes=fs_capacity_bytes,
@@ -153,6 +156,8 @@ async def publish_workspace(
             )
         else:
             update_values: dict[str, Any] = {"name": name, "prompt": prompt, "repos": repos}
+            if all_repositories is not None:
+                update_values["all_repositories"] = all_repositories
             update_values.update(
                 dict.fromkeys(sizing)
                 if clear_sizing
@@ -173,9 +178,6 @@ async def publish_workspace(
             elif clear_base_snapshot_id:
                 update_values["base_snapshot_id"] = None
             definition = store.WorkspaceUpdate(**update_values)
-        # Repository ownership and the min-one-repo rule are checked here as
-        # well as on the write: a capture takes minutes, and a definition that
-        # can never be saved should be refused before it starts.
         await store.WORKSPACES.assert_publishable(slug, definition)
     except ValueError as exc:
         return {"ok": False, "error": str(exc)}

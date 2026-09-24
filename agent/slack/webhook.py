@@ -594,7 +594,9 @@ async def workspace_scoped_default_repo(candidate: Repo, workspace: str | None) 
     if not workspace:
         return candidate
     owner = await workspace_for_repo(candidate.owner, candidate.name)
-    if owner is None or owner == workspace:
+    if owner is None or await WORKSPACES.allows_repository(
+        workspace, f"{candidate.owner}/{candidate.name}"
+    ):
         return candidate
     scoped = (await common.get_workspace_settings(workspace)).default_repo
     if not scoped:
@@ -602,7 +604,9 @@ async def workspace_scoped_default_repo(candidate: Repo, workspace: str | None) 
     fallback = Repo.model_validate(scoped)
     # The workspace's default may itself be inherited from the instance record.
     fallback_owner = await workspace_for_repo(fallback.owner, fallback.name)
-    if fallback_owner is None or fallback_owner == workspace:
+    if fallback_owner is None or await WORKSPACES.allows_repository(
+        workspace, f"{fallback.owner}/{fallback.name}"
+    ):
         return fallback
     return None
 

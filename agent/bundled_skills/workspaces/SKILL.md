@@ -5,7 +5,7 @@ description: How an Open SWE workspace's sandbox image works and how to change i
 
 # Workspaces
 
-A workspace owns repositories, Slack channels, MCP connections, and team
+A workspace can share repositories with other workspaces. It owns Slack channels, MCP connections, and team
 settings, plus the sandbox image its runs boot from. That image is two
 things: a **record** (name, prompt, repos, sizing, optional scripts) and a
 published **sandbox image**, `<prefix>-environment-<slug>:latest`. Runs
@@ -50,7 +50,13 @@ Two consequences:
 - The script must describe the **whole** build from base, even for a fork. By hand you only did the delta on top of the parent; the nightly does not start from the parent.
 - Leaving it off is allowed. The workspace then has no nightly check and keeps whatever image was last published.
 
-Write it non-interactive and safe to re-run: start with `set -euo pipefail`; clone the repos; install `rg`, `gh`, toolchains, dependencies; warm caches. Never write a secret to disk — the proxy injects git auth per run.
+Write it non-interactive and safe to re-run: start with `set -euo pipefail`; optionally clone only the repos to preload; install `rg`, `gh`, toolchains, dependencies; warm caches. Never write a secret to disk — the proxy injects git auth per run.
+
+## Repository permissions are not repository imports
+
+The explicit `repos` list grants access and supplies default routing; repositories may be bound to several workspaces. An explicit workspace choice wins, otherwise shared repositories route to `default` if bound there, then the first workspace slug alphabetically. `all_repositories=true` opts into every repository available to this GitHub App installation, including future additions, without binding them for routing or letting their workflows start threads.
+
+Neither setting clones repositories or requires setup to import them all. Setup can install tools alone, preload a subset, or leave cloning to runs. `OPENSWE_WORKSPACE_REPOS` contains only explicit bindings, never the expanded app-wide set. Editing repository permissions in the dashboard does not trigger a rebuild; request one explicitly when the image needs changing. Removing access does not erase checkouts already captured in an image.
 
 ## `update_script` — keeping a live image fresh
 

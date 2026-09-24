@@ -43,7 +43,9 @@ async def admin_client(
         yield client
 
 
-async def test_duplicate_repo_is_a_409(admin_client: httpx.AsyncClient) -> None:
+async def test_shared_repository_can_be_added_to_another_workspace(
+    admin_client: httpx.AsyncClient,
+) -> None:
     first = await admin_client.post(
         "/dashboard/api/workspaces", json={"name": "Core", "repos": ["acme/api"]}
     )
@@ -51,11 +53,11 @@ async def test_duplicate_repo_is_a_409(admin_client: httpx.AsyncClient) -> None:
     second = await admin_client.post(
         "/dashboard/api/workspaces", json={"name": "OSS", "repos": ["acme/api"]}
     )
-    assert second.status_code == 409
-    assert "already belongs to workspace core" in second.json()["detail"]
+    assert second.status_code == 200
+    assert second.json()["repos"] == ["acme/api"]
 
 
-async def test_duplicate_repo_on_update_is_a_409(admin_client: httpx.AsyncClient) -> None:
+async def test_repository_update_can_share_a_binding(admin_client: httpx.AsyncClient) -> None:
     await admin_client.post(
         "/dashboard/api/workspaces", json={"name": "Core", "repos": ["acme/api"]}
     )
@@ -63,11 +65,11 @@ async def test_duplicate_repo_on_update_is_a_409(admin_client: httpx.AsyncClient
         "/dashboard/api/workspaces", json={"name": "OSS", "repos": ["acme/oss"]}
     )
     response = await admin_client.put("/dashboard/api/workspaces/oss", json={"repos": ["acme/api"]})
-    assert response.status_code == 409
-    assert "already belongs to workspace core" in response.json()["detail"]
+    assert response.status_code == 200
+    assert response.json()["repos"] == ["acme/api"]
 
 
-async def test_repo_update_starts_snapshot_rebuild(admin_client: httpx.AsyncClient) -> None:
+async def test_repo_update_does_not_rebuild_snapshot(admin_client: httpx.AsyncClient) -> None:
     await admin_client.post(
         "/dashboard/api/workspaces",
         json={"name": "OSS", "repos": ["acme/oss"], "setup_script": "echo setup"},
@@ -83,9 +85,8 @@ async def test_repo_update_starts_snapshot_rebuild(admin_client: httpx.AsyncClie
         )
 
     assert response.status_code == 200
-    assert response.json()["refresh_status"] == "refreshing"
-    assert response.json()["refresh_run_id"] == "run-1"
-    start.assert_awaited_once_with("oss")
+    assert response.json()["refresh_status"] == "never"
+    start.assert_not_awaited()
 
 
 async def test_non_repo_update_does_not_rebuild_snapshot(admin_client: httpx.AsyncClient) -> None:
@@ -146,11 +147,20 @@ async def test_options_carry_each_workspace_default_repository(
     assert by_slug["default"]["default_repo"] is None
 
 
-async def test_a_workspace_with_no_repository_is_a_400(admin_client: httpx.AsyncClient) -> None:
-    """Only `default` may claim nothing; a malformed definition is not a conflict."""
-    response = await admin_client.post("/dashboard/api/workspaces", json={"name": "OSS"})
-    assert response.status_code == 400
-    assert "at least one repository" in response.json()["detail"]
+async def test_workspace_can_enable_app_access_without_bindings(
+    admin_client: httpx.AsyncClient,
+) -> None:
+    response = await admin_client.post(
+        "/dashboard/api/workspaces", json={"name": "OSS", "all_repositories": True}
+    )
+    assert response.status_code == 200
+    assert response.json()["all_repositories"] is True
+    assert response.json()["repos"] == []
+    response = await admin_client.put(
+        "/dashboard/api/workspaces/oss", json={"all_repositories": False}
+    )
+    assert response.status_code == 200
+    assert response.json()["all_repositories"] is False
 
 
 @pytest.mark.parametrize("stale_precheck", [False, True])
@@ -188,3 +198,50 @@ async def test_two_creates_of_one_name_at_once_are_a_200_and_a_409(
     assert sorted([first.status_code, second.status_code]) == [200, 409]
     conflict = first if first.status_code == 409 else second
     assert "already" in conflict.json()["detail"]
+
+
+async def test_defaults_work_for_every_shared_binding_and_app_wide_workspace(
+    admin_client: httpx.AsyncClient, fake_store: FakeStore
+) -> None:
+    for name in ["Core", "OSS"]:
+        await admin_client.post(
+            "/dashboard/api/workspaces", json={"name": name, "repos": ["acme/api"]}
+        )
+    await admin_client.post(
+        "/dashboard/api/workspaces", json={"name": "All", "all_repositories": True}
+    )
+    await upsert_instance_settings(WorkspaceSettingsUpdate(default_repo="acme/api"))
+    options = (await admin_client.get("/dashboard/api/workspaces/options")).json()["workspaces"]
+    assert all(option["default_repo"] == "acme/api" for option in options)
+
+
+@pytest.mark.parametrize("permission_update", [{"repos": []}, {"all_repositories": False}])
+async def test_permission_edits_wait_for_active_refresh_without_triggering_another(
+    admin_client: httpx.AsyncClient, permission_update: dict[str, object]
+) -> None:
+    await admin_client.post(
+        "/dashboard/api/workspaces",
+        json={
+            "name": "Core",
+            "repos": ["acme/api"],
+            "all_repositories": True,
+            "setup_script": "echo tools",
+        },
+    )
+    await WORKSPACES.mark_refreshing("core")
+    with patch.object(workspace_routes, "start_refresh_run", AsyncMock()) as start:
+        response = await admin_client.put("/dashboard/api/workspaces/core", json=permission_update)
+        assert response.status_code == 409
+        assert response.json()["detail"] == "a refresh of this workspace is already running"
+        unchanged = (await admin_client.get("/dashboard/api/workspaces/core")).json()
+        assert unchanged["repos"] == ["acme/api"]
+        assert unchanged["all_repositories"] is True
+
+        await WORKSPACES.mark_refresh_settled("core", "success")
+        response = await admin_client.put("/dashboard/api/workspaces/core", json=permission_update)
+
+    assert response.status_code == 200
+    assert response.json()["setup_script"] == "echo tools"
+    for field, value in permission_update.items():
+        assert response.json()[field] == value
+    start.assert_not_awaited()

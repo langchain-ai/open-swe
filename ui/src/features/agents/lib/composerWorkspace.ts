@@ -34,6 +34,28 @@ export function pickComposerWorkspace({
   return null
 }
 
+export function workspaceForRepository(
+  fullName: string | null | undefined,
+  workspaces: ReadonlyArray<
+    Pick<WorkspaceOption, "slug" | "repos" | "is_default">
+  >
+): string | null {
+  if (!fullName) return null
+  return (
+    workspaces
+      .filter((workspace) =>
+        workspace.repos.some(
+          (repo) => repo.toLowerCase() === fullName.toLowerCase()
+        )
+      )
+      .sort(
+        (a, b) =>
+          Number(b.is_default) - Number(a.is_default) ||
+          (a.slug < b.slug ? -1 : a.slug > b.slug ? 1 : 0)
+      )[0]?.slug ?? null
+  )
+}
+
 type RepoOption = { full_name: string }
 
 /**
@@ -45,12 +67,15 @@ type RepoOption = { full_name: string }
 export function reposForWorkspace(
   slug: string | null,
   workspaces: ReadonlyArray<
-    Pick<WorkspaceOption, "slug" | "repos" | "is_default" | "default_repo">
+    Pick<
+      WorkspaceOption,
+      "slug" | "repos" | "is_default" | "default_repo" | "all_repositories"
+    >
   >,
   accessible: ReadonlyArray<RepoOption>
 ): Array<RepoOption> {
   const workspace = workspaces.find((candidate) => candidate.slug === slug)
-  if (!workspace) return [...accessible]
+  if (!workspace || workspace.all_repositories) return [...accessible]
   const lower = (name: string) => name.toLowerCase()
   const claimed = new Set(workspaces.flatMap((w) => w.repos.map(lower)))
   const own = new Set(

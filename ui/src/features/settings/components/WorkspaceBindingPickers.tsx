@@ -72,14 +72,9 @@ export function RepositoryPicker({
   selected,
   onChange,
   workspaceSlug,
-  workspaces,
   disabled,
 }: BindingPickerProps) {
   const repos = useRepos()
-  const owners = useMemo(
-    () => ownersOf(workspaces, (workspace) => workspace.repos),
-    [workspaces]
-  )
   const items = useMemo<Array<PickerItem>>(
     () =>
       (repos.data?.repositories ?? []).map((repo) => ({
@@ -91,15 +86,15 @@ export function RepositoryPicker({
         ) : (
           <FolderIcon size={14} />
         ),
-        owner: owners.get(repo.full_name.toLowerCase()) ?? null,
+        owner: null,
       })),
-    [repos.data, owners]
+    [repos.data]
   )
   return (
     <OwnershipPicker
       triggerLabel="Choose repositories"
       title="Repositories"
-      description="Work on these repositories runs in this workspace. A repository belongs to one workspace."
+      description="Repositories can be shared across workspaces. Adding one does not clone it or rebuild the image."
       noun="repository"
       pluralNoun="repositories"
       items={items}

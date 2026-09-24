@@ -86,7 +86,9 @@ async def _default_repo_for(slug: str) -> str | None:
     if not repo:
         return None
     owner = await workspace_for_repo(repo["owner"], repo["name"])
-    if owner is not None and owner != slug:
+    if owner is not None and not await WORKSPACES.allows_repository(
+        slug, f"{repo['owner']}/{repo['name']}"
+    ):
         return None
     return f"{repo['owner']}/{repo['name']}"
 
@@ -126,12 +128,7 @@ async def api_update_workspace(
 ) -> Workspace:
     normalized = _normalized_slug(slug)
     previous = await WORKSPACES.get(normalized)
-    repos_changed = (
-        previous is not None
-        and body.repos is not None
-        and {repo.lower() for repo in body.repos} != {repo.lower() for repo in previous.repos}
-    )
-    if repos_changed and is_refresh_in_flight(previous):
+    if previous is not None and is_refresh_in_flight(previous):
         raise HTTPException(409, "a refresh of this workspace is already running")
     try:
         record = await WORKSPACES.apply_update(normalized, body)
@@ -139,15 +136,6 @@ async def api_update_workspace(
         raise _save_conflict(e) from e
     if record.setup_script:
         await ensure_refresh_cron(record.slug)
-        if repos_changed:
-            run_id = await start_refresh_run(record.slug)
-            if run_id is None:
-                raise HTTPException(
-                    502, "workspace was saved but its snapshot rebuild could not start"
-                )
-            return record.model_copy(
-                update={"refresh_status": "refreshing", "refresh_run_id": run_id}
-            )
     return record
 
 

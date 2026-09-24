@@ -1,5 +1,6 @@
 import { QuestionIcon } from "@phosphor-icons/react"
 
+import { Switch } from "@/components/ui/switch"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 import { Tooltip, TooltipPopup, TooltipTrigger } from "@/components/ui/tooltip"
@@ -47,6 +48,7 @@ export function Chips({
 
 export interface WorkspaceDraft {
   name: string
+  allRepositories: boolean
   repos: Array<string>
   slackChannelIds: Array<string>
   prompt: string
@@ -56,6 +58,7 @@ export function draftFromWorkspace(workspace: WorkspaceRecord): WorkspaceDraft {
   return {
     name: workspace.name,
     repos: workspace.repos,
+    allRepositories: workspace.all_repositories ?? false,
     slackChannelIds: workspace.slack_channel_ids,
     prompt: workspace.prompt,
   }
@@ -64,6 +67,7 @@ export function draftFromWorkspace(workspace: WorkspaceRecord): WorkspaceDraft {
 export const EMPTY_DRAFT: WorkspaceDraft = {
   name: "",
   repos: [],
+  allRepositories: false,
   slackChannelIds: [],
   prompt: "",
 }
@@ -94,6 +98,24 @@ export function WorkspaceEditor({
           onChange={(e) => onChange({ ...draft, name: e.target.value })}
         />
       </label>
+      <div className="flex items-start justify-between gap-4 text-sm">
+        <div>
+          <span>All GitHub App repositories</span>
+          <p className="mt-1 text-xs text-muted-foreground">
+            Grant runs access to every repository available to this
+            installation, including future additions. This does not clone
+            repositories, change routing, or allow GitHub Actions to start
+            threads automatically.
+          </p>
+        </div>
+        <Switch
+          aria-label="All GitHub App repositories"
+          checked={draft.allRepositories}
+          onCheckedChange={(allRepositories) =>
+            onChange({ ...draft, allRepositories })
+          }
+        />
+      </div>
       <div className="text-sm">
         <span className="inline-flex items-center gap-1.5">
           Repositories
@@ -106,11 +128,10 @@ export function WorkspaceEditor({
               <QuestionIcon size={15} weight="fill" />
             </TooltipTrigger>
             <TooltipPopup className="max-w-72">
-              Assigning a repository makes this the workspace for requests
-              targeting that repository, whether submitted from the dashboard,
-              Slack, GitHub issues, or pull requests. Runs use this
-              workspace&apos;s sandbox, instructions, settings, and connections.
-              Each repository can belong to only one workspace.
+              Repositories can belong to multiple workspaces. Explicit workspace
+              choices win; otherwise shared repositories route to default when
+              bound there, then the first workspace slug alphabetically. Adding
+              a repository grants access, not a checkout in the image.
             </TooltipPopup>
           </Tooltip>
         </span>

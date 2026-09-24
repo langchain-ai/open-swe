@@ -1,5 +1,4 @@
-import { useEffect, useState, type ReactNode } from "react"
-import { CircleNotchIcon } from "@phosphor-icons/react"
+import { useState } from "react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 
 import {
@@ -42,7 +41,7 @@ import {
   ModelDefaultsSection,
 } from "./WorkspaceSettingsSections"
 import type { SettingsScope } from "@/features/settings/lib/settingsScope"
-import { useOptions } from "@/lib/profile"
+import { useOptions, useRepos } from "@/lib/profile"
 
 export const workspaceRecordKey = (slug: string) => ["workspace", slug] as const
 
@@ -51,13 +50,11 @@ function GeneralSection({
   workspaces,
   channelLabel,
   onSaved,
-  rebuildStatus,
 }: {
   record: WorkspaceRecord
   workspaces: Array<WorkspaceOption>
   channelLabel: (id: string) => string
   onSaved: (saved: WorkspaceRecord) => void
-  rebuildStatus: ReactNode
 }) {
   const [draft, setDraft] = useState<WorkspaceDraft>(() =>
     draftFromWorkspace(record)
@@ -74,6 +71,7 @@ function GeneralSection({
       const saved = await api.updateWorkspace(record.slug, {
         name: draft.name.trim(),
         repos: draft.repos,
+        all_repositories: draft.allRepositories,
         slack_channel_ids: draft.slackChannelIds,
         prompt: draft.prompt,
       })
@@ -89,7 +87,7 @@ function GeneralSection({
   return (
     <SettingsSection
       title="General"
-      description="Its name, the instructions appended to every run, and what it owns. A repository or Slack channel belongs to exactly one workspace."
+      description="Its name, instructions, and repository permissions. Repositories may be shared; Slack channels belong to one workspace. Permission changes do not rebuild the sandbox image."
     >
       <WorkspaceEditor
         draft={draft}
@@ -100,7 +98,6 @@ function GeneralSection({
         channelLabel={channelLabel}
       />
       <div className="flex flex-wrap items-center gap-2 border-t border-border px-4 py-3.5">
-        {rebuildStatus}
         {error && (
           <p role="alert" className="text-xs text-destructive">
             {error}
@@ -140,22 +137,6 @@ export function WorkspaceSettingsPanel({
 }) {
   const qc = useQueryClient()
   const [deleting, setDeleting] = useState(false)
-  const [repositoryRebuild, setRepositoryRebuild] = useState<{
-    slug: string
-    finishedAt: WorkspaceRecord["refresh_finished_at"]
-  } | null>(null)
-  const [repositoryRebuildTimedOut, setRepositoryRebuildTimedOut] =
-    useState(false)
-  useEffect(() => {
-    if (!repositoryRebuild) return
-    const timeout = setTimeout(() => setRepositoryRebuildTimedOut(true), 60_000)
-    return () => clearTimeout(timeout)
-  }, [repositoryRebuild])
-  const awaitingRepositoryRebuild = (workspace: WorkspaceRecord | undefined) =>
-    repositoryRebuild?.slug === slug &&
-    (!workspace ||
-      workspace.refresh_finished_at === repositoryRebuild.finishedAt ||
-      !["success", "failed"].includes(workspace.refresh_status ?? "never"))
   const deleteWorkspace = useMutation({
     mutationFn: api.deleteWorkspace,
     onSuccess: async () => {
@@ -167,16 +148,11 @@ export function WorkspaceSettingsPanel({
   const record = useQuery({
     queryKey: workspaceRecordKey(slug),
     queryFn: () => api.getWorkspace(slug),
-    // A rebuild runs in the background; keep the image state and the rebuild
-    // button following it until it settles.
     refetchInterval: (query) =>
-      query.state.data?.refresh_status === "refreshing" ||
-      (!repositoryRebuildTimedOut &&
-        awaitingRepositoryRebuild(query.state.data))
-        ? 5000
-        : false,
+      query.state.data?.refresh_status === "refreshing" ? 5000 : false,
   })
   const options = useWorkspaceOptions(true)
+  const repositories = useRepos()
   // Model options follow the workspace: the Fable flag that gates some of
   // them is one of its settings.
   const modelOptions = useOptions(slug)
@@ -197,21 +173,6 @@ export function WorkspaceSettingsPanel({
   }
 
   const onSaved = (saved: WorkspaceRecord) => {
-    const previousRepos = new Set(
-      record.data.repos.map((repo) => repo.toLowerCase())
-    )
-    const savedRepos = new Set(saved.repos.map((repo) => repo.toLowerCase()))
-    if (
-      saved.setup_script &&
-      (previousRepos.size !== savedRepos.size ||
-        [...savedRepos].some((repo) => !previousRepos.has(repo)))
-    ) {
-      setRepositoryRebuildTimedOut(false)
-      setRepositoryRebuild({
-        slug,
-        finishedAt: saved.refresh_finished_at,
-      })
-    }
     qc.setQueryData(workspaceRecordKey(slug), saved)
     void qc.invalidateQueries({ queryKey: workspaceOptionKeys.all })
   }
@@ -236,44 +197,6 @@ export function WorkspaceSettingsPanel({
         workspaces={options.data?.workspaces ?? []}
         channelLabel={channelLabel}
         onSaved={onSaved}
-        rebuildStatus={
-          (!repositoryRebuildTimedOut &&
-            awaitingRepositoryRebuild(record.data)) ||
-          record.data.refresh_status === "refreshing" ? (
-            <p
-              role="status"
-              className="flex min-w-48 flex-1 items-center gap-2 text-xs text-muted-foreground"
-            >
-              <CircleNotchIcon
-                aria-hidden="true"
-                className="size-4 shrink-0 animate-spin motion-reduce:animate-none"
-              />
-              {record.data.refresh_status === "refreshing"
-                ? "Rebuilding sandbox image…"
-                : "Repositories saved. Sandbox image rebuild queued…"}{" "}
-              Existing runs keep their current image.
-            </p>
-          ) : awaitingRepositoryRebuild(record.data) ? (
-            <p
-              role="alert"
-              className="min-w-48 flex-1 text-xs text-destructive"
-            >
-              Repositories saved, but the image rebuild could not be confirmed.
-              Check the sandbox image status or retry Rebuild image.
-            </p>
-          ) : repositoryRebuild?.slug === slug ? (
-            <p
-              role={
-                record.data.refresh_status === "failed" ? "alert" : "status"
-              }
-              className="min-w-48 flex-1 text-xs text-muted-foreground"
-            >
-              {record.data.refresh_status === "failed"
-                ? `Image rebuild failed. ${record.data.refresh_error ?? "The previous image is still in use."}`
-                : "Sandbox image rebuilt with the saved repositories."}
-            </p>
-          ) : null
-        }
       />
       <WorkspaceSandboxSection
         key={`sandbox:${record.data.setup_script ?? ""}:${record.data.update_script ?? ""}`}
@@ -287,7 +210,16 @@ export function WorkspaceSettingsPanel({
           (model) => model.can_be_default !== false
         )}
       />
-      <DefaultRepoSection scope={scope} repositories={record.data.repos} />
+      <DefaultRepoSection
+        scope={scope}
+        repositories={
+          record.data.all_repositories
+            ? (repositories.data?.repositories ?? []).map(
+                (repo) => repo.full_name
+              )
+            : record.data.repos
+        }
+      />
       <WorkspaceRepositoriesSection slug={slug} canEdit={canEdit} />
       <LLMGatewaySection scope={scope} />
       <FableSection scope={scope} />

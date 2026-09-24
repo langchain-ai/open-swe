@@ -10,7 +10,7 @@ from agent.api_keys.models import ApiKey
 from agent.federation.github_oidc import GitHubActionsClaims
 from agent.threads import runs
 from agent.threads.principals import Principal
-from agent.workspaces.store import WORKSPACES, WorkspaceCreate
+from agent.workspaces.store import WORKSPACES, WorkspaceCreate, WorkspaceUpdate
 
 
 class _FakeThreads:
@@ -194,3 +194,36 @@ async def test_a_machine_reads_back_only_what_it_started(machine: _FakeClient) -
     with pytest.raises(HTTPException) as refused:
         theirs.assert_can_read(started)
     assert refused.value.status_code == 404
+
+
+@pytest.mark.parametrize("all_repositories", [False, True])
+async def test_machine_can_use_shared_or_app_wide_repositories(
+    machine: _FakeClient, all_repositories: bool
+) -> None:
+    await WORKSPACES.apply_update(
+        "oss",
+        WorkspaceUpdate(
+            all_repositories=all_repositories,
+            repos=[] if all_repositories else ["acme/api"],
+        ),
+    )
+    principal = await _key_caller("oss")
+    assert await runs._system_repo_config({"repo": "acme/api"}, principal) == {
+        "owner": "acme",
+        "name": "api",
+    }
+
+
+async def test_app_wide_scope_still_requires_installation_access(
+    machine: _FakeClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    await WORKSPACES.apply_update("oss", WorkspaceUpdate(all_repositories=True))
+    principal = await _key_caller("oss")
+
+    async def denied(full_name: str) -> str:
+        raise HTTPException(403, "installation cannot access this repository")
+
+    monkeypatch.setattr(runs, "require_repo_access_for_workspace", denied)
+    with pytest.raises(HTTPException) as refused:
+        await runs._system_repo_config({"repo": "outside/repo"}, principal)
+    assert refused.value.status_code == 403

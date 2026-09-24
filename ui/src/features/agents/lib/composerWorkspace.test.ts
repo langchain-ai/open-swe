@@ -4,6 +4,7 @@ import {
   pickComposerRepo,
   pickComposerWorkspace,
   reposForWorkspace,
+  workspaceForRepository,
 } from "./composerWorkspace"
 
 const base = {
@@ -79,6 +80,16 @@ const names = (repos: Array<{ full_name: string }>) =>
   repos.map((repo) => repo.full_name)
 
 describe("reposForWorkspace", () => {
+  it("offers app-wide workspaces all accessible repos without adding inaccessible ones", () => {
+    expect(
+      reposForWorkspace(
+        "oss",
+        workspaces.map((w) => ({ ...w, all_repositories: w.slug === "oss" })),
+        accessible
+      )
+    ).toEqual(accessible)
+  })
+
   it("offers a workspace the accessible repositories it owns plus its default", () => {
     expect(names(reposForWorkspace("oss", workspaces, accessible))).toEqual([
       "acme/oss",
@@ -137,5 +148,31 @@ describe("pickComposerRepo", () => {
         offered,
       })
     ).toBeNull()
+  })
+})
+
+describe("workspaceForRepository", () => {
+  it("routes shared repositories independently of API order and preserves explicit picks", () => {
+    const shared = [
+      { slug: "zebra", repos: ["acme/api"], is_default: false },
+      { slug: "alpha", repos: ["Acme/API"], is_default: false },
+      { slug: "default", repos: [], is_default: true },
+    ]
+    expect(workspaceForRepository("ACME/api", shared)).toBe("alpha")
+    expect(workspaceForRepository("acme/api", [...shared].reverse())).toBe(
+      "alpha"
+    )
+    expect(workspaceForRepository("acme/unbound", shared)).toBeNull()
+    const withDefault = shared.map((w) => ({ ...w, repos: ["acme/api"] }))
+    const repoWorkspace = workspaceForRepository("acme/api", withDefault)
+    expect(repoWorkspace).toBe("default")
+    expect(
+      pickComposerWorkspace({
+        ...base,
+        workspaces: shared,
+        repoWorkspace,
+        override: "zebra",
+      })
+    ).toBe("zebra")
   })
 })

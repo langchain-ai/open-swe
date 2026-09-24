@@ -2,7 +2,6 @@
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import {
-  act,
   cleanup,
   fireEvent,
   render,
@@ -203,6 +202,7 @@ describe("WorkspaceSettingsPanel", () => {
       expect(update).toHaveBeenCalledWith("oss", {
         name: "OSS support",
         repos: ["acme/oss"],
+        all_repositories: false,
         slack_channel_ids: ["C1"],
         prompt: "Run make test.",
       })
@@ -215,141 +215,54 @@ describe("WorkspaceSettingsPanel", () => {
     expect(screen.queryByRole("status")).toBeNull()
   })
 
-  it.each([
-    ["refreshing", "success"],
-    ["refreshing", "failed"],
-    ["success", "success"],
-    ["success", "failed"],
-    ["refreshing", "unknown"],
-    ["success", "unknown"],
-  ] as const)(
-    "follows a repository rebuild from a %s save response through stale polls to %s",
-    async (savedStatus, outcome) => {
-      const initial = {
-        ...RECORD,
-        refresh_finished_at: "2026-01-01T00:00:00Z",
-      }
-      mockApis(initial)
-      vi.spyOn(api, "repos").mockResolvedValue({
-        installations: [],
-        repositories: [],
-      })
-      const saved = {
-        ...initial,
-        repos: [],
-        refresh_finished_at: "2026-01-01T00:00:30Z",
-      }
-      vi.spyOn(api, "updateWorkspace").mockResolvedValue({
-        ...saved,
-        refresh_status: savedStatus,
-      })
-      renderPage()
-
-      fireEvent.click(
-        await screen.findByRole("button", { name: "Choose repositories" })
+  it("shares repositories and saves app-wide access without rebuilding the image", async () => {
+    mockApis()
+    vi.mocked(api.me).mockResolvedValue({
+      login: "admin",
+      is_admin: true,
+      email: "admin@example.com",
+      avatar_url: "",
+    })
+    vi.spyOn(api, "repos").mockResolvedValue({
+      installations: [],
+      repositories: [{ full_name: "acme/api", private: true }],
+    })
+    const update = vi.spyOn(api, "updateWorkspace").mockResolvedValue({
+      ...RECORD,
+      repos: ["acme/oss", "acme/api"],
+      all_repositories: true,
+    })
+    const rebuild = vi.spyOn(api, "refreshWorkspace")
+    renderPage()
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Choose repositories" })
+    )
+    const shared = await screen.findByRole("checkbox", { name: /acme\/api/ })
+    expect(shared.hasAttribute("disabled")).toBe(false)
+    fireEvent.click(shared)
+    fireEvent.click(screen.getByRole("button", { name: "Save 2 repositories" }))
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull())
+    fireEvent.click(
+      screen.getByRole("switch", { name: "All GitHub App repositories" })
+    )
+    fireEvent.click(screen.getByRole("button", { name: "Save" }))
+    await waitFor(() =>
+      expect(update).toHaveBeenCalledWith(
+        "oss",
+        expect.objectContaining({
+          repos: ["acme/oss", "acme/api"],
+          all_repositories: true,
+        })
       )
-      fireEvent.click(await screen.findByRole("checkbox", { name: "acme/oss" }))
-      fireEvent.click(
-        screen.getByRole("button", { name: "Save 0 repositories" })
-      )
-      await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull())
-
-      vi.useFakeTimers({
-        toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval"],
-      })
-      try {
-        await act(async () => {
-          fireEvent.click(screen.getByRole("button", { name: "Save" }))
-          await vi.advanceTimersByTimeAsync(1)
-        })
-        const general = screen
-          .getByRole("button", { name: "Save" })
-          .closest("section")
-        if (!general) throw new Error("no General section")
-        expect(within(general).getByRole("status").textContent).toContain(
-          savedStatus === "refreshing"
-            ? "Rebuilding sandbox image"
-            : "rebuild queued"
-        )
-        expect(
-          screen
-            .getByRole("button", {
-              name:
-                savedStatus === "refreshing" ? "Rebuilding…" : "Rebuild image",
-            })
-            .hasAttribute("disabled")
-        ).toBe(savedStatus === "refreshing")
-
-        const getWorkspace = vi
-          .mocked(api.getWorkspace)
-          .mockResolvedValue(saved)
-        const reads = getWorkspace.mock.calls.length
-        await act(async () => {
-          await vi.advanceTimersByTimeAsync(5001)
-        })
-        expect(getWorkspace.mock.calls.length).toBeGreaterThan(reads)
-        expect(screen.getByRole("status").textContent).toContain(
-          "rebuild queued"
-        )
-
-        getWorkspace.mockResolvedValue({
-          ...saved,
-          refresh_status: outcome === "unknown" ? "success" : "refreshing",
-        })
-        await act(async () => {
-          await vi.advanceTimersByTimeAsync(65_001)
-        })
-        expect(
-          within(general).getByRole(outcome === "unknown" ? "alert" : "status")
-            .textContent
-        ).toContain(
-          outcome === "unknown"
-            ? "image rebuild could not be confirmed"
-            : "Rebuilding sandbox image"
-        )
-
-        getWorkspace.mockResolvedValue({
-          ...saved,
-          refresh_status: outcome === "unknown" ? "success" : outcome,
-          refresh_finished_at:
-            outcome === "unknown"
-              ? saved.refresh_finished_at
-              : "2026-01-01T00:01:00Z",
-          refresh_error: outcome === "failed" ? "Setup script exited 1" : null,
-        })
-        await act(async () => {
-          await vi.advanceTimersByTimeAsync(5001)
-        })
-        expect(
-          within(general).getByRole(outcome === "success" ? "status" : "alert")
-            .textContent
-        ).toContain(
-          outcome === "unknown"
-            ? "image rebuild could not be confirmed"
-            : outcome === "failed"
-              ? "Image rebuild failed. Setup script exited 1"
-              : "Sandbox image rebuilt with the saved repositories."
-        )
-        expect(
-          screen
-            .getByRole("button", { name: "Rebuild image" })
-            .hasAttribute("disabled")
-        ).toBe(false)
-        const settledReads = getWorkspace.mock.calls.length
-        await act(async () => {
-          await vi.advanceTimersByTimeAsync(10001)
-        })
-        expect(getWorkspace.mock.calls.length).toBe(settledReads)
-      } finally {
-        vi.useRealTimers()
-      }
-    }
-  )
+    )
+    expect(rebuild).not.toHaveBeenCalled()
+    expect(screen.queryByRole("status")).toBeNull()
+  })
 
   it("shows a save conflict in the alert region", async () => {
     mockApis()
     vi.spyOn(api, "updateWorkspace").mockRejectedValue(
-      new ApiError(409, "repository acme/api already belongs to workspace core")
+      new ApiError(409, "slack channel C123 already belongs to workspace core")
     )
     renderPage()
 

@@ -265,16 +265,6 @@ describe("WorkspacesSection", () => {
     fireEvent.change(screen.getByLabelText("Workspace name"), {
       target: { value: "Preview" },
     })
-    const repositoryHelp = screen.getByRole("button", {
-      name: "About workspace repositories",
-    })
-    fireEvent.mouseEnter(repositoryHelp)
-    fireEvent.mouseMove(repositoryHelp)
-    expect(
-      await screen.findByText(
-        /dashboard, Slack, GitHub issues, or pull requests/
-      )
-    ).toBeTruthy()
     fireEvent.click(screen.getByRole("button", { name: "Choose repositories" }))
     fireEvent.change(await screen.findByLabelText("Add a repository by name"), {
       target: { value: "acme/web" },
@@ -294,12 +284,16 @@ describe("WorkspacesSection", () => {
     fireEvent.click(screen.getByRole("button", { name: "Save 1 channel" }))
     expect(screen.getByText("#oss-help")).toBeTruthy()
 
+    fireEvent.click(
+      screen.getByRole("switch", { name: "All GitHub App repositories" })
+    )
     fireEvent.click(screen.getByRole("button", { name: "Create workspace" }))
 
     await waitFor(() => expect(createSpy).toHaveBeenCalled())
     expect(createSpy).toHaveBeenCalledWith({
       name: "Preview",
       repos: ["acme/web"],
+      all_repositories: true,
       slack_channel_ids: ["C0000000002"],
     })
   })

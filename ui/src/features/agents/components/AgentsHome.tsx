@@ -13,6 +13,7 @@ import {
   pickComposerRepo,
   pickComposerWorkspace,
   reposForWorkspace,
+  workspaceForRepository,
 } from "@/features/agents/lib/composerWorkspace"
 import type { ModelSelection } from "@/features/agents/lib/provider/useModelOptions"
 import type { RunTarget } from "@/features/agents/components/composer/RunTargetSelector"
@@ -109,7 +110,10 @@ export function AgentsHome({
   const visibility =
     visibilityOverride ?? preferences.data?.default_visibility ?? "private"
   const workspaceOptionsQuery = useWorkspaceOptions(cloudEnabled)
-  const workspaces = workspaceOptionsQuery.data?.workspaces ?? []
+  const workspaces = useMemo(
+    () => workspaceOptionsQuery.data?.workspaces ?? [],
+    [workspaceOptionsQuery.data?.workspaces]
+  )
   // undefined = untouched, so the run falls back to the repo's own workspace,
   // then the default one.
   const [workspaceOverride, setWorkspaceOverride] = useState<string | null>(
@@ -177,13 +181,13 @@ export function AgentsHome({
   const namedRepo = (
     repoOverride === undefined ? userDefaultRepo : repoOverride
   )?.toLowerCase()
+  const repoWorkspace = useMemo(
+    () => workspaceForRepository(namedRepo, workspaces),
+    [namedRepo, workspaces]
+  )
   const selectedWorkspace = pickComposerWorkspace({
     override: workspaceOverride,
-    repoWorkspace: namedRepo
-      ? (workspaces.find((workspace) =>
-          workspace.repos.some((r) => r.toLowerCase() === namedRepo)
-        )?.slug ?? null)
-      : null,
+    repoWorkspace,
     userDefault: preferences.data?.default_workspace,
     instanceDefault: defaultWorkspaceSlug,
     workspaces,
