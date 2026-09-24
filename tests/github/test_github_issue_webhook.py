@@ -1560,6 +1560,7 @@ async def test_github_webhook_routes_pr_comment_review_to_agent(monkeypatch, reg
     monkeypatch.setattr(github_webhooks, "process_github_pr_comment", fake_process_pr_comment)
     monkeypatch.setattr(webhook_common, "GITHUB_WEBHOOK_SECRET", _TEST_WEBHOOK_SECRET)
     monkeypatch.setattr(webhook_common, "ALLOWED_GITHUB_ORGS", frozenset({"langchain-ai"}))
+    register_github_logins(monkeypatch, "octocat")
 
     response = await _post_github_webhook(
         "issue_comment",
@@ -1593,6 +1594,7 @@ async def test_github_webhook_routes_pr_review_request_comment_to_agent(
     monkeypatch.setattr(github_webhooks, "process_github_pr_comment", fake_process_pr_comment)
     monkeypatch.setattr(webhook_common, "GITHUB_WEBHOOK_SECRET", _TEST_WEBHOOK_SECRET)
     monkeypatch.setattr(webhook_common, "ALLOWED_GITHUB_ORGS", frozenset({"langchain-ai"}))
+    register_github_logins(monkeypatch, "octocat")
 
     response = await _post_github_webhook(
         "issue_comment",

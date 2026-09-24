@@ -28,7 +28,7 @@ key callers address a PR by.
 import logging
 from collections.abc import Sequence
 from datetime import datetime
-from typing import Literal, Self
+from typing import Literal, Self, TypedDict
 from uuid import UUID, uuid7
 
 from pydantic import AliasPath, BaseModel, Field, ValidationError
@@ -42,6 +42,7 @@ from sqlalchemy import (
     inspect,
     or_,
     select,
+    tuple_,
 )
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -64,6 +65,13 @@ AGENT_OPENED_LINK_SOURCE = "open_pull_request"
 
 _SEARCH_PAGE_SIZE = 50
 _GITHUB_COLUMNS = ("state", "title", "head_ref", "base_ref", "author")
+_DIFF_COLUMNS = ("additions", "deletions", "changed_files")
+
+
+class DiffStats(TypedDict):
+    files: int
+    additions: int
+    deletions: int
 
 
 class ThreadLink(Base):
@@ -123,6 +131,9 @@ class PullRequest(Base):
         ForeignKey("users.id", ondelete="SET NULL"), default=None
     )
     resolves_thread: Mapped[bool] = mapped_column(default=False)
+    additions: Mapped[int | None] = mapped_column(default=None)
+    deletions: Mapped[int | None] = mapped_column(default=None)
+    changed_files: Mapped[int | None] = mapped_column(default=None)
     threads: Mapped[list[ThreadLink]] = relationship(
         default_factory=list,
         cascade="all, delete-orphan",
@@ -163,6 +174,32 @@ class PullRequest(Base):
                 .order_by(cls.number)
             )
             return list(rows)
+
+    @classmethod
+    async def diff_stats_for(
+        cls, prs: Sequence[tuple[str, int]]
+    ) -> dict[tuple[str, int], DiffStats]:
+        """Stored line counts keyed by lowercased ``(repo_full_name, number)``."""
+        keys = [(repo_full_name.lower(), number) for repo_full_name, number in prs]
+        if not keys or not postgres.configured():
+            return {}
+        async with postgres.session() as session:
+            rows = await session.scalars(
+                select(cls).join(cls.repository).where(tuple_(Repository.key, cls.number).in_(keys))
+            )
+            return {
+                (row.repo_full_name.lower(), row.number): stats
+                for row in rows
+                if (stats := row.diff_stats) is not None
+            }
+
+    @property
+    def diff_stats(self) -> DiffStats | None:
+        if self.additions is None or self.deletions is None or self.changed_files is None:
+            return None
+        return DiffStats(
+            files=self.changed_files, additions=self.additions, deletions=self.deletions
+        )
 
     @property
     def repo_full_name(self) -> str:
@@ -412,6 +449,7 @@ class PullRequest(Base):
             author_github_id=self.author_github_id,
             author_user_id=self.author_user_id,
             resolves_thread=self.resolves_thread,
+            **{column: getattr(self, column) for column in _DIFF_COLUMNS},
             legacy_threads_discovered_at=func.clock_timestamp() if legacy_discovered else None,
         )
         discovery_change = (
@@ -431,6 +469,10 @@ class PullRequest(Base):
                 ),
                 "author_user_id": func.coalesce(upsert.excluded.author_user_id, cls.author_user_id),
                 "resolves_thread": or_(cls.resolves_thread, upsert.excluded.resolves_thread),
+                **{
+                    column: func.coalesce(getattr(upsert.excluded, column), getattr(cls, column))
+                    for column in _DIFF_COLUMNS
+                },
             }
             if overwrite
             else {}
@@ -457,6 +499,9 @@ class PullRequestPayload(BaseModel):
     state: str = ""
     draft: bool = False
     merged: bool = False
+    additions: int | None = None
+    deletions: int | None = None
+    changed_files: int | None = None
     author: str = Field("", validation_alias=AliasPath("user", "login"))
     author_id: int | None = Field(None, validation_alias=AliasPath("user", "id"))
     head_ref: str = Field("", validation_alias=AliasPath("head", "ref"))
@@ -506,4 +551,7 @@ class PullRequestEvent(BaseModel):
             base_ref=self.pull_request.base_ref,
             author=self.pull_request.author,
             author_github_id=self.pull_request.author_id,
+            additions=self.pull_request.additions,
+            deletions=self.pull_request.deletions,
+            changed_files=self.pull_request.changed_files,
         )
