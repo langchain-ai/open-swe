@@ -3,6 +3,7 @@ import {
   IoArrowBackOutline,
   IoCloudOutline,
   IoCubeOutline,
+  IoFlaskOutline,
   IoGitPullRequestOutline,
   IoOptionsOutline,
   IoSettingsOutline,
@@ -18,6 +19,7 @@ import {
   useSidebarLayout,
 } from "@/components/sidebar-layout"
 import { cn } from "@/lib/utils"
+import { useFeatureFlagsPanel } from "@/lib/featureFlags"
 import { getLastAppLocation, useHrefLinkOptions } from "@/lib/appLocation"
 
 type IconType = ComponentType<SVGProps<SVGSVGElement>>
@@ -27,6 +29,7 @@ interface NavItem {
   label: string
   icon: IconType
   adminOnly?: boolean
+  featureFlagsOnly?: boolean
 }
 
 const NAV: Array<{ heading: string; items: Array<NavItem> }> = [
@@ -36,6 +39,12 @@ const NAV: Array<{ heading: string; items: Array<NavItem> }> = [
       { to: "/my-settings", label: "Profile", icon: IoOptionsOutline },
       { to: "/cloud-agents", label: "Open SWE Agent", icon: IoCloudOutline },
       { to: "/usage", label: "Usage", icon: IoStatsChartOutline },
+      {
+        to: "/feature-flags",
+        label: "Feature Flags",
+        icon: IoFlaskOutline,
+        featureFlagsOnly: true,
+      },
     ],
   },
   {
@@ -63,6 +72,7 @@ const LINK_CLASS =
 export function AppSidebar({ user }: { user: SessionUser }) {
   const layout = useSidebarLayout()
   const hrefLinkOptions = useHrefLinkOptions()
+  const showFeatureFlags = useFeatureFlagsPanel(user)
   const isDesktop =
     typeof window !== "undefined" && Boolean(window.openSweDesktop)
 
@@ -90,7 +100,11 @@ export function AppSidebar({ user }: { user: SessionUser }) {
 
       <nav className="flex flex-1 flex-col gap-5 px-2">
         {NAV.map((group) => {
-          const items = group.items.filter((i) => !i.adminOnly || user.is_admin)
+          const items = group.items.filter(
+            (i) =>
+              (!i.adminOnly || user.is_admin) &&
+              (!i.featureFlagsOnly || showFeatureFlags)
+          )
           if (items.length === 0) return null
           return (
             <div key={group.heading} className="flex flex-col gap-0.5">

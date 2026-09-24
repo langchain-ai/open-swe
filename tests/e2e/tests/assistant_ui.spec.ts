@@ -442,7 +442,7 @@ test("standard mode still sends, and the setting applies to the same existing th
   ).toBeVisible();
   await waitForThreadIdle(page, id);
 
-  await page.goto("/my-settings");
+  await page.goto("/feature-flags");
   const toggle = page.getByRole("switch", {
     name: "Assistant UI (experimental)",
   });
