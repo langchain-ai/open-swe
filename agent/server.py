@@ -160,7 +160,7 @@ from agent.sandboxes.state import (
 from agent.sandboxes.tool_access import tools_base_url
 from agent.sandboxes.tool_runtime import ToolSurface, save_tool_context
 from agent.skill_store.store import ORGANIZATION_SKILLS_NAMESPACE, SKILLS_NAMESPACE
-from agent.slack.dm import is_dm_channel, is_dm_session
+from agent.slack.dm import is_concierge_thread, is_dm_channel
 from agent.thread_title import TITLE_GENERATION_MAX_TOKENS, schedule_thread_title_generation
 from agent.threads.recent_context import RecentContextAudience, recent_thread_context_section
 from agent.threads.summary import DASHBOARD_SOURCE, thread_is_private
@@ -767,12 +767,12 @@ def _slack_ask_mode(cfg: RunConfig) -> bool:
     )
 
 
-def _slack_dm_run(cfg: RunConfig) -> bool:
-    """Whether this run answers in a bot DM the owner runs as one session."""
+def _slack_concierge_run(cfg: RunConfig) -> bool:
+    """Whether this run answers in a bot DM its owner runs in concierge mode."""
     return (
         _slack_tools_enabled(cfg)
         and cfg.slack_thread is not None
-        and is_dm_session(cfg.slack_thread.channel_context, cfg.slack_thread.thread_ts)
+        and is_concierge_thread(cfg.slack_thread.channel_context, cfg.slack_thread.thread_ts)
     )
 
 
@@ -1473,7 +1473,7 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
         static_tools = [tool for tool in static_tools if tool is not slack_read_channel_messages]
     if not _slack_tools_enabled(cfg):
         static_tools = [tool for tool in static_tools if tool not in slack_tools]
-    elif _slack_dm_run(cfg):
+    elif _slack_concierge_run(cfg):
         static_tools = [
             tool for tool in static_tools if _registered_tool_name(tool) not in DM_EXCLUDED_TOOLS
         ]

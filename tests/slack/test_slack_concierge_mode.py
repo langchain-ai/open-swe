@@ -1,4 +1,4 @@
-"""A bot DM, for someone who turned the one-session mode on: every message routes
+"""A bot DM, for someone who turned concierge mode on: every message routes
 to the same agent thread. Off by default, where a DM keeps a thread per message.
 """
 
@@ -13,7 +13,7 @@ from starlette.requests import Request
 from agent.slack import events as slack_events
 from agent.slack import routes as slack_routes
 from agent.slack import webhook as slack_service
-from agent.slack.dm import DM_SESSION_TS
+from agent.slack.dm import CONCIERGE_TS
 from agent.slack.payloads import SlackChannelContext
 from agent.slack.request import SlackRequest
 from agent.webhooks import common as webhook_common
@@ -91,7 +91,7 @@ def _patch(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(webhook_common, "SLACK_BOT_USER_ID", "BOT")
     monkeypatch.setattr(webhook_common, "SLACK_BOT_USERNAME", "openswe")
     monkeypatch.setattr(slack_service, "process_slack_mention", AsyncMock())
-    monkeypatch.setattr(slack_routes, "dm_session_enabled", AsyncMock(return_value=True))
+    monkeypatch.setattr(slack_routes.User, "concierge_mode_for_slack", AsyncMock(return_value=True))
 
 
 async def _queued_request(payload: dict[str, Any]) -> SlackRequest:
@@ -104,11 +104,11 @@ async def _queued_request(payload: dict[str, Any]) -> SlackRequest:
     return cast(SlackRequest, background_tasks.tasks[0][1][0])
 
 
-async def test_untagged_dm_routes_to_the_one_dm_session() -> None:
+async def test_untagged_dm_routes_to_the_one_concierge_thread() -> None:
     request = await _queued_request(_dm_payload("Ev-dm"))
 
-    assert request.thread_ts == DM_SESSION_TS
-    assert request.dm_session is True
+    assert request.thread_ts == CONCIERGE_TS
+    assert request.concierge_mode is True
     assert request.reply_thread_ts == ""
     assert request.treat_all_messages_as_mentions is True
 
@@ -119,7 +119,7 @@ async def test_every_dm_message_shares_one_agent_thread() -> None:
     second_payload["event"]["ts"] = "1786573999.000100"
     second = await _queued_request(second_payload)
 
-    assert first.thread_ts == second.thread_ts == DM_SESSION_TS
+    assert first.thread_ts == second.thread_ts == CONCIERGE_TS
 
 
 async def test_dm_thread_reply_keeps_the_session_but_answers_in_the_thread() -> None:
@@ -127,7 +127,7 @@ async def test_dm_thread_reply_keeps_the_session_but_answers_in_the_thread() -> 
         _dm_payload("Ev-dm-thread", thread_ts="1786573300.000000"),
     )
 
-    assert request.thread_ts == DM_SESSION_TS
+    assert request.thread_ts == CONCIERGE_TS
     assert request.reply_thread_ts == "1786573300.000000"
 
 
@@ -135,12 +135,14 @@ async def test_dm_keeps_a_thread_per_message_until_the_person_opts_in(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The default: a DM behaves as it always has, but still answers untagged messages."""
-    monkeypatch.setattr(slack_routes, "dm_session_enabled", AsyncMock(return_value=False))
+    monkeypatch.setattr(
+        slack_routes.User, "concierge_mode_for_slack", AsyncMock(return_value=False)
+    )
 
     request = await _queued_request(_dm_payload("Ev-dm-off"))
 
     assert request.thread_ts == "1786573369.551099"
-    assert request.dm_session is False
+    assert request.concierge_mode is False
     assert request.treat_all_messages_as_mentions is True
 
 
@@ -158,4 +160,4 @@ async def test_channel_message_still_uses_its_own_slack_thread(
     request = await _queued_request(payload)
 
     assert request.thread_ts == "1786573369.551099"
-    assert request.dm_session is False
+    assert request.concierge_mode is False

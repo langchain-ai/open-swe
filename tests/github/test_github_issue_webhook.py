@@ -894,7 +894,7 @@ def test_slack_webhook_accepts_unmentioned_direct_message(monkeypatch) -> None:
     assert isinstance(event_data, SlackRequest)
     assert event_data.text == "please check my branch"
     assert event_data.thread_ts == "1700000000.000200"
-    assert event_data.dm_session is False
+    assert event_data.concierge_mode is False
     assert event_data.treat_all_messages_as_mentions is True
 
 

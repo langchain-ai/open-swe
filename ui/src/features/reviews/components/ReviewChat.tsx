@@ -307,6 +307,7 @@ function ChatBody({
   const [value, setValue] = useState("")
   const [attachments, setAttachments] = useState<Array<ChatAttachment>>([])
   const scrollRef = useRef<HTMLDivElement>(null)
+  const inputRef = useRef<HTMLTextAreaElement>(null)
   const autoScrollRef = useRef(true)
   const prevTopRef = useRef(0)
   const messages = stream.messages
@@ -326,11 +327,12 @@ function ChatBody({
   // Receive "add to chat" attachments from the diff column as composer pills.
   useEffect(() => {
     if (!composer) return
-    composer.registerSink((attachment) =>
+    composer.registerSink((attachment) => {
       setAttachments((prev) =>
         prev.some((a) => a.id === attachment.id) ? prev : [...prev, attachment]
       )
-    )
+      requestAnimationFrame(() => inputRef.current?.focus())
+    })
     return () => composer.registerSink(null)
   }, [composer])
 
@@ -546,6 +548,7 @@ function ChatBody({
           )}
           <div className="flex items-end gap-2 pl-2">
             <Textarea
+              ref={inputRef}
               value={value}
               onChange={(event) => setValue(event.target.value)}
               onKeyDown={(event) => {
