@@ -7,7 +7,9 @@ import { cn } from "@/lib/utils"
 
 /** A `javascript:` URL that opens the GitHub PR in the current tab as an Open SWE review. */
 export function reviewBookmarkletUrl(origin: string): string {
-  const script = `(()=>{const m=location.href.match(/github\\.com\\/([^/]+)\\/([^/]+)\\/pull\\/(\\d+)/);if(!m){alert("Open this on a GitHub pull request page.");return}window.open(${JSON.stringify(`${origin}/agents/reviews/`)}+m[1]+"/"+m[2]+"/"+m[3],"_blank")})()`
+  // Percent-encoded, the base holds only characters that are inert inside a JS string literal.
+  const base = encodeURIComponent(`${new URL(origin).origin}/agents/reviews/`)
+  const script = `(()=>{const m=location.href.match(/github\\.com\\/([^/]+)\\/([^/]+)\\/pull\\/(\\d+)/);if(!m){alert("Open this on a GitHub pull request page.");return}window.open(decodeURIComponent("${base}")+m[1]+"/"+m[2]+"/"+m[3],"_blank")})()`
   return `javascript:${script}`
 }
 
