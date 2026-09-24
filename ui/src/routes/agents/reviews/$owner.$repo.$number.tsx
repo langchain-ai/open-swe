@@ -15,12 +15,22 @@ import {
 import { reviewOpenedFromSidebar } from "@/features/reviews/lib/reviewEntry"
 import { Skeleton } from "@/components/ui/skeleton"
 import { api } from "@/lib/api"
+import { pageTitle } from "@/lib/pageTitle"
 import { RequireLogin } from "@/lib/auth-redirect"
 import { useSession } from "@/lib/session"
 import { cn } from "@/lib/utils"
 
 export const Route = createFileRoute("/agents/reviews/$owner/$repo/$number")({
   component: ReviewDetailPage,
+  head: ({
+    params,
+  }: {
+    params: { owner: string; repo: string; number: string }
+  }) => ({
+    meta: [
+      { title: pageTitle(`${params.owner}/${params.repo} #${params.number}`) },
+    ],
+  }),
 })
 
 function ReviewDetailPage() {
@@ -76,6 +86,11 @@ function ReviewDetailPage() {
   const queryClient = useQueryClient()
   const headSha = detail.data?.head_sha
   const seenShaRef = useRef(headSha)
+  const prTitle = detail.data?.pr.title
+  const documentTitle = pageTitle(prTitle ?? `${owner}/${repo} #${prNumber}`)
+  useEffect(() => {
+    document.title = documentTitle
+  }, [documentTitle])
   useEffect(() => {
     if (headSha && seenShaRef.current && headSha !== seenShaRef.current) {
       void queryClient.invalidateQueries({

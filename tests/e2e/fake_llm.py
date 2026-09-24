@@ -91,8 +91,8 @@ git push origin {FEATURE_BRANCH}
 echo PUSHED_OK
 """.strip()
 
-# Only a test file changes, and it stays smaller than the source change so the
-# card never drew it: the votes cast on the first revision still count.
+# Only a test file changes, and the card never draws tests: the votes cast on
+# the first revision still count.
 _EXPEDITE_FIX_SCRIPT = f"""
 set -e
 cd repo

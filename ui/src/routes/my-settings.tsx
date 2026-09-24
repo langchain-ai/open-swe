@@ -9,11 +9,13 @@ import { PersonalInstructionsSection } from "@/features/settings/components/Pers
 import { PreferencesSection } from "@/features/settings/components/PreferencesSection"
 import { PullRequestsSection } from "@/features/settings/components/PullRequestsSection"
 import { RequireLogin } from "@/lib/auth-redirect"
+import { pageTitle } from "@/lib/pageTitle"
 import { Skeleton } from "@/components/ui/skeleton"
 import { useSession } from "@/lib/session"
 
 export const Route = createFileRoute("/my-settings")({
   component: MySettingsPage,
+  head: () => ({ meta: [{ title: pageTitle("Profile") }] }),
 })
 
 function MySettingsPage() {
