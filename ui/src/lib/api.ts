@@ -250,14 +250,6 @@ export interface AllowedSlackBot {
   image_url: string
 }
 
-export interface AllowedGitHubBot {
-  github_id: number
-  login: string
-  avatar_url: string
-  created_by: string
-  created_at: string | null
-}
-
 /** The settings record at either tier: the instance, or what a workspace's runs see. */
 export interface WorkspaceSettings {
   review_draft_prs: boolean
@@ -1354,17 +1346,6 @@ export const api = {
       `/slack/allowed-bots/${encodeURIComponent(teamId)}/${encodeURIComponent(botId)}`,
       { method: "DELETE" }
     ),
-  listAllowedGitHubBots: () =>
-    request<AllowedGitHubBot[]>("/github/allowed-bots"),
-  allowGitHubBot: (body: { login: string }) =>
-    request<AllowedGitHubBot>("/github/allowed-bots", {
-      method: "POST",
-      body: JSON.stringify(body),
-    }),
-  removeAllowedGitHubBot: (githubId: number) =>
-    request<{ ok: boolean }>(`/github/allowed-bots/${githubId}`, {
-      method: "DELETE",
-    }),
   saveInstanceSettings: (body: WorkspaceSettings) =>
     request<WorkspaceSettings>("/settings", {
       method: "PUT",

@@ -12,9 +12,7 @@ from pydantic import BaseModel, ValidationError
 from agent.baby_sit import handle_ci_webhook
 from agent.database import postgres
 from agent.expedited_review.watch import handle_github_event as handle_expedited_review_event
-from agent.github.allowed_bots import AllowedGitHubBot
 from agent.github.comments import GitHubAuthError
-from agent.github.org_membership import INTERNAL_BOT_LOGINS
 from agent.github.pull_requests import PullRequest
 from agent.input_messages import (
     PersonIdentity,
@@ -868,18 +866,8 @@ class _UntaggedPrEvent(BaseModel):
 
 
 async def is_accepted_commenter(login: str) -> bool:
-    """Only registered Open SWE users and admin-allowed bots may prompt from GitHub."""
-    return login.lower() in await AllowedGitHubBot.logins() or bool(
-        await User.known_logins([login])
-    )
-
-
-def _is_accepted_comment_author(
-    login: str, known_logins: Collection[str], bot_logins: Collection[str]
-) -> bool:
-    return (
-        login.lower() in known_logins or login.lower() in bot_logins or login in INTERNAL_BOT_LOGINS
-    )
+    """Only registered Open SWE users may prompt the agent from GitHub comments."""
+    return bool(await User.known_logins([login]))
 
 
 async def untagged_agent_pr_thread_id(payload: dict[str, Any], event_type: str) -> str | None:
@@ -981,36 +969,24 @@ async def process_github_pr_comment(
                 exc_info=True,
             )
 
-    acting_login = github_login
-    bot_logins = await AllowedGitHubBot.logins()
-    is_bot = github_login.lower() in bot_logins
-    if agent_thread_id is not None or is_bot:
-        existing_metadata = await common.get_thread_metadata_safe(thread_id)
-        if existing_metadata is None:
+    if agent_thread_id is not None:
+        agent_metadata = await common.get_thread_metadata_safe(thread_id)
+        if agent_metadata is None:
             common.logger.info(
-                "Ignoring PR comment for a missing thread",
+                "Ignoring untagged PR comment for a missing agent thread",
                 extra={"thread_id": thread_id, "pr_number": pr_number},
             )
             return
-        if common.thread_is_private(existing_metadata) and not common.thread_is_promptable(
-            existing_metadata, github_login
+        if common.thread_is_private(agent_metadata) and not common.thread_is_promptable(
+            agent_metadata, github_login
         ):
             return
-        owner_login = existing_metadata.get("owner_login")
-        if is_bot:
-            if not isinstance(owner_login, str) or not owner_login:
-                common.logger.info(
-                    "Ignoring bot PR comment on a thread without an owner",
-                    extra={"thread_id": thread_id, "bot_login": github_login},
-                )
-                return
-            acting_login = owner_login
-    email = await User.email_for_login(acting_login) or ""
+    email = await User.email_for_login(github_login) or ""
     if email:
-        thread_metadata = await common.authorize_github_thread(thread_id, acting_login)
+        thread_metadata = await common.authorize_github_thread(thread_id, github_login)
         github_token = await common.get_or_resolve_thread_github_token(thread_id, email)
     else:
-        common.logger.warning("No email mapping for GitHub user '%s', skipping", acting_login)
+        common.logger.warning("No email mapping for GitHub user '%s', skipping", github_login)
         return
 
     if not github_token:
@@ -1092,19 +1068,14 @@ async def process_github_pr_comment(
             authorized_login=github_login if common.thread_is_private(thread_metadata) else None,
             require_tag=agent_thread_id is None,
         )
-    trusted = await _trusted_authors(github_login, comments=comments)
-    comments = [
-        comment
-        for comment in comments
-        if _is_accepted_comment_author(str(comment.get("author") or ""), trusted, bot_logins)
-    ]
     if not comments:
         common.logger.info("No comments found since last @open-swe tag for PR %s", pr_number)
         return
 
+    trusted = await _trusted_authors(github_login, comments=comments)
     prompt = common.build_pr_prompt(comments, pr_url, repo_config=repo_config, trusted=trusted)
     messages = []
-    introduced: set[str] = set() if is_bot else {_github_person(github_login, github_user_id)["id"]}
+    introduced: set[str] = {_github_person(github_login, github_user_id)["id"]}
     for item in comments:
         author = str(item.get("author") or "unknown")
         person = _github_person(author, github_user_id if author == github_login else None)
@@ -1134,8 +1105,8 @@ async def process_github_pr_comment(
         thread_id,
         prompt,
         input={"messages": messages},
-        github_login=acting_login,
-        github_user_id=None if is_bot else github_user_id,
+        github_login=github_login,
+        github_user_id=github_user_id,
         repo_config=repo_config,
         pr_number=pr_number,
     )
