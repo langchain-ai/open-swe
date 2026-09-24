@@ -21,6 +21,7 @@ import type {
   Chunk,
   ImageChunk,
   Message,
+  ReviewPageRef,
   WorkflowApprovalStatus,
   WorkflowPushApprovalsResponse,
 } from "./types"
@@ -308,6 +309,27 @@ export function markAgentThreadViewed(
     { queryKey: ["agent-threads", "lists", "page"] },
     (prev) => prev && { ...prev, items: viewList(prev.items) }
   )
+}
+
+/** A review has no thread detail GET to mark it read, so it posts its own. */
+export function markReviewViewed(
+  queryClient: QueryClient,
+  review: ReviewPageRef,
+  threadId?: string
+): void {
+  if (threadId) markAgentThreadViewed(queryClient, threadId)
+  api
+    .markReviewViewed(review.owner, review.repo, review.number)
+    .catch((error: unknown) =>
+      console.warn("Could not mark the review read", { review, error })
+    )
+}
+
+export function reviewChatQuery(review: ReviewPageRef) {
+  return {
+    queryKey: ["review-chat", review.owner, review.repo, review.number],
+    queryFn: () => api.getReviewChat(review.owner, review.repo, review.number),
+  } as const
 }
 
 export function setAgentThreadResolved(

@@ -87,6 +87,7 @@ import { usePendingReview } from "@/features/reviews/lib/usePendingReview"
 import type { DiffStyle } from "@/features/agents/utils/diffUtils"
 import { Markdown } from "@/features/agents/components/chat/Markdown"
 import { DiffWrapToggle } from "@/features/agents/components/DiffWrapToggle"
+import { agentThreadKeys } from "@/features/agents/lib/queries"
 import { AuthorGuidanceCard } from "@/features/reviews/components/AuthorGuidanceCard"
 import { PrHeader } from "@/features/reviews/components/PrHeader"
 import { ReviewAssessmentCard } from "@/features/reviews/components/ReviewAssessmentCard"
@@ -1710,6 +1711,7 @@ function WalkthroughCallout({ detail }: { detail: ReviewDetail }) {
         qc.setQueryData<ReviewDetail>(queryKey, (old) =>
           old ? { ...old, walkthrough_running: true } : old
         )
+      void qc.invalidateQueries({ queryKey: agentThreadKeys.lists })
       void qc.invalidateQueries({ queryKey })
     },
   })
