@@ -86,6 +86,21 @@ async def test_slack_attach_html_uploads_to_active_thread(monkeypatch: pytest.Mo
 
 
 @pytest.mark.asyncio
+async def test_slack_attach_html_returns_resolver_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    error = ValueError(
+        "file_path must resolve within the sandbox work directory (/root); "
+        "use /root/test.html instead"
+    )
+    monkeypatch.setattr(attach_tool, "resolve_sandbox_file", AsyncMock(side_effect=error))
+
+    result = await attach_tool.slack_attach_html("../test.html")
+
+    assert result == {"success": False, "error": str(error)}
+
+
+@pytest.mark.asyncio
 async def test_slack_attach_html_rejects_non_html_file(monkeypatch: pytest.MonkeyPatch) -> None:
     backend = _backend()
     monkeypatch.setattr(

@@ -21,20 +21,29 @@ async def resolve_sandbox_file(file_path: str) -> tuple[Any, str, str]:
 
     backend_proxy = await get_sandbox_backend(thread_id)
     work_dir = posixpath.normpath(await resolve_sandbox_work_dir(backend_proxy))
+    candidate_name = posixpath.basename(file_path.strip().rstrip("/"))
     path = posixpath.normpath(
         file_path.strip()
         if file_path.strip().startswith("/")
         else posixpath.join(work_dir, file_path.strip())
     )
     if posixpath.commonpath((work_dir, path)) != work_dir:
-        raise ValueError(f"file_path must resolve within the sandbox work directory ({work_dir})")
+        raise ValueError(_outside_work_dir_error(work_dir, candidate_name))
     resolved = await backend_proxy.aexecute(f"realpath -- {shlex.quote(path)}")
     if resolved.exit_code != 0:
         raise ValueError("file_path must identify an existing sandbox file")
     path = posixpath.normpath(resolved.output.strip())
     if posixpath.commonpath((work_dir, path)) != work_dir:
-        raise ValueError(f"file_path must resolve within the sandbox work directory ({work_dir})")
+        raise ValueError(_outside_work_dir_error(work_dir, candidate_name))
     return backend_proxy, path, work_dir
+
+
+def _outside_work_dir_error(work_dir: str, candidate_name: str) -> str:
+    corrected_path = posixpath.join(work_dir, candidate_name)
+    return (
+        f"file_path must resolve within the sandbox work directory ({work_dir}); "
+        f"use {corrected_path} instead"
+    )
 
 
 async def create_sandbox_file_download_url(
@@ -55,7 +64,7 @@ async def create_sandbox_file_download_url(
         backend_proxy, path, _ = await resolve_sandbox_file(file_path)
     except ValueError as exc:
         logger.warning("Sandbox download request rejected", extra={"error": str(exc)})
-        return {"error": str(exc)}
+        return {"success": False, "error": str(exc)}
     backend = unwrap_sandbox_backend(backend_proxy)
     async with get_async_sandbox_client() as client:
         download = await client.generate_download_url(
