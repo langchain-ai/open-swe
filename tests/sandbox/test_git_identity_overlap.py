@@ -1,122 +1,184 @@
-"""The bot's git identity is written while the GitHub proxy is being configured.
+"""The bot's fallback git identity is written off the critical path of startup.
 
-The identity needs the sandbox, not the proxy, so running it after the proxy
-chain put a full sandbox round trip — over a second on a cold box — on the
-critical path before the run's first model call.
+Every run rewrites it, because a reused sandbox can lose its ``--global`` config,
+and waiting for that round trip put seconds before the run's first model call.
+Sandbox readiness does not wait for it; the thread's proxy holds its first
+command until the write has finished, so no agent command runs without it.
 """
 
 import asyncio
-from unittest.mock import AsyncMock, MagicMock, patch
+import logging
+from collections.abc import Awaitable, Callable
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from deepagents.backends.protocol import ExecuteResponse, SandboxBackendProtocol
 
 from agent.github.sandbox_access import SandboxGitHubAccess
-from agent.sandboxes.lifecycle import SandboxCreateConfig, _create_sandbox_with_proxy
+from agent.sandboxes import lifecycle
+from agent.sandboxes.lifecycle import ensure_sandbox_for_thread, get_cached_sandbox_backend
+from agent.sandboxes.state import SandboxBackendProxy
+
+THREAD_ID = "thread-git-identity"
+# Bounds waits that must finish, so a regression fails instead of hanging.
+_HANG_TIMEOUT = 5
 
 
-def _backend(started: asyncio.Event) -> MagicMock:
-    async def aexecute(_command: str) -> str:
-        started.set()
-        return "ok"
+class _Sandbox(SandboxBackendProtocol):
+    """Runs commands instantly, except the identity write, which waits to be released."""
 
-    return MagicMock(id="sandbox-new", aexecute=AsyncMock(side_effect=aexecute))
+    def __init__(self, sandbox_id: str = "sandbox-1") -> None:
+        self._sandbox_id = sandbox_id
+        self.ran: list[str] = []
+        self.identity_started = asyncio.Event()
+        self.release_identity = asyncio.Event()
+        self.identity_error: Exception | None = None
+        self.identity_cancelled = False
+
+    @property
+    def id(self) -> str:
+        return self._sandbox_id
+
+    def execute(self, command: str, *, timeout: int | None = None) -> ExecuteResponse:
+        raise NotImplementedError
+
+    async def aexecute(self, command: str, *, timeout: int | None = None) -> ExecuteResponse:
+        if command.startswith("git config --global"):
+            self.identity_started.set()
+            try:
+                await self.release_identity.wait()
+            except asyncio.CancelledError:
+                self.identity_cancelled = True
+                raise
+            if self.identity_error is not None:
+                raise self.identity_error
+            command = "identity"
+        self.ran.append(command)
+        return ExecuteResponse(output="", exit_code=0)
 
 
-@pytest.mark.asyncio
-async def test_identity_is_written_while_the_proxy_is_configured() -> None:
-    started = asyncio.Event()
-    backend = _backend(started)
+@pytest.fixture
+def sandbox(monkeypatch: pytest.MonkeyPatch) -> _Sandbox:
+    """The LangSmith sandbox that a thread with no bound sandbox gets."""
+    box = _Sandbox()
+    monkeypatch.setenv("SANDBOX_TYPE", "langsmith")
+    monkeypatch.setattr(lifecycle, "get_sandbox_metadata", AsyncMock(return_value={}))
+    monkeypatch.setattr(lifecycle, "load_workspace", AsyncMock(return_value=None))
+    monkeypatch.setattr(lifecycle, "create_sandbox", AsyncMock(return_value=box))
+    monkeypatch.setattr(
+        lifecycle, "workspace_token", AsyncMock(return_value=SandboxGitHubAccess("token"))
+    )
+    monkeypatch.setattr(lifecycle, "configure_sandbox_proxy", AsyncMock())
+    monkeypatch.setattr(lifecycle, "record_proxy_token_expiry", MagicMock())
+    monkeypatch.setattr(lifecycle.client.threads, "update", AsyncMock())
+    return box
+
+
+async def _execute(proxy: SandboxBackendProxy, command: str) -> int | None:
+    return (await proxy.aexecute(command)).exit_code
+
+
+async def _execute_with_offload(proxy: SandboxBackendProxy, command: str) -> int | None:
+    offload = await proxy.aexecute_with_offload(command, "/tmp/capture", max_inline_bytes=1_000)
+    return offload.response.exit_code
+
+
+@pytest.mark.parametrize("bound", [False, True], ids=["create", "reconnect"])
+async def test_sandbox_is_ready_while_the_identity_is_still_being_written(
+    sandbox: _Sandbox, monkeypatch: pytest.MonkeyPatch, bound: bool
+) -> None:
+    if bound:
+        monkeypatch.setattr(
+            lifecycle, "get_sandbox_metadata", AsyncMock(return_value={"sandbox_id": sandbox.id})
+        )
+
+    proxy = await asyncio.wait_for(ensure_sandbox_for_thread(THREAD_ID), timeout=_HANG_TIMEOUT)
+
+    assert proxy.current is sandbox
+    await asyncio.wait_for(sandbox.identity_started.wait(), timeout=_HANG_TIMEOUT)
+    assert sandbox.ran == []
+
+
+@pytest.mark.parametrize("run", [_execute, _execute_with_offload])
+async def test_first_command_waits_for_the_identity_write(
+    sandbox: _Sandbox,
+    monkeypatch: pytest.MonkeyPatch,
+    run: Callable[[SandboxBackendProxy, str], Awaitable[int | None]],
+) -> None:
+    proxy_configured = asyncio.Event()
 
     async def configure(*_args: object, **_kwargs: object) -> None:
-        # Serial ordering would leave the identity unstarted until this returns.
-        await asyncio.wait_for(started.wait(), timeout=2)
+        await proxy_configured.wait()
 
-    with (
-        patch(
-            "agent.sandboxes.lifecycle.create_sandbox", new_callable=AsyncMock, return_value=backend
-        ),
-        patch.object(
-            SandboxCreateConfig,
-            "resolve",
-            new_callable=AsyncMock,
-            return_value=SandboxCreateConfig(snapshot_id="snap"),
-        ),
-        patch(
-            "agent.sandboxes.lifecycle.workspace_token",
-            new_callable=AsyncMock,
-            return_value=SandboxGitHubAccess("token"),
-        ),
-        patch("agent.sandboxes.lifecycle.configure_sandbox_proxy", side_effect=configure),
-        patch("agent.sandboxes.lifecycle.record_proxy_token_expiry"),
-    ):
-        assert await _create_sandbox_with_proxy(thread_id="thread-overlap") is backend
-
-    backend.aexecute.assert_awaited_once()
-
-
-@pytest.mark.asyncio
-async def test_identity_failure_fails_the_sandbox() -> None:
-    backend = MagicMock(
-        id="sandbox-new", aexecute=AsyncMock(side_effect=RuntimeError("identity failed"))
+    monkeypatch.setattr(lifecycle, "configure_sandbox_proxy", configure)
+    # The same handle the agent's tools execute through, started as build_agent does.
+    proxy = get_cached_sandbox_backend(
+        THREAD_ID, reconnect=lambda: ensure_sandbox_for_thread(THREAD_ID)
     )
+    proxy.start()
 
-    with (
-        patch(
-            "agent.sandboxes.lifecycle.create_sandbox", new_callable=AsyncMock, return_value=backend
-        ),
-        patch.object(
-            SandboxCreateConfig,
-            "resolve",
-            new_callable=AsyncMock,
-            return_value=SandboxCreateConfig(snapshot_id="snap"),
-        ),
-        patch(
-            "agent.sandboxes.lifecycle.workspace_token",
-            new_callable=AsyncMock,
-            return_value=SandboxGitHubAccess("token"),
-        ),
-        patch("agent.sandboxes.lifecycle.configure_sandbox_proxy", new_callable=AsyncMock),
-        patch("agent.sandboxes.lifecycle.record_proxy_token_expiry"),
-        pytest.raises(RuntimeError, match="identity failed"),
-    ):
-        await _create_sandbox_with_proxy(thread_id="thread-identity-fails")
+    # Issued while the sandbox is still starting, before the write is handed over.
+    command = asyncio.create_task(run(proxy, "git commit -m change"))
+    await asyncio.wait_for(sandbox.identity_started.wait(), timeout=_HANG_TIMEOUT)
+    proxy_configured.set()
+    await asyncio.wait_for(proxy.ready(), timeout=_HANG_TIMEOUT)
+
+    assert sandbox.ran == []
+    sandbox.release_identity.set()
+    assert await asyncio.wait_for(command, timeout=_HANG_TIMEOUT) == 0
+    assert sandbox.ran == ["identity", "git commit -m change"]
 
 
-@pytest.mark.asyncio
-async def test_a_failed_proxy_does_not_leave_the_identity_write_running() -> None:
-    release = asyncio.Event()
+async def test_failed_identity_write_is_logged_and_commands_still_run(
+    sandbox: _Sandbox, caplog: pytest.LogCaptureFixture
+) -> None:
+    sandbox.identity_error = RuntimeError("git is not installed")
+    sandbox.release_identity.set()
+    caplog.set_level(logging.WARNING)
 
-    async def aexecute(_command: str) -> str:
-        await release.wait()
-        return "ok"
+    proxy = await ensure_sandbox_for_thread(THREAD_ID)
+    first = await proxy.aexecute("git status")
+    second = await proxy.aexecute("git log")
 
-    backend = MagicMock(id="sandbox-new", aexecute=AsyncMock(side_effect=aexecute))
+    assert (first.exit_code, second.exit_code) == (0, 0)
+    assert sandbox.ran == ["git status", "git log"]
+    [failure] = [
+        record
+        for record in caplog.records
+        if record.exc_info and record.exc_info[1] is sandbox.identity_error
+    ]
+    assert failure.levelno == logging.WARNING
+    assert getattr(failure, "thread_id", None) == THREAD_ID
+    assert getattr(failure, "sandbox_id", None) == sandbox.id
 
-    with (
-        patch(
-            "agent.sandboxes.lifecycle.create_sandbox", new_callable=AsyncMock, return_value=backend
-        ),
-        patch.object(
-            SandboxCreateConfig,
-            "resolve",
-            new_callable=AsyncMock,
-            return_value=SandboxCreateConfig(snapshot_id="snap"),
-        ),
-        patch(
-            "agent.sandboxes.lifecycle.workspace_token",
-            new_callable=AsyncMock,
-            return_value=SandboxGitHubAccess("token"),
-        ),
-        patch(
-            "agent.sandboxes.lifecycle.configure_sandbox_proxy",
-            new_callable=AsyncMock,
-            side_effect=RuntimeError("proxy failed"),
-        ),
-        patch("agent.sandboxes.lifecycle.record_proxy_token_expiry"),
-        pytest.raises(RuntimeError, match="proxy failed"),
-    ):
-        await _create_sandbox_with_proxy(thread_id="thread-proxy-fails")
 
-    # Cancelled with the sandbox, rather than left behind to report into a run
-    # that has already given up on the box.
-    assert not release.is_set()
+async def test_lost_sandbox_cancels_its_identity_write_and_nothing_waits_on_it(
+    sandbox: _Sandbox, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A box lost while reconnecting must not hold up its replacement's first command."""
+    lost = _Sandbox("sandbox-lost")
+    sandbox.release_identity.set()
+
+    async def connect_or_create(sandbox_id: str | None = None, **_create: object) -> _Sandbox:
+        return lost if sandbox_id == lost.id else sandbox
+
+    async def configure(sandbox_id: str, *_args: object, **_kwargs: object) -> None:
+        if sandbox_id == lost.id:
+            await lost.identity_started.wait()
+            raise RuntimeError("proxy unreachable")
+
+    monkeypatch.setattr(
+        lifecycle, "get_sandbox_metadata", AsyncMock(return_value={"sandbox_id": lost.id})
+    )
+    monkeypatch.setattr(lifecycle, "create_sandbox", connect_or_create)
+    monkeypatch.setattr(lifecycle, "configure_sandbox_proxy", configure)
+
+    proxy = await asyncio.wait_for(
+        ensure_sandbox_for_thread(THREAD_ID, allow_replacement=True), timeout=_HANG_TIMEOUT
+    )
+    result = await asyncio.wait_for(proxy.aexecute("git status"), timeout=_HANG_TIMEOUT)
+
+    assert proxy.current is sandbox
+    assert lost.identity_cancelled
+    assert result.exit_code == 0
+    assert sandbox.ran == ["identity", "git status"]

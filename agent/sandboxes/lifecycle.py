@@ -281,27 +281,40 @@ async def configure_git_identity(sandbox_backend: SandboxBackendProtocol) -> Non
 async def git_identity(
     thread_id: str | None, sandbox_backend: SandboxBackendProtocol
 ) -> AsyncIterator[None]:
-    """Write the bot identity while the body configures the proxy.
+    """Write the bot identity alongside the body, off the critical path.
 
     The identity needs the box, not the proxy, and the cost is the round trip
-    rather than the two `git config` calls — on a cold sandbox that round trip
-    is over a second of the critical path before the first model call. A body
-    that raises has lost the sandbox, so the write is dropped rather than joined.
+    rather than the two `git config` calls, which can put seconds before the
+    first model call. Only commands can commit, so the write is handed to the
+    thread's proxy, which holds its first command until the write finishes; a
+    failed write is logged and the command runs regardless. Without a thread
+    there is no proxy to hand it to, so it is joined here. A body that raises
+    has lost the sandbox, so the write is cancelled rather than handed over.
     """
 
     async def run() -> None:
-        async with aphase(thread_id, "sandbox.git_identity"):
-            await configure_git_identity(sandbox_backend)
+        try:
+            async with aphase(thread_id, "sandbox.git_identity"):
+                await configure_git_identity(sandbox_backend)
+        except Exception:
+            logger.warning(
+                "Failed to write the bot git identity",
+                exc_info=True,
+                extra={"thread_id": thread_id, "sandbox_id": sandbox_backend.id},
+            )
 
     task = asyncio.create_task(run())
     try:
         yield
     except BaseException:
         task.cancel()
-        with suppress(asyncio.CancelledError, Exception):
+        with suppress(asyncio.CancelledError):
             await task
         raise
-    await task
+    if thread_id is None:
+        await task
+    else:
+        get_or_create_sandbox_backend_proxy(thread_id).hold_commands_until(task)
 
 
 async def _connect_existing_sandbox(
