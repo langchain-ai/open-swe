@@ -13,6 +13,7 @@ process), so it runs before the first run regardless of import order. Idempotent
 import logging
 import os
 import re
+import socket
 from urllib.parse import urlparse
 
 import e2e_env  # noqa: F401  (sets env before any agent import)
@@ -26,6 +27,16 @@ def apply() -> None:
     global _applied
     if _applied:
         return
+
+    # E2E_LOG_FILE captures the server's own logging, which langgraph dev does
+    # not surface: without it a swallowed warning is invisible to the suite.
+    log_file = os.environ.get("E2E_LOG_FILE")
+    if log_file:
+        handler = logging.FileHandler(log_file)
+        handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s %(message)s"))
+        root = logging.getLogger()
+        root.addHandler(handler)
+        root.setLevel(logging.INFO)
 
     import importlib
 
@@ -75,7 +86,7 @@ def apply() -> None:
     # import time. Resolving an installation would reach api.github.com, and
     # without it a durable watch has no token and silently does nothing.
     from agent import baby_sit
-    from agent.expedited_review import voting, watch
+    from agent.expedited_review import lifecycle, merge, voting
 
     # Same shadowing caveat as ``opr`` above: the tools package re-exports the
     # functions, so reach the modules by name.
@@ -83,7 +94,7 @@ def apply() -> None:
     expedite_tool = importlib.import_module("agent.tools.expedite_pr_approval")
     thread_tools = importlib.import_module("agent.tools.threads")
 
-    for module in (watch, voting, manage_baby_sit, baby_sit):
+    for module in (lifecycle, merge, voting, manage_baby_sit, baby_sit):
         for name, stub in (
             ("get_github_app_installation_id_for_repo", _dummy_install_id),
             ("get_github_app_installation_token", _dummy_install_token),
@@ -125,13 +136,48 @@ def apply() -> None:
             url=f"{BASE_URL}/mock/github/{owner}/{repo}/pull/{number}",
         )
 
+    # Uploading the expedited-review diff image crosses two production guards
+    # that a loopback harness cannot satisfy: the ticket URL must be on
+    # files.slack.com, and the byte transfer must survive the SSRF check, which
+    # rejects loopback. Widen both to this one harness path — skipping them
+    # would stop exercising them at all, and without the upload the card
+    # silently degrades to its text fallback and the suite tests a rendering
+    # nobody sees.
+    from agent.utils import url_safety
+
+    _harness_upload = f"{BASE_URL}/fake-slack/upload/"
+    _real_validate_upload = slack_client._validate_slack_upload_url
+    _real_resolve = url_safety.resolve_and_validate
+
+    def _validate_upload_url(url: str) -> tuple[bool, str]:
+        if url.startswith(_harness_upload):
+            return True, ""
+        return _real_validate_upload(url)
+
+    def _resolve_and_validate(url: str) -> tuple[bool, str, str | None, list | None]:
+        if url.startswith(_harness_upload):
+            host = urlparse(url).hostname or "127.0.0.1"
+            return True, "", host, socket.getaddrinfo(host, urlparse(url).port or 80)
+        return _real_resolve(url)
+
+    slack_client._validate_slack_upload_url = _validate_upload_url
+    url_safety.resolve_and_validate = _resolve_and_validate
+
     slack_client.parse_github_pr_url = _parse_pr_url
-    for module in (manage_baby_sit, expedite_tool, thread_tools, opr, request_pr_review):
+    merge_tool = importlib.import_module("agent.tools.merge_expedited_pr")
+    for module in (
+        manage_baby_sit,
+        expedite_tool,
+        merge_tool,
+        thread_tools,
+        opr,
+        request_pr_review,
+    ):
         if "parse_github_pr_url" in module.__dict__:
             module.__dict__["parse_github_pr_url"] = _parse_pr_url
 
     # Keep the triggering-user identity lookup offline; the real fallback to
-    # config-derived identity (Slack name/email) still runs.
+    # the config's GitHub login still runs.
     async def _no_github_identity(_token: str | None) -> None:
         return None
 
@@ -165,6 +211,7 @@ def apply() -> None:
         thread_access,
         webhook_common,
         voting,
+        merge,
         repo_access,
         github_repos,
         review_routes,
@@ -187,14 +234,14 @@ def apply() -> None:
 
     # Every other module that captured the REST base at import time: PR and
     # check reads (``ci``), the check-run writes, and the expedited-review
-    # eligibility, readiness and voting calls.
+    # eligibility, readiness and merge calls.
     from agent.expedited_review import eligibility, readiness
     from agent.github import checks as github_checks
     from agent.github import ci as github_ci
 
     github_ci.__dict__["_GITHUB_API_BASE"] = FAKE_GITHUB_API
     github_checks.__dict__["_GITHUB_API_BASE"] = FAKE_GITHUB_API
-    for module in (eligibility, readiness, voting):
+    for module in (eligibility, readiness, merge):
         module.__dict__["GITHUB_API_BASE"] = FAKE_GITHUB_API
 
     # Snapshot service: another external boundary. The E2E runs the local sandbox

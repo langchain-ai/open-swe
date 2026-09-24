@@ -53,7 +53,10 @@ function ReviewDetailPage() {
     queryFn: () => api.getReview(owner, repo, prNumber),
     enabled: !!session.data && Number.isFinite(prNumber),
     refetchInterval: (query) =>
-      query.state.data?.status === "running" ? 5000 : false,
+      query.state.data?.status === "running" ||
+      query.state.data?.walkthrough_running
+        ? 5000
+        : false,
   })
   const diff = useQuery({
     queryKey: ["reviewDiff", owner, repo, prNumber],

@@ -11,6 +11,12 @@ On a re-review with no new findings or assessment, it skips posting a new
 GitHub Review but still resolves fixed threads and updates reviewer state.
 
 Args:
+    ranking: Required. Every open finding this review would newly post, as
+        finding IDs ordered from most to least important, each exactly once.
+        Order by your own judgment of what the author most needs to fix first;
+        severity is an input, not the rule. Pass ``[]`` when there are none.
+        A ranking with missing, unknown, or repeated IDs publishes nothing and
+        returns ``expected_finding_ids`` so you can rank that exact set.
     assessment: Optional structured advisory approval assessment with the full
         ``head_sha`` inspected, integer ``risk_score`` (1 = low, 5 = high),
         ``decision`` (``would_approve`` or ``needs_human_review``), and a short

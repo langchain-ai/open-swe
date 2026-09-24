@@ -262,7 +262,7 @@ async def test_admin_cancel_reaches_private_thread_without_exporting_details(
 
 
 async def test_email_admin_can_cancel_private_thread(private_thread, monkeypatch):
-    monkeypatch.setattr(handlers, "_cancel_active_thread_runs", AsyncMock())
+    monkeypatch.setattr(handlers, "_cancel_active_thread_runs", AsyncMock(return_value=([], False)))
     with pytest.raises(HTTPException):
         await handlers.admin_cancel_dashboard_thread("private-thread", "someone")
     await handlers.admin_cancel_dashboard_thread(

@@ -34,13 +34,14 @@ import {
   isOffloading as offloadingFromState,
   prependTurns,
   routedNotice,
+  queuedTurns,
   toMessages,
 } from "./reducer"
 import type { StreamConnection } from "@/features/agents/lib/stream/connection"
 import type { RunTracker } from "@/lib/perf/streaming"
 import type { Message } from "@/features/agents/lib/types"
 import type { TranscriptEventStream } from "./api"
-import type { TranscriptState } from "./reducer"
+import type { TranscriptState, QueuedTurn } from "./reducer"
 
 const CACHE_TTL_MS = 5 * 60_000
 
@@ -84,6 +85,8 @@ class Deferred {
 
 export interface ThreadTranscript {
   messages: Array<Message>
+  /** Follow-ups queued behind the live run, oldest first. */
+  queued: Array<QueuedTurn>
   state: TranscriptState | null
   /** The one-time snapshot fetch is in flight and there is nothing to show yet. */
   isHydrating: boolean
@@ -298,8 +301,11 @@ export function useThreadTranscript(
     return built
   }, [state, threadId])
 
+  const queued = useMemo(() => (state ? queuedTurns(state) : []), [state])
+
   return {
     messages,
+    queued,
     state,
     isHydrating: state === null && error === null,
     hydration: hydrationPromise,

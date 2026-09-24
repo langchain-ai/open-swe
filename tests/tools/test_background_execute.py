@@ -139,9 +139,53 @@ async def test_background_task_cron_search_uses_metadata_not_graph_name() -> Non
 
     assert cron_id == "cron-1"
     client.crons.search.assert_awaited_once_with(
-        metadata={"kind": "background_tasks", "thread_id": "thread-1"}, limit=10
+        metadata={"kind": "background_tasks", "agent_thread_id": "thread-1"}, limit=10
     )
     assert client.crons.create.await_args.args == ("scheduler",)
+    assert client.crons.create.await_args.kwargs["metadata"] == {
+        "kind": "background_tasks",
+        "agent_thread_id": "thread-1",
+    }
+
+
+def _cron(cron_id: str, thread_id: str, metadata: dict[str, str]) -> dict[str, object]:
+    return {
+        "cron_id": cron_id,
+        "metadata": metadata,
+        "payload": {"input": {"task": "background_tasks", "thread_id": thread_id}},
+    }
+
+
+async def test_delete_crons_removes_legacy_crons_matched_by_payload(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    tagged = _cron(
+        "tagged", "thread-1", {"kind": "background_tasks", "agent_thread_id": "thread-1"}
+    )
+    legacy = [
+        _cron("legacy-1", "thread-1", {"kind": "background_tasks"}),
+        _cron("legacy-2", "thread-1", {"kind": "background_tasks"}),
+        _cron("other-thread", "thread-2", {"kind": "background_tasks"}),
+    ]
+    monkeypatch.setattr(background_tasks, "_CRON_PAGE_SIZE", 2)
+    scan = [tagged, *legacy]
+    client = AsyncMock()
+
+    async def search(*, metadata: dict[str, str], limit: int, offset: int = 0) -> list[object]:
+        if "agent_thread_id" in metadata:
+            return [tagged]
+        return scan[offset : offset + limit]
+
+    client.crons.search.side_effect = search
+
+    with patch("agent.background_tasks._client", return_value=client):
+        await background_tasks._delete_crons("thread-1")
+
+    assert [c.args[0] for c in client.crons.delete.await_args_list] == [
+        "tagged",
+        "legacy-1",
+        "legacy-2",
+    ]
 
 
 async def test_background_execute_reports_monitor_scheduling_failure() -> None:
@@ -195,6 +239,7 @@ async def test_monitor_enqueues_one_claimed_completion(tracking_failure: bool) -
             "sandbox_id": "sandbox-1",
             "source": "slack",
             "source_context": {"slack_thread": {"channel_id": "C123", "thread_ts": "123.45"}},
+            "running_background_tasks": ["task-1"],
         }
     }
 
@@ -283,7 +328,7 @@ async def test_monitor_reconciles_background_waiting_status(status: str, slack: 
         patch("agent.background_tasks._delete_crons", AsyncMock()),
     ):
         await monitor_background_tasks("thread-1")
-    assert client.threads.get.await_count == 2
+    assert client.threads.get.await_count == (1 if status == "running" else 2)
     if status == "running":
         client.threads.update.assert_not_awaited()
     else:
@@ -379,7 +424,7 @@ async def test_missing_sandbox_resets_tasks_without_redundant_reads(
 
     assert await monitor_background_tasks("thread-1") == {"status": "missing_sandbox"}
 
-    assert client.threads.get.await_count == 2
+    assert client.threads.get.await_count == (2 if tracked else 1)
     assert client.threads.update.await_count == int(tracked)
     set_status.assert_awaited_once_with("C1", "1.0", "")
     delete_crons.assert_awaited_once_with("thread-1")

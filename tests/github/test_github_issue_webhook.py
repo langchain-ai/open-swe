@@ -531,7 +531,7 @@ def test_process_github_review_finding_reply_dispatches_sanitized_reply_body(mon
     kwargs = captured["kwargs"]
     assert isinstance(kwargs, dict)
     messages = kwargs["input"]["messages"]
-    assert len(messages) == 2
+    assert len(messages) == 1
     message_content = messages[-1]["content"]
     assert isinstance(message_content, str)
     assert "Open SWE finding f_1" in message_content
@@ -1129,6 +1129,16 @@ def test_trigger_pr_review_from_ref_creates_reviewer_run(monkeypatch) -> None:
     assert status_comment_kwargs["pr_number"] == 1244
 
 
+@pytest.mark.parametrize(
+    "pr_url", ["not a URL", "https://example.com/langchain-ai/open-swe/pull/1244"]
+)
+async def test_request_pr_review_tool_rejects_invalid_url(pr_url: str) -> None:
+    result = await request_pr_review_tool(pr_url)
+
+    assert result["success"] is False
+    assert "Expected a GitHub PR URL" in str(result["error"])
+
+
 async def test_request_pr_review_tool_uses_shared_trigger(monkeypatch) -> None:
     captured: dict[str, object] = {}
 
@@ -1390,11 +1400,10 @@ def test_process_github_issue_existing_thread_uses_followup_prompt(monkeypatch) 
     )
 
     messages = cast(list[dict[str, str]], captured["messages"])
-    assert len(messages) == 2
-    entity = ElementTree.fromstring(messages[0]["content"])
-    request = ElementTree.fromstring(messages[1]["content"])
-    assert entity.attrib["id"] == "github:octocat"
-    assert request.findtext("content") == "**octocat:**\n@openswe please handle this"
+    assert len(messages) == 1
+    request = ElementTree.fromstring(messages[0]["content"])
+    assert request.attrib["sender"] == "github:octocat"
+    assert (request.text or "").strip() == "**octocat:**\n@openswe please handle this"
     assert request.find("repository") is None
 
 

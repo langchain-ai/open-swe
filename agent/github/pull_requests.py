@@ -192,6 +192,10 @@ class PullRequest(Base):
         """
         return await self._write(overwrite=True, repository_private=repository_private)
 
+    async def ensure(self) -> Self:
+        """The stored row, created bare when missing, leaving GitHub-owned columns alone."""
+        return await self._write(overwrite=False)
+
     async def link_thread(self, thread_id: str, *, source: str = "") -> Self:
         """Associate a thread with this PR, as primary when it has none yet."""
         if all(link.thread_id != thread_id for link in self.threads):

@@ -27,28 +27,12 @@ SUPPORTED_MODELS: list[ModelOption] = [
         "supports_images": True,
     },
     {
-        "id": "anthropic:claude-sonnet-5",
-        "label": "Sonnet 5",
-        "efforts": ["low", "medium", "high", "xhigh", "max"],
-        "default_effort": "high",
-        "supports_images": True,
-    },
-    {
         "id": "anthropic:claude-fable-5-1",
         "label": "Fable 5.1",
         "efforts": ["low", "medium", "high", "xhigh", "max"],
         "default_effort": "high",
         "supports_images": True,
         "can_be_default": False,
-    },
-    {
-        "id": "anthropic:claude-haiku-4-5",
-        "label": "Haiku 4.5",
-        # Haiku 4.5 predates the adaptive-thinking/effort params the other
-        # Claude entries rely on, so it is offered without reasoning.
-        "efforts": ["none"],
-        "default_effort": "none",
-        "supports_images": True,
     },
     {
         "id": "openai:gpt-6-astra",
@@ -58,22 +42,15 @@ SUPPORTED_MODELS: list[ModelOption] = [
         "supports_images": True,
     },
     {
-        "id": "openai:gpt-5.6-sol",
-        "label": "GPT-5.6 Sol",
+        "id": "openai:gpt-6-sol",
+        "label": "GPT-6 Sol",
         "efforts": ["none", "low", "medium", "high", "xhigh"],
         "default_effort": "xhigh",
         "supports_images": True,
     },
     {
-        "id": "openai:gpt-5.6-terra",
-        "label": "GPT-5.6 Terra",
-        "efforts": ["none", "low", "medium", "high", "xhigh"],
-        "default_effort": "xhigh",
-        "supports_images": True,
-    },
-    {
-        "id": "openai:gpt-5.6-luna",
-        "label": "GPT-5.6 Luna",
+        "id": "openai:gpt-6-luna",
+        "label": "GPT-6 Luna",
         "efforts": ["none", "low", "medium", "high", "xhigh", "max"],
         "default_effort": "xhigh",
         "supports_images": True,
@@ -128,8 +105,13 @@ NON_DEFAULT_MODEL_IDS: frozenset[str] = frozenset(
 DEPRECATED_MODEL_IDS: frozenset[str] = frozenset(
     {
         "anthropic:claude-opus-4-8",
+        "anthropic:claude-sonnet-5",
+        "anthropic:claude-haiku-4-5",
         "anthropic:claude-fable-5",
         "openai:gpt-5.5",
+        "openai:gpt-5.6-sol",
+        "openai:gpt-5.6-terra",
+        "openai:gpt-5.6-luna",
         "google_genai:gemini-3.5-flash",
         "google_genai:gemini-3.6-flash",
         "google_genai:gemini-3.7-flash",
@@ -153,9 +135,8 @@ _PROFILE_LOADER_MODULES: dict[str, str] = {
 }
 CODEX_CONTEXT_WINDOW_OVERRIDES: dict[str, int] = {
     "openai:gpt-6-astra": 272_000,
-    "openai:gpt-5.6-sol": 272_000,
-    "openai:gpt-5.6-terra": 272_000,
-    "openai:gpt-5.6-luna": 272_000,
+    "openai:gpt-6-sol": 272_000,
+    "openai:gpt-6-luna": 272_000,
 }
 _PROFILE_CONTEXT_WINDOW_FALLBACKS: dict[str, int] = {
     "fireworks:accounts/fireworks/models/kimi-k3": 1_048_576,
@@ -186,6 +167,8 @@ def model_profile_with_context_override(model_id: str) -> dict[str, object] | No
     provider, _, model_name = model_id.partition(":")
     loader = _profile_loader(provider)
     profile = dict(loader(model_name)) if loader is not None else {}
+    if not profile and model_name in {"gpt-6-sol", "gpt-6-luna"} and loader is not None:
+        profile = dict(loader(model_name.replace("gpt-6-", "gpt-5.6-")))
     profile["max_input_tokens"] = context_window
     return profile
 
@@ -251,7 +234,7 @@ def gate_fable_model(
 DEFAULT_MODEL_ID: str = (
     "anthropic:claude-opus-5-5"
     if ENV.ANTHROPIC_API_KEY.optional() and not ENV.OPENAI_API_KEY.optional()
-    else "openai:gpt-5.6-sol"
+    else "openai:gpt-6-sol"
 )
 DEFAULT_MODEL_EFFORT: str = "medium"
 

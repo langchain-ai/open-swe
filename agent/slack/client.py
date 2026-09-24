@@ -17,11 +17,18 @@ from urllib.parse import urlparse
 import httpx2
 from langgraph_sdk.client import LangGraphClient
 from langgraph_sdk.errors import ConflictError
+from pydantic import BaseModel, ConfigDict, ValidationError
 from slack_sdk.errors import SlackApiError
 from slack_sdk.web.async_slack_response import AsyncSlackResponse
 
 from agent.config import ENV, deployment_api_url
-from agent.slack.http import SLACK_REQUEST_ERRORS, SlackClient, slack_error, slack_retry_after
+from agent.slack.http import (
+    SLACK_REQUEST_ERRORS,
+    SlackClient,
+    slack_error,
+    slack_error_details,
+    slack_retry_after,
+)
 from agent.source_context import SlackThreadRef, SourceContext
 from agent.thread_ids import slack_thread_id
 from agent.utils.dashboard_links import dashboard_thread_url
@@ -407,15 +414,18 @@ async def _slack_thread_exists(channel_id: str, thread_ts: str) -> bool:
     return True
 
 
-async def _delete_slack_message(channel_id: str, message_ts: str) -> None:
+async def delete_slack_message(channel_id: str, message_ts: str) -> bool:
+    """Delete one of the bot's own messages; whether Slack confirmed it."""
     try:
         async with SlackClient.bot() as client:
             await client.chat_delete(channel=channel_id, ts=message_ts)
     except SLACK_REQUEST_ERRORS as exc:
         logger.warning(
-            "Orphaned Slack reply could not be removed",
+            "Slack message could not be deleted",
             extra={"slack_error": slack_error(exc), "slack_channel": channel_id},
         )
+        return False
+    return True
 
 
 async def _post_slack_message_with_ts(
@@ -458,7 +468,7 @@ async def _post_slack_message_with_ts(
                 and not _threaded_under(data, reply_ts)
                 and not await _slack_thread_exists(channel_id, reply_ts)
             ):
-                await _delete_slack_message(channel_id, message_ts)
+                await delete_slack_message(channel_id, message_ts)
                 logger.warning(
                     "Slack reply landed outside its thread",
                     extra={"slack_channel": channel_id, "slack_thread_ts": reply_ts},
@@ -469,7 +479,10 @@ async def _post_slack_message_with_ts(
         return None, None
     except SLACK_REQUEST_ERRORS as exc:
         error = slack_error(exc)
-        logger.warning("Slack message request failed", extra={"slack_error": error})
+        logger.warning(
+            "Slack message request failed",
+            extra={"slack_error": error, "slack_error_details": slack_error_details(exc)},
+        )
         return None, error
 
 
@@ -916,7 +929,10 @@ async def update_slack_message(
         return True, None
     except SLACK_REQUEST_ERRORS as exc:
         error = slack_error(exc)
-        logger.warning("Slack message request failed", extra={"slack_error": error})
+        logger.warning(
+            "Slack message request failed",
+            extra={"slack_error": error, "slack_error_details": slack_error_details(exc)},
+        )
         return False, error
 
 
@@ -974,6 +990,34 @@ async def upload_slack_thread_file(
         error = slack_error(exc)
         logger.warning("Slack file upload failed", extra={"slack_error": error})
         return None, error
+
+
+class _SlackFileInfo(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    mimetype: str = ""
+
+
+async def wait_for_slack_file(
+    file_id: str, *, timeout: float = 10.0, interval: float = 0.5
+) -> bool:
+    """Whether Slack finished processing an upload; a block citing it before then is refused."""
+    deadline = time.monotonic() + timeout
+    try:
+        async with SlackClient.bot() as client:
+            while True:
+                response = await client.files_info(file=file_id)
+                if _SlackFileInfo.model_validate(response.get("file") or {}).mimetype:
+                    return True
+                if time.monotonic() >= deadline:
+                    return False
+                await asyncio.sleep(interval)
+    except (*SLACK_REQUEST_ERRORS, ValidationError) as exc:
+        logger.warning(
+            "Slack file status check failed",
+            extra={"slack_error": slack_error(exc), "slack_file_id": file_id},
+        )
+        return False
 
 
 SLACK_FILE_DOWNLOAD_MAX_BYTES = 50 * 1024 * 1024

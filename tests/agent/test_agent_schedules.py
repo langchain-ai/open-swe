@@ -752,7 +752,7 @@ async def test_launch_github_issue_automations_matches_repo_and_sanitizes_prompt
 
     assert results[0]["status"] == "started"
     prompt = ElementTree.fromstring(fake_client.runs.created[0]["input"]["messages"][-1]["content"])
-    content = prompt.findtext("content") or ""
+    content = prompt.text or ""
     assert "Triage the newly opened issue" in content
     untrusted = content.split("<dangerous-external-untrusted-users-comment>\n", 1)[1].split(
         "\n</dangerous-external-untrusted-users-comment>", 1
@@ -1122,7 +1122,7 @@ async def test_launch_scheduled_agent_run_starts_fresh_agent_thread(
     messages = run["input"]["messages"]
     assert ElementTree.fromstring(messages[0]["content"]).attrib["kind"] == "system"
     prompt = ElementTree.fromstring(messages[-1]["content"])
-    assert prompt.findtext("content") == record["prompt"]
+    assert (prompt.text or "").strip() == record["prompt"]
     assert run["durability"] == "sync"
     assert run["multitask_strategy"] == "interrupt"
     assert run["if_not_exists"] == "create"
@@ -1427,7 +1427,7 @@ async def test_launch_scheduled_agent_run_connects_slack_thread(
     run = fake_client.runs.created[0]
     assert run["config"]["configurable"]["slack_thread"] == slack_thread
     prompt = ElementTree.fromstring(run["input"]["messages"][-1]["content"])
-    assert "slack_reply" in (prompt.findtext("content") or "")
+    assert "slack_reply" in (prompt.text or "")
     association = fake_client.store.items[
         (("slack_thread_map", "C0123456789"), "1784302353.900029")
     ]
@@ -1495,7 +1495,7 @@ async def test_launch_conditional_slack_schedule_starts_silently(
         "schedule_name": "Dependency check",
     }
     prompt = ElementTree.fromstring(run["input"]["messages"][-1]["content"])
-    assert "notify_automation_channel" in (prompt.findtext("content") or "")
+    assert "notify_automation_channel" in (prompt.text or "")
     metadata = (await fake_client.threads.get(result["thread_id"]))["metadata"]
     assert "source_context" not in metadata
 

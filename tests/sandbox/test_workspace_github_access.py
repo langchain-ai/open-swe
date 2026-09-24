@@ -5,6 +5,7 @@ import json
 from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
 from fnmatch import fnmatchcase
+from typing import TypedDict
 from unittest.mock import AsyncMock, MagicMock
 
 import httpx
@@ -12,6 +13,7 @@ import httpx2
 import pytest
 
 from agent.github import app, proxy, sandbox_access
+from agent.github.repositories import Repository
 from agent.sandboxes import lifecycle
 from agent.sandboxes.providers.langsmith import LangSmithProvider
 from agent.workspaces.refresh import _create_builder_sandbox
@@ -19,16 +21,46 @@ from agent.workspaces.store import WORKSPACES, Workspace
 from tests.support.github_sdk import mock_github_sdk
 
 
+class ListedRepository(TypedDict):
+    id: int
+    full_name: str
+
+
 @pytest.fixture
-def github(monkeypatch: pytest.MonkeyPatch) -> Iterator[list[dict[str, object]]]:
+def github_requests() -> list[httpx.Request]:
+    return []
+
+
+@pytest.fixture
+def github_repositories() -> list[ListedRepository]:
+    """What the App installation can reach, in its listing's order."""
+    return [
+        {"id": 11, "full_name": "acme/api"},
+        {"id": 22, "full_name": "acme/internal"},
+    ]
+
+
+@pytest.fixture
+def github(
+    monkeypatch: pytest.MonkeyPatch,
+    github_requests: list[httpx.Request],
+    github_repositories: list[ListedRepository],
+) -> Iterator[list[dict[str, object]]]:
     """GitHub issues synthetic tokens encoding their repository permissions."""
     payloads: list[dict[str, object]] = []
     client = httpx2.AsyncClient
 
     def handle(request: httpx.Request) -> httpx.Response:
+        github_requests.append(request)
         if request.url.path.endswith("/access_tokens"):
             body = json.loads(request.content or b"{}")
-            ids = body.get("repository_ids", [11, 22])
+            requested = body.get("repository_ids")
+            # GitHub refuses the whole token once any id is outside the installation.
+            if requested is not None and not set(requested) <= {
+                repo["id"] for repo in github_repositories
+            }:
+                return httpx.Response(422, json={"message": "Validation Failed"})
+            ids = requested if requested is not None else [11, 22]
             return httpx.Response(
                 201,
                 json={
@@ -37,15 +69,7 @@ def github(monkeypatch: pytest.MonkeyPatch) -> Iterator[list[dict[str, object]]]
                 },
             )
         if request.url.path == "/installation/repositories":
-            return httpx.Response(
-                200,
-                json={
-                    "repositories": [
-                        {"id": 11, "full_name": "acme/api"},
-                        {"id": 22, "full_name": "acme/internal"},
-                    ]
-                },
-            )
+            return httpx.Response(200, json={"repositories": github_repositories})
         raise AssertionError(f"Unexpected request: {request.method} {request.url}")
 
     def handle_proxy(request: httpx2.Request) -> httpx2.Response:
@@ -401,3 +425,150 @@ async def test_repository_access_uses_later_installation_pages(
         assert requests[-1] == {"repository_ids": [101]}
     finally:
         app.clear_app_token_cache()
+
+
+def listing_calls(requests: list[httpx.Request]) -> int:
+    return sum(request.url.path == "/installation/repositories" for request in requests)
+
+
+async def stored_repository(full_name: str, github_id: int | None = None) -> None:
+    await Repository(full_name=full_name).save()
+    if github_id is not None:
+        await Repository.record_github_ids(
+            {full_name.lower(): github_id}, checked_at=datetime.now(UTC)
+        )
+
+
+async def stored_github_id(full_name: str) -> int | None:
+    return (await Repository.by_keys([full_name.lower()]))[full_name.lower()].github_id
+
+
+@pytest.mark.usefixtures("registry_db", "github")
+async def test_first_use_lists_the_installation_once_and_stores_the_id(
+    github_requests: list[httpx.Request],
+) -> None:
+    await stored_repository("acme/api")
+
+    first = await sandbox_access.repository_token(["acme/api"])
+    app.clear_app_token_cache()
+    second = await sandbox_access.repository_token(["acme/api"])
+
+    assert first.token == second.token == "repos:11"
+    assert listing_calls(github_requests) == 1
+    assert await stored_github_id("acme/api") == 11
+
+
+@pytest.mark.usefixtures("registry_db", "github")
+async def test_repository_outside_the_installation_is_looked_for_again_after_the_interval(
+    github_requests: list[httpx.Request],
+    github_repositories: list[ListedRepository],
+) -> None:
+    await stored_repository("acme/api")
+    await stored_repository("acme/new")
+    repos = ["acme/api", "acme/new"]
+
+    assert (await sandbox_access.repository_token(repos)).token == "repos:11"
+    app.clear_app_token_cache()
+    assert (await sandbox_access.repository_token(repos)).token == "repos:11"
+    assert listing_calls(github_requests) == 1
+
+    github_repositories.append({"id": 33, "full_name": "acme/new"})
+    stale = datetime.now(UTC) - sandbox_access.RECHECK_MISSING_AFTER - timedelta(seconds=1)
+    await Repository.record_github_ids({"acme/new": None}, checked_at=stale)
+    app.clear_app_token_cache()
+
+    assert (await sandbox_access.repository_token(repos)).token == "repos:11,33"
+    assert listing_calls(github_requests) == 2
+
+
+@pytest.mark.usefixtures("registry_db", "github")
+async def test_refused_stored_id_is_replaced_from_the_listing(
+    github_requests: list[httpx.Request],
+) -> None:
+    await stored_repository("acme/api", github_id=99)
+
+    access = await sandbox_access.repository_token(["acme/api"])
+
+    assert access.token == "repos:11"
+    assert listing_calls(github_requests) == 1
+    assert await stored_github_id("acme/api") == 11
+
+
+@pytest.mark.usefixtures("registry_db", "github")
+async def test_renamed_repository_keeps_its_stored_id(
+    github_repositories: list[ListedRepository],
+) -> None:
+    await stored_repository("acme/api", github_id=11)
+    await stored_repository("acme/internal")
+    github_repositories[:] = [
+        {"id": 11, "full_name": "acme/renamed"},
+        {"id": 22, "full_name": "acme/internal"},
+        {"id": 33, "full_name": "acme/api"},
+    ]
+
+    access = await sandbox_access.repository_token(["acme/api", "acme/internal"])
+
+    assert access.token == "repos:11,22"
+    assert await stored_github_id("acme/api") == 11
+
+
+@pytest.mark.usefixtures("registry_db", "github")
+async def test_refused_ids_fail_closed_after_one_listing(
+    monkeypatch: pytest.MonkeyPatch,
+    github_requests: list[httpx.Request],
+) -> None:
+    await stored_repository("acme/api", github_id=11)
+    monkeypatch.setattr(
+        sandbox_access,
+        "get_github_app_installation_token_with_expiry",
+        AsyncMock(side_effect=[(None, None), ("discovery-token", None), (None, None)]),
+    )
+
+    with pytest.raises(RuntimeError, match="repository token is unavailable"):
+        await sandbox_access.repository_token(["acme/api"])
+
+    assert listing_calls(github_requests) == 1
+
+
+@pytest.mark.usefixtures("registry_db", "github")
+async def test_unreadable_stored_ids_fall_back_to_the_listing(
+    monkeypatch: pytest.MonkeyPatch,
+    github_requests: list[httpx.Request],
+) -> None:
+    await stored_repository("acme/api", github_id=11)
+    monkeypatch.setattr(
+        Repository, "by_keys", AsyncMock(side_effect=OSError("database unavailable"))
+    )
+
+    assert (await sandbox_access.repository_token(["acme/api"])).token == "repos:11"
+    assert listing_calls(github_requests) == 1
+
+
+@pytest.mark.usefixtures("registry_db")
+async def test_reconnect_restricted_to_one_repository_mints_from_stored_ids(
+    monkeypatch: pytest.MonkeyPatch,
+    github: list[dict[str, object]],
+    github_requests: list[httpx.Request],
+) -> None:
+    await stored_repository("acme/api")
+    await stored_repository("acme/internal")
+    monkeypatch.setattr(
+        WORKSPACES,
+        "get",
+        AsyncMock(return_value=Workspace(slug="workspace", repos=["acme/api", "acme/internal"])),
+    )
+    backend = await lifecycle._create_sandbox_with_proxy(
+        workspace_slug="workspace", thread_id="thread"
+    )
+    app.clear_app_token_cache()
+
+    await lifecycle._connect_existing_sandbox(
+        "thread",
+        cached=backend,
+        sandbox_id=backend.id,
+        github_proxy_repositories=["acme/api"],
+        workspace_slug="workspace",
+    )
+
+    assert injected_auth(github) == ["x-access-token:repos:11,22", "x-access-token:repos:11"]
+    assert listing_calls(github_requests) == 1

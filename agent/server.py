@@ -29,6 +29,7 @@ from langgraph_sdk import get_client
 warnings.filterwarnings("ignore", module="langchain_core._api.deprecation")
 
 import asyncio
+from dataclasses import replace
 
 # Suppress Pydantic v1 compatibility warnings from langchain on Python 3.14+
 warnings.filterwarnings("ignore", message=".*Pydantic V1.*", category=UserWarning)
@@ -47,6 +48,7 @@ from langchain.agents.middleware.types import AgentMiddleware, ToolCallRequest
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import HumanMessage, ToolMessage
 from langgraph.types import Command
+from langsmith.sandbox import SandboxRetryableConnectionError
 
 
 class _DisableInheritedMiddleware(AgentMiddleware):
@@ -80,12 +82,9 @@ from agent.desktop import create_desktop_backend, desktop_artifact_routes, is_de
 from agent.desktop_branch import schedule_worktree_branch_rename
 from agent.github.token import resolve_github_token
 from agent.input_messages import (
-    SENDER_CONTEXT_SENDER_ID,
-    SystemIdentity,
-    build_input_messages,
     dynamic_context_hash,
     message_sender_id,
-    system_introduction,
+    person_introduction,
     visible_dynamic_context_hashes,
 )
 from agent.mcp import load_mcp_tools
@@ -131,7 +130,7 @@ from agent.middleware.require_user_reply import (
 )
 from agent.middleware.sandbox_circuit_breaker import post_sandbox_unreachable_notification
 from agent.middleware.transcript import TranscriptMiddleware
-from agent.prompt import construct_sender_context, construct_system_prompt
+from agent.prompt import construct_system_prompt
 from agent.prompts import apply_tool_descriptions, load_prompt
 from agent.run_config import RunConfig
 from agent.runtime.constants import (
@@ -150,6 +149,7 @@ from agent.sandboxes.lifecycle import (
 from agent.sandboxes.paths import resolve_sandbox_work_dir
 from agent.sandboxes.providers.langsmith import service_identity_jwks_url
 from agent.sandboxes.read_only_backend import ReadOnlyBackend
+from agent.sandboxes.retry import SANDBOX_ATTACH_MAX_ELAPSED, retry_transient_sandbox_errors
 from agent.sandboxes.state import (
     SandboxUnreachableError,
     get_or_create_sandbox_backend_proxy,
@@ -165,6 +165,7 @@ from agent.tool_loaders.notion_mcp import load_notion_tools
 from agent.tools import (
     background_execute,
     background_task,
+    configure_repository,
     create_automation,
     create_sandbox_file_download_url,
     delete_automation,
@@ -176,6 +177,7 @@ from agent.tools import (
     fetch_url,
     get_thread,
     http_request,
+    link_pull_request,
     list_automations,
     list_threads,
     list_workspaces,
@@ -183,6 +185,7 @@ from agent.tools import (
     manage_code_channel,
     manage_incident,
     manage_thread,
+    merge_expedited_pr,
     notify_automation_channel,
     open_pull_request,
     output_iframe,
@@ -214,17 +217,26 @@ from agent.tools import (
     update_automation,
     web_search,
 )
-from agent.tools.admin_gate import actor_has_admin_context, actor_is_admin, is_private_admin_surface
+from agent.tools.admin_gate import (
+    actor_has_admin_context,
+    actor_is_admin,
+    is_private_admin_surface,
+    participant_is_admin,
+)
 from agent.tools.manage_review_approval_policy import manage_review_approval_policy
 from agent.tools.save_user_settings import personal_settings_run_allowed
 from agent.tools.submit_review_assessment_feedback import submit_review_assessment_feedback
+from agent.users import User
 from agent.utils import ttl_cache
 from agent.utils.authorship import (
+    OPEN_SWE_BOT_EMAIL,
+    OPEN_SWE_BOT_NAME,
     CollaboratorIdentity,
+    ThreadParticipant,
     resolve_participant_identities,
     resolve_triggering_user_identity,
 )
-from agent.utils.dashboard_links import dashboard_base_url, dashboard_plan_url, dashboard_thread_url
+from agent.utils.dashboard_links import dashboard_base_url, dashboard_plan_url
 from agent.utils.deferred_model import make_deferred_error_model
 from agent.utils.gateway import gateway_env_default
 from agent.utils.json_types import as_json_object, thread_metadata
@@ -350,6 +362,92 @@ async def _thread_participant_identities(thread_id: str) -> list[CollaboratorIde
         return []
 
 
+async def _user_for_login(login: str) -> User | None:
+    """The ``users`` row behind a GitHub login, or ``None`` when nothing answers."""
+    try:
+        return await User.for_login("github", login)
+    except Exception:
+        logger.warning(
+            "Could not resolve a participant; describing them from surface data",
+            extra={"participant_login": login},
+            exc_info=True,
+        )
+        return None
+
+
+async def _thread_participant(
+    identity: CollaboratorIdentity,
+    config: RunnableConfig,
+    *,
+    person_id: str | None = None,
+    timezone: str = "",
+) -> ThreadParticipant:
+    login = identity.github_login or None
+    if login is None:
+        return ThreadParticipant(identity=identity, person_id=person_id or "", timezone=timezone)
+    user, profile, workspace_admin, instructions = await asyncio.gather(
+        _user_for_login(login),
+        load_profile(login),
+        participant_is_admin(login),
+        _resolve_user_custom_instructions(login),
+    )
+    display_name = (user.display_name if user else "") or identity.display_name or login
+    return ThreadParticipant(
+        identity=replace(
+            identity,
+            display_name=display_name,
+            commit_name=display_name,
+            commit_email=identity.login_noreply_email,
+        ),
+        person_id=person_id or (f"user:{user.id}" if user else f"github:{login}"),
+        workspace_admin=workspace_admin,
+        draft_prs=profile_draft_prs(profile),
+        instructions=instructions or "",
+        email=(user.email if user else "") or "",
+        timezone=timezone,
+        linked=user is not None,
+    )
+
+
+async def _thread_participants(
+    thread_id: str,
+    config: RunnableConfig,
+    sender: CollaboratorIdentity | None,
+    *,
+    sender_person_id: str,
+    sender_display_name: str = "",
+    sender_timezone: str = "",
+) -> list[ThreadParticipant]:
+    """Everyone in the thread, each with the settings the agent acts under for them.
+
+    The sender is keyed by the id their message envelope carries, so the turn's
+    envelope resolves to their block even when no person row exists. Without a
+    GitHub account they have no commit identity, and the surface's name for them
+    is all anyone knows.
+    """
+    identities = await _thread_participant_identities(thread_id)
+    resolved_sender = sender or (
+        CollaboratorIdentity(display_name=sender_display_name, commit_name="", commit_email="")
+        if sender_display_name
+        else CollaboratorIdentity(
+            display_name=OPEN_SWE_BOT_NAME,
+            commit_name=OPEN_SWE_BOT_NAME,
+            commit_email=OPEN_SWE_BOT_EMAIL,
+        )
+    )
+    others = [
+        identity for identity in identities if identity.commit_email != resolved_sender.commit_email
+    ]
+    return list(
+        await asyncio.gather(
+            _thread_participant(
+                resolved_sender, config, person_id=sender_person_id, timezone=sender_timezone
+            ),
+            *(_thread_participant(identity, config) for identity in others),
+        )
+    )
+
+
 async def _resolve_user_custom_instructions(login: str | None) -> str | None:
     """Load user-level custom agent instructions for the triggering user."""
     if not login:
@@ -376,8 +474,10 @@ INCIDENT_AUTOMATIC_EXCLUDED_TOOLS: frozenset[str] = frozenset(
         "expose_port",
         "http_request",
         "expedite_pr_approval",
+        "merge_expedited_pr",
         "manage_baby_sit",
         "manage_thread",
+        "link_pull_request",
         "open_pull_request",
         "recreate_sandbox",
         "request_pr_review",
@@ -388,6 +488,7 @@ INCIDENT_AUTOMATIC_EXCLUDED_TOOLS: frozenset[str] = frozenset(
         "slack_start_new_thread",
         "publish_workspace",
         "refresh_workspace_start",
+        "configure_repository",
         "delete_workspace",
         "create_automation",
         "update_automation",
@@ -499,6 +600,7 @@ def _general_purpose_subagent(
         "middleware": cast(
             list[AgentMiddleware[Any, Any, Any]],
             [
+                _DisableInheritedMiddleware(RequireUserReplyMiddleware.__name__),
                 *(_DisableInheritedMiddleware(name) for name in inherited_middleware_exclusions),
                 _SubagentToolGuard(),
                 TranscriptMiddleware(),
@@ -513,13 +615,6 @@ def _general_purpose_subagent(
     return subagent
 
 
-_SENDER_CONTEXT_SYSTEM: SystemIdentity = {
-    "id": SENDER_CONTEXT_SENDER_ID,
-    "display_name": "Sender context",
-    "platform": "open-swe",
-}
-
-
 # Added to an admin thread's tools; see the admin-thread section of the prompt.
 ADMIN_TOOLS = (
     list_automations,
@@ -530,6 +625,7 @@ ADMIN_TOOLS = (
     list_workspaces,
     publish_workspace,
     refresh_workspace_start,
+    configure_repository,
     delete_workspace,
     save_organization_skill,
     delete_organization_skill,
@@ -663,7 +759,7 @@ def _slack_dm_run(cfg: RunConfig) -> bool:
 def _model_routing_mode(thread_id: str) -> RoutingMode:
     digest = hashlib.sha256(thread_id.encode()).hexdigest()
     bucket = int(digest[:8], 16) / float(0xFFFF_FFFF)
-    return "auto" if bucket < _MODEL_ROUTING_SPLIT else "performance"
+    return "auto" if bucket < _MODEL_ROUTING_SPLIT else "fast"
 
 
 def _make_model_or_defer(
@@ -760,54 +856,32 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
         }
 
     @staticmethod
-    def _sender_context_messages(
-        state: PrepareRunState, sender_context: str, *, sender_id: str | None = None
-    ) -> list[Any]:
-        """Sender context as its own message, appended after the run's input.
-
-        Splicing it into the triggering message rewrote history: that message is
-        already cached from the run that received it, so every later run sent a
-        different byte sequence for it. The transcript renders one envelope per
-        message, so this arrives as a collapsed context pill rather than markup
-        inside the user's own text.
-        """
-        if not any(
-            isinstance(candidate, HumanMessage) for candidate in state.get("messages") or []
-        ):
-            return []
-        if sender_id is None:
-            sender_id = next(
-                (
-                    candidate_id
-                    for candidate in reversed(state.get("messages") or [])
-                    if isinstance(candidate, HumanMessage)
-                    and (candidate_id := message_sender_id(candidate.content, kind="human"))
-                    is not None
-                ),
-                None,
-            )
-        if sender_id is None:
-            return []
-        identity: SystemIdentity = {
-            **_SENDER_CONTEXT_SYSTEM,
-            "subject_id": sender_id,
-            "context_hash": hashlib.sha256(sender_context.encode()).hexdigest(),
-        }
-        introduction_hash = dynamic_context_hash(system_introduction(identity)["content"])
-        if introduction_hash in visible_dynamic_context_hashes(state):
-            return []
-        return cast(
-            list[Any],
-            build_input_messages(
-                sender_context,
-                {
-                    "sender_id": _SENDER_CONTEXT_SYSTEM["id"],
-                    "surface": "automation",
-                    "kind": "system",
-                },
-                systems=[identity],
+    def _sender_subject_id(state: PrepareRunState, sender_id: str | None) -> str | None:
+        """The entity the sender context describes: the latest human message's sender."""
+        if sender_id is not None:
+            return sender_id
+        return next(
+            (
+                candidate_id
+                for candidate in reversed(state.get("messages") or [])
+                if isinstance(candidate, HumanMessage)
+                and (candidate_id := message_sender_id(candidate.content, kind="human")) is not None
             ),
+            None,
         )
+
+    @staticmethod
+    def _participants_messages(
+        state: PrepareRunState, participants: Sequence[ThreadParticipant]
+    ) -> list[Any]:
+        """One person block per participant, sent when theirs is not already visible."""
+        visible = visible_dynamic_context_hashes(state)
+        ordered = sorted(
+            participants,
+            key=lambda candidate: (candidate.identity.display_name.lower(), candidate.person_id),
+        )
+        blocks = [person_introduction(p.as_person()) for p in ordered]
+        return [block for block in blocks if dynamic_context_hash(block["content"]) not in visible]
 
     async def _prepare(self, state: PrepareRunState, runtime: Runtime) -> dict[str, Any]:  # noqa: ARG002
         schedule_thread_title_generation(
@@ -827,7 +901,21 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
                     model=self._title_model,
                 )
             async with aphase(self._thread_id, "prepare.await_sandbox"):
-                sandbox_backend = await get_or_create_sandbox_backend_proxy(self._thread_id).ready()
+                try:
+                    sandbox_proxy = get_or_create_sandbox_backend_proxy(self._thread_id)
+                    sandbox_backend = await retry_transient_sandbox_errors(
+                        sandbox_proxy.ready,
+                        description="Sandbox attach",
+                        max_elapsed=SANDBOX_ATTACH_MAX_ELAPSED,
+                    )
+                except (SandboxUnreachableError, SandboxRetryableConnectionError) as exc:
+                    await post_sandbox_unreachable_notification(
+                        self._config or {},
+                        sandbox_id=exc.sandbox_id
+                        if isinstance(exc, SandboxUnreachableError)
+                        else None,
+                    )
+                    raise
             async with aphase(self._thread_id, "prepare.work_dir"):
                 work_dir = await resolve_sandbox_work_dir(sandbox_backend)
             return {
@@ -844,8 +932,13 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
         triggering_user_identity_task = asyncio.create_task(
             resolve_triggering_user_identity(as_json_object(self._config), github_token)
         )
+        sandbox_proxy = get_or_create_sandbox_backend_proxy(self._thread_id)
         sandbox_task = asyncio.create_task(
-            get_or_create_sandbox_backend_proxy(self._thread_id).ready()
+            retry_transient_sandbox_errors(
+                sandbox_proxy.ready,
+                description="Sandbox attach",
+                max_elapsed=SANDBOX_ATTACH_MAX_ELAPSED,
+            )
         )
         try:
             async with aphase(self._thread_id, "prepare.await_sandbox"):
@@ -853,11 +946,12 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
                     triggering_user_identity_task,
                     sandbox_task,
                 )
-        except SandboxUnreachableError as exc:
+        except (SandboxUnreachableError, SandboxRetryableConnectionError) as exc:
             # The run is about to die with no sandbox; make sure the user hears
             # why rather than getting silence.
             await post_sandbox_unreachable_notification(
-                self._config or {}, sandbox_id=exc.sandbox_id
+                self._config or {},
+                sandbox_id=exc.sandbox_id if isinstance(exc, SandboxUnreachableError) else None,
             )
             raise
         del github_token
@@ -865,11 +959,7 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
             work_dir = await resolve_sandbox_work_dir(sandbox_backend)
         async with aphase(self._thread_id, "prepare.workspace"):
             workspace = await load_workspace(workspace_slug(cfg))
-        async with aphase(self._thread_id, "prepare.sender_context"):
-            sender_instructions, participant_identities = await asyncio.gather(
-                _resolve_user_custom_instructions(self._credential_login),
-                _thread_participant_identities(self._thread_id),
-            )
+        async with aphase(self._thread_id, "prepare.participants"):
             recent_context_audience = self._recent_context_audience(cfg)
             recent_context_task = (
                 asyncio.create_task(
@@ -895,25 +985,30 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
                     cast(ModelSelectionState, state)
                 )
                 attribution_model_id, attribution_effort = self._routing_defaults[attribution_route]
-            sender_context = construct_sender_context(
-                triggering_user_identity,
-                user_custom_instructions=sender_instructions,
-                draft_prs=self._draft_prs,
-                thread_url=dashboard_thread_url(self._thread_id),
-                model_id=attribution_model_id,
-                reasoning_effort=attribution_effort,
-                workspace_admin=await _workspace_admin(self._config or {}, self._profile_login),
-                participant_identities=participant_identities,
+            bot_id = (
+                cfg.slack_thread.triggering_bot_id
+                if self._source == "slack" and cfg.slack_thread
+                else ""
             )
+            subject_id = self._sender_subject_id(
+                state, f"system:slack-bot-{bot_id}" if bot_id else None
+            )
+            sender_messages: list[Any] = []
+            if subject_id is not None:
+                participants = await _thread_participants(
+                    self._thread_id,
+                    self._config or {},
+                    triggering_user_identity,
+                    sender_person_id=subject_id,
+                    sender_display_name=(
+                        cfg.slack_thread.triggering_user_name if cfg.slack_thread else ""
+                    ),
+                    sender_timezone=(
+                        cfg.slack_thread.triggering_user_timezone if cfg.slack_thread else ""
+                    ),
+                )
+                sender_messages = self._participants_messages(state, participants)
         recent_thread_context = await recent_context_task if recent_context_task is not None else ""
-        bot_id = (
-            cfg.slack_thread.triggering_bot_id
-            if self._source == "slack" and cfg.slack_thread
-            else ""
-        )
-        sender_messages = self._sender_context_messages(
-            state, sender_context, sender_id=f"system:slack-bot-{bot_id}" if bot_id else None
-        )
         try:
             async with aphase(self._thread_id, "prepare.record_run"):
                 await client.threads.update(
@@ -1054,6 +1149,7 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
     # Workspace/profile settings are accepted stale for a short TTL so graph factories
     # stay off the critical path during worker load and retry storms.
     settings: WorkspaceSettings | None = None
+    routing_defaults: dict[str, tuple[str, str | None]]
     if local_run:
         from agent.dashboard.options import default_model_pair
 
@@ -1074,7 +1170,7 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
                 _cached_profile(None if thread_settings.get("model_id") else profile_login),
             )
             model_defaults = settings.default_model_pair("agent")
-            routing_defaults = settings.agent_routing_models
+            routing_defaults = dict(settings.agent_routing_models)
             title_defaults = settings.default_thread_title_model
             use_gateway = settings.effective_gateway_enabled
             fable_enabled = settings.fable_enabled
@@ -1085,6 +1181,9 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
     linear_issue_number = linear_issue.get("linear_issue_number", "")
 
     (model_id, profile_effort), (subagent_model_id, subagent_effort) = model_defaults
+    for route, stored_route in thread_settings.get("routing_models", {}).items():
+        if route in routing_defaults:
+            routing_defaults[route] = (stored_route["model_id"], stored_route["effort"])
     title_model_id, title_effort = title_defaults
     logger.info("Using workspace default agent model: model=%s effort=%s", model_id, profile_effort)
 
@@ -1173,6 +1272,10 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
         "subagent_model_id": subagent_model_id,
         "subagent_effort": subagent_effort,
         "model_routing_enabled": adaptive_model_routing,
+        "routing_models": {
+            route: {"model_id": routed_model_id, "effort": effort}
+            for route, (routed_model_id, effort) in routing_defaults.items()
+        },
         "repo_instructions": repo_instructions,
     }
     if not local_run and (
@@ -1296,8 +1399,10 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
         manage_thread,
         manage_baby_sit,
         expedite_pr_approval,
+        merge_expedited_pr,
         notify_automation_channel,
         open_pull_request,
+        link_pull_request,
         *(
             (output_iframe, create_sandbox_file_download_url, expose_port)
             if sandbox_file_downloads
@@ -1347,7 +1452,9 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
         or not ENV.SLACK_BOT_TOKEN.get()
         or not (await cached_workspace_settings(settings_workspace)).expedited_review_enabled
     ):
-        static_tools = [tool for tool in static_tools if tool is not expedite_pr_approval]
+        static_tools = [
+            tool for tool in static_tools if tool not in (expedite_pr_approval, merge_expedited_pr)
+        ]
     incident_automatic = incident_session is not None and incident_session.explicit_request is None
     if incident_session is not None:
         static_tools.extend(incident_session.tools)

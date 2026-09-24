@@ -13,6 +13,7 @@ import {
 } from "@/components/ui/alert-dialog"
 
 import { SettingsSection } from "@/components/AppShell"
+import { WorkspaceRepositoriesSection } from "./WorkspaceRepositoriesSection"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import {
@@ -210,6 +211,7 @@ export function WorkspaceSettingsPanel({
         )}
       />
       <DefaultRepoSection scope={scope} repositories={record.data.repos} />
+      <WorkspaceRepositoriesSection slug={slug} canEdit={canEdit} />
       <LLMGatewaySection scope={scope} />
       <FableSection scope={scope} />
       <ReviewSettings scope={scope} canEdit={canEdit} />

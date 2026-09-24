@@ -28,23 +28,21 @@ SLACK_MESSAGES: dict[tuple[str, str], list[dict[str, Any]]] = {}
 EPHEMERALS: list[dict[str, Any]] = []
 CODE_CHANNELS: dict[str, dict[str, Any]] = {}
 _slack_seq = [1]
+_slack_epoch = int(time.time())
 _code_channel_seq = [0]
 
 
 def next_slack_ts() -> str:
+    """A globally-unique Slack timestamp, for a message or a thread.
+
+    Slack event dedupe keys a delivery on ``channel:ts`` in the LangGraph store,
+    and thread ids are derived from the thread's ts — both outlive the process,
+    so a counter restarting at the same value would make a rerun's messages look
+    like redeliveries and its threads carry the previous run's state. Seeding
+    the second from the clock keeps every process in its own range, and reset()
+    leaves the counter alone so back-to-back tests never collide either."""
     _slack_seq[0] += 1
-    return f"1700000000.{_slack_seq[0]:06d}"
-
-
-_thread_seq = [0]
-
-
-def new_thread_ts() -> str:
-    """A globally-unique thread ts so every send maps to a fresh LangGraph thread
-    (the in-mem store persists across restarts, so reused ids would carry state).
-    Not reset by reset(), so back-to-back tests never collide."""
-    _thread_seq[0] += 1
-    return f"{int(time.time())}.{_thread_seq[0]:06d}"
+    return f"{_slack_epoch}.{_slack_seq[0]:06d}"
 
 
 def add_slack_message(
@@ -236,16 +234,46 @@ def _file_patch(remote: Path, base: str, head: str, filename: str) -> str | None
     return "\n".join(lines[start:]) if start is not None else None
 
 
-def branch_exists(owner: str, repo: str, branch: str) -> bool:
-    """Check whether a branch exists in the bare remote (the fake GitHub)."""
+def _branch_tip(owner: str, repo: str, branch: str) -> str:
     remote = _REMOTES.get((owner, repo))
     if remote is None:
-        return False
+        return ""
     try:
-        _git("--git-dir", str(remote), "rev-parse", "--verify", f"refs/heads/{branch}")
-        return True
+        return _git(
+            "--git-dir", str(remote), "rev-parse", "--verify", f"refs/heads/{branch}"
+        ).strip()
     except subprocess.CalledProcessError:
-        return False
+        return ""
+
+
+def branch_exists(owner: str, repo: str, branch: str) -> bool:
+    """Check whether a branch exists in the bare remote (the fake GitHub)."""
+    return bool(_branch_tip(owner, repo, branch))
+
+
+def pulls() -> list[dict[str, Any]]:
+    """Every pull request, with any open one whose branch was pushed moved to the new head.
+
+    GitHub re-points a PR at each push and the new head starts with no checks.
+    """
+    for pull in PULLS:
+        if pull["state"] != "open" or pull["merged"]:
+            continue
+        tip = _branch_tip(pull["owner"], pull["repo"], pull["head"])
+        if not tip or tip == pull["branch_tip"]:
+            continue
+        files = _diff_files(pull["owner"], pull["repo"], pull["base"], pull["head"])
+        pull.update(
+            branch_tip=tip,
+            head_sha=tip,
+            files=files,
+            additions=sum(f["additions"] for f in files),
+            deletions=sum(f["deletions"] for f in files),
+            check_runs=[],
+            statuses=[],
+            updated_at=github_timestamp(),
+        )
+    return PULLS
 
 
 def github_timestamp(offset_seconds: float = 0.0) -> str:
@@ -274,6 +302,7 @@ def create_pull(
         "repo": repo,
         "head": head,
         "head_sha": f"{number:040x}",
+        "branch_tip": _branch_tip(owner, repo, head),
         "base": base,
         "title": title,
         "body": body,
@@ -286,6 +315,7 @@ def create_pull(
         "statuses": [],
         "review_threads": [],
         "reviews": [],
+        "issue_comments": [],
         "review_decision": "REVIEW_REQUIRED",
         "author": author,
         "merge_method": None,
@@ -305,7 +335,7 @@ def find_pull(
     return next(
         (
             pull
-            for pull in PULLS
+            for pull in pulls()
             if pull["number"] == number
             and (owner is None or pull["owner"] == owner)
             and (repo is None or pull["repo"] == repo)
@@ -318,7 +348,7 @@ def find_pull_by_sha(owner: str, repo: str, sha: str) -> dict[str, Any] | None:
     return next(
         (
             pull
-            for pull in PULLS
+            for pull in pulls()
             if pull["owner"] == owner and pull["repo"] == repo and pull["head_sha"] == sha
         ),
         None,
@@ -330,7 +360,7 @@ def pull_node_id(pull: dict[str, Any]) -> str:
 
 
 def mark_pull_ready(node_id: str) -> dict[str, Any] | None:
-    pull = next((pull for pull in PULLS if pull_node_id(pull) == node_id), None)
+    pull = next((pull for pull in pulls() if pull_node_id(pull) == node_id), None)
     if pull is None:
         return None
     pull["draft"] = False

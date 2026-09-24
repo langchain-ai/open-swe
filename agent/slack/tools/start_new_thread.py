@@ -12,14 +12,17 @@ from agent.run_config import RunConfig
 from agent.slack.client import (
     bind_slack_thread_id,
     get_active_slack_thread,
+    get_slack_permalink,
     post_slack_thread_reply_with_ts,
     post_slack_top_level_message_with_ts,
     store_slack_run_mapping,
 )
 from agent.source_context import SourceContext
 from agent.utils.dashboard_links import dashboard_thread_url
+from agent.utils.json_types import thread_metadata
 from agent.utils.langsmith import get_langsmith_trace_url
 from agent.utils.thread_ops import langgraph_client
+from agent.utils.thread_participants import PARTICIPANT_LOGINS_KEY, merge_participants
 from agent.webhooks.common import is_repo_allowed
 
 _TITLE_MAX_CHARS = 160
@@ -227,6 +230,33 @@ async def slack_start_new_thread(
                 ),
             }
 
+    if not cfg.thread_id:
+        return {"success": False, "error": "Missing parent thread_id"}
+    parent_metadata = thread_metadata(await client.threads.get(cfg.thread_id))
+    visibility = parent_metadata.get("visibility", "public")
+    owner_type = parent_metadata.get("owner_type", "user")
+    if visibility not in ("public", "private") or owner_type not in ("user", "system"):
+        return {"success": False, "error": "Invalid parent thread ownership"}
+    owner_login = (cfg.github_login or "").strip().lower()
+    if owner_type == "system":
+        if visibility != "public":
+            return {"success": False, "error": "System threads cannot be private"}
+        if owner_login and not cfg.background_task_completion:
+            owner_type = "user"
+    else:
+        if cfg.background_task_completion or not owner_login:
+            return {
+                "success": False,
+                "error": "A direct authenticated user run is required to start a breakout thread",
+            }
+        if visibility == "private":
+            parent_owner = parent_metadata.get("owner_login")
+            if not isinstance(parent_owner, str) or parent_owner.strip().lower() != owner_login:
+                return {
+                    "success": False,
+                    "error": "Only the private thread owner can start a breakout",
+                }
+
     clean_channel_id = channel_id.strip()
     message_ts, slack_error = await post_slack_top_level_message_with_ts(
         clean_channel_id,
@@ -269,19 +299,21 @@ async def slack_start_new_thread(
     thread_id = str(uuid.uuid4())
     await bind_slack_thread_id(client, clean_channel_id, message_ts, thread_id)
     new_slack_thread = _new_slack_thread_context(
-        current_slack_thread,
+        cfg.slack_thread.dump(),
         channel_id=clean_channel_id,
         thread_ts=message_ts,
     )
     breakout_from = {
         "channel_id": clean_channel_id,
         "thread_ts": current_thread_ts or "",
-        "message_ts": current_slack_thread.get("triggering_event_ts", ""),
+        "message_ts": cfg.slack_thread.triggering_event_ts,
     }
 
     metadata: dict[str, Any] = {
         "source": "slack",
         "title": clean_title[:80],
+        "visibility": visibility,
+        "owner_type": owner_type,
         "source_context": SourceContext.parse(
             {"slack_thread": new_slack_thread, "breakout_from": breakout_from}
         ).dump(),
@@ -294,6 +326,9 @@ async def slack_start_new_thread(
                 "repo_name": repo["name"],
             }
         )
+    if owner_type == "user":
+        metadata["owner_login"] = owner_login
+        metadata[PARTICIPANT_LOGINS_KEY] = merge_participants(None, owner_login)
     if cfg.github_login:
         metadata["github_login"] = cfg.github_login
     if cfg.user_email:
@@ -331,9 +366,12 @@ async def slack_start_new_thread(
             triggering_user_id=new_slack_thread.get("triggering_user_id") or None,
         )
 
+    slack_url = await get_slack_permalink(clean_channel_id, message_ts)
     return {
         "success": True,
         "thread_id": thread_id,
         "thread_ts": message_ts,
         "dashboard_url": dashboard_thread_url(thread_id),
+        "slack_url": slack_url
+        or f"https://slack.com/archives/{clean_channel_id}/p{message_ts.replace('.', '')}",
     }

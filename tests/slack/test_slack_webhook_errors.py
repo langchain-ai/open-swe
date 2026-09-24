@@ -195,6 +195,7 @@ async def test_dispatch_or_queue_enqueues_untagged_follow_up(
         blocks,
         {},
         explicitly_tagged=False,
+        trigger_ts="1700000000.000100",
     )
 
     assert run == {"run_id": "run-1"}
@@ -203,6 +204,7 @@ async def test_dispatch_or_queue_enqueues_untagged_follow_up(
     assert await_args.args[1] is None
     assert await_args.kwargs["input"] == {"messages": blocks}
     assert await_args.kwargs["multitask_strategy"] == "enqueue"
+    assert await_args.kwargs["metadata"]["slack_trigger_ts"] == "1700000000.000100"
 
 
 @pytest.mark.asyncio
@@ -222,9 +224,6 @@ async def test_message_update_dispatches_a_new_message_without_old_context(
         slack_webhook.common,
         "resolve_slack_links_in_context",
         AsyncMock(return_value=("", [])),
-    )
-    monkeypatch.setattr(
-        slack_webhook, "_format_slack_run_links_section", AsyncMock(return_value="")
     )
     monkeypatch.setattr(slack_webhook.User, "login_for_slack", AsyncMock(return_value="alice"))
     monkeypatch.setattr(
@@ -274,12 +273,6 @@ async def test_message_update_dispatches_a_new_message_without_old_context(
     assert store_args is not None
     assert store_args.kwargs["message_ts"] == "1.0"
     assert store_args.kwargs["agent_thread_id"] == "t1"
-
-
-def test_tagged_prompt_omits_untagged_wording() -> None:
-    preamble = slack_webhook._slack_prompt_preamble()
-
-    assert "NOT tagged" not in preamble
 
 
 @pytest.mark.asyncio

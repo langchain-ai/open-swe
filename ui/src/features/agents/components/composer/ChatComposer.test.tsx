@@ -33,6 +33,12 @@ const stream = {
 vi.mock("@langchain/react", () => ({
   useStream: () => stream,
   useChannelEffect: () => {},
+  useSubmissionQueue: () => ({
+    entries: [],
+    size: 0,
+    cancel: vi.fn(),
+    clear: vi.fn(),
+  }),
 }))
 
 vi.mock("@/lib/langgraph-client", () => ({
@@ -146,14 +152,14 @@ describe("ChatComposer stop button", () => {
     renderComposer(true)
 
     expect(screen.getByRole("button", { name: "Stop run" })).toBeTruthy()
-    expect(screen.queryByRole("button", { name: "Steer agent" })).toBeNull()
+    expect(screen.queryByRole("button", { name: "Queue message" })).toBeNull()
   })
 
   it("shows the send button when no run is live", () => {
     renderComposer(false)
 
     expect(screen.getByRole("button", { name: "Send message" })).toBeTruthy()
-    expect(screen.queryByRole("button", { name: "Steer agent" })).toBeNull()
+    expect(screen.queryByRole("button", { name: "Queue message" })).toBeNull()
     expect(screen.queryByRole("button", { name: "Stop run" })).toBeNull()
   })
 
@@ -182,7 +188,7 @@ describe("ChatComposer stop button", () => {
       />
     )
 
-    expect(screen.getByRole("button", { name: "Steer agent" })).toBeTruthy()
+    expect(screen.getByRole("button", { name: "Queue message" })).toBeTruthy()
     fireEvent.keyDown(document.body, { key: "Escape" })
 
     expect(onStop).toHaveBeenCalledOnce()
