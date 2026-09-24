@@ -111,6 +111,7 @@ def _patch(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(webhook_common, "verify_slack_signature", lambda **_kwargs: True)
     monkeypatch.setattr(webhook_common, "resolve_slack_thread_id", AsyncMock(return_value="t1"))
     monkeypatch.setattr(webhook_common, "lookup_slack_thread_id", AsyncMock(return_value="t1"))
+    monkeypatch.setattr(webhook_common, "fetch_slack_thread_messages", AsyncMock(return_value=[]))
     monkeypatch.setattr(
         webhook_common,
         "lookup_slack_run_mapping",
@@ -146,14 +147,60 @@ async def test_tagged_thread_message_is_accepted(text: str) -> None:
     assert len(background_tasks.tasks) == 1
 
 
-@pytest.mark.parametrize("subtype", ["", "file_share"])
-async def test_untagged_thread_message_is_ignored(subtype: str) -> None:
-    payload = _message_payload("the alignment is still wrong", f"Ev-{subtype}")
-    payload["event"]["subtype"] = subtype
+async def test_untagged_reply_in_mapped_agent_thread_is_accepted(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        webhook_common,
+        "fetch_slack_thread_messages",
+        AsyncMock(return_value=[{"ts": "1786573350.000000", "user": "BOT", "text": "agent reply"}]),
+    )
     background_tasks = _FakeBackgroundTasks()
 
     response = await slack_routes.slack_webhook(
-        cast(Request, _FakeRequest(payload)), cast(BackgroundTasks, background_tasks)
+        cast(
+            Request, _FakeRequest(_message_payload("the alignment is still wrong", "Ev-follow-up"))
+        ),
+        cast(BackgroundTasks, background_tasks),
+    )
+
+    assert response["status"] == "accepted"
+    assert len(background_tasks.tasks) == 1
+
+
+async def test_untagged_reply_in_unmapped_thread_is_ignored() -> None:
+    webhook_common.lookup_slack_thread_id.return_value = None
+    background_tasks = _FakeBackgroundTasks()
+
+    response = await slack_routes.slack_webhook(
+        cast(
+            Request, _FakeRequest(_message_payload("the alignment is still wrong", "Ev-unmapped"))
+        ),
+        cast(BackgroundTasks, background_tasks),
+    )
+
+    assert response == {"status": "ignored", "reason": "Not an app mention or DM"}
+    assert background_tasks.tasks == []
+
+
+async def test_untagged_reply_after_another_human_is_ignored(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        webhook_common,
+        "fetch_slack_thread_messages",
+        AsyncMock(
+            return_value=[
+                {"ts": "1786573350.000000", "user": "BOT", "text": "agent reply"},
+                {"ts": "1786573355.000000", "user": "U2", "text": "human reply"},
+            ]
+        ),
+    )
+    background_tasks = _FakeBackgroundTasks()
+
+    response = await slack_routes.slack_webhook(
+        cast(Request, _FakeRequest(_message_payload("the alignment is still wrong", "Ev-handoff"))),
+        cast(BackgroundTasks, background_tasks),
     )
 
     assert response == {"status": "ignored", "reason": "Not an app mention or DM"}
