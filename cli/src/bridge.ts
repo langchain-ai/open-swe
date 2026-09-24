@@ -35,7 +35,8 @@ export class BridgeGoneError extends Error {
 export interface OpenBridgeOptions {
   rootPath: string
   label: string | null
-  rememberedBridgeId: string | null
+  /** The bridge a resumed thread is bound to; a new thread always gets its own. */
+  bridgeId: string | null
 }
 
 function sleep(ms: number): Promise<void> {
@@ -50,6 +51,7 @@ export class Bridge {
   private running = false
   private heartbeatTimer: ReturnType<typeof setInterval> | null = null
   private readonly inFlight = new Set<Promise<void>>()
+  private readonly held = new Set<string>()
   private readonly pollControllers = new Set<AbortController>()
   private onFatal: ((error: Error) => void) | null = null
   private readonly executor: LocalExecutor
@@ -76,19 +78,11 @@ export class Bridge {
       hostname: hostname(),
       label: options.label,
     }
-    if (options.rememberedBridgeId !== null) {
-      try {
-        const session = await api.createBridge({
-          ...input,
-          bridgeId: options.rememberedBridgeId,
-        })
-        return new Bridge(api, session, input, true)
-      } catch (cause) {
-        if (!(cause instanceof ApiError) || cause.status !== 404) throw cause
-      }
-    }
-    const session = await api.createBridge({ ...input, bridgeId: null })
-    return new Bridge(api, session, input, false)
+    const session = await api.createBridge({
+      ...input,
+      bridgeId: options.bridgeId,
+    })
+    return new Bridge(api, session, input, options.bridgeId !== null)
   }
 
   start(onFatal: (error: Error) => void): void {
@@ -178,6 +172,7 @@ export class Bridge {
         const requests = await this.api.pollRequests(this.session.bridgeId, {
           wait: POLL_WAIT_SECONDS,
           limit: POLL_LIMIT,
+          held: [...this.held],
           signal: controller.signal,
         })
         backoff = MIN_BACKOFF_MS
@@ -222,6 +217,9 @@ export class Bridge {
   }
 
   private async serve(request: BridgeRequest): Promise<void> {
+    // Held until the server has the answer. A result that could not be
+    // delivered stays held, so the command is never run a second time.
+    this.held.add(request.requestId)
     let reply: DispatchOutcome
     try {
       reply = await this.executor.dispatch(request.method, request.params)
@@ -231,13 +229,17 @@ export class Bridge {
     for (let attempt = 1; attempt <= REPLY_ATTEMPTS; attempt += 1) {
       try {
         await this.api.respond(this.session.bridgeId, request.requestId, reply)
+        this.held.delete(request.requestId)
         return
       } catch (cause) {
         if (cause instanceof ApiError && cause.status === 401) {
           this.fail(new CredentialRejectedError(this.api.credential.rejected))
           return
         }
-        if (cause instanceof ApiError && cause.status === 404) return
+        if (cause instanceof ApiError && cause.status === 404) {
+          this.held.delete(request.requestId)
+          return
+        }
         if (attempt === REPLY_ATTEMPTS || !this.running) {
           process.stderr.write(
             `oswe: dropped the result for ${request.method}: ${errorMessage(cause)}\n`

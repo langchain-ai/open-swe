@@ -8,7 +8,7 @@ import {
   LocalExecutor,
   OUTPUT_KEEP_BYTES,
   OUTPUT_LIMIT_BYTES,
-  truncateOutput,
+  OutputWindow,
 } from "../src/executor.ts"
 
 async function workspace(): Promise<string> {
@@ -25,6 +25,7 @@ describe("commandEnvironment", () => {
       SOME_SECRET: "secret",
       GITHUB_TOKEN: "gho_x",
       GH_TOKEN: "gho_y",
+      OPEN_SWE_SESSION: "jwt",
       PAGER: "less",
     })
     expect(env["PATH"]).toBe("/usr/bin")
@@ -32,6 +33,7 @@ describe("commandEnvironment", () => {
     expect(env["SLACK_BOT_TOKEN"]).toBeUndefined()
     expect(env["DB_PASSWORD"]).toBeUndefined()
     expect(env["SOME_SECRET"]).toBeUndefined()
+    expect(env["OPEN_SWE_SESSION"]).toBeUndefined()
     expect(env["GITHUB_TOKEN"]).toBe("gho_x")
     expect(env["GH_TOKEN"]).toBe("gho_y")
     expect(env["PAGER"]).toBe("cat")
@@ -41,18 +43,29 @@ describe("commandEnvironment", () => {
   })
 })
 
-describe("truncateOutput", () => {
-  test("keeps short output verbatim", () => {
-    const bytes = new TextEncoder().encode("hello")
-    expect(truncateOutput(bytes)).toEqual({ output: "hello", truncated: false })
+function captured(chunks: readonly Uint8Array[]): OutputWindow {
+  const output = new OutputWindow()
+  for (const chunk of chunks) output.push(chunk)
+  return output
+}
+
+describe("OutputWindow", () => {
+  test("keeps short output verbatim, across chunks", () => {
+    const encoder = new TextEncoder()
+    expect(
+      captured([encoder.encode("hel"), encoder.encode("lo")]).finish()
+    ).toEqual({ output: "hello", truncated: false })
   })
 
-  test("keeps the head and tail of oversized output", () => {
+  test("keeps the head and tail of oversized output streamed in small chunks", () => {
     const size = OUTPUT_LIMIT_BYTES + 1024
     const bytes = new Uint8Array(size).fill(0x61)
     bytes[0] = 0x48
     bytes[size - 1] = 0x5a
-    const { output, truncated } = truncateOutput(bytes)
+    const chunks: Uint8Array[] = []
+    for (let offset = 0; offset < size; offset += 4096)
+      chunks.push(bytes.subarray(offset, offset + 4096))
+    const { output, truncated } = captured(chunks).finish()
     expect(truncated).toBe(true)
     expect(output.startsWith("H")).toBe(true)
     expect(output.endsWith("Z")).toBe(true)

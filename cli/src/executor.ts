@@ -19,7 +19,7 @@ const KILL_GRACE_MS = 2_000
 const TIMEOUT_EXIT_CODE = 124
 
 /** Keys whose values never reach the agent's shell, by suffix. */
-const SECRET_SUFFIX = /(_API_KEY|_TOKEN|_SECRET|PASSWORD)$/i
+const SECRET_SUFFIX = /(_API_KEY|_TOKEN|_SECRET|_SESSION|PASSWORD)$/i
 /** …except the ones `gh` and `git` need to talk to GitHub. */
 const KEPT_SECRETS = new Set(["GITHUB_TOKEN", "GH_TOKEN"])
 
@@ -61,22 +61,51 @@ export function commandEnvironment(
   return env
 }
 
-export function truncateOutput(bytes: Uint8Array): {
-  output: string
-  truncated: boolean
-} {
-  const decoder = new TextDecoder()
-  if (bytes.byteLength <= OUTPUT_LIMIT_BYTES) {
-    return { output: decoder.decode(bytes), truncated: false }
+export class OutputWindow {
+  private readonly head: Uint8Array[] = []
+  private headBytes = 0
+  private readonly tail: Uint8Array[] = []
+  private tailBytes = 0
+  private total = 0
+
+  push(chunk: Uint8Array): void {
+    this.total += chunk.byteLength
+    let rest = chunk
+    if (this.headBytes < OUTPUT_KEEP_BYTES) {
+      const take = Math.min(OUTPUT_KEEP_BYTES - this.headBytes, rest.byteLength)
+      this.head.push(rest.subarray(0, take))
+      this.headBytes += take
+      rest = rest.subarray(take)
+    }
+    if (rest.byteLength === 0) return
+    this.tail.push(rest)
+    this.tailBytes += rest.byteLength
+    for (
+      let first = this.tail[0];
+      first !== undefined &&
+      this.tailBytes - first.byteLength >= OUTPUT_KEEP_BYTES;
+      first = this.tail[0]
+    ) {
+      this.tail.shift()
+      this.tailBytes -= first.byteLength
+    }
   }
-  const omitted = bytes.byteLength - OUTPUT_KEEP_BYTES * 2
-  const head = decoder.decode(bytes.subarray(0, OUTPUT_KEEP_BYTES))
-  const tail = decoder.decode(
-    bytes.subarray(bytes.byteLength - OUTPUT_KEEP_BYTES)
-  )
-  return {
-    output: `${head}\n[oswe: omitted ${omitted} bytes of output]\n${tail}`,
-    truncated: true,
+
+  finish(): { output: string; truncated: boolean } {
+    const decoder = new TextDecoder()
+    const head = concatChunks(this.head)
+    const tail = concatChunks(this.tail)
+    if (this.total <= OUTPUT_LIMIT_BYTES) {
+      return {
+        output: decoder.decode(concatChunks([head, tail])),
+        truncated: false,
+      }
+    }
+    const omitted = this.total - OUTPUT_KEEP_BYTES * 2
+    return {
+      output: `${decoder.decode(head)}\n[oswe: omitted ${omitted} bytes of output]\n${decoder.decode(tail.subarray(tail.byteLength - OUTPUT_KEEP_BYTES))}`,
+      truncated: true,
+    }
   }
 }
 
@@ -180,7 +209,7 @@ export class LocalExecutor {
       }
     }
 
-    const chunks: Uint8Array[] = []
+    const captured = new OutputWindow()
     let timedOut = false
     let escalation: ReturnType<typeof setTimeout> | null = null
     const deadline = setTimeout(() => {
@@ -188,8 +217,8 @@ export class LocalExecutor {
       signalGroup("SIGTERM")
       escalation = setTimeout(() => signalGroup("SIGKILL"), KILL_GRACE_MS)
     }, seconds * 1000)
-    proc.stdout.on("data", (chunk: Buffer) => chunks.push(chunk))
-    proc.stderr.on("data", (chunk: Buffer) => chunks.push(chunk))
+    proc.stdout.on("data", (chunk: Buffer) => captured.push(chunk))
+    proc.stderr.on("data", (chunk: Buffer) => captured.push(chunk))
 
     let exitCode: number | null = null
     try {
@@ -202,7 +231,7 @@ export class LocalExecutor {
       if (escalation !== null) clearTimeout(escalation)
     }
 
-    const { output, truncated } = truncateOutput(concatChunks(chunks))
+    const { output, truncated } = captured.finish()
     if (timedOut) {
       return {
         output: `${output}\n[oswe: command timed out after ${seconds}s]`,

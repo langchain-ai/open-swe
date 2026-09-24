@@ -39,11 +39,14 @@ export interface RunConfig {
   credential: Credential
 }
 
-/** Bridges this machine has already created, so a directory reopens its own. */
-export interface BridgeMemory {
-  roots: Record<string, string>
-  threads: Record<string, string>
+/** The bridge a thread this machine started is bound to, and the directory it serves. */
+export interface ThreadBridge {
+  bridgeId: string
+  root: string
 }
+
+/** Threads this machine started, by id, so `--thread` can reopen their bridge. */
+export type BridgeMemory = Record<string, ThreadBridge>
 
 async function readFileOrNull(path: string): Promise<string | null> {
   try {
@@ -61,15 +64,6 @@ async function writePrivate(path: string, value: unknown): Promise<void> {
     mode: FILE_MODE,
   })
   await chmod(path, FILE_MODE)
-}
-
-function stringMap(value: unknown): Record<string, string> {
-  if (!isRecord(value)) return {}
-  const out: Record<string, string> = {}
-  for (const [key, entry] of Object.entries(value)) {
-    if (typeof entry === "string") out[key] = entry
-  }
-  return out
 }
 
 /** Where the desktop app keeps the backend URL it was pointed at. */
@@ -156,24 +150,24 @@ export async function clearConfig(): Promise<boolean> {
 export async function readBridgeMemory(): Promise<BridgeMemory> {
   const text = await readFileOrNull(bridgesFile())
   const parsed = text === null ? null : parseJson(text)
-  if (!isRecord(parsed)) return { roots: {}, threads: {} }
-  return {
-    roots: stringMap(parsed["roots"]),
-    threads: stringMap(parsed["threads"]),
+  const threads = isRecord(parsed) ? parsed["threads"] : null
+  const memory: BridgeMemory = {}
+  if (!isRecord(threads)) return memory
+  for (const [threadId, entry] of Object.entries(threads)) {
+    const record = isRecord(entry) ? entry : null
+    const bridgeId = stringAt(record, "bridgeId")
+    const root = stringAt(record, "root")
+    if (bridgeId !== null && root !== null)
+      memory[threadId] = { bridgeId, root }
   }
+  return memory
 }
 
-export async function writeBridgeMemory(memory: BridgeMemory): Promise<void> {
-  await writePrivate(bridgesFile(), memory)
-}
-
-export async function rememberBridge(options: {
-  root: string
-  bridgeId: string
-  threadId: string | null
-}): Promise<void> {
+export async function rememberThreadBridge(
+  threadId: string,
+  bridge: ThreadBridge
+): Promise<void> {
   const memory = await readBridgeMemory()
-  memory.roots[options.root] = options.bridgeId
-  if (options.threadId) memory.threads[options.threadId] = options.bridgeId
-  await writeBridgeMemory(memory)
+  memory[threadId] = bridge
+  await writePrivate(bridgesFile(), { threads: memory })
 }

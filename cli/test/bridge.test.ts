@@ -65,7 +65,7 @@ function fakeBackend(
           alive_threshold_seconds: 7200,
         })
       }
-      if (request.method === "GET" && path.endsWith("/requests")) {
+      if (request.method === "POST" && path.endsWith("/requests/claim")) {
         const requests = pending.splice(0, pending.length)
         return Response.json({ requests })
       }
@@ -115,7 +115,7 @@ describe("Bridge", () => {
     const bridge = await Bridge.open(fake.api, {
       rootPath: root,
       label: "repo",
-      rememberedBridgeId: null,
+      bridgeId: null,
     })
     bridge.start(() => {})
     try {
@@ -143,19 +143,18 @@ describe("Bridge", () => {
     expect(fake.deleted()).toEqual(["/bridges/bridge-1"])
   })
 
-  test("creates a fresh bridge when a remembered id is gone", async () => {
+  test("never swaps a resumed thread's missing bridge for a new one", async () => {
     const fake = fakeBackend([], { reopen404: true })
-    const bridge = await Bridge.open(fake.api, {
-      rootPath: await mkdtemp(join(tmpdir(), "open-swe-bridge-")),
-      label: null,
-      rememberedBridgeId: "stale-bridge",
-    })
     try {
-      expect(bridge.reopened).toBe(false)
-      expect(bridge.session.bridgeId).toBe("bridge-1")
+      await expect(
+        Bridge.open(fake.api, {
+          rootPath: await mkdtemp(join(tmpdir(), "open-swe-bridge-")),
+          label: null,
+          bridgeId: "stale-bridge",
+        })
+      ).rejects.toMatchObject({ status: 404 })
       expect(fake.opened().map((body) => body["bridge_id"])).toEqual([
         "stale-bridge",
-        null,
       ])
     } finally {
       await fake.stop()
@@ -169,7 +168,7 @@ describe("Bridge", () => {
     const bridge = await Bridge.open(fake.api, {
       rootPath: await mkdtemp(join(tmpdir(), "open-swe-bridge-")),
       label: null,
-      rememberedBridgeId: null,
+      bridgeId: null,
     })
     bridge.start(() => {})
     try {

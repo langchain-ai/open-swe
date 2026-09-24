@@ -9,9 +9,9 @@ import asyncio
 import logging
 from typing import Self
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException
 from fastapi.responses import Response
-from pydantic import BaseModel, model_validator
+from pydantic import BaseModel, Field, model_validator
 
 from agent.bridge import listener
 from agent.bridge.constants import (
@@ -24,13 +24,16 @@ from agent.bridge.constants import (
     MAX_POLL_WAIT_SECONDS,
 )
 from agent.bridge.protocol import JsonObject
-from agent.bridge.store import BridgeStore, ClaimedRequest
+from agent.bridge.store import BridgeInUseError, BridgeStore, ClaimedRequest
 from agent.database import postgres
 from agent.threads.principals import PrincipalDep
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["sandbox-bridge"])
+
+# A CLI runs a few commands at once; a list this long is not one it could hold.
+MAX_HELD_REQUESTS = 1024
 
 
 class BridgeOpenBody(BaseModel):
@@ -44,6 +47,14 @@ class BridgeOpenResponse(BaseModel):
     bridge_id: str
     heartbeat_interval_seconds: int
     alive_threshold_seconds: int
+
+
+class BridgeClaimBody(BaseModel):
+    """One long poll: how long to wait, how many to take, and what the CLI is already running."""
+
+    wait: int = Field(DEFAULT_POLL_WAIT_SECONDS, ge=0, le=MAX_POLL_WAIT_SECONDS)
+    limit: int = Field(DEFAULT_CLAIM_LIMIT, ge=1, le=MAX_CLAIM_LIMIT)
+    held: list[str] = Field(default_factory=list, max_length=MAX_HELD_REQUESTS)
 
 
 class BridgeRequestsResponse(BaseModel):
@@ -84,13 +95,16 @@ async def api_open_bridge(
     principal: PrincipalDep,
 ) -> BridgeOpenResponse:
     _require_postgres()
-    bridge = await BridgeStore.register(
-        owner_id=principal.sender_id,
-        hostname=body.hostname,
-        root_path=body.root_path,
-        label=body.label,
-        bridge_id=body.bridge_id,
-    )
+    try:
+        bridge = await BridgeStore.register(
+            owner_id=principal.sender_id,
+            hostname=body.hostname,
+            root_path=body.root_path,
+            label=body.label,
+            bridge_id=body.bridge_id,
+        )
+    except BridgeInUseError as exc:
+        raise HTTPException(409, "sandbox bridge is in use by another CLI process") from exc
     if bridge is None:
         raise HTTPException(404, "sandbox bridge not found")
     logger.info(
@@ -118,15 +132,16 @@ async def api_bridge_heartbeat(
     return Response(status_code=204)
 
 
-@router.get("/bridges/{bridge_id}/requests")
+@router.post("/bridges/{bridge_id}/requests/claim")
 async def api_claim_bridge_requests(
     bridge_id: str,
+    body: BridgeClaimBody,
     principal: PrincipalDep,
-    wait: int = Query(DEFAULT_POLL_WAIT_SECONDS, ge=0, le=MAX_POLL_WAIT_SECONDS),
-    limit: int = Query(DEFAULT_CLAIM_LIMIT, ge=1, le=MAX_CLAIM_LIMIT),
 ) -> BridgeRequestsResponse:
     _require_postgres()
     await _touch(bridge_id, principal.sender_id)
+    await BridgeStore.release_unheld(bridge_id, held=body.held)
+    wait, limit = body.wait, body.limit
     # Subscribing before the first claim is what closes the window in which a
     # request enqueued between the claim and the wait would go unnoticed.
     async with listener.subscribe(bridge_id) as events:

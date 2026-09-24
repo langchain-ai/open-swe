@@ -91,8 +91,9 @@ oswe run "add retries to the upload path"
 What happens:
 
 1. A sandbox bridge is registered for the current directory and starts serving
-   the remote agent's requests. Bridge ids are remembered per directory in
-   `~/.open-swe/bridges.json` and reused on the next run.
+   the remote agent's requests. Every run gets its own bridge, so two runs in
+   one directory never serve each other's requests. The thread's bridge is
+   remembered in `~/.open-swe/bridges.json` for `--thread`.
 2. A thread is created on the deployment, with `origin` repo detected from
    `git remote get-url origin`, and its dashboard URL is printed to stderr.
 3. The agent works. Nothing it says or runs is printed; follow it on the
@@ -121,7 +122,7 @@ Options:
 
 | Flag | Meaning |
 | --- | --- |
-| `--thread <id>` | Continue an existing thread instead of creating one. Must be a thread this directory's bridge is bound to. |
+| `--thread <id>` | Continue a thread oswe started on this machine, from the directory it serves. Refused while another oswe process is serving it. |
 | `--model <id>` | Agent model id. The backend only honors it together with `--effort`. |
 | `--effort <name>` | Reasoning effort for `--model`. |
 | `--visibility private` | Start a private thread instead of a workspace one. People only. |

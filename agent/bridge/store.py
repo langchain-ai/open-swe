@@ -65,6 +65,14 @@ class BridgeUnavailableError(RuntimeError):
         super().__init__(f"Sandbox bridge {bridge_id} is unavailable: {cause}")
 
 
+class BridgeInUseError(Exception):
+    """A reopen of a bridge another CLI process is still serving."""
+
+    def __init__(self, bridge_id: str) -> None:
+        self.bridge_id = bridge_id
+        super().__init__(f"Sandbox bridge {bridge_id} is in use by another CLI process")
+
+
 class Bridge(BaseModel):
     """One CLI's registration, as the ``sandbox_bridge`` row holds it."""
 
@@ -172,6 +180,9 @@ class BridgeStore:
         A reopen is how a restarted CLI picks its thread back up, so it also
         re-queues whatever the previous connection claimed and never answered:
         those requests still have a waiter on the graph side.
+
+        A bridge another process is still heartbeating is refused rather than
+        shared: two CLIs serving one queue would run each other's requests.
         """
         if bridge_id is None:
             async with postgres.transaction() as conn:
@@ -204,6 +215,11 @@ class BridgeStore:
                     last_heartbeat_at = clock_timestamp(),
                     closed_at = NULL
                 WHERE bridge_id = :bridge_id AND owner_id = :owner_id
+                  AND (
+                    closed_at IS NOT NULL
+                    OR last_heartbeat_at
+                      < clock_timestamp() - make_interval(secs => :threshold)
+                  )
                 RETURNING {_BRIDGE_COLUMNS}
                 """,
                 {
@@ -212,9 +228,12 @@ class BridgeStore:
                     "hostname": hostname,
                     "root_path": root_path,
                     "label": label,
+                    "threshold": ALIVE_THRESHOLD_SECONDS,
                 },
             )
             if not rows:
+                if await cls.load(bridge_id, owner_id=owner_id) is not None:
+                    raise BridgeInUseError(bridge_id)
                 return None
             requeued = await cls._rows(
                 conn,
@@ -282,6 +301,35 @@ class BridgeStore:
                 {"bridge_id": bridge_id, "owner_id": owner_id},
             )
         return result.rowcount > 0
+
+    @classmethod
+    async def release_unheld(cls, bridge_id: str, *, held: Sequence[str]) -> int:
+        """Return to the queue whatever this bridge claimed that its CLI does not hold.
+
+        A claim commits before its poll response reaches the CLI, so a response
+        lost in transit would otherwise leave the request claimed with a waiter
+        on the graph side and nobody running it. The CLI names every request it
+        is running on each poll; anything else claimed was never received.
+        """
+        async with postgres.transaction() as conn:
+            rows = await cls._rows(
+                conn,
+                """
+                UPDATE sandbox_bridge_request
+                SET status = 'pending', claimed_at = NULL
+                WHERE bridge_id = :bridge_id
+                  AND status = 'claimed'
+                  AND request_id <> ALL(CAST(:held AS text[]))
+                RETURNING request_id
+                """,
+                {"bridge_id": bridge_id, "held": list(held)},
+            )
+        if rows:
+            logger.info(
+                "Re-queued sandbox bridge requests the CLI never received",
+                extra={"bridge_id": bridge_id, "requeued_requests": len(rows)},
+            )
+        return len(rows)
 
     @classmethod
     async def claim(cls, bridge_id: str, *, limit: int) -> list[ClaimedRequest]:

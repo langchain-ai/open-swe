@@ -7,10 +7,11 @@ would not be testing the thing that has to hold.
 
 import asyncio
 
+import pytest
 from sqlalchemy import text
 
 from agent.bridge.protocol import JsonObject
-from agent.bridge.store import Bridge, BridgeStore
+from agent.bridge.store import Bridge, BridgeInUseError, BridgeStore
 from agent.database import postgres
 
 OWNER = "test-user"
@@ -91,6 +92,7 @@ async def test_reopening_requeues_what_the_last_connection_never_answered(
     assert [
         request.request_id for request in await BridgeStore.claim(bridge.bridge_id, limit=8)
     ] == [request_id]
+    await _go_quiet(bridge.bridge_id)
 
     reopened = await BridgeStore.register(
         owner_id=OWNER,
@@ -105,6 +107,19 @@ async def test_reopening_requeues_what_the_last_connection_never_answered(
     assert [
         request.request_id for request in await BridgeStore.claim(bridge.bridge_id, limit=8)
     ] == [request_id]
+
+
+async def test_a_bridge_another_process_is_serving_is_not_shared(registry_db: None) -> None:
+    bridge = await _open()
+
+    with pytest.raises(BridgeInUseError):
+        await BridgeStore.register(
+            owner_id=OWNER,
+            hostname="laptop.local",
+            root_path="/Users/test/project",
+            label=None,
+            bridge_id=bridge.bridge_id,
+        )
 
 
 async def test_reopening_someone_elses_bridge_finds_nothing(registry_db: None) -> None:

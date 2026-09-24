@@ -10,7 +10,7 @@ import {
   readBridgeMemory,
   readBackend,
   readConfig,
-  rememberBridge,
+  rememberThreadBridge,
   writeConfig,
 } from "./config.ts"
 import { isGitRepository, originRepo, repoFullName } from "./git.ts"
@@ -144,19 +144,18 @@ async function runCommand(options: RunOptions): Promise<number> {
     `! The remote agent will run commands and edit files in ${root} on this machine, unsandboxed.`
   )
 
-  const memory = await readBridgeMemory()
-  const remembered = memory.roots[root] ?? null
-  let rememberedBridgeId = remembered
+  let bridgeId: string | null = null
   if (options.thread !== undefined) {
-    const bound = memory.threads[options.thread] ?? null
-    if (bound !== null && remembered !== null && bound !== remembered) {
-      fail(
-        `thread ${options.thread} is bridged to ${bound}, but ${root} is bridged to ${remembered}. ` +
-          "Run oswe from the directory that started that thread."
-      )
+    const bound = (await readBridgeMemory())[options.thread]
+    if (bound === undefined) {
+      fail(`thread ${options.thread} was not started by oswe on this machine`)
       return 1
     }
-    if (bound !== null) rememberedBridgeId = bound
+    if (bound.root !== root) {
+      fail(`thread ${options.thread} serves ${bound.root}; run oswe from there`)
+      return 1
+    }
+    bridgeId = bound.bridgeId
   }
 
   let bridge: Bridge
@@ -164,11 +163,16 @@ async function runCommand(options: RunOptions): Promise<number> {
     bridge = await Bridge.open(api, {
       rootPath: root,
       label: basename(root),
-      rememberedBridgeId,
+      bridgeId,
     })
   } catch (cause) {
-    if (!(cause instanceof ApiError && cause.status === 401)) throw cause
-    fail(credential.rejected)
+    if (!(cause instanceof ApiError)) throw cause
+    if (cause.status === 401) fail(credential.rejected)
+    else if (cause.status === 404)
+      fail(`the bridge thread ${options.thread} was bound to no longer exists`)
+    else if (cause.status === 409)
+      fail(`another oswe process is serving thread ${options.thread}`)
+    else throw cause
     return 1
   }
   note(
@@ -177,7 +181,10 @@ async function runCommand(options: RunOptions): Promise<number> {
 
   const creating = options.thread === undefined
   const threadId = options.thread ?? randomUUID()
-  await rememberBridge({ root, bridgeId: bridge.session.bridgeId, threadId })
+  await rememberThreadBridge(threadId, {
+    bridgeId: bridge.session.bridgeId,
+    root,
+  })
   note(`Thread ${api.dashboardUrl(`/agents/${encodeURIComponent(threadId)}`)}`)
 
   let exitCode = 0
@@ -213,12 +220,12 @@ async function runCommand(options: RunOptions): Promise<number> {
   })
 
   const repo = await originRepo(root)
-  const configurable: JsonObject = {}
+  // Every machine run names its thread type, a resumed one included.
+  const configurable: JsonObject = { thread_type: threadType }
   // The bridge, and the repo it belongs to, are stamped on the thread when it
   // is created; the server rejects them on any later run.
   if (creating) {
     configurable["sandbox_bridge_id"] = bridge.session.bridgeId
-    configurable["thread_type"] = threadType
     if (repo !== null) configurable["repo"] = repoFullName(repo)
     else configurable["repo_explicitly_none"] = true
   }
@@ -250,7 +257,7 @@ async function runCommand(options: RunOptions): Promise<number> {
     activeRun = false
   }
 
-  if (outcome?.result) {
+  if (outcome?.status === "completed" && outcome.result) {
     printResult(outcome.result)
     exitCode = outcome.result.exitCode
   } else if (outcome !== null) {

@@ -167,15 +167,23 @@ export class ApiClient {
     )
   }
 
+  /** Long-poll for requests, naming the ones already running so a lost response is re-offered. */
   async pollRequests(
     bridgeId: string,
-    options: { wait: number; limit: number; signal?: AbortSignal }
+    options: {
+      wait: number
+      limit: number
+      held: readonly string[]
+      signal?: AbortSignal
+    }
   ): Promise<BridgeRequest[]> {
-    const query = `wait=${options.wait}&limit=${options.limit}`
     const payload = await this.json(
-      "GET",
-      `/bridges/${encodeURIComponent(bridgeId)}/requests?${query}`,
-      { signal: options.signal }
+      "POST",
+      `/bridges/${encodeURIComponent(bridgeId)}/requests/claim`,
+      {
+        body: { wait: options.wait, limit: options.limit, held: options.held },
+        signal: options.signal,
+      }
     )
     const entries = arrayAt(isRecord(payload) ? payload : null, "requests")
     if (entries === null) {
