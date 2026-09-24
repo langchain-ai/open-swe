@@ -22,7 +22,11 @@ from agent.slack.request import SlackRequest
 from agent.thread_ids import github_issue_thread_id
 from agent.users import User
 from agent.webhooks import common as webhook_common
-from tests.conftest import post_signed_github_webhook, register_github_logins
+from tests.conftest import (
+    allow_github_bots,
+    post_signed_github_webhook,
+    register_github_logins,
+)
 
 _TEST_WEBHOOK_SECRET = "test-secret-for-webhook"
 _TEST_SLACK_SECRET = "test-slack-secret"
@@ -473,6 +477,7 @@ async def test_github_webhook_wakes_agent_on_untagged_activity_on_its_pr(
     monkeypatch.setattr(webhook_common, "enforce_public_repo_org_gate", allow)
     monkeypatch.setattr(webhook_common, "GITHUB_WEBHOOK_SECRET", _TEST_WEBHOOK_SECRET)
     register_github_logins(monkeypatch, "octocat")
+    allow_github_bots(monkeypatch, "vercel[bot]", "devin-ai-integration[bot]")
     await PullRequest(
         owner="langchain-ai",
         repo="open-swe",
@@ -1342,6 +1347,7 @@ def test_process_github_pr_comment_drops_unregistered_authors_from_context(monke
         User, "email_for_login", lambda login: asyncio.sleep(0, result="octo@example.com")
     )
     register_github_logins(monkeypatch, "octocat")
+    allow_github_bots(monkeypatch, "vercel[bot]")
     monkeypatch.setattr(webhook_common, "authorize_github_thread", fake_authorize)
     monkeypatch.setattr(webhook_common, "get_or_resolve_thread_github_token", fake_token)
     monkeypatch.setattr(webhook_common, "react_to_github_comment", fake_react)

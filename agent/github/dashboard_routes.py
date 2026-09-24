@@ -4,9 +4,10 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException
 
-from agent.dashboard.deps import SESSION_DEP
+from agent.dashboard.deps import ADMIN_DEP, SESSION_DEP
 from agent.dashboard.profiles import get_valid_access_token
 from agent.github import repos
+from agent.github.allowed_bots import AllowedGitHubBot, AllowedGitHubBotView, AllowGitHubBot
 from agent.github.repo_cache import (
     REPO_LIST_FRESH_MS,
     read_cached_repos,
@@ -69,3 +70,27 @@ async def api_repository_merge_methods(
     if not token:
         raise HTTPException(401, "GitHub token unavailable, re-login required")
     return await repository_merge_methods(owner, repo, token)
+
+
+@router.get("/github/allowed-bots")
+async def api_list_allowed_github_bots(
+    _admin: dict[str, Any] = ADMIN_DEP,
+) -> list[AllowedGitHubBotView]:
+    return [bot.view() for bot in await AllowedGitHubBot.list_all()]
+
+
+@router.post("/github/allowed-bots")
+async def api_allow_github_bot(
+    body: AllowGitHubBot,
+    admin: dict[str, Any] = ADMIN_DEP,
+) -> AllowedGitHubBotView:
+    return (await AllowedGitHubBot.allow(body, created_by=admin["sub"])).view()
+
+
+@router.delete("/github/allowed-bots/{github_id}")
+async def api_remove_allowed_github_bot(
+    github_id: int,
+    _admin: dict[str, Any] = ADMIN_DEP,
+) -> dict[str, bool]:
+    await AllowedGitHubBot.remove(github_id)
+    return {"ok": True}

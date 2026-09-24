@@ -12,8 +12,9 @@ from pydantic import BaseModel, ValidationError
 from agent.baby_sit import handle_ci_webhook
 from agent.database import postgres
 from agent.expedited_review.watch import handle_github_event as handle_expedited_review_event
+from agent.github.allowed_bots import AllowedGitHubBot
 from agent.github.comments import GitHubAuthError
-from agent.github.org_membership import ACCEPTED_PR_BOT_LOGINS, INTERNAL_BOT_LOGINS
+from agent.github.org_membership import INTERNAL_BOT_LOGINS
 from agent.github.pull_requests import PullRequest
 from agent.input_messages import (
     PersonIdentity,
@@ -867,15 +868,17 @@ class _UntaggedPrEvent(BaseModel):
 
 
 async def is_accepted_commenter(login: str) -> bool:
-    """Only registered Open SWE users and known third-party bots may prompt from GitHub."""
-    return login in ACCEPTED_PR_BOT_LOGINS or bool(await User.known_logins([login]))
+    """Only registered Open SWE users and admin-allowed bots may prompt from GitHub."""
+    return login.lower() in await AllowedGitHubBot.logins() or bool(
+        await User.known_logins([login])
+    )
 
 
-def _is_accepted_comment_author(login: str, known_logins: Collection[str]) -> bool:
+def _is_accepted_comment_author(
+    login: str, known_logins: Collection[str], bot_logins: Collection[str]
+) -> bool:
     return (
-        login.lower() in known_logins
-        or login in ACCEPTED_PR_BOT_LOGINS
-        or login in INTERNAL_BOT_LOGINS
+        login.lower() in known_logins or login.lower() in bot_logins or login in INTERNAL_BOT_LOGINS
     )
 
 
@@ -979,7 +982,8 @@ async def process_github_pr_comment(
             )
 
     acting_login = github_login
-    is_bot = github_login in ACCEPTED_PR_BOT_LOGINS
+    bot_logins = await AllowedGitHubBot.logins()
+    is_bot = github_login.lower() in bot_logins
     if agent_thread_id is not None or is_bot:
         existing_metadata = await common.get_thread_metadata_safe(thread_id)
         if existing_metadata is None:
@@ -1092,7 +1096,7 @@ async def process_github_pr_comment(
     comments = [
         comment
         for comment in comments
-        if _is_accepted_comment_author(str(comment.get("author") or ""), trusted)
+        if _is_accepted_comment_author(str(comment.get("author") or ""), trusted, bot_logins)
     ]
     if not comments:
         common.logger.info("No comments found since last @open-swe tag for PR %s", pr_number)

@@ -27,6 +27,7 @@ import {
   slackManifestPlaceholdersRemain,
 } from "@/lib/slack-manifest"
 import { dashboardApiBase } from "@/lib/api-base"
+import { AllowedGitHubBotsSection } from "@/features/settings/components/AllowedGitHubBotsSection"
 import { AllowedSlackBotsSection } from "@/features/settings/components/AllowedSlackBotsSection"
 import { ExpeditedReviewSection } from "@/features/settings/components/ExpeditedReviewSection"
 import { MCPConnectionsSection } from "@/features/settings/components/MCPConnectionsSection"
@@ -95,6 +96,10 @@ function AdminPage() {
       >
         <AllowedSlackBotsSection />
       </SlackIntegrationSection>
+
+      <SettingsSection title="GitHub">
+        <AllowedGitHubBotsSection />
+      </SettingsSection>
 
       <TriggerReviewSection />
 

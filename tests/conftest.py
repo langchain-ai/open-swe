@@ -121,6 +121,18 @@ def register_github_logins(monkeypatch: pytest.MonkeyPatch, *logins: str) -> Non
     monkeypatch.setattr(User, "known_logins", known_logins)
 
 
+def allow_github_bots(monkeypatch: pytest.MonkeyPatch, *logins: str) -> None:
+    """Treat ``logins`` as admin-allowed GitHub bots."""
+    from agent.github.allowed_bots import AllowedGitHubBot
+
+    allowed = frozenset(login.lower() for login in logins)
+
+    async def bot_logins() -> frozenset[str]:
+        return allowed
+
+    monkeypatch.setattr(AllowedGitHubBot, "logins", bot_logins)
+
+
 async def post_signed_github_webhook(
     event_type: str,
     payload: Mapping[str, object],
