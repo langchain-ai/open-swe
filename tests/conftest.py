@@ -20,7 +20,7 @@ from agent import store as agent_store
 from agent.database import postgres
 from agent.sandboxes.state import SANDBOX_BACKENDS, SANDBOX_CONNECTIONS
 from agent.threads import access, diffs, handlers, listing, proxy, runs, summary
-from agent.utils import ttl_cache
+from agent.utils import shared_cache, ttl_cache
 from agent.webhooks import common as webhook_common
 from agent.workspaces.store import WORKSPACES
 
@@ -239,10 +239,13 @@ def _no_bundled_dashboard(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> No
 
 @pytest.fixture(autouse=True)
 def _reset_ttl_cache() -> Iterator[None]:
-    """Keep the process-global TTL cache from leaking workspace settings between tests."""
+    """Keep the process-global TTL cache from leaking workspace settings between tests,
+    and one test's pending shared-cache refresh from writing into the next."""
     ttl_cache.clear()
+    shared_cache.clear()
     yield
     ttl_cache.clear()
+    shared_cache.clear()
 
 
 @pytest.fixture(autouse=True)

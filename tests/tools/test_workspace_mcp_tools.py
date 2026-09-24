@@ -1,4 +1,3 @@
-import asyncio
 import json
 from contextlib import asynccontextmanager
 from unittest.mock import AsyncMock
@@ -12,6 +11,7 @@ from agent.mcp import workspace as settings
 from agent.middleware.dynamic_tools import DynamicToolMiddleware
 from agent.tool_loaders import workspace_mcp as loader
 from agent.utils import shared_cache, ttl_cache
+from tests.support.eventually import eventually
 
 
 @pytest.fixture(autouse=True)
@@ -190,7 +190,7 @@ async def test_expired_catalog_failure_does_not_log_upstream_details(
     assert len(await loader.load_workspace_mcp_tools("default")) == 1
     now = 601
     assert len(await loader.load_workspace_mcp_tools("default")) == 1
-    await asyncio.gather(*shared_cache._REFRESH_TASKS.values())
+    await eventually(lambda: any(r.name == shared_cache.__name__ for r in caplog.records))
     assert discover.await_count == 2
     assert "test-secret" not in caplog.text
 

@@ -24,11 +24,21 @@ from agent.utils import ttl_cache
 
 logger = logging.getLogger(__name__)
 
-_REFRESH_TASKS: dict[str, asyncio.Task[None]] = {}
+_REFRESH_TASKS: dict[tuple[str, int], asyncio.Task[None]] = {}
 
 
 def _now() -> float:
     return time.time()
+
+
+def clear() -> None:
+    """Cancel and forget pending background refreshes."""
+    for task in _REFRESH_TASKS.values():
+        # A task whose loop has closed can never run again, and cancelling it
+        # would schedule onto that closed loop.
+        if not task.get_loop().is_closed():
+            task.cancel()
+    _REFRESH_TASKS.clear()
 
 
 def _front_key(namespace: Sequence[str], key: str) -> str:
@@ -65,12 +75,13 @@ async def cached[T](
         await _write(value)
 
     def _schedule_refresh() -> None:
-        existing = _REFRESH_TASKS.get(front_key)
+        task_key = (front_key, id(asyncio.get_running_loop()))
+        existing = _REFRESH_TASKS.get(task_key)
         if existing is not None and not existing.done():
             return
         task = asyncio.create_task(_refresh())
-        _REFRESH_TASKS[front_key] = task
-        task.add_done_callback(lambda _task: _REFRESH_TASKS.pop(front_key, None))
+        _REFRESH_TASKS[task_key] = task
+        task.add_done_callback(lambda _task: _REFRESH_TASKS.pop(task_key, None))
 
     async def _resolve() -> T:
         try:
