@@ -291,7 +291,6 @@ def render_review_body(
     out_of_diff_findings: list[Finding] | None = None,
     additional_findings_count: int = 0,
     assessment: ReviewAssessment | None = None,
-    approved: bool = False,
 ) -> str:
     """Compose the top-level review body.
 
@@ -322,19 +321,12 @@ def render_review_body(
         decision = (
             "Would approve" if assessment.decision == "would_approve" else "Needs human review"
         )
-        if approved:
-            decision = "Approved"
-        suffix = "automatic approval" if approved else "advisory"
-        parts.append(f"**Risk: {assessment.risk_score}/5 · {decision}** ({suffix})")
+        parts.append(f"**Risk: {assessment.risk_score}/5 · {decision}** (advisory)")
         parts.append(
             "<details>\n<summary>Why?</summary>\n\n"
             f"{escape(assessment.explanation)}\n\n"
             f"Reviewed commit: `{assessment.head_sha}`. Risk ranges from 1 (low) to 5 (high). "
-            + (
-                "Approved automatically under the configured policy. No merge is performed."
-                if approved
-                else "This assessment does not approve or merge the PR."
-            )
+            + "This assessment does not approve or merge the PR."
             + "\n\n</details>"
         )
         feedback_link = (
@@ -577,26 +569,6 @@ async def open_swe_review_exists(
             params["page"] += 1
 
 
-async def approval_allowed_for_head(
-    *, owner: str, repo: str, pr_number: int, head_sha: str, token: str
-) -> bool:
-    async with github_client(token=token) as client:
-        response = await github_request(
-            client, "GET", f"{_GITHUB_API_BASE}/repos/{owner}/{repo}/pulls/{pr_number}"
-        )
-        response.raise_for_status()
-        pr = response.json()
-    if not isinstance(pr, dict):
-        return False
-    head = pr.get("head")
-    return (
-        pr.get("state") == "open"
-        and pr.get("draft") is False
-        and isinstance(head, dict)
-        and head.get("sha") == head_sha
-    )
-
-
 async def post_pull_request_review(
     *,
     owner: str,
@@ -606,13 +578,15 @@ async def post_pull_request_review(
     body: str,
     inline_comments: list[dict[str, Any]],
     token: str,
-    event: Literal["COMMENT", "APPROVE"] = "COMMENT",
 ) -> dict[str, Any] | None:
-    """POST one GitHub PR Review with inline comments. Returns the API response or None."""
+    """POST one GitHub PR Review as a comment. Returns the API response or None.
+
+    Reviewer submissions never carry an approval event; approvals come from humans.
+    """
     url = f"{_GITHUB_API_BASE}/repos/{owner}/{repo}/pulls/{pr_number}/reviews"
     payload: dict[str, Any] = {
         "commit_id": head_sha,
-        "event": event,
+        "event": "COMMENT",
         "body": body,
         "comments": inline_comments,
     }
@@ -643,7 +617,6 @@ async def post_pull_request_review(
             # once, instead of the agent retrying with byte-identical args.
             error_kind: str | None = None
             raw_errors: list[Any] = []
-            error_messages: list[object] = []
             if e.response.status_code == 422:
                 try:
                     parsed = e.response.json()
@@ -651,7 +624,6 @@ async def post_pull_request_review(
                         candidate = parsed.get("errors", [])
                         if isinstance(candidate, list):
                             raw_errors = candidate
-                        error_messages = [parsed.get("message"), *raw_errors]
                 except Exception:  # noqa: BLE001 — body may not be JSON
                     raw_errors = []
                 if any(
@@ -660,14 +632,6 @@ async def post_pull_request_review(
                     for err in raw_errors
                 ):
                     error_kind = "unresolved_anchor"
-                for error in error_messages:
-                    message = error.get("message") if isinstance(error, dict) else error
-                    if (
-                        isinstance(message, str)
-                        and "Can not approve your own pull request" in message
-                    ):
-                        error_kind = "self_approval"
-                        break
             return {
                 "_error": f"HTTP {e.response.status_code}: {body}",
                 "_error_kind": error_kind,

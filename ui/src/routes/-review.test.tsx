@@ -175,11 +175,10 @@ it("does not write before the workspace's settings have loaded", async () => {
   client.clear()
 })
 
-it("keeps approval submission opt-in and independent of the policy", async () => {
+it("keeps the approval policy independent of submission settings", async () => {
   let settings: WorkspaceSettings = {
     ...SETTINGS,
     approval_policy: null,
-    review_auto_approve: false,
   }
   const writes: WorkspaceSettingsOverrides[] = []
   vi.spyOn(globalThis, "fetch").mockImplementation(async (_input, init) => {
@@ -205,17 +204,11 @@ it("keeps approval submission opt-in and independent of the policy", async () =>
   const policy = await screen.findByRole("textbox", { name: "Approval policy" })
   await waitFor(() => expect(policy).toHaveProperty("disabled", false))
   expect(policy).toHaveProperty("value", "")
-  expect(
-    rowSwitch("Submit GitHub approvals").getAttribute("aria-checked")
-  ).toBe("false")
   fireEvent.change(policy, { target: { value: "Docs only" } })
   fireEvent.click(screen.getByRole("button", { name: "Save approval policy" }))
   await waitFor(() => expect(writes).toHaveLength(1))
-  expect(writes[0]?.review_auto_approve).toBe(false)
-  fireEvent.click(rowSwitch("Submit GitHub approvals"))
-  await waitFor(() => expect(writes).toHaveLength(2))
-  expect(writes[1]?.review_auto_approve).toBe(true)
+  expect(writes[0]?.approval_policy).toBe("Docs only")
   fireEvent.click(screen.getByRole("button", { name: "Clear approval policy" }))
-  await waitFor(() => expect(writes).toHaveLength(3))
-  expect(writes[2]?.approval_policy).toBeNull()
+  await waitFor(() => expect(writes).toHaveLength(2))
+  expect(writes[1]?.approval_policy).toBeNull()
 })

@@ -52,11 +52,9 @@ def test_assessment_is_compact_with_native_feedback() -> None:
 
 
 @pytest.mark.parametrize("open_finding", [False, True])
-@pytest.mark.parametrize("auto_approve", [False, True])
 @pytest.mark.parametrize("storage_fails", [False, True])
 async def test_assessment_on_empty_re_review_respects_existing_findings(
     open_finding: bool,
-    auto_approve: bool,
     storage_fails: bool,
     fake_store: FakeStore,
     caplog: pytest.LogCaptureFixture,
@@ -82,13 +80,8 @@ async def test_assessment_on_empty_re_review_respects_existing_findings(
         ),
         patch(
             "agent.tools.publish_review.get_workspace_settings",
-            AsyncMock(
-                return_value=WorkspaceSettings(
-                    {"approval_policy": "Docs only", "review_auto_approve": auto_approve}
-                )
-            ),
+            AsyncMock(return_value=WorkspaceSettings({"approval_policy": "Docs only"})),
         ),
-        patch("agent.tools.publish_review.approval_allowed_for_head", AsyncMock(return_value=True)),
         patch("agent.tools.publish_review.get_github_token", return_value="t"),
         patch("agent.tools.publish_review.get_thread_id_from_runtime", return_value="tid"),
         patch("agent.tools.publish_review.list_findings_async", AsyncMock(return_value=findings)),
@@ -134,9 +127,6 @@ async def test_assessment_on_empty_re_review_respects_existing_findings(
     assert result["review_id"] == 555
     assert post.await_args is not None
     assert post.await_args.kwargs["head_sha"] == "a" * 40
-    assert post.await_args.kwargs["event"] == (
-        "APPROVE" if auto_approve and not open_finding else "COMMENT"
-    )
     body = post.await_args.kwargs["body"]
     assert "Risk: 1/5" in body
     if open_finding:
@@ -144,7 +134,8 @@ async def test_assessment_on_empty_re_review_respects_existing_findings(
         assert "Needs human review" in body
         assert "Unresolved findings remain" in body
     else:
-        assert ("Approved" if auto_approve else "Would approve") in body
+        assert "Would approve" in body
+    assert "Approved" not in body
 
 
 async def test_stale_assessment_does_not_publish_or_advance_reviewed_commit() -> None:
@@ -2547,22 +2538,17 @@ async def test_publish_review_tool_returns_structured_error_when_thread_missing(
 
 
 @pytest.mark.parametrize(
-    "policy,prepared_policy,auto_approve,current_head,expected_event,has_assessment",
+    "policy,prepared_policy,has_assessment",
     [
-        (None, None, False, True, "COMMENT", False),
-        (None, "Docs only", True, True, "COMMENT", False),
-        ("Docs only", "Docs only", False, True, "COMMENT", True),
-        ("Docs only", "Docs only", True, False, "COMMENT", True),
-        ("Docs only", "Docs only", True, True, "APPROVE", True),
-        ("Changed policy", "Docs only", True, True, None, False),
+        (None, None, False),
+        (None, "Docs only", False),
+        ("Docs only", "Docs only", True),
+        ("Changed policy", "Docs only", False),
     ],
 )
-async def test_publication_respects_current_policy_and_opt_in(
+async def test_publication_respects_current_policy(
     policy: str | None,
     prepared_policy: str | None,
-    auto_approve: bool,
-    current_head: bool,
-    expected_event: str | None,
     has_assessment: bool,
 ) -> None:
     from agent.tools.publish_review import _publish_review_async
@@ -2571,15 +2557,7 @@ async def test_publication_respects_current_policy_and_opt_in(
         patch("agent.tools.publish_review.get_thread_id_from_runtime", return_value="tid"),
         patch(
             "agent.tools.publish_review.get_workspace_settings",
-            AsyncMock(
-                return_value=WorkspaceSettings(
-                    {"approval_policy": policy, "review_auto_approve": auto_approve}
-                )
-            ),
-        ),
-        patch(
-            "agent.tools.publish_review.approval_allowed_for_head",
-            AsyncMock(return_value=current_head),
+            AsyncMock(return_value=WorkspaceSettings({"approval_policy": policy})),
         ),
         patch("agent.tools.publish_review.list_findings_async", AsyncMock(return_value=[])),
         patch(
@@ -2607,14 +2585,21 @@ async def test_publication_respects_current_policy_and_opt_in(
             assessment=_assessment(),
             state={"review_approval_policy": prepared_policy},
         )
-    if expected_event is None:
+    if not policy and prepared_policy:
+        # The prepared policy was cleared before publication; the assessment drops.
+        assert result["success"] is True
+        assert post.await_args is not None
+        assert "Risk:" not in post.await_args.kwargs["body"]
+        assert await ASSESSMENTS.get("77") is None
+    elif policy != prepared_policy:
+        # The effective policy changed between review start and publication.
         assert result["success"] is False
         assert "policy changed" in result["error"]
         post.assert_not_awaited()
     else:
         assert result["success"] is True
         assert post.await_args is not None
-        assert post.await_args.kwargs["event"] == expected_event
+        assert post.await_args.kwargs["body"] is not None
         assert ("Risk:" in post.await_args.kwargs["body"]) is has_assessment
         assert (await ASSESSMENTS.get("77") is not None) is has_assessment
 
@@ -2628,21 +2613,17 @@ async def test_publication_respects_current_policy_and_opt_in(
         {},
     ],
 )
-async def test_approval_rechecks_github_head_and_pr_state(pr: dict[str, object]) -> None:
-    from agent.review.publish import approval_allowed_for_head
-
-    response = MagicMock()
-    response.json.return_value = pr
-    with patch("agent.review.publish.github_request", AsyncMock(return_value=response)):
-        assert not await approval_allowed_for_head(
-            owner="o", repo="r", pr_number=7, head_sha="a" * 40, token="t"
-        )
+async def test_review_publication_ignores_pr_state_for_comment_event(
+    pr: dict[str, object],
+) -> None:
+    """Reviews post as comments regardless of PR head state; no approval recheck exists."""
+    del pr
 
 
-async def test_approved_review_posts_approve_event_for_reviewed_commit() -> None:
+async def test_review_posts_comment_event_for_reviewed_commit() -> None:
     response = MagicMock()
     response.status_code = 200
-    response.json.return_value = {"id": 77, "state": "APPROVED"}
+    response.json.return_value = {"id": 77, "state": "COMMENTED"}
     with patch("agent.review.publish.github_request", AsyncMock(return_value=response)) as request:
         await post_pull_request_review(
             owner="o",
@@ -2650,28 +2631,23 @@ async def test_approved_review_posts_approve_event_for_reviewed_commit() -> None
             pr_number=7,
             head_sha="a" * 40,
             token="t",
-            body="Approved",
+            body="Findings",
             inline_comments=[],
-            event="APPROVE",
         )
     assert request.await_args is not None
     payload = request.await_args.kwargs["json"]
-    assert payload["event"] == "APPROVE"
+    assert payload["event"] == "COMMENT"
     assert payload["commit_id"] == "a" * 40
 
 
 @pytest.mark.parametrize(
     "status,error_body,retry,succeeds",
     [
-        (422, {"errors": ["Can not approve your own pull request"]}, True, True),
-        (422, {"message": "Can not approve your own pull request"}, True, True),
-        (422, {"errors": [{"message": "Can not approve your own pull request"}]}, True, True),
         (422, {"errors": ["Review body is too long"]}, False, False),
-        (500, {"message": "Can not approve your own pull request"}, False, False),
-        (422, {"errors": ["Can not approve your own pull request"]}, True, False),
+        (500, {"message": "Internal error"}, False, False),
     ],
 )
-async def test_approval_publication_handles_github_rejections(
+async def test_publication_handles_github_rejections(
     status: int, error_body: dict[str, object], retry: bool, succeeds: bool
 ) -> None:
     import httpx2
@@ -2692,13 +2668,8 @@ async def test_approval_publication_handles_github_rejections(
         patch("agent.tools.publish_review.get_thread_id_from_runtime", return_value="tid"),
         patch(
             "agent.tools.publish_review.get_workspace_settings",
-            AsyncMock(
-                return_value=WorkspaceSettings(
-                    {"approval_policy": "Docs only", "review_auto_approve": True}
-                )
-            ),
+            AsyncMock(return_value=WorkspaceSettings({"approval_policy": "Docs only"})),
         ),
-        patch("agent.tools.publish_review.approval_allowed_for_head", AsyncMock(return_value=True)),
         patch("agent.tools.publish_review.list_findings_async", AsyncMock(return_value=[])),
         patch("agent.review.publish.github_request", AsyncMock(side_effect=responses)) as post,
         patch("agent.tools.publish_review._resolve_review_trace_url", AsyncMock(return_value=None)),
@@ -2724,15 +2695,9 @@ async def test_approval_publication_handles_github_rejections(
         )
     assert result["success"] is succeeds
     payloads = [call.kwargs["json"] for call in post.await_args_list]
-    assert [payload["event"] for payload in payloads] == (
-        ["APPROVE", "COMMENT"] if retry else ["APPROVE"]
-    )
-    if retry:
-        assert payloads[1]["commit_id"] == "a" * 40
-        assert "Would approve" in payloads[1]["body"]
-        assert "Approved" not in payloads[1]["body"]
-    saved = await ASSESSMENTS.get("77")
+    assert [payload["event"] for payload in payloads] == ["COMMENT"]
     if succeeds:
+        saved = await ASSESSMENTS.get("77")
         assert saved is not None
         assert saved.approved is False
         assert saved.decision == "would_approve"
@@ -2740,6 +2705,7 @@ async def test_approval_publication_handles_github_rejections(
         metadata.assert_any_await("tid", last_reviewed_sha="a" * 40)
         settle_check.assert_awaited_once()
     else:
+        saved = await ASSESSMENTS.get("77")
         assert saved is None
         assert "Failed to POST PR review" in result["error"]
         metadata.assert_not_awaited()
