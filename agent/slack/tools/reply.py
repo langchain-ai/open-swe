@@ -276,8 +276,10 @@ def _build_option_blocks(message: str, options: list[str] | None) -> list[dict[s
     return blocks
 
 
-def build_pr_approval_blocks(message: str, fingerprint: str) -> list[dict[str, Any]]:
-    """Approval card for opening a PR under the author's own name."""
+def build_pr_approval_blocks(
+    message: str, fingerprint: str, thread_id: str
+) -> list[dict[str, Any]]:
+    """DM approval card for opening a PR under the author's own name."""
 
     def _button(text: str, action: str, style: str) -> dict[str, Any]:
         return {
@@ -285,7 +287,12 @@ def build_pr_approval_blocks(message: str, fingerprint: str) -> list[dict[str, A
             "text": {"type": "plain_text", "text": text, "emoji": True},
             "style": style,
             "value": json.dumps(
-                {"type": "pr_approval", "action": action, "fingerprint": fingerprint}
+                {
+                    "type": "pr_approval",
+                    "action": action,
+                    "fingerprint": fingerprint,
+                    "thread_id": thread_id,
+                }
             ),
             "action_id": f"open_swe_option_select_pr_approval_{action}",
         }

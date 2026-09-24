@@ -1,158 +1,101 @@
-"""The open_pull_request HITL approval gate for cross-person attribution."""
+"""The open_pull_request approval gate for PRs attributed to someone else."""
 
+import asyncio
 import json
 import sys
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
-import langgraph_sdk
 import pytest
 
 import agent.tools.open_pull_request  # noqa: F401  (resolves the lazy tools module)
-from agent import credential_scope
 from agent.run_config import RunConfig
+from agent.slack import client as slack_client
+from agent.threads import pr_approval
+from agent.users import User
 
 opr = sys.modules["agent.tools.open_pull_request"]
-
-
-def config(source="slack", login="bob", thread_id="thread-1"):
-    return {
-        "configurable": {
-            "thread_id": thread_id,
-            "source": source,
-            "github_login": login,
-            "visibility": "private",
-            "owner_type": "user",
-            "owner_login": login,
-        }
-    }
+_CFG = RunConfig.parse({"thread_id": "thread-1", "source": "slack", "github_login": "bob"})
 
 
 @pytest.fixture
-def thread_metadata(monkeypatch):
-    """Route ``credential_scope`` thread reads at an in-memory thread record."""
-    metadata = {"visibility": "public", "owner_type": "user", "owner_login": "alice"}
-    get_thread = AsyncMock(side_effect=lambda _id: {"metadata": metadata})
-    monkeypatch.setattr(
-        langgraph_sdk,
-        "get_client",
-        lambda **_: SimpleNamespace(threads=SimpleNamespace(get=get_thread)),
-    )
-    return metadata
-
-
-@pytest.mark.asyncio
-async def test_same_person_attribution_never_asks(thread_metadata, monkeypatch):
-    """Bob triggering a run that publishes as Bob skips the approval entirely."""
-    monkeypatch.setattr("agent.run_config.get_config", lambda: config(login="bob"))
-    assert await credential_scope.pr_author_login() == "bob"
-
-
-@pytest.mark.asyncio
-async def test_preauthorized_attribution_skips_the_card(fake_store):
-    from agent.threads import pr_approval
-
-    await pr_approval.set_always_allow("alice", allow=True, requester="bob")
-    assert await pr_approval.always_allow_for("alice", "bob") == "requester"
-    assert await pr_approval.always_allow_for("alice", "carol") == "none"
-
-
-@pytest.mark.asyncio
-async def test_gate_returns_pending_payload_without_slack(thread_metadata, fake_store, monkeypatch):
-    """No Slack location to ask in: the gate stays closed rather than publishing."""
-    monkeypatch.setattr("agent.run_config.get_config", lambda: config(login="bob"))
+def gate(monkeypatch, fake_store):
+    """Bob's run attributes the PR to Alice; thread metadata lives in memory."""
     monkeypatch.setattr(opr, "pr_author_login", AsyncMock(return_value="alice"))
-    from agent.slack import client as slack_client
+    metadata: dict[str, object] = {}
 
-    monkeypatch.setattr(
-        slack_client,
-        "get_active_slack_thread",
-        AsyncMock(return_value=None),
+    async def update(**kwargs: object) -> None:
+        patch = kwargs.get("metadata")
+        if isinstance(patch, dict):
+            metadata.update(patch)
+
+    client = SimpleNamespace(
+        threads=SimpleNamespace(get=AsyncMock(return_value={"metadata": metadata}), update=update)
     )
-    monkeypatch.setattr(opr, "get_client", lambda **_: SimpleNamespace())
-
-    from agent.threads import pr_approval as pa
-
-    meta: dict[str, object] = {}
-    thread_client = SimpleNamespace(
-        threads=SimpleNamespace(
-            get=AsyncMock(return_value={"metadata": meta}),
-            update=AsyncMock(),
-        )
-    )
-    monkeypatch.setattr(pa, "get_client", lambda: thread_client)
-    payload = await opr._pr_approval(
-        RunConfig.parse(config(login="bob")["configurable"]),
-        "token",
-        "user",
-        owner="o",
-        repo="r",
-        head="h",
-        base="b",
-        title="t",
-    )
-    assert payload is not None
-    assert payload["success"] is False
-    assert payload["pr_approval"] == "pending"
-    assert payload["pr_approval_author"] == "alice"
-    assert payload["branch_pushed"] is False
-    assert payload["pr_approval_fingerprint"]
-
-
-@pytest.mark.asyncio
-async def test_gate_times_out_after_sixty_seconds_with_pending(
-    thread_metadata, fake_store, monkeypatch
-):
-    """The wait polls the approval record and returns pending on timeout."""
-    monkeypatch.setattr("agent.run_config.get_config", lambda: config(login="bob"))
-    monkeypatch.setattr(opr, "pr_author_login", AsyncMock(return_value="alice"))
-    from agent.slack import client as slack_client
-
-    calls = {"active": 0}
-
-    async def active_thread(_client, _thread_id):
-        calls["active"] += 1
-        return {"channel_id": "C1", "thread_ts": "1.1"}
-
-    monkeypatch.setattr(slack_client, "get_active_slack_thread", active_thread)
-    posted = AsyncMock(return_value=("123.456", None))
-    monkeypatch.setattr(slack_client, "post_slack_thread_reply_with_ts", posted)
-    monkeypatch.setattr(opr, "get_client", lambda **_: SimpleNamespace())
-
-    from agent.threads import pr_approval as pa
-
-    meta: dict[str, object] = {}
-    thread_client = SimpleNamespace(
-        threads=SimpleNamespace(
-            get=AsyncMock(return_value={"metadata": meta}),
-            update=AsyncMock(),
-        )
-    )
-    monkeypatch.setattr(pa, "get_client", lambda: thread_client)
-
-    sleeps: list[float] = []
-
-    async def fake_sleep(seconds: float) -> None:
-        sleeps.append(seconds)
-
+    monkeypatch.setattr(pr_approval, "get_client", lambda: client)
+    dm = AsyncMock(return_value=("123.456", None))
+    monkeypatch.setattr(slack_client, "post_slack_top_level_message_with_ts", dm)
     monkeypatch.setattr(opr, "_APPROVAL_WAIT_SECONDS", 4.0)
-    import asyncio
+    monkeypatch.setattr(asyncio, "sleep", AsyncMock())
+    return SimpleNamespace(dm=dm, metadata=metadata)
 
-    monkeypatch.setattr(asyncio, "sleep", fake_sleep)
-    payload = await opr._pr_approval(
-        RunConfig.parse(config(login="bob")["configurable"]),
-        "token",
-        "user",
-        owner="o",
-        repo="r",
-        head="h",
-        base="b",
-        title="t",
+
+def _alice(monkeypatch, slack_id: str) -> None:
+    user = SimpleNamespace(slack_user_id=slack_id)
+    monkeypatch.setattr(User, "for_login", AsyncMock(return_value=user))
+
+
+async def _open() -> dict[str, object] | None:
+    return await opr._pr_approval(
+        _CFG, "token", "user", owner="o", repo="r", head="h", base="b", title="t"
     )
-    assert payload is not None
-    assert payload["pr_approval"] == "pending"
-    assert posted.await_count == 1
-    card = json.loads(posted.await_args.kwargs["blocks"][1]["elements"][0]["value"])
-    assert card["type"] == "pr_approval"
-    assert card["action"] == "approve"
-    assert payload["pr_approval_fingerprint"] == card["fingerprint"]
+
+
+@pytest.mark.asyncio
+async def test_card_is_dmed_to_the_author_and_times_out_pending(gate, monkeypatch):
+    _alice(monkeypatch, "U-ALICE")
+
+    payload = await _open()
+
+    assert payload is not None and payload["pr_approval"] == "pending"
+    gate.dm.assert_awaited_once()
+    assert gate.dm.await_args.args[0] == "U-ALICE"
+    card = json.loads(gate.dm.await_args.kwargs["blocks"][1]["elements"][0]["value"])
+    assert card == {
+        "type": "pr_approval",
+        "action": "approve",
+        "fingerprint": payload["pr_approval_fingerprint"],
+        "thread_id": "thread-1",
+    }
+
+
+@pytest.mark.asyncio
+async def test_approval_during_the_wait_lets_the_pr_open(gate, monkeypatch):
+    _alice(monkeypatch, "U-ALICE")
+
+    async def approve_on_poll(_seconds: float) -> None:
+        for record in gate.metadata.get("pr_approvals", {}).values():
+            record["status"] = pr_approval.PR_APPROVAL_APPROVED
+
+    monkeypatch.setattr(asyncio, "sleep", approve_on_poll)
+
+    assert await _open() is None
+
+
+@pytest.mark.asyncio
+async def test_author_without_slack_is_never_published_as(gate, monkeypatch):
+    _alice(monkeypatch, "")
+
+    payload = await _open()
+
+    assert payload is not None and payload["success"] is False
+    gate.dm.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_always_allow_skips_the_dm(gate, monkeypatch):
+    _alice(monkeypatch, "U-ALICE")
+    await pr_approval.set_always_allow("alice", allow=True, requester="bob")
+
+    assert await _open() is None
+    gate.dm.assert_not_awaited()

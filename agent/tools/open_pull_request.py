@@ -242,12 +242,9 @@ async def _pr_approval(
     if preauthorized in (ALWAYS_ALLOW_ALL, "requester"):
         return None
 
-    from agent.slack.client import (
-        LANGGRAPH_URL,
-        get_active_slack_thread,
-        post_slack_thread_reply_with_ts,
-    )
+    from agent.slack.client import post_slack_top_level_message_with_ts
     from agent.slack.tools.reply import build_pr_approval_blocks
+    from agent.users import User
 
     fingerprint = pr_approval_fingerprint(
         thread_id=cfg.thread_id,
@@ -273,12 +270,10 @@ async def _pr_approval(
             decided="denied this attribution",
         )
 
-    active = await get_active_slack_thread(get_client(url=LANGGRAPH_URL), cfg.thread_id)
-    channel_id = (active or {}).get("channel_id")
-    thread_ts = (active or {}).get("thread_ts")
-    if not isinstance(channel_id, str) or not isinstance(thread_ts, str):
-        # Nothing to ask in: without a Slack location there is no approver to
-        # reach, so the attribution stays unresolved rather than silently
+    author = await User.for_login("github", author_login)
+    author_slack_id = author.slack_user_id if author is not None else ""
+    if not author_slack_id:
+        # No DM to send: the attribution stays unresolved rather than silently
         # publishing under someone else's name.
         return _pr_approval_pending_payload(
             owner=owner,
@@ -289,6 +284,7 @@ async def _pr_approval(
             fingerprint=fingerprint,
             author_login=author_login,
             approval_url=dashboard_thread_url(cfg.thread_id),
+            decided="has no linked Slack account to approve from",
         )
 
     record = await ensure_pr_approval_pending(
@@ -304,19 +300,18 @@ async def _pr_approval(
         draft=_effective_draft(True),
     )
     if record.get("notified") is not True:
+        thread_url = dashboard_thread_url(cfg.thread_id)
+        thread_link = f"<{thread_url}|this thread>" if thread_url else "a shared thread"
         message = (
-            f":raised_hand: Open SWE wants to open a PR as *{author_login}* "
-            f"(triggered by `{requester_login}`).\n\n"
+            f":raised_hand: `{requester_login}` asked Open SWE to open a PR as you in "
+            f"{thread_link}.\n\n"
             f"*{title}*\n`{owner}/{repo}` — `{head}` → `{base}`\n\n"
-            "Approve once, always allow this requester, or deny. The tool call waits "
-            "up to a minute; after that the PR opens only once you approve."
+            "Approve once, always allow this requester, or deny."
         )
-        message_ts, _error = await post_slack_thread_reply_with_ts(
-            channel_id,
-            thread_ts,
+        message_ts, _error = await post_slack_top_level_message_with_ts(
+            author_slack_id,
             message,
-            blocks=build_pr_approval_blocks(message, fingerprint),
-            agent_thread_id=cfg.thread_id,
+            blocks=build_pr_approval_blocks(message, fingerprint, cfg.thread_id),
         )
         if message_ts:
             await mark_pr_approval_notified(cfg.thread_id, fingerprint)

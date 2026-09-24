@@ -1,6 +1,7 @@
 """The multiplayer PR approval gate on open_pull_request."""
 
 import importlib
+import json
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -140,10 +141,7 @@ async def test_decision_records_actor_and_always_allow(fake_store) -> None:
 
 
 def test_approval_card_has_three_actions() -> None:
-    blocks = reply.build_pr_approval_blocks("Approve?", "fp1")
-    actions = blocks[1]["elements"]
-    assert [element["value"] for element in actions] == [
-        '{"type": "pr_approval", "action": "approve", "fingerprint": "fp1"}',
-        '{"type": "pr_approval", "action": "always_allow", "fingerprint": "fp1"}',
-        '{"type": "pr_approval", "action": "reject", "fingerprint": "fp1"}',
-    ]
+    blocks = reply.build_pr_approval_blocks("Approve?", "fp1", "thread-1")
+    actions = [json.loads(element["value"]) for element in blocks[1]["elements"]]
+    assert [a["action"] for a in actions] == ["approve", "always_allow", "reject"]
+    assert {(a["fingerprint"], a["thread_id"]) for a in actions} == {("fp1", "thread-1")}
