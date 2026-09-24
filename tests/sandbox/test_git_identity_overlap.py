@@ -13,7 +13,13 @@ from contextlib import contextmanager
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-from deepagents.backends.protocol import ExecuteResponse, SandboxBackendProtocol
+from deepagents.backends.protocol import (
+    ExecuteResponse,
+    LsResult,
+    ReadResult,
+    SandboxBackendProtocol,
+    WriteResult,
+)
 
 from agent.github.sandbox_access import SandboxGitHubAccess
 from agent.sandboxes import lifecycle
@@ -41,6 +47,7 @@ class _Sandbox(SandboxBackendProtocol):
     def __init__(self, sandbox_id: str = "sandbox-1") -> None:
         self._sandbox_id = sandbox_id
         self.ran: list[str] = []
+        self.file_ops: list[str] = []
         self.identity_started = asyncio.Event()
         self.release_identity = asyncio.Event()
         self.identity_error: Exception | None = None
@@ -54,6 +61,18 @@ class _Sandbox(SandboxBackendProtocol):
 
     def execute(self, command: str, *, timeout: int | None = None) -> ExecuteResponse:
         raise NotImplementedError
+
+    async def aread(self, file_path: str, offset: int = 0, limit: int = 2000) -> ReadResult:
+        self.file_ops.append(f"read {file_path}")
+        return ReadResult()
+
+    async def als(self, path: str) -> LsResult:
+        self.file_ops.append(f"ls {path}")
+        return LsResult(entries=[])
+
+    async def awrite(self, file_path: str, content: str) -> WriteResult:
+        self.file_ops.append(f"write {file_path}")
+        return WriteResult(path=file_path)
 
     async def aexecute(self, command: str, *, timeout: int | None = None) -> ExecuteResponse:
         if command.startswith("git config --global"):
@@ -337,3 +356,16 @@ async def test_identity_write_is_timed_in_apm_without_joining_a_later_startup_tr
 
     assert closed_after_release["agent.startup.sandbox.git_identity"]
     assert THREAD_ID not in startup_trace._PHASES
+
+
+async def test_file_operations_do_not_wait_on_a_pending_identity_write(sandbox: _Sandbox) -> None:
+    proxy = await asyncio.wait_for(ensure_sandbox_for_thread(THREAD_ID), timeout=_HANG_TIMEOUT)
+    await asyncio.wait_for(sandbox.identity_started.wait(), timeout=_HANG_TIMEOUT)
+
+    await asyncio.wait_for(proxy.aread("/repo/README.md"), timeout=_HANG_TIMEOUT)
+    await asyncio.wait_for(proxy.als("/repo"), timeout=_HANG_TIMEOUT)
+    written = await asyncio.wait_for(proxy.awrite("/repo/NOTES.md", "x"), timeout=_HANG_TIMEOUT)
+
+    assert written.path == "/repo/NOTES.md"
+    assert sandbox.file_ops == ["read /repo/README.md", "ls /repo", "write /repo/NOTES.md"]
+    assert sandbox.ran == []
