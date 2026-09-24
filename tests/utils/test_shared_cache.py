@@ -5,6 +5,7 @@ import hashlib
 import logging
 import threading
 from collections.abc import Awaitable, Callable, Sequence
+from typing import NoReturn
 
 import pytest
 from pydantic import TypeAdapter
@@ -328,3 +329,26 @@ async def test_stale_reads_share_one_background_refresh(
     release.set()
     await eventually(lambda: _stored(fake_store) == {"n": 2})
     assert calls == 1
+
+
+@pytest.mark.parametrize("operation", ["get_item", "put_item"])
+async def test_slow_store_falls_back_like_a_failing_one(
+    fake_store: FakeStore,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    operation: str,
+) -> None:
+    async def hang(*_args: object) -> NoReturn:
+        await asyncio.Event().wait()
+        raise AssertionError("unreachable")
+
+    monkeypatch.setattr(fake_store, operation, hang)
+    monkeypatch.setattr(shared_cache, "_STORE_TIMEOUT_SECONDS", 0.01)
+
+    async def loader() -> dict[str, int]:
+        return {"n": 6}
+
+    async with asyncio.timeout(1):  # a call a stalled Store can hold up hangs here
+        assert await _cached(loader) == {"n": 6}
+
+    assert [type(_swallowed(record)) for record in _warnings(caplog)] == [TimeoutError]

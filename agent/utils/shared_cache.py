@@ -10,10 +10,10 @@ An item older than ``ttl_seconds`` is still served while one background
 refresh replaces it in both the Store and this worker's front cache; one older
 than ``max_stale_seconds`` is a miss, so the caller waits for the loader.
 
-This sits on the agent's critical path. A Store read that fails, or returns
-an item ``load`` cannot decode, falls back to the loader; a Store write that
-fails still returns the value already computed. Every such failure is
-logged, never raised.
+This sits on the agent's critical path. A Store read that fails or stalls, or
+returns an item ``load`` cannot decode, falls back to the loader; a Store write
+that fails or stalls still returns the value already computed. Every such
+failure is logged, never raised.
 """
 
 import asyncio
@@ -27,6 +27,10 @@ from agent.store import get_value, put_value
 from agent.utils import ttl_cache
 
 logger = logging.getLogger(__name__)
+
+# Store round trips sit on the critical path; past this long a slow Store is
+# treated like a failing one.
+_STORE_TIMEOUT_SECONDS = 2.0
 
 _REFRESH_TASKS: dict[tuple[str, int], asyncio.Task[None]] = {}
 
@@ -65,7 +69,8 @@ async def cached[T](
 
     async def _write(value: T) -> None:
         try:
-            await put_value(namespace, item_key, {"stored_at": _now(), "value": dump(value)})
+            async with asyncio.timeout(_STORE_TIMEOUT_SECONDS):
+                await put_value(namespace, item_key, {"stored_at": _now(), "value": dump(value)})
         except Exception:
             # On the critical path: a Store outage must not fail a call that
             # already has a value to return.
@@ -93,7 +98,8 @@ async def cached[T](
 
     async def _resolve() -> T:
         try:
-            item = await get_value(namespace, item_key)
+            async with asyncio.timeout(_STORE_TIMEOUT_SECONDS):
+                item = await get_value(namespace, item_key)
         except Exception:
             # On the critical path: a Store outage falls back to the loader.
             logger.warning("Shared cache store read failed", exc_info=True, extra=log_extra)
