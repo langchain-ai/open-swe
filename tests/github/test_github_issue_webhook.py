@@ -489,6 +489,7 @@ async def test_github_webhook_wakes_agent_on_untagged_activity_on_its_pr(
         owner="langchain-ai",
         repo="open-swe",
         number=1244,
+        opening_head_sha="head-sha",
         threads=[ThreadLink(thread_id="agent-thread", source=AGENT_OPENED_LINK_SOURCE)],
     ).save()
 
@@ -501,8 +502,13 @@ async def test_github_webhook_wakes_agent_on_untagged_activity_on_its_pr(
     assert called == ({"agent_thread_id": "agent-thread"} if accepted else {})
 
 
+@pytest.mark.parametrize(
+    ("source", "opening_head_sha"),
+    [("github_pr_comment", "head-sha"), (AGENT_OPENED_LINK_SOURCE, "")],
+    ids=["commented-only", "linked-not-opened"],
+)
 async def test_github_webhook_ignores_untagged_comment_on_pr_agent_did_not_open(
-    monkeypatch, registry_db
+    monkeypatch, registry_db, source: str, opening_head_sha: str
 ) -> None:
     monkeypatch.setattr(webhook_common, "GITHUB_WEBHOOK_SECRET", _TEST_WEBHOOK_SECRET)
     register_github_logins(monkeypatch, "octocat")
@@ -510,7 +516,8 @@ async def test_github_webhook_ignores_untagged_comment_on_pr_agent_did_not_open(
         owner="langchain-ai",
         repo="open-swe",
         number=1244,
-        threads=[ThreadLink(thread_id="comment-thread", source="github_pr_comment")],
+        opening_head_sha=opening_head_sha,
+        threads=[ThreadLink(thread_id="other-thread", source=source)],
     ).save()
 
     response = await _post_github_webhook(

@@ -215,7 +215,9 @@ class PullRequest(Base):
 
     @property
     def agent_thread_id(self) -> str | None:
-        """The agent thread that opened or updated this PR, primary first."""
+        """The agent thread that created this PR; ``None`` for PRs it only linked or reused."""
+        if not self.opening_head_sha:
+            return None
         return next(
             (link.thread_id for link in self.threads if link.source == AGENT_OPENED_LINK_SOURCE),
             None,

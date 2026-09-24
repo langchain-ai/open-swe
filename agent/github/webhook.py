@@ -858,6 +858,26 @@ class _UntaggedPrEvent(BaseModel):
     issue: _GitHubPrOrIssue | None = None
 
 
+class _AuthoredItem(BaseModel):
+    user: _GitHubAccount | None = None
+
+
+class _PrAuthorEvent(BaseModel):
+    pull_request: _AuthoredItem | None = None
+    issue: _AuthoredItem | None = None
+
+    @classmethod
+    def author_of(cls, payload: dict[str, Any]) -> str:
+        """The PR author a comment webhook names, or ``""`` when it names none."""
+        try:
+            event = cls.model_validate(payload)
+        except ValidationError:
+            common.logger.info("GitHub comment payload has no readable PR author", exc_info=True)
+            return ""
+        item = event.pull_request or event.issue
+        return item.user.login if item is not None and item.user is not None else ""
+
+
 async def is_accepted_commenter(login: str) -> bool:
     """Only registered Open SWE users may prompt the agent from GitHub comments."""
     return bool(await User.known_logins([login]))
@@ -1067,16 +1087,22 @@ async def process_github_pr_comment(
 
     trusted = await _trusted_authors(github_login, comments=comments)
     prompt = common.build_pr_prompt(comments, pr_url, repo_config=repo_config, trusted=trusted)
-    pr_author = ""
+    pr_author = _PrAuthorEvent.author_of(payload)
     author_logins: set[str] = set()
     if postgres.configured() and repo is not None:
         try:
-            pull_request = await PullRequest.get(repo.owner, repo.name, pr_number)
-            if pull_request is not None:
-                pr_author = pull_request.author
-                for login in {str(item.get("author") or "") for item in comments}:
-                    if login and await pull_request.is_authored_by(login):
-                        author_logins.add(login)
+            stored = await PullRequest.get(repo.owner, repo.name, pr_number)
+            pull_request = (
+                stored
+                if stored is not None and stored.author
+                else PullRequest(
+                    owner=repo.owner, repo=repo.name, number=pr_number, author=pr_author
+                )
+            )
+            pr_author = pull_request.author
+            for login in {str(item.get("author") or "") for item in comments}:
+                if login and await pull_request.is_authored_by(login):
+                    author_logins.add(login)
         except Exception:  # noqa: BLE001
             common.logger.warning(
                 "Failed to resolve the PR author for GitHub comments",
