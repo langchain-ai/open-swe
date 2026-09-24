@@ -1,3 +1,4 @@
+import asyncio
 import json
 import logging
 from collections.abc import Callable, Iterator
@@ -449,6 +450,28 @@ async def test_without_encryption_key_scoped_tokens_are_never_shared(
     assert (first, second) == ("ghs_minted-1", "ghs_minted-2")
     assert fake_store.items == {}
     reads.assert_not_awaited()
+
+
+@pytest.mark.parametrize("operation", ["get_item", "put_item"])
+async def test_slow_store_falls_back_like_a_failing_one(
+    shared_store: FakeStore,
+    mints: list[dict[str, object]],
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    operation: str,
+) -> None:
+    async def hang(*_args: object) -> NoReturn:
+        await asyncio.Event().wait()
+        raise AssertionError("unreachable")
+
+    monkeypatch.setattr(shared_store, operation, hang)
+    monkeypatch.setattr(github_app, "_STORE_TIMEOUT_SECONDS", 0.01)
+
+    async with asyncio.timeout(1):  # a lookup a stalled Store can hold up hangs here
+        token = await github_app.get_github_app_installation_token(repository_ids=[11])
+
+    assert token == "ghs_minted-1"
+    assert len(_warnings(caplog)) == 1
 
 
 async def test_store_outage_falls_back_to_minting_without_logging_the_token(

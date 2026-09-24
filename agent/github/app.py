@@ -1,5 +1,6 @@
 """GitHub App installation token generation."""
 
+import asyncio
 import hashlib
 import json
 import logging
@@ -40,6 +41,9 @@ ScopeKey = tuple[str, tuple[int, ...], tuple[str, ...], PermissionKey]
 # workers through the Store, encrypted; the installation-wide token never
 # leaves the process.
 _TOKEN_CACHE: dict[ScopeKey, tuple[str, str | None, datetime]] = {}
+# Shared-token Store round trips sit on the critical path; past this long a slow
+# Store is treated like a failing one.
+_STORE_TIMEOUT_SECONDS = 2.0
 
 
 class _SharedTokenPayload(BaseModel):
@@ -136,7 +140,8 @@ async def _read_shared_token(key: ScopeKey, *, now: datetime) -> _SharedTokenPay
     store_key = _shared_token_key(key)
     log_extra = {"installation_id": key[0], "store_key": store_key}
     try:
-        record = await _SHARED_TOKENS.get(store_key)
+        async with asyncio.timeout(_STORE_TIMEOUT_SECONDS):
+            record = await _SHARED_TOKENS.get(store_key)
         if record is None:
             return None
         decrypted = decrypt_token(record.encrypted_payload)
@@ -144,8 +149,8 @@ async def _read_shared_token(key: ScopeKey, *, now: datetime) -> _SharedTokenPay
             return None  # decrypt_token has logged why
         payload = _SharedTokenPayload.model_validate_json(decrypted)
     except Exception:
-        # On the critical path: a failing Store or an unreadable record falls
-        # back to minting, and the mint's write-through replaces the record.
+        # On the critical path: a slow or failing Store, or an unreadable record,
+        # falls back to minting, and the mint's write-through replaces the record.
         logger.warning("Shared GitHub App token read failed", extra=log_extra, exc_info=True)
         return None
     if payload.store_key != store_key:
@@ -167,10 +172,11 @@ async def _write_shared_token(
             expires_at=expires_at,
             good_until=good_until,
         )
-        await _SHARED_TOKENS.put(store_key, record)
+        async with asyncio.timeout(_STORE_TIMEOUT_SECONDS):
+            await _SHARED_TOKENS.put(store_key, record)
     except Exception:
-        # On the critical path: the caller still gets the token it just minted,
-        # and other workers mint their own.
+        # On the critical path: after a slow or failing write the caller still
+        # gets the token it just minted, and other workers mint their own.
         logger.warning(
             "Shared GitHub App token write failed",
             extra={"installation_id": key[0], "store_key": store_key},
