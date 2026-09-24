@@ -1031,6 +1031,16 @@ export function useResolveAgentThread() {
   })
 }
 
+/** How a thread list page was requested: by keyset cursor, or by offset. */
+export type ThreadsPageParam = Pick<ThreadsPageParams, "cursor" | "offset">
+
+export function nextThreadsPageParam(
+  page: ThreadsPage
+): ThreadsPageParam | undefined {
+  if (page.nextCursor) return { cursor: page.nextCursor }
+  return page.hasMore ? { offset: page.offset + page.items.length } : undefined
+}
+
 export function useInfiniteThreadsPages(
   params: Omit<ThreadsPageParams, "offset">,
   options: {
@@ -1044,10 +1054,10 @@ export function useInfiniteThreadsPages(
   const pagesQuery = useInfiniteQuery({
     queryKey,
     queryFn: ({ pageParam }) =>
-      agentsApi.listThreadsPage({ ...params, offset: pageParam }),
-    initialPageParam: 0,
-    getNextPageParam: (page) =>
-      page.hasMore ? page.offset + page.items.length : undefined,
+      agentsApi.listThreadsPage({ ...params, ...pageParam }),
+    // Offset 0 keeps the first request identical to the apiWarmup handoff URL.
+    initialPageParam: { offset: 0 } as ThreadsPageParam,
+    getNextPageParam: nextThreadsPageParam,
     enabled: options.enabled,
     ...(options.staleWhileRevalidate
       ? {
@@ -1057,41 +1067,49 @@ export function useInfiniteThreadsPages(
         }
       : {}),
   })
-  const runningOffsets =
-    pagesQuery.data?.pages
-      .filter((page) =>
-        page.items.some((thread) => thread.status === "running")
-      )
-      .map((page) => page.offset) ?? []
-  const pollOffsets =
-    runningOffsets.length > 0 ? [...new Set([0, ...runningOffsets])] : []
+  const loadedPages = pagesQuery.data?.pages ?? []
+  const loadedPageParams = pagesQuery.data?.pageParams ?? []
+  const runningIndexes = loadedPages.flatMap((page, index) =>
+    page.items.some((thread) => thread.status === "running") ? [index] : []
+  )
+  // Each page is refetched with the param it was loaded with, so a cursor page
+  // stays a cursor page.
+  const pollTargets = (
+    runningIndexes.length > 0 ? [...new Set([0, ...runningIndexes])] : []
+  ).flatMap((index) => {
+    const pageParam = loadedPageParams.at(index)
+    return pageParam ? [{ index, pageParam }] : []
+  })
   useQuery({
-    queryKey: ["agent-thread-page-poll", params, pollOffsets],
+    queryKey: ["agent-thread-page-poll", params, pollTargets],
     queryFn: async () => {
       const refreshed = await Promise.all(
-        pollOffsets.map((offset) =>
-          agentsApi.listThreadsPage({ ...params, offset })
+        pollTargets.map(({ pageParam }) =>
+          agentsApi.listThreadsPage({ ...params, ...pageParam })
         )
       )
-      queryClient.setQueryData<InfiniteData<ThreadsPage>>(
+      queryClient.setQueryData<InfiniteData<ThreadsPage, ThreadsPageParam>>(
         agentThreadKeys.infinitePages(params),
         (current) => {
           if (!current) return current
-          const refreshedByOffset = new Map(
-            refreshed.map((page) => [page.offset, page])
+          const refreshedByIndex = new Map(
+            pollTargets.flatMap(({ index }, position) => {
+              const page = refreshed.at(position)
+              return page ? [[index, page] as const] : []
+            })
           )
-          const membershipChanged = refreshed.some((page) => {
-            const previous = current.pages.find(
-              (candidate) => candidate.offset === page.offset
-            )
-            return (
-              !previous ||
-              previous.items.map((thread) => thread.id).join("|") !==
-                page.items.map((thread) => thread.id).join("|")
-            )
-          })
+          const membershipChanged = [...refreshedByIndex].some(
+            ([index, page]) => {
+              const previous = current.pages.at(index)
+              return (
+                !previous ||
+                previous.items.map((thread) => thread.id).join("|") !==
+                  page.items.map((thread) => thread.id).join("|")
+              )
+            }
+          )
           if (membershipChanged) {
-            const firstPage = refreshedByOffset.get(0)
+            const firstPage = refreshedByIndex.get(0)
             return firstPage
               ? {
                   ...current,
@@ -1103,7 +1121,7 @@ export function useInfiniteThreadsPages(
           return {
             ...current,
             pages: current.pages.map(
-              (page) => refreshedByOffset.get(page.offset) ?? page
+              (page, index) => refreshedByIndex.get(index) ?? page
             ),
           }
         }
@@ -1113,7 +1131,7 @@ export function useInfiniteThreadsPages(
     enabled: Boolean(
       options.enabled !== false &&
       options.pollWhileRunning &&
-      pollOffsets.length > 0
+      pollTargets.length > 0
     ),
     refetchInterval: 2000,
   })

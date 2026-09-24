@@ -446,6 +446,56 @@ describe("sidebar queries", () => {
     )
   })
 
+  it("pages by cursor and polls a running cursor page by its cursor", async () => {
+    const listThreads = vi
+      .spyOn(agentsApi, "listThreadsPage")
+      .mockImplementation(async (request) =>
+        request?.cursor === "after-first"
+          ? {
+              items: [{ id: "second", status: "running" } as AgentThread],
+              limit: SIDEBAR_PAGE_SIZE,
+              offset: 0,
+              hasMore: false,
+              nextCursor: null,
+            }
+          : {
+              items: [{ id: "first", status: "idle" } as AgentThread],
+              limit: SIDEBAR_PAGE_SIZE,
+              offset: 0,
+              hasMore: true,
+              nextCursor: "after-first",
+            }
+      )
+    const client = testClient()
+    const { result } = renderHook(
+      () => useSidebarRepoThreads({ repoFullName: "langchain-ai/cursor" }),
+      {
+        wrapper: ({ children }) => (
+          <QueryClientProvider client={client}>{children}</QueryClientProvider>
+        ),
+      }
+    )
+
+    await waitFor(() => expect(result.current.items[0]?.id).toBe("first"))
+    act(() => result.current.fetchNextPage())
+    await waitFor(() =>
+      expect(result.current.items.map((thread) => thread.id)).toEqual([
+        "first",
+        "second",
+      ])
+    )
+
+    const cursorCalls = () =>
+      listThreads.mock.calls.filter(
+        ([request]) => request?.cursor === "after-first"
+      )
+    await waitFor(() => expect(cursorCalls().length).toBeGreaterThan(1))
+    expect(cursorCalls().every(([request]) => request?.offset == null)).toBe(
+      true
+    )
+    expect(result.current.hasMore).toBe(false)
+  })
+
   it("fetches the active thread when it is outside the loaded pages", async () => {
     const opened = { id: "opened-thread", resolved: false } as AgentThread
     const getThread = vi.spyOn(agentsApi, "getThread").mockResolvedValue(opened)

@@ -20,6 +20,7 @@ from agent.dashboard.workspace_settings import (
     upsert_instance_settings,
     upsert_workspace_overrides,
 )
+from agent.database import postgres
 from agent.threads import diffs as thread_diffs
 from agent.threads import handlers
 from agent.threads import listing as thread_listing
@@ -27,6 +28,7 @@ from agent.threads import proxy as thread_proxy
 from agent.threads import routes as thread_routes
 from agent.threads import runs as thread_runs
 from agent.threads import summary as thread_summary
+from agent.threads.index_query import ThreadIndexPage
 from agent.transcript.engine import AppendResult
 from agent.workspaces.store import WORKSPACES, WorkspaceCreate
 from tests.conftest import FakeStore, patch_thread_module
@@ -3306,3 +3308,36 @@ async def test_steer_running_thread_records_and_delivers_the_follow_up(monkeypat
     assert command.event.sender.login == "teammate"
     assert "also check the tests" in command.event.text
     assert updates[-1]["participant_logins"] == {"teammate": True}
+
+
+async def test_threads_page_rejects_a_malformed_cursor() -> None:
+    with pytest.raises(HTTPException) as exc_info:
+        await thread_routes.api_list_threads_page(cursor="not a cursor", session={"sub": "octocat"})
+
+    assert exc_info.value.status_code == 400
+    assert exc_info.value.detail == "invalid_thread_cursor"
+
+
+@pytest.mark.parametrize("index_reads", [False, True])
+async def test_threads_page_reads_the_index_only_behind_the_flag(
+    monkeypatch, index_reads: bool
+) -> None:
+    monkeypatch.setenv("THREAD_INDEX_READS", "true" if index_reads else "false")
+    monkeypatch.setattr(postgres, "configured", lambda: True)
+    search = AsyncMock(return_value=[])
+    index_page = AsyncMock(
+        return_value=ThreadIndexPage(threads=[], has_more=False, next_cursor=None)
+    )
+    patch_thread_module(
+        monkeypatch,
+        "langgraph_client",
+        lambda: SimpleNamespace(threads=SimpleNamespace(search=search)),
+    )
+    patch_thread_module(monkeypatch, "list_thread_index_page", index_page)
+
+    result = await thread_routes.api_list_threads_page(session={"sub": "octocat"})
+
+    assert result["items"] == []
+    assert result["nextCursor"] is None
+    assert index_page.await_count == (1 if index_reads else 0)
+    assert search.called is not index_reads

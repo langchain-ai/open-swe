@@ -877,6 +877,34 @@ class WorkspaceStore:
                 .where(Repository.key == key)
             )
 
+    async def owners_of_repos(self, full_names: Sequence[str]) -> dict[str, str]:
+        """:meth:`owner_of_repo` for many repositories in one query, keyed by lowercased name.
+
+        Repositories no workspace owns, or whose name does not normalize, are absent.
+        """
+        keys: dict[str, str] = {}
+        for full_name in full_names:
+            try:
+                keys[normalize_repo_full_name(full_name).lower()] = full_name.lower()
+            except ValueError:
+                logger.debug(
+                    "Repository name cannot be normalized; treating it as unowned",
+                    extra={"repository": full_name},
+                    exc_info=True,
+                )
+        if not keys:
+            return {}
+        async with postgres.session() as session:
+            rows = await session.execute(
+                select(Repository.key, WorkspaceRow.slug)
+                .join(
+                    WorkspaceRepositoryRow, WorkspaceRepositoryRow.workspace_id == WorkspaceRow.id
+                )
+                .join(Repository, Repository.id == WorkspaceRepositoryRow.repository_id)
+                .where(Repository.key.in_(keys))
+            )
+            return {keys[key]: slug for key, slug in rows.tuples()}
+
     async def thread_starter_of_repo(self, full_name: str) -> str | None:
         """The slug of the workspace this repository may start threads in, if any.
 

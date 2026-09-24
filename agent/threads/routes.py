@@ -36,6 +36,7 @@ from agent.threads.handlers import (
     resolve_dashboard_thread,
     send_dashboard_message,
 )
+from agent.threads.index_query import decode_thread_cursor
 from agent.threads.listing import (
     list_dashboard_pinned_threads,
     list_dashboard_thread_repos,
@@ -158,10 +159,14 @@ async def api_list_threads_page(
     repo: str | None = None,
     ownerless: bool = False,
     sort_by: Literal["created_at", "updated_at"] = "updated_at",
+    cursor: str | None = None,
     session: dict[str, Any] = SESSION_DEP,
 ) -> dict[str, Any]:
     if all and not session_is_admin(session):
         raise HTTPException(403, "admin only")
+    thread_cursor = decode_thread_cursor(cursor) if cursor else None
+    if cursor and thread_cursor is None:
+        raise HTTPException(400, "invalid_thread_cursor")
     if repo and ownerless:
         raise HTTPException(400, "repo and ownerless are mutually exclusive")
     if repo:
@@ -185,6 +190,7 @@ async def api_list_threads_page(
         repo=repo,
         ownerless=ownerless,
         sort_by=sort_by,
+        cursor=thread_cursor,
     )
 
 

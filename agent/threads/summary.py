@@ -1,7 +1,7 @@
 """Thread metadata readers and the summary shape the dashboard renders."""
 
 import logging
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
 from typing import Any, Literal
 from urllib.parse import urlencode
@@ -371,12 +371,32 @@ async def _apply_stored_diff_stats(pull_requests: list[dict[str, Any]]) -> None:
         pr["diffStats"] = stored.get((pr["repoFullName"].lower(), pr["number"]), pr["diffStats"])
 
 
+async def apply_stored_diff_stats(summaries: Sequence[JsonObject]) -> None:
+    """Stored diff stats for every summary built with ``stored_diff_stats=False``, in one query."""
+    pull_requests = [pr for summary in summaries for pr in summary.get("pullRequests", ())]
+    if not pull_requests:
+        return
+    await _apply_stored_diff_stats(pull_requests)
+    for summary in summaries:
+        if pull_requests := summary.get("pullRequests"):
+            summary["diffStats"] = pull_requests[-1]["diffStats"]
+
+
 async def _thread_summary(
     thread: ThreadLike,
     *,
     latest_run_status: str | None = None,
     latest_run_id: str | None = None,
+    agent_status: str | None = None,
+    stored_diff_stats: bool = True,
 ) -> dict[str, Any]:
+    """The dashboard's summary of a thread.
+
+    ``agent_status`` is an already-derived status (the thread index row's) that
+    takes precedence over the one derived from the run status. With
+    ``stored_diff_stats=False`` the caller applies them for a whole page with
+    :func:`apply_stored_diff_stats`.
+    """
     metadata = thread_metadata(thread)
     owner, name, full_name = _metadata_repo(metadata)
     created_at = metadata.get("created_at_ms")
@@ -394,7 +414,7 @@ async def _thread_summary(
     run_status = latest_run_status or (
         metadata_run_status if isinstance(metadata_run_status, str) else None
     )
-    status = run_status_to_agent_status(thread_status, run_status)
+    status = agent_status or run_status_to_agent_status(thread_status, run_status)
 
     pr_number = metadata.get("pr_number")
     pr_url = metadata.get("pr_url")
@@ -499,7 +519,8 @@ async def _thread_summary(
         if legacy_pr:
             pull_requests.append(legacy_pr)
     if pull_requests:
-        await _apply_stored_diff_stats(pull_requests)
+        if stored_diff_stats:
+            await _apply_stored_diff_stats(pull_requests)
         latest_pr = pull_requests[-1]
         summary["pullRequests"] = pull_requests
         summary["pr"] = {

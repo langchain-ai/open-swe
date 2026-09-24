@@ -18,6 +18,7 @@ there would drop it for good. Everything else — :func:`workspace_for_repo`,
 """
 
 import logging
+from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Literal
 
@@ -89,6 +90,23 @@ async def workspace_for_repo(owner: str, name: str) -> str | None:
             exc_info=True,
         )
         return None
+
+
+async def workspaces_for_repos(full_names: Sequence[str]) -> dict[str, str]:
+    """:func:`workspace_for_repo` for many repositories, keyed by lowercased ``owner/name``.
+
+    Unowned repositories are absent. Fails soft the same way: a failed lookup
+    reads as every repository unowned, logged at error.
+    """
+    try:
+        return await WORKSPACES.owners_of_repos(full_names)
+    except Exception:
+        logger.error(
+            "workspace lookup failed for repositories; treating them as unowned",
+            extra={"repository_count": len(full_names)},
+            exc_info=True,
+        )
+        return {}
 
 
 async def workspace_for_slack_channel(channel_id: str) -> str | None:

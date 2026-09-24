@@ -112,6 +112,8 @@ export type ThreadSortBy = "created_at" | "updated_at"
 export interface ThreadsPageParams {
   limit?: number
   offset?: number
+  /** Keyset cursor from a previous page's `nextCursor`; takes precedence over `offset`. */
+  cursor?: string
   all?: boolean
   resolved?: boolean
   viewed?: boolean
@@ -131,6 +133,8 @@ export interface ThreadsPage {
   limit: number
   offset: number
   hasMore?: boolean
+  /** Present while `hasMore`, when the server pages by keyset cursor. */
+  nextCursor?: string | null
 }
 
 export interface SidebarRepo {
@@ -217,6 +221,7 @@ function buildThreadsPageQuery(params: ThreadsPageParams): string {
   const search = new URLSearchParams()
   if (params.limit != null) search.set("limit", String(params.limit))
   if (params.offset != null) search.set("offset", String(params.offset))
+  if (params.cursor) search.set("cursor", params.cursor)
   if (params.all != null) search.set("all", String(params.all))
   if (params.resolved != null) search.set("resolved", String(params.resolved))
   if (params.viewed != null) search.set("viewed", String(params.viewed))

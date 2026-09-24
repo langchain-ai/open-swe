@@ -14,6 +14,15 @@ from pydantic import BaseModel
 
 from agent.review.session import ReviewSessionMetadata
 from agent.review.walkthrough import Walkthrough
+from agent.threads.index_query import (
+    IndexedThread,
+    ThreadCursor,
+    ThreadListFilters,
+    list_thread_index_page,
+    list_thread_index_repos,
+    load_thread_index_threads,
+    thread_index_reads_enabled,
+)
 from agent.threads.pins import list_thread_pin_ids, pin_thread, unpin_thread
 from agent.threads.summary import (
     _SURFACED_SOURCES,
@@ -29,6 +38,7 @@ from agent.threads.summary import (
     _thread_timestamp_ms,
     _thread_updated_ms,
     _ThreadSortBy,
+    apply_stored_diff_stats,
     assert_thread_readable,
     thread_is_readable,
     thread_is_unlisted,
@@ -37,7 +47,7 @@ from agent.threads.summary import (
 from agent.utils.json_types import JsonObject, ThreadLike, as_thread_dict
 from agent.utils.thread_ops import langgraph_client, update_thread_metadata
 from agent.utils.thread_participants import participant_search_filters
-from agent.workspaces.routing import workspace_for_repo
+from agent.workspaces.routing import workspace_for_repo, workspaces_for_repos
 from agent.workspaces.store import DEFAULT_WORKSPACE_SLUG
 
 _THREADS_SEARCH_PAGE = 50
@@ -432,6 +442,55 @@ async def list_dashboard_threads(
     return page["items"]
 
 
+async def _index_summaries(
+    rows: Sequence[IndexedThread],
+    login: str,
+    email: str | None,
+    *,
+    expect_readable: bool,
+) -> list[JsonObject]:
+    """Summaries of index rows, with no LangGraph call and one diff stats query.
+
+    Rows ``thread_is_readable`` rejects are dropped. With ``expect_readable`` the
+    SQL already applied the same predicate, so a rejection means the two disagree.
+    """
+    readable: list[IndexedThread] = []
+    for row in rows:
+        if thread_is_readable(_thread_metadata(row.thread), login, email):
+            readable.append(row)
+        elif expect_readable:
+            logger.warning(
+                "Thread index returned a thread the viewer cannot read",
+                extra={"thread_id": row.cursor.thread_id},
+            )
+    summaries = list(
+        await asyncio.gather(
+            *(
+                _thread_summary(
+                    row.thread,
+                    latest_run_id=row.latest_run_id,
+                    agent_status=row.status,
+                    stored_diff_stats=False,
+                )
+                for row in readable
+            )
+        )
+    )
+    await apply_stored_diff_stats(summaries)
+    return summaries
+
+
+async def _pinned_index_summaries(login: str, email: str | None) -> list[JsonObject]:
+    pin_ids = await list_thread_pin_ids(login)
+    rows = {row.cursor.thread_id: row for row in await load_thread_index_threads(pin_ids)}
+    return await _index_summaries(
+        [rows[thread_id] for thread_id in pin_ids if thread_id in rows],
+        login,
+        email,
+        expect_readable=False,
+    )
+
+
 async def _pinned_thread_summaries(
     client: LangGraphClient,
     login: str,
@@ -465,6 +524,8 @@ async def list_dashboard_pinned_threads(
     *,
     email: str | None = None,
 ) -> list[dict[str, Any]]:
+    if thread_index_reads_enabled():
+        return await _pinned_index_summaries(login, email)
     return await _pinned_thread_summaries(langgraph_client(), login, email)
 
 
@@ -482,6 +543,16 @@ async def list_dashboard_thread_repos(
     nest repositories under their workspace; an unassigned repository belongs
     to ``default``.
     """
+    if thread_index_reads_enabled():
+        return await _index_thread_repos(
+            ThreadListFilters(
+                login=login,
+                email=email,
+                include_all=include_all,
+                resolved=None if include_resolved else False,
+                scope="all" if include_automations else "interactive",
+            )
+        )
     candidates = await _collect_thread_candidates(
         langgraph_client(),
         _participant_search_filters(login, email=email, include_all=include_all),
@@ -508,6 +579,20 @@ async def list_dashboard_thread_repos(
         owner, _, repo_name = str(entry["repoFullName"]).partition("/")
         entry["workspace"] = await workspace_for_repo(owner, repo_name) or DEFAULT_WORKSPACE_SLUG
     return sorted(repos.values(), key=lambda entry: entry["updatedAt"], reverse=True)
+
+
+async def _index_thread_repos(filters: ThreadListFilters) -> list[JsonObject]:
+    repos = await list_thread_index_repos(filters)
+    workspaces = await workspaces_for_repos([repo.repo_full_name for repo in repos])
+    return [
+        {
+            "repoFullName": repo.repo_full_name,
+            "name": repo.name,
+            "updatedAt": repo.updated_at_ms,
+            "workspace": workspaces.get(repo.repo_full_name.lower(), DEFAULT_WORKSPACE_SLUG),
+        }
+        for repo in repos
+    ]
 
 
 async def pin_dashboard_thread(thread_id: str, login: str) -> None:
@@ -547,7 +632,48 @@ async def list_dashboard_threads_page(
     surfaced_only: bool = False,
     admin_threads: bool | None = None,
     sort_by: _ThreadSortBy = "updated_at",
+    cursor: ThreadCursor | None = None,
 ) -> dict[str, Any]:
+    """One page of the thread list.
+
+    With ``THREAD_INDEX_READS`` it is one ``thread_index`` query, keyset-paged by
+    ``cursor`` (``offset`` still works without one); otherwise LangGraph is
+    searched and ``cursor`` is ignored.
+    """
+    safe_offset = max(offset, 0)
+    safe_limit = min(max(limit, 1), 100)
+    if thread_index_reads_enabled():
+        page = await list_thread_index_page(
+            ThreadListFilters(
+                login=login,
+                email=email,
+                include_all=include_all,
+                resolved=resolved,
+                viewed=viewed,
+                source=source,
+                status=status,
+                query=query,
+                scope=scope,
+                automation_id=automation_id,
+                repo=repo,
+                ownerless=ownerless,
+                filter_participant_login=filter_participant_login,
+                include_private=include_private,
+                surfaced_only=surfaced_only,
+                admin_threads=admin_threads,
+                sort_by=sort_by,
+                limit=safe_limit,
+                offset=safe_offset,
+                cursor=cursor,
+            )
+        )
+        return {
+            "items": await _index_summaries(page.threads, login, email, expect_readable=True),
+            "limit": safe_limit,
+            "offset": safe_offset,
+            "hasMore": page.has_more,
+            "nextCursor": page.next_cursor,
+        }
     client = langgraph_client()
     search_login = filter_participant_login or login
     search_email = email if search_login == login else None
@@ -556,8 +682,6 @@ async def list_dashboard_threads_page(
         if scope == "automation" and filter_participant_login is None
         else _participant_search_filters(search_login, email=search_email, include_all=include_all)
     )
-    safe_offset = max(offset, 0)
-    safe_limit = min(max(limit, 1), 100)
     summary_filters = viewed is not None or status is not None
     target = None if summary_filters else safe_offset + safe_limit + 1
 
@@ -609,4 +733,10 @@ async def list_dashboard_threads_page(
         )
         has_more = len(candidates) > safe_offset + safe_limit
 
-    return {"items": items, "limit": safe_limit, "offset": safe_offset, "hasMore": has_more}
+    return {
+        "items": items,
+        "limit": safe_limit,
+        "offset": safe_offset,
+        "hasMore": has_more,
+        "nextCursor": None,
+    }
