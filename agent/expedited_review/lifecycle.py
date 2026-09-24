@@ -233,7 +233,12 @@ async def _repost(
         if kept:
             row.slack_message_ts = message_ts
             row.slack_broadcast = broadcast
-    await delete_slack_message(location[0], old_ts if kept else message_ts)
+    stray = old_ts if kept else message_ts
+    if not await delete_slack_message(location[0], stray):
+        logger.warning(
+            "Left a stray expedited review card in Slack",
+            extra={"approval_id": str(approval.id), "slack_message_ts": stray},
+        )
     return kept
 
 

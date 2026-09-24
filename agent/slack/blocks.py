@@ -18,6 +18,7 @@ from typing import Any, Literal, NotRequired, TypedDict, cast
 
 SECTION_TEXT_MAX_CHARS = 3000
 BUTTON_TEXT_MAX_CHARS = 75
+OPTION_TEXT_MAX_CHARS = 75
 ButtonStyle = Literal["primary", "danger"]
 
 
@@ -160,7 +161,7 @@ def checkbox(text: str, *, action_id: str, value: str) -> CheckboxesElement:
     return {
         "type": "checkboxes",
         "action_id": action_id,
-        "options": [{"text": mrkdwn(text), "value": value}],
+        "options": [{"text": plain_text(text[:OPTION_TEXT_MAX_CHARS]), "value": value}],
     }
 
 

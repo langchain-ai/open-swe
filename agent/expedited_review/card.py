@@ -151,7 +151,7 @@ def _status(approval: ExpeditedApproval, author: str, channel: str | None) -> li
             blocks.append(
                 actions(
                     checkbox(
-                        f"Also send to {escape(channel)}",
+                        f"Also send to {channel}",
                         action_id=BROADCAST_CHECKBOX_ACTION_ID,
                         value=BROADCAST_OPTION,
                     )
