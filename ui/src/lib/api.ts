@@ -772,6 +772,24 @@ export interface ReviewCommentCreate {
 
 export type PullRequestReviewEvent = "APPROVE" | "REQUEST_CHANGES" | "COMMENT"
 
+export interface PendingReviewComment {
+  id: number
+  node_id: string
+  path: string
+  line: number | null
+  start_line: number | null
+  side: "LEFT" | "RIGHT" | null
+  start_side: "LEFT" | "RIGHT" | null
+  body: string
+}
+
+/** The viewer's unsubmitted GitHub review; its comments post together on submit. */
+export interface PendingReview {
+  id: number
+  node_id: string
+  comments: Array<PendingReviewComment>
+}
+
 export interface SubmittedReview {
   id: number
   html_url: string
@@ -1613,6 +1631,46 @@ export const api = {
       `/reviews/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}/re-review`,
       { method: "POST" }
     ),
+  getPendingReview: (owner: string, repo: string, number: number) =>
+    request<PendingReview | null>(
+      `/reviews/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}/pending-review`
+    ),
+  addPendingReviewComment: (
+    owner: string,
+    repo: string,
+    number: number,
+    comment: ReviewCommentCreate
+  ) =>
+    request<PendingReview>(
+      `/reviews/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}/pending-review/comments`,
+      { method: "POST", body: JSON.stringify(comment) }
+    ),
+  updatePendingReviewComment: (
+    owner: string,
+    repo: string,
+    number: number,
+    commentId: number,
+    body: string
+  ) =>
+    request<PendingReview>(
+      `/reviews/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}/pending-review/comments/${commentId}`,
+      { method: "PATCH", body: JSON.stringify({ body }) }
+    ),
+  deletePendingReviewComment: (
+    owner: string,
+    repo: string,
+    number: number,
+    commentId: number
+  ) =>
+    request<PendingReview | null>(
+      `/reviews/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}/pending-review/comments/${commentId}`,
+      { method: "DELETE" }
+    ),
+  discardPendingReview: (owner: string, repo: string, number: number) =>
+    request<{ discarded: boolean }>(
+      `/reviews/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}/pending-review`,
+      { method: "DELETE" }
+    ),
   submitPullRequestReview: (
     owner: string,
     repo: string,
@@ -1622,16 +1680,6 @@ export const api = {
     request<SubmittedReview>(
       `/reviews/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}/submit-review`,
       { method: "POST", body: JSON.stringify(review) }
-    ),
-  createReviewComment: (
-    owner: string,
-    repo: string,
-    number: number,
-    body: ReviewCommentCreate
-  ) =>
-    request<ReviewCommentResult>(
-      `/reviews/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}/comments`,
-      { method: "POST", body: JSON.stringify(body) }
     ),
   listReviewComments: (owner: string, repo: string, number: number) =>
     request<ReviewCommentsPayload>(

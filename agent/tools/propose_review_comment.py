@@ -43,5 +43,8 @@ def _propose(
         proposed=True,
         range=checked,
         body=text,
-        note="Shown to the user as a draft. Nothing is posted until they confirm it.",
+        note=(
+            "Shown to the user as a draft. If they accept it, it joins their pending"
+            " GitHub review, which posts only when they submit the review."
+        ),
     )

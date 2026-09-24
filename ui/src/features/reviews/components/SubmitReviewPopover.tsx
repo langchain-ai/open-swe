@@ -13,6 +13,7 @@ import {
 } from "@/components/ui/popover"
 import { Textarea } from "@/components/ui/textarea"
 import { api } from "@/lib/api"
+import { usePendingReview } from "@/features/reviews/lib/usePendingReview"
 
 const VERDICTS: ReadonlyArray<{
   event: PullRequestReviewEvent
@@ -47,10 +48,12 @@ export function SubmitReviewPopover({
   number: number
 }) {
   const queryClient = useQueryClient()
+  const pending = usePendingReview(owner, repo, number)
+  const pendingCount = pending.comments.length
   const [open, setOpen] = useState(false)
   const [event, setEvent] = useState<PullRequestReviewEvent>("COMMENT")
   const [body, setBody] = useState("")
-  const needsBody = event !== "APPROVE"
+  const needsBody = event !== "APPROVE" && pendingCount === 0
   const submit = useMutation({
     mutationFn: () =>
       api.submitPullRequestReview(owner, repo, number, {
@@ -71,6 +74,7 @@ export function SubmitReviewPopover({
       void queryClient.invalidateQueries({
         queryKey: ["review", owner, repo, number],
       })
+      void pending.invalidate()
     },
   })
   const canSubmit = !submit.isPending && (!needsBody || body.trim().length > 0)
@@ -86,6 +90,14 @@ export function SubmitReviewPopover({
         render={
           <Button size="sm">
             Review changes
+            {pendingCount > 0 && (
+              <span
+                aria-label={`${pendingCount} pending comments`}
+                className="rounded-full bg-primary-foreground/20 px-1.5 text-[10px] tabular-nums"
+              >
+                {pendingCount}
+              </span>
+            )}
             <CaretDownIcon />
           </Button>
         }
@@ -98,6 +110,12 @@ export function SubmitReviewPopover({
           }}
         >
           <PopoverTitle className="text-xs">Finish your review</PopoverTitle>
+          {pendingCount > 0 && (
+            <p className="mt-1 text-xs text-muted-foreground">
+              {pendingCount} pending comment{pendingCount === 1 ? "" : "s"} will
+              be submitted with this review.
+            </p>
+          )}
           <Textarea
             aria-label="Review summary"
             value={body}
@@ -147,6 +165,18 @@ export function SubmitReviewPopover({
             </p>
           )}
           <div className="mt-3 flex items-center justify-end gap-2">
+            {pending.review && (
+              <Button
+                type="button"
+                size="sm"
+                variant="ghost"
+                className="mr-auto text-destructive"
+                disabled={submit.isPending || pending.discard.isPending}
+                onClick={() => pending.discard.mutate()}
+              >
+                Discard review
+              </Button>
+            )}
             <Button
               type="button"
               size="sm"

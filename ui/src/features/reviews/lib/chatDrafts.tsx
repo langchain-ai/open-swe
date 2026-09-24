@@ -14,6 +14,7 @@ import type {
 
 export type DraftOutcome =
   | { state: "posted"; url: string }
+  | { state: "added" }
   | { state: "discarded" }
 
 export interface CommentDraft {

@@ -64,6 +64,7 @@ import type {
   ReviewDetail,
   ReviewDiffFile,
   ReviewFinding,
+  PendingReviewComment,
   ReviewUserRef,
   ScoutProgress,
 } from "@/lib/api"
@@ -79,6 +80,9 @@ import type {
 import { useChatDrafts } from "@/features/reviews/lib/chatDrafts"
 import { ProposedCommentCard } from "@/features/reviews/components/ProposedCommentCard"
 import { ReviewPageActions } from "@/features/reviews/components/ReviewPageActions"
+import { PendingReviewCommentCard } from "@/features/reviews/components/PendingReviewCommentCard"
+import { ReviewConversation } from "@/features/reviews/components/ReviewConversation"
+import { usePendingReview } from "@/features/reviews/lib/usePendingReview"
 import type { DiffStyle } from "@/features/agents/utils/diffUtils"
 import { Markdown } from "@/features/agents/components/chat/Markdown"
 import { DiffWrapToggle } from "@/features/agents/components/DiffWrapToggle"
@@ -129,6 +133,7 @@ type ReviewAnnotation =
   | { kind: "draftComment"; path: string; range: SelectedLineRange }
   | { kind: "comment"; comment: PrReviewComment }
   | { kind: "chatDraft"; draft: ProposedComment }
+  | { kind: "pending"; comment: PendingReviewComment }
 
 const REVIEW_VIEW_STORAGE_KEY = "open-swe.review.view"
 const REVIEW_DIFF_STYLE_STORAGE_KEY = "open-swe.review.diffStyle"
@@ -577,6 +582,7 @@ function useExpandedFinding(): ExpandedFindingContextValue {
 
 const NO_FINDINGS: Array<ReviewFinding> = []
 const NO_CHAT_DRAFTS: ReadonlyArray<ProposedComment> = []
+const NO_PENDING_COMMENTS: ReadonlyArray<PendingReviewComment> = []
 const ignoreSection = (_path: string, _node: HTMLDivElement | null) => {}
 
 /** Scroll to a line in whichever registered slice of the file renders it. */
@@ -801,6 +807,21 @@ function ReviewBodyInner({
     persistRead(next)
   }, [detail.findings, persistRead])
 
+  const pendingReview = usePendingReview(
+    detail.owner,
+    detail.repo,
+    detail.number
+  )
+  const pendingByFile = useMemo(() => {
+    const byFile = new Map<string, Array<PendingReviewComment>>()
+    for (const comment of pendingReview.comments) {
+      if (comment.line === null) continue
+      const list = byFile.get(comment.path) ?? []
+      list.push(comment)
+      byFile.set(comment.path, list)
+    }
+    return byFile
+  }, [pendingReview.comments])
   const chatDraftStore = useChatDrafts()
   const chatDraftsByFile = useMemo(() => {
     const byFile = new Map<string, Array<ProposedComment>>()
@@ -1340,6 +1361,11 @@ function ReviewBodyInner({
             ? NO_CHAT_DRAFTS
             : (chatDraftsByFile.get(file.path) ?? NO_CHAT_DRAFTS)
         }
+        pendingComments={
+          embedded
+            ? NO_PENDING_COMMENTS
+            : (pendingByFile.get(file.path) ?? NO_PENDING_COMMENTS)
+        }
         selectedLines={selectedLines}
         viewed={viewed.has(file.path)}
         onToggleViewed={toggleViewed}
@@ -1519,6 +1545,16 @@ function ReviewBodyInner({
                   )}
                 </div>
                 <AuthorGuidanceCard points={detail.guidance} className="mt-4" />
+                {!embedded && (
+                  <section className="mt-6" aria-label="Conversation">
+                    <h2 className="mb-2 text-sm font-medium">Conversation</h2>
+                    <ReviewConversation
+                      owner={detail.owner}
+                      repo={detail.repo}
+                      number={detail.number}
+                    />
+                  </section>
+                )}
 
                 <div className="mt-6">
                   <div className="mb-2 flex items-center justify-between gap-3">
@@ -1872,6 +1908,7 @@ const FileDiffCard = memo(function FileDiffCard({
   onUpdateOpenComment,
   onCloseOpenComment,
   chatDrafts,
+  pendingComments,
 }: {
   file: ReviewDiffFile
   /** A walkthrough step's slice of the file; `null` renders the whole diff. */
@@ -1908,6 +1945,8 @@ const FileDiffCard = memo(function FileDiffCard({
   onCloseOpenComment?: () => void
   /** Chat-drafted comments on this file still awaiting the user's decision. */
   chatDrafts: ReadonlyArray<ProposedComment>
+  /** This file's comments in the viewer's pending GitHub review. */
+  pendingComments: ReadonlyArray<PendingReviewComment>
 }) {
   // No chat means no line-selection → "Add to Chat" affordance (embedded view).
   const selectable = Boolean(onAddToChat)
@@ -1969,6 +2008,14 @@ const FileDiffCard = memo(function FileDiffCard({
         metadata: { kind: "chatDraft", draft },
       })
     }
+    for (const comment of pendingComments) {
+      if (comment.line === null) continue
+      extra.push({
+        side: comment.side === "LEFT" ? "deletions" : "additions",
+        lineNumber: comment.line,
+        metadata: { kind: "pending", comment },
+      })
+    }
     return extra.length > 0
       ? [...findingAnnotations, ...extra]
       : findingAnnotations
@@ -1977,6 +2024,7 @@ const FileDiffCard = memo(function FileDiffCard({
     commentDraftRange,
     openComment,
     chatDrafts,
+    pendingComments,
     file.path,
   ])
 
@@ -2078,6 +2126,15 @@ const FileDiffCard = memo(function FileDiffCard({
       const meta = annotation.metadata
       if (meta.kind === "finding")
         return <InlineFinding finding={meta.finding} />
+      if (meta.kind === "pending")
+        return (
+          <PendingReviewCommentCard
+            owner={owner}
+            repo={repo}
+            number={prNumber}
+            comment={meta.comment}
+          />
+        )
       if (meta.kind === "chatDraft")
         return (
           <div className="p-2 font-sans">
@@ -2408,27 +2465,17 @@ function CommentComposer({
   const [value, setValue] = useState("")
   const [mode, setMode] = useState<"write" | "preview">("write")
   const textareaRef = useRef<HTMLTextAreaElement | null>(null)
-  const queryClient = useQueryClient()
+  const pending = usePendingReview(owner, repo, prNumber)
+  const mutation = pending.add
   useEffect(() => {
     textareaRef.current?.focus()
   }, [])
-  const mutation = useMutation({
-    mutationFn: (body: string) =>
-      api.createReviewComment(
-        owner,
-        repo,
-        prNumber,
-        buildCommentPayload(path, range, body)
-      ),
-    onSuccess: () =>
-      queryClient.invalidateQueries({
-        queryKey: ["reviewComments", owner, repo, prNumber],
-      }),
-  })
   const submit = () => {
     const body = value.trim()
     if (!body || mutation.isPending) return
-    mutation.mutate(body)
+    mutation.mutate(buildCommentPayload(path, range, body), {
+      onSuccess: onClose,
+    })
   }
   // Apply a toolbar action to the live textarea selection, then restore the
   // caret/selection on the next frame (after the controlled value re-renders).
@@ -2445,7 +2492,6 @@ function CommentComposer({
       textarea.setSelectionRange(next.start, next.end)
     })
   }
-  const posted = mutation.data
   const tabClass = (active: boolean) =>
     cn(
       "rounded px-2 py-0.5 text-[11px]",
@@ -2472,21 +2518,7 @@ function CommentComposer({
             <XIcon />
           </IconButton>
         </div>
-        {posted ? (
-          <div className="flex items-center gap-2 px-3 py-2.5 text-[11px] text-muted-foreground">
-            <CheckCircleIcon className="size-3.5 text-emerald-500" />
-            Comment posted
-            <a
-              href={posted.html_url}
-              target="_blank"
-              rel="noreferrer"
-              className="inline-flex items-center gap-1 text-foreground hover:underline"
-            >
-              <IoLogoGithub className="size-3" />
-              View on GitHub
-            </a>
-          </div>
-        ) : (
+        {
           <>
             <div className="flex items-center gap-1 border-b border-border px-1.5 py-1">
               <button
@@ -2568,7 +2600,7 @@ function CommentComposer({
                 <p className="mt-1.5 text-[11px] text-destructive">
                   {mutation.error instanceof Error
                     ? mutation.error.message
-                    : "Failed to post comment"}
+                    : "Failed to add the comment"}
                 </p>
               )}
               <div className="mt-2 flex items-center justify-end gap-2">
@@ -2585,12 +2617,12 @@ function CommentComposer({
                   disabled={!value.trim() || mutation.isPending}
                   className="rounded bg-foreground px-2 py-1 text-[11px] font-medium text-background disabled:opacity-50"
                 >
-                  {mutation.isPending ? "Posting…" : "Comment"}
+                  {mutation.isPending ? "Adding…" : "Add review comment"}
                 </button>
               </div>
             </div>
           </>
-        )}
+        }
       </div>
     </div>
   )

@@ -18,7 +18,8 @@ from pydantic import BaseModel, ValidationError
 
 _GITHUB_API = "https://api.github.com"
 
-PR_DIFF_MAX_FILES = 300
+# GitHub lists at most this many files for a pull request or comparison.
+GITHUB_MAX_LISTED_FILES = 3000
 PR_DIFF_MAX_FILE_BYTES = 1_000_000
 PR_DIFF_FETCH_CONCURRENCY = 10
 _FILES_PAGE_SIZE = 100
@@ -73,8 +74,7 @@ async def build_pr_diff_files(
 
     raw_files: list[Any] = []
     page = 1
-    # One page past the cap is enough to know the diff is truncated.
-    while len(raw_files) <= PR_DIFF_MAX_FILES:
+    while True:
         files_response = await client.get(
             f"{_GITHUB_API}/repos/{full_name}/pulls/{pr_number}/files",
             params={"per_page": _FILES_PAGE_SIZE, "page": page},
@@ -85,7 +85,7 @@ async def build_pr_diff_files(
         if not isinstance(batch, list):
             raise HTTPException(502, "github API returned an unexpected files payload")
         raw_files.extend(batch)
-        if len(batch) < _FILES_PAGE_SIZE:
+        if len(batch) < _FILES_PAGE_SIZE or len(raw_files) >= GITHUB_MAX_LISTED_FILES:
             break
         page += 1
 
@@ -168,8 +168,7 @@ async def _build_diff_files(
     head_ref: str,
 ) -> dict[str, Any]:
     """Build file entries by reading each blob at ``base_ref`` and ``head_ref``."""
-    truncated = len(raw_files) > PR_DIFF_MAX_FILES
-    raw_files = raw_files[:PR_DIFF_MAX_FILES]
+    truncated = len(raw_files) >= GITHUB_MAX_LISTED_FILES
 
     semaphore = asyncio.Semaphore(PR_DIFF_FETCH_CONCURRENCY)
 

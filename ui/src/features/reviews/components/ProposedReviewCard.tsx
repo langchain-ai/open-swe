@@ -3,6 +3,7 @@ import { toast } from "sonner"
 
 import type { ReviewEvent } from "@/features/reviews/lib/chatDiffActions"
 import { useChatDrafts } from "@/features/reviews/lib/chatDrafts"
+import { usePendingReview } from "@/features/reviews/lib/usePendingReview"
 import { Button } from "@/components/ui/button"
 import {
   Card,
@@ -42,6 +43,8 @@ export function ProposedReviewCard({
   const queryClient = useQueryClient()
   const drafts = useChatDrafts()
   const draft = drafts?.reviews.find((item) => item.proposal.id === id)
+  const pending = usePendingReview(owner, repo, number)
+  const pendingCount = pending.comments.length
   const submit = useMutation({
     mutationFn: async () => {
       if (!draft) throw new Error("The draft is no longer available")
@@ -55,6 +58,7 @@ export function ProposedReviewCard({
       void queryClient.invalidateQueries({
         queryKey: ["review", owner, repo, number],
       })
+      void pending.invalidate()
     },
     onError: (error) =>
       toast.error("Couldn't submit the review", {
@@ -64,7 +68,7 @@ export function ProposedReviewCard({
   if (!drafts || !draft) return null
 
   const { outcome, body, event } = draft
-  const needsBody = event !== "APPROVE"
+  const needsBody = event !== "APPROVE" && pendingCount === 0
   return (
     <Card size="sm" className="w-full shrink-0" data-testid="proposed-review">
       <CardHeader>
@@ -77,6 +81,12 @@ export function ProposedReviewCard({
         </CardTitle>
       </CardHeader>
       <CardContent className="flex flex-col gap-2">
+        {!outcome && pendingCount > 0 && (
+          <p className="text-muted-foreground">
+            Includes your {pendingCount} pending comment
+            {pendingCount === 1 ? "" : "s"}.
+          </p>
+        )}
         {!outcome && (
           <div
             role="radiogroup"

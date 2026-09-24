@@ -1,7 +1,9 @@
 Draft a GitHub review comment on diff lines for the user to post as themselves.
 
-Nothing is posted by this call. The user sees the draft in the chat, can edit
-it, and chooses whether to post it. Only draft a comment when the user asks you
+Nothing is posted by this call. The user sees the draft in the chat and on its
+line, can edit it, and chooses whether to add it to their pending GitHub
+review; every pending comment posts together when they submit the review, so
+never tell the user a comment has been posted. Only draft a comment when the user asks you
 to comment, or agrees to your offer to. Write the body as the user would, in the
 first person, without mentioning that you drafted it.
 

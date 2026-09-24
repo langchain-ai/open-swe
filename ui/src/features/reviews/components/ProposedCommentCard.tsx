@@ -1,8 +1,6 @@
-import { useMutation, useQueryClient } from "@tanstack/react-query"
-import { toast } from "sonner"
-
 import { rangeLabel } from "@/features/reviews/lib/chatDiffActions"
 import { useChatDrafts } from "@/features/reviews/lib/chatDrafts"
+import { usePendingReview } from "@/features/reviews/lib/usePendingReview"
 import { Button } from "@/components/ui/button"
 import {
   Card,
@@ -13,9 +11,8 @@ import {
   CardTitle,
 } from "@/components/ui/card"
 import { Textarea } from "@/components/ui/textarea"
-import { api } from "@/lib/api"
 
-/** A line comment the chat drafted; nothing posts until the user confirms. */
+/** A line comment the chat drafted; the user adds it to their pending review or discards it. */
 export function ProposedCommentCard({
   owner,
   repo,
@@ -30,32 +27,26 @@ export function ProposedCommentCard({
   /** Scrolls the diff to the comment's lines; omitted when already shown there. */
   onShow?: () => void
 }) {
-  const queryClient = useQueryClient()
   const drafts = useChatDrafts()
   const draft = drafts?.comments.find((item) => item.proposal.id === id)
-  const post = useMutation({
-    mutationFn: async () => {
-      if (!draft) throw new Error("The draft is no longer available")
-      const { range } = draft.proposal
-      const multiLine = range.startLine < range.endLine
-      return api.createReviewComment(owner, repo, number, {
+  const pending = usePendingReview(owner, repo, number)
+  const post = pending.add
+  const addToReview = () => {
+    if (!draft) return
+    const { range } = draft.proposal
+    const multiLine = range.startLine < range.endLine
+    post.mutate(
+      {
         path: range.file,
         line: range.endLine,
         side: range.side,
         body: draft.body.trim(),
         start_line: multiLine ? range.startLine : null,
         start_side: multiLine ? range.side : null,
-      })
-    },
-    onSuccess: (result) => {
-      drafts?.settle(id, { state: "posted", url: result.html_url })
-      void queryClient.invalidateQueries({
-        queryKey: ["reviewComments", owner, repo, number],
-      })
-    },
-    onError: (error) =>
-      toast.error("Couldn't post the comment", { description: error.message }),
-  })
+      },
+      { onSuccess: () => drafts?.settle(id, { state: "added" }) }
+    )
+  }
   if (!drafts || !draft) return null
 
   const { outcome, body } = draft
@@ -65,8 +56,8 @@ export function ProposedCommentCard({
     <Card size="sm" className="w-full shrink-0" data-testid="proposed-comment">
       <CardHeader>
         <CardTitle>
-          {outcome?.state === "posted"
-            ? "Comment posted"
+          {outcome?.state === "added" || outcome?.state === "posted"
+            ? "Added to your review"
             : outcome?.state === "discarded"
               ? "Comment discarded"
               : "Draft review comment"}
@@ -101,17 +92,7 @@ export function ProposedCommentCard({
         )}
       </CardContent>
       <CardFooter className="justify-end gap-2">
-        {outcome?.state === "posted" ? (
-          <Button
-            size="sm"
-            variant="outline"
-            render={
-              <a href={outcome.url} target="_blank" rel="noopener noreferrer" />
-            }
-          >
-            View on GitHub
-          </Button>
-        ) : outcome ? null : (
+        {outcome ? null : (
           <>
             <Button
               size="sm"
@@ -124,9 +105,9 @@ export function ProposedCommentCard({
             <Button
               size="sm"
               disabled={post.isPending || !body.trim()}
-              onClick={() => post.mutate()}
+              onClick={addToReview}
             >
-              {post.isPending ? "Posting…" : "Post as you"}
+              {post.isPending ? "Adding…" : "Add to review"}
             </Button>
           </>
         )}
