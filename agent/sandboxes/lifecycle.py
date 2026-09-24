@@ -314,7 +314,8 @@ async def git_identity(
     if thread_id is None:
         await task
     else:
-        get_or_create_sandbox_backend_proxy(thread_id).hold_commands_until(task)
+        proxy = get_or_create_sandbox_backend_proxy(thread_id)
+        proxy.hold_commands_until(sandbox_backend.id, task)
 
 
 async def _connect_existing_sandbox(

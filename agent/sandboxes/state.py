@@ -73,7 +73,7 @@ class SandboxBackendProxy(BaseSandbox):
         self._reconnect = reconnect
         self._startup_task: asyncio.Task[SandboxBackendProtocol] | None = None
         self._lock: asyncio.Lock | None = None
-        self._pending_setup: set[asyncio.Task[None]] = set()
+        self._pending_setup: dict[asyncio.Task[None], str] = {}
 
     @property
     def current(self) -> SandboxBackendProtocol:
@@ -101,10 +101,10 @@ class SandboxBackendProxy(BaseSandbox):
     ) -> None:
         self._reconnect = reconnect
 
-    def hold_commands_until(self, setup: asyncio.Task[None]) -> None:
-        """Hold commands until ``setup`` finishes; file operations don't wait."""
-        self._pending_setup.add(setup)
-        setup.add_done_callback(self._pending_setup.discard)
+    def hold_commands_until(self, sandbox_id: str, setup: asyncio.Task[None]) -> None:
+        """Hold commands on ``sandbox_id`` until ``setup`` finishes; file operations don't wait."""
+        self._pending_setup[setup] = sandbox_id
+        setup.add_done_callback(lambda done: self._pending_setup.pop(done, None))
 
     def start(self) -> None:
         if self._startup_task is not None:
@@ -196,8 +196,10 @@ class SandboxBackendProxy(BaseSandbox):
     async def _acommand_backend(self) -> SandboxBackendProtocol:
         # Resolved first: the startup it may await is what hands over the setup.
         backend = await self._aget_backend()
-        if self._pending_setup:
-            await asyncio.wait(tuple(self._pending_setup))
+        while pending := [task for task, box in self._pending_setup.items() if box == backend.id]:
+            await asyncio.wait(pending)
+            # The thread can be rebound to another box while a command is held.
+            backend = await self._aget_backend()
         return backend
 
     def ls(self, path: str) -> LsResult:

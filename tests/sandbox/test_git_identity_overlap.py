@@ -17,7 +17,7 @@ from deepagents.backends.protocol import ExecuteResponse, SandboxBackendProtocol
 from agent.github.sandbox_access import SandboxGitHubAccess
 from agent.sandboxes import lifecycle
 from agent.sandboxes.lifecycle import ensure_sandbox_for_thread, get_cached_sandbox_backend
-from agent.sandboxes.state import SandboxBackendProxy
+from agent.sandboxes.state import SandboxBackendProxy, set_sandbox_backend
 
 THREAD_ID = "thread-git-identity"
 # Bounds waits that must finish, so a regression fails instead of hanging.
@@ -182,3 +182,31 @@ async def test_lost_sandbox_cancels_its_identity_write_and_nothing_waits_on_it(
     assert lost.identity_cancelled
     assert result.exit_code == 0
     assert sandbox.ran == ["identity", "git status"]
+
+
+async def test_rebound_thread_does_not_wait_on_the_previous_boxs_identity_write(
+    sandbox: _Sandbox,
+) -> None:
+    await ensure_sandbox_for_thread(THREAD_ID)
+    await asyncio.wait_for(sandbox.identity_started.wait(), timeout=_HANG_TIMEOUT)
+    replacement = _Sandbox("sandbox-replacement")
+    proxy = set_sandbox_backend(THREAD_ID, replacement)
+
+    result = await asyncio.wait_for(proxy.aexecute("git status"), timeout=_HANG_TIMEOUT)
+
+    assert result.exit_code == 0
+    assert (sandbox.ran, replacement.ran) == ([], ["git status"])
+
+
+async def test_command_held_through_a_rebind_runs_on_the_new_box(sandbox: _Sandbox) -> None:
+    proxy = await ensure_sandbox_for_thread(THREAD_ID)
+    await asyncio.wait_for(sandbox.identity_started.wait(), timeout=_HANG_TIMEOUT)
+    command = asyncio.create_task(proxy.aexecute("git status"))
+    await asyncio.sleep(0)  # the command resolves this box and waits on its write
+    replacement = _Sandbox("sandbox-replacement")
+    set_sandbox_backend(THREAD_ID, replacement)
+    sandbox.release_identity.set()
+
+    await asyncio.wait_for(command, timeout=_HANG_TIMEOUT)
+
+    assert (sandbox.ran, replacement.ran) == (["identity"], ["git status"])
