@@ -1297,6 +1297,14 @@ class FakeScriptedChatModel(BaseChatModel):
         run_manager: CallbackManagerForLLMRun | None = None,  # noqa: ARG002
         **kwargs: Any,
     ) -> ChatResult:
+        messages = [
+            message
+            for message in messages
+            if not (
+                isinstance(message, HumanMessage)
+                and _text(message.content).startswith("### Runtime reminder: missing Slack reply")
+            )
+        ]
         for message in messages:
             if isinstance(message, SystemMessage):
                 LAST_SYSTEM_PROMPT["text"] = _text(message.content)
