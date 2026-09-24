@@ -48,7 +48,6 @@ from agent.review.findings import (
 )
 from agent.review.publish import (
     ReviewAssessment,
-    approval_allowed_for_head,
     clear_review_started_comment,
     fetch_pr_review_threads,
     fetch_review_comments,
@@ -293,7 +292,6 @@ async def _publish_review_async(
     assessment: ReviewAssessment | None = None,
 ) -> dict[str, Any]:
     thread_id = get_thread_id_from_runtime()
-    auto_approve = False
     if assessment is not None:
         settings = await get_workspace_settings()
         policy = await get_approval_policy(owner, repo, settings)
@@ -304,10 +302,6 @@ async def _publish_review_async(
                 "success": False,
                 "error": "Approval policy changed. Start a new review before publishing an assessment.",
             }
-        else:
-            auto_approve = settings.get("review_auto_approve") is True and bool(
-                state and state.get("review_approval_policy") == policy
-            )
     # The run config's head_sha is frozen at run creation; a push that arrived
     # mid-run updated the live head in thread metadata. Prefer that so the
     # review anchors to (and last_reviewed_sha advances to) the commit actually
@@ -434,44 +428,26 @@ async def _publish_review_async(
             "skipped_empty_re_review": True,
         }
 
-    approved = (
-        auto_approve
-        and assessment is not None
-        and assessment.decision == "would_approve"
-        and await approval_allowed_for_head(
-            owner=owner, repo=repo, pr_number=pr_number, head_sha=head_sha, token=token
-        )
+    # Reviews never carry a GitHub approval event: assessments are advisory,
+    # and approvals must come from humans.
+    review_body = render_review_body(
+        pr_number=pr_number,
+        surfaced_count=len(inline_comments),
+        trace_url=review_trace_url,
+        ui_url=review_ui_url,
+        additional_findings_count=additional_findings_count,
+        assessment=assessment,
     )
-    # GitHub forbids self-approval; publish the assessment as an advisory comment instead.
-    for _ in range(2):
-        review_body = render_review_body(
-            pr_number=pr_number,
-            surfaced_count=len(inline_comments),
-            trace_url=review_trace_url,
-            ui_url=review_ui_url,
-            additional_findings_count=additional_findings_count,
-            assessment=assessment,
-            approved=approved,
-        )
 
-        review_response = await post_pull_request_review(
-            owner=owner,
-            repo=repo,
-            pr_number=pr_number,
-            head_sha=head_sha,
-            body=review_body,
-            inline_comments=inline_comments,
-            token=token,
-            event="APPROVE" if approved else "COMMENT",
-        )
-        if (
-            approved
-            and isinstance(review_response, dict)
-            and review_response.get("_error_kind") == "self_approval"
-        ):
-            approved = False
-        else:
-            break
+    review_response = await post_pull_request_review(
+        owner=owner,
+        repo=repo,
+        pr_number=pr_number,
+        head_sha=head_sha,
+        body=review_body,
+        inline_comments=inline_comments,
+        token=token,
+    )
     # If GitHub rejected the batch because one or more inline comments anchor
     # to a file/line that's not in the PR diff, drop just those findings and
     # retry once. Returning the bare 422 to the agent only invites it to
@@ -566,7 +542,7 @@ async def _publish_review_async(
                     owner=owner,
                     repo=repo,
                     pr_number=pr_number,
-                    approved=approved,
+                    approved=False,
                 ),
             )
             await set_reviewer_thread_metadata(thread_id, extra={"review_assessment_id": review_id})

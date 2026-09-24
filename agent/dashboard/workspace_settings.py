@@ -74,7 +74,6 @@ class WorkspaceSettingsUpdate(BaseModel):
     expedited_review_enabled: bool | None = None
     org_guidelines: str | None = None
     approval_policy: str | None = None
-    review_auto_approve: bool | None = None
     default_agent_model: str | None = None
     default_agent_reasoning_effort: str | None = None
     default_agent_subagent_model: str | None = None
@@ -315,7 +314,6 @@ def _default_settings() -> dict[str, Any]:
         "expedited_review_enabled": False,
         "org_guidelines": None,
         "approval_policy": None,
-        "review_auto_approve": False,
         "default_agent_model": fallback_model,
         "default_agent_reasoning_effort": fallback_effort,
         "default_agent_subagent_model": fallback_model,

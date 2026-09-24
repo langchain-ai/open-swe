@@ -90,14 +90,12 @@ function AssessmentCard({
           <span className="font-medium">Risk {assessment.risk_score}/5</span>
           <span className="text-muted-foreground">·</span>
           <span>
-            {assessment.approved
-              ? "Approved"
-              : assessment.decision === "would_approve"
-                ? "Would approve"
-                : "Needs human review"}
+            {assessment.decision === "would_approve"
+              ? "Would approve"
+              : "Needs human review"}
           </span>
           <span className="text-xs text-muted-foreground">
-            {assessment.approved ? "Automatic approval" : "Advisory"}
+            Advisory
           </span>
         </div>
         {!editing && login && feedback.isSuccess && (

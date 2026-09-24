@@ -21,24 +21,19 @@ async def manage_review_approval_policy(
     policy: str | None = None,
     repository: str | None = None,
     workspace: str | None = None,
-    auto_approve: bool | Literal["inherit"] | None = None,
 ) -> dict[str, object]:
     """Read, set, or reset approval criteria independently of review guidelines."""
     if error := await require_private_admin_surface("manage approval policies"):
         raise ValueError(error)
     if repository and workspace:
         raise ValueError("Choose a repository or workspace, not both")
-    if action == "save" and policy is None and auto_approve is None:
-        raise ValueError("Provide a policy or auto_approve setting")
+    if action == "save" and policy is None:
+        raise ValueError("Provide a policy")
     if action == "save" and policy is not None and not policy.strip():
         raise ValueError("Saving requires a non-empty policy; use reset to inherit")
-    if repository and auto_approve is not None:
-        raise ValueError("Automatic approval is configured at the instance or workspace level")
     changes: dict[str, str | bool | None] = {}
     if action == "reset" or policy is not None:
         changes["approval_policy"] = policy if action == "save" else None
-    if action == "save" and auto_approve is not None:
-        changes["review_auto_approve"] = None if auto_approve == "inherit" else auto_approve
     update = WorkspaceSettingsUpdate.model_validate(changes)
     if repository:
         repository = normalize_repo_full_name(repository)
@@ -73,7 +68,6 @@ async def manage_review_approval_policy(
         return {
             "workspace": workspace,
             "approval_policy": view["effective"].get("approval_policy"),
-            "auto_approve": view["effective"].get("review_auto_approve", False),
         }
     settings = await get_instance_settings()
     if action != "read":
@@ -88,5 +82,4 @@ async def manage_review_approval_policy(
         settings = await get_instance_settings()
     return {
         "approval_policy": settings.get("approval_policy"),
-        "auto_approve": settings.get("review_auto_approve", False),
     }

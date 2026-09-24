@@ -12,5 +12,5 @@ Include an `assessment` in `publish_review` for the exact full `head_sha` you in
 - `decision`: `would_approve` only when the applicable approval criteria are satisfied; otherwise `needs_human_review`.
 - `explanation`: one or two sentences naming the applicable approval criteria, evidence, and any uncertainty. Do not claim checks passed unless you verified them. On a re-review, include outstanding findings and earlier changes, not just the latest diff.
 
-The host submits this as an advisory comment unless automatic approval is explicitly enabled in reviewer settings. Never submit approvals through other tools, and never merge the PR.
+The assessment publishes as an advisory comment only: reviews never submit a GitHub approval, regardless of any reviewer setting. Never submit approvals through other tools, and never merge the PR.
 
