@@ -81,7 +81,7 @@ def _reported_failure(message: ToolMessage) -> bool:
 
 
 def _last_answer(messages: Sequence[BaseMessage]) -> str:
-    """The latest assistant text this turn, skipping blank replies to a nudge."""
+    """The latest non-empty assistant text this turn."""
     for message in reversed(_turn_tail(messages)):
         if isinstance(message, AIMessage) and (text := content_to_text(message.content).strip()):
             return text
