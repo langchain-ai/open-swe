@@ -502,7 +502,6 @@ async def recreate_sandbox_for_thread(
     if new_sandbox.id == old_sandbox_id:
         raise RuntimeError("Sandbox provider did not create a distinct sandbox")
 
-    await configure_git_identity(new_sandbox)
     sandbox_metadata: dict[str, Any] = {"sandbox_id": new_sandbox.id}
     base_proxy_config = get_recorded_proxy_base_config(thread_id)
     if base_proxy_config is not None:
