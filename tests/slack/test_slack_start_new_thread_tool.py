@@ -6,11 +6,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from agent.credential_scope import (
-    PrAuthorNotAParticipant,
-    pr_author_login,
-    private_credential_login,
-)
+from agent.credential_scope import pr_author_login, private_credential_login
 
 slack_breakout_tool = importlib.import_module("agent.slack.tools.start_new_thread")
 
@@ -347,13 +343,10 @@ async def test_breakout_preserves_requester_and_credential_scope(
     assert await private_credential_login() == (actor if visibility == "private" else None)
     if user_owned:
         assert child_metadata["owner_login"] == actor
-        assert await pr_author_login(actor) == actor
-        if visibility == "public":
-            with pytest.raises(PrAuthorNotAParticipant):
-                await pr_author_login("alice")
+        assert await pr_author_login() == actor
     else:
         assert "owner_login" not in child_metadata
-        assert await pr_author_login("alice") is None
+        assert await pr_author_login() is None
 
 
 async def test_breakout_rejects_unreadable_parent_scope(monkeypatch: pytest.MonkeyPatch) -> None:

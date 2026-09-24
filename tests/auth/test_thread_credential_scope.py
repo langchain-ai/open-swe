@@ -5,7 +5,6 @@ from unittest.mock import AsyncMock
 import langgraph_sdk
 import pytest
 
-from agent import credential_scope
 from agent.dashboard import profiles
 from agent.github import thread_token
 from agent.github import token as auth
@@ -379,34 +378,34 @@ async def test_github_webhook_context_always_uses_workspace_bot(monkeypatch, cre
 
 
 @pytest.mark.asyncio
-async def test_public_pr_opens_as_a_named_participant(monkeypatch, thread_metadata, credentials):
+async def test_public_pr_opens_as_the_triggering_user(monkeypatch, thread_metadata, credentials):
+    """A PR opens as the person who triggered the run, never a named participant."""
     opr = importlib.import_module("agent.tools.open_pull_request")
     thread_metadata["participant_logins"] = {"alice": True, "bob": True}
     credentials.side_effect = {"alice": "alice-token", "bob": "bob-token"}.get
     monkeypatch.setattr("agent.run_config.get_config", lambda: config(login="bob"))
 
-    assert await opr._resolve_pr_author_token("alice") == ("alice-token", "user")
+    assert await opr._resolve_pr_author_token() == ("bob-token", "user")
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("participants", [{"bob": True}, {}, None])
-async def test_public_pr_rejects_an_author_who_never_posted(
-    monkeypatch, thread_metadata, credentials, participants
+async def test_a_shared_thread_cannot_borrow_another_participants_account(
+    monkeypatch, thread_metadata, credentials
 ):
-    """A named author is only ever someone who could have opened the PR themselves."""
     opr = importlib.import_module("agent.tools.open_pull_request")
-    if participants is not None:
-        thread_metadata["participant_logins"] = participants
+    thread_metadata["participant_logins"] = {"alice": True, "bob": True}
+    credentials.side_effect = {"alice": "alice-token", "bob": "bob-token"}.get
+    monkeypatch.setattr(
+        opr, "get_github_app_installation_token", AsyncMock(return_value="bot-token")
+    )
     monkeypatch.setattr("agent.run_config.get_config", lambda: config(login="bob"))
-
-    with pytest.raises(credential_scope.PrAuthorNotAParticipant):
-        await opr._resolve_pr_author_token("mallory")
-    credentials.assert_not_awaited()
+    # Alice owns the thread, but Bob triggered this run: the PR is Bob's.
+    assert await opr._resolve_pr_author_token() == ("bob-token", "user")
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("scope", ["private", "system"])
-async def test_a_named_author_cannot_borrow_a_pinned_thread(
+async def test_pinned_threads_ignore_the_run_requester_for_pr_authorship(
     monkeypatch, thread_metadata, credentials, scope
 ):
     opr = importlib.import_module("agent.tools.open_pull_request")
@@ -418,9 +417,9 @@ async def test_a_named_author_cannot_borrow_a_pinned_thread(
     if scope == "private":
         thread_metadata["visibility"] = "private"
         monkeypatch.setattr("agent.run_config.get_config", lambda: config(login="alice"))
-        assert await opr._resolve_pr_author_token("bob") == ("alice-token", "user")
+        assert await opr._resolve_pr_author_token() == ("alice-token", "user")
     else:
         thread_metadata.update(owner_type="system")
         thread_metadata.pop("owner_login")
         monkeypatch.setattr("agent.run_config.get_config", lambda: config(login="alice"))
-        assert await opr._resolve_pr_author_token("bob") == ("bot-token", "bot")
+        assert await opr._resolve_pr_author_token() == ("bot-token", "bot")
