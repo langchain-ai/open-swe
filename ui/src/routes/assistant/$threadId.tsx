@@ -3,4 +3,5 @@ import { Conversation } from "@/features/assistant/Conversation"
 
 export const Route = createFileRoute("/assistant/$threadId")({
   component: Conversation,
+  head: () => ({ meta: [{ title: "Assistant - Open SWE" }] }),
 })

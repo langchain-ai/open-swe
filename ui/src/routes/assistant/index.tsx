@@ -13,6 +13,7 @@ export const Route = createFileRoute("/assistant/")({
       : {}),
   }),
   component: AssistantHome,
+  head: () => ({ meta: [{ title: "Assistant - Open SWE" }] }),
 })
 
 function AssistantHome() {

@@ -6,6 +6,7 @@ import { useAgentSchedules } from "@/features/agents/lib/queries"
 
 export const Route = createFileRoute("/agents/automations/$scheduleId")({
   component: EditAutomationPage,
+  head: () => ({ meta: [{ title: "Edit automation - Open SWE" }] }),
 })
 
 function EditAutomationPage() {

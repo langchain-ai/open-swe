@@ -9,6 +9,9 @@ import { useSession } from "@/lib/session"
 
 export const Route = createFileRoute("/workspaces_/$slug")({
   component: WorkspaceSettingsPage,
+  head: ({ params }: { params: { slug: string } }) => ({
+    meta: [{ title: `${params.slug} - Open SWE` }],
+  }),
 })
 
 function WorkspaceSettingsPage() {

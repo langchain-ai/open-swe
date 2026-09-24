@@ -3,6 +3,9 @@ import { IncidentDetail } from "@/features/incidents/IncidentDetail"
 
 export const Route = createFileRoute("/incidents/$incidentId")({
   component: IncidentPage,
+  head: ({ params }: { params: { incidentId: string } }) => ({
+    meta: [{ title: `Incident ${params.incidentId} - Open SWE` }],
+  }),
 })
 
 function IncidentPage() {

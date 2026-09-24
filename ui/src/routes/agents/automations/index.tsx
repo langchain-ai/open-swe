@@ -10,6 +10,7 @@ export const Route = createFileRoute("/agents/automations/")({
     tab: search.tab === "runs" ? "runs" : undefined,
   }),
   component: AutomationsIndexPage,
+  head: () => ({ meta: [{ title: "Automations - Open SWE" }] }),
 })
 
 function AutomationsIndexPage() {

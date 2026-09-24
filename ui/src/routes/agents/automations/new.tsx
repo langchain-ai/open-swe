@@ -13,6 +13,7 @@ export const Route = createFileRoute("/agents/automations/new")({
     template: typeof search.template === "string" ? search.template : undefined,
   }),
   component: NewAutomationPage,
+  head: () => ({ meta: [{ title: "New automation - Open SWE" }] }),
 })
 
 function NewAutomationPage() {

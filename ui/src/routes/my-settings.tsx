@@ -14,6 +14,7 @@ import { useSession } from "@/lib/session"
 
 export const Route = createFileRoute("/my-settings")({
   component: MySettingsPage,
+  head: () => ({ meta: [{ title: "Profile - Open SWE" }] }),
 })
 
 function MySettingsPage() {

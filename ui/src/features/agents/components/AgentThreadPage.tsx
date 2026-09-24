@@ -62,7 +62,7 @@ function AgentThreadContent({
     const documentTitle = `${title} - Open SWE`
     document.title = documentTitle
     return () => {
-      if (document.title === documentTitle) document.title = "Open SWE"
+      if (document.title === documentTitle) document.title = "Agents - Open SWE"
     }
   }, [active, title])
 

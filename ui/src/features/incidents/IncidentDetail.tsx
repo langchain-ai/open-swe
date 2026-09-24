@@ -16,7 +16,7 @@ import {
   RefreshCw,
   RotateCcw,
 } from "lucide-react"
-import { useRef, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import type { ReactNode } from "react"
 
 import { Button } from "@/components/ui/button"
@@ -94,6 +94,13 @@ export function IncidentDetail({ incidentId }: { incidentId: string }) {
     refetchInterval: 5000,
     retry: false,
   })
+  const incidentTitle = detail.data?.incident.title
+  const documentTitle = incidentTitle
+    ? `${incidentTitle} - Open SWE`
+    : "Incident - Open SWE"
+  useEffect(() => {
+    document.title = documentTitle
+  }, [documentTitle])
   const command = useMutation({
     mutationFn: ({
       action,

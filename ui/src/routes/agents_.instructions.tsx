@@ -8,6 +8,7 @@ import { useSession } from "@/lib/session"
 
 export const Route = createFileRoute("/agents_/instructions")({
   component: AgentInstructionsPage,
+  head: () => ({ meta: [{ title: "Repository Instructions - Open SWE" }] }),
 })
 
 function AgentInstructionsPage() {

@@ -57,7 +57,7 @@ describe("AgentThreadPage", () => {
 
     expect(document.title).toBe("Fix web title - Open SWE")
     view.unmount()
-    expect(document.title).toBe("Open SWE")
+    expect(document.title).toBe("Agents - Open SWE")
   })
 
   it("does not update the title for an inactive cached thread", () => {

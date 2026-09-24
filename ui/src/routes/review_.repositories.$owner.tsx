@@ -16,6 +16,9 @@ const PAGE_SIZE = 20
 
 export const Route = createFileRoute("/review_/repositories/$owner")({
   component: RepositoriesOwnerPage,
+  head: ({ params }: { params: { owner: string } }) => ({
+    meta: [{ title: `${params.owner} repositories - Open SWE` }],
+  }),
 })
 
 function RepositoriesOwnerPage() {

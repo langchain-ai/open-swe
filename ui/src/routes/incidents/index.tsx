@@ -14,6 +14,7 @@ export const Route = createFileRoute("/incidents/")({
         : undefined,
     }
   },
+  head: () => ({ meta: [{ title: "Incidents - Open SWE" }] }),
   component: IncidentsPage,
 })
 

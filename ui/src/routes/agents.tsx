@@ -18,6 +18,7 @@ import { useDesktopThreadSource } from "@/features/agents/lib/desktopThreadSourc
 
 export const Route = createFileRoute("/agents")({
   component: AgentsLayout,
+  head: () => ({ meta: [{ title: "Agents - Open SWE" }] }),
 })
 
 /**

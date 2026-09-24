@@ -55,6 +55,7 @@ export const Route = createFileRoute("/usage")({
   validateSearch: (search: Record<string, unknown>) => ({
     period: typeof search.period === "string" ? search.period : undefined,
   }),
+  head: () => ({ meta: [{ title: "Usage - Open SWE" }] }),
   component: UsagePage,
 })
 

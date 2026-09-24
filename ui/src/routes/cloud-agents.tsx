@@ -32,6 +32,7 @@ import { useSession } from "@/lib/session"
 
 export const Route = createFileRoute("/cloud-agents")({
   component: CloudAgentsPage,
+  head: () => ({ meta: [{ title: "Open SWE Agent - Open SWE" }] }),
 })
 
 function CloudAgentsPage() {

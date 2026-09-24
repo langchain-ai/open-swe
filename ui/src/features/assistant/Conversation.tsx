@@ -1,4 +1,4 @@
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { ThreadPrimitive, useAui, useAuiState } from "@assistant-ui/react"
 import { useLangChainError } from "@assistant-ui/react-langchain"
 import { ArrowDown } from "lucide-react"
@@ -36,6 +36,17 @@ export function Conversation({ initialRepo }: { initialRepo?: string | null }) {
     thread?.id ?? "",
     Boolean(thread?.pullRequests?.length)
   )
+  const title = thread?.title
+
+  useEffect(() => {
+    if (!title) return
+    const documentTitle = `${title} - Open SWE`
+    document.title = documentTitle
+    return () => {
+      if (document.title === documentTitle)
+        document.title = "Assistant - Open SWE"
+    }
+  }, [title])
 
   return (
     <div className="flex min-h-0 min-w-0 flex-1">

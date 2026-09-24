@@ -12,6 +12,7 @@ import {
 
 export const Route = createFileRoute("/agents/local/$sessionId")({
   component: LocalAgentThreadPage,
+  head: () => ({ meta: [{ title: "Local agent - Open SWE" }] }),
 })
 
 function LocalAgentThreadPage() {
@@ -22,6 +23,16 @@ function LocalAgentThreadPage() {
   useEffect(() => {
     ensureThreadLoad(sessionId)
   }, [sessionId])
+  const title = threadQuery.data?.title ?? null
+  useEffect(() => {
+    if (!title) return
+    const documentTitle = `${title} - Open SWE`
+    document.title = documentTitle
+    return () => {
+      if (document.title === documentTitle)
+        document.title = "Local agent - Open SWE"
+    }
+  }, [title])
   useEffect(() => {
     if (failed) threadDetailFailed(sessionId)
     else if (resolved) threadLocalResolved(sessionId)

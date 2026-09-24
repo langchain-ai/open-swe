@@ -9,6 +9,7 @@ import { useSession } from "@/lib/session"
 
 export const Route = createFileRoute("/workspaces")({
   component: WorkspacesPage,
+  head: () => ({ meta: [{ title: "Workspaces - Open SWE" }] }),
 })
 
 function WorkspacesPage() {

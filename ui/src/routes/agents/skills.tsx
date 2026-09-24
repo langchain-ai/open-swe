@@ -4,4 +4,5 @@ import { SkillsPage } from "@/features/agents/components/SkillsPage"
 
 export const Route = createFileRoute("/agents/skills")({
   component: SkillsPage,
+  head: () => ({ meta: [{ title: "Skills - Open SWE" }] }),
 })

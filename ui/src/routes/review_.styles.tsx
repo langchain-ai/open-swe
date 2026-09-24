@@ -8,6 +8,7 @@ import { useSession } from "@/lib/session"
 
 export const Route = createFileRoute("/review_/styles")({
   component: ReviewStylesPage,
+  head: () => ({ meta: [{ title: "Review styles - Open SWE" }] }),
 })
 
 function ReviewStylesPage() {

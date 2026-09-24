@@ -12,6 +12,7 @@ import { useSession } from "@/lib/session"
 
 export const Route = createFileRoute("/admin_/evals")({
   component: ReviewerEvalPage,
+  head: () => ({ meta: [{ title: "Reviewer evals - Open SWE" }] }),
 })
 
 function ReviewerEvalPage() {

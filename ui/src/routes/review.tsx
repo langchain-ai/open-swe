@@ -14,7 +14,10 @@ import { RequireLogin } from "@/lib/auth-redirect"
 import { useRepos } from "@/lib/profile"
 import { useSession } from "@/lib/session"
 
-export const Route = createFileRoute("/review")({ component: ReviewPage })
+export const Route = createFileRoute("/review")({
+  component: ReviewPage,
+  head: () => ({ meta: [{ title: "Open SWE Review - Open SWE" }] }),
+})
 function ReviewPage() {
   const session = useSession()
 

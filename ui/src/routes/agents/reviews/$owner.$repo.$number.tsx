@@ -15,6 +15,15 @@ import { cn } from "@/lib/utils"
 
 export const Route = createFileRoute("/agents/reviews/$owner/$repo/$number")({
   component: ReviewDetailPage,
+  head: ({
+    params,
+  }: {
+    params: { owner: string; repo: string; number: string }
+  }) => ({
+    meta: [
+      { title: `${params.owner}/${params.repo} #${params.number} - Open SWE` },
+    ],
+  }),
 })
 
 function ReviewDetailPage() {
@@ -67,6 +76,13 @@ function ReviewDetailPage() {
   const queryClient = useQueryClient()
   const headSha = detail.data?.head_sha
   const seenShaRef = useRef(headSha)
+  const prTitle = detail.data?.pr.title
+  const documentTitle = prTitle
+    ? `${prTitle} - Open SWE`
+    : `${owner}/${repo} #${prNumber} - Open SWE`
+  useEffect(() => {
+    document.title = documentTitle
+  }, [documentTitle])
   useEffect(() => {
     if (headSha && seenShaRef.current && headSha !== seenShaRef.current) {
       void queryClient.invalidateQueries({

@@ -23,6 +23,7 @@ import {
 
 export const Route = createFileRoute("/agents/reviews/")({
   validateSearch: validateReviewsSearch,
+  head: () => ({ meta: [{ title: "Pull Requests - Open SWE" }] }),
   component: ReviewsPage,
 })
 
