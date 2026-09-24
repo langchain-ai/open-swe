@@ -73,12 +73,12 @@ export function AuthorGuidanceCard({
   if (!points.length) return null
   return (
     <section
-      aria-label="How the author steered this PR"
+      aria-label="Human input"
       className={cn("rounded-lg border border-border bg-card p-4", className)}
     >
       <div className="mb-2.5 flex items-baseline gap-2">
         <h3 className="text-xs font-medium text-foreground">
-          How the author steered this PR
+          Human input
         </h3>
         <span className="text-xs text-muted-foreground tabular-nums">
           {points.length} {points.length === 1 ? "point" : "points"}

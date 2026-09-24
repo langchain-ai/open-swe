@@ -92,9 +92,6 @@ class SteeringHistory(BaseModel):
     async def load(cls, owner: str, repo: str, pr_number: int) -> Self | None:
         """This PR's human turns, or ``None`` when Open SWE did not write it.
 
-        A PR the agent produced in one pass has an opening request and nothing
-        after it, which is no steering at all.
-
         Cached briefly: a reviewer run reads this once to build its prompt and
         again for every point it records, and each read is a whole thread state.
         """
@@ -113,13 +110,17 @@ class SteeringHistory(BaseModel):
         if not thread_ids:
             return None
         turns = [turn for thread_id in thread_ids for turn in await cls._human_turns(thread_id)]
-        if len(turns) < 2:
+        if not turns:
             return None
         follow_ups = [
             turn.model_copy(update={"index": index})
-            for index, turn in enumerate(turns[1:][-MAX_FOLLOW_UPS:])
+            for index, turn in enumerate(turns[1:][-MAX_FOLLOW_UPS:], start=1)
         ]
         return cls(request=turns[0], follow_ups=follow_ups)
+
+    @property
+    def turns(self) -> list[HumanTurn]:
+        return [self.request, *self.follow_ups]
 
     @staticmethod
     async def _human_turns(thread_id: str) -> list[HumanTurn]:
@@ -164,12 +165,13 @@ class SteeringHistory(BaseModel):
         return turns
 
     def messages_block(self) -> str:
-        """The follow-up messages as ``<message author="...">`` entries, oldest first."""
+        """Every human message as a ``<message author="..." turn="...">`` entry, oldest first."""
         return "\n".join(
-            f'<message author="{html.escape(turn.author)}">\n'
+            f'<message author="{html.escape(turn.author)}" '
+            f'turn="{"opening request" if turn is self.request else "follow-up"}">\n'
             f"{_CLOSING_MESSAGE_TAG_RE.sub(lambda m: f'</{m.group(1)}_>', turn.text)}\n"
             "</message>"
-            for turn in self.follow_ups
+            for turn in self.turns
         )
 
     def source_of(self, quote: str) -> HumanTurn | None:
@@ -177,7 +179,7 @@ class SteeringHistory(BaseModel):
         needle = quote.strip().strip('"').lower()
         if not needle:
             return None
-        return next((turn for turn in self.follow_ups if needle in turn.text.lower()), None)
+        return next((turn for turn in self.turns if needle in turn.text.lower()), None)
 
 
 class GuidanceReview(Base):

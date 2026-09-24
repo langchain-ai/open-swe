@@ -140,7 +140,7 @@ class PrepareReviewScoutRunMiddleware(BasePrepareRunMiddleware):
             max_steps=MAX_STEPS,
         )
         history = await SteeringHistory.load(cfg.repo.owner, cfg.repo.name, cfg.pr_number)
-        if history is not None and history.follow_ups:
+        if history is not None:
             guidance = render_prompt(
                 "review-scout/author-guidance.md", messages=history.messages_block()
             )

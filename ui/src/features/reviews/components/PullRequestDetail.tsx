@@ -527,7 +527,7 @@ export function PullRequestDetail({
 
             {data.guidance.length > 0 && (
               <Section
-                heading="How the author steered this PR"
+                heading="Human input"
                 count={String(data.guidance.length)}
               >
                 <GuidancePointList points={data.guidance} />

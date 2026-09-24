@@ -216,7 +216,7 @@ test.describe("review page", () => {
 
     await openReview(page, pr);
     const guidance = page.getByRole("region", {
-      name: "How the author steered this PR",
+      name: "Human input",
     });
     await expect(guidance).toContainText("Keep the constants in flat modules");
 
