@@ -9,11 +9,21 @@ import httpx
 import pytest
 from cryptography.fernet import Fernet
 
+from agent.encryption import encrypt_token
 from agent.github import app as github_app
 from tests.conftest import FakeStore
 from tests.support.github_sdk import mock_github_sdk
 
 _SHARED_TOKENS = ["github_app_tokens", "v1"]
+_TOKEN_LIFETIME = timedelta(hours=1)
+# Far enough on that a token minted now has entered its last minutes, where it is
+# no longer reused.
+_PAST_REUSE_CUTOFF = _TOKEN_LIFETIME - github_app._TOKEN_CACHE_MARGIN + timedelta(seconds=1)
+
+
+def _advance_clock(monkeypatch: pytest.MonkeyPatch, by: timedelta) -> None:
+    later = github_app._now() + by
+    monkeypatch.setattr(github_app, "_now", lambda: later)
 
 
 @pytest.fixture(autouse=True)
@@ -32,10 +42,10 @@ def app_config(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
 def mints(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, object]]:
     """GitHub mints a new hour-long token per request; returns the request bodies."""
     bodies: list[dict[str, object]] = []
-    expires_at = (datetime.now(UTC) + timedelta(hours=1)).isoformat()
 
     def handle(request: httpx.Request) -> httpx.Response:
         bodies.append(json.loads(request.content))
+        expires_at = (github_app._now() + _TOKEN_LIFETIME).isoformat()
         return httpx.Response(
             201, json={"token": f"ghs_minted-{len(bodies)}", "expires_at": expires_at}
         )
@@ -275,7 +285,8 @@ async def test_store_holds_only_an_encrypted_token_under_an_opaque_key(
 
 
 def _expired(item: dict[str, object], monkeypatch: pytest.MonkeyPatch) -> dict[str, object]:
-    return item | {"good_until": (datetime.now(UTC) - timedelta(seconds=1)).isoformat()}
+    _advance_clock(monkeypatch, _PAST_REUSE_CUTOFF)
+    return item
 
 
 def _under_another_key(
@@ -290,30 +301,110 @@ def _malformed(item: dict[str, object], monkeypatch: pytest.MonkeyPatch) -> dict
 
 
 @pytest.mark.parametrize(
-    "spoil",
-    [_expired, _under_another_key, _malformed],
+    ("spoil", "warnings"),
+    [(_expired, 0), (_under_another_key, 1), (_malformed, 1)],
     ids=["expired", "undecryptable", "malformed"],
 )
 async def test_unusable_stored_token_is_replaced_by_a_fresh_one(
     shared_store: FakeStore,
     mints: list[dict[str, object]],
     monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
     spoil: Callable[[dict[str, object], pytest.MonkeyPatch], dict[str, object]],
+    warnings: int,
 ) -> None:
     assert await github_app.get_github_app_installation_token(repository_ids=[11]) == "ghs_minted-1"
     [(store_key, item)] = shared_store.values(_SHARED_TOKENS).items()
     shared_store.seed(_SHARED_TOKENS, store_key, spoil(item, monkeypatch))
 
     github_app.clear_app_token_cache()
+    caplog.clear()
     assert await github_app.get_github_app_installation_token(repository_ids=[11]) == "ghs_minted-2"
+    assert len(_warnings(caplog)) == warnings
     github_app.clear_app_token_cache()
     assert await github_app.get_github_app_installation_token(repository_ids=[11]) == "ghs_minted-2"
     assert len(mints) == 2
 
 
-class _UnscopedRequest(TypedDict, total=False):
+def _warnings(caplog: pytest.LogCaptureFixture) -> list[logging.LogRecord]:
+    return [record for record in caplog.records if record.levelno >= logging.WARNING]
+
+
+class _TokenRequest(TypedDict, total=False):
     repository_ids: list[int]
     permissions: dict[str, str]
+
+
+@pytest.mark.parametrize(
+    ("donor", "target"),
+    [
+        (
+            {"repository_ids": [11], "permissions": {"contents": "write"}},
+            {"repository_ids": [11], "permissions": {"contents": "read"}},
+        ),
+        ({"repository_ids": [22]}, {"repository_ids": [11]}),
+    ],
+    ids=["write-token-in-read-slot", "other-repository-token"],
+)
+async def test_token_copied_into_another_scopes_slot_is_not_served(
+    shared_store: FakeStore,
+    mints: list[dict[str, object]],
+    caplog: pytest.LogCaptureFixture,
+    donor: _TokenRequest,
+    target: _TokenRequest,
+) -> None:
+    donated = await github_app.get_github_app_installation_token(**donor)
+    [donor_slot] = shared_store.values(_SHARED_TOKENS)
+    await github_app.get_github_app_installation_token(**target)
+    [target_slot] = set(shared_store.values(_SHARED_TOKENS)) - {donor_slot}
+    shared_store.seed(_SHARED_TOKENS, target_slot, shared_store.values(_SHARED_TOKENS)[donor_slot])
+
+    github_app.clear_app_token_cache()  # a second worker, with an empty in-process cache
+    caplog.clear()
+    token = await github_app.get_github_app_installation_token(**target)
+
+    assert donated == "ghs_minted-1"
+    assert token == "ghs_minted-3"
+    assert len(_warnings(caplog)) == 1
+
+
+async def test_tampered_plaintext_expiry_can_neither_extend_nor_redate_a_token(
+    shared_store: FakeStore, mints: list[dict[str, object]], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    minted = await github_app.get_github_app_installation_token_with_expiry(repository_ids=[11])
+    [(store_key, item)] = shared_store.values(_SHARED_TOKENS).items()
+    tomorrow = (github_app._now() + timedelta(days=1)).isoformat()
+    shared_store.seed(
+        _SHARED_TOKENS, store_key, item | {"expires_at": tomorrow, "good_until": tomorrow}
+    )
+
+    github_app.clear_app_token_cache()  # a second worker, with an empty in-process cache
+    assert (
+        await github_app.get_github_app_installation_token_with_expiry(repository_ids=[11])
+        == minted
+    )
+
+    _advance_clock(monkeypatch, _PAST_REUSE_CUTOFF)
+    github_app.clear_app_token_cache()
+    token, _ = await github_app.get_github_app_installation_token_with_expiry(repository_ids=[11])
+    assert token == "ghs_minted-2"
+
+
+async def test_unreadable_payload_falls_back_without_logging_the_token(
+    shared_store: FakeStore, mints: list[dict[str, object]], caplog: pytest.LogCaptureFixture
+) -> None:
+    await github_app.get_github_app_installation_token(repository_ids=[11])
+    [(store_key, item)] = shared_store.values(_SHARED_TOKENS).items()
+    # Decrypts, but binds the planted token to no slot or expiry.
+    planted = encrypt_token(json.dumps({"token": "ghs_planted"}))
+    shared_store.seed(_SHARED_TOKENS, store_key, item | {"encrypted_payload": planted})
+    github_app.clear_app_token_cache()
+    caplog.clear()
+
+    assert await github_app.get_github_app_installation_token(repository_ids=[11]) == "ghs_minted-2"
+
+    assert len(_warnings(caplog)) == 1
+    assert "ghs_planted" not in caplog.text
 
 
 @pytest.mark.parametrize(
@@ -325,7 +416,7 @@ async def test_installation_wide_token_is_never_shared(
     shared_store: FakeStore,
     mints: list[dict[str, object]],
     monkeypatch: pytest.MonkeyPatch,
-    request_scope: _UnscopedRequest,
+    request_scope: _TokenRequest,
 ) -> None:
     reads = AsyncMock(wraps=shared_store.get_item)
     monkeypatch.setattr(shared_store, "get_item", reads)
