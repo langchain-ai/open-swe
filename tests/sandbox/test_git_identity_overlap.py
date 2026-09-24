@@ -90,6 +90,17 @@ def sandbox(monkeypatch: pytest.MonkeyPatch) -> _Sandbox:
     return box
 
 
+@pytest.fixture
+def stale_image(sandbox: _Sandbox, monkeypatch: pytest.MonkeyPatch) -> Workspace:
+    """A workspace whose image has aged out, so the new ``sandbox`` runs its update script."""
+    workspace = Workspace(
+        slug="base", update_script="git pull", snapshot_status="ready", snapshot_id="snap-1"
+    )
+    monkeypatch.setattr(lifecycle, "load_workspace", AsyncMock(return_value=workspace))
+    monkeypatch.setattr(lifecycle, "maybe_start_update", AsyncMock())
+    return workspace
+
+
 async def _execute(proxy: SandboxBackendProxy, command: str) -> int | None:
     return (await proxy.aexecute(command)).exit_code
 
@@ -246,20 +257,33 @@ async def test_recreate_binds_the_new_box_without_writing_its_identity_twice(
 
 
 async def test_new_sandbox_writes_its_identity_before_a_stale_images_update_script(
-    sandbox: _Sandbox, monkeypatch: pytest.MonkeyPatch
+    sandbox: _Sandbox, stale_image: Workspace
 ) -> None:
-    stale = Workspace(
-        slug="base", update_script="git pull", snapshot_status="ready", snapshot_id="snap-1"
-    )
-    monkeypatch.setattr(lifecycle, "load_workspace", AsyncMock(return_value=stale))
-    monkeypatch.setattr(lifecycle, "maybe_start_update", AsyncMock())
-
     startup = asyncio.create_task(ensure_sandbox_for_thread(THREAD_ID, workspace_slug="base"))
     await asyncio.wait_for(sandbox.identity_started.wait(), timeout=_HANG_TIMEOUT)
     sandbox.release_identity.set()
     await asyncio.wait_for(startup, timeout=_HANG_TIMEOUT)
 
-    assert sandbox.ran == ["identity", script_command("git pull", "update", stale.repos)]
+    assert sandbox.ran == ["identity", script_command("git pull", "update", stale_image.repos)]
+
+
+async def test_stale_images_wait_for_the_identity_write_is_a_startup_phase(
+    sandbox: _Sandbox, stale_image: Workspace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(startup_trace, "_PHASES", {})
+
+    startup = asyncio.create_task(ensure_sandbox_for_thread(THREAD_ID, workspace_slug="base"))
+    await asyncio.wait_for(sandbox.identity_started.wait(), timeout=_HANG_TIMEOUT)
+    [wait] = [
+        phase
+        for phase in startup_trace._PHASES[THREAD_ID]
+        if phase.name == "sandbox.await_git_identity"
+    ]
+    assert wait.end is None
+    sandbox.release_identity.set()
+    await asyncio.wait_for(startup, timeout=_HANG_TIMEOUT)
+
+    assert wait.end is not None
 
 
 async def test_identity_write_that_exits_non_zero_is_logged_and_commands_still_run(

@@ -7,6 +7,7 @@ two sandboxes concurrently; the cross-process sentinel poll was removed.
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from deepagents.backends.protocol import ExecuteResponse
 
 from agent.sandboxes.lifecycle import SANDBOX_BACKENDS, ensure_sandbox_for_thread
 from agent.sandboxes.state import (
@@ -14,6 +15,19 @@ from agent.sandboxes.state import (
     get_or_create_sandbox_backend_proxy,
     set_sandbox_backend,
 )
+
+_COMMAND_OK = ExecuteResponse(output="", exit_code=0)
+
+
+def _box(sandbox_id: str) -> MagicMock:
+    """A reachable sandbox that answers commands.
+
+    Reconnecting hands the box its git identity write, which can run after a
+    test's patches are undone, so the box has to answer it itself.
+    """
+    box = MagicMock(id=sandbox_id)
+    box.aexecute = AsyncMock(return_value=_COMMAND_OK)
+    return box
 
 
 @pytest.mark.asyncio
@@ -34,7 +48,11 @@ async def test_ensure_sandbox_creates_new_when_no_metadata() -> None:
             new_callable=AsyncMock,
             return_value=sandbox_backend,
         ) as create_sandbox,
-        patch("agent.sandboxes.lifecycle.configure_git_identity", new_callable=AsyncMock),
+        patch(
+            "agent.sandboxes.lifecycle.configure_git_identity",
+            new_callable=AsyncMock,
+            return_value=_COMMAND_OK,
+        ),
         patch(
             "agent.sandboxes.lifecycle.client.threads.update", new_callable=AsyncMock
         ) as update_thread,
@@ -55,8 +73,7 @@ async def test_ensure_sandbox_creates_new_when_no_metadata() -> None:
 async def test_ensure_sandbox_reconnects_to_metadata_sandbox() -> None:
     thread_id = "thread-reconnect"
     SANDBOX_BACKENDS.clear()
-    existing_backend = MagicMock()
-    existing_backend.id = "sandbox-existing"
+    existing_backend = _box("sandbox-existing")
 
     async def passthrough(
         sandbox_backend,
@@ -83,7 +100,6 @@ async def test_ensure_sandbox_reconnects_to_metadata_sandbox() -> None:
             new_callable=AsyncMock,
             side_effect=passthrough,
         ) as refresh_proxy,
-        patch("agent.sandboxes.lifecycle.configure_git_identity", new_callable=AsyncMock),
         patch(
             "agent.sandboxes.lifecycle.client.threads.update", new_callable=AsyncMock
         ) as update_thread,
@@ -103,8 +119,7 @@ async def test_ensure_sandbox_resolves_unresolved_backend_proxy() -> None:
     thread_id = "thread-unresolved-proxy"
     SANDBOX_BACKENDS.clear()
     proxy = get_or_create_sandbox_backend_proxy(thread_id)
-    existing_backend = MagicMock()
-    existing_backend.id = "sandbox-existing"
+    existing_backend = _box("sandbox-existing")
 
     async def passthrough(
         sandbox_backend,
@@ -131,7 +146,6 @@ async def test_ensure_sandbox_resolves_unresolved_backend_proxy() -> None:
             new_callable=AsyncMock,
             side_effect=passthrough,
         ) as refresh_proxy,
-        patch("agent.sandboxes.lifecycle.configure_git_identity", new_callable=AsyncMock),
         patch(
             "agent.sandboxes.lifecycle.client.threads.update", new_callable=AsyncMock
         ) as update_thread,
@@ -154,8 +168,7 @@ async def test_ensure_sandbox_never_reuses_connection_to_another_sandbox() -> No
     stale_backend = MagicMock()
     stale_backend.id = "sandbox-old"
     proxy = set_sandbox_backend(thread_id, stale_backend)
-    new_backend = MagicMock()
-    new_backend.id = "sandbox-new"
+    new_backend = _box("sandbox-new")
 
     async def passthrough(
         sandbox_backend,
@@ -182,7 +195,6 @@ async def test_ensure_sandbox_never_reuses_connection_to_another_sandbox() -> No
             new_callable=AsyncMock,
             side_effect=passthrough,
         ),
-        patch("agent.sandboxes.lifecycle.configure_git_identity", new_callable=AsyncMock),
         patch(
             "agent.sandboxes.lifecycle.client.threads.update", new_callable=AsyncMock
         ) as update_thread,

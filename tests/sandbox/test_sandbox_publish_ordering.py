@@ -9,6 +9,7 @@ visible only in the task's done callback.
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from deepagents.backends.protocol import ExecuteResponse
 
 from agent.sandboxes.lifecycle import SANDBOX_BACKENDS, ensure_sandbox_for_thread
 from agent.sandboxes.state import get_or_create_sandbox_backend_proxy
@@ -74,7 +75,11 @@ async def test_new_sandbox_persists_its_base_proxy_config() -> None:
             "agent.sandboxes.lifecycle.get_recorded_proxy_base_config",
             return_value=base_proxy_config,
         ),
-        patch("agent.sandboxes.lifecycle.configure_git_identity", new_callable=AsyncMock),
+        patch(
+            "agent.sandboxes.lifecycle.configure_git_identity",
+            new_callable=AsyncMock,
+            return_value=ExecuteResponse(output="", exit_code=0),
+        ),
         patch("agent.sandboxes.lifecycle.client.threads.update", update),
     ):
         await ensure_sandbox_for_thread(thread_id)

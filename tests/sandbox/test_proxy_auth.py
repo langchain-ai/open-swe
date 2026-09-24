@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx2
 import pytest
+from deepagents.backends.protocol import ExecuteResponse
 
 from agent.github.sandbox_access import SandboxGitHubAccess
 from agent.sandboxes.providers.langsmith import (
@@ -12,6 +13,8 @@ from agent.sandboxes.providers.langsmith import (
     configure_sandbox_proxy,
 )
 from agent.workspaces.store import Workspace
+
+_COMMAND_OK = ExecuteResponse(output="", exit_code=0)
 
 
 def _mock_async_client(mock_client_cls: MagicMock, inner: MagicMock) -> None:
@@ -462,7 +465,9 @@ class TestCreateSandboxWithProxy:
             ) as mock_configure_proxy,
             patch.dict("os.environ", {"SANDBOX_TYPE": "langsmith"}),
         ):
-            mock_create.return_value = MagicMock(id="sandbox-123", aexecute=AsyncMock())
+            mock_create.return_value = MagicMock(
+                id="sandbox-123", aexecute=AsyncMock(return_value=_COMMAND_OK)
+            )
 
             from agent.sandboxes.lifecycle import _create_sandbox_with_proxy
 
@@ -493,7 +498,9 @@ class TestCreateSandboxWithProxy:
             ) as mock_proxy,
             patch.dict("os.environ", {"SANDBOX_TYPE": "daytona"}),
         ):
-            mock_create.return_value = MagicMock(id="sandbox-456", aexecute=AsyncMock())
+            mock_create.return_value = MagicMock(
+                id="sandbox-456", aexecute=AsyncMock(return_value=_COMMAND_OK)
+            )
 
             from agent.sandboxes.lifecycle import _create_sandbox_with_proxy
 

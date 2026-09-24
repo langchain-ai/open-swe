@@ -105,7 +105,8 @@ class SandboxCreateConfig:
         if workspace is None or not is_snapshot_stale(workspace):
             return
         if identity is not None:
-            await asyncio.wait((identity,))
+            async with aphase(thread_id, "sandbox.await_git_identity"):
+                await asyncio.wait((identity,))
         try:
             async with aphase(thread_id, "sandbox.update_script"):
                 result = await sandbox_backend.aexecute(
