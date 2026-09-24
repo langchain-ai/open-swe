@@ -1,6 +1,6 @@
 /** @vitest-environment jsdom */
 
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
+import { QueryClientProvider } from "@tanstack/react-query"
 import {
   cleanup,
   fireEvent,
@@ -11,11 +11,14 @@ import {
 import { useState } from "react"
 import { afterEach, expect, it, vi } from "vitest"
 
+import { reportError } from "@/lib/errorReporting"
+import { makeQueryClient } from "@/lib/query"
 import { IncidentList } from "./IncidentList"
 import { IncidentDetail } from "./IncidentDetail"
 import { IncidentSettings } from "./IncidentSettings"
 import type { IncidentView } from "./api"
 
+vi.mock("@/lib/errorReporting", () => ({ reportError: vi.fn() }))
 vi.mock("@tanstack/react-router", () => ({
   Link: ({
     children,
@@ -97,8 +100,10 @@ function stubFetch(
 }
 
 function mount(component: React.ReactNode) {
-  const client = new QueryClient({
-    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+  const client = makeQueryClient()
+  client.setDefaultOptions({
+    queries: { retry: false },
+    mutations: { retry: false },
   })
   render(<QueryClientProvider client={client}>{component}</QueryClientProvider>)
   return client
@@ -229,8 +234,15 @@ it("retains a failed question and retries it with the same command identity", as
     target: { value: "  Did database latency change?  " },
   })
   fireEvent.click(screen.getByRole("button", { name: "Send question" }))
-  expect((await screen.findByRole("alert")).textContent).toContain(
-    "Dispatch unavailable"
+  await waitFor(() =>
+    expect(reportError).toHaveBeenCalledWith(
+      expect.objectContaining({
+        title: "Couldn't send incident request",
+        error: expect.objectContaining({
+          message: expect.stringContaining("Dispatch unavailable"),
+        }),
+      })
+    )
   )
   expect(input).toHaveProperty("value", "  Did database latency change?  ")
   fireEvent.click(screen.getByRole("button", { name: "Send question" }))

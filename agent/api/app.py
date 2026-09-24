@@ -8,6 +8,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from agent.api.health import router as health_router
+from agent.api.request_ids import add_request_ids
 from agent.api.tracing import add_trace_resource_names
 from agent.config import ENV
 from agent.dashboard import router as dashboard_router
@@ -122,8 +123,10 @@ def create_app() -> FastAPI:
             allow_credentials=True,
             allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
             allow_headers=["*"],
+            expose_headers=["X-Request-ID"],
         )
     add_trace_resource_names(app)
+    add_request_ids(app)
     app.include_router(dashboard_router)
     app.include_router(plan_router)
     app.include_router(workflow_approval_router)
