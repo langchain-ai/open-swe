@@ -1,10 +1,32 @@
 """Tool: ``propose_review_comment``. Drafts a line comment the user confirms before it posts."""
 
+from typing import Literal
+
 from pydantic import BaseModel
 
-from agent.tools.show_in_diff import DiffRange, DiffSide, validate_range
-
 MAX_BODY_CHARS = 10_000
+
+DiffSide = Literal["LEFT", "RIGHT"]
+
+
+class DiffRange(BaseModel):
+    file: str
+    start_line: int
+    end_line: int
+    side: DiffSide
+
+
+def validate_range(
+    file: str, start_line: int, end_line: int | None, side: DiffSide
+) -> DiffRange | str:
+    """The normalized range, or why it is invalid."""
+    path = file.strip().lstrip("/")
+    if not path:
+        return "file must be a path from the diff"
+    end = end_line if end_line is not None else start_line
+    if start_line < 1 or end < start_line:
+        return "start_line must be at least 1 and end_line must not precede it"
+    return DiffRange(file=path, start_line=start_line, end_line=end, side=side)
 
 
 class ProposeReviewCommentResult(BaseModel):

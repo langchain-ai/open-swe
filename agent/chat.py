@@ -68,7 +68,6 @@ from agent.tools import (
 )
 from agent.tools.propose_pr_review import propose_pr_review
 from agent.tools.propose_review_comment import propose_review_comment
-from agent.tools.show_in_diff import show_in_diff
 from agent.utils.deferred_model import make_deferred_error_model
 from agent.utils.model import DEFAULT_LLM_REASONING, make_model, provider_model_kwargs
 
@@ -194,7 +193,6 @@ async def get_chat_agent(config: RunnableConfig) -> Pregel:
                 list_review_findings,
                 web_search,
                 fetch_url,
-                show_in_diff,
                 propose_review_comment,
                 propose_pr_review,
             ]

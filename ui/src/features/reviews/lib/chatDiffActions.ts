@@ -7,12 +7,6 @@ export interface DiffRange {
   side: DiffSide
 }
 
-export interface ShowInDiffAction {
-  kind: "show"
-  id: string
-  range: DiffRange
-}
-
 export interface ProposedComment {
   kind: "comment"
   id: string
@@ -29,7 +23,7 @@ export interface ProposedReview {
   body: string
 }
 
-export type ChatDiffAction = ShowInDiffAction | ProposedComment | ProposedReview
+export type ChatDiffAction = ProposedComment | ProposedReview
 
 const REVIEW_EVENTS: ReadonlyArray<ReviewEvent> = [
   "APPROVE",
@@ -84,11 +78,7 @@ function contentObject(content: unknown): Record<string, unknown> | null {
   }
 }
 
-const ACTION_TOOLS = new Set([
-  "show_in_diff",
-  "propose_review_comment",
-  "propose_pr_review",
-])
+const ACTION_TOOLS = new Set(["propose_review_comment", "propose_pr_review"])
 
 /** The page action a successful chat tool result carries. */
 export function chatDiffAction(
@@ -111,11 +101,6 @@ export function chatDiffAction(
   }
   const range = parseRange(result.range)
   if (!range) return null
-  if (message.name === "show_in_diff") {
-    return result.shown === true
-      ? { kind: "show", id: message.tool_call_id, range }
-      : null
-  }
   return result.proposed === true && typeof result.body === "string"
     ? { kind: "comment", id: message.tool_call_id, range, body: result.body }
     : null

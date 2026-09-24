@@ -338,17 +338,12 @@ function ChatBody({
     setAttachments((prev) => prev.filter((a) => a.id !== id))
   }, [])
 
-  const seenShowIdsRef = useRef<Set<string> | null>(null)
-  const latestShowIdsRef = useRef("")
   const send = useCallback(
     (text: string, atts: Array<ChatAttachment>) => {
       const trimmed = text.trim()
       const first = atts[0]
       if ((!trimmed && !first) || busy) return
       const content = serializeMessage(trimmed, atts)
-      seenShowIdsRef.current = new Set(
-        latestShowIdsRef.current.split(",").filter(Boolean)
-      )
       void stream.submit({ messages: [{ type: "human", content }] })
     },
     [busy, stream]
@@ -365,15 +360,10 @@ function ChatBody({
   })
   const drafts = useChatDrafts()
   const registerDraft = drafts?.register
-  const draftIds = diffActions
-    .filter((action) => action.kind !== "show")
-    .map((action) => action.id)
-    .join(",")
+  const draftIds = diffActions.map((action) => action.id).join(",")
   useEffect(() => {
     if (!registerDraft) return
-    for (const action of diffActions) {
-      if (action.kind !== "show") registerDraft(action)
-    }
+    for (const action of diffActions) registerDraft(action)
     // diffActions is rebuilt every render; draftIds is its stable identity.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [draftIds, registerDraft])
@@ -386,9 +376,7 @@ function ChatBody({
     const type = messageType(message)
     if (type === "tool") {
       const action = chatDiffAction(toolMessageLike(message))
-      return action && action.kind !== "show"
-        ? [{ message, content: "", action }]
-        : []
+      return action ? [{ message, content: "", action }] : []
     }
     if (type !== "human" && type !== "ai") return []
     const content = messageText(message.content)
@@ -397,25 +385,6 @@ function ChatBody({
     if (parsed.type === "entity" || !parsed.content.trim()) return []
     return [{ message, content: parsed.content, structured: parsed }]
   })
-
-  // Only replies to a message sent from this mount may move the page; history
-  // can arrive at any point during hydration, so it is never replayed.
-  const showIds = diffActions
-    .filter((action) => action.kind === "show")
-    .map((action) => action.id)
-    .join(",")
-  latestShowIdsRef.current = showIds
-  useEffect(() => {
-    if (seenShowIdsRef.current === null) return
-    const shows = diffActions.filter((action) => action.kind === "show")
-    for (const action of shows) {
-      if (seenShowIdsRef.current.has(action.id)) continue
-      seenShowIdsRef.current.add(action.id)
-      composer?.showInDiff(action.range)
-    }
-    // diffActions is rebuilt every render; showIds is its stable identity.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [showIds, composer])
 
   const submitComposer = () => {
     send(value, attachments)

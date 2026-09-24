@@ -112,14 +112,6 @@ function diffColumn(page: Page): Locator {
     .filter({ hasNot: page.getByPlaceholder("Ask anything about this PR…") });
 }
 
-function diffLine(page: Page, text: string): Locator {
-  return diffColumn(page).getByText(text, { exact: true }).first();
-}
-
-function highlighted(page: Page): Locator {
-  return page.locator("[data-selected-line]");
-}
-
 async function openChatTab(page: Page) {
   await page.getByRole("button", { name: "Chat", exact: true }).click();
   await expect(
@@ -131,16 +123,6 @@ async function sendChat(page: Page, text: string) {
   const input = page.getByPlaceholder("Ask anything about this PR…");
   await input.fill(text);
   await input.press("Enter");
-}
-
-// The replay guard has to hold for the whole hydration, not just its first
-// frame, so sample across the window the pulse would have occupied.
-async function expectNoReplayedHighlight(page: Page) {
-  for (let sample = 0; sample < 8; sample += 1) {
-    expect(await highlighted(page).count()).toBe(0);
-    await page.waitForTimeout(250);
-  }
-  await expect(diffLine(page, "ZETA_41 = 41")).not.toBeInViewport();
 }
 
 let pr: SeededPullRequest;
@@ -348,44 +330,6 @@ test.describe("review page", () => {
         name: "Walk me through the review findings",
       }),
     ).toHaveCount(0);
-  });
-
-  test("show_in_diff scrolls to and highlights the lines, once", async ({
-    page,
-  }) => {
-    await openReview(page, pr);
-    await expect(diffLine(page, "ALPHA_1 = 1")).toBeVisible();
-    await expect(diffLine(page, "ZETA_41 = 41")).not.toBeInViewport();
-
-    await openChatTab(page);
-    await sendChat(page, "E2E_REVIEW_CHAT_SHOW where is the greeting built?");
-    await expect(
-      highlighted(page).filter({ hasText: "ZETA_41 = 41" }).first(),
-    ).toBeInViewport({ timeout: 30_000 });
-    await expect(diffLine(page, "ZETA_41 = 41")).toBeInViewport();
-    await expect(
-      chatPanel(page).getByText("Lines 40 to 42 build the greeting."),
-    ).toBeVisible();
-
-    // The pulse ends on its own; then move away so a replay would be visible.
-    await expect(highlighted(page)).toHaveCount(0, { timeout: 10_000 });
-    await diffLine(page, "ALPHA_1 = 1").scrollIntoViewIfNeeded();
-    await expect(diffLine(page, "ZETA_41 = 41")).not.toBeInViewport();
-
-    await page.getByRole("button", { name: "Info", exact: true }).click();
-    await openChatTab(page);
-    await expect(
-      chatPanel(page).getByText("Lines 40 to 42 build the greeting."),
-    ).toBeVisible();
-    await expectNoReplayedHighlight(page);
-
-    await page.reload();
-    await expect(diffLine(page, "ALPHA_1 = 1")).toBeVisible();
-    await openChatTab(page);
-    await expect(
-      chatPanel(page).getByText("Lines 40 to 42 build the greeting."),
-    ).toBeVisible();
-    await expectNoReplayedHighlight(page);
   });
 
   test("chat-drafted comments join one pending review that submits together", async ({

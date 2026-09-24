@@ -3,24 +3,12 @@ import { chatDiffAction } from "./chatDiffActions"
 
 const range = { file: "a.py", start_line: 3, end_line: 5, side: "RIGHT" }
 
-it("reads successful show and comment results", () => {
-  expect(
-    chatDiffAction({
-      type: "tool",
-      name: "show_in_diff",
-      tool_call_id: "c1",
-      content: JSON.stringify({ shown: true, range }),
-    })
-  ).toEqual({
-    kind: "show",
-    id: "c1",
-    range: { file: "a.py", startLine: 3, endLine: 5, side: "RIGHT" },
-  })
+it("reads a drafted comment and review", () => {
   expect(
     chatDiffAction({
       type: "tool",
       name: "propose_review_comment",
-      tool_call_id: "c2",
+      tool_call_id: "c1",
       content: [
         {
           type: "text",
@@ -28,16 +16,29 @@ it("reads successful show and comment results", () => {
         },
       ],
     })
-  ).toMatchObject({ kind: "comment", id: "c2", body: "Nit" })
-})
-
-it("ignores failed calls and other tools", () => {
+  ).toEqual({
+    kind: "comment",
+    id: "c1",
+    range: { file: "a.py", startLine: 3, endLine: 5, side: "RIGHT" },
+    body: "Nit",
+  })
   expect(
     chatDiffAction({
       type: "tool",
-      name: "show_in_diff",
+      name: "propose_pr_review",
+      tool_call_id: "c2",
+      content: JSON.stringify({ proposed: true, event: "APPROVE", body: "" }),
+    })
+  ).toMatchObject({ kind: "review", id: "c2", event: "APPROVE" })
+})
+
+it("ignores rejected drafts and other tools", () => {
+  expect(
+    chatDiffAction({
+      type: "tool",
+      name: "propose_review_comment",
       tool_call_id: "c3",
-      content: JSON.stringify({ shown: false, error: "bad range" }),
+      content: JSON.stringify({ proposed: false, error: "bad range" }),
     })
   ).toBeNull()
   expect(
@@ -45,7 +46,7 @@ it("ignores failed calls and other tools", () => {
       type: "tool",
       name: "read_repo_file",
       tool_call_id: "c4",
-      content: JSON.stringify({ shown: true, range }),
+      content: JSON.stringify({ proposed: true, range, body: "x" }),
     })
   ).toBeNull()
 })
