@@ -220,6 +220,8 @@ describe("WorkspaceSettingsPanel", () => {
     ["refreshing", "failed"],
     ["success", "success"],
     ["success", "failed"],
+    ["refreshing", "unknown"],
+    ["success", "unknown"],
   ] as const)(
     "follows a repository rebuild from a %s save response through stale polls to %s",
     async (savedStatus, outcome) => {
@@ -292,32 +294,47 @@ describe("WorkspaceSettingsPanel", () => {
 
         getWorkspace.mockResolvedValue({
           ...saved,
-          refresh_status: "refreshing",
+          refresh_status: outcome === "unknown" ? "success" : "refreshing",
         })
         await act(async () => {
-          await vi.advanceTimersByTimeAsync(5001)
+          await vi.advanceTimersByTimeAsync(65_001)
         })
-        expect(within(general).getByRole("status").textContent).toContain(
-          "Rebuilding sandbox image"
+        expect(
+          within(general).getByRole(outcome === "unknown" ? "alert" : "status")
+            .textContent
+        ).toContain(
+          outcome === "unknown"
+            ? "image rebuild could not be confirmed"
+            : "Rebuilding sandbox image"
         )
 
         getWorkspace.mockResolvedValue({
           ...saved,
-          refresh_status: outcome,
-          refresh_finished_at: "2026-01-01T00:01:00Z",
+          refresh_status: outcome === "unknown" ? "success" : outcome,
+          refresh_finished_at:
+            outcome === "unknown"
+              ? saved.refresh_finished_at
+              : "2026-01-01T00:01:00Z",
           refresh_error: outcome === "failed" ? "Setup script exited 1" : null,
         })
         await act(async () => {
           await vi.advanceTimersByTimeAsync(5001)
         })
         expect(
-          within(general).getByRole(outcome === "failed" ? "alert" : "status")
+          within(general).getByRole(outcome === "success" ? "status" : "alert")
             .textContent
         ).toContain(
-          outcome === "failed"
-            ? "Image rebuild failed. Setup script exited 1"
-            : "Sandbox image rebuilt with the saved repositories."
+          outcome === "unknown"
+            ? "image rebuild could not be confirmed"
+            : outcome === "failed"
+              ? "Image rebuild failed. Setup script exited 1"
+              : "Sandbox image rebuilt with the saved repositories."
         )
+        expect(
+          screen
+            .getByRole("button", { name: "Rebuild image" })
+            .hasAttribute("disabled")
+        ).toBe(false)
         const settledReads = getWorkspace.mock.calls.length
         await act(async () => {
           await vi.advanceTimersByTimeAsync(10001)

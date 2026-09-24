@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from "react"
+import { useEffect, useState, type ReactNode } from "react"
 import { CircleNotchIcon } from "@phosphor-icons/react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 
@@ -144,6 +144,13 @@ export function WorkspaceSettingsPanel({
     slug: string
     finishedAt: WorkspaceRecord["refresh_finished_at"]
   } | null>(null)
+  const [repositoryRebuildTimedOut, setRepositoryRebuildTimedOut] =
+    useState(false)
+  useEffect(() => {
+    if (!repositoryRebuild) return
+    const timeout = setTimeout(() => setRepositoryRebuildTimedOut(true), 60_000)
+    return () => clearTimeout(timeout)
+  }, [repositoryRebuild])
   const awaitingRepositoryRebuild = (workspace: WorkspaceRecord | undefined) =>
     repositoryRebuild?.slug === slug &&
     (!workspace ||
@@ -164,7 +171,8 @@ export function WorkspaceSettingsPanel({
     // button following it until it settles.
     refetchInterval: (query) =>
       query.state.data?.refresh_status === "refreshing" ||
-      awaitingRepositoryRebuild(query.state.data)
+      (!repositoryRebuildTimedOut &&
+        awaitingRepositoryRebuild(query.state.data))
         ? 5000
         : false,
   })
@@ -198,6 +206,7 @@ export function WorkspaceSettingsPanel({
       (previousRepos.size !== savedRepos.size ||
         [...savedRepos].some((repo) => !previousRepos.has(repo)))
     ) {
+      setRepositoryRebuildTimedOut(false)
       setRepositoryRebuild({
         slug,
         finishedAt: saved.refresh_finished_at,
@@ -228,7 +237,8 @@ export function WorkspaceSettingsPanel({
         channelLabel={channelLabel}
         onSaved={onSaved}
         rebuildStatus={
-          awaitingRepositoryRebuild(record.data) ||
+          (!repositoryRebuildTimedOut &&
+            awaitingRepositoryRebuild(record.data)) ||
           record.data.refresh_status === "refreshing" ? (
             <p
               role="status"
@@ -242,6 +252,14 @@ export function WorkspaceSettingsPanel({
                 ? "Rebuilding sandbox image…"
                 : "Repositories saved. Sandbox image rebuild queued…"}{" "}
               Existing runs keep their current image.
+            </p>
+          ) : awaitingRepositoryRebuild(record.data) ? (
+            <p
+              role="alert"
+              className="min-w-48 flex-1 text-xs text-destructive"
+            >
+              Repositories saved, but the image rebuild could not be confirmed.
+              Check the sandbox image status or retry Rebuild image.
             </p>
           ) : repositoryRebuild?.slug === slug ? (
             <p
