@@ -25,7 +25,10 @@ const DEFAULT_TITLE = pageTitle("Artifact")
 function artifactTitle(html: string, markdown: string): string | null {
   const source = html.trim() ? html : markdown
   const found = /<title\b[^>]*>([\s\S]*?)<\/title\s*>/i.exec(source)
-  const raw = found?.at(1)?.replace(/<[^>]*>/g, " ").trim()
+  const raw = found
+    ?.at(1)
+    ?.replace(/<[^>]*>/g, " ")
+    .trim()
   if (!raw) return null
   // The server escapes the title, so decode entities ("a &amp; b" → "a & b").
   const decoded = new DOMParser()
