@@ -18,7 +18,7 @@ from agent.sandboxes import lifecycle
 from agent.sandboxes.providers.langsmith import LangSmithProvider
 from agent.workspaces.refresh import _create_builder_sandbox
 from agent.workspaces.store import WORKSPACES, Workspace
-from tests.conftest import FakeStore
+from tests.conftest import FakeStore, post_signed_github_webhook
 from tests.support.github_sdk import mock_github_sdk
 
 
@@ -33,10 +33,25 @@ def github_expiry() -> str | None:
 
 
 @pytest.fixture
+def github_repositories() -> list[dict[str, str | int]]:
+    return [
+        {"id": 11, "full_name": "acme/api"},
+        {"id": 22, "full_name": "acme/internal"},
+    ]
+
+
+@pytest.fixture
+def rejected_repository_ids() -> set[int]:
+    return set()
+
+
+@pytest.fixture
 def github(
     monkeypatch: pytest.MonkeyPatch,
     github_requests: list[httpx.Request],
     github_expiry: str | None,
+    github_repositories: list[dict[str, str | int]],
+    rejected_repository_ids: set[int],
     fake_store: FakeStore,
 ) -> Iterator[list[dict[str, object]]]:
     """GitHub issues synthetic tokens encoding their repository permissions."""
@@ -48,6 +63,8 @@ def github(
         if request.url.path.endswith("/access_tokens"):
             body = json.loads(request.content or b"{}")
             ids = body.get("repository_ids", [11, 22])
+            if set(body.get("repository_ids", [])) & rejected_repository_ids:
+                return httpx.Response(422, json={"message": "Repository is no longer accessible"})
             return httpx.Response(
                 201,
                 json={
@@ -58,12 +75,7 @@ def github(
         if request.url.path == "/installation/repositories":
             return httpx.Response(
                 200,
-                json={
-                    "repositories": [
-                        {"id": 11, "full_name": "acme/api"},
-                        {"id": 22, "full_name": "acme/internal"},
-                    ]
-                },
+                json={"repositories": github_repositories},
             )
         raise AssertionError(f"Unexpected request: {request.method} {request.url}")
 
@@ -144,7 +156,7 @@ async def test_workspace_lookup_failure_cannot_grant_installation_access(
     assert github == []
 
 
-async def test_followup_reuses_thread_repository_scope(
+async def test_followup_reuses_workspace_repository_mapping(
     monkeypatch: pytest.MonkeyPatch,
     github: list[dict[str, object]],
     github_requests: list[httpx.Request],
@@ -177,12 +189,12 @@ async def test_followup_on_another_worker_reuses_repository_discovery(
     monkeypatch.setattr(
         WORKSPACES, "get", AsyncMock(return_value=Workspace(slug="workspace", repos=["acme/api"]))
     )
-    access = await sandbox_access.workspace_token("workspace", thread_id="thread")
+    access = await sandbox_access.workspace_token("workspace")
     assert access.token == "repos:11"
     app.clear_app_token_cache()
     importlib.reload(sandbox_access)
 
-    access = await sandbox_access.workspace_token("workspace", thread_id="thread")
+    access = await sandbox_access.workspace_token("workspace")
 
     assert access.token == "repos:11"
     assert sum(r.url.path == "/installation/repositories" for r in github_requests) == 1
@@ -204,35 +216,35 @@ async def test_repository_cache_outage_falls_back_to_github(
     )
     monkeypatch.setattr(fake_store, operation, AsyncMock(side_effect=RuntimeError("unavailable")))
 
-    access = await sandbox_access.workspace_token("workspace", thread_id="thread")
+    access = await sandbox_access.workspace_token("workspace")
 
     assert access.token == "repos:11"
     assert sum(r.url.path == "/installation/repositories" for r in github_requests) == 1
 
 
-@pytest.mark.parametrize("repository_ids", [[True], ["22"], [-1]])
+@pytest.mark.parametrize("repository_id", [True, "22", -1])
 async def test_malformed_repository_cache_is_replaced_from_github(
     monkeypatch: pytest.MonkeyPatch,
     github: list[dict[str, object]],
     github_requests: list[httpx.Request],
     fake_store: FakeStore,
-    repository_ids: list[object],
+    repository_id: object,
 ) -> None:
     monkeypatch.setattr(
         WORKSPACES, "get", AsyncMock(return_value=Workspace(slug="workspace", repos=["acme/api"]))
     )
-    await sandbox_access.workspace_token("workspace", thread_id="thread")
-    namespace = sandbox_access._THREAD_REPOSITORIES.namespace
-    fake_store.values(namespace)["thread"]["repository_ids"] = repository_ids
+    await sandbox_access.workspace_token("workspace")
+    namespace = sandbox_access._WORKSPACE_REPOSITORIES.namespace
+    fake_store.values(namespace)["workspace"]["repositories"] = {"acme/api": repository_id}
 
-    access = await sandbox_access.workspace_token("workspace", thread_id="thread")
+    access = await sandbox_access.workspace_token("workspace")
 
     assert access.token == "repos:11"
-    assert fake_store.values(namespace)["thread"]["repository_ids"] == [11]
+    assert fake_store.values(namespace)["workspace"]["repositories"] == {"acme/api": 11}
     assert sum(r.url.path == "/installation/repositories" for r in github_requests) == 2
 
 
-@pytest.mark.parametrize("changed_scope", ["installation", "workspace"])
+@pytest.mark.parametrize("changed_scope", ["app", "installation", "workspace"])
 async def test_shared_repository_cache_cannot_cross_scope_boundaries(
     monkeypatch: pytest.MonkeyPatch,
     github: list[dict[str, object]],
@@ -242,9 +254,11 @@ async def test_shared_repository_cache_cannot_cross_scope_boundaries(
     monkeypatch.setattr(
         WORKSPACES, "get", AsyncMock(return_value=Workspace(slug="workspace", repos=["acme/api"]))
     )
-    await sandbox_access.workspace_token("workspace", thread_id="thread")
+    await sandbox_access.workspace_token("workspace")
     slug = "workspace"
-    if changed_scope == "installation":
+    if changed_scope == "app":
+        monkeypatch.setattr(app, "GITHUB_APP_ID", "3")
+    elif changed_scope == "installation":
         monkeypatch.setattr(app, "GITHUB_APP_INSTALLATION_ID", "3")
     else:
         slug = "other"
@@ -252,14 +266,14 @@ async def test_shared_repository_cache_cannot_cross_scope_boundaries(
             WORKSPACES, "get", AsyncMock(return_value=Workspace(slug=slug, repos=["acme/api"]))
         )
 
-    access = await sandbox_access.workspace_token(slug, thread_id="thread")
+    access = await sandbox_access.workspace_token(slug)
 
     assert access.token == "repos:11"
     assert sum(r.url.path == "/installation/repositories" for r in github_requests) == 2
 
 
 @pytest.mark.parametrize("minutes", [51, 61])
-async def test_thread_access_rediscovers_repositories_after_scope_expiry(
+async def test_token_renewal_reuses_workspace_repository_mapping(
     monkeypatch: pytest.MonkeyPatch,
     github: list[dict[str, object]],
     github_requests: list[httpx.Request],
@@ -268,17 +282,17 @@ async def test_thread_access_rediscovers_repositories_after_scope_expiry(
     monkeypatch.setattr(
         WORKSPACES, "get", AsyncMock(return_value=Workspace(slug="workspace", repos=["acme/api"]))
     )
-    await sandbox_access.workspace_token("workspace", thread_id="thread")
+    await sandbox_access.workspace_token("workspace")
     later = datetime.now(UTC) + timedelta(minutes=minutes)
     clock = MagicMock(wraps=datetime, now=lambda tz: later)
     monkeypatch.setattr(sandbox_access, "datetime", clock)
     monkeypatch.setattr(app, "datetime", clock)
 
-    access = await sandbox_access.workspace_token("workspace", thread_id="thread")
+    access = await sandbox_access.workspace_token("workspace")
 
     assert access.token == "repos:11"
-    assert sum(r.url.path == "/installation/repositories" for r in github_requests) == 2
-    assert sum(r.method == "POST" for r in github_requests) == 4
+    assert sum(r.url.path == "/installation/repositories" for r in github_requests) == 1
+    assert sum(r.method == "POST" for r in github_requests) == 3
 
 
 @pytest.mark.parametrize("github_expiry", [None, "invalid"])
@@ -291,36 +305,36 @@ async def test_tokens_without_valid_expiry_are_not_reused(
         WORKSPACES, "get", AsyncMock(return_value=Workspace(slug="workspace", repos=["acme/api"]))
     )
     for _ in range(2):
-        access = await sandbox_access.workspace_token("workspace", thread_id="thread")
+        access = await sandbox_access.workspace_token("workspace")
         assert access.token == "repos:11"
 
     assert sum(r.url.path == "/installation/repositories" for r in github_requests) == 1
     assert sum(r.method == "POST" for r in github_requests) == 3
 
 
-async def test_thread_access_cannot_bypass_failed_workspace_lookup(
+async def test_workspace_access_cannot_bypass_failed_workspace_lookup(
     monkeypatch: pytest.MonkeyPatch,
     github: list[dict[str, object]],
 ) -> None:
     monkeypatch.setattr(
         WORKSPACES, "get", AsyncMock(return_value=Workspace(slug="workspace", repos=["acme/api"]))
     )
-    await sandbox_access.workspace_token("workspace", thread_id="thread")
+    await sandbox_access.workspace_token("workspace")
     monkeypatch.setattr(WORKSPACES, "get", AsyncMock(side_effect=RuntimeError("unavailable")))
 
     with pytest.raises(RuntimeError, match="unavailable"):
-        await sandbox_access.workspace_token("workspace", thread_id="thread")
+        await sandbox_access.workspace_token("workspace")
 
 
-async def test_expired_thread_access_cannot_hide_github_failure(
+async def test_expired_workspace_mapping_cannot_hide_github_failure(
     monkeypatch: pytest.MonkeyPatch,
     github: list[dict[str, object]],
 ) -> None:
     monkeypatch.setattr(
         WORKSPACES, "get", AsyncMock(return_value=Workspace(slug="workspace", repos=["acme/api"]))
     )
-    await sandbox_access.workspace_token("workspace", thread_id="thread")
-    later = datetime.now(UTC) + timedelta(hours=1)
+    await sandbox_access.workspace_token("workspace")
+    later = datetime.now(UTC) + timedelta(days=2)
     monkeypatch.setattr(sandbox_access, "datetime", MagicMock(wraps=datetime, now=lambda tz: later))
 
     def unavailable(request: httpx.Request) -> httpx.Response:
@@ -328,10 +342,10 @@ async def test_expired_thread_access_cannot_hide_github_failure(
 
     mock_github_sdk(monkeypatch, unavailable)
     with pytest.raises(RequestError, match="GitHub unavailable"):
-        await sandbox_access.workspace_token("workspace", thread_id="thread")
+        await sandbox_access.workspace_token("workspace")
 
 
-async def test_thread_access_does_not_reuse_a_broader_permission_scope(
+async def test_workspace_access_does_not_reuse_a_broader_permission_scope(
     monkeypatch: pytest.MonkeyPatch,
     github: list[dict[str, object]],
     github_requests: list[httpx.Request],
@@ -339,30 +353,208 @@ async def test_thread_access_does_not_reuse_a_broader_permission_scope(
     monkeypatch.setattr(
         WORKSPACES, "get", AsyncMock(return_value=Workspace(slug="workspace", repos=["acme/api"]))
     )
-    await sandbox_access.workspace_token(
-        "workspace", thread_id="thread", permissions={"contents": "write"}
-    )
-    await sandbox_access.workspace_token(
-        "workspace", thread_id="thread", permissions={"contents": "read"}
-    )
+    await sandbox_access.workspace_token("workspace", permissions={"contents": "write"})
+    await sandbox_access.workspace_token("workspace", permissions={"contents": "read"})
 
     bodies = [json.loads(r.content) for r in github_requests if r.method == "POST"]
     assert bodies[-1] == {"repository_ids": [11], "permissions": {"contents": "read"}}
 
 
-async def test_repository_discovery_is_scoped_to_each_thread(
+async def test_new_tasks_and_reviewers_reuse_full_workspace_repository_mapping(
     monkeypatch: pytest.MonkeyPatch,
     github: list[dict[str, object]],
     github_requests: list[httpx.Request],
 ) -> None:
     monkeypatch.setattr(
+        WORKSPACES,
+        "get",
+        AsyncMock(return_value=Workspace(slug="workspace", repos=["acme/api", "acme/internal"])),
+    )
+    await lifecycle._create_sandbox_with_proxy(
+        workspace_slug="workspace", thread_id="review", github_proxy_repositories=["acme/api"]
+    )
+    await lifecycle._create_sandbox_with_proxy(workspace_slug="workspace", thread_id="first")
+    app.clear_app_token_cache()
+    importlib.reload(sandbox_access)
+    await lifecycle._create_sandbox_with_proxy(workspace_slug="workspace", thread_id="second")
+
+    assert injected_auth(github) == [
+        "x-access-token:repos:11",
+        "x-access-token:repos:11,22",
+        "x-access-token:repos:11,22",
+    ]
+    assert sum(r.url.path == "/installation/repositories" for r in github_requests) == 1
+
+
+async def test_workspace_repository_addition_refreshes_mapping(
+    monkeypatch: pytest.MonkeyPatch,
+    github: list[dict[str, object]],
+    github_requests: list[httpx.Request],
+) -> None:
+    workspace = Workspace(slug="workspace", repos=["acme/api"])
+    monkeypatch.setattr(WORKSPACES, "get", AsyncMock(return_value=workspace))
+    assert (await sandbox_access.workspace_token("workspace")).token == "repos:11"
+    workspace.repos = ["acme/api", "acme/internal"]
+    assert (await sandbox_access.workspace_token("workspace")).token == "repos:11,22"
+    assert sum(r.url.path == "/installation/repositories" for r in github_requests) == 2
+
+
+@pytest.mark.parametrize(
+    ("event", "action"),
+    [
+        ("installation_repositories", "removed"),
+        ("installation", "unsuspend"),
+        ("repository", "renamed"),
+        ("repository", "deleted"),
+        ("repository", "transferred"),
+    ],
+)
+async def test_signed_repository_change_invalidates_mapping_across_workers(
+    monkeypatch: pytest.MonkeyPatch,
+    github: list[dict[str, object]],
+    github_requests: list[httpx.Request],
+    github_repositories: list[dict[str, str | int]],
+    event: str,
+    action: str,
+) -> None:
+    from agent.webhooks import common
+
+    monkeypatch.setattr(common, "GITHUB_WEBHOOK_SECRET", "test-secret")
+    monkeypatch.setattr(
         WORKSPACES, "get", AsyncMock(return_value=Workspace(slug="workspace", repos=["acme/api"]))
     )
-    for thread_id in ["first", "second", "first", "second"]:
-        access = await sandbox_access.workspace_token("workspace", thread_id=thread_id)
-        assert access.token == "repos:11"
+    assert (await sandbox_access.workspace_token("workspace")).token == "repos:11"
+    github_repositories[:] = [{"id": 33, "full_name": "acme/api"}]
 
+    response = await post_signed_github_webhook(
+        event, {"action": action, "installation": {"id": 2}}, secret="test-secret"
+    )
+    assert response.status_code == 200
+    importlib.reload(sandbox_access)
+    assert (await sandbox_access.workspace_token("workspace")).token == "repos:33"
     assert sum(r.url.path == "/installation/repositories" for r in github_requests) == 2
+
+
+@pytest.mark.parametrize(
+    ("installation_id", "action", "secret", "status"),
+    [
+        (3, "renamed", "test-secret", 200),
+        (2, "edited", "test-secret", 200),
+        (2, "renamed", "wrong-secret", 401),
+    ],
+)
+async def test_unrelated_or_unsigned_events_do_not_invalidate_mapping(
+    monkeypatch: pytest.MonkeyPatch,
+    github: list[dict[str, object]],
+    github_requests: list[httpx.Request],
+    installation_id: int,
+    action: str,
+    secret: str,
+    status: int,
+) -> None:
+    from agent.webhooks import common
+
+    monkeypatch.setattr(common, "GITHUB_WEBHOOK_SECRET", "test-secret")
+    monkeypatch.setattr(
+        WORKSPACES, "get", AsyncMock(return_value=Workspace(slug="workspace", repos=["acme/api"]))
+    )
+    await sandbox_access.workspace_token("workspace")
+    response = await post_signed_github_webhook(
+        "repository", {"action": action, "installation": {"id": installation_id}}, secret=secret
+    )
+    assert response.status_code == status
+    assert (await sandbox_access.workspace_token("workspace")).token == "repos:11"
+    assert sum(r.url.path == "/installation/repositories" for r in github_requests) == 1
+
+
+async def test_invalidation_failure_is_not_acknowledged(
+    monkeypatch: pytest.MonkeyPatch,
+    fake_store: FakeStore,
+) -> None:
+    from agent.webhooks import common
+
+    monkeypatch.setattr(app, "GITHUB_APP_INSTALLATION_ID", "2")
+    monkeypatch.setattr(common, "GITHUB_WEBHOOK_SECRET", "test-secret")
+    monkeypatch.setattr(fake_store, "put_item", AsyncMock(side_effect=RuntimeError("unavailable")))
+    with pytest.raises(RuntimeError, match="unavailable"):
+        await post_signed_github_webhook(
+            "installation_repositories",
+            {"action": "added", "installation": {"id": 2}},
+            secret="test-secret",
+        )
+
+
+async def test_inflight_discovery_cannot_undo_invalidation(
+    monkeypatch: pytest.MonkeyPatch,
+    github: list[dict[str, object]],
+    github_repositories: list[dict[str, str | int]],
+) -> None:
+    monkeypatch.setattr(
+        WORKSPACES, "get", AsyncMock(return_value=Workspace(slug="workspace", repos=["acme/api"]))
+    )
+    discover = sandbox_access._discover_repositories
+
+    async def invalidated_during_discovery(allowed: set[str]) -> dict[str, int]:
+        mapping = await discover(allowed)
+        await sandbox_access.invalidate_repository_discovery(
+            "installation_repositories", {"installation": {"id": 2}}
+        )
+        github_repositories[:] = [{"id": 33, "full_name": "acme/api"}]
+        return mapping
+
+    monkeypatch.setattr(sandbox_access, "_discover_repositories", invalidated_during_discovery)
+    await sandbox_access.workspace_token("workspace")
+    monkeypatch.setattr(sandbox_access, "_discover_repositories", discover)
+    assert (await sandbox_access.workspace_token("workspace")).token == "repos:33"
+
+
+async def test_missing_webhook_is_reconciled_after_a_day(
+    monkeypatch: pytest.MonkeyPatch,
+    github: list[dict[str, object]],
+    github_repositories: list[dict[str, str | int]],
+) -> None:
+    monkeypatch.setattr(
+        WORKSPACES, "get", AsyncMock(return_value=Workspace(slug="workspace", repos=["acme/api"]))
+    )
+    await sandbox_access.workspace_token("workspace")
+    github_repositories[:] = [{"id": 33, "full_name": "acme/api"}]
+    later = datetime.now(UTC) + timedelta(days=2)
+    monkeypatch.setattr(sandbox_access, "datetime", MagicMock(wraps=datetime, now=lambda tz: later))
+    assert (await sandbox_access.workspace_token("workspace")).token == "repos:33"
+
+
+async def test_previously_unavailable_repository_is_retried_without_workspace_edit(
+    monkeypatch: pytest.MonkeyPatch,
+    github: list[dict[str, object]],
+    github_repositories: list[dict[str, str | int]],
+    github_requests: list[httpx.Request],
+) -> None:
+    monkeypatch.setattr(
+        WORKSPACES, "get", AsyncMock(return_value=Workspace(slug="workspace", repos=["acme/new"]))
+    )
+    assert (await sandbox_access.workspace_token("workspace")).token is None
+    github_repositories.append({"id": 33, "full_name": "acme/new"})
+    assert (await sandbox_access.workspace_token("workspace")).token is None
+    later = datetime.now(UTC) + timedelta(minutes=6)
+    monkeypatch.setattr(sandbox_access, "datetime", MagicMock(wraps=datetime, now=lambda tz: later))
+    assert (await sandbox_access.workspace_token("workspace")).token == "repos:33"
+    assert sum(r.url.path == "/installation/repositories" for r in github_requests) == 2
+
+
+async def test_rejected_cached_ids_are_rediscovered_before_retrying_token(
+    monkeypatch: pytest.MonkeyPatch,
+    github: list[dict[str, object]],
+    github_repositories: list[dict[str, str | int]],
+    rejected_repository_ids: set[int],
+) -> None:
+    monkeypatch.setattr(
+        WORKSPACES, "get", AsyncMock(return_value=Workspace(slug="workspace", repos=["acme/api"]))
+    )
+    await sandbox_access.workspace_token("workspace")
+    app.clear_app_token_cache()
+    rejected_repository_ids.add(11)
+    github_repositories[:] = [{"id": 33, "full_name": "acme/api"}]
+    assert (await sandbox_access.workspace_token("workspace")).token == "repos:33"
 
 
 async def test_refresh_applies_repository_removal(

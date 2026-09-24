@@ -156,7 +156,7 @@ async def _create_sandbox_with_proxy(
         if ENV.SANDBOX_TYPE.get() == "langsmith":
             async with aphase(thread_id, "sandbox.proxy_token"):
                 access = await workspace_token(
-                    workspace_slug, repositories=github_proxy_repositories, thread_id=thread_id
+                    workspace_slug, repositories=github_proxy_repositories
                 )
             proxy_config = config.proxy_config
             async with aphase(thread_id, "sandbox.proxy_configure"):
@@ -224,9 +224,7 @@ async def _refresh_github_proxy(
         return
 
     async with aphase(thread_id, "sandbox.proxy_token"):
-        access = await workspace_token(
-            workspace_slug, repositories=github_proxy_repositories, thread_id=thread_id
-        )
+        access = await workspace_token(workspace_slug, repositories=github_proxy_repositories)
 
     current_backend = unwrap_sandbox_backend(sandbox_backend)
     async with aphase(thread_id, "sandbox.proxy_refresh"):

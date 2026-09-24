@@ -90,13 +90,8 @@ async def get_value(namespace: Namespace, key: str) -> dict[str, Any] | None:
     return _unwrap(item)
 
 
-async def put_value(
-    namespace: Namespace, key: str, value: Mapping[str, object], *, ttl: int | None = None
-) -> None:
-    if ttl is None:
-        await store_client().store.put_item(list(namespace), key, value)
-    else:
-        await store_client().store.put_item(list(namespace), key, value, ttl=ttl)
+async def put_value(namespace: Namespace, key: str, value: Mapping[str, object]) -> None:
+    await store_client().store.put_item(list(namespace), key, value)
 
 
 async def delete_value(namespace: Namespace, key: str) -> None:

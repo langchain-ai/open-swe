@@ -164,7 +164,6 @@ async def refresh_proxy_token(
         workspace_slug,
         repositories=effective_repositories,
         permissions=dict(permission_key) if permission_key else None,
-        thread_id=thread_id,
     )
 
     from agent.sandboxes.providers.langsmith import configure_sandbox_proxy

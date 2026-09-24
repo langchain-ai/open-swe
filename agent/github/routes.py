@@ -3,6 +3,7 @@
 from fastapi import APIRouter, Response
 
 from agent.github import webhook as service
+from agent.github.sandbox_access import REPOSITORY_DISCOVERY_EVENTS, invalidate_repository_discovery
 from agent.schedules import store as schedules
 from agent.webhooks import common
 from agent.workspaces.routing import WorkspaceLookupError, repo_is_routable
@@ -43,7 +44,7 @@ async def github_webhook(
         },
     )
 
-    if event_type not in common.SUPPORTED_GH_EVENTS:
+    if event_type not in common.SUPPORTED_GH_EVENTS | REPOSITORY_DISCOVERY_EVENTS:
         common.logger.info("Ignoring unsupported GitHub event type: %s", event_type)
         return {"status": "ignored", "reason": f"Unsupported event type: {event_type}"}
 
@@ -52,6 +53,10 @@ async def github_webhook(
     except common.json.JSONDecodeError:
         common.logger.exception("Failed to parse GitHub webhook JSON")
         return {"status": "error", "message": "Invalid JSON"}
+
+    if event_type in REPOSITORY_DISCOVERY_EVENTS:
+        await invalidate_repository_discovery(event_type, payload)
+        return {"status": "accepted", "message": "Repository discovery invalidation processed"}
 
     webhook_repo = payload.get("repository", {})
     webhook_repo_config = {

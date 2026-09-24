@@ -74,9 +74,7 @@ class FakeStore:
             raise _FakeStoreNotFoundError
         return {"value": dict(value)}
 
-    async def put_item(
-        self, namespace: Sequence[str], key: str, value: dict[str, Any], *, ttl: int | None = None
-    ) -> None:
+    async def put_item(self, namespace: Sequence[str], key: str, value: dict[str, Any]) -> None:
         self.seed(namespace, key, value)
 
     async def delete_item(self, namespace: Sequence[str], key: str) -> None:
