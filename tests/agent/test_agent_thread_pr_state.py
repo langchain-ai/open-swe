@@ -65,6 +65,67 @@ def test_pr_state_from_payload_missing_pull_request() -> None:
     assert webhook_common._pr_state_from_payload({}) is None
 
 
+def test_pr_diff_stats_from_payload_counts() -> None:
+    payload = _pr_payload(state="open")
+    payload["pull_request"]["additions"] = 8
+    payload["pull_request"]["deletions"] = 1
+    payload["pull_request"]["changed_files"] = 2
+    assert webhook_common._pr_diff_stats_from_payload(payload) == {
+        "additions": 8,
+        "deletions": 1,
+        "files": 2,
+    }
+
+
+def test_pr_diff_stats_from_payload_missing_counts() -> None:
+    assert webhook_common._pr_diff_stats_from_payload(_pr_payload(state="open")) is None
+
+
+@pytest.mark.asyncio
+async def test_update_agent_thread_pr_state_refreshes_diff_stats() -> None:
+    record = {
+        "repo_full_name": "lc/repo",
+        "number": 7,
+        "url": "https://github.com/lc/repo/pull/7",
+        "state": "open",
+        "diff_stats": {"files": 1, "additions": 2, "deletions": 1},
+    }
+    thread = {
+        "thread_id": "t1",
+        "metadata": {
+            "kind": "agent",
+            "pr_url": record["url"],
+            "pr_state": "open",
+            "pr_urls": [record["url"]],
+            "pull_requests": [record],
+        },
+    }
+    fake_client = MagicMock()
+    fake_client.threads.search = AsyncMock(side_effect=[[thread], []])
+    fake_client.threads.get = AsyncMock(return_value=thread)
+    fake_client.threads.update = AsyncMock()
+
+    payload = _pr_payload(state="open")
+    payload["pull_request"]["additions"] = 8
+    payload["pull_request"]["deletions"] = 1
+    payload["pull_request"]["changed_files"] = 2
+    with (
+        patch("agent.webhooks.common.get_client", return_value=fake_client),
+        patch("agent.webhooks.common.agent_thread_pr_state_lock", _unlocked),
+    ):
+        await webhook_common.update_agent_thread_pr_state(payload)
+
+    fake_client.threads.update.assert_awaited_once_with(
+        thread_id="t1",
+        metadata={
+            "pull_requests": [
+                {**record, "diff_stats": {"files": 2, "additions": 8, "deletions": 1}}
+            ],
+            "diff_stats": {"files": 2, "additions": 8, "deletions": 1},
+        },
+    )
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     "state,merged,expected", [("open", False, 0), ("closed", False, 0), ("closed", True, 1)]

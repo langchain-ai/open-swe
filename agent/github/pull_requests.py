@@ -437,6 +437,9 @@ class PullRequestPayload(BaseModel):
     state: str = ""
     draft: bool = False
     merged: bool = False
+    additions: int | None = None
+    deletions: int | None = None
+    changed_files: int | None = None
     author: str = Field("", validation_alias=AliasPath("user", "login"))
     author_id: int | None = Field(None, validation_alias=AliasPath("user", "id"))
     head_ref: str = Field("", validation_alias=AliasPath("head", "ref"))
@@ -470,6 +473,23 @@ class PullRequestEvent(BaseModel):
             merged=self.pull_request.merged,
             draft=self.pull_request.draft,
         )
+
+    @property
+    def diff_stats(self) -> dict[str, int] | None:
+        """``{files, additions, deletions}`` when the event payload counts them."""
+        counts = (
+            self.pull_request.additions,
+            self.pull_request.deletions,
+            self.pull_request.changed_files,
+        )
+        if any(count is None for count in counts):
+            return None
+        additions, deletions, changed_files = counts
+        return {
+            "additions": max(0, additions),
+            "deletions": max(0, deletions),
+            "files": max(0, changed_files),
+        }
 
     def to_pull_request(self) -> PullRequest | None:
         """An unsaved record carrying what this event says about the PR."""

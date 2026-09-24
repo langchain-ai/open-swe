@@ -1298,6 +1298,11 @@ def _pr_state_from_payload(payload: dict[str, Any]) -> str | None:
     return event.state if event is not None else None
 
 
+def _pr_diff_stats_from_payload(payload: dict[str, Any]) -> dict[str, int] | None:
+    event = PullRequestEvent.parse(payload)
+    return event.diff_stats if event is not None else None
+
+
 async def _record_pr_merge_feedback(thread_id: str, *, pr_url: str) -> None:
     """Record merge feedback on the thread's trace under two keys.
 
@@ -1345,6 +1350,7 @@ async def update_agent_thread_pr_state(payload: dict[str, Any]) -> None:
         return
     pr_url = pull_request.url
     new_state = pull_request.state
+    diff_stats = _pr_diff_stats_from_payload(payload)
 
     langgraph_client = get_client(url=LANGGRAPH_URL)
     try:
@@ -1366,6 +1372,10 @@ async def update_agent_thread_pr_state(payload: dict[str, Any]) -> None:
                 if not isinstance(metadata, dict) or metadata.get("kind") == REVIEWER_THREAD_KIND:
                     continue
                 metadata_update: dict[str, Any] = {}
+                # Fresh line counts ride along when the event carries them, so
+                # the thread's PR cards do not keep opening-day numbers.
+                if diff_stats is not None:
+                    metadata_update["diff_stats"] = diff_stats
                 pull_requests = metadata.get("pull_requests")
                 updated_pull_requests: list[dict[str, Any]] = []
                 previous_state: Any = None
@@ -1379,7 +1389,13 @@ async def update_agent_thread_pr_state(payload: dict[str, Any]) -> None:
                         None,
                     )
                     updated_pull_requests = [
-                        {**record, "state": new_state} if record.get("url") == pr_url else record
+                        (
+                            {**record, "state": new_state}
+                            if diff_stats is None
+                            else {**record, "state": new_state, "diff_stats": diff_stats}
+                        )
+                        if record.get("url") == pr_url
+                        else record
                         for record in pull_requests
                         if isinstance(record, dict)
                     ]
