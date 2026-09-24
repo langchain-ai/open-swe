@@ -1,6 +1,7 @@
 import json
 import logging
 from typing import Any
+from unittest.mock import AsyncMock
 
 import httpx2
 import pytest
@@ -297,3 +298,27 @@ async def test_token_lookup_without_identity_is_not_cached(
     assert not fallback.github_profile  # the config's identity
     assert retried is not None
     assert retried.github_profile  # GitHub was asked again, not a cached miss
+
+
+async def test_installation_token_skips_the_github_user_lookup(
+    fake_store: FakeStore,
+    github_client: _FakeAsyncClient,
+    installation_token: None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # One response per lookup that could run, so a regression that still calls
+    # /user fails on the assertions below rather than on an empty queue.
+    github_client._responses.extend(
+        [_FakeResponse(404, {"message": "Not Found"}), _FakeResponse(404, {"message": "Not Found"})]
+    )
+    store_reads = AsyncMock(wraps=fake_store.get_item)
+    monkeypatch.setattr(fake_store, "get_item", store_reads)
+    config = {"configurable": {"github_login": "mason-gh", "github_user_id": 7}}
+
+    identity = await resolve_triggering_user_identity(config, "ghs_installation-token")
+
+    assert identity is not None
+    assert identity.github_login == "mason-gh"
+    assert not identity.github_profile  # the config's identity
+    assert "https://api.github.com/user" not in [url for url, _headers in github_client.requests]
+    store_reads.assert_not_awaited()

@@ -23,6 +23,8 @@ _GITHUB_API_HEADERS = {
 _PUBLIC_PROFILE_CACHE_TTL_SECONDS = 3600.0
 _GITHUB_IDENTITY_NAMESPACE = ("github_user_identities", "v1")
 _GITHUB_IDENTITY_TTL_SECONDS = 3600.0
+# GitHub's prefix for App installation access tokens, which have no user behind them.
+_INSTALLATION_TOKEN_PREFIX = "ghs_"
 _GITHUB_LOGIN_MAX_CHARS = 39
 _GITHUB_LOGIN_ALLOWED = frozenset("abcdefghijklmnopqrstuvwxyz0123456789-")
 
@@ -148,7 +150,7 @@ def _dump_token_identity(identity: CollaboratorIdentity) -> object:
 
 
 async def _identity_from_github_token(github_token: str | None) -> CollaboratorIdentity | None:
-    if not github_token:
+    if not github_token or github_token.startswith(_INSTALLATION_TOKEN_PREFIX):
         return None
 
     async def fetch() -> CollaboratorIdentity:
