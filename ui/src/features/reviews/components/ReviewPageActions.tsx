@@ -1,4 +1,4 @@
-import { useQuery } from "@tanstack/react-query"
+import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { useState } from "react"
 
 import {
@@ -19,6 +19,7 @@ export function ReviewPageActions({
   number: number
 }) {
   const session = useSession()
+  const queryClient = useQueryClient()
   const fullName = `${owner}/${repo}`
   const [outcome, setOutcome] = useState<PullRequestOutcome>()
   const pr = useQuery({
@@ -27,6 +28,12 @@ export function ReviewPageActions({
     enabled: !!session.data,
     refetchOnWindowFocus: false,
   })
+  const refreshPage = () => {
+    void queryClient.invalidateQueries({
+      queryKey: ["review", owner, repo, number],
+    })
+    void pr.refetch()
+  }
   if (!session.data || !pr.data) return null
   return (
     <div className="mt-3">
@@ -34,8 +41,11 @@ export function ReviewPageActions({
         pr={pr.data}
         login={session.data.login}
         outcome={outcome}
-        onSettled={setOutcome}
-        onReady={() => void pr.refetch()}
+        onSettled={(settled) => {
+          setOutcome(settled)
+          refreshPage()
+        }}
+        onReady={refreshPage}
       />
     </div>
   )

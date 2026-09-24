@@ -1,3 +1,8 @@
+import { useQuery } from "@tanstack/react-query"
+import { useEffect } from "react"
+
+import { reviewConversationQueryKey } from "@/features/reviews/components/ReviewConversation"
+import { getReviewConversation } from "@/features/reviews/lib/conversationApi"
 import { rangeLabel } from "@/features/reviews/lib/chatDiffActions"
 import { useChatDrafts } from "@/features/reviews/lib/chatDrafts"
 import { usePendingReview } from "@/features/reviews/lib/usePendingReview"
@@ -44,9 +49,49 @@ export function ProposedCommentCard({
         start_line: multiLine ? range.startLine : null,
         start_side: multiLine ? range.side : null,
       },
-      { onSuccess: () => drafts?.settle(id, { state: "added" }) }
+      {
+        onSuccess: (review) =>
+          drafts?.settle(id, { state: "added", reviewId: review.id }),
+      }
     )
   }
+
+  const added = draft?.outcome?.state === "added" ? draft.outcome : null
+  const stillPending =
+    added !== null &&
+    pending.review?.id === added.reviewId &&
+    // Match by position: the body may have been edited since it was added.
+    pending.comments.some(
+      (comment) =>
+        comment.path === draft?.proposal.range.file &&
+        comment.line === draft.proposal.range.endLine
+    )
+  const conversation = useQuery({
+    queryKey: reviewConversationQueryKey(owner, repo, number),
+    queryFn: () => getReviewConversation(owner, repo, number),
+    enabled: added !== null && pending.loaded && !stillPending,
+  })
+  const submitted =
+    added !== null &&
+    (conversation.data?.items.some(
+      (item) => item.kind === "review" && item.id === added.reviewId
+    ) ??
+      false)
+  // An added comment whose pending review lost it (deleted, or the review was
+  // discarded) goes back to being an editable draft.
+  const orphaned =
+    added !== null &&
+    pending.loaded &&
+    !stillPending &&
+    conversation.isSuccess &&
+    !conversation.isFetching &&
+    conversation.dataUpdatedAt >= pending.updatedAt &&
+    !submitted
+  const reopen = drafts?.reopen
+  useEffect(() => {
+    if (orphaned) reopen?.(id)
+  }, [orphaned, reopen, id])
+
   if (!drafts || !draft) return null
 
   const { outcome, body } = draft
@@ -56,11 +101,13 @@ export function ProposedCommentCard({
     <Card size="sm" className="w-full shrink-0" data-testid="proposed-comment">
       <CardHeader>
         <CardTitle>
-          {outcome?.state === "added" || outcome?.state === "posted"
-            ? "Added to your review"
-            : outcome?.state === "discarded"
-              ? "Comment discarded"
-              : "Draft review comment"}
+          {submitted || outcome?.state === "posted"
+            ? "Submitted with your review"
+            : outcome?.state === "added"
+              ? "Added to your review"
+              : outcome?.state === "discarded"
+                ? "Comment discarded"
+                : "Draft review comment"}
         </CardTitle>
         <CardDescription>
           {onShow ? (

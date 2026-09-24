@@ -62,6 +62,9 @@ export function usePendingReview(owner: string, repo: string, number: number) {
   return {
     review: query.data ?? null,
     comments: query.data?.comments ?? [],
+    /** The pending review has been read, so `review === null` means there is none. */
+    loaded: query.isSuccess && !query.isFetching,
+    updatedAt: query.dataUpdatedAt,
     add,
     update,
     remove,

@@ -22,7 +22,6 @@ router = APIRouter(tags=["review"])
 _GITHUB_API = "https://api.github.com"
 _GITHUB_TIMEOUT = httpx2.Timeout(15.0, connect=5.0)
 _PAGE_SIZE = 100
-_MAX_PAGES = 10
 
 ReviewState = Literal["APPROVED", "CHANGES_REQUESTED", "COMMENTED", "DISMISSED"]
 
@@ -142,7 +141,8 @@ def _raise_for_github(response: httpx2.Response, method: str, path: str) -> None
 
 async def _get_all_pages(client: httpx2.AsyncClient, path: str) -> list[object]:
     items: list[object] = []
-    for page in range(1, _MAX_PAGES + 1):
+    page = 1
+    while True:
         response = await client.get(path, params={"per_page": _PAGE_SIZE, "page": page})
         _raise_for_github(response, "GET", path)
         batch = response.json()
@@ -151,11 +151,7 @@ async def _get_all_pages(client: httpx2.AsyncClient, path: str) -> list[object]:
         items.extend(batch)
         if len(batch) < _PAGE_SIZE:
             return items
-    logger.warning(
-        "GitHub conversation pagination truncated",
-        extra={"github_path": path, "max_pages": _MAX_PAGES},
-    )
-    return items
+        page += 1
 
 
 def _author(user: _GitHubUser | None) -> ConversationAuthor | None:

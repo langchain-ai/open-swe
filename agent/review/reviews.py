@@ -543,11 +543,20 @@ async def get_pending_review(
     if pending is None:
         return None
     # REST omits `line` on pending comments, and GraphQL keeps the side on the thread.
-    data = _ReviewThreadsData.model_validate(
-        await _github_graphql(
-            token, _REVIEW_THREADS, {"owner": owner, "repo": repo, "number": pr_number}
-        )
-    )
+    threads: list[_ReviewThread] = []
+    cursor: str | None = None
+    while True:
+        page = _ReviewThreadsData.model_validate(
+            await _github_graphql(
+                token,
+                _REVIEW_THREADS,
+                {"owner": owner, "repo": repo, "number": pr_number, "after": cursor},
+            )
+        ).connection()
+        threads.extend(page.nodes)
+        if not page.pageInfo.hasNextPage or not page.pageInfo.endCursor:
+            break
+        cursor = page.pageInfo.endCursor
     comments = [
         PendingReviewComment(
             id=int(comment.fullDatabaseId),
@@ -559,7 +568,7 @@ async def get_pending_review(
             start_side=thread.startDiffSide,
             body=comment.body,
         )
-        for thread in data.threads()
+        for thread in threads
         for comment in thread.comments.nodes
         if comment.pullRequestReview is not None
         and comment.pullRequestReview.fullDatabaseId == str(pending.id)
@@ -568,10 +577,11 @@ async def get_pending_review(
 
 
 _REVIEW_THREADS = """
-query($owner: String!, $repo: String!, $number: Int!) {
+query($owner: String!, $repo: String!, $number: Int!, $after: String) {
   repository(owner: $owner, name: $repo) {
     pullRequest(number: $number) {
-      reviewThreads(last: 100) {
+      reviewThreads(first: 100, after: $after) {
+        pageInfo { hasNextPage endCursor }
         nodes {
           path line startLine diffSide startDiffSide
           comments(first: 100) {
@@ -609,7 +619,13 @@ class _ReviewThread(BaseModel):
     comments: _ThreadComments = _ThreadComments()
 
 
+class _PageInfo(BaseModel):
+    hasNextPage: bool = False
+    endCursor: str | None = None
+
+
 class _ReviewThreads(BaseModel):
+    pageInfo: _PageInfo = _PageInfo()
     nodes: list[_ReviewThread] = []
 
 
@@ -624,9 +640,9 @@ class _ThreadsRepository(BaseModel):
 class _ReviewThreadsData(BaseModel):
     repository: _ThreadsRepository | None = None
 
-    def threads(self) -> list[_ReviewThread]:
+    def connection(self) -> _ReviewThreads:
         pull = self.repository.pullRequest if self.repository else None
-        return pull.reviewThreads.nodes if pull else []
+        return pull.reviewThreads if pull else _ReviewThreads()
 
 
 def _rest_review_comment(comment: PendingReviewCommentInput) -> dict[str, Any]:

@@ -14,7 +14,7 @@ import type {
 
 export type DraftOutcome =
   | { state: "posted"; url: string }
-  | { state: "added" }
+  | { state: "added"; reviewId: number }
   | { state: "discarded" }
 
 export interface CommentDraft {
@@ -36,6 +36,8 @@ interface ChatDrafts {
   register: (proposal: ProposedComment | ProposedReview) => void
   edit: (id: string, change: { body?: string; event?: ReviewEvent }) => void
   settle: (id: string, outcome: DraftOutcome) => void
+  /** Returns a comment draft to editable, e.g. after its pending comment was removed. */
+  reopen: (id: string) => void
 }
 
 const ChatDraftsContext = createContext<ChatDrafts | null>(null)
@@ -51,6 +53,14 @@ function readOutcome(id: string): DraftOutcome | null {
   } catch (error) {
     console.warn("Could not read a chat draft outcome", error)
     return null
+  }
+}
+
+function clearOutcome(id: string) {
+  try {
+    window.localStorage.removeItem(storageKey(id))
+  } catch (error) {
+    console.warn("Could not clear a chat draft outcome", error)
   }
 }
 
@@ -126,6 +136,15 @@ export function ChatDraftsProvider({
     )
   }, [])
 
+  const reopen = useCallback((id: string) => {
+    clearOutcome(id)
+    setComments((prev) =>
+      prev[id]?.outcome
+        ? { ...prev, [id]: { ...prev[id], outcome: null } }
+        : prev
+    )
+  }, [])
+
   const value = useMemo<ChatDrafts>(
     () => ({
       comments: Object.values(comments),
@@ -133,8 +152,9 @@ export function ChatDraftsProvider({
       register,
       edit,
       settle,
+      reopen,
     }),
-    [comments, reviews, register, edit, settle]
+    [comments, reviews, register, edit, settle, reopen]
   )
   return (
     <ChatDraftsContext.Provider value={value}>
