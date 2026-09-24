@@ -41,19 +41,19 @@ def _safe_profile_settings(
 
 
 async def _settings_for_login(login: str, *, own_settings: bool = False) -> dict[str, Any]:
-    profile, instruction_record, notion, preferences = await asyncio.gather(
+    profile, instruction_record, notion = await asyncio.gather(
         get_profile(login),
         get_user_instructions(login),
         get_notion_status(login),
-        User.preferences_for_login(login),
     )
     instructions = instruction_record.get("instructions") if instruction_record else ""
+    profile_settings = _safe_profile_settings(profile, own_settings=own_settings)
+    if own_settings:
+        preferences = await User.preferences_for_login(login)
+        profile_settings["concierge_mode"] = preferences.concierge_mode
     return {
         "login": login,
-        "profile": {
-            **_safe_profile_settings(profile, own_settings=own_settings),
-            "concierge_mode": preferences.concierge_mode,
-        },
+        "profile": profile_settings,
         "instructions": instructions if isinstance(instructions, str) else "",
         "connections": {
             "notion": notion.get("notion", {"connected": False}),

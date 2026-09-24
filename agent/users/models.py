@@ -236,21 +236,36 @@ class User(Base):
         cls, login: str, patch: UserPreferencesPatch
     ) -> UserPreferences | None:
         """Merge ``patch`` into the preferences of ``login``; ``None`` when nobody has that login."""
+        return await cls._merge_preferences(login, patch, keep_existing=False)
+
+    @classmethod
+    async def default_preferences(
+        cls, login: str, patch: UserPreferencesPatch
+    ) -> UserPreferences | None:
+        """Like :meth:`update_preferences`, but a value the person already chose wins."""
+        return await cls._merge_preferences(login, patch, keep_existing=True)
+
+    @classmethod
+    async def _merge_preferences(
+        cls, login: str, patch: UserPreferencesPatch, *, keep_existing: bool
+    ) -> UserPreferences | None:
         user = await cls.for_login("github", login) if login else None
         if user is None:
             return None
         changes = patch.model_dump(exclude_none=True)
         if not changes:
             return user.typed_preferences
+        incoming = bindparam("preferences_patch", changes, type_=JSONB)
+        merged = (
+            incoming.op("||")(cls.preferences)
+            if keep_existing
+            else cls.preferences.op("||")(incoming)
+        )
         async with postgres.session() as session:
             stored = await session.scalar(
                 update(cls)
                 .where(cls.id == user.id)
-                .values(
-                    preferences=cls.preferences.op("||")(
-                        bindparam("preferences_patch", changes, type_=JSONB)
-                    )
-                )
+                .values(preferences=merged)
                 .returning(cls.preferences)
             )
         return UserPreferences.model_validate(stored or {})

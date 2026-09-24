@@ -37,6 +37,7 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     from agent.sandboxes.providers.registry import validate_sandbox_startup_config
     from agent.transcript import listener as transcript_listener
     from agent.users import User
+    from agent.users.import_concierge_mode import import_concierge_mode
     from agent.users.import_store import import_user_mappings
     from agent.utils.model import validate_local_dev_llm_config
     from agent.workspaces.store import import_store_records
@@ -74,6 +75,14 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
             "Imported user mappings from the LangGraph Store",
             extra={"imported_users": imported_users},
         )
+    try:
+        # Concierge mode used to be a Store profile flag; this moves it into
+        # users.preferences and is a no-op once it has.
+        await import_concierge_mode()
+    except Exception:  # noqa: BLE001
+        # Startup continues: opted-in people get a thread per DM message until
+        # an import succeeds.
+        logger.exception("Importing concierge mode from the LangGraph Store failed")
     if admins := configured_admins():
         await User.sync_admins(admins)
     try:
