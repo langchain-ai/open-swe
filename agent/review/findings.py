@@ -55,6 +55,9 @@ class ReviewerThreadMissingError(RuntimeError):
 
 REVIEWER_THREAD_KIND = "reviewer"
 REVIEWER_EVAL_PUBLICATION_KEY = "reviewer_eval_publication"
+# Sidebar label for reviewer threads that have no PR identity yet. Real PR
+# titles land in ``pr`` metadata from the first webhook that reaches them.
+REVIEWER_UNTITLED = "Review: pending"
 
 # Suggestions are only useful when the reader can scan them at a glance and
 # accept with one click. Anything longer reads as the reviewer rewriting the
@@ -1044,8 +1047,9 @@ async def set_reviewer_thread_metadata(
     """Persist reviewer-thread-level metadata.
 
     Always sets ``kind=reviewer`` so the future UI can list reviewer threads by
-    filtering on metadata. Only includes the fields the caller passed in
-    (langgraph metadata updates merge rather than overwrite).
+    filtering on metadata, and keeps the sidebar title ``Review: #nn <PR
+    title>`` in step with the PR record. Only includes the fields the caller
+    passed in (langgraph metadata updates merge rather than overwrite).
 
     ``head_sha`` records the current PR head the dispatching webhook is acting
     on. A push that lands mid-run is queued into the still-running run, whose
@@ -1056,6 +1060,7 @@ async def set_reviewer_thread_metadata(
     metadata: dict[str, Any] = {"kind": REVIEWER_THREAD_KIND}
     if pr is not None:
         metadata["pr"] = pr
+        metadata["title"] = reviewer_thread_title(pr)
     if last_reviewed_sha is not None:
         metadata["last_reviewed_sha"] = last_reviewed_sha
     if head_sha is not None:
@@ -1086,6 +1091,18 @@ def get_thread_pr_meta(metadata: dict[str, Any]) -> ReviewerPRMeta | None:
     if not isinstance(pr, dict):
         return None
     return cast(ReviewerPRMeta, pr)
+
+
+def reviewer_thread_title(pr: Mapping[str, Any]) -> str:
+    """Sidebar title for a reviewer thread: ``Review: #nn <PR title>``."""
+    number = pr.get("number")
+    title = pr.get("title")
+    number_part = f"#{number}" if isinstance(number, int) and not isinstance(number, bool) else ""
+    title_part = title.strip() if isinstance(title, str) else ""
+    label = f"Review: {number_part}".strip()
+    if title_part:
+        label = f"{label} {title_part}" if number_part or label.endswith(":") else title_part
+    return label if label.strip() and label.strip() != "Review:" else REVIEWER_UNTITLED
 
 
 def get_thread_slack_ref(metadata: dict[str, Any]) -> ReviewerSlackThread | None:

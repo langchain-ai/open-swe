@@ -72,6 +72,7 @@ from agent.prompts import render_prompt
 from agent.review.enabled_repos import is_review_repo_enabled
 from agent.review.findings import (
     REVIEWER_THREAD_KIND,
+    REVIEWER_UNTITLED,
     Finding,
     append_finding_interaction,  # noqa: F401
     set_reviewer_thread_metadata,
@@ -811,7 +812,13 @@ async def ensure_thread_exists_for_metadata(
     thread_id: str, langgraph_client: LangGraphClient
 ) -> bool:
     try:
-        await langgraph_client.threads.create(thread_id=thread_id, if_exists="do_nothing")
+        await langgraph_client.threads.create(
+            thread_id=thread_id,
+            if_exists="do_nothing",
+            # Reviewer threads are listed in the Agents sidebar before the PR
+            # metadata lands; name them instead of the default "Untitled agent".
+            metadata={"title": REVIEWER_UNTITLED, "kind": REVIEWER_THREAD_KIND},
+        )
         return True
     except Exception:
         logger.exception("Failed to ensure thread %s exists before metadata update", thread_id)
