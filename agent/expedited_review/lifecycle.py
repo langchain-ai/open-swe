@@ -88,7 +88,7 @@ async def _files_for(approval: ExpeditedApproval, token: str) -> list[ChangedFil
 
 async def _diff_image_id(approval: ExpeditedApproval, files: list[ChangedFile]) -> str | None:
     """A hosted-but-unposted PNG of the diff, which the card renders inline."""
-    shown, _ = ChangedFile.rendered(files)
+    shown, _ = ChangedFile.split(files)
     if not shown:
         return None
     try:
