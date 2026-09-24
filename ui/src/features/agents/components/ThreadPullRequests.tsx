@@ -206,7 +206,8 @@ function HealthDetails({
                   <span className="truncate">{location}</span>
                 </div>
                 <p className="line-clamp-2 text-xs text-foreground">
-                  {thread.body || "No comment text"}
+                  {thread.body?.replace(/<!--[\s\S]*?-->/g, "").trim() ||
+                    "No comment text"}
                 </p>
               </>
             )
