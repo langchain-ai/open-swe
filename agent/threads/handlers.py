@@ -48,6 +48,7 @@ from agent.threads.summary import (
 )
 from agent.transcript.engine import delete_transcript
 from agent.transcript.mirror import mirror_thread_metadata
+from agent.transcript.subagents import attach_subagents
 from agent.transcript.turns import settle_run_turn
 from agent.utils.json_types import as_json_object, as_thread_dict, thread_metadata
 from agent.utils.thread_ops import (
@@ -183,6 +184,8 @@ async def get_dashboard_thread(
             latest_run_status=latest_run_status,
             latest_run_id=latest_run_id,
         )
+    with phase(record, "subagents"):
+        await attach_subagents([summary])
     return summary
 
 

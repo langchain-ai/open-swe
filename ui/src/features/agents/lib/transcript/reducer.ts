@@ -485,7 +485,7 @@ export function queuedTurns(state: TranscriptState): Array<QueuedTurn> {
   for (const turnId of state.turnOrder) {
     const turn = state.turns[turnId]
     if (!turn || !isQueuedTurn(state, turn)) continue
-    const message = turnMessages(state, turn).find(
+    const message = turnMessages(state, turn, []).find(
       (entry) => entry.author === "user"
     )
     if (!message) continue
@@ -957,18 +957,40 @@ interface TurnCacheEntry {
   messages: Array<Message>
 }
 
-const turnCache = new WeakMap<TranscriptTurnState, TurnCacheEntry>()
+// One entry per namespace projected from the turn: the root transcript and
+// any subagent view open on it read the same turn through different filters.
+const turnCache = new WeakMap<
+  TranscriptTurnState,
+  Map<string, TurnCacheEntry>
+>()
+
+function namespaceKey(namespace: Namespace): string {
+  return namespace.join("\u0000")
+}
+
+function sameNamespace(left: Namespace, right: Namespace): boolean {
+  return (
+    left.length === right.length &&
+    left.every((segment, index) => right[index] === segment)
+  )
+}
 
 /**
- * The turn's rows as the transcript renders them: the human message that opened
- * it, then one agent message whose chunks interleave reasoning, prose and tool
- * calls in event order — the same shape `streamMessagesToUi` produces.
+ * The turn's rows under `namespace` as the transcript renders them: the human
+ * message that opened it, then one agent message whose chunks interleave
+ * reasoning, prose and tool calls in event order — the same shape
+ * `streamMessagesToUi` produces. The root namespace is the thread itself; a
+ * subagent's namespace yields what that subagent said and did, with anything
+ * it spawned in turn left to the `task` card that spawned it.
  */
 function turnMessages(
   state: TranscriptState,
-  turn: TranscriptTurnState
+  turn: TranscriptTurnState,
+  namespace: Namespace
 ): Array<Message> {
-  const cached = turnCache.get(turn)
+  const key = namespaceKey(namespace)
+  let perNamespace = turnCache.get(turn)
+  const cached = perNamespace?.get(key)
   if (
     cached &&
     cached.revision === turn.revision &&
@@ -1013,9 +1035,7 @@ function turnMessages(
   for (const item of turn.items) {
     if (item.kind === "message") {
       const row = state.messages[item.id]
-      // Subagent output is not part of the root transcript; the subagent card
-      // that spawned it renders its activity instead.
-      if (!row || row.namespace.length) continue
+      if (!row || !sameNamespace(row.namespace, namespace)) continue
       if (row.role === "human") {
         flush()
         const message = humanMessage(state.threadId, row, state.entities)
@@ -1034,13 +1054,17 @@ function turnMessages(
       continue
     }
     const call = state.toolCalls[item.id]
-    if (!call || call.namespace.length) continue
+    if (!call || !sameNamespace(call.namespace, namespace)) continue
     if (INTERNAL_TOOLS.has(call.name)) continue
     append(call.toolCallId, call.startedAt, [toolChunk(state.threadId, call)])
   }
   flush()
 
-  turnCache.set(turn, {
+  if (!perNamespace) {
+    perNamespace = new Map()
+    turnCache.set(turn, perNamespace)
+  }
+  perNamespace.set(key, {
     revision: turn.revision,
     entities: state.entities,
     messages: out,
@@ -1081,7 +1105,7 @@ export function toMessages(state: TranscriptState): Array<Message> {
     // Queued follow-ups render in the queue, not the record, until they run.
     if (!turn || isQueuedTurn(state, turn) || isCancelledBeforeStart(turn))
       continue
-    messages.push(...turnMessages(state, turn))
+    messages.push(...turnMessages(state, turn, []))
   }
   messagesCache.set(state.turns, {
     turnOrder: state.turnOrder,
@@ -1089,4 +1113,37 @@ export function toMessages(state: TranscriptState): Array<Message> {
     messages,
   })
   return messages
+}
+
+/**
+ * What one subagent said and did, as UI rows: every message and tool call
+ * recorded under exactly `namespace`, across every turn of the thread. Its
+ * task prompt is not among them — the `task` call's input holds it — and a
+ * nested subagent shows as a `task` card here, the way it does at the root.
+ */
+export function subagentMessages(
+  state: TranscriptState,
+  namespace: Namespace
+): Array<Message> {
+  if (!namespace.length) return []
+  const messages: Array<Message> = []
+  for (const turnId of state.turnOrder) {
+    const turn = state.turns[turnId]
+    if (!turn || isQueuedTurn(state, turn) || isCancelledBeforeStart(turn))
+      continue
+    messages.push(...turnMessages(state, turn, namespace))
+  }
+  return messages
+}
+
+/**
+ * The `task` tool call that spawned a subagent, wherever in the thread it sits,
+ * or null when the transcript holds no such call.
+ */
+export function subagentTask(
+  state: TranscriptState,
+  toolCallId: string
+): TranscriptToolCallState | null {
+  const call = state.toolCalls[toolCallId]
+  return call && toolKind(call.name) === "task" ? call : null
 }

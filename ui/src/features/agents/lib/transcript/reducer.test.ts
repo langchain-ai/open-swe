@@ -8,6 +8,8 @@ import {
   prependTurns,
   queuedTurns,
   routedNotice,
+  subagentMessages,
+  subagentTask,
   toMessages,
 } from "./reducer"
 import type { TranscriptState } from "./reducer"
@@ -178,6 +180,28 @@ function chunkKinds(entry: Message): Array<string> {
 }
 
 describe("transcript snapshot", () => {
+  it("projects a subagent's namespace as its own transcript", () => {
+    const state = fromSnapshot(twoTurnSnapshot())
+
+    const messages = subagentMessages(state, ["task-1"])
+    expect(messages.map((entry) => [entry.author, entry.id])).toEqual([
+      ["agent", "ai-nested"],
+    ])
+    expect(chunkKinds(messages[0]!)).toEqual(["text", "tool-execution"])
+    const call = messages[0]!.chunks[1] as ToolExecutionChunk
+    expect(call.toolCallId).toBe("grep-1")
+    // The same state still renders the root without the subagent's rows.
+    const rootCalls = toMessages(state).flatMap((entry) =>
+      entry.chunks.flatMap((chunk) =>
+        chunk.kind === "tool-execution" ? [chunk.toolCallId] : []
+      )
+    )
+    expect(rootCalls).toEqual(["read-1", "task-1"])
+    expect(subagentMessages(state, ["task-2"])).toEqual([])
+    expect(subagentTask(state, "task-1")?.namespace).toEqual([])
+    expect(subagentTask(state, "grep-1")).toBeNull()
+  })
+
   it("renders a turn as one human message followed by one agent message", () => {
     const messages = toMessages(fromSnapshot(twoTurnSnapshot()))
 

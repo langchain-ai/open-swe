@@ -5,6 +5,8 @@ import {
   ArrowCounterClockwiseIcon,
   BookOpenTextIcon,
   CalendarBlankIcon,
+  CaretDownIcon,
+  CaretRightIcon,
   ChatCircleIcon,
   CircleNotchIcon,
   FolderIcon,
@@ -26,12 +28,18 @@ import { useEffect, useRef, useState } from "react"
 import type { ComponentType, SVGProps } from "react"
 
 import type { PullRequestSnapshot } from "@/features/agents/lib/api"
-import type { AgentSource, AgentThread } from "@/features/agents/lib/types"
+import type {
+  AgentSource,
+  AgentSubagentSummary,
+  AgentThread,
+} from "@/features/agents/lib/types"
 import type { SidebarThreadItem } from "@/features/agents/lib/sidebarThreads"
 import { Tooltip, TooltipPopup, TooltipTrigger } from "@/components/ui/tooltip"
 import { DeleteThreadDialog } from "@/features/agents/components/DeleteThreadDialog"
 import { ThreadMenuItems } from "@/features/agents/components/ThreadMenuItems"
 import { useMarkLocalThreadViewed } from "@/features/agents/lib/desktopLocal"
+import { useSidebarPrefs } from "@/features/agents/lib/sidebarPrefs"
+import { useActiveSubagentId } from "@/features/agents/lib/useActiveSubagentId"
 import {
   markAgentThreadViewed,
   markReviewViewed,
@@ -209,8 +217,23 @@ export function SidebarThreadRow({
   const [deleteError, setDeleteError] = useState<string | null>(null)
   const [contextMenuOpen, setContextMenuOpen] = useState(false)
   const marquee = useTitleMarquee()
+  const { prefs, toggleSubagentsCollapsed } = useSidebarPrefs()
+  const activeSubagentId = useActiveSubagentId()
 
   const thread = item.location === "cloud" ? item.thread : null
+  const subagents = item.subagents ?? []
+  const hasSubagents = subagents.length > 0
+  // A sub-thread is on screen: it takes the highlight, and stays visible even
+  // when the fold is closed so the row that is open is never hidden.
+  const activeSubagent =
+    isActive &&
+    activeSubagentId &&
+    subagents.some((subagent) => subagent.toolCallId === activeSubagentId)
+      ? activeSubagentId
+      : null
+  const subagentsCollapsed =
+    !activeSubagent && prefs.collapsedSubagentKeys.includes(item.key)
+  const rowIsActive = isActive && !activeSubagent
   const source =
     item.source && item.source !== "dashboard" ? SOURCE_META[item.source] : null
   const SourceIcon = source?.icon
@@ -289,8 +312,32 @@ export function SidebarThreadRow({
     onNavigate?.()
   }
 
+  const onToggleSubagents = (event: React.SyntheticEvent) => {
+    event.preventDefault()
+    event.stopPropagation()
+    toggleSubagentsCollapsed(item.key)
+  }
+  const SubagentCaret = subagentsCollapsed ? CaretRightIcon : CaretDownIcon
+
   const rowContent = (
     <>
+      {hasSubagents && (
+        <span
+          role="button"
+          tabIndex={0}
+          aria-expanded={!subagentsCollapsed}
+          aria-label={subagentsCollapsed ? "Show subagents" : "Hide subagents"}
+          title={subagentsCollapsed ? "Show subagents" : "Hide subagents"}
+          onClick={onToggleSubagents}
+          onKeyDown={(event) => {
+            if (event.key === "Enter" || event.key === " ")
+              onToggleSubagents(event)
+          }}
+          className="-ml-0.5 flex size-5 shrink-0 items-center justify-center rounded text-muted-foreground/80 hover:bg-accent hover:text-foreground"
+        >
+          <SubagentCaret className="size-3" weight="bold" />
+        </span>
+      )}
       <span
         ref={marquee.viewport}
         className={cn(
@@ -390,13 +437,13 @@ export function SidebarThreadRow({
 
   const rowClassName = cn(
     "flex items-center gap-2 rounded-lg pr-2.5 transition-colors",
-    indent ? "pl-6" : "pl-2.5",
+    hasSubagents ? (indent ? "pl-4" : "pl-1") : indent ? "pl-6" : "pl-2.5",
     // Only ever on screen while "Show archived" is on; without this an
     // archived row is indistinguishable from a live one.
     archived && "opacity-55",
     compact ? "h-7 gap-1.5" : "h-8",
     "text-foreground",
-    isActive ? "bg-accent" : "group-hover/row:bg-sidebar-row-hover"
+    rowIsActive ? "bg-accent" : "group-hover/row:bg-sidebar-row-hover"
   )
 
   const review = item.reviewPage
@@ -471,6 +518,21 @@ export function SidebarThreadRow({
           </ContextMenu.Positioner>
         </ContextMenu.Portal>
       </ContextMenu.Root>
+      {hasSubagents && !subagentsCollapsed && (
+        <ul aria-label={`Subagents of ${item.title}`}>
+          {subagents.map((subagent) => (
+            <SidebarSubagentRow
+              key={subagent.toolCallId}
+              threadId={item.id}
+              subagent={subagent}
+              isActive={activeSubagent === subagent.toolCallId}
+              compact={compact}
+              indent={indent}
+              onNavigate={onNavigate}
+            />
+          ))}
+        </ul>
+      )}
       <DeleteThreadDialog
         open={deleteOpen}
         onOpenChange={(open) => {
@@ -490,6 +552,74 @@ export function SidebarThreadRow({
         error={deleteError}
       />
     </>
+  )
+}
+
+function subagentAge(startedAt: number): string {
+  const age = compactAge(startedAt)
+  return age === "now" ? "just now" : `${age} ago`
+}
+
+/**
+ * A subagent listed under the thread that spawned it. Opening it shows the
+ * subagent's own transcript on the thread page; the parent row's `isActive`
+ * moves here while it does.
+ */
+function SidebarSubagentRow({
+  threadId,
+  subagent,
+  isActive,
+  compact,
+  indent,
+  onNavigate,
+}: {
+  threadId: string
+  subagent: AgentSubagentSummary
+  isActive: boolean
+  compact: boolean
+  indent: boolean
+  onNavigate?: () => void
+}) {
+  return (
+    <li className="group/row relative mb-0.5">
+      <Link
+        to="/agents/$threadId"
+        params={{ threadId }}
+        search={{ subagent: subagent.toolCallId }}
+        onClick={() => onNavigate?.()}
+        title={subagent.title}
+        className={cn(
+          "flex items-center gap-2 rounded-lg pr-2.5 text-foreground transition-colors",
+          indent ? "pl-11" : "pl-7",
+          compact ? "h-7 gap-1.5" : "py-1",
+          isActive ? "bg-accent" : "hover:bg-sidebar-row-hover"
+        )}
+      >
+        <span
+          className="size-1 shrink-0 rounded-full bg-muted-foreground/50"
+          aria-hidden
+        />
+        <span className="flex min-w-0 flex-1 flex-col">
+          <span className="truncate text-sm">{subagent.title}</span>
+          {!compact && (
+            <span className="truncate text-xs text-muted-foreground">
+              {subagentAge(subagent.startedAt)}
+            </span>
+          )}
+        </span>
+        {subagent.status === "in_progress" ? (
+          <CircleNotchIcon
+            className="size-3.5 shrink-0 animate-spin text-muted-foreground"
+            aria-label="Subagent running"
+          />
+        ) : subagent.status === "error" ? (
+          <WarningCircleIcon
+            className="size-3.5 shrink-0 text-destructive"
+            aria-label="Subagent failed"
+          />
+        ) : null}
+      </Link>
+    </li>
   )
 }
 

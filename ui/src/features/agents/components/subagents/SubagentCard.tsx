@@ -1,9 +1,11 @@
 import { memo } from "react"
-import { Bot, Loader2 } from "lucide-react"
+import { Link } from "@tanstack/react-router"
+import { ArrowUpRight, Bot, Loader2 } from "lucide-react"
 
 import { SubagentActivity } from "./SubagentActivity"
 import type { ToolExecutionChunk } from "@/features/agents/lib/types"
 import { useIsInAgentThreadStream } from "@/features/agents/lib/provider/useIsInAgentThreadStream"
+import { useThreadSource } from "@/features/agents/lib/threadSource/ThreadSourceProvider"
 
 /** Coerce an unknown tool-argument value to a trimmed string, or `""`. */
 function asString(value: unknown): string {
@@ -20,6 +22,7 @@ export const SubagentCard = memo(function SubagentCard({
   chunk: ToolExecutionChunk
 }) {
   const inLiveStream = useIsInAgentThreadStream()
+  const source = useThreadSource()
   const input = chunk.input ?? {}
   const subagentType = asString(input.subagent_type) || "subagent"
   const description = asString(input.description)
@@ -48,6 +51,19 @@ export const SubagentCard = memo(function SubagentCard({
         <span className="truncate text-[11px] font-medium text-muted-foreground">
           {subagentType}
         </span>
+        {source.kind === "transcript" && namespace && namespace.length > 0 && (
+          <Link
+            to="/agents/$threadId"
+            params={{ threadId: source.threadId }}
+            search={{ subagent: chunk.toolCallId }}
+            className="ml-auto flex shrink-0 items-center gap-0.5 rounded px-1 text-[10px] text-muted-foreground/70 hover:bg-background hover:text-foreground"
+            aria-label="Open subagent transcript"
+            title="Open subagent transcript"
+          >
+            Open
+            <ArrowUpRight className="h-3 w-3" aria-hidden />
+          </Link>
+        )}
       </div>
       {description && (
         <p className="line-clamp-5 text-[11px] leading-4 break-words whitespace-pre-wrap text-muted-foreground/70">
