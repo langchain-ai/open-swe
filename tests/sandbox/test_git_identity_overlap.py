@@ -38,6 +38,7 @@ class _Sandbox(SandboxBackendProtocol):
         self.identity_started = asyncio.Event()
         self.release_identity = asyncio.Event()
         self.identity_error: Exception | None = None
+        self.identity_exit_code = 0
         self.identity_cancelled = False
 
     @property
@@ -57,7 +58,8 @@ class _Sandbox(SandboxBackendProtocol):
                 raise
             if self.identity_error is not None:
                 raise self.identity_error
-            command = "identity"
+            self.ran.append("identity")
+            return ExecuteResponse(output="", exit_code=self.identity_exit_code)
         self.ran.append(command)
         return ExecuteResponse(output="", exit_code=0)
 
@@ -249,3 +251,21 @@ async def test_new_sandbox_writes_its_identity_before_a_stale_images_update_scri
     await asyncio.wait_for(startup, timeout=_HANG_TIMEOUT)
 
     assert sandbox.ran == ["identity", script_command("git pull", "update", stale.repos)]
+
+
+async def test_identity_write_that_exits_non_zero_is_logged_and_commands_still_run(
+    sandbox: _Sandbox, caplog: pytest.LogCaptureFixture
+) -> None:
+    sandbox.identity_exit_code = 255
+    sandbox.release_identity.set()
+    caplog.set_level(logging.WARNING)
+
+    proxy = await asyncio.wait_for(ensure_sandbox_for_thread(THREAD_ID), timeout=_HANG_TIMEOUT)
+    result = await asyncio.wait_for(proxy.aexecute("git status"), timeout=_HANG_TIMEOUT)
+
+    assert result.exit_code == 0
+    assert sandbox.ran == ["identity", "git status"]
+    [failure] = [record for record in caplog.records if getattr(record, "exit_code", None) == 255]
+    assert failure.levelno == logging.WARNING
+    assert getattr(failure, "thread_id", None) == THREAD_ID
+    assert getattr(failure, "sandbox_id", None) == sandbox.id

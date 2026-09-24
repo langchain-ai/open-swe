@@ -11,7 +11,7 @@ from contextlib import asynccontextmanager, suppress
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
-from deepagents.backends.protocol import SandboxBackendProtocol
+from deepagents.backends.protocol import ExecuteResponse, SandboxBackendProtocol
 from langgraph_sdk import get_client
 
 from agent.config import ENV
@@ -277,8 +277,8 @@ async def _refresh_github_proxy_or_fail(
     return sandbox_backend
 
 
-async def configure_git_identity(sandbox_backend: SandboxBackendProtocol) -> None:
-    await sandbox_backend.aexecute(
+async def configure_git_identity(sandbox_backend: SandboxBackendProtocol) -> ExecuteResponse:
+    return await sandbox_backend.aexecute(
         f"git config --global user.name '{OPEN_SWE_BOT_NAME}' && "
         f"git config --global user.email '{OPEN_SWE_BOT_EMAIL}'",
     )
@@ -301,14 +301,21 @@ async def git_identity(
     """
 
     async def run() -> None:
+        extra = {"thread_id": thread_id, "sandbox_id": sandbox_backend.id}
         try:
             async with aphase(thread_id, "sandbox.git_identity"):
-                await configure_git_identity(sandbox_backend)
+                result = await configure_git_identity(sandbox_backend)
         except Exception:
+            logger.warning("Failed to write the bot git identity", exc_info=True, extra=extra)
+            return
+        if result.exit_code not in (0, None):
             logger.warning(
-                "Failed to write the bot git identity",
-                exc_info=True,
-                extra={"thread_id": thread_id, "sandbox_id": sandbox_backend.id},
+                "Bot git identity write exited non-zero",
+                extra={
+                    **extra,
+                    "exit_code": result.exit_code,
+                    "log_tail": (result.output or "")[-2000:],
+                },
             )
 
     task = asyncio.create_task(run())
