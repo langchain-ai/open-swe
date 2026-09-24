@@ -60,6 +60,7 @@ class SteeringHistory(BaseModel):
 
     request: HumanTurn
     follow_ups: list[HumanTurn]
+    omitted_follow_ups: int = 0
 
     @classmethod
     async def load(cls, owner: str, repo: str, pr_number: int) -> Self | None:
@@ -73,7 +74,12 @@ class SteeringHistory(BaseModel):
         turns = [turn for thread_id in thread_ids for turn in await cls._human_turns(thread_id)]
         if not turns:
             return None
-        return cls(request=turns[0], follow_ups=turns[1:][-MAX_FOLLOW_UPS:])
+        follow_ups = turns[1:]
+        return cls(
+            request=turns[0],
+            follow_ups=follow_ups[-MAX_FOLLOW_UPS:],
+            omitted_follow_ups=max(0, len(follow_ups) - MAX_FOLLOW_UPS),
+        )
 
     @property
     def turns(self) -> list[HumanTurn]:
@@ -123,10 +129,15 @@ class SteeringHistory(BaseModel):
 
     def messages_block(self) -> str:
         """Every human message as a ``<message author="..." turn="...">`` entry, oldest first."""
-        return "\n".join(
+        entries = [
             f'<message author="{html.escape(turn.author)}" '
             f'turn="{"opening request" if turn is self.request else "follow-up"}">\n'
             f"{_CLOSING_MESSAGE_TAG_RE.sub(lambda m: f'</{m.group(1)}_>', turn.text)}\n"
             "</message>"
             for turn in self.turns
-        )
+        ]
+        if self.omitted_follow_ups:
+            entries.insert(
+                1, f"<omitted>{self.omitted_follow_ups} earlier follow-ups are not shown.</omitted>"
+            )
+        return "\n".join(entries)
