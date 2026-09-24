@@ -6,6 +6,7 @@ Wired into admin threads; each tool rechecks user or system authorization.
 import logging
 from typing import Any
 
+from agent.github.sandbox_access import resolve_repository_ids_later
 from agent.tools.admin_gate import configurable as _configurable
 from agent.tools.admin_gate import require_admin
 from agent.workspaces import refresh, store
@@ -218,6 +219,7 @@ async def publish_workspace(
     await store.retire_superseded_snapshot(
         slug, existing.snapshot_id if existing is not None else None, snapshot_id
     )
+    resolve_repository_ids_later(record.repos)
     if record.setup_script:
         await refresh.ensure_refresh_cron(slug)
     return {"ok": True, "workspace": _summary(record), "created": existing is None}
