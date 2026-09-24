@@ -38,7 +38,7 @@ from agent.review.findings import (
     findings_by_thread,
     is_thread_resolved,
 )
-from agent.review.session import PullRequestState, ReviewSession
+from agent.review.session import PullRequestState, ReviewSession, now_ms
 from agent.review_scout.launch import ReviewScoutTarget, ScoutProgress
 from agent.thread_ids import reviewer_thread_id
 from agent.utils.json_types import ThreadLike, as_json_object, thread_metadata
@@ -1491,6 +1491,8 @@ async def trigger_review_scout(
     target = await _scout_target(owner, repo, pr_number, pr_payload)
     if target is None:
         raise HTTPException(503, "the review scout needs a database and a pull request head")
+    # Taken before the scout starts, so a walkthrough it stores quickly still counts as newer.
+    requested_at_ms = now_ms()
     if await target.walkthrough() is not None:
         trigger = ReviewScoutTrigger(started=False)
     else:
@@ -1503,6 +1505,7 @@ async def trigger_review_scout(
             state=pull.lifecycle,
             workspace=target.workspace_slug,
             walkthrough_ready=not trigger.started,
+            requested_at_ms=requested_at_ms,
         )
     except Exception:
         logger.warning(

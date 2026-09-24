@@ -69,6 +69,15 @@ async def test_ready_walkthrough_stays_unread_until_viewed_after_it(monkeypatch)
 
 
 @pytest.mark.asyncio
+async def test_failed_walkthrough_is_an_error_after_a_successful_chat_run(monkeypatch):
+    monkeypatch.setattr(summary, "get_langsmith_trace_url", AsyncMock(return_value=None))
+    item = await summary._thread_summary(
+        _review_thread(walkthrough_state="failed", latest_run_status="success")
+    )
+    assert item["status"] == "error"
+
+
+@pytest.mark.asyncio
 async def test_settle_waits_while_the_scout_runs(monkeypatch):
     client = _client([{"status": "running"}])
     thread = _review_thread(walkthrough_state="building")

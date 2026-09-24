@@ -486,7 +486,7 @@ async def _thread_summary(
         }
         if review.walkthrough_state == "building":
             summary["status"] = "running"
-        elif status == "idle" and review.walkthrough_state == "failed":
+        elif status != "running" and review.walkthrough_state == "failed":
             summary["status"] = "error"
         elif status == "idle" and review.walkthrough_state == "ready":
             summary["status"] = "finished"

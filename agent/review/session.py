@@ -22,7 +22,7 @@ WalkthroughState = Literal["building", "ready", "failed"]
 PullRequestState = Literal["draft", "open", "merged", "closed"]
 
 
-def _now_ms() -> int:
+def now_ms() -> int:
     return int(datetime.now(UTC).timestamp() * 1000)
 
 
@@ -86,10 +86,11 @@ class ReviewSession(BaseModel):
         state: PullRequestState,
         workspace: str | None,
         walkthrough_ready: bool,
+        requested_at_ms: int,
     ) -> None:
         """List this review in the user's sidebar, building its walkthrough unless ready."""
         # TODO: reviewer assignment should call this for each assigned reviewer too.
-        now_ms = _now_ms()
+        opened_at_ms = now_ms()
         client = langgraph_client()
         await client.threads.create(
             thread_id=self.thread_id,
@@ -101,7 +102,7 @@ class ReviewSession(BaseModel):
                 "repo_owner": self.owner,
                 "repo_name": self.repo,
                 "pr_number": self.pr_number,
-                "created_at_ms": now_ms,
+                "created_at_ms": opened_at_ms,
             },
         )
         await client.threads.update(
@@ -116,9 +117,9 @@ class ReviewSession(BaseModel):
                 "pr_state": state,
                 "resolved": False,
                 "resolved_at_ms": None,
-                "updated_at_ms": now_ms,
+                "updated_at_ms": opened_at_ms,
                 "walkthrough_state": "ready" if walkthrough_ready else "building",
-                "walkthrough_requested_at_ms": now_ms,
-                "walkthrough_ready_at_ms": now_ms if walkthrough_ready else None,
+                "walkthrough_requested_at_ms": requested_at_ms,
+                "walkthrough_ready_at_ms": opened_at_ms if walkthrough_ready else None,
             },
         )
