@@ -838,8 +838,7 @@ async def process_expedited_review_event(payload: dict[str, Any], event_type: st
     await handle_expedited_review_event(payload, event_type)
 
 
-# Edits are excluded so fixing a typo in a comment does not re-run the agent.
-_UNTAGGED_PR_TRIGGER_ACTIONS = {"issue_comment": "created", "pull_request_review": "submitted"}
+_UNTAGGED_PR_TRIGGER_EVENTS = frozenset(["issue_comment", "pull_request_review"])
 
 
 class _GitHubAccount(BaseModel):
@@ -872,7 +871,7 @@ async def is_accepted_commenter(login: str) -> bool:
 
 async def untagged_agent_pr_thread_id(payload: dict[str, Any], event_type: str) -> str | None:
     """The agent thread an untagged comment or review on a PR it opened should wake."""
-    if event_type not in _UNTAGGED_PR_TRIGGER_ACTIONS:
+    if event_type not in _UNTAGGED_PR_TRIGGER_EVENTS:
         return None
     try:
         event = _UntaggedPrEvent.model_validate(payload)
@@ -883,7 +882,7 @@ async def untagged_agent_pr_thread_id(payload: dict[str, Any], event_type: str) 
             exc_info=True,
         )
         return None
-    if event.action != _UNTAGGED_PR_TRIGGER_ACTIONS[event_type]:
+    if event.action not in common.SUPPORTED_GH_COMMENT_ACTIONS[event_type]:
         return None
     target = event.pull_request if event_type == "pull_request_review" else event.issue
     if target is None or target.state != "open":

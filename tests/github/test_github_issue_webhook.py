@@ -422,19 +422,19 @@ async def test_github_webhook_routes_review_comment_reply_without_tag(
 
 
 def _untagged_pr_event(
-    event_type: str, sender: dict[str, str], *, number: int = 1244
+    event_type: str, sender: dict[str, str], *, action: str = "", number: int = 1244
 ) -> dict[object, object]:
     repository = {"owner": {"login": "langchain-ai"}, "name": "open-swe"}
     if event_type == "issue_comment":
         return {
-            "action": "created",
+            "action": action or "created",
             "issue": {"number": number, "state": "open", "pull_request": {"url": "u"}},
             "comment": {"id": 5, "body": "CI is failing on lint"},
             "repository": repository,
             "sender": sender,
         }
     return {
-        "action": "submitted",
+        "action": action or "submitted",
         "pull_request": {"number": number, "state": "open", "head": {"ref": "feature"}},
         "review": {"id": 6, "body": "", "state": "changes_requested"},
         "repository": repository,
@@ -443,19 +443,27 @@ def _untagged_pr_event(
 
 
 @pytest.mark.parametrize(
-    ("event_type", "sender", "accepted"),
+    ("event_type", "action", "sender", "accepted"),
     [
-        ("issue_comment", {"login": "octocat"}, True),
-        ("issue_comment", {"login": "vercel[bot]"}, False),
-        ("issue_comment", {"login": "open-swe[bot]"}, False),
-        ("issue_comment", {"login": "stranger"}, False),
-        ("pull_request_review", {"login": "octocat"}, True),
-        ("pull_request_review", {"login": "devin-ai-integration[bot]"}, False),
-        ("pull_request_review", {"login": "stranger"}, False),
+        ("issue_comment", "", {"login": "octocat"}, True),
+        ("issue_comment", "edited", {"login": "octocat"}, True),
+        ("issue_comment", "deleted", {"login": "octocat"}, False),
+        ("issue_comment", "", {"login": "vercel[bot]"}, False),
+        ("issue_comment", "", {"login": "open-swe[bot]"}, False),
+        ("issue_comment", "", {"login": "stranger"}, False),
+        ("pull_request_review", "", {"login": "octocat"}, True),
+        ("pull_request_review", "edited", {"login": "octocat"}, True),
+        ("pull_request_review", "", {"login": "devin-ai-integration[bot]"}, False),
+        ("pull_request_review", "", {"login": "stranger"}, False),
     ],
 )
 async def test_github_webhook_wakes_agent_on_untagged_activity_on_its_pr(
-    monkeypatch, registry_db, event_type: str, sender: dict[str, str], accepted: bool
+    monkeypatch,
+    registry_db,
+    event_type: str,
+    action: str,
+    sender: dict[str, str],
+    accepted: bool,
 ) -> None:
     called: dict[str, object] = {}
 
@@ -480,7 +488,9 @@ async def test_github_webhook_wakes_agent_on_untagged_activity_on_its_pr(
         threads=[ThreadLink(thread_id="agent-thread", source=AGENT_OPENED_LINK_SOURCE)],
     ).save()
 
-    response = await _post_github_webhook(event_type, _untagged_pr_event(event_type, sender))
+    response = await _post_github_webhook(
+        event_type, _untagged_pr_event(event_type, sender, action=action)
+    )
 
     assert response.status_code == 200
     assert (response.json()["status"] == "accepted") is accepted
