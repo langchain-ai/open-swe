@@ -35,6 +35,7 @@ from agent.dashboard.profiles import (  # noqa: F401
 )
 from agent.dashboard.workspace_settings import get_workspace_settings
 from agent.dispatch import dispatch_agent_run
+from agent.expedited_review.lifecycle import repo_token
 from agent.github.app import (
     get_github_app_installation_token,  # noqa: F401
     get_github_app_installation_token_with_expiry,
@@ -1304,7 +1305,7 @@ async def _pr_diff_stats(event: PullRequestEvent) -> dict[str, int] | None:
         return event.diff_stats
     owner, _, repo = event.repo_full_name.partition("/")
     number = event.pull_request.number
-    token = await get_github_app_installation_token(repositories=[repo], log_errors=False)
+    token = await repo_token(owner, repo)
     if not token or not repo or number is None:
         return None
     pr_ref = GitHubPrRef(owner=owner, repo=repo, number=number, url="")
