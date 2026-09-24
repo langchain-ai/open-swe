@@ -2,6 +2,7 @@ import asyncio
 import json
 import logging
 import time
+import traceback
 from collections.abc import Callable, Iterator
 from datetime import UTC, datetime, timedelta
 from typing import NoReturn, TypedDict
@@ -481,13 +482,32 @@ async def test_decryption_miss_is_logged_with_its_record(
     ] == [("2", store_key)]
 
 
+def _logged_text(caplog: pytest.LogCaptureFixture) -> str:
+    """All the captured records could print: messages, extras and exception chains."""
+    parts = [caplog.text]
+    for record in caplog.records:
+        parts.append(repr(vars(record)))
+        if record.exc_info and record.exc_info[1] is not None:
+            parts.extend(traceback.format_exception(record.exc_info[1]))
+    return "".join(parts)
+
+
+@pytest.mark.parametrize(
+    "plaintext",
+    [json.dumps({"token": "ghs_planted"}), "ghs_planted"],
+    ids=["payload-missing-fields", "raw-token"],
+)
 async def test_unreadable_payload_falls_back_without_logging_the_token(
-    shared_store: FakeStore, mints: list[dict[str, object]], caplog: pytest.LogCaptureFixture
+    shared_store: FakeStore,
+    mints: list[dict[str, object]],
+    caplog: pytest.LogCaptureFixture,
+    plaintext: str,
 ) -> None:
     await github_app.get_github_app_installation_token(repository_ids=[11])
     [(store_key, item)] = shared_store.values(_SHARED_TOKENS).items()
-    # Decrypts, but binds the planted token to no slot or expiry.
-    planted = encrypt_token(json.dumps({"token": "ghs_planted"}))
+    # Decrypts under the shared key, as another feature's ciphertext would, but is
+    # no payload this code wrote.
+    planted = encrypt_token(plaintext)
     shared_store.seed(_SHARED_TOKENS, store_key, item | {"encrypted_payload": planted})
     github_app.clear_app_token_cache()
     caplog.clear()
@@ -495,7 +515,7 @@ async def test_unreadable_payload_falls_back_without_logging_the_token(
     assert await github_app.get_github_app_installation_token(repository_ids=[11]) == "ghs_minted-2"
 
     assert len(_warnings(caplog)) == 1
-    assert "ghs_planted" not in caplog.text
+    assert "ghs_planted" not in _logged_text(caplog)
 
 
 @pytest.mark.parametrize(
