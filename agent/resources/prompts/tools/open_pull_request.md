@@ -54,3 +54,15 @@ Returns:
     On failure: {"success": False, "error": str}, where ``error`` states what
     failed and quotes the request, status, headers, and body GitHub actually
     returned — read it and decide what to do next.
+
+Shared threads and attribution approval:
+    In a thread with more than one participant, a PR attributed to someone other
+    than the triggering person first needs that person's approval. The tool
+    posts an approval card in the thread and waits up to 60 seconds: on
+    approval it proceeds (retry the identical call if it returned pending), on
+    denial or timeout it returns ``pr_approval: pending|denied`` with
+    ``pr_approval_fingerprint`` — PR created: no. After a denial you may
+    re-attribute to another participant, but only through this same approval
+    flow with their own sign-off, and the commits must be rewritten so the
+    author (and any Co-authored-by trailers) name that person; never swap
+    attribution silently.

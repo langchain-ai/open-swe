@@ -34,6 +34,16 @@ from agent.slack.code_channels import (
     set_view,
 )
 from agent.threads.plan_store import get_plan_content
+from agent.threads.pr_approval import (
+    ALWAYS_ALLOW_ALL,
+    PR_APPROVAL_APPROVED,
+    PR_APPROVAL_REJECTED,
+    always_allow_for,
+    ensure_pr_approval_pending,
+    get_pr_approvals,
+    mark_pr_approval_notified,
+    pr_approval_fingerprint,
+)
 from agent.utils.authorship import PR_ATTRIBUTION_TEXT, add_pr_collaboration_note
 from agent.utils.dashboard_links import dashboard_plan_url, dashboard_thread_url
 from agent.utils.langsmith import create_langsmith_thread_feedback
@@ -140,6 +150,209 @@ def _github_response_summary(resp: httpx2.Response | None) -> str:
 def _effective_draft(draft: bool) -> bool:
     preference = _configurable().draft_prs
     return preference if preference is not None else draft
+
+
+_APPROVAL_WAIT_SECONDS = 60.0
+_APPROVAL_POLL_SECONDS = 2.0
+
+
+def _pr_approval_pending_payload(
+    *,
+    owner: str,
+    repo: str,
+    head: str,
+    base: str,
+    token_kind: str,
+    fingerprint: str,
+    author_login: str,
+    approval_url: str | None,
+    decided: str | None = None,
+) -> dict[str, Any]:
+    decided_text = (
+        f"The author {author_login} {decided}. Do not retry this exact call."
+        if decided
+        else (
+            f"No approval from the author {author_login} yet. They can still approve in the "
+            "thread; when they do, this run is interrupted with the decision so you can retry."
+        )
+    )
+    return {
+        "success": False,
+        "error": (
+            "The PR would be attributed to another person, and their approval is required. "
+            f"Reason: {decided_text} Branch pushed: {owner}/{repo}:{head}. PR created: no."
+        ),
+        "pr_approval": decided or "pending",
+        "pr_approval_fingerprint": fingerprint,
+        "pr_approval_author": author_login,
+        "approval_url": approval_url,
+        "token_kind": token_kind,
+        "branch_pushed": False,
+    }
+
+
+async def _pr_author_needs_approval(
+    cfg: RunConfig,
+) -> tuple[str | None, str, str | None]:
+    """The attributed author for this run when they must approve the PR themselves.
+
+    Returns ``(author_login, requester_login, decision)`` — the author is the
+    person the PR will open as, the requester the person who triggered the run,
+    and ``decision`` one of the pre-authorization scopes when an approval is
+    unnecessary. Any element may be ``None`` when the run has no such person.
+    """
+    author_login = await pr_author_login()
+    if not author_login:
+        return None, "", None
+    requester_login = (cfg.github_login or "").strip()
+    if not requester_login or requester_login.lower() == author_login.lower():
+        return None, requester_login, None
+    decision = await always_allow_for(author_login, requester_login)
+    return author_login, requester_login, decision
+
+
+async def _pr_approval(
+    cfg: RunConfig,
+    token: str,
+    kind: str,
+    *,
+    owner: str,
+    repo: str,
+    head: str,
+    base: str,
+    title: str,
+) -> dict[str, Any] | None:
+    """The pending-approval payload when a shared thread needs the author's sign-off.
+
+    Runs the Block Kit approval card for a PR attributed to someone other than
+    the triggering user: a stored "always allow" pre-authorizes it, a shared
+    thread with a single participant never asks, and otherwise the tool waits
+    up to 60 seconds for the author's decision before returning ``pending`` —
+    the approval callback interrupts the run so the model can retry.
+    """
+    if kind != "user" or not cfg.thread_id:
+        return None
+    author_login = await pr_author_login()
+    if not author_login:
+        return None
+    requester_login = (cfg.github_login or "").strip()
+    if not requester_login or requester_login.lower() == author_login.lower():
+        return None
+    preauthorized = await always_allow_for(author_login, requester_login)
+    if preauthorized in (ALWAYS_ALLOW_ALL, "requester"):
+        return None
+
+    from agent.slack.client import (
+        LANGGRAPH_URL,
+        get_active_slack_thread,
+        post_slack_thread_reply_with_ts,
+    )
+    from agent.slack.tools.reply import build_pr_approval_blocks
+
+    fingerprint = pr_approval_fingerprint(
+        thread_id=cfg.thread_id,
+        author_login=author_login,
+        requester_login=requester_login,
+        owner=owner,
+        repo=repo,
+        head=head,
+    )
+    from agent.utils.dashboard_links import dashboard_thread_url
+
+    existing = await get_pr_approvals(cfg.thread_id)
+    if existing.get(fingerprint, {}).get("status") == PR_APPROVAL_REJECTED:
+        return _pr_approval_pending_payload(
+            owner=owner,
+            repo=repo,
+            head=head,
+            base=base,
+            token_kind=kind,
+            fingerprint=fingerprint,
+            author_login=author_login,
+            approval_url=dashboard_thread_url(cfg.thread_id),
+            decided="denied this attribution",
+        )
+
+    active = await get_active_slack_thread(get_client(url=LANGGRAPH_URL), cfg.thread_id)
+    channel_id = (active or {}).get("channel_id")
+    thread_ts = (active or {}).get("thread_ts")
+    if not isinstance(channel_id, str) or not isinstance(thread_ts, str):
+        # Nothing to ask in: without a Slack location there is no approver to
+        # reach, so the attribution stays unresolved rather than silently
+        # publishing under someone else's name.
+        return _pr_approval_pending_payload(
+            owner=owner,
+            repo=repo,
+            head=head,
+            base=base,
+            token_kind=kind,
+            fingerprint=fingerprint,
+            author_login=author_login,
+            approval_url=dashboard_thread_url(cfg.thread_id),
+        )
+
+    record = await ensure_pr_approval_pending(
+        cfg.thread_id,
+        fingerprint=fingerprint,
+        author_login=author_login,
+        requester_login=requester_login,
+        owner=owner,
+        repo=repo,
+        head=head,
+        base=base,
+        title=title,
+        draft=_effective_draft(True),
+    )
+    if record.get("notified") is not True:
+        message = (
+            f":raised_hand: Open SWE wants to open a PR as *{author_login}* "
+            f"(triggered by `{requester_login}`).\n\n"
+            f"*{title}*\n`{owner}/{repo}` — `{head}` → `{base}`\n\n"
+            "Approve once, always allow this requester, or deny. The tool call waits "
+            "up to a minute; after that the PR opens only once you approve."
+        )
+        message_ts, _error = await post_slack_thread_reply_with_ts(
+            channel_id,
+            thread_ts,
+            message,
+            blocks=build_pr_approval_blocks(message, fingerprint),
+            agent_thread_id=cfg.thread_id,
+        )
+        if message_ts:
+            await mark_pr_approval_notified(cfg.thread_id, fingerprint)
+
+    deadline = _APPROVAL_WAIT_SECONDS
+    import asyncio as _asyncio  # noqa: PLC0415
+
+    while deadline > 0:
+        await _asyncio.sleep(_APPROVAL_POLL_SECONDS)
+        deadline -= _APPROVAL_POLL_SECONDS
+        approvals = await get_pr_approvals(cfg.thread_id)
+        status = approvals.get(fingerprint, {}).get("status")
+        if status == PR_APPROVAL_APPROVED:
+            return None
+        if status == PR_APPROVAL_REJECTED:
+            return _pr_approval_pending_payload(
+                owner=owner,
+                repo=repo,
+                head=head,
+                base=base,
+                token_kind=kind,
+                fingerprint=fingerprint,
+                author_login=author_login,
+                approval_url=dashboard_thread_url(cfg.thread_id),
+                decided="denied this attribution",
+            )
+    return _pr_approval_pending_payload(
+        owner=owner,
+        repo=repo,
+        head=head,
+        base=base,
+        token_kind=kind,
+        fingerprint=fingerprint,
+        author_login=author_login,
+        approval_url=dashboard_thread_url(cfg.thread_id),
+    )
 
 
 def _configurable() -> RunConfig:
@@ -1007,6 +1220,17 @@ async def _open_pull_request(
                 branch_pushed=None,
                 failed_step="workspace_repo",
             )
+        if pending := await _pr_approval(
+            _configurable(),
+            token,
+            kind,
+            owner=owner,
+            repo=repo,
+            head=head,
+            base=base,
+            title=title,
+        ):
+            return pending
         preflight_failure = await _preflight_pr_access(
             client=client,
             token=token,

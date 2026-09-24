@@ -276,6 +276,33 @@ def _build_option_blocks(message: str, options: list[str] | None) -> list[dict[s
     return blocks
 
 
+def build_pr_approval_blocks(message: str, fingerprint: str) -> list[dict[str, Any]]:
+    """Approval card for opening a PR under the author's own name."""
+
+    def _button(text: str, action: str, style: str) -> dict[str, Any]:
+        return {
+            "type": "button",
+            "text": {"type": "plain_text", "text": text, "emoji": True},
+            "style": style,
+            "value": json.dumps(
+                {"type": "pr_approval", "action": action, "fingerprint": fingerprint}
+            ),
+            "action_id": f"open_swe_option_select_pr_approval_{action}",
+        }
+
+    return [
+        {"type": "section", "text": {"type": "mrkdwn", "text": message}},
+        {
+            "type": "actions",
+            "elements": [
+                _button("Approve once", "approve", "primary"),
+                _button("Always allow from this requester", "always_allow", "primary"),
+                _button("Deny", "reject", "danger"),
+            ],
+        },
+    ]
+
+
 def build_workflow_approval_blocks(message: str, fingerprint: str) -> list[dict[str, Any]]:
     return [
         {"type": "section", "text": {"type": "mrkdwn", "text": message}},

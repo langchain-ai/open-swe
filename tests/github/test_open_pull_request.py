@@ -528,6 +528,9 @@ async def _passthrough_body(body: str) -> str:
 def _stub_token(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(opr, "private_credential_login", AsyncMock(return_value="test-owner"))
     monkeypatch.setattr(opr, "_resolve_pr_author_token", lambda *_a, **_k: _coro(("tok", "user")))
+    # These body tests run behind the stubbed resolver; the approval gate reads
+    # live authorship and would fail the run on the unconfigured thread scope.
+    monkeypatch.setattr(opr, "_pr_approval", AsyncMock(return_value=None))
     # Footer stamping has its own test; here the body under assertion stays the caller's.
     monkeypatch.setattr(opr, "_stamp_attribution_footer", _passthrough_body)
 
@@ -640,6 +643,7 @@ def test_footer_uses_selected_route_when_thread_metadata_is_missing(
     )
     monkeypatch.setattr(opr, "private_credential_login", AsyncMock(return_value="test-owner"))
     monkeypatch.setattr(opr, "_resolve_pr_author_token", lambda *_a, **_k: _coro(("tok", "user")))
+    monkeypatch.setattr(opr, "_pr_approval", AsyncMock(return_value=None))
     client = _RoutingClient(
         post=_FakeResponse(201, {"html_url": "u", "number": 1, "user": {}}), get_routes={}
     )
