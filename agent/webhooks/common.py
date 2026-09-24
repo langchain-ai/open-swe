@@ -59,7 +59,7 @@ from agent.github.comments import (
     verify_github_signature,
 )
 from agent.github.org_membership import INTERNAL_BOT_LOGINS, is_user_active_org_member
-from agent.github.pull_requests import PullRequestEvent
+from agent.github.pull_requests import PullRequestEvent, PullRequestPayload
 from agent.github.thread_token import (
     cache_github_token_for_thread,
     invalidate_cached_github_token,
@@ -1298,9 +1298,21 @@ def _pr_state_from_payload(payload: dict[str, Any]) -> str | None:
     return event.state if event is not None else None
 
 
-def _pr_diff_stats_from_payload(payload: dict[str, Any]) -> dict[str, int] | None:
-    event = PullRequestEvent.parse(payload)
-    return event.diff_stats if event is not None else None
+async def _pr_diff_stats(event: PullRequestEvent) -> dict[str, int] | None:
+    """Diff stats from the event, fetched from GitHub when the payload omits them."""
+    if event.diff_stats is not None:
+        return event.diff_stats
+    owner, _, repo = event.repo_full_name.partition("/")
+    number = event.pull_request.number
+    token = await get_github_app_installation_token(repositories=[repo], log_errors=False)
+    if not token or not repo or number is None:
+        return None
+    pr_ref = GitHubPrRef(owner=owner, repo=repo, number=number, url="")
+    data = await fetch_github_pr_metadata(pr_ref, token=token)
+    if data is None:
+        return None
+    fetched = PullRequestPayload.model_validate(data)
+    return event.model_copy(update={"pull_request": fetched}).diff_stats
 
 
 async def _record_pr_merge_feedback(thread_id: str, *, pr_url: str) -> None:
@@ -1350,7 +1362,7 @@ async def update_agent_thread_pr_state(payload: dict[str, Any]) -> None:
         return
     pr_url = pull_request.url
     new_state = pull_request.state
-    diff_stats = _pr_diff_stats_from_payload(payload)
+    diff_stats = await _pr_diff_stats(event)
 
     langgraph_client = get_client(url=LANGGRAPH_URL)
     try:

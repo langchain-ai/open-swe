@@ -65,22 +65,6 @@ def test_pr_state_from_payload_missing_pull_request() -> None:
     assert webhook_common._pr_state_from_payload({}) is None
 
 
-def test_pr_diff_stats_from_payload_counts() -> None:
-    payload = _pr_payload(state="open")
-    payload["pull_request"]["additions"] = 8
-    payload["pull_request"]["deletions"] = 1
-    payload["pull_request"]["changed_files"] = 2
-    assert webhook_common._pr_diff_stats_from_payload(payload) == {
-        "additions": 8,
-        "deletions": 1,
-        "files": 2,
-    }
-
-
-def test_pr_diff_stats_from_payload_missing_counts() -> None:
-    assert webhook_common._pr_diff_stats_from_payload(_pr_payload(state="open")) is None
-
-
 @pytest.mark.asyncio
 async def test_update_agent_thread_pr_state_refreshes_diff_stats() -> None:
     record = {
