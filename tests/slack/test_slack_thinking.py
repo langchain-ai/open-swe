@@ -516,27 +516,55 @@ async def test_status_wait_recovers_connection_failure_without_webhook(
     ]
 
 
-async def test_status_wait_exhaustion_preserves_active_run(
+@pytest.mark.parametrize("session", [False, True])
+async def test_status_wait_keeps_refreshing_after_repeated_failures(
     monkeypatch: pytest.MonkeyPatch,
-    caplog: pytest.LogCaptureFixture,
+    session: bool,
 ) -> None:
-    client = _status_client(_AnchorStore())
-    client.runs.join.side_effect = httpx.ConnectError("disconnected")
+    refreshed = asyncio.Event()
+    complete = asyncio.Event()
+    statuses: list[str] = []
+    store = _AnchorStore()
+    client = _status_client(store)
     client.runs.list.return_value = [{"run_id": "run-1"}]
-    set_status = AsyncMock(return_value=True)
+
+    async def join(_thread_id: str, _run_id: str) -> dict[str, object]:
+        if client.runs.join.await_count <= 3:
+            raise httpx.ConnectError("disconnected")
+        await complete.wait()
+        client.runs.list.return_value = []
+        return {}
+
+    async def set_status(_channel_id: str, _thread_ts: str, status: str) -> bool:
+        statuses.append(status)
+        if status == "Thinking..." and client.runs.join.await_count > 3:
+            refreshed.set()
+        return True
+
+    client.runs.join.side_effect = join
     monkeypatch.setattr(slack_thinking, "set_slack_thread_status", set_status)
+    monkeypatch.setattr(slack_thinking, "_STATUS_REFRESH_SECONDS", 0.0)
+    monkeypatch.setattr(slack_thinking, "_DEFAULT_RETRY_SECONDS", 0.0)
 
-    await slack_thinking.show_slack_thinking_status(
-        client=client,
-        thread_id="thread-1",
-        run_id="run-1",
-        channel_id="C1",
-        thread_ts="1.0",
-    )
+    async with asyncio.timeout(2):
+        async with asyncio.TaskGroup() as tasks:
+            observer = tasks.create_task(
+                slack_thinking.show_slack_thinking_status(
+                    client=client,
+                    thread_id="thread-1",
+                    run_id="run-1",
+                    channel_id="C1",
+                    thread_ts="1.0",
+                    session_ts="0" if session else "",
+                )
+            )
+            await refreshed.wait()
+            assert not observer.done()
+            assert set(statuses) == {"Thinking..."}
+            complete.set()
 
-    assert client.runs.join.await_count == 3
-    set_status.assert_awaited_once_with("C1", "1.0", "Thinking...")
-    assert "disconnected" in caplog.text
+    assert statuses[-1] == ""
+    assert store.items == {}
 
 
 async def test_status_wait_cancellation_propagates_and_clears_idle_status(

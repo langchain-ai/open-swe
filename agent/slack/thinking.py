@@ -5,6 +5,7 @@ import hashlib
 import logging
 from collections.abc import Mapping
 from dataclasses import dataclass
+from itertools import chain, repeat
 from pathlib import PurePath
 from time import monotonic
 from typing import Any, Literal
@@ -406,7 +407,9 @@ async def show_slack_thinking_status(
 
     refresher = asyncio.create_task(refresh())
     try:
-        for attempt, delay in enumerate((0.0, *_STATUS_RETRY_DELAYS)):
+        for attempt, delay in enumerate(
+            chain((0.0, *_STATUS_RETRY_DELAYS), repeat(_DEFAULT_RETRY_SECONDS))
+        ):
             if attempt:
                 await asyncio.sleep(delay)
             try:
