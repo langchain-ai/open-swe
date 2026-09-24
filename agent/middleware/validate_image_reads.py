@@ -43,7 +43,7 @@ def is_image_bytes(head: bytes) -> bool:
 
 
 def _image_block_head(block: Any) -> bytes | None:
-    if not isinstance(block, dict) or block.get("type") != "image":
+    if not isinstance(block, dict):
         return None
     encoded = block.get("base64")
     if not isinstance(encoded, str):
@@ -54,10 +54,37 @@ def _image_block_head(block: Any) -> bytes | None:
         return b""
 
 
+def _unsupported_block_message(message: ToolMessage, block: dict[str, Any]) -> ToolMessage:
+    path = message.additional_kwargs.get("read_file_path", "the file")
+    block_type = block.get("type", "unknown")
+    mime_type = block.get("mime_type")
+    if isinstance(mime_type, str) and mime_type:
+        description = f"a {mime_type} {block_type}"
+    else:
+        description = f"a {block_type} content block"
+    return ToolMessage(
+        content=(
+            f"read_file: {path} is {description}; this model cannot accept file attachments. "
+            "It was not attached — extract its text in the sandbox (for a PDF try "
+            "`pdftotext`) or publish it with `create_sandbox_file_download_url`."
+        ),
+        name=message.name,
+        tool_call_id=message.tool_call_id,
+        status="error",
+    )
+
+
 def validate_read_file_message(message: ToolMessage) -> ToolMessage:
     if not isinstance(message.content, list):
         return message
     for block in message.content:
+        if not isinstance(block, dict):
+            return _unsupported_block_message(message, {"type": "unknown"})
+        block_type = block.get("type")
+        if block_type == "text":
+            continue
+        if block_type != "image":
+            return _unsupported_block_message(message, block)
         head = _image_block_head(block)
         if head is None or is_image_bytes(head):
             continue

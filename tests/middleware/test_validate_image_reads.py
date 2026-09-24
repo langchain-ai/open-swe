@@ -18,6 +18,22 @@ def _read_file_image(payload: bytes, mime_type: str = "image/png") -> ToolMessag
     )
 
 
+def _read_file_file(mime_type: str = "application/pdf") -> ToolMessage:
+    return ToolMessage(
+        content_blocks=[
+            {
+                "type": "file",
+                "mime_type": mime_type,
+                "source_type": "base64",
+                "data": "cGRm",
+            }
+        ],
+        name="read_file",
+        tool_call_id="call-file-1",
+        additional_kwargs={"read_file_path": "/tmp/pr-assets/report.pdf"},
+    )
+
+
 def test_json_body_saved_as_png_becomes_text_error() -> None:
     # Production trace: an expired download link wrote a JSON error body to offload.png.
     message = _read_file_image(b'{"detail":{"error":"Download link is not valid"}}')
@@ -34,6 +50,17 @@ def test_real_image_bytes_pass_through_unchanged() -> None:
     message = _read_file_image(PNG_HEAD)
 
     assert validate_read_file_message(message) is message
+
+
+def test_file_blocks_become_text_errors() -> None:
+    result = validate_read_file_message(_read_file_file())
+
+    assert isinstance(result.content, str)
+    assert "report.pdf" in result.content
+    assert "application/pdf" in result.content
+    assert result.status == "error"
+    assert result.name == "read_file"
+    assert result.tool_call_id == "call-file-1"
 
 
 def test_webp_jpeg_and_heic_are_recognised() -> None:
