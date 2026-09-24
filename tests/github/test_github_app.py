@@ -396,7 +396,10 @@ async def test_token_copied_into_another_scopes_slot_is_not_served(
 
 
 async def test_tampered_plaintext_expiry_can_neither_extend_nor_redate_a_token(
-    shared_store: FakeStore, mints: list[dict[str, object]], monkeypatch: pytest.MonkeyPatch
+    shared_store: FakeStore,
+    mints: list[dict[str, object]],
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
     minted = await github_app.get_github_app_installation_token_with_expiry(repository_ids=[11])
     [(store_key, item)] = shared_store.values(_SHARED_TOKENS).items()
@@ -406,6 +409,7 @@ async def test_tampered_plaintext_expiry_can_neither_extend_nor_redate_a_token(
     )
 
     github_app.clear_app_token_cache()  # a second worker, with an empty in-process cache
+    caplog.clear()
     assert (
         await github_app.get_github_app_installation_token_with_expiry(repository_ids=[11])
         == minted
@@ -415,6 +419,8 @@ async def test_tampered_plaintext_expiry_can_neither_extend_nor_redate_a_token(
     github_app.clear_app_token_cache()
     token, _ = await github_app.get_github_app_installation_token_with_expiry(repository_ids=[11])
     assert token == "ghs_minted-2"
+    # Only the read the payload's own expiry refused could tell the record was edited.
+    assert len(_warnings(caplog)) == 1
 
 
 async def test_payload_encrypted_over_an_hour_ago_is_not_served(

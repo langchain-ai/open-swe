@@ -164,7 +164,12 @@ async def _read_shared_token(key: ScopeKey, *, now: datetime) -> _SharedTokenPay
     if payload.store_key != store_key:
         logger.warning("Shared GitHub App token belongs to another scope", extra=log_extra)
         return None
-    return payload if now < payload.good_until else None
+    if now >= payload.good_until:
+        # Both cutoffs are written equal, so a record the plaintext one let
+        # through but the encrypted one refuses has been edited.
+        logger.warning("Shared GitHub App token has an edited expiry", extra=log_extra)
+        return None
+    return payload
 
 
 async def _write_shared_token(
