@@ -895,6 +895,7 @@ async def _update_selected_option_message(
             message_ts,
             interaction.message.text or label,
             blocks=blocks,
+            preserve_footer=True,
         )
     except Exception:
         common.logger.warning(

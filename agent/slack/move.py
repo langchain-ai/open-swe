@@ -6,7 +6,6 @@ from typing import Any
 from langgraph_sdk.client import LangGraphClient
 
 from agent.slack.client import (
-    append_slack_web_link_footer,
     bind_slack_thread_id,
     delete_slack_thread_associations,
     get_active_slack_thread,
@@ -57,10 +56,10 @@ async def move_slack_thread(
     """Post `message` as a new root in `target_channel` and move the thread's Slack binding there."""
     source_channel = str(source.get("channel_id") or "")
     source_ts = str(source.get("thread_ts") or "")
-    root_text = append_slack_web_link_footer(message, dashboard_thread_url(thread_id))
     new_ts, slack_error = await post_slack_top_level_message_with_ts(
         target_channel,
-        root_text,
+        message,
+        agent_thread_id=thread_id,
         unfurl_links=False,
         unfurl_media=False,
     )

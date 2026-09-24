@@ -439,6 +439,8 @@ async def _post_slack_message_with_ts(
     unfurl_media: bool = True,
     blocks: list[dict[str, Any]] | None = None,
     reply_broadcast: bool = False,
+    agent_thread_id: str | None = None,
+    usage: RunUsageSummary | None = None,
 ) -> tuple[str | None, str | None]:
     if not SLACK_BOT_TOKEN:
         return None, "missing_slack_bot_token"
@@ -449,7 +451,9 @@ async def _post_slack_message_with_ts(
     reply_ts = None if is_code_channel_session(thread_ts) else thread_ts
     broadcast = {"reply_broadcast": True} if reply_broadcast and reply_ts else {}
 
-    payload = prepare_slack_message({"text": text, "blocks": blocks or None})
+    payload = prepare_slack_message(
+        {"text": text, "blocks": blocks or None}, agent_thread_id=agent_thread_id, usage=usage
+    )
     try:
         async with SlackClient.bot() as client:
             data = await client.chat_postMessage(
@@ -770,12 +774,6 @@ def prepare_slack_message(
     text = str(payload.get("text") or "")
     blocks = cast(list[dict[str, object]] | None, payload.get("blocks"))
     updated: _SlackMessage = {"text": text, "blocks": blocks}
-    footer_marker = f"|{SLACK_WEB_LINK_FOOTER_LABEL}>"
-    if footer_marker in text or any(
-        block.get("type") == "context" and _block_contains_text(block, footer_marker)
-        for block in blocks or []
-    ):
-        return updated
     updated["text"] = append_slack_web_link_footer(text, dashboard_url, usage)
     updated_blocks = _with_slack_web_link_context_block(text, blocks, dashboard_url, usage)
     if updated_blocks is not None:
@@ -813,16 +811,15 @@ async def post_slack_thread_reply_with_ts(
     reply_broadcast: bool = False,
 ) -> tuple[str | None, str | None]:
     """Post a reply in a Slack thread and return its Slack timestamp and error."""
-    payload = prepare_slack_message(
-        {"text": text, "blocks": blocks}, agent_thread_id=agent_thread_id, usage=usage
-    )
     return await _post_slack_message_with_ts(
         channel_id,
-        str(payload["text"]),
+        text,
         thread_ts=thread_ts,
         unfurl_links=unfurl_links,
         unfurl_media=unfurl_media,
-        blocks=payload.get("blocks"),
+        blocks=blocks,
+        agent_thread_id=agent_thread_id,
+        usage=usage,
         reply_broadcast=reply_broadcast,
     )
 
@@ -837,11 +834,8 @@ async def post_slack_ephemeral_reply(
     agent_thread_id: str | None = None,
 ) -> bool:
     """Answer one person in a channel, carrying the same web link a thread reply would."""
-    payload = prepare_slack_message(
-        {"text": text, "blocks": blocks}, agent_thread_id=agent_thread_id, usage=usage
-    )
     return await post_slack_ephemeral_message(
-        channel_id, user_id, str(payload["text"]), blocks=payload.get("blocks")
+        channel_id, user_id, text, blocks=blocks, agent_thread_id=agent_thread_id, usage=usage
     )
 
 
@@ -856,15 +850,14 @@ async def post_slack_top_level_message_with_ts(
     usage: RunUsageSummary | None = None,
 ) -> tuple[str | None, str | None]:
     """Post a top-level Slack message and return its timestamp and error."""
-    payload = prepare_slack_message(
-        {"text": text, "blocks": blocks}, agent_thread_id=agent_thread_id, usage=usage
-    )
     return await _post_slack_message_with_ts(
         channel_id,
-        payload["text"],
+        text,
         unfurl_links=unfurl_links,
         unfurl_media=unfurl_media,
-        blocks=payload["blocks"],
+        blocks=blocks,
+        agent_thread_id=agent_thread_id,
+        usage=usage,
     )
 
 
@@ -991,12 +984,16 @@ async def update_slack_message(
     unfurl_links: bool = True,
     unfurl_media: bool = True,
     blocks: list[dict[str, Any]] | None = None,
+    agent_thread_id: str | None = None,
+    preserve_footer: bool = False,
 ) -> tuple[bool, str | None]:
     """Update a Slack message and return success plus any Slack error."""
     if not SLACK_BOT_TOKEN:
         return False, "missing_slack_bot_token"
 
-    payload = prepare_slack_message({"text": text, "blocks": blocks})
+    payload: _SlackMessage = {"text": text, "blocks": blocks}
+    if not preserve_footer:
+        payload = prepare_slack_message(payload, agent_thread_id=agent_thread_id)
     try:
         async with SlackClient.bot() as client:
             await client.chat_update(
@@ -1213,12 +1210,16 @@ async def post_slack_ephemeral_message(
     thread_ts: str | None = None,
     *,
     blocks: list[dict[str, Any]] | None = None,
+    agent_thread_id: str | None = None,
+    usage: RunUsageSummary | None = None,
 ) -> bool:
     """Post an ephemeral message visible only to one user."""
     if not SLACK_BOT_TOKEN:
         return False
 
-    payload = prepare_slack_message({"text": text, "blocks": blocks})
+    payload = prepare_slack_message(
+        {"text": text, "blocks": blocks}, agent_thread_id=agent_thread_id, usage=usage
+    )
     try:
         async with SlackClient.bot() as client:
             response = await client.chat_postEphemeral(
@@ -1306,7 +1307,12 @@ async def invite_to_slack_channel(
 
 
 async def _post_slack_callback(
-    response_url: str, payload: dict[str, Any], path_prefix: str
+    response_url: str,
+    payload: dict[str, Any],
+    path_prefix: str,
+    *,
+    agent_thread_id: str | None = None,
+    usage: RunUsageSummary | None = None,
 ) -> bool:
     try:
         parsed = urlparse(response_url)
@@ -1319,7 +1325,10 @@ async def _post_slack_callback(
     ):
         return False
     if not payload.get("delete_original"):
-        payload = {**payload, **prepare_slack_message(payload)}
+        payload = {
+            **payload,
+            **prepare_slack_message(payload, agent_thread_id=agent_thread_id, usage=usage),
+        }
     request = httpx2.Request(
         "POST",
         response_url,
@@ -1374,15 +1383,12 @@ async def replace_slack_command_message(
     agent_thread_id: str | None = None,
 ) -> bool:
     """Overwrite a slash command's acknowledgement with the reply it stood in for."""
-    payload = prepare_slack_message(
-        {"response_type": "ephemeral", "replace_original": True, "text": text, "blocks": blocks},
-        agent_thread_id=agent_thread_id,
-        usage=usage,
-    )
     return await _post_slack_callback(
         response_url,
-        {"response_type": "ephemeral", "replace_original": True, **payload},
+        {"response_type": "ephemeral", "replace_original": True, "text": text, "blocks": blocks},
         "/commands/",
+        agent_thread_id=agent_thread_id,
+        usage=usage,
     )
 
 
@@ -1809,6 +1815,7 @@ async def update_slack_trace_reply_for_web_handoff(
         channel_id,
         message_ts,
         _format_trace_reply(trace_url, dashboard_url, moved_to_web=True),
+        agent_thread_id=thread_id,
         unfurl_links=False,
         unfurl_media=False,
     )

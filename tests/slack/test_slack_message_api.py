@@ -233,32 +233,38 @@ async def test_message_transports_attach_footer_and_log_delivery(
     assert "private-token" not in str([r.__dict__ for r in records])
 
 
-@pytest.mark.parametrize("with_blocks", [False, True])
-async def test_post_preserves_existing_footer(
-    slack_api: SlackAPI, monkeypatch: pytest.MonkeyPatch, with_blocks: bool
+@pytest.mark.parametrize("thread_ts", ["1.0", "0"])
+@pytest.mark.parametrize("text", ["Done", "x" * 3001])
+async def test_reply_footer_reaches_transport_once(
+    slack_api: SlackAPI, monkeypatch: pytest.MonkeyPatch, thread_ts: str, text: str
 ) -> None:
     monkeypatch.setenv("DASHBOARD_BASE_URL", "https://dashboard.example")
-    footer = "<https://dashboard.example/agents/origin|Open in Web>"
-    blocks = [{"type": "context", "elements": [{"type": "mrkdwn", "text": footer}]}]
-    text = "Done" if with_blocks else f"Done {footer}"
-    await slack_utils.post_slack_top_level_message_with_ts(
-        "C1", text, blocks=blocks if with_blocks else None
+    await slack_utils.post_slack_thread_reply_with_ts(
+        "C1", thread_ts, text, agent_thread_id="origin"
     )
     payload = slack_api.calls[0][1]
-    assert payload["text"] == text
-    if with_blocks:
-        assert payload["blocks"] == blocks
+    footer = "<https://dashboard.example/agents/origin|Open in Web>"
+    assert payload["text"] == f"{text} {footer}"
+    if len(text) > slack_utils.SLACK_SECTION_TEXT_MAX_CHARS:
+        assert not payload.get("blocks")
+    else:
+        assert payload["blocks"] == [
+            {"type": "section", "text": {"type": "mrkdwn", "text": text}},
+            {"type": "context", "elements": [{"type": "mrkdwn", "text": footer}]},
+        ]
 
 
-async def test_post_with_repeated_unclosed_links(
+async def test_update_preserves_existing_footer(
     slack_api: SlackAPI, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setenv("DASHBOARD_BASE_URL", "https://dashboard.example")
-    text = "<http://" * 4000
-    await slack_utils.post_slack_top_level_message_with_ts("C1", text)
-    assert slack_api.calls[0][1]["text"] == (
-        f"{text} <https://dashboard.example/agents|Open in Web>"
-    )
+    footer = "<https://dashboard.example/agents/origin|Open in Web> • $0.42"
+    blocks = [{"type": "context", "elements": [{"type": "mrkdwn", "text": footer}]}]
+    text = f"Done {footer}"
+    await slack_utils.update_slack_message("C1", "1.0", text, blocks=blocks, preserve_footer=True)
+    payload = slack_api.calls[0][1]
+    assert payload["text"] == text
+    assert payload["blocks"] == blocks
 
 
 async def test_code_channel_stream_is_top_level(slack_api):

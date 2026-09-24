@@ -90,7 +90,7 @@ async def _mark_slack_reply_cost_pending(
     if updated_text == text and updated_blocks == blocks:
         return
     updated, error = await update_slack_message(
-        payload["channel_id"], message_ts, updated_text, blocks=updated_blocks
+        payload["channel_id"], message_ts, updated_text, blocks=updated_blocks, preserve_footer=True
     )
     if not updated:
         logger.warning("Could not update pending cost label", extra={"slack_error": error})
@@ -203,7 +203,7 @@ async def _refresh_once(
         return "updated", "already current"
 
     updated, error = await update_slack_message(
-        payload["channel_id"], message_ts, updated_text, blocks=updated_blocks
+        payload["channel_id"], message_ts, updated_text, blocks=updated_blocks, preserve_footer=True
     )
     if not updated:
         return "pending", error or "Slack update failed"

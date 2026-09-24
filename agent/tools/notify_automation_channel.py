@@ -8,12 +8,10 @@ from pydantic import BaseModel, field_validator
 
 from agent.run_config import RunConfig
 from agent.slack.client import (
-    append_slack_web_link_footer,
     post_slack_thread_reply_with_ts,
     post_slack_top_level_message_with_ts,
 )
 from agent.store import TypedStore, now_iso
-from agent.utils.dashboard_links import dashboard_thread_url
 
 logger = logging.getLogger(__name__)
 
@@ -173,11 +171,11 @@ async def notify_automation_channel(content: str, summary: str = "") -> dict[str
             title = (notification.schedule_name or "").strip()
             channel_message = clean_summary or clean_content
             text = f"*Open SWE automation:* {title or 'Scheduled agent'}\n\n{channel_message}"
-            text = append_slack_web_link_footer(text, dashboard_thread_url(thread_id))
             try:
                 posted_ts, slack_error = await post_slack_top_level_message_with_ts(
                     channel_id,
                     text,
+                    agent_thread_id=thread_id,
                     unfurl_links=False,
                     unfurl_media=False,
                 )
