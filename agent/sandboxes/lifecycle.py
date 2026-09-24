@@ -277,10 +277,15 @@ async def _refresh_github_proxy_or_fail(
     return sandbox_backend
 
 
+# The thread's first command waits on this write, so a stalled box must not hold it long.
+_GIT_IDENTITY_TIMEOUT_SECONDS = 30
+
+
 async def configure_git_identity(sandbox_backend: SandboxBackendProtocol) -> ExecuteResponse:
     return await sandbox_backend.aexecute(
         f"git config --global user.name '{OPEN_SWE_BOT_NAME}' && "
         f"git config --global user.email '{OPEN_SWE_BOT_EMAIL}'",
+        timeout=_GIT_IDENTITY_TIMEOUT_SECONDS,
     )
 
 

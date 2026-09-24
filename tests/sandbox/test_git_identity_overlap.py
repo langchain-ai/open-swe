@@ -30,7 +30,10 @@ _HANG_TIMEOUT = 5
 
 
 class _Sandbox(SandboxBackendProtocol):
-    """Runs commands instantly, except the identity write, which waits to be released."""
+    """Runs commands instantly, except the identity write, which waits to be released.
+
+    A stalled write is never released; it ends only at its own timeout, if it has one.
+    """
 
     def __init__(self, sandbox_id: str = "sandbox-1") -> None:
         self._sandbox_id = sandbox_id
@@ -39,6 +42,7 @@ class _Sandbox(SandboxBackendProtocol):
         self.release_identity = asyncio.Event()
         self.identity_error: Exception | None = None
         self.identity_exit_code = 0
+        self.identity_stalls = False
         self.identity_cancelled = False
 
     @property
@@ -51,6 +55,8 @@ class _Sandbox(SandboxBackendProtocol):
     async def aexecute(self, command: str, *, timeout: int | None = None) -> ExecuteResponse:
         if command.startswith("git config --global"):
             self.identity_started.set()
+            if self.identity_stalls and timeout:
+                return ExecuteResponse(output=f"Command timed out after {timeout}s.", exit_code=124)
             try:
                 await self.release_identity.wait()
             except asyncio.CancelledError:
@@ -269,3 +275,15 @@ async def test_identity_write_that_exits_non_zero_is_logged_and_commands_still_r
     assert failure.levelno == logging.WARNING
     assert getattr(failure, "thread_id", None) == THREAD_ID
     assert getattr(failure, "sandbox_id", None) == sandbox.id
+
+
+async def test_stalled_identity_write_does_not_hold_commands_indefinitely(
+    sandbox: _Sandbox,
+) -> None:
+    sandbox.identity_stalls = True
+
+    proxy = await asyncio.wait_for(ensure_sandbox_for_thread(THREAD_ID), timeout=_HANG_TIMEOUT)
+    result = await asyncio.wait_for(proxy.aexecute("git status"), timeout=_HANG_TIMEOUT)
+
+    assert result.exit_code == 0
+    assert sandbox.ran == ["git status"]
