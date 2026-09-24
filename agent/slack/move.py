@@ -1,5 +1,6 @@
-"""Rebind an Open SWE thread from one Slack thread to a new top-level Slack thread."""
+"""Rebind an Open SWE thread from one Slack location to another."""
 
+import logging
 from collections.abc import Mapping
 from typing import Any
 
@@ -12,13 +13,23 @@ from agent.slack.client import (
     get_active_slack_thread,
     lookup_slack_thread_run_mapping,
     post_slack_top_level_message_with_ts,
-    set_slack_thread_status,
     slack_thread_mutation_lock,
     store_slack_run_mapping,
 )
-from agent.slack.thinking import sync_slack_background_status
-from agent.source_context import SourceContext
+from agent.slack.code_channels import is_code_channel_session
+from agent.slack.thinking import release_slack_location_status, sync_slack_background_status
+from agent.source_context import SlackThreadRef, SourceContext
 from agent.utils.dashboard_links import dashboard_thread_url
+
+logger = logging.getLogger(__name__)
+
+
+class SlackRebindError(Exception):
+    """A failed rebind; `moved` is whether the thread already points at the destination."""
+
+    def __init__(self, message: str, *, moved: bool) -> None:
+        super().__init__(message)
+        self.moved = moved
 
 
 def _slack_error_hint(error: str | None) -> str:
@@ -31,22 +42,114 @@ def _slack_error_hint(error: str | None) -> str:
     return "Slack could not create the destination thread; retry once."
 
 
-def _new_slack_context(
-    current: Mapping[str, Any], channel_id: str, thread_ts: str
-) -> dict[str, Any]:
-    return {
-        "channel_id": channel_id,
-        "thread_ts": thread_ts,
-        "triggering_user_id": current.get("triggering_user_id", ""),
-        "triggering_user_name": current.get("triggering_user_name", ""),
-        "triggering_user_email": current.get("triggering_user_email", ""),
-        "triggering_event_ts": thread_ts,
-        **{
-            key: current[key]
-            for key in ("team_id", "triggering_bot_id", "triggering_bot_app_id")
-            if key in current
-        },
-    }
+def _new_slack_context(current: SlackThreadRef, channel_id: str, thread_ts: str) -> SlackThreadRef:
+    return SlackThreadRef.model_validate(
+        {
+            "channel_id": channel_id,
+            "thread_ts": thread_ts,
+            "triggering_user_id": current.triggering_user_id,
+            "triggering_user_name": current.triggering_user_name,
+            "triggering_user_email": current.triggering_user_email,
+            "triggering_event_ts": thread_ts,
+            **{
+                key: getattr(current, key)
+                for key in ("team_id", "triggering_bot_id", "triggering_bot_app_id")
+                if key in current.model_fields_set
+            },
+        }
+    )
+
+
+async def _current_location(client: LangGraphClient, thread_id: str) -> tuple[str, str] | None:
+    active = await get_active_slack_thread(client, thread_id)
+    return SlackThreadRef.model_validate(active).location if active else None
+
+
+async def _carry_run_mapping(
+    client: LangGraphClient, source: SlackThreadRef, destination: SlackThreadRef
+) -> None:
+    source_run = await lookup_slack_thread_run_mapping(client, source.channel_id, source.thread_ts)
+    if not isinstance(source_run, Mapping):
+        return
+    run_id = source_run.get("run_id")
+    if not isinstance(run_id, str) or not run_id:
+        return
+    await store_slack_run_mapping(
+        client,
+        destination.channel_id,
+        destination.thread_ts,
+        run_id,
+        message_ts=(
+            None if is_code_channel_session(destination.thread_ts) else destination.thread_ts
+        ),
+        triggering_user_id=(
+            str(source_run.get("triggering_user_id"))
+            if source_run.get("triggering_user_id")
+            else None
+        ),
+    )
+
+
+async def rebind_slack_thread(
+    client: LangGraphClient,
+    thread_id: str,
+    source: SlackThreadRef,
+    destination: SlackThreadRef,
+) -> None:
+    """Point the thread at `destination` and carry everything keyed to `source` along.
+
+    Finishes a rebind whose metadata already points at `destination`, so a retry
+    after a partial failure completes instead of reporting a concurrent move.
+    """
+    source_location = (source.channel_id, source.thread_ts)
+    target_location = (destination.channel_id, destination.thread_ts)
+    bound_here = False
+    try:
+        async with slack_thread_mutation_lock(
+            client, *source_location, thread_id=thread_id
+        ) as locked_active:
+            current = (
+                SlackThreadRef.model_validate(locked_active).location if locked_active else None
+            )
+            if current == target_location:
+                await bind_slack_thread_id(client, *target_location, thread_id)
+            elif current == source_location:
+                await bind_slack_thread_id(client, *target_location, thread_id)
+                bound_here = True
+                await client.threads.update(
+                    thread_id=thread_id,
+                    metadata={
+                        "source": "slack",
+                        "source_context": SourceContext(slack_thread=destination).dump(),
+                    },
+                )
+                if await _current_location(client, thread_id) != target_location:
+                    raise RuntimeError("destination metadata did not persist")
+            else:
+                raise RuntimeError("Slack thread moved concurrently; retry")
+    except Exception as exc:
+        if bound_here:
+            try:
+                await delete_slack_thread_associations(
+                    client, *target_location, expected_thread_id=thread_id
+                )
+            except Exception:
+                logger.warning(
+                    "Could not roll back a Slack rebind destination",
+                    extra={"agent_thread_id": thread_id, "slack_channel": target_location[0]},
+                    exc_info=True,
+                )
+        raise SlackRebindError(str(exc), moved=False) from exc
+
+    try:
+        await _carry_run_mapping(client, source, destination)
+        await release_slack_location_status(client, *source_location)
+        await sync_slack_background_status(client, thread_id, resume=True)
+        await delete_slack_thread_associations(
+            client, *source_location, expected_thread_id=thread_id
+        )
+    except Exception as exc:
+        raise SlackRebindError(str(exc), moved=True) from exc
 
 
 async def move_slack_thread(
@@ -57,8 +160,6 @@ async def move_slack_thread(
     message: str,
 ) -> dict[str, Any]:
     """Post `message` as a new root in `target_channel` and move the thread's Slack binding there."""
-    source_channel = str(source.get("channel_id") or "")
-    source_ts = str(source.get("thread_ts") or "")
     root_text = append_slack_web_link_footer(message, dashboard_thread_url(thread_id))
     new_ts, slack_error = await post_slack_top_level_message_with_ts(
         target_channel,
@@ -74,84 +175,25 @@ async def move_slack_thread(
             "hint": _slack_error_hint(slack_error),
         }
 
-    new_slack = _new_slack_context(source, target_channel, new_ts)
-    destination_bound = False
+    source_ref = SlackThreadRef.model_validate(dict(source))
     try:
-        async with slack_thread_mutation_lock(
-            client, source_channel, source_ts, thread_id=thread_id
-        ) as locked_active:
-            if not locked_active or (
-                locked_active.get("channel_id"),
-                locked_active.get("thread_ts"),
-            ) != (source_channel, source_ts):
-                raise RuntimeError("Slack thread moved concurrently; retry")
-            await bind_slack_thread_id(client, target_channel, new_ts, thread_id)
-            destination_bound = True
-            await client.threads.update(
-                thread_id=thread_id,
-                metadata={
-                    "source": "slack",
-                    "source_context": SourceContext.parse({"slack_thread": new_slack}).dump(),
-                },
-            )
-            persisted = await get_active_slack_thread(client, thread_id)
-            if not persisted or (persisted.get("channel_id"), persisted.get("thread_ts")) != (
-                target_channel,
-                new_ts,
-            ):
-                raise RuntimeError("destination metadata did not persist")
-    except Exception as exc:  # noqa: BLE001
-        if destination_bound:
-            try:
-                await delete_slack_thread_associations(
-                    client,
-                    target_channel,
-                    new_ts,
-                    expected_thread_id=thread_id,
-                )
-            except Exception:  # noqa: BLE001
-                pass
+        await rebind_slack_thread(
+            client, thread_id, source_ref, _new_slack_context(source_ref, target_channel, new_ts)
+        )
+    except SlackRebindError as exc:
+        if exc.moved:
+            return {
+                "success": False,
+                "error": f"Move cleanup failed: {exc}",
+                "retryable": True,
+                "channel_id": target_channel,
+                "thread_ts": new_ts,
+            }
         return {
             "success": False,
             "error": f"Could not persist Slack move: {exc}",
             "retryable": True,
         }
-
-    source_run = await lookup_slack_thread_run_mapping(client, source_channel, source_ts)
-    if isinstance(source_run, Mapping):
-        run_id = source_run.get("run_id")
-        if isinstance(run_id, str) and run_id:
-            await store_slack_run_mapping(
-                client,
-                target_channel,
-                new_ts,
-                run_id,
-                message_ts=new_ts,
-                triggering_user_id=(
-                    str(source_run.get("triggering_user_id"))
-                    if source_run.get("triggering_user_id")
-                    else None
-                ),
-            )
-
-    try:
-        await delete_slack_thread_associations(
-            client,
-            source_channel,
-            source_ts,
-            expected_thread_id=thread_id,
-        )
-    except Exception as exc:  # noqa: BLE001
-        return {
-            "success": False,
-            "error": f"Move cleanup failed: {exc}",
-            "retryable": True,
-            "channel_id": target_channel,
-            "thread_ts": new_ts,
-        }
-
-    await set_slack_thread_status(source_channel, source_ts, "")
-    await sync_slack_background_status(client, thread_id, resume=True)
 
     return {
         "success": True,

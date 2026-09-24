@@ -20,6 +20,7 @@ from agent.slack.client import (
     stop_slack_stream,
     store_slack_run_mapping,
 )
+from agent.slack.code_channels import is_code_channel_session, set_session_status
 from agent.source_context import SourceContext
 from agent.utils.background_task_state import RUNNING_BACKGROUND_TASKS_KEY
 from agent.utils.json_types import thread_metadata
@@ -33,6 +34,7 @@ _DEFAULT_RETRY_SECONDS = 30.0
 _MAX_RETRY_SECONDS = 300.0
 _THINKING_STATUS = "Thinking..."
 _STATUS_REFRESH_SECONDS = 90.0
+_LOCATION_CHECK_SECONDS = 15.0
 _STATUS_RETRY_DELAYS = (1.0, 2.0)
 _STATUS_ANCHOR_NAMESPACE = "slack_session_status_anchor"
 
@@ -146,6 +148,15 @@ class SlackThinkingStream:
         self.last_flush = monotonic()
         self.retry_at = 0.0
         self.disabled = False
+        self.next_location_check = monotonic() + _LOCATION_CHECK_SECONDS
+
+    async def moved_away(self) -> bool:
+        now = monotonic()
+        if now < self.next_location_check:
+            return False
+        self.next_location_check = now + _LOCATION_CHECK_SECONDS
+        home = (self.channel_id, self.mapping_thread_ts)
+        return await _moved_location(self.client, self.thread_id, home) is not None
 
     async def start(self) -> bool:
         initial = Step(
@@ -236,13 +247,17 @@ class SlackThinkingStream:
         self.retry_at = 0.0
 
     async def stop(self, status: str) -> None:
+        finished = status in {"success", "moved"}
         for step in self.steps.values():
             if step.failed:
-                step.status = "complete" if status == "success" else "error"
+                step.status = "complete" if finished else "error"
                 self.pending[step.task_id] = step
             elif step.status == "in_progress":
-                step.status = "complete" if status == "success" else "error"
-                step.output = "Completed" if status == "success" else "Interrupted"
+                step.status = "complete" if finished else "error"
+                if status == "moved":
+                    step.output = "Continued in the new thread"
+                else:
+                    step.output = "Completed" if finished else "Interrupted"
                 self.pending[step.task_id] = step
         if self.message_ts:
             chunks = [step.chunk() for step in self.pending.values()]
@@ -296,6 +311,9 @@ async def stream_slack_thinking_steps(
                         break
                 if active:
                     stream.consume(event)
+                    if await stream.moved_away():
+                        status = "moved"
+                        break
                     await stream.flush()
     except asyncio.CancelledError:
         status = "interrupted"
@@ -397,15 +415,19 @@ async def show_slack_thinking_status(
             await _release_status_anchor(client, channel_id, session_ts, thread_ts)
         return
 
+    home = (channel_id, session_ts or thread_ts)
+
     async def refresh() -> None:
         while True:
             await asyncio.sleep(_STATUS_REFRESH_SECONDS)
-            if session_ts:
-                await restore_slack_session_status(client, channel_id, session_ts)
-            else:
-                await restore_slack_thinking_status(
-                    *await _status_location(client, thread_id, channel_id, thread_ts)
-                )
+            moved_to = await _moved_location(client, thread_id, home)
+            if moved_to is None:
+                if session_ts:
+                    await restore_slack_session_status(client, channel_id, session_ts)
+                else:
+                    await restore_slack_thinking_status(channel_id, thread_ts)
+            elif not is_code_channel_session(moved_to[1]):
+                await restore_slack_thinking_status(*moved_to)
 
     refresher = asyncio.create_task(refresh())
     try:
@@ -444,31 +466,57 @@ async def show_slack_thinking_status(
             )
 
 
-async def _status_location(
-    client: LangGraphClient, thread_id: str, channel_id: str, thread_ts: str
-) -> tuple[str, str]:
-    """Follow the thread's current Slack binding so a moved thread takes its status along."""
+async def _moved_location(
+    client: LangGraphClient, thread_id: str, home: tuple[str, str]
+) -> tuple[str, str] | None:
+    """Where the thread now lives in Slack, when a move took it away from `home`."""
     try:
-        context = SourceContext.from_metadata(thread_metadata(await client.threads.get(thread_id)))
+        metadata = thread_metadata(await client.threads.get(thread_id))
     except Exception:
         logger.warning(
-            "Could not resolve the current Slack status location",
+            "Could not read the thread's current Slack location",
             extra={"agent_thread_id": thread_id},
             exc_info=True,
         )
-        return channel_id, thread_ts
-    location = context.slack_location
-    return location if location else (channel_id, thread_ts)
+        return None
+    location = SourceContext.from_metadata(metadata).slack_location
+    return location if location and location != home else None
 
 
 async def _settle_after_run(
     client: LangGraphClient, thread_id: str, channel_id: str, thread_ts: str, session_ts: str
 ) -> None:
-    if not session_ts:
-        channel_id, thread_ts = await _status_location(client, thread_id, channel_id, thread_ts)
-    await clear_slack_thinking_status_if_idle(
-        client, thread_id, channel_id, thread_ts, session_ts=session_ts
-    )
+    moved_to = await _moved_location(client, thread_id, (channel_id, session_ts or thread_ts))
+    if moved_to is None:
+        await clear_slack_thinking_status_if_idle(
+            client, thread_id, channel_id, thread_ts, session_ts=session_ts
+        )
+    elif not is_code_channel_session(moved_to[1]):
+        await clear_slack_thinking_status_if_idle(client, thread_id, *moved_to)
+
+
+async def release_slack_location_status(
+    client: LangGraphClient, channel_id: str, thread_ts: str
+) -> None:
+    """Take the working indicator off a Slack location the thread no longer lives in."""
+    if not is_code_channel_session(thread_ts):
+        await set_slack_thread_status(channel_id, thread_ts, "")
+        return
+    await set_session_status(channel_id, "active")
+    try:
+        item = await client.store.get_item((_STATUS_ANCHOR_NAMESPACE, channel_id), thread_ts)
+    except Exception:
+        logger.warning(
+            "Could not read the Slack session status anchor",
+            extra={"slack_channel": channel_id},
+            exc_info=True,
+        )
+        return
+    value = item.get("value") if isinstance(item, Mapping) else None
+    message_ts = value.get("message_ts") if isinstance(value, Mapping) else None
+    if isinstance(message_ts, str) and message_ts:
+        await set_slack_thread_status(channel_id, message_ts, "")
+        await _release_status_anchor(client, channel_id, thread_ts, message_ts)
 
 
 async def clear_slack_thinking_status_if_idle(
