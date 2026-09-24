@@ -18,6 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncConnection
 
 from agent.database import postgres
 from agent.review.session import ReviewSessionMetadata
+from agent.threads import index_listener
 from agent.threads.summary import (
     _SURFACED_SOURCES,
     _is_thread_resolved,
@@ -242,7 +243,32 @@ async def upsert_thread_index_rows(
         params = [{**param, "written_before": written_before} for param in params]
     async with _transaction(conn) as tx:
         await tx.execute(statement, params)
+        written = await _notify_written(tx, [param["thread_id"] for param in params])
+    if conn is None:
+        # A caller's own transaction has not committed yet; its notifications
+        # arrive through Postgres once it does.
+        for thread_id, seq in written:
+            index_listener.publish(thread_id, seq)
     return len(params)
+
+
+# ``executemany`` discards ``RETURNING`` rows, so the rows this transaction
+# wrote are read back by their write time: ``now()`` is the transaction's start.
+_NOTIFY_WRITTEN = text(
+    """
+    SELECT thread_id, seq, pg_notify(:channel, thread_id || ':' || seq)
+    FROM thread_index
+    WHERE thread_id = ANY(:thread_ids) AND synced_at >= now()
+    """
+).bindparams(bindparam("thread_ids", type_=ARRAY(Text)))
+
+
+async def _notify_written(conn: AsyncConnection, thread_ids: list[object]) -> list[tuple[str, int]]:
+    result = await conn.execute(
+        _NOTIFY_WRITTEN,
+        {"channel": index_listener.CHANNEL, "thread_ids": [str(value) for value in thread_ids]},
+    )
+    return [(str(row.thread_id), int(row.seq)) for row in result]
 
 
 async def upsert_thread_index(thread: ThreadLike, *, conn: AsyncConnection | None = None) -> None:
@@ -277,10 +303,12 @@ async def mark_thread_index_status(
     A run id the row has not seen makes the thread unread again. Review chats
     are skipped: their status also follows the walkthrough, which only the
     metadata carries, so the write-through and the reconciler own them.
+    Sidebar streams hear of it from the notification once the append commits.
     """
     await conn.execute(
         text(
             """
+            WITH updated AS (
             UPDATE thread_index SET
                 status = :status,
                 viewed = CASE
@@ -292,9 +320,17 @@ async def mark_thread_index_status(
                 seq = nextval('thread_index_seq'),
                 synced_at = clock_timestamp()
             WHERE thread_id = :thread_id AND reader_login IS NULL
+            RETURNING thread_id, seq
+            )
+            SELECT pg_notify(:channel, thread_id || ':' || seq) FROM updated
             """
         ),
-        {"thread_id": thread_id, "status": status, "run_id": run_id},
+        {
+            "thread_id": thread_id,
+            "status": status,
+            "run_id": run_id,
+            "channel": index_listener.CHANNEL,
+        },
     )
 
 
@@ -304,10 +340,24 @@ async def delete_thread_index(thread_id: str, *, conn: AsyncConnection | None = 
         return False
     async with _transaction(conn) as tx:
         result = await tx.execute(
-            text("DELETE FROM thread_index WHERE thread_id = :thread_id RETURNING 1"),
-            {"thread_id": thread_id},
+            text(
+                """
+                WITH deleted AS (
+                    DELETE FROM thread_index WHERE thread_id = :thread_id RETURNING thread_id
+                )
+                SELECT pg_notify(:channel, thread_id || ':' || :deleted) FROM deleted
+                """
+            ),
+            {
+                "thread_id": thread_id,
+                "channel": index_listener.CHANNEL,
+                "deleted": index_listener.DELETED,
+            },
         )
-        return result.first() is not None
+        deleted = result.first() is not None
+    if deleted and conn is None:
+        index_listener.publish(thread_id, None)
+    return deleted
 
 
 async def load_thread_index_row(

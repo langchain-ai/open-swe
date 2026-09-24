@@ -68,9 +68,13 @@ import type {
   OrganizeMode,
   PinnedSort,
 } from "@/features/agents/lib/sidebarPrefs"
-import { useSidebarPrefs } from "@/features/agents/lib/sidebarPrefs"
+import {
+  useSidebarPrefs,
+  useSidebarPrefsHydrated,
+} from "@/features/agents/lib/sidebarPrefs"
 import {
   agentThreadKeys,
+  sidebarStreamParams,
   usePinAgentThread,
   useResolveAgentThread,
   useSeedAgentThreadDetails,
@@ -79,6 +83,7 @@ import {
   useSidebarRepos,
   useSidebarRepoThreads,
   useSidebarRecents,
+  useThreadIndexStream,
   useWorkspaceOptions,
 } from "@/features/agents/lib/queries"
 import { useSidebarPullRequests } from "@/features/agents/lib/prChecks"
@@ -263,6 +268,14 @@ export function AgentsSidebar({
   const includeAutomations =
     prefs.filters.includeAutomations ||
     prefs.filters.sources.includes("schedule")
+  const prefsHydrated = useSidebarPrefsHydrated()
+  useThreadIndexStream(
+    sidebarStreamParams({
+      includeAutomations,
+      includeResolved: prefs.filters.includeResolved,
+    }),
+    !localOnly && prefsHydrated
+  )
   const pinnedQuery = useSidebarPinnedThreads({ enabled: !localOnly })
   const recentsQuery = useSidebarRecents({
     repoMode,

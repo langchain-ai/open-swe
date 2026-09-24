@@ -11,6 +11,7 @@ import { agentsApi } from "./api"
 import type { InfiniteData, QueryClient, QueryKey } from "@tanstack/react-query"
 import type {
   ScheduleUpdateRequest,
+  SidebarRepo,
   ThreadsPage,
   ThreadsPageParams,
 } from "./api"
@@ -23,6 +24,18 @@ import type {
   ReviewPageRef,
 } from "./types"
 import { useSidebarPrefsHydrated } from "./sidebarPrefs"
+import {
+  markThreadIndexLive,
+  openThreadIndexEvents,
+  useThreadIndexLive,
+} from "./threadIndexStream"
+import type {
+  ThreadIndexEventStream,
+  ThreadIndexStreamParams,
+  ThreadRemovedEvent,
+} from "./threadIndexStream"
+import { applyThreadIndexEvent, replaceThread } from "./threadIndexReducer"
+import { MAX_RECONNECT_ATTEMPTS, reconnectDelayMs } from "./stream/connection"
 import type { ChatSort } from "./sidebarPrefs"
 import type { Skill, SkillInput } from "@/lib/api"
 import { api } from "@/lib/api"
@@ -474,7 +487,248 @@ function sidebarPageParams({
   }
 }
 
+/** The feed behind every sidebar list: the recents and repo folders differ only by repo. */
+export function sidebarStreamParams({
+  includeAutomations,
+  includeResolved,
+}: {
+  includeAutomations: boolean
+  includeResolved: boolean
+}): ThreadIndexStreamParams {
+  const { resolved, scope } = sidebarPageParams({
+    includeAutomations,
+    includeResolved,
+  })
+  return { resolved, scope }
+}
+
+type InfinitePagesParams = Omit<ThreadsPageParams, "offset">
+
+/**
+ * Whether a list shows exactly the feed's rows, give or take the repo, so the
+ * feed may add rows to it and take them away. Any other list only has rows it
+ * already holds refreshed.
+ */
+function listFollowsStream(
+  params: InfinitePagesParams,
+  stream: ThreadIndexStreamParams
+): boolean {
+  return (
+    Boolean(params.all) === Boolean(stream.all) &&
+    params.resolved === stream.resolved &&
+    (params.scope ?? "all") === (stream.scope ?? "all") &&
+    params.source === stream.source &&
+    params.automationId === stream.automationId &&
+    !stream.repo &&
+    !stream.ownerless &&
+    params.viewed == null &&
+    !params.status &&
+    !params.q
+  )
+}
+
+function threadInList(thread: AgentThread, params: InfinitePagesParams) {
+  const repo = thread.repoFullName.trim().toLowerCase()
+  if (params.repo) return repo === params.repo.trim().toLowerCase()
+  if (params.ownerless) return !repo
+  return true
+}
+
+function applyStreamedThread(
+  queryClient: QueryClient,
+  thread: AgentThread,
+  stream: ThreadIndexStreamParams
+): void {
+  for (const [key, data] of queryClient.getQueriesData<
+    InfiniteData<ThreadsPage>
+  >({ queryKey: ["agent-threads", "lists", "infinite-pages"] })) {
+    if (!data) continue
+    const params = key[3] as InfinitePagesParams
+    const sort = params.sortBy ?? "updated_at"
+    let next = replaceThread(data, thread)
+    if (listFollowsStream(params, stream)) {
+      next = applyThreadIndexEvent(
+        data,
+        threadInList(thread, params)
+          ? { type: "upsert", thread }
+          : { type: "remove", threadId: thread.id },
+        sort
+      )
+    }
+    if (next !== data) queryClient.setQueryData(key, next)
+  }
+  queryClient.setQueryData<Array<AgentThread>>(agentThreadKeys.pinned, (prev) =>
+    prev?.map((item) => (item.id === thread.id ? thread : item))
+  )
+  queryClient.setQueryData<AgentThread>(
+    agentThreadKeys.sidebarActive(thread.id),
+    (prev) => (prev ? thread : prev)
+  )
+  // The detail read carries the conversation, which a summary does not.
+  const { messages: _messages, pendingMessages: _pending, ...summary } = thread
+  queryClient.setQueryData<AgentThread>(
+    agentThreadKeys.detail(thread.id),
+    (prev) => (prev ? { ...prev, ...summary } : prev)
+  )
+  const repo = thread.repoFullName.trim().toLowerCase()
+  if (!repo) return
+  const unknownRepo = queryClient
+    .getQueriesData<Array<SidebarRepo>>({
+      queryKey: ["agent-threads", "lists", "repos"],
+    })
+    .some(
+      ([, repos]) =>
+        repos &&
+        !repos.some((entry) => entry.repoFullName.toLowerCase() === repo)
+    )
+  if (unknownRepo) {
+    void queryClient.invalidateQueries({
+      queryKey: ["agent-threads", "lists", "repos"],
+    })
+  }
+}
+
+function applyStreamedRemoval(
+  queryClient: QueryClient,
+  event: ThreadRemovedEvent,
+  stream: ThreadIndexStreamParams
+): void {
+  const threadId = event.thread_id
+  const gone = event.reason !== "filtered"
+  for (const [key, data] of queryClient.getQueriesData<
+    InfiniteData<ThreadsPage>
+  >({ queryKey: ["agent-threads", "lists", "infinite-pages"] })) {
+    if (!data) continue
+    const params = key[3] as InfinitePagesParams
+    if (!gone && !listFollowsStream(params, stream)) continue
+    const next = applyThreadIndexEvent(
+      data,
+      { type: "remove", threadId },
+      params.sortBy ?? "updated_at"
+    )
+    if (next !== data) queryClient.setQueryData(key, next)
+  }
+  // Pins outlive resolving; only a thread the viewer can no longer open goes.
+  if (gone) {
+    queryClient.setQueryData<Array<AgentThread>>(
+      agentThreadKeys.pinned,
+      (prev) => prev?.filter((item) => item.id !== threadId)
+    )
+  }
+}
+
+/**
+ * Keep the sidebar lists current from the thread index feed instead of
+ * polling. While the feed is synchronized the list hooks stop their 2 s
+ * polls; when it drops they resume until it reconnects. A server without the
+ * feed refuses the first request, and polling simply stays on.
+ *
+ * Every (re)connection refetches the lists fetched before it opened, which
+ * covers whatever changed while no feed was listening; `resync` refetches all.
+ */
+export function useThreadIndexStream(
+  params: ThreadIndexStreamParams,
+  enabled: boolean
+): void {
+  const queryClient = useQueryClient()
+  const { all, resolved, source, scope, automationId, repo, ownerless } = params
+
+  useEffect(() => {
+    if (!enabled) return
+    const stream: ThreadIndexStreamParams = {
+      all,
+      resolved,
+      source,
+      scope,
+      automationId,
+      repo,
+      ownerless,
+    }
+    let disposed = false
+    let connection: ThreadIndexEventStream | null = null
+    let retry: ReturnType<typeof setTimeout> | null = null
+    let releaseLive: (() => void) | null = null
+    let attempt = 0
+    let lastSeq = 0
+
+    const advance = (seq: number | null) => {
+      if (seq != null && seq > lastSeq) lastSeq = seq
+    }
+    const goOffline = () => {
+      releaseLive?.()
+      releaseLive = null
+    }
+
+    const connect = () => {
+      const openedAt = Date.now()
+      connection = openThreadIndexEvents(stream, lastSeq, {
+        onOpen: () => {
+          attempt = 0
+        },
+        onSynchronized: ({ seq }) => {
+          if (disposed) return
+          advance(seq)
+          void queryClient.invalidateQueries({
+            queryKey: agentThreadKeys.lists,
+            predicate: (query) => query.state.dataUpdatedAt < openedAt,
+          })
+          releaseLive ??= markThreadIndexLive()
+        },
+        onResync: ({ seq }) => {
+          if (disposed) return
+          advance(seq)
+          invalidateAgentThreadLists(queryClient)
+        },
+        onUpserted: ({ seq, thread }) => {
+          if (disposed) return
+          advance(seq)
+          applyStreamedThread(queryClient, thread, stream)
+        },
+        onRemoved: (event) => {
+          if (disposed) return
+          advance(event.seq)
+          applyStreamedRemoval(queryClient, event, stream)
+        },
+        onError: (error, { unavailable }) => {
+          if (disposed) return
+          connection?.close()
+          connection = null
+          goOffline()
+          if (unavailable || attempt >= MAX_RECONNECT_ATTEMPTS) {
+            console.warn("Sidebar updates fell back to polling", { error })
+            return
+          }
+          attempt += 1
+          retry = setTimeout(() => {
+            retry = null
+            if (!disposed) connect()
+          }, reconnectDelayMs(attempt))
+        },
+      })
+    }
+
+    connect()
+    return () => {
+      disposed = true
+      if (retry) clearTimeout(retry)
+      connection?.close()
+      goOffline()
+    }
+  }, [
+    all,
+    automationId,
+    enabled,
+    ownerless,
+    queryClient,
+    repo,
+    resolved,
+    scope,
+    source,
+  ])
+}
+
 export function useSidebarPinnedThreads({ enabled = true } = {}) {
+  const live = useThreadIndexLive()
   return useQuery({
     queryKey: agentThreadKeys.pinned,
     queryFn: agentsApi.listPinnedThreads,
@@ -482,7 +736,7 @@ export function useSidebarPinnedThreads({ enabled = true } = {}) {
     refetchOnMount: "always",
     refetchOnWindowFocus: "always",
     refetchInterval: (query) =>
-      query.state.data?.some((thread) => thread.status === "running")
+      !live && query.state.data?.some((thread) => thread.status === "running")
         ? 2000
         : false,
   })
@@ -521,6 +775,7 @@ export function useSidebarActiveThread({
   enabled?: boolean
 }): AgentThread | undefined {
   const loaded = loadedThreads.some((thread) => thread.id === activeThreadId)
+  const live = useThreadIndexLive()
   const query = useQuery({
     queryKey: agentThreadKeys.sidebarActive(activeThreadId ?? ""),
     queryFn: () => agentsApi.getThread(activeThreadId!, { markViewed: false }),
@@ -528,7 +783,7 @@ export function useSidebarActiveThread({
     refetchOnMount: "always",
     refetchOnWindowFocus: "always",
     refetchInterval: (current) =>
-      current.state.data?.status === "running" ? 2000 : false,
+      !live && current.state.data?.status === "running" ? 2000 : false,
     retry: false,
   })
   return !loaded && (!query.data?.resolved || includeResolved)
@@ -1050,6 +1305,7 @@ export function useInfiniteThreadsPages(
   } = {}
 ) {
   const queryClient = useQueryClient()
+  const live = useThreadIndexLive()
   const queryKey = agentThreadKeys.infinitePages(params)
   const pagesQuery = useInfiniteQuery({
     queryKey,
@@ -1131,6 +1387,7 @@ export function useInfiniteThreadsPages(
     enabled: Boolean(
       options.enabled !== false &&
       options.pollWhileRunning &&
+      !live &&
       pollTargets.length > 0
     ),
     refetchInterval: 2000,

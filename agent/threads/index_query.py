@@ -173,6 +173,26 @@ _READABLE_PREDICATE = """(
 )"""
 
 
+def _automation_view(filters: ThreadListFilters) -> bool:
+    """The automation view lists every automation thread, not only the viewer's."""
+    return filters.scope == "automation" and _lowered(filters.filter_participant_login) is None
+
+
+def _participant_where(
+    filters: ThreadListFilters, login: str
+) -> tuple[list[str], dict[str, object]]:
+    if filters.include_all or _automation_view(filters):
+        return [], {}
+    participant = _lowered(filters.filter_participant_login)
+    if participant is not None:
+        return ["participants @> ARRAY[CAST(:participant AS text)]"], {"participant": participant}
+    return ["participants && :principals"], {
+        "principals": [
+            principal for principal in (login, _lowered(filters.email)) if principal is not None
+        ]
+    }
+
+
 def _where(filters: ThreadListFilters) -> tuple[list[str], dict[str, object]]:
     """The filter predicate shared by the page and repos queries, without the cursor."""
     login = _lowered(filters.login) or ""
@@ -181,18 +201,9 @@ def _where(filters: ThreadListFilters) -> tuple[list[str], dict[str, object]]:
         "login": login,
         "is_admin": is_admin(filters.email, login=filters.login),
     }
-    participant = _lowered(filters.filter_participant_login)
-    # The automation view lists every automation thread, not only the viewer's.
-    automation_view = filters.scope == "automation" and participant is None
-    if not filters.include_all and not automation_view:
-        if participant is not None:
-            clauses.append("participants @> ARRAY[CAST(:participant AS text)]")
-            params["participant"] = participant
-        else:
-            clauses.append("participants && :principals")
-            params["principals"] = [
-                principal for principal in (login, _lowered(filters.email)) if principal is not None
-            ]
+    participant_clauses, participant_params = _participant_where(filters, login)
+    clauses.extend(participant_clauses)
+    params.update(participant_params)
     if not filters.include_private:
         clauses.append("visibility = 'public'")
     if filters.admin_threads is not None:
@@ -366,3 +377,84 @@ async def load_thread_index_threads(
         result = await tx.execute(statement, {"ids": list(thread_ids)})
         records = result.mappings().all()
     return [_indexed_thread(record, "updated_at") for record in records]
+
+
+@dataclass(frozen=True, slots=True)
+class ThreadIndexChange:
+    """A row a sidebar stream re-read, and how it stands against the viewer's filters.
+
+    ``matches`` is the whole list predicate; ``readable`` is its readability part
+    alone, so a row that stopped matching can say whether the viewer lost access.
+    """
+
+    thread: IndexedThread
+    seq: int
+    matches: bool
+    readable: bool
+
+
+_REVIEW_AUDIENCE = "(reader_login IS NULL OR reader_login = :login)"
+
+
+async def load_thread_index_changes(
+    filters: ThreadListFilters,
+    *,
+    thread_ids: Sequence[str] | None = None,
+    after: int | None = None,
+    limit: int | None = None,
+    conn: AsyncConnection | None = None,
+) -> list[ThreadIndexChange]:
+    """The rows in ``thread_ids``, or written after ``after``, that concern the viewer.
+
+    A row concerns the viewer when it is in the audience ``filters`` would list
+    (the viewer's own threads, every automation thread for the automation view,
+    everything for ``include_all``), whatever its state: a thread that was
+    resolved or went private is returned with ``matches`` false, so its removal
+    can be sent. Someone else's review chat never concerns the viewer, and an
+    unrelated thread never reaches the stream, so its id does not either.
+    Ordered by ``seq``.
+    """
+    clauses, params = _where(filters)
+    audience, _ = _participant_where(filters, str(params["login"]))
+    audience = [_REVIEW_AUDIENCE, *audience]
+    if _automation_view(filters):
+        audience.append("category = 'automation'")
+    selectors: list[str] = []
+    if thread_ids is not None:
+        selectors.append("thread_id = ANY(:thread_ids)")
+        params["thread_ids"] = list(thread_ids)
+    if after is not None:
+        selectors.append("seq > :after")
+        params["after"] = after
+    limit_sql = ""
+    if limit is not None:
+        limit_sql = " LIMIT :limit"
+        params["limit"] = limit
+    sql = (
+        f"SELECT {_SELECT_COLUMNS}, seq, ({' AND '.join(clauses)}) AS matches, "
+        f"{_READABLE_PREDICATE} AS readable "
+        f"FROM thread_index WHERE {' AND '.join([*selectors, *audience])} "
+        f"ORDER BY seq{limit_sql}"
+    )
+    statement = _statement(sql, params)
+    if thread_ids is not None:
+        statement = statement.bindparams(bindparam("thread_ids", type_=ARRAY(Text)))
+    async with _read(conn) as tx:
+        result = await tx.execute(statement, params)
+        records = result.mappings().all()
+    return [
+        ThreadIndexChange(
+            thread=_indexed_thread(record, filters.sort_by),
+            seq=int(record["seq"]),
+            matches=bool(record["matches"]),
+            readable=bool(record["readable"]),
+        )
+        for record in records
+    ]
+
+
+async def thread_index_head(*, conn: AsyncConnection | None = None) -> int:
+    """The highest ``seq`` visible in this snapshot; 0 for an empty index."""
+    async with _read(conn) as tx:
+        result = await tx.execute(text("SELECT COALESCE(max(seq), 0) FROM thread_index"))
+        return int(result.scalar_one())

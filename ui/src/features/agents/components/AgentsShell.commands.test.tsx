@@ -76,6 +76,7 @@ vi.mock("@/features/agents/lib/queries", async (actual) => ({
   useSidebarRepoThreads: () => stub.emptyList,
   useInfiniteThreadsPages: () => stub.pages,
   useSeedAgentThreadDetails: () => stub.noop,
+  useThreadIndexStream: () => {},
   // Faithful to TanStack Query: a fresh wrapper object every render, with a
   // stable `mutate` inside it.
   usePinAgentThread: () => ({ ...stub.pin }),

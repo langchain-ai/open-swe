@@ -36,7 +36,11 @@ from agent.threads.handlers import (
     resolve_dashboard_thread,
     send_dashboard_message,
 )
-from agent.threads.index_query import decode_thread_cursor
+from agent.threads.index_query import (
+    ThreadListFilters,
+    decode_thread_cursor,
+    thread_index_reads_enabled,
+)
 from agent.threads.listing import (
     list_dashboard_pinned_threads,
     list_dashboard_thread_repos,
@@ -60,6 +64,7 @@ from agent.threads.runs import (
     ThreadRenameBody,
     ThreadResolveBody,
 )
+from agent.threads.stream import stream_thread_index
 from agent.utils.langsmith import get_langsmith_trace_url
 from agent.utils.timing import server_timing_header
 
@@ -144,6 +149,59 @@ async def api_unpin_thread(
     return Response(status_code=204)
 
 
+def _repo_filter(repo: str | None, ownerless: bool) -> str | None:
+    if repo and ownerless:
+        raise HTTPException(400, "repo and ownerless are mutually exclusive")
+    if not repo:
+        return None
+    owner, separator, name = repo.strip().partition("/")
+    if not separator or not owner or not name or "/" in name:
+        raise HTTPException(400, "repo must be owner/name")
+    return f"{owner}/{name}"
+
+
+@router.get("/threads/index/events")
+async def api_stream_thread_index(
+    after: int = 0,
+    all: bool = False,
+    resolved: bool | None = None,
+    source: str | None = None,
+    scope: Literal["all", "interactive", "automation"] = "all",
+    automation_id: str | None = None,
+    repo: str | None = None,
+    ownerless: bool = False,
+    session: dict[str, Any] = SESSION_DEP,
+) -> StreamingResponse:
+    """Live changes to the list ``/threads/page`` serves for the same filters.
+
+    404 without ``THREAD_INDEX_READS``: the client keeps polling instead.
+    """
+    if all and not session_is_admin(session):
+        raise HTTPException(403, "admin only")
+    if not thread_index_reads_enabled():
+        raise HTTPException(404, "thread_index_stream_unavailable")
+    filters = ThreadListFilters(
+        login=session["sub"],
+        email=session.get("email"),
+        include_all=all,
+        resolved=resolved,
+        source=source,
+        scope=scope,
+        automation_id=automation_id,
+        repo=_repo_filter(repo, ownerless),
+        ownerless=ownerless,
+    )
+    return StreamingResponse(
+        stream_thread_index(filters, max(after, 0)),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
 @router.get("/threads/page")
 async def api_list_threads_page(
     limit: int = 25,
@@ -167,13 +225,7 @@ async def api_list_threads_page(
     thread_cursor = decode_thread_cursor(cursor) if cursor else None
     if cursor and thread_cursor is None:
         raise HTTPException(400, "invalid_thread_cursor")
-    if repo and ownerless:
-        raise HTTPException(400, "repo and ownerless are mutually exclusive")
-    if repo:
-        owner, separator, name = repo.strip().partition("/")
-        if not separator or not owner or not name or "/" in name:
-            raise HTTPException(400, "repo must be owner/name")
-        repo = f"{owner}/{name}"
+    repo = _repo_filter(repo, ownerless)
     return await list_dashboard_threads_page(
         session["sub"],
         email=session.get("email"),

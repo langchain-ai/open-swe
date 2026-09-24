@@ -20,6 +20,7 @@ import asyncpg
 from sqlalchemy import ARRAY, Text, bindparam, make_url, text
 
 from agent.database import postgres
+from agent.threads import index_listener
 
 logger = logging.getLogger(__name__)
 
@@ -185,7 +186,10 @@ async def _listen_forever() -> None:
         try:
             connection = await asyncpg.connect(dsn=_dsn())
             await connection.add_listener(CHANNEL, _on_notify)
+            # The sidebar's channel shares this connection and its reconnects.
+            await connection.add_listener(index_listener.CHANNEL, index_listener.on_notify)
             delay = _RECONNECT_DELAY_SECONDS
+            index_listener.resync_subscribers()
             logger.info("Transcript listener connected", extra={"transcript_channel": CHANNEL})
             try:
                 await _resync_subscribers()
