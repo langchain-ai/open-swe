@@ -765,6 +765,9 @@ async def _record_pr_telemetry(
                     author=author if isinstance(author, str) else "",
                     author_github_id=author_id if isinstance(author_id, int) else None,
                     resolves_thread=resolves_thread,
+                    additions=additions,
+                    deletions=deletions,
+                    changed_files=changed_files,
                     threads=[ThreadLink(thread_id=thread_id, source="open_pull_request")],
                 ).save(repository_private=repo_private)
             except Exception:  # noqa: BLE001

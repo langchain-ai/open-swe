@@ -35,7 +35,6 @@ from agent.dashboard.profiles import (  # noqa: F401
 )
 from agent.dashboard.workspace_settings import get_workspace_settings
 from agent.dispatch import dispatch_agent_run
-from agent.expedited_review.lifecycle import repo_token
 from agent.github.app import (
     get_github_app_installation_token,  # noqa: F401
     get_github_app_installation_token_with_expiry,
@@ -1299,20 +1298,6 @@ def _pr_state_from_payload(payload: dict[str, Any]) -> str | None:
     return event.state if event is not None else None
 
 
-async def _pr_diff_stats(event: PullRequestEvent) -> dict[str, int] | None:
-    """Diff stats from the event, fetched from GitHub when the payload omits them."""
-    if event.diff_stats is not None:
-        return event.diff_stats
-    owner, _, repo = event.repo_full_name.partition("/")
-    number = event.pull_request.number
-    token = await repo_token(owner, repo)
-    if not token or number is None:
-        return None
-    data = await fetch_github_pr_metadata(GitHubPrRef(owner, repo, number, ""), token=token)
-    fetched = PullRequestEvent.parse({"pull_request": data})
-    return fetched.diff_stats if fetched is not None else None
-
-
 async def _record_pr_merge_feedback(thread_id: str, *, pr_url: str) -> None:
     """Record merge feedback on the thread's trace under two keys.
 
@@ -1360,7 +1345,6 @@ async def update_agent_thread_pr_state(payload: dict[str, Any]) -> None:
         return
     pr_url = pull_request.url
     new_state = pull_request.state
-    diff_stats = await _pr_diff_stats(event)
 
     langgraph_client = get_client(url=LANGGRAPH_URL)
     try:
@@ -1382,8 +1366,6 @@ async def update_agent_thread_pr_state(payload: dict[str, Any]) -> None:
                 if not isinstance(metadata, dict) or metadata.get("kind") == REVIEWER_THREAD_KIND:
                     continue
                 metadata_update: dict[str, Any] = {}
-                if diff_stats is not None:
-                    metadata_update["diff_stats"] = diff_stats
                 pull_requests = metadata.get("pull_requests")
                 updated_pull_requests: list[dict[str, Any]] = []
                 previous_state: Any = None
@@ -1397,13 +1379,7 @@ async def update_agent_thread_pr_state(payload: dict[str, Any]) -> None:
                         None,
                     )
                     updated_pull_requests = [
-                        {
-                            **record,
-                            "state": new_state,
-                            **({"diff_stats": diff_stats} if diff_stats else {}),
-                        }
-                        if record.get("url") == pr_url
-                        else record
+                        {**record, "state": new_state} if record.get("url") == pr_url else record
                         for record in pull_requests
                         if isinstance(record, dict)
                     ]
