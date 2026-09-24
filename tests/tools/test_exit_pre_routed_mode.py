@@ -59,34 +59,42 @@ async def test_exit_pre_routed_mode_commits_route_and_title(
         ("anthropic:claude-haiku-4-5", True, "explicit"),
     ],
 )
+@pytest.mark.parametrize("exit_tool", ["exit_pre_routed_mode", "exit_plan_mode"])
 async def test_invalid_or_overridden_model_does_not_commit(
-    monkeypatch, requested_model, fable_enabled, selection
+    monkeypatch, requested_model, fable_enabled, selection, exit_tool
 ) -> None:
+    module = importlib.import_module(f"agent.tools.{exit_tool}")
     commit = AsyncMock()
-    monkeypatch.setattr(exit_pre_routed_mode_module, "commit_route", commit)
-    monkeypatch.setattr(
-        exit_pre_routed_mode_module, "get_team_fable_enabled", AsyncMock(return_value=fable_enabled)
-    )
+    approve = AsyncMock()
+    monkeypatch.setattr(module, "commit_route", commit)
+    if exit_tool == "exit_plan_mode":
+        monkeypatch.setattr(module, "set_plan_status", approve)
+    monkeypatch.setattr(module, "get_team_fable_enabled", AsyncMock(return_value=fable_enabled))
     monkeypatch.setattr(
         "agent.run_config.get_config",
         lambda: {"configurable": {"thread_id": "t1", "model_selection": selection}},
     )
 
-    result = await exit_pre_routed_mode_module.exit_pre_routed_mode(
-        "fast", "Answer a question", "call-1", requested_model=requested_model
+    result = await getattr(module, exit_tool)(
+        "fast", "Answer a question", tool_call_id="call-1", requested_model=requested_model
     )
 
-    assert isinstance(result, ToolMessage)
-    assert result.status == "error"
+    if exit_tool == "exit_plan_mode":
+        assert result["success"] is False
+    else:
+        assert isinstance(result, ToolMessage)
+        assert result.status == "error"
     commit.assert_not_awaited()
+    approve.assert_not_awaited()
 
 
 @pytest.mark.parametrize(
     ("requested_model", "effort"),
     [("anthropic:claude-haiku-4-5", "none"), ("anthropic:claude-fable-5-1", "high")],
 )
+@pytest.mark.parametrize("exit_tool", ["exit_pre_routed_mode", "exit_plan_mode"])
 async def test_requested_model_handoff_persists_and_routes_first_turn_and_followup(
-    monkeypatch, requested_model, effort
+    monkeypatch, requested_model, effort, exit_tool
 ) -> None:
     from agent import model_routing
     from agent.middleware.model_selection import ModelSelectionMiddleware
@@ -110,21 +118,30 @@ async def test_requested_model_handoff_persists_and_routes_first_turn_and_follow
         return await loader()
 
     monkeypatch.setattr(ttl_cache, "cached", uncached)
+    module = importlib.import_module(f"agent.tools.{exit_tool}")
+    plan_mode = exit_tool == "exit_plan_mode"
+    if plan_mode:
+        monkeypatch.setattr(module, "_thread_metadata", AsyncMock(return_value={}))
+        monkeypatch.setattr(
+            module, "get_plan_content", AsyncMock(return_value={"markdown": "Implement it"})
+        )
+        monkeypatch.setattr(module, "list_plan_comments", AsyncMock(return_value=[]))
+        monkeypatch.setattr(module, "set_plan_status", AsyncMock())
+    monkeypatch.setattr(module, "get_team_fable_enabled", AsyncMock(return_value=True))
     monkeypatch.setattr(
-        exit_pre_routed_mode_module, "get_team_fable_enabled", AsyncMock(return_value=True)
-    )
-    monkeypatch.setattr(
-        "agent.run_config.get_config", lambda: {"configurable": {"thread_id": "requested-model"}}
+        "agent.run_config.get_config",
+        lambda: {"configurable": {"thread_id": "requested-model", "plan_mode": plan_mode}},
     )
     models = {route: MagicMock() for route in ("fast", "balanced", "performance")}
     requested = MagicMock()
     middleware = ModelSelectionMiddleware(models, requested_model_factory=lambda _: requested)
     state = await middleware.abefore_agent({"messages": []}, MagicMock())
-    assert middleware._model_for(state) is models["fast"]
+    state["plan_mode"] = plan_mode
+    assert middleware._model_for(state) is models["performance" if plan_mode else "fast"]
 
-    result = await as_tool(exit_pre_routed_mode_module.exit_pre_routed_mode).ainvoke(
+    result = await as_tool(getattr(module, exit_tool)).ainvoke(
         {
-            "name": "exit_pre_routed_mode",
+            "name": exit_tool,
             "args": {
                 "model_route": "performance",
                 "title": "Answer a question",
@@ -138,7 +155,10 @@ async def test_requested_model_handoff_persists_and_routes_first_turn_and_follow
     state.update(result.update)
     assert state["pre_routed"] is False
     assert middleware._model_for(state) is requested
-    assert requested_model in state["messages"][0].content
+    if plan_mode:
+        assert state["plan_mode"] is False
+    else:
+        assert requested_model in state["messages"][0].content
     title.assert_awaited_once()
     saved = client.threads.update.call_args.kwargs["metadata"]["agent_settings"]
     assert saved == {

@@ -11,6 +11,7 @@ from langgraph.types import Command
 from langgraph_sdk import get_client
 from typing_extensions import TypedDict
 
+from agent.dashboard.options import available_requested_models
 from agent.dashboard.plan_store import (
     PLAN_STATUS_APPROVED,
     PLAN_STATUS_SHARED,
@@ -20,6 +21,7 @@ from agent.dashboard.plan_store import (
     make_plan_approver,
     set_plan_status,
 )
+from agent.dashboard.team_settings import get_team_fable_enabled
 from agent.model_routing import commit_route
 from agent.run_config import RunConfig
 from agent.utils.thread_settings import ModelRoute
@@ -36,12 +38,27 @@ async def exit_plan_mode(
     title: str,
     state: Annotated[ExitPlanModeState | None, InjectedState] = None,
     tool_call_id: Annotated[str, InjectedToolCallId] = "",
+    requested_model: str | None = None,
 ) -> Command | dict[str, Any]:
     """Implement the `exit_plan_mode` tool."""
     cfg = RunConfig.from_runtime()
     thread_id = cfg.thread_id
     if not thread_id:
         return {"success": False, "error": "no thread_id in run config"}
+
+    if requested_model is not None:
+        if cfg.model_selection == "explicit":
+            return {
+                "success": False,
+                "error": "An explicit UI/API model choice takes precedence; omit requested_model.",
+            }
+        models = available_requested_models(fable_enabled=await get_team_fable_enabled())
+        if requested_model not in models:
+            return {
+                "success": False,
+                "error": "requested_model must be an available canonical model ID. "
+                "Retry with a valid ID, or omit it if the requested model is unavailable.",
+            }
 
     try:
         metadata = await _thread_metadata(str(thread_id))
@@ -64,7 +81,11 @@ async def exit_plan_mode(
         return {"success": False, "error": f"failed to approve plan: {exc}"}
 
     routed = await commit_route(
-        thread_id=str(thread_id), cfg=cfg, model_route=model_route, title=title
+        thread_id=str(thread_id),
+        cfg=cfg,
+        model_route=model_route,
+        title=title,
+        **({"requested_model": requested_model} if requested_model is not None else {}),
     )
     return Command(
         update={
