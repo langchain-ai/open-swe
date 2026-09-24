@@ -11,11 +11,7 @@ from langgraph.config import get_config
 from langgraph_sdk import get_client
 
 from agent.analytics.usage import record_agent_pr_usage
-from agent.credential_scope import (
-    PrAuthorNotAParticipant,
-    pr_author_login,
-    private_credential_login,
-)
+from agent.credential_scope import pr_author_login, private_credential_login
 from agent.github.app import get_github_app_installation_token
 from agent.github.comments import derive_pr_state
 from agent.github.pull_requests import PullRequest, ThreadLink
@@ -59,9 +55,9 @@ _REPORTED_RESPONSE_HEADERS = (
 )
 
 
-async def _resolve_pr_author_token(author: str | None = None) -> tuple[str | None, str]:
-    """Use the requested or requesting person's OAuth, and the bot for system threads."""
-    login = await pr_author_login(author)
+async def _resolve_pr_author_token() -> tuple[str | None, str]:
+    """Use the requesting person's OAuth, and the bot for system threads."""
+    login = await pr_author_login()
     if login is None:
         return await get_github_app_installation_token(), "bot"
     from agent.dashboard.profiles import get_valid_access_token
@@ -952,24 +948,8 @@ async def _open_pull_request(
     body: str,
     draft: bool,
     resolves_thread: bool = False,
-    author: str | None = None,
 ) -> dict[str, Any]:
-    try:
-        token, kind = await _resolve_pr_author_token(author)
-    except PrAuthorNotAParticipant as exc:
-        return _failure_payload(
-            code="pr_author_not_a_participant",
-            owner=owner,
-            repo=repo,
-            head=head,
-            base=base,
-            token_kind="user",
-            http_status=None,
-            reason=str(exc),
-            likely_cause="the requested author has not posted in this thread",
-            branch_pushed=None,
-            failed_step="resolve_pr_author_token",
-        )
+    token, kind = await _resolve_pr_author_token()
     if not token:
         return _failure_payload(
             code="no_github_token",
@@ -1116,7 +1096,6 @@ async def open_pull_request(
     body: str,
     draft: bool = True,
     resolves_thread: bool = False,
-    author: str = "",
 ) -> dict[str, Any]:
     """Implement the `open_pull_request` tool."""
     return await _open_pull_request(
@@ -1128,5 +1107,4 @@ async def open_pull_request(
         body=body,
         draft=draft,
         resolves_thread=resolves_thread,
-        author=author or None,
     )
