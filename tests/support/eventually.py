@@ -13,4 +13,6 @@ async def eventually(condition: Callable[[], bool]) -> None:
         if condition():
             return
         await asyncio.sleep(_INTERVAL_SECONDS)
+    if condition():
+        return
     raise AssertionError("condition did not hold before the background work settled")
