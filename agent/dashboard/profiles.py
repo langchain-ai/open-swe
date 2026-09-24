@@ -430,7 +430,7 @@ async def put_my_profile(
     preferences = await User.update_preferences(
         login, UserPreferencesPatch(concierge_mode=update.concierge_mode)
     )
-    if preferences is None and update.concierge_mode is not None:
+    if preferences is None and update.concierge_mode:
         raise HTTPException(status_code=409, detail="No Open SWE user record for this login yet")
     profile = await upsert_profile(login, session.get("email") or "", update)
     return {
