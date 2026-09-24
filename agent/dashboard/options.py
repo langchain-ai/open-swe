@@ -14,6 +14,7 @@ class ModelOption(TypedDict):
     efforts: list[str]
     default_effort: str
     supports_images: bool
+    supports_files: bool
     can_be_default: NotRequired[bool]
     context_window: NotRequired[int | None]
 
@@ -25,6 +26,7 @@ SUPPORTED_MODELS: list[ModelOption] = [
         "efforts": ["low", "medium", "high", "xhigh", "max"],
         "default_effort": "high",
         "supports_images": True,
+        "supports_files": False,
     },
     {
         "id": "anthropic:claude-fable-5-1",
@@ -32,6 +34,7 @@ SUPPORTED_MODELS: list[ModelOption] = [
         "efforts": ["low", "medium", "high", "xhigh", "max"],
         "default_effort": "high",
         "supports_images": True,
+        "supports_files": False,
         "can_be_default": False,
     },
     {
@@ -40,6 +43,7 @@ SUPPORTED_MODELS: list[ModelOption] = [
         "efforts": ["low", "medium", "high", "xhigh", "max"],
         "default_effort": "low",
         "supports_images": True,
+        "supports_files": False,
     },
     {
         "id": "openai:gpt-6-sol",
@@ -47,6 +51,7 @@ SUPPORTED_MODELS: list[ModelOption] = [
         "efforts": ["none", "low", "medium", "high", "xhigh"],
         "default_effort": "xhigh",
         "supports_images": True,
+        "supports_files": False,
     },
     {
         "id": "openai:gpt-6-luna",
@@ -54,6 +59,7 @@ SUPPORTED_MODELS: list[ModelOption] = [
         "efforts": ["none", "low", "medium", "high", "xhigh", "max"],
         "default_effort": "xhigh",
         "supports_images": True,
+        "supports_files": False,
     },
     {
         "id": "google_genai:gemini-3.8-flash",
@@ -61,6 +67,7 @@ SUPPORTED_MODELS: list[ModelOption] = [
         "efforts": ["minimal", "low", "medium", "high"],
         "default_effort": "medium",
         "supports_images": True,
+        "supports_files": False,
     },
     {
         "id": "fireworks:accounts/fireworks/models/kimi-k3",
@@ -69,6 +76,7 @@ SUPPORTED_MODELS: list[ModelOption] = [
         "efforts": ["low", "high", "max"],
         "default_effort": "high",
         "supports_images": False,
+        "supports_files": False,
     },
     {
         "id": "fireworks:accounts/fireworks/models/deepseek-v4-pro",
@@ -76,6 +84,7 @@ SUPPORTED_MODELS: list[ModelOption] = [
         "efforts": ["none", "low", "medium", "high", "xhigh", "max"],
         "default_effort": "high",
         "supports_images": False,
+        "supports_files": False,
     },
     {
         "id": "fireworks:accounts/fireworks/models/glm-5p3",
@@ -83,6 +92,7 @@ SUPPORTED_MODELS: list[ModelOption] = [
         "efforts": ["none", "high", "max"],
         "default_effort": "high",
         "supports_images": False,
+        "supports_files": False,
     },
     {
         "id": "fireworks:accounts/fireworks/models/glm-5p3-flash",
@@ -90,6 +100,7 @@ SUPPORTED_MODELS: list[ModelOption] = [
         "efforts": ["low", "high", "max"],
         "default_effort": "high",
         "supports_images": True,
+        "supports_files": False,
     },
 ]
 
@@ -199,6 +210,7 @@ def models_with_profile_context_windows(models: Sequence[ModelOption]) -> list[M
             "efforts": model["efforts"],
             "default_effort": model["default_effort"],
             "supports_images": model["supports_images"],
+            "supports_files": model["supports_files"],
         }
         if "can_be_default" in model:
             option["can_be_default"] = model["can_be_default"]
@@ -250,6 +262,13 @@ def model_supports_images(model_id: str) -> bool:
     for m in SUPPORTED_MODELS:
         if m["id"] == model_id:
             return m["supports_images"]
+    return False
+
+
+def model_supports_files(model_id: str) -> bool:
+    for m in SUPPORTED_MODELS:
+        if m["id"] == model_id:
+            return m["supports_files"]
     return False
 
 
