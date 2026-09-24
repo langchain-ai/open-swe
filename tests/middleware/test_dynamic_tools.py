@@ -227,6 +227,57 @@ async def test_a_group_whose_catalog_is_empty_is_not_offered() -> None:
     assert "- Corridor" not in cast(StructuredTool, middleware.tools[0]).description
 
 
+async def test_product_unavailable_tool_is_removed_from_thread_catalogs() -> None:
+    tool_name = "mcp_incident_io_ask_telemetry_1234567890"
+    tool = _tool(tool_name).model_copy(update={"metadata": {"mcp_tool_name": "ask_telemetry"}})
+    middleware = DynamicToolMiddleware({"MCPs": [tool]})
+
+    async def tool_handler(request: ToolCallRequest) -> ToolMessage:
+        return ToolMessage(
+            content='{"error":{"code":"product_not_available"}}',
+            tool_call_id=request.tool_call["id"],
+            status="error",
+        )
+
+    result = await middleware.awrap_tool_call(
+        _Request(
+            state={"loaded_integration_tools": [tool_name]},
+            tools=[],
+            tool_call={"name": tool_name, "args": {}, "id": "call-1"},
+        ),
+        tool_handler,
+    )
+    assert isinstance(result, Command)
+    state = cast(dict[str, Any], result.update)
+    state["loaded_integration_tools"] = [tool_name]
+    assert state["unavailable_integration_tools"] == [tool_name]
+    assert await middleware.catalog_tools(state) == []
+
+    loader = cast(StructuredTool, middleware.tools[0])
+    command = await cast(Any, loader.coroutine)(
+        tool_names=[tool_name], state=state, tool_call_id="load-2"
+    )
+    assert isinstance(command, Command)
+    assert (
+        "unavailable for this thread" in cast(dict[str, Any], command.update)["messages"][0].content
+    )
+
+    visible: list[str] = []
+    descriptions: list[str] = []
+
+    async def model_handler(request: ModelRequest) -> ModelResponse:
+        visible.extend(tool.name for tool in request.tools)
+        descriptions.extend(tool.description for tool in request.tools)
+        return cast(ModelResponse, object())
+
+    await middleware.awrap_model_call(
+        _Request(state=state, tools=[loader, tool]),
+        model_handler,
+    )
+    assert tool_name not in visible
+    assert all(tool_name not in description for description in descriptions)
+
+
 async def test_fork_preserves_loaded_integration_schemas() -> None:
     from langgraph.runtime import Runtime
 

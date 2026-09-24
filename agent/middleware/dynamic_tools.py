@@ -44,6 +44,7 @@ class IntegrationGroup:
 
 class DynamicToolState(AgentState):
     loaded_integration_tools: NotRequired[Annotated[list[str], _merge_tool_names]]
+    unavailable_integration_tools: NotRequired[Annotated[list[str], _merge_tool_names]]
 
 
 @dataclass
@@ -108,6 +109,23 @@ class DynamicToolMiddleware(OpenSWEMiddleware[DynamicToolState]):
                         ]
                     }
                 )
+            unavailable = self._unavailable_names(state)
+            blocked = sorted(set(normalized_names) & unavailable)
+            if blocked:
+                return Command(
+                    update={
+                        "messages": [
+                            ToolMessage(
+                                content=(
+                                    "These integration tools are unavailable for this thread: "
+                                    f"{', '.join(blocked)}. Continue without them."
+                                ),
+                                tool_call_id=tool_call_id,
+                                status="error",
+                            )
+                        ]
+                    }
+                )
             missing = await self._build(normalized_names)
             if missing:
                 return Command(
@@ -142,18 +160,13 @@ class DynamicToolMiddleware(OpenSWEMiddleware[DynamicToolState]):
                 }
             )
 
-        description = load_prompt("tools/load_integration_tools.md")
-        if self._group_of:
-            example_name = (
-                "analyzePlan" if "analyzePlan" in self._group_of else next(iter(self._group_of))
-            )
-            example = json.dumps({"tool_names": [example_name]}, separators=(",", ":"))
-            description += f"\nExample: {example}\nAvailable tools:\n" + "\n".join(catalog)
+        self._loader_prompt = load_prompt("tools/load_integration_tools.md")
+        self._catalog = catalog
         self.tools = [
             StructuredTool.from_function(
                 coroutine=load_integration_tools,
                 name="load_integration_tools",
-                description=description,
+                description=self._loader_description(),
             )
         ]
 
@@ -161,10 +174,12 @@ class DynamicToolMiddleware(OpenSWEMiddleware[DynamicToolState]):
     def has_groups(self) -> bool:
         return bool(self._groups)
 
-    async def catalog_tools(self) -> list[BaseTool]:
+    async def catalog_tools(self, state: Mapping[str, Any] | None = None) -> list[BaseTool]:
         """Resolve the connected tools for authenticated sandbox discovery."""
-        await self._build(list(self._group_of))
-        return [tool for name in self._group_of if (tool := self._tool(name)) is not None]
+        unavailable = self._unavailable_names(state)
+        names = [name for name in self._group_of if name not in unavailable]
+        await self._build(names)
+        return [tool for name in names if (tool := self._tool(name)) is not None]
 
     async def _resolve(self, group: str) -> dict[str, BaseTool]:
         resolved = self._resolved.setdefault(group, _Resolved())
@@ -205,11 +220,21 @@ class DynamicToolMiddleware(OpenSWEMiddleware[DynamicToolState]):
         request: ModelRequest,
         handler: Callable[[ModelRequest], Awaitable[ModelResponse]],
     ) -> ModelResponse:
-        loaded = self._loaded_names(request.state)
+        unavailable = self._unavailable_names(request.state)
+        loaded = [name for name in self._loaded_names(request.state) if name not in unavailable]
         if loaded:
             await self._build(loaded)
         tools = [tool for name in loaded if (tool := self._tool(name)) is not None]
-        return await handler(request.override(tools=[*request.tools, *tools]))
+        exposed: list[BaseTool] = []
+        for tool in request.tools:
+            if tool.name in unavailable:
+                continue
+            if tool.name == "load_integration_tools":
+                tool = tool.model_copy(
+                    update={"description": self._loader_description(unavailable)}
+                )
+            exposed.append(tool)
+        return await handler(request.override(tools=[*exposed, *tools]))
 
     async def awrap_tool_call(
         self,
@@ -219,6 +244,12 @@ class DynamicToolMiddleware(OpenSWEMiddleware[DynamicToolState]):
         name = request.tool_call["name"]
         if name not in self._group_of:
             return await handler(request)
+        if name in self._unavailable_names(request.state):
+            return ToolMessage(
+                content=f"{name} is unavailable for this thread. Continue without it.",
+                tool_call_id=request.tool_call["id"],
+                status="error",
+            )
         if name not in self._loaded_names(request.state):
             return ToolMessage(
                 content=f"Load {name} with load_integration_tools before calling it.",
@@ -233,12 +264,78 @@ class DynamicToolMiddleware(OpenSWEMiddleware[DynamicToolState]):
                 tool_call_id=request.tool_call["id"],
                 status="error",
             )
-        return await handler(request.override(tool=tool))
+        result = await handler(request.override(tool=tool))
+        if not _is_product_unavailable(result):
+            return result
+        return _mark_unavailable(result, name)
 
     @staticmethod
     def _loaded_names(state: Mapping[str, Any]) -> list[str]:
         loaded = state.get("loaded_integration_tools", [])
         return loaded if isinstance(loaded, list) else []
+
+    @staticmethod
+    def _unavailable_names(state: Mapping[str, Any] | None) -> set[str]:
+        if state is None:
+            return set()
+        unavailable = state.get("unavailable_integration_tools", [])
+        return set(unavailable) if isinstance(unavailable, list) else set()
+
+    def _loader_description(self, unavailable: Collection[str] = ()) -> str:
+        description = self._loader_prompt
+        available = [
+            line
+            for line in self._catalog
+            if next((name for name in self._group_of if f"- {name} " in line), "")
+            not in unavailable
+        ]
+        if self._group_of and available:
+            names = [name for name in self._group_of if name not in unavailable]
+            example_name = "analyzePlan" if "analyzePlan" in names else next(iter(names))
+            example = json.dumps({"tool_names": [example_name]}, separators=(",", ":"))
+            description += f"\nExample: {example}\nAvailable tools:\n" + "\n".join(available)
+        return description
+
+
+def _contains_product_error(value: object) -> bool:
+    if isinstance(value, Mapping):
+        if value.get("code") == "product_not_available":
+            return True
+        return any(_contains_product_error(item) for item in value.values())
+    if isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray)):
+        return any(_contains_product_error(item) for item in value)
+    if isinstance(value, str):
+        try:
+            return _contains_product_error(json.loads(value))
+        except json.JSONDecodeError:
+            return False
+    return False
+
+
+def _is_product_unavailable(result: ToolMessage | Command[Any]) -> bool:
+    if isinstance(result, ToolMessage):
+        return _contains_product_error(result.artifact) or _contains_product_error(result.content)
+    if isinstance(result, Command) and isinstance(result.update, Mapping):
+        return _contains_product_error(result.update.get("messages"))
+    return False
+
+
+def _mark_unavailable(result: ToolMessage | Command[Any], name: str) -> Command[Any]:
+    if isinstance(result, ToolMessage):
+        return Command(
+            update={
+                "unavailable_integration_tools": [name],
+                "messages": [result],
+            }
+        )
+    if isinstance(result.update, Mapping):
+        return Command(
+            update={
+                **result.update,
+                "unavailable_integration_tools": [name],
+            }
+        )
+    return Command(update={"unavailable_integration_tools": [name]})
 
 
 def _eager_group(tools: Sequence[BaseTool]) -> IntegrationGroup:
