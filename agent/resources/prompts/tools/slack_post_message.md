@@ -5,7 +5,7 @@ Slack channel mention or `slack_list_channels`; do not guess it.
 
 This sends a new top-level message without moving the current Open SWE
 conversation or starting a new agent task. For updates and answers in the
-current conversation, use `slack_thread_reply`.
+current conversation, use `slack_reply`. A thread/model footer is added automatically.
 
 Write `message` in Slack mrkdwn: *bold*, _italic_, <url|link text>, and
 <@USER_ID> mentions. Keep it concise and below 40,000 characters. Share only

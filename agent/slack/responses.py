@@ -2,6 +2,7 @@
 
 from typing import Literal, NotRequired, TypedDict
 
+from agent.slack.client import log_slack_delivery, prepare_slack_message
 from agent.utils.json_types import JsonObject
 
 
@@ -48,4 +49,6 @@ def failed(error_id: str) -> WebhookResponse:
 
 
 def ephemeral(text: str) -> SlashCommandResponse:
-    return {"response_type": "ephemeral", "text": text}
+    payload = prepare_slack_message({"text": text})
+    log_slack_delivery("slash_command_response", {}, {})
+    return {"response_type": "ephemeral", "text": payload["text"]}

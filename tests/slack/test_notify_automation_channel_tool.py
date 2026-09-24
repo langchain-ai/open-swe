@@ -5,6 +5,7 @@ from typing import Any
 import pytest
 
 from agent import store as agent_store
+from tests.support.slack_api import SlackAPI
 
 notification_tool = importlib.import_module("agent.tools.notify_automation_channel")
 
@@ -68,11 +69,7 @@ def fake_client(monkeypatch: pytest.MonkeyPatch) -> _FakeClient:
     client = _FakeClient()
     monkeypatch.setattr(agent_store, "store_client", lambda: client)
     monkeypatch.setattr(notification_tool, "get_client", lambda: client)
-    monkeypatch.setattr(
-        notification_tool,
-        "dashboard_thread_url",
-        lambda thread_id: f"https://example.com/agents/{thread_id}",
-    )
+    monkeypatch.setenv("DASHBOARD_BASE_URL", "https://example.com")
     return client
 
 
@@ -137,29 +134,23 @@ async def test_notify_automation_channel_validates_message(
 
 
 async def test_notify_automation_channel_posts_to_trusted_destination(
-    fake_client: _FakeClient, monkeypatch: pytest.MonkeyPatch
+    fake_client: _FakeClient, monkeypatch: pytest.MonkeyPatch, slack_api: SlackAPI
 ) -> None:
-    posted: list[dict[str, Any]] = []
-
-    async def fake_post(channel_id: str, text: str, **kwargs: Any) -> tuple[str, None]:
-        posted.append({"channel_id": channel_id, "text": text, "kwargs": kwargs})
-        return "1786504009.596419", None
-
     monkeypatch.setattr("agent.run_config.get_config", _config)
-    monkeypatch.setattr(notification_tool, "post_slack_top_level_message_with_ts", fake_post)
 
     result = await notification_tool.notify_automation_channel(
         "Opened a pull request with dependency updates."
     )
 
-    assert result == {"success": True, "message_ts": "1786504009.596419"}
-    assert posted[0]["channel_id"] == "C0123456789"
-    assert "Dependency check" in posted[0]["text"]
-    assert "Opened a pull request" in posted[0]["text"]
-    assert "https://example.com/agents/thread_1" in posted[0]["text"]
+    assert result == {"success": True, "message_ts": "1.0"}
+    posted = slack_api.calls[0][1]
+    assert posted["channel"] == "C0123456789"
+    assert "Dependency check" in posted["text"]
+    assert "Opened a pull request" in posted["text"]
+    assert "https://example.com/agents/thread_1" in posted["text"]
     stored = fake_client.store.items[(("automation_notifications",), "thread_1")]
     assert stored["status"] == "delivered"
-    assert stored["message_ts"] == "1786504009.596419"
+    assert stored["message_ts"] == "1.0"
     assert fake_client.threads.updates == [
         {
             "thread_id": "thread_1",

@@ -103,9 +103,7 @@ async def slack_reply(
             blocks=slack_blocks,
             usage=usage,
             post_thread_ts=post_thread_ts,
-            agent_thread_id=(
-                None if is_code_channel_session(str(thread_ts)) else str(thread_id or "") or None
-            ),
+            agent_thread_id=str(thread_id or "") or None,
             langgraph_client=client,
             run_id=run_id,
             triggering_user_id=_triggering_user_id(cfg),

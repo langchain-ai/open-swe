@@ -158,6 +158,7 @@ class SlackThinkingStream:
                 [initial.chunk()],
                 recipient_user_id=self.recipient_user_id,
                 recipient_team_id=self.recipient_team_id,
+                agent_thread_id=self.thread_id,
             )
         except SlackStreamError as exc:
             logger.info("Slack Thinking Steps unavailable for run %s: %s", self.run_id, exc.code)
