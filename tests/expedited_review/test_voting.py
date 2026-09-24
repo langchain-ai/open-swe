@@ -44,8 +44,38 @@ def harness(monkeypatch: pytest.MonkeyPatch) -> _Harness:
     return h
 
 
+class _FakeSlack:
+    def __init__(self) -> None:
+        self.broadcasts: list[bool] = []
+        self.deleted: list[str] = []
+
+    async def post(
+        self, channel_id: str, thread_ts: str, text: str, *, reply_broadcast: bool, **_: object
+    ) -> tuple[str, None]:
+        self.broadcasts.append(reply_broadcast)
+        return f"{2 + len(self.broadcasts)}.0", None
+
+    async def delete(self, channel_id: str, message_ts: str) -> bool:
+        self.deleted.append(message_ts)
+        return True
+
+
+@pytest.fixture
+def slack(monkeypatch: pytest.MonkeyPatch) -> _FakeSlack:
+    fake = _FakeSlack()
+    monkeypatch.setattr(lifecycle, "_broadcast_channel", AsyncMock(return_value="#eng"))
+    monkeypatch.setattr(lifecycle, "repo_token", AsyncMock(return_value=None))
+    monkeypatch.setattr(lifecycle, "post_slack_thread_reply_with_ts", fake.post)
+    monkeypatch.setattr(lifecycle, "delete_slack_message", fake.delete)
+    return fake
+
+
 async def _click(
-    approval: ExpeditedApproval, slack_user: str, decision: voting.CardAction = "approve"
+    approval: ExpeditedApproval,
+    slack_user: str,
+    decision: voting.VoteAction = "approve",
+    *,
+    broadcast: bool = False,
 ) -> voting.VoteOutcome:
     current = await ExpeditedApproval.get(approval.id)
     assert current is not None
@@ -53,6 +83,7 @@ async def _click(
         current,
         decision=decision,
         user=await User.for_person({"id": f"slack:{slack_user}", "platform": "slack"}),
+        broadcast=broadcast,
     )
 
 
@@ -192,6 +223,40 @@ async def test_anyone_can_dismiss_the_card_without_waking_the_agent(
     assert stored.state == "cancelled"
     assert stored.detail == "dismissed by <@U_NOBODY>"
     assert harness.agent_prompts == []
+
+
+async def test_marking_ready_with_the_box_ticked_sends_the_card_to_the_channel(
+    harness: _Harness, open_approval: OpenApproval, slack: _FakeSlack
+) -> None:
+    approval = await open_approval(awaiting_ready=True)
+
+    outcome = await _click(approval, "U_ADA", decision="ready", broadcast=True)
+
+    stored = await _stored(approval)
+    assert "Sent to the channel" in outcome.message
+    assert slack.broadcasts == [True]
+    assert slack.deleted == ["2.0"]
+    assert stored.slack_broadcast
+    assert stored.slack_message_ts == "3.0"
+
+
+async def test_a_broadcast_card_leaves_the_channel_once_it_closes(
+    harness: _Harness, open_approval: OpenApproval, slack: _FakeSlack
+) -> None:
+    approval = await open_approval()
+
+    sent = await voting.request_broadcast(await _stored(approval))
+    again = await voting.request_broadcast(await _stored(approval))
+    await voting.dismiss(await _stored(approval), "U_GRACE")
+
+    stored = await _stored(approval)
+    assert sent.message == "Sent to the channel."
+    assert "already in the channel" in again.message
+    assert slack.broadcasts == [True, False]
+    assert slack.deleted == ["2.0", "3.0"]
+    assert stored.state == "cancelled"
+    assert not stored.slack_broadcast
+    assert stored.slack_message_ts == "4.0"
 
 
 async def test_only_one_open_approval_per_pull_request(open_approval: OpenApproval) -> None:

@@ -62,8 +62,14 @@ PR link, author, the diff as the card draws it, and its status. A draft's card o
 **Dismiss**. Once approved, the diff and buttons go and
 the card says who approved. Once merged or cancelled, the whole card becomes one line,
 such as *Expedited review: merged* or *Expedited review: dismissed by @someone*, and
-the PR link. It is posted in the thread only, never broadcast to the channel.
-Reactions are never votes.
+the PR link. Reactions are never votes.
+
+The card is posted in the thread only. A draft's card has an **Also send to #channel**
+checkbox, off by default, that broadcasts the card when the author marks it ready; an
+open card awaiting approval has **Broadcast in #channel**, which anyone in the thread
+may click. Broadcasting reposts the card as a thread reply also sent to the channel.
+When the card closes for any reason, the broadcast copy is deleted and the closed card
+is posted in the thread only, so the channel keeps no finished cards.
 
 ### Voting
 
