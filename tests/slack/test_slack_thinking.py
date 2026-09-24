@@ -335,6 +335,45 @@ async def test_thread_status_refresh_finishes_before_completion_clears(
     assert calls == ["Thinking...", "Thinking...", "refresh finished", ""]
 
 
+async def test_thread_status_follows_a_mid_run_breakout(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[tuple[str, str, str]] = []
+    refreshed_destination = asyncio.Event()
+    client = _status_client(_AnchorStore())
+
+    async def set_status(channel_id: str, thread_ts: str, status: str) -> bool:
+        calls.append((channel_id, thread_ts, status))
+        if len(calls) == 1:
+            client.threads.get.return_value = {
+                "metadata": {
+                    "source_context": {"slack_thread": {"channel_id": "C2", "thread_ts": "2.0"}}
+                }
+            }
+        elif channel_id == "C2" and status:
+            refreshed_destination.set()
+        return True
+
+    async def join(_thread_id: str, _run_id: str) -> dict[str, object]:
+        await refreshed_destination.wait()
+        return {}
+
+    monkeypatch.setattr(slack_thinking, "set_slack_thread_status", set_status)
+    monkeypatch.setattr(slack_thinking, "_STATUS_REFRESH_SECONDS", 0.0)
+    client.runs.join.side_effect = join
+
+    async with asyncio.timeout(2):
+        await slack_thinking.show_slack_thinking_status(
+            client=client,
+            thread_id="thread-1",
+            run_id="run-1",
+            channel_id="C1",
+            thread_ts="1.0",
+        )
+
+    assert calls[0] == ("C1", "1.0", "Thinking...")
+    assert all(channel_id == "C2" for channel_id, _, _ in calls[1:])
+    assert calls[-1] == ("C2", "2.0", "")
+
+
 async def test_early_status_survives_while_another_run_is_active(monkeypatch) -> None:
     set_status = AsyncMock(return_value=True)
     monkeypatch.setattr(slack_thinking, "set_slack_thread_status", set_status)
@@ -800,7 +839,8 @@ async def test_status_waits_for_each_run_without_polling(
                     await refreshed.wait()
                     assert not observer.done()
                     assert "" not in statuses
-                    assert requests == ["/threads/thread-1/runs/current-run/join"]
+                    assert requests[0] == "/threads/thread-1/runs/current-run/join"
+                    assert set(requests[1:]) <= {"/threads/thread-1"}
                     completed.set()
         assert statuses[0] == "Thinking..."
         assert statuses[-1] == ""

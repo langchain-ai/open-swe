@@ -403,7 +403,9 @@ async def show_slack_thinking_status(
             if session_ts:
                 await restore_slack_session_status(client, channel_id, session_ts)
             else:
-                await restore_slack_thinking_status(channel_id, thread_ts)
+                await restore_slack_thinking_status(
+                    *await _status_location(client, thread_id, channel_id, thread_ts)
+                )
 
     refresher = asyncio.create_task(refresh())
     try:
@@ -438,10 +440,35 @@ async def show_slack_thinking_status(
                 )
         finally:
             await asyncio.shield(
-                clear_slack_thinking_status_if_idle(
-                    client, thread_id, channel_id, thread_ts, session_ts=session_ts
-                )
+                _settle_after_run(client, thread_id, channel_id, thread_ts, session_ts)
             )
+
+
+async def _status_location(
+    client: LangGraphClient, thread_id: str, channel_id: str, thread_ts: str
+) -> tuple[str, str]:
+    """Follow the thread's current Slack binding so a moved thread takes its status along."""
+    try:
+        context = SourceContext.from_metadata(thread_metadata(await client.threads.get(thread_id)))
+    except Exception:
+        logger.warning(
+            "Could not resolve the current Slack status location",
+            extra={"agent_thread_id": thread_id},
+            exc_info=True,
+        )
+        return channel_id, thread_ts
+    location = context.slack_location
+    return location if location else (channel_id, thread_ts)
+
+
+async def _settle_after_run(
+    client: LangGraphClient, thread_id: str, channel_id: str, thread_ts: str, session_ts: str
+) -> None:
+    if not session_ts:
+        channel_id, thread_ts = await _status_location(client, thread_id, channel_id, thread_ts)
+    await clear_slack_thinking_status_if_idle(
+        client, thread_id, channel_id, thread_ts, session_ts=session_ts
+    )
 
 
 async def clear_slack_thinking_status_if_idle(

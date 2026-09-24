@@ -12,9 +12,11 @@ from agent.slack.client import (
     get_active_slack_thread,
     lookup_slack_thread_run_mapping,
     post_slack_top_level_message_with_ts,
+    set_slack_thread_status,
     slack_thread_mutation_lock,
     store_slack_run_mapping,
 )
+from agent.slack.thinking import sync_slack_background_status
 from agent.source_context import SourceContext
 from agent.utils.dashboard_links import dashboard_thread_url
 
@@ -147,6 +149,9 @@ async def move_slack_thread(
             "channel_id": target_channel,
             "thread_ts": new_ts,
         }
+
+    await set_slack_thread_status(source_channel, source_ts, "")
+    await sync_slack_background_status(client, thread_id, resume=True)
 
     return {
         "success": True,
