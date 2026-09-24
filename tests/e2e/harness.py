@@ -882,6 +882,7 @@ async def mock_github_data() -> JSONResponse:
                 "files": p["files"],
                 "reviews": p["reviews"],
                 "review_comments": p["review_comments"],
+                "standalone_comment_posts": p["standalone_comment_posts"],
                 "issue_comments": p["issue_comments"],
                 "created_at": p["created_at"],
                 "updated_at": p["updated_at"],
@@ -1097,27 +1098,70 @@ async def gh_get_pull(owner: str, repo: str, number: int, request: Request) -> R
 
 
 @app.get("/fake-gh/repos/{owner}/{repo}/pulls/{number}/comments")
-async def gh_list_pull_comments(owner: str, repo: str, number: int, page: int = 1) -> JSONResponse:
+async def gh_list_pull_comments(
+    owner: str, repo: str, number: int, request: Request, page: int = 1
+) -> JSONResponse:
     pr = fakes.find_pull(number, owner, repo)
     if pr is None:
         return JSONResponse({"message": "Not Found"}, status_code=404)
-    return JSONResponse(list(reversed(pr["review_comments"])) if page == 1 else [])
+    visible = fakes.visible_review_comments(pr, _token_login(request))
+    return JSONResponse(list(reversed(visible)) if page == 1 else [])
 
 
 @app.post("/fake-gh/repos/{owner}/{repo}/pulls/{number}/comments")
 async def gh_create_pull_comment(
     owner: str, repo: str, number: int, request: Request
 ) -> JSONResponse:
-    """Post an inline comment as the person whose token was used, as GitHub does."""
-    author = _token_login(request)
-    if not author:
-        return JSONResponse({"message": "Resource not accessible by integration"}, status_code=403)
-    comment = fakes.add_review_comment(
-        number, owner, repo, author=author, payload=await request.json()
-    )
-    if comment is None:
+    """A standalone inline comment. Recorded so a spec can prove nothing posts one."""
+    pr = fakes.find_pull(number, owner, repo)
+    if pr is None:
         return JSONResponse({"message": "Not Found"}, status_code=404)
-    return JSONResponse(comment, status_code=201)
+    pr["standalone_comment_posts"].append(await request.json())
+    return JSONResponse({"message": "Standalone comments are not used"}, status_code=422)
+
+
+@app.delete("/fake-gh/repos/{owner}/{repo}/pulls/comments/{comment_id}")
+async def gh_delete_pull_comment(
+    owner: str, repo: str, comment_id: int, request: Request
+) -> Response:
+    if not fakes.delete_review_comment(owner, repo, comment_id, author=_token_login(request)):
+        return JSONResponse({"message": "Not Found"}, status_code=404)
+    return Response(status_code=204)
+
+
+@app.post("/fake-gh/repos/{owner}/{repo}/pulls/{number}/reviews/{review_id}/events")
+async def gh_submit_pending_review(
+    owner: str, repo: str, number: int, review_id: int, request: Request
+) -> JSONResponse:
+    body = await request.json()
+    status, payload = fakes.submit_pending_review(
+        number,
+        owner,
+        repo,
+        review_id,
+        author=_token_login(request),
+        event=str(body.get("event") or ""),
+        body=str(body.get("body") or ""),
+    )
+    return JSONResponse(payload, status_code=status)
+
+
+@app.delete("/fake-gh/repos/{owner}/{repo}/pulls/{number}/reviews/{review_id}")
+async def gh_delete_pending_review(
+    owner: str, repo: str, number: int, review_id: int, request: Request
+) -> JSONResponse:
+    status, payload = fakes.delete_pending_review(
+        number, owner, repo, review_id, author=_token_login(request)
+    )
+    return JSONResponse(payload, status_code=status)
+
+
+@app.get("/fake-gh/repos/{owner}/{repo}/issues/{number}/comments")
+async def gh_list_issue_comments(owner: str, repo: str, number: int, page: int = 1) -> JSONResponse:
+    pr = fakes.find_pull(number, owner, repo)
+    if pr is None:
+        return JSONResponse({"message": "Not Found"}, status_code=404)
+    return JSONResponse(pr["issue_comments"] if page == 1 else [])
 
 
 @app.get("/fake-gh/repos/{owner}/{repo}/compare/{basehead:path}")
@@ -1182,9 +1226,10 @@ async def gh_submit_pull_review(
         owner,
         repo,
         author=author,
-        state=str(body.get("event") or "COMMENT"),
+        state=str(body.get("event") or "PENDING"),
         commit_id=str(body.get("commit_id") or ""),
         body=str(body.get("body") or ""),
+        comments=[c for c in body.get("comments") or [] if isinstance(c, dict)],
     )
     if review is None:
         return JSONResponse({"message": "Not Found"}, status_code=404)
@@ -1201,8 +1246,9 @@ async def gh_create_issue_comment(
     if pr is None:
         return JSONResponse({"message": "Not Found"}, status_code=404)
     body = await request.json()
-    comment = {"id": len(pr["issue_comments"]) + 1, "body": str(body.get("body") or "")}
-    pr["issue_comments"].append(comment)
+    comment = fakes.add_issue_comment(
+        pr, author=_token_login(request), body=str(body.get("body") or "")
+    )
     return JSONResponse(comment, status_code=201)
 
 
@@ -1222,14 +1268,22 @@ async def gh_merge_pull(owner: str, repo: str, number: int, request: Request) ->
 # Seeded reviews carry only ``{author, state}``, so the list has to be
 # normalised: the dashboard's review-decision read needs a login and an id.
 @app.get("/fake-gh/repos/{owner}/{repo}/pulls/{number}/reviews")
-async def gh_list_pull_reviews(owner: str, repo: str, number: int, page: int = 1) -> JSONResponse:
+async def gh_list_pull_reviews(
+    owner: str, repo: str, number: int, request: Request, page: int = 1
+) -> JSONResponse:
+    """Submitted reviews, plus a pending one only for its author, as GitHub does."""
     pr = fakes.find_pull(number, owner, repo)
     if pr is None:
         return JSONResponse({"message": "Not Found"}, status_code=404)
     if page > 1:
         return JSONResponse([])
+    viewer = _token_login(request)
     return JSONResponse(
-        [fakes.review_rest_json(review, index) for index, review in enumerate(pr["reviews"])]
+        [
+            fakes.review_rest_json(review, index)
+            for index, review in enumerate(pr["reviews"])
+            if review.get("state") != "PENDING" or review.get("author") == viewer
+        ]
     )
 
 
@@ -1269,6 +1323,24 @@ async def gh_graphql(request: Request) -> JSONResponse:
         return JSONResponse(
             {"data": {"markPullRequestReadyForReview": {"pullRequest": {"isDraft": False}}}}
         )
+    viewer = _token_login(request)
+    mutation_input = variables.get("input")
+    if "addPullRequestReviewThread" in query and isinstance(mutation_input, dict):
+        comment = fakes.add_review_thread(viewer, mutation_input)
+        if comment is None:
+            return JSONResponse({"errors": [{"message": "Could not resolve to a pending review"}]})
+        thread = {"id": f"PRRT_node_{comment['id']}"}
+        return JSONResponse({"data": {"addPullRequestReviewThread": {"thread": thread}}})
+    if "updatePullRequestReviewComment" in query and isinstance(mutation_input, dict):
+        updated = fakes.update_review_comment_body(
+            viewer,
+            str(mutation_input.get("pullRequestReviewCommentId") or ""),
+            str(mutation_input.get("body") or ""),
+        )
+        if updated is None:
+            return JSONResponse({"errors": [{"message": "Could not resolve to a comment"}]})
+        payload = {"pullRequestReviewComment": {"id": updated["node_id"]}}
+        return JSONResponse({"data": {"updatePullRequestReviewComment": payload}})
     owner = variables.get("owner")
     repo = variables.get("repo")
     number = variables.get("number")
@@ -1277,6 +1349,12 @@ async def gh_graphql(request: Request) -> JSONResponse:
     pr = fakes.find_pull(number, owner, repo)
     if pr is None:
         return JSONResponse({"errors": [{"message": "Pull request not found"}]})
+    if "fullDatabaseId" in query and "reviewThreads" in query:
+        threads = {
+            "nodes": fakes.review_threads_graphql(pr, viewer),
+            "pageInfo": {"hasNextPage": False, "endCursor": None},
+        }
+        return JSONResponse({"data": {"repository": {"pullRequest": {"reviewThreads": threads}}}})
     if "PullRequestThreadCount" in query:
         return JSONResponse(
             {

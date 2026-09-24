@@ -4,6 +4,7 @@ import { toast } from "sonner"
 import type { ReviewEvent } from "@/features/reviews/lib/chatDiffActions"
 import { useChatDrafts } from "@/features/reviews/lib/chatDrafts"
 import { usePendingReview } from "@/features/reviews/lib/usePendingReview"
+import { reviewConversationQueryKey } from "@/features/reviews/components/ReviewConversation"
 import { Button } from "@/components/ui/button"
 import {
   Card,
@@ -59,6 +60,9 @@ export function ProposedReviewCard({
         queryKey: ["review", owner, repo, number],
       })
       void pending.invalidate()
+      void queryClient.invalidateQueries({
+        queryKey: reviewConversationQueryKey(owner, repo, number),
+      })
     },
     onError: (error) =>
       toast.error("Couldn't submit the review", {

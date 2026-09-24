@@ -38,9 +38,11 @@ interface FakeReviewComment {
   line: number;
   side: string;
   user: { login: string };
+  pull_request_review_id: number;
 }
 
 interface FakeSubmittedReview {
+  id: number;
   author: string;
   state: string;
   body: string;
@@ -51,6 +53,8 @@ interface FakePull {
   repo: string;
   review_comments: FakeReviewComment[];
   reviews: FakeSubmittedReview[];
+  standalone_comment_posts: object[];
+  issue_comments: Array<{ body: string }>;
 }
 
 function reviewApi(pr: SeededPullRequest, suffix = ""): string {
@@ -384,7 +388,7 @@ test.describe("review page", () => {
     await expectNoReplayedHighlight(page);
   });
 
-  test("drafts line comments the user edits, then posts or discards", async ({
+  test("chat-drafted comments join one pending review that submits together", async ({
     page,
   }) => {
     await openReview(page, pr);
@@ -428,34 +432,148 @@ test.describe("review page", () => {
       "Edited inline before discarding.",
     );
 
-    const posted = page.waitForResponse(
+    const added = page.waitForResponse(
       (response) =>
-        response.url().endsWith(reviewApi(pr, "/comments")) &&
+        response.url().endsWith(reviewApi(pr, "/pending-review/comments")) &&
         response.request().method() === "POST",
     );
     await chatCard(toPost).getByRole("button", { name: toPost }).click();
     await expect(inlineCard(toPost)).toBeInViewport();
     await inlineCard(toPost)
-      .getByRole("button", { name: "Post as you" })
+      .getByRole("button", { name: "Add to review" })
       .click();
-    const response = await posted;
+    const response = await added;
     expect(response.ok(), await response.text()).toBeTruthy();
-    await expect(chatCard(toPost)).toContainText("Comment posted");
+    await expect(chatCard(toPost)).toContainText("Added to your review");
     await expect(inlineCard(toPost)).toHaveCount(0);
+
+    const pendingCard = diffColumn(page)
+      .getByTestId("pending-review-comment")
+      .filter({ hasText: edited });
+    await expect(pendingCard).toContainText("Pending");
+    const reviewButton = page.getByRole("button", { name: /Review changes/ });
+    await expect(reviewButton).toContainText("1");
 
     await chatCard(toDiscard).getByRole("button", { name: "Discard" }).click();
     await expect(chatCard(toDiscard)).toContainText("Comment discarded");
     await expect(inlineCard(toDiscard)).toHaveCount(0);
 
-    const comments = (await fakePull(page, pr)).review_comments;
+    // Nothing is visible to anyone else until the review is submitted.
+    let fake = await fakePull(page, pr);
+    const [pending] = fake.reviews;
+    expect(fake.reviews).toHaveLength(1);
+    expect(pending).toMatchObject({
+      state: "PENDING",
+      author: SAME_USER.login,
+    });
+
+    const final = "Rename ZETA_5 to GREETING_PREFIX, please.";
+    await pendingCard.getByRole("button", { name: "Edit" }).click();
+    await diffColumn(page).getByLabel("Pending comment body").fill(final);
+    await diffColumn(page).getByRole("button", { name: "Save" }).click();
+    await expect(
+      diffColumn(page)
+        .getByTestId("pending-review-comment")
+        .filter({ hasText: final }),
+    ).toBeVisible();
+
+    await reviewButton.click();
+    await expect(
+      page.getByText("1 pending comment will be submitted with this review."),
+    ).toBeVisible();
+    await page.getByRole("radio", { name: /Request changes/ }).check();
+    const summary = "A couple of naming nits.";
+    await page.getByLabel("Review summary").fill(summary);
+    const submitted = page.waitForResponse(
+      (res) =>
+        res.url().endsWith(reviewApi(pr, "/submit-review")) &&
+        res.request().method() === "POST",
+    );
+    await page.getByRole("button", { name: "Submit review" }).click();
+    const submitResponse = await submitted;
+    expect(submitResponse.ok(), await submitResponse.text()).toBeTruthy();
+    await expect(
+      diffColumn(page).getByTestId("pending-review-comment"),
+    ).toHaveCount(0);
+
+    fake = await fakePull(page, pr);
+    expect(fake.reviews).toHaveLength(1);
+    expect(fake.reviews[0]).toMatchObject({
+      id: pending.id,
+      state: "CHANGES_REQUESTED",
+      body: summary,
+      author: SAME_USER.login,
+    });
+    const comments = fake.review_comments.filter(
+      (comment) => comment.pull_request_review_id === pending.id,
+    );
     expect(comments).toHaveLength(1);
     expect(comments[0]).toMatchObject({
-      body: edited,
+      body: final,
       path: "zeta.py",
       line: 5,
       side: "RIGHT",
       user: { login: SAME_USER.login },
     });
+    expect(fake.standalone_comment_posts).toEqual([]);
+  });
+
+  test("discarding the pending review drops its comments", async ({ page }) => {
+    await openReview(page, pr);
+    await openChatTab(page);
+    await sendChat(page, "E2E_REVIEW_CHAT_COMMENTS leave comments on zeta.py");
+    const card = chatPanel(page)
+      .getByTestId("proposed-comment")
+      .filter({ hasText: "zeta.py:R5" });
+    await expect(card).toContainText("Draft review comment", {
+      timeout: 30_000,
+    });
+    await card.getByRole("button", { name: "Add to review" }).click();
+    await expect(card).toContainText("Added to your review");
+    const reviewButton = page.getByRole("button", { name: /Review changes/ });
+    await expect(reviewButton).toContainText("1");
+
+    await reviewButton.click();
+    await page.getByRole("button", { name: "Discard review" }).click();
+    await expect(reviewButton).not.toContainText("1");
+    await expect(
+      diffColumn(page).getByTestId("pending-review-comment"),
+    ).toHaveCount(0);
+
+    const fake = await fakePull(page, pr);
+    expect(fake.reviews).toEqual([]);
+    expect(fake.review_comments).toEqual([]);
+    expect(fake.standalone_comment_posts).toEqual([]);
+  });
+
+  test("shows the conversation timeline and posts a top-level comment", async ({
+    page,
+  }) => {
+    await openReview(page, pr);
+    const conversation = page.getByRole("region", { name: "Conversation" });
+    await expect(conversation).toBeVisible();
+
+    const comment = "Thanks, taking a look now.";
+    await conversation.getByRole("textbox").fill(comment);
+    await conversation
+      .getByRole("button", { name: "Comment", exact: true })
+      .click();
+    await expect(conversation.getByText(comment)).toBeVisible();
+
+    await page.getByRole("button", { name: /Review changes/ }).click();
+    const verdict = "Approving the constant modules.";
+    await page.getByLabel("Review summary").fill(verdict);
+    await page.getByRole("radio", { name: /Approve/ }).check();
+    await page.getByRole("button", { name: "Submit review" }).click();
+    await expect(conversation.getByText(verdict)).toBeVisible();
+    await expect(
+      conversation.getByText("Approved", { exact: true }),
+    ).toBeVisible();
+
+    const fake = await fakePull(page, pr);
+    expect(fake.issue_comments.map((item) => item.body)).toContain(comment);
+    expect(fake.reviews).toHaveLength(1);
+    expect(fake.reviews[0]).toMatchObject({ state: "APPROVED", body: verdict });
   });
 
   test("drafts a whole-PR review the user submits with a chosen verdict", async ({
@@ -497,9 +615,10 @@ test.describe("review page", () => {
     expect(reviews).toHaveLength(1);
     expect(reviews[0]).toMatchObject({
       author: SAME_USER.login,
-      state: "REQUEST_CHANGES",
+      state: "CHANGES_REQUESTED",
       body,
     });
+    expect((await fakePull(page, pr)).standalone_comment_posts).toEqual([]);
   });
 
   test("opens info and chat as a sheet on a narrow window", async ({

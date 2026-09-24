@@ -14,6 +14,7 @@ import {
 import { Textarea } from "@/components/ui/textarea"
 import { api } from "@/lib/api"
 import { usePendingReview } from "@/features/reviews/lib/usePendingReview"
+import { reviewConversationQueryKey } from "@/features/reviews/components/ReviewConversation"
 
 const VERDICTS: ReadonlyArray<{
   event: PullRequestReviewEvent
@@ -75,6 +76,9 @@ export function SubmitReviewPopover({
         queryKey: ["review", owner, repo, number],
       })
       void pending.invalidate()
+      void queryClient.invalidateQueries({
+        queryKey: reviewConversationQueryKey(owner, repo, number),
+      })
     },
   })
   const canSubmit = !submit.isPending && (!needsBody || body.trim().length > 0)

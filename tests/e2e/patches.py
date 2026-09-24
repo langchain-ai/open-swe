@@ -276,11 +276,13 @@ def apply() -> None:
     from agent import chat as chat_graph
     from agent.github import pull_request_diff
     from agent.review import chat as review_chat
+    from agent.review import conversation as review_conversation
     from agent.review import reviews as review_reviews
     from agent.review_scout import graph as review_scout_graph
 
-    review_reviews.__dict__["_GITHUB_API"] = FAKE_GITHUB_API
-    pull_request_diff.__dict__["_GITHUB_API"] = FAKE_GITHUB_API
+    for module in (review_reviews, pull_request_diff, review_conversation):
+        module.__dict__["_GITHUB_API"] = FAKE_GITHUB_API
+    review_conversation.__dict__["get_valid_access_token"] = _dummy_user_token
     for module in (review_reviews, review_chat, chat_graph):
         module.__dict__["get_github_app_installation_token"] = _dummy_install_token
     review_chat.__dict__["fetch_pr_diff"] = _fake_fetch_pr_diff
