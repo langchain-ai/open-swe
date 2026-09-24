@@ -84,6 +84,20 @@ async def test_save_from_a_later_event_updates_github_fields_but_keeps_resolves_
     assert saved.created_at is not None and saved.updated_at is not None
 
 
+async def test_later_saves_refresh_line_counts_and_keep_them_when_omitted() -> None:
+    await PullRequest(
+        owner="lc", repo="repo", number=7, additions=2, deletions=1, changed_files=1
+    ).save()
+    await PullRequest(
+        owner="lc", repo="repo", number=7, additions=8, deletions=3, changed_files=2
+    ).save()
+    await PullRequest(owner="lc", repo="repo", number=7, state="merged").save()
+
+    assert await PullRequest.diff_stats_for([("LC/Repo", 7)]) == {
+        ("lc/repo", 7): {"files": 2, "additions": 8, "deletions": 3}
+    }
+
+
 async def test_author_links_to_a_registered_user_by_github_id_or_login() -> None:
     ada = await User.sign_in("github", "42", login="Ada")
 

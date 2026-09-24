@@ -60,7 +60,7 @@ def test_view_submission_reads_metadata_and_typed_values() -> None:
             "type": "view_submission",
             "user": {"id": "U1", "username": "ada"},
             "view": {
-                "callback_id": "expedited_review_reject",
+                "callback_id": "example_modal",
                 "private_metadata": '{"approval_id": "abc"}',
                 "state": {"values": {"feedback": {"comment": {"value": "needs a test"}}}},
             },
@@ -68,7 +68,7 @@ def test_view_submission_reads_metadata_and_typed_values() -> None:
     )
 
     assert submission is not None
-    assert submission.callback_id == "expedited_review_reject"
+    assert submission.callback_id == "example_modal"
     assert submission.metadata == {"approval_id": "abc"}
     assert submission.submitted("feedback", "comment") == "needs a test"
 

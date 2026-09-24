@@ -5,6 +5,7 @@ import hashlib
 import logging
 from collections.abc import Mapping
 from dataclasses import dataclass
+from itertools import chain, repeat
 from pathlib import PurePath
 from time import monotonic
 from typing import Any, Literal
@@ -32,6 +33,7 @@ _DEFAULT_RETRY_SECONDS = 30.0
 _MAX_RETRY_SECONDS = 300.0
 _THINKING_STATUS = "Thinking..."
 _STATUS_REFRESH_SECONDS = 90.0
+_STATUS_RETRY_DELAYS = (1.0, 2.0)
 _STATUS_ANCHOR_NAMESPACE = "slack_session_status_anchor"
 
 
@@ -90,6 +92,7 @@ def _tool_step(name: str, tool_input: Any) -> tuple[str, str]:
     labels = {
         "ls": ("Inspecting repository files", "Repository directory"),
         "open_pull_request": ("Opening pull request", "GitHub operation"),
+        "link_pull_request": ("Linking pull request", "GitHub operation"),
         "save_plan": ("Publishing implementation plan", "Plan artifact"),
         "analyzePlan": ("Checking implementation security", "Security analysis"),
     }
@@ -350,6 +353,7 @@ async def _release_status_anchor(
             extra={"slack_channel": channel_id},
             exc_info=True,
         )
+        return False
     return True
 
 
@@ -378,16 +382,11 @@ async def show_slack_thinking_status(
     thread_ts: str,
     session_ts: str = "",
 ) -> None:
-    """Keep Slack's animated "Thinking..." status alive until the run ends.
+    """Refresh Slack's status while waiting for this run's completion.
 
-    A session (a DM) has no thread to hang the status on, so ``thread_ts`` is the
-    message this run answers and ``session_ts`` names the session that owns the
-    single status: claiming it moves the status off the message that held it, so
-    the indicator is always on the latest one and only there.
-
-    Slack stops the animation when the assistant posts a message, so the status
-    is refreshed in the background for the whole run; the completion webhook
-    clears it once no run is left.
+    Session status follows its latest message anchor. The run-scoped wait also
+    handles runs that finished before observation began, without depending on
+    thread lifecycle history or completion webhook delivery.
     """
     if session_ts:
         previous = await _claim_status_anchor(client, channel_id, session_ts, thread_ts)
@@ -401,28 +400,48 @@ async def show_slack_thinking_status(
     async def refresh() -> None:
         while True:
             await asyncio.sleep(_STATUS_REFRESH_SECONDS)
-            await restore_slack_thinking_status(channel_id, thread_ts)
+            if session_ts:
+                await restore_slack_session_status(client, channel_id, session_ts)
+            else:
+                await restore_slack_thinking_status(channel_id, thread_ts)
 
     refresher = asyncio.create_task(refresh())
     try:
-        async with client.threads.stream(thread_id, assistant_id="agent") as thread_stream:
-            async for event in thread_stream.subscribe(["lifecycle"]):
-                lifecycle = root_lifecycle(event)
-                if (
-                    lifecycle is not None
-                    and lifecycle[0] == run_id
-                    and lifecycle[1] in TERMINAL_LIFECYCLE_EVENTS
-                ):
-                    break
-    except Exception:
-        logger.warning("Slack thinking status observer failed for run %s", run_id, exc_info=True)
+        for attempt, delay in enumerate(
+            chain((0.0, *_STATUS_RETRY_DELAYS), repeat(_DEFAULT_RETRY_SECONDS))
+        ):
+            if attempt:
+                await asyncio.sleep(delay)
+            try:
+                await client.runs.join(thread_id, run_id)
+                break
+            except Exception:
+                logger.warning(
+                    "Slack thinking status completion wait failed",
+                    extra={
+                        "agent_thread_id": thread_id,
+                        "run_id": run_id,
+                        "attempt": attempt + 1,
+                    },
+                    exc_info=True,
+                )
     finally:
         refresher.cancel()
-        await asyncio.shield(
-            clear_slack_thinking_status_if_idle(
-                client, thread_id, channel_id, thread_ts, session_ts=session_ts
+        try:
+            results = await asyncio.gather(refresher, return_exceptions=True)
+            error = results[0]
+            if isinstance(error, Exception):
+                logger.warning(
+                    "Slack thinking status refresher failed",
+                    extra={"agent_thread_id": thread_id, "run_id": run_id},
+                    exc_info=(type(error), error, error.__traceback__),
+                )
+        finally:
+            await asyncio.shield(
+                clear_slack_thinking_status_if_idle(
+                    client, thread_id, channel_id, thread_ts, session_ts=session_ts
+                )
             )
-        )
 
 
 async def clear_slack_thinking_status_if_idle(
@@ -434,29 +453,61 @@ async def clear_slack_thinking_status_if_idle(
     session_ts: str = "",
     metadata: Mapping[str, object] | None = None,
 ) -> None:
-    """Settle an idle indicator while preserving background work and newer anchors."""
+    """Settle idle status, retrying failed reads or writes without polling active runs."""
+    for attempt, delay in enumerate((0.0, *_STATUS_RETRY_DELAYS)):
+        if attempt:
+            await asyncio.sleep(delay)
+        if await _settle_slack_thinking_status(
+            client,
+            thread_id,
+            channel_id,
+            thread_ts,
+            session_ts=session_ts,
+            metadata=metadata if attempt == 0 else None,
+        ):
+            return
+    logger.warning(
+        "Slack status cleanup retries exhausted",
+        extra={"agent_thread_id": thread_id, "slack_channel": channel_id},
+    )
+
+
+async def _settle_slack_thinking_status(
+    client: LangGraphClient,
+    thread_id: str,
+    channel_id: str,
+    thread_ts: str,
+    *,
+    session_ts: str,
+    metadata: Mapping[str, object] | None,
+) -> bool:
     try:
         if metadata is None:
             metadata = thread_metadata(await client.threads.get(thread_id))
         if await _thread_has_active_runs(client, thread_id):
-            return
+            return True
         waiting = bool(metadata.get(RUNNING_BACKGROUND_TASKS_KEY))
         if session_ts:
             item = await client.store.get_item((_STATUS_ANCHOR_NAMESPACE, channel_id), session_ts)
             value = item.get("value") if isinstance(item, Mapping) else None
             if not isinstance(value, Mapping) or value.get("message_ts") != thread_ts:
-                return
-            if not waiting and not await _release_status_anchor(
-                client, channel_id, session_ts, thread_ts
-            ):
-                return
-        await set_slack_thread_status(
+                return True
+        if not await set_slack_thread_status(
             channel_id, thread_ts, "Waiting for background tasks…" if waiting else ""
-        )
+        ):
+            logger.warning(
+                "Slack rejected status cleanup",
+                extra={"agent_thread_id": thread_id, "slack_channel": channel_id},
+            )
+            return False
+        if session_ts and not waiting:
+            return await _release_status_anchor(client, channel_id, session_ts, thread_ts)
+        return True
     except Exception:
         logger.warning(
             "Could not settle Slack status", extra={"agent_thread_id": thread_id}, exc_info=True
         )
+        return False
 
 
 async def sync_slack_background_status(
@@ -506,13 +557,9 @@ async def sync_slack_background_status(
 
 
 async def _thread_has_active_runs(client: LangGraphClient, thread_id: str) -> bool:
-    try:
-        for status in ("pending", "running"):
-            if await client.runs.list(thread_id, status=status, limit=1):
-                return True
-    except Exception:  # noqa: BLE001
-        logger.debug("Could not list runs for thread %s", thread_id, exc_info=True)
-        return True
+    for status in ("pending", "running"):
+        if await client.runs.list(thread_id, status=status, limit=1):
+            return True
     return False
 
 

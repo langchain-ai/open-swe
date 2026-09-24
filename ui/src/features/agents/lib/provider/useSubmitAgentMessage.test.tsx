@@ -140,4 +140,27 @@ describe("useSubmitAgentMessage", () => {
     )
     expect(sidebarStatus(client)).toBe("error")
   })
+
+  it("clears queued on a failed enqueue so the failed row leaves the queue", async () => {
+    source.startRun.mockRejectedValueOnce(
+      new AgentsApiError(503, "Service Unavailable")
+    )
+    const { client, result } = setup()
+
+    await result.current.mutateAsync({
+      content: "try me",
+      images: [],
+      enqueue: true,
+    })
+
+    await waitFor(() =>
+      expect(pendingMessages(client)).toEqual([
+        expect.objectContaining({
+          content: "try me",
+          status: "failed",
+          queued: false,
+        }),
+      ])
+    )
+  })
 })

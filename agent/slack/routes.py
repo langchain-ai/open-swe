@@ -18,6 +18,7 @@ from agent.slack.ask import (
     ask_thread_id,
     process_slack_ask,
 )
+from agent.slack.breakout import parse_breakout_command, process_slack_breakout
 from agent.slack.dm import DM_SESSION_TS, dm_session_enabled, is_dm_channel
 from agent.slack.failures import (
     SlackRequestError,
@@ -46,6 +47,7 @@ from agent.slack.responses import (
     ephemeral,
     ignored,
 )
+from agent.slack.solo_threads import allow_solo_thread_followup
 from agent.slack.thread_feedback import handle_slack_feedback_interaction, is_slack_feedback_payload
 from agent.utils.json_types import JsonObject
 from agent.utils.thread_ops import langgraph_client as get_langgraph_client
@@ -445,20 +447,6 @@ async def slack_webhook(
     if in_dm:
         thread_ts = DM_SESSION_TS
 
-    is_direct_message = not is_message_update and in_dm_channel and bool(user_id)
-    if (
-        event.type != "app_mention"
-        and not is_message_update
-        and not in_code_channel
-        and allowed_bot is None
-    ):
-        has_username_mention = bool(
-            common.SLACK_BOT_USERNAME and f"@{common.SLACK_BOT_USERNAME}" in text
-        )
-        has_id_mention = bool(bot_user_id and f"<@{bot_user_id}>" in text)
-        if not (has_username_mention or has_id_mention or is_direct_message):
-            return ignored("Not an app mention or DM")
-
     if {event.subtype, updated_message.subtype} & _MEMBERSHIP_SUBTYPES:
         if in_code_channel and await common.claim_slack_event(event_id, channel_id, event_ts):
             background_tasks.add_task(_queue_channel_housekeeping, channel_id, text)
@@ -466,6 +454,40 @@ async def slack_webhook(
 
     if bot_user_id and user_id == bot_user_id:
         return ignored("Event from this bot user")
+
+    is_direct_message = not is_message_update and in_dm_channel and bool(user_id)
+    explicit_mention = bool(
+        event.type == "app_mention"
+        or (common.SLACK_BOT_USERNAME and f"@{common.SLACK_BOT_USERNAME}" in text)
+        or (bot_user_id and f"<@{bot_user_id}>" in text)
+    )
+    solo_followup = False
+    if (
+        not is_message_update
+        and not in_code_channel
+        and not in_dm_channel
+        and allowed_bot is None
+        and event.type in {"message", "app_mention"}
+        and event.subtype in {"", "file_share", "thread_broadcast"}
+        and (reply_thread_ts or explicit_mention)
+    ):
+        solo_followup = await allow_solo_thread_followup(
+            get_langgraph_client(),
+            channel_id=channel_id,
+            thread_ts=thread_ts,
+            message_ts=original_message_ts,
+            user_id=user_id,
+            explicit_mention=explicit_mention,
+        )
+    if not (
+        explicit_mention
+        or is_message_update
+        or in_code_channel
+        or allowed_bot is not None
+        or is_direct_message
+        or solo_followup
+    ):
+        return ignored("Not an app mention or DM")
 
     # From here on the message is addressed to Open SWE: any failure is reported to the thread.
     target = SlackRequestTarget(channel_id=channel_id, thread_ts=thread_ts, event_id=event_id)
@@ -514,30 +536,39 @@ async def slack_webhook(
             thread_id=thread_id,
         )
         if await common.claim_slack_event(event_id, channel_id, event_ts):
-            background_tasks.add_task(
-                service.process_slack_mention,
-                SlackRequest(
-                    channel_id=channel_id,
-                    channel_context=channel_context,
-                    thread_ts=thread_ts,
-                    event_ts=event_ts,
-                    original_message_ts=original_message_ts,
-                    event_id=event_id,
-                    user_id=user_id,
-                    text=text,
-                    attachments=attachments,
-                    bot_user_id=bot_user_id,
-                    thread_id=thread_id,
-                    treat_all_messages_as_mentions=is_direct_message or in_code_channel,
-                    code_channel=in_code_channel,
-                    dm_session=in_dm,
-                    reply_thread_ts=reply_thread_ts if in_code_channel or in_dm else "",
-                    team_id=team_id,
-                    triggering_bot_id=allowed_bot.bot_id if allowed_bot else "",
-                    triggering_bot_app_id=updated_message.app_id if allowed_bot else "",
-                ),
-                repo,
+            request = SlackRequest(
+                channel_id=channel_id,
+                channel_context=channel_context,
+                thread_ts=thread_ts,
+                event_ts=event_ts,
+                original_message_ts=original_message_ts,
+                event_id=event_id,
+                user_id=user_id,
+                text=text,
+                attachments=attachments,
+                bot_user_id=bot_user_id,
+                thread_id=thread_id,
+                treat_all_messages_as_mentions=is_direct_message
+                or in_code_channel
+                or solo_followup,
+                code_channel=in_code_channel,
+                dm_session=in_dm,
+                reply_thread_ts=reply_thread_ts if in_code_channel or in_dm else "",
+                team_id=team_id,
+                triggering_bot_id=allowed_bot.bot_id if allowed_bot else "",
+                triggering_bot_app_id=updated_message.app_id if allowed_bot else "",
             )
+            breakout_instruction = (
+                None
+                if in_code_channel or in_dm_channel or allowed_bot is not None
+                else parse_breakout_command(text, bot_user_id)
+            )
+            if breakout_instruction is not None:
+                background_tasks.add_task(
+                    process_slack_breakout, request, breakout_instruction, repo
+                )
+                return accepted("Slack breakout queued")
+            background_tasks.add_task(service.process_slack_mention, request, repo)
             return accepted("Slack mention queued")
 
         common.logger.info("Ignoring duplicate delivery of Slack event %s", event_id)
@@ -646,8 +677,6 @@ async def slack_interactivity(
         return {"status": "error", "message": "Invalid payload"}
     if is_slack_feedback_payload(payload):
         return await handle_slack_feedback_interaction(payload, background_tasks)
-    if expedited_review.is_expedited_review_submission(payload):
-        return await expedited_review.handle_submission(payload, background_tasks)
 
     interaction = SlackInteraction.parse(payload)
     if interaction is None:
@@ -730,7 +759,7 @@ async def slack_interactivity(
     target = SlackRequestTarget(channel_id=channel_id, thread_ts=reply_ts or action_ts)
 
     async def dispatch() -> WebhookResponse:
-        if button.type == expedited_review.card.BUTTON_TYPE:
+        if button.type == expedited_review.BUTTON_TYPE:
             return await expedited_review.handle_button(interaction, button, background_tasks)
 
         if button.type == "workflow_push_approval":

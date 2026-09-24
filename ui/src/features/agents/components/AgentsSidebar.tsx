@@ -1,9 +1,4 @@
-import {
-  Link,
-  useNavigate,
-  useRouter,
-  useRouterState,
-} from "@tanstack/react-router"
+import { Link, useNavigate, useRouterState } from "@tanstack/react-router"
 import {
   CaretDownIcon,
   CaretRightIcon,
@@ -111,7 +106,11 @@ import {
 } from "@/lib/appCommands"
 import { cn } from "@/lib/utils"
 import { useChatRoutes } from "@/lib/chatRoutes"
-import { getLastSectionLocation, sectionOf } from "@/lib/appLocation"
+import {
+  getLastSectionLocation,
+  sectionOf,
+  useHrefLinkOptions,
+} from "@/lib/appLocation"
 import { reportError } from "@/lib/errorReporting"
 
 interface AgentsSidebarProps {
@@ -227,15 +226,7 @@ export function AgentsSidebar({
   const activeSection = useRouterState({
     select: (state) => sectionOf(state.location.pathname),
   })
-  const router = useRouter()
-  const sectionLinkTarget = (href: string) => {
-    const url = new URL(href, "http://localhost")
-    return {
-      to: url.pathname,
-      search: router.options.parseSearch(url.search),
-      hash: url.hash.slice(1) || undefined,
-    }
-  }
+  const sectionLinkTarget = useHrefLinkOptions()
   const [updateState, setUpdateState] = useState<DesktopUpdateState>({
     status: "idle",
   })

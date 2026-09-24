@@ -5,7 +5,7 @@ import { reportError } from "@/lib/errorReporting"
 type DashboardMutationMeta = {
   /** Toast title when the mutation fails, e.g. "Couldn't pin thread". */
   errorTitle?: string
-  /** The caller shows this failure inline instead of as a toast. */
+  /** The caller shows this failure inline, so skip the toast; it is still logged. */
   silent?: boolean
 }
 
@@ -29,12 +29,12 @@ export function makeQueryClient() {
     }),
     mutationCache: new MutationCache({
       onError: (error, _variables, _context, mutation) => {
-        if (mutation.meta?.silent) return
         const key = mutation.options.mutationKey
         reportError({
           title: mutation.meta?.errorTitle ?? "Something went wrong",
           error,
           mutation: key ? JSON.stringify(key) : undefined,
+          showToast: !mutation.meta?.silent,
         })
       },
     }),

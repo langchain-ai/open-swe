@@ -8,6 +8,8 @@ export interface ErrorReport {
   title: string
   error: unknown
   mutation?: string
+  /** False when the caller already shows the failure inline. */
+  showToast?: boolean
 }
 
 function errorId(error: unknown): string {
@@ -37,24 +39,32 @@ export function ErrorToastBody({
 }
 
 /** Shows a failed action to the user and records it in Datadog under one searchable ID. */
-export function reportError({ title, error, mutation }: ErrorReport): string {
+export function reportError({
+  title,
+  error,
+  mutation,
+  showToast = true,
+}: ErrorReport): string {
   const id = errorId(error)
   const message = errorMessage(error)
   const status = error instanceof DashboardRequestError ? error.status : null
 
-  toast.error(title, {
-    id,
-    description: <ErrorToastBody message={message} id={id} />,
-    duration: 10_000,
-    action: {
-      label: "Copy ID",
-      onClick: () => {
-        void navigator.clipboard?.writeText(id).catch((copyError: unknown) => {
-          console.warn("Could not copy error ID", copyError)
-        })
+  if (showToast)
+    toast.error(title, {
+      id,
+      description: <ErrorToastBody message={message} id={id} />,
+      duration: 10_000,
+      action: {
+        label: "Copy ID",
+        onClick: () => {
+          void navigator.clipboard
+            ?.writeText(id)
+            .catch((copyError: unknown) => {
+              console.warn("Could not copy error ID", copyError)
+            })
+        },
       },
-    },
-  })
+    })
 
   getDatadogRum()?.addError?.(error, {
     error_id: id,

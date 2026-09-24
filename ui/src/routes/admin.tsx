@@ -40,8 +40,12 @@ import {
 import { INSTANCE_SCOPE } from "@/features/settings/lib/settingsScope"
 import { useOptions, useRepos } from "@/lib/profile"
 import { IncidentSettings } from "@/features/incidents/IncidentSettings"
+import { pageTitle } from "@/lib/pageTitle"
 
-export const Route = createFileRoute("/admin")({ component: AdminPage })
+export const Route = createFileRoute("/admin")({
+  head: () => ({ meta: [{ title: pageTitle("Admin") }] }),
+  component: AdminPage,
+})
 
 function AdminPage() {
   const session = useSession()

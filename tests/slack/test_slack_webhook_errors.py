@@ -195,6 +195,7 @@ async def test_dispatch_or_queue_enqueues_untagged_follow_up(
         blocks,
         {},
         explicitly_tagged=False,
+        trigger_ts="1700000000.000100",
     )
 
     assert run == {"run_id": "run-1"}
@@ -203,6 +204,7 @@ async def test_dispatch_or_queue_enqueues_untagged_follow_up(
     assert await_args.args[1] is None
     assert await_args.kwargs["input"] == {"messages": blocks}
     assert await_args.kwargs["multitask_strategy"] == "enqueue"
+    assert await_args.kwargs["metadata"]["slack_trigger_ts"] == "1700000000.000100"
 
 
 @pytest.mark.asyncio

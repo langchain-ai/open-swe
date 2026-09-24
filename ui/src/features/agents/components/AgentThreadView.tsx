@@ -160,11 +160,7 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
     [login]
   )
 
-  // The SDK stream cannot queue, so a follow-up there always steers.
-  const followUpBehavior =
-    source.kind === "transcript"
-      ? (session.data?.follow_up_behavior ?? "queue")
-      : "steer"
+  const followUpBehavior = session.data?.follow_up_behavior ?? "queue"
   const submitMessage = useCallback(
     async (
       content: string,
@@ -182,7 +178,7 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
         images,
         model_id: activeSelection?.modelId ?? null,
         effort: activeSelection?.effort ?? null,
-        enqueue: isStreaming && queue && source.kind === "transcript",
+        enqueue: isStreaming && queue,
       })
     },
     [
@@ -191,7 +187,6 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
       followUpBehavior,
       isStreaming,
       sendMessage,
-      source.kind,
     ]
   )
 
@@ -231,14 +226,19 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
     },
     []
   )
-  // Withdraws a queued follow-up: its run is cancelled before it starts, and
-  // the transcript hides the turn.
+  // A "stream"-kind source's queue only reflects a cancel via `cancelQueued`
+  // — never a lifecycle event, since the run never reached "running" —
+  // otherwise the row lingers until the next hydrate.
   const withdrawQueued = useCallback(
     async (entry: QueuedTurn) => {
       if (entry.runId === null) return
+      if (source.kind === "stream") {
+        await source.cancelQueued(entry.turnId)
+        return
+      }
       await agentsApi.cancelRun(thread.id, entry.runId)
     },
-    [thread.id]
+    [source, thread.id]
   )
   const steerInFlightRef = useRef(false)
   // Send now: the follow-up leaves the queue and goes into the live run.
@@ -306,6 +306,12 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
       ...unacknowledged.flatMap((message) => message.images ?? []),
     ])
     if (!(await source.stop())) return
+    if (source.kind === "stream" && pending.length > 0) {
+      // Same reasoning as withdrawQueued: syncs the adapter's queue store.
+      await Promise.allSettled(
+        pending.map((entry) => source.cancelQueued(entry.turnId))
+      )
+    }
     if (unacknowledged.length > 0) {
       const dropped = new Set(unacknowledged.map((message) => message.id))
       queryClient.setQueryData<AgentThread>(

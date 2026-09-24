@@ -10,6 +10,7 @@ from fastapi import HTTPException
 
 from agent.dashboard.admin import is_admin
 from agent.dashboard.options import SUPPORTED_MODEL_IDS, canonical_model_pair
+from agent.github.pull_requests import PullRequest
 from agent.slack.client import parse_github_pr_url
 from agent.slack.code_channels import CODE_CHANNEL_SESSION_TS
 from agent.slack.oauth import SLACK_TEAM_ID
@@ -30,7 +31,14 @@ DASHBOARD_SOURCE = "dashboard"
 # Threads whose transcript is served from the append-only event log.
 TRANSCRIPT_VERSION = "v2"
 # Sources whose threads should surface in the Agents UI (besides "dashboard").
-_SURFACED_SOURCES: tuple[str, ...] = ("dashboard", "github", "slack", "linear", "schedule")
+_SURFACED_SOURCES: tuple[str, ...] = (
+    "dashboard",
+    "github",
+    "slack",
+    "linear",
+    "schedule",
+    "api",
+)
 # PR lifecycle states surfaced to the UI for a thread's associated pull request.
 _PR_STATES: frozenset[str] = frozenset({"draft", "open", "merged", "closed"})
 _SANDBOX_CREATING_SENTINEL = "__creating__"
@@ -163,7 +171,7 @@ def repo_config_from_metadata(metadata: Mapping[str, Any]) -> dict[str, str]:
     return {}
 
 
-def _run_status_to_agent_status(thread_status: str | None, run_status: str | None) -> str:
+def run_status_to_agent_status(thread_status: str | None, run_status: str | None) -> str:
     # "interrupted" wins over a still-``busy`` thread: cancellation is async, so a
     # just-cancelled thread reports busy for a moment and would otherwise look
     # like it is still running. Callers refresh the newest run's real status
@@ -330,6 +338,18 @@ def _pull_request_summary(record: object, fallback_title: str) -> dict[str, Any]
     }
 
 
+async def _apply_stored_diff_stats(pull_requests: list[dict[str, Any]]) -> None:
+    try:
+        stored = await PullRequest.diff_stats_for(
+            [(pr["repoFullName"], pr["number"]) for pr in pull_requests]
+        )
+    except Exception:  # noqa: BLE001
+        logger.warning("Failed to load stored pull request diff stats", exc_info=True)
+        return
+    for pr in pull_requests:
+        pr["diffStats"] = stored.get((pr["repoFullName"].lower(), pr["number"]), pr["diffStats"])
+
+
 async def _thread_summary(
     thread: ThreadLike,
     *,
@@ -353,7 +373,7 @@ async def _thread_summary(
     run_status = latest_run_status or (
         metadata_run_status if isinstance(metadata_run_status, str) else None
     )
-    status = _run_status_to_agent_status(thread_status, run_status)
+    status = run_status_to_agent_status(thread_status, run_status)
 
     pr_number = metadata.get("pr_number")
     pr_url = metadata.get("pr_url")
@@ -458,6 +478,7 @@ async def _thread_summary(
         if legacy_pr:
             pull_requests.append(legacy_pr)
     if pull_requests:
+        await _apply_stored_diff_stats(pull_requests)
         latest_pr = pull_requests[-1]
         summary["pullRequests"] = pull_requests
         summary["pr"] = {
@@ -478,9 +499,11 @@ def _status_of(run: Any) -> str | None:
 async def _latest_run_info(client: Any, thread_id: str) -> tuple[str | None, str | None]:
     try:
         runs = await client.runs.list(thread_id, limit=1)
-        # Follow-ups queued behind the live run are newer than it; the live run
-        # is still the one that says what the thread is doing.
-        if runs and _status_of(runs[0]) == "pending":
+        # Follow-ups queued behind the live run are newer than it, and so is one
+        # withdrawn from the queue; the live run is still the one that says what
+        # the thread is doing. LangGraph also marks the thread idle when that
+        # withdrawal cancels a pending run, so this is the only busy signal left.
+        if runs and _status_of(runs[0]) in {"pending", "interrupted"}:
             runs = await client.runs.list(thread_id, status="running", limit=1) or runs
     except Exception:  # noqa: BLE001
         logger.debug("Could not fetch latest run for thread %s", thread_id, exc_info=True)

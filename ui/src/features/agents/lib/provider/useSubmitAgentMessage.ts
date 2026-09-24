@@ -106,6 +106,10 @@ export function useSubmitAgentMessage(threadId: string) {
               ...pendingMessage,
               status: "failed",
               error: describeSendError(error),
+              // A failed enqueue never reaches the SDK's queue, so this
+              // must fall back into the normal timeline instead of
+              // rendering as a permanently pending queued row.
+              queued: false,
             })
           )
           setAgentThreadStatus(queryClient, threadId, "error")

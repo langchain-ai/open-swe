@@ -74,7 +74,7 @@ async def test_an_override_applies_to_its_workspace_only(fake_store: FakeStore) 
 async def test_clearing_an_override_restores_inheritance(fake_store: FakeStore) -> None:
     await upsert_instance_settings(
         WorkspaceSettingsUpdate(
-            default_agent_model="anthropic:claude-sonnet-5",
+            default_agent_model="anthropic:claude-opus-5-5",
             default_agent_reasoning_effort="high",
         )
     )
@@ -88,7 +88,7 @@ async def test_clearing_an_override_restores_inheritance(fake_store: FakeStore) 
 
     view = await upsert_workspace_overrides("oss", WorkspaceSettingsUpdate())
     assert view["overrides"] == {}
-    assert view["effective"]["default_agent_model"] == "anthropic:claude-sonnet-5"
+    assert view["effective"]["default_agent_model"] == "anthropic:claude-opus-5-5"
     assert view["effective"]["default_agent_reasoning_effort"] == "high"
 
 
@@ -164,7 +164,7 @@ async def test_options_report_the_requested_workspaces_effective_defaults(
     """The composer's model picker is scoped to the workspace it composes in."""
     await upsert_instance_settings(
         WorkspaceSettingsUpdate(
-            default_agent_model="anthropic:claude-sonnet-5",
+            default_agent_model="anthropic:claude-opus-5-5",
             default_agent_reasoning_effort="high",
         )
     )
@@ -182,7 +182,7 @@ async def test_options_report_the_requested_workspaces_effective_defaults(
 
     assert scoped["default_agent_model"] == "openai:gpt-6-astra"
     assert scoped["default_agent_reasoning_effort"] == "low"
-    assert unscoped["default_agent_model"] == "anthropic:claude-sonnet-5"
+    assert unscoped["default_agent_model"] == "anthropic:claude-opus-5-5"
     # The Fable flag follows the same tiers, so the selectable list follows it.
     assert [m["id"] for m in scoped["models"] if m["id"] in FABLE_MODEL_IDS]
     assert not [m["id"] for m in unscoped["models"] if m["id"] in FABLE_MODEL_IDS]

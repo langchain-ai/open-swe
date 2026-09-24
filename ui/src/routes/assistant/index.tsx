@@ -1,5 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router"
 import { Conversation } from "@/features/assistant/Conversation"
+import { pageTitle } from "@/lib/pageTitle"
 
 export const Route = createFileRoute("/assistant/")({
   validateSearch: (
@@ -13,6 +14,7 @@ export const Route = createFileRoute("/assistant/")({
       : {}),
   }),
   component: AssistantHome,
+  head: () => ({ meta: [{ title: pageTitle("Assistant") }] }),
 })
 
 function AssistantHome() {

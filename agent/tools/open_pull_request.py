@@ -765,6 +765,9 @@ async def _record_pr_telemetry(
                     author=author if isinstance(author, str) else "",
                     author_github_id=author_id if isinstance(author_id, int) else None,
                     resolves_thread=resolves_thread,
+                    additions=additions,
+                    deletions=deletions,
+                    changed_files=changed_files,
                     threads=[ThreadLink(thread_id=thread_id, source="open_pull_request")],
                 ).save(repository_private=repo_private)
             except Exception:  # noqa: BLE001
@@ -889,17 +892,19 @@ async def _is_private_repo(client: httpx2.AsyncClient, token: str, owner: str, r
 async def _stamp_attribution_footer(body: str) -> str:
     """Make the platform footer, naming this run's model, the body's last line."""
     cfg = _configurable()
-    model_id: str | None = None
-    effort: str | None = None
+    model_id: str | None = cfg.resolved_agent_model_id
+    effort: str | None = cfg.resolved_agent_effort
     if cfg.thread_id:
         try:
             thread = await get_client().threads.get(cfg.thread_id)
             metadata = thread.get("metadata") if isinstance(thread, dict) else None
             if isinstance(metadata, dict):
                 model = metadata.get("model")
-                model_id = model if isinstance(model, str) and model else None
                 value = metadata.get("effort")
-                effort = value if isinstance(value, str) and value else None
+                if model_id is None and isinstance(model, str) and model:
+                    model_id = model
+                if effort is None and isinstance(value, str) and value:
+                    effort = value
         except Exception:
             logger.debug("Could not read the thread's model for the PR footer", exc_info=True)
     return add_pr_collaboration_note(
@@ -1130,3 +1135,41 @@ async def open_pull_request(
         resolves_thread=resolves_thread,
         author=author or None,
     )
+
+
+def _ref_name(pr: dict[str, Any], side: str) -> str:
+    branch = pr.get(side)
+    ref = branch.get("ref") if isinstance(branch, dict) else None
+    return ref if isinstance(ref, str) else ""
+
+
+async def link_pull_request(pr_url: str, resolves_thread: bool = False) -> dict[str, Any]:
+    """Implement the `link_pull_request` tool."""
+    ref = parse_github_pr_url(pr_url)
+    if ref is None:
+        return {"success": False, "error": f"Not a GitHub pull request URL: {pr_url}"}
+    token, kind = await _resolve_pr_author_token()
+    if not token:
+        return {"success": False, "error": "No GitHub token was available to read the PR"}
+    async with httpx2.AsyncClient(timeout=30.0) as client:
+        if (
+            kind == "user"
+            and await private_credential_login() is None
+            and not await _workspace_has_repository(client, ref.owner, ref.repo)
+        ):
+            return {"success": False, "error": f"{ref.owner}/{ref.repo} is not in this workspace"}
+        pr = await _fetch_pr_details(client, token, ref.owner, ref.repo, ref.number)
+        if not pr:
+            return {"success": False, "error": f"Could not read {pr_url}"}
+        await _record_pr_telemetry(
+            client=client,
+            token=token,
+            owner=ref.owner,
+            repo=ref.repo,
+            head=_ref_name(pr, "head"),
+            base=_ref_name(pr, "base"),
+            pr=pr,
+            resolves_thread=resolves_thread,
+            record_opening=False,
+        )
+    return {"success": True, "url": pr.get("html_url"), "number": ref.number}

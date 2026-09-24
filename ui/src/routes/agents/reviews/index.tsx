@@ -7,12 +7,15 @@ import {
 import { GitPullRequestIcon } from "@phosphor-icons/react"
 
 import type { ReviewSummary } from "@/lib/api"
+import { pageTitle } from "@/lib/pageTitle"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import { api } from "@/lib/api"
 import { useSession } from "@/lib/session"
 import { cn } from "@/lib/utils"
 import { MyPullRequests } from "@/features/reviews/MyPullRequests"
+import { OpenPullRequestInput } from "@/features/reviews/OpenPullRequestInput"
+import { ReviewBookmarklet } from "@/features/reviews/ReviewBookmarklet"
 import { PullRequestLinks } from "@/features/reviews/PullRequestLinks"
 import { ReviewCounts } from "@/features/reviews/components/ReviewCounts"
 import {
@@ -23,6 +26,7 @@ import {
 
 export const Route = createFileRoute("/agents/reviews/")({
   validateSearch: validateReviewsSearch,
+  head: () => ({ meta: [{ title: pageTitle("Pull Requests") }] }),
   component: ReviewsPage,
 })
 
@@ -129,6 +133,11 @@ function ReviewsPage() {
                 </button>
               ))}
             </div>
+            <OpenPullRequestInput />
+            <ReviewBookmarklet />
+            <span className="hidden text-xs text-muted-foreground lg:inline">
+              Drag to your bookmarks bar
+            </span>
             {!mine && (
               <Button
                 className="ml-auto"

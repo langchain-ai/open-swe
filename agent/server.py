@@ -48,6 +48,7 @@ from langchain.agents.middleware.types import AgentMiddleware, ToolCallRequest
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import HumanMessage, ToolMessage
 from langgraph.types import Command
+from langsmith.sandbox import SandboxRetryableConnectionError
 
 
 class _DisableInheritedMiddleware(AgentMiddleware):
@@ -148,6 +149,7 @@ from agent.sandboxes.lifecycle import (
 from agent.sandboxes.paths import resolve_sandbox_work_dir
 from agent.sandboxes.providers.langsmith import service_identity_jwks_url
 from agent.sandboxes.read_only_backend import ReadOnlyBackend
+from agent.sandboxes.retry import SANDBOX_ATTACH_MAX_ELAPSED, retry_transient_sandbox_errors
 from agent.sandboxes.state import (
     SandboxUnreachableError,
     get_or_create_sandbox_backend_proxy,
@@ -163,6 +165,7 @@ from agent.tool_loaders.notion_mcp import load_notion_tools
 from agent.tools import (
     background_execute,
     background_task,
+    configure_repository,
     create_automation,
     create_sandbox_file_download_url,
     delete_automation,
@@ -174,6 +177,7 @@ from agent.tools import (
     fetch_url,
     get_thread,
     http_request,
+    link_pull_request,
     list_automations,
     list_threads,
     list_workspaces,
@@ -181,6 +185,7 @@ from agent.tools import (
     manage_code_channel,
     manage_incident,
     manage_thread,
+    merge_expedited_pr,
     notify_automation_channel,
     open_pull_request,
     output_iframe,
@@ -190,6 +195,7 @@ from agent.tools import (
     recreate_sandbox,
     refresh_workspace_start,
     report_platform_issue,
+    request_pr_review,
     save_organization_skill,
     save_plan,
     save_user_instructions,
@@ -468,10 +474,13 @@ INCIDENT_AUTOMATIC_EXCLUDED_TOOLS: frozenset[str] = frozenset(
         "expose_port",
         "http_request",
         "expedite_pr_approval",
+        "merge_expedited_pr",
         "manage_baby_sit",
         "manage_thread",
+        "link_pull_request",
         "open_pull_request",
         "recreate_sandbox",
+        "request_pr_review",
         "save_user_skill",
         "delete_user_skill",
         "slack_move_thread",
@@ -479,6 +488,7 @@ INCIDENT_AUTOMATIC_EXCLUDED_TOOLS: frozenset[str] = frozenset(
         "slack_start_new_thread",
         "publish_workspace",
         "refresh_workspace_start",
+        "configure_repository",
         "delete_workspace",
         "create_automation",
         "update_automation",
@@ -590,6 +600,7 @@ def _general_purpose_subagent(
         "middleware": cast(
             list[AgentMiddleware[Any, Any, Any]],
             [
+                _DisableInheritedMiddleware(RequireUserReplyMiddleware.__name__),
                 *(_DisableInheritedMiddleware(name) for name in inherited_middleware_exclusions),
                 _SubagentToolGuard(),
                 TranscriptMiddleware(),
@@ -614,6 +625,7 @@ ADMIN_TOOLS = (
     list_workspaces,
     publish_workspace,
     refresh_workspace_start,
+    configure_repository,
     delete_workspace,
     save_organization_skill,
     delete_organization_skill,
@@ -747,7 +759,7 @@ def _slack_dm_run(cfg: RunConfig) -> bool:
 def _model_routing_mode(thread_id: str) -> RoutingMode:
     digest = hashlib.sha256(thread_id.encode()).hexdigest()
     bucket = int(digest[:8], 16) / float(0xFFFF_FFFF)
-    return "auto" if bucket < _MODEL_ROUTING_SPLIT else "performance"
+    return "auto" if bucket < _MODEL_ROUTING_SPLIT else "fast"
 
 
 def _make_model_or_defer(
@@ -889,7 +901,21 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
                     model=self._title_model,
                 )
             async with aphase(self._thread_id, "prepare.await_sandbox"):
-                sandbox_backend = await get_or_create_sandbox_backend_proxy(self._thread_id).ready()
+                try:
+                    sandbox_proxy = get_or_create_sandbox_backend_proxy(self._thread_id)
+                    sandbox_backend = await retry_transient_sandbox_errors(
+                        sandbox_proxy.ready,
+                        description="Sandbox attach",
+                        max_elapsed=SANDBOX_ATTACH_MAX_ELAPSED,
+                    )
+                except (SandboxUnreachableError, SandboxRetryableConnectionError) as exc:
+                    await post_sandbox_unreachable_notification(
+                        self._config or {},
+                        sandbox_id=exc.sandbox_id
+                        if isinstance(exc, SandboxUnreachableError)
+                        else None,
+                    )
+                    raise
             async with aphase(self._thread_id, "prepare.work_dir"):
                 work_dir = await resolve_sandbox_work_dir(sandbox_backend)
             return {
@@ -906,8 +932,13 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
         triggering_user_identity_task = asyncio.create_task(
             resolve_triggering_user_identity(as_json_object(self._config), github_token)
         )
+        sandbox_proxy = get_or_create_sandbox_backend_proxy(self._thread_id)
         sandbox_task = asyncio.create_task(
-            get_or_create_sandbox_backend_proxy(self._thread_id).ready()
+            retry_transient_sandbox_errors(
+                sandbox_proxy.ready,
+                description="Sandbox attach",
+                max_elapsed=SANDBOX_ATTACH_MAX_ELAPSED,
+            )
         )
         try:
             async with aphase(self._thread_id, "prepare.await_sandbox"):
@@ -915,11 +946,12 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
                     triggering_user_identity_task,
                     sandbox_task,
                 )
-        except SandboxUnreachableError as exc:
+        except (SandboxUnreachableError, SandboxRetryableConnectionError) as exc:
             # The run is about to die with no sandbox; make sure the user hears
             # why rather than getting silence.
             await post_sandbox_unreachable_notification(
-                self._config or {}, sandbox_id=exc.sandbox_id
+                self._config or {},
+                sandbox_id=exc.sandbox_id if isinstance(exc, SandboxUnreachableError) else None,
             )
             raise
         del github_token
@@ -953,6 +985,8 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
                     cast(ModelSelectionState, state)
                 )
                 attribution_model_id, attribution_effort = self._routing_defaults[attribution_route]
+            configurable["resolved_agent_model_id"] = attribution_model_id
+            configurable["resolved_agent_effort"] = attribution_effort
             bot_id = (
                 cfg.slack_thread.triggering_bot_id
                 if self._source == "slack" and cfg.slack_thread
@@ -1117,6 +1151,7 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
     # Workspace/profile settings are accepted stale for a short TTL so graph factories
     # stay off the critical path during worker load and retry storms.
     settings: WorkspaceSettings | None = None
+    routing_defaults: dict[str, tuple[str, str | None]]
     if local_run:
         from agent.dashboard.options import default_model_pair
 
@@ -1137,7 +1172,7 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
                 _cached_profile(None if thread_settings.get("model_id") else profile_login),
             )
             model_defaults = settings.default_model_pair("agent")
-            routing_defaults = settings.agent_routing_models
+            routing_defaults = dict(settings.agent_routing_models)
             title_defaults = settings.default_thread_title_model
             use_gateway = settings.effective_gateway_enabled
             fable_enabled = settings.fable_enabled
@@ -1148,6 +1183,9 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
     linear_issue_number = linear_issue.get("linear_issue_number", "")
 
     (model_id, profile_effort), (subagent_model_id, subagent_effort) = model_defaults
+    for route, stored_route in thread_settings.get("routing_models", {}).items():
+        if route in routing_defaults:
+            routing_defaults[route] = (stored_route["model_id"], stored_route["effort"])
     title_model_id, title_effort = title_defaults
     logger.info("Using workspace default agent model: model=%s effort=%s", model_id, profile_effort)
 
@@ -1236,6 +1274,10 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
         "subagent_model_id": subagent_model_id,
         "subagent_effort": subagent_effort,
         "model_routing_enabled": adaptive_model_routing,
+        "routing_models": {
+            route: {"model_id": routed_model_id, "effort": effort}
+            for route, (routed_model_id, effort) in routing_defaults.items()
+        },
         "repo_instructions": repo_instructions,
     }
     if not local_run and (
@@ -1297,6 +1339,7 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
     source = cfg.source or "dashboard"
     configurable["source"] = source
     configurable["resolved_agent_model_id"] = model_id
+    configurable["resolved_agent_effort"] = profile_effort
     user_email = cfg.user_email or ""
 
     async with aphase(thread_id, "factory.admin_thread"):
@@ -1359,14 +1402,17 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
         manage_thread,
         manage_baby_sit,
         expedite_pr_approval,
+        merge_expedited_pr,
         notify_automation_channel,
         open_pull_request,
+        link_pull_request,
         *(
             (output_iframe, create_sandbox_file_download_url, expose_port)
             if sandbox_file_downloads
             else ()
         ),
         read_user_settings,
+        request_pr_review,
         recreate_sandbox,
         report_platform_issue,
         schedule_thread_wakeup,
@@ -1409,7 +1455,9 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
         or not ENV.SLACK_BOT_TOKEN.get()
         or not (await cached_workspace_settings(settings_workspace)).expedited_review_enabled
     ):
-        static_tools = [tool for tool in static_tools if tool is not expedite_pr_approval]
+        static_tools = [
+            tool for tool in static_tools if tool not in (expedite_pr_approval, merge_expedited_pr)
+        ]
     incident_automatic = incident_session is not None and incident_session.explicit_request is None
     if incident_session is not None:
         static_tools.extend(incident_session.tools)

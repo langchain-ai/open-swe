@@ -100,6 +100,13 @@ export function PreferencesSection() {
     queryFn: api.listWorkspaceOptions,
     staleTime: 60_000,
   })
+  const workspaceItems = [
+    { value: NO_DEFAULT_WORKSPACE, label: "Workspace default" },
+    ...(workspaceOptions.data?.workspaces ?? []).map((workspace) => ({
+      value: workspace.slug,
+      label: workspace.name,
+    })),
+  ]
   const archiveThreads = useMutation({
     meta: { errorTitle: "Couldn't archive threads" },
     mutationFn: agentsApi.resolveAllThreads,
@@ -133,7 +140,11 @@ export function PreferencesSection() {
         label="Appearance"
         description="Theme used across the dashboard."
         control={
-          <Select value={theme} onValueChange={(v) => v && setTheme(v)}>
+          <Select
+            items={THEMES}
+            value={theme}
+            onValueChange={(v) => v && setTheme(v)}
+          >
             <SelectTrigger className="w-40">
               <SelectValue />
             </SelectTrigger>
@@ -152,6 +163,7 @@ export function PreferencesSection() {
         description="Preselected when you start a cloud thread. Private threads can use your personal integrations and only you can prompt them; workspace threads are open to everyone and run without personal credentials. Visibility cannot change after a thread is created."
         control={
           <Select
+            items={VISIBILITIES}
             value={preferences.data?.default_visibility ?? "private"}
             onValueChange={(v) =>
               v &&
@@ -179,6 +191,7 @@ export function PreferencesSection() {
         description="Preselected in the composer's workspace picker when the chosen repository does not belong to another workspace."
         control={
           <Select
+            items={workspaceItems}
             value={preferences.data?.default_workspace ?? NO_DEFAULT_WORKSPACE}
             onValueChange={(v) =>
               v &&
@@ -192,12 +205,9 @@ export function PreferencesSection() {
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value={NO_DEFAULT_WORKSPACE}>
-                Workspace default
-              </SelectItem>
-              {(workspaceOptions.data?.workspaces ?? []).map((workspace) => (
-                <SelectItem key={workspace.slug} value={workspace.slug}>
-                  {workspace.name}
+              {workspaceItems.map((workspace) => (
+                <SelectItem key={workspace.value} value={workspace.value}>
+                  {workspace.label}
                 </SelectItem>
               ))}
             </SelectContent>
@@ -209,6 +219,7 @@ export function PreferencesSection() {
         description="Queue follow-ups until the run ends, or steer the current run with them. ⌘↵ does the opposite for one message; Enter on an empty composer sends the next queued message now."
         control={
           <Select
+            items={FOLLOW_UP_BEHAVIORS}
             value={preferences.data?.follow_up_behavior ?? "queue"}
             onValueChange={(v) =>
               v &&

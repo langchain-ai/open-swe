@@ -102,12 +102,16 @@ it("keeps the request ID when the server was never reached", async () => {
   )
 })
 
-it("leaves silent mutations to the caller", async () => {
+it("still logs a silent mutation it does not toast", async () => {
   stubFetch(async () => Response.json({ detail: "bad" }, { status: 422 }))
 
   await runFailingMutation({ silent: true })
 
+  const requestId = sent[0]!.headers["X-Request-ID"]
   expect(toastError).not.toHaveBeenCalled()
-  expect(addError).not.toHaveBeenCalled()
-  expect(reports()).toHaveLength(0)
+  expect(addError).toHaveBeenCalledWith(
+    expect.anything(),
+    expect.objectContaining({ error_id: requestId, status: 422 })
+  )
+  await vi.waitFor(() => expect(reports()).toHaveLength(1))
 })
