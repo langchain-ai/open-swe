@@ -211,6 +211,19 @@ def _is_thread_viewed(metadata: Mapping[str, Any], latest_run_id: str | None) ->
     return isinstance(viewed_at, (int, float))
 
 
+def review_chat_status(
+    review: ReviewSessionMetadata, status: str, viewed: bool
+) -> tuple[str, bool]:
+    """The status and read state a review chat shows, which follow its walkthrough."""
+    if review.walkthrough_state == "building":
+        status = "running"
+    elif status != "running" and review.walkthrough_state == "failed":
+        status = "error"
+    elif status == "idle" and review.walkthrough_state == "ready":
+        status = "finished"
+    return status, viewed and not review.unseen_walkthrough
+
+
 def _is_thread_resolved(metadata: Mapping[str, Any]) -> bool:
     return metadata.get("resolved") is True
 
@@ -498,13 +511,7 @@ async def _thread_summary(
             "repo": review.repo_name,
             "number": review.pr_number,
         }
-        if review.walkthrough_state == "building":
-            summary["status"] = "running"
-        elif status != "running" and review.walkthrough_state == "failed":
-            summary["status"] = "error"
-        elif status == "idle" and review.walkthrough_state == "ready":
-            summary["status"] = "finished"
-        summary["viewed"] = summary["viewed"] and not review.unseen_walkthrough
+        summary["status"], summary["viewed"] = review_chat_status(review, status, summary["viewed"])
     # The transcript hydrates client-side from the SDK (`GET …/state` →
     # `stream.messages`); the summary only carries metadata.
     summary["messages"] = []
