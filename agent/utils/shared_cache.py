@@ -69,13 +69,13 @@ async def cached[T](
         except Exception:
             # On the critical path: a Store outage must not fail a call that
             # already has a value to return.
-            logger.warning("Shared cache store write failed", extra=log_extra)
+            logger.warning("Shared cache store write failed", exc_info=True, extra=log_extra)
 
     async def _refresh() -> None:
         try:
             value = await loader()
         except Exception:
-            logger.warning("Shared cache background refresh failed", extra=log_extra)
+            logger.warning("Shared cache background refresh failed", exc_info=True, extra=log_extra)
             return
         # The stale read that started this refresh left the old value in the
         # front cache for a full ttl; replace it now that the new one is known.
@@ -96,17 +96,22 @@ async def cached[T](
             item = await get_value(namespace, item_key)
         except Exception:
             # On the critical path: a Store outage falls back to the loader.
-            logger.warning("Shared cache store read failed", extra=log_extra)
+            logger.warning("Shared cache store read failed", exc_info=True, extra=log_extra)
             item = None
 
         if item is not None:
             try:
                 value = load(item["value"])
                 age = _now() - item["stored_at"]
-            except Exception:
+            except Exception as exc:
                 # On the critical path: an item this version cannot decode must
-                # not break callers; recompute and overwrite it instead.
-                logger.warning("Shared cache store item is not decodable", extra=log_extra)
+                # not break callers; recompute and overwrite it instead. Only the
+                # error's type is logged: a validation error echoes the stored
+                # value, which can hold personal data such as an email.
+                logger.warning(
+                    "Shared cache store item is not decodable",
+                    extra={**log_extra, "error_type": type(exc).__name__},
+                )
             else:
                 if age < ttl_seconds:
                     return value

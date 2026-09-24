@@ -2,10 +2,12 @@
 
 import asyncio
 import hashlib
+import logging
 import threading
 from collections.abc import Awaitable, Callable, Sequence
 
 import pytest
+from pydantic import TypeAdapter
 
 from agent.utils import shared_cache, ttl_cache
 from tests.conftest import FakeStore
@@ -24,6 +26,19 @@ async def _cached(loader: Callable[[], Awaitable[dict[str, int]]]) -> dict[str, 
 
 def _stored(fake_store: FakeStore) -> object:
     return fake_store.values(_NAMESPACE)[_ITEM_KEY]["value"]
+
+
+def _warnings(caplog: pytest.LogCaptureFixture) -> list[logging.LogRecord]:
+    return [
+        record
+        for record in caplog.records
+        if record.name == shared_cache.__name__ and record.levelno == logging.WARNING
+    ]
+
+
+def _swallowed(record: logging.LogRecord) -> BaseException | None:
+    """The exception a warning says it swallowed, if it attached one."""
+    return record.exc_info[1] if record.exc_info else None
 
 
 def _seed_stale_item(fake_store: FakeStore, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -95,12 +110,13 @@ async def test_stale_store_value_served_while_background_refresh_stores_new_one(
 
 
 async def test_store_read_failure_falls_back_to_loader(
-    fake_store: FakeStore, monkeypatch: pytest.MonkeyPatch
+    fake_store: FakeStore, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
     """A Store outage on read must not fail the call; it degrades to the loader."""
+    outage = RuntimeError("store unavailable")
 
     async def failing_get_item(_namespace: Sequence[str], _key: str) -> dict[str, object]:
-        raise RuntimeError("store unavailable")
+        raise outage
 
     monkeypatch.setattr(fake_store, "get_item", failing_get_item)
 
@@ -112,17 +128,19 @@ async def test_store_read_failure_falls_back_to_loader(
     )
 
     assert result == {"n": 5}
+    assert [_swallowed(record) for record in _warnings(caplog)] == [outage]
 
 
 async def test_store_write_failure_does_not_fail_the_call(
-    fake_store: FakeStore, monkeypatch: pytest.MonkeyPatch
+    fake_store: FakeStore, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
     """A Store outage on write must not fail a call that already has a value to return."""
+    outage = RuntimeError("store unavailable")
 
     async def failing_put_item(
         _namespace: Sequence[str], _key: str, _value: dict[str, object]
     ) -> None:
-        raise RuntimeError("store unavailable")
+        raise outage
 
     monkeypatch.setattr(fake_store, "put_item", failing_put_item)
 
@@ -134,6 +152,7 @@ async def test_store_write_failure_does_not_fail_the_call(
     )
 
     assert result == {"n": 3}
+    assert [_swallowed(record) for record in _warnings(caplog)] == [outage]
 
 
 async def test_clear_cancels_a_pending_refresh(
@@ -240,3 +259,72 @@ async def test_item_older_than_max_stale_makes_the_caller_wait_for_the_loader(
 
     assert result == {"n": 2}
     assert _stored(fake_store) == {"n": 2}
+
+
+async def test_failed_refresh_is_logged_and_the_stale_value_kept(
+    fake_store: FakeStore, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    _seed_stale_item(fake_store, monkeypatch)
+    failure = RuntimeError("upstream unavailable")
+
+    async def failing_loader() -> dict[str, int]:
+        raise failure
+
+    assert await _cached(failing_loader) == {"n": 1}
+    await eventually(lambda: bool(_warnings(caplog)))
+
+    assert [_swallowed(record) for record in _warnings(caplog)] == [failure]
+    assert _stored(fake_store) == {"n": 1}
+
+
+async def test_undecodable_item_falls_back_to_the_loader_without_logging_its_contents(
+    fake_store: FakeStore, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A pydantic ValidationError echoes its input, which can be a stored identity's email."""
+    fake_store.seed(
+        _NAMESPACE, _ITEM_KEY, {"stored_at": 1_000.0, "value": {"n": "mason@example.com"}}
+    )
+
+    async def loader() -> dict[str, int]:
+        return {"n": 4}
+
+    result = await shared_cache.cached(
+        _NAMESPACE,
+        _KEY,
+        60.0,
+        loader,
+        dump=lambda v: v,
+        load=TypeAdapter(dict[str, int]).validate_python,
+    )
+
+    assert result == {"n": 4}
+    assert _stored(fake_store) == {"n": 4}
+    [record] = _warnings(caplog)
+    assert getattr(record, "error_type", None) == "ValidationError"
+    assert _swallowed(record) is None
+    assert "mason@example.com" not in caplog.text
+
+
+async def test_stale_reads_share_one_background_refresh(
+    fake_store: FakeStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _seed_stale_item(fake_store, monkeypatch)
+    release = asyncio.Event()
+    calls = 0
+
+    async def held_loader() -> dict[str, int]:
+        nonlocal calls
+        calls += 1
+        await release.wait()
+        return {"n": 2}
+
+    assert await _cached(held_loader) == {"n": 1}
+    ttl_cache.clear()  # this worker's copy expires while that refresh is still running
+    assert await _cached(held_loader) == {"n": 1}
+    # Both reads finished before either refresh could start, so this sees every one.
+    await eventually(lambda: calls > 0)
+    assert calls == 1
+
+    release.set()
+    await eventually(lambda: _stored(fake_store) == {"n": 2})
+    assert calls == 1
