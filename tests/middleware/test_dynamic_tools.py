@@ -301,6 +301,19 @@ async def test_a_tool_loaded_as_a_follow_up_arrives_is_added_after_the_follow_up
     ]
 
 
+async def test_a_tool_is_added_past_an_empty_reply_the_provider_drops() -> None:
+    thread = _Thread(_notion(), _opus())
+    await thread.tool_turn(["notion-search"])
+    await thread.model_call()
+    # The model answered with nothing, and a follow-up arrived before the run's next call.
+    thread.messages += [AIMessage(""), HumanMessage("Any luck?")]
+
+    request = await thread.model_call()
+
+    assert _shape(request.messages) == ["human", "ai", "tool", "ai", "human", "+notion-search"]
+    assert _anthropic_turns(_payload(request))[-1] == "system notion-search"
+
+
 async def test_reloading_a_loaded_tool_adds_only_the_tools_new_to_this_run() -> None:
     thread = _Thread(_notion(), _opus())
 

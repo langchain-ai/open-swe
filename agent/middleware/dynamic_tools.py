@@ -376,10 +376,14 @@ def _insertion_point(messages: Sequence[AnyMessage], anchor: int) -> int:
     """Index after the anchor's tool-result batch and any follow-ups queued behind it.
 
     Anthropic needs the addition after a user turn and before an assistant turn, so
-    it may not split a tool-result batch; OpenAI needs it to keep its position.
+    it may not split a tool-result batch; OpenAI needs it to keep its position. An
+    empty reply is skipped too: Anthropic drops it, leaving no assistant turn there.
     """
     index = anchor + 1
-    while index < len(messages) and isinstance(messages[index], ToolMessage | HumanMessage):
+    while index < len(messages) and (
+        isinstance(message := messages[index], ToolMessage | HumanMessage)
+        or (isinstance(message, AIMessage) and not message.content and not message.tool_calls)
+    ):
         index += 1
     return index
 
