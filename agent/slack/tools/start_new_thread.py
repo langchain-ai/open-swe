@@ -260,7 +260,9 @@ async def slack_start_new_thread(
 
     clean_channel_id = channel_id.strip()
     source_line = (
-        await source_thread_line(clean_channel_id, current_thread_ts)
+        await source_thread_line(
+            clean_channel_id, cfg.slack_thread.triggering_event_ts or current_thread_ts
+        )
         if isinstance(current_thread_ts, str) and current_thread_ts
         else ""
     )

@@ -2,6 +2,7 @@ import { createFileRoute } from "@tanstack/react-router"
 
 import type { AutomationsTab } from "@/features/automations/components/AutomationsList"
 import { AutomationsList } from "@/features/automations/components/AutomationsList"
+import { pageTitle } from "@/lib/pageTitle"
 
 export const Route = createFileRoute("/agents/automations/")({
   validateSearch: (
@@ -10,6 +11,7 @@ export const Route = createFileRoute("/agents/automations/")({
     tab: search.tab === "runs" ? "runs" : undefined,
   }),
   component: AutomationsIndexPage,
+  head: () => ({ meta: [{ title: pageTitle("Automations") }] }),
 })
 
 function AutomationsIndexPage() {
