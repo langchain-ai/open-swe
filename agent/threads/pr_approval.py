@@ -2,12 +2,11 @@
 
 When a run is triggered by a person who is not the person the PR is attributed
 to — a shared Slack thread where a participant asks the bot to publish as
-another participant — the PR author gets the final say. The tool returns a
-``pr_approval_required`` payload instead of blocking the run, posts a Block Kit
-card in the Slack thread, and a callback interrupts the active run with the
-author's decision so the bot can retry the exact tool call. An author can
-approve once or store an "always allow" preference keyed by requester, and a
-thread with a single participant never asks.
+another participant — the PR author gets the final say, once per thread. The
+tool DMs the author a Block Kit card and waits briefly for the decision; a
+callback interrupts the active run with it. An author can approve once or store
+an "always allow" preference keyed by requester, and a thread with a single
+participant never asks.
 """
 
 import hashlib
@@ -34,17 +33,9 @@ ALWAYS_ALLOW_ALL = "all"
 ALWAYS_ALLOW_NONE = "none"
 
 
-def pr_approval_fingerprint(
-    *,
-    thread_id: str,
-    author_login: str,
-    requester_login: str,
-    owner: str,
-    repo: str,
-    head: str,
-) -> str:
-    """Identity of one approval request; a retried open gets a fresh one."""
-    raw = f"{thread_id}|{author_login}|{requester_login}|{owner}/{repo}|{head}"
+def pr_approval_fingerprint(*, thread_id: str, author_login: str) -> str:
+    """One decision per thread and author; every PR opened as them in the thread shares it."""
+    raw = f"{thread_id}|{author_login.lower()}"
     return hashlib.sha256(raw.encode()).hexdigest()[:16]
 
 

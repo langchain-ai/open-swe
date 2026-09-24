@@ -50,24 +50,11 @@ def _thread_record(fingerprint: str, **overrides: object) -> dict[str, object]:
     return record
 
 
-def test_fingerprint_binds_thread_author_requester_repo_and_branch() -> None:
-    kwargs = {
-        "thread_id": "t1",
-        "author_login": "alice",
-        "requester_login": "bob",
-        "owner": "langchain-ai",
-        "repo": "langchainplus",
-        "head": "branch",
-    }
-    assert pr_approval.pr_approval_fingerprint(**kwargs) == pr_approval.pr_approval_fingerprint(
-        **kwargs
-    )
-    assert pr_approval.pr_approval_fingerprint(
-        **{**kwargs, "head": "other"}
-    ) != pr_approval.pr_approval_fingerprint(**kwargs)
-    assert pr_approval.pr_approval_fingerprint(
-        **{**kwargs, "author_login": "carol"}
-    ) != pr_approval.pr_approval_fingerprint(**kwargs)
+def test_fingerprint_is_per_thread_and_author() -> None:
+    fingerprint = pr_approval.pr_approval_fingerprint(thread_id="t1", author_login="alice")
+    assert pr_approval.pr_approval_fingerprint(thread_id="t1", author_login="Alice") == fingerprint
+    assert pr_approval.pr_approval_fingerprint(thread_id="t2", author_login="alice") != fingerprint
+    assert pr_approval.pr_approval_fingerprint(thread_id="t1", author_login="carol") != fingerprint
 
 
 @pytest.mark.asyncio

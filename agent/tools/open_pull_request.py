@@ -246,14 +246,7 @@ async def _pr_approval(
     from agent.slack.tools.reply import build_pr_approval_blocks
     from agent.users import User
 
-    fingerprint = pr_approval_fingerprint(
-        thread_id=cfg.thread_id,
-        author_login=author_login,
-        requester_login=requester_login,
-        owner=owner,
-        repo=repo,
-        head=head,
-    )
+    fingerprint = pr_approval_fingerprint(thread_id=cfg.thread_id, author_login=author_login)
     from agent.utils.dashboard_links import dashboard_thread_url
 
     existing = await get_pr_approvals(cfg.thread_id)
