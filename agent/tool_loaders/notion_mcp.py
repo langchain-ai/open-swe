@@ -1,14 +1,20 @@
 """Server-side Notion tools backed by Notion's hosted MCP server."""
 
+import asyncio
 import logging
 from datetime import timedelta
 from typing import Any, cast
 
 from langchain_core.tools import BaseTool
+from langchain_mcp_adapters.sessions import StreamableHttpConnection, create_session
+from langchain_mcp_adapters.tools import convert_mcp_tool_to_langchain_tool
+from mcp.types import PaginatedRequestParams, Tool
+from pydantic import TypeAdapter
 
 from agent.credential_scope import private_credential_login
 from agent.dashboard.notion_oauth import NOTION_MCP_URL
 from agent.dashboard.user_credentials import get_notion_access_token
+from agent.utils import shared_cache
 from agent.utils.thread_participants import resolve_participant
 
 logger = logging.getLogger(__name__)
@@ -17,21 +23,40 @@ _MCP_TIMEOUT_SECONDS = 30.0
 
 
 async def _build_mcp_tools(access_token: str) -> list[BaseTool]:
-    from langchain_mcp_adapters.client import MultiServerMCPClient
+    connection: StreamableHttpConnection = {
+        "transport": "streamable_http",
+        "url": NOTION_MCP_URL,
+        "headers": {"Authorization": f"Bearer {access_token}"},
+        "timeout": timedelta(seconds=_MCP_TIMEOUT_SECONDS),
+    }
 
-    client = MultiServerMCPClient(
-        {
-            "notion": {
-                "transport": "streamable_http",
-                "url": NOTION_MCP_URL,
-                "headers": {
-                    "Authorization": f"Bearer {access_token}",
-                },
-                "timeout": timedelta(seconds=_MCP_TIMEOUT_SECONDS),
-            }
-        }
+    async def discover() -> list[Tool]:
+        async with asyncio.timeout(_MCP_TIMEOUT_SECONDS), create_session(connection) as session:
+            await session.initialize()
+            page = await session.list_tools()
+            definitions = list(page.tools)
+            cursors: set[str] = set()
+            while page.nextCursor:
+                if page.nextCursor in cursors:
+                    raise ValueError("Notion MCP repeated a catalog cursor")
+                cursors.add(page.nextCursor)
+                page = await session.list_tools(
+                    params=PaginatedRequestParams(cursor=page.nextCursor)
+                )
+                definitions.extend(page.tools)
+            return definitions
+
+    definitions = await shared_cache.cached(
+        shared_cache.scoped_key("notion:definitions", NOTION_MCP_URL, access_token),
+        300,
+        discover,
+        adapter=TypeAdapter(list[Tool]),
+        max_age=3600,
     )
-    return await client.get_tools()
+    return [
+        convert_mcp_tool_to_langchain_tool(None, definition, connection=connection)
+        for definition in definitions
+    ]
 
 
 async def _fresh_mcp_tool(login: str, tool_name: str) -> BaseTool:

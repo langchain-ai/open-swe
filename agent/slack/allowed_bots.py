@@ -4,7 +4,7 @@ import re
 from typing import Any
 
 from fastapi import HTTPException
-from pydantic import BaseModel, ConfigDict, field_validator
+from pydantic import BaseModel, ConfigDict, TypeAdapter, field_validator
 
 from agent.slack.http import (
     SlackClient,
@@ -14,7 +14,7 @@ from agent.slack.http import (
     slack_identity,
 )
 from agent.store import TypedStore, now_iso
-from agent.utils import ttl_cache
+from agent.utils import shared_cache
 
 
 class AllowSlackBot(BaseModel):
@@ -117,44 +117,51 @@ async def allow_slack_bot(body: AllowSlackBot, admin: dict[str, Any]) -> Allowed
 
 async def list_slack_bots() -> list[SlackBotOption]:
     async with slack_http_errors(), SlackClient.bot() as client:
+        token = client.token
 
         async def load() -> list[SlackBotOption]:
-            auth = await slack_identity(client)
-            team_id = auth["team_id"]
-            bots: dict[str, SlackBotOption] = {}
-            async for member in slack_bot_members(client):
-                if (
-                    member.get("is_bot") is not True
-                    or member.get("deleted")
-                    or member.get("team_id") != team_id
-                    or member.get("id") in {auth.get("user_id"), "USLACKBOT"}
-                ):
-                    continue
-                profile = member.get("profile")
-                if not isinstance(profile, dict):
-                    continue
-                bot_id, user_id = profile.get("bot_id"), member.get("id")
-                if not isinstance(bot_id, str) or not bot_id or bot_id == auth.get("bot_id"):
-                    continue
-                if not isinstance(user_id, str) or not user_id:
-                    continue
-                name = (
-                    profile.get("display_name")
-                    or profile.get("real_name")
-                    or member.get("name")
-                    or user_id
-                )
-                image_url = profile.get("image_48") or ""
-                bots[bot_id] = SlackBotOption(
-                    team_id=team_id,
-                    bot_id=bot_id,
-                    user_id=user_id,
-                    name=name if isinstance(name, str) else user_id,
-                    image_url=image_url
-                    if isinstance(image_url, str) and image_url.startswith("https://")
-                    else "",
-                )
-            return sorted(bots.values(), key=lambda bot: (bot.name.casefold(), bot.bot_id))
+            async with SlackClient.bot(token=token) as loader_client:
+                auth = await slack_identity(loader_client)
+                team_id = auth["team_id"]
+                bots: dict[str, SlackBotOption] = {}
+                async for member in slack_bot_members(loader_client):
+                    if (
+                        member.get("is_bot") is not True
+                        or member.get("deleted")
+                        or member.get("team_id") != team_id
+                        or member.get("id") in {auth.get("user_id"), "USLACKBOT"}
+                    ):
+                        continue
+                    profile = member.get("profile")
+                    if not isinstance(profile, dict):
+                        continue
+                    bot_id, user_id = profile.get("bot_id"), member.get("id")
+                    if not isinstance(bot_id, str) or not bot_id or bot_id == auth.get("bot_id"):
+                        continue
+                    if not isinstance(user_id, str) or not user_id:
+                        continue
+                    name = (
+                        profile.get("display_name")
+                        or profile.get("real_name")
+                        or member.get("name")
+                        or user_id
+                    )
+                    image_url = profile.get("image_48") or ""
+                    bots[bot_id] = SlackBotOption(
+                        team_id=team_id,
+                        bot_id=bot_id,
+                        user_id=user_id,
+                        name=name if isinstance(name, str) else user_id,
+                        image_url=image_url
+                        if isinstance(image_url, str) and image_url.startswith("https://")
+                        else "",
+                    )
+                return sorted(bots.values(), key=lambda bot: (bot.name.casefold(), bot.bot_id))
 
         # A directory is only a suggestion; every selection is reverified when added.
-        return await ttl_cache.cached(f"{slack_cache_key(client)}:bot-directory", 300, load)
+        return await shared_cache.cached(
+            f"{slack_cache_key(client)}:bot-directory",
+            300,
+            load,
+            adapter=TypeAdapter(list[SlackBotOption]),
+        )

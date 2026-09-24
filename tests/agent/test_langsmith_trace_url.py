@@ -7,8 +7,6 @@ _REAL_DISCOVER_TENANT_ID = ls_utils._discover_tenant_id
 
 @pytest.fixture(autouse=True)
 def _clear_cache(monkeypatch: pytest.MonkeyPatch) -> None:
-    ls_utils._PROJECT_ID_CACHE.clear()
-    ls_utils._TENANT_ID_CACHE.clear()
     monkeypatch.setattr(ls_utils, "_discover_tenant_id", lambda: None)
 
 
@@ -189,7 +187,7 @@ async def test_trace_url_none_when_tenant_unset(monkeypatch: pytest.MonkeyPatch)
 
 async def test_tenant_id_prefers_env(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("LANGSMITH_TENANT_ID", "tenant-env")
-    ls_utils._TENANT_ID_CACHE[ls_utils._workspace_key()] = "tenant-cached"
+    await ls_utils._remember_tenant_id("tenant-cached")
 
     assert await ls_utils.resolve_tenant_id() == "tenant-env"
 

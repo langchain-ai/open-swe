@@ -14,7 +14,6 @@ from langgraph.runtime import Runtime
 
 import agent.server as server
 from agent.middleware.prepare_run import PrepareRunState
-from agent.utils import ttl_cache
 
 _INSTALLATION_TOKEN = "installation-token"
 
@@ -49,11 +48,6 @@ class _FakeGitHubClient:
 class _ReadyProxy:
     async def ready(self) -> Any:
         return MagicMock()
-
-
-@pytest.fixture(autouse=True)
-def _clear_public_profile_cache() -> None:
-    ttl_cache.clear()
 
 
 @pytest.fixture

@@ -7,7 +7,6 @@ import pytest
 import agent.utils.authorship as authorship
 from agent.github import app as github_app
 from agent.users import User
-from agent.utils import ttl_cache
 from agent.utils.authorship import (
     OPEN_SWE_BOT_EMAIL,
     OPEN_SWE_BOT_NAME,
@@ -136,11 +135,6 @@ def installation_token(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(github_app, "get_github_app_installation_token", fake_token)
 
 
-@pytest.fixture(autouse=True)
-def _clear_public_profile_cache() -> None:
-    ttl_cache.clear()
-
-
 @pytest.mark.parametrize(
     "payload",
     [
@@ -160,12 +154,12 @@ async def test_public_profile_lookup_rejects_invalid_payloads(
 
 
 async def test_public_profile_lookup_failure_is_nonfatal(
-    github_client: _FakeAsyncClient, installation_token: None
+    github_client: _FakeAsyncClient, installation_token: None, shared_cache_backend
 ) -> None:
     github_client._responses.append(_FakeResponse(404, {"message": "Not Found"}))
     assert await resolve_public_github_profile("mason-gh") is None
 
-    ttl_cache.clear()
+    shared_cache_backend.clear()
     github_client._responses.append(httpx2.ConnectError("boom"))
     assert await resolve_public_github_profile("mason-gh") is None
 
@@ -206,7 +200,7 @@ async def test_public_profile_lookup_rejects_invalid_logins(
 
 
 async def test_config_identity_without_trusted_slack_name_stays_blank(
-    github_client: _FakeAsyncClient, installation_token: None
+    github_client: _FakeAsyncClient, installation_token: None, shared_cache_backend
 ) -> None:
     github_client._responses.append(_FakeResponse(404, {"message": "Not Found"}))
     config = {

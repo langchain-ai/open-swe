@@ -8,11 +8,12 @@ from typing import Any, Self
 
 import aiohttp
 from fastapi import HTTPException
+from pydantic import JsonValue, TypeAdapter
 from slack_sdk.errors import SlackApiError
 from slack_sdk.web.async_client import AsyncWebClient
 
 from agent.config import ENV
-from agent.utils import ttl_cache
+from agent.utils import shared_cache
 
 SLACK_API_BASE_URL = "https://slack.com/api/"
 SLACK_REQUEST_ERRORS = (SlackApiError, aiohttp.ClientError, TimeoutError, ValueError)
@@ -37,8 +38,8 @@ class _SlackResponse(aiohttp.ClientResponse):
 class SlackClient(AsyncWebClient):
     @classmethod
     @asynccontextmanager
-    async def bot(cls) -> AsyncIterator[Self]:
-        token = ENV.SLACK_BOT_TOKEN.get()
+    async def bot(cls, *, token: str | None = None) -> AsyncIterator[Self]:
+        token = token or ENV.SLACK_BOT_TOKEN.get()
         if not token:
             raise HTTPException(400, "Slack is not configured.")
         async with aiohttp.ClientSession(
@@ -116,8 +117,11 @@ async def slack_http_errors() -> AsyncIterator[None]:
 
 
 async def slack_identity(client: AsyncWebClient) -> dict[str, Any]:
+    token = client.token
+
     async def load() -> dict[str, Any]:
-        response = await client.auth_test()
+        async with SlackClient.bot(token=token) as loader_client:
+            response = await loader_client.auth_test()
         data = response.data
         if (
             not isinstance(data, dict)
@@ -127,7 +131,12 @@ async def slack_identity(client: AsyncWebClient) -> dict[str, Any]:
             raise HTTPException(502, "Slack did not return a workspace ID.")
         return data
 
-    return await ttl_cache.cached(f"{slack_cache_key(client)}:identity", 300, load)
+    return await shared_cache.cached(
+        f"{slack_cache_key(client)}:identity",
+        300,
+        load,
+        adapter=TypeAdapter(dict[str, JsonValue]),
+    )
 
 
 async def slack_bot_members(client: AsyncWebClient) -> AsyncIterator[dict[str, Any]]:

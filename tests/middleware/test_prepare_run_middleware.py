@@ -1,4 +1,3 @@
-import asyncio
 from collections.abc import Awaitable, Callable
 from typing import Any, cast
 from unittest.mock import MagicMock
@@ -23,7 +22,6 @@ from agent.run_config import RunConfig
 from agent.server import PrepareAgentRunMiddleware
 from agent.slack.payloads import SlackChannelContext
 from agent.source_context import SlackThreadRef
-from agent.utils import ttl_cache
 from agent.utils.authorship import CollaboratorIdentity, ThreadParticipant
 
 
@@ -207,74 +205,6 @@ def test_participant_blocks_are_restored_after_compaction():
     )
 
     assert len(PrepareAgentRunMiddleware._participants_messages(state, [alice])) == 1
-
-
-@pytest.mark.asyncio
-async def test_ttl_cache_single_flight_and_stale_while_error():
-    ttl_cache.clear()
-    calls = 0
-
-    async def loader():
-        nonlocal calls
-        calls += 1
-        await asyncio.sleep(0)
-        return calls
-
-    results = await asyncio.gather(*(ttl_cache.cached("k", 60, loader) for _ in range(10)))
-    assert results == [1] * 10
-    assert calls == 1
-
-    ttl_cache.set_cached("k", "stale", -1)
-
-    async def failing_loader():
-        raise RuntimeError("boom")
-
-    assert await ttl_cache.cached("k", 60, failing_loader) == "stale"
-
-
-@pytest.mark.asyncio
-async def test_ttl_cache_stale_while_revalidate_refreshes_in_background():
-    ttl_cache.clear()
-    ttl_cache.set_cached("k", "stale", -1)
-    refresh_started = asyncio.Event()
-    allow_refresh = asyncio.Event()
-    calls = 0
-
-    async def loader():
-        nonlocal calls
-        calls += 1
-        refresh_started.set()
-        await allow_refresh.wait()
-        return "fresh"
-
-    assert await ttl_cache.cached_stale_while_revalidate("k", 60, loader) == "stale"
-    await asyncio.wait_for(refresh_started.wait(), timeout=1)
-    assert calls == 1
-
-    allow_refresh.set()
-    for _ in range(20):
-        if await ttl_cache.cached_stale_while_revalidate("k", 60, loader) == "fresh":
-            break
-        await asyncio.sleep(0.01)
-    else:
-        raise AssertionError("stale cache entry was not refreshed")
-
-
-@pytest.mark.asyncio
-async def test_ttl_cache_exception_without_stale_is_not_cached():
-    ttl_cache.clear()
-    calls = 0
-
-    async def failing_loader():
-        nonlocal calls
-        calls += 1
-        raise RuntimeError("boom")
-
-    with pytest.raises(RuntimeError):
-        await ttl_cache.cached("k", 60, failing_loader)
-    with pytest.raises(RuntimeError):
-        await ttl_cache.cached("k", 60, failing_loader)
-    assert calls == 2
 
 
 def test_recent_context_audience_fails_closed_for_shared_destinations() -> None:

@@ -38,7 +38,9 @@ from deepagents.middleware.subagents import SubAgent
 from langchain.agents.middleware import ModelCallLimitMiddleware
 from langchain.agents.middleware.types import AgentMiddleware
 from langchain_core.language_models.chat_models import BaseChatModel
+from pydantic import TypeAdapter
 
+from agent.config import ENV
 from agent.dashboard.options import gate_fable_model
 from agent.dashboard.workspace_settings_cache import cached_workspace_settings
 from agent.github.app import get_github_app_installation_token_with_expiry
@@ -105,7 +107,7 @@ from agent.tools import (
     update_finding,
     web_search,
 )
-from agent.utils import ttl_cache
+from agent.utils import shared_cache
 from agent.utils.agents_md import fetch_agents_md, fetch_scoped_agents_md
 from agent.utils.api_standards_skill import fetch_api_standards_skill
 from agent.utils.deferred_model import make_deferred_error_model
@@ -614,10 +616,17 @@ def _make_model_or_defer(
 
 
 async def _cached_api_standards_skill() -> str | None:
-    return await ttl_cache.cached(
-        "reviewer:api-standards-skill",
+    return await shared_cache.cached(
+        shared_cache.scoped_key(
+            "reviewer:api-standards-skill",
+            ENV.API_STANDARDS_SKILL_HANDLE.get(),
+            ENV.LANGSMITH_API_KEY.optional() or "",
+            ENV.LANGSMITH_ENDPOINT.get(),
+        ),
         300,
         fetch_api_standards_skill,
+        adapter=TypeAdapter(str | None),
+        max_age=3600,
     )
 
 

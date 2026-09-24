@@ -16,12 +16,9 @@ from typing import Any, TypedDict
 
 from pydantic import TypeAdapter, ValidationError
 
-from agent.utils import ttl_cache
-
 logger = logging.getLogger(__name__)
 
 THREAD_SETTINGS_KEY = "agent_settings"
-_CACHE_TTL_SECONDS = 300
 
 
 class ThreadModel(TypedDict):
@@ -51,10 +48,6 @@ def normalize_thread_settings(settings: Mapping[str, Any]) -> tuple[ThreadSettin
     return value, value != settings
 
 
-def _cache_key(thread_id: str) -> str:
-    return f"thread-settings:{thread_id}"
-
-
 async def load_thread_settings(client: Any, thread_id: str) -> ThreadSettings:
     """The thread's stored settings, or an empty mapping when it has none yet."""
 
@@ -65,7 +58,7 @@ async def load_thread_settings(client: Any, thread_id: str) -> ThreadSettings:
         return normalize_thread_settings(stored)[0] if isinstance(stored, dict) else {}
 
     try:
-        return await ttl_cache.cached(_cache_key(thread_id), _CACHE_TTL_SECONDS, _load)
+        return await _load()
     except Exception:
         logger.debug("Could not read settings for thread %s", thread_id, exc_info=True)
         return {}
@@ -80,4 +73,3 @@ async def store_thread_settings(client: Any, thread_id: str, settings: ThreadSet
     except Exception:
         logger.debug("Could not store settings for thread %s", thread_id, exc_info=True)
         return
-    ttl_cache.set_cached(_cache_key(thread_id), settings, _CACHE_TTL_SECONDS)

@@ -1,11 +1,14 @@
 """Shared pytest fixtures."""
 
+import asyncio
 import hashlib
 import hmac
 import json
 import os
+import sys
 from collections.abc import AsyncIterator, Iterator, Mapping, Sequence
 from contextlib import asynccontextmanager
+from datetime import timedelta
 from pathlib import Path
 from types import ModuleType
 from typing import Any
@@ -13,6 +16,7 @@ from uuid import uuid4
 
 import httpx
 import pytest
+from pydantic import JsonValue
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine
 
@@ -20,7 +24,7 @@ from agent import store as agent_store
 from agent.database import postgres
 from agent.sandboxes.state import SANDBOX_BACKENDS, SANDBOX_CONNECTIONS
 from agent.threads import access, diffs, handlers, listing, proxy, runs, summary
-from agent.utils import ttl_cache
+from agent.utils import shared_cache
 from agent.webhooks import common as webhook_common
 from agent.workspaces.store import WORKSPACES
 
@@ -238,14 +242,6 @@ def _no_bundled_dashboard(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> No
 
 
 @pytest.fixture(autouse=True)
-def _reset_ttl_cache() -> Iterator[None]:
-    """Keep the process-global TTL cache from leaking workspace settings between tests."""
-    ttl_cache.clear()
-    yield
-    ttl_cache.clear()
-
-
-@pytest.fixture(autouse=True)
 def _reset_sandbox_registries() -> Iterator[None]:
     """Both sandbox registries are process globals; a leaked handle would let one
     test's sandbox answer for the next test's thread."""
@@ -298,3 +294,26 @@ def slack_api(monkeypatch: pytest.MonkeyPatch):
         monkeypatch.setattr(code_channels, "SLACK_BOT_TOKEN", "test-slack-token")
         monkeypatch.setattr(channels, "SLACK_BOT_TOKEN", "test-slack-token")
         yield api
+
+
+@pytest.fixture(autouse=True)
+async def shared_cache_backend(monkeypatch: pytest.MonkeyPatch) -> AsyncIterator[dict[str, str]]:
+    """Round-trip shared results as JSON without requiring an Agent Server."""
+    records: dict[str, str] = {}
+
+    async def get(key: str) -> object:
+        return json.loads(records[key]) if key in records else None
+
+    async def put(key: str, value: JsonValue, *, ttl: timedelta | None = None) -> None:
+        records[key] = json.dumps(value)
+
+    sdk_cache = ModuleType("langgraph_sdk.cache")
+    monkeypatch.setattr(sdk_cache, "cache_get", get, raising=False)
+    monkeypatch.setattr(sdk_cache, "cache_set", put, raising=False)
+    monkeypatch.setitem(sys.modules, "langgraph_sdk.cache", sdk_cache)
+    yield records
+    tasks = list(shared_cache._REFRESHES.values())
+    for task in tasks:
+        task.cancel()
+    await asyncio.gather(*tasks, return_exceptions=True)
+    shared_cache._REFRESHES.clear()
