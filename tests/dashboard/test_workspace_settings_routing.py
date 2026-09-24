@@ -32,15 +32,15 @@ def test_workspace_settings_update_accepts_routing_pairs() -> None:
     )
 
 
-def test_review_scout_uses_the_fast_routing_tier() -> None:
-    assert WorkspaceSettings(_routing_settings()).review_scout_model == _ROUTING_PAIRS["fast"]
+def test_review_scout_uses_the_balanced_routing_tier() -> None:
+    assert WorkspaceSettings(_routing_settings()).review_scout_model == _ROUTING_PAIRS["balanced"]
 
 
-def test_review_scout_falls_back_to_luna_without_a_usable_fast_tier() -> None:
+def test_review_scout_falls_back_without_a_usable_balanced_tier() -> None:
     settings = WorkspaceSettings(
         {
-            "default_agent_routing_fast_model": "bogus:model",
-            "default_agent_routing_fast_reasoning_effort": "low",
+            "default_agent_routing_balanced_model": "bogus:model",
+            "default_agent_routing_balanced_reasoning_effort": "low",
         }
     )
     assert settings.review_scout_model == REVIEW_SCOUT_FALLBACK_MODEL

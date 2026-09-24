@@ -971,6 +971,8 @@ export interface ReviewWalkthroughStep {
 /** The review scout's reading order for the PR's current head. */
 export interface ReviewWalkthrough {
   head_sha: string
+  /** The scout's summary of what people asked for; empty when it wrote none. */
+  human_input: string
   steps: Array<ReviewWalkthroughStep>
 }
 
@@ -995,7 +997,6 @@ export interface ReviewDetail extends Omit<
   walkthrough_progress: ScoutProgress | null
   /** Why the latest reviewer run failed, when `status` is `"error"`. */
   review_error: string | null
-  guidance: Array<GuidancePoint>
 }
 
 export interface ScoutAction {
@@ -1017,17 +1018,6 @@ export interface PublishedReviewAssessment {
   risk_score: number
   decision: "would_approve" | "needs_human_review"
   explanation: string
-}
-
-/**
- * One place the author redirected Open SWE that the reviewer could see in the
- * final change. Recorded during a review, so it is absent until one has run.
- */
-export interface GuidancePoint {
-  summary: string
-  quote: string
-  /** Empty when the quote matched no stored message. */
-  author: string
 }
 
 export interface ReviewAssessmentFeedbackInput {
@@ -1101,7 +1091,8 @@ export interface PullRequestPreview {
   // or no checks configured.
   unresolved: Array<PreviewThread> | null
   checks: Array<PreviewCheck> | null
-  guidance: Array<GuidancePoint>
+  /** The review scout's summary of what people asked for; empty until one has run. */
+  human_input: string
 }
 
 export interface ReviewDiffPayload {

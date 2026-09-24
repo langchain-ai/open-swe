@@ -86,6 +86,7 @@ class Walkthrough(Base):
     head_sha: Mapped[str]
     merge_base_sha: Mapped[str]
     scout_thread_id: Mapped[str] = mapped_column(default="")
+    human_input_summary: Mapped[str] = mapped_column(server_default="", default="")
     generated_at: Mapped[datetime | None] = mapped_column(server_default=NOW, init=False)
     steps: Mapped[list[WalkthroughStep]] = relationship(
         default_factory=list,
@@ -104,6 +105,7 @@ class Walkthrough(Base):
         merge_base_sha: str,
         scout_thread_id: str,
         steps: list[StepDraft],
+        human_input_summary: str = "",
     ) -> None:
         """Store ``steps`` as this PR's walkthrough, replacing any earlier one."""
         pull_request = await PullRequest(owner=owner, repo=repo, number=number).ensure()
@@ -112,6 +114,7 @@ class Walkthrough(Base):
             head_sha=head_sha,
             merge_base_sha=merge_base_sha,
             scout_thread_id=scout_thread_id,
+            human_input_summary=human_input_summary,
             steps=[
                 WalkthroughStep(
                     position=position,
@@ -219,12 +222,14 @@ class WalkthroughView(BaseModel):
     """A walkthrough as the review page reads it."""
 
     head_sha: str
+    human_input: str
     steps: list[WalkthroughStepView]
 
     @classmethod
     def of(cls, walkthrough: Walkthrough) -> Self:
         return cls(
             head_sha=walkthrough.head_sha,
+            human_input=walkthrough.human_input_summary,
             steps=[
                 WalkthroughStepView(
                     index=position,
