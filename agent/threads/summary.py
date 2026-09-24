@@ -10,6 +10,7 @@ from fastapi import HTTPException
 
 from agent.dashboard.admin import is_admin
 from agent.dashboard.options import SUPPORTED_MODEL_IDS, canonical_model_pair
+from agent.github.pull_requests import PullRequest
 from agent.slack.client import parse_github_pr_url
 from agent.slack.code_channels import CODE_CHANNEL_SESSION_TS
 from agent.slack.oauth import SLACK_TEAM_ID
@@ -337,6 +338,18 @@ def _pull_request_summary(record: object, fallback_title: str) -> dict[str, Any]
     }
 
 
+async def _apply_stored_diff_stats(pull_requests: list[dict[str, Any]]) -> None:
+    try:
+        stored = await PullRequest.diff_stats_for(
+            [(pr["repoFullName"], pr["number"]) for pr in pull_requests]
+        )
+    except Exception:  # noqa: BLE001
+        logger.warning("Failed to load stored pull request diff stats", exc_info=True)
+        return
+    for pr in pull_requests:
+        pr["diffStats"] = stored.get((pr["repoFullName"].lower(), pr["number"]), pr["diffStats"])
+
+
 async def _thread_summary(
     thread: ThreadLike,
     *,
@@ -465,6 +478,7 @@ async def _thread_summary(
         if legacy_pr:
             pull_requests.append(legacy_pr)
     if pull_requests:
+        await _apply_stored_diff_stats(pull_requests)
         latest_pr = pull_requests[-1]
         summary["pullRequests"] = pull_requests
         summary["pr"] = {
