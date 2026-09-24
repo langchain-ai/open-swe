@@ -770,8 +770,9 @@ def prepare_slack_message(
     text = str(payload.get("text") or "")
     blocks = cast(list[dict[str, object]] | None, payload.get("blocks"))
     updated: _SlackMessage = {"text": text, "blocks": blocks}
-    if re.search(r"<https?://[^>]+\|Open in Web>", text) or any(
-        block.get("type") == "context" and _block_contains_text(block, "|Open in Web>")
+    footer_marker = f"|{SLACK_WEB_LINK_FOOTER_LABEL}>"
+    if footer_marker in text or any(
+        block.get("type") == "context" and _block_contains_text(block, footer_marker)
         for block in blocks or []
     ):
         return updated

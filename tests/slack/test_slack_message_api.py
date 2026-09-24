@@ -233,6 +233,34 @@ async def test_message_transports_attach_footer_and_log_delivery(
     assert "private-token" not in str([r.__dict__ for r in records])
 
 
+@pytest.mark.parametrize("with_blocks", [False, True])
+async def test_post_preserves_existing_footer(
+    slack_api: SlackAPI, monkeypatch: pytest.MonkeyPatch, with_blocks: bool
+) -> None:
+    monkeypatch.setenv("DASHBOARD_BASE_URL", "https://dashboard.example")
+    footer = "<https://dashboard.example/agents/origin|Open in Web>"
+    blocks = [{"type": "context", "elements": [{"type": "mrkdwn", "text": footer}]}]
+    text = "Done" if with_blocks else f"Done {footer}"
+    await slack_utils.post_slack_top_level_message_with_ts(
+        "C1", text, blocks=blocks if with_blocks else None
+    )
+    payload = slack_api.calls[0][1]
+    assert payload["text"] == text
+    if with_blocks:
+        assert payload["blocks"] == blocks
+
+
+async def test_post_with_repeated_unclosed_links(
+    slack_api: SlackAPI, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("DASHBOARD_BASE_URL", "https://dashboard.example")
+    text = "<http://" * 4000
+    await slack_utils.post_slack_top_level_message_with_ts("C1", text)
+    assert slack_api.calls[0][1]["text"] == (
+        f"{text} <https://dashboard.example/agents|Open in Web>"
+    )
+
+
 async def test_code_channel_stream_is_top_level(slack_api):
     await slack_utils.start_slack_stream("C1", "0", [])
     assert "thread_ts" not in slack_api.calls[0][1]
