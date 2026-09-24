@@ -41,10 +41,17 @@ def github_repositories() -> list[ListedRepository]:
 
 
 @pytest.fixture
+def token_generation() -> dict[str, int]:
+    """Bump ``n`` to make GitHub issue a different token for the same repositories."""
+    return {"n": 0}
+
+
+@pytest.fixture
 def github(
     monkeypatch: pytest.MonkeyPatch,
     github_requests: list[httpx.Request],
     github_repositories: list[ListedRepository],
+    token_generation: dict[str, int],
 ) -> Iterator[list[dict[str, object]]]:
     """GitHub issues synthetic tokens encoding their repository permissions."""
     payloads: list[dict[str, object]] = []
@@ -64,7 +71,9 @@ def github(
             return httpx.Response(
                 201,
                 json={
-                    "token": "repos:" + ",".join(str(repo_id) for repo_id in ids),
+                    "token": "repos:"
+                    + ",".join(str(repo_id) for repo_id in ids)
+                    + (f"@{token_generation['n']}" if token_generation["n"] else ""),
                     "expires_at": (datetime.now(UTC) + timedelta(hours=1)).isoformat(),
                 },
             )
@@ -298,6 +307,7 @@ async def test_git_auth_preserves_repository_scope_for_mixed_case_remotes(
 async def test_expiry_refresh_keeps_workspace_and_custom_proxy_rules(
     monkeypatch: pytest.MonkeyPatch,
     github: list[dict[str, object]],
+    token_generation: dict[str, int],
 ) -> None:
     custom = {"name": "external", "match_hosts": ["example.com"]}
     monkeypatch.setattr(
@@ -315,15 +325,99 @@ async def test_expiry_refresh_keeps_workspace_and_custom_proxy_rules(
         workspace_slug="workspace", thread_id="thread"
     )
     monkeypatch.setitem(proxy.SANDBOX_BACKENDS, "thread", backend)
+    app.clear_app_token_cache()  # past the cache's margin, so the refresh mints anew
+    token_generation["n"] = 1
 
     assert await proxy.maybe_refresh_proxy_token(
         "thread", now=datetime.now(UTC) + timedelta(hours=1)
     )
 
-    assert injected_auth(github) == ["x-access-token:repos:11", "x-access-token:repos:11"]
+    assert injected_auth(github) == ["x-access-token:repos:11", "x-access-token:repos:11@1"]
     config = github[-1]["proxy_config"]
     assert isinstance(config, dict)
     assert custom in config["rules"]
+
+
+async def _start_run(monkeypatch: pytest.MonkeyPatch, workspace: Workspace) -> None:
+    """Boot the thread's sandbox the way a run does; ``workspace`` stays editable."""
+    monkeypatch.setattr(WORKSPACES, "get", AsyncMock(return_value=workspace))
+    backend = await lifecycle._create_sandbox_with_proxy(
+        workspace_slug=workspace.slug, thread_id="thread"
+    )
+    monkeypatch.setitem(proxy.SANDBOX_BACKENDS, "thread", backend)
+
+
+def _mints(github_requests: list[httpx.Request]) -> int:
+    return sum(request.url.path.endswith("/access_tokens") for request in github_requests)
+
+
+@pytest.mark.parametrize(
+    ("repos_after", "expected"),
+    [
+        (["acme/api", "acme/internal"], "x-access-token:repos:11,22"),
+        ([], ""),
+    ],
+    ids=["repo-added", "repo-removed"],
+)
+async def test_workspace_repo_change_reaches_a_running_sandbox_before_the_next_model_call(
+    monkeypatch: pytest.MonkeyPatch,
+    github: list[dict[str, object]],
+    repos_after: list[str],
+    expected: str,
+) -> None:
+    workspace = Workspace(slug="workspace", repos=["acme/api"])
+    await _start_run(monkeypatch, workspace)
+
+    workspace.repos = repos_after
+
+    assert await proxy.maybe_refresh_proxy_token("thread")
+    assert injected_auth(github) == ["x-access-token:repos:11", expected]
+
+
+async def test_unchanged_workspace_leaves_the_proxy_and_github_alone(
+    monkeypatch: pytest.MonkeyPatch,
+    github: list[dict[str, object]],
+    github_requests: list[httpx.Request],
+) -> None:
+    await _start_run(monkeypatch, Workspace(slug="workspace", repos=["acme/api"]))
+    mints = _mints(github_requests)
+
+    assert not await proxy.maybe_refresh_proxy_token("thread")
+    assert len(github) == 1
+    assert _mints(github_requests) == mints
+
+
+async def test_refresh_that_gets_the_same_token_does_not_reconfigure_the_proxy(
+    monkeypatch: pytest.MonkeyPatch,
+    github: list[dict[str, object]],
+) -> None:
+    await _start_run(monkeypatch, Workspace(slug="workspace", repos=["acme/api"]))
+
+    # Near the recorded expiry, but the token is still cached, so the refresh gets it back.
+    assert not await proxy.maybe_refresh_proxy_token(
+        "thread", now=datetime.now(UTC) + timedelta(hours=1)
+    )
+    assert len(github) == 1
+
+
+async def test_pinned_repository_scope_never_widens_to_new_workspace_repos(
+    monkeypatch: pytest.MonkeyPatch,
+    github: list[dict[str, object]],
+    github_requests: list[httpx.Request],
+) -> None:
+    workspace = Workspace(slug="workspace", repos=["acme/api"])
+    monkeypatch.setattr(WORKSPACES, "get", AsyncMock(return_value=workspace))
+    backend = await lifecycle._create_sandbox_with_proxy(
+        workspace_slug="workspace", thread_id="thread", github_proxy_repositories=["acme/api"]
+    )
+    monkeypatch.setitem(proxy.SANDBOX_BACKENDS, "thread", backend)
+    mints = _mints(github_requests)
+
+    workspace.repos = ["acme/api", "acme/internal"]
+
+    assert not await proxy.maybe_refresh_proxy_token("thread")
+    assert len(github) == 1
+    assert _mints(github_requests) == mints
 
 
 async def test_missing_workspace_does_not_inherit_default_access(

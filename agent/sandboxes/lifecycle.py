@@ -172,6 +172,7 @@ async def _create_sandbox_with_proxy(
                 repositories=github_proxy_repositories,
                 workspace_slug=workspace_slug,
                 base_proxy_config=proxy_config,
+                minted=access,
             )
 
     # This run gets fresh checkouts now; the background capture makes the *next*
@@ -240,6 +241,7 @@ async def _refresh_github_proxy(
         repositories=github_proxy_repositories,
         workspace_slug=workspace_slug,
         base_proxy_config=base_proxy_config,
+        minted=access,
     )
 
 
