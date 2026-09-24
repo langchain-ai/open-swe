@@ -88,15 +88,16 @@ async def _files_for(approval: ExpeditedApproval, token: str) -> list[ChangedFil
 
 async def _diff_image_id(approval: ExpeditedApproval, files: list[ChangedFile]) -> str | None:
     """A hosted-but-unposted PNG of the diff, which the card renders inline."""
-    shown, _ = ChangedFile.rendered(files)
+    shown, _ = ChangedFile.split(files)
     if not shown:
         return None
     try:
         png = await asyncio.to_thread(render_diff_png, shown)
-    except (ValueError, OSError) as exc:
+    except Exception:
         logger.warning(
-            "Failed to render expedited review diff image",
-            extra={"approval_id": str(approval.id), "render_error": str(exc)},
+            "Failed to render expedited review diff image; posting the text diff",
+            extra={"approval_id": str(approval.id)},
+            exc_info=True,
         )
         return None
     file_id, error = await upload_slack_thread_file(

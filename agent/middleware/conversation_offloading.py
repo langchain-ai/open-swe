@@ -14,6 +14,7 @@ from langchain.agents.middleware.types import (
     ExtendedModelResponse,
     ModelRequest,
     ModelResponse,
+    OmitFromOutput,
     hook_config,
 )
 from langchain_core.messages import AnyMessage
@@ -28,7 +29,7 @@ def _take_latest[T](left: T | None, right: T | None) -> T | None:
 
 
 class OffloadingState(SummarizationState):
-    conversation_offloading: NotRequired[Annotated[dict[str, Any], _take_latest]]
+    conversation_offloading: NotRequired[Annotated[dict[str, object], OmitFromOutput, _take_latest]]
 
 
 class ConversationOffloadingMiddleware(SummarizationMiddleware):

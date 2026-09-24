@@ -46,13 +46,13 @@ def test_fingerprint_ignores_test_files_the_card_does_not_draw() -> None:
     assert before.fingerprint != new_source.fingerprint
 
 
-def test_fingerprint_covers_tests_once_the_card_draws_them() -> None:
+def test_fingerprint_ignores_tests_even_when_they_outweigh_the_source() -> None:
     source = _file("src/app.py", additions=1, patch="+a")
     before = assess_eligibility([source, _file("tests/test_app.py", additions=5, patch="+x")])
     after = assess_eligibility([source, _file("tests/test_app.py", additions=5, patch="+y")])
 
     assert isinstance(before, EligibleDiff) and isinstance(after, EligibleDiff)
-    assert before.fingerprint != after.fingerprint
+    assert before.fingerprint == after.fingerprint
 
 
 def test_tests_growing_past_the_source_keep_a_card_that_did_not_draw_them() -> None:
@@ -63,21 +63,6 @@ def test_tests_growing_past_the_source_keep_a_card_that_did_not_draw_them() -> N
     assert isinstance(card, EligibleDiff)
     assert fingerprint_matches(grown, card.fingerprint)
     assert not fingerprint_matches([_file("src/app.py", patch="+c"), *grown[1:]], card.fingerprint)
-
-
-def test_tests_a_card_drew_still_count_after_the_source_outgrows_them() -> None:
-    card = assess_eligibility(
-        [_file("src/app.py", patch="+a"), _file("tests/test_app.py", additions=5, patch="+x")]
-    )
-    source = _file("src/app.py", additions=9, patch="+a")
-
-    assert isinstance(card, EligibleDiff)
-    assert fingerprint_matches(
-        [source, _file("tests/test_app.py", additions=1, patch="+x")], card.fingerprint
-    )
-    assert not fingerprint_matches(
-        [source, _file("tests/test_app.py", additions=1, patch="+y")], card.fingerprint
-    )
 
 
 def test_line_cap_is_inclusive_and_carries_leeway_past_the_advertised_limit() -> None:
@@ -152,33 +137,6 @@ def test_test_paths_are_recognised_across_languages() -> None:
         assert ChangedFile(filename=path).is_test, path
     for path in ("agent/latest.py", "ui/src/features/contest/Entry.tsx", "docs/protest.md"):
         assert not ChangedFile(filename=path).is_test, path
-
-
-def test_a_mostly_source_change_keeps_its_tests_off_the_card() -> None:
-    files = [_file("agent/app.py", additions=8), _file("tests/test_app.py", additions=3)]
-
-    shown, named = ChangedFile.rendered(files)
-
-    assert [file.filename for file in shown] == ["agent/app.py"]
-    assert [file.filename for file in named] == ["tests/test_app.py"]
-
-
-def test_a_test_heavy_change_shows_its_tests() -> None:
-    files = [_file("agent/app.py", additions=2), _file("tests/test_app.py", additions=30)]
-
-    shown, named = ChangedFile.rendered(files)
-
-    assert [file.filename for file in shown] == ["agent/app.py", "tests/test_app.py"]
-    assert named == []
-
-
-def test_a_test_heavy_change_still_only_names_tests_it_cannot_draw() -> None:
-    files = [_file("tests/test_app.py", additions=30, patch=None)]
-
-    shown, named = ChangedFile.rendered(files)
-
-    assert shown == []
-    assert [file.filename for file in named] == ["tests/test_app.py"]
 
 
 def test_a_move_into_the_tests_tree_is_not_exempt() -> None:
