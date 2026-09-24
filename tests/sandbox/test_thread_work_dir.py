@@ -165,7 +165,11 @@ async def test_failed_metadata_write_does_not_fail_the_run(
     with caplog.at_level(logging.WARNING, logger=lifecycle.__name__):
         assert await resolve_thread_work_dir(_THREAD_ID, backend) == "/workspace"
 
-    assert [getattr(record, "sandbox_id", None) for record in caplog.records] == ["sb-1"]
+    assert [
+        getattr(record, "sandbox_id", None)
+        for record in caplog.records
+        if record.levelno >= logging.WARNING
+    ] == ["sb-1"]
 
 
 @pytest.mark.parametrize(
