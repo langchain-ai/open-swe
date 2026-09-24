@@ -54,13 +54,14 @@ def test_deployment_api_url_prefers_platform_injected_url(
     assert deployment_api_url() == "https://preview.example"
 
 
-def test_deployment_api_url_does_not_read_legacy_langgraph_url(
+def test_deployment_api_url_falls_back_to_legacy_langgraph_url(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """Standalone installs configured before the rename set only LANGGRAPH_URL."""
     monkeypatch.delenv("LANGSMITH_HOST_API_URL", raising=False)
     monkeypatch.setenv("LANGGRAPH_URL", "https://legacy.example")
 
-    assert deployment_api_url() == "http://localhost:2024"
+    assert deployment_api_url() == "https://legacy.example"
 
 
 def test_require_raises_for_unset(monkeypatch: pytest.MonkeyPatch) -> None:

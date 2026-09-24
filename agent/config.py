@@ -176,6 +176,9 @@ ENV.var(
     "The deployment's own public API URL; LangGraph Platform injects it per deployment. "
     "Set it to the public ingress URL for standalone deployments.",
     default="http://localhost:2024",
+    # Installs that predate the rename set LANGGRAPH_URL. The platform-injected name is read
+    # first, so a preview that inherits its parent's LANGGRAPH_URL still gets its own URL.
+    aliases=("LANGGRAPH_URL",),
 )
 ENV.var(
     "LANGSMITH_GATEWAY_API_KEY",
