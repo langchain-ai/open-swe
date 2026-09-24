@@ -44,6 +44,10 @@ _TOKEN_CACHE: dict[ScopeKey, tuple[str, str | None, datetime]] = {}
 # Shared-token Store round trips sit on the critical path; past this long a slow
 # Store is treated like a failing one.
 _STORE_TIMEOUT_SECONDS = 2.0
+# Other features encrypt caller-chosen values under the same key, so a payload is
+# honoured only this long after it was encrypted: a record planted from one of
+# those ciphertexts then expires instead of being served forever.
+_SHARED_TOKEN_TTL_SECONDS = 3600
 
 
 class _SharedTokenPayload(BaseModel):
@@ -62,8 +66,8 @@ class _SharedToken(BaseModel):
     """A repository-scoped token as workers share it through the Store.
 
     Anyone who can write the Store can edit a record or copy it into another
-    slot, so reads trust only the encrypted payload; the plaintext expiry is
-    kept for inspection.
+    slot, so reads trust only the encrypted payload. The plaintext expiry is
+    kept for inspection and to skip stale records unread.
     """
 
     encrypted_payload: str
@@ -142,9 +146,11 @@ async def _read_shared_token(key: ScopeKey, *, now: datetime) -> _SharedTokenPay
     try:
         async with asyncio.timeout(_STORE_TIMEOUT_SECONDS):
             record = await _SHARED_TOKENS.get(store_key)
-        if record is None:
+        # A passed plaintext cutoff can only make a read miss sooner, never extend
+        # it; skipping such stale records keeps them from tripping the payload TTL.
+        if record is None or now >= record.good_until:
             return None
-        decrypted = decrypt_token(record.encrypted_payload)
+        decrypted = decrypt_token(record.encrypted_payload, ttl_seconds=_SHARED_TOKEN_TTL_SECONDS)
         if not decrypted:
             return None  # decrypt_token has logged why
         payload = _SharedTokenPayload.model_validate_json(decrypted)

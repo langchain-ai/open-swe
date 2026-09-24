@@ -56,13 +56,17 @@ def encrypt_token(token: str) -> str:
     return encrypted.decode()
 
 
-def decrypt_token(encrypted_token: str) -> str:
-    """Decrypt a token, trying each configured key in order."""
+def decrypt_token(encrypted_token: str, *, ttl_seconds: int | None = None) -> str:
+    """Decrypt a token, trying each configured key in order.
+
+    With ``ttl_seconds``, a token encrypted longer ago than that is rejected like
+    an invalid one.
+    """
     if not encrypted_token:
         return ""
 
     try:
-        decrypted = _get_fernet().decrypt(encrypted_token.encode())
+        decrypted = _get_fernet().decrypt(encrypted_token.encode(), ttl=ttl_seconds)
         return decrypted.decode()
     except InvalidToken:
         logger.warning("Failed to decrypt token: invalid token")

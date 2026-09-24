@@ -1,6 +1,7 @@
 import asyncio
 import json
 import logging
+import time
 from collections.abc import Callable, Iterator
 from datetime import UTC, datetime, timedelta
 from typing import NoReturn, TypedDict
@@ -10,7 +11,8 @@ import httpx
 import pytest
 from cryptography.fernet import Fernet
 
-from agent.encryption import encrypt_token
+from agent.config import ENV
+from agent.encryption import decrypt_token, encrypt_token
 from agent.github import app as github_app
 from tests.conftest import FakeStore
 from tests.support.github_sdk import mock_github_sdk
@@ -290,6 +292,25 @@ def _expired(item: dict[str, object], monkeypatch: pytest.MonkeyPatch) -> dict[s
     return item
 
 
+def _decrypted_payload(item: dict[str, object]) -> str:
+    encrypted = item["encrypted_payload"]
+    assert isinstance(encrypted, str)
+    return decrypt_token(encrypted)
+
+
+def _encrypted_long_ago(plaintext: str) -> str:
+    """``plaintext`` encrypted under the configured key two hours ago."""
+    key = ENV.TOKEN_ENCRYPTION_KEY.require().encode()
+    two_hours_ago = int(time.time()) - 2 * 3600
+    return Fernet(key).encrypt_at_time(plaintext.encode(), two_hours_ago).decode()
+
+
+def _stale(item: dict[str, object], monkeypatch: pytest.MonkeyPatch) -> dict[str, object]:
+    """A record left from long ago: past its cutoff and encrypted over an hour back."""
+    _advance_clock(monkeypatch, _PAST_REUSE_CUTOFF)
+    return item | {"encrypted_payload": _encrypted_long_ago(_decrypted_payload(item))}
+
+
 def _under_another_key(
     item: dict[str, object], monkeypatch: pytest.MonkeyPatch
 ) -> dict[str, object]:
@@ -303,8 +324,8 @@ def _malformed(item: dict[str, object], monkeypatch: pytest.MonkeyPatch) -> dict
 
 @pytest.mark.parametrize(
     ("spoil", "warnings"),
-    [(_expired, 0), (_under_another_key, 1), (_malformed, 1)],
-    ids=["expired", "undecryptable", "malformed"],
+    [(_expired, 0), (_stale, 0), (_under_another_key, 1), (_malformed, 1)],
+    ids=["expired", "stale", "undecryptable", "malformed"],
 )
 async def test_unusable_stored_token_is_replaced_by_a_fresh_one(
     shared_store: FakeStore,
@@ -389,6 +410,27 @@ async def test_tampered_plaintext_expiry_can_neither_extend_nor_redate_a_token(
     github_app.clear_app_token_cache()
     token, _ = await github_app.get_github_app_installation_token_with_expiry(repository_ids=[11])
     assert token == "ghs_minted-2"
+
+
+async def test_payload_encrypted_over_an_hour_ago_is_not_served(
+    shared_store: FakeStore, mints: list[dict[str, object]]
+) -> None:
+    await github_app.get_github_app_installation_token(repository_ids=[11])
+    [(store_key, item)] = shared_store.values(_SHARED_TOKENS).items()
+    # Bound to this slot and good until 2099, but encrypted two hours ago.
+    forever = "2099-01-01T00:00:00Z"
+    planted = json.loads(_decrypted_payload(item)) | {"token": "ghs_planted", "good_until": forever}
+    shared_store.seed(
+        _SHARED_TOKENS,
+        store_key,
+        item
+        | {"encrypted_payload": _encrypted_long_ago(json.dumps(planted)), "good_until": forever},
+    )
+
+    github_app.clear_app_token_cache()  # a second worker, with an empty in-process cache
+    assert await github_app.get_github_app_installation_token(repository_ids=[11]) == "ghs_minted-2"
+    github_app.clear_app_token_cache()
+    assert await github_app.get_github_app_installation_token(repository_ids=[11]) == "ghs_minted-2"
 
 
 async def test_unreadable_payload_falls_back_without_logging_the_token(
