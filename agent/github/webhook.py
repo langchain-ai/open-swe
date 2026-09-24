@@ -1074,6 +1074,22 @@ async def process_github_pr_comment(
 
     trusted = await _trusted_authors(github_login, comments=comments)
     prompt = common.build_pr_prompt(comments, pr_url, repo_config=repo_config, trusted=trusted)
+    pr_author = ""
+    author_logins: set[str] = set()
+    if postgres.configured() and repo is not None:
+        try:
+            pull_request = await PullRequest.get(repo.owner, repo.name, pr_number)
+            if pull_request is not None:
+                pr_author = pull_request.author
+                for login in {str(item.get("author") or "") for item in comments}:
+                    if login and await pull_request.is_authored_by(login):
+                        author_logins.add(login)
+        except Exception:  # noqa: BLE001
+            common.logger.warning(
+                "Failed to resolve the PR author for GitHub comments",
+                extra={"pr_repo_full_name": f"{repo.owner}/{repo.name}", "pr_number": pr_number},
+                exc_info=True,
+            )
     messages = []
     introduced: set[str] = {_github_person(github_login, github_user_id)["id"]}
     for item in comments:
@@ -1092,7 +1108,8 @@ async def process_github_pr_comment(
                     "surface": "github",
                     "kind": "human",
                     "data": {
-                        "pull_request": {"number": pr_number, "url": pr_url},
+                        "pull_request": {"number": pr_number, "url": pr_url, "author": pr_author},
+                        "sender_is_pr_author": str(author in author_logins).lower(),
                         "comment_type": str(item.get("type", "comment")),
                         "path": str(item.get("path", "")),
                         "line": str(item.get("line", "")),
