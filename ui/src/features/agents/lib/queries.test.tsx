@@ -795,50 +795,104 @@ describe("pushed thread changes", () => {
     return { ...hook, source }
   }
 
-  it("updates a cached thread in place without refetching the lists", async () => {
+  it("refetches the lists on every ready, the first included", () => {
     vi.spyOn(agentsApi, "listPinnedThreads").mockResolvedValue([])
     const client = testClient()
-    const running = {
-      ...optimisticThread("thread-1", { prompt: "Fix it" }),
-      status: "running" as const,
-    }
-    cachedPages(client, [running])
     const { source, unmount } = connect(client)
     const invalidate = vi.spyOn(client, "invalidateQueries")
 
-    act(() => {
-      source.emit("ready")
-      source.emit("thread-updated", {
-        thread: { ...running, status: "finished" },
-      })
-    })
-
-    expect(
-      client.getQueryData<InfiniteData<ThreadsPage>>(sidebarKey)?.pages[0]
-        ?.items[0]
-    ).toMatchObject({ id: "thread-1", status: "finished" })
-    expect(invalidate).not.toHaveBeenCalled()
-    unmount()
-    expect(source.closed).toBe(true)
-  })
-
-  it("refetches the lists for a thread none of them hold", async () => {
-    vi.spyOn(agentsApi, "listPinnedThreads").mockResolvedValue([])
-    const client = testClient()
-    cachedPages(client, [])
-    const { source, unmount } = connect(client)
-    const invalidate = vi.spyOn(client, "invalidateQueries")
-
-    act(() => {
-      source.emit("ready")
-      source.emit("thread-updated", {
-        thread: optimisticThread("just-started", { prompt: "New" }),
-      })
-    })
+    act(() => source.emit("ready"))
 
     expect(invalidate).toHaveBeenCalledWith({
       queryKey: agentThreadKeys.lists,
     })
+    unmount()
+    expect(source.closed).toBe(true)
+  })
+
+  it("updates a thread every list holds in place without refetching", async () => {
+    const running = {
+      ...optimisticThread("thread-1", { prompt: "Fix it" }),
+      status: "running" as const,
+    }
+    vi.spyOn(agentsApi, "listPinnedThreads").mockResolvedValue([])
+    const client = testClient()
+    cachedPages(client, [running])
+    const { source, unmount } = connect(client)
+    act(() => source.emit("ready"))
+    await waitFor(() => expect(client.isFetching()).toBe(0))
+    const invalidate = vi.spyOn(client, "invalidateQueries")
+
+    act(() =>
+      source.emit("thread-updated", {
+        thread: { ...running, status: "finished" },
+      })
+    )
+
+    await waitFor(() =>
+      expect(
+        client.getQueryData<InfiniteData<ThreadsPage>>(sidebarKey)?.pages[0]
+          ?.items[0]
+      ).toMatchObject({ id: "thread-1", status: "finished" })
+    )
+    expect(invalidate).not.toHaveBeenCalled()
+    unmount()
+  })
+
+  it("refetches the lists when a sidebar page lacks the thread, even if pinned holds it", async () => {
+    const pinned = optimisticThread("pinned", { prompt: "Pinned" })
+    vi.spyOn(agentsApi, "listPinnedThreads").mockResolvedValue([pinned])
+    const client = testClient()
+    cachedPages(client, [])
+    const { result, source, unmount } = connect(client)
+    act(() => source.emit("ready"))
+    await waitFor(() => expect(client.isFetching()).toBe(0))
+    await waitFor(() => expect(result.current.data).toEqual([pinned]))
+    const invalidate = vi.spyOn(client, "invalidateQueries")
+
+    act(() =>
+      source.emit("thread-updated", {
+        thread: { ...pinned, status: "finished" },
+      })
+    )
+
+    await waitFor(() =>
+      expect(invalidate).toHaveBeenCalledWith({
+        queryKey: agentThreadKeys.lists,
+      })
+    )
+    unmount()
+  })
+
+  it("does not let a fetch that was in flight overwrite a pushed status", async () => {
+    const running = {
+      ...optimisticThread("pin", { prompt: "Pin" }),
+      status: "running" as const,
+    }
+    const finished = { ...running, status: "finished" as const }
+    let resolveStale: (threads: Array<AgentThread>) => void = () => {}
+    vi.spyOn(agentsApi, "listPinnedThreads")
+      .mockResolvedValueOnce([running])
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveStale = resolve
+          })
+      )
+      .mockResolvedValue([finished])
+    const client = testClient()
+    const { result, source, unmount } = connect(client)
+    await waitFor(() => expect(result.current.data).toEqual([running]))
+    // `ready` refetches the lists; that response is still on its way.
+    act(() => source.emit("ready"))
+    await waitFor(() => expect(client.isFetching()).toBeGreaterThan(0))
+
+    act(() => source.emit("thread-updated", { thread: finished }))
+    await waitFor(() => expect(result.current.data).toEqual([finished]))
+    await act(async () => resolveStale([running]))
+
+    await waitFor(() => expect(client.isFetching()).toBe(0))
+    expect(result.current.data).toEqual([finished])
     unmount()
   })
 
@@ -852,6 +906,7 @@ describe("pushed thread changes", () => {
     const { result, source, unmount } = connect(client)
     await vi.waitFor(() => expect(result.current.data).toEqual([running]))
     act(() => source.emit("ready"))
+    await act(() => vi.advanceTimersByTimeAsync(0))
     const connectedCalls = listPins.mock.calls.length
 
     await act(() => vi.advanceTimersByTimeAsync(6000))

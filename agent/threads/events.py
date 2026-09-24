@@ -22,11 +22,13 @@ from agent.threads.listing import (
     _summarize_threads,
     thread_has_participant,
 )
+from agent.threads.pins import list_thread_pin_ids
 from agent.threads.summary import (
     _is_automation_thread,
     _thread_id,
     _thread_metadata,
     thread_is_readable,
+    thread_is_unlisted,
 )
 from agent.utils.json_types import ThreadLike
 from agent.utils.thread_ops import langgraph_client
@@ -48,12 +50,30 @@ class Viewer:
     include_all: bool
     """Every readable thread, as the admin-only ``all`` sidebar lists them."""
 
-    def may_see(self, metadata: Mapping[str, Any]) -> bool:
-        return thread_is_readable(metadata, self.login, self.email) and (
-            self.include_all
+    def may_list(self, metadata: Mapping[str, Any]) -> bool:
+        return thread_is_readable(metadata, self.login, self.email) and not thread_is_unlisted(
+            metadata
+        )
+
+    def lists(self, metadata: Mapping[str, Any], *, pinned: bool) -> bool:
+        """Whether one of the viewer's sidebar lists holds this thread."""
+        return self.may_list(metadata) and (
+            pinned
+            or self.include_all
             or _is_automation_thread(metadata)
             or thread_has_participant(metadata, self.login, email=self.email)
         )
+
+
+class _Pins:
+    """The viewer's pinned thread ids, re-read when a change may be explained by a new pin."""
+
+    def __init__(self, login: str) -> None:
+        self._login = login
+        self.ids: frozenset[str] = frozenset()
+
+    async def refresh(self) -> None:
+        self.ids = frozenset(await list_thread_pin_ids(self._login))
 
 
 def _frame(event: str, data: str) -> str:
@@ -67,6 +87,8 @@ async def stream_thread_changes(viewer: Viewer) -> AsyncGenerator[str]:
     misses nothing in between.
     """
     async with changes.subscribe() as thread_ids:
+        pins = _Pins(viewer.login)
+        await pins.refresh()
         yield _frame("ready", "{}")
         pending: asyncio.Task[str] | None = None
         try:
@@ -82,7 +104,9 @@ async def stream_thread_changes(viewer: Viewer) -> AsyncGenerator[str]:
                 if changes.RESYNC in batch:
                     yield _frame("resync", "{}")
                 for summary in await _visible_summaries(
-                    [thread_id for thread_id in batch if thread_id != changes.RESYNC], viewer
+                    [thread_id for thread_id in batch if thread_id != changes.RESYNC],
+                    viewer,
+                    pins,
                 ):
                     yield _frame(
                         "thread-updated", json.dumps(jsonable_encoder({"thread": summary}))
@@ -115,19 +139,34 @@ async def _coalesce(first: str, thread_ids: AsyncIterator[str]) -> list[str]:
     return list(batch)
 
 
-async def _visible_summaries(thread_ids: list[str], viewer: Viewer) -> list[dict[str, Any]]:
-    """The ``/threads/page`` item for each thread the viewer may list; deleted ones drop out."""
+async def _visible_summaries(
+    thread_ids: list[str], viewer: Viewer, pins: _Pins
+) -> list[dict[str, Any]]:
+    """The ``/threads/page`` item for each thread the viewer lists; deleted ones drop out.
+
+    A readable thread the viewer does not otherwise list may have been pinned
+    since the pins were read, so they are read again, at most once per batch.
+    """
     if not thread_ids:
         return []
     client = langgraph_client()
     found: list[ThreadLike] = await client.threads.search(
         ids=thread_ids, limit=len(thread_ids), select=_THREAD_LIST_SELECT
     )
-    by_id = {
+    readable = {
         thread_id: thread
         for thread in found
-        if (thread_id := _thread_id(thread)) and viewer.may_see(_thread_metadata(thread))
+        if (thread_id := _thread_id(thread)) and viewer.may_list(_thread_metadata(thread))
+    }
+
+    def listed(thread_id: str, thread: ThreadLike) -> bool:
+        return viewer.lists(_thread_metadata(thread), pinned=thread_id in pins.ids)
+
+    if not all(listed(thread_id, thread) for thread_id, thread in readable.items()):
+        await pins.refresh()
+    visible = {
+        thread_id: thread for thread_id, thread in readable.items() if listed(thread_id, thread)
     }
     return await _summarize_threads(
-        client, [by_id[thread_id] for thread_id in thread_ids if thread_id in by_id]
+        client, [visible[thread_id] for thread_id in thread_ids if thread_id in visible]
     )

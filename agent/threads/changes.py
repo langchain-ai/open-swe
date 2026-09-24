@@ -57,15 +57,18 @@ async def subscribe() -> AsyncIterator[AsyncIterator[str]]:
 
 
 def publish_local(thread_id: str) -> None:
-    """Hand ``thread_id`` to this process's subscribers, dropping a full queue's oldest."""
+    """Hand ``thread_id`` to this process's subscribers.
+
+    A full queue is replaced by a single ``RESYNC``: the subscriber refetches
+    everything, which covers every id it was holding and this one.
+    """
     for queue in tuple(_SUBSCRIBERS):
         try:
             queue.put_nowait(thread_id)
         except asyncio.QueueFull:
-            with contextlib.suppress(asyncio.QueueEmpty):
+            while not queue.empty():
                 queue.get_nowait()
-            with contextlib.suppress(asyncio.QueueFull):
-                queue.put_nowait(thread_id)
+            queue.put_nowait(RESYNC)
 
 
 async def publish_thread_changed(thread_id: str) -> None:

@@ -35,7 +35,21 @@ class _Threads:
 
 
 @pytest.fixture
-def langgraph(monkeypatch: pytest.MonkeyPatch):
+def pins(monkeypatch: pytest.MonkeyPatch) -> list[str]:
+    pinned: list[str] = []
+
+    async def list_pins(login: str) -> list[str]:
+        del login
+        return list(pinned)
+
+    monkeypatch.setattr(events, "list_thread_pin_ids", list_pins)
+    return pinned
+
+
+@pytest.fixture
+def langgraph(monkeypatch: pytest.MonkeyPatch, pins: list[str]):
+    del pins
+
     def install(*threads: dict[str, object]) -> None:
         client = SimpleNamespace(threads=_Threads(list(threads)))
         monkeypatch.setattr(events, "langgraph_client", lambda: client)
@@ -90,11 +104,13 @@ async def test_a_thread_the_viewer_cannot_list_is_never_named(langgraph) -> None
     langgraph(
         _thread("someone-elses", participant_logins={"bob": True}),
         _thread("private", participant_logins={"alice": True}, visibility="private"),
+        _thread("oswe-question", participant_logins={"alice": True}, unlisted=True),
         _thread("mine", participant_logins={"alice": True}),
     )
     async with _stream(_ALICE) as stream:
         await changes.publish_thread_changed("someone-elses")
         await changes.publish_thread_changed("private")
+        await changes.publish_thread_changed("oswe-question")
         await changes.publish_thread_changed("gone")
         await changes.publish_thread_changed("mine")
         assert _updated_id(await _next_frame(stream)) == "mine"
@@ -120,6 +136,16 @@ async def test_an_automation_thread_reaches_a_viewer_who_is_not_a_participant(la
     async with _stream(_ALICE) as stream:
         await changes.publish_thread_changed("nightly")
         assert _updated_id(await _next_frame(stream)) == "nightly"
+
+
+async def test_a_thread_pinned_after_the_stream_opened_reaches_its_pinner(
+    langgraph, pins: list[str]
+) -> None:
+    langgraph(_thread("bobs", participant_logins={"bob": True}))
+    async with _stream(_ALICE) as stream:
+        pins.append("bobs")
+        await changes.publish_thread_changed("bobs")
+        assert _updated_id(await _next_frame(stream)) == "bobs"
 
 
 async def test_a_resync_marker_tells_the_client_to_refetch(langgraph) -> None:
@@ -151,4 +177,19 @@ async def test_a_postgres_failure_still_reaches_local_subscribers(
         with caplog.at_level(logging.WARNING, logger=changes.__name__):
             await changes.publish_thread_changed("t-1")
         assert await asyncio.wait_for(anext(thread_ids), timeout=1) == "t-1"
-    assert any(record.thread_id == "t-1" for record in caplog.records)
+    assert any(getattr(record, "thread_id", None) == "t-1" for record in caplog.records)
+
+
+async def test_an_overflowing_subscriber_is_told_to_resync_once() -> None:
+    async with changes.subscribe() as thread_ids:
+        for index in range(changes._QUEUE_LIMIT * 2 + 10):
+            changes.publish_local(f"t-{index}")
+        received: list[str] = []
+        while True:
+            try:
+                received.append(await asyncio.wait_for(anext(thread_ids), timeout=0.05))
+            except TimeoutError:
+                break
+    assert received[0] == changes.RESYNC
+    assert received.count(changes.RESYNC) == 1
+    assert received[-1] == f"t-{changes._QUEUE_LIMIT * 2 + 9}"

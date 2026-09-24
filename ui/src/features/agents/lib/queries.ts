@@ -387,20 +387,30 @@ export function setAgentThreadResolved(
 }
 
 /**
- * Lay a pushed summary over every cached copy of the thread. A thread no list
- * holds yet is most likely one that just started, so the lists refetch.
+ * Lay a pushed summary over every cached copy of the thread. A list query that
+ * does not hold it yet, or would now order it differently, has to refetch: a
+ * run start is what brings a thread to the top of a sorted page.
+ *
+ * In-flight fetches are cancelled first, so a response that left the server
+ * before the change cannot land on top of it; the lists they were refreshing
+ * then refetch after the change instead.
  */
-export function applyAgentThreadUpdate(
+export async function applyAgentThreadUpdate(
   queryClient: QueryClient,
   thread: AgentThread
-): void {
-  let found = false
+): Promise<void> {
+  const detailKey = agentThreadKeys.detail(thread.id)
+  let missing = queryClient.isFetching({ queryKey: agentThreadKeys.lists }) > 0
+  await Promise.all([
+    queryClient.cancelQueries({ queryKey: agentThreadKeys.lists }),
+    queryClient.cancelQueries({ queryKey: detailKey, exact: true }),
+  ])
   queryClient.setQueriesData<InfiniteData<ThreadsPage>>(
     { queryKey: ["agent-threads", "lists", "infinite-pages"] },
     (prev) => {
       if (!prev) return prev
       const replaced = replaceThreadInPages(prev, thread)
-      found ||= replaced.found
+      missing ||= !replaced.found
       return replaced.value
     }
   )
@@ -409,18 +419,13 @@ export function applyAgentThreadUpdate(
     (prev) => {
       if (!prev) return prev
       const replaced = replaceThreadInPage(prev, thread)
-      found ||= replaced.found
+      missing ||= !replaced.found
       return replaced.value
     }
   )
   queryClient.setQueryData<Array<AgentThread>>(
     agentThreadKeys.pinned,
-    (prev) => {
-      if (!prev) return prev
-      const replaced = replaceThreadInList(prev, thread)
-      found ||= replaced.found
-      return replaced.value
-    }
+    (prev) => (prev ? replaceThreadInList(prev, thread).value : prev)
   )
   queryClient.setQueryData<AgentThread>(
     agentThreadKeys.sidebarActive(thread.id),
@@ -428,13 +433,12 @@ export function applyAgentThreadUpdate(
   )
   // Keeps the detail's age: a pushed summary must not hold off the detail
   // GET that its `staleTime` would otherwise allow.
-  const detailKey = agentThreadKeys.detail(thread.id)
   queryClient.setQueryData<AgentThread>(
     detailKey,
     (prev) => (prev ? mergeThreadSummary(prev, thread) : prev),
     { updatedAt: queryClient.getQueryState(detailKey)?.dataUpdatedAt }
   )
-  if (!found) invalidateAgentThreadLists(queryClient)
+  if (missing) invalidateAgentThreadLists(queryClient)
 }
 
 /** Apply pushed run starts and ends to the sidebar caches. Mount once. */
@@ -443,7 +447,8 @@ export function useThreadChanges(enabled: boolean): void {
   useEffect(() => {
     if (!enabled) return
     return connectThreadChanges({
-      onThreadUpdated: (thread) => applyAgentThreadUpdate(queryClient, thread),
+      onThreadUpdated: (thread) =>
+        void applyAgentThreadUpdate(queryClient, thread),
       onResync: () => invalidateAgentThreadLists(queryClient),
     })
   }, [enabled, queryClient])

@@ -84,7 +84,6 @@ export function connectThreadChanges(
   let source: EventSource | null = null
   let retry: ReturnType<typeof setTimeout> | null = null
   let attempt = 0
-  let connectedBefore = false
 
   const fail = async (ready: boolean) => {
     source?.close()
@@ -120,9 +119,9 @@ export function connectThreadChanges(
       ready = true
       attempt = 0
       setLive(true)
-      // Whatever changed while the feed was down was not announced.
-      if (connectedBefore) handlers.onResync()
-      connectedBefore = true
+      // Whatever changed before this subscription existed was not announced:
+      // on the first connection, a list fetch may have finished just before.
+      handlers.onResync()
     })
     current.addEventListener("thread-updated", (event) => {
       if (disposed || source !== current) return
