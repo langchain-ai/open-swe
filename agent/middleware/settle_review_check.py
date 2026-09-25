@@ -15,6 +15,7 @@ from langgraph.runtime import Runtime
 
 from agent.github.thread_token import get_github_token
 from agent.middleware.trace import scrub_middleware_inputs
+from agent.review.bot_token import mint_reviewer_github_token
 from agent.review.findings import get_thread_metadata
 from agent.review.publish import settle_review_check_run
 from agent.run_config import RunConfig
@@ -39,7 +40,7 @@ async def settle_review_check_on_exit(
         metadata = await get_thread_metadata(thread_id)
         if not isinstance(metadata.get("review_check_run_id"), int):
             return None
-        token = get_github_token()
+        token = get_github_token() or await mint_reviewer_github_token(cfg)
         if not token:
             logger.warning("No GitHub token to settle stale review check on thread %s", thread_id)
             return None

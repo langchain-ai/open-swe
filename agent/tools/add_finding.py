@@ -5,6 +5,7 @@ from typing import Annotated, Any
 from langgraph.prebuilt import InjectedState
 
 from agent.github.thread_token import get_github_token
+from agent.review.bot_token import mint_reviewer_github_token
 from agent.review.diff import compute_diff_line_set, fetch_pr_diff, is_range_in_diff
 from agent.review.findings import (
     DEFAULT_FINDING_TITLE,
@@ -134,7 +135,7 @@ async def _resolve_diff_context(
             return state_line_set, state_diff_text if isinstance(state_diff_text, str) else ""
     if cfg.diff_line_set is not None:
         return cfg.diff_line_set, cfg.diff_text or ""
-    token = get_github_token()
+    token = get_github_token() or await mint_reviewer_github_token(cfg)
     if cfg.repo and cfg.pr_number is not None and token:
         diff_text = await fetch_pr_diff(
             owner=cfg.repo.owner,

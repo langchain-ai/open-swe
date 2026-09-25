@@ -17,6 +17,7 @@ from agent.github.thread_token import (
     invalidate_cached_github_token,
 )
 from agent.review.assessment_feedback import ASSESSMENTS, PublishedAssessment
+from agent.review.bot_token import mint_reviewer_github_token
 from agent.review.diff import compute_diff_line_set, fetch_pr_diff, is_range_in_diff
 from agent.review.findings import (
     REVIEW_FINDING_CAP,
@@ -124,7 +125,7 @@ async def publish_review(
         except ReviewerThreadMissingError as exc:
             return thread_missing_tool_result(exc)
 
-    token = get_github_token()
+    token = get_github_token() or await mint_reviewer_github_token(cfg)
     if not token:
         return {"success": False, "error": "No GitHub token available"}
 

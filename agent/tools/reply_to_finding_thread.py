@@ -1,6 +1,7 @@
 from typing import Any
 
 from agent.github.thread_token import get_github_token
+from agent.review.bot_token import mint_reviewer_github_token
 from agent.review.findings import (
     FindingInteraction,
     ReviewerThreadMissingError,
@@ -24,7 +25,7 @@ async def reply_to_finding_thread(finding_id: str, body: str) -> dict[str, Any]:
     if not cfg.repo or cfg.pr_number is None:
         return {"success": False, "error": "Missing repo or PR info in run config"}
 
-    token = get_github_token()
+    token = get_github_token() or await mint_reviewer_github_token(cfg)
     if not token:
         return {"success": False, "error": "No GitHub token available"}
 

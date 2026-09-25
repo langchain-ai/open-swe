@@ -423,3 +423,43 @@ async def test_publish_review_invalidates_cached_token_on_401(
     assert "401" in result["error"]
     assert invalidated["calls"] == 1
     assert invalidated.get("thread_id") == "thread-xyz"
+
+
+@pytest.mark.asyncio
+async def test_publish_review_re_mints_bot_token_after_cached_one_expires(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import importlib
+
+    publish_review_module = importlib.import_module("agent.tools.publish_review")
+    bot_token_module = importlib.import_module("agent.review.bot_token")
+
+    config = {
+        "configurable": {
+            "thread_id": "thread-xyz",
+            "source": "github",
+            "repo": {"owner": "o", "name": "r"},
+            "pr_number": 7,
+            "head_sha": "deadbeef",
+        },
+    }
+    expiring = (datetime.now(UTC) + timedelta(seconds=30)).isoformat()
+    github_token.cache_github_token_for_thread(
+        "thread-xyz", "stale-token", expires_at=expiring, is_bot_token=True
+    )
+    fresh_expiry = (datetime.now(UTC) + timedelta(hours=1)).isoformat()
+    mint = AsyncMock(return_value=("fresh-token", fresh_expiry))
+    publish = AsyncMock(return_value={"success": True})
+
+    monkeypatch.setattr(publish_review_module, "get_config", lambda: config)
+    monkeypatch.setattr(github_token, "get_config", lambda: config)
+    monkeypatch.setattr(bot_token_module, "get_github_app_installation_token_with_expiry", mint)
+    monkeypatch.setattr(publish_review_module, "_publish_review_async", publish)
+    monkeypatch.setattr(publish_review_module, "_record_ranking", AsyncMock(return_value=None))
+
+    result = await publish_review_module.publish_review(ranking=[])
+
+    assert result == {"success": True}
+    assert publish.await_args.kwargs["token"] == "fresh-token"
+    mint.assert_awaited_once_with(repositories=["r"])
+    assert github_token.get_github_token(config) == "fresh-token"
