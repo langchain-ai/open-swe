@@ -56,7 +56,8 @@ jobs:
                 ($names | index("latest-mac.yml")) != null and
                 any($names[]; test("^Open-SWE-\($v)-.*-mac\\.zip$")) and
                 any($names[]; test("^Open-SWE-\($v)-.*\\.dmg$")) and
-                any($names[]; test("^Open-SWE-\($v)-.*-mac\\.zip\\.blockmap$"))
+                any($names[]; test("^Open-SWE-\($v)-.*-mac\\.zip\\.blockmap$")) and
+                (["oswe-darwin-arm64.tar.gz", "oswe-darwin-x64.tar.gz", "oswe-linux-arm64.tar.gz", "oswe-linux-x64.tar.gz", "oswe-SHA256SUMS"] - $names | length) == 0
               ' >/dev/null; then
                 echo "$tag already has a complete release"
                 exit 1
@@ -73,12 +74,16 @@ jobs:
         env:
           VERSION: ${{ steps.release.outputs.version }}
         run: |
-          node -e "const fs=require('fs'); const path='desktop/package.json'; const pkg=require('./'+path); pkg.version=process.env.VERSION; fs.writeFileSync(path, JSON.stringify(pkg, null, 2)+'\n')"
+          node -e "const fs=require('fs'); for (const path of ['desktop/package.json', 'cli/package.json']) { const pkg=require('./'+path); pkg.version=process.env.VERSION; fs.writeFileSync(path, JSON.stringify(pkg, null, 2)+'\n') }"
 
       - name: Set up Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: "24"
+
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: "1.4.2"
 
       - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
 
@@ -161,6 +166,7 @@ jobs:
           fi
 
           test -x "${apps[0]}/Contents/Resources/local-backend/runtime/bin/python3"
+          test "$("${apps[0]}/Contents/Resources/bin/oswe" --version)" = "$VERSION"
           codesign --verify --deep --strict --verbose=2 "${apps[0]}"
           xcrun stapler validate "${apps[0]}"
           spctl --assess --type execute --verbose=2 "${apps[0]}"
@@ -183,6 +189,47 @@ jobs:
             echo "update_metadata=desktop/dist/latest-mac.yml" >> "$GITHUB_OUTPUT"
             echo "update_blockmap=${mac_zips[0]}.blockmap" >> "$GITHUB_OUTPUT"
           fi
+
+      - name: Build standalone CLI binaries
+        id: cli
+        env:
+          VERSION: ${{ steps.release.outputs.version }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+        run: |
+          build="$RUNNER_TEMP/oswe"
+          assets="$RUNNER_TEMP/oswe-assets"
+          mkdir -p "$assets"
+          targets=(darwin-arm64 darwin-x64 linux-arm64 linux-x64)
+          for target in "${targets[@]}"; do
+            pnpm --filter open-swe-cli run compile --target="bun-${target}" --outfile "$build/${target}/oswe"
+          done
+
+          for target in darwin-arm64 darwin-x64; do
+            codesign --force --options runtime --timestamp \
+              --entitlements desktop/entitlements.mac.plist \
+              --keychain "$CSC_KEYCHAIN" --sign "Developer ID Application" \
+              "$build/${target}/oswe"
+            codesign --verify --strict --verbose=2 "$build/${target}/oswe"
+          done
+          test "$("$build/darwin-arm64/oswe" --version)" = "$VERSION"
+
+          (cd "$build" && zip -qr "$RUNNER_TEMP/oswe-notarize.zip" darwin-arm64 darwin-x64)
+          submission=$(xcrun notarytool submit "$RUNNER_TEMP/oswe-notarize.zip" \
+            --key "$APPLE_API_KEY_PATH" --key-id "$APPLE_API_KEY_ID" --issuer "$APPLE_API_ISSUER" \
+            --wait --output-format json)
+          echo "$submission"
+          if [ "$(jq -r .status <<<"$submission")" != "Accepted" ]; then
+            xcrun notarytool log "$(jq -r .id <<<"$submission")" \
+              --key "$APPLE_API_KEY_PATH" --key-id "$APPLE_API_KEY_ID" --issuer "$APPLE_API_ISSUER"
+            exit 1
+          fi
+
+          for target in "${targets[@]}"; do
+            COPYFILE_DISABLE=1 tar -czf "$assets/oswe-${target}.tar.gz" -C "$build/${target}" oswe
+          done
+          (cd "$assets" && shasum -a 256 oswe-*.tar.gz > oswe-SHA256SUMS)
+          echo "dir=$assets" >> "$GITHUB_OUTPUT"
 
       - name: Tag desktop version
         env:
@@ -207,6 +254,7 @@ jobs:
             ${{ steps.assets.outputs.app_zip }}
             ${{ steps.assets.outputs.update_metadata }}
             ${{ steps.assets.outputs.update_blockmap }}
+            ${{ steps.cli.outputs.dir }}/oswe-*
 
       - name: Generate tap token
         if: steps.release.outputs.prerelease == 'false'
