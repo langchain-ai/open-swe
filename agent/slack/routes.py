@@ -47,6 +47,7 @@ from agent.slack.responses import (
     ephemeral,
     ignored,
 )
+from agent.slack.run_feedback import FEEDBACK_ACTION, process_feedback
 from agent.slack.solo_threads import allow_solo_thread_followup
 from agent.slack.thread_feedback import handle_slack_feedback_interaction, is_slack_feedback_payload
 from agent.users import User
@@ -684,6 +685,13 @@ async def slack_interactivity(
     interaction = SlackInteraction.parse(payload)
     if interaction is None:
         return ignored("Invalid Slack interaction")
+    if interaction.type == "block_actions":
+        feedback_action = next(
+            (action for action in interaction.actions if action.action_id == FEEDBACK_ACTION), None
+        )
+        if feedback_action is not None:
+            background_tasks.add_task(process_feedback, interaction, feedback_action)
+            return {}
 
     if interaction.type == "block_suggestion" and interaction.container.type == "code_channel_view":
         if not (interaction.channel_id and interaction.container.view_id and interaction.action_id):

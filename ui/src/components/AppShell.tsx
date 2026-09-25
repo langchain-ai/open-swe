@@ -79,7 +79,7 @@ export function AppShell({
   return (
     <div className="flex h-svh overflow-hidden bg-background text-foreground">
       <AppSidebar user={user} />
-      <main className="flex-1 overflow-y-auto">
+      <main className="relative flex-1 overflow-y-auto">
         <div className={cn(PAGE_CONTAINER, className)}>
           <PageHeader
             action={action}

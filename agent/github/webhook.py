@@ -7,6 +7,8 @@ object (``common.X``) so tests that monkeypatch them keep working.
 from collections.abc import Collection, Iterable
 from typing import Any
 
+from pydantic import BaseModel, ValidationError
+
 from agent.baby_sit import handle_ci_webhook
 from agent.database import postgres
 from agent.github.comments import GitHubAuthError
@@ -828,7 +830,86 @@ async def process_github_ci_event(
     await handle_ci_webhook(payload, event_type, delivery_id=delivery_id)
 
 
-async def process_github_pr_comment(payload: dict[str, Any], event_type: str) -> None:
+_UNTAGGED_PR_TRIGGER_EVENTS = frozenset(["issue_comment", "pull_request_review"])
+
+
+class _GitHubAccount(BaseModel):
+    login: str
+
+
+class _GitHubRepository(BaseModel):
+    name: str
+    owner: _GitHubAccount
+
+
+class _GitHubPrOrIssue(BaseModel):
+    number: int
+    state: str
+    pull_request: dict[str, object] | None = None
+
+
+class _UntaggedPrEvent(BaseModel):
+    action: str
+    sender: _GitHubAccount
+    repository: _GitHubRepository
+    pull_request: _GitHubPrOrIssue | None = None
+    issue: _GitHubPrOrIssue | None = None
+
+
+class _AuthoredItem(BaseModel):
+    user: _GitHubAccount | None = None
+
+
+class _PrAuthorEvent(BaseModel):
+    pull_request: _AuthoredItem | None = None
+    issue: _AuthoredItem | None = None
+
+    @classmethod
+    def author_of(cls, payload: dict[str, Any]) -> str:
+        """The PR author a comment webhook names, or ``""`` when it names none."""
+        try:
+            event = cls.model_validate(payload)
+        except ValidationError:
+            common.logger.info("GitHub comment payload has no readable PR author", exc_info=True)
+            return ""
+        item = event.pull_request or event.issue
+        return item.user.login if item is not None and item.user is not None else ""
+
+
+async def is_accepted_commenter(login: str) -> bool:
+    """Only registered Open SWE users may prompt the agent from GitHub comments."""
+    return bool(await User.known_logins([login]))
+
+
+async def untagged_agent_pr_thread_id(payload: dict[str, Any], event_type: str) -> str | None:
+    """The agent thread an untagged comment or review on a PR it opened should wake."""
+    if event_type not in _UNTAGGED_PR_TRIGGER_EVENTS:
+        return None
+    try:
+        event = _UntaggedPrEvent.model_validate(payload)
+    except ValidationError:
+        common.logger.info(
+            "Ignoring untagged GitHub event with an unexpected payload shape",
+            extra={"github_event": event_type},
+            exc_info=True,
+        )
+        return None
+    if event.action not in common.SUPPORTED_GH_COMMENT_ACTIONS[event_type]:
+        return None
+    target = event.pull_request if event_type == "pull_request_review" else event.issue
+    if target is None or target.state != "open":
+        return None
+    if event_type == "issue_comment" and target.pull_request is None:
+        return None
+    pull_request = await PullRequest.get(
+        event.repository.owner.login, event.repository.name, target.number
+    )
+    return pull_request.agent_thread_id if pull_request is not None else None
+
+
+async def process_github_pr_comment(
+    payload: dict[str, Any], event_type: str, *, agent_thread_id: str | None = None
+) -> None:
     """Process a GitHub PR comment that tagged @open-swe.
 
     Retrieves the existing thread token, reacts with 👀, fetches all comments
@@ -857,7 +938,7 @@ async def process_github_pr_comment(payload: dict[str, Any], event_type: str) ->
         branch_name,
     )
 
-    thread_id = thread_id_from_branch(branch_name) if branch_name else None
+    thread_id = agent_thread_id or (thread_id_from_branch(branch_name) if branch_name else None)
     if not thread_id:
         if not pr_number:
             common.logger.warning(
@@ -899,6 +980,18 @@ async def process_github_pr_comment(payload: dict[str, Any], event_type: str) ->
                 exc_info=True,
             )
 
+    if agent_thread_id is not None:
+        agent_metadata = await common.get_thread_metadata_safe(thread_id)
+        if agent_metadata is None:
+            common.logger.info(
+                "Ignoring untagged PR comment for a missing agent thread",
+                extra={"thread_id": thread_id, "pr_number": pr_number},
+            )
+            return
+        if common.thread_is_private(agent_metadata) and not common.thread_is_promptable(
+            agent_metadata, github_login
+        ):
+            return
     email = await User.email_for_login(github_login) or ""
     if email:
         thread_metadata = await common.authorize_github_thread(thread_id, github_login)
@@ -940,8 +1033,11 @@ async def process_github_pr_comment(payload: dict[str, Any], event_type: str) ->
         return
 
     event = payload.get("review" if event_type == "pull_request_review" else "comment", {})
+    event_body = event.get("body") or ""
+    if event_type == "pull_request_review" and not event_body:
+        event_body = f"_Submitted a review: {event.get('state', 'commented')}_"
     event_comment = {
-        "body": event.get("body", ""),
+        "body": event_body,
         "author": event.get("user", {}).get("login", ""),
         "created_at": event.get("submitted_at") or event.get("created_at", ""),
         "event_at": event.get("updated_at") if payload.get("action") == "edited" else None,
@@ -961,8 +1057,13 @@ async def process_github_pr_comment(payload: dict[str, Any], event_type: str) ->
     ):
         return
 
+    fetch_comments = (
+        common.fetch_pr_comments_since_last_tag
+        if agent_thread_id is None
+        else common.fetch_pr_event_comments
+    )
     try:
-        comments = await common.fetch_pr_comments_since_last_tag(
+        comments = await fetch_comments(
             repo_config,
             pr_number,
             token=github_token,
@@ -974,7 +1075,7 @@ async def process_github_pr_comment(payload: dict[str, Any], event_type: str) ->
         if not github_token:
             common.logger.warning("Re-auth failed for thread %s after 401; skipping", thread_id)
             return
-        comments = await common.fetch_pr_comments_since_last_tag(
+        comments = await fetch_comments(
             repo_config,
             pr_number,
             token=github_token,
@@ -987,6 +1088,28 @@ async def process_github_pr_comment(payload: dict[str, Any], event_type: str) ->
 
     trusted = await _trusted_authors(github_login, comments=comments)
     prompt = common.build_pr_prompt(comments, pr_url, repo_config=repo_config, trusted=trusted)
+    pr_author = _PrAuthorEvent.author_of(payload)
+    author_logins: set[str] = set()
+    if postgres.configured() and repo is not None:
+        try:
+            stored = await PullRequest.get(repo.owner, repo.name, pr_number)
+            pull_request = (
+                stored
+                if stored is not None and stored.author
+                else PullRequest(
+                    owner=repo.owner, repo=repo.name, number=pr_number, author=pr_author
+                )
+            )
+            pr_author = pull_request.author
+            for login in {str(item.get("author") or "") for item in comments}:
+                if login and await pull_request.is_authored_by(login):
+                    author_logins.add(login)
+        except Exception:  # noqa: BLE001
+            common.logger.warning(
+                "Failed to resolve the PR author for GitHub comments",
+                extra={"pr_repo_full_name": f"{repo.owner}/{repo.name}", "pr_number": pr_number},
+                exc_info=True,
+            )
     messages = []
     introduced: set[str] = {_github_person(github_login, github_user_id)["id"]}
     for item in comments:
@@ -1005,7 +1128,8 @@ async def process_github_pr_comment(payload: dict[str, Any], event_type: str) ->
                     "surface": "github",
                     "kind": "human",
                     "data": {
-                        "pull_request": {"number": pr_number, "url": pr_url},
+                        "pull_request": {"number": pr_number, "url": pr_url, "author": pr_author},
+                        "sender_is_pr_author": str(author in author_logins).lower(),
                         "comment_type": str(item.get("type", "comment")),
                         "path": str(item.get("path", "")),
                         "line": str(item.get("line", "")),

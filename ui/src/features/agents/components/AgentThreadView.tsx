@@ -150,7 +150,10 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
     (model) => model.id === activeSelection?.modelId
   )
   const baseMessages = source.messages
-  const isStreaming = thread.status === "running" || source.isRunning
+  const isStreaming =
+    source.kind === "transcript"
+      ? source.isRunning
+      : thread.status === "running" || source.isRunning
   // Server truth: follow-ups queued behind the live run, from the transcript.
   const queued = source.queued
   const login = session.data?.login
