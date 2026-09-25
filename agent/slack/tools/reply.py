@@ -302,8 +302,8 @@ def build_pr_approval_blocks(
         {
             "type": "actions",
             "elements": [
-                _button("Approve once", "approve", "primary"),
-                _button("Always allow from this requester", "always_allow", "primary"),
+                _button("Approve", "approve", "primary"),
+                _button("Always allow", "always_allow", "primary"),
                 _button("Deny", "reject", "danger"),
             ],
         },

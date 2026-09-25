@@ -232,19 +232,6 @@ class User(Base):
         return user is not None and user.typed_preferences.concierge_mode
 
     @classmethod
-    async def always_allow_pr_attribution(
-        cls, author_login: str, requester_login: str
-    ) -> UserPreferences | None:
-        """Let ``requester_login`` open PRs as ``author_login`` without asking again."""
-        preferences = await cls.preferences_for_login(author_login)
-        if preferences.allows_pr_attribution_from(requester_login):
-            return preferences
-        requesters = [*preferences.pr_attribution_requesters, requester_login.lower()]
-        return await cls.update_preferences(
-            author_login, UserPreferencesPatch(pr_attribution_requesters=requesters)
-        )
-
-    @classmethod
     async def update_preferences(
         cls, login: str, patch: UserPreferencesPatch
     ) -> UserPreferences | None:

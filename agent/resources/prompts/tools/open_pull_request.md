@@ -56,8 +56,8 @@ Returns:
     returned — read it and decide what to do next.
 
 Shared threads and attribution approval:
-    In a thread with more than one participant, a PR attributed to someone other
-    than the triggering person first needs that person's approval. The tool
+    In a thread with more than one participant, a PR first needs the approval of
+    the person it opens as, unless they chose "Always allow". The tool
     DMs them an approval card in Slack and waits up to 60 seconds: on
     approval it proceeds (retry the identical call if it returned pending), on
     denial or timeout it returns ``pr_approval: pending|denied`` with

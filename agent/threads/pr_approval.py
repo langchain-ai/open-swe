@@ -1,12 +1,10 @@
-"""Human approval for opening a PR as someone else in a shared thread.
+"""The PR author's approval before Open SWE opens a PR as them in a shared thread.
 
-When a run is triggered by a person who is not the person the PR is attributed
-to — a shared Slack thread where a participant asks the bot to publish as
-another participant — the PR author gets the final say, once per thread. The
-tool DMs the author a Block Kit card and waits briefly for the decision; a
-callback interrupts the active run with it. An author can approve once or store
-an "always allow" preference keyed by requester, and a thread with a single
-participant never asks.
+In a thread with more than one participant, anyone there can steer the run, so
+whoever the PR opens as gets the final say, once per thread. The tool DMs them a
+Block Kit card and waits briefly for the decision; a callback interrupts the
+active run with it. "Always allow" skips the card from then on, and a thread
+with a single participant never asks.
 """
 
 import hashlib
@@ -17,7 +15,8 @@ from uuid import uuid4
 from langgraph_sdk import get_client
 
 from agent.store import now_iso
-from agent.users import User
+from agent.users import User, UserPreferencesPatch
+from agent.utils.thread_participants import PARTICIPANT_LOGINS_KEY, participant_logins
 
 logger = logging.getLogger(__name__)
 
@@ -35,11 +34,19 @@ def pr_approval_fingerprint(*, thread_id: str, author_login: str) -> str:
     return hashlib.sha256(raw.encode()).hexdigest()[:16]
 
 
-async def get_pr_approvals(thread_id: str) -> dict[str, dict[str, Any]]:
-    client = get_client()
-    thread = await client.threads.get(thread_id)
+async def _thread_metadata(thread_id: str) -> dict[str, Any] | None:
+    thread = await get_client().threads.get(thread_id)
     metadata = thread.get("metadata") if isinstance(thread, dict) else None
-    return _approvals_from_metadata(metadata if isinstance(metadata, dict) else None)
+    return metadata if isinstance(metadata, dict) else None
+
+
+async def is_shared_thread(thread_id: str) -> bool:
+    metadata = await _thread_metadata(thread_id) or {}
+    return len(participant_logins(metadata.get(PARTICIPANT_LOGINS_KEY))) > 1
+
+
+async def get_pr_approvals(thread_id: str) -> dict[str, dict[str, Any]]:
+    return _approvals_from_metadata(await _thread_metadata(thread_id))
 
 
 def _approvals_from_metadata(metadata: dict[str, Any] | None) -> dict[str, dict[str, Any]]:
@@ -71,7 +78,6 @@ async def ensure_pr_approval_pending(
     *,
     fingerprint: str,
     author_login: str,
-    requester_login: str,
     owner: str,
     repo: str,
     head: str,
@@ -88,7 +94,6 @@ async def ensure_pr_approval_pending(
 
     fields = {
         "author_login": author_login,
-        "requester_login": requester_login,
         "owner": owner,
         "repo": repo,
         "head": head,
@@ -131,13 +136,13 @@ async def decide_pr_approval(
     record["status"] = PR_APPROVAL_APPROVED if approved else PR_APPROVAL_REJECTED
     record["decided_at"] = now_iso()
     record["decided_by"] = actor
-    requester = record.get("requester_login")
-    if always_allow and isinstance(requester, str) and requester:
+    if always_allow:
         author = str(record.get("author_login") or actor)
-        if await User.always_allow_pr_attribution(author, requester) is None:
+        patch = UserPreferencesPatch(pr_attribution_always_allowed=True)
+        if await User.update_preferences(author, patch) is None:
             logger.warning(
                 "No user row to store the PR attribution preference on",
-                extra={"author_login": author, "requester_login": requester},
+                extra={"author_login": author},
             )
     approvals[fingerprint] = record
     await _save_approvals(thread_id, approvals)

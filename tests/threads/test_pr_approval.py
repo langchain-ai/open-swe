@@ -8,7 +8,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 from agent.threads import pr_approval
-from agent.users import User, UserPreferences
+from agent.users import User, UserPreferences, UserPreferencesPatch
 
 reply = importlib.import_module("agent.slack.tools.reply")
 
@@ -43,7 +43,6 @@ def _thread_record(fingerprint: str, **overrides: object) -> dict[str, object]:
         "fingerprint": fingerprint,
         "status": pr_approval.PR_APPROVAL_PENDING,
         "author_login": "alice",
-        "requester_login": "bob",
         "notified": False,
         "requested_at": "2026-01-01T00:00:00+00:00",
     }
@@ -67,7 +66,6 @@ async def test_pending_record_created_once_and_idempotent(fake_store) -> None:
         kwargs = {
             "fingerprint": "fp1",
             "author_login": "alice",
-            "requester_login": "bob",
             "owner": "o",
             "repo": "r",
             "head": "h",
@@ -92,10 +90,10 @@ async def test_pending_record_created_once_and_idempotent(fake_store) -> None:
 async def test_decision_records_actor_and_always_allow(fake_store) -> None:
     metadata: dict[str, object] = {"pr_approvals": {"fp1": _thread_record("fp1")}}
     client, _update = _client(metadata)
-    allow = AsyncMock(return_value=UserPreferences(pr_attribution_requesters=["bob"]))
+    allow = AsyncMock(return_value=UserPreferences(pr_attribution_always_allowed=True))
     with pytest.MonkeyPatch.context() as mp:
         mp.setattr(pr_approval, "get_client", lambda: client)
-        mp.setattr(User, "always_allow_pr_attribution", allow)
+        mp.setattr(User, "update_preferences", allow)
 
         record = await pr_approval.decide_pr_approval(
             "thread-1", "fp1", approved=True, actor="alice", always_allow=True
@@ -103,7 +101,9 @@ async def test_decision_records_actor_and_always_allow(fake_store) -> None:
         assert record is not None
         assert record["status"] == pr_approval.PR_APPROVAL_APPROVED
         assert record["decided_by"] == "alice"
-        allow.assert_awaited_once_with("alice", "bob")
+        allow.assert_awaited_once_with(
+            "alice", UserPreferencesPatch(pr_attribution_always_allowed=True)
+        )
 
         assert (
             await pr_approval.decide_pr_approval("thread-1", "missing", approved=True, actor="a")

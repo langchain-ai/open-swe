@@ -39,6 +39,7 @@ from agent.threads.pr_approval import (
     PR_APPROVAL_REJECTED,
     ensure_pr_approval_pending,
     get_pr_approvals,
+    is_shared_thread,
     mark_pr_approval_notified,
     pr_approval_fingerprint,
 )
@@ -177,7 +178,8 @@ def _pr_approval_pending_payload(
     return {
         "success": False,
         "error": (
-            "The PR would be attributed to another person, and their approval is required. "
+            "This thread has more than one participant, so the PR author must approve "
+            "opening it under their name. "
             f"Reason: {decided_text} Branch pushed: {owner}/{repo}:{head}. PR created: no."
         ),
         "pr_approval": decided or "pending",
@@ -203,26 +205,22 @@ async def _pr_approval(
 ) -> dict[str, Any] | None:
     """The pending-approval payload when a shared thread needs the author's sign-off.
 
-    Runs the Block Kit approval card for a PR attributed to someone other than
-    the triggering user: a stored "always allow" pre-authorizes it, a shared
-    thread with a single participant never asks, and otherwise the tool waits
-    up to 60 seconds for the author's decision before returning ``pending`` —
-    the approval callback interrupts the run so the model can retry.
+    In a thread with more than one participant, whoever the PR opens as must
+    approve it, unless they chose "Always allow". The tool waits up to 60
+    seconds for the decision before returning ``pending``; the approval
+    callback interrupts the run so the model can retry.
     """
-    if kind != "user" or not cfg.thread_id:
+    if kind != "user" or not cfg.thread_id or not await is_shared_thread(cfg.thread_id):
         return None
     author_login = await pr_author_login(author)
     if not author_login:
-        return None
-    requester_login = (cfg.github_login or "").strip()
-    if not requester_login or requester_login.lower() == author_login.lower():
         return None
     from agent.slack.client import post_slack_top_level_message_with_ts
     from agent.slack.tools.reply import build_pr_approval_blocks
     from agent.users import User
 
     author = await User.for_login("github", author_login)
-    if author is not None and author.typed_preferences.allows_pr_attribution_from(requester_login):
+    if author is not None and author.typed_preferences.pr_attribution_always_allowed:
         return None
 
     fingerprint = pr_approval_fingerprint(thread_id=cfg.thread_id, author_login=author_login)
@@ -260,7 +258,6 @@ async def _pr_approval(
         cfg.thread_id,
         fingerprint=fingerprint,
         author_login=author_login,
-        requester_login=requester_login,
         owner=owner,
         repo=repo,
         head=head,
@@ -272,10 +269,9 @@ async def _pr_approval(
         thread_url = dashboard_thread_url(cfg.thread_id)
         thread_link = f"<{thread_url}|this thread>" if thread_url else "a shared thread"
         message = (
-            f":raised_hand: `{requester_login}` asked Open SWE to open a PR as you in "
-            f"{thread_link}.\n\n"
+            f":raised_hand: Open SWE wants to open a PR as you in {thread_link}.\n\n"
             f"*{title}*\n`{owner}/{repo}` — `{head}` → `{base}`\n\n"
-            "Approve once, always allow this requester, or deny."
+            "Approve, always allow, or deny."
         )
         message_ts, _error = await post_slack_top_level_message_with_ts(
             author_slack_id,
