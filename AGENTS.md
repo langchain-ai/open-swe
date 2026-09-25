@@ -39,6 +39,7 @@ The main agent is assembled in `agent/server.py` from the middleware in `agent/m
 - Create database migrations with `make migration m="Short description"`.
 - Use structured logging with a static message and values in `extra`; never interpolate values into log messages. Avoid standard `LogRecord` field names in `extra`.
 - Prefer making API write operations exposed through UI controls available as appropriately authorized agent tools, but treat this as a guideline, not a requirement. Direct UI controls may ship without a corresponding tool, especially for secret input until a secure tool-driven input flow exists. Do not add a tool when the agent can already do the same thing through a CLI in its sandbox, such as the authenticated `gh`.
+- A person's concierge DM thread must know everything that happens in their DM with the bot. Anything Open SWE posts into that DM outside the concierge thread's own run (approval cards, notifications, messages from other threads or schedules), and every button the person clicks there, must reach the concierge thread's context. Never add a DM post or DM button without that.
 - Never discard an error. Every `except` either propagates (re-raise, or raise a more useful error) or logs what it swallowed — a bare `except ...: return None` / `pass` hides the failure from everyone debugging it later.
 
 ## Testing
