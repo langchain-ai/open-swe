@@ -22,8 +22,8 @@ from pydantic import BaseModel, TypeAdapter
 
 CONFLICT_LIMIT = 10
 PROMPT_PATH = Path(".github/prompts/resolve_preview_conflict.md")
-ADDED_CONFLICT_MARKER = re.compile(r"^\+(<{7}|>{7})( |$)")
-AGENT_HIDDEN_ENV = frozenset({"GH_TOKEN", "GITHUB_TOKEN"})
+MERGED_LINE = re.compile(r"merged:((?: \d+)*)")
+LEFT_OUT_LINE = re.compile(r"#(\d+): (.+)")
 AGENT_INTERRUPT_GRACE_SECONDS = 60
 RERERE_NOTE = "conflicts resolved from the rerere cache"
 AGENT_NOTE = "conflicts resolved by oswe"
@@ -159,10 +159,6 @@ async def rev_parse(ref: str) -> str:
     return (await git("rev-parse", ref)).stdout.strip()
 
 
-async def is_ancestor(ancestor: str, descendant: str) -> bool:
-    return (await git("merge-base", "--is-ancestor", ancestor, descendant, check=False)).code == 0
-
-
 async def remote_refs(pattern: str) -> list[str]:
     listing = (await git("ls-remote", "origin", pattern)).stdout
     return [line.split("\t", 1)[1] for line in listing.splitlines() if "\t" in line]
@@ -213,6 +209,7 @@ class Merged:
 @dataclass(frozen=True)
 class Conflicted:
     paths: tuple[str, ...]
+    agent_note: str | None = None
 
 
 @dataclass(frozen=True)
@@ -255,17 +252,35 @@ class Pending:
     conflicts: tuple[str, ...]
 
 
-async def resolve_with_agent(prompt: str, pending: list[Pending], timeout: float) -> None:
-    """One oswe run merges every conflicting PR; commits it leaves that fail review are dropped."""
+@dataclass(frozen=True)
+class AgentReport:
+    merged: frozenset[int]
+    reasons: dict[int, str]
+
+    @classmethod
+    def parse(cls, stdout: str) -> Self | None:
+        """The report in the prompt's format, or None when stdout does not follow it."""
+        lines = stdout.strip().splitlines()
+        if not lines or not (head := MERGED_LINE.fullmatch(lines[0])):
+            return None
+        reasons: dict[int, str] = {}
+        for line in lines[1:]:
+            if not (left_out := LEFT_OUT_LINE.fullmatch(line)):
+                return None
+            reasons[int(left_out.group(1))] = left_out.group(2)
+        return cls(frozenset(int(number) for number in head.group(1).split()), reasons)
+
+
+async def resolve_with_agent(
+    prompt: str, pending: list[Pending], timeout: float
+) -> AgentReport | None:
+    """Hand every conflicting PR to one oswe run and return what it reports doing."""
     before = await rev_parse("HEAD")
-    listing = "\n".join(f"{item.sha} {item.pull.merge_message}" for item in pending)
-    env = {name: value for name, value in os.environ.items() if name not in AGENT_HIDDEN_ENV}
+    listing = "\n".join(f"#{item.pull.number} {item.sha} {item.pull.title}" for item in pending)
     print(f"merging {len(pending)} conflicting PR(s) with oswe", file=sys.stderr, flush=True)
-    proc = await asyncio.create_subprocess_exec(
-        "oswe", "run", prompt, stdin=PIPE, stdout=sys.stderr, env=env
-    )
+    proc = await asyncio.create_subprocess_exec("oswe", "run", prompt, stdin=PIPE, stdout=PIPE)
     try:
-        await asyncio.wait_for(proc.communicate(listing.encode()), timeout)
+        stdout, _ = await asyncio.wait_for(proc.communicate(listing.encode()), timeout)
     except TimeoutError:
         warn(f"oswe ran past {timeout:.0f}s; interrupting it")
         proc.send_signal(signal.SIGINT)
@@ -274,18 +289,17 @@ async def resolve_with_agent(prompt: str, pending: list[Pending], timeout: float
         except TimeoutError:
             proc.kill()
             await proc.wait()
-    if proc.returncode != 0:
-        warn(f"oswe exited {proc.returncode}; keeping only the merges it completed")
-    await git("merge", "--abort", check=False)
+        stdout = b""
+    report = stdout.decode()
+    print(report, file=sys.stderr, flush=True)
     await discard_uncommitted()
-    if not await is_ancestor(before, "HEAD"):
-        warn("oswe rewrote the preview history; discarding its merges")
-        await restore_head(before)
-        return
-    diff = (await git("diff", before, "HEAD")).stdout
-    if any(ADDED_CONFLICT_MARKER.match(line) for line in diff.splitlines()):
-        warn("oswe committed conflict markers; discarding its merges")
-        await restore_head(before)
+    if parsed := AgentReport.parse(report):
+        return parsed
+    warn(
+        f"oswe exited {proc.returncode} without a report in the required format; discarding its work"
+    )
+    await restore_head(before)
+    return None
 
 
 def conflict_marker(sha: str, paths: tuple[str, ...]) -> str:
@@ -399,8 +413,10 @@ The preview resets to plain `main` every {s.reset_days} days, in the
 
     async def skip_pull(self, pull: Pull, sha: str, outcome: Conflicted | Unmergeable) -> None:
         match outcome:
-            case Conflicted(paths=paths):
+            case Conflicted(paths=paths, agent_note=None):
                 reason = "merge conflict with the preview tree"
+            case Conflicted(paths=paths, agent_note=note):
+                reason = f"merge conflict with the preview tree; oswe left it out: {note}"
             case Unmergeable(reason=reason):
                 paths = ()
         unlabelled = ""
@@ -490,13 +506,15 @@ The preview resets to plain `main` every {s.reset_days} days, in the
                     await self.skip_pull(item.pull, item.sha, failed)
         if not remaining:
             return
-        await resolve_with_agent(prompt, remaining, self.settings.agent_timeout_seconds)
+        report = await resolve_with_agent(prompt, remaining, self.settings.agent_timeout_seconds)
         for item in remaining:
-            if await is_ancestor(item.sha, "HEAD"):
+            number = item.pull.number
+            if report is not None and number in report.merged:
                 self.included.append(f"{item.pull.link} — `{item.sha[:7]}` — {AGENT_NOTE}")
                 self.agent_resolved = True
             else:
-                await self.skip_pull(item.pull, item.sha, Conflicted(item.conflicts))
+                note = report.reasons.get(number) if report is not None else None
+                await self.skip_pull(item.pull, item.sha, Conflicted(item.conflicts, note))
 
     def write_summary(self, base_sha: str) -> None:
         summary(

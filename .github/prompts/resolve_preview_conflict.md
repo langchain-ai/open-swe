@@ -1,5 +1,14 @@
-This checkout is the preview deployment being assembled: `main` plus every labelled pull request that merged cleanly. The pull requests listed below (`<sha> <merge message>`) conflicted with it. Get as many of them as you can into the preview on top of `HEAD`, each as its own merge commit, with the result behaving the way both sides intended.
+This checkout is the preview deployment being assembled: `main` plus every labelled pull request that merged cleanly. The pull requests listed below (`#<number> <head sha> <title>`) conflicted with it. Get them into the preview on top of `HEAD`, with the result behaving the way every side intended. Whatever is committed on `HEAD` when you finish is what deploys.
 
-Only the commits you add on top of `HEAD` are kept; existing history must stay as it is and nothing is pushed. A pull request you cannot merge confidently is better left out than merged wrong.
+Finish with `cli_result`. A script parses `stdout`, so it must follow this format exactly:
 
-Finish with `cli_result`: say what you merged and what you left out and why, with `exit_code` 0 if everything went in.
+```
+merged: <numbers>
+#<number>: <reason>
+```
+
+- The first line is `merged:` followed by the numbers of every listed pull request now in the preview, each preceded by a single space, without `#` (`merged: 12 34`). If none went in, the line is just `merged:`.
+- Then one `#<number>: <reason>` line for each listed pull request you left out, with a one-sentence reason. Nothing for the ones you merged.
+- No other lines, no Markdown, no code fences.
+
+`exit_code` is 0 if every listed pull request is merged, 1 otherwise.
