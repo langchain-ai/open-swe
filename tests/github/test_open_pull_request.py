@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, MagicMock, call, patch
 import httpx2
 import langgraph_sdk
 import pytest
+from langchain_core.messages import AIMessage, HumanMessage
 
 import agent.tools.open_pull_request  # noqa: F401
 
@@ -634,6 +635,19 @@ def test_footer_names_the_model_that_opened_the_pr(
         (
             {"selected_model_id": "openai:gpt-6-sol", "selected_effort": "high"},
             "openai:gpt-6-sol (high)",
+        ),
+        (
+            {
+                "selected_model_id": "openai:gpt-6-sol",
+                "selected_effort": "high",
+                "messages": [
+                    HumanMessage(content="request"),
+                    AIMessage(
+                        content="answer", response_metadata={"model_name": "claude-opus-5-5"}
+                    ),
+                ],
+            },
+            "claude-opus-5-5",
         ),
     ],
 )

@@ -38,6 +38,7 @@ from agent.threads.plan_store import get_plan_content
 from agent.utils.authorship import PR_ATTRIBUTION_TEXT, add_pr_collaboration_note
 from agent.utils.dashboard_links import dashboard_plan_url, dashboard_thread_url
 from agent.utils.langsmith import create_langsmith_thread_feedback
+from agent.utils.run_usage import summarize_run_usage
 
 logger = logging.getLogger(__name__)
 
@@ -912,10 +913,17 @@ async def _stamp_attribution_footer(body: str, state: dict[str, Any] | None = No
     cfg = _configurable()
     model_id: str | None = cfg.resolved_agent_model_id
     effort: str | None = cfg.resolved_agent_effort
-    if isinstance(state, dict) and isinstance(state.get("selected_model_id"), str):
-        model_id = state["selected_model_id"]
-        effort = state.get("selected_effort")
-    if cfg.thread_id and not (isinstance(state, dict) and state.get("selected_model_id")):
+    selected = state.get("selected_model_id") if isinstance(state, dict) else None
+    if isinstance(selected, str) and selected:
+        model_id = selected
+        effort = state.get("selected_effort") if isinstance(state, dict) else None
+        usage = summarize_run_usage(state, invocation_id=cfg.invocation_id or None)
+        if usage is not None and usage.models:
+            reported = {name.rsplit("/", 1)[-1].rsplit(":", 1)[-1] for name in usage.models}
+            if reported != {selected.rsplit("/", 1)[-1].rsplit(":", 1)[-1]}:
+                model_id = ", ".join(usage.models)
+                effort = None
+    if cfg.thread_id and not selected:
         try:
             thread = await get_client().threads.get(cfg.thread_id)
             metadata = thread.get("metadata") if isinstance(thread, dict) else None
