@@ -330,7 +330,11 @@ async def test_private_read_exposes_all_ordinary_settings_only_for_requester(
     assert result["participants"] == [
         {
             "login": "Alice",
-            "profile": {**ordinary, "concierge_mode": False},
+            "profile": {
+                **ordinary,
+                "concierge_mode": False,
+                "experimental": {"pr_comment_triggers": False},
+            },
             "preferences": {
                 "default_workspace": "mine",
                 "default_visibility": "private",
