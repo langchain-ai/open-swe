@@ -33,8 +33,12 @@ async def save_user_settings(settings: dict[str, SettingValue]) -> dict[str, obj
         return {"ok": False, "error": "Could not verify the private thread requester"}
     if not login:
         return {"ok": False, "error": "Personal settings require an authenticated private thread"}
-    if "concierge_mode" in settings:
-        return {"ok": False, "error": "Change concierge_mode in the dashboard settings instead"}
+    for dashboard_only in ("concierge_mode", "experimental"):
+        if dashboard_only in settings:
+            return {
+                "ok": False,
+                "error": f"Change {dashboard_only} in the dashboard settings instead",
+            }
     try:
         updated = await patch_personal_settings(login, settings)
     except ValueError as exc:

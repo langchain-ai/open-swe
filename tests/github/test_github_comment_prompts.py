@@ -1,5 +1,6 @@
 from typing import Any
 
+import pytest
 from langchain_core.callbacks.manager import CallbackManagerForLLMRun
 from langchain_core.language_models import BaseChatModel
 from langchain_core.language_models.base import LangSmithParams
@@ -83,6 +84,20 @@ def test_construct_system_prompt_renders_working_environment_path() -> None:
         working_environment = prompt.split("---", 1)[0]
         assert "`/workspace/project`" in working_environment
         assert "{working_dir}" not in working_environment
+
+
+@pytest.mark.parametrize(
+    ("source", "pr_comment_triggers", "has_rules"),
+    [("github", True, True), ("github", False, False), ("slack", True, False)],
+)
+def test_pr_author_rules_follow_the_threads_experimental_flag(
+    source: str, pr_comment_triggers: bool, has_rules: bool
+) -> None:
+    prompt = construct_system_prompt(
+        working_dir="/workspace", source=source, pr_comment_triggers=pr_comment_triggers
+    )
+
+    assert ("sender_is_pr_author" in prompt) is has_rules
 
 
 def test_background_task_prompt_continues_without_acknowledging() -> None:

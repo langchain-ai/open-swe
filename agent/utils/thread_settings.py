@@ -37,6 +37,7 @@ class ThreadSettings(TypedDict, total=False):
     model_routing_enabled: bool
     routing_models: dict[str, ThreadModel]
     repo_instructions: str | None
+    experimental: dict[str, bool]
 
 
 _THREAD_SETTINGS_ADAPTER = TypeAdapter(ThreadSettings)

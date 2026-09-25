@@ -82,6 +82,7 @@ from agent.dashboard.workspace_settings import WorkspaceSettings, get_workspace_
 from agent.dashboard.workspace_settings_cache import cached_workspace_settings
 from agent.desktop import create_desktop_backend, desktop_artifact_routes, is_desktop_run
 from agent.desktop_branch import schedule_worktree_branch_rename
+from agent.experimental import ExperimentalFeatures
 from agent.github.token import resolve_github_token
 from agent.input_messages import (
     dynamic_context_hash,
@@ -813,6 +814,7 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
         draft_prs: bool,
         recent_thread_context_enabled: bool,
         admin_workspaces: bool,
+        experimental: ExperimentalFeatures | None = None,
         model_selection: ModelSelectionMiddleware | None = None,
         routing_defaults: Mapping[str, tuple[str, str | None]] | None = None,
         credential_login: str | None = None,
@@ -832,6 +834,7 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
         self._draft_prs = draft_prs
         self._recent_thread_context_enabled = recent_thread_context_enabled
         self._admin_workspaces = admin_workspaces
+        self._experimental = experimental or ExperimentalFeatures()
         self._model_selection = model_selection
         self._routing_defaults = dict(routing_defaults or {})
 
@@ -1099,6 +1102,7 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
                 continued_from_collaborative=bool(cfg.continued_from_thread_id),
                 local_checkout=bridged,
                 recent_thread_context=recent_thread_context,
+                pr_comment_triggers=self._experimental.enabled("pr_comment_triggers"),
             ),
         }
 
@@ -1283,10 +1287,17 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
     cfg.draft_prs = sender_draft_prs
     if isinstance(thread_settings.get("model_id"), str):
         repo_instructions = thread_settings.get("repo_instructions")
+        experimental = ExperimentalFeatures.from_thread_settings(thread_settings)
     else:
         async with aphase(thread_id, "factory.repo_instructions"):
             repo_instructions = await _resolve_repo_custom_instructions(
                 await _resolve_prompt_default_repo(cfg)
+            )
+        async with aphase(thread_id, "factory.experimental_features"):
+            experimental = (
+                (await User.preferences_for_login(profile_login)).experimental
+                if profile_login
+                else ExperimentalFeatures()
             )
     # Stored before the Fable gate so a deployment-wide toggle still applies on
     # every run rather than being frozen into the thread.
@@ -1301,6 +1312,7 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
             for route, (routed_model_id, effort) in routing_defaults.items()
         },
         "repo_instructions": repo_instructions,
+        "experimental": experimental.thread_value(),
     }
     if not local_run and (
         settings_changed or {**thread_settings, **resolved_settings} != thread_settings
@@ -1644,6 +1656,7 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
                             else False
                         ),
                         admin_workspaces=admin_thread,
+                        experimental=experimental,
                         model_selection=model_selection,
                         routing_defaults=routing_defaults,
                     ),

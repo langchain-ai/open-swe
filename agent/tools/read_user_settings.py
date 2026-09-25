@@ -51,6 +51,7 @@ async def _settings_for_login(login: str, *, own_settings: bool = False) -> dict
     if own_settings:
         preferences = await User.preferences_for_login(login)
         profile_settings["concierge_mode"] = preferences.concierge_mode
+        profile_settings["experimental"] = preferences.experimental.model_dump()
     return {
         "login": login,
         "profile": profile_settings,

@@ -2,13 +2,17 @@
 
 from pydantic import BaseModel, ConfigDict
 
+from agent.experimental import ExperimentalFeatures, ExperimentalFeaturesPatch
+
 
 class UserPreferences(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
     # The person's Slack DM with the bot is one conversation instead of a thread per message.
     concierge_mode: bool = False
+    experimental: ExperimentalFeatures = ExperimentalFeatures()
 
 
 class UserPreferencesPatch(BaseModel):
     concierge_mode: bool | None = None
+    experimental: ExperimentalFeaturesPatch | None = None

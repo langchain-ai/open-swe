@@ -226,10 +226,16 @@ export interface Profile {
   model_routing_enabled?: boolean
   recent_thread_context_enabled?: boolean
   concierge_mode?: boolean
+  experimental?: ExperimentalFeatures
   draft_prs?: boolean
   review_draft_prs?: boolean | null
   slack_onboarding_dismissed?: boolean
   updated_at?: string
+}
+
+/** Opt-in features; each thread keeps the values its creator had when it started. */
+export interface ExperimentalFeatures {
+  pr_comment_triggers?: boolean
 }
 
 export interface ProfileUpdate {
@@ -245,6 +251,7 @@ export interface ProfileUpdate {
   model_routing_enabled?: boolean | null
   recent_thread_context_enabled?: boolean
   concierge_mode?: boolean
+  experimental?: ExperimentalFeatures
   draft_prs?: boolean
   review_draft_prs?: boolean | null
   slack_onboarding_dismissed?: boolean

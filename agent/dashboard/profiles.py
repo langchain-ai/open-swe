@@ -32,6 +32,7 @@ from agent.dashboard.options import (
     provider_fallback_pair,
 )
 from agent.encryption import decrypt_token, encrypt_token
+from agent.experimental import ExperimentalFeaturesPatch
 from agent.store import (
     delete_value,
     get_value,
@@ -60,6 +61,7 @@ class ProfileUpdate(BaseModel):
     model_routing_enabled: bool | None = None
     recent_thread_context_enabled: bool = False
     concierge_mode: bool | None = None
+    experimental: ExperimentalFeaturesPatch | None = None
     draft_prs: bool | None = None
     review_draft_prs: bool | None = None
     experimental_assistant_ui: bool | None = None
@@ -416,8 +418,8 @@ async def get_my_profile(
         get_profile(session["sub"]), User.preferences_for_login(session["sub"])
     )
     if not profile:
-        return {"concierge_mode": preferences.concierge_mode}
-    return {**normalize_profile_for_response(profile), "concierge_mode": preferences.concierge_mode}
+        return _preference_fields(preferences)
+    return {**normalize_profile_for_response(profile), **_preference_fields(preferences)}
 
 
 @router.put("/profile")
@@ -428,12 +430,25 @@ async def put_my_profile(
     update.validate_pairing()
     login = session["sub"]
     preferences = await User.update_preferences(
-        login, UserPreferencesPatch(concierge_mode=update.concierge_mode)
+        login,
+        UserPreferencesPatch(
+            concierge_mode=update.concierge_mode, experimental=update.experimental
+        ),
     )
-    if preferences is None and update.concierge_mode:
+    turns_on_preference = update.concierge_mode or (
+        update.experimental is not None and any(update.experimental.model_dump().values())
+    )
+    if preferences is None and turns_on_preference:
         raise HTTPException(status_code=409, detail="No Open SWE user record for this login yet")
     profile = await upsert_profile(login, session.get("email") or "", update)
     return {
         **normalize_profile_for_response(profile),
-        "concierge_mode": (preferences or UserPreferences()).concierge_mode,
+        **_preference_fields(preferences or UserPreferences()),
+    }
+
+
+def _preference_fields(preferences: UserPreferences) -> dict[str, Any]:
+    return {
+        "concierge_mode": preferences.concierge_mode,
+        "experimental": preferences.experimental.model_dump(),
     }
