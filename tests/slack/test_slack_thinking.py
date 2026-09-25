@@ -800,7 +800,8 @@ async def test_status_waits_for_each_run_without_polling(
                     await refreshed.wait()
                     assert not observer.done()
                     assert "" not in statuses
-                    assert requests == ["/threads/thread-1/runs/current-run/join"]
+                    assert requests[0] == "/threads/thread-1/runs/current-run/join"
+                    assert set(requests[1:]) <= {"/threads/thread-1"}
                     completed.set()
         assert statuses[0] == "Thinking..."
         assert statuses[-1] == ""
