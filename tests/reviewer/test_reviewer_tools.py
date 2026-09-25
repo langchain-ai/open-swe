@@ -313,7 +313,9 @@ async def test_resolve_finding_thread_resolves_all_known_threads() -> None:
             "agent.run_config.get_config",
             return_value=_config(repo={"owner": "o", "name": "r"}, pr_number=7),
         ),
-        patch("agent.tools.resolve_finding_thread.get_github_token", return_value="token"),
+        patch(
+            "agent.tools.resolve_finding_thread.resolve_thread_github_token", return_value="token"
+        ),
         patch("agent.tools.resolve_finding_thread.get_thread_id_from_runtime", return_value="tid"),
         patch("agent.tools.resolve_finding_thread.get_finding", AsyncMock(return_value=finding)),
         patch("agent.tools.resolve_finding_thread.resolve_review_thread", resolve),
@@ -585,7 +587,9 @@ async def test_update_finding_resolves_github_thread_when_pr_context_available()
             AsyncMock(return_value=[_existing_finding(github_review_thread_ids=["THREAD_1"])]),
         ),
         patch("agent.run_config.get_config", return_value=cfg),
-        patch("agent.tools.resolve_finding_thread.get_github_token", return_value="token"),
+        patch(
+            "agent.tools.resolve_finding_thread.resolve_thread_github_token", return_value="token"
+        ),
         patch("agent.tools.update_finding.update_finding_fields", AsyncMock()) as update,
         patch(
             "agent.tools.resolve_finding_thread._resolve_finding_thread_async",
@@ -620,7 +624,9 @@ async def test_update_finding_leaves_open_when_github_resolution_fails() -> None
             AsyncMock(return_value=[_existing_finding(github_review_thread_ids=["THREAD_1"])]),
         ),
         patch("agent.run_config.get_config", return_value=cfg),
-        patch("agent.tools.resolve_finding_thread.get_github_token", return_value="token"),
+        patch(
+            "agent.tools.resolve_finding_thread.resolve_thread_github_token", return_value="token"
+        ),
         patch("agent.tools.update_finding.update_finding_fields", AsyncMock()) as update,
         patch(
             "agent.tools.resolve_finding_thread._resolve_finding_thread_async",

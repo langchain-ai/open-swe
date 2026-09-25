@@ -1,12 +1,13 @@
 """GitHub token lookup utilities."""
 
 import logging
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from langgraph.config import get_config
 
+from agent.github.app import get_github_app_installation_token_with_expiry
 from agent.run_config import RunConfig
 
 logger = logging.getLogger(__name__)
@@ -20,6 +21,9 @@ _GITHUB_TOKEN_MAX_TTL = timedelta(hours=24)
 _BOT_PRINCIPAL = "bot"
 # (thread_id, principal) -> (token, token_expires_at, cached_at)
 _GITHUB_TOKEN_CACHE: dict[tuple[str, str], tuple[str, str | None, datetime]] = {}
+# thread_id -> (repositories the bot token was scoped to, cached_at). Outlives the token
+# itself so an expired bot token is re-minted at the same scope, never a wider one.
+_BOT_TOKEN_SCOPES: dict[str, tuple[tuple[str, ...], datetime]] = {}
 
 
 def github_token_principal(*, login: str | None = None, email: str | None = None) -> str | None:
@@ -42,8 +46,12 @@ def cache_github_token_for_thread(
     *,
     principal: str | None = None,
     is_bot_token: bool = False,
+    repositories: Sequence[str] | None = None,
 ) -> None:
-    """Cache a GitHub token in process for the current thread and principal."""
+    """Cache a GitHub token in process for the current thread and principal.
+
+    ``repositories`` is the scope a bot token was minted with (None: installation-wide).
+    """
     if not thread_id or not token:
         return
     cache_principal = _BOT_PRINCIPAL if is_bot_token else principal
@@ -52,6 +60,8 @@ def cache_github_token_for_thread(
         return
     now = datetime.now(UTC)
     _GITHUB_TOKEN_CACHE[(thread_id, cache_principal)] = (token, expires_at, now)
+    if is_bot_token:
+        _BOT_TOKEN_SCOPES[thread_id] = (tuple(repositories or ()), now)
     _evict_expired(now=now)
 
 
@@ -102,6 +112,13 @@ def _evict_expired(*, now: datetime | None = None) -> None:
     ]
     for key in stale:
         _GITHUB_TOKEN_CACHE.pop(key, None)
+    stale_scopes = [
+        thread_id
+        for thread_id, (_repositories, cached_at) in _BOT_TOKEN_SCOPES.items()
+        if current - cached_at >= _GITHUB_TOKEN_MAX_TTL
+    ]
+    for thread_id in stale_scopes:
+        _BOT_TOKEN_SCOPES.pop(thread_id, None)
 
 
 def _cached_token_if_fresh(
@@ -144,6 +161,29 @@ def get_github_token(run_config: Mapping[str, Any] | None = None) -> str | None:
     return token
 
 
+async def resolve_thread_github_token(run_config: Mapping[str, Any] | None = None) -> str | None:
+    """Resolve the current thread's GitHub token, re-minting an expired bot token."""
+    resolved = run_config if run_config is not None else get_config()
+    if token := get_github_token(resolved):
+        return token
+    thread_id = _thread_id_from_config(resolved)
+    scope = _BOT_TOKEN_SCOPES.get(thread_id) if thread_id else None
+    if not thread_id or scope is None:
+        return None
+    repositories = scope[0]
+    token, expires_at = await get_github_app_installation_token_with_expiry(
+        repositories=list(repositories) or None
+    )
+    if not token:
+        logger.warning("Could not re-mint expired bot GitHub token", extra={"thread_id": thread_id})
+        return None
+    logger.info("Re-minted expired bot GitHub token", extra={"thread_id": thread_id})
+    cache_github_token_for_thread(
+        thread_id, token, expires_at=expires_at, is_bot_token=True, repositories=repositories
+    )
+    return token
+
+
 async def get_github_token_from_thread(
     thread_id: str, *, principal: str | None = None
 ) -> tuple[str | None, str | None]:
@@ -155,4 +195,5 @@ async def invalidate_cached_github_token(thread_id: str) -> None:
     """Clear every cached GitHub token for a thread."""
     for key in [key for key in _GITHUB_TOKEN_CACHE if key[0] == thread_id]:
         _GITHUB_TOKEN_CACHE.pop(key, None)
+    _BOT_TOKEN_SCOPES.pop(thread_id, None)
     logger.info("Invalidated cached GitHub token for thread %s", thread_id)
