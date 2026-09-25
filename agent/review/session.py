@@ -12,6 +12,7 @@ from typing import Literal, Self
 from pydantic import BaseModel, ValidationError
 
 from agent.thread_ids import review_chat_thread_id, review_scout_thread_id
+from agent.threads.creation import create_thread
 from agent.utils.thread_ops import langgraph_client
 
 logger = logging.getLogger(__name__)
@@ -92,8 +93,11 @@ class ReviewSession(BaseModel):
         # TODO: reviewer assignment should call this for each assigned reviewer too.
         opened_at_ms = now_ms()
         client = langgraph_client()
-        await client.threads.create(
-            thread_id=self.thread_id,
+        thread_title = title or f"{self.owner}/{self.repo}#{self.pr_number}"
+        await create_thread(
+            client,
+            self.thread_id,
+            title=thread_title,
             if_exists="do_nothing",
             metadata={
                 "kind": REVIEW_CHAT_SOURCE,
@@ -108,7 +112,7 @@ class ReviewSession(BaseModel):
         await client.threads.update(
             thread_id=self.thread_id,
             metadata={
-                "title": title or f"{self.owner}/{self.repo}#{self.pr_number}",
+                "title": thread_title,
                 "participant_logins": {self.login.lower(): True},
                 "thread_category": "review",
                 "workspace": workspace,

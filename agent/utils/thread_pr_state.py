@@ -10,6 +10,7 @@ from contextlib import asynccontextmanager
 from langgraph_sdk.client import LangGraphClient
 from langgraph_sdk.errors import ConflictError, NotFoundError
 
+from agent.threads.creation import create_lock_thread
 from agent.utils.json_types import thread_metadata
 
 logger = logging.getLogger(__name__)
@@ -31,11 +32,8 @@ async def agent_thread_pr_state_lock(
     attempt = 0
     while True:
         try:
-            await client.threads.create(
-                thread_id=lock_id,
-                if_exists="raise",
-                ttl=_LOCK_TTL_MINUTES,
-                metadata={"lock_owner": owner},
+            await create_lock_thread(
+                client, lock_id, ttl_minutes=_LOCK_TTL_MINUTES, metadata={"lock_owner": owner}
             )
             break
         except ConflictError:

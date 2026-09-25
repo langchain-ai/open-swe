@@ -229,7 +229,7 @@ async def _process_slack_ask(request: SlackAskRequest) -> None:
         channel_name=_channel_label(channel_context),
         channel_context=await _channel_context(request.channel_id) or _NO_CHANNEL_CONTEXT,
     )
-    await dispatch_agent_run(thread_id, prompt, configurable, source="slack")
+    await dispatch_agent_run(thread_id, prompt, configurable, source="slack", thread_title=None)
     logger.info(
         "Started a Slack slash command run",
         extra={"agent_thread_id": thread_id, "slack_channel": request.channel_id},

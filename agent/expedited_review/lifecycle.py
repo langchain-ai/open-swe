@@ -268,6 +268,7 @@ async def notify_agent(approval: ExpeditedApproval, prompt: str) -> bool:
             prompt,
             configurable,
             source=str(configurable["source"]),
+            thread_title=None,
             metadata={},
             multitask_strategy="enqueue",
         )

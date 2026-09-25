@@ -304,6 +304,7 @@ async def start_pull_request_thread(
             prompt,
             configurable,
             source="dashboard",
+            thread_title=None,
             client=client,
             multitask_strategy="enqueue",
         )

@@ -241,6 +241,7 @@ async def monitor_background_tasks(thread_id: str) -> dict[str, Any]:
                 message,
                 configurable,
                 source=str(configurable.get("source") or "dashboard"),
+                thread_title=None,
                 context=_BACKGROUND_TASK_CONTEXT,
                 systems=[_BACKGROUND_TASK_SENDER],
                 metadata={},

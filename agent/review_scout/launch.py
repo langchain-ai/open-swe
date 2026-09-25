@@ -209,18 +209,10 @@ class ReviewScoutTarget(BaseModel):
                 ],
             ),
             source="review-scout",
+            thread_title=f"Walkthrough: {self.pr_title} #{self.pr_number}",
             config={"configurable": with_invocation_id(configurable, new_invocation_id())},
             metadata={_HEAD_METADATA_KEY: self.head_sha},
         )
-        try:
-            await dispatch_client().threads.update(
-                self.thread_id,
-                metadata={"title": f"Walkthrough: {self.pr_title} #{self.pr_number}"},
-            )
-        except Exception:  # noqa: BLE001
-            logger.warning(
-                "Could not title the review scout thread", exc_info=True, extra=self.log_extra
-            )
         logger.info("Started review scout", extra=self.log_extra)
         return _ScoutRun.model_validate(run).run_id
 
