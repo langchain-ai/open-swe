@@ -27,6 +27,7 @@ from agent.slack.orphan import (
 )
 from agent.slack.run_feedback import feedback_block
 from agent.slack.thinking import restore_slack_session_status, restore_slack_thinking_status
+from agent.tools.pr_link_guard import pr_link_error, unverified_pr_links
 from agent.utils.json_types import thread_metadata
 from agent.utils.run_usage import RunUsageSummary, summarize_run_usage
 from agent.utils.thread_ops import langgraph_client as get_langgraph_client
@@ -49,6 +50,9 @@ async def slack_reply(
     run_id = _current_run_id(config)
     slack_thread = cfg.slack_thread.dump() if cfg.slack_thread else {}
     thread_id = cfg.thread_id
+    unverified = await unverified_pr_links(str(thread_id or ""), message)
+    if unverified:
+        return pr_link_error(unverified)
     if cfg.slack_ask is True:
         return await _ephemeral_reply(cfg, message, blocks, options, state)
     client = get_langgraph_client()
