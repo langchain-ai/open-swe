@@ -24,7 +24,6 @@ from agent.expedited_review.lifecycle import (
     retire,
 )
 from agent.expedited_review.reviews import (
-    dismiss_approval,
     github_token_hint,
     settings_hint,
     submit_approval,
@@ -156,11 +155,9 @@ async def handle_vote(
 async def _submit_review(approval: ExpeditedApproval, voter_user_id: UUID) -> str | None:
     """Send a new vote to GitHub now; what kept it off GitHub, or ``None`` once it is there.
 
-    A vote that could not be sent stays recorded, and the merge submits it.
+    A vote that could not be sent stays recorded, and the merge submits it. The POST
+    runs under the card's row lock, which the merge also holds, so one of them submits.
     """
-    vote = approval.vote_by(voter_user_id)
-    if vote is None:
-        return "This expedited review vanished."
     pr = approval.pull_request
     unavailable = "GitHub was unavailable, so Open SWE will submit your review when it merges."
     token = await repo_token(pr.owner, pr.repo)
@@ -175,17 +172,17 @@ async def _submit_review(approval: ExpeditedApproval, voter_user_id: UUID) -> st
         return unavailable
     if not fingerprint_matches(files, approval.diff_fingerprint):
         return "A later commit changed the diff on this card, so no review was submitted."
-    failed = await submit_approval(approval, vote, head_sha)
+    async with ExpeditedApproval.locked(approval.id) as (_, row):
+        if row is None or row.state != "open":
+            return "The card closed before your review reached GitHub."
+        vote = row.vote_by(voter_user_id)
+        if vote is None:
+            return "This expedited review vanished."
+        if vote.github_review_id is not None:
+            return None
+        failed = await submit_approval(row, vote, head_sha)
     if failed is not None:
         return f"{failed} Open SWE will try again when it merges."
-    async with ExpeditedApproval.locked(approval.id) as (_, row):
-        stored = row.vote_by(voter_user_id) if row is not None and row.state == "open" else None
-        if stored is not None:
-            stored.github_review_id = vote.github_review_id
-            stored.github_review_sha = vote.github_review_sha
-    if stored is None:
-        await dismiss_approval(approval, vote, token, "the card closed before this review landed")
-        return "The card closed while GitHub was answering, so the review was withdrawn."
     return None
 
 

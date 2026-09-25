@@ -70,7 +70,7 @@ async def merge_approved(approval: ExpeditedApproval) -> MergeResult:
         await mark_merged(approval)
         return MergeResult("merged", f"{pr.url} is already merged.")
     if snapshot.state != "open":
-        await retire(approval, "cancelled", "the pull request was closed", dismiss_reviews=False)
+        await retire(approval, "cancelled", "the pull request was closed")
         return MergeResult("closed", "The pull request is closed; the expedited review ended.")
 
     files = await fetch_changed_files(
@@ -118,8 +118,12 @@ async def merge_approved(approval: ExpeditedApproval) -> MergeResult:
                 "`merge_expedited_pr` again.",
             )
         for vote in row.approvals:
-            # An approval on an older head still counts unless GitHub dismissed it as stale.
-            if vote.github_review_id in snapshot.approved_review_ids:
+            # An approval on an older head still counts unless GitHub dismissed it as stale;
+            # one on this head was submitted by a click after the snapshot was read.
+            if vote.github_review_id is not None and (
+                vote.github_review_id in snapshot.approved_review_ids
+                or vote.github_review_sha == snapshot.head_sha
+            ):
                 continue
             failed = await submit_approval(row, vote, snapshot.head_sha)
             if failed is not None:

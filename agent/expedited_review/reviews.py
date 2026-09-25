@@ -80,7 +80,10 @@ async def submit_approval(
 async def dismiss_approval(
     approval: ExpeditedApproval, vote: ApprovalVote, token: str, reason: str
 ) -> None:
-    """Withdraw the GitHub review ``vote`` submitted, if it submitted one."""
+    """Withdraw the GitHub review ``vote`` submitted; clears its id once GitHub confirms.
+
+    A review whose id is still set after this is retried the next time a card closes.
+    """
     if vote.github_review_id is None:
         return
     pr = approval.pull_request
@@ -92,16 +95,14 @@ async def dismiss_approval(
     try:
         async with github_client(token=token) as client:
             response = await github_request(client, "PUT", url, json=payload)
-            response.raise_for_status()
+            # A review GitHub no longer has cannot count toward a merge either.
+            if response.status_code != 404:
+                response.raise_for_status()
     except httpx2.HTTPError:
         logger.warning(
             "Failed to dismiss an expedited review approval on GitHub",
             extra={"approval_id": str(approval.id), "github_review_id": vote.github_review_id},
             exc_info=True,
         )
-
-
-async def dismiss_approvals(approval: ExpeditedApproval, token: str, reason: str) -> None:
-    """Withdraw every GitHub review a closed, unmerged card submitted."""
-    for vote in approval.approvals:
-        await dismiss_approval(approval, vote, token, reason)
+        return
+    vote.github_review_id = None

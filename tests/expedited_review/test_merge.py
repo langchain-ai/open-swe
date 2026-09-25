@@ -41,6 +41,8 @@ class _GitHub:
         self.reviews: list[tuple[str, str]] = []
         self.approved: set[int] = set()
         self.dismissed: list[str] = []
+        self.dismiss_status = 200
+        self.pull: dict[str, Any] = {"state": "open", "merged": False}
         self.merges: list[dict[str, Any]] = []
         self.merge_status = 200
         self.files = [_SOURCE, _TEST]
@@ -55,6 +57,7 @@ class _GitHub:
         monkeypatch.setattr(merge, "github_request", self._request)
         monkeypatch.setattr(reviews, "github_request", self._request)
         monkeypatch.setattr(lifecycle, "repo_token", AsyncMock(return_value="app-token"))
+        monkeypatch.setattr(lifecycle, "fetch_pr", self._pull)
         monkeypatch.setattr(lifecycle, "refresh_card", AsyncMock())
         monkeypatch.setattr(lifecycle, "add_slack_reaction", AsyncMock(return_value=True))
 
@@ -71,6 +74,9 @@ class _GitHub:
     async def _pr(self, **_: object) -> dict[str, Any]:
         return {"head": {"sha": self.current_head or self.readiness.snapshot.head_sha}}
 
+    async def _pull(self, **_: object) -> dict[str, Any]:
+        return self.pull
+
     async def _review(
         self, approval: ExpeditedApproval, vote: ApprovalVote, head_sha: str
     ) -> str | None:
@@ -85,7 +91,9 @@ class _GitHub:
     ) -> httpx2.Response:
         if url.endswith("/dismissals"):
             self.dismissed.append(url.rsplit("/", 2)[-2])
-            return httpx2.Response(200, json={}, request=httpx2.Request(method, url))
+            return httpx2.Response(
+                self.dismiss_status, json={}, request=httpx2.Request(method, url)
+            )
         self.merges.append(kwargs["json"])
         return httpx2.Response(
             self.merge_status,
@@ -159,6 +167,18 @@ async def test_a_standing_review_from_the_click_is_not_submitted_again(
     assert result.status == "merged"
     assert github.reviews == [("grace", "abc123"), ("linus", "abc123")]
     assert github.merges == [{"sha": "def456", "merge_method": "squash"}]
+
+
+async def test_a_click_review_on_this_head_the_snapshot_missed_is_not_submitted_again(
+    github: _GitHub, open_approval: OpenApproval
+) -> None:
+    approval = await _reviewed(await _approved(open_approval, "U_GRACE"), github)
+    github.approved.clear()
+
+    result = await merge.merge_approved(approval)
+
+    assert result.status == "merged"
+    assert github.reviews == [("grace", "abc123")]
 
 
 async def test_a_review_github_dismissed_as_stale_is_submitted_on_the_new_head(
@@ -299,9 +319,10 @@ async def test_someone_else_merging_on_github_only_marks_the_card_and_reacts(
     monkeypatch.setattr(lifecycle, "add_slack_reaction", reactions)
     monkeypatch.setattr(lifecycle, "post_slack_thread_reply_with_ts", posts)
     monkeypatch.setattr(lifecycle, "dispatch_agent_run", wakes)
+    github.pull = {"state": "closed", "merged": True}
 
-    await lifecycle.close_for_pull_request("lc", "repo", 7, merged=True)
-    await lifecycle.close_for_pull_request("lc", "repo", 7, merged=True)
+    await lifecycle.close_for_pull_request("lc", "repo", 7)
+    await lifecycle.close_for_pull_request("lc", "repo", 7)
 
     assert (await _reload(approval)).state == "merged"
     reactions.assert_awaited_once_with("C1", "1.0", "merged")
@@ -310,12 +331,42 @@ async def test_someone_else_merging_on_github_only_marks_the_card_and_reacts(
     assert github.dismissed == [] and github.merges == []
 
 
-async def test_a_pr_closed_unmerged_closes_the_card_and_keeps_its_reviews(
+async def test_a_pr_closed_unmerged_closes_the_card_and_dismisses_its_reviews(
+    github: _GitHub, open_approval: OpenApproval
+) -> None:
+    approval = await _reviewed(await _approved(open_approval, "U_GRACE"), github)
+    github.pull = {"state": "closed", "merged": False}
+
+    await lifecycle.close_for_pull_request("lc", "repo", 7)
+
+    stored = await _reload(approval)
+    assert stored.state == "cancelled"
+    assert github.dismissed == ["101"]
+    assert stored.votes[0].github_review_id is None
+
+
+async def test_a_late_close_webhook_leaves_a_reopened_pr_card_open(
     github: _GitHub, open_approval: OpenApproval
 ) -> None:
     approval = await _reviewed(await _approved(open_approval, "U_GRACE"), github)
 
-    await lifecycle.close_for_pull_request("lc", "repo", 7, merged=False)
+    await lifecycle.close_for_pull_request("lc", "repo", 7)
 
-    assert (await _reload(approval)).state == "cancelled"
+    assert (await _reload(approval)).state == "open"
     assert github.dismissed == []
+
+
+async def test_a_dismissal_github_refused_is_retried_when_a_card_next_closes(
+    github: _GitHub, open_approval: OpenApproval
+) -> None:
+    approval = await _reviewed(await _approved(open_approval, "U_GRACE"), github)
+    github.dismiss_status = 500
+
+    await lifecycle.retire(approval, "cancelled", "dismissed by <@U_LINUS>")
+    refused = await _reload(approval)
+    github.dismiss_status = 200
+    await lifecycle.withdraw_reviews(refused)
+
+    assert refused.votes[0].github_review_id == 101
+    assert github.dismissed == ["101", "101"]
+    assert (await _reload(approval)).votes[0].github_review_id is None

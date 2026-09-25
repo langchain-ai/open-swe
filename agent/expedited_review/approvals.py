@@ -176,6 +176,19 @@ class ExpeditedApproval(Base):
             return list(rows)
 
     @classmethod
+    async def with_standing_reviews(cls, pull_request_id: UUID) -> list[Self]:
+        """Closed, unmerged cards for a pull request with a GitHub review not yet dismissed."""
+        async with postgres.session() as session:
+            rows = await session.scalars(
+                cls._loaded(select(cls)).where(
+                    cls.pull_request_id == pull_request_id,
+                    cls.state.not_in(("open", "merged")),
+                    cls.votes.any(ApprovalVote.github_review_id.is_not(None)),
+                )
+            )
+            return list(rows)
+
+    @classmethod
     async def all_for_repo(cls, owner: str, repo: str) -> list[Self]:
         """Every approval a repository has ever had, oldest first."""
         async with postgres.session() as session:

@@ -524,10 +524,9 @@ async def settle_expedited_review_on_close(payload: dict[str, Any]) -> None:
     """Mark a closed PR's open expedited card merged or closed, whoever closed the PR."""
     event = PullRequestEvent.parse(payload)
     identity = event.identity if event is not None else None
-    if event is None or identity is None or not postgres.configured():
+    if identity is None or not postgres.configured():
         return
-    owner, repo, number = identity
-    await close_for_pull_request(owner, repo, number, merged=event.pull_request.merged)
+    await close_for_pull_request(*identity)
 
 
 async def process_github_pr_close(payload: dict[str, Any]) -> None:
