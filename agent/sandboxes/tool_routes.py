@@ -70,6 +70,26 @@ async def list_tools(
     return ToolList(tools=tools[offset : offset + limit], total=len(tools))
 
 
+TaskId = Annotated[str, Path(pattern=r"^[A-Za-z0-9-]{1,128}$")]
+
+
+@router.post("/background-tasks/{task_id}/complete", status_code=204)
+async def background_task_complete(task_id: TaskId, access: Access) -> None:
+    from agent.background_tasks import reconcile_background_tasks
+
+    result = await reconcile_background_tasks(access.thread_id)
+    if result.get("pending"):
+        # The runner retries on 5xx, which is what redelivers a failed dispatch.
+        raise HTTPException(503, "Background task completion is not delivered yet")
+
+
+@router.post("/background-tasks/{task_id}/heartbeat", status_code=204)
+async def background_task_heartbeat(task_id: TaskId, access: Access) -> None:
+    from agent.background_tasks import keep_sandbox_alive
+
+    await keep_sandbox_alive(access.sandbox_id)
+
+
 @router.post("/invoke/{tool_name}", response_model=ToolResult)
 async def invoke_tool(
     tool_name: Annotated[str, Path(min_length=1, max_length=256)],
