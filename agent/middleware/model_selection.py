@@ -55,15 +55,15 @@ class RouteDecision(BaseModel):
     model_route: Route
 
 
-async def _select_semif_route(task: str) -> Route | None:
+async def _select_jev_route(task: str) -> Route | None:
     api_key = ENV.LANGSMITH_GATEWAY_API_KEY.optional() or ENV.LANGSMITH_API_KEY.optional()
     if not api_key:
-        logger.info("SemIf routing has no gateway key; using fallback classifier")
+        logger.info("Jev routing has no gateway key; using fallback classifier")
         return None
     try:
         async with httpx2.AsyncClient(timeout=3.0) as client:
             classifier = TypeSafeClassifier(
-                model="semif-qwen3.5-4b",
+                model="typesafe/jev-1.13.0",
                 api_key=api_key,
                 base_url=gateway_base_url(),
                 async_client=client,
@@ -88,16 +88,16 @@ async def _select_semif_route(task: str) -> Route | None:
             or abs(sum(probabilities.values()) - 1) > 0.01
             or probabilities[answer.choice] != max(probabilities.values())
         ):
-            raise ValueError("Invalid SemIf routing probabilities")
+            raise ValueError("Invalid Jev routing probabilities")
         if answer.confidence < 0.6:
             logger.info(
-                "SemIf routing confidence below threshold; using fallback classifier",
+                "Jev routing confidence below threshold; using fallback classifier",
                 extra={"confidence": answer.confidence},
             )
             return None
         return RouteDecision.model_validate({"model_route": answer.choice}).model_route
     except Exception:
-        logger.exception("SemIf routing failed; using fallback classifier")
+        logger.exception("Jev routing failed; using fallback classifier")
         return None
 
 
@@ -162,8 +162,8 @@ class ModelSelectionMiddleware(OpenSWEMiddleware[ModelSelectionState]):
             return "fast"
         messages = state.get("messages", [])
         task = _latest_human_task(messages)[-8_000:]
-        if semif_route := await _select_semif_route(task):
-            return semif_route
+        if jev_route := await _select_jev_route(task):
+            return jev_route
         route: Route = "balanced"
         try:
             decision = await self._classifier.ainvoke(

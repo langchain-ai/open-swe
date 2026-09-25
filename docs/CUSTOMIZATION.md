@@ -198,11 +198,11 @@ async def get_agent(config: RunnableConfig) -> Pregel:
     return create_deep_agent(model=model, ...)
 ```
 
-### Auto model routing with SemIf
+### Auto model routing with Jev
 
-Eligible Auto turns use the open-source `semif-qwen3.5-4b` decision model through the [LangSmith Gateway System One API](https://docs.langchain.com/langsmith/llm-gateway-decision-models). This classifier call is independent of the provider-proxy gateway toggle below; it uses `LANGSMITH_GATEWAY_API_KEY` (falling back to `LANGSMITH_API_KEY`) and respects `LANGSMITH_GATEWAY_BASE_URL`. The classifier uses `langchain-typesafe`'s `TypeSafeClassifier`. The key needs gateway access; no TypeSafe provider key is required.
+Eligible Auto turns use the `typesafe/jev-1.13.0` decision model through the [LangSmith Gateway System One API](https://docs.langchain.com/langsmith/llm-gateway-decision-models). Configure `TYPESAFE_API_KEY` as a workspace provider secret for gateway BYOK access. This classifier call is independent of the provider-proxy gateway toggle below; it uses `LANGSMITH_GATEWAY_API_KEY` (falling back to `LANGSMITH_API_KEY`) and respects `LANGSMITH_GATEWAY_BASE_URL`. The classifier uses `langchain-typesafe`'s `TypeSafeClassifier`; pass the LangSmith gateway key, not the TypeSafe key, to the classifier.
 
-SemIf receives the same bounded task text (up to 8,000 characters) as the existing classifier. Missing credentials, API errors, a three-second HTTP timeout, malformed responses, or confidence below `0.6` fall back to the existing chat classifier, then to the balanced route if that also fails. The confidence cutoff is an initial heuristic, not a calibrated correctness probability. Existing Auto eligibility, fast-mode control, and persisted routes are unchanged.
+Jev receives the same bounded task text (up to 8,000 characters) as the existing classifier. Missing gateway credentials, API errors, a three-second HTTP timeout, malformed responses, or confidence below `0.6` fall back to the existing chat classifier, then to the balanced route if that also fails. The confidence cutoff is an initial heuristic, not a calibrated correctness probability. Existing Auto eligibility, fast-mode control, and persisted routes are unchanged.
 
 ### Routing through the LangSmith LLM Gateway
 

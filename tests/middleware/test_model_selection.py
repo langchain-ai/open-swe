@@ -255,7 +255,7 @@ async def test_plain_human_message_without_an_envelope_is_still_classified() -> 
 @pytest.mark.parametrize(
     "failure", [None, "timeout", "http", "malformed", "confidence", "nan", "probabilities"]
 )
-async def test_semif_routes_or_falls_back(
+async def test_jev_routes_or_falls_back(
     monkeypatch: pytest.MonkeyPatch, failure: str | None
 ) -> None:
     requests: list[httpx2.Request] = []
@@ -271,7 +271,7 @@ async def test_semif_routes_or_falls_back(
         return httpx2.Response(
             200,
             json={
-                "model": "semif-qwen3.5-4b",
+                "model": "typesafe/jev-1.13.0",
                 "answers": {
                     "route": {
                         "type": "choice",
@@ -308,7 +308,7 @@ async def test_semif_routes_or_falls_back(
     assert requests[0].headers["Authorization"] == "Bearer gateway-key"
     payload = json.loads(requests[0].read())
     assert payload["state"] == "x" * 8_000
-    assert payload["model"] == "semif-qwen3.5-4b"
+    assert payload["model"] == "typesafe/jev-1.13.0"
     if failure:
         fallback.assert_awaited_once()
     else:
