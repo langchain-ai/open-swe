@@ -53,16 +53,17 @@ class RouteDecision(BaseModel):
 
 
 async def _select_jev_route(task: str) -> Route:
-    api_key = ENV.LANGSMITH_GATEWAY_API_KEY.optional() or ENV.LANGSMITH_API_KEY.optional()
-    if not api_key:
-        logger.warning("Jev routing has no gateway key; using balanced route")
+    typesafe_key = ENV.TYPESAFE_API_KEY.optional()
+    gateway_key = ENV.LANGSMITH_GATEWAY_API_KEY.optional() or ENV.LANGSMITH_API_KEY.optional()
+    if not typesafe_key and not gateway_key:
+        logger.warning("Jev routing has no API key; using balanced route")
         return "balanced"
     try:
         async with httpx2.AsyncClient(timeout=3.0) as client:
             classifier = TypeSafeClassifier(
-                model="typesafe/jev-1.13.0",
-                api_key=api_key,
-                base_url=gateway_base_url(),
+                model="jev-1.13.0" if typesafe_key else "typesafe/jev-1.13.0",
+                api_key=typesafe_key or gateway_key,
+                **({} if typesafe_key else {"base_url": gateway_base_url()}),
                 async_client=client,
             )
             response = await classifier.ainvoke(

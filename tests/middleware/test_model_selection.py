@@ -12,6 +12,7 @@ from agent.middleware.model_selection import ModelSelectionMiddleware, ModelSele
 
 @pytest.fixture(autouse=True)
 def _no_gateway_credentials(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("TYPESAFE_API_KEY", raising=False)
     monkeypatch.delenv("LANGSMITH_GATEWAY_API_KEY", raising=False)
     monkeypatch.delenv("LANGSMITH_API_KEY", raising=False)
 
@@ -221,8 +222,9 @@ async def test_jev_sees_the_human_request_not_injected_context(
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("failure", [None, "timeout", "http", "malformed", "confidence", "nan"])
+@pytest.mark.parametrize("use_gateway", [False, True])
 async def test_jev_routes_or_falls_back(
-    monkeypatch: pytest.MonkeyPatch, failure: str | None
+    monkeypatch: pytest.MonkeyPatch, failure: str | None, use_gateway: bool
 ) -> None:
     requests: list[httpx2.Request] = []
 
@@ -237,7 +239,7 @@ async def test_jev_routes_or_falls_back(
         return httpx2.Response(
             200,
             json={
-                "model": "typesafe/jev-1.13.0",
+                "model": "typesafe/jev-1.13.0" if use_gateway else "jev-1.13.0",
                 "answers": {
                     "route": {
                         "type": "choice",
@@ -261,6 +263,9 @@ async def test_jev_routes_or_falls_back(
     monkeypatch.setenv("LANGSMITH_GATEWAY_API_KEY", "gateway-key")
     monkeypatch.setenv("LANGSMITH_API_KEY", "other-key")
     monkeypatch.setenv("LANGSMITH_GATEWAY_BASE_URL", "https://gateway.example.com/")
+    monkeypatch.setenv("TYPESAFE_BASE_URL", "https://typesafe.example.com/")
+    if not use_gateway:
+        monkeypatch.setenv("TYPESAFE_API_KEY", "typesafe-key")
     monkeypatch.setattr(
         "agent.middleware.model_selection.httpx2.AsyncClient",
         lambda **kwargs: client(**kwargs, transport=httpx2.MockTransport(handle)),
@@ -270,11 +275,18 @@ async def test_jev_routes_or_falls_back(
     route = await middleware.select_route(state)
     assert route == ("balanced" if failure else "fast")
     assert len(requests) == 1
-    assert requests[0].url == "https://gateway.example.com/v1/systemone"
-    assert requests[0].headers["Authorization"] == "Bearer gateway-key"
+    assert requests[0].url == (
+        "https://gateway.example.com/v1/systemone"
+        if use_gateway
+        else "https://typesafe.example.com/v1/systemone"
+    )
+    assert requests[0].headers["Authorization"] == (
+        "Bearer gateway-key" if use_gateway else "Bearer typesafe-key"
+    )
     payload = json.loads(requests[0].read())
     assert payload["state"] == "x" * 8_000
-    assert payload["model"] == "typesafe/jev-1.13.0"
+    assert payload["model"] == ("typesafe/jev-1.13.0" if use_gateway else "jev-1.13.0")
+    assert payload["questions"]["route"]["type"] == "choice"
     state["model_route"] = route
     assert await middleware.select_route(state) == route
     assert len(requests) == 1
