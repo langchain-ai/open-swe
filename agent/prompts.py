@@ -5,6 +5,7 @@ from pathlib import PurePosixPath
 from string import Template
 from typing import Any
 
+from jinja2 import Environment, StrictUndefined
 from langchain_core.tools import BaseTool
 
 _PROMPT_ROOT = resources.files("agent.resources").joinpath("prompts")
@@ -27,6 +28,16 @@ def load_prompt(name: str) -> str:
 def render_prompt(name: str, values: Mapping[str, object] | None = None, **kwargs: object) -> str:
     substitutions = {**(values or {}), **kwargs}
     return Template(load_prompt(name)).substitute(substitutions)
+
+
+_JINJA = Environment(
+    autoescape=False, undefined=StrictUndefined, trim_blocks=True, lstrip_blocks=True
+)
+
+
+def render_template(name: str, **values: object) -> str:
+    """Render a prompt that uses Jinja syntax, such as ``{% if %}`` blocks."""
+    return _JINJA.from_string(load_prompt(name)).render(values).strip()
 
 
 def apply_tool_descriptions(

@@ -60,7 +60,6 @@ from agent.workspaces.store import DEFAULT_WORKSPACE_SLUG, WORKSPACES, parse_wor
 _CODE_CHANNEL_CONTEXT = load_prompt("runs/slack-code-channel.md")
 _CONCIERGE_CONTEXT = load_prompt("runs/slack-concierge.md")
 _MESSAGE_UPDATE_PREAMBLE = load_prompt("runs/slack-message-update.md")
-_BREAKOUT_COMMAND_CONTEXT = load_prompt("runs/slack-breakout-command.md")
 
 
 def _is_explicit_slack_request(
@@ -1034,7 +1033,6 @@ async def _process_slack_mention_impl(
         section
         for section in (
             _MESSAGE_UPDATE_PREAMBLE if message_update else "",
-            _BREAKOUT_COMMAND_CONTEXT if request.context_thread_ts else "",
             resolved_links_section,
         )
         if section
@@ -1054,6 +1052,8 @@ async def _process_slack_mention_impl(
     # admins, and a non-admin's DM gets nothing extra.
     if is_dm_channel(channel_context):
         configurable["admin_thread"] = True
+    if request.context_thread_ts:
+        configurable["slack_breakout"] = True
     if thread_workspace:
         configurable["workspace"] = thread_workspace
         configurable["environment"] = thread_workspace
