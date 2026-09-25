@@ -119,7 +119,9 @@ class IncidentSession:
                     "incident context blocks or tool results. Stores the report, updates the "
                     "postmortem summary, and posts the channel update when a responder asked a "
                     "question, or, unprompted, when the findings changed and the channel has been "
-                    "quiet long enough. Call it exactly once at the end of the turn."
+                    "quiet long enough. If the result reports omissions, retry once with valid "
+                    "current-turn evidence IDs when possible; otherwise disclose the omissions "
+                    "to the responder."
                 ),
                 args_schema=ReportDraft,
             ),
@@ -158,7 +160,8 @@ class IncidentSession:
     async def _record_incident_report(self, **kwargs: Any) -> dict[str, Any]:
         await self.check()
         draft = ReportDraft.model_validate(kwargs)
-        report = finalize_report(draft, self.collector)
+        finalized = finalize_report(draft, self.collector)
+        report = finalized.report
         record = self.record
         digest = service.fingerprint(digest_fields(report))
         previous = await service.REPORTS.get(record.id)
@@ -219,7 +222,8 @@ class IncidentSession:
         return {
             "recorded": True,
             "posted": posted,
-            "omitted_claims": any("omitted" in gap for gap in report.gaps),
+            "omitted_claims": bool(finalized.omissions["items"]),
+            "omissions": finalized.omissions,
         }
 
     async def _search_incidents(self, query: str = "") -> dict[str, Any]:

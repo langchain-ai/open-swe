@@ -31,7 +31,8 @@ def test_report_keeps_supported_claims_and_drops_invented_or_partial_citations()
         }
     )
 
-    report = finalize_report(draft, collected)
+    finalized = finalize_report(draft, collected)
+    report = finalized.report
 
     assert report.summary == "Responders observed errors [slack:1]"
     assert report.outcome == "findings"
@@ -40,6 +41,28 @@ def test_report_keeps_supported_claims_and_drops_invented_or_partial_citations()
     assert [hypothesis.title for hypothesis in report.hypotheses] == ["Observed regression"]
     assert report.gaps
     assert [evidence.id for evidence in report.evidence] == ["slack:1"]
+    assert finalized.omissions == {
+        "items": [
+            {"kind": "summary", "text": "Invented cause", "unknown_evidence_ids": ["missing"]},
+            {"kind": "summary", "text": "Unsupported inference", "unknown_evidence_ids": []},
+            {
+                "kind": "impact",
+                "text": "Entire fleet is down",
+                "unknown_evidence_ids": ["missing"],
+            },
+            {
+                "kind": "next_step",
+                "text": "Disable authentication",
+                "unknown_evidence_ids": ["missing"],
+            },
+            {
+                "kind": "hypothesis",
+                "text": "Fabricated diagnosis",
+                "unknown_evidence_ids": ["missing"],
+            },
+        ],
+        "known_evidence_ids": ["slack:1"],
+    }
 
 
 @pytest.mark.parametrize("references", [[], ["invented"]])
@@ -50,9 +73,9 @@ def test_report_without_supported_summary_remains_inconclusive(references):
         ),
         evidence_tools.EvidenceCollector(),
     )
-    assert report.outcome == "inconclusive"
-    assert "Everything is healthy" not in report.summary
-    assert report.gaps
+    assert report.report.outcome == "inconclusive"
+    assert "Everything is healthy" not in report.report.summary
+    assert report.report.gaps
 
 
 def _envelope(text: str) -> str:

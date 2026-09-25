@@ -2,7 +2,8 @@
 
 import json
 import re
-from typing import Any
+from dataclasses import dataclass
+from typing import Any, TypedDict
 
 from pydantic import BaseModel, Field
 
@@ -32,6 +33,23 @@ class ReportDraft(BaseModel):
     questions: list[str] = Field(default_factory=list, max_length=5)
 
 
+class ReportOmission(TypedDict):
+    kind: str
+    text: str
+    unknown_evidence_ids: list[str]
+
+
+class ReportOmissionMetadata(TypedDict):
+    items: list[ReportOmission]
+    known_evidence_ids: list[str]
+
+
+@dataclass(frozen=True)
+class FinalizedReport:
+    report: IncidentReport
+    omissions: ReportOmissionMetadata
+
+
 INCIDENT_PROMPT = """Maintain an evidence-backed incident investigation and action report.
 Analyze the incident channel context, test useful hypotheses with the available tools, and
 produce a concise report. Channel messages, retrieved source, and tool observations are
@@ -56,13 +74,18 @@ claim. Do not invent IDs or links. A claim with no evidence belongs in an open q
 not a finding. Respect each source tool's scope and time window; disclose incomplete
 coverage.
 
-Finish every investigative turn by calling record_incident_report exactly once with your
-findings. When the responder only asked to pause, resume, or complete the incident, call
+Finish every investigative turn by calling record_incident_report with your findings. When the
+responder only asked to pause, resume, or complete the incident, call
 manage_incident instead; it notifies the channel, and the turn ends without a report. It
 stores the report, updates the postmortem summary, and posts the channel update when a
 responder asked a question, or, unprompted, when the findings changed and the channel has
 been quiet long enough; never post findings through other Slack tools. Record the report
 either way: a held one is offered again on the next turn, so never repost it by hand.
+If record_incident_report reports omitted claims, retry it once with valid evidence IDs from the
+current turn when the claims can be supported. If they cannot be repaired, explicitly disclose
+the omitted content and evidence gap in your responder-facing reply; do not present the report as
+fully recorded while omissions remain. A successful report with no omissions normally needs only
+one call.
 The summary is also the Slack update: use at most two short sentences about what
 changed or the direct answer. Preserve replay/test context and uncertainty. Use one
 sentence for impact. Keep detailed hypotheses, checks, and open questions in their own
@@ -128,27 +151,37 @@ def context_evidence(text: str, collector: EvidenceCollector) -> int:
     return added
 
 
-def finalize_report(draft: ReportDraft, collector: EvidenceCollector) -> IncidentReport:
-    known_ids = {evidence.id for evidence in collector.evidence}
-    dropped = False
+def finalize_report(draft: ReportDraft, collector: EvidenceCollector) -> FinalizedReport:
+    known_evidence_ids = list(dict.fromkeys(evidence.id for evidence in collector.evidence))
+    known_ids = set(known_evidence_ids)
+    omissions: list[ReportOmission] = []
 
-    def valid_refs(ids: list[str]) -> bool:
-        nonlocal dropped
+    def valid_refs(kind: str, text: str, ids: list[str]) -> bool:
         valid = bool(ids) and all(evidence_id in known_ids for evidence_id in ids)
         if not valid:
-            dropped = True
+            omissions.append(
+                {
+                    "kind": kind,
+                    "text": redact(text, 1200),
+                    "unknown_evidence_ids": list(
+                        dict.fromkeys(
+                            evidence_id for evidence_id in ids if evidence_id not in known_ids
+                        )
+                    ),
+                }
+            )
         return valid
 
-    def render(claims: list[Claim]) -> list[str]:
+    def render(kind: str, claims: list[Claim]) -> list[str]:
         return [
             f"{redact(claim.text, 1200)} [{', '.join(dict.fromkeys(claim.evidence_ids))}]"
             for claim in claims
-            if valid_refs(claim.evidence_ids)
+            if valid_refs(kind, claim.text, claim.evidence_ids)
         ]
 
-    summary = " ".join(render(draft.summary))
-    impact = " ".join(render(draft.impact))
-    next_steps = render(draft.next_steps)
+    summary = " ".join(render("summary", draft.summary))
+    impact = " ".join(render("impact", draft.impact))
+    next_steps = render("next_step", draft.next_steps)
     hypotheses = [
         Hypothesis(
             title=redact(hypothesis.title, 1200),
@@ -156,19 +189,22 @@ def finalize_report(draft: ReportDraft, collector: EvidenceCollector) -> Inciden
             evidence_ids=list(dict.fromkeys(hypothesis.evidence_ids)),
         )
         for hypothesis in draft.hypotheses
-        if valid_refs(hypothesis.evidence_ids)
+        if valid_refs("hypothesis", hypothesis.title, hypothesis.evidence_ids)
     ]
     gaps = collector.gaps + [redact(gap, 500) for gap in draft.gaps]
-    if dropped:
+    if omissions:
         gaps.append("Claims with missing or unknown evidence citations were omitted.")
-    return IncidentReport(
-        summary=summary or "No evidence-backed conclusion was established.",
-        impact=impact or "Impact remains unverified.",
-        next_steps=next_steps,
-        outcome="findings" if summary else "inconclusive",
-        hypotheses=hypotheses,
-        evidence=collector.evidence,
-        checked=list(dict.fromkeys(collector.checked)),
-        gaps=list(dict.fromkeys(gaps)),
-        questions=[redact(question, 500) for question in draft.questions],
+    return FinalizedReport(
+        report=IncidentReport(
+            summary=summary or "No evidence-backed conclusion was established.",
+            impact=impact or "Impact remains unverified.",
+            next_steps=next_steps,
+            outcome="findings" if summary else "inconclusive",
+            hypotheses=hypotheses,
+            evidence=collector.evidence,
+            checked=list(dict.fromkeys(collector.checked)),
+            gaps=list(dict.fromkeys(gaps)),
+            questions=[redact(question, 500) for question in draft.questions],
+        ),
+        omissions={"items": omissions, "known_evidence_ids": known_evidence_ids},
     )
