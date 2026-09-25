@@ -6,6 +6,7 @@ import pytest
 from sqlalchemy import func, select, update
 
 from agent.database import postgres
+from agent.experimental import ExperimentalFeaturesPatch
 from agent.users import UnauthorizedUser, User, UserPreferences, UserPreferencesPatch
 
 pytestmark = pytest.mark.usefixtures("registry_db")
@@ -191,6 +192,31 @@ async def test_preference_patches_merge_and_skip_unset_fields() -> None:
     assert turned_off == UserPreferences(concierge_mode=False)
     stored = await User.for_login("github", "bob")
     assert stored is not None and stored.preferences == {"concierge_mode": False, "future": "kept"}
+
+
+async def test_experimental_flag_patches_keep_sibling_flags() -> None:
+    await User.sign_in("github", "9", login="bob")
+    async with postgres.session() as session:
+        await session.execute(
+            update(User).values(
+                preferences={"concierge_mode": True, "experimental": {"future_flag": True}}
+            )
+        )
+
+    await User.update_preferences(
+        "bob",
+        UserPreferencesPatch(experimental=ExperimentalFeaturesPatch(pr_comment_triggers=True)),
+    )
+    await User.default_preferences(
+        "bob",
+        UserPreferencesPatch(experimental=ExperimentalFeaturesPatch(pr_comment_triggers=False)),
+    )
+
+    stored = await User.for_login("github", "bob")
+    assert stored is not None and stored.preferences == {
+        "concierge_mode": True,
+        "experimental": {"future_flag": True, "pr_comment_triggers": True},
+    }
 
 
 async def test_preferences_for_an_unknown_login_are_defaults_and_cannot_be_saved() -> None:

@@ -11,6 +11,7 @@ from pydantic import BaseModel, ValidationError
 
 from agent.baby_sit import handle_ci_webhook
 from agent.database import postgres
+from agent.experimental import ExperimentalFeatures
 from agent.github.comments import GitHubAuthError
 from agent.github.pull_requests import PullRequest
 from agent.input_messages import (
@@ -904,7 +905,11 @@ async def untagged_agent_pr_thread_id(payload: dict[str, Any], event_type: str) 
     pull_request = await PullRequest.get(
         event.repository.owner.login, event.repository.name, target.number
     )
-    return pull_request.agent_thread_id if pull_request is not None else None
+    thread_id = pull_request.agent_thread_id if pull_request is not None else None
+    if thread_id is None:
+        return None
+    features = await ExperimentalFeatures.for_thread(thread_id)
+    return thread_id if features.enabled("pr_comment_triggers") else None
 
 
 async def process_github_pr_comment(
@@ -1088,9 +1093,12 @@ async def process_github_pr_comment(
 
     trusted = await _trusted_authors(github_login, comments=comments)
     prompt = common.build_pr_prompt(comments, pr_url, repo_config=repo_config, trusted=trusted)
+    pr_comment_triggers = (await ExperimentalFeatures.for_thread(thread_id)).enabled(
+        "pr_comment_triggers"
+    )
     pr_author = _PrAuthorEvent.author_of(payload)
     author_logins: set[str] = set()
-    if postgres.configured() and repo is not None:
+    if pr_comment_triggers and postgres.configured() and repo is not None:
         try:
             stored = await PullRequest.get(repo.owner, repo.name, pr_number)
             pull_request = (
@@ -1128,8 +1136,18 @@ async def process_github_pr_comment(
                     "surface": "github",
                     "kind": "human",
                     "data": {
-                        "pull_request": {"number": pr_number, "url": pr_url, "author": pr_author},
-                        "sender_is_pr_author": str(author in author_logins).lower(),
+                        **(
+                            {
+                                "pull_request": {
+                                    "number": pr_number,
+                                    "url": pr_url,
+                                    "author": pr_author,
+                                },
+                                "sender_is_pr_author": str(author in author_logins).lower(),
+                            }
+                            if pr_comment_triggers
+                            else {"pull_request": {"number": pr_number, "url": pr_url}}
+                        ),
                         "comment_type": str(item.get("type", "comment")),
                         "path": str(item.get("path", "")),
                         "line": str(item.get("line", "")),

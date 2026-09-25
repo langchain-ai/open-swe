@@ -21,6 +21,7 @@ from sqlalchemy import (
     bindparam,
     delete,
     func,
+    literal,
     or_,
     select,
     text,
@@ -253,7 +254,8 @@ class User(Base):
         if user is None:
             return None
         changes = patch.model_dump(exclude_none=True)
-        if not changes:
+        experimental = changes.pop("experimental", {})
+        if not changes and not experimental:
             return user.typed_preferences
         incoming = bindparam("preferences_patch", changes, type_=JSONB)
         merged = (
@@ -261,6 +263,12 @@ class User(Base):
             if keep_existing
             else cls.preferences.op("||")(incoming)
         )
+        if experimental:
+            # `||` merges one level deep, so a flag patch must not replace its siblings.
+            current = func.coalesce(cls.preferences["experimental"], literal({}, JSONB))
+            flags = bindparam("experimental_patch", experimental, type_=JSONB)
+            nested = flags.op("||")(current) if keep_existing else current.op("||")(flags)
+            merged = merged.op("||")(func.jsonb_build_object("experimental", nested))
         async with postgres.session() as session:
             stored = await session.scalar(
                 update(cls)

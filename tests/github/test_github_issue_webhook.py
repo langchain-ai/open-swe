@@ -11,6 +11,7 @@ import httpx
 import pytest
 from fastapi.testclient import TestClient
 
+from agent import experimental
 from agent.api.app import app
 from agent.github import routes as github_routes
 from agent.github import webhook as github_webhooks
@@ -23,6 +24,7 @@ from agent.slack.request import SlackRequest
 from agent.slack.tools.request_pr_review import request_pr_review as request_pr_review_tool
 from agent.thread_ids import github_issue_thread_id
 from agent.users import User
+from agent.utils.thread_settings import ThreadSettings
 from agent.webhooks import common as webhook_common
 from tests.conftest import post_signed_github_webhook, register_github_logins
 
@@ -485,6 +487,7 @@ async def test_github_webhook_wakes_agent_on_untagged_activity_on_its_pr(
     monkeypatch.setattr(webhook_common, "enforce_public_repo_org_gate", allow)
     monkeypatch.setattr(webhook_common, "GITHUB_WEBHOOK_SECRET", _TEST_WEBHOOK_SECRET)
     register_github_logins(monkeypatch, "octocat")
+    _thread_experimental_features(monkeypatch, pr_comment_triggers=True)
     await PullRequest(
         owner="langchain-ai",
         repo="open-swe",
@@ -500,6 +503,34 @@ async def test_github_webhook_wakes_agent_on_untagged_activity_on_its_pr(
     assert response.status_code == 200
     assert (response.json()["status"] == "accepted") is accepted
     assert called == ({"agent_thread_id": "agent-thread"} if accepted else {})
+
+
+def _thread_experimental_features(monkeypatch: pytest.MonkeyPatch, **flags: bool) -> None:
+    async def load(_client: object, thread_id: str) -> ThreadSettings:
+        return {"experimental": flags}
+
+    monkeypatch.setattr(experimental, "load_thread_settings", load)
+
+
+async def test_untagged_comment_is_ignored_when_the_thread_did_not_opt_in(
+    monkeypatch, registry_db
+) -> None:
+    monkeypatch.setattr(webhook_common, "GITHUB_WEBHOOK_SECRET", _TEST_WEBHOOK_SECRET)
+    register_github_logins(monkeypatch, "octocat")
+    _thread_experimental_features(monkeypatch)
+    await PullRequest(
+        owner="langchain-ai",
+        repo="open-swe",
+        number=1244,
+        opening_head_sha="head-sha",
+        threads=[ThreadLink(thread_id="agent-thread", source=AGENT_OPENED_LINK_SOURCE)],
+    ).save()
+
+    response = await _post_github_webhook(
+        "issue_comment", _untagged_pr_event("issue_comment", {"login": "octocat"})
+    )
+
+    assert response.json()["status"] == "ignored"
 
 
 @pytest.mark.parametrize(

@@ -50,7 +50,9 @@ def render_open_swe_shared_base(*, sandbox_file_downloads: bool) -> str:
     return f"{OPEN_SWE_SHARED_BASE}\n\n{load_prompt('system/sandbox-file-downloads.md')}"
 
 
-def _render_source_guidance(source: str, slack_context: bool, slack_ask: bool = False) -> str:
+def _render_source_guidance(
+    source: str, slack_context: bool, slack_ask: bool = False, pr_comment_triggers: bool = False
+) -> str:
     if source == "background_task":
         name = "background-task"
     elif source == "slack" and slack_context:
@@ -66,6 +68,8 @@ def _render_source_guidance(source: str, slack_context: bool, slack_ask: bool = 
     else:
         name = "generic"
     guidance = load_prompt(f"system/source-{name}.md")
+    if name == "github" and pr_comment_triggers:
+        guidance += f"\n{load_prompt('system/source-github-pr-comments.md')}"
     return f"<open_swe_source_context>\n{guidance}\n</open_swe_source_context>"
 
 
@@ -133,6 +137,7 @@ def construct_system_prompt(
     continued_from_collaborative: bool = False,
     local_checkout: bool = False,
     recent_thread_context: str | None = None,
+    pr_comment_triggers: bool = False,
 ) -> str:
     """Render the agent's system prompt.
 
@@ -167,7 +172,9 @@ def construct_system_prompt(
         ),
         source_guidance_section=render_prompt(
             "system/source-context.md",
-            source_guidance=_render_source_guidance(source, slack_context, slack_ask),
+            source_guidance=_render_source_guidance(
+                source, slack_context, slack_ask, pr_comment_triggers
+            ),
         ),
         self_awareness_section=load_prompt("system/self-awareness.md"),
         default_prompt_section=default_prompt_section,
