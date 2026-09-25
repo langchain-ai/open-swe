@@ -4,7 +4,6 @@ import {
   Cloud,
   Folder,
   FolderGit2,
-  FolderOpen,
   FolderPlus,
   GitBranch,
   Laptop,
@@ -23,12 +22,9 @@ import {
   MenuGroupLabel,
   MenuItem,
   MenuPopup,
-  MenuSeparator,
-  MenuSub,
-  MenuSubPopup,
-  MenuSubTrigger,
   MenuTrigger,
 } from "@/components/ui/menu"
+import { RepoSelector } from "@/features/settings/components/RepoSelector"
 import { cn } from "@/lib/utils"
 
 export type RunTarget = "cloud" | "local"
@@ -84,70 +80,43 @@ export function LocalRepoSelector({
   triggerClassName?: string
   side?: "top" | "bottom"
 }) {
-  const selectedRepo = repos.find((repo) => repo.cwd === selectedRepoPath)
   return (
-    <Menu>
-      <MenuTrigger
-        className={cn(
-          "flex max-w-[260px] items-center gap-1 text-muted-foreground transition-opacity hover:opacity-80",
-          triggerClassName
-        )}
-        title={selectedRepo?.cwd}
-      >
-        <FolderOpen className="size-3.5 shrink-0" />
-        <span className="truncate">{selectedRepo?.name ?? placeholder}</span>
-        <ComposerControlChevron />
-      </MenuTrigger>
-      <MenuPopup align="start" className="w-64" side={side} sideOffset={7}>
-        <MenuGroup>
-          <MenuGroupLabel>Repositories</MenuGroupLabel>
-          {repos.length === 0 && (
-            <MenuItem disabled>No repositories added</MenuItem>
-          )}
-          {repos.map((repo) => (
-            <MenuItem
-              key={repo.cwd}
-              onClick={() => onSelectRepo(repo.cwd)}
-              title={repo.cwd}
-            >
-              <FolderOpen />
-              <span className="min-w-0 flex-1 truncate">{repo.name}</span>
-              {selectedRepoPath === repo.cwd && <Check className="ml-auto" />}
-            </MenuItem>
-          ))}
-        </MenuGroup>
-        <MenuSeparator />
-        <MenuGroup>
-          <MenuItem onClick={onAddRepo}>
-            <FolderPlus />
+    <RepoSelector
+      repos={repos.map((repo) => ({ full_name: repo.cwd, label: repo.name }))}
+      selectedRepo={selectedRepoPath}
+      onRepoChange={(repo) => {
+        if (repo) onSelectRepo(repo)
+      }}
+      placeholder={placeholder}
+      triggerClassName={triggerClassName}
+      side={side}
+      historyScope="local"
+      refreshable={false}
+      footer={
+        <div className="border-t border-border p-2">
+          <button
+            type="button"
+            onClick={onAddRepo}
+            className="flex items-center gap-2 py-1"
+          >
+            <FolderPlus className="size-3.5" />
             Add repository…
-          </MenuItem>
-          {repos.length > 0 && (
-            <MenuSub>
-              <MenuSubTrigger>
-                <Trash2 />
-                Remove repository…
-              </MenuSubTrigger>
-              <MenuSubPopup className="w-64">
-                <MenuGroup>
-                  {repos.map((repo) => (
-                    <MenuItem
-                      key={repo.cwd}
-                      onClick={() => onRemoveRepo(repo.cwd)}
-                      title={repo.cwd}
-                      variant="destructive"
-                    >
-                      <FolderOpen />
-                      <span className="truncate">{repo.name}</span>
-                    </MenuItem>
-                  ))}
-                </MenuGroup>
-              </MenuSubPopup>
-            </MenuSub>
-          )}
-        </MenuGroup>
-      </MenuPopup>
-    </Menu>
+          </button>
+          {repos.map((repo) => (
+            <button
+              key={repo.cwd}
+              type="button"
+              onClick={() => onRemoveRepo(repo.cwd)}
+              className="flex items-center gap-2 py-1 text-muted-foreground"
+              aria-label={`Remove ${repo.name}`}
+            >
+              <Trash2 className="size-3.5" />
+              Remove {repo.name}
+            </button>
+          ))}
+        </div>
+      }
+    />
   )
 }
 

@@ -6,6 +6,7 @@ import {
   useAuiState,
 } from "@assistant-ui/react"
 import { ArrowUp, Plus, Square, X } from "lucide-react"
+import { RepoSelector } from "@/features/settings/components/RepoSelector"
 import { ModelPicker } from "@/features/agents/components/ModelPicker"
 import { useModelOptions } from "@/features/agents/lib/provider/useModelOptions"
 import { modelConfigurable } from "@/features/agents/lib/stream/promptMessage"
@@ -139,24 +140,19 @@ export function Composer({ initialRepo }: { initialRepo?: string | null }) {
           />
           {!thread && (
             <>
-              <select
-                aria-label="Repository"
-                value={typeof config?.repo === "string" ? config.repo : ""}
-                onChange={(event) =>
-                  update({
-                    repo: event.target.value || null,
-                    repo_explicitly_none: !event.target.value,
-                  })
+              <RepoSelector
+                label="Repository"
+                repos={repos.data?.repositories}
+                selectedRepo={
+                  typeof config?.repo === "string" ? config.repo : null
                 }
-                className="max-w-40 bg-transparent text-xs"
-              >
-                <option value="">No repository</option>
-                {repos.data?.repositories.map((repo) => (
-                  <option key={repo.full_name} value={repo.full_name}>
-                    {repo.full_name}
-                  </option>
-                ))}
-              </select>
+                autoSelect={!config?.repo_explicitly_none}
+                disabled={disabled || !config}
+                onRepoChange={(repo) =>
+                  update({ repo, repo_explicitly_none: !repo })
+                }
+                triggerClassName="max-w-40 text-xs"
+              />
               {workspaces.length > 0 && (
                 <select
                   aria-label="Workspace"
