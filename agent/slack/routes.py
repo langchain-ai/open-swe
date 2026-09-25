@@ -8,6 +8,7 @@ from typing import Literal, TypedDict, cast
 from fastapi import APIRouter, Response
 from langgraph_sdk.client import LangGraphClient
 
+from agent.act_as import slack as act_as
 from agent.expedited_review import slack as expedited_review
 from agent.slack import webhook as service
 from agent.slack.allowed_bots import resolve_allowed_slack_bot
@@ -769,8 +770,8 @@ async def slack_interactivity(
         if button.type == expedited_review.BUTTON_TYPE:
             return await expedited_review.handle_button(interaction, button, background_tasks)
 
-        if button.type == "pr_approval":
-            return await _handle_pr_approval(interaction, action, button, background_tasks)
+        if button.type == act_as.BUTTON_TYPE:
+            return await act_as.handle_button(interaction, button, background_tasks)
 
         if button.type == "workflow_push_approval":
             if not channel_id or not thread_ts or not button.fingerprint:
@@ -887,74 +888,6 @@ async def slack_interactivity(
         return accepted("Slack option queued")
 
     return await answer_slack_request(target, dispatch)
-
-
-async def _handle_pr_approval(
-    interaction: SlackInteraction,
-    action: SlackBlockAction,
-    button: SlackButtonValue,
-    background_tasks: common.BackgroundTasks,
-) -> WebhookResponse:
-    """Record the author's DM decision and tell the source thread."""
-    from agent.slack.client import get_active_slack_thread
-    from agent.threads.pr_approval import decide_pr_approval, get_pr_approvals
-    from agent.users import User
-
-    channel_id = interaction.channel_id
-    user_id = interaction.user.id
-    thread_id = button.thread_id
-    if not channel_id or not user_id or not thread_id or not button.fingerprint:
-        return ignored("Missing PR approval context")
-    if button.action not in {"approve", "reject", "always_allow"}:
-        return ignored("Unknown PR approval action")
-
-    record = (await get_pr_approvals(thread_id)).get(button.fingerprint)
-    if record is None:
-        await common.post_slack_ephemeral_message(
-            channel_id,
-            user_id,
-            "I couldn't find that PR approval request. Ask Open SWE to open the PR again.",
-        )
-        return ignored("pr approval not found")
-    author = str(record.get("author_login") or "")
-    clicker = await User.login_for_slack(user_id)
-    # Only the person the PR would be attributed to can answer for it.
-    if not author or not clicker or clicker.lower() != author.lower():
-        await common.post_slack_ephemeral_message(
-            channel_id, user_id, f"Only `{author or 'the PR author'}` can answer this request."
-        )
-        return ignored("pr approval clicked by someone other than the author")
-
-    approved = button.action != "reject"
-    await decide_pr_approval(
-        thread_id,
-        button.fingerprint,
-        approved=approved,
-        actor=clicker,
-        always_allow=button.action == "always_allow",
-    )
-    background_tasks.add_task(
-        _update_selected_option_message,
-        interaction,
-        action,
-        "Always allowed"
-        if button.action == "always_allow"
-        else "Approved"
-        if approved
-        else "Denied",
-    )
-    active = await get_active_slack_thread(get_langgraph_client(), thread_id)
-    source_channel = (active or {}).get("channel_id")
-    source_ts = (active or {}).get("thread_ts")
-    if isinstance(source_channel, str) and isinstance(source_ts, str):
-        verdict = "approved" if approved else "denied"
-        await common.post_slack_thread_reply(
-            channel_id=source_channel,
-            thread_ts=source_ts,
-            text=f"`{author}` {verdict} opening the PR under their name.",
-            agent_thread_id=thread_id,
-        )
-    return accepted("PR approval decided")
 
 
 async def _update_selected_option_message(

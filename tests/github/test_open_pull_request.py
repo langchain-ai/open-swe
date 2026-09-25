@@ -14,8 +14,8 @@ opr = sys.modules["agent.tools.open_pull_request"]
 
 
 @pytest.fixture(autouse=True)
-def _single_participant_thread(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(opr, "is_shared_thread", AsyncMock(return_value=False))
+def _consent_not_needed(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(opr, "require_consent", AsyncMock(return_value=None))
 
 
 class _FakeRequest:

@@ -55,12 +55,12 @@ Returns:
     failed and quotes the request, status, headers, and body GitHub actually
     returned — read it and decide what to do next.
 
-Shared threads and attribution approval:
+Shared threads and acting as someone:
     In a thread with more than one participant, a PR first needs the approval of
     the person it opens as, unless they chose "Always allow". The tool
     DMs them an approval card in Slack and waits up to 120 seconds: on
-    approval it proceeds, on denial or timeout it returns
-    ``pr_approval: pending|denied`` — PR created: no. On ``pending``, tell the
+    approval it proceeds, otherwise it returns
+    ``act_as: pending|denied|unreachable`` — PR created: no. On ``pending``, tell the
     thread the PR is waiting on that person; their approval stays recorded, so
     calling the tool again after they approve opens it. After a denial you may
     re-attribute to another participant, but only through this same approval
