@@ -11,8 +11,40 @@ from agent.credential_scope import (
     pr_author_login,
     private_credential_login,
 )
+from agent.slack.channels import SlackChannel
 
 slack_breakout_tool = importlib.import_module("agent.slack.tools.start_new_thread")
+
+
+def _channel(*, private: bool) -> SlackChannel | None:
+    return SlackChannel.from_payload(
+        {
+            "id": "C1",
+            "is_channel": True,
+            "is_private": private,
+            "is_ext_shared": False,
+            "is_pending_ext_shared": False,
+        }
+    )
+
+
+@pytest.fixture(autouse=True)
+def public_channel(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(SlackChannel, "load", AsyncMock(return_value=_channel(private=False)))
+
+
+async def test_slack_start_new_thread_refuses_private_channel(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("agent.run_config.get_config", _config)
+    monkeypatch.setattr(SlackChannel, "load", AsyncMock(return_value=_channel(private=True)))
+    post = AsyncMock()
+    monkeypatch.setattr(slack_breakout_tool, "post_slack_top_level_message_with_ts", post)
+
+    result = await slack_breakout_tool.slack_start_new_thread("Title", "Do the thing.")
+
+    assert result["success"] is False
+    post.assert_not_awaited()
 
 
 async def _fake_trace_url(thread_id: str, **kwargs: object) -> str:
@@ -185,7 +217,7 @@ async def test_slack_start_new_thread_success(
         "dashboard_thread_url",
         lambda thread_id: f"https://dashboard.example/agents/{thread_id}",
     )
-    source_line = AsyncMock(return_value="<https://p/src|from this thread>")
+    source_line = AsyncMock(return_value="<https://p/src|(source)>")
     react = AsyncMock()
     monkeypatch.setattr(slack_breakout_tool, "source_thread_line", source_line)
     monkeypatch.setattr(slack_breakout_tool, "mark_broken_out", react)
@@ -208,10 +240,10 @@ async def test_slack_start_new_thread_success(
     get_permalink.assert_awaited_once_with("C1", new_ts)
     assert captured["top_level_post"]["channel_id"] == "C1"
     assert captured["top_level_post"]["text"] == (
-        "*Breakout thread:* Investigate follow-up · <https://p/src|from this thread> · <@U1>"
+        "`/breakout`: Investigate follow-up · <https://p/src|(source)> · <@U1>"
     )
     source_line.assert_awaited_once_with("C1", "1700000000.000002")
-    react.assert_awaited_once_with("C1", "1700000000.000002")
+    react.assert_awaited_once_with("C1", "1700000000.000001", "1700000000.000002", "C1", new_ts)
     assert captured["top_level_post"]["unfurl_links"] is False
     assert captured["thread_reply"] == {
         "channel_id": "C1",

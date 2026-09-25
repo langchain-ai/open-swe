@@ -24,7 +24,7 @@ from agent.dispatch import create_durable_run
 from agent.github.comments import format_github_comment_body_for_prompt
 from agent.input_messages import InputMessageContext, build_run_input
 from agent.invocation import new_invocation_id, with_invocation_id
-from agent.prompts import render_prompt
+from agent.prompts import prompt
 from agent.run_config import RunConfig
 from agent.slack.client import (
     bind_slack_thread_id,
@@ -496,19 +496,19 @@ def _slack_root_message(record: dict[str, Any], *, test_run: bool = False) -> st
 
 
 def _scheduled_prompt(
-    record: dict[str, Any], slack_thread: dict[str, Any] | None, *, prompt: str | None = None
+    record: dict[str, Any], slack_thread: dict[str, Any] | None, *, task: str | None = None
 ) -> str:
-    prompt = str(record["prompt"]) if prompt is None else prompt
+    task = str(record["prompt"]) if task is None else task
     if slack_thread:
-        return render_prompt("runs/scheduled-slack-thread.md", prompt=prompt)
+        return prompt("runs/scheduled-slack-thread", prompt=task)
     slack_channel_id = record.get("slack_channel_id")
     if (
         _slack_notification_mode(record) == "on_action"
         and isinstance(slack_channel_id, str)
         and slack_channel_id
     ):
-        return render_prompt("runs/scheduled-notify-on-action.md", prompt=prompt)
-    return prompt
+        return prompt("runs/scheduled-notify-on-action", prompt=task)
+    return task
 
 
 def _admin_thread_enabled(record: dict[str, Any]) -> bool:
@@ -724,7 +724,7 @@ async def _launch_agent_schedule_record(
         thread_id,
         _AGENT_ASSISTANT_ID,
         input=build_run_input(
-            _scheduled_prompt(record, slack_thread, prompt=prompt),
+            _scheduled_prompt(record, slack_thread, task=prompt),
             input_context,
             systems=[
                 {

@@ -7,9 +7,10 @@ from fastapi import HTTPException
 
 from agent.dashboard.repo_access import require_repo_access_for_user
 from agent.dispatch import dispatch_agent_run
-from agent.prompts import render_prompt
+from agent.prompts import prompt
 from agent.run_config import RunConfig
 from agent.slack.breakout_links import mark_broken_out, source_thread_line
+from agent.slack.channels import SlackChannel
 from agent.slack.client import (
     bind_slack_thread_id,
     get_active_slack_thread,
@@ -98,7 +99,7 @@ def _truncate_for_slack(text: str) -> str:
 
 
 def _visible_message(title: str) -> str:
-    return f"*Breakout thread:* {title}"
+    return f"`/breakout`: {title}"
 
 
 def _thread_details(instructions: str, repo: dict[str, str] | None) -> str:
@@ -130,8 +131,8 @@ async def _run_prompt(
     repo_text = f"{repo['owner']}/{repo['name']}" if repo else "(no repository specified)"
     channel_id = original_slack_thread.get("channel_id", "")
     thread_ts = original_slack_thread.get("thread_ts", "")
-    return render_prompt(
-        "runs/slack-breakout.md",
+    return prompt(
+        "runs/slack-breakout",
         title=title,
         repo=repo_text,
         channel_id=channel_id,
@@ -179,6 +180,12 @@ async def slack_start_new_thread(
     current_thread_ts = current_slack_thread.get("thread_ts")
     if not isinstance(channel_id, str) or not channel_id.strip():
         return {"success": False, "error": "Missing slack_thread.channel_id in config"}
+    channel = await SlackChannel.load(channel_id.strip(), use_cache=False)
+    if channel is None or not channel.public:
+        return {
+            "success": False,
+            "error": "Breakout threads can only be started in public channels; do not retry.",
+        }
 
     clean_title = _validate_text(title, field="title", max_chars=_TITLE_MAX_CHARS)
     if isinstance(clean_title, dict):
@@ -353,6 +360,7 @@ async def slack_start_new_thread(
     new_configurable: dict[str, Any] = {
         "slack_thread": new_slack_thread,
         "source": "slack",
+        "slack_breakout": True,
     }
     if repo:
         new_configurable["repo"] = repo
@@ -396,7 +404,9 @@ async def slack_start_new_thread(
     if isinstance(current_thread_ts, str) and current_thread_ts:
         request_ts = breakout_from["message_ts"]
         if request_ts:
-            await mark_broken_out(clean_channel_id, request_ts)
+            await mark_broken_out(
+                clean_channel_id, current_thread_ts, request_ts, clean_channel_id, message_ts
+            )
         result["next_step"] = (
             "End the turn with slack_no_reply_needed; do not reply in the current thread."
         )

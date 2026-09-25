@@ -39,7 +39,7 @@ from agent.middleware import (
 )
 from agent.middleware.prepare_run import PrepareRunState
 from agent.middleware.trace import OpenSWEMiddleware
-from agent.prompts import apply_tool_descriptions, render_prompt
+from agent.prompts import apply_tool_descriptions, prompt
 from agent.review.author_guidance import SteeringHistory
 from agent.review.walkthrough import Walkthrough
 from agent.review_scout.git import ScoutGitError, finalize, setup_working_tree
@@ -132,8 +132,8 @@ class PrepareReviewScoutRunMiddleware(BasePrepareRunMiddleware):
         merge_base = await setup_working_tree(
             backend, repo_dir, base_sha=cfg.base_sha, head_sha=cfg.head_sha
         )
-        system_prompt = render_prompt(
-            "review-scout/main.md",
+        system_prompt = prompt(
+            "review-scout/main",
             pr_number=cfg.pr_number,
             repo_full_name=cfg.repo.full_name,
             pr_title=_CLOSING_TITLE_TAG_RE.sub("</pr_title_>", cfg.pr_title or ""),
@@ -143,9 +143,7 @@ class PrepareReviewScoutRunMiddleware(BasePrepareRunMiddleware):
         )
         history = await SteeringHistory.load(cfg.repo.owner, cfg.repo.name, cfg.pr_number)
         if history is not None:
-            human_input = render_prompt(
-                "review-scout/human-input.md", messages=history.messages_block()
-            )
+            human_input = prompt("review-scout/human-input", messages=history.messages_block())
             system_prompt = f"{system_prompt}\n\n{human_input}"
         return {
             "work_dir": work_dir,

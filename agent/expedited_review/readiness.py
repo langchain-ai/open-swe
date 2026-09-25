@@ -15,6 +15,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 import httpx2
+from pydantic import BaseModel
 
 from agent.baby_sit import aggregate_check_state
 from agent.github.ci import (
@@ -57,6 +58,12 @@ class PullRequestSnapshot:
     open_swe_review_required: bool = False
     open_swe_reviewed_head: bool = False
     allowed_merge_methods: list[str] = field(default_factory=list)
+    approved_review_ids: frozenset[int] = frozenset()
+
+
+class _ReviewState(BaseModel):
+    id: int | None = None
+    state: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -246,5 +253,10 @@ async def assess_readiness(
         open_swe_review_required=review_required,
         open_swe_reviewed_head=reviewed_head,
         allowed_merge_methods=_merge_methods(pr),
+        approved_review_ids=frozenset(
+            parsed.id
+            for parsed in map(_ReviewState.model_validate, reviews)
+            if parsed.state == "APPROVED" and parsed.id is not None
+        ),
     )
     return Readiness(snapshot=snapshot, blockers=readiness_blockers(snapshot))

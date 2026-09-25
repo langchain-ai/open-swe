@@ -16,6 +16,7 @@ on:
 
 permissions:
   contents: write
+  id-token: write
   issues: write
   pull-requests: write
 
@@ -37,6 +38,7 @@ jobs:
           ref: main
           fetch-depth: 0
           persist-credentials: true
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
       - name: Require reapproval after a PR update
         if: github.event_name == 'pull_request_target' && github.event.action == 'synchronize'
         env:
@@ -52,11 +54,28 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_REPO: ${{ github.repository }}
-        run: ./scripts/build_preview_branch.sh reset
+        run: uv run scripts/build_preview_branch.py reset
+      - name: Install the latest oswe
+        if: vars.OPEN_SWE_BACKEND_URL != ''
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          tag="$(gh api "repos/${GH_REPO}/releases?per_page=30" --jq '[.[] | select(any(.assets[]; .name == "oswe-linux-x64.tar.gz"))][0].tag_name // ""')"
+          if [[ -z "$tag" ]]; then
+            echo "::warning::No release ships oswe yet; preview conflicts will not be resolved automatically."
+            exit 0
+          fi
+          dir="$RUNNER_TEMP/oswe"
+          gh release download "$tag" -p oswe-linux-x64.tar.gz -p oswe-SHA256SUMS -D "$dir"
+          (cd "$dir" && sha256sum --check --ignore-missing oswe-SHA256SUMS && tar -xzf oswe-linux-x64.tar.gz)
+          echo "$dir" >>"$GITHUB_PATH"
+          "$dir/oswe" --version
       - name: Assemble and publish the preview tree
         env:
           EXCLUDE_PR_NUMBER: ${{ github.event.action == 'synchronize' && github.event.pull_request.number || '' }}
           FORCE: ${{ inputs.force }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_REPO: ${{ github.repository }}
-        run: ./scripts/build_preview_branch.sh build
+          OPEN_SWE_BACKEND_URL: ${{ vars.OPEN_SWE_BACKEND_URL }}
+        run: uv run scripts/build_preview_branch.py build

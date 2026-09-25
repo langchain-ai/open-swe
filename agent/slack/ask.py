@@ -14,7 +14,7 @@ from typing import Any
 from pydantic import BaseModel
 
 from agent.dispatch import dispatch_agent_run
-from agent.prompts import render_prompt
+from agent.prompts import prompt
 from agent.slack.channels import SlackChannel
 from agent.slack.client import (
     acknowledge_slack_command,
@@ -220,8 +220,8 @@ async def _process_slack_ask(request: SlackAskRequest) -> None:
         "workspace": workspace,
         "environment": workspace,
     }
-    prompt = render_prompt(
-        "runs/slack-ask.md",
+    run_prompt = prompt(
+        "runs/slack-ask",
         command=request.command,
         asked_by=user_name or f"<@{request.user_id}>",
         request=request.question,
@@ -229,7 +229,7 @@ async def _process_slack_ask(request: SlackAskRequest) -> None:
         channel_name=_channel_label(channel_context),
         channel_context=await _channel_context(request.channel_id) or _NO_CHANNEL_CONTEXT,
     )
-    await dispatch_agent_run(thread_id, prompt, configurable, source="slack", thread_title=None)
+    await dispatch_agent_run(thread_id, run_prompt, configurable, source="slack", thread_title=None)
     logger.info(
         "Started a Slack slash command run",
         extra={"agent_thread_id": thread_id, "slack_channel": request.channel_id},

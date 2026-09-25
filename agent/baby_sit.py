@@ -27,7 +27,7 @@ from agent.github.ci import (
 )
 from agent.github.comments import post_github_comment
 from agent.github.pull_requests import PullRequestPayload
-from agent.prompts import render_prompt
+from agent.prompts import prompt
 from agent.slack.client import GitHubPrRef, post_slack_thread_reply
 from agent.source_context import SourceContext
 from agent.store import TypedStore, now_iso
@@ -112,8 +112,8 @@ class BabySitWatch(BaseModel):
             conclusion = _prompt_scalar(failure.get("conclusion") or "failure", 50)
             url = _prompt_scalar(failure.get("url") or "", 500)
             lines.append(f"- {name} ({conclusion})" + (f" — {url}" if url else ""))
-        return render_prompt(
-            "runs/baby-sit-failure.md",
+        return prompt(
+            "runs/baby-sit-failure",
             pr_url=self.pr_url,
             head_sha=self.head_sha,
             retry_count=self.retry_count,
@@ -337,16 +337,17 @@ async def _has_expedited_card(watch: BabySitWatch) -> bool:
 
 async def _finish_ready(watch: BabySitWatch) -> str:
     """Hand a green PR back to its agent thread, which decides whether to merge or report."""
-    prompt = (
-        "runs/baby-sit-ready-expedited.md"
-        if await _has_expedited_card(watch)
-        else "runs/baby-sit-ready.md"
-    )
+    expedited = await _has_expedited_card(watch)
     try:
         configurable = watch.dispatch_config()
         await dispatch_agent_run(
             watch.thread_id,
-            render_prompt(prompt, pr_url=watch.pr_url, head_sha=watch.head_sha),
+            prompt(
+                "runs/baby-sit-ready",
+                pr_url=watch.pr_url,
+                head_sha=watch.head_sha,
+                expedited=expedited,
+            ),
             configurable,
             source=str(configurable.get("source") or "github"),
             thread_title=None,

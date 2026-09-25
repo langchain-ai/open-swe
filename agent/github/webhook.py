@@ -11,8 +11,9 @@ from pydantic import BaseModel, ValidationError
 
 from agent.baby_sit import handle_ci_webhook
 from agent.database import postgres
+from agent.expedited_review.lifecycle import close_for_pull_request
 from agent.github.comments import GitHubAuthError
-from agent.github.pull_requests import PullRequest
+from agent.github.pull_requests import PullRequest, PullRequestEvent
 from agent.input_messages import (
     PersonIdentity,
     RunInput,
@@ -22,7 +23,7 @@ from agent.input_messages import (
     system_input,
     system_introduction,
 )
-from agent.prompts import load_prompt, render_prompt
+from agent.prompts import load_prompt, prompt
 from agent.review.findings import FindingInteraction, ReviewerPRMeta, ReviewerSlackThread
 from agent.review.walkthrough import Walkthrough
 from agent.run_config import Repo
@@ -71,8 +72,8 @@ def build_github_issue_prompt(
     formatted_body = common.format_github_comment_body_for_prompt(
         issue_author or github_login, body, trusted=trusted
     )
-    return render_prompt(
-        "runs/github-issue.md",
+    return prompt(
+        "runs/github-issue",
         repository=f"{repo_config.get('owner')}/{repo_config.get('name')}",
         triggered_by_line=triggered_by_line,
         issue_number=issue_number,
@@ -528,6 +529,15 @@ async def process_github_pr_ready(payload: dict[str, Any]) -> None:
     # "github_auto" would fall through to the email-based path, which has no
     # user_email to route on for webhook-triggered runs.
     await _dispatch_first_review_from_pr_payload(payload, source="github")
+
+
+async def settle_expedited_review_on_close(payload: dict[str, Any]) -> None:
+    """Mark a closed PR's open expedited card merged or closed, whoever closed the PR."""
+    event = PullRequestEvent.parse(payload)
+    identity = event.identity if event is not None else None
+    if identity is None or not postgres.configured():
+        return
+    await close_for_pull_request(*identity)
 
 
 async def process_github_pr_close(payload: dict[str, Any]) -> None:

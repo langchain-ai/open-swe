@@ -36,7 +36,7 @@ from agent.middleware import (
     TimeoutWrapupMiddleware,
     ToolErrorMiddleware,
 )
-from agent.prompts import apply_tool_descriptions, load_prompt, render_prompt
+from agent.prompts import apply_tool_descriptions, load_prompt, prompt
 from agent.review.style_guidance import REVIEWER_STYLE_THEMES
 from agent.run_config import RunConfig
 from agent.runtime import (
@@ -110,8 +110,8 @@ class PrepareAnalyzerRunMiddleware(BasePrepareRunMiddleware):
         owner, _, name = full_name.partition("/")
         samples_text = cfg.review_style_samples_text or ""
         mode = cfg.analyzer_mode or "bootstrap"
-        system_prompt = render_prompt(
-            "analyzer/main.md",
+        system_prompt = prompt(
+            "analyzer/main",
             repo_owner=owner or "<owner>",
             repo_name=name or "<repo>",
             working_dir=work_dir,
