@@ -25,6 +25,11 @@ def upgrade() -> None:
         ) PARTITION BY RANGE (received_at)
         """
     )
+    for column in ("user_id", "workspace_id", "repository_id", "pull_request_id"):
+        op.execute(
+            f"CREATE INDEX event_log_{column.removesuffix('_id')}_idx ON event_log ({column}) "
+            f"WHERE {column} IS NOT NULL"
+        )
     op.execute("CREATE INDEX event_log_delivery_idx ON event_log (source, delivery_id)")
     op.execute("CREATE INDEX event_log_received_idx ON event_log (received_at, source, event_type)")
     for statement in (
