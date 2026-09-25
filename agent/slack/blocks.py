@@ -65,6 +65,8 @@ class ButtonElement(TypedDict):
     text: PlainText
     action_id: str
     value: NotRequired[str]
+    url: NotRequired[str]
+    accessibility_label: NotRequired[str]
     style: NotRequired[ButtonStyle]
 
 
@@ -86,6 +88,7 @@ type ActionElement = ButtonElement | CheckboxesElement
 class ActionsBlock(TypedDict):
     type: Literal["actions"]
     elements: list[ActionElement]
+    block_id: NotRequired[str]
 
 
 class FeedbackButton(TypedDict):

@@ -22,8 +22,12 @@ def interaction(rating: Literal["up", "down"] = "up") -> SlackInteraction:
             "message": {"ts": "2.0", "thread_ts": "1.0"},
             "actions": [
                 {
-                    "action_id": run_feedback.FEEDBACK_ACTION,
-                    "type": "feedback_buttons",
+                    "action_id": (
+                        "open_swe_run_feedback_up"
+                        if rating == "up"
+                        else "open_swe_run_feedback_down"
+                    ),
+                    "type": "button",
                     "value": json.dumps({"run_id": "run-1", "rating": rating}),
                 }
             ],
@@ -54,6 +58,13 @@ async def saved_feedback(monkeypatch: pytest.MonkeyPatch) -> AsyncMock:
     save = AsyncMock(return_value=True)
     monkeypatch.setattr(run_feedback, "create_langsmith_feedback", save)
     return save
+
+
+async def test_mismatched_button_and_rating_is_ignored(saved_feedback: AsyncMock) -> None:
+    payload = interaction("up")
+    payload.actions[0].action_id = "open_swe_run_feedback_down"
+    await run_feedback.process_feedback(payload, payload.actions[0])
+    saved_feedback.assert_not_awaited()
 
 
 async def test_rerating_updates_same_feedback_on_exact_reply_run(saved_feedback: AsyncMock) -> None:
@@ -150,3 +161,20 @@ async def test_webhook_acknowledges_feedback_without_starting_agent(
     process.assert_not_awaited()
     await tasks()
     process.assert_awaited_once_with(interaction(), interaction().actions[0])
+
+
+async def test_web_link_button_is_acknowledged_without_starting_agent(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    payload = interaction()
+    payload.actions[0].action_id = "open_swe_web_link"
+    body = urlencode({"payload": payload.model_dump_json()}).encode()
+
+    async def receive() -> dict[str, object]:
+        return {"type": "http.request", "body": body}
+
+    request = Request({"type": "http", "headers": []}, receive)
+    tasks = BackgroundTasks()
+    monkeypatch.setattr(routes.common, "verify_slack_signature", lambda **kwargs: True)
+    assert await routes.slack_interactivity(request, tasks) == {}
+    assert not tasks.tasks

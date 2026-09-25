@@ -12,8 +12,8 @@ from agent.slack.client import (
     format_slack_session_cost,
     lookup_slack_run_message_mapping,
     update_slack_message,
-    with_slack_pending_session_cost,
     with_slack_session_cost,
+    without_slack_pending_session_cost,
 )
 from agent.utils.langsmith import LangSmithCostUnavailable, get_langsmith_thread_cost
 from agent.utils.thread_ops import langgraph_client
@@ -65,10 +65,10 @@ def _payload(state: Mapping[str, Any], attempt: int) -> SessionCostRefresh | Non
     return payload
 
 
-async def _mark_slack_reply_cost_pending(
-    payload: SessionCostRefresh, client: LangGraphClient, *, clear: bool = False
+async def _clear_slack_reply_pending_cost(
+    payload: SessionCostRefresh, client: LangGraphClient
 ) -> None:
-    """Best-effort: flag the mapped final reply as awaiting its deferred cost."""
+    """Best-effort: clear old pending labels from a mapped reply."""
     mapping = await lookup_slack_run_message_mapping(
         client, payload["channel_id"], payload["run_id"]
     )
@@ -86,21 +86,21 @@ async def _mark_slack_reply_cost_pending(
     blocks = message.get("blocks")
     if not isinstance(text, str) or (blocks is not None and not isinstance(blocks, list)):
         return
-    updated_text, updated_blocks = with_slack_pending_session_cost(text, blocks, clear=clear)
+    updated_text, updated_blocks = without_slack_pending_session_cost(text, blocks)
     if updated_text == text and updated_blocks == blocks:
         return
     updated, error = await update_slack_message(
         payload["channel_id"], message_ts, updated_text, blocks=updated_blocks
     )
     if not updated:
-        logger.warning("Could not update pending cost label", extra={"slack_error": error})
+        logger.warning("Could not clear pending cost label", extra={"slack_error": error})
 
 
 async def _clear_pending_cost(state: Mapping[str, object], client: LangGraphClient) -> None:
     try:
         payload = _payload(state, 0)
         if payload is not None:
-            await _mark_slack_reply_cost_pending(payload, client, clear=True)
+            await _clear_slack_reply_pending_cost(payload, client)
     except Exception:
         logger.warning("Could not clear pending cost label", exc_info=True)
 
@@ -130,15 +130,6 @@ async def schedule_session_cost_refresh(
     except Exception:  # noqa: BLE001
         logger.warning("Could not schedule session-cost refresh", exc_info=True)
         return False
-    if attempt == 0:
-        try:
-            await _mark_slack_reply_cost_pending(payload, client)
-        except Exception:  # noqa: BLE001
-            logger.warning(
-                "Could not mark Slack reply cost pending",
-                extra={"run_id": payload["run_id"]},
-                exc_info=True,
-            )
     return True
 
 
