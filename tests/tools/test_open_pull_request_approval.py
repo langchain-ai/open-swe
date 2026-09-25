@@ -113,3 +113,16 @@ async def test_always_allow_skips_the_dm(gate, monkeypatch):
 
     assert await _open() is None
     gate.dm.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_retry_after_a_late_approval_opens_without_asking_again(gate, monkeypatch):
+    _alice(monkeypatch, "U-ALICE")
+    timed_out = await _open()
+    assert timed_out is not None and timed_out["pr_approval"] == "pending"
+    for record in gate.metadata["pr_approvals"].values():
+        record["status"] = pr_approval.PR_APPROVAL_APPROVED
+    gate.dm.reset_mock()
+
+    assert await _open() is None
+    gate.dm.assert_not_awaited()

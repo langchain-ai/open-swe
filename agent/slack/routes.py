@@ -895,10 +895,9 @@ async def _handle_pr_approval(
     button: SlackButtonValue,
     background_tasks: common.BackgroundTasks,
 ) -> WebhookResponse:
-    """Record the author's DM decision, tell the source thread, and wake the run."""
+    """Record the author's DM decision and tell the source thread."""
     from agent.slack.client import get_active_slack_thread
     from agent.threads.pr_approval import decide_pr_approval, get_pr_approvals
-    from agent.threads.pr_approval_callback import post_pr_approval_decision
     from agent.users import User
 
     channel_id = interaction.channel_id
@@ -955,8 +954,6 @@ async def _handle_pr_approval(
             text=f"`{author}` {verdict} opening the PR under their name.",
             agent_thread_id=thread_id,
         )
-    # Interrupt, never queue: the tool may still be waiting on this decision.
-    await post_pr_approval_decision(thread_id, approved=approved)
     return accepted("PR approval decided")
 
 

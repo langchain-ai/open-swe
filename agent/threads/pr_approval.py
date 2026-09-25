@@ -2,9 +2,9 @@
 
 In a thread with more than one participant, anyone there can steer the run, so
 whoever the PR opens as gets the final say, once per thread. The tool DMs them a
-Block Kit card and waits briefly for the decision; a callback interrupts the
-active run with it. "Always allow" skips the card from then on, and a thread
-with a single participant never asks.
+Block Kit card and waits for the decision; a late decision still applies to the
+next attempt in the thread. "Always allow" skips the card from then on, and a
+thread with a single participant never asks.
 """
 
 import hashlib

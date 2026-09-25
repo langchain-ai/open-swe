@@ -151,7 +151,7 @@ def _effective_draft(draft: bool) -> bool:
     return preference if preference is not None else draft
 
 
-_APPROVAL_WAIT_SECONDS = 60.0
+_APPROVAL_WAIT_SECONDS = 120.0
 _APPROVAL_POLL_SECONDS = 2.0
 
 
@@ -171,8 +171,9 @@ def _pr_approval_pending_payload(
         f"The author {author_login} {decided}. Do not retry this exact call."
         if decided
         else (
-            f"No approval from the author {author_login} yet. They can still approve in the "
-            "thread; when they do, this run is interrupted with the decision so you can retry."
+            f"The author {author_login} did not answer within "
+            f"{int(_APPROVAL_WAIT_SECONDS)} seconds. Their approval stays recorded for this "
+            "thread, so calling open_pull_request again after they approve opens the PR."
         )
     )
     return {
@@ -206,9 +207,8 @@ async def _pr_approval(
     """The pending-approval payload when a shared thread needs the author's sign-off.
 
     In a thread with more than one participant, whoever the PR opens as must
-    approve it, unless they chose "Always allow". The tool waits up to 60
-    seconds for the decision before returning ``pending``; the approval
-    callback interrupts the run so the model can retry.
+    approve it, unless they chose "Always allow". The tool waits up to 120
+    seconds for the decision before returning ``pending``.
     """
     if kind != "user" or not cfg.thread_id or not await is_shared_thread(cfg.thread_id):
         return None
@@ -224,8 +224,10 @@ async def _pr_approval(
         return None
 
     fingerprint = pr_approval_fingerprint(thread_id=cfg.thread_id, author_login=author_login)
-    existing = await get_pr_approvals(cfg.thread_id)
-    if existing.get(fingerprint, {}).get("status") == PR_APPROVAL_REJECTED:
+    existing_status = (await get_pr_approvals(cfg.thread_id)).get(fingerprint, {}).get("status")
+    if existing_status == PR_APPROVAL_APPROVED:
+        return None
+    if existing_status == PR_APPROVAL_REJECTED:
         return _pr_approval_pending_payload(
             owner=owner,
             repo=repo,
@@ -282,10 +284,8 @@ async def _pr_approval(
             await mark_pr_approval_notified(cfg.thread_id, fingerprint)
 
     deadline = _APPROVAL_WAIT_SECONDS
-    import asyncio as _asyncio  # noqa: PLC0415
-
     while deadline > 0:
-        await _asyncio.sleep(_APPROVAL_POLL_SECONDS)
+        await asyncio.sleep(_APPROVAL_POLL_SECONDS)
         deadline -= _APPROVAL_POLL_SECONDS
         approvals = await get_pr_approvals(cfg.thread_id)
         status = approvals.get(fingerprint, {}).get("status")
