@@ -81,6 +81,9 @@ async def api_get_my_preferences(
     session: dict[str, Any] = SESSION_DEP,
 ) -> dict[str, Any]:
     return {
+        # Threads no longer read a saved visibility; "public" keeps an older
+        # dashboard bundle (which sends it explicitly) from going private.
+        "default_visibility": "public",
         **await get_user_preferences(session["sub"]),
         "default_local_tracing_project": ENV.LANGSMITH_PROJECT.get(),
     }
@@ -92,6 +95,9 @@ async def api_put_my_preferences(
     session: dict[str, Any] = SESSION_DEP,
 ) -> dict[str, Any]:
     return {
+        # Threads no longer read a saved visibility; "public" keeps an older
+        # dashboard bundle (which sends it explicitly) from going private.
+        "default_visibility": "public",
         **await set_user_preferences(session["sub"], body),
         "default_local_tracing_project": ENV.LANGSMITH_PROJECT.get(),
     }

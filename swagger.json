@@ -1827,14 +1827,6 @@
       },
       "UserPreferencesUpdate": {
         "properties": {
-          "default_visibility": {
-            "enum": [
-              "public",
-              "private"
-            ],
-            "title": "Default Visibility",
-            "type": "string"
-          },
           "default_workspace": {
             "anyOf": [
               {
@@ -1845,6 +1837,21 @@
               }
             ],
             "title": "Default Workspace"
+          },
+          "follow_up_behavior": {
+            "anyOf": [
+              {
+                "enum": [
+                  "queue",
+                  "steer"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Follow Up Behavior"
           },
           "local_tracing_project": {
             "anyOf": [
@@ -1858,9 +1865,6 @@
             "title": "Local Tracing Project"
           }
         },
-        "required": [
-          "default_visibility"
-        ],
         "title": "UserPreferencesUpdate",
         "type": "object"
       },
