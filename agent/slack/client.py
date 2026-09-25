@@ -140,6 +140,7 @@ def replace_bot_mention_with_username(text: str, bot_user_id: str, bot_username:
 
 
 _SLACK_USER_MENTION_RE = re.compile(r"<@([UW][A-Z0-9]+)>")
+_SLACK_CHANNEL_MENTION_RE = re.compile(r"<#([CG][A-Z0-9]+)\|?>")
 
 
 def slack_mentioned_user_ids(text: str) -> list[str]:
@@ -147,18 +148,33 @@ def slack_mentioned_user_ids(text: str) -> list[str]:
     return _SLACK_USER_MENTION_RE.findall(text)
 
 
-def label_slack_user_mentions(text: str, user_names_by_id: Mapping[str, str]) -> str:
-    """Rewrite bare `<@USER_ID>` mentions to Slack's labelled `<@USER_ID|name>` form."""
+def slack_mentioned_channel_ids(text: str) -> list[str]:
+    """The channel ids in `<#CHANNEL_ID>` mentions that carry no name."""
+    return _SLACK_CHANNEL_MENTION_RE.findall(text)
 
+
+def _label_slack_mentions(
+    text: str, pattern: re.Pattern[str], sigil: str, names_by_id: Mapping[str, str]
+) -> str:
     def label(match: re.Match[str]) -> str:
-        user_id = match[1]
-        name = user_names_by_id.get(user_id, "")
-        if not name or name == user_id:
+        entity_id = match[1]
+        name = names_by_id.get(entity_id, "")
+        if not name or name == entity_id:
             return match[0]
         escaped = name.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-        return f"<@{user_id}|{escaped}>"
+        return f"<{sigil}{entity_id}|{escaped}>"
 
-    return _SLACK_USER_MENTION_RE.sub(label, text)
+    return pattern.sub(label, text)
+
+
+def label_slack_user_mentions(text: str, user_names_by_id: Mapping[str, str]) -> str:
+    """Rewrite bare `<@USER_ID>` mentions to Slack's labelled `<@USER_ID|name>` form."""
+    return _label_slack_mentions(text, _SLACK_USER_MENTION_RE, "@", user_names_by_id)
+
+
+def label_slack_channel_mentions(text: str, channel_names_by_id: Mapping[str, str]) -> str:
+    """Rewrite unnamed `<#CHANNEL_ID>` mentions to Slack's labelled `<#CHANNEL_ID|name>` form."""
+    return _label_slack_mentions(text, _SLACK_CHANNEL_MENTION_RE, "#", channel_names_by_id)
 
 
 def convert_mentions_to_slack_format(text: str) -> str:

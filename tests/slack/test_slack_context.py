@@ -2149,6 +2149,7 @@ def _context_input(messages: list[dict], **kwargs: object) -> list[str]:
         cast(dict, kwargs.get("user_names_by_id", {"U123": "Alice", "UBOT": "Open SWE"})),
         cast(dict, kwargs.get("logins_by_user_id", {})),
         person_ids_by_user_id=cast(dict, kwargs.get("person_ids_by_user_id", {})),
+        channel_names_by_id=cast(dict, kwargs.get("channel_names_by_id", {})),
         channel={"id": "slack:C123", "platform": "slack"},
         bot_user_id="UBOT",
         event_ts="9.0",
@@ -2173,6 +2174,21 @@ def test_slack_context_labels_mentioned_people_with_their_names() -> None:
     rendered = str(contents)
     assert "cc &lt;@U456|Bob &amp;lt;B&amp;gt;&gt; for viz" in rendered
     assert "and &lt;@U789|Carol&gt; and &lt;@U000&gt;" in rendered
+
+
+def test_slack_context_names_unnamed_channel_mentions() -> None:
+    contents = _context_input(
+        [
+            {"ts": "1.0", "text": "see <#C456|> and <#C789|old-name>", "user": "U123"},
+            {"ts": "9.0", "text": "<@UBOT> also <#C456>", "user": "U123"},
+        ],
+        channel_names_by_id={"C456": "eng", "C789": "new-name"},
+        request_text="also <#C456> and <#C000>",
+    )
+
+    rendered = str(contents)
+    assert "see &lt;#C456|eng&gt; and &lt;#C789|old-name&gt;" in rendered
+    assert "also &lt;#C456|eng&gt; and &lt;#C000&gt;" in rendered
 
 
 def test_slack_context_never_replays_open_swes_own_replies(
