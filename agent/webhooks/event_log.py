@@ -1,5 +1,6 @@
 """Append-only log of verified GitHub, Slack, and Linear webhook deliveries."""
 
+import asyncio
 import json
 import logging
 import time
@@ -22,6 +23,7 @@ _TABLE = "event_log"
 _ROTATE_INTERVAL_SECONDS = 3600
 
 _ROTATED_AT: float | None = None
+_ROTATION_LOCK = asyncio.Lock()
 
 _INSERT = text(
     f"""
@@ -69,6 +71,7 @@ class EventRefs(BaseModel):
         try:
             delivery = _GitHubDelivery.model_validate_json(body)
         except ValidationError:
+            logger.debug("GitHub delivery names no linkable rows", exc_info=True)
             return cls()
         number = delivery.pull_request.number if delivery.pull_request else None
         if number is None and delivery.issue and delivery.issue.pull_request:
@@ -86,10 +89,11 @@ class EventRefs(BaseModel):
         try:
             delivery = _LinearDelivery.model_validate_json(body)
         except ValidationError:
+            logger.debug("Linear delivery names no linkable rows", exc_info=True)
             return cls()
-        email = delivery.actor.email if delivery.actor else ""
-        if not email and delivery.data and delivery.data.user:
-            email = delivery.data.user.email
+        email = delivery.data.user.email if delivery.data and delivery.data.user else ""
+        if not email and delivery.actor:
+            email = delivery.actor.email
         return cls(email=email)
 
 
@@ -173,15 +177,17 @@ class EventLog:
     async def ensure_partitions(cls) -> None:
         """Rotate at most once an hour per process; call before every read or write."""
         global _ROTATED_AT
-        now = time.monotonic()
-        if _ROTATED_AT is not None and now - _ROTATED_AT < _ROTATE_INTERVAL_SECONDS:
+        if cls._rotated_recently():
             return
-        _ROTATED_AT = now
-        try:
+        async with _ROTATION_LOCK:
+            if cls._rotated_recently():
+                return
             await cls.rotate_partitions()
-        except Exception:
-            _ROTATED_AT = None
-            raise
+            _ROTATED_AT = time.monotonic()
+
+    @staticmethod
+    def _rotated_recently() -> bool:
+        return _ROTATED_AT is not None and time.monotonic() - _ROTATED_AT < _ROTATE_INTERVAL_SECONDS
 
     @classmethod
     async def rotate_partitions(cls, today: date | None = None) -> None:

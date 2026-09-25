@@ -711,7 +711,9 @@ async def slack_interactivity(
         "slack",
         event_type=interaction.type if interaction else "",
         delivery_id=interaction.trigger_id if interaction else "",
-        refs=EventRefs(slack_user_id=interaction.user.id, slack_channel_id=interaction.channel_id)
+        refs=EventRefs(
+            slack_user_id=interaction.user.id, slack_channel_id=interaction.origin_channel_id
+        )
         if interaction
         else None,
     )
