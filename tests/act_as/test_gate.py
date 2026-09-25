@@ -32,10 +32,13 @@ def dm(thread_metadata: JsonObject, monkeypatch: pytest.MonkeyPatch) -> AsyncMoc
     return send
 
 
-def _alice(monkeypatch: pytest.MonkeyPatch, slack_id: str, *, always: bool = False) -> None:
-    person = SimpleNamespace(
-        slack_user_id=slack_id, typed_preferences=UserPreferences(act_as_always_allowed=always)
+def _alice(
+    monkeypatch: pytest.MonkeyPatch, slack_id: str, *, always: bool = False, flagged: bool = True
+) -> None:
+    preferences = UserPreferences(
+        experimental_act_as_approval=flagged, act_as_always_allowed=always
     )
+    person = SimpleNamespace(slack_user_id=slack_id, typed_preferences=preferences)
     monkeypatch.setattr(User, "for_login", AsyncMock(return_value=person))
 
 
@@ -146,6 +149,14 @@ async def test_failed_dm_refuses_instead_of_waiting(dm, monkeypatch):
 @pytest.mark.asyncio
 async def test_always_allow_skips_the_dm(dm, monkeypatch):
     _alice(monkeypatch, "U-ALICE", always=True)
+
+    assert await _open() is None
+    dm.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_people_without_the_feature_flag_are_never_asked(dm, monkeypatch):
+    _alice(monkeypatch, "U-ALICE", flagged=False)
 
     assert await _open() is None
     dm.assert_not_awaited()

@@ -4,7 +4,8 @@ In a thread with more than one participant anyone can steer the run, so the
 person the PR opens as gets the final say, once per thread. They get a DM card
 and the tool waits for their answer; an answer that comes later still applies to
 the next attempt. "Always allow" skips the card, and a thread with a single
-participant never asks.
+participant never asks. Only people who turned on the
+``experimental_act_as_approval`` feature flag are asked.
 """
 
 import asyncio
@@ -80,13 +81,15 @@ async def require_consent(
     if not login:
         return None
     person = await User.for_login("github", login)
-    if person is not None and person.typed_preferences.act_as_always_allowed:
+    if person is None or not person.typed_preferences.experimental_act_as_approval:
+        return None
+    if person.typed_preferences.act_as_always_allowed:
         return None
     existing = thread.for_login(login)
     if existing is not None and existing.status != "pending":
         return None if existing.status == "approved" else _refusal(login, "denied", token_kind)
 
-    slack_user_id = person.slack_user_id if person is not None else ""
+    slack_user_id = person.slack_user_id
     if not slack_user_id:
         return _refusal(login, "unreachable", token_kind)
     request = await thread.request(login, owner=owner, repo=repo, head=head, base=base, title=title)
