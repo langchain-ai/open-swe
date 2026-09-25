@@ -210,6 +210,21 @@ class SlackInteractionUser(SlackPayload):
     username: str = ""
 
 
+class SlackSelectedOption(SlackPayload):
+    value: str = ""
+
+
+class SlackInputValue(SlackPayload):
+    """One element's current value, as a view's or message's ``state.values`` carries it."""
+
+    value: str | None = None
+    selected_options: list[SlackSelectedOption] = Field(default_factory=list)
+
+
+class SlackViewState(SlackPayload):
+    values: dict[str, dict[str, SlackInputValue]] = Field(default_factory=dict)
+
+
 class SlackInteraction(SlackPayload):
     """A Block Kit interaction (``block_actions``, ``block_suggestion``)."""
 
@@ -222,6 +237,7 @@ class SlackInteraction(SlackPayload):
     user: SlackInteractionUser = Field(default_factory=SlackInteractionUser)
     channel: SlackRef = Field(default_factory=SlackRef)
     message: SlackInteractionMessage = Field(default_factory=SlackInteractionMessage)
+    state: SlackViewState = Field(default_factory=SlackViewState)
 
     @property
     def channel_id(self) -> str:
@@ -245,16 +261,6 @@ class SlackButtonValue(SlackPayload):
     thread_id: str = ""
     thread_ts: str = ""
     response: str = ""
-
-
-class SlackInputValue(SlackPayload):
-    """One input element's submitted value, as ``view.state.values`` carries it."""
-
-    value: str | None = None
-
-
-class SlackViewState(SlackPayload):
-    values: dict[str, dict[str, SlackInputValue]] = Field(default_factory=dict)
 
 
 class SlackView(SlackPayload):

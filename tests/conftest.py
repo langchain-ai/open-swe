@@ -109,6 +109,18 @@ def fake_store(monkeypatch: pytest.MonkeyPatch) -> FakeStore:
     return client.store
 
 
+def register_github_logins(monkeypatch: pytest.MonkeyPatch, *logins: str) -> None:
+    """Treat ``logins`` as registered Open SWE users."""
+    from agent.users import User
+
+    registered = {login.lower() for login in logins}
+
+    async def known_logins(candidates: Sequence[str]) -> frozenset[str]:
+        return frozenset(c.lower() for c in candidates if c.lower() in registered)
+
+    monkeypatch.setattr(User, "known_logins", known_logins)
+
+
 async def post_signed_github_webhook(
     event_type: str,
     payload: Mapping[str, object],

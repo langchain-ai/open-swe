@@ -234,6 +234,7 @@ async def dispatch_turn(
         "agent",
         input=_input(record, request=request, requester=requester),
         source="incidents_agent",
+        thread_title=None,
         config={
             "configurable": _configurable(
                 record, policy, request=request, reply_thread_ts=reply_thread_ts

@@ -18,7 +18,7 @@ from agent.credential_scope import (
 )
 from agent.github.app import get_github_app_installation_token
 from agent.github.comments import derive_pr_state
-from agent.github.pull_requests import PullRequest, ThreadLink
+from agent.github.pull_requests import AGENT_OPENED_LINK_SOURCE, PullRequest, ThreadLink
 from agent.github.token import GitHubUserAuthRequired
 from agent.run_config import RunConfig
 from agent.slack.client import (
@@ -743,6 +743,11 @@ async def _record_pr_telemetry(
             if repo_private is not None:
                 metadata["repo_private"] = repo_private
             await get_client().threads.update(thread_id=thread_id, metadata=metadata)
+            origin = (
+                cfg.slack_thread
+                if record_opening and cfg.slack_thread and cfg.slack_thread.channel_id
+                else None
+            )
             try:
                 await PullRequest(
                     owner=owner,
@@ -762,13 +767,25 @@ async def _record_pr_telemetry(
                         if record_opening and isinstance(opening_head_sha, str)
                         else ""
                     ),
+                    opening_model_id=(
+                        (cfg.resolved_agent_model_id or "") if record_opening else ""
+                    ),
+                    opening_effort=(cfg.resolved_agent_effort or "") if record_opening else "",
+                    langsmith_run_id=str(run_id) if record_opening and run_id else "",
+                    slack_team_id=origin.team_id if origin else "",
+                    slack_channel_id=origin.channel_id if origin else "",
+                    slack_thread_ts=origin.thread_ts if origin else "",
+                    # Other sources carry a stale trigger or the bot's own post.
+                    slack_message_ts=(
+                        origin.triggering_event_ts if origin and cfg.source == "slack" else ""
+                    ),
                     author=author if isinstance(author, str) else "",
                     author_github_id=author_id if isinstance(author_id, int) else None,
                     resolves_thread=resolves_thread,
                     additions=additions,
                     deletions=deletions,
                     changed_files=changed_files,
-                    threads=[ThreadLink(thread_id=thread_id, source="open_pull_request")],
+                    threads=[ThreadLink(thread_id=thread_id, source=AGENT_OPENED_LINK_SOURCE)],
                 ).save(repository_private=repo_private)
             except Exception:  # noqa: BLE001
                 # The PR exists on GitHub either way; failing the tool over the

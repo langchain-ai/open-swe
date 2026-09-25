@@ -21,7 +21,10 @@ from agent.threads.access import (
     _github_token_for_login,
     _readable_thread_metadata,
 )
+from agent.threads.creation import create_thread
 from agent.threads.listing import list_unresolved_dashboard_threads, settle_review_walkthrough
+from agent.threads.machine_reads import machine_thread
+from agent.threads.principals import Principal
 from agent.threads.runs import (
     _ASSISTANT_ID,
     QUEUED_BY_KEY,
@@ -50,7 +53,7 @@ from agent.transcript.engine import delete_transcript
 from agent.transcript.mirror import mirror_thread_metadata
 from agent.transcript.subagents import attach_subagents
 from agent.transcript.turns import settle_run_turn
-from agent.utils.json_types import as_json_object, as_thread_dict, thread_metadata
+from agent.utils.json_types import JsonObject, as_json_object, as_thread_dict, thread_metadata
 from agent.utils.thread_ops import (
     get_thread_active_status,
     langgraph_client,
@@ -387,6 +390,29 @@ async def cancel_dashboard_thread(
     return await _thread_summary(thread)
 
 
+async def cancel_machine_thread(thread_id: str, principal: Principal) -> JsonObject:
+    """Interrupt every run on a thread a machine principal started, queued ones included."""
+    client = langgraph_client()
+    try:
+        thread = await client.threads.get(thread_id)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(404, "thread not found") from exc
+    principal.assert_can_post(thread_metadata(thread))
+    try:
+        cancelled_run_ids, _ = await _cancel_active_thread_runs(client, thread_id)
+    except Exception as exc:  # noqa: BLE001
+        logger.exception(
+            "Failed to cancel a machine thread's runs", extra={"agent_thread_id": thread_id}
+        )
+        raise HTTPException(502, "failed to request thread cancellation") from exc
+    await interrupt_transcript_turns(thread_id, cancelled_run_ids)
+    await client.threads.update(
+        thread_id=thread_id,
+        metadata={"latest_run_status": "interrupted", "updated_at_ms": _now_ms()},
+    )
+    return await machine_thread(thread_id, principal)
+
+
 async def admin_cancel_dashboard_thread(
     thread_id: str, login: str | None = None, *, email: str | None = None
 ) -> dict[str, Any]:
@@ -546,7 +572,13 @@ async def continue_thread_privately(
         }
     )
     new_thread_id = str(uuid.uuid4())
-    await client.threads.create(thread_id=new_thread_id, metadata=new_metadata, if_exists="raise")
+    await create_thread(
+        client,
+        new_thread_id,
+        title=new_metadata["title"],
+        metadata=new_metadata,
+        if_exists="raise",
+    )
     if copied:
         try:
             await client.threads.update_state(new_thread_id, values={"messages": copied})

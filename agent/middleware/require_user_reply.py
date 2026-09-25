@@ -25,7 +25,7 @@ from agent.input_messages import (
 )
 from agent.middleware.message_content import content_to_text
 from agent.middleware.trace import OpenSWEMiddleware
-from agent.prompts import render_prompt
+from agent.prompts import prompt
 
 logger = logging.getLogger(__name__)
 
@@ -63,7 +63,7 @@ def _starts_turn(message: BaseMessage) -> bool:
     return message_sender_id(message.content, kind="system") != REPLY_GUARD["id"]
 
 
-def _turn_tail(messages: Sequence[BaseMessage]) -> list[BaseMessage]:
+def turn_tail(messages: Sequence[BaseMessage]) -> list[BaseMessage]:
     """Messages produced since the last thing a person said."""
     for index in range(len(messages) - 1, -1, -1):
         if _starts_turn(messages[index]):
@@ -71,7 +71,7 @@ def _turn_tail(messages: Sequence[BaseMessage]) -> list[BaseMessage]:
     return list(messages)
 
 
-def _reported_failure(message: ToolMessage) -> bool:
+def reported_failure(message: ToolMessage) -> bool:
     if message.status == "error":
         return True
     try:
@@ -83,7 +83,7 @@ def _reported_failure(message: ToolMessage) -> bool:
 
 def _last_answer(messages: Sequence[BaseMessage]) -> str:
     """The latest non-empty assistant text this turn."""
-    for message in reversed(_turn_tail(messages)):
+    for message in reversed(turn_tail(messages)):
         if isinstance(message, AIMessage) and (text := content_to_text(message.content).strip()):
             return text
     return ""
@@ -131,7 +131,7 @@ class RequireUserReplyMiddleware(OpenSWEMiddleware):
         )
 
     def _satisfied(self, messages: Sequence[BaseMessage]) -> bool:
-        tail = _turn_tail(messages)
+        tail = turn_tail(messages)
         call_ids = {
             call.get("id")
             for message in tail
@@ -144,7 +144,7 @@ class RequireUserReplyMiddleware(OpenSWEMiddleware):
         return any(
             isinstance(message, ToolMessage)
             and message.tool_call_id in call_ids
-            and not _reported_failure(message)
+            and not reported_failure(message)
             for message in tail
         )
 
@@ -162,8 +162,8 @@ class RequireUserReplyMiddleware(OpenSWEMiddleware):
         )
 
     def _nudge(self, state: Mapping[str, Any]) -> list[HumanMessage]:
-        instruction = render_prompt(
-            "runs/missing-user-reply.md",
+        instruction = prompt(
+            "runs/missing-user-reply",
             {"reply_tool": self._tool_name, "no_reply_tool": self._no_reply_tool_name},
         )
         built = build_input_messages(

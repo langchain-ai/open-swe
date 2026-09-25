@@ -16,11 +16,15 @@ from agent.expedited_review import card
 from agent.expedited_review.approvals import ApprovalState, ExpeditedApproval
 from agent.expedited_review.diff_image import render_diff_png
 from agent.expedited_review.eligibility import ChangedFile, fetch_changed_files
+from agent.expedited_review.reviews import dismiss_approval
 from agent.github.app import (
     get_github_app_installation_id_for_repo,
     get_github_app_installation_token,
 )
-from agent.slack.blocks import block_payload
+from agent.github.ci import fetch_pr
+from agent.github.pull_requests import PullRequestPayload
+from agent.slack.blocks import Block, block_payload
+from agent.slack.channels import SlackChannel
 from agent.slack.client import (
     add_slack_reaction,
     delete_slack_message,
@@ -29,6 +33,7 @@ from agent.slack.client import (
     upload_slack_thread_file,
     wait_for_slack_file,
 )
+from agent.slack.code_channels import is_code_channel_session
 
 logger = logging.getLogger(__name__)
 
@@ -135,6 +140,7 @@ async def post_card(
         author=await approval.author_mention(),
         files=files,
         diff_image_id=approval.slack_diff_file_id or None,
+        channel=await _broadcast_channel(approval),
     )
     return await post_slack_thread_reply_with_ts(
         location[0],
@@ -145,28 +151,44 @@ async def post_card(
     )
 
 
-async def refresh_card(approval: ExpeditedApproval, *, outcome: str | None = None) -> None:
-    """Re-render the posted card from current state; used after votes and outcomes."""
-    if not approval.slack_channel_id or not approval.slack_message_ts:
-        return
+async def _broadcast_channel(approval: ExpeditedApproval) -> str | None:
+    """``#name`` of the channel the card could be broadcast to; ``None`` outside a thread."""
+    if not approval.slack_thread_ts or is_code_channel_session(approval.slack_thread_ts):
+        return None
+    channel = await SlackChannel.load(approval.slack_channel_id)
+    return f"#{channel.name}" if channel is not None and channel.name else None
+
+
+async def _render(approval: ExpeditedApproval, outcome: str | None) -> tuple[str, list[Block]]:
     pr = approval.pull_request
     token = await repo_token(pr.owner, pr.repo)
     files = await _files_for(approval, token) if token else []
     diff_image_id = approval.slack_diff_file_id or None
     author = await approval.author_mention()
     if outcome is None:
-        text, blocks = card.open_card(
-            approval, title=pr.title, author=author, files=files, diff_image_id=diff_image_id
-        )
-    else:
-        text, blocks = card.closed_card(
+        return card.open_card(
             approval,
             title=pr.title,
             author=author,
             files=files,
-            outcome=outcome,
             diff_image_id=diff_image_id,
+            channel=await _broadcast_channel(approval),
         )
+    return card.closed_card(
+        approval,
+        title=pr.title,
+        author=author,
+        files=files,
+        outcome=outcome,
+        diff_image_id=diff_image_id,
+    )
+
+
+async def refresh_card(approval: ExpeditedApproval, *, outcome: str | None = None) -> None:
+    """Re-render the posted card from current state; used after votes and outcomes."""
+    if not approval.slack_channel_id or not approval.slack_message_ts:
+        return
+    text, blocks = await _render(approval, outcome)
     ok, error = await update_slack_message(
         approval.slack_channel_id, approval.slack_message_ts, text, blocks=block_payload(blocks)
     )
@@ -175,6 +197,59 @@ async def refresh_card(approval: ExpeditedApproval, *, outcome: str | None = Non
             "Failed to update expedited review card",
             extra={"approval_id": str(approval.id), "slack_error": error},
         )
+
+
+async def _repost(
+    approval: ExpeditedApproval, *, broadcast: bool, outcome: str | None = None
+) -> bool:
+    """Replace the posted card with a fresh thread reply, sent to the channel if ``broadcast``.
+
+    The new card is posted before the old one is deleted, so a failure leaves one card up.
+    """
+    location = approval.slack_location
+    if location is None or not approval.slack_message_ts:
+        return False
+    old_ts = approval.slack_message_ts
+    approval.slack_broadcast = broadcast
+    text, blocks = await _render(approval, outcome)
+    message_ts, error = await post_slack_thread_reply_with_ts(
+        location[0],
+        location[1],
+        text,
+        blocks=block_payload(blocks),
+        agent_thread_id=approval.thread_id or None,
+        reply_broadcast=broadcast,
+    )
+    if not message_ts:
+        logger.warning(
+            "Failed to repost expedited review card",
+            extra={"approval_id": str(approval.id), "slack_error": error, "broadcast": broadcast},
+        )
+        return False
+    async with ExpeditedApproval.locked(approval.id) as (_, row):
+        # An open card that closed meanwhile keeps its closing render; the new copy is the stray.
+        kept = (
+            row is not None
+            and row.slack_message_ts == old_ts
+            and (outcome is not None or row.state == "open")
+        )
+        if kept:
+            row.slack_message_ts = message_ts
+            row.slack_broadcast = broadcast
+    stray = old_ts if kept else message_ts
+    if not await delete_slack_message(location[0], stray):
+        logger.warning(
+            "Left a stray expedited review card in Slack",
+            extra={"approval_id": str(approval.id), "slack_message_ts": stray},
+        )
+    return kept
+
+
+async def broadcast_card(approval: ExpeditedApproval) -> bool:
+    """Send the open card to the channel as well as its thread."""
+    if approval.slack_broadcast or await _broadcast_channel(approval) is None:
+        return False
+    return await _repost(approval, broadcast=True)
 
 
 async def notify_agent(approval: ExpeditedApproval, prompt: str) -> bool:
@@ -196,6 +271,7 @@ async def notify_agent(approval: ExpeditedApproval, prompt: str) -> bool:
             prompt,
             configurable,
             source=str(configurable["source"]),
+            thread_title=None,
             metadata={},
             multitask_strategy="enqueue",
         )
@@ -218,7 +294,11 @@ async def retire(
     updated = await transition(approval.id, expected=("open",), state=state, detail=outcome)
     if updated is None:
         return None
-    await refresh_card(updated, outcome=outcome)
+    if state != "merged":
+        await withdraw_reviews(updated)
+    # A closed card leaves the channel and stays in the thread only.
+    if not updated.slack_broadcast or not await _repost(updated, broadcast=False, outcome=outcome):
+        await refresh_card(updated, outcome=outcome)
     return updated
 
 
@@ -242,3 +322,51 @@ async def mark_merged(approval: ExpeditedApproval) -> None:
     if location is not None:
         if not await add_slack_reaction(location[0], location[1], "merged"):
             await add_slack_reaction(location[0], location[1], "white_check_mark")
+
+
+async def withdraw_reviews(approval: ExpeditedApproval) -> None:
+    """Dismiss the GitHub reviews every closed, unmerged card of this PR still has standing.
+
+    Covers earlier cards too, so a dismissal GitHub refused is retried here.
+    """
+    pr = approval.pull_request
+    token = await repo_token(pr.owner, pr.repo)
+    if token is None:
+        logger.warning(
+            "No GitHub App token to dismiss expedited review approvals",
+            extra={"approval_id": str(approval.id)},
+        )
+        return
+    for stale in await ExpeditedApproval.with_standing_reviews(approval.pull_request_id):
+        async with ExpeditedApproval.locked(stale.id) as (_, row):
+            if row is None or row.state in {"open", "merged"}:
+                continue
+            for vote in row.approvals:
+                await dismiss_approval(row, vote, token, row.detail)
+
+
+async def close_for_pull_request(owner: str, repo: str, number: int) -> None:
+    """Settle a PR's open card once the PR is closed on GitHub, whoever closed it.
+
+    Reads the PR's current state, so a late webhook cannot close a card for a reopened
+    PR. Only the card and the merged reaction change: nothing new is posted and the
+    agent is not woken.
+    """
+    approval = await ExpeditedApproval.active_for(owner, repo, number)
+    if approval is None:
+        return
+    token = await repo_token(owner, repo)
+    payload = (
+        await fetch_pr(owner=owner, repo=repo, pr_number=number, token=token) if token else None
+    )
+    if payload is None:
+        logger.warning(
+            "Could not read a closed pull request to settle its expedited card",
+            extra={"approval_id": str(approval.id)},
+        )
+        return
+    current = PullRequestPayload.model_validate(payload)
+    if current.merged:
+        await mark_merged(approval)
+    elif current.state == "closed":
+        await retire(approval, "cancelled", "the pull request was closed")

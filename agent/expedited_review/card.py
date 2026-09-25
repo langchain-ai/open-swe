@@ -92,16 +92,24 @@ def _test_diffstat(tests: list[ChangedFile]) -> list[Block]:
     return [context(heading + "\n".join(lines))]
 
 
-def _vote_buttons(approval: ExpeditedApproval) -> tuple[ButtonElement, ...]:
-    return (
+def _vote_buttons(approval: ExpeditedApproval, channel: str | None) -> list[ButtonElement]:
+    buttons = [
         button(
             "Approve",
             action_id="open_swe_option_select_approve",
             value=_button_value("approve", approval),
             style="primary",
-        ),
-        _dismiss_button(approval),
-    )
+        )
+    ]
+    if channel and not approval.slack_broadcast:
+        buttons.append(
+            button(
+                f"Broadcast in {channel}",
+                action_id="open_swe_option_select_broadcast",
+                value=_button_value("broadcast", approval),
+            )
+        )
+    return [*buttons, _dismiss_button(approval)]
 
 
 def _ready_button(approval: ExpeditedApproval) -> ButtonElement:
@@ -130,7 +138,7 @@ def _voting_diff(
     return [*_diff_sections(files, diff_image_id), divider()]
 
 
-def _status(approval: ExpeditedApproval, author: str) -> list[Block]:
+def _status(approval: ExpeditedApproval, author: str, channel: str | None) -> list[Block]:
     if approval.awaiting_ready:
         return [
             section(f"*Draft.* {author}, mark it ready for review so someone else can approve it."),
@@ -142,7 +150,7 @@ def _status(approval: ExpeditedApproval, author: str) -> list[Block]:
                 f"*{_vote_summary(approval, author)}* Merging once checks and reviews are clean."
             )
         ]
-    return [section(_vote_summary(approval, author)), actions(*_vote_buttons(approval))]
+    return [section(_vote_summary(approval, author)), actions(*_vote_buttons(approval, channel))]
 
 
 def open_card(
@@ -152,17 +160,19 @@ def open_card(
     author: str,
     files: list[ChangedFile],
     diff_image_id: str | None = None,
+    channel: str | None = None,
 ) -> tuple[str, list[Block]]:
     """Text fallback and blocks for an open card; diff and buttons go once it is approved.
 
     ``author`` is the PR author's Slack mention, from :meth:`ExpeditedApproval.author_mention`.
+    ``channel`` (``#name``) offers broadcasting the card there; ``None`` offers nothing.
     """
     pr = approval.pull_request
     blocks: list[Block] = [
         *_header(approval, title, author),
         divider(),
         *_voting_diff(approval, files, diff_image_id),
-        *_status(approval, author),
+        *_status(approval, author, channel),
     ]
     text = f"Expedited review requested for {pr.url}"
     return text, blocks

@@ -28,6 +28,8 @@ async def handle_button(
         decision = "approve"
     elif button.action == "ready":
         decision = "ready"
+    elif button.action == "broadcast":
+        decision = "broadcast"
     elif button.action in {"dismiss", "reject"}:
         # Cards already posted in Slack still carry a Reject button.
         decision = "dismiss"

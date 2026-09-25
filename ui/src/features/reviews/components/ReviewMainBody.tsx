@@ -38,6 +38,7 @@ import {
   XCircleIcon,
   XIcon,
 } from "@phosphor-icons/react"
+import { Link } from "@tanstack/react-router"
 import { IoLogoGithub } from "react-icons/io5"
 import { toast } from "sonner"
 import {
@@ -61,6 +62,7 @@ import type {
   PrReviewComment,
   ReviewCheckRun,
   ReviewCommentCreate,
+  ReviewCommentsPayload,
   ReviewDetail,
   ReviewDiffFile,
   ReviewFinding,
@@ -117,6 +119,7 @@ import { Sheet, SheetPopup } from "@/components/ui/sheet"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Textarea } from "@/components/ui/textarea"
 import { api, reviewImageProxyUrl } from "@/lib/api"
+import { optimisticUpdate } from "@/lib/optimistic"
 import { useSession } from "@/lib/session"
 import { useMediaQuery } from "@/lib/useIsMobile"
 import { cn } from "@/lib/utils"
@@ -125,6 +128,8 @@ type SideTab = "info" | "chat"
 type SidePanelLayout = "inline" | "sheet"
 // Tailwind's `xl` breakpoint: below it the side panel opens as a sheet.
 const WIDE_MEDIA_QUERY = "(min-width: 1280px)"
+
+type ReviewRef = Pick<ReviewDetail, "owner" | "repo" | "number">
 
 // Metadata carried by a Pierre diff line annotation. Findings render as the
 // read-only InlineFinding card; a draftComment renders the inline composer; a
@@ -149,6 +154,8 @@ function readStoredDiffStyle(): DiffStyle {
 
 // One attachment for a single-side line range. Deletions resolve against the
 // original file, additions against the modified file.
+const SELECTION_CONTEXT_LINES = 2
+
 function makeSideAttachment(
   file: ReviewDiffFile,
   side: "deletions" | "additions",
@@ -159,8 +166,18 @@ function makeSideAttachment(
     side === "deletions" ? file.originalContent : file.modifiedContent
   const lines = source.split("\n")
   const start = Math.max(1, Math.min(fromLine, toLine))
-  const end = Math.max(fromLine, toLine)
-  const snippet = lines.slice(start - 1, end).join("\n")
+  const end = Math.min(lines.length, Math.max(fromLine, toLine))
+  const first = Math.max(1, start - SELECTION_CONTEXT_LINES)
+  const last = Math.min(lines.length, end + SELECTION_CONTEXT_LINES)
+  const width = String(last).length
+  const snippet = lines
+    .slice(first - 1, last)
+    .map((text, i) => {
+      const n = first + i
+      const marker = n >= start && n <= end ? ">" : " "
+      return `${marker} ${String(n).padStart(width)} | ${text}`
+    })
+    .join("\n")
   const sideLabel = side === "deletions" ? "L" : "R"
   const lineLabel =
     start === end ? `${sideLabel}${start}` : `${sideLabel}${start}-${end}`
@@ -433,6 +450,7 @@ interface ResolvedGroup {
   index: number
   title: string
   summary: string
+  other: boolean
   files: Array<ResolvedGroupFile>
   additions: number
   deletions: number
@@ -584,6 +602,7 @@ function useExpandedFinding(): ExpandedFindingContextValue {
 const NO_FINDINGS: Array<ReviewFinding> = []
 const NO_CHAT_DRAFTS: ReadonlyArray<ProposedComment> = []
 const NO_PENDING_COMMENTS: ReadonlyArray<PendingReviewComment> = []
+const NO_PATHS: ReadonlySet<string> = new Set()
 const ignoreSection = (_path: string, _node: HTMLDivElement | null) => {}
 
 /** Scroll to a line in whichever registered slice of the file renders it. */
@@ -862,8 +881,7 @@ function ReviewBodyInner({
       return null
     const byPath = new Map(diffFiles.map((file) => [file.path, file]))
     const seen = new Set<string>()
-    const resolved: Array<Omit<ResolvedGroup, "index"> & { other: boolean }> =
-      []
+    const resolved: Array<Omit<ResolvedGroup, "index">> = []
     for (const step of walkthrough.steps) {
       const files: Array<ResolvedGroupFile> = []
       for (const lines of step.files) {
@@ -887,7 +905,7 @@ function ReviewBodyInner({
       if (files.length === 0) continue
       resolved.push({
         title: step.title,
-        summary: step.summary,
+        summary: step.other ? "" : step.summary,
         other: step.other,
         files,
         ...sumStats(files),
@@ -912,10 +930,7 @@ function ReviewBodyInner({
       }
     }
     if (resolved.length === 0) return null
-    return resolved.map(({ other: _other, ...group }, i) => ({
-      ...group,
-      index: i + 1,
-    }))
+    return resolved.map((group, i) => ({ ...group, index: i + 1 }))
   }, [diffFiles, walkthrough])
 
   const sidebarGroups = useMemo<Array<ReviewSidebarGroup> | null>(() => {
@@ -944,6 +959,22 @@ function ReviewBodyInner({
       window.localStorage.setItem(REVIEW_VIEW_STORAGE_KEY, next)
     }
   }, [])
+
+  const collapsedByDefault = useMemo<ReadonlySet<string>>(() => {
+    if (view !== "ai" || !groupedView) return NO_PATHS
+    const paths = (groups: Array<ResolvedGroup>) =>
+      groups.flatMap((group) => group.files.map((entry) => entry.file.path))
+    const inSteps = new Set(paths(groupedView.filter((group) => !group.other)))
+    return new Set(
+      paths(groupedView.filter((group) => group.other)).filter(
+        (path) => !inSteps.has(path)
+      )
+    )
+  }, [view, groupedView])
+  const collapsedByDefaultRef = useRef(collapsedByDefault)
+  useEffect(() => {
+    collapsedByDefaultRef.current = collapsedByDefault
+  }, [collapsedByDefault])
 
   const scrollToFile = useCallback((path: string) => {
     setSelectedFile(path)
@@ -1057,7 +1088,9 @@ function ReviewBodyInner({
   )
 
   const toggleExpanded = useCallback((path: string) => {
-    const current = expandedRef.current[path] ?? !viewedRef.current.has(path)
+    const current =
+      expandedRef.current[path] ??
+      (!viewedRef.current.has(path) && !collapsedByDefaultRef.current.has(path))
     const next = !current
     if (!next && expandedFindingRef.current?.file === path) setExpandedId(null)
     setExpandedFiles((prev) => ({ ...prev, [path]: next }))
@@ -1370,7 +1403,10 @@ function ReviewBodyInner({
         selectedLines={selectedLines}
         viewed={viewed.has(file.path)}
         onToggleViewed={toggleViewed}
-        expanded={expandedFiles[file.path] ?? !viewed.has(file.path)}
+        expanded={
+          expandedFiles[file.path] ??
+          (!viewed.has(file.path) && !collapsedByDefault.has(file.path))
+        }
         onToggleExpanded={toggleExpanded}
         onSelectLines={selectLines}
         onAddToChat={embedded ? undefined : addToChat}
@@ -1564,6 +1600,11 @@ function ReviewBodyInner({
                   <div className="mb-2 flex items-center justify-between gap-3">
                     <h2 className="text-sm font-medium">Changes</h2>
                     <div className="flex items-center gap-3">
+                      {detail.walkthrough && (
+                        <ScoutThreadLink
+                          threadId={detail.walkthrough_scout_thread_id}
+                        />
+                      )}
                       {linesLeft !== null && (
                         <span className="text-xs text-muted-foreground">
                           {linesLeft === 0
@@ -1697,22 +1738,44 @@ function ScoutProgressPreview({ progress }: { progress: ScoutProgress }) {
   )
 }
 
+function ScoutThreadLink({
+  threadId,
+  className,
+}: {
+  threadId: string | null
+  className?: string
+}) {
+  if (!threadId) return null
+  return (
+    <Link
+      to="/agents/$threadId"
+      params={{ threadId }}
+      className={cn(
+        "inline-block text-xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline",
+        className
+      )}
+    >
+      Open thread
+    </Link>
+  )
+}
+
 /** Runs the review scout alone, so the walkthrough exists without a full review. */
 function WalkthroughCallout({ detail }: { detail: ReviewDetail }) {
   const qc = useQueryClient()
   const scout = useMutation({
-    mutationFn: () =>
-      api.runReviewScout(detail.owner, detail.repo, detail.number),
-    onSuccess: () => {
+    mutationFn: ({ owner, repo, number }: ReviewRef) =>
+      api.runReviewScout(owner, repo, number),
+    meta: { errorTitle: "Couldn't build walkthrough" },
+    onSuccess: ({ started }, { owner, repo, number }) => {
+      const queryKey = ["review", owner, repo, number]
+      if (started)
+        qc.setQueryData<ReviewDetail>(queryKey, (old) =>
+          old ? { ...old, walkthrough_running: true } : old
+        )
       void qc.invalidateQueries({ queryKey: agentThreadKeys.lists })
-      return qc.invalidateQueries({
-        queryKey: ["review", detail.owner, detail.repo, detail.number],
-      })
+      void qc.invalidateQueries({ queryKey })
     },
-    onError: (error) =>
-      toast.error("Couldn't start the walkthrough", {
-        description: error.message,
-      }),
   })
   const running = detail.walkthrough_running || scout.isPending
   // This card only renders while there is no walkthrough, so a scout that
@@ -1764,12 +1827,16 @@ function WalkthroughCallout({ detail }: { detail: ReviewDetail }) {
         {failureSummary && (
           <p className="mt-1.5 text-xs break-words text-destructive">
             Last attempt failed: {failureSummary}
-            {detail.walkthrough_scout_thread_id &&
-              ` (scout thread ${detail.walkthrough_scout_thread_id})`}
           </p>
         )}
+        {(running || failure) && (
+          <ScoutThreadLink
+            threadId={detail.walkthrough_scout_thread_id}
+            className="mt-1.5"
+          />
+        )}
       </div>
-      <Button size="lg" onClick={() => scout.mutate()} disabled={running}>
+      <Button size="lg" onClick={() => scout.mutate(detail)} disabled={running}>
         {running ? (
           <CircleNotchIcon className="animate-spin" />
         ) : (
@@ -2662,17 +2729,38 @@ function InlineComment({
   const sideLabel = comment.side === "LEFT" ? "L" : "R"
   const editable =
     session.data?.login.toLowerCase() === comment.author.toLowerCase()
+  const commentsKey = ["reviewComments", owner, repo, prNumber]
   const mutation = useMutation({
-    mutationFn: (next: string) =>
+    mutationFn: ({ next }: { next: string; previous: string }) =>
       api.updateReviewComment(owner, repo, prNumber, comment.id, next),
-    onSuccess: (_, next) => {
+    meta: { errorTitle: "Couldn't update comment" },
+    onMutate: async ({ next }) => {
       setBody(next)
-      setDraft(next)
       setEditing(false)
+      return {
+        undo: await optimisticUpdate<ReviewCommentsPayload>(
+          queryClient,
+          commentsKey,
+          (old) => ({
+            comments: old.comments.map((c) =>
+              c.id === comment.id ? { ...c, body: next } : c
+            ),
+          })
+        ),
+      }
+    },
+    onSuccess: (_, { next }) => {
+      setDraft(next)
       onUpdate?.({ ...comment, body: next })
-      void queryClient.invalidateQueries({
-        queryKey: ["reviewComments", owner, repo, prNumber],
-      })
+    },
+    onError: (_error, { next, previous }, context) => {
+      context?.undo()
+      setBody(previous)
+      setDraft(next)
+      setEditing(true)
+    },
+    onSettled: () => {
+      void queryClient.invalidateQueries({ queryKey: commentsKey })
     },
   })
   useEffect(() => {
@@ -2683,7 +2771,8 @@ function InlineComment({
   }, [comment.id, comment.body])
   const submit = () => {
     const next = draft.trim()
-    if (next && next !== body && !mutation.isPending) mutation.mutate(next)
+    if (next && next !== body && !mutation.isPending)
+      mutation.mutate({ next, previous: body })
   }
   const cancel = () => {
     setDraft(body)
@@ -2764,13 +2853,6 @@ function InlineComment({
               className="resize-y text-xs"
               autoFocus
             />
-            {mutation.isError && (
-              <p className="mt-1.5 text-[11px] text-destructive">
-                {mutation.error instanceof Error
-                  ? mutation.error.message
-                  : "Failed to update comment"}
-              </p>
-            )}
             <div className="mt-2 flex items-center justify-end gap-2">
               <button
                 type="button"
@@ -3022,11 +3104,15 @@ function SidePanel({
 }) {
   const qc = useQueryClient()
   const reReview = useMutation({
-    mutationFn: () => api.reReview(detail.owner, detail.repo, detail.number),
-    onSuccess: () => {
-      void qc.invalidateQueries({
-        queryKey: ["review", detail.owner, detail.repo, detail.number],
-      })
+    mutationFn: ({ owner, repo, number }: ReviewRef) =>
+      api.reReview(owner, repo, number),
+    meta: { errorTitle: "Couldn't start re-review" },
+    onSuccess: (_result, { owner, repo, number }) => {
+      const queryKey = ["review", owner, repo, number]
+      qc.setQueryData<ReviewDetail>(queryKey, (old) =>
+        old ? { ...old, status: "running" } : old
+      )
+      void qc.invalidateQueries({ queryKey })
     },
   })
 
@@ -3119,7 +3205,7 @@ function SidePanel({
                 </span>
                 <button
                   type="button"
-                  onClick={() => reReview.mutate()}
+                  onClick={() => reReview.mutate(detail)}
                   disabled={reReview.isPending || detail.status === "running"}
                   className="inline-flex items-center gap-1 rounded border border-border px-1.5 py-0.5 text-[11px] text-muted-foreground hover:text-foreground disabled:opacity-50"
                 >
@@ -3138,11 +3224,6 @@ function SidePanel({
                 {detail.status === "error" && detail.review_error && (
                   <div className="break-words text-destructive">
                     {detail.review_error}
-                  </div>
-                )}
-                {reReview.error && (
-                  <div className="text-destructive">
-                    {reReview.error.message}
                   </div>
                 )}
               </div>
