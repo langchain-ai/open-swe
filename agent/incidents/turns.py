@@ -19,6 +19,7 @@ from agent.input_messages import (
     system_input,
     system_introduction,
 )
+from agent.prompts import prompt
 from agent.slack.client import (
     post_slack_thread_reply_with_ts,
     slack_message_bot_id,
@@ -32,19 +33,8 @@ logger = logging.getLogger(__name__)
 # The whole channel is one conversation, like a code channel session.
 SESSION_TS = "0"
 AUTOMATIC_DELAY_SECONDS = 15
-FIRST_INVESTIGATION_REQUEST = (
-    "This incident channel has its first activity. Run the full investigation now, without "
-    "waiting to be asked: identify the problem from the alert, check whether it has happened "
-    "before, size the impact against comparable regions and endpoints, establish the cause, and "
-    "propose the steps to solve it, including any pull request or runbook that already covers "
-    "this failure mode. Record the report with those sections filled in; it is published to the "
-    "channel once."
-)
-AUTOMATIC_REQUEST = (
-    "New activity arrived in the incident channel. Review the new context messages and record an "
-    "updated report so the stored investigation and postmortem stay current. This turn does not "
-    "post to the channel, so do not restate what responders already said there."
-)
+FIRST_INVESTIGATION_REQUEST = prompt("incidents/first-investigation")
+AUTOMATIC_REQUEST = prompt("incidents/automatic")
 FAILURE_NOTICE = (
     "The incident agent hit an error on its last turn. Mention me with a question to retry."
 )
