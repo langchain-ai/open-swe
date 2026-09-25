@@ -16,7 +16,8 @@ def upgrade() -> None:
         "ADD COLUMN slack_thread_ts text NOT NULL DEFAULT '', "
         "ADD COLUMN slack_message_ts text NOT NULL DEFAULT '', "
         "ADD COLUMN opening_model_id text NOT NULL DEFAULT '', "
-        "ADD COLUMN opening_effort text NOT NULL DEFAULT ''"
+        "ADD COLUMN opening_effort text NOT NULL DEFAULT '', "
+        "ADD COLUMN langsmith_run_id text NOT NULL DEFAULT ''"
     )
 
 

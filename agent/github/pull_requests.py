@@ -71,6 +71,7 @@ _WRITE_ONCE_COLUMNS = (
     "opening_head_sha",
     "opening_model_id",
     "opening_effort",
+    "langsmith_run_id",
     "slack_team_id",
     "slack_channel_id",
     "slack_thread_ts",
@@ -137,6 +138,7 @@ class PullRequest(Base):
     opening_head_sha: Mapped[str] = mapped_column(server_default="", default="")
     opening_model_id: Mapped[str] = mapped_column(server_default="", default="")
     opening_effort: Mapped[str] = mapped_column(server_default="", default="")
+    langsmith_run_id: Mapped[str] = mapped_column(server_default="", default="")
     slack_team_id: Mapped[str] = mapped_column(server_default="", default="")
     slack_channel_id: Mapped[str] = mapped_column(server_default="", default="")
     slack_thread_ts: Mapped[str] = mapped_column(server_default="", default="")

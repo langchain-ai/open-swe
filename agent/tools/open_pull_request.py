@@ -772,6 +772,7 @@ async def _record_pr_telemetry(
                         (cfg.resolved_agent_model_id or "") if record_opening else ""
                     ),
                     opening_effort=(cfg.resolved_agent_effort or "") if record_opening else "",
+                    langsmith_run_id=str(run_id) if record_opening and run_id else "",
                     slack_team_id=origin.team_id if origin else "",
                     slack_channel_id=origin.channel_id if origin else "",
                     slack_thread_ts=origin.thread_ts if origin else "",
