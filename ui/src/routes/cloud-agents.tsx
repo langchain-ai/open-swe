@@ -362,28 +362,6 @@ function CloudAgentsPage() {
         </div>
       </SettingsSection>
 
-      <SettingsSection
-        title="Experimental"
-        description="Applies to threads you start after turning it on. Existing threads keep the setting they started with."
-      >
-        <div className="divide-y divide-border">
-          <SettingsRow
-            label="Respond to PR comments without a mention"
-            description="On pull requests Open SWE opens for you, comments and reviews from Open SWE users wake the agent without tagging it. It follows your comments right away and weighs everyone else's."
-            control={
-              <Switch
-                checked={
-                  profile.data?.experimental?.pr_comment_triggers ?? false
-                }
-                onCheckedChange={(v) =>
-                  persist({ experimental: { pr_comment_triggers: v } })
-                }
-              />
-            }
-          />
-        </div>
-      </SettingsSection>
-
       <SettingsSection title="Rules">
         <SettingsNavRow
           to="/agents/instructions"
