@@ -126,11 +126,11 @@ def test_thread_run_json_keys_match_the_dashboard_client():
 @pytest.mark.parametrize(
     "intent,template,title,dispatches",
     [
-        (OPEN, "runs/pull-request-thread.md", "Fix broken build", False),
-        (FIX, "runs/pull-request-fix.md", "Fix acme/app#12", True),
+        (OPEN, "runs/pull-request-thread", "Fix broken build", False),
+        (FIX, "runs/pull-request-fix", "Fix acme/app#12", True),
         (
             ADDRESS_COMMENTS,
-            "runs/pull-request-comments.md.jinja",
+            "runs/pull-request-comments",
             "Address comments on acme/app#12",
             True,
         ),
@@ -140,11 +140,7 @@ async def test_each_intent_names_its_own_prompt_and_thread_title(
     setup, intent, template, title, dispatches
 ):
     FakeRegistry.thread_ids = []
-    prompt = (
-        pr_fixes.render_template(template, url=PR_URL, comment_url="")
-        if template.endswith(".jinja")
-        else pr_fixes.render_prompt(template, url=PR_URL)
-    )
+    prompt = pr_fixes.prompt(template, url=PR_URL, comment_url="")
 
     assert await pr_fixes.start_pull_request_thread(
         "acme", "app", 12, "alice", intent=intent
@@ -262,7 +258,7 @@ async def test_fix_message_includes_full_displayed_failure_context(setup):
     await pr_fixes.start_pull_request_thread("acme", "app", 12, "alice", intent=intent)
 
     prompt = pr_fixes.dispatch_agent_run.await_args.args[1]
-    assert prompt.startswith(pr_fixes.render_prompt("runs/pull-request-fix.md", url=PR_URL))
+    assert prompt.startswith(pr_fixes.prompt("runs/pull-request-fix", url=PR_URL))
     assert json.loads(prompt[prompt.index("{\n") :]) == context.model_dump()
 
 
@@ -276,9 +272,7 @@ async def test_single_comment_run_names_the_comment_and_carries_instructions(set
 
     prompt = pr_fixes.dispatch_agent_run.await_args.args[1]
     assert prompt.startswith(
-        pr_fixes.render_template(
-            "runs/pull-request-comments.md.jinja", url=PR_URL, comment_url=comment_url
-        )
+        pr_fixes.prompt("runs/pull-request-comments", url=PR_URL, comment_url=comment_url)
     )
     assert prompt.endswith("\nkeep the old name")
 

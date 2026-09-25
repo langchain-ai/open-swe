@@ -10,7 +10,7 @@ from langgraph_sdk.client import LangGraphClient
 
 from agent.config import ENV
 from agent.dispatch import dispatch_agent_run
-from agent.prompts import render_prompt
+from agent.prompts import prompt
 from agent.slack.client import (
     lookup_slack_run_mapping,
     lookup_slack_thread_id,
@@ -155,7 +155,7 @@ def _stop_summary_prompt(had_active_runs: bool) -> str:
         if had_active_runs
         else "No active run was present when the stop reaction was processed."
     )
-    return render_prompt("runs/slack-stop-summary.md", observed_state=observed_state)
+    return prompt("runs/slack-stop-summary", observed_state=observed_state)
 
 
 def _agent_version_metadata() -> dict[str, str]:

@@ -8,7 +8,7 @@ from agent.database import postgres
 from agent.dispatch import create_durable_run, dispatch_client
 from agent.input_messages import build_run_input
 from agent.invocation import new_invocation_id, with_invocation_id
-from agent.prompts import render_prompt
+from agent.prompts import prompt
 from agent.review.walkthrough import WalkthroughView
 from agent.thread_ids import review_scout_thread_id
 from agent.utils.thread_ops import thread_run_error
@@ -179,7 +179,7 @@ class ReviewScoutTarget(BaseModel):
             self.thread_id,
             ASSISTANT_ID,
             input=build_run_input(
-                render_prompt("review-scout/kickoff.md", pr_number=self.pr_number),
+                prompt("review-scout/kickoff", pr_number=self.pr_number),
                 {"sender_id": _SENDER_ID, "surface": "automation", "kind": "system"},
                 systems=[
                     {"id": _SENDER_ID, "display_name": "Review scout", "platform": "open-swe"}

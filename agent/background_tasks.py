@@ -8,7 +8,7 @@ from langgraph_sdk import get_client
 
 from agent.dispatch import dispatch_agent_run
 from agent.input_messages import InputMessageContext, SystemIdentity
-from agent.prompts import render_prompt
+from agent.prompts import prompt
 from agent.sandboxes.providers.registry import create_sandbox
 from agent.slack.thinking import sync_slack_background_status
 from agent.source_context import SourceContext
@@ -107,8 +107,8 @@ def _notification(task: dict[str, Any]) -> str:
     exit_code = task.get("exit_code")
     duration = task.get("duration_seconds")
     output_path = str(task.get("output_path") or "")
-    return render_prompt(
-        "runs/background-task-completion.md",
+    return prompt(
+        "runs/background-task-completion",
         task_id=task_id,
         status=status,
         exit_code=exit_code,
