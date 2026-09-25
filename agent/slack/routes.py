@@ -54,7 +54,7 @@ from agent.users import User
 from agent.utils.json_types import JsonObject
 from agent.utils.thread_ops import langgraph_client as get_langgraph_client
 from agent.webhooks import common
-from agent.webhooks.inbound import InboundWebhook
+from agent.webhooks.event_log import EventLog
 
 router = APIRouter()
 
@@ -276,7 +276,7 @@ async def slack_webhook(
 
     payload = parse_json_object(body)
     envelope = SlackEventEnvelope.parse(payload) if payload is not None else None
-    await InboundWebhook.record(
+    await EventLog.record(
         request,
         body,
         "slack",
@@ -597,7 +597,7 @@ async def slack_command(
 
     form = common.parse_qs(body.decode("utf-8"))
     value = lambda key: str((form.get(key) or [""])[0]).strip()  # noqa: E731
-    await InboundWebhook.record(
+    await EventLog.record(
         request, body, "slack", event_type=value("command"), delivery_id=value("trigger_id")
     )
     channel_id = value("channel_id")
@@ -647,7 +647,7 @@ async def slack_code_channel_command(
 
     form = common.parse_qs(body.decode("utf-8"))
     value = lambda key: str((form.get(key) or [""])[0]).strip()  # noqa: E731
-    await InboundWebhook.record(
+    await EventLog.record(
         request, body, "slack", event_type=value("command"), delivery_id=value("trigger_id")
     )
     channel_id = value("channel_id")
@@ -689,7 +689,7 @@ async def slack_interactivity(
     payload_raw = (form.get("payload") or [""])[0]
     payload = parse_json_object(payload_raw.encode("utf-8"))
     interaction = SlackInteraction.parse(payload) if payload is not None else None
-    await InboundWebhook.record(
+    await EventLog.record(
         request,
         body,
         "slack",

@@ -1,4 +1,4 @@
-"""Inbound webhooks"""
+"""Event log"""
 
 from alembic import op
 
@@ -11,7 +11,7 @@ depends_on = None
 def upgrade() -> None:
     op.execute(
         """
-        CREATE TABLE inbound_webhooks (
+        CREATE TABLE event_log (
             received_at timestamptz NOT NULL DEFAULT clock_timestamp(),
             source text NOT NULL CHECK (source IN ('github', 'slack', 'linear')),
             endpoint text NOT NULL,
@@ -21,9 +21,7 @@ def upgrade() -> None:
         ) PARTITION BY RANGE (received_at)
         """
     )
-    op.execute(
-        "CREATE INDEX inbound_webhooks_delivery_idx ON inbound_webhooks (source, delivery_id)"
-    )
+    op.execute("CREATE INDEX event_log_delivery_idx ON event_log (source, delivery_id)")
 
 
 def downgrade() -> None:

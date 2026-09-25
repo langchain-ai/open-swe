@@ -4,7 +4,7 @@ from sqlalchemy import text
 from starlette.requests import Request
 
 from agent.database import transaction
-from agent.webhooks.inbound import InboundWebhook
+from agent.webhooks.event_log import EventLog
 
 
 async def _partitions() -> set[str]:
@@ -12,26 +12,26 @@ async def _partitions() -> set[str]:
         rows = await conn.execute(
             text(
                 "SELECT c.relname FROM pg_inherits i JOIN pg_class c ON c.oid = i.inhrelid "
-                "WHERE i.inhparent = 'inbound_webhooks'::regclass"
+                "WHERE i.inhparent = 'event_log'::regclass"
             )
         )
         return set(rows.scalars().all())
 
 
 async def test_rotation_keeps_yesterday_today_and_tomorrow(registry_db: None) -> None:
-    await InboundWebhook.rotate_partitions(date(2026, 9, 1))
-    assert await _partitions() == {"inbound_webhooks_20260901", "inbound_webhooks_20260902"}
+    await EventLog.rotate_partitions(date(2026, 9, 1))
+    assert await _partitions() == {"event_log_20260901", "event_log_20260902"}
 
-    await InboundWebhook.rotate_partitions(date(2026, 9, 3))
+    await EventLog.rotate_partitions(date(2026, 9, 3))
     assert await _partitions() == {
-        "inbound_webhooks_20260902",
-        "inbound_webhooks_20260903",
-        "inbound_webhooks_20260904",
+        "event_log_20260902",
+        "event_log_20260903",
+        "event_log_20260904",
     }
 
 
 async def test_record_stores_form_bodies_as_objects(registry_db: None) -> None:
-    await InboundWebhook.rotate_partitions(datetime.now(UTC).date())
+    await EventLog.rotate_partitions(datetime.now(UTC).date())
     request = Request(
         {
             "type": "http",
@@ -42,7 +42,7 @@ async def test_record_stores_form_bodies_as_objects(registry_db: None) -> None:
         }
     )
 
-    await InboundWebhook.record(
+    await EventLog.record(
         request,
         b"command=%2Foswe&text=hello+there",
         "slack",
@@ -53,9 +53,7 @@ async def test_record_stores_form_bodies_as_objects(registry_db: None) -> None:
     async with transaction() as conn:
         row = (
             await conn.execute(
-                text(
-                    "SELECT source, endpoint, event_type, delivery_id, payload FROM inbound_webhooks"
-                )
+                text("SELECT source, endpoint, event_type, delivery_id, payload FROM event_log")
             )
         ).one()
     assert tuple(row) == (

@@ -18,14 +18,14 @@ logger = logging.getLogger(__name__)
 type WebhookSource = Literal["github", "slack", "linear"]
 
 RETAINED_DAYS = 2
-_TABLE = "inbound_webhooks"
+_TABLE = "event_log"
 _ROTATE_INTERVAL_SECONDS = 3600
 
 _STOP = asyncio.Event()
 _TASK: asyncio.Task[None] | None = None
 
 
-class InboundWebhook:
+class EventLog:
     @classmethod
     async def record(
         cls,
@@ -57,7 +57,7 @@ class InboundWebhook:
                 )
         except Exception:  # noqa: BLE001
             logger.warning(
-                "Recording an inbound webhook failed",
+                "Recording a webhook in the event log failed",
                 extra={"webhook_source": source, "webhook_endpoint": request.url.path},
                 exc_info=True,
             )
@@ -109,10 +109,10 @@ async def start() -> None:
         return
     _STOP.clear()
     try:
-        await InboundWebhook.rotate_partitions()
+        await EventLog.rotate_partitions()
     except Exception:  # noqa: BLE001
-        logger.warning("Rotating inbound webhook partitions failed", exc_info=True)
-    _TASK = asyncio.create_task(_rotate_forever(), name="inbound-webhook-partitions")
+        logger.warning("Rotating event log partitions failed", exc_info=True)
+    _TASK = asyncio.create_task(_rotate_forever(), name="event-log-partitions")
 
 
 async def stop() -> None:
@@ -132,6 +132,6 @@ async def _rotate_forever() -> None:
         else:
             return
         try:
-            await InboundWebhook.rotate_partitions()
+            await EventLog.rotate_partitions()
         except Exception:  # noqa: BLE001
-            logger.warning("Rotating inbound webhook partitions failed", exc_info=True)
+            logger.warning("Rotating event log partitions failed", exc_info=True)
