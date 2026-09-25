@@ -127,7 +127,17 @@ function WorkspaceRow({
           </span>
         </div>
         <div className="flex items-center gap-3 sm:shrink-0">
-          <span className={`text-xs ${REFRESH_CLASS[status]}`}>
+          <span
+            className={`text-xs ${REFRESH_CLASS[status]}`}
+            title={
+              status !== "refreshing" && when && workspace.refresh_finished_at
+                ? new Date(workspace.refresh_finished_at).toLocaleString(
+                    undefined,
+                    { timeZoneName: "short" }
+                  )
+                : undefined
+            }
+          >
             {refreshLabel(status, workspace.refresh_kind)}
             {status !== "refreshing" && when ? ` ${when}` : ""}
           </span>

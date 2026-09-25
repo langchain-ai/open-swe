@@ -1,12 +1,13 @@
 """Review scout graph.
 
 Cuts a pull request's full diff into an ordered series of commits a reviewer
-can read top to bottom and stores them as the PR's walkthrough, and records
-where the author's steering changed what shipped. Runs on its own thread per
-PR; the reviewer starts it and waits for both before reviewing.
+can read top to bottom and stores them as the PR's walkthrough, alongside a
+summary of the human input behind it. Runs on its own thread per PR; the
+reviewer starts it and waits for it before reviewing.
 """
 
 import logging
+import re
 from typing import Any, NotRequired, cast
 
 from deepagents import create_deep_agent
@@ -38,7 +39,7 @@ from agent.middleware import (
 from agent.middleware.prepare_run import PrepareRunState
 from agent.middleware.trace import OpenSWEMiddleware
 from agent.prompts import apply_tool_descriptions, render_prompt
-from agent.review.author_guidance import GUIDANCE_CAP, GuidanceReview, SteeringHistory
+from agent.review.author_guidance import SteeringHistory
 from agent.review.walkthrough import Walkthrough
 from agent.review_scout.git import ScoutGitError, finalize, setup_working_tree
 from agent.review_scout.paths import scout_repo_dir
@@ -53,18 +54,20 @@ from agent.runtime import (
 )
 from agent.sandboxes.repo_prep import prepare_review_repo
 from agent.tools.commit_walkthrough_step import commit_walkthrough_step
-from agent.tools.record_guidance import record_guidance
+from agent.tools.record_human_input import record_human_input
 from agent.utils.deferred_model import make_deferred_error_model
 from agent.utils.model import DEFAULT_LLM_REASONING, make_model, provider_model_kwargs
 
 logger = logging.getLogger(__name__)
 
 SCOUT_MODEL_CALL_LIMIT = 150
+_CLOSING_TITLE_TAG_RE = re.compile(r"</\s*pr_title\s*>", re.IGNORECASE)
 MAX_STEPS = 8
 
 
 class ReviewScoutState(PrepareRunState):
     scout_merge_base: NotRequired[str | None]
+    human_input_summary: NotRequired[str]
 
 
 async def _ensure_scout_sandbox(thread_id: str, cfg: RunConfig) -> SandboxBackendProtocol:
@@ -131,22 +134,23 @@ class PrepareReviewScoutRunMiddleware(BasePrepareRunMiddleware):
             "review-scout/main.md",
             pr_number=cfg.pr_number,
             repo_full_name=cfg.repo.full_name,
-            pr_title=cfg.pr_title or "",
+            pr_title=_CLOSING_TITLE_TAG_RE.sub("</pr_title_>", cfg.pr_title or ""),
             repo_dir=repo_dir,
             merge_base=merge_base,
             patch_dir=f"{work_dir}/.scout-patches",
             max_steps=MAX_STEPS,
         )
         history = await SteeringHistory.load(cfg.repo.owner, cfg.repo.name, cfg.pr_number)
-        if history is not None and history.follow_ups:
-            guidance = render_prompt(
-                "review-scout/author-guidance.md", messages=history.messages_block()
+        if history is not None:
+            human_input = render_prompt(
+                "review-scout/human-input.md", messages=history.messages_block()
             )
-            system_prompt = f"{system_prompt}\n\n{guidance}"
+            system_prompt = f"{system_prompt}\n\n{human_input}"
         return {
             "work_dir": work_dir,
             "rendered_system_prompt": system_prompt,
             "scout_merge_base": merge_base,
+            "human_input_summary": "",
         }
 
 
@@ -169,9 +173,6 @@ class StoreWalkthroughMiddleware(OpenSWEMiddleware[ReviewScoutState]):
             "pr_number": cfg.pr_number,
             "scout_head_sha": cfg.head_sha,
         }
-        # Settles which head the guidance card describes, including when this
-        # run recorded nothing.
-        await GuidanceReview.complete(cfg.repo.owner, cfg.repo.name, cfg.pr_number, cfg.head_sha)
         backend = get_cached_sandbox_backend(self._thread_id)
         repo_dir = await scout_repo_dir(backend, cfg)
         if repo_dir is None:
@@ -198,6 +199,7 @@ class StoreWalkthroughMiddleware(OpenSWEMiddleware[ReviewScoutState]):
             merge_base_sha=merge_base,
             scout_thread_id=self._thread_id,
             steps=steps,
+            human_input_summary=state.get("human_input_summary", ""),
         )
         logger.info("Stored review walkthrough", extra={**extra, "scout_steps": len(steps)})
 
@@ -243,10 +245,7 @@ async def get_review_scout(config: RunnableConfig) -> Pregel:
     return create_deep_agent(
         model=model,
         system_prompt="",
-        tools=apply_tool_descriptions(
-            [commit_walkthrough_step, record_guidance],
-            {"record_guidance": {"cap": GUIDANCE_CAP}},
-        ),
+        tools=apply_tool_descriptions([commit_walkthrough_step, record_human_input]),
         backend=get_cached_sandbox_backend(thread_id, reconnect=reconnect_backend),
         middleware=cast(
             list[AgentMiddleware[Any, Any, Any]],

@@ -40,10 +40,7 @@ import type {
   LoadEarlier,
   MessagesScrollControl,
 } from "@/features/agents/components/messages"
-import {
-  describeSendError,
-  useSubmitAgentMessage,
-} from "@/features/agents/lib/provider/useSubmitAgentMessage"
+import { useSubmitAgentMessage } from "@/features/agents/lib/provider/useSubmitAgentMessage"
 import { useModelOptions } from "@/features/agents/lib/provider/useModelOptions"
 import {
   agentThreadKeys,
@@ -63,6 +60,7 @@ import type {
   SubmitOptions,
 } from "@/features/agents/components/composer/ChatComposer"
 import { agentsApi } from "@/features/agents/lib/api"
+import { reportError } from "@/lib/errorReporting"
 import { useSession } from "@/lib/session"
 import { useIsMobile } from "@/lib/useIsMobile"
 import { useThreadSource } from "@/features/agents/lib/threadSource/ThreadSourceProvider"
@@ -152,7 +150,10 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
     (model) => model.id === activeSelection?.modelId
   )
   const baseMessages = source.messages
-  const isStreaming = thread.status === "running" || source.isRunning
+  const isStreaming =
+    source.kind === "transcript"
+      ? source.isRunning
+      : thread.status === "running" || source.isRunning
   // Server truth: follow-ups queued behind the live run, from the transcript.
   const queued = source.queued
   const login = session.data?.login
@@ -162,11 +163,7 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
     [login]
   )
 
-  // The SDK stream cannot queue, so a follow-up there always steers.
-  const followUpBehavior =
-    source.kind === "transcript"
-      ? (session.data?.follow_up_behavior ?? "queue")
-      : "steer"
+  const followUpBehavior = session.data?.follow_up_behavior ?? "queue"
   const submitMessage = useCallback(
     async (
       content: string,
@@ -184,7 +181,7 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
         images,
         model_id: activeSelection?.modelId ?? null,
         effort: activeSelection?.effort ?? null,
-        enqueue: isStreaming && queue && source.kind === "transcript",
+        enqueue: isStreaming && queue,
       })
     },
     [
@@ -193,7 +190,6 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
       followUpBehavior,
       isStreaming,
       sendMessage,
-      source.kind,
     ]
   )
 
@@ -233,14 +229,19 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
     },
     []
   )
-  // Withdraws a queued follow-up: its run is cancelled before it starts, and
-  // the transcript hides the turn.
+  // A "stream"-kind source's queue only reflects a cancel via `cancelQueued`
+  // — never a lifecycle event, since the run never reached "running" —
+  // otherwise the row lingers until the next hydrate.
   const withdrawQueued = useCallback(
     async (entry: QueuedTurn) => {
       if (entry.runId === null) return
+      if (source.kind === "stream") {
+        await source.cancelQueued(entry.turnId)
+        return
+      }
       await agentsApi.cancelRun(thread.id, entry.runId)
     },
-    [thread.id]
+    [source, thread.id]
   )
   const steerInFlightRef = useRef(false)
   // Send now: the follow-up leaves the queue and goes into the live run.
@@ -252,11 +253,9 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
         const images = await materializeQueuedImages(entry)
         if (images === null) return
         await withdrawQueued(entry)
-        await sendMessage.mutateAsync({ content: queuedText(entry), images })
+        sendMessage.mutate({ content: queuedText(entry), images })
       } catch (error) {
-        toast.error(
-          `Couldn't send the queued message now: ${describeSendError(error)}`
-        )
+        reportError({ title: "Couldn't send the queued message now", error })
       } finally {
         steerInFlightRef.current = false
       }
@@ -287,9 +286,7 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
         await withdrawQueued(entry)
         restoreQueuedToComposer([queuedText(entry)], images)
       })().catch((error: unknown) =>
-        toast.error(
-          `Couldn't cancel the queued message: ${describeSendError(error)}`
-        )
+        reportError({ title: "Couldn't cancel the queued message", error })
       )
     },
     [materializeQueuedImages, queued, restoreQueuedToComposer, withdrawQueued]
@@ -311,9 +308,12 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
       ...pending.flatMap(queuedImages),
       ...unacknowledged.flatMap((message) => message.images ?? []),
     ])
-    if (!(await source.stop())) {
-      toast.error("Couldn't stop the run.")
-      return
+    if (!(await source.stop())) return
+    if (source.kind === "stream" && pending.length > 0) {
+      // Same reasoning as withdrawQueued: syncs the adapter's queue store.
+      await Promise.allSettled(
+        pending.map((entry) => source.cancelQueued(entry.turnId))
+      )
     }
     if (unacknowledged.length > 0) {
       const dropped = new Set(unacknowledged.map((message) => message.id))
@@ -522,7 +522,9 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
           onRename={(title) =>
             renameThread.mutateAsync({ threadId: thread.id, title })
           }
-          target="Cloud"
+          target={
+            thread.sandboxId?.startsWith("bridge:") ? "Local CLI" : "Cloud"
+          }
           panelCollapsed={panelCollapsed}
           thread={thread}
         />

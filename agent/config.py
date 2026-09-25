@@ -207,6 +207,10 @@ ENV.var(
     "LANGCHAIN_REVISION_ID", "Revision id LangGraph Platform injects; attached to run metadata."
 )
 ENV.var(
+    "LANGSMITH_LANGGRAPH_GIT_REF_SHA",
+    "Resolved source commit injected by LangSmith for Git-backed deployments.",
+)
+ENV.var(
     "OPEN_SWE_BUILD_INFO_DIR",
     "Directory of the backend's build-identity sidecar; image builds stamp /opt/open-swe-backend.",
 )
@@ -239,6 +243,10 @@ ENV.var(
 )
 ENV.var("GITHUB_APP_INSTALLATION_ID", "GitHub App installation used when a run names none.")
 ENV.var("GITHUB_WEBHOOK_SECRET", "HMAC secret for GitHub webhook deliveries.", secret=True)
+ENV.var(
+    "GITHUB_OIDC_AUDIENCE",
+    "Audience a federated GitHub Actions token must carry; defaults to the dashboard URL.",
+)
 ENV.var(
     "GITHUB_OAUTH_PROVIDER_ID", "LangSmith OAuth provider id for the legacy brokered GitHub auth."
 )

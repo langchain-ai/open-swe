@@ -31,7 +31,7 @@ from agent.transcript.engine import AppendResult
 from agent.workspaces.store import WORKSPACES, WorkspaceCreate
 from tests.conftest import FakeStore, patch_thread_module
 
-_TEXT_ONLY_MODEL = "fireworks:accounts/fireworks/models/deepseek-v4-pro"
+_TEXT_ONLY_MODEL = "fireworks:accounts/fireworks/models/kimi-k3"
 _VISION_MODEL = "openai:gpt-6-sol"
 _FABLE = "anthropic:claude-fable-5-1"
 _PAIR = ("openai:gpt-6-sol", "medium")
@@ -409,7 +409,7 @@ async def test_enrich_run_start_command_resolves_model_from_repos_workspace(
     await WORKSPACES.create(WorkspaceCreate(name="OSS", repos=["acme/oss"]), "octocat")
     await upsert_instance_settings(
         WorkspaceSettingsUpdate(
-            default_agent_model="anthropic:claude-sonnet-5",
+            default_agent_model="anthropic:claude-opus-5-5",
             default_agent_reasoning_effort="high",
         )
     )

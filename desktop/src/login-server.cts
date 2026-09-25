@@ -8,7 +8,7 @@ function page(heading, detail) {
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<title>Open SWE</title>
+<title>${heading} - Open SWE</title>
 <style>
   :root { color-scheme: light dark }
   body {

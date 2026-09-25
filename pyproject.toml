@@ -17,10 +17,10 @@ dependencies = [
     "langgraph>=1.2.12",
     "markdownify>=1.2.3",
     "markdown-it-py==4.2.0",
-    "langchain-anthropic>=1.7.2",
+    "langchain-anthropic>=1.7.4",
     "langgraph-cli[inmem]>=0.4.31",
     "langsmith>=0.14.0",
-    "langchain-openai>=1.6.3,<2.0.0",
+    "langchain-openai>=1.6.5,<2.0.0",
     "openai>=3.10.0,<4.0.0",
     "langchain-fireworks>=1.6.2",
     # langchain-fireworks 1.4.2 pins a pre-release fireworks-ai; opt in explicitly so uv resolves it.
@@ -72,12 +72,10 @@ sandbox-providers = [
 # Override-dependencies only apply when langchain-e2b is installed (the sandbox-e2b
 # or sandbox-providers extra).
 override-dependencies = ["deepagents==0.7.17", "wcmatch>=11.0"]
-# Each langgraph-api release pins its langgraph-runtime-inmem peer to a single
-# minor window expressed in `.dev0` bounds (`>=0.32.0.dev0,<0.33.0.dev0`), which
-# uv's default pre-release policy shies away from, so a plain resolve lands on the
-# end-of-life 0.10.3. Hold the local dev server at the version `langgraph.json`
-# declares for the deployment, so tests run against the runtime that serves prod.
-constraint-dependencies = ["langgraph-api>=0.13.3,<0.14"]
+constraint-dependencies = [
+    "langgraph-api>=0.15.0rc1,<0.16",
+    "langgraph-runtime-inmem>=0.35.0rc1,<0.36",
+]
 
 [build-system]
 requires = ["hatchling"]

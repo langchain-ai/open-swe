@@ -126,7 +126,7 @@ it("shows delivery lag separately from suppression, then refreshes to a populate
     .mockResolvedValue(report(captured))
   const client = mountReport()
   expect(await screen.findByText(/No PRs have been recorded/)).toBeTruthy()
-  expect(screen.getByText("Event processing is behind")).toBeTruthy()
+  expect(screen.getByText("Analytics are updating")).toBeTruthy()
   fireEvent.click(screen.getByText("Details"))
   expect(
     screen.getAllByText(/still waiting to be processed/).length
@@ -182,7 +182,7 @@ it("shows delivery lag separately from suppression, then refreshes to a populate
   )
   await act(() => client.invalidateQueries())
   expect(await screen.findByText("example-model")).toBeTruthy()
-  expect(screen.getByText("Event processing is up to date")).toBeTruthy()
+  expect(screen.getByText("Analytics are up to date")).toBeTruthy()
   expect(
     screen.getByLabelText("Analytics coverage").querySelector("details")?.open
   ).toBe(true)
@@ -720,7 +720,7 @@ it("refreshes the usage leaderboard and merge rate report from the coverage foot
     )
     .mockResolvedValue(report(captured))
   const client = mountReport()
-  expect(await screen.findByText("Event processing is behind")).toBeTruthy()
+  expect(await screen.findByText("Analytics are updating")).toBeTruthy()
 
   const beforeUsage = vi.mocked(api.usageLeaderboard).mock.calls.length
   const beforeReport = vi.mocked(api.prMergeRateByModel).mock.calls.length
@@ -827,7 +827,7 @@ it("keeps failed delivery visible when all PR groups are suppressed", async () =
   )
   const client = mountReport()
   expect(await screen.findByText(/too small to show/)).toBeTruthy()
-  expect(screen.getByText("Event processing needs attention")).toBeTruthy()
+  expect(screen.getByText("Analytics need attention")).toBeTruthy()
   expect(
     screen.getAllByText(/Some events could not be processed/).length
   ).toBeGreaterThan(0)
@@ -937,7 +937,7 @@ it("distinguishes unavailable usage from empty usage and recovers without duplic
   fireEvent.click(screen.getByRole("button", { name: "Retry usage analytics" }))
   expect(await screen.findByText(/No Open SWE Agent usage/)).toBeTruthy()
   expect(screen.getByLabelText("Analytics coverage")).toBeTruthy()
-  expect(screen.getByText("Event processing is behind")).toBeTruthy()
+  expect(screen.getByText("Analytics are updating")).toBeTruthy()
   fireEvent.click(screen.getByText("Details"))
   expect(screen.getByText(/Reporting since/)).toBeTruthy()
   expect(

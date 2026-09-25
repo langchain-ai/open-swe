@@ -15,7 +15,7 @@ import logging
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, model_validator
 
 from agent.dashboard.oauth import (
@@ -40,6 +40,7 @@ from agent.store import (
     search_all_values,
     search_values,
 )
+from agent.users import User, UserPreferences, UserPreferencesPatch
 
 logger = logging.getLogger(__name__)
 
@@ -58,10 +59,11 @@ class ProfileUpdate(BaseModel):
     auto_fix_ci: bool = True
     model_routing_enabled: bool | None = None
     recent_thread_context_enabled: bool = False
-    dm_session_enabled: bool = False
+    concierge_mode: bool | None = None
     draft_prs: bool | None = None
     review_draft_prs: bool | None = None
     experimental_assistant_ui: bool | None = None
+    slack_onboarding_dismissed: bool = False
 
     @model_validator(mode="after")
     def _normalize_stale_model_pairs(self) -> ProfileUpdate:
@@ -118,6 +120,7 @@ def _normalize_stale_model_pair(model: str, effort: str | None) -> tuple[str, st
 def normalize_profile_for_response(profile: dict[str, Any]) -> dict[str, Any]:
     value = dict(profile)
     value.pop("create_prs", None)
+    value.pop("dm_session_enabled", None)
     for model_field, effort_field in (
         ("default_model", "reasoning_effort"),
         ("default_subagent_model", "subagent_reasoning_effort"),
@@ -185,11 +188,6 @@ async def upsert_profile(login: str, email: str, update: ProfileUpdate) -> dict[
             if "recent_thread_context_enabled" in update.model_fields_set
             else existing.get("recent_thread_context_enabled", False)
         ),
-        "dm_session_enabled": (
-            update.dm_session_enabled
-            if "dm_session_enabled" in update.model_fields_set
-            else existing.get("dm_session_enabled", False)
-        ),
         "draft_prs": (
             update.draft_prs if update.draft_prs is not None else existing.get("draft_prs", True)
         ),
@@ -198,6 +196,11 @@ async def upsert_profile(login: str, email: str, update: ProfileUpdate) -> dict[
             update.experimental_assistant_ui
             if update.experimental_assistant_ui is not None
             else existing.get("experimental_assistant_ui")
+        ),
+        "slack_onboarding_dismissed": (
+            update.slack_onboarding_dismissed
+            if "slack_onboarding_dismissed" in update.model_fields_set
+            else existing.get("slack_onboarding_dismissed", False)
         ),
         "updated_at": now_iso(),
     }
@@ -409,10 +412,12 @@ _SESSION_DEP = Depends(require_session)
 async def get_my_profile(
     session: dict[str, Any] = _SESSION_DEP,
 ) -> dict[str, Any]:
-    profile = await get_profile(session["sub"])
+    profile, preferences = await asyncio.gather(
+        get_profile(session["sub"]), User.preferences_for_login(session["sub"])
+    )
     if not profile:
-        return {}
-    return normalize_profile_for_response(profile)
+        return {"concierge_mode": preferences.concierge_mode}
+    return {**normalize_profile_for_response(profile), "concierge_mode": preferences.concierge_mode}
 
 
 @router.put("/profile")
@@ -421,4 +426,14 @@ async def put_my_profile(
     session: dict[str, Any] = _SESSION_DEP,
 ) -> dict[str, Any]:
     update.validate_pairing()
-    return await upsert_profile(session["sub"], session.get("email") or "", update)
+    login = session["sub"]
+    preferences = await User.update_preferences(
+        login, UserPreferencesPatch(concierge_mode=update.concierge_mode)
+    )
+    if preferences is None and update.concierge_mode:
+        raise HTTPException(status_code=409, detail="No Open SWE user record for this login yet")
+    profile = await upsert_profile(login, session.get("email") or "", update)
+    return {
+        **normalize_profile_for_response(profile),
+        "concierge_mode": (preferences or UserPreferences()).concierge_mode,
+    }

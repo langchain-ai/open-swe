@@ -156,6 +156,8 @@ export interface SeedPullRequestOptions {
   reviews?: FakeReview[];
   review_threads?: FakeReviewThread[];
   review_decision?: "APPROVED" | "CHANGES_REQUESTED" | "REVIEW_REQUIRED";
+  // Committed to `head` off the base branch, so the PR carries a real diff.
+  files?: Record<string, string>;
 }
 
 export interface SeededPullRequest {

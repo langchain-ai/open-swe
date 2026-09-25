@@ -80,6 +80,16 @@ def slack_error(exc: Exception) -> str:
     return code or "invalid_slack_response"
 
 
+def slack_error_details(exc: Exception) -> list[str]:
+    """Slack's ``response_metadata.messages``, which name the offending block for ``invalid_blocks``."""
+    data = getattr(getattr(exc, "response", None), "data", None)
+    metadata = data.get("response_metadata") if isinstance(data, dict) else None
+    messages = metadata.get("messages") if isinstance(metadata, dict) else None
+    if not isinstance(messages, list):
+        return []
+    return [message[:300] for message in messages if isinstance(message, str)][:10]
+
+
 def slack_cache_key(client: AsyncWebClient) -> str:
     return "slack:" + hashlib.sha256((client.token or "").encode()).hexdigest()
 

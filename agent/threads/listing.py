@@ -1,13 +1,19 @@
 """Searching, filtering and paging the thread list behind the Agents UI."""
 
 import asyncio
+import logging
 from collections.abc import Mapping, Sequence
+from datetime import UTC, datetime
 from typing import Any, Literal
 
 from fastapi import HTTPException
 from langgraph_sdk.client import LangGraphClient
+from langgraph_sdk.errors import NotFoundError
 from langgraph_sdk.schema import ThreadSelectField
+from pydantic import BaseModel
 
+from agent.review.session import ReviewSessionMetadata
+from agent.review.walkthrough import Walkthrough
 from agent.threads.pins import list_thread_pin_ids, pin_thread, unpin_thread
 from agent.threads.summary import (
     _SURFACED_SOURCES,
@@ -28,7 +34,7 @@ from agent.threads.summary import (
     thread_is_unlisted,
     thread_source,
 )
-from agent.utils.json_types import JsonObject, ThreadLike
+from agent.utils.json_types import JsonObject, ThreadLike, as_thread_dict
 from agent.utils.thread_ops import langgraph_client
 from agent.utils.thread_participants import participant_search_filters
 from agent.workspaces.routing import workspace_for_repo
@@ -46,6 +52,12 @@ _THREAD_LIST_SELECT: list[ThreadSelectField] = [
 _PINNED_THREADS_BATCH_SIZE = 1000
 _RUN_REFRESH_CONCURRENCY = 8
 _RUNNING_METADATA_STATUSES = {"pending", "running"}
+
+logger = logging.getLogger(__name__)
+
+
+class _ScoutRunStatus(BaseModel):
+    status: str = ""
 
 
 def _participant_search_filters(
@@ -216,6 +228,46 @@ def _should_refresh_latest_run(thread: ThreadLike) -> bool:
     )
 
 
+async def settle_review_walkthrough(client: Any, thread: ThreadLike) -> ThreadLike:
+    """Record a review's walkthrough as ready or failed once its scout has stopped."""
+    metadata = _thread_metadata(thread)
+    review = ReviewSessionMetadata.parse(metadata)
+    thread_id = _thread_id(thread)
+    if review is None or review.walkthrough_state != "building" or not thread_id:
+        return thread
+    try:
+        runs = await client.runs.list(review.scout_thread_id, limit=1)
+    except NotFoundError:
+        runs = []
+    except Exception:
+        logger.warning(
+            "Could not read the review scout's runs", exc_info=True, extra={"thread_id": thread_id}
+        )
+        return thread
+    if runs and _ScoutRunStatus.model_validate(runs[0]).status in _RUNNING_METADATA_STATUSES:
+        return thread
+    requested_at = datetime.fromtimestamp((review.walkthrough_requested_at_ms or 0) / 1000, UTC)
+    now_ms = int(datetime.now(UTC).timestamp() * 1000)
+    try:
+        ready = await Walkthrough.generated_since(
+            review.repo_owner, review.repo_name, review.pr_number, requested_at
+        )
+        update: dict[str, Any] = {
+            "walkthrough_state": "ready" if ready else "failed",
+            "walkthrough_ready_at_ms": now_ms if ready else None,
+            "updated_at_ms": now_ms,
+        }
+        await client.threads.update(thread_id=thread_id, metadata=update)
+    except Exception:
+        logger.warning(
+            "Could not record the review walkthrough's outcome",
+            exc_info=True,
+            extra={"thread_id": thread_id},
+        )
+        return thread
+    return {**as_thread_dict(thread), "metadata": {**metadata, **update}}
+
+
 async def _summarize_thread(
     client: Any,
     thread: ThreadLike,
@@ -223,6 +275,7 @@ async def _summarize_thread(
     refresh_active_run: bool = True,
     minimal_run_update: bool = False,
 ) -> dict[str, Any]:
+    thread = await settle_review_walkthrough(client, thread)
     latest_run_status = latest_run_id = None
     if refresh_active_run and _should_refresh_latest_run(thread):
         thread, latest_run_status, latest_run_id = await _refresh_latest_run_metadata(
@@ -303,6 +356,9 @@ async def _collect_thread_candidates(
             for thread in batch:
                 metadata = _thread_metadata(thread)
                 if thread_source(metadata) == "incidents_agent":
+                    continue
+                review = ReviewSessionMetadata.parse(metadata)
+                if review is not None and not review.owned_by(viewer_login):
                     continue
                 if metadata.get("visibility", "public") != "public" and (
                     not include_private

@@ -240,32 +240,6 @@ async def test_prompt_uses_exact_run_mapping_and_deduplicates(
 
 
 @pytest.mark.asyncio
-async def test_success_completion_schedules_feedback_prompt(
-    context: Any, fake_store: Any, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    fake_store.values(("slack_thread_feedback", "C1")).clear()
-    client = AsyncMock()
-    client.threads.get.return_value = {
-        "metadata": {
-            "source": "slack",
-            "source_context": {"slack_thread": {"channel_id": "C1", "thread_ts": "1.0"}},
-        }
-    }
-    monkeypatch.setattr(completion, "langgraph_client", lambda: client)
-    monkeypatch.setattr(prompt_scheduler, "langgraph_client", lambda: client)
-    schedule = AsyncMock()
-    monkeypatch.setattr(prompt_scheduler, "_schedule", schedule)
-    await completion.handle_run_completion(
-        {"thread_id": "thread-1", "run_id": "run-1", "status": "success"}
-    )
-    schedule.assert_awaited_once()
-    assert schedule.await_args.kwargs["answer_run_id"] == "run-1"
-    assert schedule.await_args.kwargs["slack_run_id"] == "run-1"
-    assert schedule.await_args.kwargs["channel_id"] == "C1"
-    feedback.post_slack_ephemeral_message.assert_not_awaited()
-
-
-@pytest.mark.asyncio
 @pytest.mark.parametrize(
     "change",
     ["other_user", "other_channel", "unknown_run", "external", "bad_metadata", "long_comment"],

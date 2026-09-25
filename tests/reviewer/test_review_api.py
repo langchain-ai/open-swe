@@ -5,6 +5,7 @@ from agent.review import reviews as review_api
 from agent.review.reviews import (
     _ALLOWED_IMAGE_CONTENT_TYPES,
     _finding_counts,
+    _image_request_headers,
     _is_allowed_image_url,
     _require_image_in_pr,
     _serialize_finding,
@@ -60,10 +61,10 @@ def test_thread_review_summary():
             "head_sha": "abc",
             "watch": True,
             "latest_run_status": "success",
-            "findings": [{"id": "f_1", "severity": "high", "confidence": "high", "status": "open"}],
         },
     }
-    summary = _thread_review_summary(thread)
+    findings = [{"id": "f_1", "severity": "high", "confidence": "high", "status": "open"}]
+    summary = _thread_review_summary(thread, findings)
     assert summary is not None
     assert summary["owner"] == "acme"
     assert summary["number"] == 7
@@ -73,7 +74,7 @@ def test_thread_review_summary():
 
 
 def test_thread_review_summary_requires_pr_meta():
-    assert _thread_review_summary({"metadata": {"kind": "reviewer"}}) is None
+    assert _thread_review_summary({"metadata": {"kind": "reviewer"}}, []) is None
 
 
 def test_is_allowed_image_url_accepts_github_hosts():
@@ -93,6 +94,25 @@ def test_is_allowed_image_url_rejects_unsafe_urls():
     assert not _is_allowed_image_url("https://githubusercontent.com.evil.com/x.png")
     # Internal address.
     assert not _is_allowed_image_url("https://169.254.169.254/latest/meta-data")
+
+
+def test_is_allowed_image_url_accepts_only_githubs_asset_bucket():
+    assert _is_allowed_image_url(
+        "https://github-production-user-asset-6210df.s3.amazonaws.com/1/x.png?X-Amz-Signature=y"
+    )
+    assert not _is_allowed_image_url("https://attacker-bucket.s3.amazonaws.com/x.png")
+
+
+def test_image_token_only_reaches_githubusercontent():
+    assert "Authorization" in _image_request_headers(
+        "https://private-user-images.githubusercontent.com/1/x.png", "tok"
+    )
+    assert "Authorization" not in _image_request_headers(
+        "https://github.com/user-attachments/assets/abc", "tok"
+    )
+    assert "Authorization" not in _image_request_headers(
+        "https://github-production-user-asset-6210df.s3.amazonaws.com/1/x.png", "tok"
+    )
 
 
 def test_image_content_type_allowlist_excludes_svg():

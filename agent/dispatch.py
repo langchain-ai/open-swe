@@ -238,6 +238,7 @@ def prepare_run_config(
     configurable = with_invocation_id(configurable, invocation_id)
     configurable.setdefault("invocation_started_at", started_at)
     configurable[V3_STREAMING_CONFIG_KEY] = True
+    configurable.setdefault("background_task_completion", False)
     run_config["configurable"] = configurable
     run_config["metadata"] = with_invocation_id(merged_metadata, invocation_id)
     return run_config

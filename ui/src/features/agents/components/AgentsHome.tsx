@@ -103,7 +103,10 @@ export function AgentsHome({
   })
   const [visibility, setVisibility] = useState<"public" | "private">("public")
   const workspaceOptionsQuery = useWorkspaceOptions(cloudEnabled)
-  const workspaces = workspaceOptionsQuery.data?.workspaces ?? []
+  const workspaces = useMemo(
+    () => workspaceOptionsQuery.data?.workspaces ?? [],
+    [workspaceOptionsQuery.data]
+  )
   // undefined = untouched, so the run falls back to the repo's own workspace,
   // then the default one.
   const [workspaceOverride, setWorkspaceOverride] = useState<string | null>(
@@ -521,7 +524,8 @@ export function AgentsHome({
       modelConfigurable(activeSelection)
     if (repo) configurable.repo = repo
     if (repoOverride === null) configurable.repo_explicitly_none = true
-    configurable.visibility = visibility
+    configurable.thread_type =
+      visibility === "private" ? "private" : "workspace"
     if (selectedWorkspace) configurable.workspace = selectedWorkspace
 
     const handleCloudSubmitError = (error: unknown) => {

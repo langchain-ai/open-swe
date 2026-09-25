@@ -11,6 +11,7 @@ from agent.invocation import new_invocation_id, with_invocation_id
 from agent.prompts import render_prompt
 from agent.review.walkthrough import WalkthroughView
 from agent.thread_ids import review_scout_thread_id
+from agent.utils.thread_ops import thread_run_error
 
 logger = logging.getLogger(__name__)
 
@@ -18,13 +19,67 @@ ASSISTANT_ID = "review-scout"
 # The reviewer waits this long for the walkthrough before reviewing without it;
 # the scout keeps running and still stores its result for the review page.
 SCOUT_WAIT_SECONDS = 600
+_POLL_SECONDS = 5
+_ACTIVE_STATUSES = frozenset({"pending", "running"})
 _SENDER_ID = "system:review-scout"
 _HEAD_METADATA_KEY = "scout_head_sha"
 
 
 class _ScoutRun(BaseModel):
     run_id: str
+    status: str = ""
     metadata: dict[str, object] = {}
+
+
+_COMMIT_STEP_TOOL = "commit_walkthrough_step"
+
+
+_RECENT_ACTIONS = 5
+_ACTION_TARGET_KEYS = ("file_path", "path", "pattern", "title", "command")
+_ACTION_TARGET_CHARS = 80
+
+
+class _ToolCall(BaseModel):
+    name: str = ""
+    args: dict[str, object] = {}
+
+    def action(self) -> ScoutAction:
+        target = next(
+            (
+                value
+                for key in _ACTION_TARGET_KEYS
+                if isinstance(value := self.args.get(key), str) and value
+            ),
+            None,
+        )
+        return ScoutAction(tool=self.name, target=target[:_ACTION_TARGET_CHARS] if target else None)
+
+
+class _ScoutMessage(BaseModel):
+    type: str = ""
+    name: str | None = None
+    tool_calls: list[_ToolCall] = []
+
+
+class _ScoutValues(BaseModel):
+    messages: list[_ScoutMessage] = []
+
+
+class _ScoutState(BaseModel):
+    values: _ScoutValues = _ScoutValues()
+
+
+class ScoutAction(BaseModel):
+    tool: str
+    target: str | None = None
+
+
+class ScoutProgress(BaseModel):
+    """What a running scout is doing, for the review page's status line."""
+
+    steps: int
+    running: bool
+    recent: list[ScoutAction]
 
 
 class ReviewScoutTarget(BaseModel):
@@ -66,6 +121,41 @@ class ReviewScoutTarget(BaseModel):
                 if run.metadata.get(_HEAD_METADATA_KEY) == self.head_sha:
                     return run.run_id
         return None
+
+    async def progress(self) -> ScoutProgress:
+        """How far the running scout has got, from its latest checkpoint."""
+        state = _ScoutState.model_validate(
+            await dispatch_client().threads.get_state(self.thread_id)
+        )
+        messages = state.values.messages
+        steps = sum(
+            1
+            for message in messages
+            if message.type == "tool" and message.name == _COMMIT_STEP_TOOL
+        )
+        calls = [
+            call for message in messages if message.type == "ai" for call in message.tool_calls
+        ]
+        last = messages[-1] if messages else None
+        return ScoutProgress(
+            steps=steps,
+            running=last is not None and last.type == "ai" and bool(last.tool_calls),
+            recent=[call.action() for call in calls[-_RECENT_ACTIONS:]],
+        )
+
+    async def last_failure(self) -> str | None:
+        """The error that ended the latest scout run on this head, when it failed."""
+        client = dispatch_client()
+        try:
+            runs = await client.runs.list(self.thread_id, limit=1)
+        except NotFoundError:
+            return None
+        if not runs:
+            return None
+        run = _ScoutRun.model_validate(runs[0])
+        if run.status != "error" or run.metadata.get(_HEAD_METADATA_KEY) != self.head_sha:
+            return None
+        return await thread_run_error(self.thread_id) or "The review scout run ended with an error."
 
     async def start(self) -> str:
         """The scout run for this head, started when none is already running.
@@ -114,13 +204,14 @@ class ReviewScoutTarget(BaseModel):
         if existing is not None:
             return existing
         run_id = await self.start()
-        try:
-            await asyncio.wait_for(
-                dispatch_client().runs.join(self.thread_id, run_id), SCOUT_WAIT_SECONDS
-            )
-        except TimeoutError:
-            logger.warning(
-                "Review scout did not finish in time for the reviewer", extra=self.log_extra
-            )
-            return None
-        return await self.walkthrough()
+        # Polled rather than joined: one join request idles for the whole run
+        # and would hit the client's 300s read timeout first.
+        client = dispatch_client()
+        deadline = asyncio.get_running_loop().time() + SCOUT_WAIT_SECONDS
+        while asyncio.get_running_loop().time() < deadline:
+            run = _ScoutRun.model_validate(await client.runs.get(self.thread_id, run_id))
+            if run.status not in _ACTIVE_STATUSES:
+                return await self.walkthrough()
+            await asyncio.sleep(_POLL_SECONDS)
+        logger.warning("Review scout did not finish in time for the reviewer", extra=self.log_extra)
+        return None

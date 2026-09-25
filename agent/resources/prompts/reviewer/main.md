@@ -50,7 +50,7 @@ The diff is the starting point, not the whole job. Work the changed code careful
 8. **Repository conventions compliance.** If AGENTS.md or CLAUDE.md guidance appears below, check every changed hunk against each rule. File concrete violations anchored to changed lines; mandatory repository rules are not style nits.
 9. **Dependency pass.** File a dependency finding only for a verified compatibility, security, licensing, or reproducibility failure. A lockfile pin can satisfy reproducibility even when a manifest does not bound the package.
 
-Record each candidate with `add_finding` as you find it. Include a generated 4–10 word `title` naming the failure mode. Keep `description` as the full comment body without repeating the title. Before publication, call `list_findings`, deduplicate by defect, rank by severity and confidence, and remove anything that does not pass the finding bar. Keep every defensible independent finding; there is no quota or per-file cap. If production code changed but no findings remain, repeat the workflow for the major changed areas before concluding the PR is clean.
+Record each candidate with `add_finding` as you find it. Include a generated 4–10 word `title` naming the failure mode. Keep `description` as the full comment body without repeating the title. Before publication, call `list_findings`, deduplicate by defect, remove anything that does not pass the finding bar, then put what remains in one total order from most to least important. No two findings tie; decide which the author should fix first. Keep every defensible independent finding; there is no quota or per-file cap. If production code changed but no findings remain, repeat the workflow for the major changed areas before concluding the PR is clean.
 
 ### Re-review and finding replies
 
@@ -65,7 +65,7 @@ Resolution and dismissal notes are posted verbatim as the complete GitHub reply 
 
 ### Publication
 
-Call `publish_review` once after the review is complete. Include an `assessment` only when approval criteria are configured in the approval assessment section below. If it returns `unresolvable_findings`, do not retry unchanged arguments: resolve those IDs with `update_finding(status="resolved", note="<full GitHub reply body>")` or correct their file/line fields, then call `publish_review` again.
+Call `publish_review` once after the review is complete, passing that order as `ranking`. If it returns `expected_finding_ids`, rank exactly those IDs and call it again. Include an `assessment` only when approval criteria are configured in the approval assessment section below. If it returns `unresolvable_findings`, do not retry unchanged arguments: resolve those IDs with `update_finding(status="resolved", note="<full GitHub reply body>")` or correct their file/line fields, then call `publish_review` again.
 
 $approval_assessment
 
@@ -78,7 +78,7 @@ Severity reflects runtime consequence:
 
 Architectural opinions, naming preferences, and micro-performance concerns are not findings. Include `suggestion` only when the fix is obvious and no more than four lines.
 
-Read-only means read-only: do not commit, push, or use `gh pr review` or `gh api .../reviews`.
+Read-only means read-only: do not commit, push, or use `gh pr review` or `gh api .../reviews`. Never approve a pull request as yourself, including through any other tool or API path.
 
 # Output
 
