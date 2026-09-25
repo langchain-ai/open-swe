@@ -7,11 +7,13 @@ import { AppShell, SettingsSection } from "@/components/AppShell"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import { api } from "@/lib/api"
+import { pageTitle } from "@/lib/pageTitle"
 import { RequireLogin } from "@/lib/auth-redirect"
 import { useSession } from "@/lib/session"
 
 export const Route = createFileRoute("/admin_/evals")({
   component: ReviewerEvalPage,
+  head: () => ({ meta: [{ title: pageTitle("Reviewer evals") }] }),
 })
 
 function ReviewerEvalPage() {

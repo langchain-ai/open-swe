@@ -53,6 +53,7 @@ export function useSubmitAgentMessage(threadId: string) {
   const source = useThreadSource()
 
   return useMutation({
+    meta: { errorTitle: "Couldn't send message" },
     mutationFn: async (vars: SendAgentMessageVariables) => {
       if (vars.content.trim() === "/offload") {
         if (source.isRunning) {
@@ -105,6 +106,10 @@ export function useSubmitAgentMessage(threadId: string) {
               ...pendingMessage,
               status: "failed",
               error: describeSendError(error),
+              // A failed enqueue never reaches the SDK's queue, so this
+              // must fall back into the normal timeline instead of
+              // rendering as a permanently pending queued row.
+              queued: false,
             })
           )
           setAgentThreadStatus(queryClient, threadId, "error")

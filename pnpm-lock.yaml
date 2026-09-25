@@ -45,6 +45,15 @@ importers:
         specifier: ^2.10.11
         version: 2.10.12
 
+  cli:
+    devDependencies:
+      '@types/bun':
+        specifier: ^1.3.11
+        version: 1.4.2
+      typescript:
+        specifier: ^5.9.3
+        version: 5.9.3
+
   desktop:
     dependencies:
       electron-updater:
@@ -83,7 +92,7 @@ importers:
         version: 0.15.21(@types/react-dom@19.2.5(@types/react@19.2.18))(@types/react@19.2.18)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(use-sync-external-store@1.6.0(react@19.2.8))
       '@assistant-ui/react-langchain':
         specifier: 0.0.30
-        version: 0.0.30(@assistant-ui/tap@0.9.18(@types/react@19.2.18)(react@19.2.8))(@langchain/react@1.1.0(@langchain/core@1.2.9(ws@8.21.3))(react-dom@19.2.8(react@19.2.8))(react@19.2.8))(@types/react@19.2.18)(react@19.2.8)
+        version: 0.0.30(@assistant-ui/tap@0.9.18(@types/react@19.2.18)(react@19.2.8))(@langchain/react@1.2.0-rc.0(@langchain/core@1.2.9(ws@8.21.3))(react-dom@19.2.8(react@19.2.8))(react@19.2.8))(@types/react@19.2.18)(react@19.2.8)
       '@base-ui/react':
         specifier: ^1.7.0
         version: 1.7.0(@types/react@19.2.18)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
@@ -97,11 +106,11 @@ importers:
         specifier: ^1.2.9
         version: 1.2.9(ws@8.21.3)
       '@langchain/langgraph-sdk':
-        specifier: ^1.11.0
-        version: 1.11.0(@langchain/core@1.2.9(ws@8.21.3))(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
+        specifier: 1.12.0-rc.0
+        version: 1.12.0-rc.0(@langchain/core@1.2.9(ws@8.21.3))(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
       '@langchain/react':
-        specifier: ^1.1.0
-        version: 1.1.0(@langchain/core@1.2.9(ws@8.21.3))(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
+        specifier: 1.2.0-rc.0
+        version: 1.2.0-rc.0(@langchain/core@1.2.9(ws@8.21.3))(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
       '@lexical/react':
         specifier: ^0.49.0
         version: 0.49.0(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(typescript@5.9.3)(yjs@13.6.32)
@@ -902,8 +911,8 @@ packages:
     resolution: {integrity: sha512-conzSEj9Zu1AyXJLXsSbgrtxtxinmI1yGqQ5CIJZSoV5rvv+yvQE/vgBnoySpBQ/bl3YPgj2FL/gbDjWykLSfg==}
     engines: {node: '>=20'}
 
-  '@langchain/langgraph-sdk@1.11.0':
-    resolution: {integrity: sha512-Gk6mrCs2fbqKr3luQxVM5ZEcpjK35QO5w/Tr9h/RQPzeKqrsHyPrP4NR9udfgy1ycu7KvvoZ3V0t3beN/edx0g==}
+  '@langchain/langgraph-sdk@1.12.0-rc.0':
+    resolution: {integrity: sha512-x5pRJk3PoWDpJpVWlf183e8xSyhUeJi/iPBv3upJZk8rQuklxmtYbBDx3OezgeZCBfslqtGuhWxeVcz/vkiNpA==}
     peerDependencies:
       '@langchain/core': ^1.1.48
       react: ^18 || ^19
@@ -917,8 +926,8 @@ packages:
   '@langchain/protocol@0.0.19':
     resolution: {integrity: sha512-9hKcRrH7cBX6gfutdfXPoft1OCchHe4FEpALoDJMl5Qu+n/YG5ynZmyu8+8cxORlPwHBoKTxggvXz+76M1yX1Q==}
 
-  '@langchain/react@1.1.0':
-    resolution: {integrity: sha512-qoy52auOC6RfyVG86NS1JlLPRcDvgO+XfESpaXdYBV6HHrY1arOcpwV3cSv/8CmkKnkgp21c0AEYvvK6hCADtw==}
+  '@langchain/react@1.2.0-rc.0':
+    resolution: {integrity: sha512-JrzhCM+LxFHHwHAIVpvJkcETvEdbBLQ6Rq/oQG3XRT8t0DSukVZEUnZhJ60HNexQhmfhvvyY9t6pbp6izyG9tQ==}
     peerDependencies:
       '@langchain/core': ^1.1.48
       react: ^18 || ^19
@@ -3282,6 +3291,9 @@ packages:
   '@types/aria-query@5.0.4':
     resolution: {integrity: sha512-rfT93uj5s0PRL7EzccGMs3brplhcrghnDoV26NqKhCAS1hVo+WdNsPvE/yb6ilfr5hi2MEk6d5EWJTKdxg8jVw==}
 
+  '@types/bun@1.4.2':
+    resolution: {integrity: sha512-GimotNn7+ZV0uVArItBbriZsR1oNf0+WTzPkdcFrzShI7k2norL0uzEaJT8T33dWr7O/c9ZDuAFQrctKCi72oQ==}
+
   '@types/cacheable-request@6.0.3':
     resolution: {integrity: sha512-IQ3EbTzGxIigb1I3qPZc1rWJnH0BmSKv5QYTalEwweFvyBDLSAe24zP0le/hyi7ecGfZVlIVAg4BZqb8WBwKqw==}
 
@@ -3757,6 +3769,9 @@ packages:
   builder-util@26.15.3:
     resolution: {integrity: sha512-q2hn7Mbo2nFNkVekPiHFx6Nfo3hURmES3tfBn+k5Pqxl2RkmP3QGqZUhH/q9Pch/4G05NRhPjDlVj1O8q4Txvw==}
     engines: {node: '>=14.0.0'}
+
+  bun-types@1.4.2:
+    resolution: {integrity: sha512-bxV1FgK7yBIzjRe5zBozIM4Bem11ZJcCXSrjWRG3YWLt8yFDePu4cLjpebO8OvPeIE9trbyPF4fuj3Cia4Fj3w==}
 
   bundle-name@4.1.0:
     resolution: {integrity: sha512-tjwM5exMg6BGRI+kNmTntNsvdZS1X8BFYS6tnJ2hdH0kVxM6/eVZ2xy+FqStSWvYmtfFMDLIxurorHwDKfDz5Q==}
@@ -7298,7 +7313,7 @@ snapshots:
       - ioredis
       - redis
 
-  '@assistant-ui/react-langchain@0.0.30(@assistant-ui/tap@0.9.18(@types/react@19.2.18)(react@19.2.8))(@langchain/react@1.1.0(@langchain/core@1.2.9(ws@8.21.3))(react-dom@19.2.8(react@19.2.8))(react@19.2.8))(@types/react@19.2.18)(react@19.2.8)':
+  '@assistant-ui/react-langchain@0.0.30(@assistant-ui/tap@0.9.18(@types/react@19.2.18)(react@19.2.8))(@langchain/react@1.2.0-rc.0(@langchain/core@1.2.9(ws@8.21.3))(react-dom@19.2.8(react@19.2.8))(react@19.2.8))(@types/react@19.2.18)(react@19.2.8)':
     dependencies:
       '@assistant-ui/core': 0.3.20(@assistant-ui/store@0.3.14(@assistant-ui/tap@0.9.18(@types/react@19.2.18)(react@19.2.8))(@types/react@19.2.18)(react@19.2.8))(@assistant-ui/tap@0.9.18(@types/react@19.2.18)(react@19.2.8))(@types/react@19.2.18)(assistant-cloud@0.2.2)(react@19.2.8)
       '@assistant-ui/store': 0.3.14(@assistant-ui/tap@0.9.18(@types/react@19.2.18)(react@19.2.8))(@types/react@19.2.18)(react@19.2.8)
@@ -7306,7 +7321,7 @@ snapshots:
       assistant-stream: 0.3.44
       react: 19.2.8
     optionalDependencies:
-      '@langchain/react': 1.1.0(@langchain/core@1.2.9(ws@8.21.3))(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
+      '@langchain/react': 1.2.0-rc.0(@langchain/core@1.2.9(ws@8.21.3))(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
       '@types/react': 19.2.18
     transitivePeerDependencies:
       - '@assistant-ui/tap'
@@ -7968,7 +7983,7 @@ snapshots:
       - openai
       - ws
 
-  '@langchain/langgraph-sdk@1.11.0(@langchain/core@1.2.9(ws@8.21.3))(react-dom@19.2.8(react@19.2.8))(react@19.2.8)':
+  '@langchain/langgraph-sdk@1.12.0-rc.0(@langchain/core@1.2.9(ws@8.21.3))(react-dom@19.2.8(react@19.2.8))(react@19.2.8)':
     dependencies:
       '@langchain/core': 1.2.9(ws@8.21.3)
       '@langchain/protocol': 0.0.19
@@ -7981,10 +7996,10 @@ snapshots:
 
   '@langchain/protocol@0.0.19': {}
 
-  '@langchain/react@1.1.0(@langchain/core@1.2.9(ws@8.21.3))(react-dom@19.2.8(react@19.2.8))(react@19.2.8)':
+  '@langchain/react@1.2.0-rc.0(@langchain/core@1.2.9(ws@8.21.3))(react-dom@19.2.8(react@19.2.8))(react@19.2.8)':
     dependencies:
       '@langchain/core': 1.2.9(ws@8.21.3)
-      '@langchain/langgraph-sdk': 1.11.0(@langchain/core@1.2.9(ws@8.21.3))(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
+      '@langchain/langgraph-sdk': 1.12.0-rc.0(@langchain/core@1.2.9(ws@8.21.3))(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
       react: 19.2.8
     transitivePeerDependencies:
       - react-dom
@@ -10126,6 +10141,10 @@ snapshots:
 
   '@types/aria-query@5.0.4': {}
 
+  '@types/bun@1.4.2':
+    dependencies:
+      bun-types: 1.4.2
+
   '@types/cacheable-request@6.0.3':
     dependencies:
       '@types/http-cache-semantics': 4.2.0
@@ -10679,6 +10698,10 @@ snapshots:
       tiny-async-pool: 1.3.0
     transitivePeerDependencies:
       - supports-color
+
+  bun-types@1.4.2:
+    dependencies:
+      '@types/node': 26.3.0
 
   bundle-name@4.1.0:
     dependencies:

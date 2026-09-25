@@ -24,12 +24,18 @@ THREAD_SETTINGS_KEY = "agent_settings"
 _CACHE_TTL_SECONDS = 300
 
 
+class ThreadModel(TypedDict):
+    model_id: str
+    effort: str | None
+
+
 class ThreadSettings(TypedDict, total=False):
     model_id: str
     effort: str | None
     subagent_model_id: str
     subagent_effort: str | None
     model_routing_enabled: bool
+    routing_models: dict[str, ThreadModel]
     repo_instructions: str | None
 
 

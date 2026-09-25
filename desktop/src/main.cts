@@ -910,7 +910,7 @@ function errorPage(error) {
     <meta charset="utf-8">
     <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'">
     <meta name="color-scheme" content="light dark">
-    <title>Open SWE</title>
+    <title>Startup error - Open SWE</title>
     <style>
       body { margin: 0; min-height: 100vh; display: grid; place-items: center; font: 14px system-ui, sans-serif; }
       main { max-width: 520px; padding: 32px; text-align: center; }

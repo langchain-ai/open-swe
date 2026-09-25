@@ -86,6 +86,7 @@ class Walkthrough(Base):
     head_sha: Mapped[str]
     merge_base_sha: Mapped[str]
     scout_thread_id: Mapped[str] = mapped_column(default="")
+    human_input_summary: Mapped[str] = mapped_column(server_default="", default="")
     generated_at: Mapped[datetime | None] = mapped_column(server_default=NOW, init=False)
     steps: Mapped[list[WalkthroughStep]] = relationship(
         default_factory=list,
@@ -104,6 +105,7 @@ class Walkthrough(Base):
         merge_base_sha: str,
         scout_thread_id: str,
         steps: list[StepDraft],
+        human_input_summary: str = "",
     ) -> None:
         """Store ``steps`` as this PR's walkthrough, replacing any earlier one."""
         pull_request = await PullRequest(owner=owner, repo=repo, number=number).ensure()
@@ -112,6 +114,7 @@ class Walkthrough(Base):
             head_sha=head_sha,
             merge_base_sha=merge_base_sha,
             scout_thread_id=scout_thread_id,
+            human_input_summary=human_input_summary,
             steps=[
                 WalkthroughStep(
                     position=position,
@@ -152,6 +155,39 @@ class Walkthrough(Base):
             )
 
     @classmethod
+    async def generated_since(cls, owner: str, repo: str, number: int, since: datetime) -> bool:
+        """Whether the PR has a walkthrough, for any head, stored at or after ``since``."""
+        if not postgres.configured():
+            return False
+        async with postgres.session() as session:
+            found = await session.scalar(
+                select(cls.pull_request_id)
+                .join(PullRequest, PullRequest.id == cls.pull_request_id)
+                .join(PullRequest.repository)
+                .where(
+                    Repository.key == f"{owner}/{repo}".lower(),
+                    PullRequest.number == number,
+                    cls.generated_at >= since,
+                )
+            )
+        return found is not None
+
+    @classmethod
+    async def dismiss(cls, owner: str, repo: str, number: int) -> bool:
+        """Delete the PR's walkthrough so the scout can build it again; ``False`` when none existed."""
+        pull_request = await PullRequest.get(owner, repo, number)
+        if pull_request is None:
+            return False
+        async with postgres.session() as session:
+            deleted = await session.scalar(
+                delete(cls)
+                .where(cls.pull_request_id == pull_request.id)
+                .returning(cls.pull_request_id)
+            )
+            await session.commit()
+        return deleted is not None
+
+    @classmethod
     async def carry_forward(
         cls, owner: str, repo: str, number: int, *, from_sha: str, to_sha: str
     ) -> None:
@@ -186,12 +222,14 @@ class WalkthroughView(BaseModel):
     """A walkthrough as the review page reads it."""
 
     head_sha: str
+    human_input: str
     steps: list[WalkthroughStepView]
 
     @classmethod
     def of(cls, walkthrough: Walkthrough) -> Self:
         return cls(
             head_sha=walkthrough.head_sha,
+            human_input=walkthrough.human_input_summary,
             steps=[
                 WalkthroughStepView(
                     index=position,

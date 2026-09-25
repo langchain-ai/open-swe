@@ -249,13 +249,21 @@ async def test_only_mid_run_human_messages_are_recorded_once(
     ]
     await middleware.abefore_agent({"messages": history}, None)
 
-    injected = HumanMessage(content="also do this", id="human-queued")
+    summary = HumanMessage(
+        content="You are in the middle of a conversation that has been summarized.",
+        id="summary-1",
+        additional_kwargs={"lc_source": "summarization"},
+    )
+    injected = HumanMessage(content=summary.content, id="human-queued")
 
     async def model_handler(request: ModelRequest) -> ModelResponse:
+        assert summary in request.messages
         return ModelResponse(result=[AIMessage(content="ok", id="ai-2")])
 
     for _ in range(2):
-        await middleware.awrap_model_call(_model_request([*history, injected]), model_handler)
+        await middleware.awrap_model_call(
+            _model_request([summary, *history, injected]), model_handler
+        )
     await middleware.aafter_agent({"messages": history}, None)
 
     human_events = [

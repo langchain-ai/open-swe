@@ -406,9 +406,17 @@ export interface AgentPullRequestContextResponse {
   prompt: string
 }
 
+export interface ReviewPageRef {
+  owner: string
+  repo: string
+  number: number
+}
+
 export interface AgentThread {
   visibility?: "public" | "private"
   id: string
+  /** Set on a PR review listed in the sidebar: its row opens this review page. */
+  reviewPage?: ReviewPageRef
   /**
    * Transcript source for the thread, from its LangGraph metadata. `"v2"` means
    * the append-only event log serves it; absent means the SDK stream does.

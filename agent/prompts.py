@@ -5,6 +5,7 @@ from pathlib import PurePosixPath
 from string import Template
 from typing import Any
 
+from jinja2 import Environment, StrictUndefined
 from langchain_core.tools import BaseTool
 
 _PROMPT_ROOT = resources.files("agent.resources").joinpath("prompts")
@@ -12,7 +13,7 @@ _PROMPT_ROOT = resources.files("agent.resources").joinpath("prompts")
 
 def _prompt_path(name: str) -> PurePosixPath:
     path = PurePosixPath(name)
-    if path.is_absolute() or path.suffix != ".md" or ".." in path.parts:
+    if path.is_absolute() or not path.name.endswith((".md", ".md.jinja")) or ".." in path.parts:
         raise ValueError(f"invalid prompt resource path: {name!r}")
     return path
 
@@ -27,6 +28,18 @@ def load_prompt(name: str) -> str:
 def render_prompt(name: str, values: Mapping[str, object] | None = None, **kwargs: object) -> str:
     substitutions = {**(values or {}), **kwargs}
     return Template(load_prompt(name)).substitute(substitutions)
+
+
+_JINJA = Environment(
+    autoescape=False, undefined=StrictUndefined, trim_blocks=True, lstrip_blocks=True
+)
+
+
+def render_template(name: str, **values: object) -> str:
+    """Render a ``.md.jinja`` prompt."""
+    if not name.endswith(".md.jinja"):
+        raise ValueError(f"Jinja prompts must end in .md.jinja: {name!r}")
+    return _JINJA.from_string(load_prompt(name)).render(values).strip()
 
 
 def apply_tool_descriptions(

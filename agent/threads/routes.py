@@ -2,10 +2,10 @@
 
 import logging
 from time import perf_counter
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 from uuid import UUID
 
-from fastapi import APIRouter, HTTPException, Request, Response
+from fastapi import APIRouter, HTTPException, Query, Request, Response
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
@@ -23,6 +23,7 @@ from agent.threads.feedback import feedback_router
 from agent.threads.handlers import (
     admin_cancel_dashboard_thread,
     cancel_dashboard_thread,
+    cancel_machine_thread,
     continue_thread_privately,
     delete_dashboard_thread,
     get_dashboard_pull_request_checks,
@@ -50,6 +51,8 @@ from agent.threads.proxy import (
     proxy_dashboard_thread_commands,
     proxy_dashboard_thread_history,
     proxy_dashboard_thread_run_cancel,
+    proxy_dashboard_thread_run_enqueue,
+    proxy_dashboard_thread_runs_list,
     proxy_dashboard_thread_stream_events,
 )
 from agent.threads.runs import (
@@ -354,6 +357,43 @@ async def api_resolve_thread(
     )
 
 
+@router.get("/threads/{thread_id}/runs")
+async def api_list_thread_runs(
+    thread_id: str,
+    limit: int = 10,
+    offset: int = 0,
+    status: str | None = None,
+    select: Annotated[list[str] | None, Query()] = None,
+    session: dict[str, Any] = SESSION_DEP,
+) -> Response:
+    status_code, content, media_type = await proxy_dashboard_thread_runs_list(
+        thread_id,
+        session["sub"],
+        limit=limit,
+        offset=offset,
+        status=status,
+        select=select,
+        email=session.get("email"),
+    )
+    return Response(content=content, status_code=status_code, media_type=media_type)
+
+
+@router.post("/threads/{thread_id}/runs")
+async def api_create_thread_run(
+    thread_id: str,
+    request: Request,
+    session: dict[str, Any] = SESSION_DEP,
+) -> dict[str, Any]:
+    body = await request.body()
+    return await proxy_dashboard_thread_run_enqueue(
+        thread_id,
+        session["sub"],
+        body,
+        email=session.get("email"),
+        content_type=request.headers.get("content-type", "application/json"),
+    )
+
+
 @router.post("/threads/{thread_id}/runs/{run_id}/cancel")
 async def api_cancel_thread_run(
     thread_id: str,
@@ -378,9 +418,11 @@ async def api_cancel_thread_run(
 @router.post("/threads/{thread_id}/cancel")
 async def api_cancel_thread(
     thread_id: str,
-    session: dict[str, Any] = SESSION_DEP,
+    principal: PrincipalDep,
 ) -> dict[str, Any]:
-    return await cancel_dashboard_thread(thread_id, session["sub"], email=session.get("email"))
+    if principal.machine:
+        return await cancel_machine_thread(thread_id, principal)
+    return await cancel_dashboard_thread(thread_id, principal.person, email=principal.email)
 
 
 @router.post("/admin/threads/{thread_id}/cancel")
@@ -420,15 +462,16 @@ async def api_get_thread_state(
 async def api_thread_stream_events(
     thread_id: str,
     request: Request,
-    session: dict[str, Any] = SESSION_DEP,
+    principal: PrincipalDep,
 ) -> StreamingResponse:
     body = await request.body()
     stream = await proxy_dashboard_thread_stream_events(
         thread_id,
-        session["sub"],
+        principal.login or "",
         body,
-        email=session.get("email"),
+        email=principal.email,
         content_type=request.headers.get("content-type", "application/json"),
+        principal=principal,
     )
     return StreamingResponse(
         stream,

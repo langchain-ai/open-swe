@@ -510,7 +510,7 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
     ).toHaveCount(0);
   });
 
-  test("answers a queued follow-up after stopping a run this browser started", async ({
+  test("restores a queued follow-up after stopping a browser-started run and answers when resent", async ({
     page,
   }) => {
     await loginAs(page, SAME_USER);
@@ -533,7 +533,10 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
     await expect(page.getByRole("button", { name: "Stop run" })).toBeVisible();
     await typeIntoComposer(page, queuedText);
     await expect(
-      page.getByTestId("queued-message").filter({ hasText: queuedText }),
+      page
+        .getByTestId("queued-message")
+        .filter({ hasText: queuedText })
+        .and(page.locator("[data-queued-pending='false']")),
     ).toBeVisible();
 
     await page.getByRole("button", { name: "Stop run" }).click();
@@ -541,6 +544,18 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
     await expect(page.getByTestId("queued-message")).toHaveCount(0, {
       timeout: 30_000,
     });
+    await expect(page.getByTestId("composer-editor")).toContainText(
+      queuedText,
+      { timeout: 30_000 },
+    );
+    await expect(
+      page.getByTestId("user-message").filter({ hasText: queuedText }),
+    ).toHaveCount(0);
+
+    await page
+      .getByRole("button", { name: "Send message", exact: true })
+      .click();
+
     await expect(
       page.getByTestId("user-message").filter({ hasText: queuedText }),
     ).toBeVisible({ timeout: 30_000 });
