@@ -8,12 +8,13 @@ reviewer starts it and waits for it before reviewing.
 
 import logging
 import re
+from collections.abc import Awaitable, Callable
 from typing import Any, NotRequired, cast
 
 from deepagents import create_deep_agent
 from deepagents.backends.protocol import SandboxBackendProtocol
 from langchain.agents.middleware import ModelCallLimitMiddleware
-from langchain.agents.middleware.types import AgentMiddleware
+from langchain.agents.middleware.types import AgentMiddleware, ModelRequest, ModelResponse
 from langchain_core.language_models.chat_models import BaseChatModel
 from langgraph.graph.state import RunnableConfig
 from langgraph.pregel import Pregel
@@ -62,11 +63,13 @@ logger = logging.getLogger(__name__)
 
 SCOUT_MODEL_CALL_LIMIT = 150
 _CLOSING_TITLE_TAG_RE = re.compile(r"</\s*pr_title\s*>", re.IGNORECASE)
+_HUMAN_INPUT_TOOL = record_human_input.__name__
 
 
 class ReviewScoutState(PrepareRunState):
     scout_merge_base: NotRequired[str | None]
     human_input_summary: NotRequired[str]
+    has_human_input: NotRequired[bool]
 
 
 async def _ensure_scout_sandbox(thread_id: str, cfg: RunConfig) -> SandboxBackendProtocol:
@@ -149,7 +152,20 @@ class PrepareReviewScoutRunMiddleware(BasePrepareRunMiddleware):
             "rendered_system_prompt": system_prompt,
             "scout_merge_base": merge_base,
             "human_input_summary": "",
+            "has_human_input": history is not None,
         }
+
+    async def awrap_model_call(
+        self,
+        request: ModelRequest,
+        handler: Callable[[ModelRequest], Awaitable[ModelResponse]],
+    ) -> ModelResponse:
+        # Without messages from the people who asked for the PR, the model would summarize its description instead.
+        if not request.state.get("has_human_input"):
+            request = request.override(
+                tools=[t for t in request.tools if getattr(t, "name", None) != _HUMAN_INPUT_TOOL]
+            )
+        return await super().awrap_model_call(request, handler)
 
 
 class StoreWalkthroughMiddleware(OpenSWEMiddleware[ReviewScoutState]):
