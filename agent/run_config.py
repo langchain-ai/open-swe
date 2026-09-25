@@ -128,6 +128,7 @@ class RunConfig(BaseModel):
     # Pull request under review
     pr_number: Int | None = None
     pr_url: str | None = None
+    pr_title: str | None = None
     head_sha: str | None = None
     base_sha: str | None = None
     last_reviewed_sha: str | None = None
@@ -146,17 +147,15 @@ class RunConfig(BaseModel):
     # Model selection
     agent_model_id: str | None = None
     resolved_agent_model_id: str | None = None
+    resolved_agent_effort: str | None = None
     agent_effort: str | None = None
     model_selection: str | None = None
     reviewer_model_id: str | None = None
     reviewer_reasoning_effort: str | None = None
     reviewer_subagent_model_id: str | None = None
     reviewer_subagent_reasoning_effort: str | None = None
-    grouping_model_id: str | None = None
-    grouping_reasoning_effort: str | None = None
 
     # Behavior toggles
-    plan_mode: bool | None = None
     draft_prs: bool | None = None
     admin_thread: bool | None = None
     stop_summary: bool | None = None

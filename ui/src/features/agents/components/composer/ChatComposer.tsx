@@ -1,8 +1,8 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { ImagePlus, Map as MapIcon, Plus, X } from "lucide-react"
+import { ImagePlus, Plus, X } from "lucide-react"
 
 import { ComposerCommandMenu } from "./ComposerCommandMenu"
-import { ComposerControl, ComposerControlIcon } from "./ComposerControl"
+import { ComposerControl } from "./ComposerControl"
 import { ComposerPrimaryActions } from "./ComposerPrimaryActions"
 import {
   ComposerPromptEditor,
@@ -34,13 +34,17 @@ import type {
   DesktopProjectRef,
   DesktopWorkspaceMode,
 } from "@/desktop"
-import type { ModelOption, Skill, WorkspaceOption } from "@/lib/api"
+import type {
+  FollowUpBehavior,
+  ModelOption,
+  Skill,
+  WorkspaceOption,
+} from "@/lib/api"
 import type { ImageChunk } from "@/features/agents/lib/types"
 import type { ModelSelection } from "@/features/agents/lib/provider/useModelOptions"
 import { ModelPicker } from "@/features/agents/components/ModelPicker"
 import { RepoSelector } from "@/features/settings/components/RepoSelector"
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from "@/components/ui/menu"
-import { Tooltip, TooltipPopup, TooltipTrigger } from "@/components/ui/tooltip"
 import { useRegisterAppCommands } from "@/lib/appCommands"
 import { cn } from "@/lib/utils"
 
@@ -69,21 +73,25 @@ const SLASH_COMMANDS: Array<SlashCommandSpec> = [
     description: "Offload conversation context",
   },
   {
-    command: "plan",
-    label: "/plan",
-    description: "Research read-only and propose a plan first",
-  },
-  {
-    command: "default",
-    label: "/default",
-    description: "Leave plan mode and edit directly",
-  },
-  {
     command: "model",
     label: "/model",
     description: "Pick a model and reasoning effort",
   },
 ]
+
+/** How a submission should be treated: as the configured default, or the opposite. */
+export interface SubmitOptions {
+  /** Set by ⌘↵ / Ctrl+Enter: do the opposite of the configured follow-up behavior. */
+  alternate: boolean
+}
+
+/** Text and attachments handed back to the composer, e.g. a cancelled queued message. */
+export interface RestoredDraft {
+  /** Changes on every restore so the same content can come back twice. */
+  key: number
+  text: string
+  images: Array<ImageChunk>
+}
 
 export interface ChatComposerProps {
   placeholder?: string
@@ -95,7 +103,20 @@ export interface ChatComposerProps {
   /** Enables the stop button for the thread's live run. */
   activeRun?: ActiveRun
   onStop?: () => void | Promise<void>
-  onSubmit?: (value: string, images: Array<ImageChunk>) => void | Promise<void>
+  onSubmit?: (
+    value: string,
+    images: Array<ImageChunk>,
+    options?: SubmitOptions
+  ) => void | Promise<void>
+  /**
+   * Enter on an empty composer while a run is live. The thread view uses it to
+   * send the next queued message now.
+   */
+  onEmptySubmit?: () => void
+  /** What a message sent while a run is live does; drives copy only. */
+  followUpBehavior?: FollowUpBehavior
+  /** Content to put back in front of whatever is being typed. */
+  restoreDraft?: RestoredDraft | null
   models?: Array<ModelOption>
   selection?: ModelSelection | null
   onSelectionChange?: (next: ModelSelection | null) => void
@@ -118,9 +139,6 @@ export interface ChatComposerProps {
   onRemoveLocalRepo?: (cwd: string) => void
   onRefreshLocalRepoBranch?: () => void
   onSelectLocalRepoBranch?: (branch: string) => void
-  /** When provided, a Plan mode toggle is shown. Plan mode researches read-only and proposes a plan before editing. */
-  planMode?: boolean
-  onPlanModeChange?: (next: boolean) => void
   /** Workspaces a new thread can boot from. The picker appears only when there are several. */
   workspaceOptions?: Array<WorkspaceOption>
   selectedWorkspace?: string | null
@@ -209,12 +227,7 @@ export function buildCommandItems(
     }))
 }
 
-/**
- * The prompt composer: a Lexical editor with `@file` chips, `/command`
- * autocomplete, and `$skill` autocomplete, plus the control row (model, plan
- * mode, attachments, context)
- * and the send/stop button.
- */
+/** Prompt editor with autocomplete, model selection, attachments, and send/stop controls. */
 export const ChatComposer = memo(function ChatComposer({
   placeholder = "Ask Open SWE to build, fix bugs, explore",
   autoFocus = false,
@@ -225,6 +238,9 @@ export const ChatComposer = memo(function ChatComposer({
   activeRun,
   onStop,
   onSubmit,
+  onEmptySubmit,
+  followUpBehavior = "queue",
+  restoreDraft = null,
   models = [],
   selection = null,
   onSelectionChange,
@@ -245,8 +261,6 @@ export const ChatComposer = memo(function ChatComposer({
   onRemoveLocalRepo,
   onRefreshLocalRepoBranch,
   onSelectLocalRepoBranch,
-  planMode = false,
-  onPlanModeChange,
   workspaceOptions = [],
   selectedWorkspace = null,
   onWorkspaceChange,
@@ -356,11 +370,9 @@ export const ChatComposer = memo(function ChatComposer({
     return models.some((m) => m.id === selection.modelId && m.supports_images)
   }, [models, pendingImages.length, selection])
 
+  const composerEmpty = value.trim().length === 0 && pendingImages.length === 0
   const canSubmit =
-    !disabled &&
-    !isSubmitting &&
-    selectedModelSupportsImages &&
-    (value.trim().length > 0 || pendingImages.length > 0)
+    !disabled && !isSubmitting && selectedModelSupportsImages && !composerEmpty
 
   const applyPrompt = useCallback((nextValue: string, nextCursor: number) => {
     setValue(nextValue)
@@ -369,38 +381,57 @@ export const ChatComposer = memo(function ChatComposer({
     setActiveItemId(null)
   }, [])
 
-  const handleSubmit = useCallback(async () => {
-    if (submittingRef.current || disabled) return
-    // The editor is the source of truth for what is on screen; a keystroke that
-    // has not yet round-tripped through state would otherwise be dropped.
-    const snapshot = editorRef.current?.readSnapshot()
-    const trimmed = (snapshot?.value ?? value).trim()
-    if (trimmed.length === 0 && pendingImages.length === 0) return
-
-    if (trimmed === "/offload" && (!canOffload || pendingImages.length)) {
-      setComposerError(
-        pendingImages.length
-          ? "Offloading does not accept attachments."
-          : "Offloading requires an idle, existing conversation."
-      )
-      return
+  const restoredKeyRef = useRef<number | null>(null)
+  useEffect(() => {
+    if (!restoreDraft || restoredKeyRef.current === restoreDraft.key) return
+    restoredKeyRef.current = restoreDraft.key
+    const current = editorRef.current?.readSnapshot()?.value ?? value
+    const next = [restoreDraft.text, current]
+      .filter((part) => part.trim().length > 0)
+      .join("\n\n")
+    applyPrompt(next, next.length)
+    if (restoreDraft.images.length > 0) {
+      // oxlint-disable-next-line react/set-state-in-effect
+      setPendingImages((prev) => [...restoreDraft.images, ...prev])
     }
+    editorRef.current?.focusAtEnd()
+  }, [applyPrompt, restoreDraft, value])
 
-    const images = pendingImages
-    submittingRef.current = true
-    setIsSubmitting(true)
-    applyPrompt("", 0)
-    setPendingImages([])
-    setComposerError(null)
-    try {
-      await onSubmit?.(trimmed, images)
-    } catch {
-      // Caller surfaces send errors (e.g. via react-query mutation state).
-    } finally {
-      submittingRef.current = false
-      setIsSubmitting(false)
-    }
-  }, [applyPrompt, disabled, onSubmit, pendingImages, value, canOffload])
+  const handleSubmit = useCallback(
+    async (options?: SubmitOptions) => {
+      if (submittingRef.current || disabled) return
+      // The editor is the source of truth for what is on screen; a keystroke that
+      // has not yet round-tripped through state would otherwise be dropped.
+      const snapshot = editorRef.current?.readSnapshot()
+      const trimmed = (snapshot?.value ?? value).trim()
+      if (trimmed.length === 0 && pendingImages.length === 0) return
+
+      if (trimmed === "/offload" && (!canOffload || pendingImages.length)) {
+        setComposerError(
+          pendingImages.length
+            ? "Offloading does not accept attachments."
+            : "Offloading requires an idle, existing conversation."
+        )
+        return
+      }
+
+      const images = pendingImages
+      submittingRef.current = true
+      setIsSubmitting(true)
+      applyPrompt("", 0)
+      setPendingImages([])
+      setComposerError(null)
+      try {
+        await onSubmit?.(trimmed, images, options)
+      } catch {
+        // Caller surfaces send errors (e.g. via react-query mutation state).
+      } finally {
+        submittingRef.current = false
+        setIsSubmitting(false)
+      }
+    },
+    [applyPrompt, disabled, onSubmit, pendingImages, value, canOffload]
+  )
 
   const selectCommandItem = useCallback(
     (item: ComposerCommandItem) => {
@@ -439,11 +470,9 @@ export const ChatComposer = memo(function ChatComposer({
         ""
       )
       applyPrompt(next.text, next.cursor)
-      if (item.command === "plan") onPlanModeChange?.(true)
-      if (item.command === "default") onPlanModeChange?.(false)
       if (item.command === "model") setModelPickerOpen(true)
     },
-    [applyPrompt, onPlanModeChange, trigger, value]
+    [applyPrompt, trigger, value]
   )
 
   const handleCommandKeyDown = useCallback(
@@ -473,12 +502,20 @@ export const ChatComposer = memo(function ChatComposer({
         }
       }
 
-      if (key === "Tab" && event.shiftKey && onPlanModeChange) {
-        onPlanModeChange(!planMode)
-        return true
-      }
       if (key === "Enter" && !event.shiftKey) {
-        if (canSubmit) void handleSubmit()
+        if (canSubmit) {
+          void handleSubmit({ alternate: event.metaKey || event.ctrlKey })
+        } else if (
+          composerEmpty &&
+          busy &&
+          !disabled &&
+          !isSubmitting &&
+          onEmptySubmit
+        ) {
+          // Only a truly empty composer sends the queue head. A draft that
+          // cannot be sent (images on a text-only model) must stay put.
+          onEmptySubmit()
+        }
         // Swallow it either way: a bare Enter must never insert a newline in a
         // composer whose Enter means "send".
         return true
@@ -487,12 +524,15 @@ export const ChatComposer = memo(function ChatComposer({
     },
     [
       activeItem,
+      busy,
       canSubmit,
       commandItems,
+      composerEmpty,
+      disabled,
       handleSubmit,
+      isSubmitting,
       menuOpen,
-      onPlanModeChange,
-      planMode,
+      onEmptySubmit,
       selectCommandItem,
       triggerKey,
     ]
@@ -630,7 +670,7 @@ export const ChatComposer = memo(function ChatComposer({
       {(onRepoChange ||
         onRunTargetChange ||
         onWorkspaceChange ||
-        onSelectLocalRepoBranch) && (
+        (runTarget === "local" && onSelectLocalRepoBranch)) && (
         <div className="relative mx-5 -mb-3 flex min-w-0 flex-wrap items-center gap-x-5 gap-y-2 rounded-t-2xl bg-accent px-4 pt-3 pb-5 text-xs dark:bg-muted">
           {runTarget && onRunTargetChange && (
             <RunTargetSelector onChange={onRunTargetChange} value={runTarget} />
@@ -690,9 +730,11 @@ export const ChatComposer = memo(function ChatComposer({
 
       <div
         className={cn(
-          "relative z-10 flex flex-col rounded-2xl border-[0.75px] border-foreground/[0.06] bg-card px-3 py-2.5 shadow-[0_1px_2px_rgba(0,0,0,0.045)] transition-colors dark:bg-[#222] dark:shadow-none",
+          "relative z-10 flex flex-col rounded-2xl border border-foreground/20 bg-card px-3 py-2.5 shadow-md transition-[border-color,box-shadow] duration-300 hover:shadow-lg dark:bg-[#222]",
           compact ? "min-h-[88px]" : "min-h-[106px]",
-          dragKind && "border border-primary"
+          dragKind
+            ? "border-primary"
+            : "focus-within:border-foreground/30 hover:border-foreground/30"
         )}
         onDragEnter={handleDragEnter}
         onDragLeave={handleDragLeave}
@@ -768,7 +810,13 @@ export const ChatComposer = memo(function ChatComposer({
           }}
           onCommandKeyDown={handleCommandKeyDown}
           onPaste={handlePaste}
-          placeholder={busy ? "Send a message to queue next..." : placeholder}
+          placeholder={
+            busy
+              ? followUpBehavior === "steer"
+                ? "Send a message to steer the run..."
+                : "Send a message to queue next..."
+              : placeholder
+          }
           skillNames={skillNames}
           value={value}
         />
@@ -794,12 +842,6 @@ export const ChatComposer = memo(function ChatComposer({
                 <ImagePlus />
                 Attach images
               </MenuItem>
-              {onPlanModeChange && (
-                <MenuItem onClick={() => onPlanModeChange(!planMode)}>
-                  <MapIcon />
-                  {planMode ? "Disable plan mode" : "Enable plan mode"}
-                </MenuItem>
-              )}
             </MenuPopup>
           </Menu>
 
@@ -816,26 +858,6 @@ export const ChatComposer = memo(function ChatComposer({
                 triggerClassName="h-7 max-w-full rounded-md px-2 text-xs/relaxed text-muted-foreground/70 hover:bg-muted hover:text-foreground/80"
               />
             )}
-
-            {planMode && onPlanModeChange && (
-              <Tooltip>
-                <TooltipTrigger
-                  render={
-                    <ComposerControl
-                      aria-label="Exit plan mode"
-                      aria-pressed
-                      className="bg-primary/10 text-primary hover:bg-primary/15 hover:text-primary"
-                      onClick={() => onPlanModeChange(false)}
-                      type="button"
-                    />
-                  }
-                >
-                  <ComposerControlIcon icon={MapIcon} />
-                  <span>Plan</span>
-                </TooltipTrigger>
-                <TooltipPopup side="top">Exit plan mode</TooltipPopup>
-              </Tooltip>
-            )}
           </div>
 
           <div className="flex items-center gap-1">
@@ -849,6 +871,9 @@ export const ChatComposer = memo(function ChatComposer({
             activeRun={activeRun}
             canSubmit={canSubmit}
             onSubmit={() => void handleSubmit()}
+            runningLabel={
+              followUpBehavior === "steer" ? "Steer agent" : "Queue message"
+            }
             onStop={onStop}
             stopOnEscape={!menuOpen && !modelPickerOpen && !extrasMenuOpen}
             submitting={isSubmitting}

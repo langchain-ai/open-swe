@@ -1,9 +1,11 @@
-from typing import Any, cast
+from typing import Any
 from unittest.mock import AsyncMock
 
 import pytest
+from fastapi import HTTPException
 
 from agent import store as agent_store
+from tests.conftest import FakeStore
 
 
 def test_dashboard_plan_url_uses_plan_path(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -19,55 +21,9 @@ def test_dashboard_plan_url_none_without_thread() -> None:
     assert dashboard_plan_url("") is None
 
 
-def test_format_comments_numbers_and_skips_blank() -> None:
-    from agent.threads.plan_store import format_plan_comments
-
-    text = format_plan_comments(
-        [
-            {"author": "alice", "body": "add a docstring"},
-            {"author": "bob", "body": "looks good"},
-            {"author": "carol", "body": "   "},  # blank → skipped
-        ]
-    )
-    assert '<plan-review-comment author="alice">' in text
-    assert "<reviewer-feedback>add a docstring</reviewer-feedback>" in text
-    assert '<plan-review-comment author="bob">' in text
-    assert "<reviewer-feedback>looks good</reviewer-feedback>" in text
-    assert "carol" not in text
-
-
-def test_format_comments_includes_highlight_and_surrounding_context() -> None:
-    from agent.threads.plan_store import format_plan_comments
-
-    text = format_plan_comments(
-        [
-            {
-                "author": "alice",
-                "body": "make <this> concrete",
-                "anchor": {
-                    "exact": "Persist the result",
-                    "context_before": "Write the output\nCheck permissions",
-                    "context_after": "Return the identifier\nLog completion",
-                },
-            }
-        ]
-    )
-
-    assert text == (
-        '1. <plan-review-comment author="alice">\n'
-        "<surrounding-context>Write the output\nCheck permissions\nPersist the result\n"
-        "Return the identifier\nLog completion</surrounding-context>\n"
-        "<highlighted-text>Persist the result</highlighted-text>\n"
-        "<reviewer-feedback>make &lt;this&gt; concrete</reviewer-feedback>\n"
-        "</plan-review-comment>"
-    )
-
-
-def test_format_comments_empty() -> None:
+def test_comment_anchor_validation() -> None:
     from agent.threads.plan_api import CommentBody, TextAnchor
-    from agent.threads.plan_store import format_plan_comments
 
-    assert format_plan_comments([]) == ""
     anchor = TextAnchor(
         exact="text",
         prefix="",
@@ -83,20 +39,6 @@ def test_format_comments_empty() -> None:
             body="comment",
             anchor=TextAnchor(exact="text", prefix="", suffix="", start=0, end=3),
         )
-
-
-def test_plan_approved_slack_text_mentions_comments_and_actor() -> None:
-    from agent.threads.plan_api import _plan_approved_slack_blocks, _plan_approved_slack_text
-
-    text = _plan_approved_slack_text(2, "Alice")
-
-    assert text == "Plan approved with 2 comments by Alice"
-    assert _plan_approved_slack_blocks(text) == [
-        {
-            "type": "context",
-            "elements": [{"type": "mrkdwn", "text": "_Plan approved with 2 comments by Alice_"}],
-        }
-    ]
 
 
 def _fake_client(store: Any) -> Any:
@@ -206,14 +148,12 @@ async def test_save_plan_reads_html_file_from_sandbox(
         html: str,
         status: str,
         plan_file_path: str | None = None,
-        plan_mode: bool | None = True,
     ) -> None:
         saved.update(
             thread_id=thread_id,
             html=html,
             status=status,
             plan_file_path=plan_file_path,
-            plan_mode=plan_mode,
         )
 
     monkeypatch.setattr(
@@ -233,7 +173,6 @@ async def test_save_plan_reads_html_file_from_sandbox(
         "html": "<!doctype html><html><head><title>Plan</title></head><body><h1>Plan</h1></body></html>",
         "status": "shared",
         "plan_file_path": "/workspace/plans/2026-06-29-test-plan.html",
-        "plan_mode": None,
     }
 
 
@@ -275,99 +214,6 @@ async def test_save_plan_wraps_a_fragment_with_a_title_from_the_filename(
     assert "<script>go()</script>" in saved["html"]
 
 
-async def test_save_plan_preserves_plan_mode_from_state_when_active(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    import importlib
-
-    save_plan_tool = importlib.import_module("agent.tools.save_plan")
-
-    saved: dict[str, Any] = {}
-
-    class _Backend:
-        async def aread(self, file_path: str, offset: int = 0, limit: int = 2000) -> dict[str, Any]:
-            return {
-                "file_data": {
-                    "encoding": "utf-8",
-                    "content": "<!doctype html><html><head><title>Plan</title></head><body><h1>Plan</h1></body></html>",
-                }
-            }
-
-    async def fake_save_content(
-        thread_id: str,
-        *,
-        html: str,
-        status: str,
-        plan_file_path: str | None = None,
-        plan_mode: bool | None = True,
-    ) -> None:
-        saved.update(plan_mode=plan_mode, status=status)
-
-    monkeypatch.setattr(
-        "agent.run_config.get_config", lambda: {"configurable": {"thread_id": "thread-1"}}
-    )
-
-    async def fake_backend(thread_id: str) -> _Backend:
-        return _Backend()
-
-    monkeypatch.setattr(save_plan_tool, "get_sandbox_backend", fake_backend)
-    monkeypatch.setattr(save_plan_tool, "save_plan_content", fake_save_content)
-
-    result = await save_plan_tool.save_plan(
-        "/workspace/plans/2026-06-29-test-plan.html", state={"plan_mode": True}
-    )
-
-    assert result["success"] is True
-    assert saved["plan_mode"] is True
-    assert saved["status"] == "ready"
-
-
-async def test_save_plan_preserves_plan_mode_from_config_when_active(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    import importlib
-
-    save_plan_tool = importlib.import_module("agent.tools.save_plan")
-
-    saved: dict[str, Any] = {}
-
-    class _Backend:
-        async def aread(self, file_path: str, offset: int = 0, limit: int = 2000) -> dict[str, Any]:
-            return {
-                "file_data": {
-                    "encoding": "utf-8",
-                    "content": "<!doctype html><html><head><title>Plan</title></head><body><h1>Plan</h1></body></html>",
-                }
-            }
-
-    async def fake_save_content(
-        thread_id: str,
-        *,
-        html: str,
-        status: str,
-        plan_file_path: str | None = None,
-        plan_mode: bool | None = True,
-    ) -> None:
-        saved.update(plan_mode=plan_mode, status=status)
-
-    monkeypatch.setattr(
-        "agent.run_config.get_config",
-        lambda: {"configurable": {"thread_id": "thread-1", "plan_mode": True}},
-    )
-
-    async def fake_backend(thread_id: str) -> _Backend:
-        return _Backend()
-
-    monkeypatch.setattr(save_plan_tool, "get_sandbox_backend", fake_backend)
-    monkeypatch.setattr(save_plan_tool, "save_plan_content", fake_save_content)
-
-    result = await save_plan_tool.save_plan("/workspace/plans/2026-06-29-test-plan.html")
-
-    assert result["success"] is True
-    assert saved["plan_mode"] is True
-    assert saved["status"] == "ready"
-
-
 def test_plan_routes_registered() -> None:
     from agent.webapp import app
 
@@ -385,8 +231,8 @@ def test_plan_routes_registered() -> None:
 
     paths = route_paths(app.routes)
     assert "/dashboard/api/plan/{thread_id}" in paths
-    assert "/dashboard/api/plan/{thread_id}/approve" in paths
-    assert "/dashboard/api/plan/{thread_id}/reject" in paths
+    assert "/dashboard/api/plan/{thread_id}/approve" not in paths
+    assert "/dashboard/api/plan/{thread_id}/reject" not in paths
     assert "/dashboard/api/plan/{thread_id}/comments" in paths
     assert "/dashboard/api/plan/{thread_id}/comments/{comment_id}" in paths
     assert "/dashboard/api/plan/yjs/{thread_id}" not in paths
@@ -455,152 +301,7 @@ def test_plan_file_path_for_thread_uses_plans_dir_and_slug() -> None:
     assert path.endswith("-thread-abc-123.html")
 
 
-class _FakeReq:
-    def __init__(self, tools: list[Any], state: dict[str, Any]) -> None:
-        self.tools = tools
-        self.state = state
-
-    def override(self, **kw: Any) -> _FakeReq:
-        return _FakeReq(kw.get("tools", self.tools), self.state)
-
-
-def _names(req: _FakeReq) -> set[str]:
-    return {t["name"] for t in req.tools}
-
-
-def test_plan_mode_middleware_initial_always_filters() -> None:
-    from agent.middleware import PlanModeMiddleware
-
-    mw = PlanModeMiddleware(excluded=frozenset({"write_file"}), initial=True)
-    req = _FakeReq([{"name": "read_file"}, {"name": "write_file"}], {})
-    assert _names(cast(_FakeReq, mw._filter(cast(Any, req)))) == {"read_file"}
-
-
-def test_plan_mode_middleware_self_activation_via_state() -> None:
-    from agent.middleware import PlanModeMiddleware
-
-    mw = PlanModeMiddleware(excluded=frozenset({"write_file"}), initial=False)
-    # Plan mode not yet active: nothing filtered.
-    off = _FakeReq([{"name": "read_file"}, {"name": "write_file"}], {})
-    assert _names(cast(_FakeReq, mw._filter(cast(Any, off)))) == {"read_file", "write_file"}
-    # After enter_plan_mode sets state: the next request is filtered.
-    on = _FakeReq([{"name": "read_file"}, {"name": "write_file"}], {"plan_mode": True})
-    assert _names(cast(_FakeReq, mw._filter(cast(Any, on)))) == {"read_file"}
-
-
-def test_plan_mode_middleware_self_deactivation_via_state() -> None:
-    from agent.middleware import PlanModeMiddleware
-
-    mw = PlanModeMiddleware(excluded=frozenset({"write_file"}), initial=True)
-    off = _FakeReq([{"name": "read_file"}, {"name": "write_file"}], {"plan_mode": False})
-    assert _names(cast(_FakeReq, mw._filter(cast(Any, off)))) == {"read_file", "write_file"}
-
-
 # --- manual plan editing -------------------------------------------------
-
-
-async def test_set_plan_status_preserves_plan_file_path(monkeypatch: pytest.MonkeyPatch) -> None:
-    from agent.threads import plan_store
-
-    existing = {
-        "html": "# Plan",
-        "status": "ready",
-        "plan_file_path": "/workspace/plans/foo.html",
-    }
-    saved: dict[str, Any] = {}
-
-    class _Store:
-        async def get_item(self, *a: Any, **k: Any) -> Any:
-            return {"value": existing}
-
-        async def put_item(self, namespace: Any, key: str, value: Any, *a: Any, **k: Any) -> None:
-            saved.update(value)
-
-    async def fake_merge(thread_id: str, metadata: dict[str, Any]) -> None:
-        return None
-
-    monkeypatch.setattr(agent_store, "store_client", lambda: _fake_client(_Store()))
-    monkeypatch.setattr(plan_store, "_merge_thread_metadata", fake_merge)
-
-    await plan_store.set_plan_status("t", plan_store.PLAN_STATUS_REVISING, plan_mode=True)
-    assert saved["plan_file_path"] == "/workspace/plans/foo.html"
-    assert saved["status"] == plan_store.PLAN_STATUS_REVISING
-
-
-async def test_set_plan_status_records_approver_audit(monkeypatch: pytest.MonkeyPatch) -> None:
-    from agent.threads import plan_store
-
-    saved: dict[str, Any] = {}
-    merged: dict[str, Any] = {}
-
-    class _Store:
-        async def get_item(self, *a: Any, **k: Any) -> Any:
-            return {
-                "value": {
-                    "html": "<html><head><title>Plan</title></head><body>Plan</body></html>",
-                    "status": "ready",
-                    "plan_file_path": "/workspace/plans/foo.html",
-                }
-            }
-
-        async def put_item(self, namespace: Any, key: str, value: Any, *a: Any, **k: Any) -> None:
-            saved.update(value)
-
-    async def fake_merge(thread_id: str, metadata: dict[str, Any]) -> None:
-        merged.update(metadata)
-
-    monkeypatch.setattr(agent_store, "store_client", lambda: _fake_client(_Store()))
-    monkeypatch.setattr(plan_store, "_merge_thread_metadata", fake_merge)
-
-    await plan_store.set_plan_status(
-        "t",
-        plan_store.PLAN_STATUS_APPROVED,
-        plan_mode=False,
-        approved_by={"id": "octo", "name": "Octo", "source": "dashboard"},
-    )
-
-    assert saved["html"] == "<html><head><title>Plan</title></head><body>Plan</body></html>"
-    assert saved["plan_file_path"] == "/workspace/plans/foo.html"
-    assert saved["approved_by"] == {"id": "octo", "name": "Octo", "source": "dashboard"}
-    assert isinstance(saved["approved_at"], str)
-    assert merged == {
-        "plan_status": "approved",
-        "plan_mode": False,
-        "plan_approved_by": saved["approved_by"],
-        "plan_approved_at": saved["approved_at"],
-    }
-
-
-async def test_set_plan_status_clears_shared_content_when_entering_plan_mode(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    from agent.threads import plan_store
-
-    existing = {
-        "html": "# Old report",
-        "status": "shared",
-        "plan_file_path": "/workspace/plans/old-report.html",
-    }
-    saved: dict[str, Any] = {}
-    merged: dict[str, Any] = {}
-
-    class _Store:
-        async def get_item(self, *a: Any, **k: Any) -> Any:
-            return {"value": existing}
-
-        async def put_item(self, namespace: Any, key: str, value: Any, *a: Any, **k: Any) -> None:
-            saved.update(value)
-
-    async def fake_merge(thread_id: str, metadata: dict[str, Any]) -> None:
-        merged.update(metadata)
-
-    monkeypatch.setattr(agent_store, "store_client", lambda: _fake_client(_Store()))
-    monkeypatch.setattr(plan_store, "_merge_thread_metadata", fake_merge)
-
-    await plan_store.set_plan_status("t", plan_store.PLAN_STATUS_PLANNING, plan_mode=True)
-
-    assert saved == {"html": "", "status": "planning"}
-    assert merged == {"plan_status": "planning", "plan_mode": True}
 
 
 async def test_save_plan_content_clear_comments_flag(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -629,7 +330,7 @@ async def test_save_plan_content_clear_comments_flag(monkeypatch: pytest.MonkeyP
     assert cleared == ["t"]
 
 
-async def test_save_plan_content_can_skip_plan_mode_metadata(
+async def test_save_plan_content_publishes_shared_artifact(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from agent.threads import plan_store
@@ -650,9 +351,59 @@ async def test_save_plan_content_can_skip_plan_mode_metadata(
     monkeypatch.setattr(plan_store, "clear_plan_comments", fake_clear)
     monkeypatch.setattr(plan_store, "_merge_thread_metadata", fake_merge)
 
-    await plan_store.save_plan_content("t", html="x", plan_mode=None)
+    await plan_store.save_plan_content("t", html="x")
 
-    assert merged == {"plan_status": "ready"}
+    assert merged == {
+        "plan_status": "shared",
+        "plan_approved_by": None,
+        "plan_approved_at": None,
+    }
+
+
+async def test_republished_artifact_drops_legacy_approval(
+    monkeypatch: pytest.MonkeyPatch, fake_store: FakeStore
+) -> None:
+    from agent.threads import plan_api, plan_store
+
+    metadata: dict[str, object] = {
+        "source": "slack",
+        "plan_status": "approved",
+        "plan_approved_by": "reviewer",
+        "plan_approved_at": "2026-08-16T12:00:00+00:00",
+    }
+
+    async def merge_metadata(thread_id: str, changes: dict[str, object]) -> None:
+        metadata.update(changes)
+
+    monkeypatch.setattr(plan_store, "_merge_thread_metadata", merge_metadata)
+    monkeypatch.setattr(plan_api, "fetch_thread_metadata", AsyncMock(return_value=metadata))
+    await plan_store.save_plan_content("t1", html="<p>Updated artifact</p>")
+    result = await plan_api.get_plan(
+        "t1", session={"sub": "reviewer", "email": None, "name": "Reviewer"}
+    )
+    assert result["status"] == "shared"
+    assert result["approvedBy"] is None
+    assert result["approvedAt"] is None
+
+
+async def test_dismissal_clears_when_artifact_is_republished(
+    monkeypatch: pytest.MonkeyPatch, fake_store: FakeStore
+) -> None:
+    from agent.threads import plan_api, plan_store
+
+    session = {"sub": "owner", "email": None}
+    monkeypatch.setattr(plan_store, "_merge_thread_metadata", AsyncMock())
+    monkeypatch.setattr(
+        plan_api,
+        "fetch_thread_metadata",
+        AsyncMock(return_value={"source": "dashboard", "github_login": "owner"}),
+    )
+    await plan_store.save_plan_content("t1", html="<p>v1</p>")
+    await plan_api.update_plan("t1", plan_api.PlanUpdate(dismissed=True), session=session)
+    assert (await plan_api.get_plan("t1", session=session))["dismissed"] is True
+
+    await plan_store.save_plan_content("t1", html="<p>v2</p>")
+    assert (await plan_api.get_plan("t1", session=session))["dismissed"] is False
 
 
 async def test_get_plan_returns_approval_attribution(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -727,8 +478,10 @@ def _patch_update_plan_deps(
     monkeypatch.setattr(plan_api, "write_plan_to_sandbox", fake_write)
 
 
+@pytest.mark.parametrize("status", ["ready", "approved", "cancelled", "shared"])
 async def test_update_plan_saves_and_mirrors_sandbox(
     monkeypatch: pytest.MonkeyPatch,
+    status: str,
 ) -> None:
     from agent.threads import plan_api
 
@@ -736,10 +489,10 @@ async def test_update_plan_saves_and_mirrors_sandbox(
     sandbox: dict[str, Any] = {}
     _patch_update_plan_deps(
         monkeypatch,
-        metadata={"plan_status": "ready"},
+        metadata={"plan_status": status},
         content={
             "html": "old",
-            "status": "ready",
+            "status": status,
             "plan_file_path": "/workspace/plans/2026-06-29-existing.html",
         },
         saved=saved,
@@ -749,8 +502,8 @@ async def test_update_plan_saves_and_mirrors_sandbox(
     result = await plan_api.update_plan(
         "t1", plan_api.PlanUpdate(html="# New\n\ndo x"), session={"sub": "a", "email": None}
     )
-    assert result == {"status": "ready", "html": "# New\n\ndo x"}
-    assert saved["status"] == "ready"
+    assert result == {"status": "shared", "html": "# New\n\ndo x"}
+    assert saved["status"] == "shared"
     assert saved["clear_comments"] is False
     assert saved["plan_file_path"] == "/workspace/plans/2026-06-29-existing.html"
     assert sandbox["content"] == "# New\n\ndo x"
@@ -770,469 +523,53 @@ async def test_update_plan_rejects_empty(monkeypatch: pytest.MonkeyPatch) -> Non
     assert exc.value.status_code == 422
 
 
-async def test_update_plan_blocked_once_approved(monkeypatch: pytest.MonkeyPatch) -> None:
-    from fastapi import HTTPException
+@pytest.mark.parametrize("status", ["ready", "approved", "cancelled", "shared"])
+async def test_artifact_comments_remain_authorized_without_approval_gates(
+    monkeypatch: pytest.MonkeyPatch, fake_store: FakeStore, status: str
+) -> None:
+    from agent.threads import plan_api, plan_store
 
-    from agent.threads import plan_api
-
-    _patch_update_plan_deps(
-        monkeypatch,
-        metadata={"plan_status": "approved"},
-        content={"html": "old", "status": "approved"},
-        saved={},
-        sandbox={},
+    fake_store.seed(
+        plan_store.PLAN_CONTENT_NAMESPACE, "t", {"html": "<p>Report</p>", "status": status}
     )
+    monkeypatch.setattr(
+        plan_api, "fetch_thread_metadata", AsyncMock(return_value={"source": "slack"})
+    )
+    author = {"sub": "alice", "name": "Alice"}
+    comment = await plan_api.post_plan_comment("t", plan_api.CommentBody(body="Feedback"), author)
+    assert (await plan_api.get_plan_comments("t", author))["comments"] == [comment]
     with pytest.raises(HTTPException) as exc:
-        await plan_api.update_plan(
-            "t1", plan_api.PlanUpdate(html="x"), session={"sub": "a", "email": None}
-        )
-    assert exc.value.status_code == 409
+        await plan_api.remove_plan_comment("t", comment["id"], {"sub": "bob"})
+    assert exc.value.status_code == 403
+    await plan_api.remove_plan_comment("t", comment["id"], author)
+    assert (await plan_api.get_plan_comments("t", author))["comments"] == []
 
 
-async def test_approve_plan_hides_unreadable_thread(monkeypatch: pytest.MonkeyPatch) -> None:
-    from fastapi import HTTPException
-
-    from agent.threads import plan_api
-
-    async def fake_meta(thread_id: str) -> dict[str, Any]:
-        return {"source": "unknown", "github_login": "owner"}
-
-    monkeypatch.setattr(plan_api, "fetch_thread_metadata", fake_meta)
-
-    with pytest.raises(HTTPException) as exc:
-        await plan_api.approve_plan("t1", session={"sub": "reviewer", "email": None})
-
-    assert exc.value.status_code == 404
-
-
-async def test_any_participant_can_approve_and_dispatch_published_html(
-    monkeypatch: pytest.MonkeyPatch,
+async def test_legacy_markdown_artifact_edits_preserve_comments_and_path(
+    monkeypatch: pytest.MonkeyPatch, fake_store: FakeStore
 ) -> None:
-    from agent.threads import plan_api
+    from agent.threads import plan_api, plan_store
 
-    dispatched: dict[str, Any] = {}
-
-    async def fake_meta(thread_id: str) -> dict[str, Any]:
-        return {"source": "slack", "plan_mode": True, "plan_status": "ready"}
-
-    async def fake_get_content(thread_id: str, *, raise_on_error: bool = False) -> dict[str, Any]:
-        return {"html": "# Edited plan\n\nstep one", "status": "ready"}
-
-    async def fake_list(thread_id: str, *, raise_on_error: bool = False) -> list[dict[str, Any]]:
-        return [{"author": "bob", "body": "use snake_case"}]
-
-    async def fake_set_status(
-        thread_id: str,
-        status: str,
-        *,
-        plan_mode: Any = None,
-        approved_by: Any = None,
-    ) -> None:
-        dispatched.update(status=status, approved_by=approved_by)
-
-    async def fake_dispatch(
-        thread_id: str,
-        metadata: dict[str, Any],
-        text: str,
-        *,
-        plan_mode: bool,
-        github_login: str | None,
-        user_email: str | None = None,
-    ) -> dict[str, Any]:
-        dispatched.update(text=text, plan_mode=plan_mode)
-        return {"run_id": "run-1"}
-
-    monkeypatch.setattr(plan_api, "fetch_thread_metadata", fake_meta)
-    monkeypatch.setattr(plan_api, "get_plan_content", fake_get_content)
-    monkeypatch.setattr(plan_api, "list_plan_comments", fake_list)
-    monkeypatch.setattr(plan_api, "set_plan_status", fake_set_status)
-    monkeypatch.setattr(plan_api, "dispatch_followup", fake_dispatch)
-
-    result = await plan_api.approve_plan("t1", session={"sub": "a", "email": None})
-    assert result == {"status": "approved", "run_id": "run-1"}
-    assert "# Edited plan" in dispatched["text"]
-    assert "use snake_case" in dispatched["text"]
-    assert "exactly as written" not in dispatched["text"]
-    assert dispatched["plan_mode"] is False
-    assert dispatched["approved_by"] == {"id": "a", "name": "a", "source": "dashboard"}
-
-
-async def test_concurrent_plan_approvals_dispatch_once(monkeypatch: pytest.MonkeyPatch) -> None:
-    import asyncio
-
-    from agent.threads import plan_api
-
-    state = {"source": "dashboard", "plan_mode": True, "plan_status": "ready"}
-    dispatches: list[str] = []
-
-    async def fake_meta(thread_id: str) -> dict[str, Any]:
-        return dict(state)
-
-    async def fake_get_content(thread_id: str, *, raise_on_error: bool = False) -> dict[str, Any]:
-        return {
-            "html": "<html><head><title>Plan</title></head><body>Plan</body></html>",
-            "status": state["plan_status"],
-        }
-
-    async def fake_list(thread_id: str, *, raise_on_error: bool = False) -> list[dict[str, Any]]:
-        return []
-
-    async def fake_set_status(
-        thread_id: str,
-        status: str,
-        *,
-        plan_mode: Any = None,
-        approved_by: Any = None,
-    ) -> None:
-        state.update(plan_mode=plan_mode, plan_status=status)
-
-    async def fake_dispatch(
-        thread_id: str,
-        metadata: dict[str, Any],
-        text: str,
-        *,
-        plan_mode: bool,
-        github_login: str | None,
-        user_email: str | None = None,
-    ) -> dict[str, Any]:
-        dispatches.append(thread_id)
-        return {"run_id": "run-1"}
-
-    monkeypatch.setattr(plan_api, "fetch_thread_metadata", fake_meta)
-    monkeypatch.setattr(plan_api, "get_plan_content", fake_get_content)
-    monkeypatch.setattr(plan_api, "list_plan_comments", fake_list)
-    monkeypatch.setattr(plan_api, "set_plan_status", fake_set_status)
-    monkeypatch.setattr(plan_api, "dispatch_followup", fake_dispatch)
-    monkeypatch.setattr(plan_api, "_maybe_post_plan_approved_to_slack", AsyncMock())
-
-    approver = {"id": "reviewer", "name": "Reviewer", "source": "dashboard"}
-    results = await asyncio.gather(
-        plan_api.approve_plan_for_thread("t1", approver=approver, github_login="reviewer"),
-        plan_api.approve_plan_for_thread("t1", approver=approver, github_login="reviewer"),
+    path = "/workspace/plans/legacy.md"
+    fake_store.seed(
+        plan_store.PLAN_CONTENT_NAMESPACE,
+        "t",
+        {
+            "markdown": "# Old plan",
+            "status": "approved",
+            "plan_file_path": path,
+        },
     )
-
-    assert dispatches == ["t1"]
-    assert results[0] == {"status": "approved", "run_id": "run-1"}
-    assert results[1] == {"status": "approved", "already_approved": True}
-
-
-async def test_failed_approval_dispatch_rolls_back_and_can_retry(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    from agent.threads import plan_api
-
-    state = {"source": "dashboard", "plan_mode": True, "plan_status": "ready"}
-    status_updates: list[tuple[str, Any]] = []
-    dispatch_attempts = 0
-
-    async def fake_meta(thread_id: str) -> dict[str, Any]:
-        return dict(state)
-
-    async def fake_get_content(thread_id: str, *, raise_on_error: bool = False) -> dict[str, Any]:
-        return {
-            "html": "<html><head><title>Plan</title></head><body>Plan</body></html>",
-            "status": state["plan_status"],
-        }
-
-    async def fake_list(thread_id: str, *, raise_on_error: bool = False) -> list[dict[str, Any]]:
-        return []
-
-    async def fake_set_status(
-        thread_id: str,
-        status: str,
-        *,
-        plan_mode: Any = None,
-        approved_by: Any = None,
-    ) -> None:
-        status_updates.append((status, plan_mode))
-        state.update(plan_mode=plan_mode, plan_status=status)
-
-    async def fake_dispatch(
-        thread_id: str,
-        metadata: dict[str, Any],
-        text: str,
-        *,
-        plan_mode: bool,
-        github_login: str | None,
-        user_email: str | None = None,
-    ) -> dict[str, Any]:
-        nonlocal dispatch_attempts
-        dispatch_attempts += 1
-        if dispatch_attempts == 1:
-            raise RuntimeError("dispatch unavailable")
-        return {"run_id": "run-2"}
-
-    monkeypatch.setattr(plan_api, "fetch_thread_metadata", fake_meta)
-    monkeypatch.setattr(plan_api, "get_plan_content", fake_get_content)
-    monkeypatch.setattr(plan_api, "list_plan_comments", fake_list)
-    monkeypatch.setattr(plan_api, "set_plan_status", fake_set_status)
-    monkeypatch.setattr(plan_api, "dispatch_followup", fake_dispatch)
-    monkeypatch.setattr(plan_api, "_maybe_post_plan_approved_to_slack", AsyncMock())
-
-    approver = {"id": "reviewer", "name": "Reviewer", "source": "dashboard"}
-    with pytest.raises(RuntimeError, match="dispatch unavailable"):
-        await plan_api.approve_plan_for_thread("t1", approver=approver, github_login="reviewer")
-
-    assert status_updates == [("approved", False), ("ready", True)]
-    result = await plan_api.approve_plan_for_thread(
-        "t1", approver=approver, github_login="reviewer"
+    monkeypatch.setattr(
+        plan_api, "fetch_thread_metadata", AsyncMock(return_value={"source": "slack"})
     )
-    assert result == {"status": "approved", "run_id": "run-2"}
-    assert dispatch_attempts == 2
-
-
-async def test_approve_plan_posts_slack_approval_notice(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    from agent.threads import plan_api
-
-    posted: dict[str, Any] = {}
-    dispatched: dict[str, Any] = {}
-
-    async def fake_meta(thread_id: str) -> dict[str, Any]:
-        return {
-            "source": "slack",
-            "plan_mode": True,
-            "plan_status": "ready",
-            "source_context": {"slack_thread": {"channel_id": "C1", "thread_ts": "123.45"}},
-        }
-
-    async def fake_get_content(thread_id: str, *, raise_on_error: bool = False) -> dict[str, Any]:
-        return {"html": "# Plan", "status": "ready"}
-
-    async def fake_list(thread_id: str, *, raise_on_error: bool = False) -> list[dict[str, Any]]:
-        return [
-            {"author": "alice", "body": "looks good"},
-            {"author": "bob", "body": "add a test"},
-        ]
-
-    async def fake_set_status(
-        thread_id: str,
-        status: str,
-        *,
-        plan_mode: Any = None,
-        approved_by: Any = None,
-    ) -> None:
-        return None
-
-    async def fake_post(
-        channel_id: str,
-        thread_ts: str,
-        text: str,
-        *,
-        blocks: list[dict[str, Any]] | None = None,
-        **kwargs: Any,
-    ) -> bool:
-        posted.update(
-            channel_id=channel_id,
-            thread_ts=thread_ts,
-            text=text,
-            blocks=blocks,
-            **kwargs,
-        )
-        return True
-
-    async def fake_dispatch(
-        thread_id: str,
-        metadata: dict[str, Any],
-        text: str,
-        *,
-        plan_mode: bool,
-        github_login: str | None,
-        user_email: str | None = None,
-    ) -> dict[str, Any]:
-        dispatched.update(text=text, plan_mode=plan_mode)
-        return {"run_id": "run-1"}
-
-    monkeypatch.setattr(plan_api, "fetch_thread_metadata", fake_meta)
-    monkeypatch.setattr(plan_api, "get_plan_content", fake_get_content)
-    monkeypatch.setattr(plan_api, "list_plan_comments", fake_list)
-    monkeypatch.setattr(plan_api, "set_plan_status", fake_set_status)
-    monkeypatch.setattr(plan_api, "post_slack_thread_reply", fake_post)
-    monkeypatch.setattr(plan_api, "dispatch_followup", fake_dispatch)
-
-    result = await plan_api.approve_plan(
-        "t1", session={"sub": "alice", "email": None, "name": "Alice Example"}
-    )
-
-    assert result["status"] == "approved"
-    assert posted == {
-        "channel_id": "C1",
-        "thread_ts": "123.45",
-        "text": "Plan approved with 2 comments by Alice Example",
-        "blocks": [
-            {
-                "type": "context",
-                "elements": [
-                    {
-                        "type": "mrkdwn",
-                        "text": "_Plan approved with 2 comments by Alice Example_",
-                    }
-                ],
-            }
-        ],
-        "agent_thread_id": "t1",
-    }
-    assert dispatched["plan_mode"] is False
-
-
-async def test_approve_plan_aborts_when_plan_read_fails(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    from agent.threads import plan_api
-
-    dispatched: list[Any] = []
-
-    async def fake_meta(thread_id: str) -> dict[str, Any]:
-        return {"source": "slack", "plan_mode": True, "plan_status": "ready"}
-
-    async def fake_get_content(thread_id: str, *, raise_on_error: bool = False) -> dict[str, Any]:
-        # A transient store failure must abort approval, not silently drop the
-        # owner's edited plan and dispatch the generic fallback text.
-        raise RuntimeError("store down")
-
-    async def fake_set_status(
-        thread_id: str,
-        status: str,
-        *,
-        plan_mode: Any = None,
-        approved_by: Any = None,
-    ) -> None:
-        return None
-
-    async def fake_dispatch(*a: Any, **k: Any) -> None:
-        dispatched.append((a, k))
-
-    monkeypatch.setattr(plan_api, "fetch_thread_metadata", fake_meta)
-    monkeypatch.setattr(plan_api, "get_plan_content", fake_get_content)
-    monkeypatch.setattr(plan_api, "set_plan_status", fake_set_status)
-    monkeypatch.setattr(plan_api, "dispatch_followup", fake_dispatch)
-
-    with pytest.raises(RuntimeError):
-        await plan_api.approve_plan("t1", session={"sub": "a", "email": None})
-    assert dispatched == []
-
-
-async def test_approve_plan_rejects_shared_content(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    from fastapi import HTTPException
-
-    from agent.threads import plan_api
-
-    dispatched: list[Any] = []
-
-    async def fake_meta(thread_id: str) -> dict[str, Any]:
-        return {"source": "slack", "plan_status": "shared"}
-
-    async def fake_get_content(thread_id: str, *, raise_on_error: bool = False) -> dict[str, Any]:
-        return {"html": "# Report", "status": "shared"}
-
-    async def fake_dispatch(*a: Any, **k: Any) -> None:
-        dispatched.append((a, k))
-
-    monkeypatch.setattr(plan_api, "fetch_thread_metadata", fake_meta)
-    monkeypatch.setattr(plan_api, "get_plan_content", fake_get_content)
-    monkeypatch.setattr(plan_api, "dispatch_followup", fake_dispatch)
-
-    with pytest.raises(HTTPException) as exc:
-        await plan_api.approve_plan("t1", session={"sub": "a", "email": None})
-    assert exc.value.status_code == 409
-    assert dispatched == []
-
-
-async def test_reject_plan_can_mark_revising_without_dispatch(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    from agent.threads import plan_api
-
-    statuses: list[tuple[str, bool]] = []
-    dispatched: list[Any] = []
-
-    async def fake_meta(thread_id: str) -> dict[str, Any]:
-        return {"source": "dashboard", "plan_mode": True, "plan_status": "ready"}
-
-    async def fake_get_content(thread_id: str, *, raise_on_error: bool = False) -> dict[str, Any]:
-        return {"html": "<h1>Plan</h1>", "status": "ready"}
-
-    async def fake_list(thread_id: str, *, raise_on_error: bool = False) -> list[dict[str, Any]]:
-        return []
-
-    async def fake_set_status(thread_id: str, status: str, *, plan_mode: bool) -> None:
-        statuses.append((status, plan_mode))
-
-    async def fake_dispatch(*args: Any, **kwargs: Any) -> None:
-        dispatched.append((args, kwargs))
-
-    monkeypatch.setattr(plan_api, "fetch_thread_metadata", fake_meta)
-    monkeypatch.setattr(plan_api, "get_plan_content", fake_get_content)
-    monkeypatch.setattr(plan_api, "list_plan_comments", fake_list)
-    monkeypatch.setattr(plan_api, "set_plan_status", fake_set_status)
-    monkeypatch.setattr(plan_api, "dispatch_followup", fake_dispatch)
-
-    result = await plan_api.reject_plan(
-        "t1", plan_api.PlanRejection(dispatch=False), session={"sub": "a", "email": None}
-    )
-
-    assert result == {"status": "revising"}
-    assert statuses == [("revising", True)]
-    assert dispatched == []
-
-
-async def test_reject_plan_rejects_stale_decision(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    from fastapi import HTTPException
-
-    from agent.threads import plan_api
-
-    statuses: list[tuple[str, bool]] = []
-
-    async def fake_meta(thread_id: str) -> dict[str, Any]:
-        return {"source": "dashboard", "plan_mode": False, "plan_status": "approved"}
-
-    async def fake_get_content(thread_id: str, *, raise_on_error: bool = False) -> dict[str, Any]:
-        return {"html": "<h1>Plan</h1>", "status": "approved"}
-
-    async def fake_set_status(thread_id: str, status: str, *, plan_mode: bool) -> None:
-        statuses.append((status, plan_mode))
-
-    monkeypatch.setattr(plan_api, "fetch_thread_metadata", fake_meta)
-    monkeypatch.setattr(plan_api, "get_plan_content", fake_get_content)
-    monkeypatch.setattr(plan_api, "set_plan_status", fake_set_status)
-
-    with pytest.raises(HTTPException, match="no longer ready") as exc_info:
-        await plan_api.reject_plan(
-            "t1", plan_api.PlanRejection(dispatch=False), session={"sub": "a", "email": None}
-        )
-
-    assert exc_info.value.status_code == 409
-    assert statuses == []
-
-
-async def test_reject_plan_rejects_shared_content(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    from fastapi import HTTPException
-
-    from agent.threads import plan_api
-
-    dispatched: list[Any] = []
-
-    async def fake_meta(thread_id: str) -> dict[str, Any]:
-        return {"source": "slack", "plan_status": "shared"}
-
-    async def fake_get_content(thread_id: str, *, raise_on_error: bool = False) -> dict[str, Any]:
-        return {"html": "# Report", "status": "shared"}
-
-    async def fake_dispatch(*a: Any, **k: Any) -> None:
-        dispatched.append((a, k))
-
-    monkeypatch.setattr(plan_api, "fetch_thread_metadata", fake_meta)
-    monkeypatch.setattr(plan_api, "get_plan_content", fake_get_content)
-    monkeypatch.setattr(plan_api, "dispatch_followup", fake_dispatch)
-
-    with pytest.raises(HTTPException) as exc:
-        await plan_api.reject_plan("t1", session={"sub": "a", "email": None})
-    assert exc.value.status_code == 409
-    assert dispatched == []
+    monkeypatch.setattr(plan_store, "_merge_thread_metadata", AsyncMock())
+    write = AsyncMock(return_value=path)
+    monkeypatch.setattr(plan_api, "write_plan_to_sandbox", write)
+    author = {"sub": "alice"}
+    comment = await plan_api.post_plan_comment("t", plan_api.CommentBody(body="Keep this"), author)
+    result = await plan_api.update_plan("t", plan_api.PlanUpdate(markdown="# Updated"), author)
+    assert result == {"status": "shared", "markdown": "# Updated"}
+    assert (await plan_api.get_plan("t", author))["markdown"] == "# Updated"
+    assert (await plan_api.get_plan_comments("t", author))["comments"] == [comment]
+    write.assert_awaited_once_with("t", "# Updated", plan_file_path=path)

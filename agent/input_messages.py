@@ -3,10 +3,10 @@
 import hashlib
 from collections.abc import Mapping
 from html import escape
-from typing import Any, Literal, NotRequired, TypedDict, cast
+from typing import Any, Literal, NotRequired, TypedDict
 from xml.etree import ElementTree
 
-from langchain_core.messages import AnyMessage, BaseMessage
+from langchain_core.messages import BaseMessage
 
 INJECTED_DYNAMIC_CONTEXT_HASHES_KEY = "injected_dynamic_context_hashes"
 # Written by the deepagents summarization middleware; the prompt it builds is the
@@ -17,29 +17,46 @@ Surface = Literal["slack", "linear", "github", "web", "desktop", "automation", "
 EntityKind = Literal["person", "channel", "system"]
 MessageKind = Literal["human", "system"]
 
-# The run's own annotation of whoever sent the turn, appended after the turn's
-# message rather than being one; readers have to look past it to find the turn.
-SENDER_CONTEXT_SENDER_ID = "system:sender-context"
-
 
 class PersonIdentity(TypedDict):
+    """Everything the agent knows about one person, independent of any surface.
+
+    The surface a message arrived on belongs to its envelope, so this block is
+    identical whichever way the person reached the thread and is re-sent only
+    when their own data changes.
+    """
+
     id: str
     display_name: NotRequired[str]
-    handle: NotRequired[str]
-    platform: NotRequired[str]
     github_login: NotRequired[str]
+    commit_name: NotRequired[str]
+    commit_email: NotRequired[str]
     email: NotRequired[str]
     timezone: NotRequired[str]
-    open_swe_account: NotRequired[str]
+    open_swe_account: NotRequired[Literal["linked", "unlinked"]]
+    workspace_admin: NotRequired[Literal["yes", "no"]]
+    new_prs: NotRequired[Literal["as drafts", "ready for review"]]
+    standing_instructions: NotRequired[str]
 
 
 class ChannelIdentity(TypedDict):
+    """The conversation a message arrived in, with whatever stays true of it.
+
+    Thread-constant data belongs here rather than in a per-turn message: the
+    block is deduped by content, so the model is told once and told again only
+    when something about the conversation actually changes.
+    """
+
     id: str
     platform: str
     name: NotRequired[str]
     thread_id: NotRequired[str]
     topic: NotRequired[str]
     purpose: NotRequired[str]
+    description: NotRequired[str]
+    default_repo: NotRequired[str]
+    web_url: NotRequired[str]
+    trace_url: NotRequired[str]
 
 
 class SystemIdentity(TypedDict):
@@ -47,8 +64,7 @@ class SystemIdentity(TypedDict):
     display_name: str
     platform: NotRequired[str]
     sender_type: NotRequired[str]
-    subject_id: NotRequired[str]
-    context_hash: NotRequired[str]
+    content: NotRequired[str]
 
 
 Identity = PersonIdentity | ChannelIdentity | SystemIdentity
@@ -76,17 +92,29 @@ class RunInput(TypedDict):
 _ENTITY_FIELDS: dict[EntityKind, tuple[str, ...]] = {
     "person": (
         "display_name",
-        "handle",
-        "platform",
         "github_login",
+        "commit_name",
+        "commit_email",
         "email",
         "timezone",
         "open_swe_account",
+        "workspace_admin",
+        "new_prs",
+        "standing_instructions",
     ),
-    "channel": ("platform", "name", "thread_id", "topic", "purpose"),
-    "system": ("display_name", "platform", "sender_type", "subject_id", "context_hash"),
+    "channel": (
+        "platform",
+        "name",
+        "thread_id",
+        "topic",
+        "purpose",
+        "description",
+        "default_repo",
+        "web_url",
+        "trace_url",
+    ),
+    "system": ("display_name", "platform", "sender_type", "content"),
 }
-_UNTRUSTED_ENTITY_FIELDS = frozenset({"topic", "purpose"})
 
 
 def _xml_text(value: object) -> str:
@@ -95,6 +123,14 @@ def _xml_text(value: object) -> str:
 
 def _xml_attr(value: object) -> str:
     return escape(str(value), quote=True)
+
+
+def split_person_id(person: PersonIdentity) -> tuple[str, str]:
+    """``(platform, external id)`` from ``person["id"]``; platform may be empty."""
+    platform, separator, external_id = person["id"].partition(":")
+    if not separator:
+        return "", person["id"]
+    return platform, external_id
 
 
 def _validate_entity_id(entity_id: str) -> str:
@@ -114,42 +150,56 @@ def injected_dynamic_context_hashes_from_metadata(metadata: object) -> set[str]:
     return {value for value in values if isinstance(value, str) and value}
 
 
-def message_sender_id(content: object, *, kind: MessageKind | None = None) -> str | None:
+def _content_texts(content: object) -> list[str]:
     values = content if isinstance(content, list) else [content]
-    for value in values:
-        text = value.get("text") if isinstance(value, dict) else value
-        if not isinstance(text, str) or "<input-message" not in text:
+    return [
+        text
+        for value in values
+        if isinstance(text := (value.get("text") if isinstance(value, dict) else value), str)
+    ]
+
+
+def _input_message_elements(content: object) -> list[ElementTree.Element]:
+    elements: list[ElementTree.Element] = []
+    for text in _content_texts(content):
+        if "<input-message" not in text:
             continue
         try:
             root = ElementTree.fromstring(text)
         except ElementTree.ParseError:
             continue
-        messages = [root] if root.tag == "input-message" else root.findall(".//input-message")
-        for message in messages:
-            sender = message.get("sender")
-            if sender and (kind is None or message.get("kind") == kind):
-                return sender
+        elements.extend([root] if root.tag == "input-message" else root.findall(".//input-message"))
+    return elements
+
+
+def message_sender_id(content: object, *, kind: MessageKind | None = None) -> str | None:
+    for message in _input_message_elements(content):
+        sender = message.get("sender")
+        if sender and (kind is None or message.get("kind") == kind):
+            return sender
     return None
+
+
+def _envelope_body(message: ElementTree.Element) -> str:
+    """The authored text of an envelope, accepting the stored ``<content>`` shape."""
+    return (message.text or "").strip() or (message.findtext("content") or "").strip()
 
 
 def input_message_text(content: object) -> str | None:
     """The authored text carried by a serialized input message, when present."""
-    texts: list[str] = []
-    values = content if isinstance(content, list) else [content]
-    for value in values:
-        text = value.get("text") if isinstance(value, dict) else value
-        if not isinstance(text, str) or "<input-message" not in text:
-            continue
-        try:
-            root = ElementTree.fromstring(text)
-        except ElementTree.ParseError:
-            continue
-        messages = [root] if root.tag == "input-message" else root.findall(".//input-message")
-        for message in messages:
-            body = message.findtext("content")
-            if body and body.strip():
-                texts.append(body.strip())
+    texts = [
+        body for message in _input_message_elements(content) if (body := _envelope_body(message))
+    ]
     return "\n\n".join(texts) or None
+
+
+def input_message_timestamps(content: object) -> set[str]:
+    """Source-message timestamps the serialized envelopes in ``content`` carry."""
+    return {
+        timestamp
+        for message in _input_message_elements(content)
+        if (timestamp := message.get("timestamp"))
+    }
 
 
 def dynamic_context_hash(content: object) -> str | None:
@@ -172,26 +222,21 @@ def dynamic_context_hash(content: object) -> str | None:
     return None
 
 
-def dynamic_context_messages(messages: object) -> list[AnyMessage]:
-    if not isinstance(messages, (list, tuple)):
-        return []
-    found: list[AnyMessage] = []
-    hashes: set[str] = set()
-    for message in messages:
-        if not isinstance(message, BaseMessage):
-            continue
-        message = cast(AnyMessage, message)
-        context_hash = dynamic_context_hash(message.content)
-        if context_hash is not None and context_hash not in hashes:
-            hashes.add(context_hash)
-            found.append(message)
-    return found
+def _message_content(message: object) -> object:
+    """The content of a message, whether it is a model object or its JSON form."""
+    if isinstance(message, BaseMessage):
+        return message.content
+    if isinstance(message, Mapping):
+        return message.get("content")
+    return None
 
 
 def dynamic_context_hashes_from_messages(messages: object) -> set[str]:
+    if not isinstance(messages, (list, tuple)):
+        return set()
     hashes: set[str] = set()
-    for message in dynamic_context_messages(messages):
-        context_hash = dynamic_context_hash(message.content)
+    for message in messages:
+        context_hash = dynamic_context_hash(_message_content(message))
         if context_hash is not None:
             hashes.add(context_hash)
     return hashes
@@ -215,23 +260,28 @@ def visible_dynamic_context_hashes(state: Mapping[str, Any]) -> set[str]:
     return dynamic_context_hashes_from_messages(messages)
 
 
+def _entity_field_line(field: str, value: object) -> str:
+    text = _xml_text(value)
+    if "\n" not in text:
+        return f"{field}: {text}"
+    indented = "\n".join(f"  {line}" for line in text.split("\n"))
+    return f"{field}:\n{indented}"
+
+
 def _entity_message(identity: Identity, kind: EntityKind) -> RunMessage:
     entity_id = _validate_entity_id(identity["id"])
-    children: list[str] = []
+    lines: list[str] = []
     for field in _ENTITY_FIELDS[kind]:
         value = identity.get(field)  # type: ignore[union-attr]
         if value is None or value == "":
             continue
-        trust = ' trust="untrusted"' if field in _UNTRUSTED_ENTITY_FIELDS else ""
-        children.append(f"<{field}{trust}>{_xml_text(value)}</{field}>")
-    body = "\n".join(children)
+        lines.append(_entity_field_line(field, value))
+    body = "\n".join(lines)
     canonical = f'<dynamic-context kind="{kind}" id="{_xml_attr(entity_id)}">'
     if body:
         canonical += f"\n{body}\n"
     canonical += "</dynamic-context>"
-    context_hash = hashlib.sha256(canonical.encode()).hexdigest()
-    serialized = canonical.replace(">", f' hash="{context_hash}">', 1)
-    return {"role": "user", "content": serialized}
+    return {"role": "user", "content": canonical}
 
 
 def person_introduction(person: PersonIdentity) -> RunMessage:
@@ -268,9 +318,15 @@ def _serialize_message(text: str, context: InputMessageContext) -> str:
     channel_id = context.get("channel_id")
     if channel_id:
         attributes.insert(1, f'channel="{_xml_attr(_validate_entity_id(channel_id))}"')
-    children = [_data_element(name, value) for name, value in context.get("data", {}).items()]
-    children.append(f"<content>{_xml_text(text)}</content>")
-    body = "\n".join(children)
+    children: list[str] = []
+    for name, value in context.get("data", {}).items():
+        if isinstance(value, (dict, list, tuple)):
+            children.append(_data_element(name, value))
+        elif not name.replace("_", "").replace("-", "").isalnum():
+            raise ValueError(f"invalid structured data field: {name}")
+        else:
+            attributes.append(f'{name}="{_xml_attr(value)}"')
+    body = "\n".join([_xml_text(text), *children])
     return f"<input-message {' '.join(attributes)}>\n{body}\n</input-message>"
 
 
@@ -356,7 +412,6 @@ def build_input_messages(
     content: str | list[dict[str, Any]],
     context: InputMessageContext,
     *,
-    people: list[PersonIdentity] | None = None,
     channels: list[ChannelIdentity] | None = None,
     systems: list[SystemIdentity] | None = None,
     injected_dynamic_context_hashes: set[str] | None = None,
@@ -366,7 +421,6 @@ def build_input_messages(
     )
     messages: list[RunMessage] = []
     introductions = [
-        *(person_introduction(person) for person in people or []),
         *(channel_introduction(channel) for channel in channels or []),
         *(system_introduction(system) for system in systems or []),
     ]
@@ -387,7 +441,6 @@ def build_run_input(
     content: str | list[dict[str, Any]],
     context: InputMessageContext,
     *,
-    people: list[PersonIdentity] | None = None,
     channels: list[ChannelIdentity] | None = None,
     systems: list[SystemIdentity] | None = None,
     injected_dynamic_context_hashes: set[str] | None = None,
@@ -397,7 +450,6 @@ def build_run_input(
         "messages": build_input_messages(
             content,
             context,
-            people=people,
             channels=channels,
             systems=systems,
             injected_dynamic_context_hashes=injected_dynamic_context_hashes,

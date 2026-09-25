@@ -1,5 +1,5 @@
 /** @vitest-environment jsdom */
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
+import { QueryClientProvider } from "@tanstack/react-query"
 import {
   cleanup,
   fireEvent,
@@ -13,12 +13,15 @@ import { useState } from "react"
 import { toast } from "sonner"
 
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }))
+vi.mock("@/lib/errorReporting", () => ({ reportError: vi.fn() }))
 import {
   api,
   type OpenPullRequest,
   type PullRequestActionResult,
   type PullRequestThreadResult,
 } from "@/lib/api"
+import { reportError } from "@/lib/errorReporting"
+import { makeQueryClient } from "@/lib/query"
 import { MyPullRequests } from "./MyPullRequests"
 import type { ReviewsSearch } from "./search"
 
@@ -115,16 +118,25 @@ function mount() {
       />
     )
   }
+  const client = makeQueryClient()
+  client.setDefaultOptions({ queries: { retry: false } })
   return render(
-    <QueryClientProvider
-      client={
-        new QueryClient({ defaultOptions: { queries: { retry: false } } })
-      }
-    >
+    <QueryClientProvider client={client}>
       <Harness />
     </QueryClientProvider>
   )
 }
+const expectReported = (title: string, message: string) =>
+  waitFor(() =>
+    expect(reportError).toHaveBeenCalledWith(
+      expect.objectContaining({
+        title,
+        error: expect.objectContaining({
+          message: expect.stringContaining(message),
+        }),
+      })
+    )
+  )
 const section = () =>
   screen.getByRole("region", { name: "My open pull requests" })
 // Anchored on the title heading: a card's own failing-check list also contains
@@ -242,8 +254,8 @@ describe("My PRs", () => {
     mount()
     const card = (await screen.findByText("Change 1")).closest("li")!
     fireEvent.click(within(card).getByRole("button", { name: "Agent" }))
-    expect(await within(card).findByRole("alert")).toHaveProperty(
-      "textContent",
+    await expectReported(
+      "Couldn't open agent thread",
       "Thread backend unavailable"
     )
     expect(
@@ -301,14 +313,11 @@ describe("My PRs", () => {
     await screen.findByText("Change 1")
     fireEvent.change(await mergeSelect(1), { target: { value: "merge" } })
     fireEvent.click(screen.getByRole("button", { name: "Merge" }))
-    expect(await screen.findByRole("alert")).toHaveProperty(
-      "textContent",
+    await expectReported(
+      "Could not merge acme/app#1",
       "Required checks have not passed"
     )
     expect(screen.getByText("Change 1")).toBeTruthy()
-    expect(toast.error).toHaveBeenCalledWith("Could not merge acme/app#1", {
-      description: "Required checks have not passed",
-    })
     expect(
       (screen.getByRole("button", { name: "Retry merge" }) as HTMLButtonElement)
         .disabled
@@ -938,24 +947,27 @@ describe("My PRs", () => {
     mount()
     const card = (await screen.findByText("Change 1")).closest("li")!
     fireEvent.click(within(card).getByRole("button", { name: "Close" }))
-    const dialog = await screen.findByRole("alertdialog")
+    const dialog = await screen.findByRole("dialog")
     expect(within(dialog).getByText("Close acme/app#1?")).toBeTruthy()
     fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }))
-    await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull())
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull())
     expect(api.closePullRequest).not.toHaveBeenCalled()
     expect(screen.getByText("Change 1")).toBeTruthy()
     fireEvent.click(within(card).getByRole("button", { name: "Close" }))
+    const reopened = await screen.findByRole("dialog")
+    fireEvent.change(within(reopened).getByRole("textbox"), {
+      target: { value: "  Superseded by #2  " },
+    })
     fireEvent.click(
-      within(await screen.findByRole("alertdialog")).getByRole("button", {
-        name: "Close pull request",
-      })
+      within(reopened).getByRole("button", { name: "Close pull request" })
     )
     await waitFor(() =>
       expect(within(card).getByText(/^Closed ·/)).toBeTruthy()
     )
     expect(within(card).queryByRole("button", { name: "Close" })).toBeNull()
     expect(api.closePullRequest).toHaveBeenCalledWith(
-      expect.objectContaining({ number: 1 })
+      expect.objectContaining({ number: 1 }),
+      "Superseded by #2"
     )
     expect(toast.success).toHaveBeenCalledWith("Closed acme/app#1")
   })
@@ -1007,12 +1019,10 @@ describe("My PRs", () => {
     const card = (await screen.findByText("Change 1")).closest("li")!
     fireEvent.change(await mergeSelect(1), { target: { value: "squash" } })
     fireEvent.click(within(card).getByRole("button", { name: "Merge" }))
-    expect((await within(card).findByRole("alert")).textContent).toContain(
+    await expectReported(
+      "Could not merge acme/app#1",
       "A conversation must be resolved"
     )
-    expect(toast.error).toHaveBeenCalledWith("Could not merge acme/app#1", {
-      description: expect.stringContaining("Repository rule violations found"),
-    })
     expect(within(card).getByText("Change 1")).toBeTruthy()
   })
 

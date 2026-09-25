@@ -7,7 +7,7 @@ from httpx2 import Response
 
 from agent.github import webhook as github_webhooks
 from agent.webhooks import common as webhook_common
-from tests.conftest import post_signed_github_webhook
+from tests.conftest import post_signed_github_webhook, register_github_logins
 
 _TEST_WEBHOOK_SECRET = "test-secret-for-webhook"
 
@@ -35,6 +35,7 @@ def _common_setup(monkeypatch, *, gate: str = "langchain-ai") -> None:
     monkeypatch.setattr(webhook_common, "GITHUB_WEBHOOK_SECRET", _TEST_WEBHOOK_SECRET)
     monkeypatch.setattr(webhook_common, "PUBLIC_REPO_ORG_GATE", gate)
     monkeypatch.setattr(webhook_common, "ALLOWED_GITHUB_ORGS", frozenset())
+    register_github_logins(monkeypatch, "stranger", "insider")
 
 
 async def test_gate_blocks_non_member_on_public_pr_comment(
@@ -273,7 +274,9 @@ async def test_review_requested_is_unsupported_before_public_repo_gate(
     assert seen["calls"] == []
 
 
-async def test_gate_allows_internal_bot_sender(fake_store: Any, monkeypatch, registry_db) -> None:
+async def test_internal_bot_comment_never_prompts_the_agent(
+    fake_store: Any, monkeypatch, registry_db
+) -> None:
     _common_setup(monkeypatch)
     seen = _install_membership_stub(monkeypatch, members=set())
 
@@ -309,8 +312,8 @@ async def test_gate_allows_internal_bot_sender(fake_store: Any, monkeypatch, reg
     )
 
     assert response.status_code == 200
-    assert response.json()["status"] == "accepted"
-    assert called["event"] == "issue_comment"
+    assert response.json()["status"] == "ignored"
+    assert called == {}
     assert seen["calls"] == []
 
 

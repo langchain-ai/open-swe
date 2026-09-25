@@ -27,7 +27,7 @@ Open SWE turns engineering work into a repeatable system. Give it a code-change 
 It goes beyond code generation. Open SWE can review pull requests, learn a repository's review style, monitor CI, and respond to feedback. It is open source, deployable in your infrastructure, and designed to be adapted to your team's repositories, tools, policies, and workflows.
 
 > [!NOTE]
-> Open SWE is under active development. APIs, setup, and product surfaces may continue to evolve.
+> **Under active development.** We’re rapidly iterating on Open SWE, so expect breaking changes and rough edges. We’re not accepting issues or external contributions at this time. You’re welcome to explore and fork the code, but correctness, stability, and compatibility are not guaranteed.
 
 ---
 
@@ -130,7 +130,6 @@ A useful software factory needs both autonomy and boundaries. Open SWE includes:
 - Credentials kept in the server process or injected through a sandbox proxy
 - Human approval before pushing workflow-file changes
 - Read-only reviewer and PR chat agents
-- Plan mode for reviewing an implementation approach before code changes
 - Opt-in automatic review and CI monitoring
 
 Sandboxes can have network access and powerful tools. Deployments should use least-privilege credentials, restrict enabled repositories and integrations, and tailor approval rules to their environment.

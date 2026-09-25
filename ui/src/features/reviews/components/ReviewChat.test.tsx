@@ -77,6 +77,7 @@ function renderChat({ withAttachmentButton = false } = {}) {
           repo="open-swe"
           number={42}
           headSha={"a".repeat(40)}
+          reviewed={true}
         />
       </ReviewChatComposerProvider>
     </QueryClientProvider>

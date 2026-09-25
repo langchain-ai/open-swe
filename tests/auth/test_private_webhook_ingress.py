@@ -5,6 +5,7 @@ import pytest
 from fastapi import HTTPException
 
 from agent.github.comments import fetch_pr_comments_since_last_tag
+from agent.slack import move as slack_move
 from agent.slack import webhook
 from agent.slack.request import SlackRequest
 from agent.slack.tools import move_thread
@@ -195,7 +196,7 @@ async def test_private_slack_move_cannot_publish_to_channel(monkeypatch):
         ),
     )
     post = AsyncMock()
-    monkeypatch.setattr(move_thread, "post_slack_top_level_message_with_ts", post)
+    monkeypatch.setattr(slack_move, "post_slack_top_level_message_with_ts", post)
     result = await move_thread.slack_move_thread("Move here", "C1")
     assert result["success"] is False
     post.assert_not_awaited()

@@ -66,7 +66,6 @@ export function TierRow({
             <Button
               size="sm"
               variant="ghost"
-              disabled={settings.saving}
               onClick={() => settings.reset(...fields)}
               aria-label={`Reset ${label} to the instance value`}
             >
@@ -77,11 +76,6 @@ export function TierRow({
       }
     />
   )
-}
-
-function SaveError({ settings }: { settings: ScopedSettings }) {
-  if (!settings.error) return null
-  return <p className="px-4 pb-3 text-xs text-destructive">{settings.error}</p>
 }
 
 export function LLMGatewaySection({ scope }: { scope: SettingsScope }) {
@@ -112,7 +106,7 @@ export function LLMGatewaySection({ scope }: { scope: SettingsScope }) {
                 if (value === null && scoped) settings.reset("gateway_enabled")
                 else settings.save({ gateway_enabled: value })
               }}
-              disabled={!settings.data || settings.saving}
+              disabled={!settings.data}
             >
               <SelectTrigger className="w-48">
                 <SelectValue />
@@ -130,7 +124,6 @@ export function LLMGatewaySection({ scope }: { scope: SettingsScope }) {
           }
         />
       </div>
-      <SaveError settings={settings} />
     </SettingsSection>
   )
 }
@@ -156,12 +149,11 @@ export function FableSection({ scope }: { scope: SettingsScope }) {
             <Switch
               checked={!!settings.data?.fable_enabled}
               onCheckedChange={(next) => settings.save({ fable_enabled: next })}
-              disabled={!settings.data || settings.saving}
+              disabled={!settings.data}
             />
           }
         />
       </div>
-      <SaveError settings={settings} />
     </SettingsSection>
   )
 }
@@ -201,13 +193,12 @@ export function DefaultRepoSection({
                 emptySelectionLabel="No default repository"
                 triggerClassName="h-7 w-full max-w-none rounded-md border border-input bg-input/20 px-2 py-1.5 text-xs/relaxed text-foreground transition-colors hover:opacity-100 dark:bg-input/30"
                 dropdownClassName="w-56"
-                disabled={!settings.data || settings.saving}
+                disabled={!settings.data}
               />
             </div>
           }
         />
       </div>
-      <SaveError settings={settings} />
     </SettingsSection>
   )
 }
@@ -254,7 +245,7 @@ function ModelRow({
           model={settings.data?.[modelField] ?? null}
           effort={settings.data?.[effortField] ?? null}
           onChange={(model, effort) => settings.save(patch(model, effort))}
-          disabled={!settings.data || settings.saving}
+          disabled={!settings.data}
           inheritLabel={
             inheritLabel && settings.scope.kind === "workspace"
               ? "Inherit instance setting"
@@ -305,7 +296,7 @@ export function ModelDefaultsSection({
               onCheckedChange={(next) =>
                 settings.save({ model_routing_enabled: next })
               }
-              disabled={!settings.data || settings.saving}
+              disabled={!settings.data}
             />
           }
         />
@@ -345,7 +336,7 @@ export function ModelDefaultsSection({
           settings={settings}
           models={models}
           label="Agent routing: performance"
-          description="Model used for complex reasoning and plan-mode turns."
+          description="Model used for complex reasoning."
           modelField="default_agent_routing_performance_model"
           effortField="default_agent_routing_performance_reasoning_effort"
         />
@@ -376,19 +367,6 @@ export function ModelDefaultsSection({
         <ModelRow
           settings={settings}
           models={models}
-          label="Open SWE Review Diff Grouping"
-          description={`Model used for the review's 'AI sorted' view that groups changed files into a logical walkthrough. ${
-            scoped
-              ? "Unset here it follows the instance setting, and only falls back to the Reviewer subagent default when the instance leaves it unset too."
-              : "Falls back to the Reviewer subagent default when unset."
-          }`}
-          modelField="default_grouping_model"
-          effortField="default_grouping_reasoning_effort"
-          inheritLabel="Reviewer subagent default"
-        />
-        <ModelRow
-          settings={settings}
-          models={models}
           label="Open SWE Review Chat"
           description={`Model used by the 'chat with this PR' assistant on the review page. ${
             scoped
@@ -400,7 +378,6 @@ export function ModelDefaultsSection({
           inheritLabel="Agent default"
         />
       </div>
-      <SaveError settings={settings} />
     </SettingsSection>
   )
 }

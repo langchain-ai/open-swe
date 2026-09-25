@@ -1,9 +1,11 @@
 from agent.expedited_review.eligibility import (
+    ACCEPTED_CHANGED_LINES,
     MAX_CHANGED_LINES,
     ChangedFile,
     EligibleDiff,
     Ineligible,
     assess_eligibility,
+    fingerprint_matches,
 )
 
 
@@ -32,12 +34,48 @@ def test_fingerprint_changes_with_the_patch() -> None:
     assert before.fingerprint != after.fingerprint
 
 
-def test_line_cap_is_inclusive() -> None:
+def test_fingerprint_ignores_test_files_the_card_does_not_draw() -> None:
+    source = _file("src/app.py", additions=4, patch="+a\n+b\n+c\n+d")
+    before = assess_eligibility([source, _file("tests/test_app.py", additions=1, patch="+x")])
+    after = assess_eligibility([source, _file("tests/test_app.py", additions=2, patch="+x\n+y")])
+    new_source = assess_eligibility([source, _file("src/other.py", patch="+z")])
+
+    assert isinstance(before, EligibleDiff) and isinstance(after, EligibleDiff)
+    assert isinstance(new_source, EligibleDiff)
+    assert before.fingerprint == after.fingerprint
+    assert before.fingerprint != new_source.fingerprint
+
+
+def test_fingerprint_ignores_tests_even_when_they_outweigh_the_source() -> None:
+    source = _file("src/app.py", additions=1, patch="+a")
+    before = assess_eligibility([source, _file("tests/test_app.py", additions=5, patch="+x")])
+    after = assess_eligibility([source, _file("tests/test_app.py", additions=5, patch="+y")])
+
+    assert isinstance(before, EligibleDiff) and isinstance(after, EligibleDiff)
+    assert before.fingerprint == after.fingerprint
+
+
+def test_tests_growing_past_the_source_keep_a_card_that_did_not_draw_them() -> None:
+    source = _file("src/app.py", additions=2, patch="+a\n+b")
+    card = assess_eligibility([source, _file("tests/test_app.py", additions=1, patch="+x")])
+    grown = [source, _file("tests/test_app.py", additions=9, patch="+x\n+y")]
+
+    assert isinstance(card, EligibleDiff)
+    assert fingerprint_matches(grown, card.fingerprint)
+    assert not fingerprint_matches([_file("src/app.py", patch="+c"), *grown[1:]], card.fingerprint)
+
+
+def test_line_cap_is_inclusive_and_carries_leeway_past_the_advertised_limit() -> None:
     at_cap = assess_eligibility([_file("a.py", additions=MAX_CHANGED_LINES)])
     over_cap = assess_eligibility([_file("a.py", additions=MAX_CHANGED_LINES + 1)])
+    at_leeway = assess_eligibility([_file("a.py", additions=ACCEPTED_CHANGED_LINES)])
+    past_leeway = assess_eligibility([_file("a.py", additions=ACCEPTED_CHANGED_LINES + 1)])
 
     assert isinstance(at_cap, EligibleDiff)
-    assert isinstance(over_cap, Ineligible)
+    assert isinstance(over_cap, EligibleDiff)
+    assert isinstance(at_leeway, EligibleDiff)
+    assert isinstance(past_leeway, Ineligible)
+    assert f"limit is {MAX_CHANGED_LINES}" in past_leeway.reason
 
 
 def test_files_without_a_text_patch_are_refused() -> None:
@@ -72,3 +110,54 @@ def test_a_rename_carrying_a_text_diff_is_eligible() -> None:
     )
 
     assert isinstance(assess_eligibility([moved]), EligibleDiff)
+
+
+def test_test_files_are_outside_the_line_cap_and_the_patch_gate() -> None:
+    verdict = assess_eligibility(
+        [
+            _file("agent/app.py", additions=2),
+            _file("tests/test_app.py", additions=400, patch=None),
+        ]
+    )
+
+    assert isinstance(verdict, EligibleDiff)
+    assert verdict.changed_lines == 2
+    assert verdict.test_lines == 400
+
+
+def test_test_paths_are_recognised_across_languages() -> None:
+    for path in (
+        "tests/expedited_review/test_eligibility.py",
+        "agent/conftest.py",
+        "agent/slack/client_test.go",
+        "ui/src/lib/api.test.ts",
+        "tests/e2e/tests/expedited_review.spec.ts",
+        "internal/testdata/golden.json",
+    ):
+        assert ChangedFile(filename=path).is_test, path
+    for path in ("agent/latest.py", "ui/src/features/contest/Entry.tsx", "docs/protest.md"):
+        assert not ChangedFile(filename=path).is_test, path
+
+
+def test_a_move_into_the_tests_tree_is_not_exempt() -> None:
+    """The production file disappears; the voters have to see that."""
+    moved = ChangedFile(
+        filename="tests/critical.py",
+        previous_filename="agent/critical.py",
+        status="renamed",
+        patch=None,
+    )
+
+    assert not moved.is_test
+    assert isinstance(assess_eligibility([moved]), Ineligible)
+
+
+def test_a_move_within_the_tests_tree_stays_exempt() -> None:
+    moved = ChangedFile(
+        filename="tests/unit/test_app.py",
+        previous_filename="tests/test_app.py",
+        status="renamed",
+        patch=None,
+    )
+
+    assert moved.is_test

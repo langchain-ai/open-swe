@@ -189,6 +189,8 @@ class GitHubProxyRule(TypedDict):
 
 
 def _github_proxy_rules(github_token: str | None) -> list[GitHubProxyRule]:
+    if not github_token:
+        return []
     basic_auth = base64.b64encode(f"x-access-token:{github_token}".encode()).decode()
     # GitHub enforces repository IDs on the token, including for mixed-case URLs.
     return [
@@ -198,8 +200,8 @@ def _github_proxy_rules(github_token: str | None) -> list[GitHubProxyRule]:
             "headers": [
                 {
                     "name": "Authorization",
-                    "type": "opaque" if github_token else "plaintext",
-                    "value": f"Bearer {github_token}" if github_token else "",
+                    "type": "opaque",
+                    "value": f"Bearer {github_token}",
                 }
             ],
             # `gh` refuses to run without a token in its environment even though the
@@ -215,9 +217,7 @@ def _github_proxy_rules(github_token: str | None) -> list[GitHubProxyRule]:
                     "type": "opaque",
                     "value": f"Basic {basic_auth}",
                 }
-            ]
-            if github_token
-            else [],
+            ],
         },
     ]
 

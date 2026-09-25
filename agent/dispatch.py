@@ -46,6 +46,7 @@ from agent.input_messages import (
 from agent.invocation import new_invocation_id, resolve_invocation_id, with_invocation_id
 from agent.run_config import RunConfig
 from agent.source_context import SourceContext
+from agent.users import User
 
 logger = logging.getLogger(__name__)
 
@@ -54,6 +55,8 @@ LangGraphRunConfig = dict[str, Any]
 
 # The server's legacy-named compatibility marker selects the v3 stream path.
 V3_STREAMING_CONFIG_KEY = "__event_streaming_v2"
+# Run metadata ``kind`` of a run started only to deliver store leftovers.
+FOLLOW_UP_PICKUP_KIND = "follow_up_pickup"
 # The dashboard's ``run.start`` defaults, minus protocol-only channels rejected by
 # the REST ``POST /runs`` schema.
 V3_RUN_STREAM_MODES: tuple[str, ...] = (
@@ -66,13 +69,14 @@ V3_RUN_STREAM_MODES: tuple[str, ...] = (
 )
 
 
-def _dispatch_input(content: ContentBlocks, source: str, configurable: dict[str, Any]) -> RunInput:
+async def _dispatch_input(
+    content: ContentBlocks, source: str, configurable: dict[str, Any]
+) -> RunInput:
     surface: Surface = (
         source
         if source in {"slack", "linear", "github", "web", "desktop", "eval"}
         else "automation"
     )  # type: ignore[assignment]
-    people: list[PersonIdentity] = []
     channels: list[ChannelIdentity] = []
     systems: list[SystemIdentity] = []
     cfg = RunConfig.parse(configurable)
@@ -80,20 +84,17 @@ def _dispatch_input(content: ContentBlocks, source: str, configurable: dict[str,
     email = cfg.user_email
     slack_thread = cfg.slack_thread
     sender_id = ""
+    # Only for resolving the canonical id: the run describes the sender itself.
+    sender: PersonIdentity | None = None
     channel_id: str | None = None
     if surface == "slack" and slack_thread is not None:
         if slack_thread.triggering_user_id:
             sender_id = f"slack:{slack_thread.triggering_user_id}"
-            person: PersonIdentity = {"id": sender_id, "platform": "slack"}
-            if slack_thread.triggering_user_name:
-                person["display_name"] = slack_thread.triggering_user_name
-            if slack_thread.triggering_user_timezone:
-                person["timezone"] = slack_thread.triggering_user_timezone
+            sender = {"id": sender_id}
             if login:
-                person["github_login"] = login
+                sender["github_login"] = login
             if email:
-                person["email"] = email
-            people.append(person)
+                sender["email"] = email
         if slack_thread.channel_id:
             channel_id = f"slack:{slack_thread.channel_id}"
             channel: ChannelIdentity = {"id": channel_id, "platform": "slack"}
@@ -113,13 +114,14 @@ def _dispatch_input(content: ContentBlocks, source: str, configurable: dict[str,
             channels.append(channel)
     if not sender_id and login:
         sender_id = f"github:{login}"
-        person = {"id": sender_id, "platform": "github", "github_login": login}
+        sender = {"id": sender_id, "github_login": login}
         if email:
-            person["email"] = email
-        people.append(person)
+            sender["email"] = email
     if not sender_id and surface == "linear" and email:
         sender_id = f"linear:{email.lower()}"
-        people.append({"id": sender_id, "platform": "linear", "email": email})
+        sender = {"id": sender_id, "email": email}
+    if sender is not None:
+        sender_id = (await User.canonical_person(sender))["id"]
     kind = "human" if sender_id else "system"
     if not sender_id:
         sender_id = f"system:{source.replace('_', '-')}"
@@ -140,7 +142,6 @@ def _dispatch_input(content: ContentBlocks, source: str, configurable: dict[str,
     return build_run_input(
         content,
         context,
-        people=people,
         channels=channels,
         systems=systems,
     )
@@ -237,6 +238,7 @@ def prepare_run_config(
     configurable = with_invocation_id(configurable, invocation_id)
     configurable.setdefault("invocation_started_at", started_at)
     configurable[V3_STREAMING_CONFIG_KEY] = True
+    configurable.setdefault("background_task_completion", False)
     run_config["configurable"] = configurable
     run_config["metadata"] = with_invocation_id(merged_metadata, invocation_id)
     return run_config
@@ -307,7 +309,6 @@ async def dispatch_agent_run(
     source: str,
     input: RunInput | None = None,
     context: InputMessageContext | None = None,
-    people: list[PersonIdentity] | None = None,
     channels: list[ChannelIdentity] | None = None,
     systems: list[SystemIdentity] | None = None,
     assistant_id: str = "agent",
@@ -323,7 +324,7 @@ async def dispatch_agent_run(
     the graph (``"agent"`` or ``"reviewer"``).
     """
     if input is not None and any(
-        value is not None for value in (content, context, people, channels, systems)
+        value is not None for value in (content, context, channels, systems)
     ):
         raise ValueError("prebuilt input cannot be combined with content or source identities")
     if input is None:
@@ -333,12 +334,11 @@ async def dispatch_agent_run(
             build_run_input(
                 content,
                 context,
-                people=people,
                 channels=channels,
                 systems=systems,
             )
             if context is not None
-            else _dispatch_input(content, source, configurable)
+            else await _dispatch_input(content, source, configurable)
         )
     client = client or dispatch_client()
     if assistant_id == "agent" and source in {"slack", "web", "desktop", "dashboard"}:

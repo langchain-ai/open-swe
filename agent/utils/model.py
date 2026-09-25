@@ -1,4 +1,3 @@
-import asyncio
 from typing import Any, Literal, TypedDict, Unpack, cast
 
 from langchain.chat_models import init_chat_model
@@ -31,38 +30,6 @@ _TIMEOUT_PROVIDER_PREFIXES = (
     "google_genai:",
     "fireworks:",
 )
-
-_MODEL_CACHE: dict[
-    tuple[str, bool | None, int | None, tuple[tuple[str, str], ...], int | None], Any
-] = {}
-
-
-def _loop_cache_key() -> int | None:
-    try:
-        return id(asyncio.get_running_loop())
-    except RuntimeError:
-        return None
-
-
-def _freeze_model_kwargs(kwargs: dict[str, object]) -> tuple[tuple[str, str], ...]:
-    return tuple(sorted((key, repr(value)) for key, value in kwargs.items()))
-
-
-async def close_cached_models() -> None:
-    models = list(_MODEL_CACHE.values())
-    _MODEL_CACHE.clear()
-    for model in models:
-        close = getattr(model, "aclose", None)
-        if callable(close):
-            result = close()
-            if asyncio.iscoroutine(result):
-                await result
-            continue
-        close = getattr(model, "close", None)
-        if callable(close):
-            result = close()
-            if asyncio.iscoroutine(result):
-                await result
 
 
 OpenAIReasoningEffort = Literal["none", "low", "medium", "high", "xhigh", "max"]
@@ -191,25 +158,12 @@ def make_model(model_id: str, *, use_gateway: bool | None = None, **kwargs: Unpa
     if profile_override is not None:
         model_kwargs["profile"] = profile_override
 
-    max_tokens = model_kwargs.get("max_tokens")
-    max_tokens_key = max_tokens if type(max_tokens) is int else None
-    key = (
-        model_id,
-        use_gateway,
-        max_tokens_key,
-        _freeze_model_kwargs(model_kwargs),
-        _loop_cache_key(),
-    )
-    cached = _MODEL_CACHE.get(key)
-    if cached is not None:
-        return cached
     if oauth_applied:
         model = build_desktop_openai_oauth_model(
             model_id.split(":", 1)[1], **cast(dict[str, Any], model_kwargs)
         )
     else:
         model = init_chat_model(model=init_model_id, **cast(dict[str, Any], model_kwargs))
-    _MODEL_CACHE[key] = model
     return model
 
 
@@ -221,9 +175,9 @@ def fallback_model_id_for(primary_model_id: str) -> str | None:
     local, or self-hosted providers we don't want to silently route off-host).
     """
     if primary_model_id.startswith("anthropic:"):
-        return "openai:gpt-5.6-sol"
+        return "openai:gpt-6-sol"
     if primary_model_id.startswith("openai:"):
-        return "anthropic:claude-opus-5"
+        return "anthropic:claude-opus-5-5"
     return None
 
 

@@ -18,6 +18,7 @@ from typing import Any, Literal, NotRequired, TypedDict, cast
 
 SECTION_TEXT_MAX_CHARS = 3000
 BUTTON_TEXT_MAX_CHARS = 75
+OPTION_TEXT_MAX_CHARS = 75
 ButtonStyle = Literal["primary", "danger"]
 
 
@@ -67,9 +68,42 @@ class ButtonElement(TypedDict):
     style: NotRequired[ButtonStyle]
 
 
+class OptionObject(TypedDict):
+    text: TextObject
+    value: str
+
+
+class CheckboxesElement(TypedDict):
+    type: Literal["checkboxes"]
+    action_id: str
+    options: list[OptionObject]
+    initial_options: NotRequired[list[OptionObject]]
+
+
+type ActionElement = ButtonElement | CheckboxesElement
+
+
 class ActionsBlock(TypedDict):
     type: Literal["actions"]
-    elements: list[ButtonElement]
+    elements: list[ActionElement]
+
+
+class FeedbackButton(TypedDict):
+    text: PlainText
+    value: str
+    accessibility_label: str
+
+
+class FeedbackButtons(TypedDict):
+    type: Literal["feedback_buttons"]
+    action_id: str
+    positive_button: FeedbackButton
+    negative_button: FeedbackButton
+
+
+class ContextActionsBlock(TypedDict):
+    type: Literal["context_actions"]
+    elements: list[FeedbackButtons]
 
 
 class PlainTextInput(TypedDict):
@@ -88,7 +122,15 @@ class InputBlock(TypedDict):
     optional: NotRequired[bool]
 
 
-type Block = SectionBlock | ContextBlock | DividerBlock | ImageBlock | ActionsBlock | InputBlock
+type Block = (
+    SectionBlock
+    | ContextBlock
+    | DividerBlock
+    | ImageBlock
+    | ActionsBlock
+    | ContextActionsBlock
+    | InputBlock
+)
 
 
 class ModalView(TypedDict):
@@ -140,7 +182,16 @@ def button(
     return element
 
 
-def actions(*elements: ButtonElement) -> ActionsBlock:
+def checkbox(text: str, *, action_id: str, value: str) -> CheckboxesElement:
+    """A single unticked checkbox; a click's ``state.values`` says whether it is ticked."""
+    return {
+        "type": "checkboxes",
+        "action_id": action_id,
+        "options": [{"text": plain_text(text[:OPTION_TEXT_MAX_CHARS]), "value": value}],
+    }
+
+
+def actions(*elements: ActionElement) -> ActionsBlock:
     return {"type": "actions", "elements": list(elements)}
 
 

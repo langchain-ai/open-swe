@@ -7,7 +7,6 @@ from typing import Any, Literal
 
 from pydantic import BaseModel
 
-from agent.source_context import SourceContext
 from agent.store import TypedStore, now_ms
 from agent.utils.thread_ops import langgraph_client
 from agent.utils.thread_pr_state import agent_thread_pr_state_lock
@@ -173,14 +172,11 @@ async def _schedule(
 
 
 async def schedule_answer_feedback(thread_id: str, run_id: str, metadata: dict[str, Any]) -> None:
-    origin = SourceContext.from_metadata(metadata).slack_thread
     await _schedule(
         thread_id,
         metadata,
         event_id=f"answer:{run_id}",
         answer_run_id=run_id,
-        channel_id=origin.channel_id if origin else "",
-        slack_run_id=run_id if origin else "",
     )
 
 

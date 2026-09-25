@@ -7,7 +7,7 @@ lookup hit / null-name / failure / cache paths.
 
 import json
 from typing import Any, cast
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from langgraph.runtime import Runtime
@@ -79,7 +79,7 @@ def _middleware(config: dict[str, Any], *, credential_login: str | None = None) 
         linear_project_id="",
         linear_issue_number="",
         draft_prs=False,
-        plan_mode=False,
+        recent_thread_context_enabled=False,
         admin_workspaces=False,
         credential_login=credential_login,
     )
@@ -115,7 +115,6 @@ def prepare_harness(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
     monkeypatch.setattr(server, "_resolve_user_custom_instructions", _async_none)
     monkeypatch.setattr(server, "_thread_participant_identities", _async_list)
     monkeypatch.setattr(server, "_workspace_admin", _async_false)
-    monkeypatch.setattr(server, "construct_sender_context", lambda *args, **kwargs: "sender")
     monkeypatch.setattr(server, "construct_system_prompt", lambda *args, **kwargs: "system prompt")
 
     class _Threads:
@@ -162,6 +161,25 @@ async def _prepare(middleware: Any) -> dict[str, Any]:
     return await middleware._prepare(
         cast(PrepareRunState, {"messages": []}), cast(Runtime[Any], MagicMock())
     )
+
+
+async def test_routed_run_exposes_selected_model_and_effort_to_tools(
+    prepare_harness: dict[str, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    prepare_harness["thread_metadata"] = {"visibility": "public"}
+    monkeypatch.setattr(server, "resolve_triggering_user_identity", _async_none)
+    config = _slack_config()
+    middleware = _middleware(config)
+    middleware._effort = "medium"
+    middleware._model_selection = MagicMock()
+    middleware._model_selection.select_route = AsyncMock(return_value="performance")
+    middleware._routing_defaults = {"performance": ("openai:routed", "high")}
+
+    await _prepare(middleware)
+
+    assert config["configurable"]["resolved_agent_model_id"] == "openai:routed"
+    assert config["configurable"]["resolved_agent_effort"] == "high"
+    assert prepare_harness["thread_update"]["metadata"]["effort"] == "high"
 
 
 async def test_private_scope_uses_oauth_identity_and_skips_public_lookup(

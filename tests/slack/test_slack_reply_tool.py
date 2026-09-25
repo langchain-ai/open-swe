@@ -1,7 +1,7 @@
 import importlib
 import json
 from contextlib import asynccontextmanager
-from typing import Any
+from typing import Any, Literal
 from unittest.mock import AsyncMock
 from uuid import UUID
 
@@ -314,6 +314,79 @@ async def test_slack_reply_passes_executing_run_id(
     assert captured["triggering_user_id"] == "active-user"
 
 
+@pytest.mark.parametrize("response_type", ["progress", "final"])
+@pytest.mark.parametrize("options", [None, ["Yes", "No"]])
+async def test_only_final_reply_has_feedback_for_its_run(
+    monkeypatch: pytest.MonkeyPatch,
+    response_type: Literal["progress", "final"],
+    options: list[str] | None,
+) -> None:
+    config = _config()
+    config["run_id"] = "run-1"
+    config["configurable"]["slack_thread"]["triggering_user_id"] = "U1"
+    monkeypatch.setattr(slack_reply_tool, "get_config", lambda: config)
+    post = AsyncMock(return_value=("2.0", None))
+    monkeypatch.setattr(slack_reply_tool, "_post_and_store_mapping", post)
+
+    assert await slack_reply_tool.slack_reply("Answer", response_type, options=options) == {
+        "success": True
+    }
+    assert post.await_args is not None
+    blocks = post.await_args.kwargs["blocks"]
+    feedback = [block for block in blocks if block["type"] == "context_actions"]
+    if response_type == "progress":
+        assert feedback == []
+    else:
+        buttons = feedback[0]["elements"][0]
+        assert buttons["type"] == "feedback_buttons"
+        assert json.loads(buttons["positive_button"]["value"]) == {
+            "run_id": "run-1",
+            "rating": "up",
+        }
+        assert json.loads(buttons["negative_button"]["value"]) == {
+            "run_id": "run-1",
+            "rating": "down",
+        }
+    assert blocks[0] == {"type": "markdown", "text": "Answer"}
+    if options:
+        assert blocks[1]["type"] == "actions"
+
+
+async def test_long_reply_retains_all_text_alongside_feedback(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = _config()
+    config["run_id"] = "run-1"
+    config["configurable"]["slack_thread"]["triggering_user_id"] = "U1"
+    monkeypatch.setattr(slack_reply_tool, "get_config", lambda: config)
+    post = AsyncMock(return_value=("2.0", None))
+    monkeypatch.setattr(slack_reply_tool, "_post_and_store_mapping", post)
+
+    assert await slack_reply_tool.slack_reply("x" * 12001, "final") == {"success": True}
+    assert post.await_args is not None
+    blocks = post.await_args.kwargs["blocks"]
+    assert "".join(block["text"]["text"] for block in blocks[:-1]) == "x" * 12001
+    assert all(len(block["text"]["text"]) <= 3000 for block in blocks[:-1])
+    assert blocks[-1]["type"] == "context_actions"
+
+
+async def test_custom_blocks_preserved_when_feedback_is_appended(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = _config()
+    config["run_id"] = "run-1"
+    config["configurable"]["slack_thread"]["triggering_user_id"] = "U1"
+    monkeypatch.setattr(slack_reply_tool, "get_config", lambda: config)
+    post = AsyncMock(return_value=("2.0", None))
+    monkeypatch.setattr(slack_reply_tool, "_post_and_store_mapping", post)
+    blocks = [{"type": "section", "text": {"type": "mrkdwn", "text": "Answer"}}]
+
+    assert await slack_reply_tool.slack_reply("Answer", "final", blocks=blocks) == {"success": True}
+    assert post.await_args is not None
+    assert post.await_args.kwargs["blocks"][:-1] == blocks
+    assert len(blocks) == 1
+
+
 async def test_slack_reply_restores_thinking_status_after_interim_reply(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -435,14 +508,12 @@ async def test_slack_reply_builds_option_blocks(monkeypatch: pytest.MonkeyPatch)
 
 
 @pytest.mark.parametrize(
-    "plan_mode,status,is_plan",
-    [(False, "ready", False), (True, "ready", True), (True, "shared", False)],
+    "plan_mode",
+    [False, True],
 )
-async def test_plan_buttons_require_active_plan_context(
+async def test_legacy_plan_config_uses_ordinary_option_buttons(
     monkeypatch: pytest.MonkeyPatch,
     plan_mode: bool,
-    status: str,
-    is_plan: bool,
 ) -> None:
     config = _config()
     config["configurable"].update(thread_id="thread-1", plan_mode=plan_mode)
@@ -451,11 +522,6 @@ async def test_plan_buttons_require_active_plan_context(
         slack_reply_tool,
         "get_active_slack_thread",
         AsyncMock(return_value={"channel_id": "C1", "thread_ts": "0"}),
-    )
-    monkeypatch.setattr(
-        slack_reply_tool,
-        "get_plan_content",
-        AsyncMock(return_value={"status": status, "html": "plan"}),
     )
     post = AsyncMock(return_value=("2.0", None))
     monkeypatch.setattr(slack_reply_tool, "_post_and_store_mapping", post)
@@ -469,17 +535,10 @@ async def test_plan_buttons_require_active_plan_context(
 
     buttons = post.await_args.kwargs["blocks"][1]["elements"]
     values = [json.loads(button["value"]) for button in buttons]
-    if is_plan:
-        assert [value["action"] for value in values] == ["approve", "revise"]
-        assert all(
-            value["thread_id"] == "thread-1" and value["thread_ts"] == "0" and value["fingerprint"]
-            for value in values
-        )
-    else:
-        assert values == [
-            {"type": "open_swe_option", "response": label}
-            for label in ["Approve & implement", "Request changes"]
-        ]
+    assert values == [
+        {"type": "open_swe_option", "response": label}
+        for label in ["Approve & implement", "Request changes"]
+    ]
 
 
 def test_slack_action_ids_are_unique_and_recognized() -> None:
@@ -533,7 +592,9 @@ async def test_slack_reply_passes_model_reported_usage(
         captured.update(kwargs)
         return "2.0", None
 
-    monkeypatch.setattr(slack_reply_tool, "get_config", _config)
+    config = _config()
+    config["configurable"]["resolved_agent_effort"] = "high"
+    monkeypatch.setattr(slack_reply_tool, "get_config", lambda: config)
     monkeypatch.setattr(slack_reply_tool, "_post_and_store_mapping", fake_post_and_store_mapping)
     state = {
         "messages": [
@@ -551,7 +612,36 @@ async def test_slack_reply_passes_model_reported_usage(
     assert result == {"success": True}
     usage = captured["usage"]
     assert usage.models == ("model-a",)
+    assert usage.reasoning_effort == "high"
     assert usage.total_tokens == 110
+
+
+async def test_slack_reply_uses_selected_route_effort(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, Any] = {}
+
+    async def post(*_args: Any, **kwargs: Any) -> tuple[str, None]:
+        captured.update(kwargs)
+        return "2.0", None
+
+    config = _config()
+    config["configurable"].update(
+        resolved_agent_model_id="model-balanced",
+        resolved_agent_effort="high",
+    )
+    monkeypatch.setattr(slack_reply_tool, "get_config", lambda: config)
+    monkeypatch.setattr(slack_reply_tool, "_post_and_store_mapping", post)
+    state = {
+        "model_route": "balanced",
+        "messages": [
+            HumanMessage(content="request"),
+            AIMessage(content="answer", response_metadata={"model_name": "model-balanced"}),
+        ],
+    }
+
+    assert await slack_reply_tool.slack_reply("Done", "final", state=state) == {"success": True}
+    assert captured["usage"].reasoning_effort == "high"
 
 
 async def test_reply_moves_the_thread_to_the_dashboard_when_its_slack_thread_is_gone(

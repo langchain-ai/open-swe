@@ -10,6 +10,8 @@ from fastapi import HTTPException
 
 from agent.dashboard.admin import is_admin
 from agent.dashboard.options import SUPPORTED_MODEL_IDS, canonical_model_pair
+from agent.github.pull_requests import PullRequest
+from agent.review.session import ReviewSessionMetadata
 from agent.slack.client import parse_github_pr_url
 from agent.slack.code_channels import CODE_CHANNEL_SESSION_TS
 from agent.slack.oauth import SLACK_TEAM_ID
@@ -30,7 +32,14 @@ DASHBOARD_SOURCE = "dashboard"
 # Threads whose transcript is served from the append-only event log.
 TRANSCRIPT_VERSION = "v2"
 # Sources whose threads should surface in the Agents UI (besides "dashboard").
-_SURFACED_SOURCES: tuple[str, ...] = ("dashboard", "github", "slack", "linear", "schedule")
+_SURFACED_SOURCES: tuple[str, ...] = (
+    "dashboard",
+    "github",
+    "slack",
+    "linear",
+    "schedule",
+    "api",
+)
 # PR lifecycle states surfaced to the UI for a thread's associated pull request.
 _PR_STATES: frozenset[str] = frozenset({"draft", "open", "merged", "closed"})
 _SANDBOX_CREATING_SENTINEL = "__creating__"
@@ -105,7 +114,13 @@ def thread_is_unlisted(metadata: Mapping[str, Any]) -> bool:
 def thread_is_readable(
     metadata: Mapping[str, Any], login: str | None = None, email: str | None = None
 ) -> bool:
-    """Private threads are visible to their immutable owner and to workspace admins."""
+    """Private threads are visible to their immutable owner and to workspace admins.
+
+    A review chat is readable only by the user it belongs to, so its sidebar row
+    can be pinned, archived and marked read.
+    """
+    if (review := ReviewSessionMetadata.parse(metadata)) is not None:
+        return review.owned_by(login)
     return thread_source(metadata) in _SURFACED_SOURCES and (
         not thread_is_private(metadata)
         or thread_is_owner(metadata, login)
@@ -163,7 +178,7 @@ def repo_config_from_metadata(metadata: Mapping[str, Any]) -> dict[str, str]:
     return {}
 
 
-def _run_status_to_agent_status(thread_status: str | None, run_status: str | None) -> str:
+def run_status_to_agent_status(thread_status: str | None, run_status: str | None) -> str:
     # "interrupted" wins over a still-``busy`` thread: cancellation is async, so a
     # just-cancelled thread reports busy for a moment and would otherwise look
     # like it is still running. Callers refresh the newest run's real status
@@ -330,6 +345,18 @@ def _pull_request_summary(record: object, fallback_title: str) -> dict[str, Any]
     }
 
 
+async def _apply_stored_diff_stats(pull_requests: list[dict[str, Any]]) -> None:
+    try:
+        stored = await PullRequest.diff_stats_for(
+            [(pr["repoFullName"], pr["number"]) for pr in pull_requests]
+        )
+    except Exception:  # noqa: BLE001
+        logger.warning("Failed to load stored pull request diff stats", exc_info=True)
+        return
+    for pr in pull_requests:
+        pr["diffStats"] = stored.get((pr["repoFullName"].lower(), pr["number"]), pr["diffStats"])
+
+
 async def _thread_summary(
     thread: ThreadLike,
     *,
@@ -353,7 +380,7 @@ async def _thread_summary(
     run_status = latest_run_status or (
         metadata_run_status if isinstance(metadata_run_status, str) else None
     )
-    status = _run_status_to_agent_status(thread_status, run_status)
+    status = run_status_to_agent_status(thread_status, run_status)
 
     pr_number = metadata.get("pr_number")
     pr_url = metadata.get("pr_url")
@@ -381,7 +408,6 @@ async def _thread_summary(
         "branch": metadata.get("branch_name") or metadata.get("base_branch") or "main",
         "model": model,
         "effort": effort,
-        "planMode": metadata.get("plan_mode") is True,
         "modelSelection": (
             metadata.get("model_selection")
             if metadata.get("model_selection") in {"auto", "explicit"}
@@ -459,36 +485,59 @@ async def _thread_summary(
         if legacy_pr:
             pull_requests.append(legacy_pr)
     if pull_requests:
+        await _apply_stored_diff_stats(pull_requests)
         latest_pr = pull_requests[-1]
         summary["pullRequests"] = pull_requests
         summary["pr"] = {
             key: latest_pr[key] for key in ("number", "title", "state", "headRef", "baseRef", "url")
         }
         summary["diffStats"] = latest_pr["diffStats"]
+    if (review := ReviewSessionMetadata.parse(metadata)) is not None:
+        summary["reviewPage"] = {
+            "owner": review.repo_owner,
+            "repo": review.repo_name,
+            "number": review.pr_number,
+        }
+        if review.walkthrough_state == "building":
+            summary["status"] = "running"
+        elif status != "running" and review.walkthrough_state == "failed":
+            summary["status"] = "error"
+        elif status == "idle" and review.walkthrough_state == "ready":
+            summary["status"] = "finished"
+        summary["viewed"] = summary["viewed"] and not review.unseen_walkthrough
     # The transcript hydrates client-side from the SDK (`GET …/state` →
     # `stream.messages`); the summary only carries metadata.
     summary["messages"] = []
     return summary
 
 
+def _status_of(run: Any) -> str | None:
+    raw = run.get("status") if isinstance(run, dict) else getattr(run, "status", None)
+    return raw.lower() if isinstance(raw, str) else None
+
+
 async def _latest_run_info(client: Any, thread_id: str) -> tuple[str | None, str | None]:
     try:
         runs = await client.runs.list(thread_id, limit=1)
+        # Follow-ups queued behind the live run are newer than it, and so is one
+        # withdrawn from the queue; the live run is still the one that says what
+        # the thread is doing. LangGraph also marks the thread idle when that
+        # withdrawal cancels a pending run, so this is the only busy signal left.
+        if runs and _status_of(runs[0]) in {"pending", "interrupted"}:
+            runs = await client.runs.list(thread_id, status="running", limit=1) or runs
     except Exception:  # noqa: BLE001
         logger.debug("Could not fetch latest run for thread %s", thread_id, exc_info=True)
         return None, None
     if not runs:
         return None, None
     run = runs[0]
-    raw_status = run.get("status") if isinstance(run, dict) else getattr(run, "status", None)
     raw_id = (
         (run.get("run_id") or run.get("id"))
         if isinstance(run, dict)
         else (getattr(run, "run_id", None) or getattr(run, "id", None))
     )
-    status = raw_status.lower() if isinstance(raw_status, str) else None
     run_id = raw_id if isinstance(raw_id, str) and raw_id else None
-    return status, run_id
+    return _status_of(run), run_id
 
 
 async def _refresh_latest_run_metadata(

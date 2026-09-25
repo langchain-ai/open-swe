@@ -73,6 +73,64 @@ async def test_close_requires_github_confirmation(github, status, state):
     assert request.await_args.kwargs == {"json": {"state": "closed"}, "max_retries": 0}
 
 
+async def test_a_close_reason_is_posted_as_a_comment_before_closing(github):
+    request = github(
+        AsyncMock(
+            side_effect=[
+                response({"comments": 0}),
+                response({"id": 1}, 201),
+                response({"state": "closed"}),
+            ]
+        )
+    )
+    action = actions.CloseAction(action="close", reason="  Superseded by #8  ")
+
+    await actions.act_on_pull_request("acme", "app", 7, action, "user-token")
+
+    calls = [(call.args[1:], call.kwargs.get("json")) for call in request.await_args_list]
+    assert calls == [
+        (("GET", "https://api.github.com/repos/acme/app/issues/7"), None),
+        (
+            ("POST", "https://api.github.com/repos/acme/app/issues/7/comments"),
+            {"body": "Superseded by #8"},
+        ),
+        (("PATCH", "https://api.github.com/repos/acme/app/pulls/7"), {"state": "closed"}),
+    ]
+
+
+async def test_retrying_a_close_does_not_post_the_same_reason_twice(github):
+    request = github(
+        AsyncMock(
+            side_effect=[
+                response({"comments": 101}),
+                response([{"body": "Stale"}]),
+                response({"state": "closed"}),
+            ]
+        )
+    )
+    action = actions.CloseAction(action="close", reason="Stale")
+
+    await actions.act_on_pull_request("acme", "app", 7, action, "user-token")
+
+    assert [call.args[1:] for call in request.await_args_list] == [
+        ("GET", "https://api.github.com/repos/acme/app/issues/7"),
+        ("GET", "https://api.github.com/repos/acme/app/issues/7/comments?per_page=100&page=2"),
+        ("PATCH", "https://api.github.com/repos/acme/app/pulls/7"),
+    ]
+
+
+async def test_a_refused_reason_comment_leaves_the_pull_request_open(github):
+    request = github(
+        AsyncMock(side_effect=[response({"comments": 0}), response({"message": "Locked"}, 403)])
+    )
+    action = actions.CloseAction(action="close", reason="Stale")
+
+    with pytest.raises(HTTPException, match="Locked"):
+        await actions.act_on_pull_request("acme", "app", 7, action, "user-token")
+
+    assert request.await_count == 2
+
+
 async def test_a_network_failure_is_a_bad_gateway(github):
     github(AsyncMock(side_effect=httpx2.ConnectError("boom")))
     with pytest.raises(HTTPException, match="Could not confirm close") as error:
@@ -311,3 +369,26 @@ async def test_approval_tool_rejects_noninteractive_runs(monkeypatch, config):
         "error": "Approval requires a direct user request.",
     }
     authorize.assert_not_awaited()
+
+
+@pytest.mark.parametrize("status", [202, 422])
+async def test_updating_the_branch_pins_the_head_the_viewer_saw(github, status):
+    request = github(
+        AsyncMock(return_value=response({"message": "expected head sha didn't match"}, status))
+    )
+    action = actions.UpdateBranchAction(action="update-branch", sha="b" * 40)
+    if status == 202:
+        result = await actions.act_on_pull_request("acme", "app", 7, action, "user-token")
+        assert result == actions.PullRequestActionResult(action="update-branch", done=True)
+    else:
+        with pytest.raises(HTTPException, match="expected head sha") as error:
+            await actions.act_on_pull_request("acme", "app", 7, action, "user-token")
+        assert error.value.status_code == 422
+    assert request.await_args.args[1:] == (
+        "PUT",
+        "https://api.github.com/repos/acme/app/pulls/7/update-branch",
+    )
+    assert request.await_args.kwargs == {
+        "json": {"expected_head_sha": "b" * 40},
+        "max_retries": 0,
+    }

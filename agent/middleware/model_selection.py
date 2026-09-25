@@ -4,7 +4,7 @@ from typing import Any, Literal, NotRequired
 
 from langchain.agents.middleware.types import AgentState, ModelRequest, ModelResponse
 from langchain_core.language_models import BaseChatModel
-from langchain_core.messages import HumanMessage, ToolMessage
+from langchain_core.messages import HumanMessage
 from langgraph.config import get_stream_writer
 from langgraph.runtime import Runtime
 from pydantic import BaseModel
@@ -17,10 +17,9 @@ logger = logging.getLogger(__name__)
 
 Route = Literal["fast", "balanced", "performance"]
 PersistedRoute = Route | Literal["fast_alt"]
-RoutingMode = Literal["auto", "performance"]
+RoutingMode = Literal["auto", "fast"]
 
 _CLASSIFIER_PROMPT = load_prompt("model-selection.md")
-_PLAN_APPROVED_PREFIX = "Plan mode is now inactive because the plan was approved."
 
 
 def _latest_human_task(messages: Sequence[Any]) -> str:
@@ -53,7 +52,6 @@ class RouteDecision(BaseModel):
 
 class ModelSelectionState(AgentState):
     model_route: NotRequired[PersistedRoute]
-    plan_mode: NotRequired[bool]
 
 
 def normalize_route(route: PersistedRoute) -> Route:
@@ -105,27 +103,14 @@ class ModelSelectionMiddleware(OpenSWEMiddleware[ModelSelectionState]):
     async def select_route(
         self,
         state: ModelSelectionState,
-        *,
-        plan_mode: bool | None = None,
     ) -> Route:
         """Select the model route for a turn."""
-        if state.get("plan_mode") if plan_mode is None else plan_mode:
-            return "performance"
         if model_route := state.get("model_route"):
             return normalize_route(model_route)
-        if self._routing_mode == "performance":
-            return "performance"
+        if self._routing_mode == "fast":
+            return "fast"
         messages = state.get("messages", [])
-        approved_plan = next(
-            (
-                message.text
-                for message in reversed(messages)
-                if isinstance(message, ToolMessage)
-                and message.text.startswith(_PLAN_APPROVED_PREFIX)
-            ),
-            "",
-        )
-        task = approved_plan or _latest_human_task(messages)
+        task = _latest_human_task(messages)
         route: Route = "balanced"
         try:
             decision = await self._classifier.ainvoke(
@@ -146,8 +131,6 @@ class ModelSelectionMiddleware(OpenSWEMiddleware[ModelSelectionState]):
         route = await self.select_route(state)
         if self._routing_mode == "auto":
             await _emit_routed_model(self._models, self._route_model_ids, route)
-        if state.get("plan_mode"):
-            return {}
         return {"model_route": route}
 
     async def awrap_model_call(
@@ -155,11 +138,7 @@ class ModelSelectionMiddleware(OpenSWEMiddleware[ModelSelectionState]):
         request: ModelRequest,
         handler: Callable[[ModelRequest], Awaitable[ModelResponse]],
     ) -> ModelResponse:
-        route: PersistedRoute = (
-            "performance"
-            if request.state.get("plan_mode")
-            else request.state.get("model_route", "balanced")
-        )
+        route: PersistedRoute = request.state.get("model_route", "balanced")
         model = self._models.get(normalize_route(route)) or self._models.get("balanced")
         if model is None:
             model = self._models["balanced"]

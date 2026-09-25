@@ -6,7 +6,7 @@ Supported profile fields:
 - `default_model`, `reasoning_effort`: the main-agent model and effort.
 - `default_subagent_model`, `subagent_reasoning_effort`: subagent overrides; set both to null to inherit the main model.
 - `default_repo`, `base_branch`, `branch_prefix`: repository/branch defaults; null clears them.
-- `auto_fix_ci`: boolean preference.
+- `auto_fix_ci`, `recent_thread_context_enabled`: boolean preferences.
 - `model_routing_enabled`, `review_draft_prs`: boolean overrides; null inherits the shared default.
 - `draft_prs`: whether newly opened PRs are drafts; use true or false (null keeps the existing preference).
 
@@ -14,9 +14,9 @@ Supported dashboard preferences:
 - `default_visibility`: `private` or `public`, for future threads only.
 - `default_workspace`: workspace slug; null clears the default.
 - `local_tracing_project`: tracing project; null clears it. Restart the desktop app after changing this.
-- `transcript_streaming`: boolean; reopen a thread after changing this.
+- `follow_up_behavior`: `queue` or `steer`. What a message sent while a run is live does: wait for the run to end, or steer the running agent.
 
-`dm_session_enabled` is read-only through agent tools. Direct the user to the dashboard settings to enable or disable it; including it rejects the entire patch without saving any fields.
+`concierge_mode` (the user's Slack DM with Open SWE as one conversation) is read-only through agent tools. Direct the user to the dashboard settings to enable or disable it; including it rejects the entire patch without saving any fields.
 
 Only save explicitly requested personal changes. If personal versus shared scope is unclear, ask first. Use `save_user_instructions` for standing behavioral guidance and the existing personal skill tools for skills. This tool cannot change credentials, account links, admin/shared settings, or browser-local appearance/notification preferences. Defaults apply to future runs/threads; do not claim to have changed the current run's model, thread visibility, or workspace.
 

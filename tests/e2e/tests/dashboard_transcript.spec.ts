@@ -5,7 +5,6 @@ import {
   loginAs,
   openRunningThreadViaSlackLink,
   openThreadViaSlackLink,
-  setTranscriptStreaming,
   threadIdFromUrl,
   typeIntoComposer,
   waitForStateToContain,
@@ -212,14 +211,10 @@ test.describe("transcript rendering", () => {
     ).toBeVisible();
   });
 
-  // Reading from the transcript is opt-in, so this is the path every user is on
-  // until they flip the switch. Its own user, because the preference is stored
-  // server-side and other workers sign in as `SAME_USER` with it turned on.
-  test("a user who has not opted in hydrates from LangGraph state", async ({
+  test("a new user hydrates from the transcript by default", async ({
     page,
   }) => {
     await loginAs(page, { login: "carol", email: "carol@example.com" });
-    await setTranscriptStreaming(page, false);
     const hydrations: Array<string> = [];
     page.on("request", (request) => {
       if (request.method() !== "GET") return;
@@ -233,8 +228,7 @@ test.describe("transcript rendering", () => {
     await waitForThreadIdle(page, threadId);
     await expectTranscriptVisible(page);
 
-    expect(hydrations).toContain(`/dashboard/api/threads/${threadId}/state`);
-    expect(hydrations).not.toContain(
+    expect(hydrations).toContain(
       `/dashboard/api/threads/${threadId}/transcript`,
     );
   });
@@ -268,9 +262,9 @@ test.describe("transcript rendering", () => {
     await waitForThreadIdle(page, threadId);
     await waitForThreadNotBusy(page, threadId);
 
-    await page.getByRole("button", { name: /GPT-5\.6 Sol/ }).click();
-    await page.getByText("GPT-5.6 Sol", { exact: true }).last().hover();
-    await page.getByRole("option", { name: /Opus 5/ }).click();
+    await page.getByRole("button", { name: /GPT-6 Sol/ }).click();
+    await page.getByText("GPT-6 Sol", { exact: true }).last().hover();
+    await page.getByRole("option", { name: /Opus 5\.5/ }).click();
     await typeIntoComposer(page, "Use Opus for this thread");
     await waitForThreadIdle(page, threadId);
     await waitForThreadNotBusy(page, threadId);
@@ -298,7 +292,7 @@ test.describe("transcript rendering", () => {
         }>;
         return runs[0]?.kwargs?.config?.configurable?.agent_model_id;
       })
-      .toBe("anthropic:claude-opus-5");
+      .toBe("anthropic:claude-opus-5-5");
   });
 
   test("renders structured input envelopes safely and keeps legacy messages", async ({
@@ -327,16 +321,17 @@ test.describe("transcript rendering", () => {
         const injected = [
           [
             "entity-person",
-            '<dynamic-context kind="person" id="github:alice"><display_name>Alice</display_name></dynamic-context>',
+            '<dynamic-context kind="person" id="github:alice">\ndisplay_name: Alice\n</dynamic-context>',
           ],
           [
             "entity-system",
-            '<dynamic-context kind="system" id="system:scheduler"><display_name>Scheduler</display_name></dynamic-context>',
+            '<dynamic-context kind="system" id="system:scheduler">\ndisplay_name: Scheduler\n</dynamic-context>',
           ],
           [
             "structured-person",
-            '<input-message sender="github:alice" surface="web" kind="human"><content>Person says &lt;img data-e2e-injected src=x&gt;</content></input-message>',
+            '<input-message sender="github:alice" surface="web" kind="human">\nPerson says &lt;img data-e2e-injected src=x&gt;\n</input-message>',
           ],
+          // Rows already in the database wrap their text in `<content>`.
           [
             "structured-system",
             '<input-message sender="system:scheduler" surface="automation"><content>Automation checks CI</content></input-message>',
