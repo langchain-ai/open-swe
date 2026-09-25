@@ -86,11 +86,11 @@ def report_message(
         "findings": "Investigation",
     }.get(reason, "Investigation update")
     if reason == "findings":
-        sections = _investigation(report, compact)
-        # Nothing filled in, so fall back to the headline rather than posting a bare title.
-        sections = (
-            [f"*{heading}*", *sections] if sections else [f"*{heading}*\n{compact(text, 800)}"]
-        )
+        # Without a problem section the headline is the only statement of the finding; the
+        # fallback previous-occurrence and impact sections must not stand in for it.
+        summary = "" if report.problem else compact(text, 800)
+        sections = [f"*{heading}*\n{summary}" if summary else f"*{heading}*"]
+        sections.extend(_investigation(report, compact))
     else:
         summary = compact(text, 2400 if reason == "answer" else 800)
         sections = [f"*{heading}*\n{summary or 'No evidence-backed conclusion was established.'}"]

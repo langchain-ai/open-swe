@@ -1,7 +1,9 @@
 import pytest
 
+from agent.incidents.evidence_tools import EvidenceCollector
 from agent.incidents.models import Evidence, Hypothesis, IncidentReport
 from agent.incidents.presentation import report_message
+from agent.incidents.report import ReportDraft, finalize_report
 
 
 def test_investigation_publishes_named_sections_and_keeps_details_in_report():
@@ -55,6 +57,18 @@ def test_investigation_without_sections_falls_back_to_the_headline():
     text, _ = report_message(report, report.summary, None)
     assert "Errors began at 09:04" in text
     assert text.strip() != "*Investigation*"
+
+
+def test_summary_only_investigation_is_not_hidden_behind_placeholder_sections():
+    collector = EvidenceCollector()
+    collector.evidence = [Evidence(id="slack:1", source="slack", summary="Alert")]
+    draft = ReportDraft.model_validate(
+        {"summary": [{"text": "Errors began at 09:04", "evidence_ids": ["slack:1"]}]}
+    )
+    report = finalize_report(draft, collector)
+    text, _ = report_message(report, report.summary, None)
+    assert "Errors began at 09:04" in text
+    assert "No previous-occurrence check was recorded" in text
 
 
 def test_answers_do_not_repeat_suggestions_from_an_earlier_report():
