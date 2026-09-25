@@ -47,7 +47,11 @@ def render_open_swe_shared_base(*, sandbox_file_downloads: bool) -> str:
     """Render shared guidance for the tools available to this agent."""
     if not sandbox_file_downloads:
         return OPEN_SWE_SHARED_BASE
-    return f"{OPEN_SWE_SHARED_BASE}\n\n{load_prompt('system/sandbox-file-downloads.md')}"
+    return (
+        f"{OPEN_SWE_SHARED_BASE}\n\n"
+        f"{load_prompt('system/sandbox-file-downloads.md')}\n\n"
+        f"{load_prompt('system/sandbox-browser-capture.md')}"
+    )
 
 
 def _render_source_guidance(source: str, slack_context: bool, slack_ask: bool = False) -> str:
