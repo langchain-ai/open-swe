@@ -34,6 +34,7 @@ from agent.slack.code_channels import (
     set_view,
 )
 from agent.threads.plan_store import get_plan_content
+from agent.threads.summary import DASHBOARD_SOURCE
 from agent.utils.authorship import PR_ATTRIBUTION_TEXT, add_pr_collaboration_note
 from agent.utils.dashboard_links import dashboard_plan_url, dashboard_thread_url
 from agent.utils.langsmith import create_langsmith_thread_feedback
@@ -743,6 +744,11 @@ async def _record_pr_telemetry(
             if repo_private is not None:
                 metadata["repo_private"] = repo_private
             await get_client().threads.update(thread_id=thread_id, metadata=metadata)
+            origin = (
+                cfg.slack_thread
+                if record_opening and cfg.slack_thread and cfg.slack_thread.channel_id
+                else None
+            )
             try:
                 await PullRequest(
                     owner=owner,
@@ -760,6 +766,19 @@ async def _record_pr_telemetry(
                     opening_head_sha=(
                         opening_head_sha
                         if record_opening and isinstance(opening_head_sha, str)
+                        else ""
+                    ),
+                    opening_model_id=(
+                        (cfg.resolved_agent_model_id or "") if record_opening else ""
+                    ),
+                    opening_effort=(cfg.resolved_agent_effort or "") if record_opening else "",
+                    slack_team_id=origin.team_id if origin else "",
+                    slack_channel_id=origin.channel_id if origin else "",
+                    slack_thread_ts=origin.thread_ts if origin else "",
+                    # A dashboard follow-up inherits the thread's last Slack trigger.
+                    slack_message_ts=(
+                        origin.triggering_event_ts
+                        if origin and cfg.source != DASHBOARD_SOURCE
                         else ""
                     ),
                     author=author if isinstance(author, str) else "",
