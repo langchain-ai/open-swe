@@ -1,0 +1,1 @@
+Note from Open SWE, not written by this person: another Open SWE thread ($thread_url) sent an approval card into this DM asking to open a PR as them. PR: "$title" in $repo ($head → $base). The card offers Approve, Always allow, and Deny. The answer applies to every PR opened as them in that thread; they answer on the card, not by replying to you.

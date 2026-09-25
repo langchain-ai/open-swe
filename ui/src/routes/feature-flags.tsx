@@ -2,6 +2,7 @@ import { Navigate, createFileRoute } from "@tanstack/react-router"
 
 import { AppShell, SettingsSection } from "@/components/AppShell"
 import { Skeleton } from "@/components/ui/skeleton"
+import { ActAsApprovalPreference } from "@/features/settings/components/ActAsApprovalPreference"
 import { AssistantUiPreference } from "@/features/settings/components/AssistantUiPreference"
 import { RequireLogin } from "@/lib/auth-redirect"
 import { useFeatureFlagsPanel } from "@/lib/featureFlags"
@@ -38,7 +39,10 @@ function FeatureFlagsPage() {
       description={`Experimental features under test. Toggle this tab from the command palette (${paletteShortcut}).`}
     >
       <SettingsSection title="Experiments">
-        <AssistantUiPreference />
+        <div className="divide-y divide-border">
+          <AssistantUiPreference />
+          <ActAsApprovalPreference />
+        </div>
       </SettingsSection>
     </AppShell>
   )

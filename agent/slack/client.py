@@ -486,6 +486,22 @@ async def _post_slack_message_with_ts(
         return None, error
 
 
+async def open_slack_dm(slack_user_id: str) -> tuple[str | None, str | None]:
+    """The bot's DM channel with ``slack_user_id`` and the Slack error, if any."""
+    if not SLACK_BOT_TOKEN:
+        return None, "missing_slack_bot_token"
+    try:
+        async with SlackClient.bot() as client:
+            data = await client.conversations_open(users=slack_user_id)
+    except SLACK_REQUEST_ERRORS as exc:
+        error = slack_error(exc)
+        logger.warning("Slack DM open failed", extra={"slack_error": error})
+        return None, error
+    channel = data.get("channel")
+    channel_id = channel.get("id") if isinstance(channel, dict) else None
+    return (channel_id, None) if isinstance(channel_id, str) and channel_id else (None, None)
+
+
 def _slack_thread_dashboard_url(
     channel_id: str, thread_ts: str, agent_thread_id: str | None = None
 ) -> str | None:

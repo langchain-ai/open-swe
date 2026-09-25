@@ -63,6 +63,7 @@ class ProfileUpdate(BaseModel):
     draft_prs: bool | None = None
     review_draft_prs: bool | None = None
     experimental_assistant_ui: bool | None = None
+    experimental_act_as_approval: bool | None = None
     slack_onboarding_dismissed: bool = False
 
     @model_validator(mode="after")
@@ -415,9 +416,17 @@ async def get_my_profile(
     profile, preferences = await asyncio.gather(
         get_profile(session["sub"]), User.preferences_for_login(session["sub"])
     )
-    if not profile:
-        return {"concierge_mode": preferences.concierge_mode}
-    return {**normalize_profile_for_response(profile), "concierge_mode": preferences.concierge_mode}
+    return {
+        **(normalize_profile_for_response(profile) if profile else {}),
+        **_preferences(preferences),
+    }
+
+
+def _preferences(preferences: UserPreferences) -> dict[str, bool]:
+    return {
+        "concierge_mode": preferences.concierge_mode,
+        "experimental_act_as_approval": preferences.experimental_act_as_approval,
+    }
 
 
 @router.put("/profile")
@@ -428,12 +437,16 @@ async def put_my_profile(
     update.validate_pairing()
     login = session["sub"]
     preferences = await User.update_preferences(
-        login, UserPreferencesPatch(concierge_mode=update.concierge_mode)
+        login,
+        UserPreferencesPatch(
+            concierge_mode=update.concierge_mode,
+            experimental_act_as_approval=update.experimental_act_as_approval,
+        ),
     )
-    if preferences is None and update.concierge_mode:
+    if preferences is None and (update.concierge_mode or update.experimental_act_as_approval):
         raise HTTPException(status_code=409, detail="No Open SWE user record for this login yet")
     profile = await upsert_profile(login, session.get("email") or "", update)
     return {
         **normalize_profile_for_response(profile),
-        "concierge_mode": (preferences or UserPreferences()).concierge_mode,
+        **_preferences(preferences or UserPreferences()),
     }

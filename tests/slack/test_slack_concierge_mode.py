@@ -161,3 +161,26 @@ async def test_channel_message_still_uses_its_own_slack_thread(
 
     assert request.thread_ts == "1786573369.551099"
     assert request.concierge_mode is False
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("concierge_on", [True, False])
+async def test_a_note_reaches_the_concierge_thread_only_in_concierge_mode(
+    monkeypatch: pytest.MonkeyPatch, concierge_on: bool
+) -> None:
+    from agent.slack import dm
+
+    monkeypatch.setattr(dm.User, "concierge_mode_for_slack", AsyncMock(return_value=concierge_on))
+    lookup = AsyncMock(return_value="concierge-thread")
+    monkeypatch.setattr(dm, "lookup_slack_thread_id", lookup)
+    monkeypatch.setattr(dm, "langgraph_client", lambda: object())
+    queue = AsyncMock(return_value=True)
+    monkeypatch.setattr(dm, "queue_message_for_thread", queue)
+
+    await dm.note_for_concierge("U1", "D1", "a note")
+
+    if concierge_on:
+        assert lookup.await_args.args[1:] == ("D1", CONCIERGE_TS)
+        queue.assert_awaited_once_with("concierge-thread", [{"type": "text", "text": "a note"}])
+    else:
+        queue.assert_not_awaited()
