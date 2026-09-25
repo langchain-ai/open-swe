@@ -38,6 +38,7 @@ import {
   XCircleIcon,
   XIcon,
 } from "@phosphor-icons/react"
+import { Link } from "@tanstack/react-router"
 import { IoLogoGithub } from "react-icons/io5"
 import { toast } from "sonner"
 import {
@@ -1580,6 +1581,11 @@ function ReviewBodyInner({
                   <div className="mb-2 flex items-center justify-between gap-3">
                     <h2 className="text-sm font-medium">Changes</h2>
                     <div className="flex items-center gap-3">
+                      {detail.walkthrough && (
+                        <ScoutThreadLink
+                          threadId={detail.walkthrough_scout_thread_id}
+                        />
+                      )}
                       {linesLeft !== null && (
                         <span className="text-xs text-muted-foreground">
                           {linesLeft === 0
@@ -1713,6 +1719,28 @@ function ScoutProgressPreview({ progress }: { progress: ScoutProgress }) {
   )
 }
 
+function ScoutThreadLink({
+  threadId,
+  className,
+}: {
+  threadId: string | null
+  className?: string
+}) {
+  if (!threadId) return null
+  return (
+    <Link
+      to="/agents/$threadId"
+      params={{ threadId }}
+      className={cn(
+        "inline-block text-xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline",
+        className
+      )}
+    >
+      Open thread
+    </Link>
+  )
+}
+
 /** Runs the review scout alone, so the walkthrough exists without a full review. */
 function WalkthroughCallout({ detail }: { detail: ReviewDetail }) {
   const qc = useQueryClient()
@@ -1780,9 +1808,13 @@ function WalkthroughCallout({ detail }: { detail: ReviewDetail }) {
         {failureSummary && (
           <p className="mt-1.5 text-xs break-words text-destructive">
             Last attempt failed: {failureSummary}
-            {detail.walkthrough_scout_thread_id &&
-              ` (scout thread ${detail.walkthrough_scout_thread_id})`}
           </p>
+        )}
+        {(running || failure) && (
+          <ScoutThreadLink
+            threadId={detail.walkthrough_scout_thread_id}
+            className="mt-1.5"
+          />
         )}
       </div>
       <Button size="lg" onClick={() => scout.mutate(detail)} disabled={running}>

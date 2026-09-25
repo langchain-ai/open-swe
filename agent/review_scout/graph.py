@@ -62,7 +62,6 @@ logger = logging.getLogger(__name__)
 
 SCOUT_MODEL_CALL_LIMIT = 150
 _CLOSING_TITLE_TAG_RE = re.compile(r"</\s*pr_title\s*>", re.IGNORECASE)
-MAX_STEPS = 8
 
 
 class ReviewScoutState(PrepareRunState):
@@ -138,7 +137,6 @@ class PrepareReviewScoutRunMiddleware(BasePrepareRunMiddleware):
             repo_dir=repo_dir,
             merge_base=merge_base,
             patch_dir=f"{work_dir}/.scout-patches",
-            max_steps=MAX_STEPS,
         )
         history = await SteeringHistory.load(cfg.repo.owner, cfg.repo.name, cfg.pr_number)
         if history is not None:

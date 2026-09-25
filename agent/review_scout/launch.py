@@ -2,7 +2,7 @@ import asyncio
 import logging
 
 from langgraph_sdk.errors import NotFoundError
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 
 from agent.database import postgres
 from agent.dispatch import create_durable_run, dispatch_client
@@ -40,6 +40,7 @@ _ACTION_TARGET_CHARS = 80
 
 
 class _ToolCall(BaseModel):
+    id: str = ""
     name: str = ""
     args: dict[str, object] = {}
 
@@ -55,10 +56,29 @@ class _ToolCall(BaseModel):
         return ScoutAction(tool=self.name, target=target[:_ACTION_TARGET_CHARS] if target else None)
 
 
+class _CommitResult(BaseModel):
+    success: bool = False
+
+
 class _ScoutMessage(BaseModel):
     type: str = ""
     name: str | None = None
+    content: str | list[object] = ""
+    tool_call_id: str | None = None
     tool_calls: list[_ToolCall] = []
+
+    def committed(self) -> bool:
+        if (
+            self.type != "tool"
+            or self.name != _COMMIT_STEP_TOOL
+            or not isinstance(self.content, str)
+        ):
+            return False
+        try:
+            return _CommitResult.model_validate_json(self.content).success
+        except ValidationError:
+            logger.warning("Unparseable review scout commit result", exc_info=True)
+            return False
 
 
 class _ScoutValues(BaseModel):
@@ -128,14 +148,17 @@ class ReviewScoutTarget(BaseModel):
             await dispatch_client().threads.get_state(self.thread_id)
         )
         messages = state.values.messages
-        steps = sum(
-            1
-            for message in messages
-            if message.type == "tool" and message.name == _COMMIT_STEP_TOOL
-        )
+        run_start = max((i for i, m in enumerate(messages) if m.type == "human"), default=0)
+        messages = messages[run_start:]
         calls = [
             call for message in messages if message.type == "ai" for call in message.tool_calls
         ]
+        other_calls = {call.id for call in calls if call.args.get("other") is True}
+        steps = sum(
+            1
+            for message in messages
+            if message.committed() and message.tool_call_id not in other_calls
+        )
         last = messages[-1] if messages else None
         return ScoutProgress(
             steps=steps,

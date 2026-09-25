@@ -84,21 +84,43 @@ async def setup_working_tree(
     return _require_sha(output.strip().splitlines()[-1].strip())
 
 
+async def committed_kinds(
+    backend: SandboxBackendProtocol, repo_dir: str, *, base_sha: str, head_sha: str
+) -> list[bool]:
+    """Whether each commit the scout has made so far is an "other" commit, oldest first."""
+    base, head = _require_sha(base_sha), _require_sha(head_sha)
+    fmt = shlex.quote(f"%(trailers:key={SCOUT_KIND_TRAILER},valueonly){_RECORD}")
+    log = await _run(
+        backend,
+        repo_dir,
+        f"mb=$(git merge-base {base} {head})\n"
+        f'git log --first-parent --reverse --format={fmt} "$mb"..HEAD',
+    )
+    return [kind.strip() == "other" for kind in log.split(_RECORD)[:-1]]
+
+
 async def commit_staged(
     backend: SandboxBackendProtocol, repo_dir: str, *, title: str, summary: str, other: bool
 ) -> str | None:
-    """Commit the index as one walkthrough step; ``None`` when nothing is staged."""
+    """Commit the index as one walkthrough step; ``None`` when nothing is staged.
+
+    An "other" commit may be empty, so a pull request with nothing mechanical can still open with one.
+    """
     kind = "other" if other else "step"
     message = ["-m", title]
     if summary:
         message += ["-m", summary]
     quoted = " ".join(shlex.quote(part) for part in message)
     trailer = shlex.quote(f"{SCOUT_KIND_TRAILER}: {kind}")
+    empty_check = (
+        "" if other else "if git diff --cached --quiet; then echo NOTHING_STAGED; exit 0; fi\n"
+    )
+    allow_empty = " --allow-empty" if other else ""
     output = await _run(
         backend,
         repo_dir,
-        "if git diff --cached --quiet; then echo NOTHING_STAGED; exit 0; fi\n"
-        f"git {_IDENTITY} commit --quiet --no-verify {quoted} --trailer {trailer}\n"
+        f"{empty_check}"
+        f"git {_IDENTITY} commit --quiet --no-verify{allow_empty} {quoted} --trailer {trailer}\n"
         "git rev-parse HEAD",
     )
     last = output.strip().splitlines()[-1].strip() if output.strip() else ""
