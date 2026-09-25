@@ -1654,7 +1654,6 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
                         else []
                     ),
                     *([workspace_skills] if workspace_skills else []),
-                    *([dynamic_tool_middleware] if dynamic_tool_middleware else []),
                     SanitizeToolInputsMiddleware(),
                     ValidateImageReadsMiddleware(),
                     ModelCallLimitMiddleware(
@@ -1695,6 +1694,7 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
                     record_run_usage,
                     *([model_selection] if model_selection else []),
                     *fallback_middleware,
+                    *([dynamic_tool_middleware] if dynamic_tool_middleware else []),
                     SanitizeFireworksMessagesMiddleware(),
                     SanitizeOpenAIResponsesMiddleware(),
                     SanitizeThinkingBlocksMiddleware(),

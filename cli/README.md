@@ -10,6 +10,20 @@ sandbox requests, runs them locally, and posts the results back.
 > The agent runs commands **unsandboxed**, as you, in whatever directory you
 > started it from. It can read, write and delete anything you can.
 
+## Install
+
+Every desktop release, stable and nightly, ships `oswe` twice: inside the app
+at `Open SWE.app/Contents/Resources/bin/oswe`, and as standalone downloads for
+`darwin-arm64`, `darwin-x64`, `linux-arm64` and `linux-x64` with an
+`oswe-SHA256SUMS` file. The macOS binaries are signed and notarized.
+
+```sh
+curl -fsSL https://github.com/langchain-ai/open-swe/releases/latest/download/oswe-darwin-arm64.tar.gz | tar -xz
+sudo mv oswe /usr/local/bin/
+```
+
+`oswe --version` prints the desktop release it came from.
+
 ## Build
 
 ```sh

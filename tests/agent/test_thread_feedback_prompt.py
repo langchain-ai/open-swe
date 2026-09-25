@@ -156,6 +156,19 @@ async def test_web_answer_becomes_ready_after_run_succeeds(context: Any) -> None
     slack_feedback.post_slack_feedback_prompt.assert_not_awaited()
 
 
+async def test_slack_answer_keeps_dashboard_prompt_without_delayed_slack_prompt(
+    context: Any,
+) -> None:
+    metadata = {
+        **context.threads.get.return_value["metadata"],
+        "source_context": {"slack_thread": {"channel_id": "C1", "thread_ts": "1.0"}},
+    }
+    await feedback.schedule_answer_feedback("t1", "r1", metadata)
+    await _run(context, context.runs.create.call_args.kwargs["input"], 302000)
+    assert await feedback.feedback_prompt_status("t1") == "ready"
+    slack_feedback.post_slack_feedback_prompt.assert_not_awaited()
+
+
 async def test_new_turn_within_quiet_period_suppresses_pending_prompt(context: Any) -> None:
     payload = await _schedule(context)
     context.runs.list.return_value = [{"run_id": "r2", "status": "success"}]
