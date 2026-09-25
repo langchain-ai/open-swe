@@ -172,13 +172,22 @@ async def test_breakout_to_channel_starts_there_with_source_transcript(monkeypat
     monkeypatch.setattr(breakout, "langgraph_client", lambda: object())
     resolve = AsyncMock(return_value="new-thread")
     monkeypatch.setattr(breakout.common, "resolve_slack_thread_id", resolve)
+    target_repo = object()
+    repo_config = AsyncMock(return_value=target_repo)
+    monkeypatch.setattr(breakout.common, "get_slack_repo_config", repo_config)
     mention = AsyncMock()
     monkeypatch.setattr(breakout.service, "process_slack_mention", mention)
 
-    await breakout.process_slack_breakout(_request(), Command("fix it", "<#C2|eng>", "C2"), None)
+    await breakout.process_slack_breakout(
+        _request(), Command("fix it", "<#C2|eng>", "C2"), object()
+    )
 
     assert root.await_args.args[0] == "C2"
     resolve.assert_awaited_once_with(resolve.await_args.args[0], "C2", "200.0")
+    repo_config.assert_awaited_once_with(
+        "C2", "200.0", slack_user_id="U_ALICE", thread_id="old-thread"
+    )
+    assert mention.await_args.args[1] is target_repo
     posted.reactions.assert_awaited_once_with("C1", "100.0", "105.0", "C2", "200.0")
     sent = mention.await_args.args[0]
     assert (sent.channel_id, sent.thread_ts, sent.context_channel_id, sent.context_thread_ts) == (
@@ -255,3 +264,19 @@ async def test_breakout_refuses_a_channel_it_cannot_look_up(monkeypatch, public_
 
     root.assert_not_awaited()
     posted.ephemeral.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_breakout_never_leaves_a_private_channel(monkeypatch, public_channels):
+    posted = _patch_slack(monkeypatch)
+    public_channels.side_effect = lambda channel_id, **_: _channel(
+        channel_id, private=channel_id == "C1"
+    )
+    root = AsyncMock()
+    monkeypatch.setattr(breakout, "post_slack_top_level_message_with_ts", root)
+
+    await breakout.process_slack_breakout(_request(), Command("fix it", "<#C2>", "C2"), None)
+
+    root.assert_not_awaited()
+    posted.reactions.assert_not_awaited()
+    assert "<#C1>" in posted.ephemeral.await_args.args[2]

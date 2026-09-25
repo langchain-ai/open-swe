@@ -160,6 +160,13 @@ async def _start(
     await _mark_done(request, target, new_ts)
     thread_id = await common.resolve_slack_thread_id(langgraph_client(), target, new_ts)
     moved_channel = target != request.channel_id
+    if moved_channel:
+        repo = await common.get_slack_repo_config(
+            target,
+            new_ts,
+            slack_user_id=request.user_id or None,
+            thread_id=request.thread_id or thread_id,
+        )
     await service.process_slack_mention(
         request.model_copy(
             update={
@@ -193,13 +200,15 @@ async def process_slack_breakout(
             )
             return
         target = command.target_channel(request)
-        channel = await SlackChannel.load(target, use_cache=False)
-        if channel is None or not channel.public:
-            await _tell_sender(
-                request,
-                f"<#{target}> is not a public channel. Breakouts only go to public channels.",
-            )
-            return
+        for channel_id in dict.fromkeys((request.channel_id, target)):
+            channel = await SlackChannel.load(channel_id, use_cache=False)
+            if channel is None or not channel.public:
+                await _tell_sender(
+                    request,
+                    f"<#{channel_id}> is not a public channel. Breakouts only work "
+                    "from and to public channels.",
+                )
+                return
         if command.instruction:
             await _start(request, command.instruction, target, repo)
         else:
