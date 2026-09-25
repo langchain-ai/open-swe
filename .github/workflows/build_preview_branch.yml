@@ -38,6 +38,7 @@ jobs:
           ref: main
           fetch-depth: 0
           persist-credentials: true
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
       - name: Require reapproval after a PR update
         if: github.event_name == 'pull_request_target' && github.event.action == 'synchronize'
         env:
@@ -53,7 +54,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_REPO: ${{ github.repository }}
-        run: ./scripts/build_preview_branch.sh reset
+        run: uv run scripts/build_preview_branch.py reset
       - name: Install the latest oswe
         if: vars.OPEN_SWE_BACKEND_URL != ''
         env:
@@ -84,7 +85,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_REPO: ${{ github.repository }}
           OPEN_SWE_BACKEND_URL: ${{ vars.OPEN_SWE_BACKEND_URL }}
-        run: ./scripts/build_preview_branch.sh build
+        run: uv run scripts/build_preview_branch.py build
       - name: Save resolved conflicts
         if: steps.build.outputs.agent_resolved == 'true'
         uses: actions/cache/save@v6
